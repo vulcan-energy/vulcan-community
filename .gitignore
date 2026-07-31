@@ -2,6 +2,7 @@
 node_modules/
 dist/
 coverage/
+.claude/
 .playwright-cli/
 apps/*/.vite-cache/
 apps/geometry-editor/src/generated/
