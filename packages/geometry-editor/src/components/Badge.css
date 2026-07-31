@@ -1,0 +1,221 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+/* Foolproof Global Badge Styling System */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 14px;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  background: var(--surface-control); /* default, will be overridden */
+  color: var(--text-primary);         /* default, will be overridden */
+  transition: all 0.2s;
+}
+
+.badge-count {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+}
+
+.badge-permutation {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+}
+
+.badge-status {
+  background: var(--surface-control);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+/* Remove all other badge size, font, or shape overrides below this line. Only color/background may differ. */
+
+/* Count badges - used for tab counts, permutation counts, etc. */
+.badge-count:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+/* Validation badges - circular badges for validation status */
+.badge-validation {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  padding: 0;
+  border: 2px solid transparent;
+}
+
+.badge-validation.valid {
+  background-color: var(--status-success-bg);
+  border-color: var(--status-success-border);
+}
+
+.badge-validation.valid span {
+  color: var(--status-success-text);
+}
+
+.badge-validation.partial {
+  background-color: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
+}
+
+.badge-validation.partial span {
+  color: var(--status-warning-text);
+}
+
+.badge-validation.invalid {
+  background-color: var(--status-error-bg);
+  border-color: var(--status-error-border);
+}
+
+.badge-validation.invalid span {
+  color: var(--status-error-text);
+}
+
+.badge-validation.checking {
+  background-color: var(--status-neutral-bg);
+  border-color: var(--status-neutral-border);
+}
+
+.badge-validation.checking span {
+  color: var(--status-neutral-text);
+}
+
+/* Parameter badges - for parameter categories */
+.badge-parameter {
+  background: var(--surface-control);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  min-width: 18px;
+  height: 18px;
+  padding: 2px 4px;
+  font-size: var(--font-size-xxs);
+  font-weight: 600;
+}
+
+.badge-parameter:hover {
+  background: var(--surface-control-hover);
+  border-color: var(--border-medium);
+}
+
+/* Tab badges - specifically for tab navigation */
+.badge-tab {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  min-width: 20px;
+  height: 20px;
+  padding: 2px 6px;
+  font-weight: 700;
+}
+
+.badge-tab:hover {
+  background: var(--accent-hover);
+}
+
+/* Progress badges - for showing completion status */
+.badge-progress {
+  background: var(--status-info-bg);
+  color: var(--status-info-text);
+  padding: 2px 6px;
+}
+
+.badge-progress.completed {
+  background: var(--status-success-bg);
+  color: var(--status-success-text);
+}
+
+.badge-progress.error {
+  background: var(--status-error-bg);
+  color: var(--status-error-text);
+}
+
+/* Badge content styling */
+.badge span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-weight: bold;
+  font-size: var(--font-size-xxs);
+  line-height: 1;
+}
+
+/* Badge with icon */
+.badge-with-icon {
+  gap: 4px;
+}
+
+.badge-with-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .badge {
+    font-size: var(--font-size-caption);
+    padding: 1px 4px;
+  }
+
+  .badge-count,
+  .badge-tab {
+    min-width: 18px;
+    height: 18px;
+  }
+
+  .badge-validation {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+/* Animation for badge updates */
+.badge-update {
+  animation: badgePulse 0.3s ease-in-out;
+}
+
+@keyframes badgePulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Focus states for accessibility */
+.badge:focus {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .badge {
+    border: 1px solid currentColor;
+  }
+
+  .badge-validation {
+    border-width: 2px;
+  }
+}
+
+.badge-required {
+  background: var(--status-error-bg);
+  color: var(--status-error-text);
+  border: 1px solid var(--status-error-border);
+}

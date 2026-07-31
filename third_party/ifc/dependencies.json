@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-07-25",
+  "scope": "Vulcan Community browser IFC import",
+  "first_party_parser": {
+    "path": "apps/geometry-editor/src/assets/ifc/ifc_parser.py",
+    "owner": "Home Energy Foundry Limited",
+    "license": "AGPL-3.0-only",
+    "additional_terms": "Vulcan Origin Terms",
+    "status": "owner-approved"
+  },
+  "replacement_build": {
+    "status": "not_required_binary_is_not_redistributed",
+    "completed_research": "Pinned Pyodide container digest and exact six-dependency native closure identified; native archive hashes and Git commits recorded below.",
+    "remaining_gate": "None for this repository, which neither commits nor redistributes the wheel. A build that serves it to users conveys GPL-3.0-or-later CGAL code and must offer the Corresponding Source recorded here under GPLv3 section 6. The CGAL build revision below is reconstructed rather than authoritative, so that offer should designate the upstream IfcOpenShell material and mirror it rather than relying on third-party URLs remaining reachable.",
+    "release_substitution_authorized": true
+  },
+  "distributed_artifacts": [
+    {
+      "path": "apps/geometry-editor/public/ifc/ifcopenshell-0.8.3+34a1bc6-cp313-cp313-emscripten_4_0_9_wasm32.whl",
+      "name": "ifcopenshell",
+      "version": "0.8.3+34a1bc6",
+      "size_bytes": 10985020,
+      "sha256": "0092a71cfd56753b16f78541e1b9ea74446c2f51f9cbf0897aeaef615a5c89ab",
+      "upstream_artifact_url": "https://ifcopenshell.github.io/wasm-wheels/ifcopenshell-0.8.3%2B34a1bc6-cp313-cp313-emscripten_4_0_9_wasm32.whl",
+      "upstream_artifact_repository": "https://github.com/IfcOpenShell/wasm-wheels",
+      "upstream_artifact_commit": "d1126cec5b6deec97575e7f66fcb429eb7db605c",
+      "upstream_git_blob": "ed7b7c16c752081a12dd3af90f73a0294b0c07a8",
+      "source_commit": "34a1bc6f04c6dfc66915ca5345bfdf78e23447c6",
+      "source_url": "https://github.com/IfcOpenShell/IfcOpenShell/tree/34a1bc6f04c6dfc66915ca5345bfdf78e23447c6",
+      "build_workflow_url": "https://github.com/IfcOpenShell/IfcOpenShell/blob/34a1bc6f04c6dfc66915ca5345bfdf78e23447c6/.github/workflows/build_pyodide.yml",
+      "build_run_url": "https://github.com/IfcOpenShell/IfcOpenShell/actions/runs/15689939439",
+      "ifcopenshell_license": "LGPL-3.0-or-later",
+      "combined_binary_license_note": "The statically built extension contains GPL-3.0-or-later CGAL Nef_3 code and must not be represented as LGPL-only.",
+      "wheel_metadata_quirk": "The outer artifact name is CPython 3.13/Emscripten 4.0.9 specific, while its internal WHEEL metadata says Root-Is-Purelib: true and Tag: py3-none-any.",
+      "release_status": "approved_third_party_not_in_source_release",
+      "required_action": "Do not commit this binary. scripts/fetch-ifc-wheel.sh downloads and SHA-256 verifies it for local use or deployment, so neither the repository nor its source archive conveys it. A deployment that serves the wheel must offer the Corresponding Source recorded in this file."
+    }
+  ],
+  "ifcopenshell_build_inputs": [
+    {
+      "name": "IfcOpenShell",
+      "version_or_revision": "0.8.3 / 34a1bc6f04c6dfc66915ca5345bfdf78e23447c6",
+      "license": "LGPL-3.0-or-later",
+      "source": "https://github.com/IfcOpenShell/IfcOpenShell/tree/34a1bc6f04c6dfc66915ca5345bfdf78e23447c6"
+    },
+    {
+      "name": "CGAL",
+      "version_or_revision": "5.6.x-branch; exact build revision not preserved",
+      "reconstructed_revision": "8e582373db5fcb3b5d27c867e43731fcce8b4119",
+      "reconstruction_is_authoritative": false,
+      "license": "GPL-3.0-or-later for Nef_3 and other GPL packages; other CGAL packages have their own terms",
+      "source": "https://github.com/CGAL/cgal/tree/8e582373db5fcb3b5d27c867e43731fcce8b4119",
+      "binary_evidence": "_ifcopenshell_wrapper.so contains CGAL::Nef_polyhedron_3 symbols"
+    },
+    {
+      "name": "GMP",
+      "version_or_revision": "6.2.1",
+      "license": "LGPL-3.0-or-later OR GPL-2.0-or-later",
+      "selected_license": "LGPL-3.0-or-later",
+      "source": "https://ftp.gnu.org/gnu/gmp/gmp-6.2.1.tar.bz2"
+    },
+    {
+      "name": "MPFR",
+      "version_or_revision": "3.1.6",
+      "license": "LGPL-3.0-or-later",
+      "source": "https://www.mpfr.org/mpfr-3.1.6/mpfr-3.1.6.tar.bz2"
+    },
+    {
+      "name": "Open CASCADE Technology",
+      "version_or_revision": "7.8.1 / V7_8_1",
+      "source_commit": "bd2a789f15235755ce4d1a3b07379a2e062fdc2e",
+      "license": "LGPL-2.1-only WITH OCCT-exception-1.0",
+      "source": "https://github.com/Open-Cascade-SAS/OCCT/tree/V7_8_1",
+      "notice_requirement": "State prominently that the artifact uses or is based on Open CASCADE Technology facilities."
+    },
+    {
+      "name": "FreeType",
+      "version_or_revision": "2.11.1 / VER-2-11-1",
+      "source_commit": "3f83daeecb1a78d851b660eed025eeba362c0e4a",
+      "license": "FTL",
+      "source": "https://gitlab.freedesktop.org/freetype/freetype/-/tree/VER-2-11-1"
+    },
+    {
+      "name": "Boost",
+      "version_or_revision": "1.86.0",
+      "license": "BSL-1.0",
+      "source": "https://github.com/boostorg/boost/tree/boost-1.86.0",
+      "build_download": "https://github.com/boostorg/boost/releases/download/boost-1.86.0/boost-1.86.0-b2-nodocs.tar.gz",
+      "build_download_sha256": "2128a4c96862b5c0970c1e34d76b1d57e4a1016b80df85ad39667f30b1deba26"
+    },
+    {
+      "name": "libxml2",
+      "version_or_revision": "2.13.8",
+      "license": "MIT",
+      "source": "https://github.com/GNOME/libxml2/tree/v2.13.8",
+      "build_download": "https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.8.tar.xz",
+      "build_download_sha256": "277294cb33119ab71b2bc81f2f445e9bc9435b893ad15bb2cd2b0e859a0ee84a"
+    },
+    {
+      "name": "nlohmann/json",
+      "version_or_revision": "3.6.1 / v3.6.1",
+      "license": "MIT",
+      "source": "https://github.com/nlohmann/json/tree/v3.6.1",
+      "build_download": "https://github.com/nlohmann/json/releases/download/v3.6.1/json.hpp",
+      "build_download_sha256": "d2eeb25d2e95bffeb08ebb7704cdffd2e8fca7113eba9a0b38d60a5c391ea09a"
+    },
+    {
+      "name": "Eigen",
+      "version_or_revision": "3.3.9",
+      "source_commit": "0fd6b4f71dd85b2009ee4d1aeb296e2c11fc9d68",
+      "license": "MPL-2.0 with file-level exceptions",
+      "source": "https://gitlab.com/libeigen/eigen/-/tree/3.3.9"
+    }
+  ],
+  "remote_runtime": {
+    "distribution_mode": "Fetched from cdn.jsdelivr.net only when the user starts IFC import; these artifacts are not stored in the Community source tree.",
+    "pyodide": {
+      "version": "0.28.0a3",
+      "source_commit": "ed567eb8d2b41fb0e325927c44466b866ef56a34",
+      "source": "https://github.com/pyodide/pyodide/tree/ed567eb8d2b41fb0e325927c44466b866ef56a34",
+      "release": "https://github.com/pyodide/pyodide/releases/tag/0.28.0a3",
+      "index_url": "https://cdn.jsdelivr.net/pyodide/v0.28.0a3/full/",
+      "python_version": "3.13.2",
+      "abi": "2025_0",
+      "architecture": "wasm32",
+      "emscripten_version": "4.0.9",
+      "build_container": {
+        "repository": "pyodide/pyodide-env",
+        "trace_tag": "20250311-chrome134-firefox136-py313",
+        "manifest_digest": "sha256:87e02300bfaf7862604db13a182624d75ac9f65e369e5bf18aaab9135933ca9d",
+        "reference": "pyodide/pyodide-env@sha256:87e02300bfaf7862604db13a182624d75ac9f65e369e5bf18aaab9135933ca9d",
+        "environment_override_allowed": false
+      },
+      "licensing_note": "The Pyodide source repository is MPL-2.0; the distributed JavaScript package metadata identifies Apache-2.0. CPython and bundled/runtime components retain their own notices.",
+      "core_release_archive": {
+        "file": "pyodide-core-0.28.0a3.tar.bz2",
+        "size_bytes": 5310178,
+        "sha256": "59fc89f8847458011b1b4ef5a45ba0fe183555eb06cd305ec9092a13cb43f161",
+        "url": "https://github.com/pyodide/pyodide/releases/download/0.28.0a3/pyodide-core-0.28.0a3.tar.bz2"
+      },
+      "assets": [
+        {
+          "file": "pyodide.mjs",
+          "size_bytes": 14682,
+          "sha256": "f72278606dfe5864071877325bef8fa0fff30ccd1a130fdb0417a2d2ade65ce7"
+        },
+        {
+          "file": "pyodide.asm.js",
+          "size_bytes": 1008996,
+          "sha256": "edf2e10c3ad0f2272e6f48456ed6a95c3a161b78cc0047d4d8520b17eda572f2"
+        },
+        {
+          "file": "pyodide.asm.wasm",
+          "size_bytes": 8632745,
+          "sha256": "a26051adcd0c5f3605cf7eefb285da10c0d7fd87bc2d26006e64f892015df657"
+        },
+        {
+          "file": "python_stdlib.zip",
+          "size_bytes": 2415942,
+          "sha256": "fc3e769b2be058249fddc8eb2a2ea2b54589852aa0f68eae2ff8247814d5276f"
+        },
+        {
+          "file": "pyodide-lock.json",
+          "size_bytes": 105248,
+          "sha256": "0f0e5c5c691d6d4f6e0823335428393422320ae9b753fbddc6ba983ca9fc2ff4"
+        }
+      ],
+      "core_sources": [
+        {
+          "name": "CPython",
+          "version_or_revision": "3.13.2",
+          "license": "PSF-2.0 and bundled-module notices",
+          "source": "https://www.python.org/ftp/python/3.13.2/Python-3.13.2.tgz",
+          "sha256": "b8d79530e3b7c96a5cb2d40d431ddb512af4a563e863728d8713039aa50203f9"
+        },
+        {
+          "name": "libffi",
+          "version_or_revision": "f08493d249d2067c8b3207ba46693dd858f95db3",
+          "license": "MIT-like libffi licence",
+          "source": "https://github.com/libffi/libffi/tree/f08493d249d2067c8b3207ba46693dd858f95db3"
+        },
+        {
+          "name": "hiwire",
+          "version_or_revision": "6a1e67280a15d929ebeceee54a6358c9c8d5f697",
+          "license": "MPL-2.0",
+          "source": "https://github.com/pyodide/hiwire/tree/6a1e67280a15d929ebeceee54a6358c9c8d5f697"
+        },
+        {
+          "name": "Emscripten",
+          "version_or_revision": "4.0.9",
+          "license": "MIT, with LLVM components under Apache-2.0 WITH LLVM-exception",
+          "source": "https://github.com/emscripten-core/emscripten/tree/4.0.9"
+        }
+      ]
+    },
+    "packages": [
+      {
+        "name": "micropip",
+        "version": "0.9.0",
+        "file": "micropip-0.9.0-py3-none-any.whl",
+        "size_bytes": 114896,
+        "sha256": "4b56c6e7bc45388381ec9acbd69c17cfd1be9efa2d080f11f99013abcb97db00",
+        "license": "MPL-2.0; vendored packaging material is Apache-2.0 OR BSD-2-Clause",
+        "source": "https://github.com/pyodide/micropip",
+        "recipe": "https://github.com/pyodide/pyodide/blob/ed567eb8d2b41fb0e325927c44466b866ef56a34/packages/micropip/meta.yaml",
+        "recipe_source_sha256": "babcf68c1849e229aa887564bc5f2de50273c3212e73c9aff8e3e6e80f2b6a23"
+      },
+      {
+        "name": "numpy",
+        "version": "2.2.5",
+        "file": "numpy-2.2.5-cp313-cp313-pyodide_2025_0_wasm32.whl",
+        "size_bytes": 11712032,
+        "sha256": "125230b4c3ecd08803e5c43f1162e017c0718d9f253146225a705a952b9c16c2",
+        "license": "BSD-3-Clause, with bundled notices preserved in the wheel",
+        "source": "https://files.pythonhosted.org/packages/source/n/numpy/numpy-2.2.5.tar.gz",
+        "source_sha256": "a9c0d994680cd991b1cb772e8b297340085466a6fe964bc9d4e80f5e2f43c291",
+        "recipe": "https://github.com/pyodide/pyodide/blob/ed567eb8d2b41fb0e325927c44466b866ef56a34/packages/numpy/meta.yaml",
+        "build_note": "The Pyodide recipe uses allow-noblas=true, so this artifact does not add OpenBLAS."
+      },
+      {
+        "name": "packaging",
+        "version": "24.2",
+        "file": "packaging-24.2-py3-none-any.whl",
+        "size_bytes": 71930,
+        "sha256": "33ac77ce490af3438eb1364cf640a922d3d09beb297b2a9fa45f83d6e9bfd756",
+        "license": "Apache-2.0 OR BSD-2-Clause",
+        "source": "https://files.pythonhosted.org/packages/source/p/packaging/packaging-24.2.tar.gz",
+        "source_sha256": "c228a6dc5e932d346bc5739379109d49e8853dd8223571c7c5b55260edc0b97f",
+        "recipe": "https://github.com/pyodide/pyodide/blob/ed567eb8d2b41fb0e325927c44466b866ef56a34/packages/packaging/meta.yaml"
+      },
+      {
+        "name": "shapely",
+        "version": "2.0.7",
+        "file": "shapely-2.0.7-cp313-cp313-pyodide_2025_0_wasm32.whl",
+        "size_bytes": 836090,
+        "sha256": "4f045df480a1920951895e148592eb8168f68b4f889d6f7d9c9083ec1c6ff58f",
+        "license": "BSD-3-Clause",
+        "source": "https://files.pythonhosted.org/packages/source/s/shapely/shapely-2.0.7.tar.gz",
+        "source_sha256": "28fe2997aab9a9dc026dc6a355d04e85841546b2a5d232ed953e3321ab958ee5",
+        "recipe": "https://github.com/pyodide/pyodide/blob/ed567eb8d2b41fb0e325927c44466b866ef56a34/packages/shapely/meta.yaml",
+        "embedded_dependencies": [
+          {
+            "name": "GEOS",
+            "version": "3.12.1",
+            "license": "LGPL-2.1-or-later",
+            "source": "https://github.com/libgeos/geos/releases/download/3.12.1/geos-3.12.1.tar.bz2",
+            "source_sha256": "d6ea7e492224b51193e8244fe3ec17c4d44d0777f3c32ca4fb171140549a0d03",
+            "note": "The Shapely wheel vendors libgeos.so and libgeos_c.so but does not itself include the GEOS licence text."
+          }
+        ]
+      }
+    ]
+  },
+  "release_requirements": [
+    "Do not describe the current IfcOpenShell wheel as LGPL-only; its compiled CGAL Nef_3 code is GPL-3.0-or-later.",
+    "Keep the wheel outside Git and source releases; scripts/fetch-ifc-wheel.sh must fetch the pinned upstream artifact and verify its SHA-256.",
+    "Any deployment that serves the wheel must provide its complete Corresponding Source and preserve the notices and licence texts for its statically incorporated dependencies.",
+    "Any replacement wheel must be an authoritative upstream artifact or a build that pins the container, native sources and complete Python build toolchain, disables unpinned network resolution and excludes CGAL if it is not required.",
+    "If Pyodide assets are mirrored rather than fetched from the pinned upstream CDN, preserve all embedded notices and publish the matching source and patches.",
+    "Verify every fetched or distributed artifact against this inventory during release packaging."
+  ]
+}

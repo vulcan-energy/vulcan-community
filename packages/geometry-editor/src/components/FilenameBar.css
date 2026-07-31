@@ -1,0 +1,144 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.filename-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  border-bottom-width: 0;
+}
+
+.filename-bar-left,
+.filename-bar-center,
+.filename-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filename-bar-center {
+  flex: 1;
+  justify-content: center;
+}
+
+.filename-bar-center label {
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.filename-separator {
+  width: 1px;
+  height: 32px;
+  background: var(--border-subtle);
+  margin: 0 0.5rem;
+}
+
+.filename-bar-save-stack {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* The save-error details portal is owned by FilenameBar, so it must carry its
+   own styling rather than rely on a host application's files menu. */
+.save-error-dropdown.files-dropdown {
+  width: 420px !important;
+  min-width: 360px !important;
+  max-width: min(420px, calc(100vw - 24px)) !important;
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.save-error-dropdown .files-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.save-error-dropdown .files-dropdown-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.save-error-dropdown .files-dropdown-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.save-error-dropdown .files-dropdown-refresh {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.save-error-dropdown .files-dropdown-refresh:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.save-error-dropdown .files-dropdown-refresh svg {
+  width: 14px;
+  height: 14px;
+}
+
+.save-error-dropdown .files-dropdown-content {
+  max-height: min(360px, calc(100vh - 220px));
+  overflow-y: auto;
+}
+
+.save-error-dropdown .files-dropdown-item {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  box-sizing: border-box;
+  text-align: left;
+  transition: background-color 0.2s ease;
+}
+
+@media (max-width: 768px) {
+  .filename-bar {
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+
+  .filename-bar-left,
+  .filename-bar-right,
+  .filename-bar-center {
+    justify-content: center;
+  }
+
+  .filename-separator {
+    display: none;
+  }
+}

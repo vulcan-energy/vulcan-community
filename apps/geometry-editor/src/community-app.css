@@ -1,0 +1,42 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+.community-geometry-editor-shell {
+  width: 100%;
+  height: 100%;
+}
+
+.community-origin-link {
+  position: fixed;
+  right: 12px;
+  bottom: 8px;
+  z-index: 20;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+.community-origin-link a {
+  color: var(--text-secondary);
+}
+
+.community-origin-link a:hover,
+.community-origin-link a:focus-visible {
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--app-bg);
+  color: var(--text-primary);
+}

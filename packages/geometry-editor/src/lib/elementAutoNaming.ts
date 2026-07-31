@@ -1,0 +1,158 @@
+// SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import type { Element, System } from '../geometry/types';
+
+export const SYSTEM_SUBCATEGORY_AUTO_NAME_LABELS: Record<System['subcategory'], string> = {
+  HeatSourceWet: 'Heat source wet',
+  HotWaterSource: 'Hot water',
+  HotWaterDemand: 'Hot water demand',
+  InfiltrationVentilation: 'Infiltration ventilation',
+  SpaceCoolSystem: 'Space cooling',
+  SpaceHeatSystem: 'Space heating',
+  WWHRS: 'WWHRS',
+};
+
+const AUTO_NAME_ACRONYM_MAP: Record<string, string> = {
+  mvhr: 'MVHR',
+  mev: 'MEV',
+  ufh: 'UFH',
+  wwhrs: 'WWHRS',
+  pcdb: 'PCDB',
+};
+
+export const normalizeAutoNameLabel = (raw: string): string => {
+  const normalized = raw.trim().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  return normalized
+    .split(' ')
+    .map((token) => {
+      const lower = token.toLowerCase();
+      if (AUTO_NAME_ACRONYM_MAP[lower]) return AUTO_NAME_ACRONYM_MAP[lower];
+      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+    })
+    .join(' ');
+};
+
+export const normalizeAutoNameTypeToken = (raw: string): string => {
+  if (!raw || !raw.trim()) return '';
+  const withSpaces = raw
+    .replace(/_/g, ' ')
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalizeAutoNameLabel(withSpaces);
+};
+
+const SYSTEM_EXTRA_JSON_FAMILY_KEYS: Array<System['subcategory']> = [
+  'HeatSourceWet',
+  'HotWaterSource',
+  'HotWaterDemand',
+  'InfiltrationVentilation',
+  'SpaceCoolSystem',
+  'SpaceHeatSystem',
+  'WWHRS',
+];
+
+const extractSystemTypeLabelFromFamilyValue = (value: unknown): string => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const rec = value as Record<string, unknown>;
+  const direct = rec.type;
+  if (typeof direct === 'string' && direct.trim()) {
+    return normalizeAutoNameTypeToken(direct);
+  }
+  for (const child of Object.values(rec)) {
+    if (!child || typeof child !== 'object' || Array.isArray(child)) continue;
+    const childType = (child as Record<string, unknown>).type;
+    if (typeof childType === 'string' && childType.trim()) {
+      return normalizeAutoNameTypeToken(childType);
+    }
+  }
+  return '';
+};
+
+export const extractSystemTypeLabelFromExtraJson = (element: Pick<Element, 'type'> & Partial<Element>): string => {
+  if (!element.extra_json || typeof element.extra_json !== 'object' || Array.isArray(element.extra_json)) return '';
+  const extra = element.extra_json as Record<string, unknown>;
+  const preferredRaw =
+    'subcategory' in element ? (element as { subcategory?: unknown }).subcategory : undefined;
+  const preferred =
+    typeof preferredRaw === 'string' ? (preferredRaw as System['subcategory']) : undefined;
+  const familySearchOrder = preferred
+    ? [preferred, ...SYSTEM_EXTRA_JSON_FAMILY_KEYS.filter((key) => key !== preferred)]
+    : [...SYSTEM_EXTRA_JSON_FAMILY_KEYS];
+  for (const familyKey of familySearchOrder) {
+    const label = extractSystemTypeLabelFromFamilyValue(extra[familyKey]);
+    if (label) return label;
+  }
+  return '';
+};
+
+export type ElementPitchClass =
+  | 'vertical'
+  | 'horizontal-up'
+  | 'horizontal-down'
+  | 'up-facing-slope'
+  | 'down-facing-slope'
+  | 'unknown';
+
+const PITCH_LABEL_EPSILON_DEG = 0.5;
+
+export const normalizePitch360 = (pitch: number): number => {
+  const normalized = ((pitch % 360) + 360) % 360;
+  return normalized > 180 ? 360 - normalized : normalized;
+};
+
+export const classifyPitch = (pitchRaw: unknown): ElementPitchClass => {
+  if (typeof pitchRaw !== 'number' || !Number.isFinite(pitchRaw)) return 'unknown';
+  const pitch = normalizePitch360(pitchRaw);
+  if (Math.abs(pitch - 90) <= PITCH_LABEL_EPSILON_DEG) return 'vertical';
+  if (Math.abs(pitch - 0) <= PITCH_LABEL_EPSILON_DEG) return 'horizontal-up';
+  if (Math.abs(pitch - 180) <= PITCH_LABEL_EPSILON_DEG) return 'horizontal-down';
+  if (pitch > 0 && pitch < 90) return 'up-facing-slope';
+  if (pitch > 90 && pitch < 180) return 'down-facing-slope';
+  return 'unknown';
+};
+
+export type AutoNameNumberFormatter = (number?: string) => string;
+
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export const generateUniqueElementName = (
+  baseName: string,
+  existingNames: string[],
+  formatWithNumber?: AutoNameNumberFormatter,
+): string => {
+  const existing = new Set(existingNames);
+  let counter = 1;
+  let name = formatWithNumber ? formatWithNumber() : baseName;
+  const seenGeneratedNames = new Set([name]);
+
+  while (existing.has(name)) {
+    const fallbackName = `${baseName} ${counter}`;
+    const formattedName = formatWithNumber ? formatWithNumber(String(counter)) : fallbackName;
+    name = seenGeneratedNames.has(formattedName) ? fallbackName : formattedName;
+    seenGeneratedNames.add(name);
+    counter++;
+  }
+
+  return name;
+};
+
+export const looksLikeAutoGeneratedName = (
+  name: string,
+  baseName: string,
+  formatWithNumber?: AutoNameNumberFormatter,
+): boolean => {
+  if (!baseName) return false;
+  const base = formatWithNumber ? formatWithNumber() : baseName;
+  if (name === base) return true;
+  if (formatWithNumber) {
+    const marker = '__VULCAN_NUMBER__';
+    const formatted = formatWithNumber(marker);
+    const escaped = escapeRegex(formatted).replace(escapeRegex(marker), '\\d+');
+    return new RegExp(`^${escaped}$`).test(name);
+  }
+  const escaped = escapeRegex(baseName);
+  return new RegExp(`^${escaped} \\d+$`).test(name);
+};

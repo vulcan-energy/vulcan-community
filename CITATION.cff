@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: >-
+  If you use Vulcan Community, please cite this software metadata. Citation is
+  requested, not an additional condition of the software licence.
+title: Vulcan Community
+type: software
+authors:
+  - name: Home Energy Foundry Limited
+contact:
+  - name: Home Energy Foundry Limited
+    email: info@usevulcan.app
+url: https://usevulcan.app/open-source
+repository-code: https://github.com/vulcan-energy/vulcan-community
+license: AGPL-3.0-only

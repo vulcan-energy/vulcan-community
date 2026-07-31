@@ -1,0 +1,55 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.standard-card {
+  background: var(--bg-tertiary);
+  border: var(--border-width-thin) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--card-padding);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Important for flexbox scrolling */
+  margin-top: 0; /* Remove margin-top - spacing handled by parent containers */
+  transition: var(--transition-colors);
+}
+
+.standard-card:hover {
+  border-color: var(--border-medium);
+}
+
+.standard-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0;
+  padding-bottom: var(--spacing-lg);
+  border-bottom: var(--border-width-thin) solid var(--border-subtle);
+}
+
+.standard-card-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  text-transform: none;
+  letter-spacing: 0px;
+}
+
+.standard-card-divider {
+  display: none; /* Remove the divider since we're using border-bottom instead */
+}
+
+.standard-card-content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0; /* Important for flexbox scrolling */
+  padding-top: var(--spacing-lg);
+}
+
+@media (max-width: 900px) {
+  .standard-card {
+    margin-top: 0;
+  }
+}

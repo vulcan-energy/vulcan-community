@@ -1,0 +1,94 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.files-dropdown {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  width: min(520px, calc(100vw - 24px));
+  min-width: min(520px, calc(100vw - 24px));
+  max-width: min(520px, calc(100vw - 24px));
+  overflow: hidden;
+}
+
+.files-dropdown--project-menu-open {
+  overflow: visible;
+}
+
+.files-dropdown-content {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.files-dropdown-loading,
+.files-dropdown-error,
+.files-dropdown-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.files-dropdown-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  text-align: left;
+  width: 100%;
+}
+
+.files-dropdown-item:hover {
+  background: var(--hover-bg);
+}
+
+.files-dropdown-item:disabled {
+  cursor: default;
+}
+
+.files-dropdown-item.active {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+}
+
+.files-dropdown-item.active:hover {
+  background: var(--accent-hover);
+}
+
+.files-dropdown-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+  color: var(--text-secondary);
+}
+
+.files-dropdown-action-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+  .files-dropdown {
+    width: min(320px, calc(100vw - 24px));
+    min-width: min(320px, calc(100vw - 24px));
+    max-width: min(320px, calc(100vw - 24px));
+    left: -8px;
+  }
+
+  .files-dropdown-item {
+    padding: 10px 12px;
+  }
+}

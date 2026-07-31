@@ -1,0 +1,147 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+/* StandardInput Component Styles */
+
+.standard-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  width: 100%;
+}
+
+.standard-input-label {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-xs);
+}
+
+.standard-input {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  color: var(--text-input);
+  background: var(--bg-tertiary);
+  border: var(--form-input-border);
+  border-radius: var(--radius-sm);
+  padding: var(--form-input-padding);
+  height: var(--form-input-height);
+  transition: var(--transition-all);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.standard-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.standard-input:hover:not(:focus):not(:disabled):not(:read-only) {
+  border-color: var(--border-medium);
+  background: var(--hover-bg);
+}
+
+.standard-input:disabled {
+  background: var(--bg-secondary);
+  color: var(--text-secondary); /* improve contrast for derived/disabled values */
+  cursor: not-allowed;
+  border-color: var(--border-subtle);
+}
+
+.standard-input::placeholder {
+  color: var(--text-placeholder, rgba(183, 206, 196, 0.4));
+  opacity: 1; /* Ensure opacity is applied correctly */
+}
+
+/* Size variants */
+.standard-input-sm {
+  height: 32px;
+  font-size: var(--font-size-sm);
+  padding: 6px 10px;
+}
+
+.standard-input-md {
+  height: var(--form-input-height);
+  font-size: var(--font-size-base);
+  padding: var(--form-input-padding);
+}
+
+.standard-input-lg {
+  height: 44px;
+  font-size: var(--font-size-lg);
+  padding: 10px 16px;
+}
+
+/* Ghost variant - transparent with rounded border */
+.standard-input-ghost {
+  background: transparent;
+  border: var(--border-width-thin) solid var(--border-subtle);
+  border-radius: var(--form-input-radius);
+  padding: var(--spacing-sm) var(--spacing-lg);
+}
+
+.standard-input-ghost:hover:not(:focus):not(:disabled):not(:read-only) {
+  border-color: var(--border-medium);
+  background: var(--hover-bg);
+}
+
+.standard-input-ghost:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  background: var(--hover-bg);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+/* Non-input display: not focusable, no hover affordance, no pointer interaction (e.g. plant `type`). */
+.standard-input-static {
+  pointer-events: none;
+  cursor: default;
+  user-select: none;
+}
+
+.standard-input-ghost.standard-input-static:hover {
+  border-color: var(--border-subtle);
+  background: transparent;
+}
+
+/* Error state */
+.standard-input-error {
+  border-color: var(--error-text);
+}
+
+.standard-input-error:hover:not(:focus):not(:disabled):not(:read-only) {
+  border-color: var(--error-text);
+}
+
+.standard-input-error:focus {
+  border-color: var(--error-text);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--error-bg);
+}
+
+.standard-input-error-text {
+  font-size: var(--font-size-sm);
+  color: var(--error-text);
+  font-weight: var(--font-weight-medium);
+  margin-top: var(--spacing-xs);
+}
+
+.standard-input-helper-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-top: var(--spacing-xs);
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .standard-input {
+    border-color: var(--border-strong);
+  }
+
+  .standard-input:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary);
+  }
+}

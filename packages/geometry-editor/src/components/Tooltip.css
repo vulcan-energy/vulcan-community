@@ -1,0 +1,290 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.tooltip-container {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip {
+  position: absolute;
+  z-index: 9999;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border: 1px solid var(--accent-primary);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  box-shadow: var(--shadow-control);
+  min-width: 220px;
+  max-width: 400px;
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: auto;
+  word-wrap: break-word;
+  pointer-events: none;
+}
+
+/* Fixed positioning variant for specific use cases */
+.tooltip-fixed {
+  position: fixed;
+}
+
+.tooltip::before {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 0;
+  border: 6px solid transparent;
+}
+
+.tooltip-bottom::before {
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-bottom-color: var(--accent-primary);
+}
+
+.tooltip-top::before {
+  bottom: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-top-color: var(--accent-primary);
+}
+
+.tooltip-left::before {
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-left-color: var(--accent-primary);
+}
+
+.tooltip-right::before {
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-right-color: var(--accent-primary);
+}
+
+.tooltip-content {
+  position: relative;
+}
+
+/* Direct content styling for truncation/preview tooltips */
+.tooltip-direct-content {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.tooltip-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.tooltip-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--text-secondary);
+  border-top: 2px solid var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.tooltip-error {
+  color: var(--error-text);
+  font-style: italic;
+}
+
+.tooltip-markdown {
+  color: var(--text-secondary);
+}
+
+.tooltip-markdown h1,
+.tooltip-markdown h2,
+.tooltip-markdown h3,
+.tooltip-markdown h4,
+.tooltip-markdown h5,
+.tooltip-markdown h6 {
+  color: var(--accent-primary);
+  margin: 0 0 8px 0;
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.tooltip-markdown h1 {
+  font-size: var(--font-size-lg);
+}
+
+.tooltip-markdown h2 {
+  font-size: var(--font-size-base);
+}
+
+.tooltip-markdown h3,
+.tooltip-markdown h4,
+.tooltip-markdown h5,
+.tooltip-markdown h6 {
+  font-size: var(--font-size-xs);
+}
+
+.tooltip-markdown p {
+  margin: 0 0 8px 0;
+}
+
+.tooltip-markdown img {
+  display: block;
+  max-width: min(100%, 320px);
+  max-height: 180px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  margin: 8px auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.tooltip-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.tooltip-markdown ul,
+.tooltip-markdown ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.tooltip-markdown li {
+  margin: 4px 0;
+}
+
+.tooltip-markdown strong,
+.tooltip-markdown b {
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+.tooltip-markdown em,
+.tooltip-markdown i {
+  font-style: italic;
+}
+
+.tooltip-markdown code {
+  background: var(--selected-bg);
+  color: var(--accent-primary);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: var(--font-size-caption);
+}
+
+.tooltip-markdown pre {
+  background: rgba(26, 52, 55, 0.8);
+  border: 1px solid var(--accent-primary);
+  border-radius: 4px;
+  padding: 8px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.tooltip-markdown pre code {
+  background: none;
+  padding: 0;
+  color: var(--text-secondary);
+}
+
+.tooltip-markdown blockquote {
+  border-left: 3px solid var(--accent-primary);
+  margin: 8px 0;
+  padding-left: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.tooltip-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: var(--font-size-xs);
+}
+
+.tooltip-markdown th,
+.tooltip-markdown td {
+  border: 1px solid var(--accent-primary);
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.tooltip-markdown th {
+  background: var(--selected-bg);
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+.tooltip-markdown td {
+  color: var(--text-secondary);
+}
+
+/* Hover effect for tooltip trigger */
+.tooltip-container:hover {
+  cursor: pointer;
+}
+
+/* Ensure tooltip doesn't interfere with other elements */
+.tooltip-container * {
+  pointer-events: auto;
+}
+
+.tooltip * {
+  pointer-events: none;
+}
+
+/* Schema tooltip content styling */
+.tooltip-schema-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tooltip-metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--accent-primary-alpha);
+}
+
+.tooltip-metadata-item {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary, var(--text-secondary));
+  line-height: 1.4;
+}
+
+.tooltip-metadata-item strong {
+  color: var(--accent-primary, var(--accent-primary));
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.tooltip-variant {
+  color: var(--accent-secondary, rgba(234, 253, 90, 0.8));
+  font-style: italic;
+}
+
+.tooltip-no-info {
+  color: var(--text-secondary, var(--text-secondary));
+  font-style: italic;
+  font-size: var(--font-size-xs);
+}

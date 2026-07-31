@@ -1,0 +1,14 @@
+{
+  "name": "@vulcan-community/geometry-editor-host",
+  "version": "0.0.0-private",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "peerDependencies": {
+    "react": "19.2.6"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  }
+}

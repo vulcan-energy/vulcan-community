@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"],
+  /* Tests are not typechecked, here or in web/tsconfig.app.json, which excludes the
+     same patterns under src/. Compiling them here would newly typecheck files vitest
+     has only ever transpiled. */
+  "exclude": ["src/**/__tests__/**", "src/**/__fixtures__/**", "src/**/*.test.*", "src/**/*.spec.*"]
+}

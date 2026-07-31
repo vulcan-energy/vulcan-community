@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+[workspace]
+members = [
+    "crates/vulcan-csv-codec",
+    "crates/vulcan-model-transform",
+    "crates/vulcan-model-wasm",
+]
+resolver = "2"
+
+[patch."https://github.com/communitiesuk/epb-home-energy-model.git"]
+home-energy-model = { path = "./hem_engine_upstream" }
+
+[patch."https://github.com/communitiesuk/epb-hem-wrapper-fhs.git"]
+home-energy-model-wrapper-fhs = { path = "./hem_fhs_upstream" }
+
+# Preserve the no-network/no-filesystem resolver defaults required by the WASM graph.
+[patch.crates-io]
+jsonschema_046 = { package = "jsonschema", path = "./third_party/jsonschema-0.46.5-offline" }

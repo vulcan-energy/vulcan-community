@@ -1,0 +1,205 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.form-section {
+  margin-bottom: 1.5rem;
+}
+
+.form-section h3 {
+  display: none; /* Hide subheaders for cleaner look */
+  color: var(--accent-primary);
+  border-bottom: 2px solid var(--accent-primary);
+}
+
+.form-section h3,
+.form-section-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-variation-settings: 'wght' 600;
+  color: var(--accent-primary);
+  margin: 1rem 0 0.5rem 0;
+  border-bottom: 2px solid var(--accent-primary);
+  padding-bottom: 0.25rem;
+}
+
+.element-form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.element-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: left;
+  margin-bottom: 4px;
+}
+
+.element-input {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0; /* Allow flex items to shrink below their content size */
+  margin-bottom: 8px;
+}
+
+.styled-checkbox {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+.styled-checkbox:checked + .checkbox-custom {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.checkbox-custom {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.6em;
+  width: 1.6em;
+  background: transparent;
+  border: 2px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  transition: background 0.2s, border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.checkbox-custom:hover {
+  border-color: var(--border-medium);
+  background: var(--hover-bg);
+}
+
+.checkbox-custom:after {
+  content: "";
+  position: absolute;
+  display: none;
+}
+
+.styled-checkbox:checked + .checkbox-custom:after {
+  display: block;
+  top: 40%;
+  left: 50%;
+  width: 40%;
+  height: 70%;
+  border: solid var(--bg-primary);
+  border-width: 0 0.18em 0.18em 0;
+  transform: translate(-50%, -50%) rotate(45deg);
+  content: "";
+  background: none;
+  box-sizing: border-box;
+}
+
+.advanced-fields-full-width {
+  width: 100%;
+  margin-top: var(--spacing-lg);
+  padding-top: var(--spacing-lg);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.space-heat-emitter-dropdown__container {
+  width: 100%;
+  min-width: 0;
+}
+
+.space-heat-emitter-dropdown__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  text-align: left;
+  background-image: none;
+}
+
+.space-heat-emitter-dropdown__trigger::after {
+  content: "▾";
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 0.8em;
+}
+
+.space-heat-emitter-dropdown__trigger--open {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.space-heat-emitter-dropdown__trigger-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.space-heat-emitter-dropdown {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.space-heat-emitter-dropdown__content {
+  max-height: none;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.space-heat-emitter-dropdown__row {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 12px;
+  color: var(--text-primary);
+}
+
+.space-heat-emitter-dropdown__row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent-primary);
+}
+
+.space-heat-emitter-dropdown__row--checked {
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+}
+
+.space-heat-emitter-dropdown__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.space-heat-emitter-dropdown__empty {
+  text-align: left;
+}
+
+.space-heat-emitter-dropdown__footer {
+  border-top: 1px solid var(--border-subtle);
+  padding: 4px 0;
+}
+
+.space-heat-emitter-dropdown__create {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 7px 12px;
+  color: var(--accent-primary);
+  font-size: 13px;
+  line-height: 1.3;
+  font-weight: 700;
+}

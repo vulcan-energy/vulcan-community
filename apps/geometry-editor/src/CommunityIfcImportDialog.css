@@ -1,0 +1,215 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.community-ifc-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  background: rgb(0 0 0 / 64%);
+}
+
+.community-ifc-dialog {
+  width: min(640px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 28px;
+  border: 1px solid var(--border-color, #526c6f);
+  border-radius: 18px;
+  color: var(--text-primary, #f5f8f8);
+  background: var(--modal-bg, var(--panel-bg, #173c3e));
+  box-shadow: 0 20px 70px rgb(0 0 0 / 48%);
+}
+
+.community-ifc-header,
+.community-ifc-header > div,
+.community-ifc-actions {
+  display: flex;
+  align-items: center;
+}
+
+.community-ifc-header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.community-ifc-header > div {
+  gap: 12px;
+}
+
+.community-ifc-header h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.community-ifc-experimental {
+  padding: 3px 8px;
+  border: 1px solid var(--warning-color, #e1f454);
+  border-radius: 999px;
+  color: var(--warning-color, #e1f454);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.community-ifc-close {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  background: var(--button-secondary-bg, #294e50);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.community-ifc-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.community-ifc-disclosure {
+  margin: 18px 0;
+  padding: 14px 16px;
+  border-left: 4px solid var(--accent-color, #e1f454);
+  background: rgb(255 255 255 / 6%);
+  line-height: 1.45;
+}
+
+.community-ifc-field {
+  display: grid;
+  gap: 7px;
+  margin: 18px 0;
+  font-weight: 700;
+}
+
+.community-ifc-field input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #526c6f);
+  border-radius: 8px;
+  color: var(--text-primary, #f5f8f8);
+  background: var(--input-bg, #102c2e);
+  font: inherit;
+}
+
+.community-ifc-modes {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0;
+  padding: 0;
+  border: 0;
+}
+
+.community-ifc-modes legend {
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.community-ifc-modes label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-color, #526c6f);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.community-ifc-modes span {
+  display: grid;
+  gap: 3px;
+}
+
+.community-ifc-modes small,
+.community-ifc-retention {
+  color: var(--text-secondary, #b7c7c7);
+}
+
+.community-ifc-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 18px 0;
+}
+
+.community-ifc-retention {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.community-ifc-progress,
+.community-ifc-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.community-ifc-progress {
+  background: rgb(225 244 84 / 12%);
+}
+
+.community-ifc-error {
+  color: var(--error-color, #ff7777);
+  background: rgb(255 80 80 / 10%);
+}
+
+.community-ifc-actions {
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.community-ifc-actions button {
+  min-width: 128px;
+  padding: 11px 18px;
+  border: 1px solid var(--border-color, #526c6f);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.community-ifc-primary {
+  border-color: var(--accent-color, #e1f454) !important;
+  color: var(--accent-contrast, #173037);
+  background: var(--accent-color, #e1f454);
+}
+
+.community-ifc-secondary {
+  color: var(--text-primary, #f5f8f8);
+  background: transparent;
+}
+
+.community-ifc-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@media (max-width: 640px) {
+  .community-ifc-backdrop {
+    padding: 0;
+  }
+
+  .community-ifc-dialog {
+    min-height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    padding: 20px;
+  }
+
+  .community-ifc-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .community-ifc-actions button {
+    width: 100%;
+  }
+}

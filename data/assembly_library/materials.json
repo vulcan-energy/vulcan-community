@@ -1,0 +1,49 @@
+{
+  "sourceEdition": "Vulcan Community illustrative starter data",
+  "description": "Editable example values for learning the assembly workflow. These are not product, compliance, or project design values; replace them with verified project-specific data before relying on a calculation.",
+  "materialCategories": [
+    { "id": "community_starter", "label": "Illustrative starter materials" }
+  ],
+  "materials": [
+    {
+      "id": "community.starter.masonry",
+      "name": "Illustrative dense masonry",
+      "shortName": "starter masonry",
+      "category": "community_starter",
+      "lambda_W_mK": 0.8,
+      "density_kg_m3": 1800,
+      "specific_heat_J_kg_K": 840,
+      "sourceRef": "Illustrative editable value; replace with verified project-specific data"
+    },
+    {
+      "id": "community.starter.insulation",
+      "name": "Illustrative insulation",
+      "shortName": "starter insulation",
+      "category": "community_starter",
+      "lambda_W_mK": 0.04,
+      "density_kg_m3": 30,
+      "specific_heat_J_kg_K": 1400,
+      "sourceRef": "Illustrative editable value; replace with verified project-specific data"
+    },
+    {
+      "id": "community.starter.board",
+      "name": "Illustrative lining board",
+      "shortName": "starter board",
+      "category": "community_starter",
+      "lambda_W_mK": 0.25,
+      "density_kg_m3": 900,
+      "specific_heat_J_kg_K": 1000,
+      "sourceRef": "Illustrative editable value; replace with verified project-specific data"
+    },
+    {
+      "id": "community.starter.concrete",
+      "name": "Illustrative dense slab",
+      "shortName": "starter slab",
+      "category": "community_starter",
+      "lambda_W_mK": 1.75,
+      "density_kg_m3": 2300,
+      "specific_heat_J_kg_K": 880,
+      "sourceRef": "Illustrative editable value; replace with verified project-specific data"
+    }
+  ]
+}

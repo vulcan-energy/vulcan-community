@@ -1,0 +1,42 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.experimental-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #faf5ff;
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 1px 2px rgba(76, 29, 149, 0.35);
+  cursor: default;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.experimental-pill:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+.experimental-pill-tooltip {
+  position: fixed;
+  z-index: 200000;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  line-height: 1.45;
+  color: #faf5ff;
+  background: #5b21b6;
+  border: 1px solid #7c3aed;
+  box-shadow: 0 8px 24px rgba(76, 29, 149, 0.45);
+  pointer-events: none;
+}

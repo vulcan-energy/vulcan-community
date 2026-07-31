@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+[package]
+name = "vulcan-model-wasm"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Browser-facing Vulcan model conversion and FHS preflight"
+license = "AGPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+vulcan-model-transform = { path = "../vulcan-model-transform" }
+hem_upstream = { package = "home-energy-model", git = "https://github.com/communitiesuk/epb-home-energy-model.git", rev = "62d3df705690f33b3fc3e905c9971d4f3743bf2e" }
+hem_fhs_upstream = { package = "home-energy-model-wrapper-fhs", git = "https://github.com/communitiesuk/epb-hem-wrapper-fhs.git", rev = "c5ba2673fbd886cfe4fb528f61b376bdf406ebbd" }
+wasm-bindgen = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Select the browser entropy backend for both versions pulled by the pinned HEM/FHS graph.
+getrandom = { version = "0.3.3", features = ["wasm_js"], default-features = false }
+getrandom04 = { package = "getrandom", version = "0.4.2", features = ["wasm_js"], default-features = false }
+js-sys = "0.3"
+wasm-bindgen-rayon = { version = "1.3.0", default-features = false, features = ["no-bundler"] }

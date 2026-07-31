@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "component": "Vulcan Community",
+  "original_developer": "Home Energy Foundry Limited",
+  "company_number": "14972259",
+  "homepage": "https://usevulcan.app/open-source",
+  "license": "AGPL-3.0-only",
+  "additional_terms": "Vulcan-Origin-Terms-1.0",
+  "source": {
+    "repository": "https://github.com/vulcan-energy/vulcan-community",
+    "revision": null,
+    "archive": null,
+    "status": "release_candidate"
+  },
+  "third_party": [
+    {
+      "component": "Home Energy Model engine",
+      "license": "MIT",
+      "source": "https://github.com/communitiesuk/epb-home-energy-model",
+      "revision": "62d3df705690f33b3fc3e905c9971d4f3743bf2e"
+    },
+    {
+      "component": "Home Energy Model Future Homes Standard wrapper",
+      "license": "MIT",
+      "source": "https://github.com/communitiesuk/epb-hem-wrapper-fhs",
+      "revision": "c5ba2673fbd886cfe4fb528f61b376bdf406ebbd",
+      "license_evidence_revision": "dd5ba73a19674d631da59b4924bb7dc2833fbb3b"
+    },
+    {
+      "component": "HEM guidance Building Fabric Table 3.7 default psi values",
+      "license": "OGL-UK-3.0",
+      "source": "Home Energy Model guidance, Building Fabric, section 3.7.2, Table 3.7",
+      "revision": "HEM guidance Building Fabric, Table 3.7 (psi values for different types of junctions); pinned evidence copy SHA-256 6bfeeb31bf1bf3296722f393745ccda895f4bfed9f39b70e8e3abecd12d1f7c9",
+      "attribution": "Contains public sector information licensed under the Open Government Licence v3.0."
+    }
+  ],
+  "official_build": false,
+  "contact": "info@usevulcan.app"
+}

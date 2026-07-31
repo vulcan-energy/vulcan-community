@@ -1,0 +1,646 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+/* Global Button System */
+
+/* Base button styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none !important;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  box-sizing: border-box;
+  /* Reset browser defaults */
+  background: none;
+  padding: 0;
+  margin: 0;
+  outline: none;
+}
+
+.btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* Button Sizes */
+
+/* Navigation size - for header navigation and "Run Simulation" */
+.btn-nav {
+  padding: 0.6rem 1.4rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  min-height: 44px;
+  border-radius: var(--radius-lg);
+  transition: all 0.2s ease-in-out;
+  /* Apply Profile button glassmorphism effect */
+  background: var(--surface-control-active) !important;
+  border: 1px solid var(--border-overlay) !important;
+  color: var(--text-primary) !important;
+}
+
+.btn-nav:hover:not(:disabled):not(.active) {
+  background: var(--surface-control-strong) !important;
+  border-color: var(--border-medium) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-nav.active {
+  /* Simplified active state - only outline, no background/text color changes */
+  background: var(--surface-control-active) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--accent-primary) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px var(--focus-outline);
+}
+
+.btn-nav.active:hover {
+  /* Active state hover - keep the outline but slightly enhance the background */
+  background: var(--surface-control-active) !important;
+  border-color: var(--accent-primary) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px var(--focus-outline);
+}
+
+.btn-nav.filename-bar-action {
+  min-height: 38px;
+  padding: 0.45rem 0.85rem;
+  font-size: var(--font-size-base);
+  border-radius: var(--radius-md);
+}
+
+.btn-nav.filename-bar-action svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* Standard size - for all other buttons */
+.btn-standard {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  min-height: 44px;
+  border-radius: var(--radius-lg);
+}
+
+/* Small size - for compact buttons */
+.btn-small,
+.btn-sm {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  min-height: 32px;
+  border-radius: var(--radius-md);
+}
+
+.btn.btn-primary:not(.btn-standard):not(.btn-small):not(.btn-sm):not(.btn-nav):not(.btn-icon-only),
+.btn.btn-secondary:not(.btn-standard):not(.btn-small):not(.btn-sm):not(.btn-nav):not(.btn-icon-only) {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  min-height: 32px;
+  border-radius: var(--radius-md);
+}
+
+/* Button Variants */
+
+/* Yellow variant - Primary buttons */
+.btn-yellow,
+.btn.btn-primary {
+  background: var(--accent-primary) !important;
+  color: var(--text-on-accent) !important;
+  box-shadow: 0 1px 2px rgba(26, 52, 55, 0.06);
+}
+
+.btn-yellow:hover:not(:disabled),
+.btn.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(26, 52, 55, 0.12);
+}
+
+.btn-yellow:active:not(:disabled),
+.btn.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(26, 52, 55, 0.06);
+}
+
+/* Grey variant - Secondary buttons like "Columns", "Previous", "Next" */
+.btn-grey {
+  background: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-subtle);
+}
+
+.btn-grey:hover:not(:disabled) {
+  background: var(--hover-bg) !important;
+  border-color: var(--border-medium);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-grey:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* Ghost variant - Transparent buttons for clean look */
+.btn-ghost,
+.btn.btn-secondary {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-subtle) !important;
+}
+
+.btn-ghost:hover:not(:disabled),
+.btn.btn-secondary:hover:not(:disabled) {
+  background: var(--hover-bg) !important;
+  border-color: var(--border-medium) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(26, 52, 55, 0.1);
+}
+
+.btn-ghost:active:not(:disabled),
+.btn.btn-secondary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* Danger variant - For destructive actions */
+.btn-danger {
+  background: var(--error-bg) !important;
+  color: var(--error-text) !important;
+  border: none !important;
+}
+
+.btn-danger:focus {
+  outline: none;
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--error-hover) !important;
+  border-color: var(--error-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px var(--error-hover);
+}
+
+.btn-danger:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* Special states for yellow buttons */
+.btn-yellow.success {
+  background: var(--success-bg) !important;
+  color: var(--success-text) !important;
+}
+
+.btn-yellow.error {
+  background: var(--error-bg) !important;
+  color: var(--error-text) !important;
+}
+
+/* Button with icon */
+.btn-icon {
+  gap: 0.5rem;
+}
+
+.btn-icon-only {
+  padding: 0.5rem;
+  min-width: 38px;
+  width: 38px;
+  height: 38px;
+}
+
+.btn-nav.btn-icon-only {
+  min-width: 44px;
+  width: 44px;
+  height: 44px;
+}
+
+/* Full width button */
+.btn-full {
+  width: 100%;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .btn-nav {
+    padding: 0.5rem 1.2rem;
+    font-size: 1rem;
+    min-height: 40px;
+  }
+
+  .btn-standard {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+    min-height: 36px;
+  }
+
+  .btn-icon-only {
+    min-width: 36px;
+    width: 36px;
+    height: 36px;
+  }
+
+  .btn-nav.btn-icon-only {
+    min-width: 40px;
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .btn-yellow {
+    border: 1px solid var(--bg-primary);
+  }
+
+  .btn-grey {
+    border: 1px solid var(--bg-primary);
+  }
+}
+
+/* Enhanced Save Button Styles */
+.save-button {
+  min-width: 120px !important;
+  width: 120px !important;
+  height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.save-button-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  justify-content: center;
+}
+
+.save-error-indicator {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  font-size: var(--font-size-base);
+}
+
+.save-error-indicator:hover {
+  opacity: 0.85;
+}
+
+.save-error-details {
+  margin: 0;
+  max-height: none;
+  overflow: visible;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 2px 0;
+  font-size: var(--font-size-caption);
+  line-height: 1.32;
+}
+
+.save-error-details-button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  cursor: pointer;
+  color: var(--text-primary);
+  font: inherit;
+  background: transparent;
+}
+
+.save-error-details-button:hover {
+  color: #d4f04f;
+}
+
+.save-error-details-button:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.save-error-header-count {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xxs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.save-error-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.save-error-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 150px) minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+}
+
+.save-error-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.save-error-row-content {
+  min-width: 0;
+}
+
+.save-error-location {
+  background: var(--surface-control-hover);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.save-error-user-message {
+  color: var(--text-primary);
+  flex: 1 1 auto;
+  font-size: var(--font-size-caption);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.save-error-technical {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xxs);
+  margin-top: 2px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.save-error-technical summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.save-error-technical-body {
+  margin-top: 2px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.save-error-technical-meta {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  margin-top: 3px;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
+
+
+.save-button-text {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+
+/* Save button state styles - maintain consistent size */
+.save-button.saving {
+  background: var(--accent-primary) !important;
+  color: var(--text-on-accent) !important;
+  opacity: 0.8;
+}
+
+.save-button.success {
+  background: var(--success-text) !important;
+  color: white !important;
+}
+
+.save-button.error {
+  background: var(--error-text) !important;
+  color: white !important;
+}
+
+/* Animation for spinning icon */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/*
+ * Junction builder / thermal bridge section editor — matches main canvas `.draw-button`
+ * (see GeometryCanvas.css) so palette, zoom, and modal actions look consistent.
+ */
+button.global-button {
+  margin: 0;
+  font: inherit;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+button.global-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+button.global-button:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+button.global-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.global-button--primary,
+button.global-button.global-button--primary {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  border-color: var(--accent-primary);
+  /* Outer glow clips in narrow rails — keep state in the fill/border only */
+  box-shadow: none;
+}
+
+button.global-button--primary:hover:not(:disabled),
+button.global-button.global-button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-primary);
+  box-shadow: none;
+  transform: none;
+}
+
+/* Junction modal left rail: same --bg-secondary as default global-button fill — looked like bare text */
+.junction-palette-toolbar button.global-button:not(.global-button--primary) {
+  background: var(--bg-primary);
+  border-color: var(--border-subtle);
+}
+
+.junction-palette-toolbar button.global-button:not(.global-button--primary):hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+
+/* Thermal bridge junction modal — one compact row (Solve / Adopt / name / Save / Load) */
+/* Toolbar sits above the junction canvas (Solve / Adopt / preset / Save / Load) */
+.junction-toolbar-row {
+  --junction-toolbar-h: 32px;
+  --junction-toolbar-radius: 8px;
+  --junction-toolbar-pad-x: 12px;
+  --junction-toolbar-font: 12px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* global-button row actions — same box as Save (.btn) and the preset input */
+.junction-toolbar-row button.junction-toolbar-action-btn.global-button {
+  height: var(--junction-toolbar-h);
+  min-height: var(--junction-toolbar-h);
+  max-height: var(--junction-toolbar-h);
+  box-sizing: border-box;
+  padding: 0 var(--junction-toolbar-pad-x) !important;
+  font-size: var(--junction-toolbar-font);
+  font-weight: 500;
+  line-height: 1;
+  border-radius: var(--junction-toolbar-radius) !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/*
+ * Solve + mesh (gear): two real <button>s for accessibility, one visual control.
+ * Without this, each child keeps full toolbar radius and reads as separate pills.
+ */
+.junction-toolbar-row .junction-solve-split {
+  display: inline-flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-radius: var(--junction-toolbar-radius);
+  overflow: hidden;
+}
+
+.junction-toolbar-row .junction-solve-split > button.junction-toolbar-action-btn.global-button {
+  border-radius: 0 !important;
+  margin: 0;
+}
+
+.junction-toolbar-row .junction-solve-split > button.junction-toolbar-action-btn.global-button:first-child {
+  border-top-left-radius: var(--junction-toolbar-radius) !important;
+  border-bottom-left-radius: var(--junction-toolbar-radius) !important;
+}
+
+.junction-toolbar-row .junction-solve-split > button.junction-toolbar-action-btn.global-button:last-child {
+  border-top-right-radius: var(--junction-toolbar-radius) !important;
+  border-bottom-right-radius: var(--junction-toolbar-radius) !important;
+  padding-left: 8px !important;
+  padding-right: 9px !important;
+  min-width: 34px;
+}
+
+.junction-toolbar-row
+  .junction-solve-split
+  > button.junction-toolbar-action-btn.global-button
+  + button.junction-toolbar-action-btn.global-button {
+  border-left: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.junction-toolbar-row .junction-preset-name-input {
+  width: 140px;
+  min-width: 96px;
+  max-width: min(200px, 28vw);
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  margin: 0;
+  height: var(--junction-toolbar-h) !important;
+  min-height: var(--junction-toolbar-h) !important;
+  max-height: var(--junction-toolbar-h) !important;
+  padding: 0 10px !important;
+  font-size: var(--junction-toolbar-font) !important;
+  font-weight: 500;
+  line-height: 1 !important;
+  border-radius: var(--junction-toolbar-radius) !important;
+  flex-shrink: 0;
+}
+
+/* Save uses `.btn` / `.btn-small` (pill radius + min-height) — force same chrome as global-button row */
+.junction-toolbar-row .junction-preset-save-button.save-button {
+  min-width: 96px !important;
+  width: auto !important;
+  max-width: none !important;
+  height: var(--junction-toolbar-h) !important;
+  min-height: var(--junction-toolbar-h) !important;
+  max-height: var(--junction-toolbar-h) !important;
+  padding: 0 var(--junction-toolbar-pad-x) !important;
+  border-radius: var(--junction-toolbar-radius) !important;
+  font-size: var(--junction-toolbar-font) !important;
+  flex-shrink: 0;
+}
+
+.junction-toolbar-row .junction-preset-save-button.save-button .save-button-content {
+  gap: 6px;
+}
+
+.junction-toolbar-row .junction-preset-save-button.save-button .save-button-text {
+  font-size: var(--junction-toolbar-font);
+  font-weight: 500;
+}

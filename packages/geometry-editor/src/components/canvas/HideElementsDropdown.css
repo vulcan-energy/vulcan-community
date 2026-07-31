@@ -1,0 +1,104 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.hide-elements-dropdown.files-dropdown {
+  width: min(200px, calc(100vw - 24px));
+  min-width: 0;
+  max-width: min(200px, calc(100vw - 24px));
+  overflow: hidden;
+  box-sizing: border-box;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.hide-elements-dropdown .hide-elements-dropdown__content {
+  padding: 0;
+  overflow-y: auto;
+}
+
+.hide-elements-dropdown__section-title {
+  padding: 2px 8px 3px;
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.hide-panels-dropdown__actions {
+  display: flex;
+  justify-content: flex-start;
+  padding: 6px 8px 2px;
+}
+
+.hide-panels-dropdown .files-dropdown-action-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 5px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.hide-panels-dropdown .files-dropdown-action-pill:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+  border-color: var(--border);
+}
+
+.hide-elements-dropdown__divider {
+  height: 0;
+  margin: 2px 10px 3px;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.hide-elements-dropdown .files-dropdown-item.hide-elements-dropdown__row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  padding: 2px 8px;
+  box-sizing: border-box;
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.hide-elements-dropdown .files-dropdown-item.hide-elements-dropdown__row:hover {
+  background: var(--hover-bg);
+}
+
+.hide-elements-dropdown__individual-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--font-size-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hide-elements-dropdown__empty {
+  padding: 3px 8px 6px;
+  font-size: var(--font-size-caption);
+  opacity: 0.75;
+}

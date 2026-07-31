@@ -1,0 +1,8 @@
+[submodule "hem_engine_upstream"]
+	path = hem_engine_upstream
+	url = https://github.com/communitiesuk/epb-home-energy-model
+	branch = main
+[submodule "hem_fhs_upstream"]
+	path = hem_fhs_upstream
+	url = https://github.com/communitiesuk/epb-hem-wrapper-fhs
+	branch = main

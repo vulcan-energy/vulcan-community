@@ -1,0 +1,499 @@
+// SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import { toFhsMassDistributionClass } from '../../lib/assemblyMassHeuristic';
+import { arealHeatCapacityBandFromJPerM2K } from '../../lib/assemblyCalculator';
+import type { ExternalDetailProfileLink } from '../../lib/assemblyTypes';
+import {
+  parseSchemaProfileMetadata,
+  type ModelSchemaProfile,
+} from './modelSchemaProfile';
+import { ingestThermalBridgeLinearPostParse } from '../../lib/thermalBridgeFloorIngest';
+import {
+  decodeGuideOverlayMetadataValue,
+  decodeGuideOverlaySourceMetadataValue,
+  type GuideOverlay,
+  type GuideOverlaySource,
+} from '../guideOverlay';
+import {
+  resolveGuideOverlayForFloor,
+  resolveGuideOverlaySourceForFloor,
+  type GuideOverlayByFloor,
+  type GuideOverlaySourceByFloor,
+} from '../guideOverlayByFloor';
+import type {
+  Zone,
+  SpaceLabel,
+  Element,
+  SapBuiltFormCode,
+} from '../types';
+import {
+  parseCsvLine,
+  parseCsvSections,
+  stripLegacyBuildingServicesBlocks,
+  findTabularGeometryCsvStart,
+} from './csvSectionRows';
+import { ingestGeometryTabularSections } from './ingestGeometryTabularSections';
+import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
+
+export type ComplianceSettings = {
+  PartO_active_cooling_required?: boolean;
+  NumberOfBedrooms?: number;
+  NumberOfWetRooms?: number;
+  GroundFloorArea?: number;
+  HeatingControlType?: 'SeparateTempControl' | 'SeparateTimeAndTempControl';
+  PartGcompliance?: boolean;
+  ColdWaterSource?: 'mains water' | 'header tank';
+  complianceValidationEnabled?: boolean;
+  /** When false, this model is hidden from the Scenarios base-model picker (CSV row `ScenariosBaseModelEnabled`). */
+  scenariosBaseModelEnabled?: boolean;
+  AirPermeability_test_pressure?: 'Standard' | 'Pulse test only';
+  AirPermeability_test_result?: number;
+  AirPermeability_env_area?: number;
+  AirPermeability_ventilation_zone_height?: number;
+  Ventilation_shield_class?: 'Open' | 'Normal' | 'Shielded';
+  Ventilation_terrain_class?: 'OpenWater' | 'OpenField' | 'Suburban' | 'Urban';
+  Ventilation_altitude?: number;
+  Ventilation_ventilation_zone_base_height?: number;
+  Ventilation_noise_nuisance?: boolean;
+  BuildingLength?: number;
+  BuildingWidth?: number;
+  NumberOfHabitableRooms?: number;
+  NumberOfHotTappedRooms?: number;
+  NumberOfUtilityRooms?: number;
+  NumberOfBathrooms?: number;
+  NumberOfSanitaryAccommodations?: number;
+  KitchenExtractorHoodExternal?: boolean;
+  build_type?: 'flat' | 'house';
+  built_form?: SapBuiltFormCode;
+  storeys_in_dwelling?: number;
+  storey_of_dwelling?: number;
+  storeys_in_building?: number;
+};
+
+function parseAirPermeabilityTestPressure(
+  raw: string | undefined,
+): ComplianceSettings['AirPermeability_test_pressure'] | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  if (value === 'Pulse test only') return 'Pulse test only';
+  if (value === 'Standard') return 'Standard';
+  const legacyNumeric = Number.parseFloat(value);
+  if (Number.isFinite(legacyNumeric)) return 'Standard';
+  return undefined;
+}
+
+export type ParsedCsvMetadata = {
+  globalOrientationOffset: number;
+  schemaProfile?: ModelSchemaProfile;
+  defaultsPath?: string;
+  hostDocumentMetadata: Readonly<Record<string, string>>;
+  propertyPostcode?: string;
+  junctionPsiDefaultsPath?: string;
+  guideOverlay: GuideOverlay | null;
+  guideOverlaySource?: GuideOverlaySource | null;
+  guideOverlayByFloor: GuideOverlayByFloor;
+  guideOverlaySourceByFloor: GuideOverlaySourceByFloor;
+  defaultThermalBridging?: number;
+  complianceSettings: ComplianceSettings;
+  creationDefaultAssemblyIds?: Partial<Record<'wall' | 'roof' | 'ground_floor', string>>;
+  detailedBridgePsiProfile?: ExternalDetailProfileLink | null;
+};
+
+export type ParsedCsvGeometry = {
+  zones: Zone[];
+  elements: Element[];
+  spaceLabels: SpaceLabel[];
+  metadata: ParsedCsvMetadata;
+  /** Non-fatal data-loss notices (e.g. malformed extra_json dropped) that MUST be shown to the user. */
+  warnings: string[];
+};
+
+export type ParseCsvToGeometryOptions = Readonly<{
+  hostDocumentMetadataKeys?: readonly string[];
+}>;
+
+export const parseCsvToGeometry = (
+  csvContent: string,
+  options: ParseCsvToGeometryOptions = {},
+): ParsedCsvGeometry => {
+  const ensureMetadataSection = (csv: string): string => {
+    if (!csv.includes('Metadata,')) {
+      const lines = csv.split('\n');
+      lines.splice(
+        0,
+        0,
+        'Metadata,,,,,,,,,,,,,',
+        'GlobalOrientationOffset,0.0,,,,,,,,,,,,,',
+        ',,,,,,,,,,,,,',
+      );
+      return lines.join('\n');
+    }
+    return csv;
+  };
+
+  const processedCsvContent = ensureMetadataSection(csvContent);
+  const lines = processedCsvContent.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+
+  const tabularStart = findTabularGeometryCsvStart(lines);
+  const metadataLines = lines.slice(0, tabularStart);
+  const tabularCsv = stripLegacyBuildingServicesBlocks(lines.slice(tabularStart).join('\n'));
+
+  let globalOffset = 0;
+  let detectedDefaultsPath: string | undefined;
+  let detectedSchemaProfile: ModelSchemaProfile | undefined;
+  const hostDocumentMetadataKeys = new Set(options.hostDocumentMetadataKeys ?? []);
+  const detectedHostDocumentMetadata: Record<string, string> = {};
+  let detectedPropertyPostcode: string | undefined;
+  let detectedJunctionPsiDefaultsPath: string | undefined;
+  const detectedGuideOverlayByFloor: GuideOverlayByFloor = {};
+  const detectedGuideOverlaySourceByFloor: GuideOverlaySourceByFloor = {};
+  let detectedDefaultThermalBridging: number | undefined;
+  let detectedDefaultAssemblyWall: string | undefined;
+  let detectedDefaultAssemblyRoof: string | undefined;
+  let detectedDefaultAssemblyGroundFloor: string | undefined;
+  let detectedDetailedBridgePsiProfileSource: string | undefined;
+  let detectedDetailedBridgePsiProfileId: string | undefined;
+  let detectedDetailedBridgePsiProfileLabel: string | undefined;
+  const complianceSettings: ComplianceSettings = {};
+
+  for (const line of metadataLines) {
+    if (line.startsWith('Metadata,')) continue;
+    const metadataFields = parseCsvLine(line);
+    const hostMetadataKey = metadataFields[0]?.trim();
+    if (hostMetadataKey && hostDocumentMetadataKeys.has(hostMetadataKey)) {
+      const value = metadataFields[1]?.trim();
+      if (value) detectedHostDocumentMetadata[hostMetadataKey] = value;
+      continue;
+    }
+    if (line.startsWith('GlobalOrientationOffset,')) {
+      const offset = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(offset)) globalOffset = offset;
+      continue;
+    }
+    if (line.startsWith('DefaultsPath,')) {
+      const parts = line.split(',');
+      detectedDefaultsPath = parts[1] ? parts[1] : undefined;
+      continue;
+    }
+    if (line.startsWith('Postcode,')) {
+      const parts = parseCsvLine(line);
+      const value = parts[1]?.trim();
+      detectedPropertyPostcode = value || undefined;
+      continue;
+    }
+    if (line.startsWith('SchemaProfile,')) {
+      const parts = parseCsvLine(line);
+      detectedSchemaProfile = parseSchemaProfileMetadata(parts[1]);
+      continue;
+    }
+    if (line.startsWith('DefaultAssemblyWall,')) {
+      const parts = parseCsvLine(line);
+      const v = parts[1]?.trim();
+      if (v) detectedDefaultAssemblyWall = v;
+      continue;
+    }
+    if (line.startsWith('DefaultAssemblyRoof,')) {
+      const parts = parseCsvLine(line);
+      const v = parts[1]?.trim();
+      if (v) detectedDefaultAssemblyRoof = v;
+      continue;
+    }
+    if (line.startsWith('DefaultAssemblyGroundFloor,')) {
+      const parts = parseCsvLine(line);
+      const v = parts[1]?.trim();
+      if (v) detectedDefaultAssemblyGroundFloor = v;
+      continue;
+    }
+    if (line.startsWith('JunctionPsiDefaultsPath,')) {
+      const parts = parseCsvLine(line);
+      const value = parts[1] ? parts[1].trim() : '';
+      detectedJunctionPsiDefaultsPath = value ? value : undefined;
+      continue;
+    }
+    if (line.startsWith('DetailedBridgePsiProfileSource,')) {
+      const parts = parseCsvLine(line);
+      const value = parts[1] ? parts[1].trim() : '';
+      detectedDetailedBridgePsiProfileSource = value ? value : undefined;
+      continue;
+    }
+    if (line.startsWith('DetailedBridgePsiProfileId,')) {
+      const parts = parseCsvLine(line);
+      const value = parts[1] ? parts[1].trim() : '';
+      detectedDetailedBridgePsiProfileId = value ? value : undefined;
+      continue;
+    }
+    if (line.startsWith('DetailedBridgePsiProfileLabel,')) {
+      const parts = parseCsvLine(line);
+      const value = parts[1] ? parts[1].trim() : '';
+      detectedDetailedBridgePsiProfileLabel = value ? value : undefined;
+      continue;
+    }
+    if (line.startsWith('GuideOverlay,')) {
+      const parts = parseCsvLine(line);
+      // Format: `GuideOverlay,<floorIndex>,<payload>,...` (current).
+      // Legacy: `GuideOverlay,<payload>,...` — treated as floor 0.
+      const second = (parts[1] ?? '').trim();
+      const isFloorIndex = /^-?\d+$/.test(second);
+      const floorIndex = isFloorIndex ? parseInt(second, 10) : 0;
+      const payload = isFloorIndex ? (parts[2] ?? '') : (parts[1] ?? '');
+      const decoded = decodeGuideOverlayMetadataValue(payload);
+      if (decoded) {
+        detectedGuideOverlayByFloor[floorIndex] = decoded;
+      }
+      continue;
+    }
+    if (line.startsWith('GuideOverlaySource,')) {
+      const parts = parseCsvLine(line);
+      const second = (parts[1] ?? '').trim();
+      const isFloorIndex = /^-?\d+$/.test(second);
+      const floorIndex = isFloorIndex ? parseInt(second, 10) : 0;
+      const payload = isFloorIndex ? (parts[2] ?? '') : (parts[1] ?? '');
+      const decoded = decodeGuideOverlaySourceMetadataValue(payload);
+      if (decoded) {
+        detectedGuideOverlaySourceByFloor[floorIndex] = decoded;
+      }
+      continue;
+    }
+    if (line.startsWith('DefaultThermalBridging,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value) && value >= 0) detectedDefaultThermalBridging = value;
+      continue;
+    }
+    if (line.startsWith('PartO_active_cooling_required,')) {
+      const value = line.split(',')[1]?.trim().toUpperCase();
+      complianceSettings.PartO_active_cooling_required = value === 'TRUE';
+      continue;
+    }
+    if (line.startsWith('NumberOfBedrooms,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.NumberOfBedrooms = Math.max(0, Math.floor(value));
+      continue;
+    }
+    if (line.startsWith('NumberOfWetRooms,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.NumberOfWetRooms = Math.max(0, Math.floor(value));
+      continue;
+    }
+    if (line.startsWith('GroundFloorArea,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value) && value >= 0) complianceSettings.GroundFloorArea = value;
+      continue;
+    }
+    if (line.startsWith('HeatingControlType,')) {
+      const value = line.split(',')[1]?.trim();
+      if (value === 'SeparateTempControl' || value === 'SeparateTimeAndTempControl') {
+        complianceSettings.HeatingControlType = value;
+      }
+      continue;
+    }
+    if (line.startsWith('PartGcompliance,')) {
+      const value = line.split(',')[1]?.trim().toUpperCase();
+      complianceSettings.PartGcompliance = value === 'TRUE';
+      continue;
+    }
+    if (line.startsWith('ColdWaterSource,')) {
+      const value = line.split(',')[1]?.trim();
+      if (value === 'mains water' || value === 'header tank') {
+        complianceSettings.ColdWaterSource = value;
+      }
+      continue;
+    }
+    if (line.startsWith('ComplianceValidationEnabled,')) {
+      const value = line.split(',')[1]?.trim().toUpperCase();
+      complianceSettings.complianceValidationEnabled = value === 'TRUE';
+      continue;
+    }
+    if (line.startsWith('ScenariosBaseModelEnabled,')) {
+      const value = line.split(',')[1]?.trim().toUpperCase();
+      complianceSettings.scenariosBaseModelEnabled = value === 'TRUE';
+      continue;
+    }
+    if (line.startsWith('AirPermeability_test_pressure,')) {
+      const value = parseAirPermeabilityTestPressure(line.split(',')[1]);
+      if (value !== undefined) complianceSettings.AirPermeability_test_pressure = value;
+      continue;
+    }
+    if (line.startsWith('AirPermeability_test_result,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.AirPermeability_test_result = value;
+      continue;
+    }
+    if (line.startsWith('AirPermeability_ventilation_zone_height,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.AirPermeability_ventilation_zone_height = value;
+      continue;
+    }
+    if (line.startsWith('Ventilation_shield_class,')) {
+      const value = line.split(',')[1]?.trim();
+      if (value === 'Open' || value === 'Normal' || value === 'Shielded') {
+        complianceSettings.Ventilation_shield_class = value;
+      }
+      continue;
+    }
+    if (line.startsWith('Ventilation_terrain_class,')) {
+      const value = line.split(',')[1]?.trim();
+      if (value === 'OpenWater' || value === 'OpenField' || value === 'Suburban' || value === 'Urban') {
+        complianceSettings.Ventilation_terrain_class = value;
+      }
+      continue;
+    }
+    if (line.startsWith('Ventilation_altitude,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.Ventilation_altitude = value;
+      continue;
+    }
+    if (line.startsWith('Ventilation_ventilation_zone_base_height,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.Ventilation_ventilation_zone_base_height = value;
+      continue;
+    }
+    if (line.startsWith('Ventilation_noise_nuisance,')) {
+      const value = line.split(',')[1]?.trim().toUpperCase();
+      complianceSettings.Ventilation_noise_nuisance = value === 'TRUE';
+      continue;
+    }
+    if (line.startsWith('BuildingLength,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.BuildingLength = value;
+      continue;
+    }
+    if (line.startsWith('BuildingWidth,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.BuildingWidth = value;
+      continue;
+    }
+    if (line.startsWith('NumberOfHabitableRooms,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.NumberOfHabitableRooms = Math.max(0, Math.floor(value));
+      continue;
+    }
+    if (line.startsWith('NumberOfHotTappedRooms,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.NumberOfHotTappedRooms = Math.max(0, Math.floor(value));
+      continue;
+    }
+    if (line.startsWith('NumberOfUtilityRooms,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.NumberOfUtilityRooms = Math.max(0, Math.floor(value));
+      continue;
+    }
+    if (line.startsWith('NumberOfBathrooms,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.NumberOfBathrooms = Math.max(0, Math.floor(value));
+      continue;
+    }
+    if (line.startsWith('NumberOfSanitaryAccommodations,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.NumberOfSanitaryAccommodations = Math.max(0, Math.floor(value));
+      continue;
+    }
+    if (line.startsWith('KitchenExtractorHoodExternal,')) {
+      const value = line.split(',')[1]?.trim().toUpperCase();
+      complianceSettings.KitchenExtractorHoodExternal = value === 'TRUE';
+      continue;
+    }
+    if (line.startsWith('General_build_type,')) {
+      const value = line.split(',')[1]?.trim();
+      if (value === 'flat' || value === 'house') complianceSettings.build_type = value;
+      continue;
+    }
+    if (line.startsWith('General_built_form,')) {
+      const value = Number(line.split(',')[1]?.trim());
+      if (Number.isInteger(value) && value >= 1 && value <= 6) {
+        complianceSettings.built_form = value as SapBuiltFormCode;
+      }
+      continue;
+    }
+    if (line.startsWith('General_storeys_in_dwelling,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.storeys_in_dwelling = Math.max(1, Math.floor(value));
+      continue;
+    }
+    if (line.startsWith('General_storey_of_dwelling,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.storey_of_dwelling = Math.floor(value);
+      continue;
+    }
+    if (line.startsWith('General_storeys_in_building,')) {
+      const value = parseFloat(line.split(',')[1] ?? '');
+      if (!isNaN(value)) complianceSettings.storeys_in_building = Math.max(1, Math.floor(value));
+      continue;
+    }
+  }
+
+  const warnings: string[] = [];
+  const parseExtraJson = (jsonString: string, elementName?: string): Record<string, unknown> | undefined => {
+    if (!jsonString || jsonString.trim() === '') return undefined;
+    try {
+      const parsed = JSON.parse(jsonString) as Record<string, unknown>;
+      if (typeof parsed.mass_distribution_class === 'string') {
+        parsed.mass_distribution_class =
+          toFhsMassDistributionClass(parsed.mass_distribution_class) ?? parsed.mass_distribution_class;
+      }
+      if (typeof parsed.areal_heat_capacity === 'number') {
+        parsed.areal_heat_capacity =
+          arealHeatCapacityBandFromJPerM2K(parsed.areal_heat_capacity) ?? parsed.areal_heat_capacity;
+      }
+      return parsed;
+    } catch (error) {
+      const snippet = jsonString.length > 200 ? `${jsonString.slice(0, 200)}…` : jsonString;
+      warnings.push(
+        `Element "${elementName || '(unknown)'}": invalid extra_json — all advanced overrides for this element ` +
+        `were dropped and will be permanently lost on the next save. Bad JSON: ${snippet}`,
+      );
+      console.warn('Failed to parse extra_json:', jsonString, error);
+      return undefined;
+    }
+  };
+
+  const sections = parseCsvSections(tabularCsv);
+  const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels } = ingestGeometryTabularSections(
+    sections,
+    parseExtraJson,
+  );
+
+  const creationDefaultAssemblyIds: Partial<Record<'wall' | 'roof' | 'ground_floor', string>> = {
+    ...(detectedDefaultAssemblyWall ? { wall: detectedDefaultAssemblyWall } : {}),
+    ...(detectedDefaultAssemblyRoof ? { roof: detectedDefaultAssemblyRoof } : {}),
+    ...(detectedDefaultAssemblyGroundFloor ? { ground_floor: detectedDefaultAssemblyGroundFloor } : {}),
+  };
+  const detailedBridgePsiProfile =
+    detectedDetailedBridgePsiProfileSource && detectedDetailedBridgePsiProfileId
+      ? {
+          source: detectedDetailedBridgePsiProfileSource,
+          profileId: detectedDetailedBridgePsiProfileId,
+          label: detectedDetailedBridgePsiProfileLabel || detectedDetailedBridgePsiProfileId,
+        }
+      : null;
+
+  for (const el of newElements) {
+    if (el.type === 'ThermalBridgeLinear') {
+      ingestThermalBridgeLinearPostParse(el, newElements);
+    }
+  }
+  const normalizedElements = normalizeThermalBridgeSourceLinks(newElements);
+
+  return {
+    zones: newZones,
+    elements: normalizedElements,
+    spaceLabels: newSpaceLabels,
+    warnings,
+    metadata: {
+      globalOrientationOffset: globalOffset,
+      schemaProfile: detectedSchemaProfile,
+      defaultsPath: detectedDefaultsPath,
+      hostDocumentMetadata: detectedHostDocumentMetadata,
+      propertyPostcode: detectedPropertyPostcode,
+      junctionPsiDefaultsPath: detectedJunctionPsiDefaultsPath,
+      guideOverlay: resolveGuideOverlayForFloor(detectedGuideOverlayByFloor, 0).value,
+      guideOverlaySource: resolveGuideOverlaySourceForFloor(detectedGuideOverlaySourceByFloor, 0).value,
+      guideOverlayByFloor: detectedGuideOverlayByFloor,
+      guideOverlaySourceByFloor: detectedGuideOverlaySourceByFloor,
+      defaultThermalBridging: detectedDefaultThermalBridging,
+      complianceSettings,
+      ...(Object.keys(creationDefaultAssemblyIds).length > 0 ? { creationDefaultAssemblyIds } : {}),
+      ...(detailedBridgePsiProfile ? { detailedBridgePsiProfile } : {}),
+    },
+  };
+};

@@ -1,0 +1,9 @@
+# Install and build output for the repository workspace.
+node_modules/
+dist/
+coverage/
+.playwright-cli/
+apps/*/.vite-cache/
+apps/geometry-editor/src/generated/
+apps/geometry-editor/public/ifc/*.whl
+target/

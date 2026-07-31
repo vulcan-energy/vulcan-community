@@ -1,0 +1,4 @@
+# Branch protection cannot be enabled on the current plan while this repository
+# is private, so these owners are advisory until publication.
+
+* @baziyer

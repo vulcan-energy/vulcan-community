@@ -1,0 +1,52 @@
+# Home Energy Model (HEM) guidance - Building Fabric, section 3.7.2,
+# Table 3.7: psi values for different types of junctions, default linear
+# thermal transmittance (W/m.K).
+# Publisher: Department for Energy Security and Net Zero. Crown copyright.
+# Contains public sector information licensed under the Open Government Licence v3.0.
+# Pinned evidence copy SHA-256: 6bfeeb31bf1bf3296722f393745ccda895f4bfed9f39b70e8e3abecd12d1f7c9
+# Full table for junction types; omit rows in a project copy to fall back to built-in values.
+junction_type,linear_thermal_transmittance
+E1,1
+E2,1
+E3,0.1
+E4,0.1
+E5,0.32
+E6,0.14
+E7,0.28
+E8,0.1
+E9,0.15
+E10,0.12
+E11,0.15
+E12,0.25
+E13,0.25
+E14,0.16
+E15,0.3
+E16,0.18
+E17,0
+E18,0.24
+E19,0.1
+E20,0.32
+E21,0.32
+E22,0.22
+E23,1
+E24,0.15
+E25,0.24
+P1,0.32
+P2,0
+P3,0
+P4,0.48
+P5,0.48
+P6,0.32
+P7,0.48
+P8,0.48
+R1,0.24
+R2,0.24
+R3,0.24
+R4,0.12
+R5,0.12
+R6,0.12
+R7,0.12
+R8,0.12
+R9,0.32
+R10,0.32
+R11,0.24

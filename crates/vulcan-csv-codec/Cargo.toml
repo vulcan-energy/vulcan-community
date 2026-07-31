@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "vulcan-csv-codec"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Syntax-only parser for Vulcan sectioned Geometry CSV"
+license = "Apache-2.0"
+
+[dependencies]
+serde_json = "1.0"

@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.phase1a.json",
+  "compilerOptions": {
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "../../packages/geometry-document/src/**/*.ts",
+    "../../packages/geometry-document-ui/src/**/*.ts",
+    "../../packages/geometry-document-ui/src/**/*.tsx",
+    "../../packages/geometry-editor-host/src/**/*.ts",
+    "../../packages/geometry-editor/src/**/*.ts",
+    "../../packages/geometry-editor/src/**/*.tsx"
+  ]
+}

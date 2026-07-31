@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "packages/geometry-editor/src/**/*.ts",
+    "packages/geometry-editor/src/**/*.tsx",
+    "packages/geometry-editor-host/src/**/*.ts",
+    "packages/geometry-document-ui/src/**/*.ts",
+    "packages/geometry-document-ui/src/**/*.tsx",
+    "apps/geometry-editor/src/**/*.ts",
+    "apps/geometry-editor/src/**/*.tsx"
+  ],
+  /* Tests are not typechecked, here or in web/tsconfig.app.json, which excludes the
+     same patterns under src/. Compiling them here would newly typecheck files vitest
+     has only ever transpiled. */
+  "exclude": ["**/__tests__/**", "**/__fixtures__/**", "**/*.test.*", "**/*.spec.*"]
+}

@@ -1,0 +1,36 @@
+{
+  "description": "Illustrative editable stacks for learning the Community assembly workflow. They are not verified project constructions.",
+  "assemblies": [
+    {
+      "id": "community.starter.wall",
+      "name": "",
+      "elementType": "wall",
+      "sourceType": "community_starter_illustrative",
+      "layers": [
+        { "kind": "solid", "materialId": "community.starter.board", "thickness_m": 0.0125 },
+        { "kind": "solid", "materialId": "community.starter.insulation", "thickness_m": 0.1 },
+        { "kind": "solid", "materialId": "community.starter.masonry", "thickness_m": 0.1 }
+      ]
+    },
+    {
+      "id": "community.starter.roof",
+      "name": "",
+      "elementType": "roof",
+      "sourceType": "community_starter_illustrative",
+      "layers": [
+        { "kind": "solid", "materialId": "community.starter.board", "thickness_m": 0.0125 },
+        { "kind": "solid", "materialId": "community.starter.insulation", "thickness_m": 0.2 }
+      ]
+    },
+    {
+      "id": "community.starter.ground_floor",
+      "name": "",
+      "elementType": "ground_floor",
+      "sourceType": "community_starter_illustrative",
+      "layers": [
+        { "kind": "solid", "materialId": "community.starter.concrete", "thickness_m": 0.15 },
+        { "kind": "solid", "materialId": "community.starter.insulation", "thickness_m": 0.1 }
+      ]
+    }
+  ]
+}

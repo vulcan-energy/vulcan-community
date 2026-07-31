@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: CI
+
+# Runs this repository's tests from a standalone checkout so each change is
+# independently reproducible.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # Third-party code is pinned to a full commit SHA rather than a mutable tag.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          # The HEM upstreams carry the schemas several tests read. No --depth: a shallow
+          # fetch reaches the tip of the tracked branch, which satisfies a pinned commit
+          # only while the pin happens to be that tip.
+          submodules: recursive
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Enforce licence policy
+        run: npm run licence
+
+      - name: Enforce release metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/validate-licensing.mjs --release
+
+      - name: Run tests
+        run: npm test
+
+      - name: Typecheck editor packages
+        run: npm run typecheck
+
+      - name: Typecheck geometry document
+        run: npm run typecheck:document
+
+      - name: Lint
+        run: npm run lint
+        # The raw command exposes the existing debt and therefore exits non-zero. The
+        # following ratchet is the enforcing step: current debt passes, increases fail.
+        continue-on-error: true
+
+      - name: Enforce static-analysis ratchet
+        run: npm run quality
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch; the toolchain input pins the actual version
+        with:
+          toolchain: "1.97.1"
+          components: clippy, rustfmt
+
+      - name: Check Rust formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test

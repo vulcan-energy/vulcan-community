@@ -1,0 +1,14 @@
+{
+  "name": "@vulcan-community/geometry-document",
+  "version": "0.0.0-private",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "fflate": "0.8.2"
+  }
+}

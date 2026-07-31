@@ -1,0 +1,143 @@
+// SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import type { UISchemaElement } from '@jsonforms/core';
+
+function shouldRecurseIntoNestedObject(childSchema: unknown): boolean {
+  if (!childSchema || typeof childSchema !== 'object' || Array.isArray(childSchema)) return false;
+  const c = childSchema as Record<string, unknown>;
+  const t = c.type;
+  const isObjType = t === 'object' || (Array.isArray(t) && (t as string[]).includes('object'));
+  const p = c.properties;
+  const hasProps =
+    !!(
+      p &&
+      typeof p === 'object' &&
+      !Array.isArray(p) &&
+      Object.keys(p as Record<string, unknown>).length > 0
+    );
+  return hasProps && (isObjType || !c.type);
+}
+
+/** Discriminant first, then alphabetical (JsonForms order otherwise sorted keys put `type` last). */
+function sortPropertyKeys(keys: string[]): string[] {
+  return [...keys].sort((a, b) => {
+    const ra = a === 'type' ? 0 : 1;
+    const rb = b === 'type' ? 0 : 1;
+    if (ra !== rb) return ra - rb;
+    return a.localeCompare(b);
+  });
+}
+
+function titleOrKeyFromSchema(key: string, childSchema: unknown): string {
+  if (childSchema && typeof childSchema === 'object' && !Array.isArray(childSchema)) {
+    const t = (childSchema as { title?: string }).title;
+    if (typeof t === 'string' && t.trim()) return t.trim();
+  }
+  return key;
+}
+
+type PlantControlCtx = {
+  plantKey: string;
+  multiPlant: boolean;
+  /** Nested object keys from the plant root (not including the leaf property key). */
+  pathLabels: string[];
+};
+
+function leafControlLabel(key: string, childSchema: unknown, ctx: PlantControlCtx): string | undefined {
+  const tail = titleOrKeyFromSchema(key, childSchema);
+  const prefixParts: string[] = [];
+  if (ctx.multiPlant) prefixParts.push(ctx.plantKey);
+  prefixParts.push(...ctx.pathLabels);
+  if (prefixParts.length === 0) return undefined;
+  return [...prefixParts, tail].join(' · ');
+}
+
+/**
+ * VerticalLayout + Control only (no `Group` — Group maps to accordion chrome in
+ * {@link standardRenderers} and reads Scenario-style, not normal Advanced Fields).
+ */
+function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: PlantControlCtx): UISchemaElement[] {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    return [{ type: 'Control', scope: scopePrefix }];
+  }
+  const s = schema as Record<string, unknown>;
+  const props = s.properties;
+  if (props && typeof props === 'object' && !Array.isArray(props) && Object.keys(props).length > 0) {
+    const keys = sortPropertyKeys(Object.keys(props as Record<string, unknown>));
+    const out: UISchemaElement[] = [];
+    for (const key of keys) {
+      const childSchema = (props as Record<string, unknown>)[key];
+      const childScope = `${scopePrefix}/properties/${key}`;
+      if (shouldRecurseIntoNestedObject(childSchema)) {
+        const nextPathLabels = key === 'HeatSource' ? ctx.pathLabels : [...ctx.pathLabels, key];
+        const childElements = buildControlsForSchema(childSchema, childScope, {
+          ...ctx,
+          pathLabels: nextPathLabels,
+        });
+        // Hot water `HeatSource` is a map of named heaters; the Heat Source control above covers the
+        // main choice. Hoist inner controls so we do not add a redundant HeatSource
+        // section wrapper (scopes stay under .../HeatSource/...).
+        if (key === 'HeatSource') {
+          out.push(...childElements);
+        } else {
+          out.push({
+            type: 'VerticalLayout',
+            elements: childElements,
+          });
+        }
+      } else {
+        const isPlantRootType = ctx.pathLabels.length === 0 && key === 'type';
+        if (isPlantRootType) {
+          continue;
+        }
+        // `HeatSource` is a map: JsonForms only recurses when keys are materialised as `properties`.
+        // Otherwise a single Control binds to an object and renders as "[object Object]". The Heat Source
+        // picker + hoisted per-heater controls cover editing; skip the broken blob control.
+        if (key === 'HeatSource' && !shouldRecurseIntoNestedObject(childSchema)) {
+          continue;
+        }
+        const label = leafControlLabel(key, childSchema, ctx);
+        const control: UISchemaElement = {
+          type: 'Control',
+          scope: childScope,
+          ...(label ? { label } : {}),
+        };
+        out.push(control);
+      }
+    }
+    return out;
+  }
+  return [{ type: 'Control', scope: scopePrefix }];
+}
+
+/**
+ * Flat list of controls (same JsonForms path as other geometry Advanced Fields): no accordion
+ * `Group` per plant. When several plants exist under one subtype, labels are prefixed with the
+ * plant key so identical schema keys (e.g. `type`) stay distinguishable.
+ */
+export function buildSystemAdvancedUischema(
+  subtype: string,
+  subschema: Record<string, unknown>,
+): UISchemaElement {
+  const rootProps = subschema.properties as Record<string, unknown> | undefined;
+  const inner = rootProps?.[subtype] as Record<string, unknown> | undefined;
+  const plantProps = inner?.properties as Record<string, unknown> | undefined;
+  if (!plantProps || Object.keys(plantProps).length === 0) {
+    return { type: 'VerticalLayout', elements: [] };
+  }
+
+  const plantKeys = sortPropertyKeys(Object.keys(plantProps));
+  const multiPlant = plantKeys.length > 1;
+  const elements: UISchemaElement[] = [];
+
+  for (const plantKey of plantKeys) {
+    const plantSchema = plantProps[plantKey];
+    const baseScope = `#/properties/${subtype}/properties/${plantKey}`;
+    elements.push(
+      ...buildControlsForSchema(plantSchema, baseScope, { plantKey, multiPlant, pathLabels: [] }),
+    );
+  }
+
+  return { type: 'VerticalLayout', elements };
+}

@@ -1,0 +1,284 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.floor-picker-container {
+  position: relative;
+  min-width: 120px;
+}
+
+.floor-picker-trigger {
+  min-width: 120px;
+  justify-content: flex-start;
+}
+
+.floor-picker-trigger-open {
+  border-color: var(--surface-control-strong);
+  background: var(--surface-control-hover);
+}
+
+.floor-picker-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.floor-picker-panel {
+  position: fixed;
+  z-index: 2400;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle, var(--surface-control-active));
+  border-radius: 10px;
+  box-shadow: var(--shadow-elevated);
+  overflow: hidden;
+}
+
+.floor-picker-list {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.floor-picker-empty {
+  padding: 12px 14px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.floor-picker-row-shell {
+  display: flex;
+  align-items: stretch;
+  padding: 0 8px;
+  gap: 6px;
+}
+
+.floor-picker-row {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.floor-picker-row:hover {
+  background: var(--surface-control);
+}
+
+.floor-picker-row-active {
+  background: var(--accent-primary-alpha);
+}
+
+.floor-picker-row-active:hover {
+  background: var(--selected-bg);
+}
+
+.floor-picker-row-main {
+  min-width: 0;
+}
+
+.floor-picker-row-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.floor-picker-row-title {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floor-picker-row-meta {
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+  white-space: nowrap;
+}
+
+.floor-picker-delete-btn {
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.floor-picker-height-shell {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle, var(--surface-control-active));
+  border-radius: 6px;
+  background: var(--surface-control);
+  flex-shrink: 0;
+  cursor: text;
+}
+
+.floor-picker-height-shell-readonly {
+  cursor: default;
+  opacity: 0.7;
+  background: var(--surface-control);
+}
+
+.floor-picker-height-shell-readonly:focus-within {
+  border-color: var(--border-subtle, var(--surface-control-active));
+  background: var(--surface-control);
+  box-shadow: none;
+}
+
+.floor-picker-override-warning {
+  align-self: center;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--validation-warning);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.floor-picker-override-warning:hover {
+  background: var(--warning-bg);
+}
+
+.floor-picker-height-shell:focus-within {
+  border-color: var(--accent-primary);
+  background: var(--surface-control);
+}
+
+.floor-picker-height-input {
+  width: 44px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-align: right;
+  appearance: textfield;
+  -moz-appearance: textfield;
+  padding: 0;
+}
+
+.floor-picker-height-input::-webkit-outer-spin-button,
+.floor-picker-height-input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.floor-picker-height-unit {
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.floor-picker-divider {
+  height: 1px;
+  background: var(--border-subtle, var(--surface-control-active));
+}
+
+.floor-picker-footer {
+  padding: 10px;
+  background: var(--bg-secondary, var(--surface-control));
+}
+
+.floor-picker-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.floor-picker-input-shell {
+  height: 34px;
+  min-width: 72px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle, var(--surface-control-active));
+  border-radius: 999px;
+  background: var(--surface-control);
+  transition: border-color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+}
+
+.floor-picker-input-shell:focus-within {
+  border-color: var(--accent-primary);
+  background: var(--surface-control);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.floor-picker-input-shell-disabled {
+  opacity: 0.6;
+  background: var(--surface-control);
+}
+
+.floor-picker-input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-align: left;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.floor-picker-input::-webkit-outer-spin-button,
+.floor-picker-input::-webkit-inner-spin-button {
+  margin: 0;
+}
+
+.floor-picker-input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.floor-picker-add-preview {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floor-picker-add-preview-existing {
+  color: var(--text-warning);
+}
+
+.floor-picker-add-button {
+  min-width: auto;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.floor-picker-toast {
+  margin-top: 8px;
+  font-size: var(--font-size-caption);
+  color: var(--error-text);
+}

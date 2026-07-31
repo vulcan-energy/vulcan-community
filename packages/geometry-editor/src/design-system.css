@@ -1,0 +1,535 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+/* HEM Runner Design System
+ * Based on the excellent patterns established in ResultsViewer.css
+ * Provides consistent styling variables across the entire application
+ */
+
+:root {
+  /* === COLOR PALETTE === */
+
+  /* Primary Colors */
+  --bg-primary: #19383A;          /* Main background - deep teal */
+  --bg-secondary: #29494C;        /* Secondary backgrounds, subtle borders */
+  --bg-tertiary: transparent;     /* Card backgrounds (transparent for clean look) */
+
+  /* Accent Colors */
+  --accent-primary: #DDEE63;       /* Primary actions, highlights - softened yellow-green */
+  --accent-secondary: var(--text-secondary);     /* Secondary text, subtle borders */
+  --accent-hover: #C9DD55;         /* Hover state for accent buttons */
+
+  /* Text Colors */
+  --text-primary: #FFFFFF;         /* Primary text - white */
+  --text-input: var(--text-primary);          /* Input text */
+  --text-secondary: #B7CEC4;       /* Secondary text - light teal */
+  --text-muted: #9BB3AC;           /* Muted text - accessible low-emphasis teal */
+  --text-placeholder: color-mix(in srgb, var(--text-secondary) 58%, transparent);
+  --text-on-accent: #19383A;       /* Dark text on accent backgrounds */
+
+  /* Status Colors */
+  --success-bg: color-mix(in srgb, var(--success-text) 14%, transparent);
+  --success-text: #22C55E;                  /* Green text for success messages */
+  --success-border: color-mix(in srgb, var(--success-text) 38%, transparent);
+  --error-bg: color-mix(in srgb, var(--error-text) 12%, transparent);
+  --error-text: #FF6B6B;                    /* Red text for error messages */
+  --error-border: color-mix(in srgb, var(--error-text) 38%, transparent);
+  --error-hover: color-mix(in srgb, var(--error-text) 22%, transparent);
+
+  /* Validation indicator palette (dots, badges, canvas markers) */
+  --validation-error: #dc2626;
+  --validation-error-border: color-mix(in srgb, var(--validation-error) 78%, #000);
+  --validation-error-active: color-mix(in srgb, var(--validation-error) 62%, #000);
+  --validation-error-text: #fca5a5;
+  --validation-error-on-fill: #ffffff;
+  --validation-error-badge-bg: rgba(220, 38, 38, 0.15);
+  --validation-error-badge-border: rgba(248, 113, 113, 0.45);
+  --validation-warning: #f59e0b;
+  --validation-warning-border: color-mix(in srgb, var(--validation-warning) 78%, #000);
+  --validation-warning-active: color-mix(in srgb, var(--validation-warning) 62%, #000);
+  --validation-warning-text: #fcd34d;
+  --validation-warning-on-fill: #111827;
+  --validation-warning-badge-bg: rgba(245, 158, 11, 0.16);
+  --validation-warning-badge-border: rgba(251, 191, 36, 0.45);
+  --validation-info: #3b82f6;
+  --validation-info-border: color-mix(in srgb, var(--validation-info) 78%, #000);
+  --validation-info-active: color-mix(in srgb, var(--validation-info) 62%, #000);
+  --validation-info-text: #93c5fd;
+  --validation-info-on-fill: #111827;
+  --validation-info-badge-bg: rgba(59, 130, 246, 0.15);
+  --validation-info-badge-border: rgba(96, 165, 250, 0.4);
+  --status-success-bg: var(--success-bg);
+  --status-success-border: var(--success-border);
+  --status-success-text: var(--success-text);
+  --status-warning-bg: var(--validation-warning-badge-bg);
+  --status-warning-border: var(--validation-warning-badge-border);
+  --status-warning-text: var(--validation-warning-text);
+  --status-error-bg: var(--validation-error-badge-bg);
+  --status-error-border: var(--validation-error-badge-border);
+  --status-error-text: var(--validation-error-text);
+  --status-info-bg: var(--validation-info-badge-bg);
+  --status-info-border: var(--validation-info-badge-border);
+  --status-info-text: var(--validation-info-text);
+  --status-neutral-bg: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  --status-neutral-border: color-mix(in srgb, var(--text-muted) 34%, transparent);
+  --status-neutral-text: var(--text-muted);
+
+  /* Interaction Colors */
+  --hover-bg: color-mix(in srgb, var(--accent-primary) 9%, transparent);
+  --selected-bg: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+  --focus-outline: color-mix(in srgb, var(--accent-primary) 38%, transparent);
+  --resize-handle-active: var(--accent-primary);
+  --row-highlight-bg: var(--selected-bg);
+  --row-highlight-border: color-mix(in srgb, var(--accent-primary) 34%, transparent);
+  --status-badge-bg: color-mix(in srgb, var(--accent-primary) 22%, transparent);
+  --status-badge-border: color-mix(in srgb, var(--accent-primary) 34%, transparent);
+  --status-badge-text: var(--text-primary);
+  /* Badge palette for Auto/Custom states */
+  --badge-auto-bg: #244f46;
+  --badge-auto-text: #b7cec4;
+  --badge-custom-bg: #513c2c;
+  --badge-custom-text: #f5d39a;
+
+  /* Border Colors */
+  --border-subtle: color-mix(in srgb, var(--border-strong) 45%, transparent);
+  --border-medium: color-mix(in srgb, var(--border-strong) 70%, transparent);
+  --border-strong: #6A8A8D;                   /* Strong borders */
+  /* Aliases used by GlobalButtonSystem / GeometryCanvas (invalid vars drop entire border/hover) */
+  --border-color: var(--border-medium);
+  --bg-hover: #355a62; /* Slightly lifted teal for neutral control hover (vs --bg-secondary) */
+
+  /* === TYPOGRAPHY === */
+
+  /* Font Family */
+  --font-family: 'Clash Grotesk', sans-serif;
+
+  /* Font Sizes */
+  --font-size-micro: 9px;  /* Dense badge text */
+  --font-size-xxs: 10px;   /* Compact metadata */
+  --font-size-caption: 11px; /* Compact labels */
+  --font-size-xs: 12px;    /* Help text, overlay labels */
+  --font-size-sm: 13px;     /* Table content, small text */
+  --font-size-base: 14px;   /* Body text, buttons, table headers, form inputs */
+  --font-size-lg: 16px;     /* Section headers, form labels */
+  --font-size-xl: 20px;     /* Page titles */
+  --font-size-xxl: 24px;    /* Large titles */
+
+  /* Font Weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Line Heights */
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.4;
+  --line-height-relaxed: 1.5;
+
+  /* === SPACING === */
+
+  /* Padding & Margins */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 20px;
+  --spacing-xxl: 24px;
+  --spacing-xxxl: 32px;
+
+  /* Component Spacing */
+  --form-input-padding: 8px 12px;
+  --button-padding-sm: 6px 12px;
+  --button-padding-md: 8px 16px;
+  --button-padding-lg: 12px 20px;
+  --table-cell-padding: 8px 20px;
+  --table-header-padding: 12px 20px;
+  --card-padding: 20px;
+
+  /* === BORDERS & RADII === */
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 20px;
+  --radius-full: 50px;
+
+  /* Border Widths */
+  --border-width-thin: 1px;
+  --border-width-medium: 2px;
+
+  /* === SHADOWS === */
+
+  /* Box Shadows */
+  --shadow-sm: 0 1px 2px rgba(26, 52, 55, 0.06);
+  --shadow-md: 0 2px 4px rgba(26, 52, 55, 0.12);
+  --shadow-lg: 0 4px 6px rgba(0, 0, 0, 0.1);
+
+  /* === TRANSITIONS === */
+
+  /* Transition Durations */
+  --transition-fast: 0.15s;
+  --transition-normal: 0.2s;
+  --transition-slow: 0.3s;
+
+  /* Common Transition Properties */
+  --transition-all: all var(--transition-normal) ease;
+  --transition-colors: color var(--transition-normal) ease, background-color var(--transition-normal) ease, border-color var(--transition-normal) ease;
+  --transition-transform: transform var(--transition-fast) ease;
+
+  /* === COMPONENT SPECIFIC === */
+
+  /* Tables */
+  --table-row-height: 40px;
+  --table-header-height: 44px;
+
+  /* Forms */
+  --form-input-height: 36px;
+  --form-input-radius: var(--radius-lg);
+  --form-input-border: var(--border-width-thin) solid var(--border-subtle);
+  --form-input-border-focus: var(--border-width-thin) solid var(--accent-primary);
+
+  /* Focus State System - NEW */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--focus-outline);
+  --focus-ring-blur: 0px;
+
+  /* Buttons */
+  --button-height-sm: 32px;
+  --button-height-md: 36px;
+  --button-height-lg: 44px;
+
+  /* Z-Index Scale */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal-backdrop: 900;
+  --z-modal: 1000;
+  --z-tooltip: 1100;
+
+  /* === SEMANTIC THEME TOKENS === */
+
+  --color-bg-app: var(--bg-primary);
+  --color-bg-panel: var(--bg-secondary);
+  --color-bg-control: var(--bg-tertiary);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent-primary);
+  --color-accent-hover: var(--accent-hover);
+  --color-danger: var(--error-text);
+  --color-danger-bg: var(--error-bg);
+  --color-success: var(--success-text);
+  --color-warning: var(--validation-warning);
+  --color-info: var(--validation-info);
+
+  /* Text-bearing canvas overlays need a stable surface; translucent glass cannot
+     guarantee contrast when panels are dragged over light geometry. */
+  --surface-overlay: var(--surface-overlay-solid);
+  --surface-overlay-solid: #121f22;
+  --surface-overlay-hover: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --surface-overlay-selected: color-mix(in srgb, var(--text-primary) 14%, transparent);
+  --text-overlay-primary: var(--text-primary);
+  --text-overlay-secondary: var(--text-secondary);
+  --text-overlay-muted: var(--text-muted);
+  --text-overlay-label: var(--accent-primary);
+  --border-overlay: var(--border-medium);
+  --shadow-overlay: 0 8px 28px rgba(0, 0, 0, 0.28);
+  --shadow-canvas-panel: 0 1px 3px rgba(0, 0, 0, 0.22);
+
+  /* Theme-aware app chrome */
+  --surface-control: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  --surface-control-hover: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --surface-control-active: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  --surface-control-strong: color-mix(in srgb, var(--text-primary) 18%, transparent);
+  --surface-scrim: rgba(0, 0, 0, 0.7);
+  --surface-scrim-subtle: rgba(0, 0, 0, 0.5);
+  --shadow-control: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  /* Stable semantic colours: these keep meaning across user themes. */
+  --semantic-snap: #1E90FF;
+  --semantic-snap-hover: color-mix(in srgb, var(--semantic-snap) 86%, #000);
+  --semantic-explain: #ff6b35;
+  --semantic-explain-bg: color-mix(in srgb, var(--semantic-explain) 12%, transparent);
+  --semantic-human: #1E90FF;
+  --semantic-human-bg: color-mix(in srgb, var(--semantic-human) 12%, transparent);
+  --semantic-on-color: #ffffff;
+
+  /* Theme-aware non-form visuals */
+  --brand-logo-filter: none;
+  --chart-surface: var(--bg-primary);
+  --chart-panel: var(--bg-secondary);
+  --chart-axis: var(--text-secondary);
+  --chart-grid: var(--border-medium);
+  --chart-tooltip-bg: var(--surface-overlay-solid);
+  --chart-tooltip-border: var(--border-overlay);
+  --chart-tooltip-text: var(--text-overlay-secondary);
+  --chart-tooltip-shadow: var(--shadow-control);
+  --chart-muted: var(--text-muted);
+  --chart-selection-bg: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+  --chart-series-1: #ffffff;
+  --chart-series-2: #ddee63;
+  --chart-series-3: #87ceeb;
+  --chart-series-4: #ffa07a;
+  --chart-series-5: #98fb98;
+  --chart-series-6: #dda0dd;
+  --chart-series-7: #f0e68c;
+  --chart-series-8: #ffb6c1;
+  --canvas-label-bg: var(--surface-overlay-solid);
+  --canvas-label-border: var(--border-strong);
+  --canvas-label-selected-border: var(--accent-primary);
+  --canvas-label-text: var(--text-overlay-primary);
+  --canvas-label-pill-bg: var(--bg-hover);
+  --canvas-label-pill-border: var(--border-strong);
+  --canvas-label-shadow: rgba(0, 0, 0, 0.22);
+  --canvas-element-selected: #ff6b6b;
+  --canvas-element-hover: var(--accent-primary);
+  --canvas-element-external-wall-stroke: #d7e7e1;
+  --canvas-element-external-wall-fill: color-mix(in srgb, var(--canvas-element-external-wall-stroke) 16%, transparent);
+  --canvas-element-internal-wall-stroke: #8bd3ff;
+  --canvas-element-internal-wall-fill: color-mix(in srgb, var(--canvas-element-internal-wall-stroke) 18%, transparent);
+  --canvas-element-party-wall-stroke: #c084fc;
+  --canvas-element-party-wall-fill: color-mix(in srgb, var(--canvas-element-party-wall-stroke) 18%, transparent);
+  --canvas-element-adjacent-unconditioned-stroke: #fbbf24;
+  --canvas-element-adjacent-unconditioned-fill: color-mix(in srgb, var(--canvas-element-adjacent-unconditioned-stroke) 18%, transparent);
+  --canvas-element-wall-stroke: var(--canvas-element-external-wall-stroke);
+  --canvas-element-wall-fill: var(--canvas-element-external-wall-fill);
+  --canvas-element-door-stroke: #ff9f2f;
+  --canvas-element-door-fill: color-mix(in srgb, var(--canvas-element-door-stroke) 18%, transparent);
+  --canvas-element-window-stroke: #87ceeb;
+  --canvas-element-window-fill: color-mix(in srgb, var(--canvas-element-window-stroke) 18%, transparent);
+  --canvas-element-ground-stroke: #6dbb6d;
+  --canvas-element-ground-fill: color-mix(in srgb, var(--canvas-element-ground-stroke) 28%, transparent);
+  --canvas-element-adjacent-stroke: var(--canvas-element-internal-wall-stroke);
+  --canvas-element-adjacent-fill: var(--canvas-element-internal-wall-fill);
+  --canvas-element-context-stroke: #9ca3af;
+  --canvas-element-context-fill: color-mix(in srgb, var(--canvas-element-context-stroke) 16%, transparent);
+  --canvas-element-thermal-bridge-stroke: #ff6b35;
+  --canvas-element-thermal-bridge-selected-stroke: #ff7a3d;
+  --canvas-element-shading-stroke: #f4c430;
+  --canvas-element-lighting-stroke: #ffb347;
+  --canvas-element-ductwork-stroke: #4ade80;
+  --canvas-element-pipework-stroke: #38bdf8;
+  --canvas-element-emitter-stroke: #60a5fa;
+  --canvas-element-appliance-stroke: #cbd5e1;
+  --canvas-element-hot-water-stroke: #fb7185;
+  --canvas-element-vent-stroke: #22d3ee;
+  --canvas-element-mechanical-ventilation-stroke: #2dd4bf;
+  --canvas-element-combustion-stroke: #ff7a3d;
+  --canvas-element-onsite-generation-stroke: #facc15;
+  --canvas-element-battery-stroke: #a78bfa;
+  --canvas-element-system-stroke: #fb923c;
+  --canvas-element-light-external-wall-stroke: var(--canvas-element-external-wall-stroke);
+  --canvas-element-light-external-wall-fill: var(--canvas-element-external-wall-fill);
+  --canvas-element-light-internal-wall-stroke: var(--canvas-element-internal-wall-stroke);
+  --canvas-element-light-internal-wall-fill: var(--canvas-element-internal-wall-fill);
+  --canvas-element-light-party-wall-stroke: var(--canvas-element-party-wall-stroke);
+  --canvas-element-light-party-wall-fill: var(--canvas-element-party-wall-fill);
+  --canvas-element-light-adjacent-unconditioned-stroke: var(--canvas-element-adjacent-unconditioned-stroke);
+  --canvas-element-light-adjacent-unconditioned-fill: var(--canvas-element-adjacent-unconditioned-fill);
+  --canvas-element-light-wall-stroke: var(--canvas-element-external-wall-stroke);
+  --canvas-element-light-wall-fill: var(--canvas-element-external-wall-fill);
+  --canvas-element-light-door-stroke: var(--canvas-element-door-stroke);
+  --canvas-element-light-door-fill: var(--canvas-element-door-fill);
+  --canvas-element-light-window-stroke: var(--canvas-element-window-stroke);
+  --canvas-element-light-window-fill: var(--canvas-element-window-fill);
+  --canvas-element-light-ground-stroke: var(--canvas-element-ground-stroke);
+  --canvas-element-light-ground-fill: var(--canvas-element-ground-fill);
+  --canvas-element-light-adjacent-stroke: var(--canvas-element-internal-wall-stroke);
+  --canvas-element-light-adjacent-fill: var(--canvas-element-internal-wall-fill);
+  --canvas-element-light-context-stroke: var(--canvas-element-context-stroke);
+  --canvas-element-light-context-fill: var(--canvas-element-context-fill);
+  --canvas-element-light-thermal-bridge-stroke: var(--canvas-element-thermal-bridge-stroke);
+  --canvas-element-light-thermal-bridge-selected-stroke: var(--canvas-element-thermal-bridge-selected-stroke);
+  --canvas-element-light-shading-stroke: var(--canvas-element-shading-stroke);
+  --canvas-element-light-lighting-stroke: var(--canvas-element-lighting-stroke);
+  --canvas-element-light-ductwork-stroke: var(--canvas-element-ductwork-stroke);
+  --canvas-element-light-pipework-stroke: var(--canvas-element-pipework-stroke);
+  --canvas-element-light-emitter-stroke: var(--canvas-element-emitter-stroke);
+  --canvas-element-light-appliance-stroke: var(--canvas-element-appliance-stroke);
+  --canvas-element-light-hot-water-stroke: var(--canvas-element-hot-water-stroke);
+  --canvas-element-light-vent-stroke: var(--canvas-element-vent-stroke);
+  --canvas-element-light-mechanical-ventilation-stroke: var(--canvas-element-mechanical-ventilation-stroke);
+  --canvas-element-light-combustion-stroke: var(--canvas-element-combustion-stroke);
+  --canvas-element-light-onsite-generation-stroke: var(--canvas-element-onsite-generation-stroke);
+  --canvas-element-light-battery-stroke: var(--canvas-element-battery-stroke);
+  --canvas-element-light-system-stroke: var(--canvas-element-system-stroke);
+  --canvas-drawing-guide: #ddee63;
+  --canvas-drawing-guide-fill: color-mix(in srgb, var(--canvas-drawing-guide) 14%, transparent);
+  --canvas-drawing-handle-fill: #ddee63;
+  --canvas-drawing-handle-stroke: #ffffff;
+  --canvas-drawing-tooltip-bg: var(--canvas-label-bg);
+  --canvas-drawing-tooltip-border: var(--canvas-label-border);
+  --canvas-drawing-tooltip-text: var(--canvas-label-text);
+  --canvas-drawing-tooltip-shadow: var(--canvas-label-shadow);
+  --canvas-3d-bg: #0d1417;
+  --canvas-3d-grid-cell: #27383d;
+  --canvas-3d-grid-section: #4b6269;
+  --canvas-3d-selection-overlay: #fff176;
+  --canvas-3d-hover-overlay: #5eead4;
+  --canvas-3d-dormer-cutout: #f6df5a;
+  --canvas-3d-fallback-edge: #64748b;
+  --canvas-3d-thermal-bridge-emissive: #6b5a12;
+  --canvas-3d-window-edge: #7ec8ff;
+  --canvas-3d-door-edge: #ffb366;
+  --canvas-3d-window-emissive: #153a5c;
+  --canvas-3d-door-emissive: #5c3010;
+  --canvas-3d-vent-free-area: #22d3ee;
+  --canvas-3d-vent-max-open: #fbbf24;
+  --canvas-3d-vent-frame: #f5f0d6;
+  --canvas-3d-icon-stroke: #ffffff;
+  --canvas-3d-label-shadow: 0 1px 2px rgba(0, 0, 0, 0.92);
+
+  /* Back-compat aliases for older component CSS. These make theme migration
+     explicit instead of silently dropping declarations for undefined vars. */
+  --background: var(--bg-primary);
+  --background-primary: var(--bg-primary);
+  --background-secondary: var(--bg-secondary);
+  --background-tertiary: var(--bg-tertiary);
+  --surface-primary: var(--bg-primary);
+  --bg-elevated: var(--bg-secondary);
+  --bg-input: var(--bg-tertiary);
+  --input-bg: var(--bg-tertiary);
+  --border: var(--border-subtle);
+  --border-primary: var(--border-subtle);
+  --border-hover: var(--border-medium);
+  --color-border: var(--border-subtle);
+  --text-subtle: var(--text-secondary);
+  --text-tertiary: var(--text-secondary);
+  --text-error: var(--error-text);
+  --text-warning: var(--validation-warning-text);
+  --text-danger: var(--error-text);
+  --error: var(--error-text);
+  --error-color: var(--error-text);
+  --error-bg-color: var(--error-bg);
+  --warning: var(--validation-warning);
+  --warning-text: var(--validation-warning-text);
+  --warning-color: var(--validation-warning-text);
+  --warning-bg: var(--status-warning-bg);
+  --surface-warning: var(--warning-bg);
+  --border-warning: var(--status-warning-border);
+  --accent-blue: var(--validation-info);
+  --accent-primary-alpha: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+  --color-error: var(--error-text);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-border: var(--border-warning);
+  --color-warning-fg: var(--validation-warning-text);
+  --color-warning-hover: var(--validation-warning-badge-bg);
+  --color-success-bg: var(--success-bg);
+  --color-success-border: var(--status-success-border);
+  --color-success-fg: var(--success-text);
+  --color-surface-elevated: var(--bg-secondary);
+  --color-text-muted: var(--text-muted);
+  --highlight: var(--accent-primary);
+  --shadow-subtle: var(--shadow-sm);
+  --shadow-medium: var(--shadow-md);
+  --font-size-md: var(--font-size-base);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --line-height-md: var(--line-height-normal);
+}
+
+/* === GLOBAL RESETS === */
+
+/* Apply design system fonts globally */
+* {
+  font-family: var(--font-family);
+}
+
+/* Consistent box-sizing */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* Remove default margins and padding */
+* {
+  margin: 0;
+  padding: 0;
+}
+
+/* Ensure smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Set base font properties */
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* === UTILITY CLASSES === */
+
+/* Text Colors */
+.text-primary { color: var(--text-primary); }
+.text-input { color: var(--text-input); }
+.text-secondary { color: var(--text-secondary); }
+.text-muted { color: var(--text-muted); }
+.text-accent { color: var(--accent-primary); }
+
+/* Background Colors */
+.bg-primary { background-color: var(--bg-primary); }
+.bg-secondary { background-color: var(--bg-secondary); }
+.bg-tertiary { background-color: var(--bg-tertiary); }
+.bg-hover { background-color: var(--hover-bg); }
+.bg-selected { background-color: var(--selected-bg); }
+
+/* Focus States - NEW */
+.focus-ring {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.focus-ring:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+/* Font Sizes */
+.text-sm { font-size: var(--font-size-sm); }
+.text-base { font-size: var(--font-size-base); }
+.text-lg { font-size: var(--font-size-lg); }
+.text-xl { font-size: var(--font-size-xl); }
+.text-xxl { font-size: var(--font-size-xxl); }
+
+/* Font Weights */
+.font-normal { font-weight: var(--font-weight-normal); }
+.font-medium { font-weight: var(--font-weight-medium); }
+.font-semibold { font-weight: var(--font-weight-semibold); }
+.font-bold { font-weight: var(--font-weight-bold); }
+
+/* Spacing */
+.p-xs { padding: var(--spacing-xs); }
+.p-sm { padding: var(--spacing-sm); }
+.p-md { padding: var(--spacing-md); }
+.p-lg { padding: var(--spacing-lg); }
+.p-xl { padding: var(--spacing-xl); }
+.p-xxl { padding: var(--spacing-xxl); }
+
+.m-xs { margin: var(--spacing-xs); }
+.m-sm { margin: var(--spacing-sm); }
+.m-md { margin: var(--spacing-md); }
+.m-lg { margin: var(--spacing-lg); }
+.m-xl { margin: var(--spacing-xl); }
+.m-xxl { margin: var(--spacing-xxl); }
+
+/* Border Radius */
+.rounded-sm { border-radius: var(--radius-sm); }
+.rounded-md { border-radius: var(--radius-md); }
+.rounded-lg { border-radius: var(--radius-lg); }
+.rounded-xl { border-radius: var(--radius-xl); }
+.rounded-full { border-radius: var(--radius-full); }
+
+/* Transitions */
+.transition-all { transition: var(--transition-all); }
+.transition-colors { transition: var(--transition-colors); }
+.transition-transform { transition: var(--transition-transform); }

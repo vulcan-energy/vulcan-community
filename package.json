@@ -1,0 +1,49 @@
+{
+  "name": "@vulcan-community/workspace",
+  "version": "0.0.0-private",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "npm@10.9.3",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build:model-wasm && npm run build:app",
+    "build:app": "npm run build --workspace @vulcan-community/geometry-editor-app",
+    "build:model-wasm": "./scripts/build-model-wasm.sh",
+    "dev": "npm run build:model-wasm && npm run dev --workspace @vulcan-community/geometry-editor-app",
+    "fetch:ifc-wheel": "./scripts/fetch-ifc-wheel.sh",
+    "generate:sbom": "node scripts/generate-cargo-sbom.mjs",
+    "licence": "node scripts/validate-licensing.mjs",
+    "lint": "eslint .",
+    "quality": "node scripts/quality-gate.mjs --enforce",
+    "typecheck": "tsc -p tsconfig.phase1a.json",
+    "typecheck:document": "tsc -p packages/geometry-document/tsconfig.json",
+    "test": "vitest run && npm run test:sbom",
+    "test:sbom": "node --test scripts/generate-cargo-sbom.test.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.32.0",
+    "@testing-library/jest-dom": "6.6.4",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "24.0.7",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "@vitejs/plugin-react": "4.5.2",
+    "eslint": "9.32.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.4.26",
+    "globals": "16.3.0",
+    "jsdom": "26.1.0",
+    "react-doctor": "0.5.6",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.39.0",
+    "vitest": "3.2.6"
+  }
+}

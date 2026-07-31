@@ -1,0 +1,985 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+/*
+ * The legacy Files class names are part of the shared presentation contract.
+ * Keep every one behind a Geometry Files root so importing this stylesheet
+ * cannot restyle unrelated Official controls which reuse those class names.
+ */
+.geometry-files-menu-root.files-dropdown-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.geometry-files-menu-root .files-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.75rem 1.5rem;
+  background: var(--surface-control-active);
+  border: 1px solid var(--border-overlay);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  min-height: 44px;
+}
+
+.geometry-files-menu-root .files-button:hover {
+  background: var(--surface-control-strong);
+  border-color: var(--border-medium);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.geometry-files-menu-root .files-button:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.geometry-files-menu-root .files-button svg {
+  flex-shrink: 0;
+  color: var(--text-primary);
+}
+
+.geometry-files-menu.files-dropdown {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  width: min(520px, calc(100vw - 24px));
+  min-width: min(520px, calc(100vw - 24px));
+  max-width: min(520px, calc(100vw - 24px));
+  overflow: hidden;
+}
+
+.geometry-files-menu.files-dropdown--project-menu-open {
+  overflow: visible;
+}
+
+.geometry-files-menu .files-dropdown-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.geometry-files-menu .files-dropdown-search {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-family);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  height: 28px;
+  transition: all 0.2s ease;
+  outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.geometry-files-menu .files-dropdown-search:focus {
+  border-color: var(--accent-primary);
+  background: var(--bg-primary);
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.geometry-files-menu .files-dropdown-search::placeholder {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.geometry-files-menu .files-dropdown-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.geometry-files-menu .files-dropdown-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.geometry-files-menu .files-dropdown-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.geometry-files-menu .files-dropdown-refresh:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.geometry-files-menu .files-dropdown-refresh svg {
+  width: 14px;
+  height: 14px;
+}
+
+.geometry-files-menu .files-dropdown-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 0;
+}
+
+.geometry-files-menu .files-dropdown-content {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.geometry-files-menu .files-dropdown-loading,
+.geometry-files-menu .files-dropdown-error,
+.geometry-files-menu .files-dropdown-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.geometry-files-menu .files-dropdown-loading p,
+.geometry-files-menu .files-dropdown-error p,
+.geometry-files-menu .files-dropdown-empty p {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+}
+
+.geometry-files-menu .files-dropdown-empty p:last-child {
+  margin-bottom: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.geometry-files-menu .files-dropdown-notice {
+  margin: 8px 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--selected-bg);
+  font-size: var(--font-size-caption);
+}
+
+.geometry-files-menu .files-dropdown-retry {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.geometry-files-menu .files-dropdown-retry:hover {
+  background: var(--accent-hover);
+}
+
+.geometry-files-menu .files-dropdown-list {
+  padding: 4px 0;
+}
+
+.geometry-files-menu .files-dropdown-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.geometry-files-menu .files-dropdown-item-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-bottom: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.geometry-files-menu .files-dropdown-item-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.geometry-files-menu .files-dropdown-item-summary-row .files-dropdown-item-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.geometry-files-menu .files-dropdown-item-summary-row .files-dropdown-item-stats {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.geometry-files-menu .files-dropdown-item-projects {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geometry-files-menu .files-dropdown-item.active .files-dropdown-item-projects,
+.geometry-files-menu .files-dropdown-item.active .files-dropdown-item-name {
+  color: var(--text-on-accent);
+}
+
+.geometry-files-menu .files-dropdown-item.active .files-dropdown-item-projects {
+  opacity: 0.8;
+}
+
+.geometry-files-menu .files-dropdown-item-stats {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.geometry-files-menu .files-dropdown-item.active .files-dropdown-item-stats {
+  color: var(--text-on-accent);
+  opacity: 0.8;
+}
+
+.geometry-files-menu .files-dropdown-item-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.geometry-files-menu .files-dropdown-item-current {
+  flex-shrink: 0;
+  color: var(--accent-primary);
+}
+
+.geometry-files-menu .files-dropdown-item.active .files-dropdown-item-current {
+  color: var(--text-on-accent);
+}
+
+.geometry-files-menu .files-dropdown-item-current svg {
+  width: 16px;
+  height: 16px;
+}
+
+.geometry-files-menu .files-dropdown-item-container {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background-color 0.2s ease;
+}
+
+.geometry-files-menu.files-dropdown .files-dropdown-item-container:hover {
+  background: var(--hover-bg);
+}
+
+.geometry-files-menu.files-dropdown .files-dropdown-item-container--active {
+  background: var(--accent-primary);
+}
+
+.geometry-files-menu.files-dropdown .files-dropdown-item-container--active:hover {
+  background: var(--accent-hover);
+}
+
+.geometry-files-menu .files-dropdown-item-container:last-child {
+  border-bottom: none;
+}
+
+.geometry-files-menu .files-dropdown-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  text-align: left;
+  width: 100%;
+}
+
+.geometry-files-menu .files-dropdown-item:hover {
+  background: var(--hover-bg);
+}
+
+.geometry-files-menu .files-dropdown-item:disabled {
+  cursor: default;
+}
+
+.geometry-files-menu .files-dropdown-item.active {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+}
+
+.geometry-files-menu .files-dropdown-item.active:hover {
+  background: var(--accent-hover);
+}
+
+.geometry-files-menu.files-dropdown .files-dropdown-item:hover,
+.geometry-files-menu.files-dropdown .files-dropdown-item.active,
+.geometry-files-menu.files-dropdown .files-dropdown-item.active:hover {
+  background: transparent;
+}
+
+.geometry-files-menu .files-dropdown-item--pending:not(.active) {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.geometry-files-menu .files-dropdown-item--pending:not(.active):hover {
+  background: none;
+}
+
+.geometry-files-menu .files-dropdown-unsaved-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.geometry-files-menu .files-dropdown-item.active .files-dropdown-unsaved-chip {
+  border-color: color-mix(in srgb, var(--text-on-accent) 70%, transparent);
+  color: var(--text-on-accent);
+}
+
+.geometry-files-menu .files-dropdown-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  opacity: 1;
+}
+
+.geometry-files-menu .files-dropdown-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+  color: var(--text-secondary);
+}
+
+.geometry-files-menu .files-dropdown-action-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.geometry-files-menu .files-dropdown-item-container--active .files-dropdown-action-btn {
+  color: var(--text-on-accent);
+}
+
+.geometry-files-menu .files-dropdown-delete-btn:hover {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.geometry-files-menu .files-dropdown-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.geometry-files-menu .files-dropdown-new-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.geometry-files-menu .files-dropdown-new-btn:hover {
+  background: var(--hover-bg);
+  border-color: var(--border-hover);
+}
+
+.geometry-files-menu .files-dropdown-new-btn--primary {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--text-on-accent);
+  font-weight: 700;
+}
+
+.geometry-files-menu .files-dropdown-new-btn--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--text-on-accent);
+}
+
+/* Workspace projects panel, preserving the pre-Phase-1B Files presentation. */
+.geometry-files-menu .files-dropdown-project-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border-subtle, var(--border-subtle));
+  box-sizing: border-box;
+}
+
+.geometry-files-menu .files-dropdown-project-panel--status {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary, var(--text-muted));
+  margin: 0;
+}
+
+.geometry-files-menu .files-dropdown-project-panel--error {
+  color: var(--validation-warning);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.geometry-files-menu .files-dropdown-project-panel--retry {
+  font-size: var(--font-size-caption);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle, #444);
+  background: var(--bg-tertiary, var(--bg-secondary));
+  color: var(--text-primary, #eee);
+  cursor: pointer;
+}
+
+.geometry-files-menu .fproj-toolbar,
+.geometry-files-menu .fproj-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.geometry-files-menu .fproj-toolbar {
+  justify-content: space-between;
+}
+
+.geometry-files-menu .fproj-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.geometry-files-menu .fproj-selector {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.geometry-files-menu .fproj-scope {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 32px;
+  padding: 4px 10px;
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle, var(--border-subtle));
+  background: var(--bg-secondary, var(--bg-secondary));
+  color: var(--text-primary, #eee);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.geometry-files-menu .fproj-scope:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.geometry-files-menu .fproj-scope-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geometry-files-menu .fproj-menu {
+  position: absolute;
+  z-index: 1002;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  padding: 6px;
+  border: 1px solid var(--border-subtle, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-elevated);
+  max-height: min(420px, calc(100vh - 190px));
+  overflow-y: auto;
+}
+
+.geometry-files-menu .fproj-menu-item,
+.geometry-files-menu .fproj-menu-project-select {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  font-size: var(--font-size-xs);
+}
+
+.geometry-files-menu .fproj-menu-item:hover,
+.geometry-files-menu .fproj-menu-item:focus-visible,
+.geometry-files-menu .fproj-menu-project-select:hover,
+.geometry-files-menu .fproj-menu-project-select:focus-visible {
+  background: var(--hover-bg);
+  outline: none;
+}
+
+.geometry-files-menu .fproj-menu-item--selected,
+.geometry-files-menu .fproj-menu-project--selected .fproj-menu-project-select {
+  background: var(--selected-bg);
+  color: var(--text-primary);
+}
+
+.geometry-files-menu .fproj-menu-meta {
+  color: var(--text-secondary, var(--text-muted));
+  font-size: var(--font-size-caption);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.geometry-files-menu .fproj-menu-project-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.geometry-files-menu .fproj-menu-project-title > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geometry-files-menu .fproj-menu-divider {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--border-subtle, var(--border-subtle));
+}
+
+.geometry-files-menu .fproj-menu-project {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.geometry-files-menu .fproj-menu-project-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.72;
+}
+
+.geometry-files-menu .fproj-menu-project:hover .fproj-menu-project-actions,
+.geometry-files-menu .fproj-menu-project:focus-within .fproj-menu-project-actions {
+  opacity: 1;
+}
+
+.geometry-files-menu .fproj-kind-select {
+  height: 26px;
+  max-width: 118px;
+  border: 1px solid var(--border-subtle, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary, var(--bg-secondary));
+  color: var(--text-secondary, var(--text-muted));
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
+.geometry-files-menu .fproj-kind-select:focus-visible {
+  border-color: var(--accent-primary);
+  outline: none;
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.geometry-files-menu .fproj-menu-icon-button {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary, var(--text-muted));
+  cursor: pointer;
+}
+
+.geometry-files-menu .fproj-menu-membership-button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary, var(--bg-secondary));
+  color: var(--text-secondary, var(--text-muted));
+  cursor: pointer;
+}
+
+.geometry-files-menu .fproj-menu-membership-button:hover,
+.geometry-files-menu .fproj-menu-membership-button:focus-visible {
+  border-color: var(--accent-primary, var(--accent-primary));
+  color: var(--accent-primary, var(--accent-primary));
+  outline: none;
+}
+
+.geometry-files-menu .fproj-menu-membership-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.geometry-files-menu .fproj-menu-membership-button:disabled:hover {
+  border-color: var(--border-subtle, var(--border-subtle));
+  color: var(--text-secondary, var(--text-muted));
+}
+
+.geometry-files-menu .fproj-menu-membership-button--added {
+  border-color: color-mix(in srgb, var(--accent-primary) 70%, transparent);
+  background: var(--selected-bg);
+  color: var(--accent-primary);
+}
+
+.geometry-files-menu .fproj-menu-icon-button:hover,
+.geometry-files-menu .fproj-menu-icon-button:focus-visible {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.geometry-files-menu .fproj-menu-icon-button--danger:hover,
+.geometry-files-menu .fproj-menu-icon-button--danger:focus-visible {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.geometry-files-menu .fproj-menu-rename-input,
+.geometry-files-menu .fproj-menu-create input {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--border-subtle, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary, var(--bg-secondary));
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  padding: 4px 8px;
+}
+
+.geometry-files-menu .fproj-menu-rename-input:focus,
+.geometry-files-menu .fproj-menu-create input:focus {
+  border-color: var(--accent-primary);
+  outline: none;
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+.geometry-files-menu .fproj-menu-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+}
+
+.geometry-files-menu .fproj-kind-select--create {
+  height: 30px;
+  max-width: none;
+}
+
+.geometry-files-menu .fproj-menu-create button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.geometry-files-menu .fproj-menu-create button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.geometry-files-menu .fproj-menu-create button:hover:not(:disabled),
+.geometry-files-menu .fproj-menu-create button:focus-visible:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  outline: none;
+}
+
+.geometry-files-menu .fproj-current {
+  padding-top: 2px;
+  justify-content: space-between;
+}
+
+.geometry-files-menu .fproj-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.geometry-files-menu .fproj-current-label {
+  color: var(--text-secondary, var(--text-muted));
+  font-size: var(--font-size-caption);
+  min-width: 0;
+}
+
+.geometry-files-menu .fproj-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 8px;
+  font-size: var(--font-size-caption);
+  border-radius: 4px;
+  background: var(--bg-tertiary, var(--bg-secondary));
+  border: 1px solid var(--border-subtle, var(--border-subtle));
+  color: var(--text-primary, #eee);
+}
+
+.geometry-files-menu .fproj-chip--muted {
+  color: var(--text-secondary, var(--text-muted));
+}
+
+.geometry-files-menu .fproj-chip button {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--text-secondary, var(--text-muted));
+  font-size: var(--font-size-xs);
+  line-height: 1;
+}
+
+.geometry-files-menu .fproj-chip button:hover {
+  color: var(--text-primary, var(--semantic-on-color));
+}
+
+.geometry-files-menu .fproj-current-action {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  height: 30px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle, var(--border-subtle));
+  background: var(--bg-secondary, var(--bg-secondary));
+  color: var(--text-secondary, var(--text-secondary));
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.geometry-files-menu .fproj-current-action:hover {
+  border-color: var(--accent-primary, var(--accent-primary));
+  color: var(--accent-primary, var(--accent-primary));
+}
+
+.geometry-files-menu .files-dropdown-project-panel .btn-batch-workflow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 10px;
+  background: var(--bg-secondary, var(--bg-secondary));
+  border: 1px solid var(--border-subtle, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary, var(--text-secondary));
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.geometry-files-menu .files-dropdown-project-panel .btn-batch-workflow:hover:not(:disabled) {
+  border-color: var(--accent-primary, var(--accent-primary));
+  color: var(--accent-primary, var(--accent-primary));
+  background: var(--hover-bg);
+}
+
+.geometry-files-menu .files-dropdown-project-panel .btn-batch-workflow:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Public document dialogs use isolated names and may render outside the menu portal. */
+.geometry-files-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 58%);
+}
+
+.geometry-files-dialog {
+  width: min(440px, 100%);
+  padding: 20px;
+  color: var(--text-primary, #f4f4f4);
+  background: var(--bg-primary, #1e1e1e);
+  border: 1px solid var(--border-subtle, #424242);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--shadow-elevated, 0 12px 36px rgb(0 0 0 / 35%));
+}
+
+.geometry-files-dialog h2 {
+  margin: 0 0 10px;
+  font-size: 1.1rem;
+}
+
+.geometry-files-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.geometry-files-dialog-actions button {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-subtle, #424242);
+  border-radius: var(--radius-sm, 5px);
+  color: var(--text-primary, #f4f4f4);
+  background: var(--bg-secondary, #292929);
+  cursor: pointer;
+}
+
+.geometry-files-dialog-actions .geometry-files-danger {
+  color: #fff;
+  background: var(--error, #c62828);
+  border-color: var(--error, #c62828);
+}
+
+.geometry-files-dialog-actions .geometry-files-primary {
+  color: var(--text-on-accent, #171717);
+  background: var(--accent-primary, #ffca28);
+  border-color: var(--accent-primary, #ffca28);
+}
+
+.geometry-portable-source-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(320px, 45vh);
+  margin-top: 14px;
+  overflow-y: auto;
+}
+
+.geometry-portable-source-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle, #424242);
+  border-radius: var(--radius-sm, 5px);
+  cursor: pointer;
+}
+
+.geometry-portable-source-row span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.geometry-portable-source-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geometry-portable-source-row small {
+  color: var(--text-secondary, #b5b5b5);
+}
+
+@media (max-width: 768px) {
+  .geometry-files-menu.files-dropdown {
+    width: min(320px, calc(100vw - 24px));
+    min-width: min(320px, calc(100vw - 24px));
+    max-width: min(320px, calc(100vw - 24px));
+    left: -8px;
+  }
+
+  .geometry-files-menu .files-dropdown-header {
+    padding: 10px 12px;
+  }
+
+  .geometry-files-menu .files-dropdown-item {
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 560px) {
+  .geometry-files-menu .fproj-toolbar,
+  .geometry-files-menu .fproj-current {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .geometry-files-menu .fproj-toolbar-actions,
+  .geometry-files-menu .fproj-current-action {
+    width: 100%;
+  }
+
+  .geometry-files-menu .fproj-toolbar-actions > *,
+  .geometry-files-menu .fproj-current-action {
+    flex: 1;
+    max-width: none;
+  }
+}
