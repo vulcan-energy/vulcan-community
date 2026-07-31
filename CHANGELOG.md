@@ -6,6 +6,8 @@ from earlier private Vulcan development.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-31
+
 ### Added
 
 - The public source tree for the offline-first 2D/3D building-geometry

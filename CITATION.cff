@@ -12,3 +12,6 @@ contact:
 url: https://usevulcan.app/open-source
 repository-code: https://github.com/vulcan-energy/vulcan-community
 license: AGPL-3.0-only
+version: 1.0.0
+commit: 6b3e051ff93d1f5a10f3a3314ec131afef749e7e
+date-released: 2026-07-31
