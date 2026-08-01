@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: WASM build
+
+# The model WASM build is the most fragile documented workflow: it needs a
+# nightly toolchain, rust-src, the wasm32 target and a pinned wasm-pack. The
+# main CI never exercises it, so this workflow catches toolchain rot before
+# users following README.md#run-locally do.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
+  pull_request:
+    paths:
+      - '.github/workflows/wasm-build.yml'
+      - 'scripts/build-model-wasm.sh'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'third_party/jsonschema-0.46.5-offline/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Third-party code is pinned to a full commit SHA rather than a mutable tag.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch; the toolchain input selects nightly
+        with:
+          toolchain: nightly
+          components: rust-src
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - name: Build the Community model WASM
+        run: ./scripts/build-model-wasm.sh
