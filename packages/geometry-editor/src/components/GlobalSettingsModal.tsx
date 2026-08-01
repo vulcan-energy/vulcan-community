@@ -69,7 +69,7 @@ export type GlobalSettingsModalProps = Readonly<{
   isOpen: boolean;
   onClose(): void;
   workspaceResourcePort: GeometryWorkspaceResourcePort;
-  /** Official may retain its established template path; Community omits this. */
+  /** Hosts may retain an established template path; Community omits this. */
   fallbackDefaultsPath?: string;
   inspectDefaultsCompatibility?: (
     content: string

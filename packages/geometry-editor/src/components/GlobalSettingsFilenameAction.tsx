@@ -8,7 +8,7 @@ export type GlobalSettingsFilenameActionProps = Readonly<{
   context: FilenameBarActionContext;
 }>;
 
-/** Canonical Global Settings filename action shared by Community and Official hosts. */
+/** Canonical Global Settings filename action shared by all editor hosts. */
 export function GlobalSettingsFilenameAction({
   context,
 }: GlobalSettingsFilenameActionProps) {

@@ -8,8 +8,9 @@ is required, and project files stay on the user's machine.
 It authors and validates HEM and FHS model inputs; it does not run simulations.
 The included WASM exposes CSV-to-HEM conversion, FHS preflight and version
 reporting, with no simulation run entry point. To calculate results, use the
-public, MIT-licensed [upstream HEM engine](hem_engine_upstream/README.md)
-separately.
+public, MIT-licensed
+[upstream HEM engine](https://github.com/communitiesuk/epb-home-energy-model)
+separately; this repository pins it as the `hem_engine_upstream` submodule.
 
 The editor includes 2D/3D geometry authoring, Core/FHS fields, local documents
 and projects, editable defaults, an assembly calculator, automatic thermal
@@ -112,11 +113,11 @@ which produces misleading hook errors instead of exercising the application.
 ## Project scope
 
 Vulcan Community covers the browser editor and its local authoring and
-validation workflow. The separate Vulcan Official product adds Quick Sim, SAP
-PDF/XML import and comparison, SAP/RdSAP calculation and lodgement,
-account-backed managed workspaces, billing and entitlements, private catalogues,
-detailed thermal solving, telemetry and support services. Those components are
-not part of this repository.
+validation workflow: geometry, Core/FHS fields, local documents and defaults,
+the assembly calculator, automatic thermal bridges, CSV-to-HEM conversion and
+FHS preflight. Simulation, SAP/RdSAP calculation and lodgement,
+account-backed managed workspaces and other commercial services are separate
+[Vulcan products](https://usevulcan.app) and are not part of this repository.
 
 ## Licences by path
 

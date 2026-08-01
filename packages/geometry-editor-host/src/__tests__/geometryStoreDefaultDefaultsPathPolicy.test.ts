@@ -34,7 +34,7 @@ function createWorkspaceResourcePort(
 }
 
 describe('geometry store default defaults-path policy', () => {
-  it('preserves the Official default for creation, export, legacy load and reset', () => {
+  it('preserves the historic host default for creation, export, legacy load and reset', () => {
     const store = createGeometryStore();
 
     expect(store.getState().defaultsPath).toBe(DEFAULT_DEFAULTS_PATH);

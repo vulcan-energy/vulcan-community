@@ -102,7 +102,7 @@ export interface AssemblyCalculatorModalProps {
   onApply: (extraJsonPatch: Record<string, unknown>) => void;
   /** Host-owned access to the currently selected workspace. */
   workspaceResourcePort: GeometryWorkspaceResourcePort;
-  /** Optional Official-only recognised/manufacturer detail catalogue. */
+  /** Optional host-supplied recognised/manufacturer detail catalogue. */
   externalDetailCataloguePort?: ExternalDetailCataloguePort;
   /**
    * When set while the modal opens, sets **Fabric type** (wall vs roof) for opaque and adjacent-conditioned

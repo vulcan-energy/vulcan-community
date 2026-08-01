@@ -12,8 +12,8 @@ export type GeometryWorkspaceResourceListOptions = Readonly<{
 
 /**
  * Local workspace resources used by public editor features such as presets,
- * overlays and document sidecars. The Official host adapts its managed
- * workspace; the Community host adapts the user-selected local workspace.
+ * overlays and document sidecars. The Community host adapts the user-selected
+ * local workspace; other hosts adapt whatever storage they manage.
  */
 export interface GeometryWorkspaceResourcePort {
   readonly availability: 'available' | 'unavailable';
