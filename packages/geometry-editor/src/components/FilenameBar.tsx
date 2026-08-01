@@ -29,7 +29,8 @@ export type FilenameBarProps = Omit<FilenameBarActionContext, 'filename'> & Read
   saveError: string | null;
   /**
    * Required storage suffix for hosts that present a stem-only filename field.
-   * Official omits this and retains its existing filename behavior.
+   * Hosts that present the full filename omit this and retain their existing
+   * filename behavior.
    */
   fileNameExtension?: string;
   /** Host-specific heading for save failures. */

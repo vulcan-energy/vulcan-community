@@ -151,7 +151,7 @@ describe('selectPartFData defaults isolation', () => {
     __resetDefaultsCacheForTests();
   });
 
-  it('uses the caller defaults instead of the ambient Official compatibility cache', () => {
+  it('uses the caller defaults instead of the ambient compatibility cache', () => {
     const blankVent = (id: string): Element => ({
       id,
       name: id,

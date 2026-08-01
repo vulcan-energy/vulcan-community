@@ -50,9 +50,9 @@ mechanically. This decision is complete and is not a remaining release gate.
 - Community owns the single canonical editor/store, document/local-workspace
   flow, FHS authoring/preflight, automatic bridge topology, assembly calculator,
   local CSV-to-HEM conversion and explicit user-invoked IFC importer.
-- Official supplies Quick Sim, SAP PDF/XML import/diff/prefill, native SAP/RdSAP
-  calculation/lodgement, detailed solving, proprietary catalogues, managed
-  account services, telemetry and entitlement.
+- Separate proprietary Vulcan products supply Quick Sim, SAP PDF/XML
+  import/diff/prefill, native SAP/RdSAP calculation/lodgement, detailed solving,
+  proprietary catalogues, managed account services, telemetry and entitlement.
 - Community must contain no public-to-private import, plan logic, private
   feature symbol, private dynamic import or private build path.
 

@@ -174,7 +174,7 @@ describe('defaultsCache', () => {
       expect(hasDefaultValue('u_value', 'BuildingElementOpaque', undefined, undefined, 'external_door')).toBe(true);
     });
 
-    it('keeps explicit defaults lookups isolated from sibling and Official compatibility defaults', () => {
+    it('keeps explicit defaults lookups isolated from sibling and ambient compatibility defaults', () => {
       const createDefaultsLookup = (
         defaultsCacheModule as typeof defaultsCacheModule & {
           createDefaultsLookup?: (defaults: unknown) => ExplicitDefaultsLookup;

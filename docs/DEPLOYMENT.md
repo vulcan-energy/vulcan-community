@@ -13,10 +13,20 @@ From a standalone Vulcan Community checkout:
 ```bash
 git submodule update --init --recursive
 npm ci
-./scripts/fetch-ifc-wheel.sh
 ./scripts/build-model-wasm.sh
 npm run build --workspace @vulcan-community/geometry-editor-app
 ```
+
+IFC import is optional. To include it in a deployment, fetch the pinned
+third-party wheel before building:
+
+```bash
+./scripts/fetch-ifc-wheel.sh
+```
+
+The README's IFC section covers the wheel's size, licence and provenance.
+Without the wheel the site builds and serves normally, and IFC import fails
+when invoked.
 
 The final command writes the deployable site to
 `apps/geometry-editor/dist/`. Configure a single-page application fallback so

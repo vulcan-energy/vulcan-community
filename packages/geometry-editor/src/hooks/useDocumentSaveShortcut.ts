@@ -17,9 +17,8 @@ const mountedOwners = new Set<symbol>();
  *
  * Focus selects an owner when multiple editors are mounted. A lone editor may
  * also claim an unfocused shortcut, except while an editable control outside
- * that editor owns focus. This preserves the established Official behavior
- * while coordinating Official and Community compositions through one shared
- * registry.
+ * that editor owns focus. This preserves each host's established behavior
+ * while coordinating all editor compositions through one shared registry.
  */
 export function useDocumentSaveShortcut({
   documentHost,

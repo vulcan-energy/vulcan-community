@@ -134,7 +134,7 @@ export type GeometryFilesMenuProps = Readonly<{
     input: Readonly<{ name: string; description: string }>,
   ) => void;
   onDeleteProject?: (project: GeometryFilesMenuProject) => void;
-  /** Official Vulcan keeps its established private confirmation modal. */
+  /** `'host'` lets a host keep its own established confirmation modal. */
   projectDeleteConfirmation?: 'shared' | 'host';
 
   onNewDocument?: () => void;

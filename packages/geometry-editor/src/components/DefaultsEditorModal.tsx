@@ -28,7 +28,7 @@ export type DefaultsEditorModalProps = Readonly<{
   ) => ReactNode;
 }>;
 
-/** One canonical fabric-first defaults editor shared by Community and Official. */
+/** One canonical fabric-first defaults editor shared by all editor hosts. */
 export function DefaultsEditorModal({
   isOpen,
   filePath,

@@ -2670,7 +2670,7 @@ export const detectMissingElements = detectMissingElementsCore;
 export interface CreateGeometryStoreOptions {
   /**
    * Host-owned path used for new/reset documents and legacy CSVs without a
-   * DefaultsPath row. `undefined` preserves Official's historic path; `null`
+   * DefaultsPath row. `undefined` preserves the host's historic path; `null`
    * means the host has no implicit workspace defaults resource.
    */
   defaultDefaultsPath?: string | null;

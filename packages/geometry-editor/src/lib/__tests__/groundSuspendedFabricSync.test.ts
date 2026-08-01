@@ -196,7 +196,7 @@ describe('applyGroundThicknessWallsManualTracking', () => {
 });
 
 describe('syncSuspendedGroundFabricFromWalls', () => {
-  it('uses the owning defaults lookup instead of ambient Official defaults', () => {
+  it('uses the owning defaults lookup instead of ambient compatibility defaults', () => {
     __setDefaultsObjectForTests({
       ExposedElements: {
         wall: { type: 'BuildingElementOpaque', u_value: 9.99 },

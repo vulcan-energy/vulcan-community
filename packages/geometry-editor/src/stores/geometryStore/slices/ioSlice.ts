@@ -1327,7 +1327,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     {
       // Use the CSV's explicit path, or the embedding host's configured default.
       // Community supplies its one starter defaults_template.json resource;
-      // Official retains the historic workspace default.
+      // other hosts retain their historic workspace defaults.
       const rawFromCsv = metadata.defaultsPath?.trim() || options.defaultDefaultsPath;
       const pathsToTry = rawFromCsv ? defaultsReadPathAttempts(rawFromCsv) : [];
       const defaultsPathForStore = rawFromCsv

@@ -117,7 +117,7 @@ describe('usePanelLayout composition insets', () => {
       detailsTopPx: 224,
     },
     {
-      composition: 'Official desktop',
+      composition: 'Inset host desktop',
       hostTopInsetPx: 120,
       initialElementsPanelPlacement: 'left' as const,
       freshElementsLeftPx: 0,
@@ -125,7 +125,7 @@ describe('usePanelLayout composition insets', () => {
       detailsTopPx: 344,
     },
     {
-      composition: 'Official mobile',
+      composition: 'Inset host mobile',
       hostTopInsetPx: 160,
       initialElementsPanelPlacement: 'left' as const,
       freshElementsLeftPx: 0,
@@ -195,8 +195,8 @@ describe('usePanelLayout composition insets', () => {
         },
       );
 
-      // Community starts at its useful reset position. Official explicitly
-      // preserves its established fresh-profile left placement.
+      // Community starts at its useful reset position. Inset hosts explicitly
+      // preserve their established fresh-profile left placement.
       expectRect(layout.elementsRect, {
         ...expectedElements,
         x: freshElementsLeftPx,

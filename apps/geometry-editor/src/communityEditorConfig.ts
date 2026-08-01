@@ -24,7 +24,7 @@ export type CommunityEditorConfig = Readonly<{
 
 /**
  * Deliberately small standalone-app configuration surface. Integrators edit or
- * replace this value; the canonical editor and Official host remain shared.
+ * replace this value; the canonical editor packages remain shared.
  */
 export const COMMUNITY_EDITOR_CONFIG: CommunityEditorConfig = Object.freeze({
   theme: 'low-glare-dark',
