@@ -8765,7 +8765,8 @@ wall 0,Living,BuildingElementOpaque,4,90,2,2,0,0,"{""mass_distribution_class"":"
 
     // Note: Test for mechvent_extra_json_overrides_defaults_sfp removed - requires full model setup
     // Fix verified: extra_json now overrides defaults (see builder.rs lines 2057-2069)
-    // Manual test: Run CSV merge on Great Haddon.csv, verify SFP=0.368 (not 1.5)
+    // Manual test: run a CSV merge over a model whose extra_json sets a
+    // mechvent SFP, and verify the merged value wins over the default.
 
     #[test]
     fn ground_extra_json_ignored_for_unknown_keys() {
