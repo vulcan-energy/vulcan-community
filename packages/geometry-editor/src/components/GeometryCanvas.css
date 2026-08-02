@@ -605,9 +605,13 @@
 
 /* FilenameBar save button inside canvas */
 .geometry-canvas .save-button {
+  min-height: 28px !important;
   height: 28px !important;
   min-width: 100px !important;
   width: auto !important;
+  font-size: var(--font-size-xs) !important;
+  padding: 4px 10px !important;
+  border-radius: 8px !important;
 }
 
 /* Files menu trigger button inside canvas */
