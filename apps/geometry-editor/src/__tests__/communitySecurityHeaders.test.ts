@@ -58,7 +58,10 @@ describe('Community editor security headers', () => {
     expect(productionSecurityHeaders).toEqual(productionHeaders);
     expect(parseStaticHeaders(staticHeaders)).toEqual(productionHeaders);
     expect(staticHeaders).toBe(renderStaticHeaders(productionSecurityHeaders));
-    expect(productionCspDirectives).not.toContain(expect.stringContaining('ws:'));
+    // toContain compares array elements with ===, so an asymmetric matcher
+    // never matches one and the negated form silently passes whatever the CSP
+    // says. Join and match the text instead.
+    expect(productionCspDirectives.join(' ')).not.toContain('ws:');
   });
 
   it('reuses the production policy for preview and adds ws only for dev HMR', () => {
