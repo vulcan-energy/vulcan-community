@@ -26,6 +26,20 @@ import {
   getAdjacentPartyWallUiToggleLabel,
 } from '../stores/geometryStore';
 import {
+  bindElementFormModule,
+  type ElementFormInstance,
+  type ElementFormRenderCtx,
+} from './elementForms/types';
+import { electricBatteryFormModule } from './elementForms/electricBattery';
+import {
+  useDecimalInput,
+  useIntegerInput,
+  decimalInputProps,
+  integerInputProps,
+  numericDraftValueOrDefault,
+  readExtraJsonRecord,
+} from './elementForms/formPrimitives';
+import {
   useGeometrySchemaPort,
   useGeometrySourceComparisonPort,
 } from '../../../geometry-editor-host/src/editorServicePorts';
@@ -648,123 +662,6 @@ function areDormerThermalOverridesEqual(
   });
 }
 
-// Custom hook for decimal input handling with proper typing support.
-const useDecimalInput = (
-  initialValue: number | '' = '',
-  onCommit?: (value: number | '') => void,
-  options?: { commitOnChange?: boolean; formatOnBlur?: 'fixed2' | 'preserve' | 'number' },
-) => useNumericDraftInput(initialValue, onCommit, {
-  commitOnChange: options?.commitOnChange,
-  formatOnBlur: options?.formatOnBlur ?? 'fixed2',
-});
-
-// Custom hook for integer-only input handling
-// - Accepts blank while editing
-// - On blur, coerces to an integer and formats without decimals
-const useIntegerInput = (
-  initialValue: number | '' = '',
-  onCommit?: (value: number | '') => void,
-  options?: { commitOnChange?: boolean },
-) => {
-  const [value, setValue] = useState<number | ''>(initialValue);
-  const [inputValue, setInputValue] = useState<string>(initialValue === '' ? '' : initialValue.toString());
-  const [isEditing, setIsEditing] = useState(false);
-  const isEditingRef = useRef(isEditing);
-  const commitOnChange = options?.commitOnChange ?? false;
-  useEffect(() => {
-    isEditingRef.current = isEditing;
-  }, [isEditing]);
-  const setExternalValue = (nextValue: number | '') => {
-    setIsEditing(false);
-    setValue(nextValue);
-    setInputValue(nextValue === '' ? '' : nextValue.toString());
-  };
-  const syncValue = (nextValue: number | '') => {
-    if (isEditingRef.current) return;
-    setValue(nextValue);
-    setInputValue(nextValue === '' ? '' : nextValue.toString());
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawValue = e.target.value;
-    setIsEditing(true);
-    setInputValue(rawValue);
-    if (!commitOnChange) return;
-
-    const trimmed = rawValue.trim();
-    if (trimmed === '') {
-      setValue('');
-      onCommit?.('');
-      return;
-    }
-
-    const parsed = parseFloat(trimmed);
-    if (!isNaN(parsed)) {
-      const rounded = Math.round(parsed);
-      setValue(rounded);
-      onCommit?.(rounded);
-    }
-  };
-
-  const commitRawValue = (rawValue: string) => {
-    setIsEditing(false);
-    const emitCommit = (nextValue: number | '') => {
-      if (!onCommit) return;
-      setTimeout(() => onCommit(nextValue), 0);
-    };
-    const trimmed = rawValue.trim();
-    if (trimmed === '') {
-      setValue('');
-      setInputValue('');
-      emitCommit('');
-    } else {
-      const parsed = parseFloat(trimmed);
-      if (!isNaN(parsed)) {
-        const rounded = Math.round(parsed);
-        setValue(rounded);
-        setInputValue(String(rounded));
-        emitCommit(rounded);
-      } else {
-        // Reset to previous valid value on invalid input
-        setInputValue(value === '' ? '' : value.toString());
-      }
-    }
-  };
-
-  const handleBlur = (e?: React.FocusEvent<HTMLInputElement>) => {
-    commitRawValue(e?.currentTarget.value ?? inputValue);
-  };
-
-  return {
-    value,
-    setValue: setExternalValue,
-    syncValue,
-    inputValue,
-    handleInputChange,
-    handleBlur,
-    isEditing,
-  };
-};
-
-const decimalInputProps = (input: ReturnType<typeof useDecimalInput>) => ({
-  type: 'text' as const,
-  inputMode: 'decimal' as const,
-  value: input.inputValue,
-  onChange: input.handleInputChange,
-  onBlur: input.handleBlur,
-});
-
-const integerInputProps = (input: ReturnType<typeof useIntegerInput>) => ({
-  type: 'text' as const,
-  inputMode: 'numeric' as const,
-  value: input.inputValue,
-  onChange: input.handleInputChange,
-  onBlur: input.handleBlur,
-});
-
-const numericDraftValueOrDefault = (value: number | '', fallback: number): number => (
-  typeof value === 'number' && Number.isFinite(value) ? value : fallback
-);
 
 import type { ElementType, Element, Zone } from '../stores/geometryStore';
 import { FieldValidationIndicator, ValidationIndicator, ValidationPill } from './ValidationIndicator';
@@ -860,12 +757,6 @@ function formatSystemPresetName(preset: string): string {
   return preset.replace(/_/g, ' ');
 }
 
-function readExtraJsonRecord(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
-}
 
 function readFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -3205,9 +3096,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   ]);
 
   // ElectricBattery
-  const batteryCapacityInput = useDecimalInput('', commitElementNumericField('capacity'), { commitOnChange: true });
-  const batteryEfficiencyInput = useDecimalInput('', commitElementNumericField('charge_discharge_efficiency_round_trip'), { commitOnChange: true });
-  const [batteryLocation, setBatteryLocation] = useState<'' | 'inside' | 'outside'>('');
+  const electricBatteryFormState = electricBatteryFormModule.useFormState({ commitElementNumericField });
+  const elementFormInstances = {
+    ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
+  } satisfies Partial<Record<ElementType, ElementFormInstance>>;
 
   // System (sample presets + PCDB)
   const [systemSubcategory, setSystemSubcategory] = useState<string>('');
@@ -4669,24 +4561,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           onSiteWidthInput.setValue(width);
           onSiteHeightInput.setValue(height);
         } else if (element.type === 'ElectricBattery') {
-          // Electric battery (zone-specific selection, though typically global)
-          const capacity =
-            'capacity' in element && typeof element.capacity === 'number'
-              ? roundToTwoDecimals(element.capacity)
-              : (element.capacity ?? '');
-          const efficiency =
-            'charge_discharge_efficiency_round_trip' in element &&
-            typeof element.charge_discharge_efficiency_round_trip === 'number'
-              ? roundToTwoDecimals(element.charge_discharge_efficiency_round_trip)
-              : (element.charge_discharge_efficiency_round_trip ?? '');
-
-          batteryCapacityInput.setValue(capacity);
-          batteryEfficiencyInput.setValue(efficiency);
-          setBatteryLocation(
-            'battery_location' in element && element.battery_location
-              ? element.battery_location
-              : ''
-          );
+          elementFormInstances.ElectricBattery.hydrate(element);
         } else if (element.type === 'System') {
           setSystemSubcategory(element.subcategory || '');
           setSystemPreset(element.system_preset || '');
@@ -4827,24 +4702,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           onSiteWidthInput.setValue(width);
           onSiteHeightInput.setValue(height);
         } else if (element.type === 'ElectricBattery') {
-          // Electric battery (global selection)
-          const capacity =
-            'capacity' in element && typeof element.capacity === 'number'
-              ? roundToTwoDecimals(element.capacity)
-              : (element.capacity ?? '');
-          const efficiency =
-            'charge_discharge_efficiency_round_trip' in element &&
-            typeof element.charge_discharge_efficiency_round_trip === 'number'
-              ? roundToTwoDecimals(element.charge_discharge_efficiency_round_trip)
-              : (element.charge_discharge_efficiency_round_trip ?? '');
-
-          batteryCapacityInput.setValue(capacity);
-          batteryEfficiencyInput.setValue(efficiency);
-          setBatteryLocation(
-            'battery_location' in element && element.battery_location
-              ? element.battery_location
-              : ''
-          );
+          elementFormInstances.ElectricBattery.hydrate(element);
         } else if (element.type === 'System') {
           setSystemSubcategory(element.subcategory || '');
           setSystemPreset(element.system_preset || '');
@@ -5243,6 +5101,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     zoneFloorAreaInput.setValue('');
     zoneHeightInput.setValue('');
     setSimplifiedThermalBridging(false);
+
+    // Extracted form families own their share of the reset.
+    for (const instance of Object.values(elementFormInstances)) {
+      instance.reset();
+    }
   }
   useLayoutEffect(() => {
     resetFormFieldsRef.current = resetFormFields;
@@ -7007,29 +6870,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       }
 
       case 'ElectricBattery': {
-        // Build element data with main UI fields
-        const elementData: Record<string, unknown> = {
-          ...baseData,
-          capacity: batteryCapacityInput.value === '' ? undefined : batteryCapacityInput.value,
-          charge_discharge_efficiency_round_trip: batteryEfficiencyInput.value === '' ? undefined : batteryEfficiencyInput.value,
-          battery_location: batteryLocation || undefined,
-          zoneId: elementZoneId || undefined
-        };
-
-        // Auto-remove main UI fields from extra_json to avoid duplication
-        if (elementData.extra_json) {
-          const restExtraJson = { ...readExtraJsonRecord(elementData.extra_json) };
-          delete restExtraJson.capacity;
-          delete restExtraJson.charge_discharge_efficiency_round_trip;
-          delete restExtraJson.battery_location;
-          delete restExtraJson.grid_charging_possible;
-          delete restExtraJson.threshold_charges;
-          delete restExtraJson.threshold_prices;
-          delete restExtraJson.tariff;
-          elementData.extra_json = Object.keys(restExtraJson).length > 0 ? restExtraJson : undefined;
-        }
-
-        return elementData as Partial<Element>;
+        return elementFormInstances.ElectricBattery.buildElementData({ baseData, elementZoneId });
       }
 
       case 'System': {
@@ -7087,7 +6928,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       case 'OnSiteGeneration':
         return 'PhotovoltaicSystem';
       case 'ElectricBattery':
-        return undefined; // No subtypes
+        return elementFormInstances.ElectricBattery.subtype();
       case 'System':
         return systemSubcategory || undefined; // Subcategory drives schema resolution
       default:
@@ -7690,6 +7531,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   };
 
   const renderAttributePanel = () => {
+    const formRenderCtx: ElementFormRenderCtx = {
+      elementType,
+      fieldUnit,
+      renderFieldLabel,
+      renderFieldLabelWithComparisonIndicator,
+      registerBaseFieldRefs,
+      getFieldValidationIssue,
+      globalComparisonFieldIndicators,
+      commitExistingElementDraft,
+    };
     switch (elementType) {
       case 'BuildingElementOpaque':
         return selectedIsDormerAnchor ? (
@@ -11031,55 +10882,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       }
 
       case 'ElectricBattery':
-        return (
-          <>
-            {renderFieldLabelWithComparisonIndicator('Capacity (kWh):', elementType, globalComparisonFieldIndicators.capacity)}
-            <div className="element-input" ref={registerBaseFieldRefs('capacity')}>
-              <StandardInput
-                {...decimalInputProps(batteryCapacityInput)}
-                unit={fieldUnit('capacity')}
-                step="0.1"
-                min="0"
-                max="50"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('capacity', batteryCapacityInput.value)} issue={getFieldValidationIssue('capacity', batteryCapacityInput.value) || undefined} />
-            </div>
-            {renderFieldLabel('Charge/Discharge Efficiency (Round Trip):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs('charge_discharge_efficiency_round_trip')}>
-              <StandardInput
-                {...decimalInputProps(batteryEfficiencyInput)}
-                unit={fieldUnit('charge_discharge_efficiency_round_trip')}
-                step="0.01"
-                min="0"
-                max="1"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('charge_discharge_efficiency_round_trip', batteryEfficiencyInput.value)} issue={getFieldValidationIssue('charge_discharge_efficiency_round_trip', batteryEfficiencyInput.value) || undefined} />
-            </div>
-            {renderFieldLabel('Battery Location:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['batteryLocation', 'battery_location'])}>
-              <StandardDropdown
-                value={batteryLocation}
-                onChange={(value) => {
-                  const nextValue = value as 'inside' | 'outside';
-                  setBatteryLocation(nextValue);
-                  commitExistingElementDraft({ battery_location: nextValue });
-                }}
-                options={[
-                  { value: 'inside', label: 'Inside' },
-                  { value: 'outside', label: 'Outside' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-          </>
-        );
+        return elementFormInstances.ElectricBattery.renderPanel(formRenderCtx);
 
       default:
         return <div>Select an element type to see attributes</div>;
