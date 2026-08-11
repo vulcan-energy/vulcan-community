@@ -27,7 +27,10 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['**/dist', '**/coverage', '**/node_modules', 'crates', 'data', 'third_party'] },
+  // .vite-cache holds Vite's dependency pre-bundles: third-party code whose inline eslint
+  // directives report against unloaded plugins. It is gitignored, so linting it makes the
+  // quality gate's result depend on whether the dev server has run on that machine.
+  { ignores: ['**/dist', '**/coverage', '**/node_modules', '**/.vite-cache', 'crates', 'data', 'third_party'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
