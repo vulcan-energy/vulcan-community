@@ -202,13 +202,15 @@ const LINE_WALL_TYPES: Array<Element['type']> = [
  * Same wall filtering as {@link calculateDerivedHeight}.
  */
 export function getPerFloorLineWallAverageHeights(zoneId: string, elements: Element[]): Map<number, number> {
-  const lineWalls = elements.filter(
-    (el) =>
-      (el as any).zoneId === zoneId &&
-      LINE_WALL_TYPES.includes(el.type) &&
-      el.coordinates &&
-      el.coordinates.length === 2,
-  );
+  const lineWalls = elements.filter((el) => {
+    if ((el as any).zoneId !== zoneId) return false;
+    if (!LINE_WALL_TYPES.includes(el.type)) return false;
+    if (!el.coordinates || el.coordinates.length !== 2) return false;
+    if (el.type === 'BuildingElementOpaque' && el.is_external_door === true) return false;
+
+    const pitch = (el as { pitch?: number }).pitch;
+    return typeof pitch !== 'number' || pitch === 90;
+  });
 
   const byFloor = new Map<number, typeof lineWalls>();
   for (const wall of lineWalls) {
@@ -224,19 +226,12 @@ export function getPerFloorLineWallAverageHeights(zoneId: string, elements: Elem
 
     for (const wall of floorWalls) {
       const h = (wall as any).height as number | undefined;
-      const pitch = (wall as any).pitch as number | undefined;
       const width = (wall as any).width as number | undefined;
 
       if (typeof h !== 'number' || h <= 0) continue;
 
-      let effectiveHeight = h;
-      if (typeof pitch === 'number') {
-        if (pitch === 0 || pitch === 180) continue;
-        effectiveHeight = h * Math.sin((pitch * Math.PI) / 180);
-      }
-
       const weight = typeof width === 'number' && width > 0 ? width : 1;
-      weightedSum += effectiveHeight * weight;
+      weightedSum += h * weight;
       weightTotal += weight;
     }
 
@@ -923,8 +918,8 @@ export function calculateDerivedWindowMidHeight(baseHeightM: number, openingHeig
  * For single-storey zones: weighted average of wall heights (weighted by width).
  * For multi-storey zones: **mean** of each storey’s weighted-average wall height (typical storey height).
  *
- * Horizontal elements (pitch 0/180) are excluded. Pitched walls use
- * effective height = h × sin(pitch).
+ * Only vertical line walls (pitch unset or 90°) contribute. Horizontal and
+ * pitched surfaces, polygon walls, windows, and external doors are excluded.
  *
  * Returns 0 when no suitable wall data is available.
  */
