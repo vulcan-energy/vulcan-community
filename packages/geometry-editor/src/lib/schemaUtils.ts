@@ -10,19 +10,14 @@ import {
   variantTitleFor,
   type SchemaNode,
 } from './schemaTypes';
+import { resolveRefChain, resolveSchemaRef } from './schemaRefResolver';
 
 export type { SchemaNode } from './schemaTypes';
 
 type SchemaSearchMatch = { param: SchemaNode; paramId: string; path: string[] };
 
 function resolveNode(value: SchemaNode, root: SchemaNode): SchemaNode | null {
-  let resolved: SchemaNode | null = value.$ref ? resolveRef(value.$ref, root) : value;
-  while (resolved?.$ref) {
-    const next = resolveRef(resolved.$ref, root);
-    if (!next) break;
-    resolved = next;
-  }
-  return resolved;
+  return resolveRefChain(root, value);
 }
 
 export interface ParameterInfo {
@@ -69,28 +64,6 @@ export function extractConstraints(param: SchemaNode): {
 }
 
 /**
- * Resolve a $ref reference in the schema
- */
-function resolveRef(ref: string, root: SchemaNode): SchemaNode | null {
-  if (!ref.startsWith('#/')) return null;
-
-  const path = ref.slice(2).split('/');
-  let current: SchemaNode | null = root;
-
-  for (const segment of path) {
-    if (!current) return null;
-    const next: unknown = current[segment];
-    if (isSchemaNode(next)) {
-      current = next;
-    } else {
-      return null;
-    }
-  }
-
-  return current;
-}
-
-/**
  * Resolve $ref but preserve local metadata (e.g., description/title/default) from the referencing node.
  *
  * This is important for tooltips because many schemas use `$ref` for type/enum,
@@ -100,12 +73,7 @@ function resolveRefPreservingLocal(param: SchemaNode, root: SchemaNode): SchemaN
   const ref = param.$ref;
   if (!ref || typeof ref !== 'string') return param;
 
-  let resolved = resolveRef(ref, root);
-  while (resolved?.$ref) {
-    const next = resolveRef(resolved.$ref, root);
-    if (!next) break;
-    resolved = next;
-  }
+  const resolved = resolveRefChain(root, param);
   if (!resolved) return param;
 
   // Merge: resolved base first, then overlay local fields (but drop $ref itself to avoid confusion)
@@ -126,7 +94,7 @@ function searchInObject(
 ): void {
   // Handle $ref
   if (obj.$ref) {
-    const resolved = resolveRef(obj.$ref, root);
+    const resolved = resolveSchemaRef(root, obj.$ref);
     if (resolved) {
       searchInObject(resolved, paramId, root, path, results);
     }
@@ -645,7 +613,7 @@ export function navigateToPath(path: string[], useFHSSchema = false): ParameterI
       if (current && typeof current === 'object') {
         // Handle $ref
         if (current.$ref) {
-          current = resolveRef(current.$ref, root);
+          current = resolveSchemaRef(root, current.$ref);
         }
         if (!current) return null;
 
@@ -677,7 +645,7 @@ export function navigateToPath(path: string[], useFHSSchema = false): ParameterI
           let found = false;
           if (resolvedAdditional.oneOf && Array.isArray(resolvedAdditional.oneOf)) {
             for (const option of resolvedAdditional.oneOf) {
-              const resolvedOption = option.$ref ? resolveRef(option.$ref, root) : option;
+              const resolvedOption = option.$ref ? resolveSchemaRef(root, option.$ref) : option;
               if (resolvedOption && resolvedOption.properties && resolvedOption.properties[segment]) {
                 current = resolvedOption.properties[segment];
                 resolvedPath.push(segment);
@@ -688,7 +656,7 @@ export function navigateToPath(path: string[], useFHSSchema = false): ParameterI
           }
           if (!found && resolvedAdditional.anyOf && Array.isArray(resolvedAdditional.anyOf)) {
             for (const option of resolvedAdditional.anyOf) {
-              const resolvedOption = option.$ref ? resolveRef(option.$ref, root) : option;
+              const resolvedOption = option.$ref ? resolveSchemaRef(root, option.$ref) : option;
               if (resolvedOption && resolvedOption.properties && resolvedOption.properties[segment]) {
                 current = resolvedOption.properties[segment];
                 resolvedPath.push(segment);
@@ -1075,7 +1043,7 @@ function buildSearchIndex(
 
   // Handle $ref
   if (node.$ref) {
-    const resolved = resolveRef(node.$ref, root);
+    const resolved = resolveSchemaRef(root, node.$ref);
     if (resolved) {
       buildSearchIndex(resolved, root, basePath, index, seen, variantTitle);
     }
