@@ -31,6 +31,12 @@ import {
   type ElementFormRenderCtx,
 } from './elementForms/types';
 import { electricBatteryFormModule } from './elementForms/electricBattery';
+import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
+import { getLightingFieldValue, lightingFormModule } from './elementForms/lighting';
+import { applianceFormModule } from './elementForms/appliance';
+import { hotWaterDemandFormModule } from './elementForms/hotWaterDemand';
+import { combustionAppliancesFormModule } from './elementForms/combustionAppliances';
+import { onSiteGenerationFormModule } from './elementForms/onSiteGeneration';
 import {
   useDecimalInput,
   useIntegerInput,
@@ -151,8 +157,6 @@ import {
   getPvFootprintDimensionsFromPreset,
   readPvFootprintFlags,
   rebuildPvRectangleFromBottomEdge,
-  rebuildPvRectangleFromBottomEdgeDimensions,
-  DEFAULT_PV_FOOTPRINT_M,
   derivePvDimensionsFromCoords,
 } from '../lib/pvPanelFootprint';
 import { deriveFromHostRoof } from '../lib/pvHostDerivation';
@@ -384,31 +388,6 @@ function horizontalPolygonSurfaceSelectValue(pitch: number | undefined | null): 
   if (r === 180) return '180';
   return '';
 }
-const LIGHTING_ENTRY_MODE_KEY = '_lighting_entry_mode';
-const LIGHTING_GRADE_KEY = '_lighting_grade';
-const LIGHTING_LAMP_TYPE_KEY = '_lighting_lamp_type';
-type LightingEntryMode = 'guided' | 'detailed';
-type LightingGrade = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'unknown';
-type LightingLampType = 'Linear fluorescent' | 'LED' | 'Halogen LV' | 'Halogen' | 'Incandescent' | 'CFL';
-const LIGHTING_GRADE_TO_EFFICACY: Record<LightingGrade, number | undefined> = {
-  A: 210,
-  B: 185,
-  C: 160,
-  D: 135,
-  E: 110,
-  F: 85,
-  G: 0,
-  unknown: undefined,
-};
-const LIGHTING_LAMP_TYPE_DEFAULT_POWER: Record<LightingLampType, number> = {
-  'Linear fluorescent': 8.3,
-  LED: 10,
-  'Halogen LV': 25.7,
-  Halogen: 42.8,
-  Incandescent: 60,
-  CFL: 10,
-};
-
 // Utility function for consistent 2 decimal place formatting
 const formatToTwoDecimals = (value: number | string | undefined): string => {
   if (value === undefined || value === null || value === '') return '0.00';
@@ -668,7 +647,6 @@ import { FieldValidationIndicator, ValidationIndicator, ValidationPill } from '.
 import { StandardCard } from './StandardCard';
 import { StandardInput } from './StandardInput';
 import { ResetFieldButton } from './ResetFieldButton';
-import { useNumericDraftInput } from './numericDraftInput';
 import { aggregateSpaceLabelsForZone } from '../lib/spaceLabelDerivation';
 import { StandardDropdown } from './StandardDropdown';
 import { ElementTypePicker } from './ElementTypePicker';
@@ -782,12 +760,6 @@ function unheatedPitchedRoofCeilingElevationSourceLabel(
     case 'roof-base':
       return 'roof base';
   }
-}
-
-function readNonEmptyString(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 // Define Selection type locally
@@ -1650,25 +1622,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return !!target && (target.type === 'element' || target.type === 'global') && !target.isPlaceholder;
   }, [selection]);
 
-  const getLightingFieldValue = (
-    element: Element,
-    field: 'efficacy' | 'count' | 'power',
-  ): number | undefined => {
-    const directValue = (element as unknown as Record<string, unknown>)[field];
-    if (typeof directValue === 'number') {
-      return directValue;
-    }
-
-    const bulbs = (element as { bulbs?: Record<string, { efficacy?: number; count?: number; power?: number }> }).bulbs;
-    if (!bulbs || typeof bulbs !== 'object') {
-      return undefined;
-    }
-
-    const chosenBulb = bulbs.led ?? bulbs.incandescent;
-    const nestedValue = chosenBulb?.[field];
-    return typeof nestedValue === 'number' ? nestedValue : undefined;
-  };
-
   const buildLightingCommitPatch = (
     existingElement: Element,
     overrides: Partial<Element>,
@@ -2118,7 +2071,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     commitElementNumericField('linear_thermal_transmittance'),
     { commitOnChange: false, formatOnBlur: 'preserve' },
   );
-  const heatTransferCoeffInput = useDecimalInput('', commitElementNumericField('heat_transfer_coeff'), { commitOnChange: true });
   const widthInputSetValueRef = useRef(widthInput.syncValue);
   const heightInputSetValueRef = useRef(heightInput.syncValue);
   const areaInputSetValueRef = useRef(areaInput.syncValue);
@@ -2507,99 +2459,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   const roundToInt = (value: number) => Math.round(value ?? 0);
 
-  /** Sloped PV/roof: typing orientation rotates the polygon in plan (like walls). Flat or degenerate: store only. */
-  const commitOnSiteOrientation = useCallback(
-    (value: number | '') => {
-      if (!selection?.id || (selection.type !== 'element' && selection.type !== 'global')) {
-        commitExistingElementDraftRef.current({ orientation360: value } as Partial<Element>);
-        return;
-      }
-      if (value === '') {
-        commitExistingElementDraftRef.current({ orientation360: '' } as Partial<Element>);
-        return;
-      }
-      const el = getElementById(selection.id);
-      if (!el || el.type !== 'OnSiteGeneration') {
-        commitExistingElementDraftRef.current({ orientation360: value } as Partial<Element>);
-        return;
-      }
-      const pitch = (el as { pitch?: number }).pitch ?? 0;
-      const coords = el.coordinates || [];
-      // Manual orientation edits on a hosted panel must mark the field as overridden so the
-      // store hook does not re-derive from the host on the coordinate-rotation that follows.
-      if (pitch > 0 && pitch < 90 && coords.length >= 3) {
-        const globalOffset = geometryStore.getState().globalOrientationOffset;
-        const next = applyCompassOrientationToSlopedPolygonCoords(
-          coords as Array<{ x: number; y: number; z: number }>,
-          value,
-          globalOffset,
-        );
-        if (next) {
-          updateElement(selection.id, {
-            coordinates: next,
-            _orientationUserOverride: true,
-          } as Partial<Element>);
-          return;
-        }
-      }
-      commitExistingElementDraftRef.current({
-        orientation360: value,
-        _orientationUserOverride: true,
-      } as Partial<Element>);
-    },
-    [selection, getElementById, geometryStore, updateElement],
-  );
-
-  const commitOnSitePitchOverride = useCallback(
-    (value: number | '') => {
-      commitExistingElementDraftRef.current({
-        pitch: value,
-        _pitchUserOverride: true,
-      } as Partial<Element>);
-    },
-    [],
-  );
-
-  const commitOnSiteBaseHeightOverride = useCallback(
-    (value: number | '') => {
-      commitExistingElementDraftRef.current({
-        base_height: value,
-        _baseHeightUserOverride: true,
-      } as Partial<Element>);
-    },
-    [],
-  );
-
-  const resetOnSiteOrientationToHost = useCallback(
-    (value: number) => {
-      if (!selection?.id) return;
-      const el = getElementById(selection.id);
-      if (!el || el.type !== 'OnSiteGeneration') return;
-      const pitch = (el as { pitch?: number }).pitch ?? 0;
-      const coords = el.coordinates || [];
-      if (pitch > 0 && pitch < 90 && coords.length >= 3) {
-        const globalOffset = geometryStore.getState().globalOrientationOffset;
-        const next = applyCompassOrientationToSlopedPolygonCoords(
-          coords as Array<{ x: number; y: number; z: number }>,
-          value,
-          globalOffset,
-        );
-        if (next) {
-          updateElement(selection.id, {
-            coordinates: next,
-            _orientationUserOverride: false,
-          } as Partial<Element>);
-          return;
-        }
-      }
-      commitExistingElementDraftRef.current({
-        orientation360: value,
-        _orientationUserOverride: false,
-      } as Partial<Element>);
-    },
-    [selection, getElementById, geometryStore, updateElement],
-  );
-
   // NEW: CSV v3 element state variables
   // WindowShading
   const [linkedWindow, setLinkedWindow] = useKeyedState(
@@ -2610,111 +2469,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const depthInput = useDecimalInput('', commitElementNumericField('depth'), { commitOnChange: true });
   const distanceInput = useDecimalInput('', commitElementNumericField('distance'), { commitOnChange: true });
   const transparencyInput = useDecimalInput('', commitElementNumericField('transparency'), { commitOnChange: true });
-
-  // Lighting
-  const [lightingEntryMode, setLightingEntryMode] = useState<LightingEntryMode>('detailed');
-  const [lightingGrade, setLightingGrade] = useState<LightingGrade>('unknown');
-  const [lightingLampType, setLightingLampType] = useState<LightingLampType>('LED');
-  const efficacyInput = useDecimalInput('', commitElementNumericField('efficacy'), { commitOnChange: true });
-  const countInput = useIntegerInput('', commitElementNumericField('count'), { commitOnChange: true });
-  const powerInput = useDecimalInput(
-    '',
-    (value) => commitExistingElementDraft({ power: typeof value === 'number' && value > 0 ? value : undefined } as Partial<Element>),
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
-
-  const isLightingGrade = (value: unknown): value is LightingGrade => {
-    return typeof value === 'string' && Object.prototype.hasOwnProperty.call(LIGHTING_GRADE_TO_EFFICACY, value);
-  };
-
-  const isLightingLampType = (value: unknown): value is LightingLampType => {
-    return typeof value === 'string' && Object.prototype.hasOwnProperty.call(LIGHTING_LAMP_TYPE_DEFAULT_POWER, value);
-  };
-
-  const buildLightingUiExtra = (
-    existing: unknown,
-    mode: LightingEntryMode,
-    grade?: LightingGrade,
-    lampType?: LightingLampType,
-  ) => {
-    const next = {
-      ...readExtraJsonRecord(existing),
-      [LIGHTING_ENTRY_MODE_KEY]: mode,
-    } as Record<string, unknown>;
-    if (grade) {
-      next[LIGHTING_GRADE_KEY] = grade;
-    } else {
-      delete next[LIGHTING_GRADE_KEY];
-    }
-    if (lampType) {
-      next[LIGHTING_LAMP_TYPE_KEY] = lampType;
-    } else {
-      delete next[LIGHTING_LAMP_TYPE_KEY];
-    }
-    return next;
-  };
-
-  const applyGuidedLightingSelection = (
-    grade: LightingGrade,
-    lampType: LightingLampType,
-  ) => {
-    const nextEfficacy = LIGHTING_GRADE_TO_EFFICACY[grade];
-    const nextPower = LIGHTING_LAMP_TYPE_DEFAULT_POWER[lampType];
-    setLightingGrade(grade);
-    setLightingLampType(lampType);
-    efficacyInput.setValue(nextEfficacy ?? '');
-    powerInput.setValue(nextPower);
-
-    if (!selection || (selection.type !== 'element' && selection.type !== 'global') || selection.isPlaceholder) {
-      return;
-    }
-    const current = getElementById(selection.id);
-    if (!current || current.type !== 'Lighting') return;
-    commitExistingElementDraft({
-      simplified_lighting: false,
-      efficacy: nextEfficacy,
-      count: countInput.value || undefined,
-      power: nextPower,
-      extra_json: buildLightingUiExtra(current.extra_json, 'guided', grade, lampType),
-    } as Partial<Element>);
-  };
-
-  const commitLightingModeChange = (targetMode: LightingEntryMode) => {
-    setLightingEntryMode(targetMode);
-
-    if (!selection || (selection.type !== 'element' && selection.type !== 'global') || selection.isPlaceholder) {
-      return;
-    }
-    const current = getElementById(selection.id);
-    if (!current || current.type !== 'Lighting') return;
-
-    const currentEfficacy = typeof efficacyInput.value === 'number' ? efficacyInput.value : undefined;
-    const nextEfficacy = targetMode === 'guided'
-      ? LIGHTING_GRADE_TO_EFFICACY[lightingGrade]
-      : (currentEfficacy !== undefined && Number.isFinite(currentEfficacy) && currentEfficacy > 0 ? currentEfficacy : undefined);
-    if (targetMode === 'guided' || !(currentEfficacy !== undefined && Number.isFinite(currentEfficacy) && currentEfficacy > 0)) efficacyInput.setValue(nextEfficacy ?? '');
-    const defaultPower = targetMode === 'guided' ? LIGHTING_LAMP_TYPE_DEFAULT_POWER[lightingLampType] : undefined;
-    const nextPower =
-      typeof powerInput.value === 'number' && Number.isFinite(powerInput.value) && powerInput.value > 0
-        ? powerInput.value
-        : defaultPower;
-    if (!(typeof powerInput.value === 'number' && Number.isFinite(powerInput.value) && powerInput.value > 0)) {
-      powerInput.setValue(nextPower ?? '');
-    }
-
-    commitExistingElementDraft({
-      simplified_lighting: false,
-      efficacy: nextEfficacy,
-      count: countInput.value || undefined,
-      power: nextPower,
-      extra_json: buildLightingUiExtra(
-        current.extra_json,
-        targetMode,
-        targetMode === 'guided' ? lightingGrade : undefined,
-        lightingLampType,
-      ),
-    } as Partial<Element>);
-  };
 
   // MechanicalVentilationDuctwork
   const [ductType, setDuctType] = useState<'' | 'supply' | 'extract' | 'intake' | 'exhaust'>('');
@@ -2761,23 +2515,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   // WaterPipework
   const [location, setLocation] = useState<'' | 'internal' | 'external'>('');
-
-  // Appliance
-  const [applianceKey, setApplianceKey] = useState<string>('');
-  if (
-    applianceKey !== ''
-    && applianceKeyOptions.length > 0
-    && !applianceKeyOptions.includes(applianceKey)
-  ) {
-    setApplianceKey('');
-  }
-
-  // HotWaterDemand
-  const [hotWaterSubcategory, setHotWaterSubcategory] = useState<'' | 'MixerShower' | 'Bath' | 'InstantElecShower' | 'OtherWaterUseDetails'>('');
-  const [allowLowFlowrate, setAllowLowFlowrate] = useState<boolean>(false);
-  const sizeInput = useDecimalInput('', commitElementNumericField('size'), { commitOnChange: true });
-  const flowrateInput = useDecimalInput('', commitElementNumericField('flowrate'), { commitOnChange: true });
-  const ratedPowerInput = useDecimalInput('', commitElementNumericField('rated_power'), { commitOnChange: true });
 
   // ContextShading
   const [contextShadingType, setContextShadingType] = useState<'' | 'obstacle' | 'overhang'>('');
@@ -2852,17 +2589,43 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     { commitOnChange: true },
   );
 
+  const elementFormStateCtx = {
+    commitElementNumericField,
+    commitExistingElementDraft,
+    applianceKeyOptions,
+    selection,
+    getElementById,
+    updateElement,
+    getGlobalOrientationOffset: () => geometryStore.getState().globalOrientationOffset,
+    getCurrentOrientation,
+    selectedElementV,
+  };
+  // ElectricBattery
+  const electricBatteryFormState = electricBatteryFormModule.useFormState(elementFormStateCtx);
+  // ThermalBridgePoint
+  const thermalBridgePointFormState = thermalBridgePointFormModule.useFormState(elementFormStateCtx);
+  // Lighting
+  const lightingFormState = lightingFormModule.useFormState(elementFormStateCtx);
+  // Appliance
+  const applianceFormState = applianceFormModule.useFormState(elementFormStateCtx);
+  // HotWaterDemand
+  const hotWaterDemandFormState = hotWaterDemandFormModule.useFormState(elementFormStateCtx);
   // CombustionAppliances
-  const [applianceType, setApplianceType] = useState<'' | 'open_fireplace' | 'closed_fireplace' | 'stove' | 'closed_with_fan' | 'open_gas_flue_balancer' | 'open_gas_kitchen_stove' | 'open_gas_fire' | 'closed_fire'>('');
-  const [exhaustSituation, setExhaustSituation] = useState<'' | 'into_room' | 'into_chimney' | 'into_separate_duct' | 'into_mech_vent'>('');
-  const [fuelType, setFuelType] = useState<'' | 'wood' | 'gas' | 'oil' | 'coal'>('');
-  const [supplySituation, setSupplySituation] = useState<'' | 'room_air' | 'outside_air' | 'outside'>('');
-
+  const combustionAppliancesFormState = combustionAppliancesFormModule.useFormState(elementFormStateCtx);
   // OnSiteGeneration
-  const peakPowerInput = useDecimalInput('', commitElementNumericField('peak_power'), { commitOnChange: true });
-  const onSitePitchInput = useIntegerInput('', commitOnSitePitchOverride, { commitOnChange: true });
-  const onSiteOrientationInput = useIntegerInput('', commitOnSiteOrientation, { commitOnChange: true });
-  const onSiteBaseHeightInput = useDecimalInput('', commitOnSiteBaseHeightOverride, { commitOnChange: true });
+  const onSiteGenerationFormState = onSiteGenerationFormModule.useFormState(elementFormStateCtx);
+  const elementFormInstances = {
+    ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
+    ThermalBridgePoint: bindElementFormModule(thermalBridgePointFormModule, thermalBridgePointFormState),
+    Lighting: bindElementFormModule(lightingFormModule, lightingFormState),
+    Appliance: bindElementFormModule(applianceFormModule, applianceFormState),
+    HotWaterDemand: bindElementFormModule(hotWaterDemandFormModule, hotWaterDemandFormState),
+    CombustionAppliances: bindElementFormModule(combustionAppliancesFormModule, combustionAppliancesFormState),
+    OnSiteGeneration: bindElementFormModule(onSiteGenerationFormModule, onSiteGenerationFormState),
+  } satisfies Partial<Record<ElementType, ElementFormInstance>>;
+
+  // Floor-move base-height sync, shared across several families; OnSiteGeneration's
+  // share now writes through its module state (see onSiteGeneration.tsx header).
   const syncFloorMoveHeightInputs = useCallback((heightPatch: {
     base_height?: number;
     _base_height?: number;
@@ -2872,7 +2635,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (typeof heightPatch.base_height === 'number') {
       const nextBaseHeight = roundToTwoDecimals(heightPatch.base_height);
       baseHeightInput.setValue(nextBaseHeight);
-      onSiteBaseHeightInput.setValue(nextBaseHeight);
+      onSiteGenerationFormState.onSiteBaseHeightInput.setValue(nextBaseHeight);
     }
     if (typeof heightPatch._base_height === 'number') {
       adjacentViewerBaseHeightInput.setValue(roundToTwoDecimals(heightPatch._base_height));
@@ -2880,226 +2643,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (typeof heightPatch.mid_height === 'number') {
       midHeightInput.setValue(roundToTwoDecimals(heightPatch.mid_height));
     }
-  }, [adjacentViewerBaseHeightInput, baseHeightInput, midHeightInput, onSiteBaseHeightInput]);
-
-  const commitOnSiteDimensionField = (field: 'width' | 'height') => (value: number | '') => {
-    if (!selection?.id || (selection.type !== 'element' && selection.type !== 'global')) {
-      return;
-    }
-    const el = getElementById(selection.id) as any;
-    if (!el || el.type !== 'OnSiteGeneration') {
-      updateElement(selection.id, { [field]: value } as Partial<Element>);
-      return;
-    }
-
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-      updateElement(selection.id, { [field]: value } as Partial<Element>);
-      return;
-    }
-
-    const nextWidth =
-      field === 'width'
-        ? value
-        : typeof onSiteWidthInput.value === 'number' && onSiteWidthInput.value > 0
-          ? onSiteWidthInput.value
-          : typeof el.width === 'number' && el.width > 0
-            ? el.width
-            : DEFAULT_PV_FOOTPRINT_M.width;
-    const nextHeight =
-      field === 'height'
-        ? value
-        : typeof onSiteHeightInput.value === 'number' && onSiteHeightInput.value > 0
-          ? onSiteHeightInput.value
-          : typeof el.height === 'number' && el.height > 0
-            ? el.height
-            : DEFAULT_PV_FOOTPRINT_M.height;
-    if (!el.coordinates || el.coordinates.length < 2) {
-      updateElement(selection.id, {
-        width: roundToTwoDecimals(nextWidth),
-        height: roundToTwoDecimals(nextHeight),
-      } as Partial<Element>);
-      return;
-    }
-
-    const A = el.coordinates[0];
-    const B = el.coordinates[1];
-    if (Math.hypot(B.x - A.x, B.y - A.y) < 1e-4) {
-      updateElement(selection.id, {
-        width: roundToTwoDecimals(nextWidth),
-        height: roundToTwoDecimals(nextHeight),
-      } as Partial<Element>);
-      return;
-    }
-
-    const roundedWidth = roundToTwoDecimals(nextWidth);
-    const roundedHeight = roundToTwoDecimals(nextHeight);
-    const flags = readPvFootprintFlags(el.extra_json);
-    const coordinates = rebuildPvRectangleFromBottomEdgeDimensions(
-      A,
-      B,
-      roundedWidth,
-      roundedHeight,
-      flags.flipUpslope,
-      typeof el.pitch === 'number' ? el.pitch : undefined,
-    );
-    const nextExtra =
-      el.extra_json && typeof el.extra_json === 'object' ? { ...el.extra_json } : {};
-    nextExtra._pv_bottom_is_long = roundedWidth >= roundedHeight;
-
-    updateElement(selection.id, {
-      coordinates,
-      width: roundedWidth,
-      height: roundedHeight,
-      extra_json: nextExtra,
-    });
-  };
-
-  const onSiteWidthInput = useDecimalInput('', commitOnSiteDimensionField('width'), { commitOnChange: true });
-  const onSiteHeightInput = useDecimalInput('', commitOnSiteDimensionField('height'), { commitOnChange: true });
-  const onSiteWidthInputValue = onSiteWidthInput.value;
-  const onSiteHeightInputValue = onSiteHeightInput.value;
-  const onSiteWidthSetValue = onSiteWidthInput.setValue;
-  const onSiteHeightSetValue = onSiteHeightInput.setValue;
-
-  // Wall line + OnSiteGeneration: keep orientation fields in sync when coordinates change on canvas (selectedElementV bumps).
-  // For OnSiteGeneration we also re-sync pitch and base_height because the store hook may patch
-  // them when the panel moves to a different position on the host roof; without this the input
-  // value stays stale and the Reset button keeps reappearing on every drag.
-  useEffect(() => {
-    if (!selection?.id || (selection.type !== 'element' && selection.type !== 'global')) return;
-    const el = getElementById(selection.id);
-    if (!el) return;
-    const o = roundToInt(getCurrentOrientation(el));
-    if (el.type === 'OnSiteGeneration') {
-      onSiteOrientationInput.syncValue(o);
-      const p = (el as { pitch?: number }).pitch;
-      if (typeof p === 'number' && Number.isFinite(p)) {
-        onSitePitchInput.syncValue(Math.round(p));
-      }
-      const bh = (el as { base_height?: number }).base_height;
-      if (typeof bh === 'number' && Number.isFinite(bh)) {
-        onSiteBaseHeightInput.syncValue(roundToTwoDecimals(bh));
-      }
-      const w = (el as { width?: number }).width;
-      if (typeof w === 'number' && Number.isFinite(w)) {
-        onSiteWidthInput.syncValue(roundToTwoDecimals(w));
-      }
-      const h = (el as { height?: number }).height;
-      if (typeof h === 'number' && Number.isFinite(h)) {
-        onSiteHeightInput.syncValue(roundToTwoDecimals(h));
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only when selection or element version changes
-  }, [selection?.id, selection?.type, selectedElementV]);
-
-  /** Rebuild plan footprint from the bottom edge using current width/height fields */
-  const resetOnSiteDimensions = useCallback(() => {
-    if (!selection?.id || (selection.type !== 'element' && selection.type !== 'global')) return;
-    const el = getElementById(selection.id) as any;
-    if (!el || el.type !== 'OnSiteGeneration' || !el.coordinates || el.coordinates.length < 2) return;
-    const A = el.coordinates[0];
-    const B = el.coordinates[1];
-    if (Math.hypot(B.x - A.x, B.y - A.y) < 1e-4) return;
-
-    const rawW =
-      typeof onSiteWidthInputValue === 'number' && onSiteWidthInputValue > 0
-        ? onSiteWidthInputValue
-        : typeof el.width === 'number' && el.width > 0
-          ? el.width
-          : DEFAULT_PV_FOOTPRINT_M.width;
-    const rawH =
-      typeof onSiteHeightInputValue === 'number' && onSiteHeightInputValue > 0
-        ? onSiteHeightInputValue
-        : typeof el.height === 'number' && el.height > 0
-          ? el.height
-          : DEFAULT_PV_FOOTPRINT_M.height;
-
-    const flags = readPvFootprintFlags(el.extra_json);
-    const roundedWidth = roundToTwoDecimals(rawW);
-    const roundedHeight = roundToTwoDecimals(rawH);
-    const coords = rebuildPvRectangleFromBottomEdgeDimensions(
-      A,
-      B,
-      roundedWidth,
-      roundedHeight,
-      flags.flipUpslope,
-      typeof el.pitch === 'number' ? el.pitch : undefined,
-    );
-    const nextExtra =
-      el.extra_json && typeof el.extra_json === 'object' ? { ...el.extra_json } : {};
-    nextExtra._pv_bottom_is_long = roundedWidth >= roundedHeight;
-    updateElement(selection.id, {
-      coordinates: coords,
-      width: roundedWidth,
-      height: roundedHeight,
-      extra_json: nextExtra,
-    });
-  }, [selection, getElementById, updateElement, onSiteWidthInputValue, onSiteHeightInputValue]);
-
-  /** Swap width ↔ height and flip which module side runs along the bottom edge */
-  const switchOnSiteOrientation = useCallback(() => {
-    if (!selection?.id || (selection.type !== 'element' && selection.type !== 'global')) return;
-    const el = getElementById(selection.id) as any;
-    if (!el || el.type !== 'OnSiteGeneration' || !el.coordinates || el.coordinates.length < 2) return;
-    const A = el.coordinates[0];
-    const B = el.coordinates[1];
-    if (Math.hypot(B.x - A.x, B.y - A.y) < 1e-4) return;
-
-    const rawW =
-      typeof onSiteWidthInputValue === 'number' && onSiteWidthInputValue > 0
-        ? onSiteWidthInputValue
-        : typeof el.width === 'number' && el.width > 0
-          ? el.width
-          : DEFAULT_PV_FOOTPRINT_M.width;
-    const rawH =
-      typeof onSiteHeightInputValue === 'number' && onSiteHeightInputValue > 0
-        ? onSiteHeightInputValue
-        : typeof el.height === 'number' && el.height > 0
-          ? el.height
-          : DEFAULT_PV_FOOTPRINT_M.height;
-
-    const newW = rawH;
-    const newH = rawW;
-    const flags = readPvFootprintFlags(el.extra_json);
-    const roundedWidth = roundToTwoDecimals(newW);
-    const roundedHeight = roundToTwoDecimals(newH);
-    const coords = rebuildPvRectangleFromBottomEdgeDimensions(
-      A,
-      B,
-      roundedWidth,
-      roundedHeight,
-      flags.flipUpslope,
-      typeof el.pitch === 'number' ? el.pitch : undefined,
-    );
-
-    onSiteWidthSetValue(roundedWidth);
-    onSiteHeightSetValue(roundedHeight);
-
-    const baseExtra =
-      el.extra_json && typeof el.extra_json === 'object' ? { ...el.extra_json } : {};
-    baseExtra._pv_bottom_is_long = roundedWidth >= roundedHeight;
-
-    updateElement(selection.id, {
-      coordinates: coords,
-      width: roundedWidth,
-      height: roundedHeight,
-      extra_json: baseExtra,
-    });
-  }, [
-    getElementById,
-    onSiteHeightInputValue,
-    onSiteHeightSetValue,
-    onSiteWidthInputValue,
-    onSiteWidthSetValue,
-    selection,
-    updateElement,
-  ]);
-
-  // ElectricBattery
-  const electricBatteryFormState = electricBatteryFormModule.useFormState({ commitElementNumericField });
-  const elementFormInstances = {
-    ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
-  } satisfies Partial<Record<ElementType, ElementFormInstance>>;
+  }, [adjacentViewerBaseHeightInput, baseHeightInput, midHeightInput, onSiteGenerationFormState.onSiteBaseHeightInput]);
 
   // System (sample presets + PCDB)
   const [systemSubcategory, setSystemSubcategory] = useState<string>('');
@@ -3122,7 +2666,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     elementType,
     floorType: floorType || undefined,
     wetEmitterSubtype: subcategory || undefined,
-    hotWaterSubtype: hotWaterSubcategory || undefined,
+    hotWaterSubtype: hotWaterDemandFormState.hotWaterSubcategory || undefined,
     ventilationSubtype: ventType || undefined,
     systemSubtype: systemSubcategory || undefined,
     pitch,
@@ -4027,12 +3571,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       if (typeof storeUpdate.is_unheated_pitched_roof === 'boolean') setIsUnheatedPitchedRoof(storeUpdate.is_unheated_pitched_roof);
       if (typeof storeUpdate.is_external_door === 'boolean') setIsExternalDoor(storeUpdate.is_external_door);
       if (data.type === 'OnSiteGeneration') {
-        if (typeof storeUpdate.peak_power === 'number') peakPowerInput.setValue(roundToTwoDecimals(storeUpdate.peak_power));
-        if (typeof storeUpdate.pitch === 'number') onSitePitchInput.setValue(Math.round(storeUpdate.pitch));
-        if (typeof storeUpdate.orientation360 === 'number') onSiteOrientationInput.setValue(Math.round(storeUpdate.orientation360));
-        if (typeof storeUpdate.base_height === 'number') onSiteBaseHeightInput.setValue(roundToTwoDecimals(storeUpdate.base_height));
-        if (typeof storeUpdate.width === 'number') onSiteWidthInput.setValue(roundToTwoDecimals(storeUpdate.width));
-        if (typeof storeUpdate.height === 'number') onSiteHeightInput.setValue(roundToTwoDecimals(storeUpdate.height));
+        if (typeof storeUpdate.peak_power === 'number') onSiteGenerationFormState.peakPowerInput.setValue(roundToTwoDecimals(storeUpdate.peak_power));
+        if (typeof storeUpdate.pitch === 'number') onSiteGenerationFormState.onSitePitchInput.setValue(Math.round(storeUpdate.pitch));
+        if (typeof storeUpdate.orientation360 === 'number') onSiteGenerationFormState.onSiteOrientationInput.setValue(Math.round(storeUpdate.orientation360));
+        if (typeof storeUpdate.base_height === 'number') onSiteGenerationFormState.onSiteBaseHeightInput.setValue(roundToTwoDecimals(storeUpdate.base_height));
+        if (typeof storeUpdate.width === 'number') onSiteGenerationFormState.onSiteWidthInput.setValue(roundToTwoDecimals(storeUpdate.width));
+        if (typeof storeUpdate.height === 'number') onSiteGenerationFormState.onSiteHeightInput.setValue(roundToTwoDecimals(storeUpdate.height));
       }
     } catch (e) {
       console.warn(`[ElementPresets] Failed to load preset ${presetKey}`, e);
@@ -4386,7 +3930,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             tbZ1Input.setValue(0);
           }
         } else if (element.type === 'ThermalBridgePoint') {
-          heatTransferCoeffInput.setValue('heat_transfer_coeff' in element ? element.heat_transfer_coeff ?? '' : '');
+          elementFormInstances.ThermalBridgePoint.hydrate(element);
         }
         // NEW: Load CSV v3 element types
         else if (element.type === 'WindowShading') {
@@ -4397,30 +3941,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           distanceInput.setValue('distance' in element ? element.distance ?? '' : '');
           transparencyInput.setValue('transparency' in element ? element.transparency ?? '' : '');
         } else if (element.type === 'Lighting') {
-          const currentExtra = readExtraJsonRecord((element as { extra_json?: unknown }).extra_json);
-          const savedModeRaw = readNonEmptyString(currentExtra[LIGHTING_ENTRY_MODE_KEY]);
-          const savedGradeRaw = readNonEmptyString(currentExtra[LIGHTING_GRADE_KEY]);
-          const savedLampTypeRaw = readNonEmptyString(currentExtra[LIGHTING_LAMP_TYPE_KEY]);
-          const hasSavedGrade = isLightingGrade(savedGradeRaw);
-          const savedGrade = hasSavedGrade ? savedGradeRaw : 'unknown';
-          const savedLampType = isLightingLampType(savedLampTypeRaw) ? savedLampTypeRaw : 'LED';
-          const entryMode: LightingEntryMode =
-            savedModeRaw === 'guided' || savedModeRaw === 'detailed' ? savedModeRaw : 'detailed';
-          const efficacyFromElement = getLightingFieldValue(element, 'efficacy');
-          const nextEfficacy = entryMode === 'guided'
-            ? (hasSavedGrade ? LIGHTING_GRADE_TO_EFFICACY[savedGrade] : efficacyFromElement)
-            : efficacyFromElement;
-          const powerFromElement = getLightingFieldValue(element, 'power');
-          const nextPower = entryMode === 'guided'
-            ? (powerFromElement ?? LIGHTING_LAMP_TYPE_DEFAULT_POWER[savedLampType])
-            : (powerFromElement ?? '');
-
-          setLightingEntryMode(entryMode);
-          setLightingGrade(savedGrade);
-          setLightingLampType(savedLampType);
-          efficacyInput.setValue(nextEfficacy ?? '');
-          countInput.setValue(getLightingFieldValue(element, 'count') ?? '');
-          powerInput.setValue(nextPower);
+          elementFormInstances.Lighting.hydrate(element);
         } else if (element.type === 'MechanicalVentilationDuctwork') {
           setDuctType('duct_type' in element ? element.duct_type ?? '' : '');
           lengthInput.setValue('length' in element ? element.length ?? '' : '');
@@ -4486,15 +4007,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             tbZ1Input.setValue(0);
           }
         } else if (element.type === 'Appliance') {
-          const validKeys = applianceKeyOptions;
-          const incoming = 'appliancekey' in element ? element.appliancekey ?? '' : '';
-          setApplianceKey(validKeys.includes(incoming) ? incoming : '');
+          elementFormInstances.Appliance.hydrate(element);
         } else if (element.type === 'HotWaterDemand') {
-          setHotWaterSubcategory('subcategory' in element ? element.subcategory ?? '' : '');
-          setAllowLowFlowrate('allow_low_flowrate' in element ? !!element.allow_low_flowrate : false);
-          sizeInput.setValue('size' in element ? element.size ?? '' : '');
-          flowrateInput.setValue('flowrate' in element ? element.flowrate ?? '' : '');
-          ratedPowerInput.setValue('rated_power' in element ? element.rated_power ?? '' : '');
+          elementFormInstances.HotWaterDemand.hydrate(element);
         } else if (element.type === 'ContextShading') {
           setContextShadingType('shading_type' in element ? element.shading_type ?? '' : '');
           startAngleInput.setValue('start_angle' in element && typeof element.start_angle === 'number' ? Math.round(element.start_angle) : '');
@@ -4527,39 +4042,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             setPitch(Math.round(positionValues.pitch));
           }
         } else if (element.type === 'CombustionAppliances') {
-          setApplianceType('appliance_type' in element ? element.appliance_type ?? '' : '');
-          setExhaustSituation('exhaust_situation' in element ? element.exhaust_situation ?? '' : '');
-          setFuelType('fuel_type' in element ? element.fuel_type ?? '' : '');
-          setSupplySituation('supply_situation' in element ? element.supply_situation ?? '' : '');
+          elementFormInstances.CombustionAppliances.hydrate(element);
         } else if (element.type === 'OnSiteGeneration') {
-          // On-site solar (zone-specific selection)
-          const peakPower = 'peak_power' in element && typeof element.peak_power === 'number'
-            ? roundToTwoDecimals(element.peak_power)
-            : (element.peak_power ?? '');
-          const pitch =
-            'pitch' in element && typeof element.pitch === 'number'
-              ? Math.round(element.pitch)
-              : (element.pitch ?? '');
-          const orientation = roundToInt(getCurrentOrientation(element));
-          const baseHeight =
-            'base_height' in element && typeof element.base_height === 'number'
-              ? roundToTwoDecimals(element.base_height)
-              : (element.base_height ?? '');
-          const width =
-            'width' in element && typeof element.width === 'number'
-              ? roundToTwoDecimals(element.width)
-              : (element.width ?? '');
-          const height =
-            'height' in element && typeof element.height === 'number'
-              ? roundToTwoDecimals(element.height)
-              : (element.height ?? '');
-
-          peakPowerInput.setValue(peakPower);
-          onSitePitchInput.setValue(pitch);
-          onSiteOrientationInput.setValue(orientation);
-          onSiteBaseHeightInput.setValue(baseHeight);
-          onSiteWidthInput.setValue(width);
-          onSiteHeightInput.setValue(height);
+          elementFormInstances.OnSiteGeneration.hydrate(element);
         } else if (element.type === 'ElectricBattery') {
           elementFormInstances.ElectricBattery.hydrate(element);
         } else if (element.type === 'System') {
@@ -4601,15 +4086,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             tbZ1Input.setValue(0);
           }
         } else if (element.type === 'Appliance') {
-          const validKeys = applianceKeyOptions;
-          const incoming = 'appliancekey' in element ? element.appliancekey ?? '' : '';
-          setApplianceKey(validKeys.includes(incoming) ? incoming : '');
+          elementFormInstances.Appliance.hydrate(element);
         } else if (element.type === 'HotWaterDemand') {
-          setHotWaterSubcategory('subcategory' in element ? element.subcategory ?? '' : '');
-          setAllowLowFlowrate('allow_low_flowrate' in element ? !!element.allow_low_flowrate : false);
-          sizeInput.setValue('size' in element ? element.size ?? '' : '');
-          flowrateInput.setValue('flowrate' in element ? element.flowrate ?? '' : '');
-          ratedPowerInput.setValue('rated_power' in element ? element.rated_power ?? '' : '');
+          elementFormInstances.HotWaterDemand.hydrate(element);
         } else if (element.type === 'ContextShading') {
           setContextShadingType('shading_type' in element ? element.shading_type ?? '' : '');
           startAngleInput.setValue('start_angle' in element && typeof element.start_angle === 'number' ? Math.round(element.start_angle) : '');
@@ -4668,39 +4147,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             setPitch(Math.round(positionValues.pitch));
           }
         } else if (element.type === 'CombustionAppliances') {
-          setApplianceType('appliance_type' in element ? element.appliance_type ?? '' : '');
-          setExhaustSituation('exhaust_situation' in element ? element.exhaust_situation ?? '' : '');
-          setFuelType('fuel_type' in element ? element.fuel_type ?? '' : '');
-          setSupplySituation('supply_situation' in element ? element.supply_situation ?? '' : '');
+          elementFormInstances.CombustionAppliances.hydrate(element);
         } else if (element.type === 'OnSiteGeneration') {
-          // On-site solar (global selection)
-          const peakPower = 'peak_power' in element && typeof element.peak_power === 'number'
-            ? roundToTwoDecimals(element.peak_power)
-            : (element.peak_power ?? '');
-          const pitch =
-            'pitch' in element && typeof element.pitch === 'number'
-              ? Math.round(element.pitch)
-              : (element.pitch ?? '');
-          const orientation = roundToInt(getCurrentOrientation(element));
-          const baseHeight =
-            'base_height' in element && typeof element.base_height === 'number'
-              ? roundToTwoDecimals(element.base_height)
-              : (element.base_height ?? '');
-          const width =
-            'width' in element && typeof element.width === 'number'
-              ? roundToTwoDecimals(element.width)
-              : (element.width ?? '');
-          const height =
-            'height' in element && typeof element.height === 'number'
-              ? roundToTwoDecimals(element.height)
-              : (element.height ?? '');
-
-          peakPowerInput.setValue(peakPower);
-          onSitePitchInput.setValue(pitch);
-          onSiteOrientationInput.setValue(orientation);
-          onSiteBaseHeightInput.setValue(baseHeight);
-          onSiteWidthInput.setValue(width);
-          onSiteHeightInput.setValue(height);
+          elementFormInstances.OnSiteGeneration.hydrate(element);
         } else if (element.type === 'ElectricBattery') {
           elementFormInstances.ElectricBattery.hydrate(element);
         } else if (element.type === 'System') {
@@ -4962,14 +4411,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         case 'flowrate':
           if (
             elementType === 'HotWaterDemand' &&
-            hotWaterSubcategory !== 'InstantElecShower' &&
-            hotWaterSubcategory !== 'Bath'
+            hotWaterDemandFormState.hotWaterSubcategory !== 'InstantElecShower' &&
+            hotWaterDemandFormState.hotWaterSubcategory !== 'Bath'
           ) {
             if (!value || value === 0) {
               return 'Flowrate cannot be 0';
             }
             // Core schema validations (red errors)
-            if (hotWaterSubcategory === 'OtherWaterUseDetails' && numericValue < 0.1) {
+            if (hotWaterDemandFormState.hotWaterSubcategory === 'OtherWaterUseDetails' && numericValue < 0.1) {
               return 'Flowrate must be at least 0.1 L/min';
             }
             if (numericValue > 15) {
@@ -4980,9 +4429,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           }
           return null;
         case 'size':
-          return (!value || value === 0) && elementType === 'HotWaterDemand' && hotWaterSubcategory === 'Bath' ? 'Size cannot be 0' : null;
+          return (!value || value === 0) && elementType === 'HotWaterDemand' && hotWaterDemandFormState.hotWaterSubcategory === 'Bath' ? 'Size cannot be 0' : null;
         case 'ratedPower':
-          return (!value || value === 0) && elementType === 'HotWaterDemand' && hotWaterSubcategory === 'InstantElecShower' ? 'Rated Power cannot be 0' : null;
+          return (!value || value === 0) && elementType === 'HotWaterDemand' && hotWaterDemandFormState.hotWaterSubcategory === 'InstantElecShower' ? 'Rated Power cannot be 0' : null;
         case 'midHeightAirFlowPath':
           return (!value || value === 0) && elementType === 'Vents' ? 'Mid Height Air Flow Path cannot be 0' : null;
         case 'areaCm2':
@@ -5025,7 +4474,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     tbZ0Input.setValue(0);
     tbZ1Input.setValue(0);
     linearThermalTransmittanceInput.setValue('');
-    heatTransferCoeffInput.setValue('');
 
     // NEW: CSV v3 element state variables
     // WindowShading
@@ -5034,14 +4482,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     depthInput.setValue('');
     distanceInput.setValue('');
     transparencyInput.setValue('');
-
-    // Lighting
-    setLightingEntryMode('detailed');
-    setLightingGrade('unknown');
-    setLightingLampType('LED');
-    powerInput.setValue('');
-    efficacyInput.setValue('');
-    countInput.setValue('');
 
     // MechanicalVentilationDuctwork
     setDuctType('');
@@ -5055,16 +4495,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
     // WaterPipework
     setLocation('');
-
-    // Appliance
-    setApplianceKey('');
-
-    // HotWaterDemand
-    setHotWaterSubcategory('');
-    setAllowLowFlowrate(false);
-    sizeInput.setValue('');
-    flowrateInput.setValue('');
-    ratedPowerInput.setValue('');
 
     // ContextShading
     setContextShadingType('');
@@ -5080,12 +4510,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     setVentType('');
     mechanicalVentilationMidHeightInput.setValue('');
     mvhrTerminalMidHeightAirFlowPathInput.setValue('');
-
-    // CombustionAppliances
-    setApplianceType('');
-    setExhaustSituation('');
-    setFuelType('');
-    setSupplySituation('');
 
     // System
     setSystemSubcategory('');
@@ -6627,10 +6051,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } as Partial<Element>;
 
       case 'ThermalBridgePoint':
-        return {
-          ...baseData,
-          heat_transfer_coeff: heatTransferCoeffInput.value
-        } as Partial<Element>;
+        return elementFormInstances.ThermalBridgePoint.buildElementData({ baseData, elementZoneId });
 
       // NEW: CSV v3 element types
       case 'WindowShading':
@@ -6644,41 +6065,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           transparency: transparencyInput.value || undefined
         } as Partial<Element>;
 
-	      case 'Lighting':
-	        {
-	          const countVal = countInput.value;
-		          const powerVal = powerInput.value;
-	          const enteredEfficacy = efficacyInput.value;
-	          const enteredEfficacyIsPositive = typeof enteredEfficacy === 'number' && Number.isFinite(enteredEfficacy) && enteredEfficacy > 0;
-	          const powerIsPositive = typeof powerVal === 'number' && Number.isFinite(powerVal) && powerVal > 0;
-	          const countIsPositive = typeof countVal === 'number' && Number.isFinite(countVal) && countVal > 0;
-	          const effVal = lightingEntryMode === 'guided'
-	            ? (LIGHTING_GRADE_TO_EFFICACY[lightingGrade] ?? undefined)
-	            : (enteredEfficacyIsPositive ? enteredEfficacy : undefined);
-	          const resolvedPower = lightingEntryMode === 'guided'
-	            ? (powerIsPositive ? powerVal : LIGHTING_LAMP_TYPE_DEFAULT_POWER[lightingLampType])
-	            : (powerIsPositive ? powerVal : undefined);
-	          const resolvedCount = countIsPositive ? countVal : undefined;
-          const extraJsonLighting: Record<string, unknown> = {
-            [LIGHTING_ENTRY_MODE_KEY]: lightingEntryMode,
-            [LIGHTING_GRADE_KEY]: lightingGrade,
-            [LIGHTING_LAMP_TYPE_KEY]: lightingLampType,
-          };
-	          const ledBulb = {
-	            count: resolvedCount,
-	            power: resolvedPower,
-	            efficacy: effVal,
-	          };
-        return {
-          ...baseData,
-          simplified_lighting: false,
-            efficacy: effVal,
-            count: resolvedCount,
-            power: resolvedPower,
-            bulbs: { led: ledBulb },
-            extra_json: extraJsonLighting,
-        } as Partial<Element>;
-        }
+      case 'Lighting':
+        return elementFormInstances.Lighting.buildElementData({ baseData, elementZoneId });
 
 	      case 'MechanicalVentilationDuctwork':
 	        return {
@@ -6743,22 +6131,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } as Partial<Element>;
 
       case 'Appliance':
-        return {
-          ...baseData,
-          appliancekey: applianceKey || undefined,
-          zoneId: undefined // Global object
-        } as Partial<Element>;
+        return elementFormInstances.Appliance.buildElementData({ baseData, elementZoneId });
 
       case 'HotWaterDemand':
-        return {
-          ...baseData,
-	          subcategory: hotWaterSubcategory || undefined,
-	          allow_low_flowrate: hotWaterSubcategory === 'MixerShower' ? allowLowFlowrate : undefined,
-          size: sizeInput.value || undefined,
-          flowrate: flowrateInput.value || undefined,
-          rated_power: ratedPowerInput.value || undefined,
-          zoneId: undefined // Global object
-        } as Partial<Element>;
+        return elementFormInstances.HotWaterDemand.buildElementData({ baseData, elementZoneId });
 
 	      case 'ContextShading':
 	        return {
@@ -6828,45 +6204,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       }
 
       case 'CombustionAppliances':
-        return {
-          ...baseData,
-	          appliance_type: applianceType || undefined,
-	          exhaust_situation: exhaustSituation || undefined,
-	          fuel_type: fuelType || undefined,
-	          supply_situation: supplySituation || undefined,
-          zoneId: undefined // Global object
-        } as Partial<Element>;
+        return elementFormInstances.CombustionAppliances.buildElementData({ baseData, elementZoneId });
 
       case 'OnSiteGeneration': {
-        // Build element data with main UI fields
-        const elementData: Record<string, unknown> = {
-          ...baseData,
-	          generation_type: 'PhotovoltaicSystem',
-		          peak_power: peakPowerInput.value === '' ? undefined : peakPowerInput.value,
-		          pitch: onSitePitchInput.value === '' ? undefined : onSitePitchInput.value,
-		          orientation360: onSiteOrientationInput.value === '' ? undefined : onSiteOrientationInput.value,
-		          base_height: onSiteBaseHeightInput.value === '' ? undefined : onSiteBaseHeightInput.value,
-          width: onSiteWidthInput.value || undefined,
-          height: onSiteHeightInput.value || undefined,
-          zoneId: elementZoneId || undefined
-        };
-
-        // Auto-remove main UI fields from extra_json to avoid duplication; drop canvas-only _pv_* (not in HEM schema)
-        if (elementData.extra_json) {
-          const restExtraJson = { ...readExtraJsonRecord(elementData.extra_json) };
-          delete restExtraJson.peak_power;
-          delete restExtraJson.pitch;
-          delete restExtraJson.orientation360;
-          delete restExtraJson.base_height;
-          delete restExtraJson.width;
-          delete restExtraJson.height;
-          const withoutPv = Object.fromEntries(
-            Object.entries(restExtraJson).filter(([k]) => !k.startsWith('_pv_')),
-          );
-          elementData.extra_json = Object.keys(withoutPv).length > 0 ? withoutPv : undefined;
-        }
-
-        return elementData as Partial<Element>;
+        return elementFormInstances.OnSiteGeneration.buildElementData({ baseData, elementZoneId });
       }
 
       case 'ElectricBattery': {
@@ -6916,17 +6257,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       case 'WetEmitter':
         return subcategory || undefined;
       case 'Appliance':
-        return applianceKey;
+        return elementFormInstances.Appliance.subtype();
       case 'HotWaterDemand':
-        return hotWaterSubcategory || undefined;
+        return elementFormInstances.HotWaterDemand.subtype();
       case 'WindowShading':
         return shadingType;
       case 'ContextShading':
         return contextShadingType || undefined;
       case 'CombustionAppliances':
-        return applianceType || undefined;
+        return elementFormInstances.CombustionAppliances.subtype();
       case 'OnSiteGeneration':
-        return 'PhotovoltaicSystem';
+        return elementFormInstances.OnSiteGeneration.subtype();
       case 'ElectricBattery':
         return elementFormInstances.ElectricBattery.subtype();
       case 'System':
@@ -7537,9 +6878,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       renderFieldLabel,
       renderFieldLabelWithComparisonIndicator,
       registerBaseFieldRefs,
+      registerBaseFieldRef,
       getFieldValidationIssue,
       globalComparisonFieldIndicators,
       commitExistingElementDraft,
+      selection,
+      getElementById,
+      updateElement,
+      getGlobalOrientationOffset: () => geometryStore.getState().globalOrientationOffset,
+      onSiteHostDerivation,
+      selectedPvDimensionNotes,
     };
     switch (elementType) {
       case 'BuildingElementOpaque':
@@ -9057,21 +8405,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         );
 
       case 'ThermalBridgePoint':
-        return (
-          <>
-            {renderFieldLabel('Heat Transfer Coefficient (W/K):', elementType)}
-            <div className="element-input">
-              <StandardInput
-                {...decimalInputProps(heatTransferCoeffInput)}
-                unit={fieldUnit('heat_transfer_coeff')}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-          </>
-        );
+        return elementFormInstances.ThermalBridgePoint.renderPanel(formRenderCtx);
 
       // NEW: CSV v3 element types
       case 'WindowShading':
@@ -9237,139 +8571,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         );
 
       case 'Lighting':
-        return (
-          <>
-            <div className="element-editor-segment">
-              <div className="element-editor-segment__label">Entry mode</div>
-              <div className="element-editor-segment__control">
-                <button
-                  type="button"
-                  className={`element-editor-segment__button ${lightingEntryMode === 'guided' ? 'element-editor-segment__button--active' : ''}`}
-                  onClick={() => commitLightingModeChange('guided')}
-                >
-                  Guided
-                </button>
-                <button
-                  type="button"
-                  className={`element-editor-segment__button ${lightingEntryMode === 'detailed' ? 'element-editor-segment__button--active' : ''}`}
-                  onClick={() => commitLightingModeChange('detailed')}
-                >
-                  Detailed
-                </button>
-              </div>
-            </div>
-            {renderFieldLabel('Count:', elementType)}
-            <div className="element-input">
-              <StandardInput
-                {...integerInputProps(countInput)}
-                unit={fieldUnit('count')}
-                step="1"
-                min="1"
-                required
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {lightingEntryMode === 'guided' && (
-              <>
-                {renderFieldLabel('Efficiency Grade:', elementType)}
-                <div className="element-input">
-                  <StandardDropdown
-                    value={lightingGrade}
-                    onChange={(value) => applyGuidedLightingSelection(value as LightingGrade, lightingLampType)}
-                    options={[
-                      { value: 'A', label: 'A (210 lm/W)' },
-                      { value: 'B', label: 'B (185 lm/W)' },
-                      { value: 'C', label: 'C (160 lm/W)' },
-                      { value: 'D', label: 'D (135 lm/W)' },
-                      { value: 'E', label: 'E (110 lm/W)' },
-                      { value: 'F', label: 'F (85 lm/W)' },
-                      { value: 'G', label: 'G (0 lm/W)' },
-	                      { value: 'unknown', label: 'Unknown' },
-                    ]}
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                {renderFieldLabel('Lamp Type:', elementType)}
-                <div className="element-input">
-                  <StandardDropdown
-                    value={lightingLampType}
-                    onChange={(value) => {
-                      const nextLampType = value as LightingLampType;
-                      applyGuidedLightingSelection(lightingGrade, nextLampType);
-                    }}
-                    options={[
-                      { value: 'Linear fluorescent', label: 'Linear fluorescent (8.3 W)' },
-                      { value: 'LED', label: 'LED (10 W)' },
-                      { value: 'Halogen LV', label: 'Halogen LV (25.7 W)' },
-                      { value: 'Halogen', label: 'Halogen (42.8 W)' },
-                      { value: 'Incandescent', label: 'Incandescent (60 W)' },
-                      { value: 'CFL', label: 'CFL (10 W)' },
-                    ]}
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                {renderFieldLabel('Efficacy (lm/W):', elementType)}
-                <div className="element-input">
-                  <StandardInput
-                    type="text"
-                    inputMode="numeric"
-                    value={LIGHTING_GRADE_TO_EFFICACY[lightingGrade] ?? ''}
-                    unit={fieldUnit('efficacy')}
-                    disabled
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                {renderFieldLabel('Power (W):', elementType)}
-                <div className="element-input">
-                  <StandardInput
-                    type="text"
-                    inputMode="numeric"
-                    value={LIGHTING_LAMP_TYPE_DEFAULT_POWER[lightingLampType]}
-                    unit={fieldUnit('power')}
-                    disabled
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                <div className="element-editor-note">
-                  Grade writes efficacy and lamp type writes power.
-                </div>
-              </>
-            )}
-            {lightingEntryMode === 'detailed' && (
-              <>
-                {renderFieldLabel('Efficacy (lm/W):', elementType)}
-                <div className="element-input">
-                  <StandardInput
-                    {...decimalInputProps(efficacyInput)}
-                    unit={fieldUnit('efficacy')}
-                    step="0.01"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                {renderFieldLabel('Power (W):', elementType)}
-                <div className="element-input">
-                  <StandardInput
-                    {...decimalInputProps(powerInput)}
-                    unit={fieldUnit('power')}
-                    step="0.1"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-              </>
-            )}
-          </>
-        );
+        return elementFormInstances.Lighting.renderPanel(formRenderCtx);
 
       case 'MechanicalVentilationDuctwork':
         return (
@@ -9807,142 +9009,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         );
 
       case 'Appliance':
-        return (
-          <>
-            {renderFieldLabel('Appliance Key:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['applianceKey', 'appliancekey', 'appliance_key'])}>
-              <StandardDropdown
-                value={applianceKey}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'Appliance'>['appliancekey'] | '';
-                  setApplianceKey(nextValue);
-                  commitExistingElementDraft({ appliancekey: nextValue || undefined });
-                }}
-                options={[
-                  { value: '', label: 'Select appliance' },
-                  ...applianceKeyOptions.map(key => ({ value: key, label: key })),
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-          </>
-        );
+        return elementFormInstances.Appliance.renderPanel(formRenderCtx);
 
       case 'HotWaterDemand':
-        return (
-          <>
-            {renderFieldLabel('Subcategory:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs('subcategory')}>
-              <StandardDropdown
-                value={hotWaterSubcategory}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'HotWaterDemand'>['subcategory'];
-                  setHotWaterSubcategory(nextValue);
-                  commitExistingElementDraft({
-                    subcategory: nextValue,
-                    allow_low_flowrate: nextValue === 'MixerShower' ? allowLowFlowrate : undefined,
-                  });
-                }}
-                options={[
-                  { value: 'OtherWaterUseDetails', label: 'Other Water Use Details' },
-                  { value: 'MixerShower', label: 'Mixer Shower' },
-                  { value: 'InstantElecShower', label: 'Instant Electric Shower' },
-                  { value: 'Bath', label: 'Bath' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {hotWaterSubcategory === 'MixerShower' && (
-              <>
-                {renderFieldLabel('Air Pressure Shower?', elementType, 'allow_low_flowrate')}
-                <div
-                  className="element-input"
-                  ref={registerBaseFieldRefs('allow_low_flowrate')}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}
-                >
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="allow-low-flowrate"
-                      checked={allowLowFlowrate === true}
-                      onChange={() => {
-                        setAllowLowFlowrate(true);
-                        commitExistingElementDraft({ allow_low_flowrate: true });
-                      }}
-                    />
-                    <span>Yes</span>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="allow-low-flowrate"
-                      checked={allowLowFlowrate === false}
-                      onChange={() => {
-                        setAllowLowFlowrate(false);
-                        commitExistingElementDraft({ allow_low_flowrate: false });
-                      }}
-                    />
-                    <span>No</span>
-                  </label>
-                </div>
-              </>
-            )}
-            {hotWaterSubcategory === 'Bath' && (
-              <>
-                {renderFieldLabel('Size (L):', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('size')}>
-                  <StandardInput
-                    {...decimalInputProps(sizeInput)}
-                    unit={fieldUnit('size')}
-                    step="1"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-              </>
-            )}
-            {(hotWaterSubcategory === 'MixerShower' || hotWaterSubcategory === 'OtherWaterUseDetails') && (
-              <>
-                {renderFieldLabel('Flowrate (L/min):', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('flowrate')}>
-                  <StandardInput
-                    {...decimalInputProps(flowrateInput)}
-                    unit={fieldUnit('flowrate')}
-                    step="0.1"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                  />
-                  <FieldValidationIndicator
-                    hasIssue={!!getFieldValidationIssue('flowrate', flowrateInput.value)}
-                    issue={getFieldValidationIssue('flowrate', flowrateInput.value) || undefined}
-                  />
-                </div>
-              </>
-            )}
-            {hotWaterSubcategory === 'InstantElecShower' && (
-              <>
-                {renderFieldLabel('Rated Power:', elementType, 'rated_power')}
-                <div className="element-input" ref={registerBaseFieldRefs(['ratedPower', 'rated_power'])}>
-                  <StandardInput
-                    {...decimalInputProps(ratedPowerInput)}
-                    unit={fieldUnit('rated_power')}
-                    step="1"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-              </>
-            )}
-          </>
-        );
+        return elementFormInstances.HotWaterDemand.renderPanel(formRenderCtx);
 
       case 'ContextShading':
         return (
@@ -10461,303 +9531,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       }
 
       case 'CombustionAppliances':
-        return (
-          <>
-            {renderFieldLabel('Appliance Type:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['applianceType', 'appliance_type'])}>
-              <StandardDropdown
-                value={applianceType}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'CombustionAppliances'>['appliance_type'];
-                  setApplianceType(nextValue);
-                  commitExistingElementDraft({ appliance_type: nextValue });
-                }}
-                options={[
-                  { value: 'open_fireplace', label: 'Open Fireplace' },
-                  { value: 'closed_with_fan', label: 'Closed with Fan' },
-                  { value: 'open_gas_flue_balancer', label: 'Open Gas Flue Balancer' },
-                  { value: 'open_gas_kitchen_stove', label: 'Open Gas Kitchen Stove' },
-                  { value: 'open_gas_fire', label: 'Open Gas Fire' },
-                  { value: 'closed_fire', label: 'Closed Fire' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Exhaust Situation:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['exhaustSituation', 'exhaust_situation'])}>
-              <StandardDropdown
-                value={exhaustSituation}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'CombustionAppliances'>['exhaust_situation'];
-                  setExhaustSituation(nextValue);
-                  commitExistingElementDraft({ exhaust_situation: nextValue });
-                }}
-                options={[
-                  { value: 'into_room', label: 'Into Room' },
-                  { value: 'into_separate_duct', label: 'Into Separate Duct' },
-                  { value: 'into_mech_vent', label: 'Into Mechanical Ventilation' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Fuel Type:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['fuelType', 'fuel_type'])}>
-              <StandardDropdown
-                value={fuelType}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'CombustionAppliances'>['fuel_type'];
-                  setFuelType(nextValue);
-                  commitExistingElementDraft({ fuel_type: nextValue });
-                }}
-                options={[
-                  { value: 'wood', label: 'Wood' },
-                  { value: 'gas', label: 'Gas' },
-                  { value: 'oil', label: 'Oil' },
-                  { value: 'coal', label: 'Coal' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Supply Situation:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['supplySituation', 'supply_situation'])}>
-              <StandardDropdown
-                value={supplySituation}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'CombustionAppliances'>['supply_situation'];
-                  setSupplySituation(nextValue);
-                  commitExistingElementDraft({ supply_situation: nextValue });
-                }}
-                options={[
-                  { value: 'room_air', label: 'Room Air' },
-                  { value: 'outside', label: 'Outside' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-          </>
-        );
+        return elementFormInstances.CombustionAppliances.renderPanel(formRenderCtx);
 
       case 'OnSiteGeneration':
-        return (
-          <>
-            {renderFieldLabelWithComparisonIndicator('Peak Power (kWp):', elementType, globalComparisonFieldIndicators.peak_power)}
-            <div className="element-input" ref={registerBaseFieldRef('peak_power')}>
-              <StandardInput
-                {...decimalInputProps(peakPowerInput)}
-                unit={fieldUnit('peak_power')}
-                step="0.001"
-                min="0.001"
-                max="100"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('peak_power', peakPowerInput.value)} issue={getFieldValidationIssue('peak_power', peakPowerInput.value) || undefined} />
-            </div>
-            {(() => {
-              const hostName = onSiteHostDerivation?.hostName;
-              const renderHostResetRow = (
-                fieldKey: 'pitch' | 'orientation360' | 'base_height',
-                unitSuffix: string,
-                inputJsx: React.ReactNode,
-                currentValue: number | '',
-                onReset: (derived: number) => void,
-              ) => {
-                const derivedValue = onSiteHostDerivation?.derived[fieldKey];
-                const hasHostValue = typeof derivedValue === 'number' && Number.isFinite(derivedValue);
-                const epsilon = fieldKey === 'base_height' ? 0.01 : 0.5;
-                const current = typeof currentValue === 'number' ? currentValue : null;
-                const isDivergent =
-                  hasHostValue && current !== null && Math.abs(current - (derivedValue as number)) > epsilon;
-                return (
-                  <div
-                    className="element-input"
-                    style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
-                  >
-                    <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>
-                      <div className={isDivergent ? 'custom-value' : ''} style={{ flex: 1 }}>
-                        {inputJsx}
-                      </div>
-                      {isDivergent && hasHostValue ? (
-                        <ResetFieldButton
-                          onClick={() => onReset(derivedValue as number)}
-                          align="inline"
-                          title={`Reset to ${derivedValue}${unitSuffix} (from ${hostName ?? 'host roof'})`}
-                          ariaLabel="Reset to host value"
-                          label="Reset"
-                        />
-                      ) : null}
-                    </div>
-                    {hasHostValue ? (
-                      <div style={INLINE_FIELD_NOTE_STYLE}>
-                        {isDivergent
-                          ? `Default: ${derivedValue}${unitSuffix} · from ${hostName ?? 'host roof'}`
-                          : `From ${hostName ?? 'host roof'}`}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              };
-              return (
-                <>
-                  {renderFieldLabel('Pitch (degrees):', elementType, 'pitch')}
-                  <div ref={registerBaseFieldRefs('pitch')}>
-                    {renderHostResetRow(
-                      'pitch',
-                      '°',
-                      <>
-                        <StandardInput
-                          {...integerInputProps(onSitePitchInput)}
-                          unit={fieldUnit('pitch')}
-                          step="1"
-                          min="0"
-                          max="90"
-                          variant="ghost"
-                          size="md"
-                          className="flex-1"
-                        />
-                        <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('pitch', onSitePitchInput.value)} issue={getFieldValidationIssue('pitch', onSitePitchInput.value) || undefined} />
-                      </>,
-                      onSitePitchInput.value,
-                      (derived) => {
-                        onSitePitchInput.setValue(Math.round(derived));
-                        commitExistingElementDraft({
-                          pitch: derived,
-                          _pitchUserOverride: false,
-                        } as Partial<Element>);
-                      },
-                    )}
-                  </div>
-                  {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
-                  <div ref={registerBaseFieldRefs('orientation360')}>
-                    {renderHostResetRow(
-                      'orientation360',
-                      '°',
-                      <>
-                        <StandardInput
-                          {...integerInputProps(onSiteOrientationInput)}
-                          unit={fieldUnit('orientation360')}
-                          step="1"
-                          min="0"
-                          max="360"
-                          variant="ghost"
-                          size="md"
-                          className="flex-1"
-                        />
-                        <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('orientation360', onSiteOrientationInput.value)} issue={getFieldValidationIssue('orientation360', onSiteOrientationInput.value) || undefined} />
-                      </>,
-                      onSiteOrientationInput.value,
-                      (derived) => {
-                        onSiteOrientationInput.setValue(Math.round(derived));
-                        resetOnSiteOrientationToHost(derived);
-                      },
-                    )}
-                  </div>
-                  {renderFieldLabel('Base Height (m):', elementType, 'base_height')}
-                  <div ref={registerBaseFieldRefs('base_height')}>
-                    {renderHostResetRow(
-                      'base_height',
-                      ' m',
-                      <>
-                        <StandardInput
-                          {...decimalInputProps(onSiteBaseHeightInput)}
-                          unit={fieldUnit('base_height')}
-                          step="0.01"
-                          min="0"
-                          max="500"
-                          variant="ghost"
-                          size="md"
-                          className="flex-1"
-                        />
-                        <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('base_height', onSiteBaseHeightInput.value)} issue={getFieldValidationIssue('base_height', onSiteBaseHeightInput.value) || undefined} />
-                      </>,
-                      onSiteBaseHeightInput.value,
-                      (derived) => {
-                        onSiteBaseHeightInput.setValue(roundToTwoDecimals(derived));
-                        commitExistingElementDraft({
-                          base_height: derived,
-                          _baseHeightUserOverride: false,
-                        } as Partial<Element>);
-                      },
-                    )}
-                  </div>
-                </>
-              );
-            })()}
-            {renderFieldLabel('Width (m):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs('width')}>
-              <StandardInput
-                {...decimalInputProps(onSiteWidthInput)}
-                unit={fieldUnit('width')}
-                step="0.01"
-                min="0"
-                max="100"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('width', onSiteWidthInput.value)} issue={getFieldValidationIssue('width', onSiteWidthInput.value) || undefined} />
-            </div>
-            {selectedPvDimensionNotes?.width ? (
-              <div style={INLINE_FIELD_NOTE_STYLE}>
-                {selectedPvDimensionNotes.width}
-              </div>
-            ) : null}
-            {renderFieldLabel('Height (m):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs('height')}>
-              <StandardInput
-                {...decimalInputProps(onSiteHeightInput)}
-                unit={fieldUnit('height')}
-                step="0.01"
-                min="0"
-                max="100"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('height', onSiteHeightInput.value)} issue={getFieldValidationIssue('height', onSiteHeightInput.value) || undefined} />
-            </div>
-            {selectedPvDimensionNotes?.height ? (
-              <div style={INLINE_FIELD_NOTE_STYLE}>
-                {selectedPvDimensionNotes.height}
-              </div>
-            ) : null}
-            <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <button
-                type="button"
-                className="btn editor-action-btn editor-action-btn--secondary"
-                disabled={(() => {
-                  if (!selection?.id) return true;
-                  const el = getElementById(selection.id) as any;
-                  if (!el || el.type !== 'OnSiteGeneration' || !el.coordinates || el.coordinates.length < 2) return true;
-                  const [p0, p1] = el.coordinates;
-                  return Math.hypot(p1.x - p0.x, p1.y - p0.y) < 1e-4;
-                })()}
-                onClick={resetOnSiteDimensions}
-              >
-                Rebuild footprint
-              </button>
-              <button
-                type="button"
-                className="btn editor-action-btn editor-action-btn--secondary"
-                disabled={(() => {
-                  if (!selection?.id) return true;
-                  const el = getElementById(selection.id) as any;
-                  if (!el || el.type !== 'OnSiteGeneration' || !el.coordinates || el.coordinates.length < 2) return true;
-                  const [p0, p1] = el.coordinates;
-                  return Math.hypot(p1.x - p0.x, p1.y - p0.y) < 1e-4;
-                })()}
-                onClick={switchOnSiteOrientation}
-              >
-                Switch orientation
-              </button>
-            </div>
-          </>
-        );
+        return elementFormInstances.OnSiteGeneration.renderPanel(formRenderCtx);
 
       case 'System': {
         return (
