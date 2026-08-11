@@ -3,6 +3,7 @@
 
 // Build and cache standalone, dereferenced subschemas per category (browser-safe)
 import { getSchemaKeyForCategory } from './categoryMap';
+import { resolveSchemaPointer } from './schemaRefResolver';
 
 type SchemaRecord = Record<string, unknown>;
 
@@ -34,23 +35,14 @@ function categoryToKey(category: string | undefined): string | undefined {
   return getSchemaKeyForCategory(category);
 }
 
-// JSON Pointer token decode (~1 => /, ~0 => ~)
-function decodePtrToken(token: string): string {
-  return token.replace(/~1/g, '/').replace(/~0/g, '~');
-}
-
+// Throwing wrapper over the shared walker: this cache's callers treat a dangling
+// pointer as a build error with context, not a null to tolerate.
 function resolvePointer(root: unknown, pointer: string): unknown {
   if (!pointer || pointer === '#' || pointer === '#/') return root;
   if (!pointer.startsWith('#/')) throw new Error(`Only internal refs supported: ${pointer}`);
-  const parts = pointer.slice(2).split('/').map(decodePtrToken);
-  let cur: unknown = root;
-  for (const p of parts) {
-    if (!isSchemaRecord(cur) || !(p in cur)) {
-      throw new Error(`Pointer not found: ${pointer}`);
-    }
-    cur = cur[p];
-  }
-  return cur;
+  const target = resolveSchemaPointer(root, pointer);
+  if (target === undefined) throw new Error(`Pointer not found: ${pointer}`);
+  return target;
 }
 
 function deepClone<T>(v: T): T {
