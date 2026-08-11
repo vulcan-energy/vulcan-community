@@ -12,6 +12,7 @@ import {
   type ResolvedFieldPresentation,
 } from './fieldPresentation';
 import { isRecord } from './jsonTypes';
+import { resolveSchemaPointer } from './schemaRefResolver';
 import { TOOLTIP_OVERRIDES } from './schemaDescriptionOverrides';
 
 export interface ModelAuthoringFieldConfiguration {
@@ -119,18 +120,10 @@ function isNumericSchema(node: GeometrySchemaNode): boolean {
   return false;
 }
 
-function decodePointerSegment(segment: string): string {
-  return segment.replace(/~1/g, '/').replace(/~0/g, '~');
-}
-
 function resolveLocalRef(root: GeometrySchemaNode, ref: unknown): GeometrySchemaNode | null {
-  if (typeof ref !== 'string' || !ref.startsWith('#/')) return null;
-  let current: unknown = root;
-  for (const segment of ref.slice(2).split('/').map(decodePointerSegment)) {
-    if (!isRecord(current)) return null;
-    current = current[segment];
-  }
-  return isRecord(current) ? current : null;
+  if (typeof ref !== 'string') return null;
+  const resolved = resolveSchemaPointer(root, ref);
+  return isRecord(resolved) ? (resolved as GeometrySchemaNode) : null;
 }
 
 function schemaTitle(node: GeometrySchemaNode, propertyKey: string): string {
