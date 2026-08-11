@@ -27,7 +27,11 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['**/dist', '**/coverage', '**/node_modules', 'crates', 'data', 'third_party'] },
+  // .vite-cache (Vite dependency pre-bundles, carrying inline eslint directives against
+  // unloaded plugins) and apps/*/src/generated (wasm-pack output, including a .d.ts the
+  // TS glob matches) are gitignored build products. Linting them makes the quality gate's
+  // result depend on whether the dev server or WASM build has run on that machine.
+  { ignores: ['**/dist', '**/coverage', '**/node_modules', '**/.vite-cache', 'apps/*/src/generated', 'crates', 'data', 'third_party'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
