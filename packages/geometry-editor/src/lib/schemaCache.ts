@@ -4,6 +4,7 @@
 import { getAjvInstance, ensureRootSchema } from './ajvCache';
 import { errorMessageFromUnknown, isRecord } from './jsonTypes';
 import { asSchemaNode, isSchemaNode, type SchemaNode } from './schemaTypes';
+import { resolveRefNode } from './schemaRefResolver';
 import type { GeometrySchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 
 export type GeometrySchemaAssetSource = Readonly<{
@@ -485,15 +486,6 @@ const ELEMENT_TYPE_TO_SCHEMA_KEY: Record<string, string> = {
   'System': 'System',
 };
 
-function resolveRefFromDefs(schema: SchemaNode, ref: unknown): SchemaNode | null {
-  const refNode = asSchemaNode(ref);
-  if (refNode?.$ref) {
-    const refName = refNode.$ref.replace('#/$defs/', '');
-    return schema.$defs?.[refName] ?? null;
-  }
-  return refNode;
-}
-
 function unwrapAdditionalProperties(node: unknown): SchemaNode | null {
   const schemaNode = asSchemaNode(node);
   if (!schemaNode) return null;
@@ -602,14 +594,14 @@ function resolveCoreMechanicalVentilationBaseSchema(schema: SchemaNode, schemaKe
       ? anyOfEntry.additionalProperties
       : null;
     if (additionalProperties?.$ref) {
-      return resolveRefFromDefs(schema, additionalProperties);
+      return resolveRefNode(schema, additionalProperties);
     }
     if (additionalProperties) {
       return additionalProperties;
     }
   } else if (isSchemaNode(mechVentProp?.additionalProperties)) {
     if (mechVentProp.additionalProperties.$ref) {
-      return resolveRefFromDefs(schema, mechVentProp.additionalProperties);
+      return resolveRefNode(schema, mechVentProp.additionalProperties);
     }
     return mechVentProp.additionalProperties;
   } else if (mechVentProp) {
@@ -630,7 +622,7 @@ function getCoreThermalBridgingZoneSchema(schema: SchemaNode): SchemaNode | unde
 function resolveSchemaFromMappingEntry(schema: SchemaNode, variantRef: unknown): SchemaNode | null {
   if (!variantRef) return null;
   if (typeof variantRef === 'string') {
-    return resolveRefFromDefs(schema, { $ref: variantRef });
+    return resolveRefNode(schema, { $ref: variantRef });
   }
   if (isSchemaNode(variantRef)) {
     return variantRef;
@@ -932,7 +924,7 @@ function resolveFhsElementSubschemaFromRoot(schema: SchemaNode | null, elementTy
     };
 
     const resolveRef = (ref: unknown): SchemaNode | null => {
-      return resolveRefFromDefs(schema, ref);
+      return resolveRefNode(schema, ref);
     };
 
     let specificSchema: SchemaNode | null = null;
@@ -1187,7 +1179,7 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
     };
 
     const resolveRef = (ref: unknown): SchemaNode | null => {
-      return resolveRefFromDefs(schema, ref);
+      return resolveRefNode(schema, ref);
     };
 
     for (const item of candidate.oneOf) {
@@ -1307,7 +1299,7 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
     // Case 2: Check if baseSchema has oneOf (non-FHS schema)
     if (baseSchema && baseSchema.oneOf && Array.isArray(baseSchema.oneOf)) {
       const resolveRef = (ref: unknown): SchemaNode | null => {
-        return resolveRefFromDefs(schema, ref);
+        return resolveRefNode(schema, ref);
       };
 
       for (const option of baseSchema.oneOf) {
@@ -1480,7 +1472,7 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
 
     // Helper to resolve $ref to actual schema definition
     const resolveRef = (ref: unknown): SchemaNode | null => {
-      return resolveRefFromDefs(schema, ref);
+      return resolveRefNode(schema, ref);
     };
 
     // Helper to check if a resolved schema matches the element type
