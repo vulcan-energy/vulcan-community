@@ -1967,6 +1967,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/elementForms/system.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/system.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/elementForms/thermalBridgeLinear.tsx",
       "source_path": "packages/geometry-editor/src/components/elementForms/thermalBridgeLinear.tsx",
       "license": "AGPL-3.0-only",
@@ -2001,6 +2009,14 @@
     {
       "path": "packages/geometry-editor/src/components/elementForms/waterPipework.tsx",
       "source_path": "packages/geometry-editor/src/components/elementForms/waterPipework.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/elementForms/wetEmitter.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/wetEmitter.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
