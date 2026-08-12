@@ -55,10 +55,10 @@ import {
   writeCanvasInteractionSession,
 } from './canvasInteractionSession';
 import {
-  readRootCssVar,
   type CanvasElementRendererPalette,
   type CanvasInteractionPalette,
 } from './elementRendererPalette';
+import { readRootCssVar } from '../../lib/cssVars';
 import {
   snapCornerToOtherCornersFromCache as utilSnapCornerToOtherCornersFromCache,
   applyAngleSnapIfClose as utilApplyAngleSnapIfClose,
@@ -67,7 +67,7 @@ import {
   getExactSnappedVertices as utilGetExactSnappedVertices,
   getWallSupportedSnappedVertices as utilGetWallSupportedSnappedVertices,
   findPerpendicularFootOnWallInfiniteFromCache as utilFindPerpFootOnWallInfiniteFromCache,
-  getNearbySnapCornerTargets as utilGetNearbySnapCornerTargets,
+  findClosestSnapCorner as utilFindClosestSnapCorner,
   getNearbySnapWallSegments as utilGetNearbySnapWallSegments,
   type GeometrySnapCache,
 } from '../../lib/snapUtils';
@@ -119,6 +119,12 @@ function isSameSnapFloor(
   return a !== null && b !== null && a === b;
 }
 
+/**
+ * Storey-gated: unlike the 3D vertex-drag snap (`GeometryCanvas3D.snap3DPlanPoint`), this skips
+ * a candidate corner unless it is on the same floor as the dragged vertex (for `BuildingElement*`
+ * pairs) — the shared snap cache spans every floor, and the 2D plan view needs that gate to avoid
+ * snapping to a corner that is only coincidentally at the same XY on another storey.
+ */
 function findCornerVertexSnapTarget(
   element: Element,
   vertexIndex: number,
@@ -128,25 +134,11 @@ function findCornerVertexSnapTarget(
   snapTol: number,
 ): { x: number; y: number } | null {
   const sourceZ = element.coordinates?.[vertexIndex]?.z;
-  let best: { x: number; y: number } | null = null;
-  let bestDSq = Infinity;
-  let bestOrder = Infinity;
-  const snapTolSq = snapTol * snapTol;
-  for (const target of utilGetNearbySnapCornerTargets(snapCache, world, snapTol)) {
-    if (target.elementId === element.id) continue;
-    const targetElement = elementsById[target.elementId];
-    if (!isSameSnapFloor(element, sourceZ, targetElement, target.z)) continue;
-    const dx = target.x - world.x;
-    const dy = target.y - world.y;
-    const dSq = dx * dx + dy * dy;
-    if (dSq > snapTolSq) continue;
-    if (dSq < bestDSq || (dSq === bestDSq && target.order < bestOrder)) {
-      bestDSq = dSq;
-      bestOrder = target.order;
-      best = { x: target.x, y: target.y };
-    }
-  }
-  return best;
+  const best = utilFindClosestSnapCorner(world, snapCache, snapTol, {
+    isExcluded: (target) => target.elementId === element.id,
+    isEligible: (target) => isSameSnapFloor(element, sourceZ, elementsById[target.elementId], target.z),
+  });
+  return best ? { x: best.x, y: best.y } : null;
 }
 
 function findWallSegmentVertexSnapTarget(

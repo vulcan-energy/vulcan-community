@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { withCanvasAlpha, type ElementCanvasPalette } from '../../lib/shapeUtils';
+import { readRootCssVar } from '../../lib/cssVars';
 
 export type CanvasElementRendererPalette = ElementCanvasPalette & { hover: string };
 
@@ -14,17 +15,6 @@ export interface CanvasInteractionPalette {
   guideFill: string;
   dormerGuide: string;
   warningGuide: string;
-}
-
-export function readRootCssVar(varName: string, fallback: string, seen = new Set<string>()): string {
-  if (typeof window === 'undefined') return fallback;
-  if (seen.has(varName)) return fallback;
-  seen.add(varName);
-  const value = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-  if (!value || value.includes('color-mix(')) return fallback;
-  const varMatch = value.match(/^var\((--[^,\s)]+)(?:,\s*([^)]+))?\)$/);
-  if (varMatch) return readRootCssVar(varMatch[1], varMatch[2]?.trim() || fallback, seen);
-  return value;
 }
 
 export function getHexRelativeLuminance(hex: string): number | null {

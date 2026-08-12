@@ -25,10 +25,11 @@ import {
   type Geometry3DEditVertexHandle,
 } from '../../lib/geometry3dEditHandles';
 import {
-  getNearbySnapCornerTargets,
+  findClosestSnapCorner,
   translateShapeToSnapFromCache,
   type GeometrySnapCache,
 } from '../../lib/snapUtils';
+import { readRootCssVar } from '../../lib/cssVars';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { WindowVentilation3D } from '../../lib/geometry3dPrimitivesTypes';
 import { computeElement3DFrameTarget } from '../../lib/geometry3dFrame';
@@ -88,19 +89,6 @@ const EDIT_HANDLE_PITCH_RADIUS_M = 0.13;
 const EDIT_HANDLE_PITCH_PX_TO_DEG = 0.12;
 const EDIT_HANDLE_DRAG_LABEL_OFFSET_M = 0.32;
 const EDIT_HANDLE_SNAP_MARKER_RADIUS_M = 0.08;
-
-function readRootCssVar(varName: string, fallback: string): string {
-  if (typeof window === 'undefined') return fallback;
-  const style = getComputedStyle(document.documentElement);
-  const readValue = (name: string, depth = 0): string => {
-    const value = style.getPropertyValue(name).trim();
-    if (!value) return fallback;
-    const varMatch = /^var\((--[^,)]+)(?:,[^)]+)?\)$/.exec(value);
-    if (varMatch && depth < 4) return readValue(varMatch[1], depth + 1);
-    return value.includes('color-mix(') ? fallback : value;
-  };
-  return readValue(varName);
-}
 
 function openingEdgeColor(kind: 'window' | 'door'): string {
   return kind === 'window'
@@ -923,6 +911,13 @@ function releaseEditPointer(event: Geometry3DEditPointerEvent) {
   }
 }
 
+/**
+ * Unlike the 2D vertex-drag snap (`ElementRenderer.findCornerVertexSnapTarget`), this does not
+ * gate candidates by storey: `excludedElementIds` (built by `excludedElementIdsForVertex`)
+ * already excludes the dragged element plus every element sharing the exact source vertex
+ * coordinates, and the 3D edit view has no established need for a same-floor guard beyond that.
+ * Kept as an explicit divergence rather than silently unified with the 2D behaviour.
+ */
 function snap3DPlanPoint(
   point: { x: number; y: number },
   snapCache: GeometrySnapCache | undefined,
@@ -930,20 +925,9 @@ function snap3DPlanPoint(
   excludedElementIds: Set<string>,
 ): { x: number; y: number; snapped: boolean } {
   if (!snapCache) return { ...point, snapped: false };
-  const tolSq = snapTol * snapTol;
-  let best: { x: number; y: number; order: number; distSq: number } | null = null;
-
-  for (const target of getNearbySnapCornerTargets(snapCache, point, snapTol)) {
-    if (excludedElementIds.has(target.elementId)) continue;
-    const dx = target.x - point.x;
-    const dy = target.y - point.y;
-    const distSq = dx * dx + dy * dy;
-    if (distSq > tolSq) continue;
-    if (!best || distSq < best.distSq || (distSq === best.distSq && target.order < best.order)) {
-      best = { x: target.x, y: target.y, order: target.order, distSq };
-    }
-  }
-
+  const best = findClosestSnapCorner(point, snapCache, snapTol, {
+    isExcluded: (target) => excludedElementIds.has(target.elementId),
+  });
   return best ? { x: best.x, y: best.y, snapped: true } : { ...point, snapped: false };
 }
 

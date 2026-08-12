@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { readRootCssVar } from './elementRendererPalette';
+import { readRootCssVar } from '../../lib/cssVars';
 
 export type DrawingCanvasPalette = {
   guide: string;

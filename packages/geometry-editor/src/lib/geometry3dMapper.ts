@@ -29,6 +29,7 @@ import {
 import { computeSlopedPolygonInwardNormal2D } from './geometry3dSloped';
 import { calculateDerivedBaseHeight, withEffectiveStoreyHeights } from './zoneDerivation';
 import { getMechanicalVentilationDuctworkRoleStyle } from './mvhrDuctwork';
+import { readRootCssVar } from './cssVars';
 import type {
   Geometry3DPrimitive,
   PlanarFacePrimitive,
@@ -479,19 +480,6 @@ function isOpeningElement(element: Element): boolean {
     return true;
   }
   return false;
-}
-
-function readRootCssVar(varName: string, fallback: string, seen = new Set<string>()): string {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
-  if (seen.has(varName)) return fallback;
-  seen.add(varName);
-  const value = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-  if (!value || value.includes('color-mix(')) return fallback;
-  const varMatch = value.match(/^var\((--[^,\s)]+)(?:,\s*([^)]+))?\)$/);
-  if (varMatch) {
-    return readRootCssVar(varMatch[1], varMatch[2]?.trim() || fallback, seen);
-  }
-  return value;
 }
 
 function getColorForElement3D(element: Element): string {
