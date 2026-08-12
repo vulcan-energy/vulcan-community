@@ -6,7 +6,7 @@ import ReactDOM from 'react-dom';
 import './FilesDropdownPrimitives.css';
 import './ElementCreator.css';
 import { useShallow } from 'zustand/react/shallow';
-import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M, ZONE_NAME_SUGGESTIONS, roundToTwoDecimals, roundToFourDecimals } from '../geometry/constants';
+import { ZONE_NAME_SUGGESTIONS, roundToTwoDecimals } from '../geometry/constants';
 import { normalizeHorizontalAdjacentPlanPitch } from '../geometry/adjacentPlanPitch';
 import { calculatePolygonArea, isAdjacentConditionedInternalFloorDoubled } from '../lib/polygonSync';
 import {
@@ -43,6 +43,7 @@ import { wetEmitterFormModule } from './elementForms/wetEmitter';
 import { formatSystemPresetName, systemFormModule } from './elementForms/system';
 import { useServiceLineFormState } from './elementForms/serviceLine';
 import { useWallSharedFormState } from './elementForms/wallShared';
+import { buildingElementGroundFormModule } from './elementForms/buildingElementGround';
 import {
   useDecimalInput,
   decimalInputProps,
@@ -104,10 +105,6 @@ import {
 } from '../lib/transparentOpeningDerivedFields';
 import { elementBaseElevationMForTb } from '../lib/geometry3dMapper';
 import {
-  computeWeightedExternalWallAssemblyThicknessDetailsForGroundElement,
-  computeWeightedExternalWallAssemblyThicknessForGroundElement,
-  applyComputedGroundUValueAutofill,
-  groundExposedPerimeterManualFlag,
   syncGroundExposedPerimetersFromWalls,
   syncSuspendedGroundFabricFromWalls,
   GROUND_EXPOSED_PERIMETER_MANUAL_KEY,
@@ -117,14 +114,10 @@ import {
 } from '../lib/groundSuspendedFabricSync';
 import {
   computeGroundUValueFromElementModel,
-  defaultSuspendedAreaPerPerimeterVent,
-  parseWindShieldLocation,
 } from '../lib/groundUValueCalculator';
-import { computeGroundExposedPerimeterDetails } from '../lib/groundExposedPerimeter';
 import type {
   BuildingElementAdjacentConditionedSpace,
   BuildingElementAdjacentUnconditionedSpace_Simple,
-  BuildingElementGround,
   BuildingElementOpaque,
   BuildingElementPartyWall,
   BuildingElementTransparent,
@@ -202,7 +195,6 @@ import {
 } from '../geometry/thermalBridge/externalDetailContracts';
 
 const ELEMENT_NAME_INPUT_ID = 'geometry-element-name-input';
-const GROUND_LINE_HEIGHT_EXTRA_KEY = '_ground_line_height_m';
 const CREATE_SPACE_HEAT_SYSTEM_OPTION = '__create_space_heat_system__';
 const DEFAULT_WET_DISTRIBUTION_PRESET_ID = 'wet_distribution';
 
@@ -364,13 +356,6 @@ const SpaceHeatSystemEmitterDropdown: React.FC<SpaceHeatSystemEmitterDropdownPro
   );
 };
 
-function hasReliableGroundExposedPerimeter(
-  details: ReturnType<typeof computeGroundExposedPerimeterDetails> | null | undefined,
-): boolean {
-  if (!details) return false;
-  if (details.valueM > 0) return true;
-  return details.shapePerimeterM > 0 && details.linkedBoundaryPerimeterM >= Math.max(0, details.shapePerimeterM - 0.05);
-}
 // Utility function for consistent 2 decimal place formatting
 const formatToTwoDecimals = (value: number | string | undefined): string => {
   if (value === undefined || value === null || value === '') return '0.00';
@@ -1653,56 +1638,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const freeAreaHeightInput = useDecimalInput('', commitElementNumericField('free_area_height'), { commitOnChange: true });
   const midHeightInput = useDecimalInput('', commitElementNumericField('mid_height'), { commitOnChange: true });
   const maxWindowOpenAreaInput = useDecimalInput('', commitElementNumericField('max_window_open_area'), { commitOnChange: true });
-  const totalAreaInput = useDecimalInput('', commitElementNumericField('total_area'), { commitOnChange: true });
-  const commitGroundPerimeter = (value: number | '') => {
-    if (!isExistingElementSelection()) return;
-    const currentSelection = selection as Exclude<Selection, null>;
-    const element = getElementById(currentSelection.id);
-    if (!element || element.type !== 'BuildingElementGround') {
-      commitExistingElementDraft({ perimeter: value } as Partial<Element>);
-      return;
-    }
-
-    const extra = readExtraJsonRecord(element.extra_json);
-    const nextExtra = { ...extra };
-    const autoDetails = computeGroundExposedPerimeterDetails(latestElementsByIdRef.current, element);
-    const autoValue = hasReliableGroundExposedPerimeter(autoDetails) ? autoDetails.valueM : null;
-
-    if (value === '') {
-      delete nextExtra[GROUND_EXPOSED_PERIMETER_MANUAL_KEY];
-      commitExistingElementDraft({
-        ...(autoValue != null ? { perimeter: autoValue } : {}),
-        extra_json: nextExtra,
-      } as Partial<Element>);
-      return;
-    }
-
-    const rounded = roundToTwoDecimals(value);
-    if (autoValue != null && Math.abs(rounded - autoValue) <= 0.01) {
-      delete nextExtra[GROUND_EXPOSED_PERIMETER_MANUAL_KEY];
-    } else {
-      nextExtra[GROUND_EXPOSED_PERIMETER_MANUAL_KEY] = true;
-    }
-    commitExistingElementDraft({
-      perimeter: rounded,
-      extra_json: nextExtra,
-    } as Partial<Element>);
-  };
-  const perimeterInput = useDecimalInput('', commitGroundPerimeter, { commitOnChange: true });
-  const [floorType, setFloorType] = useState<'' | 'Heated_basement' | 'Slab_no_edge_insulation' | 'Slab_edge_insulation' | 'Suspended_floor' | 'Unheated_basement'>('');
-  const depthBasementFloorInput = useDecimalInput('', commitElementNumericField('depth_basement_floor'), { commitOnChange: true });
-  const thicknessWallsInput = useDecimalInput('', commitElementNumericField('thickness_walls'), { commitOnChange: true });
-  const groundLineHeightInput = useDecimalInput('', (value) => {
-    const element = selection?.type === 'element' ? getElementById(selection.id) : null;
-    if (!element || element.type !== 'BuildingElementGround') return;
-    const extra = readExtraJsonRecord(element.extra_json);
-    updateElement(element.id, {
-      extra_json: {
-        ...extra,
-        [GROUND_LINE_HEIGHT_EXTRA_KEY]: typeof value === 'number' ? value : undefined,
-      },
-    } as Partial<Element>);
-  }, { commitOnChange: true });
+  // totalAreaInput/commitGroundPerimeter/perimeterInput/floorType/
+  // depthBasementFloorInput/thicknessWallsInput/groundLineHeightInput now
+  // live in elementForms/buildingElementGround.tsx (slice-6 brief, Stage 1).
   const serviceLine = useServiceLineFormState({
     commitElementNumericField,
     selection,
@@ -1719,22 +1657,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // own effect of the same shape below.
   const midHeightInputSetValueRef = useRef(midHeightInput.syncValue);
   const maxWindowOpenAreaInputSetValueRef = useRef(maxWindowOpenAreaInput.syncValue);
-  const totalAreaInputSetValueRef = useRef(totalAreaInput.syncValue);
   useEffect(() => {
     midHeightInputSetValueRef.current = midHeightInput.syncValue;
     maxWindowOpenAreaInputSetValueRef.current = maxWindowOpenAreaInput.syncValue;
-    totalAreaInputSetValueRef.current = totalAreaInput.syncValue;
   }, [
     maxWindowOpenAreaInput.syncValue,
     midHeightInput.syncValue,
-    totalAreaInput.syncValue,
   ]);
 
-  const numbersClose = useCallback((a: number | null | undefined, b: number | null | undefined, eps = 1e-6): boolean => {
-    if (a == null && b == null) return true;
-    if (a == null || b == null) return false;
-    return Math.abs(a - b) <= eps;
-  }, []);
+  // totalAreaInputSetValueRef (+ its slice of this effect) and numbersClose
+  // now live in elementForms/buildingElementGround.tsx (slice-6 brief, Stage
+  // 1) — numbersClose had zero callers left outside Ground's own U-value
+  // sync effect.
 
   const handleDetailedJunctionHostReadinessAction = useCallback(
     (action: {
@@ -2030,6 +1964,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     shared: {
       heightInput: wallShared.heightInput,
       distanceInput,
+      widthInput: wallShared.widthInput,
       areaInput: wallShared.areaInput,
       parentElement: wallShared.parentElement,
       setParentElement: wallShared.setParentElement,
@@ -2082,8 +2017,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const wetEmitterFormState = wetEmitterFormModule.useFormState(elementFormStateCtx);
   // System
   const systemFormState = systemFormModule.useFormState(elementFormStateCtx);
+  // BuildingElementGround
+  const buildingElementGroundFormState = buildingElementGroundFormModule.useFormState(elementFormStateCtx);
   const elementFormInstances = {
     ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
+    BuildingElementGround: bindElementFormModule(buildingElementGroundFormModule, buildingElementGroundFormState),
     ThermalBridgeLinear: bindElementFormModule(thermalBridgeLinearFormModule, thermalBridgeLinearFormState),
     ThermalBridgePoint: bindElementFormModule(thermalBridgePointFormModule, thermalBridgePointFormState),
     Lighting: bindElementFormModule(lightingFormModule, lightingFormState),
@@ -2137,7 +2075,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     mode: useFHSSchema ? 'fhs' : 'core',
     schemaPort,
     elementType,
-    floorType: floorType || undefined,
+    floorType: buildingElementGroundFormState.floorType || undefined,
     wetEmitterSubtype: wetEmitterFormState.subcategory || undefined,
     hotWaterSubtype: hotWaterDemandFormState.hotWaterSubcategory || undefined,
     ventilationSubtype: mechanicalVentilationFormState.ventType || undefined,
@@ -2966,29 +2904,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             }
           }
         } else if (element.type === 'BuildingElementGround') {
-          // Round numeric values to 2dp when loading from file
-          const width = 'width' in element && typeof element.width === 'number' ? roundToTwoDecimals(element.width) : (element.width ?? '');
-          const height = 'height' in element && typeof element.height === 'number' ? roundToTwoDecimals(element.height) : (element.height ?? '');
-          const area = 'area' in element && typeof element.area === 'number' ? roundToTwoDecimals(element.area) : (element.area ?? '');
-          const totalArea = 'total_area' in element && typeof element.total_area === 'number' ? roundToTwoDecimals(element.total_area) : (element.total_area ?? '');
-          const perimeter = 'perimeter' in element && typeof element.perimeter === 'number' ? roundToTwoDecimals(element.perimeter) : (element.perimeter ?? '');
-          const depthBasementFloor = 'depth_basement_floor' in element && typeof element.depth_basement_floor === 'number'
-            ? roundToTwoDecimals(element.depth_basement_floor) : (element.depth_basement_floor ?? '');
-          const thicknessWalls = 'thickness_walls' in element && typeof element.thickness_walls === 'number'
-            ? roundToTwoDecimals(element.thickness_walls) : (element.thickness_walls ?? '');
-          const extra = readExtraJsonRecord((element as any).extra_json);
-          const groundLineHeight = readFiniteNumber(extra[GROUND_LINE_HEIGHT_EXTRA_KEY]) ?? '';
-
-          wallShared.widthInput.setValue(width);
-          wallShared.heightInput.setValue(height);
-          wallShared.setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          wallShared.areaInput.setValue(area);
-          totalAreaInput.setValue(totalArea);
-          perimeterInput.setValue(perimeter);
-          setFloorType('floor_type' in element ? element.floor_type ?? '' : '');
-          depthBasementFloorInput.setValue(depthBasementFloor);
-          thicknessWallsInput.setValue(thicknessWalls);
-          groundLineHeightInput.setValue(groundLineHeight);
+          elementFormInstances.BuildingElementGround.hydrate(element);
         } else if (isAdjacentLikeElement(element)) {
           // Round numeric values to 2dp when loading from file
           const derivedLineWidth =
@@ -3158,30 +3074,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     syncZoneHeightValue,
   ]);
 
-  // Keep suspended-ground wall thickness input aligned with the store when `updateElement` bumps `_v`
-  // (auto-sync from assemblies, "Use assembly", etc.). The main selection loader intentionally avoids
-  // re-running on every selected-element mutation, so we mirror only `thickness_walls` here.
-  const thicknessWallsSetValueRef = useRef(thicknessWallsInput.syncValue);
-  useEffect(() => {
-    thicknessWallsSetValueRef.current = thicknessWallsInput.syncValue;
-  }, [thicknessWallsInput.syncValue]);
-  useEffect(() => {
-    if (selection?.type !== 'element' || !selection.id) return;
-    const el = getElementById(selection.id);
-    if (!el || el.type !== 'BuildingElementGround') return;
-    const tw =
-      'thickness_walls' in el && typeof el.thickness_walls === 'number' && Number.isFinite(el.thickness_walls)
-        ? roundToTwoDecimals(el.thickness_walls)
-        : '';
-    thicknessWallsSetValueRef.current(tw);
-  }, [selection?.id, selection?.type, selectedElementV, getElementById]);
-
-  // Auto-calculate total_area for BuildingElementGround when area changes
-  useEffect(() => {
-    if (elementType === 'BuildingElementGround' && wallShared.areaInput.value && wallShared.areaInput.value > 0) {
-      totalAreaInputSetValueRef.current(wallShared.areaInput.value);
-    }
-  }, [elementType, wallShared.areaInput.value]);
+  // The suspended-ground wall-thickness store-alignment effect and the
+  // "auto-calculate total_area" effect now live inside
+  // buildingElementGroundFormState's useFormState (elementForms/
+  // buildingElementGround.tsx, slice-6 brief Stage 1).
 
   // Add effect to handle placeholder discard/auto-save
   useEffect(() => {
@@ -3422,12 +3318,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     freeAreaHeightInput.setValue('');
     midHeightInput.setValue('');
     maxWindowOpenAreaInput.setValue('');
-    totalAreaInput.setValue('');
-    perimeterInput.setValue('');
-    setFloorType('');
-    groundLineHeightInput.setValue('');
-    depthBasementFloorInput.setValue('');
-    thicknessWallsInput.setValue('');
+    // totalAreaInput/perimeterInput/floorType/groundLineHeightInput/
+    // depthBasementFloorInput/thicknessWallsInput reset lines now live in
+    // buildingElementGroundFormModule.reset() (via the elementFormInstances
+    // loop below).
     // ThermalBridgeLinear/MechanicalVentilationDuctwork/WaterPipework each call
     // resetServiceLine(state.serviceLine) from their own module reset() (via the
     // elementFormInstances loop below); no direct call needed here now that all
@@ -4324,10 +4218,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const assemblyModalGroundFloorType = (() => {
     if (assemblyModalElementMode !== 'BuildingElementGround') return undefined;
     if (selectedIsDormerAnchor && dormerAssemblyRepresentative?.type === 'BuildingElementGround') {
-      const ft = (dormerAssemblyRepresentative as { floor_type?: typeof floorType }).floor_type;
-      return ft || floorType || undefined;
+      const ft = (dormerAssemblyRepresentative as { floor_type?: typeof buildingElementGroundFormState.floorType }).floor_type;
+      return ft || buildingElementGroundFormState.floorType || undefined;
     }
-    if (elementType === 'BuildingElementGround') return floorType || undefined;
+    if (elementType === 'BuildingElementGround') return buildingElementGroundFormState.floorType || undefined;
     return undefined;
   })();
 
@@ -4419,200 +4313,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     try { return roundToTwoDecimals(calculatePolygonArea(selectedElement.coordinates)); } catch { return 0; }
   }, [selectedElement]);
 
-  const derivedGroundArea = useMemo((): number => {
-    if (selectedElement?.type !== 'BuildingElementGround') return 0;
-    if (selectedShape === 'line' && selectedElement.coordinates?.length === 2) {
-      const [a, b] = selectedElement.coordinates;
-      const length = Math.hypot(b.x - a.x, b.y - a.y);
-      const lineHeight = typeof groundLineHeightInput.value === 'number' && Number.isFinite(groundLineHeightInput.value)
-        ? Math.max(0, groundLineHeightInput.value)
-        : 0;
-      return roundToTwoDecimals(length * lineHeight);
-    }
-    return roundToTwoDecimals(derivedPolygonArea);
-  }, [selectedElement, selectedShape, groundLineHeightInput.value, derivedPolygonArea]);
-
-  const derivedGroundEffectiveArea = useMemo((): number => {
-    if (selectedElement?.type !== 'BuildingElementGround') return 0;
-    if (selectedShape === 'line') return derivedGroundArea;
-    if (typeof selectedElement.area === 'number' && Number.isFinite(selectedElement.area) && selectedElement.area > 0) {
-      return roundToTwoDecimals(selectedElement.area);
-    }
-    return derivedGroundArea;
-  }, [selectedElement, selectedShape, derivedGroundArea]);
-
-  const derivedGroundShapePerimeter = useMemo((): number => {
-    if (selectedElement?.type !== 'BuildingElementGround' || !selectedElement.coordinates || selectedElement.coordinates.length < 2) {
-      return 0;
-    }
-    if (selectedShape === 'line' && selectedElement.coordinates.length === 2) {
-      const [a, b] = selectedElement.coordinates;
-      return roundToTwoDecimals(Math.hypot(b.x - a.x, b.y - a.y));
-    }
-    if (selectedElement.coordinates.length < 3) return 0;
-    let perimeter = 0;
-    for (let i = 0; i < selectedElement.coordinates.length; i++) {
-      const current = selectedElement.coordinates[i];
-      const next = selectedElement.coordinates[(i + 1) % selectedElement.coordinates.length];
-      perimeter += Math.hypot(next.x - current.x, next.y - current.y);
-    }
-    return roundToTwoDecimals(perimeter);
-  }, [selectedElement, selectedShape]);
-
-  const groundPerimeterDetails = useMemo(() => {
-    if (selectedElement?.type !== 'BuildingElementGround') return null;
-    return computeGroundExposedPerimeterDetails(elementsById, selectedElement as BuildingElementGround);
-  }, [selectedElement, elementsById]);
-
-  const groundPerimeterManual = useMemo((): boolean => {
-    if (selectedElement?.type !== 'BuildingElementGround') return false;
-    return groundExposedPerimeterManualFlag(readExtraJsonRecord(selectedElement.extra_json));
-  }, [selectedElement]);
-
-  const derivedGroundPerimeter = useMemo((): number => {
-    if (selectedElement?.type !== 'BuildingElementGround') return 0;
-    if (
-      groundPerimeterManual &&
-      typeof selectedElement.perimeter === 'number' &&
-      Number.isFinite(selectedElement.perimeter) &&
-      selectedElement.perimeter >= 0
-    ) {
-      return roundToTwoDecimals(selectedElement.perimeter);
-    }
-    const details = groundPerimeterDetails;
-    if (details && hasReliableGroundExposedPerimeter(details)) {
-      return details.valueM;
-    }
-    return derivedGroundShapePerimeter;
-  }, [selectedElement, groundPerimeterManual, groundPerimeterDetails, derivedGroundShapePerimeter]);
-
-  const groundPerimeterBreakdownText = useMemo((): string | null => {
-    if (selectedElement?.type !== 'BuildingElementGround' || !groundPerimeterDetails) return null;
-    const exposed = groundPerimeterDetails.exposedRuns
-      .slice(0, 3)
-      .map((run) => `${run.label} ${formatConditionalDecimals(run.lengthM)} m`);
-    const exposedSuffix =
-      groundPerimeterDetails.exposedRuns.length > exposed.length
-        ? ` +${groundPerimeterDetails.exposedRuns.length - exposed.length} more`
-        : '';
-    const excluded = groundPerimeterDetails.excludedRuns
-      .slice(0, 2)
-      .map((run) => `${run.label}${run.reason ? ` (${run.reason})` : ''} ${formatConditionalDecimals(run.lengthM)} m`);
-    const excludedText = excluded.length > 0 ? ` Excluded: ${excluded.join(', ')}.` : '';
-    if (hasReliableGroundExposedPerimeter(groundPerimeterDetails)) {
-      const sourceText = exposed.length > 0 ? ` from ${exposed.join(', ')}${exposedSuffix}` : '';
-      return `${groundPerimeterManual ? 'Manual override.' : 'Auto exposed perimeter:'} ${formatConditionalDecimals(groundPerimeterDetails.valueM)} m${sourceText}.${excludedText}`;
-    }
-    if (groundPerimeterDetails.linkedLineCount > 0 && excluded.length > 0) {
-      return `No external exposed wall runs on this floor outline.${excludedText}`;
-    }
-    return `No exposed wall runs found on this floor outline. Drawn outline is ${formatConditionalDecimals(groundPerimeterDetails.shapePerimeterM)} m.`;
-  }, [selectedElement, groundPerimeterDetails, groundPerimeterManual]);
-
-  const resetGroundPerimeterToAuto = useCallback(() => {
-    const details = groundPerimeterDetails;
-    if (selectedElement?.type !== 'BuildingElementGround' || !details || !hasReliableGroundExposedPerimeter(details)) {
-      return;
-    }
-    const extra = { ...readExtraJsonRecord(selectedElement.extra_json) };
-    delete extra[GROUND_EXPOSED_PERIMETER_MANUAL_KEY];
-    updateElement(selectedElement.id, {
-      perimeter: details.valueM,
-      extra_json: extra,
-    } as Partial<Element>);
-  }, [selectedElement, groundPerimeterDetails, updateElement]);
-
-  useEffect(() => {
-    if (selection?.type !== 'element') return;
-    const current = getElementById(selection.id);
-    if (!current || current.type !== 'BuildingElementGround') return;
-
-    const floorTypeForCalc = floorType || current.floor_type || undefined;
-    const extra = readExtraJsonRecord(current.extra_json);
-    let nextExtra: Record<string, unknown> = { ...extra };
-    let changed = false;
-
-    if (floorTypeForCalc === 'Suspended_floor') {
-      // Defaults only when fields are missing (JsonForms often stores numbers as strings — use readFiniteNumber).
-      if (readFiniteNumber(nextExtra.height_upper_surface) == null) {
-        nextExtra.height_upper_surface = SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M;
-        changed = true;
-      }
-      const parsedShield = parseWindShieldLocation(nextExtra.shield_fact_location);
-      if (nextExtra.shield_fact_location !== parsedShield) {
-        nextExtra.shield_fact_location = parsedShield;
-        changed = true;
-      }
-      // Treat 0 as unset: JsonForms often shows 0 while the field was never meaningfully filled; Part F default should apply.
-      const apv = readFiniteNumber(nextExtra.area_per_perimeter_vent);
-      if (apv == null || apv === 0) {
-        const derivedDefault = defaultSuspendedAreaPerPerimeterVent(derivedGroundArea, derivedGroundPerimeter);
-        if (derivedDefault != null) {
-          // Must not use roundToTwoDecimals: 0.0015 m²/m (Part F minimum) rounds to 0 and retriggers this effect forever.
-          const roundedVent = roundToFourDecimals(derivedDefault);
-          if (!numbersClose(apv, roundedVent)) {
-            nextExtra.area_per_perimeter_vent = roundedVent;
-            changed = true;
-          }
-        }
-      }
-    }
-
-    const depthBasementFloor = readFiniteNumber(current.depth_basement_floor);
-    const thicknessWalls = typeof thicknessWallsInput.value === 'number' && Number.isFinite(thicknessWallsInput.value)
-      ? thicknessWallsInput.value
-      : readFiniteNumber(current.thickness_walls) ?? 0;
-
-    const needsBasementDepth =
-      floorTypeForCalc === 'Heated_basement' || floorTypeForCalc === 'Unheated_basement';
-    const basementDepthOk =
-      !needsBasementDepth
-      || (depthBasementFloor != null && Number.isFinite(depthBasementFloor) && depthBasementFloor > 0);
-
-    const uComputed =
-      derivedGroundArea > 0 && derivedGroundPerimeter > 0 && thicknessWalls > 0 && basementDepthOk
-        ? computeGroundUValueFromElementModel(current, nextExtra, floorTypeForCalc, {
-            totalArea: derivedGroundArea,
-            perimeter: derivedGroundPerimeter,
-            thicknessWalls,
-            ...(needsBasementDepth && depthBasementFloor != null ? { depthBasementFloorM: depthBasementFloor } : {}),
-          })
-        : null;
-
-    const uSync = applyComputedGroundUValueAutofill(nextExtra, uComputed);
-    if (uSync.changed) {
-      nextExtra = uSync.extra;
-      changed = true;
-    }
-
-    const syncAreaForLine = selectedShape === 'line' ? derivedGroundArea : null;
-    const needsGroundSync =
-      !numbersClose(readFiniteNumber(current.total_area), derivedGroundArea)
-      || !numbersClose(readFiniteNumber(current.perimeter), derivedGroundPerimeter)
-      || (syncAreaForLine != null && !numbersClose(readFiniteNumber(current.area), syncAreaForLine));
-
-    if (!changed && !needsGroundSync) return;
-
-    updateElement(current.id, {
-      ...(needsGroundSync ? {
-        total_area: derivedGroundArea,
-        perimeter: derivedGroundPerimeter,
-        ...(syncAreaForLine != null ? { area: syncAreaForLine } : {}),
-      } : {}),
-      ...(changed ? { extra_json: nextExtra } : {}),
-    } as Partial<Element>);
-  }, [
-    selection,
-    selectedElementV,
-    getElementById,
-    updateElement,
-    floorType,
-    thicknessWallsInput.value,
-    derivedGroundArea,
-    derivedGroundPerimeter,
-    selectedShape,
-    numbersClose,
-  ]);
+  // derivedGroundArea/derivedGroundEffectiveArea/derivedGroundShapePerimeter/
+  // groundPerimeterDetails/groundPerimeterManual/derivedGroundPerimeter/
+  // groundPerimeterBreakdownText/resetGroundPerimeterToAuto and the
+  // U-value/extra_json autofill sync effect now live inside
+  // buildingElementGroundFormState (elementForms/buildingElementGround.tsx,
+  // slice-6 brief Stage 1) — the orchestrator reads
+  // buildingElementGroundFormState.derivedGroundArea/derivedGroundPerimeter
+  // directly wherever still needed below (same precedent as
+  // systemFormState.systemSubcategory / wetEmitterFormState.subcategory).
 
   const liveWidthValue = parseLiveDecimalInput(wallShared.widthInput.inputValue);
   const liveHeightValue = parseLiveDecimalInput(wallShared.heightInput.inputValue);
@@ -4907,7 +4616,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   const buildNewElementData = (): Partial<Element> => {
     const viewerElevationPatch =
-      elementSupportsGenericElevationControl(elementType, null, floorType) &&
+      elementSupportsGenericElevationControl(elementType, null, buildingElementGroundFormState.floorType) &&
       typeof elementElevationInput.value === 'number' &&
       Number.isFinite(elementElevationInput.value)
         ? { _base_height: roundToTwoDecimals(elementElevationInput.value) }
@@ -4968,25 +4677,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 	        }
 
       case 'BuildingElementGround':
-        {
-          const derivedArea = derivedGroundArea;
-          const derivedPerimeter = derivedGroundPerimeter;
-          const extraJsonGround = typeof groundLineHeightInput.value === 'number'
-            ? { [GROUND_LINE_HEIGHT_EXTRA_KEY]: groundLineHeightInput.value }
-            : undefined;
-	        return {
-	          ...baseData,
-	          width: wallShared.widthInput.value,
-	            area: derivedArea,
-          pitch: wallShared.pitch,
-            total_area: derivedArea,
-          perimeter: derivedPerimeter,
-	          floor_type: floorType || undefined,
-	          depth_basement_floor: depthBasementFloorInput.value === '' ? undefined : depthBasementFloorInput.value,
-	          thickness_walls: thicknessWallsInput.value === '' ? undefined : thicknessWallsInput.value,
-          extra_json: extraJsonGround,
-        } as Partial<Element>;
-        }
+        return elementFormInstances.BuildingElementGround.buildElementData({ baseData, elementZoneId });
 
 	      case 'BuildingElementAdjacentConditionedSpace':
 	      case 'BuildingElementAdjacentUnconditionedSpace_Simple':
@@ -5069,18 +4760,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // Helper functions for AdvancedFieldsEditor
   const getElementSubtype = (): string | undefined => {
     switch (elementType) {
-      case 'BuildingElementGround': {
-        // Persisted `floor_type` on the element (store) is authoritative; local `floorType` can lag after updates.
-        if (selection.type === 'element' || selection.type === 'global') {
-          const el = getElementById(selection.id);
-          const persisted =
-            el && typeof (el as { floor_type?: string }).floor_type === 'string'
-              ? (el as { floor_type: string }).floor_type
-              : undefined;
-          if (persisted) return persisted;
-        }
-        return floorType || undefined;
-      }
+      case 'BuildingElementGround':
+        return elementFormInstances.BuildingElementGround.subtype();
       case 'MechanicalVentilation':
         return elementFormInstances.MechanicalVentilation.subtype();
       case 'WetEmitter':
@@ -5119,36 +4800,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return readExtraJsonRecord('extra_json' in current ? current.extra_json : undefined);
   };
 
-  const resyncGroundThicknessWallsFromAssemblies = useCallback(() => {
-    if (selection?.type !== 'element') return;
-    const current = getElementById(selection.id);
-    if (!current || current.type !== 'BuildingElementGround') return;
-    const th = computeWeightedExternalWallAssemblyThicknessForGroundElement(elementsById, current);
-    if (th == null) return;
-    const ex = readExtraJsonRecord(current.extra_json);
-    const rest = { ...ex };
-    delete rest[THICKNESS_WALLS_MANUAL_KEY];
-    updateElement(current.id, {
-      thickness_walls: th,
-      extra_json: rest,
-    } as Partial<Element>);
-  }, [selection, getElementById, elementsById, updateElement]);
-
-  const groundWallThicknessAutofill = useMemo(() => {
-    if (selection?.type !== 'element') return { valueM: null, areaTotalM2: 0, sources: [], candidateCount: 0 };
-    const current = getElementById(selection.id);
-    if (!current || current.type !== 'BuildingElementGround') {
-      return { valueM: null, areaTotalM2: 0, sources: [], candidateCount: 0 };
-    }
-    return computeWeightedExternalWallAssemblyThicknessDetailsForGroundElement(elementsById, current);
-  }, [selection, getElementById, elementsById]);
-
-  const liveThicknessWallsValue = (() => {
-    const raw = thicknessWallsInput.inputValue.trim();
-    if (raw === '') return null;
-    const parsed = parseLiveDecimalInput(raw);
-    return Number.isFinite(parsed) ? parsed : null;
-  })();
+  // resyncGroundThicknessWallsFromAssemblies/groundWallThicknessAutofill/
+  // liveThicknessWallsValue now live inside buildingElementGroundFormState
+  // (elementForms/buildingElementGround.tsx, slice-6 brief Stage 1).
 
   const handleAdvancedFieldsChange = useCallback((updatedData: AdvancedFieldsElementPatch) => {
     let nextUpdatedData: AdvancedFieldsElementPatch = updatedData;
@@ -5637,7 +5291,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       selection,
       getElementById,
       updateElement,
+      setSelection,
       getGlobalOrientationOffset: () => geometryStore.getState().globalOrientationOffset,
+      elementElevationInput,
       onSiteHostDerivation,
       selectedPvDimensionNotes,
       elementZoneId,
@@ -6350,223 +6006,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         );
 
       case 'BuildingElementGround':
-        return (
-          <>
-            {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
-            <div className="element-input" ref={registerBaseFieldRef('area')}>
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                value={formatToTwoDecimals(derivedGroundEffectiveArea)}
-                unit={fieldUnit('area')}
-                readOnly
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Total Area (m²):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['totalArea', 'total_area'])}>
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                value={formatConditionalDecimals(derivedGroundArea)}
-                unit={fieldUnit('total_area')}
-                readOnly
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('totalArea', derivedGroundArea)} issue={getFieldValidationIssue('totalArea', derivedGroundArea) || undefined} />
-            </div>
-            {renderFieldLabel('Perimeter (m):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs('perimeter')}>
-              <StandardInput
-                {...decimalInputProps(perimeterInput)}
-                unit={fieldUnit('perimeter')}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              {groundPerimeterManual && hasReliableGroundExposedPerimeter(groundPerimeterDetails) ? (
-                <ResetFieldButton
-                  align="inline"
-                  title="Set perimeter to the exposed wall-linked perimeter"
-                  ariaLabel="Use exposed perimeter"
-                  label="Use exposed"
-                  onClick={resetGroundPerimeterToAuto}
-                />
-              ) : null}
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('perimeter', derivedGroundPerimeter)} issue={getFieldValidationIssue('perimeter', derivedGroundPerimeter) || undefined} />
-            </div>
-            {groundPerimeterBreakdownText ? (
-              <div style={INLINE_FIELD_NOTE_STYLE}>
-                {groundPerimeterBreakdownText}
-              </div>
-            ) : null}
-            {selectedShape === 'line' && (
-              <>
-                {renderFieldLabel('Ground Wall Height (m):', elementType)}
-                <div className="element-input">
-                  <StandardInput
-                    {...decimalInputProps(groundLineHeightInput)}
-                    unit={fieldUnit('height')}
-                    step="0.01"
-                    min="0"
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Ground wall area is derived as line length x height.
-                </div>
-              </>
-            )}
-            {renderFieldLabel('Floor Type:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['floorType', 'floor_type'])}>
-              <StandardDropdown
-                value={floorType}
-                onChange={(value) => {
-                  const nextValue = value as typeof floorType;
-                  setFloorType(nextValue);
-                  const patch = {
-                    floor_type: nextValue || undefined,
-                    ...(!groundFloorTypeSupportsViewerElevation(nextValue) ? { _base_height: undefined } : {}),
-                  } as Partial<Element>;
-                  if (!groundFloorTypeSupportsViewerElevation(nextValue)) {
-                    elementElevationInput.setValue('');
-                  }
-                  commitExistingElementDraft(patch);
-                }}
-                options={[
-                  { value: 'Heated_basement', label: 'Heated Basement' },
-                  { value: 'Slab_no_edge_insulation', label: 'Slab No Edge Insulation' },
-                  { value: 'Slab_edge_insulation', label: 'Slab Edge Insulation' },
-                  { value: 'Suspended_floor', label: 'Suspended Floor' },
-                  { value: 'Unheated_basement', label: 'Unheated Basement' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {/* Only show depth_basement_floor for Heated_basement and Unheated_basement */}
-            {(floorType === 'Heated_basement' || floorType === 'Unheated_basement') && (
-              <>
-            {renderFieldLabel('Depth Basement Floor (m):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['depthBasementFloor', 'depth_basement_floor'])}>
-              <StandardInput
-                {...decimalInputProps(depthBasementFloorInput)}
-                unit={fieldUnit('depth_basement_floor')}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-              </>
-            )}
-            {renderFieldLabel('Thickness Walls (m):', elementType)}
-            <div
-              className="element-input"
-              ref={registerBaseFieldRefs(['thicknessWalls', 'thickness_walls'])}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'stretch',
-                gap: 4,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', width: '100%', minWidth: 0 }}>
-                <StandardInput
-                  {...decimalInputProps(thicknessWallsInput)}
-                  unit={fieldUnit('thickness_walls')}
-                  step="0.01"
-                  min="0"
-                  variant="ghost"
-                  size="md"
-                  className={
-                    groundWallThicknessAutofill.valueM != null ||
-                    groundWallThicknessAutofill.candidateCount > 0
-                      ? 'flex-1'
-                      : undefined
-                  }
-                />
-                {groundWallThicknessAutofill.valueM != null &&
-                liveThicknessWallsValue != null &&
-                Math.abs(liveThicknessWallsValue - groundWallThicknessAutofill.valueM) > 1e-5 ? (
-                  <ResetFieldButton
-                    align="inline"
-                    title="Set thickness to the area-weighted assembly solid thickness from adjacent walls on this storey"
-                    ariaLabel="Use Assembly wall thickness"
-                    label="Use Assembly"
-                    onClick={resyncGroundThicknessWallsFromAssemblies}
-                  />
-                ) : null}
-              </div>
-              {groundWallThicknessAutofill.sources.length > 0 ? (
-                  <div
-                    style={{
-                      color: 'var(--text-secondary)',
-                      fontSize: 12,
-                      lineHeight: 1.45,
-                      minWidth: 0,
-                      overflowWrap: 'anywhere',
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    From assemblies:{' '}
-                    {Array.from(
-                      groundWallThicknessAutofill.sources.reduce((groups, source) => {
-                        const key = source.thicknessM.toFixed(2);
-                        const existing = groups.get(key);
-                        if (existing) existing.push(source);
-                        else groups.set(key, [source]);
-                        return groups;
-                      }, new Map<string, typeof groundWallThicknessAutofill.sources>()),
-                    ).map(([thicknessKey, group], groupIndex) => (
-                      <React.Fragment key={thicknessKey}>
-                        {groupIndex > 0 ? ' · ' : null}
-                        {group.map((source, index) => (
-                          <React.Fragment key={source.elementId}>
-                            {index > 0 ? ', ' : null}
-                            <button
-                              type="button"
-                              onClick={() => setSelection({ type: 'element', id: source.elementId })}
-                              style={{
-                                border: 'none',
-                                background: 'none',
-                                padding: 0,
-                                color: 'var(--accent-blue)',
-                                cursor: 'pointer',
-                                font: 'inherit',
-                                textDecoration: 'underline',
-                              }}
-                              title={`${source.label}: ${source.areaM2.toFixed(2)} m², assembly solid thickness ${source.thicknessM.toFixed(2)} m`}
-                            >
-                              {source.label}
-                            </button>
-                          </React.Fragment>
-                        ))}
-                        {': '}
-                        {thicknessKey} m
-                      </React.Fragment>
-                    ))}
-                  </div>
-                ) : groundWallThicknessAutofill.candidateCount > 0 ? (
-                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.35 }}>
-                    Adjacent walls found on this storey, but none have an applied wall assembly thickness.
-                  </div>
-                ) : (
-                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.35 }}>
-                    No adjacent wall assembly thickness available on this storey.
-                  </div>
-                )}
-            </div>
-          </>
-        );
+        return elementFormInstances.BuildingElementGround.renderPanel(formRenderCtx);
 
       case 'BuildingElementAdjacentConditionedSpace':
       case 'BuildingElementAdjacentUnconditionedSpace_Simple':
@@ -6940,7 +6380,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (selection.type !== 'element' && selection.type !== 'global') return undefined;
     const el = getElementById(selection.id);
     if (!el) return undefined;
-    if (!elementSupportsGenericElevationControl(elementType, el, floorType)) return undefined;
+    if (!elementSupportsGenericElevationControl(elementType, el, buildingElementGroundFormState.floorType)) return undefined;
     const effectiveElevation = elementBaseElevationMForTb(
       el,
       withEffectiveStoreyHeights(floors, allElements),
@@ -6954,7 +6394,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (selection.type !== 'element' && selection.type !== 'global') return null;
     const el = getElementById(selection.id);
     if (!el) return null;
-    if (!elementSupportsGenericElevationControl(elementType, el, floorType)) return null;
+    if (!elementSupportsGenericElevationControl(elementType, el, buildingElementGroundFormState.floorType)) return null;
     return (
       <>
         {renderFieldLabel('Elevation above model ground (m):', elementType, '_base_height')}
@@ -8015,15 +7455,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 if (el?.type === 'BuildingElementGround') {
                   const depthBasementFloor = readFiniteNumber(el.depth_basement_floor);
                   const thicknessWalls =
-                    typeof thicknessWallsInput.value === 'number' && Number.isFinite(thicknessWallsInput.value)
-                      ? thicknessWallsInput.value
+                    typeof buildingElementGroundFormState.thicknessWallsInput.value === 'number' && Number.isFinite(buildingElementGroundFormState.thicknessWallsInput.value)
+                      ? buildingElementGroundFormState.thicknessWallsInput.value
                       : readFiniteNumber(el.thickness_walls);
                   const floorTypeForApply = el.floor_type ?? assemblyModalGroundFloorType ?? undefined;
                   const needsBasementDepth =
                     floorTypeForApply === 'Heated_basement' || floorTypeForApply === 'Unheated_basement';
                   const uComputed = computeGroundUValueFromElementModel(el, nextExtra, floorTypeForApply, {
-                    totalArea: derivedGroundArea,
-                    perimeter: derivedGroundPerimeter,
+                    totalArea: buildingElementGroundFormState.derivedGroundArea,
+                    perimeter: buildingElementGroundFormState.derivedGroundPerimeter,
                     ...(thicknessWalls != null ? { thicknessWalls } : {}),
                     ...(needsBasementDepth && depthBasementFloor != null ? { depthBasementFloorM: depthBasementFloor } : {}),
                   });

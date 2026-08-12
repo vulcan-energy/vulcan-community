@@ -48,11 +48,19 @@ export interface OnSiteHostDerivation {
  * still reach it — the same passthrough precedent as OnSiteGeneration's
  * getCurrentOrientation. */
 export interface ElementFormSharedCtx {
-  /** WindowShading/ContextShading's editable height field. */
+  /** WindowShading/ContextShading's editable height field; also
+   * BuildingElementGround's hydrate/buildElementData (elementForms/
+   * buildingElementGround.tsx) — Ground never renders it, but preserves the
+   * legacy hydrate write for byte-identical behaviour. */
   heightInput: NumericDraftInputBinding;
   /** WindowShading's editable distance field; ContextShading's read-only computed
    * distance display. */
   distanceInput: NumericDraftInputBinding;
+  /** The unextracted wall family's (Opaque/Transparent/adjacent) width field;
+   * also BuildingElementGround's (elementForms/buildingElementGround.tsx) —
+   * Ground is the first ctx.shared consumer to need this one (the five
+   * earlier consumers never did). */
+  widthInput: NumericDraftInputBinding;
   /** The unextracted wall family's (Opaque/Transparent/Ground/adjacent) area
    * field; also WetEmitter's UFH-only area field (elementForms/wetEmitter.tsx),
    * read/written ONLY via ctx.shared — same precedent as heightInput/
@@ -197,7 +205,18 @@ export interface ElementFormRenderCtx {
   selection: ElementFormSelection | null;
   getElementById: (id: string) => Element | undefined;
   updateElement: (id: string, updates: Partial<Element>, skipAutoSave?: boolean) => void;
+  /** Generic "change the current selection" capability — BuildingElementGround's
+   * panel (elementForms/buildingElementGround.tsx) uses it so clicking a source
+   * wall's name in the "From assemblies" thickness breakdown jumps selection to
+   * it. Not assembly-calculator-specific; any module may use it to navigate. */
+  setSelection: (selection: ElementFormSelection) => void;
   getGlobalOrientationOffset: () => number;
+  /** Orchestrator-wide "Elevation above model ground" field (every family's
+   * generic elevation control, see elementSupportsGenericElevationControl).
+   * BuildingElementGround's panel clears its draft value when a newly-picked
+   * floor type no longer supports a viewer elevation — same legacy behaviour,
+   * write-only use. */
+  elementElevationInput: NumericDraftInputBinding;
   onSiteHostDerivation: OnSiteHostDerivation | null;
   selectedPvDimensionNotes: { width: string; height: string } | null;
   /** Selected element's zone, needed by WindowShading's linked-window dropdown to
