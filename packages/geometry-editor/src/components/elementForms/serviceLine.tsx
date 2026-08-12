@@ -3,19 +3,16 @@
 
 // Service-line state shared by exactly three element families —
 // ThermalBridgeLinear (TBL), MechanicalVentilationDuctwork (MVD), and
-// WaterPipework (WP) — extracted verbatim from ElementCreator ahead of those
-// families' own modules (this repo's slices 2-4). Unlike the rest of
-// elementForms/*, this file is not itself an ElementFormModule: the
-// orchestrator creates exactly ONE instance via useServiceLineFormState (the
-// "single-instance preservation" the legacy component already relied on) and
-// still reads `mode` itself for the shared shape picker, so the hook is
-// called directly by ElementCreator rather than through the ElementFormModule
-// registry. hydrateServiceLineFromElement/resetServiceLine/
-// renderServiceLineCoreFields are plain exported helpers for the trio's own
-// future hydrate/reset/renderPanel; ElementCreator does not call them yet —
-// its own hydrate/reset/renderPanel switches still address the group's
-// fields (serviceLine.lengthInput etc.) directly until the trio's modules
-// exist.
+// WaterPipework (WP) — extracted verbatim from ElementCreator alongside those
+// families' own modules. Unlike the rest of elementForms/*, this file is not
+// itself an ElementFormModule: the orchestrator creates exactly ONE instance
+// via useServiceLineFormState (the "single-instance preservation" the legacy
+// component already relied on) and still reads `mode` itself for the shared
+// shape picker, so the hook is called directly by ElementCreator and bridged
+// to the trio's modules through ElementFormStateCtx.serviceLine.
+// hydrateServiceLineFromElement/resetServiceLine/renderServiceLineCoreFields
+// are plain exported helpers the three modules call from their own
+// hydrate/reset/renderPanel.
 //
 // Moved verbatim from ElementCreator:
 // - commitServiceLineEndpointZ, including its ThermalBridgeLinear-only
@@ -212,10 +209,9 @@ export function useServiceLineFormState(args: {
   return { lengthInput, tbZ0Input, tbZ1Input, mode, actualLength };
 }
 
-/** Shared hydrate lines for the trio's length + Z0/Z1 fields (the block
- * repeated verbatim across TBL/MVD/WP's element- and global-selection hydrate
- * branches in ElementCreator). Not yet called by ElementCreator — wired in
- * once each family's own module exists. */
+/** Shared hydrate lines for the trio's length + Z0/Z1 fields (the block the
+ * legacy component repeated verbatim across TBL/MVD/WP's element- and
+ * global-selection hydrate branches), called from each module's hydrate. */
 export function hydrateServiceLineFromElement(group: ServiceLineFormGroup, element: Element): void {
   group.lengthInput.setValue('length' in element ? element.length ?? '' : '');
   const cz = element.coordinates;
@@ -228,9 +224,9 @@ export function hydrateServiceLineFromElement(group: ServiceLineFormGroup, eleme
   }
 }
 
-/** Idempotent — each trio module calls it from its own reset(). Not yet
- * called by ElementCreator's own resetFormFields; that keeps addressing the
- * group's fields directly until the trio's modules exist. */
+/** Idempotent — each trio module calls it from its own reset(), so the
+ * orchestrator's instances loop resets the shared group up to three times
+ * per resetFormFields, matching the legacy unconditional reset. */
 export function resetServiceLine(group: ServiceLineFormGroup): void {
   group.lengthInput.setValue('');
   group.tbZ0Input.setValue(0);
@@ -249,9 +245,9 @@ export interface ServiceLineCoreFieldsOptions {
  * passes lengthReadOnlyWhenVertical: false (its length field is always
  * editable); MVD/WP pass true (their length field is read-only, with
  * onChange/onBlur undefined, while mode === 'vertical' — coordinates alone
- * drive length then). Not yet called by ElementCreator's own renderPanel
- * switch — the three panels still render their own literal copies until
- * each family's module exists. */
+ * drive length then). Called from each module's renderPanel; the legacy
+ * MVD/WP copies differed only in prop order, so this single form is the
+ * canonical one. */
 export function renderServiceLineCoreFields(
   group: ServiceLineFormGroup,
   ctx: ElementFormRenderCtx,
