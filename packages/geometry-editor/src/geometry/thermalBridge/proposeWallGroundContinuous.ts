@@ -364,3 +364,22 @@ export function isGroundContactPartyWallForP1Tb(
 export function partyWallLinkedToGroundSlabForP1(pw: BuildingElementPartyWall, elements: Element[]): boolean {
   return linkedNonBasementGroundSlabForLineElement(pw, elements) !== null;
 }
+
+/**
+ * Party-wall mirror of the continuous-E6 ground veto: true when P1/P6 claims `elevationM` for this
+ * wall — a linked non-basement ground slab sits at that elevation and the wall base sits on it.
+ * P2/P3 must stand down there or the same run is counted in both families.
+ */
+export function partyWallGroundFamilyClaimsElevation(
+  pw: BuildingElementPartyWall,
+  elements: Element[],
+  floors: Floor[],
+  elevationM: number,
+): boolean {
+  const linkedGround = linkedNonBasementGroundSlabForLineElement(pw, elements);
+  if (!linkedGround) return false;
+  const groundElev = groundContactElevationMForLinkedSlab(linkedGround, floors);
+  if (Math.abs(elevationM - groundElev) > SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M) return false;
+  const baseEl = elementBaseElevationMForTb(pw, floors);
+  return Math.abs(baseEl - groundElev) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
+}

@@ -27,6 +27,7 @@ import {
   zonesCompatible,
 } from './proposeAdjacentWallJunction';
 import { partyWallVerticalExtentM, isPartyWallVerticalEnvelopeLine } from './proposePartyWallToExternalE18';
+import { partyWallGroundFamilyClaimsElevation } from './proposeWallGroundContinuous';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from './proposeFacadeOpenings';
 
@@ -77,6 +78,10 @@ export function proposePartyWallIntermediateFloorP2P3ThermalBridges(
 
       const slabZ = elementBaseElevationMForTb(adj, floors);
       if (slabZ < pExt.zLo - Z_BAND_EPS_M || slabZ > pExt.zHi + Z_BAND_EPS_M) continue;
+      // Ground-family precedence, mirroring the continuous-E6 veto: when P1/P6 claims
+      // this elevation (linked ground slab under the wall base), a conditioned plate at
+      // the same level must not add a coincident P2/P3 for the same run.
+      if (partyWallGroundFamilyClaimsElevation(pw, elements, floors, slabZ)) continue;
 
       const aExt = adjacentEnvelopeVerticalExtentM(adj, floors);
       const zLo = Math.max(pExt.zLo, aExt.zLo);
