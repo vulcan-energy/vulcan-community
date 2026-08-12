@@ -1887,6 +1887,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/elementForms/contextShading.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/contextShading.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/elementForms/electricBattery.tsx",
       "source_path": "packages/geometry-editor/src/components/elementForms/electricBattery.tsx",
       "license": "AGPL-3.0-only",
@@ -1937,6 +1945,22 @@
     {
       "path": "packages/geometry-editor/src/components/elementForms/types.ts",
       "source_path": "packages/geometry-editor/src/components/elementForms/types.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/elementForms/vents.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/vents.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/elementForms/windowShading.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/windowShading.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -2137,6 +2161,14 @@
     {
       "path": "packages/geometry-editor/src/components/OrthogonalRoomEditModal.tsx",
       "source_path": "packages/geometry-editor/src/components/OrthogonalRoomEditModal.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/ParentElementDropdown.tsx",
+      "source_path": "packages/geometry-editor/src/components/ParentElementDropdown.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

@@ -15,7 +15,6 @@ import {
   useGeometryStore,
   useGeometryStoreApi,
   ZONE_NAME_SUGGESTIONS,
-  SHADING_TYPES,
   DUCT_TYPES,
   APPLIANCE_KEYS,
   validateZone,
@@ -33,10 +32,14 @@ import {
 import { electricBatteryFormModule } from './elementForms/electricBattery';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
 import { getLightingFieldValue, lightingFormModule } from './elementForms/lighting';
+import { ParentElementDropdown } from './ParentElementDropdown';
 import { applianceFormModule } from './elementForms/appliance';
 import { hotWaterDemandFormModule } from './elementForms/hotWaterDemand';
 import { combustionAppliancesFormModule } from './elementForms/combustionAppliances';
 import { onSiteGenerationFormModule } from './elementForms/onSiteGeneration';
+import { windowShadingFormModule } from './elementForms/windowShading';
+import { contextShadingFormModule } from './elementForms/contextShading';
+import { ventsFormModule } from './elementForms/vents';
 import {
   useDecimalInput,
   useIntegerInput,
@@ -44,6 +47,10 @@ import {
   integerInputProps,
   numericDraftValueOrDefault,
   readExtraJsonRecord,
+  formatConditionalDecimals,
+  HORIZONTAL_POLYGON_PITCH_OPTIONS,
+  HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER,
+  horizontalPolygonSurfaceSelectValue,
 } from './elementForms/formPrimitives';
 import {
   useGeometrySchemaPort,
@@ -374,20 +381,6 @@ function hasReliableGroundExposedPerimeter(
   if (details.valueM > 0) return true;
   return details.shapePerimeterM > 0 && details.linkedBoundaryPerimeterM >= Math.max(0, details.shapePerimeterM - 0.05);
 }
-/** Horizontal `polygon` building elements: model stores pitch 0 (up) or 180 (down) only. */
-const HORIZONTAL_POLYGON_PITCH_OPTIONS: { value: string; label: string }[] = [
-  { value: '0', label: 'Facing up (0°)' },
-  { value: '180', label: 'Facing down (180°)' },
-];
-/** 90° must not use the same <select> value as 0° — wall-style defaults are 90 (vertical); only 0/180 are valid here. */
-const HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER = 'Select 0° (up) or 180° (down)';
-function horizontalPolygonSurfaceSelectValue(pitch: number | undefined | null): string {
-  if (typeof pitch !== 'number' || !Number.isFinite(pitch)) return '';
-  const r = Math.round(pitch);
-  if (r === 0) return '0';
-  if (r === 180) return '180';
-  return '';
-}
 // Utility function for consistent 2 decimal place formatting
 const formatToTwoDecimals = (value: number | string | undefined): string => {
   if (value === undefined || value === null || value === '') return '0.00';
@@ -411,14 +404,6 @@ const calculateZoneVolume = (
 
 const readPositiveZoneNumber = (value: number | ''): number | null => {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
-};
-
-// Utility function for conditional formatting - integers show as integers, decimals show 2dp
-const formatConditionalDecimals = (value: number | string | undefined): string => {
-  if (value === undefined || value === null || value === '') return '0';
-  const num = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
-  if (!Number.isFinite(num)) return '0';
-  return Number.isInteger(num) ? num.toString() : num.toFixed(2);
 };
 
 const INLINE_FIELD_NOTE_STYLE: React.CSSProperties = {
@@ -919,58 +904,6 @@ interface ElementCreatorProps {
   externalDetailCataloguePort?: ExternalDetailCataloguePort;
 }
 
-// Parent Element Dropdown Component
-interface ParentElementDropdownProps {
-  value: string;
-  onChange: (value: string) => void;
-  elementType: ElementType;
-  zoneId: string;
-  placeholder: string;
-  selfId?: string;
-}
-
-const ParentElementDropdown: React.FC<ParentElementDropdownProps> = ({
-  value,
-  onChange,
-  elementType,
-  zoneId,
-  placeholder,
-  selfId
-}) => {
-  const getAvailableParentElements = useGeometryStore((s) => s.getAvailableParentElements);
-  const availableParents = getAvailableParentElements(elementType, zoneId, selfId);
-
-  return (
-    <div className="element-input" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-      <div style={{ flex: 1 }}>
-        <StandardDropdown
-          value={value}
-          onChange={onChange}
-          options={[
-            { value: '', label: placeholder },
-            ...availableParents.map((parent) => ({
-              value: parent.name,
-              label: `${parent.name || '(Unnamed)'} (${parent.type === 'BuildingElementOpaque' ? 'Opaque' : parent.type})`
-            }))
-          ]}
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {value && (
-        <button
-          type="button"
-          className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"
-          onClick={() => onChange('')}
-          title="Unlink parent element"
-        >
-          Unlink
-        </button>
-      )}
-    </div>
-  );
-};
-
 // eslint-disable-next-line react-refresh/only-export-components -- geometry helper shared with tests.
 export function projectLinearChildOntoParentSegment(
   child: Element,
@@ -1353,9 +1286,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const removePlaceholder = useGeometryStore((s) => s.removePlaceholder);
   const updateZone = useGeometryStore((s) => s.updateZone);
   const removeElement = useGeometryStore((s) => s.removeElement);
-  const calculateContextShadingAngles = useGeometryStore((s) => s.calculateContextShadingAngles);
-  const calculateShadingAngularRange = useGeometryStore((s) => s.calculateShadingAngularRange);
-  const calculateContextShadingDistance = useGeometryStore((s) => s.calculateContextShadingDistance);
   const duplicateElement = useGeometryStore((s) => s.duplicateElement);
   const setSelectedElementIds = useGeometryStore((s) => s.setSelectedElementIds);
   const setCurrentFloorZ = useGeometryStore((s) => s.setCurrentFloorZ);
@@ -2460,15 +2390,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const roundToInt = (value: number) => Math.round(value ?? 0);
 
   // NEW: CSV v3 element state variables
-  // WindowShading
-  const [linkedWindow, setLinkedWindow] = useKeyedState(
-    selectedDraftKey,
-    selectedParentElementValue,
-  );
-  const [shadingType, setShadingType] = useState<'' | 'object' | 'overhang' | 'sidefinright' | 'sidefinleft' | 'reveal'>('');
-  const depthInput = useDecimalInput('', commitElementNumericField('depth'), { commitOnChange: true });
+  // WindowShading's own exclusive state (linkedWindow/shadingType/depthInput/
+  // transparencyInput) now lives in its module (elementForms/windowShading.tsx).
+  // distanceInput is shared with ContextShading and the not-yet-extracted wall
+  // family (see ElementFormSharedCtx) and stays here.
   const distanceInput = useDecimalInput('', commitElementNumericField('distance'), { commitOnChange: true });
-  const transparencyInput = useDecimalInput('', commitElementNumericField('transparency'), { commitOnChange: true });
 
   // MechanicalVentilationDuctwork
   const [ductType, setDuctType] = useState<'' | 'supply' | 'extract' | 'intake' | 'exhaust'>('');
@@ -2516,14 +2442,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // WaterPipework
   const [location, setLocation] = useState<'' | 'internal' | 'external'>('');
 
-  // ContextShading
-  const [contextShadingType, setContextShadingType] = useState<'' | 'obstacle' | 'overhang'>('');
-  const startAngleInput = useIntegerInput('', commitElementNumericField('start_angle'), { commitOnChange: true });
-  const endAngleInput = useIntegerInput('', commitElementNumericField('end_angle'), { commitOnChange: true });
+  // ContextShading's exclusive state now lives in its module
+  // (elementForms/contextShading.tsx).
 
-  // Vents
-  const midHeightAirFlowPathInput = useDecimalInput('', commitElementNumericField('mid_height_air_flow_path'), { commitOnChange: true });
-  const areaCm2Input = useDecimalInput('', commitElementNumericField('area_cm2'), { commitOnChange: true });
+  // Vents' exclusive state now lives in its module (elementForms/vents.tsx).
 
   // MechanicalVentilation
   const [ventType, setVentType] = useState<string>('');
@@ -2589,6 +2511,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     { commitOnChange: true },
   );
 
+  // Vents' optimistic DISPLAY write when a parent wall/window is chosen — mirrors
+  // the parent's pitch/orientation360 into the shared inputs so the panel shows the
+  // inherited values immediately, without Vents reading/owning the shared pitch
+  // state directly (see ElementFormSharedCtx).
+  const applyParentPitchOrientationForDisplay = (
+    parentPitch: number | undefined,
+    parentOrientation: number | undefined,
+  ) => {
+    if (typeof parentPitch === 'number') setPitch(parentPitch);
+    if (typeof parentOrientation === 'number') setOrientation360(parentOrientation);
+  };
+
   const elementFormStateCtx = {
     commitElementNumericField,
     commitExistingElementDraft,
@@ -2599,6 +2533,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     getGlobalOrientationOffset: () => geometryStore.getState().globalOrientationOffset,
     getCurrentOrientation,
     selectedElementV,
+    shared: {
+      heightInput,
+      distanceInput,
+      parentElement,
+      setParentElement,
+      pitch,
+      setPitch,
+      orientation360,
+      setOrientation360,
+      applyOrientationToGeometry,
+      applyParentPitchOrientationForDisplay,
+    },
+    elementIds,
+    elementsById,
   };
   // ElectricBattery
   const electricBatteryFormState = electricBatteryFormModule.useFormState(elementFormStateCtx);
@@ -2614,6 +2562,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const combustionAppliancesFormState = combustionAppliancesFormModule.useFormState(elementFormStateCtx);
   // OnSiteGeneration
   const onSiteGenerationFormState = onSiteGenerationFormModule.useFormState(elementFormStateCtx);
+  // WindowShading
+  const windowShadingFormState = windowShadingFormModule.useFormState(elementFormStateCtx);
+  // ContextShading
+  const contextShadingFormState = contextShadingFormModule.useFormState(elementFormStateCtx);
+  // Vents
+  const ventsFormState = ventsFormModule.useFormState(elementFormStateCtx);
   const elementFormInstances = {
     ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
     ThermalBridgePoint: bindElementFormModule(thermalBridgePointFormModule, thermalBridgePointFormState),
@@ -2622,6 +2576,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     HotWaterDemand: bindElementFormModule(hotWaterDemandFormModule, hotWaterDemandFormState),
     CombustionAppliances: bindElementFormModule(combustionAppliancesFormModule, combustionAppliancesFormState),
     OnSiteGeneration: bindElementFormModule(onSiteGenerationFormModule, onSiteGenerationFormState),
+    WindowShading: bindElementFormModule(windowShadingFormModule, windowShadingFormState),
+    ContextShading: bindElementFormModule(contextShadingFormModule, contextShadingFormState),
+    Vents: bindElementFormModule(ventsFormModule, ventsFormState),
   } satisfies Partial<Record<ElementType, ElementFormInstance>>;
 
   // Floor-move base-height sync, shared across several families; OnSiteGeneration's
@@ -3934,12 +3891,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         }
         // NEW: Load CSV v3 element types
         else if (element.type === 'WindowShading') {
-          setLinkedWindow('parent_element' in element ? element.parent_element ?? '' : '');
-          setShadingType('shading_type' in element ? element.shading_type ?? '' : '');
-          heightInput.setValue('height' in element ? element.height ?? '' : '');
-          depthInput.setValue('depth' in element ? element.depth ?? '' : '');
-          distanceInput.setValue('distance' in element ? element.distance ?? '' : '');
-          transparencyInput.setValue('transparency' in element ? element.transparency ?? '' : '');
+          elementFormInstances.WindowShading.hydrate(element);
         } else if (element.type === 'Lighting') {
           elementFormInstances.Lighting.hydrate(element);
         } else if (element.type === 'MechanicalVentilationDuctwork') {
@@ -4011,18 +3963,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } else if (element.type === 'HotWaterDemand') {
           elementFormInstances.HotWaterDemand.hydrate(element);
         } else if (element.type === 'ContextShading') {
-          setContextShadingType('shading_type' in element ? element.shading_type ?? '' : '');
-          startAngleInput.setValue('start_angle' in element && typeof element.start_angle === 'number' ? Math.round(element.start_angle) : '');
-          endAngleInput.setValue('end_angle' in element && typeof element.end_angle === 'number' ? Math.round(element.end_angle) : '');
-          distanceInput.setValue('distance' in element ? element.distance ?? '' : '');
-          heightInput.setValue('height' in element ? element.height ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
+          elementFormInstances.ContextShading.hydrate(element);
         }
         // NEW: Load InfiltrationVentilation element types
         else if (element.type === 'Vents') {
-          midHeightAirFlowPathInput.setValue('mid_height_air_flow_path' in element ? element.mid_height_air_flow_path ?? '' : '');
-          areaCm2Input.setValue('area_cm2' in element ? element.area_cm2 ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
+          elementFormInstances.Vents.hydrate(element);
         } else if (element.type === 'MechanicalVentilation') {
           setVentType('vent_type' in element ? element.vent_type ?? '' : '');
           setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
@@ -4090,18 +4035,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } else if (element.type === 'HotWaterDemand') {
           elementFormInstances.HotWaterDemand.hydrate(element);
         } else if (element.type === 'ContextShading') {
-          setContextShadingType('shading_type' in element ? element.shading_type ?? '' : '');
-          startAngleInput.setValue('start_angle' in element && typeof element.start_angle === 'number' ? Math.round(element.start_angle) : '');
-          endAngleInput.setValue('end_angle' in element && typeof element.end_angle === 'number' ? Math.round(element.end_angle) : '');
-          distanceInput.setValue('distance' in element ? element.distance ?? '' : '');
-          heightInput.setValue('height' in element ? element.height ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
+          elementFormInstances.ContextShading.hydrate(element);
         }
         // NEW: Load InfiltrationVentilation element types
         else if (element.type === 'Vents') {
-          midHeightAirFlowPathInput.setValue('mid_height_air_flow_path' in element ? element.mid_height_air_flow_path ?? '' : '');
-          areaCm2Input.setValue('area_cm2' in element ? element.area_cm2 ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
+          elementFormInstances.Vents.hydrate(element);
         } else if (element.type === 'MechanicalVentilationDuctwork') {
           setDuctType('duct_type' in element ? element.duct_type ?? '' : '');
           lengthInput.setValue('length' in element ? element.length ?? '' : '');
@@ -4396,16 +4334,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         case 'distance':
           return (!value || value === 0) && ['WindowShading', 'ContextShading'].includes(elementType) ? 'Distance cannot be 0' : null;
         case 'windowShadingHeight':
-          return (!value || value === 0) && elementType === 'WindowShading' && shadingType === 'object' ? 'Height cannot be 0' : null;
+          return (!value || value === 0) && elementType === 'WindowShading' && windowShadingFormState.shadingType === 'object' ? 'Height cannot be 0' : null;
         case 'windowShadingTransparency':
           return (
             value === '' ||
             value === undefined ||
             numericValue < 0 ||
             numericValue > 1
-          ) && elementType === 'WindowShading' && shadingType === 'object' ? 'Transparency must be between 0 and 1' : null;
+          ) && elementType === 'WindowShading' && windowShadingFormState.shadingType === 'object' ? 'Transparency must be between 0 and 1' : null;
         case 'windowShadingDepth':
-          return (!value || value === 0) && elementType === 'WindowShading' && shadingType !== 'object' ? 'Depth cannot be 0' : null;
+          return (!value || value === 0) && elementType === 'WindowShading' && windowShadingFormState.shadingType !== 'object' ? 'Depth cannot be 0' : null;
         case 'unitNumber':
           return (!value || value === 0) && elementType === 'WetEmitter' && ['radiator', 'fancoil'].includes(subcategory) ? 'Unit Number cannot be 0' : null;
         case 'flowrate':
@@ -4476,12 +4414,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     linearThermalTransmittanceInput.setValue('');
 
     // NEW: CSV v3 element state variables
-    // WindowShading
-    setLinkedWindow('');
-    setShadingType('');
-    depthInput.setValue('');
+    // WindowShading's own reset lines now live in its module (via the
+    // elementFormInstances loop below). distanceInput is shared with
+    // ContextShading and the not-yet-extracted wall family; stays here.
     distanceInput.setValue('');
-    transparencyInput.setValue('');
 
     // MechanicalVentilationDuctwork
     setDuctType('');
@@ -4496,15 +4432,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // WaterPipework
     setLocation('');
 
-    // ContextShading
-    setContextShadingType('');
-    startAngleInput.setValue('');
-    endAngleInput.setValue('');
+    // ContextShading's own reset lines now live in its module (via the
+    // elementFormInstances loop below).
 
     // NEW: InfiltrationVentilation element state variables
-    // Vents
-    midHeightAirFlowPathInput.setValue('');
-    areaCm2Input.setValue('');
+    // Vents' own reset lines now live in its module (via the
+    // elementFormInstances loop below).
 
     // MechanicalVentilation
     setVentType('');
@@ -6055,15 +5988,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
       // NEW: CSV v3 element types
       case 'WindowShading':
-        return {
-          ...baseData,
-          parent_element: linkedWindow,
-          shading_type: shadingType || undefined,
-          depth: depthInput.value || undefined,
-          height: heightInput.value || undefined,
-          distance: distanceInput.value || undefined,
-          transparency: transparencyInput.value || undefined
-        } as Partial<Element>;
+        return elementFormInstances.WindowShading.buildElementData({ baseData, elementZoneId });
 
       case 'Lighting':
         return elementFormInstances.Lighting.buildElementData({ baseData, elementZoneId });
@@ -6137,35 +6062,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         return elementFormInstances.HotWaterDemand.buildElementData({ baseData, elementZoneId });
 
 	      case 'ContextShading':
-	        return {
-	          ...baseData,
-		          shading_type: contextShadingType || undefined,
-		          start_angle: startAngleInput.value === '' ? undefined : startAngleInput.value,
-		          end_angle: endAngleInput.value === '' ? undefined : endAngleInput.value,
-	          distance: distanceInput.value,
-	          height: heightInput.value,
-          parent_element: parentElement || null,
-          zoneId: undefined // Global object
-        } as Partial<Element>;
+	        return elementFormInstances.ContextShading.buildElementData({ baseData, elementZoneId });
 
       // NEW: InfiltrationVentilation element types
-      case 'Vents': {
-        // Find the selected wall/window parent to inherit orientation360 and pitch
-        const ventParentElement = elementIds
-          .map(id => elementsById[id])
-          .find(e => e && e.name === parentElement && (e.type === 'BuildingElementOpaque' || e.type === 'BuildingElementTransparent')) as { orientation360?: number; pitch?: number } | undefined;
-	        const inheritedOrientation = typeof ventParentElement?.orientation360 === 'number' ? ventParentElement.orientation360 : undefined;
-	        const inheritedPitch = typeof ventParentElement?.pitch === 'number' ? ventParentElement.pitch : undefined;
-	        return {
-	          ...baseData,
-	          mid_height_air_flow_path: midHeightAirFlowPathInput.value,
-	          area_cm2: areaCm2Input.value,
-          parent_element: parentElement,
-          orientation360: inheritedOrientation,
-          pitch: inheritedPitch,
-          zoneId: undefined // Global object
-        } as Partial<Element>;
-      }
+      case 'Vents':
+        return elementFormInstances.Vents.buildElementData({ baseData, elementZoneId });
 
       case 'MechanicalVentilation': {
         const parent = getParentByName(elementsById, elementIds, parentElement);
@@ -6261,9 +6162,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       case 'HotWaterDemand':
         return elementFormInstances.HotWaterDemand.subtype();
       case 'WindowShading':
-        return shadingType;
+        return elementFormInstances.WindowShading.subtype();
       case 'ContextShading':
-        return contextShadingType || undefined;
+        return elementFormInstances.ContextShading.subtype();
       case 'CombustionAppliances':
         return elementFormInstances.CombustionAppliances.subtype();
       case 'OnSiteGeneration':
@@ -6888,6 +6789,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       getGlobalOrientationOffset: () => geometryStore.getState().globalOrientationOffset,
       onSiteHostDerivation,
       selectedPvDimensionNotes,
+      elementZoneId,
+      elementIds,
+      elementsById,
     };
     switch (elementType) {
       case 'BuildingElementOpaque':
@@ -8409,166 +8313,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
       // NEW: CSV v3 element types
       case 'WindowShading':
-        return (
-          <>
-            {renderFieldLabel('Linked Window:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element', 'linked_window'])}>
-              <StandardDropdown
-                value={linkedWindow}
-                onChange={(value) => {
-                  setLinkedWindow(value);
-                  // Update the element with the new parent_element
-                  if (selection && selection.type === 'element') {
-                    updateElement(selection.id, { parent_element: value });
-
-                    // If linking a WindowShading to a window, project the point to the nearest point on that window
-                    try {
-                      const current = getElementById(selection.id);
-                      // Only project when subtype is constrained (NOT 'object')
-                      if (current && current.type === 'WindowShading' && (current as any).shading_type !== 'object') {
-                        const parent = elementIds
-                          .map(id => elementsById[id])
-                          .find(el => el && el.type === 'BuildingElementTransparent' && el.name === value);
-                        if (parent && current.coordinates && current.coordinates.length >= 1 && parent.coordinates && parent.coordinates.length === 2) {
-                          const p = current.coordinates[0];
-                          const [A, B] = parent.coordinates as Array<{x:number,y:number,z:number}>;
-                          const vx = B.x - A.x; const vy = B.y - A.y; const v2 = vx*vx + vy*vy || 1;
-                          const tRaw = ((p.x - A.x) * vx + (p.y - A.y) * vy) / v2;
-                          const t = Math.max(0, Math.min(1, tRaw));
-                          const proj = { x: A.x + t * vx, y: A.y + t * vy, z: p.z };
-                          updateElement(selection.id, { coordinates: [proj] });
-                        }
-                      }
-                    } catch { /* swallow: best-effort */ }
-                  }
-                }}
-                options={[
-                  { value: '', label: 'Select a window' },
-                  ...elementIds
-                    .map(id => elementsById[id])
-                    .filter(el => el && el.type === 'BuildingElementTransparent' && el.zoneId === elementZoneId)
-                    .map(window => ({ value: window.name, label: window.name }))
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Shading Type:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['shadingType', 'shading_type'])}>
-              <StandardDropdown
-                value={shadingType}
-                onChange={(value) => {
-                  const nextShadingType = value as typeof shadingType;
-                  setShadingType(nextShadingType);
-                  // If switching away from 'object' to a constrained subtype, and parent exists,
-                  // re-project current point back onto the parent window axis
-                  try {
-                    if (selection && selection.type === 'element') {
-                      const el = getElementById(selection.id);
-                      if (el && el.type === 'WindowShading' && (el as any).parent_element && nextShadingType && nextShadingType !== 'object') {
-                        const parent = elementIds
-                          .map(id => elementsById[id])
-                          .find(e => e && e.type === 'BuildingElementTransparent' && e.name === (el as any).parent_element);
-                        if (parent && parent.coordinates && parent.coordinates.length === 2 && el.coordinates && el.coordinates.length >= 1) {
-                          const p = el.coordinates[0];
-                          const [A,B] = parent.coordinates as Array<{x:number,y:number,z:number}>;
-                          const vx = B.x - A.x; const vy = B.y - A.y; const v2 = vx*vx + vy*vy || 1;
-                          const t = Math.max(0, Math.min(1, ((p.x - A.x) * vx + (p.y - A.y) * vy) / v2));
-                          const proj = { x: A.x + t * vx, y: A.y + t * vy, z: p.z };
-                          updateElement(selection.id, { coordinates: [proj], shading_type: nextShadingType as any });
-                          return;
-                        }
-                      }
-                    }
-                  } catch { /* swallow: best-effort */ }
-                  if (selection && selection.type === 'element') {
-                    updateElement(selection.id, { shading_type: nextShadingType || undefined as any });
-                  }
-                }}
-                options={[
-                  { value: '', label: 'Select shading type' },
-                  ...SHADING_TYPES.map(type => ({ value: type, label: type })),
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {shadingType === '' ? null : shadingType === 'object' ? (
-              <>
-                {renderFieldLabel('Height (m):', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('height')}>
-                  <StandardInput
-                    {...decimalInputProps(heightInput)}
-                    unit={fieldUnit('height')}
-                    step="0.01"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                {renderFieldLabel('Distance (m):', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('distance')}>
-                  <StandardInput
-                    {...decimalInputProps(distanceInput)}
-                    unit={fieldUnit('distance')}
-                    step="0.01"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                  <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('distance', distanceInput.value)} issue={getFieldValidationIssue('distance', distanceInput.value) || undefined} />
-                </div>
-                {renderFieldLabel('Transparency:', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('transparency')}>
-                  <StandardInput
-                    {...decimalInputProps(transparencyInput)}
-                    unit={fieldUnit('transparency')}
-                    step="0.01"
-                    min="0"
-                    max="1"
-                    required
-                    variant="ghost"
-                    size="md"
-                  />
-                  <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('windowShadingTransparency', transparencyInput.value)} issue={getFieldValidationIssue('windowShadingTransparency', transparencyInput.value) || undefined} />
-                </div>
-              </>
-            ) : (
-              <>
-                {renderFieldLabel('Depth (m):', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('depth')}>
-                  <StandardInput
-                    {...decimalInputProps(depthInput)}
-                    unit={fieldUnit('depth')}
-                    step="0.01"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                  />
-                  <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('windowShadingDepth', depthInput.value)} issue={getFieldValidationIssue('windowShadingDepth', depthInput.value) || undefined} />
-                </div>
-                {renderFieldLabel('Distance (m):', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('distance')}>
-                  <StandardInput
-                    {...decimalInputProps(distanceInput)}
-                    unit={fieldUnit('distance')}
-                    step="0.01"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                  <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('distance', distanceInput.value)} issue={getFieldValidationIssue('distance', distanceInput.value) || undefined} />
-                </div>
-              </>
-            )}
-          </>
-        );
+        return elementFormInstances.WindowShading.renderPanel(formRenderCtx);
 
       case 'Lighting':
         return elementFormInstances.Lighting.renderPanel(formRenderCtx);
@@ -9015,365 +8760,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         return elementFormInstances.HotWaterDemand.renderPanel(formRenderCtx);
 
       case 'ContextShading':
-        return (
-          <>
-            {renderFieldLabel('Shading Type:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['shadingType', 'shading_type'])}>
-              <StandardDropdown
-                value={contextShadingType}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'ContextShading'>['shading_type'];
-                  setContextShadingType(nextValue);
-                  commitExistingElementDraft({ shading_type: nextValue });
-                }}
-                options={[
-                  { value: 'obstacle', label: 'Obstacle' },
-                  { value: 'overhang', label: 'Overhang' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-
-            {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
-            <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element'])}>
-              <StandardDropdown
-                value={parentElement || ''}
-                onChange={(value) => {
-                  setParentElement(value || '');
-                  // Auto-calculate angles AND distance when parent changes
-                  if (value && selection.type === 'element') {
-                    const contextShading = getElementById(selection.id) as any;
-                    const parentEl = elementIds
-                      .map(id => elementsById[id])
-                      .find(el => el && el.name === value);
-                    if (contextShading && parentEl) {
-                      const { start_angle, end_angle } = calculateContextShadingAngles(
-                        contextShading,
-                        parentEl,
-                        geometryStore.getState().globalOrientationOffset,
-                      );
-                      startAngleInput.setValue(start_angle);
-                      endAngleInput.setValue(end_angle);
-                      // Calculate and store distance immediately
-                      const distance = calculateContextShadingDistance(contextShading, parentEl);
-                      updateElement(selection.id, { parent_element: value, start_angle, end_angle, distance });
-                    }
-                  }
-                }}
-                options={[
-                  { value: '', label: 'None' },
-                  ...elementIds
-                    .map(id => elementsById[id])
-                    .filter(el => el && ['BuildingElementGround', 'BuildingElementOpaque', ...ADJACENT_LIKE_ELEMENT_TYPES].includes(el.type))
-                    .map(el => ({ value: el!.name, label: `${el!.name} (${el!.type})` }))
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-
-            {renderFieldLabel('Start Angle (degrees):', elementType)}
-            <div className="element-input">
-	              <StandardInput
-	                type="text"
-	                inputMode="numeric"
-                value={(() => {
-                  // Calculate angles in real-time for ContextShading elements using the new angular range approach
-                  if (selection.type === 'element' && elementType === 'ContextShading') {
-                    const contextShading = getElementById(selection.id) as any;
-                    const parentEl = elementIds
-                      .map(id => elementsById[id])
-                      .find(el => el && el.name === parentElement);
-                    if (contextShading && parentEl) {
-                      const offset = geometryStore.getState().globalOrientationOffset;
-                      const range = calculateShadingAngularRange(contextShading, parentEl, offset);
-                      const shownStart = range.start_angle;
-                      return Number.isFinite(shownStart) ? Number(shownStart.toFixed(2)) : 0;
-                    }
-                  }
-                  return startAngleInput.value;
-                })()}
-                unit={fieldUnit('start_angle')}
-                onChange={startAngleInput.handleInputChange}
-                onBlur={startAngleInput.handleBlur}
-                step="1"
-                min="0"
-                max="360"
-                required
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('End Angle (degrees):', elementType)}
-            <div className="element-input">
-	              <StandardInput
-	                type="text"
-	                inputMode="numeric"
-                value={(() => {
-                  // Calculate angles in real-time for ContextShading elements using the new angular range approach
-                  if (selection.type === 'element' && elementType === 'ContextShading') {
-                    const contextShading = getElementById(selection.id) as any;
-                    const parentEl = elementIds
-                      .map(id => elementsById[id])
-                      .find(el => el && el.name === parentElement);
-                    if (contextShading && parentEl) {
-                      const offset = geometryStore.getState().globalOrientationOffset;
-                      const range = calculateShadingAngularRange(contextShading, parentEl, offset);
-                      const shownEnd = range.end_angle;
-                      return Number.isFinite(shownEnd) ? Number(shownEnd.toFixed(2)) : 0;
-                    }
-                  }
-                  return endAngleInput.value;
-                })()}
-                unit={fieldUnit('end_angle')}
-                onChange={endAngleInput.handleInputChange}
-                onBlur={endAngleInput.handleBlur}
-                step="1"
-                min="0"
-                max="360"
-                required
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Distance (m):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs('distance')}>
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                value={(() => {
-                  if (selection.type === 'element' && elementType === 'ContextShading') {
-                    const contextShading = getElementById(selection.id) as any;
-                    const parentEl = elementIds
-                      .map(id => elementsById[id])
-                      .find(el => el && el.name === parentElement);
-                    if (contextShading && parentEl) {
-                      const d = calculateContextShadingDistance(contextShading, parentEl);
-                      return Number.isFinite(d) ? Number(d.toFixed(2)) : 0;
-                    }
-                  }
-                  const d = typeof distanceInput.value === 'number' ? distanceInput.value : parseFloat(String(distanceInput.value)) || 0;
-                  return Number.isFinite(d) ? Number(d.toFixed(2)) : 0;
-                })()}
-                unit={fieldUnit('distance')}
-                onChange={() => {}}
-                disabled
-                step="0.01"
-                min="0"
-                required
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('distance', distanceInput.value)} issue={getFieldValidationIssue('distance', distanceInput.value) || undefined} />
-            </div>
-            {renderFieldLabel('Height (m):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs('height')}>
-              <StandardInput
-                {...decimalInputProps(heightInput)}
-                unit={fieldUnit('height')}
-                step="0.01"
-                min="0"
-                required
-                variant="ghost"
-                size="md"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('height', heightInput.value)} issue={getFieldValidationIssue('height', heightInput.value) || undefined} />
-            </div>
-          </>
-        );
+        return elementFormInstances.ContextShading.renderPanel(formRenderCtx);
 
       // NEW: InfiltrationVentilation element types
       case 'Vents':
-        return (
-          <>
-            {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
-            <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element'])}>
-              <ParentElementDropdown
-                value={parentElement}
-                onChange={(value) => {
-                  setParentElement(value);
-                  // Auto-inherit pitch and orientation from parent element
-                  if (value) {
-                    const parent = elementIds
-                      .map(id => elementsById[id])
-                      .find(e => e && e.name === value);
-                    if (parent && ('pitch' in parent || 'orientation360' in parent)) {
-                      if ('pitch' in parent && parent.pitch !== undefined) {
-                        setPitch(parent.pitch);
-                      }
-                      if ('orientation360' in parent && parent.orientation360 !== undefined) {
-                        setOrientation360(parent.orientation360);
-                      }
-                    }
-                  }
-                  // Update the element in the store with the new parent_element (both placeholder and non-placeholder)
-                  if (selection && (selection.type === 'element' || selection.type === 'global')) {
-                    updateElement(selection.id, { parent_element: value });
-                  }
-                }}
-                elementType={elementType}
-                zoneId="" // Global object - can select from any zone
-                placeholder="Select a parent wall/window element (required)"
-                selfId={selection.type === 'element' ? selection.id : undefined}
-              />
-            </div>
-            {renderFieldLabel('Mid Height Air Flow Path (m):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['midHeightAirFlowPath', 'mid_height_air_flow_path'])}>
-              <StandardInput
-                {...decimalInputProps(midHeightAirFlowPathInput)}
-                unit={fieldUnit('mid_height_air_flow_path')}
-                step="0.1"
-                min="0"
-                required
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-                  <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('midHeightAirFlowPath', midHeightAirFlowPathInput.value)} issue={getFieldValidationIssue('midHeightAirFlowPath', midHeightAirFlowPathInput.value) || undefined} />
-            </div>
-            {renderFieldLabel('Area (cm²):', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['areaCm2', 'area_cm2'])}>
-              <StandardInput
-                {...decimalInputProps(areaCm2Input)}
-                unit={fieldUnit('area_cm2')}
-                step="1"
-                min="0"
-                required
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-                  <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('areaCm2', areaCm2Input.value)} issue={getFieldValidationIssue('areaCm2', areaCm2Input.value) || undefined} />
-            </div>
-            {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
-            <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('orientation360')}>
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                value={getCurrentOrientation(getCurrentElementData() as Element)}
-                unit={fieldUnit('orientation360')}
-                onChange={(e) => setOrientation360(Math.round(parseFloat(e.target.value) || 0))}
-                onBlur={() => {
-                  if (!Number.isFinite(orientation360)) return;
-                  applyOrientationToGeometry(orientation360);
-                }}
-                step="1"
-                min="0"
-                max="360"
-                readOnly={!!parentElement}
-                variant="ghost"
-                size="md"
-              />
-              {parentElement && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {parentElement}
-                </div>
-              )}
-            </div>
-            {renderFieldLabel(selectedShape === 'polygon' ? 'Surface facing:' : 'Pitch (degrees):', elementType, 'pitch')}
-            <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('pitch')}>
-              {selectedShape === 'polygon' ? (
-                <StandardDropdown
-                  value={horizontalPolygonSurfaceSelectValue(horizontalPolygonControlPitch)}
-                  unit={fieldUnit('pitch')}
-                  onChange={(value) => {
-                    if (value !== '0' && value !== '180') return;
-                    const next = value === '180' ? 180 : 0;
-                    setPitch(next);
-                    if (selection.type === 'element') {
-                      updateElement(selection.id, { pitch: next });
-                    }
-                  }}
-                  options={HORIZONTAL_POLYGON_PITCH_OPTIONS}
-                  placeholder={HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER}
-                  variant="ghost"
-                  size="md"
-                  disabled={!!parentElement}
-                />
-	              ) : (
-                  <StandardInput
-                    type="text"
-                    inputMode="numeric"
-                  value={formatConditionalDecimals(pitch)}
-                  unit={fieldUnit('pitch')}
-                  onChange={(e) => {
-                    const newPitch = parseFloat(e.target.value) || 0;
-
-                    // Check for shape-pitch mismatches before updating
-                    if (selection.type === 'element') {
-                      const currentElement = getElementById(selection.id);
-                      if (currentElement) {
-                        const currentShape = getElementShape(currentElement);
-
-                        // For polygons: only allow 0° or 180° (horizontal surfaces)
-                        if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
-                          const ok = window.confirm(
-                            `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
-                          );
-                          if (ok) {
-                            // Keep same coordinates, just update pitch - sloped-polygon uses same coordinate structure
-                            const roundedPitch = Math.round(newPitch);
-                            updateElement(currentElement.id, { pitch: roundedPitch });
-                            setPitch(roundedPitch);
-                            return;
-                          } else {
-                            // Reset to 0° if user cancels
-                            setPitch(0);
-                            updateElement(selection.id, { pitch: 0 });
-                            return;
-                          }
-                        }
-
-                        // For lines: suggest polygon conversion for horizontal surfaces
-                        if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
-                          const ok = window.confirm(
-                            `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
-                          );
-                          if (ok) {
-                            const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
-                            const roundedPitch = Math.round(newPitch);
-                            updateElement(currentElement.id, { coordinates: nextCoords, pitch: roundedPitch });
-                          }
-                        }
-                      }
-                    }
-
-                    const roundedPitch = Math.round(newPitch);
-                    setPitch(roundedPitch);
-                    // Only update pitch, don't touch coordinates
-                    if (selection.type === 'element') {
-                      updateElement(selection.id, { pitch: roundedPitch });
-                    }
-                  }}
-                  step="1"
-                  min="0"
-                  max="180"
-                  readOnly={!!parentElement}
-                  variant="ghost"
-                  style={{ fontFamily: 'Clash Grotesk, sans-serif', fontWeight: 400 }}
-                />
-              )}
-              {selectedShape !== 'polygon' && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  {pitch === 0
-                    ? 'Facing up (horizontal)'
-                    : pitch === 90
-                      ? 'Vertical'
-                      : pitch === 180
-                        ? 'Facing down (horizontal)'
-                        : 'Angled surface'}
-                </div>
-              )}
-              {parentElement && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {parentElement}
-                </div>
-              )}
-            </div>
-          </>
-        );
+        return elementFormInstances.Vents.renderPanel(formRenderCtx);
 
       case 'MechanicalVentilation': {
         const mechanicalVentilationCanBeHosted = canMechanicalVentilationInheritHostPlacement(ventType);
