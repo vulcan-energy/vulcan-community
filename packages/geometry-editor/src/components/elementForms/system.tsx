@@ -72,19 +72,27 @@
 // orchestrator-side (option (b) from the brief's item 8), NOT moved into this
 // module's renderPanel. This module exposes pendingSystemAction/
 // setPendingSystemAction/confirmSystemSourceSwitch on its returned state for
-// the orchestrator's tail-rendered modal to read. Moving the modal into
-// renderPanel is provably NOT behaviour-preserving: resetFormFields has never
-// cleared pendingSystemAction (a pre-existing gap the brief defers to a later
-// simplify commit, decision (g)), so a pending confirm can currently survive
-// a selection change to ANY other element/zone/dormer — but renderPanel only
-// mounts while `elementType === 'System' && (selection.type === 'element' ||
-// 'global')`. Moving the modal inside would make it vanish the instant
-// selection changes away, which the orchestrator-tail placement (mounted
-// unconditionally in `body`, outside any selection/elementType gate) does not
-// do today. formatSystemPresetName and PendingSystemAction are exported here
-// (per the brief's move list) and imported back into ElementCreator.tsx for
-// the modal's title/message text — the same "import a helper back from its
+// the orchestrator's tail-rendered modal to read. That placement decision is
+// unchanged by the simplify-commit fix below: renderPanel only mounts while
+// `elementType === 'System' && (selection.type === 'element' || 'global')`,
+// so moving the modal inside would still make it vanish (not close, just
+// unmount mid-confirm with no onClose/onConfirm run) the instant selection
+// changes away — the orchestrator-tail placement (mounted unconditionally in
+// `body`, outside any selection/elementType gate) does not do that.
+// formatSystemPresetName and PendingSystemAction are exported here (per the
+// brief's move list) and imported back into ElementCreator.tsx for the
+// modal's title/message text — the same "import a helper back from its
 // module" pattern already used for e.g. getLightingFieldValue.
+//
+// INTENTIONAL BEHAVIOUR FIX (slice-5 brief decision (g), landed in the
+// simplify commit): legacy resetFormFields never cleared pendingSystemAction,
+// so a pending confirm could survive a selection change to ANY other
+// element/zone/dormer. reset() below now calls setPendingSystemAction(null)
+// — see its own comment for the mechanics. That closes the modal itself on
+// selection change too (isOpen={!!systemFormState.pendingSystemAction} in
+// ElementCreator.tsx reads this module's state live), which is a genuine
+// behaviour change from the pre-fix leak, not a further argument for
+// relocating the modal above.
 //
 // systemPresetOptions/preset-loading effect: uses ctx.workspaceResourcePort
 // (stage-1 ctx addition) exactly as the brief anticipated. useKeyedState
@@ -753,10 +761,18 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
     state.setSystemExtraJson(null);
     state.setSystemUiMode('presets');
     state.prevSystemSelectionIdRef.current = null;
-    // pendingSystemAction is intentionally NOT reset here — resetFormFields
-    // never cleared it either (see module header's "DeleteConfirmModal"
-    // note); fixing that gap is deferred to the later simplify commit
-    // (slice-5 brief decision (g)), out of scope for this stage.
+
+    // INTENTIONAL BEHAVIOUR FIX (slice-5 brief decision (g)): legacy
+    // resetFormFields never cleared pendingSystemAction, so a pending
+    // source-switch confirm (the DeleteConfirmModal orchestrator-tail-
+    // renders whenever `!!systemFormState.pendingSystemAction`) could
+    // survive a selection change to ANY other element/zone/dormer — the
+    // modal would stay open, or a stale confirm could later fire, against
+    // whatever got selected next. resetFormFields runs on every selection
+    // change (see ElementCreator.tsx's selection effect, before hydrate),
+    // and the modal reads this module's pendingSystemAction directly (a
+    // live reference, not a copy), so clearing it here closes the leak.
+    state.setPendingSystemAction(null);
   },
 
   buildElementData(state, ctx) {

@@ -8269,12 +8269,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         )}
       {/* pendingSystemAction lives in elementForms/system.tsx's module state now
           (slice-5 brief item 8) — this modal stays orchestrator-tail-rendered
-          rather than moving into System's renderPanel: resetFormFields has
-          never cleared pendingSystemAction (decision (g), fixed in a later
-          simplify commit), so a pending confirm can survive a selection
-          change to ANY other element/zone/dormer, and renderPanel only
-          mounts while elementType === 'System'. See system.tsx's module
-          header for the full writeup. */}
+          rather than moving into System's renderPanel, because renderPanel
+          only mounts while elementType === 'System'; moving the modal inside
+          would make it vanish (unmount mid-confirm) the instant selection
+          changes away, which this tail placement (mounted unconditionally in
+          `body`) does not do. System's reset() now clears pendingSystemAction
+          on every selection change (INTENTIONAL BEHAVIOUR FIX, decision (g)
+          — legacy resetFormFields never did), so isOpen below already goes
+          false on selection change; that fix is orthogonal to this modal's
+          placement. See system.tsx's module header for the full writeup. */}
       <DeleteConfirmModal
         isOpen={!!systemFormState.pendingSystemAction}
         onClose={() => systemFormState.setPendingSystemAction(null)}
