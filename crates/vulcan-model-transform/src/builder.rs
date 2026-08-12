@@ -53,8 +53,19 @@ fn coerce_mass_distribution_class_for_fhs(raw: &str) -> Option<String> {
 
 const HORIZONTAL_POLYGON_Z_MAX_SPAN: f64 = 0.03;
 
-const NAMED_UI_ONLY_EXTRA_JSON_KEYS: &[&str] =
-    &["psi_source", "vulcan_assembly_v1", "ru_calculator_state_v1"];
+/// Non-underscore UI-only `extra_json` keys. The `_`-prefixed ones are caught by the prefix rule in
+/// [`is_ui_only_extra_json_key`]; these have to be named. Mirrors `EXTRA_JSON_UI_KEYS` in
+/// `packages/geometry-editor/src/lib/csvPresetUtils.ts`, which strips them browser-side before the
+/// merge — this list is what holds the invariant on every other route into the merge (the MCP
+/// server, the batch CLI, a hand-edited CSV), where that strip never runs.
+const NAMED_UI_ONLY_EXTRA_JSON_KEYS: &[&str] = &[
+    "psi_source",
+    "vulcan_assembly_v1",
+    "ru_calculator_state_v1",
+    // Adopted detailed-junction solve provenance: ψ anatomy, flanking-term U′ provenance and audit
+    // envelope. HEM reads the adopted `linear_thermal_transmittance`, never this blob.
+    "thermal_bridge_solver",
+];
 
 fn is_ui_only_extra_json_key(key: &str) -> bool {
     key.starts_with('_') || NAMED_UI_ONLY_EXTRA_JSON_KEYS.contains(&key)

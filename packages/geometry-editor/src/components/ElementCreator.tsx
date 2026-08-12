@@ -3623,7 +3623,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         JSON.stringify(presetJson, null, 2)
       );
 
-      const existingExtraJson = el.extra_json || {};
+      /**
+       * Re-read at apply time. `el` was read before the two awaited workspace writes above, so
+       * merging the preset key into *its* `extra_json` would revert anything written during that
+       * window (an adopted thermal-bridge solve, an assembly apply, a JsonForms edit).
+       */
+      const existingExtraJson = readExtraJsonRecord(getElementById(selection.id)?.extra_json);
       updateElement(selection.id, {
         extra_json: { ...existingExtraJson, _element_preset: presetKey },
       });
@@ -8203,9 +8208,19 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
                     const applyPsi = (psi: number) => {
                       linearThermalTransmittanceInput.setValue(psi);
-                      if (element && element.type === 'ThermalBridgeLinear') {
+                      /**
+                       * Re-read the element **at apply time**, not as this render captured it. `element`
+                       * above is a render snapshot, and spreading it re-sends that whole snapshot —
+                       * including `extra_json` — so any write landed since the render is silently
+                       * reverted. The detailed-junction solver adopts ψ and writes its
+                       * `thermal_bridge_solver` provenance while this panel is on screen, and a ψ
+                       * shortcut clicked afterwards would have thrown that provenance away. Same
+                       * apply-time-read rule as `applyThermalBridgeUpdate` in the junction contribution.
+                       */
+                      const current = getElementById(selection.id);
+                      if (current && current.type === 'ThermalBridgeLinear') {
                         updateElement(selection.id, {
-                          ...element,
+                          ...current,
                           linear_thermal_transmittance: psi,
                         } as Partial<Element>);
                       }

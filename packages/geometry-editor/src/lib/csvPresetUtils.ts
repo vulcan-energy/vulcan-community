@@ -9,8 +9,12 @@
 /**
  * Keys removed from extra_json before WASM → HEM JSON merge.
  * - UI-only: presets, psi picker state, canvas PV footprint flags (`_pv_*`).
- * - Audit-only: large assembly payloads — HEM does not read them; the saved geometry CSV
- *   (written before strip) retains the full extra_json for evidence / review.
+ * - Audit-only: large assembly and solver-provenance payloads — HEM does not read them; the saved
+ *   geometry CSV (written before strip) retains the full extra_json for evidence / review.
+ *
+ * Second consumer: `AdvancedFieldsEditor` builds a Set from this list and re-attaches those keys
+ * after every JsonForms change, because JsonForms drops extra_json keys that are not in the element
+ * schema. A key that is neither `_`-prefixed nor listed here does not survive an Advanced Fields edit.
  *
  * Do **not** add `junction_preset_id` / `junction_preset_name` here — they must survive strip
  * for lodged evidence and model reload (same CSV column; `ioSlice` exports full `extra_json`).
@@ -31,6 +35,18 @@ export const EXTRA_JSON_UI_KEYS = [
   '_vulcan_ui_tb_adjacent_element_id',
   /** Legacy UI hint key (removed from product); strip so it never reaches HEM merge. */
   '_vulcan_ui_tb_suggest_junction',
+  /**
+   * Detailed junction solver adoption provenance (`AdoptedThermalBridgeSolverProvenanceV1`): the
+   * solve's ψ anatomy, flanking-term U′ provenance and audit envelope. HEM reads only the adopted
+   * `linear_thermal_transmittance`, never this blob, and it is the largest audit-only payload a
+   * thermal bridge carries — so it is stripped before merge and kept in the saved CSV, exactly like
+   * `vulcan_assembly_v1`.
+   *
+   * Registering it here also puts it in `AdvancedFieldsEditor`'s preserve set, alongside
+   * `vulcan_assembly_v1`: the editor re-attaches only `_`-prefixed and listed keys after a JsonForms
+   * change, so this is what stops a schema-driven edit from dropping an adopted solve.
+   */
+  'thermal_bridge_solver',
 ];
 
 /** Minimal CSV line parser that handles quoted fields. */

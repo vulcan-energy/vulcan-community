@@ -269,6 +269,42 @@ describe('stripUiKeysFromCsv', () => {
     expect(result).not.toContain('_vulcan_ui_tb_adjacent_element_id');
     expect(result).not.toContain('adj42');
   });
+
+  it('strips the adopted thermal_bridge_solver provenance but keeps the adopted ψ inputs', () => {
+    // Shape of `AdoptedThermalBridgeSolverProvenanceV1`: audit-only, and the largest payload a
+    // thermal bridge carries. HEM reads the `linear_thermal_transmittance` column, never this blob.
+    const extraJson = jsonCsvCell({
+      junction_type: 'E5',
+      thermal_bridge_solver: {
+        solvedAt: '2026-08-12T00:00:00.000Z',
+        sectionId: 'section-1',
+        detailId: 'wall_floor_ground_normal',
+        junctionType: 'E5',
+        payloadHash: 'sha256-abc',
+        hash_scheme: 'sha256',
+        sourceHash: 'source-hash-1',
+        l2d_w_per_m_k: 0.5,
+        psi_w_per_m_k: 0.081,
+        psi_flanking_terms: [{ role: 'wall_leaf', u_value_source: 'element_declared_fallback' }],
+        warningMessages: [],
+      },
+    });
+    const csv = [
+      'Thermal Bridging Elements,,,,,,,,',
+      'Name,Zone,Type,length,linear_thermal_transmittance,coords,extra_json',
+      `tb1,Living,ThermalBridgeLinear,4,0.081,,${extraJson}`,
+    ].join('\n');
+
+    const result = stripUiKeysFromCsv(csv);
+
+    expect(result).not.toContain('thermal_bridge_solver');
+    expect(result).not.toContain('sha256-abc');
+    expect(result).not.toContain('psi_flanking_terms');
+    // The adopted ψ itself is a CSV column, not extra_json, so it must be untouched.
+    expect(result).toContain(',4,0.081,');
+    expect(result).toContain('junction_type');
+    expect(result).toContain('E5');
+  });
 });
 
 describe('upsertScenariosBaseModelEnabledLine', () => {
