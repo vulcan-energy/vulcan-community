@@ -25,7 +25,7 @@ import {
 } from './proposeWallGroundContinuous';
 import { isPartyWallVerticalEnvelopeLine, partyWallVerticalExtentM } from './proposePartyWallToExternalE18';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode, SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M } from './proposeFacadeOpenings';
 
 const MIN_PLAN_OVERLAP_M = 0.05;
 const Z_BAND_EPS_M = 0.04;
@@ -69,11 +69,15 @@ export function proposePartyWallGroundP1P6ThermalBridges(
     const Pa = P[0]!;
     const Pb = P[1]!;
     const pExt = partyWallVerticalExtentM(pw, floors);
+    const wallBaseM = elementBaseElevationMForTb(pw, floors);
 
     for (const g of grounds) {
       if (!zonesCompatible(pw.zoneId, g.zoneId)) continue;
       const slabZElev = nonBasementGroundSurfaceElevationM(g) ?? elementBaseElevationMForTb(g, floors);
       if (slabZElev < pExt.zLo - Z_BAND_EPS_M || slabZElev > pExt.zHi + Z_BAND_EPS_M) continue;
+      // P1/P6 is a wall-FOOT junction: a legacy ground-typed slab higher up the wall
+      // (room-tool era upper storeys) must not mint a second P1 at the wall head.
+      if (Math.abs(slabZElev - wallBaseM) > SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M) continue;
 
       const edges = groundSlabPolygonEdgesXY(g);
       let edgeIdx = 0;
