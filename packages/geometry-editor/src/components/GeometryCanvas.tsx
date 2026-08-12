@@ -11,6 +11,7 @@ import { ElementCreator } from './ElementCreator';
 import { MultiSelectPanel } from './MultiSelectPanel';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld, computePlanViewBoundsCenter, withCanvasAlpha, type ElementCanvasPalette } from '../lib/shapeUtils';
 import { findOverlappingElements, getOverlapCenter } from '../lib/overlapDetection';
+import { readRootCssVar } from '../lib/cssVars';
 import { calculateMemoizedLabelPositions, transformCachedLabelPosition, getSmartLabelPillTexts, getSmartLabelLayoutSignature, SMART_LABEL_METRICS, type LabelPosition } from '../lib/labelUtils';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { FilenameBar, type FilenameBarActionContext } from './FilenameBar';
@@ -812,17 +813,6 @@ type CanvasLabelTheme = {
   pillBorder: string;
   shadow: string;
 };
-
-function readRootCssVar(varName: string, fallback: string, seen = new Set<string>()): string {
-  if (typeof window === 'undefined') return fallback;
-  if (seen.has(varName)) return fallback;
-  seen.add(varName);
-  const value = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-  if (!value || value.includes('color-mix(')) return fallback;
-  const varMatch = value.match(/^var\((--[^,\s)]+)(?:,\s*([^)]+))?\)$/);
-  if (varMatch) return readRootCssVar(varMatch[1], varMatch[2]?.trim() || fallback, seen);
-  return value;
-}
 
 function resolveCanvasPaint(value: string | undefined, fallback: string): string {
   if (!value) return fallback;

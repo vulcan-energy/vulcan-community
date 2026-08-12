@@ -233,6 +233,46 @@ export function getNearbySnapWallSegments(
   return querySnapBuckets(index.wallBuckets, index.cellSize, point, tolerance);
 }
 
+export type FindClosestSnapCornerOptions = {
+  /** Skip a candidate target when this returns true (e.g. the target's own element). */
+  isExcluded?: (target: SnapCornerTarget) => boolean;
+  /** Skip a candidate target when this returns false (e.g. a same-storey gate). */
+  isEligible?: (target: SnapCornerTarget) => boolean;
+};
+
+export type ClosestSnapCorner = { x: number; y: number; elementId: string; order: number };
+
+/**
+ * Closest corner target within `tol` of `point`: nearest by squared XY distance, ties broken by
+ * `order` (the earlier-inserted element wins, matching cache-build order). This is the loop
+ * shared by 2D vertex-drag snapping (`ElementRenderer.findCornerVertexSnapTarget`) and 3D
+ * vertex-drag snapping (`GeometryCanvas3D.snap3DPlanPoint`); the two call sites differ in which
+ * candidates they exclude/allow, so that is threaded through as options rather than baked in.
+ */
+export function findClosestSnapCorner(
+  point: { x: number; y: number },
+  snapCache: GeometrySnapCache,
+  tol: number,
+  options?: FindClosestSnapCornerOptions,
+): ClosestSnapCorner | null {
+  const tolSq = tol * tol;
+  let best: (ClosestSnapCorner & { distSq: number }) | null = null;
+
+  for (const target of getNearbySnapCornerTargets(snapCache, point, tol)) {
+    if (options?.isExcluded?.(target)) continue;
+    if (options?.isEligible && !options.isEligible(target)) continue;
+    const dx = target.x - point.x;
+    const dy = target.y - point.y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq > tolSq) continue;
+    if (!best || distSq < best.distSq || (distSq === best.distSq && target.order < best.order)) {
+      best = { x: target.x, y: target.y, elementId: target.elementId, order: target.order, distSq };
+    }
+  }
+
+  return best;
+}
+
 export function buildGeometrySnapCache(elementsById: Record<string, Element>): GeometrySnapCache {
   const cornerTargets: SnapCornerTarget[] = [];
   const wallSegments: SnapWallSegmentTarget[] = [];

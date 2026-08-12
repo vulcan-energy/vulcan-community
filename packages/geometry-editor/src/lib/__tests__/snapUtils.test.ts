@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest';
 import {
   applyAngleSnapIfClose,
   buildGeometrySnapCache,
+  buildGeometrySnapCacheFromTargets,
   constrainPointOrthogonally,
+  findClosestSnapCorner,
   resolveOpeningSegmentParentFromCache,
   resolveDrawSnapPoint,
   getExactSnappedVertices,
@@ -456,5 +458,62 @@ describe('getWallSupportedSnappedVertices', () => {
     } as any;
 
     expect(getWallSupportedSnappedVertices(ground, { ground, upperWall })).toEqual(new Set());
+  });
+});
+
+describe('findClosestSnapCorner', () => {
+  // Shared by ElementRenderer's 2D vertex-drag snap and GeometryCanvas3D's 3D vertex-drag snap
+  // (both previously carried their own copy of this loop). findClosestSnapCorner only consumes
+  // SnapCornerTarget[], so the cache is built directly from targets rather than Element fixtures.
+  const cache = buildGeometrySnapCacheFromTargets(
+    [
+      { elementId: 'near', order: 0, x: 1, y: 0, z: 0 },
+      { elementId: 'far', order: 1, x: 5, y: 0, z: 0 },
+    ],
+    [],
+  );
+
+  it('returns the closest corner within tolerance', () => {
+    const result = findClosestSnapCorner({ x: 0.95, y: 0 }, cache, 0.5);
+    expect(result).toMatchObject({ x: 1, y: 0, elementId: 'near' });
+  });
+
+  it('returns null when nothing is within tolerance', () => {
+    expect(findClosestSnapCorner({ x: 3, y: 0 }, cache, 0.5)).toBeNull();
+  });
+
+  it('breaks distance ties by insertion order', () => {
+    const tiedCache = buildGeometrySnapCacheFromTargets(
+      [
+        { elementId: 'first', order: 0, x: 0, y: 1, z: 0 },
+        { elementId: 'second', order: 1, x: 0, y: -1, z: 0 },
+      ],
+      [],
+    );
+    const result = findClosestSnapCorner({ x: 0, y: 0 }, tiedCache, 5);
+    expect(result?.elementId).toBe('first');
+  });
+
+  it('applies isExcluded and isEligible filters (the 2D/3D call-site divergence)', () => {
+    // isExcluded alone (matches GeometryCanvas3D.snap3DPlanPoint's excludedElementIds set)
+    expect(
+      findClosestSnapCorner({ x: 1, y: 0 }, cache, 0.5, {
+        isExcluded: (target) => target.elementId === 'near',
+      }),
+    ).toBeNull();
+    // isEligible alone (matches ElementRenderer.findCornerVertexSnapTarget's same-storey gate)
+    expect(
+      findClosestSnapCorner({ x: 1, y: 0 }, cache, 0.5, {
+        isEligible: () => false,
+      }),
+    ).toBeNull();
+  });
+
+  it('includes a target exactly at the tolerance boundary', () => {
+    const boundaryCache = buildGeometrySnapCacheFromTargets(
+      [{ elementId: 'target', order: 0, x: 1, y: 0, z: 0 }],
+      [],
+    );
+    expect(findClosestSnapCorner({ x: 0, y: 0 }, boundaryCache, 1)?.elementId).toBe('target');
   });
 });
