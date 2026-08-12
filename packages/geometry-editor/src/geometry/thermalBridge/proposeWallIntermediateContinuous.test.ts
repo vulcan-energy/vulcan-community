@@ -289,10 +289,32 @@ describe('proposeWallIntermediateContinuous', () => {
     expect(p[0].suggestedLengthM).toBe(10);
   });
 
-  it('keeps E6 on an upper wall stacked directly above the ground-floor perimeter', () => {
-    // Ordinary two-storey geometry: the F2 wall sits on the same plan line as the
-    // F1 ground slab edge. Plan linkage alone would veto its E6 (the ground slab is
-    // 2.4 m below); the veto must require the wall to actually qualify for E5.
+  it('does not use a party-flagged pitch-180 plate as a generic continuous E6 host', () => {
+    const partyPlate = makeIntermediateSlab({
+      id: 'party-plate',
+      name: 'Party ceiling',
+      floorId: 'f1',
+      pitch: 180,
+      extra_json: { _vulcan_ui_party_element: true },
+    });
+    const wall = makeWall({
+      id: 'wall-party',
+      name: 'Party-floor wall',
+      floorId: 'f1',
+      base_height: 2.4,
+      coordinates: [
+        { x: 0, y: 0, z: 1 },
+        { x: 10, y: 0, z: 1 },
+      ],
+    });
+
+    expect(proposeWallIntermediateContinuous([partyPlate, wall], [], testFloors)).toHaveLength(0);
+  });
+
+  it('gives a room-tool two-storey house continuous E6 at its pitch-180 F2 floor and E5 only at ground', () => {
+    // Ordinary room-tool geometry: the F2 wall and pitch-180 floor sit on the same
+    // plan line as the F1 ground slab edge. Plan linkage alone would veto E6 (the
+    // ground slab is 2.4 m below); the veto must require E5 at this elevation.
     const groundSlab = {
       type: 'BuildingElementGround',
       id: 'ground-f0',
@@ -311,7 +333,12 @@ describe('proposeWallIntermediateContinuous', () => {
       floor_type: 'Slab_no_edge_insulation',
       floorId: 'f0',
     } as unknown as BuildingElementGround;
-    const upperSlab = makeIntermediateSlab();
+    const upperSlab = makeIntermediateSlab({
+      id: 'floor-f1',
+      name: 'F2 internal floor',
+      floorId: 'f1',
+      pitch: 180,
+    });
     const groundWall = makeWall({
       id: 'wall-g',
       name: 'Ground wall',

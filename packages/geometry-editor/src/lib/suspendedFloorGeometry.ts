@@ -80,11 +80,11 @@ export function groundSlabPolygonEdgesXY(g: BuildingElementGround): Array<[[numb
   return out;
 }
 
-/** Closed-plan edges for a horizontal pitch-0 conditioned floor polygon or line. */
+/** Closed-plan edges for a horizontal pitch-0 or pitch-180 conditioned floor polygon or line. */
 export function adjacentConditionedFloorPolygonEdgesXY(
   floor: BuildingElementAdjacentConditionedSpace,
 ): Array<[[number, number], [number, number]]> {
-  if (floor.isPlaceholder || floor.pitch !== 0) return [];
+  if (floor.isPlaceholder || (floor.pitch !== 0 && floor.pitch !== 180)) return [];
   const c = floor.coordinates;
   if (!c || c.length < 2) return [];
   const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
@@ -193,7 +193,7 @@ export function findLinkedGroundSlabForLineElement(
 
 /**
  * Find the horizontal conditioned floor footprint linked to a line by name or plan-boundary proximity.
- * This mirrors {@link findLinkedGroundSlabForLineElement} for pitch-0 floor faces.
+ * This mirrors {@link findLinkedGroundSlabForLineElement} for pitch-0 and pitch-180 floor faces.
  */
 export function findLinkedAdjacentConditionedFloorForLineElement(
   line: LineGroundHost,
@@ -213,8 +213,18 @@ export function findLinkedAdjacentConditionedFloorForLineElement(
   if (!c || c.length !== 2) return null;
   const a = c[0]!;
   const b = c[1]!;
+  const lineStorey = Math.floor(Math.min(
+    typeof a.z === 'number' && Number.isFinite(a.z) ? a.z : 0,
+    typeof b.z === 'number' && Number.isFinite(b.z) ? b.z : 0,
+  ));
 
-  let best: { floor: BuildingElementAdjacentConditionedSpace; distanceM: number } | null = null;
+  // Stacked same-footprint plates tie on XY distance, so prefer the plate in the
+  // line's storey before using distance. This mirrors ground-slab linkage above.
+  let best: {
+    floor: BuildingElementAdjacentConditionedSpace;
+    storeyGap: number;
+    distanceM: number;
+  } | null = null;
   for (const floor of sameZoneFloors) {
     const edges = adjacentConditionedFloorPolygonEdgesXY(floor);
     if (edges.length === 0) continue;
@@ -222,8 +232,16 @@ export function findLinkedAdjacentConditionedFloorForLineElement(
     const dB = minDistancePointToEdgesM(b.x, b.y, edges);
     if (dA > toleranceM || dB > toleranceM) continue;
     const distanceM = Math.max(dA, dB);
-    if (!best || distanceM < best.distanceM) {
-      best = { floor, distanceM };
+    const floorZ = floor.coordinates?.[0]?.z;
+    const storeyGap = Math.abs(
+      Math.floor(typeof floorZ === 'number' && Number.isFinite(floorZ) ? floorZ : 0) - lineStorey,
+    );
+    if (
+      !best ||
+      storeyGap < best.storeyGap ||
+      (storeyGap === best.storeyGap && distanceM < best.distanceM)
+    ) {
+      best = { floor, storeyGap, distanceM };
     }
   }
   return best?.floor ?? null;
