@@ -6,6 +6,8 @@ import { JsonForms } from '@jsonforms/react';
 import { materialRenderers } from '@jsonforms/material-renderers';
 import type { JsonSchema, UISchemaElement, ValidationMode } from '@jsonforms/core';
 import { standardRenderers, renderFieldLabelWithTooltip } from './jsonformsRenderers';
+import { DirectAdvancedFields } from './DirectAdvancedFields';
+import { isDirectRenderAdvancedFieldsEnabled } from '../lib/directRenderAdvancedFieldsFlag';
 import { StandardDropdown } from './StandardDropdown';
 import { getAjvInstance, ensureRootSchema } from '../lib/ajvCache';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
@@ -2346,16 +2348,27 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           </>
         )}
 
-      <JsonForms
-        schema={subschema}
-        {...(systemAdvancedUischema ? { uischema: systemAdvancedUischema } : {})}
-        data={advancedFieldsData}
-        renderers={jsonFormsRenderers}
-        ajv={getAjvInstance()}
-        config={jsonFormsConfig}
-        validationMode={JSON_FORMS_VALIDATION_MODE}
-        onChange={handleJsonFormsChange}
-      />
+      {elementType === 'ElectricBattery' && isDirectRenderAdvancedFieldsEnabled() ? (
+        // R4.2 spike: direct-render off the resolved subschema, no <JsonForms> dispatch.
+        // Default-OFF; see lib/directRenderAdvancedFieldsFlag.ts.
+        <DirectAdvancedFields
+          schema={subschema as Record<string, unknown>}
+          data={advancedFieldsData as Record<string, unknown>}
+          config={jsonFormsConfig}
+          onDataChange={(data) => handleJsonFormsChange({ data, errors: [] })}
+        />
+      ) : (
+        <JsonForms
+          schema={subschema}
+          {...(systemAdvancedUischema ? { uischema: systemAdvancedUischema } : {})}
+          data={advancedFieldsData}
+          renderers={jsonFormsRenderers}
+          ajv={getAjvInstance()}
+          config={jsonFormsConfig}
+          validationMode={JSON_FORMS_VALIDATION_MODE}
+          onChange={handleJsonFormsChange}
+        />
+      )}
       {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && (
         <UnheatedSpaceRuCalculatorModal
           workspaceResourcePort={workspaceResourcePort}
