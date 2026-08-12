@@ -42,6 +42,7 @@ import { waterPipeworkFormModule } from './elementForms/waterPipework';
 import { wetEmitterFormModule } from './elementForms/wetEmitter';
 import { formatSystemPresetName, systemFormModule } from './elementForms/system';
 import { useServiceLineFormState } from './elementForms/serviceLine';
+import { useWallSharedFormState } from './elementForms/wallShared';
 import {
   useDecimalInput,
   decimalInputProps,
@@ -52,12 +53,8 @@ import {
   HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER,
   horizontalPolygonSurfaceSelectValue,
 } from './elementForms/formPrimitives';
-// Not formPrimitives' useDecimalInput: that wrapper doesn't forward `syncExternal`, and the
-// single-element pitch input needs it (see pitchDraftInput below) so the draft re-syncs from
-// `pitch` on selection/preset/dormer changes without threading a `.setValue()` call through
-// every one of those call sites, mirroring width/height's simpler "no confirm-dialog side
-// effects" case.
-import { useNumericDraftInput } from './numericDraftInput';
+// PR #31's pitchDraftInput/commitTypedPitch (useNumericDraftInput) landed in
+// elementForms/wallShared.tsx instead of here — see that file's own import comment for why.
 import {
   useGeometrySchemaPort,
   useGeometrySourceComparisonPort,
@@ -156,7 +153,6 @@ import {
 import { ProfileHeightsPopover } from './ProfileHeightsPopover';
 import { useKeyedState } from '../hooks/useKeyedState';
 import {
-  applyCompassOrientationToSlopedPolygonCoords,
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
 } from '../lib/openingSegmentOutward';
@@ -1435,63 +1431,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     commitExistingElementDraft({ [field]: value } as Partial<Element>);
   };
 
-  const isSelectedSlopedFabricPolygon = () => {
-    if (!isExistingElementSelection()) return false;
-    const currentSelection = selection as Exclude<Selection, null>;
-    const element = getElementById(currentSelection.id);
-    if (!element) return false;
-    if (
-      element.type !== 'BuildingElementOpaque' &&
-      element.type !== 'BuildingElementTransparent' &&
-      !ADJACENT_LIKE_ELEMENT_TYPES.includes(element.type as ElementType)
-    ) {
-      return false;
-    }
-    return getElementShape(element) === 'sloped-polygon';
-  };
-
-  const widthInputValueForCommitRef = useRef<number | ''>('');
-  const heightInputValueForCommitRef = useRef<number | ''>('');
-
-  const commitElementWidthField = (value: number | '') => {
-    if (value === '') return;
-    const width = typeof value === 'number' ? value : undefined;
-    const overrides: Record<string, unknown> = { width: value };
-    if (
-      !isSelectedSlopedFabricPolygon() &&
-      (
-        elementType === 'BuildingElementOpaque'
-        || elementType === 'BuildingElementTransparent'
-        || ADJACENT_LIKE_ELEMENT_TYPES.includes(elementType)
-      )
-    ) {
-      const height = typeof heightInputValueForCommitRef.current === 'number'
-        ? heightInputValueForCommitRef.current
-        : undefined;
-      overrides.area = width !== undefined && height !== undefined ? width * height : undefined;
-    }
-    commitExistingElementDraft(overrides as Partial<Element>);
-  };
-
-  const commitElementHeightField = (value: number | '') => {
-    if (value === '') return;
-    const height = typeof value === 'number' ? value : undefined;
-    const overrides: Record<string, unknown> = { height: value };
-    if (
-      !isSelectedSlopedFabricPolygon() &&
-      (
-        elementType === 'BuildingElementOpaque'
-        || elementType === 'BuildingElementTransparent'
-        || ADJACENT_LIKE_ELEMENT_TYPES.includes(elementType)
-      )
-    ) {
-      const width = typeof widthInputValueForCommitRef.current === 'number'
-        ? widthInputValueForCommitRef.current
-        : undefined;
-      overrides.area = width !== undefined && height !== undefined ? width * height : undefined;
-    }
-    commitExistingElementDraft(overrides as Partial<Element>);
-  };
+  // isSelectedSlopedFabricPolygon/widthInputValueForCommitRef/
+  // heightInputValueForCommitRef/commitElementWidthField/
+  // commitElementHeightField now live in elementForms/wallShared.tsx (moved
+  // verbatim as part of useWallSharedFormState — see that file's header).
 
   // Element creation state
   const [elementName, setElementName] = useState('');
@@ -1500,106 +1443,102 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const [elementZoneId, setElementZoneId] = useState<string>('');
   const [elementFloorId, setElementFloorId] = useState<string>('');
 
-  // Form fields for different element types
-  const widthInput = useDecimalInput('', commitElementWidthField, { commitOnChange: true });
-  const heightInput = useDecimalInput('', commitElementHeightField, { commitOnChange: true });
-  useEffect(() => {
-    widthInputValueForCommitRef.current = widthInput.value;
-    heightInputValueForCommitRef.current = heightInput.value;
-  }, [heightInput.value, widthInput.value]);
-  const areaInput = useDecimalInput('', commitElementNumericField('area'), { commitOnChange: true });
-  const selectedDraftElement = selection?.id
-    && (selection.type === 'element' || selection.type === 'global')
-    ? getElementById(selection.id)
-    : undefined;
-  const selectedDraftKey = selectedDraftElement
-    ? `${selectedDraftElement.id}\0${selectedElementV}`
-    : 'new';
-  const selectedDraftPitch = selectedDraftElement && 'pitch' in selectedDraftElement
-    ? selectedDraftElement.pitch
-    : undefined;
-  const [pitch, setPitch] = useKeyedState(
-    selectedDraftKey,
-    typeof selectedDraftPitch === 'number' && Number.isFinite(selectedDraftPitch)
-      ? selectedDraftPitch
-      : 90,
-  );
-  // Draft-string commit for the single-element typed pitch input (Opaque/Transparent/
-  // Adjacent-like: the three literal-copy blocks below all bind to this one instance, since
-  // only one renders at a time for a given elementType and hooks must run unconditionally).
-  // Was previously a plain controlled `<input value={formatConditionalDecimals(pitch)}>` with
-  // `parseFloat(e.target.value)` re-deriving the displayed value every keystroke: typing "22."
-  // parsed to 22, which snapped the visible field back to "22" mid-type (the trailing "."
-  // vanished), so the next keystroke landed on the wrong digit — decimal entry was effectively
-  // impossible. `useNumericDraftInput` decouples the *displayed* raw string (`inputValue`) from
-  // the *committed* value: the field echoes exactly what was typed while editing, and only
-  // reformats (to 2dp) on blur. Values commit at 2dp (roundToTwoDecimals) to match the CSV
-  // writer/importer (both round to 2dp), so a save/load/save cycle is idempotent from the
-  // first cycle. `syncExternal: true` re-syncs the draft from `pitch` whenever it changes
-  // externally (selection change, preset load, dormer/parent inherit, etc.) without threading
-  // `.setValue()` through every one of those call sites.
-  const commitTypedPitch = (parsed: number | ''): void => {
-    if (parsed === '') return;
-    const newPitch = roundToTwoDecimals(parsed);
+  // Calculate current orientation based on global offset. Relocated here
+  // (verbatim; was originally declared much further down, right before the
+  // old orientation360 useKeyedState) so useWallSharedFormState below — which
+  // needs it to compute orientation360's initial value — can be the group's
+  // single call site while every other not-yet-moved declaration keeps its
+  // original relative order. Depends on nothing declared between the old and
+  // new position (only `geometryStore`, in scope since line ~1002, and
+  // imported pure functions), so this is a pure reordering with identical
+  // per-render output — see wallShared.tsx's header, adaptation 2.
+  const getCurrentOrientation = (element: Element): number => {
+    if (!('orientation360' in element) || element.orientation360 === undefined) {
+      return 0;
+    }
 
-    if (selection.type === 'element') {
-      const currentElement = getElementById(selection.id);
-      if (currentElement) {
-        const currentShape = getElementShape(currentElement);
+    // For walls, we need to recalculate the orientation based on current global offset
+    if (
+      (element.type === 'BuildingElementOpaque' || element.type === 'BuildingElementTransparent') &&
+      element.coordinates?.length === 2
+    ) {
+      // Get the element's coordinates to recalculate orientation
+      const coordinates = element.coordinates;
+      if (coordinates && coordinates.length >= 2) {
+        const start = coordinates[0];
+        const end = coordinates[1];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
 
-        // For polygons: only allow 0° or 180° (horizontal surfaces)
-        if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
-          const ok = window.confirm(
-            `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
-          );
-          if (ok) {
-            // Keep same coordinates, just update pitch - sloped-polygon uses same coordinate structure.
-            const patch: Partial<Element> = { pitch: newPitch } as Partial<Element>;
-            if (currentElement.type === 'BuildingElementAdjacentConditionedSpace') {
-              const extra = readExtraJsonRecord(currentElement.extra_json);
-              if (VULCAN_UI_PARTY_ELEMENT_KEY in extra) {
-                const nextExtra = { ...extra };
-                delete nextExtra[VULCAN_UI_PARTY_ELEMENT_KEY];
-                patch.extra_json = nextExtra;
-              }
-            }
-            updateElement(currentElement.id, patch);
-            setPitch(newPitch);
-            return;
-          } else {
-            // Reset to 0° if user cancels
-            setPitch(0);
-            updateElement(selection.id, { pitch: 0 });
-            return;
-          }
+        if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) {
+          return element.orientation360 || 0; // Degenerate case
         }
 
-        // For lines: suggest polygon conversion for horizontal surfaces
-        if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
-          const ok = window.confirm(
-            `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
-          );
-          if (ok) {
-            const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
-            updateElement(currentElement.id, { coordinates: nextCoords, pitch: newPitch });
-          }
+        // Recalculate the outward-facing orientation with the current global offset.
+        const globalOffset = geometryStore.getState().globalOrientationOffset;
+        const outwardOrientation = orientation360FromSegmentOutwardModelXY(start.x, start.y, end.x, end.y, 0);
+        const recalculatedOrientation = ((outwardOrientation ?? (element.orientation360 || 0)) - globalOffset + 360) % 360;
+
+        return recalculatedOrientation;
+      }
+    }
+
+    // Sloped PV / sloped roof / sloped opaque·transparent polygon: derive from first edge (bottom), same as draw + polygon sync
+    if (
+      (element.type === 'OnSiteGeneration' ||
+        element.type === 'BuildingElementOpaque' ||
+        element.type === 'BuildingElementTransparent') &&
+      element.coordinates &&
+      element.coordinates.length >= 2
+    ) {
+      const pitch = (element as { pitch?: number }).pitch;
+      if (pitch !== undefined && pitch > 0 && pitch < 90) {
+        const start = element.coordinates[0];
+        const end = element.coordinates[1];
+        if (Math.abs(end.x - start.x) >= 0.01 || Math.abs(end.y - start.y) >= 0.01) {
+          const recalculated =
+            orientation360SlopedFromFirstEdge(
+              start.x,
+              start.y,
+              end.x,
+              end.y,
+              geometryStore.getState().globalOrientationOffset,
+            ) ?? element.orientation360;
+          return recalculated ?? element.orientation360 ?? 0;
         }
       }
     }
 
-    // Typed pitch passes through at 2dp (exact intent); only drag interactions round to a whole degree.
-    setPitch(newPitch);
-    // Only update pitch, don't touch coordinates
-    if (selection.type === 'element') {
-      updateElement(selection.id, { pitch: newPitch });
-    }
+    // For other elements, return stored value
+    return element.orientation360;
   };
-  const pitchDraftInput = useNumericDraftInput(pitch, commitTypedPitch, {
-    commitOnChange: true,
-    formatOnBlur: 'fixed2',
-    syncExternal: true,
+
+  // Form fields for different element types — see elementForms/wallShared.tsx
+  // for the moved declarations (widthInput/heightInput/areaInput/
+  // baseHeightInput/parentElement/pitch/pitchDraftInput/commitTypedPitch/
+  // orientation360/applyOrientationToGeometry/
+  // applyParentPitchOrientationForDisplay and their shared internals) and its
+  // header for the full verbatim-move writeup. pitchDraftInput/
+  // commitTypedPitch (origin/main PR #31, "Let pitch carry decimals") were
+  // ported straight into wallShared rather than landing here inline: they
+  // close over selection/getElementById/updateElement/setPitch, all already
+  // threaded into useWallSharedFormState's args, and — same reasoning as
+  // getCurrentOrientation's relocation above — must be a single,
+  // unconditionally-called hook instance shared by all three wall-family
+  // pitch fields, which is exactly what this single-instance group hook is
+  // for.
+  const wallShared = useWallSharedFormState({
+    elementType,
+    selection,
+    isExistingElementSelection,
+    getElementById,
+    commitExistingElementDraft,
+    commitElementNumericField,
+    selectedElementV,
+    updateElement,
+    getGlobalOrientationOffset: () => geometryStore.getState().globalOrientationOffset,
+    getCurrentOrientation,
   });
-  const baseHeightInput = useDecimalInput('', commitElementNumericField('base_height'), { commitOnChange: true });
   const commitUnheatedPitchedRoofCeilingElevation = (value: number | '') => {
     if (!isExistingElementSelection()) return;
     const currentSelection = selection as Exclude<Selection, null>;
@@ -1706,13 +1645,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     selection?.id ?? 'none',
     false,
   );
-  const selectedParentElementValue = selectedDraftElement && 'parent_element' in selectedDraftElement
-    ? String((selectedDraftElement as { parent_element?: string | null }).parent_element ?? '').trim()
-    : '';
-  const [parentElement, setParentElement] = useKeyedState(
-    selectedDraftKey,
-    selectedParentElementValue,
-  );
+  // selectedParentElementValue/parentElement/setParentElement now live in
+  // elementForms/wallShared.tsx (wallShared.parentElement/setParentElement).
   const [selectedDormerType, setSelectedDormerType] = useState<DormerType>('mono-pitch');
   const [dormerDepth, setDormerDepth] = useState<number>(1.5);
   const [dormerRoofIsUnheatedPitchedRoof, setDormerRoofIsUnheatedPitchedRoof] = useState<boolean>(false);
@@ -1777,26 +1711,23 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     commitExistingElementDraftRef,
     selectedElementV,
   });
-  const widthInputSetValueRef = useRef(widthInput.syncValue);
-  const heightInputSetValueRef = useRef(heightInput.syncValue);
-  const areaInputSetValueRef = useRef(areaInput.syncValue);
+  // widthInputSetValueRef/heightInputSetValueRef/areaInputSetValueRef now live
+  // in elementForms/wallShared.tsx (wallShared.widthInputSetValueRef etc.) —
+  // split out of this combined effect, same "split the combined effect"
+  // precedent slice 3 set for serviceLine.tsx. midHeight/maxWindowOpenArea/
+  // totalArea are Transparent/Ground-owned, not wall-shared, and keep their
+  // own effect of the same shape below.
   const midHeightInputSetValueRef = useRef(midHeightInput.syncValue);
   const maxWindowOpenAreaInputSetValueRef = useRef(maxWindowOpenAreaInput.syncValue);
   const totalAreaInputSetValueRef = useRef(totalAreaInput.syncValue);
   useEffect(() => {
-    widthInputSetValueRef.current = widthInput.syncValue;
-    heightInputSetValueRef.current = heightInput.syncValue;
-    areaInputSetValueRef.current = areaInput.syncValue;
     midHeightInputSetValueRef.current = midHeightInput.syncValue;
     maxWindowOpenAreaInputSetValueRef.current = maxWindowOpenAreaInput.syncValue;
     totalAreaInputSetValueRef.current = totalAreaInput.syncValue;
   }, [
-    areaInput.syncValue,
-    heightInput.syncValue,
     maxWindowOpenAreaInput.syncValue,
     midHeightInput.syncValue,
     totalAreaInput.syncValue,
-    widthInput.syncValue,
   ]);
 
   const numbersClose = useCallback((a: number | null | undefined, b: number | null | undefined, eps = 1e-6): boolean => {
@@ -1900,9 +1831,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return { hostId, hostName: host.name, derived };
   }, [selection, elementsById, floors, allElements]);
 
-  const widthInputValue = widthInput.value;
-  const heightInputValue = heightInput.value;
-  const baseHeightInputValue = baseHeightInput.value;
+  const widthInputValue = wallShared.widthInput.value;
+  const heightInputValue = wallShared.heightInput.value;
+  const baseHeightInputValue = wallShared.baseHeightInput.value;
   const freeAreaHeightInputValue = freeAreaHeightInput.value;
 
   /** Opening mid-height: base + height/2 (matches HEM / engine convention). */
@@ -1993,115 +1924,19 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   useEffect(() => {
     const z = parseInt(elementFloorId, 10);
     if (isNaN(z) || z <= 0) return;
-    if (baseHeightInput.isEditing) return;
-    if (baseHeightInput.value !== 0 && baseHeightInput.value !== '') return;
+    if (wallShared.baseHeightInput.isEditing) return;
+    if (wallShared.baseHeightInput.value !== 0 && wallShared.baseHeightInput.value !== '') return;
     if (derivedBaseHeight > 0) {
-      baseHeightInput.setValue(derivedBaseHeight);
+      wallShared.baseHeightInput.setValue(derivedBaseHeight);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elementFloorId, derivedBaseHeight]);
 
   // Calculate current orientation based on global offset
-  const getCurrentOrientation = (element: Element): number => {
-    if (!('orientation360' in element) || element.orientation360 === undefined) {
-      return 0;
-    }
-
-    // For walls, we need to recalculate the orientation based on current global offset
-    if (
-      (element.type === 'BuildingElementOpaque' || element.type === 'BuildingElementTransparent') &&
-      element.coordinates?.length === 2
-    ) {
-      // Get the element's coordinates to recalculate orientation
-      const coordinates = element.coordinates;
-      if (coordinates && coordinates.length >= 2) {
-        const start = coordinates[0];
-        const end = coordinates[1];
-        const dx = end.x - start.x;
-        const dy = end.y - start.y;
-
-        if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) {
-          return element.orientation360 || 0; // Degenerate case
-        }
-
-        // Recalculate the outward-facing orientation with the current global offset.
-        const globalOffset = geometryStore.getState().globalOrientationOffset;
-        const outwardOrientation = orientation360FromSegmentOutwardModelXY(start.x, start.y, end.x, end.y, 0);
-        const recalculatedOrientation = ((outwardOrientation ?? (element.orientation360 || 0)) - globalOffset + 360) % 360;
-
-        return recalculatedOrientation;
-      }
-    }
-
-    // Sloped PV / sloped roof / sloped opaque·transparent polygon: derive from first edge (bottom), same as draw + polygon sync
-    if (
-      (element.type === 'OnSiteGeneration' ||
-        element.type === 'BuildingElementOpaque' ||
-        element.type === 'BuildingElementTransparent') &&
-      element.coordinates &&
-      element.coordinates.length >= 2
-    ) {
-      const pitch = (element as { pitch?: number }).pitch;
-      if (pitch !== undefined && pitch > 0 && pitch < 90) {
-        const start = element.coordinates[0];
-        const end = element.coordinates[1];
-        if (Math.abs(end.x - start.x) >= 0.01 || Math.abs(end.y - start.y) >= 0.01) {
-          const recalculated =
-            orientation360SlopedFromFirstEdge(
-              start.x,
-              start.y,
-              end.x,
-              end.y,
-              geometryStore.getState().globalOrientationOffset,
-            ) ?? element.orientation360;
-          return recalculated ?? element.orientation360 ?? 0;
-        }
-      }
-    }
-
-    // For other elements, return stored value
-    return element.orientation360;
-  };
-
-  const [orientation360, setOrientation360] = useKeyedState(
-    selectedDraftKey,
-    selectedDraftElement ? Math.round(getCurrentOrientation(selectedDraftElement)) : 0,
-  );
-
-  // Apply edited orientation360: rotate sloped polygons in plan (first-edge compass), or 2-point lines around the first endpoint
-  const applyOrientationToGeometry = (desiredOrientationDeg: number) => {
-    if (!selection || selection.type !== 'element') return;
-    const el = getElementById(selection.id);
-    if (!el || !el.coordinates || el.coordinates.length < 2) return;
-
-    const shape = getElementShape(el as Element);
-    if (shape === 'sloped-polygon' && el.coordinates.length >= 3) {
-      const globalOffset = geometryStore.getState().globalOrientationOffset;
-      const next = applyCompassOrientationToSlopedPolygonCoords(
-        el.coordinates as Array<{ x: number; y: number; z: number }>,
-        desiredOrientationDeg,
-        globalOffset,
-      );
-      if (next) {
-        updateElement(selection.id, { coordinates: next });
-        return;
-      }
-      commitElementNumericField('orientation360')(desiredOrientationDeg);
-      return;
-    }
-
-    if (el.coordinates.length !== 2) return;
-    const [A, B] = el.coordinates as Array<{ x: number; y: number; z: number }>;
-    const len = Math.hypot(B.x - A.x, B.y - A.y);
-    if (len <= 0) return;
-    // `orientation360` for 2-point lines is the outward-facing compass bearing.
-    const offset = geometryStore.getState().globalOrientationOffset;
-    const desiredOutwardDeg = (desiredOrientationDeg + offset + 360) % 360;
-    const desiredWallDirectionDeg = (180 - desiredOutwardDeg + 360) % 360; // mathematical tangent angle, 0=East
-    const rad = desiredWallDirectionDeg * Math.PI / 180;
-    const newB = { x: A.x + len * Math.cos(rad), y: A.y + len * Math.sin(rad), z: B.z };
-    updateElement(selection.id, { coordinates: [A, newB] });
-  };
+  // getCurrentOrientation moved up (see the copy just above
+  // useWallSharedFormState); orientation360/setOrientation360/
+  // applyOrientationToGeometry now live in elementForms/wallShared.tsx
+  // (wallShared.orientation360 etc.).
 
   const roundToInt = (value: number) => Math.round(value ?? 0);
 
@@ -2178,17 +2013,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // MechanicalVentilationTerminal's own commit helpers/inputs now live in its
   // module (elementForms/mechanicalVentilationTerminal.tsx).
 
-  // Vents' optimistic DISPLAY write when a parent wall/window is chosen — mirrors
-  // the parent's pitch/orientation360 into the shared inputs so the panel shows the
-  // inherited values immediately, without Vents reading/owning the shared pitch
-  // state directly (see ElementFormSharedCtx).
-  const applyParentPitchOrientationForDisplay = (
-    parentPitch: number | undefined,
-    parentOrientation: number | undefined,
-  ) => {
-    if (typeof parentPitch === 'number') setPitch(parentPitch);
-    if (typeof parentOrientation === 'number') setOrientation360(parentOrientation);
-  };
+  // applyParentPitchOrientationForDisplay now lives in
+  // elementForms/wallShared.tsx (wallShared.applyParentPitchOrientationForDisplay).
 
   const elementFormStateCtx = {
     elementType,
@@ -2202,17 +2028,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     getCurrentOrientation,
     selectedElementV,
     shared: {
-      heightInput,
+      heightInput: wallShared.heightInput,
       distanceInput,
-      areaInput,
-      parentElement,
-      setParentElement,
-      pitch,
-      setPitch,
-      orientation360,
-      setOrientation360,
-      applyOrientationToGeometry,
-      applyParentPitchOrientationForDisplay,
+      areaInput: wallShared.areaInput,
+      parentElement: wallShared.parentElement,
+      setParentElement: wallShared.setParentElement,
+      pitch: wallShared.pitch,
+      setPitch: wallShared.setPitch,
+      orientation360: wallShared.orientation360,
+      setOrientation360: wallShared.setOrientation360,
+      applyOrientationToGeometry: wallShared.applyOrientationToGeometry,
+      applyParentPitchOrientationForDisplay: wallShared.applyParentPitchOrientationForDisplay,
       spaceHeatSystem,
       setSpaceHeatSystem,
     },
@@ -2292,7 +2118,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (!heightPatch) return;
     if (typeof heightPatch.base_height === 'number') {
       const nextBaseHeight = roundToTwoDecimals(heightPatch.base_height);
-      baseHeightInput.setValue(nextBaseHeight);
+      wallShared.baseHeightInput.setValue(nextBaseHeight);
       onSiteGenerationFormState.onSiteBaseHeightInput.setValue(nextBaseHeight);
     }
     if (typeof heightPatch._base_height === 'number') {
@@ -2301,7 +2127,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (typeof heightPatch.mid_height === 'number') {
       midHeightInput.setValue(roundToTwoDecimals(heightPatch.mid_height));
     }
-  }, [adjacentViewerBaseHeightInput, baseHeightInput, midHeightInput, onSiteGenerationFormState.onSiteBaseHeightInput]);
+  }, [adjacentViewerBaseHeightInput, wallShared.baseHeightInput, midHeightInput, onSiteGenerationFormState.onSiteBaseHeightInput]);
 
   // System's own exclusive state now lives in its module (via systemFormState
   // above, elementForms/system.tsx) — see that module's header for the full
@@ -2316,7 +2142,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     hotWaterSubtype: hotWaterDemandFormState.hotWaterSubcategory || undefined,
     ventilationSubtype: mechanicalVentilationFormState.ventType || undefined,
     systemSubtype: systemFormState.systemSubcategory || undefined,
-    pitch,
+    pitch: wallShared.pitch,
     isExternalDoor,
   });
   const resolveElementFieldPresentation = elementFieldPresentation.resolve;
@@ -2834,10 +2660,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       updateElement(selection.id, storeUpdate);
       setElementPreset(presetKey);
 
-      if (typeof storeUpdate.width === 'number') widthInput.setValue(roundToTwoDecimals(storeUpdate.width));
-      if (typeof storeUpdate.height === 'number') heightInput.setValue(roundToTwoDecimals(storeUpdate.height));
-      if (typeof storeUpdate.pitch === 'number') setPitch(storeUpdate.pitch);
-      if (typeof storeUpdate.base_height === 'number') baseHeightInput.setValue(roundToTwoDecimals(storeUpdate.base_height));
+      if (typeof storeUpdate.width === 'number') wallShared.widthInput.setValue(roundToTwoDecimals(storeUpdate.width));
+      if (typeof storeUpdate.height === 'number') wallShared.heightInput.setValue(roundToTwoDecimals(storeUpdate.height));
+      if (typeof storeUpdate.pitch === 'number') wallShared.setPitch(storeUpdate.pitch);
+      if (typeof storeUpdate.base_height === 'number') wallShared.baseHeightInput.setValue(roundToTwoDecimals(storeUpdate.base_height));
       if (typeof storeUpdate.frame_area_fraction === 'number') {
         lateNumericInputSettersRef.current.freeAreaFraction(
           roundToTwoDecimals(storeUpdate.frame_area_fraction),
@@ -3078,13 +2904,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           const orientation = roundToInt(getCurrentOrientation(element));
           const baseHeight = 'base_height' in element && typeof element.base_height === 'number' ? roundToTwoDecimals(element.base_height) : (element.base_height ?? '');
 
-          widthInput.setValue(width);
-          heightInput.setValue(height);
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          areaInput.setValue(area);
-          setPitch(pitch);
-          setOrientation360(orientation);
-          baseHeightInput.setValue(baseHeight);
+          wallShared.widthInput.setValue(width);
+          wallShared.heightInput.setValue(height);
+          wallShared.setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
+          wallShared.areaInput.setValue(area);
+          wallShared.setPitch(pitch);
+          wallShared.setOrientation360(orientation);
+          wallShared.baseHeightInput.setValue(baseHeight);
 
           // Window-specific fields (only for BuildingElementTransparent)
           if (element.type === 'BuildingElementTransparent') {
@@ -3153,10 +2979,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           const extra = readExtraJsonRecord((element as any).extra_json);
           const groundLineHeight = readFiniteNumber(extra[GROUND_LINE_HEIGHT_EXTRA_KEY]) ?? '';
 
-          widthInput.setValue(width);
-          heightInput.setValue(height);
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          areaInput.setValue(area);
+          wallShared.widthInput.setValue(width);
+          wallShared.heightInput.setValue(height);
+          wallShared.setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
+          wallShared.areaInput.setValue(area);
           totalAreaInput.setValue(totalArea);
           perimeterInput.setValue(perimeter);
           setFloorType('floor_type' in element ? element.floor_type ?? '' : '');
@@ -3184,11 +3010,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           // may still hold 90 for an internal floor polygon until the user sets 0/180 in the surface-facing control.
           const pitch = typeof element.pitch === 'number' ? element.pitch : (element.pitch ?? 90);
           const adjacentExtra = readExtraJsonRecord((element as { extra_json?: unknown }).extra_json);
-          widthInput.setValue(width);
-          heightInput.setValue(height);
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          areaInput.setValue(area);
-          setPitch(pitch);
+          wallShared.widthInput.setValue(width);
+          wallShared.heightInput.setValue(height);
+          wallShared.setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
+          wallShared.areaInput.setValue(area);
+          wallShared.setPitch(pitch);
           const cavityResistance = readFiniteNumber(adjacentExtra.thermal_resistance_cavity);
           partyWallCavityResistanceInput.setValue(
             cavityResistance == null ? '' : formatConditionalDecimals(cavityResistance),
@@ -3352,10 +3178,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   // Auto-calculate total_area for BuildingElementGround when area changes
   useEffect(() => {
-    if (elementType === 'BuildingElementGround' && areaInput.value && areaInput.value > 0) {
-      totalAreaInputSetValueRef.current(areaInput.value);
+    if (elementType === 'BuildingElementGround' && wallShared.areaInput.value && wallShared.areaInput.value > 0) {
+      totalAreaInputSetValueRef.current(wallShared.areaInput.value);
     }
-  }, [elementType, areaInput.value]);
+  }, [elementType, wallShared.areaInput.value]);
 
   // Add effect to handle placeholder discard/auto-save
   useEffect(() => {
@@ -3579,19 +3405,19 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   function resetFormFields() {
     setElementName('');
     setElementType('BuildingElementOpaque');
-    widthInput.setValue('');
-    heightInput.setValue('');
-    areaInput.setValue('');
-    setPitch(90);
-    setOrientation360(0);
-    baseHeightInput.setValue('');
+    wallShared.widthInput.setValue('');
+    wallShared.heightInput.setValue('');
+    wallShared.areaInput.setValue('');
+    wallShared.setPitch(90);
+    wallShared.setOrientation360(0);
+    wallShared.baseHeightInput.setValue('');
     unheatedPitchedRoofCeilingElevationInput.setValue('');
     adjacentViewerBaseHeightInput.setValue('');
     elementElevationInput.setValue('');
     setIsUnheatedPitchedRoof(false);
     setDormerRoofIsUnheatedPitchedRoof(false);
     setIsExternalDoor(false);
-    setParentElement('');
+    wallShared.setParentElement('');
     lateNumericInputSettersRef.current.freeAreaFraction('');
     freeAreaHeightInput.setValue('');
     midHeightInput.setValue('');
@@ -3795,7 +3621,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       throw new Error('This element is not a dormer anchor.');
     }
 
-    const targetHostName = (overrides.hostName ?? parentElement ?? metadata.host_element_name ?? '').trim();
+    const targetHostName = (overrides.hostName ?? wallShared.parentElement ?? metadata.host_element_name ?? '').trim();
     const host = Object.values(elementsById).find(
       (element) => element.type === 'BuildingElementOpaque' && element.name === targetHostName,
     );
@@ -4492,7 +4318,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       const p = rep.pitch;
       return typeof p === 'number' && Number.isFinite(p) && p > 0 ? p : 90;
     }
-    return elementType === 'BuildingElementGround' ? 180 : pitch;
+    return elementType === 'BuildingElementGround' ? 180 : wallShared.pitch;
   })();
 
   const assemblyModalGroundFloorType = (() => {
@@ -4543,24 +4369,35 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       typeof selectedElement.area === 'number'
         ? roundToTwoDecimals(selectedElement.area)
         : (selectedElement.area ?? '');
-    widthInputSetValueRef.current(width);
-    heightInputSetValueRef.current(height);
-    areaInputSetValueRef.current(area);
-  }, [selection?.id, selection?.type, selectedElement]);
+    wallShared.widthInputSetValueRef.current(width);
+    wallShared.heightInputSetValueRef.current(height);
+    wallShared.areaInputSetValueRef.current(area);
+  // wallShared.*SetValueRef are stable ref objects (useRef never changes identity)
+  // — listing them is a no-op for when this effect re-runs, but satisfies
+  // exhaustive-deps, which (unlike a same-component useRef) can't verify
+  // stability through a property access on another hook's return value.
+  }, [
+    selection?.id,
+    selection?.type,
+    selectedElement,
+    wallShared.areaInputSetValueRef,
+    wallShared.heightInputSetValueRef,
+    wallShared.widthInputSetValueRef,
+  ]);
 
   // Surface-facing control must read pitch from the store (`selectedElement`), not only local
   // `pitch` state — they can diverge, which made re-picking 0 a no-op and mis-saved CSV.
   const horizontalPolygonControlPitch = useMemo(() => {
-    if (selection?.type !== 'element' || !selectedElement) return pitch;
+    if (selection?.type !== 'element' || !selectedElement) return wallShared.pitch;
     if (!isAdjacentLikeElement(selectedElement) || getElementShape(selectedElement) !== 'polygon') {
-      return pitch;
+      return wallShared.pitch;
     }
     const p = (selectedElement as { pitch?: number }).pitch;
     if (typeof p === 'number' && Number.isFinite(p)) {
       return Math.round(p);
     }
-    return pitch;
-  }, [selection?.type, selectedElement, pitch]);
+    return wallShared.pitch;
+  }, [selection?.type, selectedElement, wallShared.pitch]);
 
   // 90° is the wall/line default; a flat horizontal polygon must be 0 or 180. Heal to match parse/export.
   useLayoutEffect(() => {
@@ -4777,8 +4614,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     numbersClose,
   ]);
 
-  const liveWidthValue = parseLiveDecimalInput(widthInput.inputValue);
-  const liveHeightValue = parseLiveDecimalInput(heightInput.inputValue);
+  const liveWidthValue = parseLiveDecimalInput(wallShared.widthInput.inputValue);
+  const liveHeightValue = parseLiveDecimalInput(wallShared.heightInput.inputValue);
   const liveRectArea = useMemo(
     () => roundToTwoDecimals(liveWidthValue * liveHeightValue),
     [liveWidthValue, liveHeightValue],
@@ -4792,8 +4629,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     ) {
       return null;
     }
-    return deriveSlopedElementDimensions({ ...selectedElement, pitch });
-  }, [selectedElement, selectedShape, pitch]);
+    return deriveSlopedElementDimensions({ ...selectedElement, pitch: wallShared.pitch });
+  }, [selectedElement, selectedShape, wallShared.pitch]);
   const selectedSlopedDimensionNotes = useMemo(() => {
     if (!selectedElement || !selectedSlopedDimensions) return null;
     const semantics = getPolygonScalarDimensionSemantics(
@@ -4808,7 +4645,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   }, [selectedElement, selectedSlopedDimensions]);
   const selectedPvDimensionNotes = useMemo(() => {
     if (!selectedElement || selectedElement.type !== 'OnSiteGeneration') return null;
-    const pitchValue = typeof selectedElement.pitch === 'number' ? selectedElement.pitch : pitch;
+    const pitchValue = typeof selectedElement.pitch === 'number' ? selectedElement.pitch : wallShared.pitch;
     const derivedDimensions = derivePvDimensionsFromCoords(selectedElement.coordinates, pitchValue);
     if (!derivedDimensions) return null;
     const semantics = getPolygonScalarDimensionSemantics(
@@ -4820,7 +4657,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       width: 'Width is the low edge of this PV footprint.',
       height: 'Height is equivalent: plan footprint area divided by low-edge width, then pitch-corrected.',
     };
-  }, [selectedElement, pitch]);
+  }, [selectedElement, wallShared.pitch]);
   const showSlopedWidthReset =
     !!selectedSlopedDimensions &&
     !!selectedElement &&
@@ -4833,20 +4670,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     Math.abs(liveHeightValue - selectedSlopedDimensions.height) > 0.01;
   const resetSlopedWidthToCanvas = useCallback(() => {
     if (!selectedSlopedDimensions) return;
-    widthInput.setValue(selectedSlopedDimensions.width);
+    wallShared.widthInput.setValue(selectedSlopedDimensions.width);
     commitExistingElementDraftRef.current({
       width: selectedSlopedDimensions.width,
       _widthUserOverride: false,
     } as Partial<Element>);
-  }, [selectedSlopedDimensions, widthInput]);
+  }, [selectedSlopedDimensions, wallShared.widthInput]);
   const resetSlopedHeightToCanvas = useCallback(() => {
     if (!selectedSlopedDimensions) return;
-    heightInput.setValue(selectedSlopedDimensions.height);
+    wallShared.heightInput.setValue(selectedSlopedDimensions.height);
     commitExistingElementDraftRef.current({
       height: selectedSlopedDimensions.height,
       _heightUserOverride: false,
     } as Partial<Element>);
-  }, [selectedSlopedDimensions, heightInput]);
+  }, [selectedSlopedDimensions, wallShared.heightInput]);
   const selectedSlopedTransparentNeedsRebuild = useMemo(() => {
     if (
       selectedElement?.type !== 'BuildingElementTransparent' ||
@@ -4859,9 +4696,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       coordinates: selectedElement.coordinates,
       widthM: selectedSlopedDimensions.width,
       heightM: selectedSlopedDimensions.height,
-      pitchDegrees: typeof selectedElement.pitch === 'number' ? selectedElement.pitch : pitch,
+      pitchDegrees: typeof selectedElement.pitch === 'number' ? selectedElement.pitch : wallShared.pitch,
     });
-  }, [selectedElement, selectedShape, selectedSlopedDimensions, pitch]);
+  }, [selectedElement, selectedShape, selectedSlopedDimensions, wallShared.pitch]);
   const showSlopedTransparentRebuildOpening =
     selectedElement?.type === 'BuildingElementTransparent' &&
     selectedShape === 'sloped-polygon' &&
@@ -4873,23 +4710,23 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       !selectedSlopedDimensions
     ) return;
     const nextWidth =
-      typeof widthInput.value === 'number' && widthInput.value > 0
-        ? widthInput.value
+      typeof wallShared.widthInput.value === 'number' && wallShared.widthInput.value > 0
+        ? wallShared.widthInput.value
         : selectedSlopedDimensions.width;
     const nextHeight =
-      typeof heightInput.value === 'number' && heightInput.value > 0
-        ? heightInput.value
+      typeof wallShared.heightInput.value === 'number' && wallShared.heightInput.value > 0
+        ? wallShared.heightInput.value
         : selectedSlopedDimensions.height;
     const patch = buildSlopedPolygonRectangleDimensionPatch({
       coordinates: selectedElement.coordinates,
       widthM: nextWidth,
       heightM: nextHeight,
-      pitchDegrees: typeof selectedElement.pitch === 'number' ? selectedElement.pitch : pitch,
+      pitchDegrees: typeof selectedElement.pitch === 'number' ? selectedElement.pitch : wallShared.pitch,
     });
     if (!patch) return;
-    if (typeof patch.width === 'number') widthInput.setValue(patch.width);
-    if (typeof patch.height === 'number') heightInput.setValue(patch.height);
-    if (typeof patch.area === 'number') areaInput.setValue(patch.area);
+    if (typeof patch.width === 'number') wallShared.widthInput.setValue(patch.width);
+    if (typeof patch.height === 'number') wallShared.heightInput.setValue(patch.height);
+    if (typeof patch.area === 'number') wallShared.areaInput.setValue(patch.area);
     commitExistingElementDraftRef.current(patch);
   };
   const selectedFieldValidationByKey = useMemo(() => {
@@ -4918,7 +4755,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // Gross/openings remain visible as helper information for context.
   const selectedOpaqueAreaSummary = useMemo(() => {
     if (!selectedElement || selectedElement.type !== 'BuildingElementOpaque') return null;
-    const draftElement = { ...selectedElement, pitch } as Element;
+    const draftElement = { ...selectedElement, pitch: wallShared.pitch } as Element;
     const grossArea = selectedShape === 'polygon' || selectedShape === 'sloped-polygon'
       ? getElementGrossArea(draftElement)
       : liveRectArea;
@@ -4930,21 +4767,21 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       subtractedArea: roundToTwoDecimals(subtractedArea),
       usesUnheatedPitchedRoofPlanArea: isUnheatedPitchedRoofPlanAreaElement(draftElement),
     };
-  }, [selectedElement, selectedShape, pitch, liveRectArea, elementsById]);
+  }, [selectedElement, selectedShape, wallShared.pitch, liveRectArea, elementsById]);
 
   const canMarkUnheatedPitchedRoof = elementType === 'BuildingElementOpaque' && selectedShape === 'sloped-polygon';
   const canMarkExternalDoor = elementType === 'BuildingElementOpaque'
     && selectedShape === 'line'
-    && typeof pitch === 'number'
-    && Number.isFinite(pitch)
-    && Math.round(pitch) === 90;
+    && typeof wallShared.pitch === 'number'
+    && Number.isFinite(wallShared.pitch)
+    && Math.round(wallShared.pitch) === 90;
   const unheatedPitchedRoofCeilingElevationSuggestion = useMemo(() => {
     if (!selectedElement || selectedElement.type !== 'BuildingElementOpaque') return null;
     const draftRoof = {
       ...selectedElement,
-      pitch,
-      base_height: typeof baseHeightInput.value === 'number'
-        ? baseHeightInput.value
+      pitch: wallShared.pitch,
+      base_height: typeof wallShared.baseHeightInput.value === 'number'
+        ? wallShared.baseHeightInput.value
         : selectedElement.base_height,
       is_unheated_pitched_roof: true,
       extra_json: mergeUnheatedPitchedRoofCeilingElevationExtraJson(selectedElement.extra_json, ''),
@@ -4954,7 +4791,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       allElements,
       withEffectiveStoreyHeights(floors, allElements),
     );
-  }, [selectedElement, pitch, baseHeightInput.value, allElements, floors]);
+  }, [selectedElement, wallShared.pitch, wallShared.baseHeightInput.value, allElements, floors]);
 
   const canUseProfileTop = useMemo(() => {
     if (!selectedElement || selectedShape !== 'line') return false;
@@ -4986,11 +4823,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     const h =
       selectedElement && 'height' in selectedElement && typeof (selectedElement as { height?: number }).height === 'number'
         ? (selectedElement as { height: number }).height
-        : typeof heightInput.value === 'number'
-          ? heightInput.value
+        : typeof wallShared.heightInput.value === 'number'
+          ? wallShared.heightInput.value
           : 0;
     return [h, h];
-  }, [selectedElement, heightInput.value]);
+  }, [selectedElement, wallShared.heightInput.value]);
 
   const applyLineProfileHeights = useCallback(
     (heights: number[]) => {
@@ -5023,8 +4860,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         };
       }
       commitExistingElementDraftRef.current(patch);
-      widthInput.setValue(roundToTwoDecimals(exp.width));
-      heightInput.setValue(roundToTwoDecimals(exp.height));
+      wallShared.widthInput.setValue(roundToTwoDecimals(exp.width));
+      wallShared.heightInput.setValue(roundToTwoDecimals(exp.height));
       if (draft.type === 'BuildingElementTransparent') {
         midHeightInput.setValue(
           roundToTwoDecimals(getTransparentExportMidHeight(draft as BuildingElementTransparent)),
@@ -5035,8 +4872,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       selection,
       isExistingElementSelection,
       getElementById,
-      widthInput,
-      heightInput,
+      wallShared.widthInput,
+      wallShared.heightInput,
       midHeightInput,
     ],
   );
@@ -5086,8 +4923,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 	    switch (elementType) {
 		      case 'BuildingElementOpaque':
 		        {
-		          const width = widthInput.value;
-		          const height = heightInput.value;
+		          const width = wallShared.widthInput.value;
+		          const height = wallShared.heightInput.value;
 		          const coldRoofCeilingExtraJson =
 		            isUnheatedPitchedRoof && typeof unheatedPitchedRoofCeilingElevationInput.value === 'number'
 		              ? mergeUnheatedPitchedRoofCeilingElevationExtraJson(
@@ -5100,29 +4937,29 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 		          width,
 		          height,
 		          area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-		          pitch,
-		          orientation360: roundToInt(orientation360),
-		          base_height: baseHeightInput.value === '' ? undefined : baseHeightInput.value,
+		          pitch: wallShared.pitch,
+		          orientation360: roundToInt(wallShared.orientation360),
+		          base_height: wallShared.baseHeightInput.value === '' ? undefined : wallShared.baseHeightInput.value,
 	          is_unheated_pitched_roof: isUnheatedPitchedRoof,
 	          is_external_door: isExternalDoor,
-		          parent_element: parentElement,
+		          parent_element: wallShared.parentElement,
 		          ...(coldRoofCeilingExtraJson ? { extra_json: coldRoofCeilingExtraJson } : {}),
 		        } as Partial<Element>;
 		        }
 
 	      case 'BuildingElementTransparent':
 	        {
-	          const width = widthInput.value;
-	          const height = heightInput.value;
+	          const width = wallShared.widthInput.value;
+	          const height = wallShared.heightInput.value;
 	        return {
 	          ...baseData,
 	          width,
 	          height,
 	          area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-          pitch,
-          orientation360: roundToInt(orientation360),
-	          base_height: baseHeightInput.value === '' ? undefined : baseHeightInput.value,
-          parent_element: parentElement,
+          pitch: wallShared.pitch,
+          orientation360: roundToInt(wallShared.orientation360),
+	          base_height: wallShared.baseHeightInput.value === '' ? undefined : wallShared.baseHeightInput.value,
+          parent_element: wallShared.parentElement,
 	          frame_area_fraction: freeAreaFraction === '' ? undefined : freeAreaFraction,
           free_area_height: freeAreaHeightInput.value,
           mid_height: midHeightInput.value,
@@ -5139,9 +4976,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             : undefined;
 	        return {
 	          ...baseData,
-	          width: widthInput.value,
+	          width: wallShared.widthInput.value,
 	            area: derivedArea,
-          pitch,
+          pitch: wallShared.pitch,
             total_area: derivedArea,
           perimeter: derivedPerimeter,
 	          floor_type: floorType || undefined,
@@ -5155,14 +4992,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 	      case 'BuildingElementAdjacentUnconditionedSpace_Simple':
 	      case 'BuildingElementPartyWall':
 	        {
-	          const width = widthInput.value;
-	          const height = heightInput.value;
+	          const width = wallShared.widthInput.value;
+	          const height = wallShared.heightInput.value;
 	        return {
 	          ...baseData,
 	          width,
 	          height,
 	          area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-	          pitch
+	          pitch: wallShared.pitch
 	        } as Partial<Element>;
 	        }
 
@@ -5501,18 +5338,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   const applyHostedParentElement = useCallback(
     (value: string, emptyParentValue: string | null) => {
-      setParentElement(value);
+      wallShared.setParentElement(value);
       const parent = getParentByName(elementsById, elementIds, value);
       if (parent) {
         if ('pitch' in parent && typeof parent.pitch === 'number') {
-          setPitch(parent.pitch);
+          wallShared.setPitch(parent.pitch);
         }
         const parentOrientation = getParentOrientation360(
           parent,
           geometryStore.getState().globalOrientationOffset,
         );
         if (typeof parentOrientation === 'number') {
-          setOrientation360(parentOrientation);
+          wallShared.setOrientation360(parentOrientation);
         }
       }
 
@@ -5529,15 +5366,22 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         ),
       );
     },
+    // wallShared is listed whole (not per-setter) — eslint-plugin-react-hooks
+    // 7.1.1 treats the three individual wallShared.set* entries as redundant
+    // once the base object is present. This does widen the callback's own
+    // recreate cadence to every render (wallShared is a fresh object per
+    // render, unlike the plain useKeyedState setters this replaces, which
+    // were themselves only recreated when selectedDraftKey changed) — but
+    // every call site already wraps this callback in a fresh inline arrow
+    // (see the two `onChange={(value) => applyHostedParentElement(...)}`
+    // sites), so nothing downstream relies on its own referential stability.
     [
       elementIds,
       elementsById,
       geometryStore,
       getElementById,
       selection,
-      setOrientation360,
-      setParentElement,
-      setPitch,
+      wallShared,
       updateElement,
     ],
   );
@@ -5557,7 +5401,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           ref={fieldRef('width')}
         >
           <StandardInput
-            {...decimalInputProps(widthInput)}
+            {...decimalInputProps(wallShared.widthInput)}
             unit={fieldUnit('width')}
             step={options.widthStep}
             min="0"
@@ -5592,7 +5436,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           ref={fieldRef('height')}
         >
           <StandardInput
-            {...decimalInputProps(heightInput)}
+            {...decimalInputProps(wallShared.heightInput)}
             unit={fieldUnit('height')}
             step={options.heightStep}
             min="0"
@@ -5815,9 +5659,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             {renderFieldLabel('Host Roof:', elementType, 'parent_element')}
             <div className="element-input">
               <ParentElementDropdown
-                value={parentElement}
+                value={wallShared.parentElement}
                 onChange={(value) => {
-                  setParentElement(value);
+                  wallShared.setParentElement(value);
                   commitDormerAnchorChanges({ hostName: value });
                 }}
                 elementType={elementType}
@@ -5982,7 +5826,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
             <div className="element-input">
               <ParentElementDropdown
-                value={parentElement}
+                value={wallShared.parentElement}
                 onChange={(value) => applyHostedParentElement(value, null)}
                 elementType={elementType}
                 zoneId={elementZoneId}
@@ -6030,7 +5874,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   onChange={(value) => {
                     if (value !== '0' && value !== '180') return;
                     const next = value === '180' ? 180 : 0;
-                    setPitch(next);
+                    wallShared.setPitch(next);
                     if (selection.type === 'element') {
                       updateElement(selection.id, { pitch: next });
                     }
@@ -6040,37 +5884,37 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   unit={fieldUnit('pitch')}
                   variant="ghost"
                   size="md"
-                  disabled={!!parentElement}
+                  disabled={!!wallShared.parentElement}
                 />
               ) : (
                 <StandardInput
                   type="text"
                   inputMode="decimal"
-                  value={pitchDraftInput.inputValue}
+                  value={wallShared.pitchDraftInput.inputValue}
                   unit={fieldUnit('pitch')}
-                  onChange={pitchDraftInput.handleInputChange}
-                  onBlur={pitchDraftInput.handleBlur}
+                  onChange={wallShared.pitchDraftInput.handleInputChange}
+                  onBlur={wallShared.pitchDraftInput.handleBlur}
                   min="0"
                   max="180"
-                  readOnly={!!parentElement}
+                  readOnly={!!wallShared.parentElement}
                   variant="ghost"
                   size="md"
                 />
               )}
               {selectedShape !== 'polygon' && (
                 <div style={INLINE_FIELD_NOTE_STYLE}>
-                  {pitch === 0
+                  {wallShared.pitch === 0
                     ? 'Facing up (horizontal)'
-                    : pitch === 90
+                    : wallShared.pitch === 90
                       ? 'Vertical'
-                      : pitch === 180
+                      : wallShared.pitch === 180
                         ? 'Facing down (horizontal)'
                         : 'Angled surface'}
                 </div>
               )}
-              {parentElement && (
+              {wallShared.parentElement && (
                 <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {parentElement}
+                  Inherited from parent: {wallShared.parentElement}
                 </div>
               )}
             </div>
@@ -6081,18 +5925,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   <StandardInput
                     type="text"
                     inputMode="numeric"
-                    value={Number.isFinite(orientation360) ? orientation360 : 0}
+                    value={Number.isFinite(wallShared.orientation360) ? wallShared.orientation360 : 0}
                     unit={fieldUnit('orientation360')}
-                    onChange={(e) => setOrientation360(Math.round(parseFloat(e.target.value) || 0))}
+                    onChange={(e) => wallShared.setOrientation360(Math.round(parseFloat(e.target.value) || 0))}
                     onBlur={(e) => {
                       const parsed = Math.round(parseFloat(e.currentTarget.value) || 0);
-                      setOrientation360(parsed);
-                      applyOrientationToGeometry(parsed);
+                      wallShared.setOrientation360(parsed);
+                      wallShared.applyOrientationToGeometry(parsed);
                     }}
                     step="1"
                     min="0"
                     max="360"
-                    readOnly={!!parentElement}
+                    readOnly={!!wallShared.parentElement}
                     variant="ghost"
                     size="md"
                   />
@@ -6116,9 +5960,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   </button>
                 )}
               </div>
-              {parentElement && (
+              {wallShared.parentElement && (
                 <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {parentElement}
+                  Inherited from parent: {wallShared.parentElement}
                 </div>
               )}
             </div>
@@ -6131,14 +5975,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>
                 <div
                   className={
-                    baseHeightResetTarget && typeof baseHeightInput.value === 'number' && Math.abs(baseHeightInput.value - baseHeightResetTarget.value) > 0.01
+                    baseHeightResetTarget && typeof wallShared.baseHeightInput.value === 'number' && Math.abs(wallShared.baseHeightInput.value - baseHeightResetTarget.value) > 0.01
                       ? 'custom-value'
                       : ''
                   }
                   style={{ flex: 1 }}
                 >
                   <StandardInput
-                    {...decimalInputProps(baseHeightInput)}
+                    {...decimalInputProps(wallShared.baseHeightInput)}
                     unit={fieldUnit('base_height')}
                     step="0.01"
                     min={baseHeightResetTarget && baseHeightResetTarget.value < 0 ? undefined : '0'}
@@ -6148,10 +5992,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     placeholder={baseHeightResetTarget ? String(baseHeightResetTarget.value) : undefined}
                   />
                 </div>
-                {baseHeightResetTarget && typeof baseHeightInput.value === 'number' && Math.abs(baseHeightInput.value - baseHeightResetTarget.value) > 0.01 && (
+                {baseHeightResetTarget && typeof wallShared.baseHeightInput.value === 'number' && Math.abs(wallShared.baseHeightInput.value - baseHeightResetTarget.value) > 0.01 && (
                   <ResetFieldButton
                     onClick={() => {
-                      baseHeightInput.setValue(baseHeightResetTarget.value);
+                      wallShared.baseHeightInput.setValue(baseHeightResetTarget.value);
                       commitExistingElementDraft({ base_height: baseHeightResetTarget.value });
                     }}
                     align="inline"
@@ -6163,7 +6007,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               </div>
               {baseHeightResetTarget ? (
                 <div style={INLINE_FIELD_NOTE_STYLE}>
-                  {typeof baseHeightInput.value === 'number' && Math.abs(baseHeightInput.value - baseHeightResetTarget.value) > 0.01
+                  {typeof wallShared.baseHeightInput.value === 'number' && Math.abs(wallShared.baseHeightInput.value - baseHeightResetTarget.value) > 0.01
                     ? `Default: ${baseHeightResetTarget.value} m · ${baseHeightResetTarget.note}`
                     : `Suggested: ${baseHeightResetTarget.value} m · ${baseHeightResetTarget.note}`}
                 </div>
@@ -6265,7 +6109,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             {renderFieldLabel('Linked Wall:', elementType)}
             <div className="element-input">
               <ParentElementDropdown
-                value={parentElement}
+                value={wallShared.parentElement}
                 onChange={(value) => applyHostedParentElement(value, '')}
                 elementType={elementType}
                 zoneId={elementZoneId}
@@ -6429,7 +6273,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   onChange={(value) => {
                     if (value !== '0' && value !== '180') return;
                     const next = value === '180' ? 180 : 0;
-                    setPitch(next);
+                    wallShared.setPitch(next);
                     if (selection.type === 'element') {
                       updateElement(selection.id, { pitch: next });
                     }
@@ -6443,10 +6287,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 	                <StandardInput
                   type="text"
                   inputMode="decimal"
-                  value={pitchDraftInput.inputValue}
+                  value={wallShared.pitchDraftInput.inputValue}
                   unit={fieldUnit('pitch')}
-                  onChange={pitchDraftInput.handleInputChange}
-                  onBlur={pitchDraftInput.handleBlur}
+                  onChange={wallShared.pitchDraftInput.handleInputChange}
+                  onBlur={wallShared.pitchDraftInput.handleBlur}
                   min="0"
                   max="180"
                   variant="ghost"
@@ -6455,11 +6299,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               )}
               {selectedShape !== 'polygon' && (
                 <div style={INLINE_FIELD_NOTE_STYLE}>
-                  {pitch === 0
+                  {wallShared.pitch === 0
                     ? 'Facing up (horizontal)'
-                    : pitch === 90
+                    : wallShared.pitch === 90
                       ? 'Vertical'
-                      : pitch === 180
+                      : wallShared.pitch === 180
                         ? 'Facing down (horizontal)'
                         : 'Angled surface'}
                 </div>
@@ -6470,31 +6314,31 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               <StandardInput
                 type="text"
                 inputMode="numeric"
-                value={Number.isFinite(orientation360) ? orientation360 : getCurrentOrientation(getCurrentElementData() as Element)}
+                value={Number.isFinite(wallShared.orientation360) ? wallShared.orientation360 : getCurrentOrientation(getCurrentElementData() as Element)}
                 unit={fieldUnit('orientation360')}
-                onChange={(e) => setOrientation360(Math.round(parseFloat(e.target.value) || 0))}
+                onChange={(e) => wallShared.setOrientation360(Math.round(parseFloat(e.target.value) || 0))}
                 onBlur={(e) => {
                   const parsed = Math.round(parseFloat(e.currentTarget.value) || 0);
-                  setOrientation360(parsed);
-                  applyOrientationToGeometry(parsed);
+                  wallShared.setOrientation360(parsed);
+                  wallShared.applyOrientationToGeometry(parsed);
                 }}
                 step="1"
                 min="0"
                 max="360"
-                readOnly={!!parentElement}
+                readOnly={!!wallShared.parentElement}
                 variant="ghost"
                 size="md"
               />
-              {parentElement && (
+              {wallShared.parentElement && (
                 <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {parentElement}
+                  Inherited from parent: {wallShared.parentElement}
                 </div>
               )}
             </div>
             {renderFieldLabel('Base Height (m):', elementType, 'base_height')}
             <div className="element-input" ref={registerBaseFieldRef('base_height')}>
               <StandardInput
-                {...decimalInputProps(baseHeightInput)}
+                {...decimalInputProps(wallShared.baseHeightInput)}
                 unit={fieldUnit('base_height')}
                 step="0.01"
                 min="0"
@@ -6796,7 +6640,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     ...selectedElement,
                     width: liveWidthValue,
                     height: liveHeightValue,
-                    pitch,
+                    pitch: wallShared.pitch,
                   } as Element)
                 : selectedShape === 'polygon'
                   ? showInternalFloorDoubling
@@ -6843,7 +6687,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   onChange={(value) => {
                     if (value !== '0' && value !== '180') return;
                     const next = value === '180' ? 180 : 0;
-                    setPitch(next);
+                    wallShared.setPitch(next);
                     if (selection.type === 'element') {
                       updateElement(selection.id, { pitch: next });
                     }
@@ -6857,10 +6701,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 <StandardInput
                   type="text"
                   inputMode="decimal"
-                  value={pitchDraftInput.inputValue}
+                  value={wallShared.pitchDraftInput.inputValue}
                   unit={fieldUnit('pitch')}
-                  onChange={pitchDraftInput.handleInputChange}
-                  onBlur={pitchDraftInput.handleBlur}
+                  onChange={wallShared.pitchDraftInput.handleInputChange}
+                  onBlur={wallShared.pitchDraftInput.handleBlur}
                   min="0"
                   max="180"
                   variant="ghost"
@@ -6869,11 +6713,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               )}
               {selectedShape !== 'polygon' && (
                 <div style={INLINE_FIELD_NOTE_STYLE}>
-                  {pitch === 0
+                  {wallShared.pitch === 0
                     ? 'Facing up (horizontal)'
-                    : pitch === 90
+                    : wallShared.pitch === 90
                       ? 'Vertical'
-                      : pitch === 180
+                      : wallShared.pitch === 180
                         ? 'Facing down (horizontal)'
                         : 'Angled surface'}
                 </div>
@@ -7274,7 +7118,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       }
                       if (shape === 'line' && BUILDING_FABRIC_LINE_PITCH_TYPES.has(el.type as ElementType)) {
                         updates.pitch = 90;
-                        setPitch(90);
+                        wallShared.setPitch(90);
                       }
                       if (el.type === 'BuildingElementOpaque') {
                         if (shape !== 'sloped-polygon') {
