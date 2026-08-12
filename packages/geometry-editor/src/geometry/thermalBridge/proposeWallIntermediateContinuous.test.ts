@@ -289,6 +289,65 @@ describe('proposeWallIntermediateContinuous', () => {
     expect(p[0].suggestedLengthM).toBe(10);
   });
 
+  it('keeps E6 on an upper wall stacked directly above the ground-floor perimeter', () => {
+    // Ordinary two-storey geometry: the F2 wall sits on the same plan line as the
+    // F1 ground slab edge. Plan linkage alone would veto its E6 (the ground slab is
+    // 2.4 m below); the veto must require the wall to actually qualify for E5.
+    const groundSlab = {
+      type: 'BuildingElementGround',
+      id: 'ground-f0',
+      name: 'Ground slab',
+      zoneId: 'z1',
+      parent_element: null,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 10, y: 0, z: 0 },
+        { x: 10, y: 8, z: 0 },
+        { x: 0, y: 8, z: 0 },
+      ],
+      area: 80,
+      pitch: 180,
+      isPlaceholder: false,
+      floor_type: 'Slab_no_edge_insulation',
+      floorId: 'f0',
+    } as unknown as BuildingElementGround;
+    const upperSlab = makeIntermediateSlab();
+    const groundWall = makeWall({
+      id: 'wall-g',
+      name: 'Ground wall',
+      floorId: 'f0',
+      base_height: 0,
+      height: 2.4,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 10, y: 0, z: 0 },
+      ],
+    });
+    const upperWall = makeWall({
+      id: 'wall-u',
+      name: 'Upper wall',
+      floorId: 'f1',
+      base_height: 2.4,
+      coordinates: [
+        { x: 0, y: 0, z: 1 },
+        { x: 10, y: 0, z: 1 },
+      ],
+    });
+    const elements = [groundSlab, upperSlab, groundWall, upperWall];
+
+    const e6 = proposeWallIntermediateContinuous(elements, [], testFloors);
+    expect(e6).toHaveLength(1);
+    expect(e6[0].junctionCode).toBe('E6');
+    expect(e6[0].openingName).toContain('Upper wall');
+    expect(e6[0].coordinates.every((point) => point.z === 2.4)).toBe(true);
+
+    const e5 = proposeWallGroundContinuous(elements, [], testFloors);
+    expect(e5).toHaveLength(1);
+    expect(e5[0].junctionCode).toBe('E5');
+    expect(e5[0].openingName).toContain('Ground wall');
+    expect(e5[0].coordinates.every((point) => point.z === 0)).toBe(true);
+  });
+
   it('emits E6 for a ground-storey wall linked to a conditioned floor polygon', () => {
     const slab = makeIntermediateSlab({
       id: 'flat-floor',

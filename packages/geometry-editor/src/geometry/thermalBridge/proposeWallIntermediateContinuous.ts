@@ -33,6 +33,7 @@ import {
 import {
   footIntervalOnWallForRole,
   gapIntervalsAlongWall,
+  isGroundContactExternalWallForContinuousTb,
   wallHasPositiveFabricExtent,
   wallLinkedToGroundSlabForContinuousE5,
   wallLinkedToIntermediateFloorSlabForContinuousE6,
@@ -108,7 +109,14 @@ export function proposeWallIntermediateContinuous(
     if (!useUnheatedBasementE6) {
       if (!effectiveFloors) continue;
       if (!isIntermediateSlabExternalWallForContinuousTb(w, effectiveFloors)) continue;
-      if (wallLinkedToGroundSlabForContinuousE5(w, elements)) continue;
+      // Ground precedence must be elevation-aware: plan linkage alone also matches an
+      // upper wall sitting directly above the ground-floor perimeter, and vetoing on
+      // that would silently drop E6 for ordinary stacked storeys. Veto only when the
+      // wall actually qualifies for continuous E5 (linked ground slab at its base).
+      if (
+        wallLinkedToGroundSlabForContinuousE5(w, elements) &&
+        isGroundContactExternalWallForContinuousTb(w, effectiveFloors, elements)
+      ) continue;
       if (!wallLinkedToIntermediateFloorSlabForContinuousE6(w, elements, effectiveFloors)) continue;
     }
 
