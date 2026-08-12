@@ -28,7 +28,13 @@ export type PolygonScalarDimensionSemantics = {
   lowEdgeWidth: number;
   farEdgeWidth?: number;
   vertexCount: number;
-  usesEquivalentHeight: boolean;
+  /**
+   * True for non-parallelogram sloped shapes (triangles, trapezoids, ...): height is kept as
+   * the true up-slope (slope-plane) length, and width becomes the equivalent dimension
+   * (surface area ÷ height) so the surface area stays exact. False for parallelograms, where
+   * width = low-edge length and height = area ÷ width already equals the true slope length.
+   */
+  usesEquivalentWidth: boolean;
 };
 
 export type PolygonPoint2D = {
@@ -278,7 +284,15 @@ export const getSlopedPolygonSurfaceArea = (
   return roundToTwoDecimals(calculatePlanarFaceArea3D(liftedPoints));
 };
 
-export const deriveSlopedElementDimensions = (
+/**
+ * Pre-"equivalent-width" formula: width = low-edge length, height = surface area ÷ low-edge
+ * width, applied uniformly to every sloped shape including non-parallelograms. For a true
+ * parallelogram this already equals the true slope length (see `deriveSlopedElementDimensions`),
+ * so it stays the live formula for those shapes. Kept as a standalone export only so CSV imports
+ * saved before the equivalent-width change can distinguish a genuine user override from a stale
+ * auto-calculated value on import (see `loadFromCSV` in stores/geometryStore/slices/ioSlice.ts).
+ */
+export const deriveLegacySlopedElementDimensions = (
   element: SlopedElementDimensionSource,
 ): SlopedElementDimensions | null => {
   const coords = element.coordinates;
@@ -303,6 +317,51 @@ export const deriveSlopedElementDimensions = (
   };
 };
 
+export const deriveSlopedElementDimensions = (
+  element: SlopedElementDimensionSource,
+): SlopedElementDimensions | null => {
+  // For parallelograms the legacy formula is already exact (height = area / low-edge width =
+  // true slope length), so it doubles as the guard clauses and the parallelogram result here.
+  const parallelogramDimensions = deriveLegacySlopedElementDimensions(element);
+  if (!parallelogramDimensions) return null;
+
+  const coords = element.coordinates as ReadonlyArray<{ x: number; y: number }>;
+  const pitch = element.pitch as number;
+  const area = parallelogramDimensions.area;
+
+  const semantics = getPolygonScalarDimensionSemantics(coords);
+  if (!semantics?.usesEquivalentWidth) return parallelogramDimensions;
+
+  // Non-parallelogram (triangle/trapezoid) sloped shapes: keep HEIGHT physically true because
+  // HEM derives overhang/obstacle shading from it (projected_height = height·sin(pitch)), and
+  // make WIDTH the equivalent dimension instead, so the surface area stays exact.
+  // True up-slope extent = the plan-perpendicular distance from the eaves edge to the farthest
+  // vertex, projected onto the pitched plane (divided by cos(pitch)).
+  const hostPlanPoints = coords.map((point) => [point.x, point.y] as [number, number]);
+  const inwardNormal2D = computeSlopedPolygonInwardNormal2D(hostPlanPoints);
+  if (!inwardNormal2D) return parallelogramDimensions;
+
+  const anchor = hostPlanPoints[0];
+  let dMax = 0;
+  for (const point of hostPlanPoints) {
+    const d = (point[0] - anchor[0]) * inwardNormal2D[0] + (point[1] - anchor[1]) * inwardNormal2D[1];
+    if (d > dMax) dMax = d;
+  }
+  // Degenerate: every vertex sits on (or behind) the eaves line — fall back to the
+  // parallelogram formula rather than divide by ~0.
+  if (dMax <= 1e-9) return parallelogramDimensions;
+
+  const cosPitch = Math.cos((pitch * Math.PI) / 180);
+  const slopeExtent = cosPitch > 1e-9 ? dMax / cosPitch : dMax;
+  if (!Number.isFinite(slopeExtent) || slopeExtent <= 1e-9) return parallelogramDimensions;
+
+  return {
+    width: roundToTwoDecimals(area / slopeExtent),
+    height: roundToTwoDecimals(slopeExtent),
+    area: roundToTwoDecimals(area),
+  };
+};
+
 export const getPolygonScalarDimensionSemantics = (
   coordinates: ReadonlyArray<{ x: number; y: number }> | undefined,
   lowEdgeWidthOverride?: number,
@@ -321,7 +380,7 @@ export const getPolygonScalarDimensionSemantics = (
     return {
       lowEdgeWidth: roundToTwoDecimals(lowEdgeWidth),
       vertexCount: coordinates.length,
-      usesEquivalentHeight: true,
+      usesEquivalentWidth: true,
     };
   }
 
@@ -334,7 +393,7 @@ export const getPolygonScalarDimensionSemantics = (
       lowEdgeWidth: roundToTwoDecimals(lowEdgeWidth),
       farEdgeWidth: Number.isFinite(farEdgeWidth) ? roundToTwoDecimals(farEdgeWidth) : undefined,
       vertexCount: coordinates.length,
-      usesEquivalentHeight: true,
+      usesEquivalentWidth: true,
     };
   }
 
@@ -349,7 +408,7 @@ export const getPolygonScalarDimensionSemantics = (
     lowEdgeWidth: roundToTwoDecimals(lowEdgeWidth),
     farEdgeWidth: roundToTwoDecimals(farEdgeWidth),
     vertexCount: coordinates.length,
-    usesEquivalentHeight: farEdgeDiffers || farEdgeNotParallel,
+    usesEquivalentWidth: farEdgeDiffers || farEdgeNotParallel,
   };
 };
 

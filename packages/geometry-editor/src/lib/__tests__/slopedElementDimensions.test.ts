@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  deriveLegacySlopedElementDimensions,
   deriveSlopedElementDimensions,
   getPolygonScalarDimensionSemantics,
   getSlopedPolygonSurfaceArea,
@@ -31,7 +32,7 @@ describe('sloped element dimensions', () => {
     });
   });
 
-  it('keeps surface area consistent for non-rectangular sloped polygons', () => {
+  it('keeps surface area consistent for non-rectangular sloped polygons (height stays true slope length, width becomes equivalent)', () => {
     const element = {
       coordinates: [
         { x: 0, y: 0, z: 0 },
@@ -45,7 +46,9 @@ describe('sloped element dimensions', () => {
     const derived = deriveSlopedElementDimensions(element);
 
     expect(derived).not.toBeNull();
-    expect(derived?.width).toBe(4);
+    // Farthest vertex from the eaves edge is (0, 3): true up-slope length = 3 / cos(45deg).
+    expect(derived?.height).toBeCloseTo(3 / Math.cos((45 * Math.PI) / 180), 2);
+    expect(derived?.width).not.toBe(4); // no longer the low-edge length for a tapered shape
     expect(derived ? Math.abs(Number((derived.width * derived.height).toFixed(2)) - derived.area) : 0).toBeLessThanOrEqual(0.03);
   });
 
@@ -72,7 +75,7 @@ describe('sloped element dimensions', () => {
       lowEdgeWidth: 4,
       farEdgeWidth: 6,
       vertexCount: 4,
-      usesEquivalentHeight: true,
+      usesEquivalentWidth: true,
     });
   });
 
@@ -88,7 +91,7 @@ describe('sloped element dimensions', () => {
       lowEdgeWidth: 4,
       farEdgeWidth: 4,
       vertexCount: 4,
-      usesEquivalentHeight: false,
+      usesEquivalentWidth: false,
     });
   });
 
@@ -104,7 +107,7 @@ describe('sloped element dimensions', () => {
     expect(semantics).toMatchObject({
       lowEdgeWidth: 4,
       vertexCount: 5,
-      usesEquivalentHeight: true,
+      usesEquivalentWidth: true,
     });
   });
 
@@ -190,5 +193,118 @@ describe('sloped element dimensions', () => {
       heightM: 2,
       pitchDegrees: 60,
     })).toBe(true);
+  });
+});
+
+// The equivalent-width formula change: for a non-parallelogram sloped shape (triangle,
+// trapezoid), HEIGHT stays the true up-slope (slope-plane) length — HEM derives
+// overhang/obstacle shading from it (projected_height = height*sin(pitch)) — and WIDTH
+// becomes the equivalent dimension (area / height) instead. Parallelograms (including
+// rectangles) are unaffected: width = low-edge length and height = area / width already
+// equals the true slope length for that shape.
+describe('deriveSlopedElementDimensions — equivalent-width formula for non-parallelogram slopes', () => {
+  const roundToTwoDp = (n: number): number => Math.round(n * 100) / 100;
+
+  it('triangle slope: height is the true up-slope length, not area / low-edge width', () => {
+    // Eaves edge (0,0)->(4,0) = 4 m; apex (2,3) sits 3 m up-slope in plan, pitch 30 deg.
+    const element = {
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+        { x: 2, y: 3, z: 0 },
+      ],
+      pitch: 30,
+    };
+
+    const legacy = deriveLegacySlopedElementDimensions(element);
+    expect(legacy).not.toBeNull();
+    expect(legacy?.width).toBe(4); // old formula: width = low-edge length
+
+    const derived = deriveSlopedElementDimensions(element);
+    expect(derived).not.toBeNull();
+
+    // True slope length to the farthest vertex (the apex, 3 m up-slope in plan): 3 / cos(30deg).
+    const expectedHeight = 3 / Math.cos((30 * Math.PI) / 180);
+    expect(derived?.height).toBeCloseTo(expectedHeight, 2);
+    expect(derived?.height).toBeCloseTo(3.46, 2);
+
+    // The old formula (height = area / low-edge width) is gone.
+    expect(derived?.height).not.toBe(legacy?.height);
+    expect(derived?.width).not.toBe(legacy?.width);
+
+    // Width is now the equivalent dimension: area is preserved (width * height ~= area).
+    if (derived) {
+      expect(Math.abs(roundToTwoDp(derived.width * derived.height) - derived.area)).toBeLessThanOrEqual(0.03);
+    }
+  });
+
+  it('trapezoid slope: height is the far-extent slope length, width is the equivalent dimension', () => {
+    // Eaves edge (0,0)->(6,0) = 6 m (low edge); far edge (1,4)->(4,4) is shorter and set back
+    // 4 m up-slope in plan, pitch 40 deg.
+    const element = {
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 6, y: 0, z: 0 },
+        { x: 4, y: 4, z: 0 },
+        { x: 1, y: 4, z: 0 },
+      ],
+      pitch: 40,
+    };
+
+    const legacy = deriveLegacySlopedElementDimensions(element);
+    expect(legacy).not.toBeNull();
+    expect(legacy?.width).toBe(6);
+
+    const derived = deriveSlopedElementDimensions(element);
+    expect(derived).not.toBeNull();
+
+    const expectedHeight = 4 / Math.cos((40 * Math.PI) / 180);
+    expect(derived?.height).toBeCloseTo(expectedHeight, 2);
+
+    // No longer pinned to the low-edge width, and no longer the old area/width value.
+    expect(derived?.width).not.toBe(6);
+    expect(derived?.height).not.toBe(legacy?.height);
+
+    if (derived) {
+      expect(Math.abs(roundToTwoDp(derived.width * derived.height) - derived.area)).toBeLessThanOrEqual(0.03);
+    }
+  });
+
+  it('rectangle slope (parallelogram): unchanged regression pin', () => {
+    const element = {
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 6, y: 0, z: 0 },
+        { x: 6, y: 3, z: 0 },
+        { x: 0, y: 3, z: 0 },
+      ],
+      pitch: 30,
+    };
+
+    const derived = deriveSlopedElementDimensions(element);
+    const legacy = deriveLegacySlopedElementDimensions(element);
+
+    expect(derived).toEqual({ width: 6, height: 3.46, area: 20.78 });
+    // For a true parallelogram, the current and legacy formulas coincide.
+    expect(derived).toEqual(legacy);
+  });
+
+  it('sheared parallelogram slope (opposite sides equal and parallel but not axis-aligned): unchanged regression pin', () => {
+    const element = {
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+        { x: 5, y: 1, z: 0 },
+        { x: 1, y: 1, z: 0 },
+      ],
+      pitch: 60,
+    };
+
+    const derived = deriveSlopedElementDimensions(element);
+    const legacy = deriveLegacySlopedElementDimensions(element);
+
+    expect(derived).not.toBeNull();
+    expect(derived).toEqual(legacy);
+    expect(derived?.width).toBe(4);
   });
 });

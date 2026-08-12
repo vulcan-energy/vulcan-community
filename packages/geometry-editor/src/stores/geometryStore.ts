@@ -45,6 +45,7 @@ import {
   buildHostDerivedPatch,
   deriveFromHostRoof,
   findHostRoofId,
+  inferPvHostOverrideFlags,
 } from '../lib/pvHostDerivation';
 import {
   calculateDerivedFloorArea,
@@ -6119,32 +6120,7 @@ const createGeometryState = (
               // first time, infer per-field override flags from the existing values so we do not
               // silently overwrite manual settings carried over from CSV.
               if (isFirstAttach) {
-                const epsAng = 0.5;
-                const epsBh = 0.01;
-                if (
-                  panelWithHost._baseHeightUserOverride === undefined &&
-                  typeof panelWithHost.base_height === 'number' &&
-                  typeof derived.base_height === 'number' &&
-                  Math.abs(panelWithHost.base_height - derived.base_height) > epsBh
-                ) {
-                  panelWithHost._baseHeightUserOverride = true;
-                }
-                if (
-                  panelWithHost._pitchUserOverride === undefined &&
-                  typeof panelWithHost.pitch === 'number' &&
-                  typeof derived.pitch === 'number' &&
-                  Math.abs(panelWithHost.pitch - derived.pitch) > epsAng
-                ) {
-                  panelWithHost._pitchUserOverride = true;
-                }
-                if (
-                  panelWithHost._orientationUserOverride === undefined &&
-                  typeof panelWithHost.orientation360 === 'number' &&
-                  typeof derived.orientation360 === 'number' &&
-                  Math.abs(panelWithHost.orientation360 - derived.orientation360) > epsAng
-                ) {
-                  panelWithHost._orientationUserOverride = true;
-                }
+                Object.assign(panelWithHost, inferPvHostOverrideFlags(panelWithHost, derived));
               }
               const patch = buildHostDerivedPatch(panelWithHost, derived);
               newElementsById[id] = { ...panelWithHost, ...patch } as Element;
