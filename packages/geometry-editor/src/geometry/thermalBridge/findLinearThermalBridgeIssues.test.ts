@@ -345,17 +345,74 @@ describe('findLinearThermalBridgeIssues', () => {
     expect(issues.filter((i) => i.kind === 'mismatch_tb_plan_alignment')).toHaveLength(0);
   });
 
-  it('does not flag colinear overlap for E5 vs P1 (same wall–ground line from different auto passes)', () => {
-    const a = tbLinear('tb-a', 'E5', null, [
+  it.each([
+    ['E5', 'P1'],
+    ['E6', 'P2'],
+    ['E6', 'P3'],
+  ] as const)('does not flag colinear overlap for %s vs %s when either host set is empty', (codeA, codeB) => {
+    const a = tbLinear('tb-a', codeA, null, [
       { x: 0, y: 0, z: 0 },
       { x: 4, y: 0, z: 0 },
     ]);
-    const b = tbLinear('tb-b', 'P1', null, [
-      { x: 0, y: 0, z: 0 },
-      { x: 4, y: 0, z: 0 },
-    ]);
+    const b = tbLinear(
+      'tb-b',
+      codeB,
+      null,
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+      ],
+      { thermal_bridge_source: { host_wall_id: 'wall-b', host_wall_b_id: 'slab-b' } },
+    );
     const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
     expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(0);
+  });
+
+  it.each([
+    ['E5', 'P1'],
+    ['E6', 'P2'],
+    ['E6', 'P3'],
+  ] as const)('does not flag colinear overlap for %s vs %s when host sets are distinct', (codeA, codeB) => {
+    const a = tbLinear(
+      'tb-a',
+      codeA,
+      null,
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+      ],
+      { thermal_bridge_source: { host_wall_id: 'wall-a', host_wall_b_id: 'slab-a' } },
+    );
+    const b = tbLinear(
+      'tb-b',
+      codeB,
+      null,
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+      ],
+      { thermal_bridge_source: { host_wall_id: 'wall-b', host_wall_b_id: 'slab-b' } },
+    );
+    const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
+    expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(0);
+  });
+
+  it.each([
+    ['E5', 'P1'],
+    ['E6', 'P2'],
+    ['E6', 'P3'],
+  ] as const)('flags colinear overlap for %s vs %s when host sets are identical', (codeA, codeB) => {
+    const source = { thermal_bridge_source: { host_wall_id: 'wall', host_wall_b_id: 'slab' } };
+    const a = tbLinear('tb-a', codeA, null, [
+      { x: 0, y: 0, z: 0 },
+      { x: 4, y: 0, z: 0 },
+    ], source);
+    const b = tbLinear('tb-b', codeB, null, [
+      { x: 0, y: 0, z: 0 },
+      { x: 4, y: 0, z: 0 },
+    ], source);
+    const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
+    expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(2);
   });
 
   it('flags pairwise overlap_duplicate_colinear_segment for coincident runs (any junction_type)', () => {
