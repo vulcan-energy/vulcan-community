@@ -15,7 +15,8 @@
 // windowShadingFormState.shadingType instead of a local variable.
 
 import { useState } from 'react';
-import { SHADING_TYPES, type Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
+import { SHADING_TYPES } from '../../stores/geometryStore';
 import { useKeyedState } from '../../hooks/useKeyedState';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';

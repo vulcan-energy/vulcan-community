@@ -27,7 +27,8 @@
 
 import { useEffect } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { roundToTwoDecimals, type Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
+import { roundToTwoDecimals } from '../../geometry/constants';
 import { applyCompassOrientationToSlopedPolygonCoords } from '../../lib/openingSegmentOutward';
 import {
   readPvFootprintFlags,

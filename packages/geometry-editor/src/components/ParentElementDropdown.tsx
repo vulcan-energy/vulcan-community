@@ -5,7 +5,8 @@
 // extracted elementForms modules can use it without importing the orchestrator.
 
 import React from 'react';
-import { useGeometryStore, type ElementType } from '../stores/geometryStore';
+import type { ElementType } from '../geometry/types';
+import { useGeometryStore } from '../stores/geometryStore';
 import { StandardDropdown } from './StandardDropdown';
 
 interface ParentElementDropdownProps {

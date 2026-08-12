@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../stores/geometryStore';
+import type { Element } from '../geometry/types';
 
 /** Storey index (..., -1, 0, 1, 2, …) in `extra_json.floor_id` for TB / pipework / ductwork — not `Floor.id`. Legacy CSV may still carry string `Floor.id`. */
 export const THERMAL_BRIDGE_EXTRA_JSON_FLOOR_ID_KEY = 'floor_id' as const;

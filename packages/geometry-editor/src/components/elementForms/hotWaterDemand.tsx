@@ -11,7 +11,7 @@
 // read hotWaterDemandFormState.hotWaterSubcategory instead.
 
 import { useState } from 'react';
-import type { Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';

@@ -9,7 +9,7 @@
  * pitched-roof only in {@link proposePartyWallToSlopedRoofP4P5ThermalBridges}).
  */
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, BuildingElementPartyWall, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import {

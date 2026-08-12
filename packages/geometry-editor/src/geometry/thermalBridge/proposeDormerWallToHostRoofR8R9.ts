@@ -7,7 +7,7 @@
  * with walls; the cut line under a dormer usually lies **inside** the host roof plan, so it is added here
  * using `extra_json.dormer_bundle.host_element_name` to resolve the host opaque.
  */
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
 import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';

@@ -23,7 +23,8 @@
 // separate element family that stays inline in ElementCreator for now.
 
 import { useState } from 'react';
-import { DUCT_TYPES, type DuctType, type Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
+import { DUCT_TYPES, type DuctType } from '../../stores/geometryStore';
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { StandardDropdown } from '../StandardDropdown';
 import {

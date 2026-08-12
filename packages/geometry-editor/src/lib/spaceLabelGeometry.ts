@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../stores/geometryStore';
-import type { SpaceLabel } from '../geometry/types';
+import type { SpaceLabel, Element } from '../geometry/types';
 import { isWalkableFloorHorizontalPolygon } from './zoneDerivation';
 import { signedShoelaceArea2 } from './spaceInference/signedArea';
 import { refineWallSegments, type RawSeg } from './spaceInference/refineWallSegments';

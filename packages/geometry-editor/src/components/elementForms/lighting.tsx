@@ -14,7 +14,7 @@
 // element type) reads lighting fields through the same lens.
 
 import { useState } from 'react';
-import type { Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
 import {

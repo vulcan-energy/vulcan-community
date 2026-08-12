@@ -8,16 +8,7 @@ import {
   useGeometryStoreApi,
   DUCT_TYPES,
   isGlobalObject,
-  type Element,
-  type BuildingElementOpaque,
-  type BuildingElementTransparent,
-  type BuildingElementGround,
-  type BuildingElementAdjacentConditionedSpace,
-  type BuildingElementAdjacentUnconditionedSpace_Simple,
-  type BuildingElementPartyWall,
   type DuctType,
-  type WetEmitter,
-  type WaterPipework,
 } from '../stores/geometryStore';
 import { StandardInput } from './StandardInput';
 import { StandardDropdown } from './StandardDropdown';
@@ -39,7 +30,7 @@ import {
 } from '../lib/multiSelectAssemblyApply';
 import { getElementShape } from '../lib/shapeUtils';
 import { ELEMENT_TYPE_ORDER } from '../lib/elementTypeMetadata';
-import type { WindowShading } from '../geometry/types';
+import type { WindowShading, Element, BuildingElementOpaque, BuildingElementTransparent, BuildingElementGround, BuildingElementAdjacentConditionedSpace, BuildingElementAdjacentUnconditionedSpace_Simple, BuildingElementPartyWall, WetEmitter, WaterPipework } from '../geometry/types';
 import {
   AREAL_HEAT_CAPACITY_ENUM,
   MASS_DISTRIBUTION_CLASS_ENUM,

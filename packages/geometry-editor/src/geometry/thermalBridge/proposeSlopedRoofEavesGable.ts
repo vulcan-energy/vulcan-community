@@ -22,7 +22,7 @@ import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';

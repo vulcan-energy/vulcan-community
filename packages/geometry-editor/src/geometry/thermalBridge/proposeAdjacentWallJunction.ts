@@ -25,7 +25,7 @@ import type {
   BuildingElementOpaque,
   Element,
 } from '../types';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import { elementBaseElevationMForTb, elementFloorZIndexForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { isExternalLineWall } from './proposeExternalCorners';

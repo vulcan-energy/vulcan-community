@@ -104,6 +104,8 @@ import {
 } from '../lib/spaceInference/remapInferredSpaceLabels';
 import { detectMissingElements as detectMissingElementsCore } from '../geometry/validation/detectMissingElements';
 import type { MissingElement, ValidationResult } from '../geometry/validation/types';
+// Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
+// remove or relocate these re-exports without a paired web/ PR.
 export type { MissingElement, ValidationResult } from '../geometry/validation/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals, ZONE_NAME_SUGGESTIONS } from '../geometry/constants';
 import { parseCoords } from '../geometry/coords';
@@ -227,6 +229,8 @@ import type {
   SpaceLabel,
   SapBuiltFormCode,
 } from '../geometry/types';
+// Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
+// remove or relocate these re-exports without a paired web/ PR.
 export { roundToTwoDecimals, roundToFourDecimals, ZONE_NAME_SUGGESTIONS } from '../geometry/constants';
 export { parseCoords, formatCoords, updateElementCoordinates } from '../geometry/coords';
 export {

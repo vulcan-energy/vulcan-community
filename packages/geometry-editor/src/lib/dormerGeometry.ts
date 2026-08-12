@@ -5,8 +5,8 @@ import type {
   BuildingElementOpaque,
   BuildingElementTransparent,
   Element,
+  Floor,
 } from '../geometry/types';
-import type { Floor } from '../stores/geometryStore';
 import { getOpaqueHostBaseElevationAlignedWith3D } from './geometry3dMapper';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
 import { calculatePolygonArea } from './polygonSync';

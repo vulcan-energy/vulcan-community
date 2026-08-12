@@ -9,7 +9,7 @@
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';

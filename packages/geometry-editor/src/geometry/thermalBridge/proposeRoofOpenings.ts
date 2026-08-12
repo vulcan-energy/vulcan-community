@@ -18,7 +18,7 @@
 
 import { roundToTwoDecimals } from '../constants';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element } from '../types';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
 import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';

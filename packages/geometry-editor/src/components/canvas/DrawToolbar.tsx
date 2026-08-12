@@ -3,7 +3,7 @@
 
 import React, { memo, useCallback, useEffect, useMemo } from 'react';
 import type { DrawMode } from '../../hooks/useDrawingMode';
-import type { Element, ElementType, Floor } from '../../stores/geometryStore';
+import type { Element, ElementType, Floor } from '../../geometry/types';
 import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { StandardDropdown } from '../StandardDropdown';

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Minimal shape utilities to support Phase 1 without changing existing behavior
-import type { Element, ElementType } from '../stores/geometryStore';
+import type { Element, ElementType } from '../geometry/types';
 import { modelToCanvas2D, canvasToModel2D } from './geometryTransform';
 import { getMechanicalVentilationDuctworkRoleStyle } from './mvhrDuctwork';
 

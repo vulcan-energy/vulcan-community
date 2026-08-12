@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { BuildingElementOpaque, BuildingElementTransparent } from '../geometry/types';
-import type { Floor } from '../stores/geometryStore';
+import type { BuildingElementOpaque, BuildingElementTransparent, Floor } from '../geometry/types';
 import { inwardNormal2DForSlopedRoof, roofTopElevationAtPlanM } from './roofTopElevationAtPlanM';
 
 type Pt2 = { x: number; y: number };

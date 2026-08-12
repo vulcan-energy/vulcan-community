@@ -6,10 +6,9 @@ import { Group, Line, Circle, Rect, Text } from 'react-konva';
 import { getPointElementIconNode } from '../../lib/pointElementIconSpec';
 import { lucideIconNodeToKonva } from '../../lib/lucideIconKonva';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
+import type { Element, Floor } from '../../geometry/types';
 import {
   useGeometryStoreApi,
-  type Element,
-  type Floor,
   type GeometryStoreApi,
   generateDefaultCoordinates,
   shouldSnapToParent,

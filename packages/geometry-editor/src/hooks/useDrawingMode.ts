@@ -3,7 +3,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import { CANVAS_CONSTANTS } from '../lib/canvasConstants';
-import type { ElementType } from '../stores/geometryStore';
+import type { ElementType } from '../geometry/types';
 
 export type DrawMode =
   | 'none'

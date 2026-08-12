@@ -10,7 +10,7 @@
  */
 import { roundToTwoDecimals } from '../constants';
 import type { BuildingElementOpaque, BuildingElementPartyWall, Element } from '../types';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { distPointToSegmentXY } from './tbLinkage';

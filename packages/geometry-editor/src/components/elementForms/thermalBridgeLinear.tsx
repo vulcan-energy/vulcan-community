@@ -25,7 +25,8 @@
 // shortcut buttons below) and moves here with its only caller.
 
 import { useEffect, useRef } from 'react';
-import { useGeometryStore, type Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
+import { useGeometryStore } from '../../stores/geometryStore';
 import { isServiceLineElementType } from '../../lib/serviceLineDrawModes';
 import { writeTbLineMode } from '../../lib/thermalBridgeLineMode';
 import { baseLinearPsiForJunction, getPApportionedLinearPsiForEditor } from '../../geometry/thermalBridge/linearTbPsi';

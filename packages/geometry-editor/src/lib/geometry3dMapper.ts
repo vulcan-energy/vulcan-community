@@ -12,8 +12,7 @@ import {
   physicalZUsesFloorId,
 } from './elementCanvasFloor';
 import { inferThermalBridgeLineModeFromCoordinates, THERMAL_BRIDGE_PLAN_LEN_EPS_M } from './thermalBridgeLinearGeometry';
-import type { Element, Floor } from '../stores/geometryStore';
-import type { BuildingElementGround, BuildingElementOpaque, BuildingElementTransparent, Element as GeometryElement } from '../geometry/types';
+import type { BuildingElementGround, BuildingElementOpaque, BuildingElementTransparent, Element as GeometryElement, Element, Floor } from '../geometry/types';
 import type { WindowVentilation3D } from './geometry3dPrimitivesTypes';
 import {
   buildContextShadingSectorPrism,

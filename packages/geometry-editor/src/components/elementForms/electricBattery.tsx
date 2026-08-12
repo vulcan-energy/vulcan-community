@@ -6,7 +6,8 @@
 // byte-identical, so one hydrate covers both.
 
 import { useState } from 'react';
-import { roundToTwoDecimals, type Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
+import { roundToTwoDecimals } from '../../geometry/constants';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';

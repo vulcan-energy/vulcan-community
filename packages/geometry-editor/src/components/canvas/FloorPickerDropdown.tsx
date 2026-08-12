@@ -6,7 +6,7 @@ import ReactDOM from 'react-dom';
 import { DeleteConfirmModal } from '../DeleteConfirmModal';
 import { DraftSafeNumberInput } from '../DraftSafeNumberInput';
 import { getElementCanvasFloorZValue } from '../../lib/elementCanvasFloor';
-import type { Element, Floor } from '../../stores/geometryStore';
+import type { Element, Floor } from '../../geometry/types';
 import {
   BASE_HEIGHT_AUTOSYNC_TOLERANCE_M,
   getCumulativeBaseHeightsByFloorId,

@@ -27,7 +27,7 @@ import {
   slabElevationMForFloorZ,
 } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, ThermalBridgeLinear } from '../types';
 import { JUNCTION_TYPE_TO_PSI } from '../../lib/simplifiedFabricMap';
 import { dist3, midpoint3 } from './tbLinkage';

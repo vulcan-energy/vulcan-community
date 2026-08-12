@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { getElementShape } from './shapeUtils';
-import type { Element } from '../stores/geometryStore';
+import type { Element } from '../geometry/types';
 
 /**
  * Base paint order for the plan canvas, shared by the interactive layer and the static

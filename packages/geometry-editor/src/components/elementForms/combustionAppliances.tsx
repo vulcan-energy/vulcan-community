@@ -6,7 +6,7 @@
 // byte-identical, so one hydrate covers both.
 
 import { useState } from 'react';
-import type { Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { StandardDropdown } from '../StandardDropdown';
 import type { ElementFormModule } from './types';
 

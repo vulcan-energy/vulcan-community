@@ -18,7 +18,7 @@
 import { isVulcanUiPartyFloorElement } from '../../lib/assemblyMaterialFabric';
 import { elementBaseElevationMForTb, elementFloorZIndexForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { BuildingElementAdjacentConditionedSpace, BuildingElementPartyWall, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import {

@@ -20,7 +20,8 @@
 // hook-rule-safe call site the module contract guarantees runs every render.
 
 import { useState } from 'react';
-import { useGeometryStore, type ContextShading, type Element, type ElementType } from '../../stores/geometryStore';
+import type { ContextShading, Element, ElementType } from '../../geometry/types';
+import { useGeometryStore } from '../../stores/geometryStore';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';

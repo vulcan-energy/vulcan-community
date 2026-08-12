@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useEffect } from 'react';
-import type { Element, ElementType } from '../stores/geometryStore';
-import type { SpaceLabel } from '../geometry/types';
+import type { SpaceLabel, Element, ElementType } from '../geometry/types';
 import { CANVAS_CONSTANTS } from '../lib/canvasConstants';
 import { getDormerBundleAnchorElement, getDormerBundleName } from '../lib/dormerGeometry';
 import type { DrawMode } from './useDrawingMode';

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useCallback, useState } from 'react';
-import type { Element } from '../stores/geometryStore';
+import type { Element } from '../geometry/types';
 import {
   elementIsCategoryGhost,
   loadElementCategoryGhostState,

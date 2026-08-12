@@ -24,7 +24,7 @@
  * edge where an adjacent vertical meets the roof; same **plan edge** can conceptually coincide with
  * an eaves/gable proposal only if the model duplicates geometry — assessors should avoid counting twice.
  */
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type {
   BuildingElementAdjacentConditionedSpace,
   BuildingElementAdjacentUnconditionedSpace_Simple,

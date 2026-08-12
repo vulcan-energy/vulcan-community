@@ -12,7 +12,7 @@
 // ctx — can still read the same valid-keys list the legacy code used.
 
 import { useState } from 'react';
-import type { Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { StandardDropdown } from '../StandardDropdown';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { calculateArrowPoints, calculateDirectionArrow } from '../../lib/directionArrows';
 import { worldToCanvas } from '../../lib/shapeUtils';
 import Konva from 'konva';

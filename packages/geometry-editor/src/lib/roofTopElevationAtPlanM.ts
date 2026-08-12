@@ -6,8 +6,7 @@
  */
 import { elementBaseElevationMForTb } from './geometry3dMapper';
 import { computeSlopedPolygonInwardNormal2D, elevationAtSlopedVertexM } from './geometry3dSloped';
-import type { Floor } from '../stores/geometryStore';
-import type { BuildingElementOpaque } from '../geometry/types';
+import type { BuildingElementOpaque, Floor } from '../geometry/types';
 
 function roofBaseElevationM(roof: BuildingElementOpaque, floors: Floor[] | undefined): number {
   if (floors && floors.length > 0) {

@@ -3,9 +3,9 @@
 
 import React, { useCallback, useState, useRef, useEffect, useLayoutEffect, useMemo, memo, useSyncExternalStore } from 'react';
 import { Rnd } from 'react-rnd';
-import type { Element, ElementType, MissingElement, Zone } from '../../stores/geometryStore';
+import type { Element, ElementType, Zone } from '../../geometry/types';
 import { useGeometryStore, useGeometryStoreApi, validateZone } from '../../stores/geometryStore';
-import type { ValidationResult } from '../../geometry/validation/types';
+import type { ValidationResult, MissingElement } from '../../geometry/validation/types';
 import { validateSpaceLabels } from '../../geometry/validation/validateSpaceLabels';
 import { getVolumeCalculationBreakdown } from '../../lib/zoneDerivation';
 import { getContextualElementDisplayName, getElementTypeDisplayName } from '../../lib/displayNames';
