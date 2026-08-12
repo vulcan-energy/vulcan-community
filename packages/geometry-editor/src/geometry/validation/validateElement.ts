@@ -1497,7 +1497,7 @@ export const validateElementCore = (
             Math.abs(onSiteElement.pitch - derived.pitch) > epsAng
           ) {
             warnings.push(
-              geo(`Pitch differs from ${hostName} (${derived.pitch}°)`, 'pitch'),
+              geo(`Pitch differs from ${hostName} (${roundToTwoDecimals(derived.pitch)}°)`, 'pitch'),
             );
           }
           if (
@@ -1507,7 +1507,7 @@ export const validateElementCore = (
           ) {
             warnings.push(
               geo(
-                `Orientation differs from ${hostName} (${derived.orientation360}°)`,
+                `Orientation differs from ${hostName} (${roundToTwoDecimals(derived.orientation360)}°)`,
                 'orientation360',
               ),
             );

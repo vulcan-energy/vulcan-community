@@ -37,14 +37,17 @@
 
 import type { CSSProperties } from 'react';
 import { getElementShape, convertShapeCoordinates } from '../../lib/shapeUtils';
+import { roundToTwoDecimals } from '../../geometry/constants';
 import type { Element } from '../../geometry/types';
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
+// Not formPrimitives' useDecimalInput: see ElementCreator.tsx's identical note on its own
+// pitchDraftInput — that wrapper doesn't forward `syncExternal`, needed here too.
+import { useNumericDraftInput } from '../numericDraftInput';
 import {
   decimalInputProps,
-  formatConditionalDecimals,
   HORIZONTAL_POLYGON_PITCH_OPTIONS,
   HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER,
   horizontalPolygonSurfaceSelectValue,
@@ -67,6 +70,13 @@ export interface VentsFormState {
   setParentElement: (value: string) => void;
   pitch: number;
   setPitch: (value: number) => void;
+  /** Draft-string commit for the typed pitch input — Vents' own copy of
+   * ElementCreator's `pitchDraftInput` (see its identical doc comment). Not threaded
+   * through `ctx.shared`: only one of Vents' or the wall family's pitch field ever
+   * renders at a time (elementType-gated), so an independent instance here is
+   * simpler than widening `ElementFormSharedCtx`, and both instances stay in sync
+   * with the same underlying `ctx.shared.pitch` via `syncExternal`. */
+  pitchDraftInput: ReturnType<typeof useNumericDraftInput>;
   orientation360: number;
   setOrientation360: (value: number) => void;
   applyOrientationToGeometry: (desiredOrientationDeg: number) => void;
@@ -92,6 +102,55 @@ function useFormState(ctx: ElementFormStateCtx): VentsFormState {
           !!e && e.name === name && (e.type === 'BuildingElementOpaque' || e.type === 'BuildingElementTransparent'),
       ) as { orientation360?: number; pitch?: number } | undefined;
 
+  // See ElementCreator.tsx's identical pitchDraftInput for the full rationale (decimal-entry
+  // precision + 2dp commit to match the CSV writer/importer).
+  const commitTypedPitch = (parsed: number | ''): void => {
+    if (parsed === '') return;
+    const newPitch = roundToTwoDecimals(parsed);
+
+    if (ctx.selection?.type === 'element') {
+      const currentElement = ctx.getElementById(ctx.selection.id);
+      if (currentElement) {
+        const currentShape = getElementShape(currentElement);
+
+        if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
+          const ok = window.confirm(
+            `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
+          );
+          if (ok) {
+            ctx.updateElement(currentElement.id, { pitch: newPitch });
+            ctx.shared.setPitch(newPitch);
+            return;
+          } else {
+            ctx.shared.setPitch(0);
+            ctx.updateElement(ctx.selection.id, { pitch: 0 });
+            return;
+          }
+        }
+
+        if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
+          const ok = window.confirm(
+            `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
+          );
+          if (ok) {
+            const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
+            ctx.updateElement(currentElement.id, { coordinates: nextCoords, pitch: newPitch });
+          }
+        }
+      }
+    }
+
+    ctx.shared.setPitch(newPitch);
+    if (ctx.selection?.type === 'element') {
+      ctx.updateElement(ctx.selection.id, { pitch: newPitch });
+    }
+  };
+  const pitchDraftInput = useNumericDraftInput(ctx.shared.pitch, commitTypedPitch, {
+    commitOnChange: true,
+    formatOnBlur: 'fixed2',
+    syncExternal: true,
+  });
+
   return {
     midHeightAirFlowPathInput,
     areaCm2Input,
@@ -99,6 +158,7 @@ function useFormState(ctx: ElementFormStateCtx): VentsFormState {
     setParentElement: ctx.shared.setParentElement,
     pitch: ctx.shared.pitch,
     setPitch: ctx.shared.setPitch,
+    pitchDraftInput,
     orientation360: ctx.shared.orientation360,
     setOrientation360: ctx.shared.setOrientation360,
     applyOrientationToGeometry: ctx.shared.applyOrientationToGeometry,
@@ -150,6 +210,7 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
       setParentElement,
       pitch,
       setPitch,
+      pitchDraftInput,
       orientation360,
       setOrientation360,
       applyOrientationToGeometry,
@@ -287,59 +348,11 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
           ) : (
             <StandardInput
               type="text"
-              inputMode="numeric"
-              value={formatConditionalDecimals(pitch)}
+              inputMode="decimal"
+              value={pitchDraftInput.inputValue}
               unit={fieldUnit('pitch')}
-              onChange={(e) => {
-                const newPitch = parseFloat(e.target.value) || 0;
-
-                // Check for shape-pitch mismatches before updating
-                if (selection?.type === 'element') {
-                  const currentElement = getElementById(selection.id);
-                  if (currentElement) {
-                    const currentShape = getElementShape(currentElement);
-
-                    // For polygons: only allow 0° or 180° (horizontal surfaces)
-                    if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
-                      const ok = window.confirm(
-                        `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
-                      );
-                      if (ok) {
-                        // Keep same coordinates, just update pitch - sloped-polygon uses same coordinate structure
-                        const roundedPitch = Math.round(newPitch);
-                        updateElement(currentElement.id, { pitch: roundedPitch });
-                        setPitch(roundedPitch);
-                        return;
-                      } else {
-                        // Reset to 0° if user cancels
-                        setPitch(0);
-                        updateElement(selection.id, { pitch: 0 });
-                        return;
-                      }
-                    }
-
-                    // For lines: suggest polygon conversion for horizontal surfaces
-                    if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
-                      const ok = window.confirm(
-                        `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
-                      );
-                      if (ok) {
-                        const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
-                        const roundedPitch = Math.round(newPitch);
-                        updateElement(currentElement.id, { coordinates: nextCoords, pitch: roundedPitch });
-                      }
-                    }
-                  }
-                }
-
-                const roundedPitch = Math.round(newPitch);
-                setPitch(roundedPitch);
-                // Only update pitch, don't touch coordinates
-                if (selection?.type === 'element') {
-                  updateElement(selection.id, { pitch: roundedPitch });
-                }
-              }}
-              step="1"
+              onChange={pitchDraftInput.handleInputChange}
+              onBlur={pitchDraftInput.handleBlur}
               min="0"
               max="180"
               readOnly={!!parentElement}

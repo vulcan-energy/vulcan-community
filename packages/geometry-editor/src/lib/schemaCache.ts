@@ -2049,18 +2049,26 @@ function collectIntegerKeysFromSubschema(subschema: SchemaNode | null): Set<stri
 function fallbackIntegerKeys(elementType: string): Set<string> {
   // Fallback when schema isn't loaded (e.g. tests or early startup).
   // Keep this minimal and focused on known "integer-ish" fields that frequently cause UX issues.
+  //
+  // `pitch` is deliberately NOT listed here for any element type: both Core and FHS schemas
+  // declare it `"type": "number"` (fractional degrees, e.g. 22.5°), and the FHS-only integer
+  // rounding lives at the correct layer — builder.rs's `coerce_building_element_value`
+  // (vulcan-model-transform), gated on `is_fhs_schema`. Forcing it to integer here overrode
+  // both loaded schemas unconditionally (see the merge below) and silently rounded a typed
+  // 22.5° to 23° on every addElement/updateElement/CSV load. `orientation360` keeps its
+  // integer coercion: that one is deliberate and pinned by tests.
   const map: Record<string, string[]> = {
-    BuildingElementOpaque: ['pitch', 'orientation360'],
-    BuildingElementTransparent: ['pitch', 'orientation360'],
-    BuildingElementGround: ['pitch', 'orientation360'], // pitch appears on some ground variants
-    BuildingElementAdjacentConditionedSpace: ['pitch'],
-    BuildingElementAdjacentUnconditionedSpace_Simple: ['pitch'],
-    BuildingElementPartyWall: ['pitch'],
+    BuildingElementOpaque: ['orientation360'],
+    BuildingElementTransparent: ['orientation360'],
+    BuildingElementGround: [],
+    BuildingElementAdjacentConditionedSpace: [],
+    BuildingElementAdjacentUnconditionedSpace_Simple: [],
+    BuildingElementPartyWall: [],
     ContextShading: ['start_angle', 'end_angle'],
-    OnSiteGeneration: ['pitch', 'orientation360'],
+    OnSiteGeneration: ['orientation360'],
     Lighting: ['count'],
     WetEmitter: ['unit_number'],
-    Vents: ['pitch', 'orientation360'],
+    Vents: ['orientation360'],
   };
   return new Set<string>(map[elementType] || []);
 }
