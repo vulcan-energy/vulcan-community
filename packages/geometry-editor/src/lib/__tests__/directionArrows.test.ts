@@ -6,6 +6,49 @@ import { calculateDirectionArrow, calculateArrowPoints } from '../directionArrow
 
 describe('Direction Arrow Calculations', () => {
   describe('calculateDirectionArrow', () => {
+    it('places an Orientation-axis slope arrow at the centroid and points it downslope', () => {
+      const element = {
+        type: 'BuildingElementOpaque' as const,
+        coordinates: [
+          { x: 0, y: 0, z: 0 },
+          { x: 4, y: 0, z: 0 },
+          { x: 2, y: 3, z: 0 },
+        ],
+        pitch: 30,
+        orientation360: 60,
+        extra_json: { _slope_pitch_axis: 'orientation' },
+      };
+
+      const result = calculateDirectionArrow(element as any, 30);
+
+      expect(result?.centerX).toBeCloseTo(2, 12);
+      expect(result?.centerY).toBeCloseTo(1, 12);
+      expect(result?.arrowX).toBeCloseTo(2.25, 12);
+      expect(result?.arrowY).toBeCloseTo(1, 12);
+      expect(result?.orientation).toBe(60);
+    });
+
+    it('keeps the bottom-edge sloped arrow on the first-edge midpoint', () => {
+      const element = {
+        type: 'BuildingElementOpaque' as const,
+        coordinates: [
+          { x: 0, y: 0, z: 0 },
+          { x: 4, y: 0, z: 0 },
+          { x: 2, y: 3, z: 0 },
+        ],
+        pitch: 30,
+        orientation360: 180,
+      };
+
+      expect(calculateDirectionArrow(element as any, 47)).toEqual({
+        centerX: 2,
+        centerY: 0,
+        arrowX: 2,
+        arrowY: -0.25,
+        orientation: 180,
+      });
+    });
+
     it('should calculate arrow for horizontal line (always perpendicular)', () => {
       const element = {
         type: 'BuildingElementOpaque' as const,

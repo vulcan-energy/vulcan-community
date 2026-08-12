@@ -100,6 +100,45 @@ describe('defaultJunctionCodeForEdge / junctionOptions (roof roles)', () => {
 });
 
 describe('proposeRoofOpeningThermalBridges', () => {
+  it('emits nothing for Orientation pitch-axis openings or hosts (lengths would flatten)', () => {
+    const standalone = {
+      ...makeRoofOpening({
+        id: 'sk-orient',
+        name: 'Orientation Skylight',
+        pitch: 45,
+        coordinates: [
+          { x: 0, y: 0, z: 0 },
+          { x: 2, y: 0, z: 0 },
+          { x: 2, y: 2, z: 0 },
+          { x: 0, y: 2, z: 0 },
+        ],
+      }),
+      parent_element: null,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 135,
+    } as BuildingElementTransparent;
+    expect(proposeRoofOpeningThermalBridges([standalone])).toEqual([]);
+
+    const orientationHost = {
+      ...makeHostRoof(),
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 135,
+    };
+    const hosted = makeRoofOpening({
+      id: 'sk-hosted',
+      name: 'Hosted Skylight',
+      pitch: 45,
+      parent_element: orientationHost.name,
+      coordinates: [
+        { x: 1, y: 1, z: 0 },
+        { x: 2, y: 1, z: 0 },
+        { x: 2, y: 2, z: 0 },
+        { x: 1, y: 2, z: 0 },
+      ],
+    });
+    expect(proposeRoofOpeningThermalBridges([orientationHost, hosted])).toEqual([]);
+  });
+
   it('emits five R-series proposals per roof opening (incl. R11 kerb line)', () => {
     const r = makeRoofOpening({ id: 'sk1', name: 'Skylight A', pitch: 40 });
     const p = proposeRoofOpeningThermalBridges([r]);

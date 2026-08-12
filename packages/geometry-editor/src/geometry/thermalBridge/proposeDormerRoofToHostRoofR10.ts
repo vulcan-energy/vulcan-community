@@ -14,6 +14,7 @@ import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { roundToTwoDecimals } from '../constants';
 import { type FacadeOpeningEdgeRole, type FacadeOpeningTbProposal, psiTable37ForCode } from './proposeFacadeOpenings';
 import { isSlopedPitchedRoofElementForEavesGable } from './proposeSlopedRoofEavesGable';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { zonesCompatible } from './proposeAdjacentWallJunction';
 
 const MIN_LEN_M = 0.05;
@@ -71,6 +72,7 @@ export function proposeDormerRoofToHostRoofR10ThermalBridges(
   for (const e of elements) {
     if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) continue;
     const roof = e as BuildingElementOpaque;
+    if (isOrientationPitchAxis(roof)) continue;
     if (!isSlopedPitchedRoofElementForEavesGable(roof)) continue;
     const name = roof.name?.trim();
     if (name) roofByName.set(name, roof);
@@ -80,6 +82,7 @@ export function proposeDormerRoofToHostRoofR10ThermalBridges(
   for (const e of elements) {
     if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) continue;
     const dormerRoof = e as BuildingElementOpaque;
+    if (isOrientationPitchAxis(dormerRoof)) continue;
     if (!isDormerRoofPlane(dormerRoof)) continue;
     if (!isSlopedPitchedRoofElementForEavesGable(dormerRoof)) continue;
     const c = dormerRoof.coordinates;

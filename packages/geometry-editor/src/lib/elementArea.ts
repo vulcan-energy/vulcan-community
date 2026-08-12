@@ -156,6 +156,7 @@ const parsePolygonPoints = (raw: unknown): PolygonPoint3D[] => {
 const getDormerNettingAreaOverride = (
   parentElement: BuildingElementOpaque,
   childElement: Element,
+  globalOrientationOffset?: number,
 ): number | null => {
   const dormerBundle = childElement.extra_json?.dormer_bundle;
   if (!dormerBundle || typeof dormerBundle !== 'object') return null;
@@ -168,14 +169,15 @@ const getDormerNettingAreaOverride = (
   const cutoutPolygon = parsePolygonPoints(bundle.cutout_polygon);
   if (cutoutPolygon.length < 3) return null;
 
-  return getSlopedPolygonSurfaceArea(cutoutPolygon, parentElement);
+  return getSlopedPolygonSurfaceArea(cutoutPolygon, parentElement, globalOrientationOffset);
 };
 
 const getParentNettingAreaOverride = (
   parentElement: BuildingElementOpaque,
   childElement: Element,
+  globalOrientationOffset?: number,
 ): number | null => {
-  const dormerOverride = getDormerNettingAreaOverride(parentElement, childElement);
+  const dormerOverride = getDormerNettingAreaOverride(parentElement, childElement, globalOrientationOffset);
   if (dormerOverride !== null) return dormerOverride;
 
   const rawValue = childElement.extra_json?.parent_netting_area;
@@ -378,6 +380,7 @@ const getAreaBasedFaceGeometry = (
 
 export const getAreaBasedElementExportGeometry = (
   element: AreaBasedElement,
+  globalOrientationOffset?: number,
 ): { width: number; height: number; baseHeight: number } => {
   const faceGeometry = getAreaBasedFaceGeometry(element);
   if (faceGeometry) {
@@ -396,7 +399,7 @@ export const getAreaBasedElementExportGeometry = (
     };
   }
 
-  const slopedDimensions = deriveSlopedElementDimensions(element);
+  const slopedDimensions = deriveSlopedElementDimensions(element, globalOrientationOffset);
   if (slopedDimensions) {
     const widthUserOverride = (element as { _widthUserOverride?: boolean })._widthUserOverride === true;
     const heightUserOverride = (element as { _heightUserOverride?: boolean })._heightUserOverride === true;
@@ -416,15 +419,16 @@ export const getAreaBasedElementExportGeometry = (
 
 export const getOpaqueElementExportGeometry = (
   element: BuildingElementOpaque,
-) => getAreaBasedElementExportGeometry(element);
+  globalOrientationOffset?: number,
+) => getAreaBasedElementExportGeometry(element, globalOrientationOffset);
 
 /** Mid-height for CSV / engine: centre of the equivalent rectangle (base + height/2). */
-export const getTransparentExportMidHeight = (element: BuildingElementTransparent): number => {
-  const { baseHeight, height } = getAreaBasedElementExportGeometry(element);
+export const getTransparentExportMidHeight = (element: BuildingElementTransparent, globalOrientationOffset?: number): number => {
+  const { baseHeight, height } = getAreaBasedElementExportGeometry(element, globalOrientationOffset);
   return roundToTwoDecimals(baseHeight + height / 2);
 };
 
-export const getElementGrossArea = (element: Element): number => {
+export const getElementGrossArea = (element: Element, globalOrientationOffset?: number): number => {
   if (isAreaBasedBuildingElement(element)) {
     const shape = getElementShape(element);
     const factor = internalAdjacentConditionedAreaMultiplier(element);
@@ -439,7 +443,7 @@ export const getElementGrossArea = (element: Element): number => {
     }
 
     if (shape === 'sloped-polygon' && element.coordinates.length >= 3) {
-      const surfaceArea = getSlopedPolygonSurfaceArea(element.coordinates, element)
+      const surfaceArea = getSlopedPolygonSurfaceArea(element.coordinates, element, globalOrientationOffset)
         ?? roundToTwoDecimals(calculatePolygonArea(element.coordinates));
       return roundToTwoDecimals(surfaceArea * factor);
     }
@@ -480,14 +484,15 @@ export const getElementGrossArea = (element: Element): number => {
 
 export const getOpaqueOpeningArea = (
   element: BuildingElementOpaque,
-  elementsById: Record<string, Element>
+  elementsById: Record<string, Element>,
+  globalOrientationOffset?: number,
 ): number => {
   const openingArea = Object.values(elementsById).reduce((sum, child) => {
     if (
       child.zoneId === element.zoneId &&
       child.parent_element === element.name
     ) {
-      const parentNettingAreaOverride = getParentNettingAreaOverride(element, child);
+      const parentNettingAreaOverride = getParentNettingAreaOverride(element, child, globalOrientationOffset);
       if (parentNettingAreaOverride !== null) {
         return sum + parentNettingAreaOverride;
       }
@@ -496,7 +501,7 @@ export const getOpaqueOpeningArea = (
         child.type === 'BuildingElementTransparent' ||
         isOpaqueExternalDoorLineElement(child)
       ) {
-        return sum + getElementGrossArea(child);
+        return sum + getElementGrossArea(child, globalOrientationOffset);
       }
     }
     return sum;
@@ -507,12 +512,13 @@ export const getOpaqueOpeningArea = (
 
 export const getElementEffectiveArea = (
   element: Element,
-  elementsById: Record<string, Element>
+  elementsById: Record<string, Element>,
+  globalOrientationOffset?: number,
 ): number => {
-  const grossArea = getElementGrossArea(element);
+  const grossArea = getElementGrossArea(element, globalOrientationOffset);
 
   if (element.type === 'BuildingElementOpaque') {
-    return roundToTwoDecimals(Math.max(0, grossArea - getOpaqueOpeningArea(element, elementsById)));
+    return roundToTwoDecimals(Math.max(0, grossArea - getOpaqueOpeningArea(element, elementsById, globalOrientationOffset)));
   }
 
   return grossArea;

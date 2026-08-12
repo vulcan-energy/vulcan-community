@@ -6,6 +6,8 @@ import {
   computeSlopedPolygonInwardNormal2D,
   elevationAtSlopedVertexM,
 } from './geometry3dSloped';
+import { isOrientationPitchAxis, slopedPolygonPlaneBasis } from './slopePitchAxis';
+import type { Element } from '../geometry/types';
 
 export type SlopedPolygonPoint3D = {
   x: number;
@@ -16,6 +18,9 @@ export type SlopedPolygonPoint3D = {
 export type SlopedElementDimensionSource = {
   coordinates?: SlopedPolygonPoint3D[];
   pitch?: number;
+  type?: Element['type'];
+  orientation360?: number;
+  extra_json?: Record<string, unknown>;
 };
 
 export type SlopedElementDimensions = {
@@ -257,25 +262,32 @@ const calculatePlanarFaceArea3D = (points: SlopedPolygonPoint3D[]): number => {
 
 export const getSlopedPolygonSurfaceArea = (
   polygon: SlopedPolygonPoint3D[],
-  slopeReference: { coordinates: SlopedPolygonPoint3D[]; pitch?: number },
+  slopeReference: SlopedElementDimensionSource,
+  globalOrientationOffset?: number,
 ): number | null => {
   if (polygon.length < 3) return null;
   const pitch = slopeReference.pitch;
   if (!isFiniteNumber(pitch) || pitch <= 0 || pitch >= 90) return null;
-  if (slopeReference.coordinates.length < 3) return null;
+  const coordinates = slopeReference.coordinates;
+  if (!Array.isArray(coordinates) || coordinates.length < 3) return null;
 
-  const hostPlanPoints = slopeReference.coordinates.map((point) => [point.x, point.y] as [number, number]);
-  const inwardNormal2D = computeSlopedPolygonInwardNormal2D(hostPlanPoints);
-  if (!inwardNormal2D) return null;
-
-  const eavesAnchor = hostPlanPoints[0];
+  const hostPlanPoints = coordinates.map((point) => [point.x, point.y] as [number, number]);
+  const orientationAxis = isOrientationPitchAxis(slopeReference as Element);
+  if (orientationAxis && !Number.isFinite(globalOrientationOffset)) return null;
+  const basis = slopedPolygonPlaneBasis(
+    hostPlanPoints,
+    orientationAxis ? 'orientation' : 'bottom-edge',
+    slopeReference.orientation360 ?? 0,
+    globalOrientationOffset ?? 0,
+  );
+  if (!basis) return null;
   const liftedPoints = polygon.map((point) => ({
     x: point.x,
     y: point.y,
     z: elevationAtSlopedVertexM(
       [point.x, point.y],
-      eavesAnchor,
-      inwardNormal2D,
+      basis.anchorXY,
+      basis.upslope2D,
       0,
       pitch,
     ),
@@ -319,17 +331,53 @@ export const deriveLegacySlopedElementDimensions = (
 
 export const deriveSlopedElementDimensions = (
   element: SlopedElementDimensionSource,
+  globalOrientationOffset?: number,
 ): SlopedElementDimensions | null => {
+  const coords = element.coordinates;
+  const pitch = element.pitch;
+  const orientationAxis = isOrientationPitchAxis(element as Element);
+  if (orientationAxis) {
+    if (!Array.isArray(coords) || coords.length < 3) return null;
+    if (!isFiniteNumber(pitch) || pitch <= 0 || pitch >= 90) return null;
+    if (!Number.isFinite(globalOrientationOffset)) return null;
+    const area = getSlopedPolygonSurfaceArea(coords, element, globalOrientationOffset);
+    if (!isFiniteNumber(area) || area <= 0) return null;
+    const points = coords.map((point) => [point.x, point.y] as [number, number]);
+    const basis = slopedPolygonPlaneBasis(
+      points,
+      'orientation',
+      element.orientation360 ?? 0,
+      globalOrientationOffset!,
+    );
+    if (!basis) return null;
+    let dMax = 0;
+    for (const point of points) {
+      const d =
+        (point[0] - basis.anchorXY[0]) * basis.upslope2D[0] +
+        (point[1] - basis.anchorXY[1]) * basis.upslope2D[1];
+      if (d > dMax) dMax = d;
+    }
+    if (dMax <= 1e-9) return null;
+    const cosPitch = Math.cos((pitch * Math.PI) / 180);
+    const slopeExtent = cosPitch > 1e-9 ? dMax / cosPitch : dMax;
+    if (!Number.isFinite(slopeExtent) || slopeExtent <= 1e-9) return null;
+    return {
+      width: roundToTwoDecimals(area / slopeExtent),
+      height: roundToTwoDecimals(slopeExtent),
+      area: roundToTwoDecimals(area),
+    };
+  }
+
   // For parallelograms the legacy formula is already exact (height = area / low-edge width =
   // true slope length), so it doubles as the guard clauses and the parallelogram result here.
   const parallelogramDimensions = deriveLegacySlopedElementDimensions(element);
   if (!parallelogramDimensions) return null;
 
-  const coords = element.coordinates as ReadonlyArray<{ x: number; y: number }>;
-  const pitch = element.pitch as number;
+  const bottomEdgeCoords = element.coordinates as ReadonlyArray<{ x: number; y: number }>;
+  const bottomEdgePitch = element.pitch as number;
   const area = parallelogramDimensions.area;
 
-  const semantics = getPolygonScalarDimensionSemantics(coords);
+  const semantics = getPolygonScalarDimensionSemantics(bottomEdgeCoords);
   if (!semantics?.usesEquivalentWidth) return parallelogramDimensions;
 
   // Non-parallelogram (triangle/trapezoid) sloped shapes: keep HEIGHT physically true because
@@ -337,7 +385,7 @@ export const deriveSlopedElementDimensions = (
   // make WIDTH the equivalent dimension instead, so the surface area stays exact.
   // True up-slope extent = the plan-perpendicular distance from the eaves edge to the farthest
   // vertex, projected onto the pitched plane (divided by cos(pitch)).
-  const hostPlanPoints = coords.map((point) => [point.x, point.y] as [number, number]);
+  const hostPlanPoints = bottomEdgeCoords.map((point) => [point.x, point.y] as [number, number]);
   const inwardNormal2D = computeSlopedPolygonInwardNormal2D(hostPlanPoints);
   if (!inwardNormal2D) return parallelogramDimensions;
 
@@ -351,7 +399,7 @@ export const deriveSlopedElementDimensions = (
   // parallelogram formula rather than divide by ~0.
   if (dMax <= 1e-9) return parallelogramDimensions;
 
-  const cosPitch = Math.cos((pitch * Math.PI) / 180);
+  const cosPitch = Math.cos((bottomEdgePitch * Math.PI) / 180);
   const slopeExtent = cosPitch > 1e-9 ? dMax / cosPitch : dMax;
   if (!Number.isFinite(slopeExtent) || slopeExtent <= 1e-9) return parallelogramDimensions;
 

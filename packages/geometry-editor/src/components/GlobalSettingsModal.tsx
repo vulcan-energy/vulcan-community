@@ -403,6 +403,7 @@ export function GlobalSettingsModal({
     defaultThermalBridging,
     complianceSettings,
     floors,
+    globalOrientationOffset,
     junctionPsiDefaultsPath,
     junctionPsiDefaultsError,
     junctionPsiDefaultsLoading,
@@ -421,6 +422,7 @@ export function GlobalSettingsModal({
       defaultThermalBridging: state.defaultThermalBridging,
       complianceSettings: state.complianceSettings,
       floors: state.floors,
+      globalOrientationOffset: state.globalOrientationOffset,
       junctionPsiDefaultsPath: state.junctionPsiDefaultsPath,
       junctionPsiDefaultsError: state.junctionPsiDefaultsError,
       junctionPsiDefaultsLoading: state.junctionPsiDefaultsLoading,
@@ -1037,12 +1039,14 @@ export function GlobalSettingsModal({
         zones,
         complianceValidationEnabled: effectiveComplianceValidationEnabled,
         complianceSettings,
+        globalOrientationOffset,
       }),
     [
       complianceSettings,
       effectiveComplianceValidationEnabled,
       elementsById,
       floors,
+      globalOrientationOffset,
       zones,
     ]
   );

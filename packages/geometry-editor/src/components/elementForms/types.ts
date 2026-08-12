@@ -141,6 +141,7 @@ export interface ElementFormStateCtx {
   selection: ElementFormSelection | null;
   getElementById: (id: string) => Element | undefined;
   updateElement: (id: string, updates: Partial<Element>, skipAutoSave?: boolean) => void;
+  setSlopePitchAxis: (id: string, axis: 'bottom-edge' | 'orientation') => void;
   /** OnSiteGeneration's sloped-panel orientation commit needs the current
    * global plan-rotation offset to rotate coordinates in place. */
   getGlobalOrientationOffset: () => number;

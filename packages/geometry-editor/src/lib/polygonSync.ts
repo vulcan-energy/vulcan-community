@@ -101,7 +101,7 @@ export function syncPolygonElement(
   ];
 
   if (polygonCapableTypes.includes(element.type)) {
-    const slopedDimensions = deriveSlopedElementDimensions(element);
+    const slopedDimensions = deriveSlopedElementDimensions(element, globalOrientationOffset);
     if (slopedDimensions) {
       const usePlanArea =
         element.type === 'BuildingElementOpaque' &&

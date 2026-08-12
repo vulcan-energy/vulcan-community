@@ -34,6 +34,7 @@ import type {
 import { isExternalLineWall } from './proposeExternalCorners';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
 import { inwardNormal2DForSlopedRoof, roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { roundToTwoDecimals } from '../constants';
@@ -132,6 +133,7 @@ export function proposeRoomInRoofRoofToWallR8R9ThermalBridges(
   floors = withEffectiveStoreyHeights(floors, elements);
   const roofs = elements.filter((e): e is BuildingElementOpaque => {
     if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) return false;
+    if (isOrientationPitchAxis(e)) return false;
     return isSlopedPitchedRoofElementForEavesGable(e);
   });
 

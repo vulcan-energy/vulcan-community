@@ -19,6 +19,7 @@ import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { computeSlopedPolygonInwardNormal2D } from '../../lib/geometry3dSloped';
 import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
@@ -132,6 +133,7 @@ function pushEavesGableProposals(
   elements: Element[],
   out: FacadeOpeningTbProposal[],
 ): void {
+  if (isOrientationPitchAxis(o)) return;
   const c = o.coordinates;
   if (!c || c.length < 2) return;
   if (!isSlopedPitchedRoofElementForEavesGable(o)) return;

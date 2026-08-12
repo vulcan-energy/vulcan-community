@@ -199,6 +199,7 @@ function formatAreaForWarning(value: number): string {
 export function collectFhsGlazingLimitWarnings(args: {
   elements: Element[];
   zones: Zone[];
+  globalOrientationOffset?: number;
 }): string[] {
   const zones = args.zones.filter((zone) => !zone.isPlaceholder);
   if (
@@ -220,7 +221,7 @@ export function collectFhsGlazingLimitWarnings(args: {
   let rooflightUValueArea = 0;
 
   for (const window of windows) {
-    const { width, height } = getAreaBasedElementExportGeometry(window);
+    const { width, height } = getAreaBasedElementExportGeometry(window, args.globalOrientationOffset);
     if (!(width > 0) || !(height > 0)) return [];
     const area = width * height;
     totalGlazingArea += area;
@@ -275,12 +276,14 @@ export function collectGlobalSettingsWarnings(args: {
   zones?: Zone[];
   complianceValidationEnabled?: boolean;
   complianceSettings: GlobalSettingsShape;
+  globalOrientationOffset?: number;
 }): string[] {
   const warnings: string[] = [];
   if (args.complianceValidationEnabled && args.zones) {
     warnings.push(...collectFhsGlazingLimitWarnings({
       elements: args.elements,
       zones: args.zones,
+      globalOrientationOffset: args.globalOrientationOffset,
     }));
   }
   const settings = args.complianceSettings;

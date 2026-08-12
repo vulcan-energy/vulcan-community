@@ -20,6 +20,7 @@ import { roundToTwoDecimals } from '../constants';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element } from '../types';
 import type { Floor } from '../../geometry/types';
 import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import {
@@ -169,6 +170,11 @@ export function proposeRoofOpeningThermalBridges(
     if (el.type !== 'BuildingElementTransparent') continue;
     const t = el as BuildingElementTransparent;
     if (!isRoofWindowOpening(t)) continue;
+    // T1 safe guard: an Orientation-axis plane hinges on the authored fall line, and
+    // roofTopElevationAtPlanM has no offset here, so jamb lengths would silently
+    // flatten to plan lengths. Skip; the opening surfaces as unproposed until T2.
+    const orientationHost = findRoofHost(t, elements);
+    if (isOrientationPitchAxis(t) || (orientationHost && isOrientationPitchAxis(orientationHost))) continue;
     if (t.coordinates.length >= 4) {
       out.push(...polygonRoofOpeningProposals(t, elements, floors));
       continue;

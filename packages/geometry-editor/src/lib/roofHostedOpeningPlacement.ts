@@ -3,6 +3,7 @@
 
 import type { BuildingElementOpaque, BuildingElementTransparent, Floor } from '../geometry/types';
 import { inwardNormal2DForSlopedRoof, roofTopElevationAtPlanM } from './roofTopElevationAtPlanM';
+import { isOrientationPitchAxis } from './slopePitchAxis';
 
 type Pt2 = { x: number; y: number };
 
@@ -56,6 +57,7 @@ export function computeRoofHostedOpeningPlacement(
   roof: BuildingElementOpaque,
   floors: Floor[] | undefined,
 ): RoofHostedOpeningPlacement | null {
+  if (isOrientationPitchAxis(roof)) return null;
   const pitch = roof.pitch;
   if (typeof pitch !== 'number' || !Number.isFinite(pitch) || pitch <= 0 || pitch >= 90) {
     return null;
@@ -143,6 +145,7 @@ export function moveRoofHostedOpeningToSurfaceDistance(
   floors: Floor[] | undefined,
   targetDistanceM: number,
 ): OpeningCoordinate[] | null {
+  if (isOrientationPitchAxis(roof)) return null;
   if (!Number.isFinite(targetDistanceM) || targetDistanceM < 0) return null;
 
   const placement = computeRoofHostedOpeningPlacement(opening, roof, floors);

@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SLOPE_PITCH_AXIS_EXTRA_JSON_KEY } from './slopePitchAxis';
+
+export { SLOPE_PITCH_AXIS_EXTRA_JSON_KEY } from './slopePitchAxis';
+
 /**
  * Shared CSV preset utilities.
  * Extracted from geometryWorker so they can be unit-tested outside the worker context.
@@ -69,6 +73,7 @@ export const EXTRA_JSON_UI_KEYS = [
    * also strips it, matching every other fixed-name `_`-prefixed key above.
    */
   NAME_AUTO_SYNC_EXTRA_JSON_KEY,
+  SLOPE_PITCH_AXIS_EXTRA_JSON_KEY,
 ];
 
 /** Minimal CSV line parser that handles quoted fields. */

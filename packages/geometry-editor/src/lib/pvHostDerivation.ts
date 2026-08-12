@@ -15,6 +15,7 @@ import {
 } from './openingSegmentOutward';
 import { isRoofLikeOpaqueElement } from './roofElement';
 import { roofTopElevationAtPlanM } from './roofTopElevationAtPlanM';
+import { isOrientationPitchAxis } from './slopePitchAxis';
 
 type Pt2 = { x: number; y: number };
 
@@ -110,6 +111,7 @@ export function deriveFromHostRoof(
   panel: Pick<OnSiteGeneration | BuildingElementTransparent, 'coordinates'>,
   roof: BuildingElementOpaque,
   floors: Floor[] | undefined,
+  globalOrientationOffset?: number,
 ): { base_height?: number; pitch?: number; orientation360?: number } {
   const result: { base_height?: number; pitch?: number; orientation360?: number } = {};
 
@@ -127,7 +129,7 @@ export function deriveFromHostRoof(
   if (isSloped) {
     const elevations: number[] = [];
     for (const p of ringPts) {
-      const z = roofTopElevationAtPlanM(roof, p.x, p.y, floors);
+      const z = roofTopElevationAtPlanM(roof, p.x, p.y, floors, globalOrientationOffset);
       if (typeof z === 'number' && Number.isFinite(z)) elevations.push(z);
     }
     if (elevations.length > 0) {
@@ -149,18 +151,22 @@ export function deriveFromHostRoof(
 
 export function alignHostedSlopedPanelToHostOrientation(
   panel: Pick<OnSiteGeneration | BuildingElementTransparent, 'coordinates'>,
-  roof: Pick<BuildingElementOpaque, 'coordinates'>,
+  roof: Pick<BuildingElementOpaque, 'coordinates' | 'orientation360' | 'extra_json' | 'pitch' | 'type'>,
   globalOrientationOffset = 0,
 ): Array<{ x: number; y: number; z: number }> | null {
   const hostCoords = roof.coordinates ?? [];
   if (hostCoords.length < 2) return null;
-  const desired = orientation360SlopedFromFirstEdge(
-    hostCoords[0]!.x,
-    hostCoords[0]!.y,
-    hostCoords[1]!.x,
-    hostCoords[1]!.y,
-    globalOrientationOffset,
-  );
+  const desired = isOrientationPitchAxis(roof as BuildingElementOpaque)
+    ? (typeof roof.orientation360 === 'number' && Number.isFinite(roof.orientation360)
+        ? roof.orientation360
+        : null)
+    : orientation360SlopedFromFirstEdge(
+        hostCoords[0]!.x,
+        hostCoords[0]!.y,
+        hostCoords[1]!.x,
+        hostCoords[1]!.y,
+        globalOrientationOffset,
+      );
   if (desired === null) return null;
   return applyCompassOrientationToSlopedPolygonCoords(
     panel.coordinates as Array<{ x: number; y: number; z: number }>,

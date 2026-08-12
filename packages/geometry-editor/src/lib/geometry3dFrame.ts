@@ -42,11 +42,10 @@ export function computeElement3DFrameTarget(
         pts.push([px, elevation, pz]);
       }
     } else if (primitive.kind === 'polygon-sloped') {
-      const anchor: [number, number] = [primitive.points[0][0], primitive.points[0][1]];
       for (const point of primitive.points) {
         const [px, pz] = modelXYToThreeXZ(point);
         const y =
-          elevationAtSlopedVertexM(point, anchor, primitive.inwardNormal2D, primitive.baseElevationM, primitive.pitchDeg) +
+          elevationAtSlopedVertexM(point, primitive.hingeAnchorXY, primitive.inwardNormal2D, primitive.baseElevationM, primitive.pitchDeg) +
           primitive.thicknessM / 2;
         pts.push([px, y, pz]);
       }

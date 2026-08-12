@@ -5,7 +5,8 @@
  * Roof **top** plane elevation at a plan point — shared by R8/R9 and sloped-roof gable (E12/E13) proposals.
  */
 import { elementBaseElevationMForTb } from './geometry3dMapper';
-import { computeSlopedPolygonInwardNormal2D, elevationAtSlopedVertexM } from './geometry3dSloped';
+import { elevationAtSlopedVertexM } from './geometry3dSloped';
+import { isOrientationPitchAxis, slopedPolygonPlaneBasis } from './slopePitchAxis';
 import type { BuildingElementOpaque, Floor } from '../geometry/types';
 
 function roofBaseElevationM(roof: BuildingElementOpaque, floors: Floor[] | undefined): number {
@@ -39,12 +40,22 @@ function inwardNormal2DStripLeftOfDirectedEdge(roof: BuildingElementOpaque): [nu
 }
 
 /** Inward normal in plan for sloped roof polygon or 2-vertex strip (same convention as 3D sloped envelopes). */
-export function inwardNormal2DForSlopedRoof(roof: BuildingElementOpaque): [number, number] | null {
+export function inwardNormal2DForSlopedRoof(
+  roof: BuildingElementOpaque,
+  globalOrientationOffset?: number,
+): [number, number] | null {
   const c = roof.coordinates;
   if (!c || c.length < 2) return null;
   if (c.length >= 3) {
     const planPts = c.map((p) => [p.x, p.y] as [number, number]);
-    return computeSlopedPolygonInwardNormal2D(planPts);
+    const orientationAxis = isOrientationPitchAxis(roof);
+    if (orientationAxis && !Number.isFinite(globalOrientationOffset)) return null;
+    return slopedPolygonPlaneBasis(
+      planPts,
+      orientationAxis ? 'orientation' : 'bottom-edge',
+      roof.orientation360 ?? 0,
+      globalOrientationOffset ?? 0,
+    )?.upslope2D ?? null;
   }
   return inwardNormal2DStripLeftOfDirectedEdge(roof);
 }
@@ -57,14 +68,26 @@ export function roofTopElevationAtPlanM(
   x: number,
   y: number,
   floors: Floor[] | undefined,
+  globalOrientationOffset?: number,
 ): number | null {
   const c = roof.coordinates;
   if (!c || c.length < 2) return null;
   const pitch = roof.pitch;
   if (typeof pitch !== 'number' || !Number.isFinite(pitch) || pitch <= 0 || pitch >= 90) return null;
-  const inward = inwardNormal2DForSlopedRoof(roof);
+  const orientationAxis = isOrientationPitchAxis(roof);
+  if (orientationAxis && !Number.isFinite(globalOrientationOffset)) return null;
+  const points = c.map((point) => [point.x, point.y] as [number, number]);
+  const basis = c.length >= 3
+    ? slopedPolygonPlaneBasis(
+        points,
+        orientationAxis ? 'orientation' : 'bottom-edge',
+        roof.orientation360 ?? 0,
+        globalOrientationOffset ?? 0,
+      )
+    : null;
+  const inward = basis?.upslope2D ?? inwardNormal2DForSlopedRoof(roof, globalOrientationOffset);
   if (!inward) return null;
   const baseEl = roofBaseElevationM(roof, floors);
-  const anchor: [number, number] = [c[0]!.x, c[0]!.y];
+  const anchor: [number, number] = basis?.anchorXY ?? [c[0]!.x, c[0]!.y];
   return elevationAtSlopedVertexM([x, y], anchor, inward, baseEl, pitch);
 }

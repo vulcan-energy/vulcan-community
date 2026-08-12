@@ -155,8 +155,9 @@ function minimumFhsBathSizeLitres(numberOfBedrooms?: number): number | undefined
 function pushSlopedDimensionOverrideWarnings(
   element: Element,
   warnings: ValidationIssue[],
+  globalOrientationOffset?: number,
 ): void {
-  const derived = deriveSlopedElementDimensions(element);
+  const derived = deriveSlopedElementDimensions(element, globalOrientationOffset);
   if (!derived) return;
   const widthOverride = (element as { _widthUserOverride?: boolean })._widthUserOverride === true;
   const heightOverride = (element as { _heightUserOverride?: boolean })._heightUserOverride === true;
@@ -219,6 +220,7 @@ export interface ValidationContext {
   elementsById?: Record<string, Element>;
   zones?: Zone[];
   floors?: Floor[];
+  globalOrientationOffset?: number;
   complianceValidationEnabled?: boolean;
   /** Global inputs used to resolve the same ventilation-zone base height written on save. */
   complianceSettings?: GlobalSettingsShape;
@@ -670,7 +672,7 @@ export const validateElementCore = (
       const shape = getElementShape(el);
 
       if (shape === 'sloped-polygon' && el.coordinates && el.coordinates.length >= 3) {
-        const derivedDimensions = deriveSlopedElementDimensions(el);
+        const derivedDimensions = deriveSlopedElementDimensions(el, context.globalOrientationOffset);
         pushSelfIntersectingSlopedPolygonWarning(el.coordinates, warnings);
 
         if (!derivedDimensions || derivedDimensions.width === 0) {
@@ -682,7 +684,7 @@ export const validateElementCore = (
         if (!derivedDimensions || derivedDimensions.area === 0) {
           warnings.push(geo('Area is 0 — check coordinates', 'area'));
         }
-        pushSlopedDimensionOverrideWarnings(el, warnings);
+        pushSlopedDimensionOverrideWarnings(el, warnings, context.globalOrientationOffset);
       } else if (shape === 'polygon' && el.coordinates && el.coordinates.length >= 3) {
         // Use derived values for polygon validation
         const derivedArea = calculatePolygonArea(el.coordinates);
@@ -718,7 +720,7 @@ export const validateElementCore = (
       const shape = getElementShape(el);
 
       if (shape === 'sloped-polygon' && el.coordinates && el.coordinates.length >= 3) {
-        const derivedDimensions = deriveSlopedElementDimensions(el);
+        const derivedDimensions = deriveSlopedElementDimensions(el, context.globalOrientationOffset);
         pushSelfIntersectingSlopedPolygonWarning(el.coordinates, warnings);
 
         if (!derivedDimensions || derivedDimensions.width === 0) {
@@ -730,7 +732,7 @@ export const validateElementCore = (
         if (!derivedDimensions || derivedDimensions.area === 0) {
           warnings.push(geo('Area is 0 — check coordinates', 'area'));
         }
-        pushSlopedDimensionOverrideWarnings(el, warnings);
+        pushSlopedDimensionOverrideWarnings(el, warnings, context.globalOrientationOffset);
       } else if (shape === 'polygon' && el.coordinates && el.coordinates.length >= 3) {
         // Use derived values for polygon validation
         const derivedArea = calculatePolygonArea(el.coordinates);
@@ -776,7 +778,7 @@ export const validateElementCore = (
           complianceSettings: context.complianceSettings,
         });
         if (ventilationZoneBaseHeight !== undefined) {
-          const windowBaseHeight = getAreaBasedElementExportGeometry(el).baseHeight;
+          const windowBaseHeight = getAreaBasedElementExportGeometry(el, context.globalOrientationOffset).baseHeight;
           if (windowBaseHeight < ventilationZoneBaseHeight) {
             issues.push(
               fhs(
@@ -874,7 +876,7 @@ export const validateElementCore = (
         planArea > MIN_ADJACENT_PLAN_AREA_FOR_POLYGON_METRICS_M2;
 
       if (adjacentShape === 'sloped-polygon' && adjCoords && adjCoords.length >= 3) {
-        const derivedDimensions = deriveSlopedElementDimensions(adjacentElement);
+        const derivedDimensions = deriveSlopedElementDimensions(adjacentElement, context.globalOrientationOffset);
         pushSelfIntersectingSlopedPolygonWarning(adjCoords, warnings);
 
         if (!derivedDimensions || derivedDimensions.width === 0) {
@@ -886,7 +888,7 @@ export const validateElementCore = (
         if (!derivedDimensions || derivedDimensions.area === 0) {
           issues.push(geo('Area cannot be 0', 'area'));
         }
-        pushSlopedDimensionOverrideWarnings(adjacentElement, warnings);
+        pushSlopedDimensionOverrideWarnings(adjacentElement, warnings, context.globalOrientationOffset);
       } else if (usePolygonDerivedAdjacentValidation) {
         // Horizontal-ish polygons (internal floors / ceilings): derive metrics from plan footprint
         const derivedArea = planArea;
@@ -1488,6 +1490,7 @@ export const validateElementCore = (
             onSiteElement,
             hostRoof,
             elementsById ? withEffectiveStoreyHeights(floors ?? [], Object.values(elementsById)) : floors,
+            context.globalOrientationOffset,
           );
           const epsAng = 0.5;
           const epsBh = 0.01;
@@ -1651,7 +1654,7 @@ export const validateElementCore = (
           ? (elementData.generation_type ?? extraJson.generation_type ?? extraJson.type)
           : (
             element.type === 'BuildingElementOpaque' && field === 'area'
-                    ? (elementsById ? getElementEffectiveArea(element, elementsById) : elementData[field] ?? extraJson[field])
+                    ? (elementsById ? getElementEffectiveArea(element, elementsById, context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
               : (elementData[field] ?? extraJson[field])
           );
         const hasField = isOnSiteTypeCollision
@@ -1705,7 +1708,7 @@ export const validateElementCore = (
           ? (elementData.generation_type ?? extraJson.generation_type ?? extraJson.type)
           : (
             element.type === 'BuildingElementOpaque' && field === 'area'
-                  ? (elementsById ? getElementEffectiveArea(element, elementsById) : elementData[field] ?? extraJson[field])
+                  ? (elementsById ? getElementEffectiveArea(element, elementsById, context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
               : (elementData[field] ?? extraJson[field])
           );
         if (fieldValue === null || fieldValue === undefined) continue;
@@ -2142,6 +2145,7 @@ export const collectGeometryValidation = (
     defaultsLoading?: boolean;
     junctionPsiWorkspaceByType?: Record<string, number>;
     complianceSettings?: GlobalSettingsShape;
+    globalOrientationOffset?: number;
   },
 ): GeometryValidationSummary => {
   const warnings: string[] = [];
@@ -2162,6 +2166,7 @@ export const collectGeometryValidation = (
       elementsById,
       zones,
       floors: options.floors,
+      globalOrientationOffset: options.globalOrientationOffset,
       complianceValidationEnabled: options.complianceValidationEnabled || false,
       complianceSettings: options.complianceSettings,
       numberOfBedrooms: options.complianceSettings?.NumberOfBedrooms,
@@ -2213,6 +2218,7 @@ export const collectGeometryValidation = (
         zones,
         complianceValidationEnabled: options.complianceValidationEnabled,
         complianceSettings: options.complianceSettings,
+        globalOrientationOffset: options.globalOrientationOffset,
       }),
     );
   }

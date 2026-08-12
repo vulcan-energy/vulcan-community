@@ -4,6 +4,7 @@
 import type { Element } from '../geometry/types';
 import type { Geometry3DPrimitive } from './geometry3dPrimitivesTypes';
 import { elevationAtSlopedVertexM } from './geometry3dSloped';
+import { slopeHingeContourSegment } from './slopePitchAxis';
 import { getElementShape } from './shapeUtils';
 import { projectSegmentOntoParent } from './snapUtils';
 
@@ -142,7 +143,7 @@ function primitiveElevationBounds(primitive: Geometry3DPrimitive): { min: number
   if (primitive.kind === 'polygon-sloped') {
     const elevations = primitive.points.map((point) => elevationAtSlopedVertexM(
       point,
-      primitive.points[0],
+      primitive.hingeAnchorXY,
       primitive.inwardNormal2D,
       primitive.baseElevationM,
       primitive.pitchDeg,
@@ -222,9 +223,7 @@ function buildSlopedHandleAnchors(
   pitchElevationM: number;
 } | null {
   if (!primitive || primitive.points.length < 2) return null;
-  const eavesA = primitive.points[0];
-  const eavesB = primitive.points[1];
-  const eavesAnchor = eavesA;
+  const eavesAnchor = primitive.hingeAnchorXY;
   const planModelXY = averagePointXY(primitive.points);
   const planSurfaceElevationM = elevationAtSlopedVertexM(
     [planModelXY.x, planModelXY.y],
@@ -238,9 +237,13 @@ function buildSlopedHandleAnchors(
     (point[1] - eavesAnchor[1]) * primitive.inwardNormal2D[1]
   )));
   const maxDistance = Math.max(...distances);
+  const hingeSegment = primitive.pitchAxis === 'orientation'
+    ? slopeHingeContourSegment(primitive.points, primitive.hingeAnchorXY, primitive.inwardNormal2D)
+      ?? [primitive.points[0], primitive.points[1]] as [[number, number], [number, number]]
+    : [primitive.points[0], primitive.points[1]] as [[number, number], [number, number]];
   const eavesModelXY = {
-    x: (eavesA[0] + eavesB[0]) / 2,
-    y: (eavesA[1] + eavesB[1]) / 2,
+    x: (hingeSegment[0][0] + hingeSegment[1][0]) / 2,
+    y: (hingeSegment[0][1] + hingeSegment[1][1]) / 2,
   };
   const pitchModelXY = {
     x: eavesModelXY.x + primitive.inwardNormal2D[0] * maxDistance,

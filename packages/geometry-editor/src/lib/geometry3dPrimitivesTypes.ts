@@ -85,16 +85,18 @@ export interface PolygonPrismPrimitive {
   windowVentilation?: WindowVentilation3D;
 }
 
-/** Pitched planar surface: first edge (points[0]→points[1]) is low eaves; upslope into polygon interior. */
+/** Pitched planar surface with an explicit horizontal-contour hinge basis. */
 export interface PolygonSlopedPrimitive {
   kind: 'polygon-sloped';
   elementId: string;
   elementType: Element['type'];
   floorZ: number;
   points: Array<[number, number]>;
-  /** Elevation (m) along the eaves line (lowest edge) */
+  /** Elevation (m) along the horizontal hinge contour. */
   baseElevationM: number;
   pitchDeg: number;
+  hingeAnchorXY: [number, number];
+  pitchAxis: 'bottom-edge' | 'orientation';
   /** Unit inward normal in model XY (upslope in plan) */
   inwardNormal2D: [number, number];
   thicknessM: number;

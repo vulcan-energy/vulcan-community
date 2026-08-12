@@ -16,6 +16,7 @@ export type CanvasInteractionKind =
   | 'space-label-vertex-drag'
   | 'drawing-preview'
   | 'guide-overlay-drag'
+  | 'orientation-arrow-drag'
   | 'stage-pan'
   | 'marquee';
 

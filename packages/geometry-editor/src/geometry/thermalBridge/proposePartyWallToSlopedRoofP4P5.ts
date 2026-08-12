@@ -9,6 +9,7 @@
  */
 import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { computeSlopedPolygonInwardNormal2D } from '../../lib/geometry3dSloped';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
@@ -60,6 +61,7 @@ export function proposePartyWallToSlopedRoofP4P5ThermalBridges(
   for (const el of elements) {
     if (el.type !== 'BuildingElementOpaque' || el.isPlaceholder) continue;
     const o = el as BuildingElementOpaque;
+    if (isOrientationPitchAxis(o)) continue;
     if (!isSlopedRoofOpaqueForP4P5(o)) continue;
     const c = o.coordinates;
     if (!c || c.length < 3) continue;

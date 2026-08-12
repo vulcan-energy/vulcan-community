@@ -63,6 +63,7 @@ import {
 } from '../../../geometry-editor-host/src/editorServicePorts';
 import type { GeometrySourceComparisonPort } from '../../../geometry-editor-host/src/sourceComparisonPort';
 import { getElementShape, isTypeShapeCompatible, convertShapeCoordinates } from '../lib/shapeUtils';
+import { isOrientationPitchAxis } from '../lib/slopePitchAxis';
 import {
   isVulcanUiPartyFloorElement,
   VULCAN_UI_PARTY_ELEMENT_KEY,
@@ -970,6 +971,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const addZone = useGeometryStore((s) => s.addZone);
   const addElement = useGeometryStore((s) => s.addElement);
   const updateElement = useGeometryStore((s) => s.updateElement);
+  const setSlopePitchAxis = useGeometryStore((s) => s.setSlopePitchAxis);
   const flipElementOrientation = useGeometryStore((s) => s.flipElementOrientation);
   const isElementNameManual = useGeometryStore((s) => s.isElementNameManual);
   const resetElementNameToAuto = useGeometryStore((s) => s.resetElementNameToAuto);
@@ -1391,6 +1393,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       return 0;
     }
 
+    if (isOrientationPitchAxis(element)) return element.orientation360;
+
     // For walls, we need to recalculate the orientation based on current global offset
     if (
       (element.type === 'BuildingElementOpaque' || element.type === 'BuildingElementTransparent') &&
@@ -1629,9 +1633,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       panel,
       host as BuildingElementOpaque,
       withEffectiveStoreyHeights(floors, allElements),
+      geometryStore.getState().globalOrientationOffset,
     );
     return { hostId, hostName: host.name, derived };
-  }, [selection, elementsById, floors, allElements]);
+  }, [selection, elementsById, floors, allElements, geometryStore]);
 
   // derivedWindowMidHeight/derivedWindowMaxOpenArea and the auto-sync effect
   // that writes them now live inside buildingElementTransparentFormState
@@ -1747,6 +1752,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     selection,
     getElementById,
     updateElement,
+    setSlopePitchAxis,
     getGlobalOrientationOffset: () => geometryStore.getState().globalOrientationOffset,
     getCurrentOrientation,
     selectedElementV,
@@ -3750,15 +3756,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     ) {
       return null;
     }
-    return deriveSlopedElementDimensions({ ...selectedElement, pitch: wallShared.pitch });
-  }, [selectedElement, selectedShape, wallShared.pitch]);
+    return deriveSlopedElementDimensions(
+      { ...selectedElement, pitch: wallShared.pitch },
+      geometryStore.getState().globalOrientationOffset,
+    );
+  }, [selectedElement, selectedShape, wallShared.pitch, geometryStore]);
   const selectedSlopedDimensionNotes = useMemo(() => {
     if (!selectedElement || !selectedSlopedDimensions) return null;
     const semantics = getPolygonScalarDimensionSemantics(
       selectedElement.coordinates,
       selectedSlopedDimensions.width,
     );
-    if (!semantics?.usesEquivalentWidth) return null;
+    if (!isOrientationPitchAxis(selectedElement) && !semantics?.usesEquivalentWidth) return null;
     return {
       width: 'Width is equivalent: surface area divided by height, preserving area for tapered shapes.',
       height: 'Height is the true up-slope length of this sloped shape.',
@@ -3915,8 +3924,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       if (!isAreaBasedExportElement(draft)) {
         return;
       }
-      const exp = getAreaBasedElementExportGeometry(draft);
-      const gross = getElementGrossArea(draft);
+      const exp = getAreaBasedElementExportGeometry(draft, geometryStore.getState().globalOrientationOffset);
+      const globalOrientationOffset = geometryStore.getState().globalOrientationOffset;
+      const gross = getElementGrossArea(draft, globalOrientationOffset);
       let patch: Partial<Element> = {
         extra_json: mergedExtra,
         width: exp.width,
@@ -3926,7 +3936,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       if (draft.type === 'BuildingElementTransparent') {
         patch = {
           ...patch,
-          mid_height: getTransparentExportMidHeight(draft as BuildingElementTransparent),
+          mid_height: getTransparentExportMidHeight(draft as BuildingElementTransparent, globalOrientationOffset),
         };
       }
       commitExistingElementDraftRef.current(patch);
@@ -3934,7 +3944,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       wallShared.heightInput.setValue(roundToTwoDecimals(exp.height));
       if (draft.type === 'BuildingElementTransparent') {
         buildingElementTransparentFormState.midHeightInput.setValue(
-          roundToTwoDecimals(getTransparentExportMidHeight(draft as BuildingElementTransparent)),
+          roundToTwoDecimals(getTransparentExportMidHeight(draft as BuildingElementTransparent, globalOrientationOffset)),
         );
       }
     },
@@ -3945,6 +3955,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       wallShared.widthInput,
       wallShared.heightInput,
       buildingElementTransparentFormState.midHeightInput,
+      geometryStore,
     ],
   );
 
