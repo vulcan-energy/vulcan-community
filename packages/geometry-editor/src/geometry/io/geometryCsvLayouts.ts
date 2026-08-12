@@ -219,7 +219,7 @@ export const EXPECTED_SECTION_HEADERS: Record<string, readonly string[]> = {
     'coords',
     'extra_json',
   ],
-  Appliances: ['Name', 'Type', 'appliancekey', 'base_height', 'coords'],
+  Appliances: ['Name', 'Type', 'appliancekey', 'base_height', 'coords', 'extra_json'],
   'Hot Water Outlets': [
     'Name',
     'Type',
@@ -230,6 +230,7 @@ export const EXPECTED_SECTION_HEADERS: Record<string, readonly string[]> = {
     'allow_low_flowrate',
     'base_height',
     'coords',
+    'extra_json',
   ],
   'Context Shading': [
     'Name',
@@ -277,8 +278,8 @@ const ADDITIVE_OPTIONAL_COLUMNS: Record<string, ReadonlySet<string>> = {
   'Ventilation Systems': new Set(['terminal_type', 'host_element', 'coords']),
   'Combustion Appliances': new Set(['base_height']),
   'Wet Emitters': new Set(['space_heat_system', 'base_height']),
-  Appliances: new Set(['base_height', 'coords']),
-  'Hot Water Outlets': new Set(['allow_low_flowrate', 'base_height', 'coords']),
+  Appliances: new Set(['base_height', 'coords', 'extra_json']),
+  'Hot Water Outlets': new Set(['allow_low_flowrate', 'base_height', 'coords', 'extra_json']),
   'Context Shading': new Set(['shading_type', 'start_angle', 'end_angle', 'parent_element', 'base_height', 'coords', 'extra_json']),
   'Water Pipework': new Set(['pipework_type']),
   Systems: new Set(['Zone', 'Type', 'subcategory', 'system_preset', 'base_height', 'coords', 'extra_json']),

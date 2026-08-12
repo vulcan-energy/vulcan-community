@@ -746,6 +746,7 @@ export function ingestGeometryTabularSections(
             parent_element: null,
             coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
             ...viewerBaseHeightPatch(d),
+            extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
           });
           break;
         }
@@ -771,6 +772,7 @@ export function ingestGeometryTabularSections(
             parent_element: null,
             coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
             ...viewerBaseHeightPatch(d),
+            extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
           };
           newElements.push(hotWaterDemandElement);
           break;
