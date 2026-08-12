@@ -70,7 +70,7 @@ import {
   defaultsReadPathAttempts,
   normalizeDefaultsPathForMetadata,
 } from '../../../lib/workspacePaths';
-import { applySpaceLabelsToZonesAndCompliance } from '../../../lib/spaceLabelDerivation';
+import { FLOOR_AREA_MATCH_EPSILON_M2, applySpaceLabelsToZonesAndCompliance } from '../../../lib/spaceLabelDerivation';
 import { normalizeDevelopmentContextShadingExtraJsonForCsv } from '../../../lib/developmentContextShading';
 import {
   getMechanicalVentilationCsvFlatPositionValues,
@@ -1368,7 +1368,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const appliancesHeader = [...EXPECTED_SECTION_HEADERS.Appliances];
       const appliancesColumnCount = appliancesHeader.length;
 
-      lines.push('Appliances,,,,');
+      lines.push('Appliances,,,,,');
       lines.push(ensureColumnCount(appliancesHeader, appliancesColumnCount));
       applianceElements.forEach(element => {
         const appliancesRow = [
@@ -1376,7 +1376,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(element.type),
           escapeCSV(element.appliancekey),
           escapeCSV(formatViewerBaseHeightForCsv(element)),
-          formatElementCoordsForCsv(element)
+          formatElementCoordsForCsv(element),
+          escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
         lines.push(ensureColumnCount(appliancesRow, appliancesColumnCount));
       });
@@ -1389,7 +1390,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const hotWaterHeader = [...EXPECTED_SECTION_HEADERS['Hot Water Outlets']];
       const hotWaterColumnCount = hotWaterHeader.length;
 
-      lines.push('Hot Water Outlets,,,,,,,,');
+      lines.push('Hot Water Outlets,,,,,,,,,');
       lines.push(ensureColumnCount(hotWaterHeader, hotWaterColumnCount));
       hotWaterElements.forEach(element => {
         const fr = element.flowrate;
@@ -1408,7 +1409,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(ratedCell),
             escapeCSV(element.subcategory === 'MixerShower' && typeof element.allow_low_flowrate === 'boolean' ? (element.allow_low_flowrate ? 'TRUE' : 'FALSE') : ''),
           escapeCSV(formatViewerBaseHeightForCsv(element)),
-          formatElementCoordsForCsv(element)
+          formatElementCoordsForCsv(element),
+          escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
         lines.push(ensureColumnCount(hotWaterRow, hotWaterColumnCount));
       });
@@ -1857,6 +1859,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         `MechanicalVentilationTerminal '${element.name}' disconnected from ineligible host '${hostName}'`,
       );
     }
+    // Effective (override-aware) storey heights, matching the in-session updateElement path and
+    // the PV host reconstruction further below — computed once for every hosted-transparent
+    // opening in this loop rather than per-iteration.
+    const effectiveFloorsForHostedTransparent = withEffectiveStoreyHeights(get().floors, newElements);
     for (const element of newElements) {
       if (element.type !== 'BuildingElementTransparent') continue;
       const opening = element as BuildingElementTransparent;
@@ -1875,7 +1881,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (aligned) {
         opening.coordinates = aligned;
       }
-      const derived = deriveFromHostRoof(opening, roof, get().floors);
+      const derived = deriveFromHostRoof(opening, roof, effectiveFloorsForHostedTransparent);
       Object.assign(opening, buildTransparentHostDerivedPatch(opening, derived));
     }
 
@@ -1894,7 +1900,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const csvFloorArea = zone.floorArea || 0;
       if (csvFloorArea > 0) {
         const { floorArea: derivedArea } = calculateDerivedFloorArea(zone.id, allElements);
-        if (derivedArea > 0 && Math.abs(csvFloorArea - derivedArea) > 0.005) {
+        if (derivedArea > 0 && Math.abs(csvFloorArea - derivedArea) > FLOOR_AREA_MATCH_EPSILON_M2) {
           flags._floorAreaUserOverride = true;
         }
       }
@@ -1918,7 +1924,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     let complianceFromLabels: Partial<GeometryState['complianceSettings']> = {};
     if (labelList.length > 0) {
       const cv = get().complianceSettings.complianceValidationEnabled === true;
-      const applied = applySpaceLabelsToZonesAndCompliance(zonesForStore, labelList, cv);
+      const applied = applySpaceLabelsToZonesAndCompliance(zonesForStore, labelList, cv, undefined, {
+        preserveManualFloorAreaOverride: true,
+      });
       zonesForStore = applied.zones;
       complianceFromLabels = applied.compliancePatch;
     }

@@ -5749,6 +5749,21 @@ const createGeometryState = (
         (normalizedUpdates as { coordinates?: ElementCoordinate[] }).coordinates,
       );
 
+      // PV first-attach quirk: for an OnSiteGeneration panel, `syncPolygonElement` (invoked via
+      // applyCoordinateDerivedElementFields just below) defaults an unset pitch/orientation360 to
+      // 0 *before* the host-detection / first-attach override inference that runs later in this
+      // same update (see "isFirstAttach" further down). That auto-defaulted 0 then looks, to
+      // inferPvHostOverrideFlags, like a human typed 0° against a sloped roof — pinning a
+      // _pitchUserOverride / _orientationUserOverride nobody asked for. Capture which fields were
+      // genuinely unset *before* the sync mutates them, so the first-attach branch can tell the
+      // auto-default apart from a real user-authored value.
+      const pvPanelAutoDefaultableFields = nextElement.type === 'OnSiteGeneration'
+        ? {
+            pitch: !Number.isFinite((nextElement as OnSiteGeneration).pitch as number),
+            orientation360: !Number.isFinite((nextElement as OnSiteGeneration).orientation360 as number),
+          }
+        : null;
+
       // trimmed debug logging
 
       // Derive calculated properties from coordinates only when geometry changed
@@ -6119,9 +6134,19 @@ const createGeometryState = (
               );
               // If a previously-loaded (non-placeholder) panel is being attached to a host for the
               // first time, infer per-field override flags from the existing values so we do not
-              // silently overwrite manual settings carried over from CSV.
+              // silently overwrite manual settings carried over from CSV. Feed the pre-sync
+              // unset-ness captured above rather than panelWithHost's own (possibly
+              // auto-defaulted-to-0) pitch/orientation360, so a value `syncPolygonElement` just
+              // defaulted a moment ago isn't mistaken for one the user typed.
               if (isFirstAttach) {
-                Object.assign(panelWithHost, inferPvHostOverrideFlags(panelWithHost, derived));
+                const panelForOverrideInference = pvPanelAutoDefaultableFields
+                  ? {
+                      ...panelWithHost,
+                      ...(pvPanelAutoDefaultableFields.pitch ? { pitch: undefined } : {}),
+                      ...(pvPanelAutoDefaultableFields.orientation360 ? { orientation360: undefined } : {}),
+                    }
+                  : panelWithHost;
+                Object.assign(panelWithHost, inferPvHostOverrideFlags(panelForOverrideInference, derived));
               }
               const patch = buildHostDerivedPatch(panelWithHost, derived);
               newElementsById[id] = { ...panelWithHost, ...patch } as Element;

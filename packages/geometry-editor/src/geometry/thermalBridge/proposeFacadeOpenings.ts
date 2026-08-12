@@ -36,6 +36,7 @@ import type {
   Element,
   ThermalBridgeLinear,
 } from '../types';
+import { isVulcanUiPartyFloorElement } from '../../lib/assemblyMaterialFabric';
 import { JUNCTION_TYPE_TO_PSI } from '../../lib/simplifiedFabricMap';
 import { dist3, midpoint3 } from './tbLinkage';
 import {
@@ -397,7 +398,9 @@ function linkedConditionedFloorForFacadeOpening(
 ): BuildingElementAdjacentConditionedSpace | null {
   const conditionedFloors = elements.filter(
     (el): el is BuildingElementAdjacentConditionedSpace =>
-      el.type === 'BuildingElementAdjacentConditionedSpace' && !el.isPlaceholder,
+      el.type === 'BuildingElementAdjacentConditionedSpace' &&
+      !el.isPlaceholder &&
+      !isVulcanUiPartyFloorElement(el),
   );
   const hostWall = hostWallForFacadeOpening(opening, elements);
   if (hostWall) {

@@ -4,7 +4,7 @@
 /**
  * **E7** — party **floor or party ceiling** between dwellings (horizontal junction), meeting an **external** wall:
  * a **horizontal** `BuildingElementAdjacentConditionedSpace` slab (**closed polygon**) with the UI
- * party flag (`_vulcan_ui_party_element`), pitch **0**, plan edge **coincident** with the external wall, at slab
+ * party flag (`_vulcan_ui_party_element`), pitch **0 or 180**, plan edge **coincident** with the external wall, at slab
  * elevation **Z** within the wall’s vertical extent.
  *
  * Use the same element pattern for party intermediate slabs and party ceilings; polygon footprints use each
@@ -35,7 +35,7 @@ function dist2XY(a: { x: number; y: number }, b: { x: number; y: number }): numb
 }
 
 /**
- * Party-flag horizontal conditioned slab host for **E7**: pitch **0**, coplanar footprint, line or polygon with at
+ * Party-flag horizontal conditioned slab host for **E7**: pitch **0 or 180**, coplanar footprint, line or polygon with at
  * least one usable plan edge.
  */
 export function isPartyHorizontalConditionedFloorSlabHost(
