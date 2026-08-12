@@ -37,7 +37,7 @@
 
 import type { CSSProperties } from 'react';
 import { getElementShape, convertShapeCoordinates } from '../../lib/shapeUtils';
-import { type Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';

@@ -6,7 +6,8 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { Billboard, Html, OrbitControls, Grid, Edges, Line } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
-import { useGeometryStore, type Element, type Floor } from '../../stores/geometryStore';
+import type { Element, Floor } from '../../geometry/types';
+import { useGeometryStore } from '../../stores/geometryStore';
 import { useThemeStore } from '../../stores/themeStore';
 import {
   buildGeometry3DPrimitives,

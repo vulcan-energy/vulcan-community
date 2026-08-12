@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import polygonClipping, { type MultiPolygon, type Pair, type Polygon, type Ring } from 'polygon-clipping';
-import type { Element } from '../stores/geometryStore';
+import type { Element } from '../geometry/types';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { orientation360SlopedFromFirstEdge } from './openingSegmentOutward';
 import { isVulcanUiPartyFloorElement } from './assemblyMaterialFabric';

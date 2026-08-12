@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { collectInferenceWallSegmentsForStorey } from './collectWallSegments';
 import { extractInteriorFaces } from './polygonizeInteriorFaces';
 import type { InferSpaceFootprintsOptions, InferredSpaceFootprint, WallSegment2D } from './types';

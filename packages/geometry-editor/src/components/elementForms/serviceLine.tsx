@@ -40,8 +40,8 @@
 // (this group's) was that branch's only caller.
 
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from 'react';
-import { roundToTwoDecimals, type Element } from '../../stores/geometryStore';
-import type { ThermalBridgeLinear } from '../../geometry/types';
+import { roundToTwoDecimals } from '../../geometry/constants';
+import type { ThermalBridgeLinear, Element } from '../../geometry/types';
 import {
   resolveThermalBridgeLineMode,
   syncThermalBridgeLinearLengthFromCoordinates,

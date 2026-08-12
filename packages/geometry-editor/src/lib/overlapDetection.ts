@@ -14,7 +14,7 @@
  * Only detects true overlaps: lines overlapping lines, points overlapping points, and polygons overlapping polygons.
  */
 
-import type { Element } from '../stores/geometryStore';
+import type { Element } from '../geometry/types';
 import { isColinear } from './shapeUtils';
 import { getElementShape } from './shapeUtils';
 import { isPointInPolygon2D as isPointInsidePolygon } from './pointInPolygon';

@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import './HideElementsDropdown.css';
-import type { Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import {
   ELEMENT_CATEGORY_GHOST_OPTIONS,
   type ElementCategoryGhostKey,

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { Element } from '../types';
 import { proposeAdjacentWallJunctionThermalBridges } from './proposeAdjacentWallJunction';
 import { proposeBasementGroundE22ThermalBridges } from './proposeBasementFloorE22';

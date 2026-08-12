@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { IconNode } from 'lucide';
-import type { Element } from '../stores/geometryStore';
+import type { Element } from '../geometry/types';
 
 export type Geometry3DPrimitive =
   | WallSegmentPrimitive

@@ -11,7 +11,7 @@
 
 import type { ReactNode } from 'react';
 import type { GeometryDetailedJunctionSolverContribution } from '../../../../geometry-editor-host/src';
-import type { Element, ElementType } from '../../stores/geometryStore';
+import type { Element, ElementType } from '../../geometry/types';
 import type { NumericDraftInputBinding } from './formPrimitives';
 import type { ServiceLineFormGroup } from './serviceLine';
 

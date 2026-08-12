@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../stores/geometryStore';
+import type { Element } from '../geometry/types';
 import { getElementShape } from './shapeUtils';
 
 export const ELEMENT_CATEGORY_GHOST_STORAGE_KEY = 'hem:elementCategoryGhost';

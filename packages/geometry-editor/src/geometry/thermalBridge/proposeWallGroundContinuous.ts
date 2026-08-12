@@ -15,7 +15,7 @@ import {
   elementFloorZIndexForTb,
   slabElevationMForFloorZ,
 } from '../../lib/geometry3dMapper';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { isBasementGroundElement } from '../../lib/basementGeometry';
 import { roundToTwoDecimals } from '../constants';

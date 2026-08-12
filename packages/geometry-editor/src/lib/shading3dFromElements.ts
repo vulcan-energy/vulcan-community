@@ -8,8 +8,7 @@
  * WindowShading horizontal “outward” matches the 2D canvas opening arrow (`openingSegmentOutward.ts`), not `orientation360`.
  */
 import * as THREE from 'three';
-import type { Element } from '../stores/geometryStore';
-import type { BuildingElementOpaque, BuildingElementTransparent } from '../geometry/types';
+import type { BuildingElementOpaque, BuildingElementTransparent, Element } from '../geometry/types';
 import { modelXYToThreeXZ } from './geometryTransform';
 import { frameInsetFromFrameAreaFraction } from './geometryVentilationOverlay';
 import type { OrientedBoxPrimitive, PolygonPrismPrimitive } from './geometry3dPrimitivesTypes';

@@ -13,7 +13,7 @@ import { worldToCanvas } from '../../lib/shapeUtils';
 import { calculateDrawingPreviewArrow, calculateArrowPoints } from '../../lib/directionArrows';
 import { buildPvPanelRectangleCoords } from '../../lib/pvPanelFootprint';
 import type { DrawMode } from '../../hooks/useDrawingMode';
-import type { ElementType } from '../../stores/geometryStore';
+import type { ElementType } from '../../geometry/types';
 import type { DrawingCanvasPalette } from './drawingPreviewPalette';
 
 // Blue dot + hint pill track snap/cursor while drawing; fall back to a committed

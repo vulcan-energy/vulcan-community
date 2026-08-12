@@ -35,8 +35,7 @@ import {
   Wind,
   Zap,
 } from 'lucide';
-import type { Element } from '../stores/geometryStore';
-import type { SystemSubcategory } from '../geometry/types';
+import type { SystemSubcategory, Element } from '../geometry/types';
 
 const HEAT_PUMP_PCDB_TYPES = new Set<string>([
   'AirSourceHeatPump',

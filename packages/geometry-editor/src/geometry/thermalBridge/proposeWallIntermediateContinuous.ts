@@ -21,7 +21,7 @@ import {
 } from '../../lib/geometry3dMapper';
 import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeometry';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import { roundToTwoDecimals } from '../constants';
 import type { BuildingElementOpaque, Element } from '../types';
 import { isExternalLineWall } from './proposeExternalCorners';

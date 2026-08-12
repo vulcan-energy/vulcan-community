@@ -44,9 +44,6 @@ import { useGeometrySourceComparisonPort } from '../../../geometry-editor-host/s
 import {
   useGeometryStore,
   useGeometryStoreApi,
-  type Element,
-  type ElementType,
-  type Floor,
   type GeometryStoreApi,
   shouldSnapToParent,
 } from '../stores/geometryStore';
@@ -237,7 +234,7 @@ import {
   spaceLabelPlanAreaM2,
 } from '../lib/spaceLabelDerivation';
 import { getSpaceLabelBaseNameForRoomType } from '../lib/spaceLabelNaming';
-import type { ContextShading, SpaceLabel } from '../geometry/types';
+import type { ContextShading, SpaceLabel, Element, ElementType, Floor } from '../geometry/types';
 import { geometryPerf } from '../lib/geometryPerf';
 import {
   getDevelopmentContextStems,

@@ -3,7 +3,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { segmentIntersectsRect, worldToCanvas, canvasToWorld } from '../lib/shapeUtils';
-import type { Element } from '../stores/geometryStore';
+import type { Element } from '../geometry/types';
 import { clearVertexLengthPillPreview } from '../components/canvas/elementDragPreview';
 import {
   beginCanvasInteraction,

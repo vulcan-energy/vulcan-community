@@ -7,8 +7,7 @@
  * panel as `_pvHostRoofId`; per-field `_*UserOverride` flags suppress auto-derivation when
  * the user has manually edited a field.
  */
-import type { BuildingElementOpaque, BuildingElementTransparent, Element, OnSiteGeneration } from '../geometry/types';
-import type { Floor } from '../stores/geometryStore';
+import type { BuildingElementOpaque, BuildingElementTransparent, Element, OnSiteGeneration, Floor } from '../geometry/types';
 import { elementBaseElevationMForTb } from './geometry3dMapper';
 import {
   applyCompassOrientationToSlopedPolygonCoords,

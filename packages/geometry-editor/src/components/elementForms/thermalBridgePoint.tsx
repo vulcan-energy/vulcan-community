@@ -6,7 +6,7 @@
 // element-selection chain (there is no ThermalBridgePoint case in the
 // global-selection chain), so this module's single hydrate covers it.
 
-import type { Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { StandardInput } from '../StandardInput';
 import { decimalInputProps, useDecimalInput } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';

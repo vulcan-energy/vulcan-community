@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { getElementCanvasFloorZValue, normalizeStoreyIndex } from '../elementCanvasFloor';
 import { isInferenceWallElement, type WallSegment2D } from './types';
 

@@ -8,17 +8,14 @@ import './ElementCreator.css';
 import type { IconNode } from 'lucide';
 import { Pencil, Plus, X as XIcon } from 'lucide';
 import { useShallow } from 'zustand/react/shallow';
-import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M } from '../geometry/constants';
+import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M, ZONE_NAME_SUGGESTIONS, roundToTwoDecimals, roundToFourDecimals } from '../geometry/constants';
 import { normalizeHorizontalAdjacentPlanPitch } from '../geometry/adjacentPlanPitch';
 import { calculatePolygonArea, isAdjacentConditionedInternalFloorDoubled } from '../lib/polygonSync';
 import {
   useGeometryStore,
   useGeometryStoreApi,
-  ZONE_NAME_SUGGESTIONS,
   APPLIANCE_KEYS,
   validateZone,
-  roundToTwoDecimals,
-  roundToFourDecimals,
   deriveWallProperties,
   isGlobalObject,
   getAdjacentPartyWallUiToggleLabel,
@@ -133,6 +130,9 @@ import type {
   OnSiteGeneration,
   SpaceLabel,
   ThermalBridgeLinear,
+  ElementType,
+  Element,
+  Zone,
 } from '../geometry/types';
 import {
   thermalBridgeLinearHasPositiveRun,
@@ -624,7 +624,6 @@ function areDormerThermalOverridesEqual(
 }
 
 
-import type { ElementType, Element, Zone } from '../stores/geometryStore';
 import { FieldValidationIndicator, ValidationIndicator, ValidationPill } from './ValidationIndicator';
 import { StandardCard } from './StandardCard';
 import { StandardInput } from './StandardInput';

@@ -9,7 +9,7 @@
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { basementFloorSurfaceElevationM, isBasementGroundElement } from '../../lib/basementGeometry';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { BuildingElementGround, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';

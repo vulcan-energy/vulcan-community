@@ -6,7 +6,7 @@
  * its host roof. These are not eaves, gable/rake, ridge, or roof-window edges; Table K1
  * names R10 as "all other roof or room-in-roof junctions".
  */
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
 import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';

@@ -41,7 +41,7 @@
  * **Adjust policy** by changing {@link junctionDedupeTier} only — keep this docblock in sync.
  */
 
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import { elementFloorZIndexForTb } from '../../lib/geometry3dMapper';
 import type { Element } from '../types';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';

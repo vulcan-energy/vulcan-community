@@ -17,7 +17,7 @@ import {
 } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { isBasementGroundElement } from '../../lib/basementGeometry';
-import type { Floor } from '../../stores/geometryStore';
+import type { Floor } from '../../geometry/types';
 import type { BuildingElementGround, BuildingElementPartyWall, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import { planOverlapAdjacentOnWall, zonesCompatible } from './proposeAdjacentWallJunction';

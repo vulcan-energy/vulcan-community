@@ -45,9 +45,9 @@ import {
   calculateSuggestedVentilationBaseHeight,
   calculateSuggestedVentilationHeight,
 } from "../lib/zoneDerivation";
+import type { SapBuiltFormCode } from "../geometry/types";
 import {
   useGeometryStore,
-  type SapBuiltFormCode,
 } from "../stores/geometryStore";
 import { DerivedNumberField } from "./DerivedNumberField";
 import { ModalHeader } from "./ModalHeader";
