@@ -3,7 +3,7 @@
 
 // Wall-family shared state — the group of fields ElementCreator's not-yet-
 // extracted BuildingElementOpaque/Transparent/Ground/PartyWall/Adjacent-like
-// hydrate/reset/build/render code shares with five already-extracted modules
+// hydrate/reset/build/render code shares with seven already-extracted modules
 // (windowShading, contextShading, vents, mechanicalVentilation,
 // mechanicalVentilationDuctwork/Terminal, wetEmitter) through
 // ElementFormSharedCtx. Slice-6 brief decision 1, STAGE 0: this is the

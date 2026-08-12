@@ -658,24 +658,26 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
       // few cases over IS legitimate — untouched).
       //
       // Precondition grep (this slice's Stage 1 requirement) before landing:
-      // crates/vulcan-model-transform/src/builder.rs scopes `pitch` to
-      // Opaque/Transparent/Adjacent-like/PartyWall only — Ground's own
-      // schema branch (both data/schemas/input_fhs.schema.json and
-      // core-input.schema.json) never lists `pitch` among Ground's
-      // properties, and the CSV-row-driven `element_context.insert("pitch",
-      // ...)` only fires when the CSV row itself has a `pitch` column, which
-      // Ground rows never do. crates/vulcan-csv-codec has zero `pitch`
-      // references at all. On the TS side, geometry/io/geometryCsvLayouts.ts'
-      // 'Ground Elements' column list omits `pitch`, and
-      // stores/geometryStore/slices/ioSlice.ts's `generateCSV` Ground row
-      // builder enumerates fields explicitly without `element.pitch`. (One
-      // surprise worth recording: core-input.schema.json's
-      // BuildingElementGround*  variants DO require `pitch` — but the Rust
-      // builder always seeds Ground elements from
-      // data/defaults/defaults_template.json, which already bakes in
-      // `"pitch": 180` for the Ground template, so this required field is
-      // satisfied independently of anything the editor persists.) Dropped
-      // here.
+      // no consumer anywhere reads an editor-persisted Ground `pitch`. In
+      // crates/vulcan-model-transform/src/builder.rs the CSV-row-driven
+      // `element_context.insert("pitch", ...)` only fires when the CSV row
+      // itself has a `pitch` column, which Ground rows never do
+      // (geometry/io/geometryCsvLayouts.ts' 'Ground Elements' column list
+      // omits `pitch`, and stores/geometryStore/slices/ioSlice.ts's
+      // `generateCSV` Ground row builder enumerates fields explicitly
+      // without `element.pitch` — the wall/party types' pitch columns are
+      // where builder.rs actually gets pitch values from).
+      // crates/vulcan-csv-codec has zero `pitch` references at all.
+      //
+      // IMPORTANT CAVEAT — do not "simplify" further: core-input.schema.json's
+      // BuildingElementGround* variants DO list `pitch` in properties AND
+      // required. That requirement is satisfied because the Rust builder
+      // always seeds Ground elements from
+      // data/defaults/defaults_template.json, which bakes in `"pitch": 180`
+      // for the Ground template — independent of anything the editor
+      // persists. Removing that defaults seed WOULD break core-input-mode
+      // schema validation for every Ground element; only the editor-side
+      // phantom emission was dead. Dropped here.
       total_area: derivedArea,
       perimeter: derivedPerimeter,
       floor_type: state.floorType || undefined,
