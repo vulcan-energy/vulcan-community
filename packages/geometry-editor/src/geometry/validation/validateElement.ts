@@ -66,7 +66,7 @@ import { roundToTwoDecimals } from '../constants';
 import { thermalBridgeLinearHasPositiveRun } from '../../lib/thermalBridgeLinearGeometry';
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { findSuspendedGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
-import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeometry';
+import { findLinkedBasementGroundForLineElement, isBasementGroundElement } from '../../lib/basementGeometry';
 import { computeGroundExposedPerimeterDetails } from '../../lib/groundExposedPerimeter';
 import { isExternalLineWall } from '../thermalBridge/proposeExternalCorners';
 import type { LinearThermalBridgeIssue } from '../thermalBridge/findLinearThermalBridgeIssues';
@@ -1861,6 +1861,19 @@ export const validateElementCore = (
             'perimeter',
           ),
         );
+      }
+      // A non-basement ground element drawn on an upper canvas storey is almost always a legacy
+      // room-tool artefact — it exports ground-contact fabric on a floor that isn't the ground.
+      // Basements (z < 0) and the ground storey (z = 0) never warn.
+      if (!isBasementGroundElement(ground)) {
+        const canvasFloorZ = getElementCanvasFloorZValue(element, floors);
+        if (canvasFloorZ !== undefined && canvasFloorZ >= 1) {
+          warnings.push(
+            geo(
+              'Ground-contact floor above the ground storey — change the element type if this should be an internal or exposed floor',
+            ),
+          );
+        }
       }
     }
 

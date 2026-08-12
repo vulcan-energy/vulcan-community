@@ -18,6 +18,8 @@ const inputCss = readFileSync(componentPath('StandardInput.css'), 'utf8');
 const dropdownCss = readFileSync(componentPath('StandardDropdown.css'), 'utf8');
 const shellCss = readFileSync(componentPath('StandardControlShell.css'), 'utf8');
 const canvasCss = readFileSync(componentPath('GeometryCanvas.css'), 'utf8');
+const floorPickerDropdownCss = readFileSync(componentPath('canvas/FloorPickerDropdown.css'), 'utf8');
+const presetDropdownCss = readFileSync(componentPath('PresetDropdown.css'), 'utf8');
 
 describe('shared standard-control hover contract', () => {
   it('highlights editable default inputs without advertising disabled or read-only inputs', () => {
@@ -31,6 +33,14 @@ describe('shared standard-control hover contract', () => {
       /\.standard-dropdown:hover:not\(:focus\):not\(:disabled\)\s*\{[^}]*background-color:\s*var\(--hover-bg\)/s,
     );
     expect(dropdownCss).not.toMatch(/\.standard-dropdown-ghost[^}]*\{[^}]*\bbackground:/s);
+  });
+
+  it('keeps component-owned trigger state classes off the chevron-deleting background shorthand', () => {
+    // FloorPickerDropdown and PresetDropdown both render `.standard-dropdown` on their own trigger
+    // element and layer an open-state class on top; each shipped a `background:` shorthand
+    // regression on that class that silently deleted the shared chevron background-image.
+    expect(floorPickerDropdownCss).not.toMatch(/\.floor-picker-trigger-open\s*\{[^}]*\bbackground:/s);
+    expect(presetDropdownCss).not.toMatch(/\.preset-dropdown-trigger\.preset-dropdown-open\s*\{[^}]*\bbackground:/s);
   });
 
   it('highlights unit-bearing shells only when they are editable', () => {
