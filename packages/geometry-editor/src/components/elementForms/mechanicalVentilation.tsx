@@ -47,7 +47,8 @@
 // has no other callers here).
 
 import { useState, type CSSProperties } from 'react';
-import { roundToTwoDecimals, type Element } from '../../stores/geometryStore';
+import { roundToTwoDecimals } from '../../geometry/constants';
+import type { Element } from '../../geometry/types';
 import {
   buildMechanicalVentilationParentPatch,
   getParentByName,

@@ -14,17 +14,14 @@
 // ElementFormStateCtx.elementIds (readonly) and the orchestrator's own
 // mutable elementIds array satisfy it without a cast.
 
-import {
-  deriveWallProperties,
-  roundToFourDecimals,
-  type Element,
-} from '../stores/geometryStore';
+import { deriveWallProperties } from '../stores/geometryStore';
+import { roundToFourDecimals } from '../geometry/constants';
 import { projectSegmentOntoParent } from './snapUtils';
 import {
   applyMechanicalVentilationCsvPositionColumns,
   canMechanicalVentilationInheritHostPlacement,
 } from './mechanicalVentilationBranches';
-import type { BuildingElementOpaque, BuildingElementTransparent } from '../geometry/types';
+import type { BuildingElementOpaque, BuildingElementTransparent, Element } from '../geometry/types';
 
 export function getParentByName(
   elementsById: Record<string, Element>,

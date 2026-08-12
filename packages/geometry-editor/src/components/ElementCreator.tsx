@@ -5,8 +5,6 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallba
 import ReactDOM from 'react-dom';
 import './FilesDropdownPrimitives.css';
 import './ElementCreator.css';
-import type { IconNode } from 'lucide';
-import { Pencil, Plus, X as XIcon } from 'lucide';
 import { useShallow } from 'zustand/react/shallow';
 import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M, ZONE_NAME_SUGGESTIONS, roundToTwoDecimals, roundToFourDecimals } from '../geometry/constants';
 import { normalizeHorizontalAdjacentPlanPitch } from '../geometry/adjacentPlanPitch';
@@ -173,13 +171,8 @@ import {
   getParentOrientation360,
   buildHostedLinearParentPatch,
 } from '../lib/parentOrientation';
-import {
-  MVHR_DUCT_ROLES,
-  MVHR_TERMINAL_ROLES,
-  isMvhrTerminalHost,
-  type MvhrDuctRole,
-  type MvhrTerminalRole,
-} from '../lib/mvhrDuctwork';
+import type { MvhrDuctRole, MvhrTerminalRole } from '../lib/mvhrDuctwork';
+import { useMvhrDuctTerminalManager } from './MvhrDuctTerminalManager';
 import {
   buildDormerBundleDraft,
   computeAutoDormerBundleName,
@@ -419,109 +412,8 @@ const EDITOR_FIELD_ACTION_FIELD_STYLE: React.CSSProperties = {
   flex: '1 1 auto',
   minWidth: 0,
 };
-const MVHR_MANAGER_STYLE: React.CSSProperties = {
-  display: 'grid',
-  gap: '8px',
-  marginTop: '8px',
-};
-const MVHR_MANAGER_SECTION_STYLE: React.CSSProperties = {
-  display: 'grid',
-  gap: '4px',
-};
-const MVHR_MANAGER_SECTION_HEADER_STYLE: React.CSSProperties = {
-  ...INLINE_FIELD_NOTE_STYLE,
-  fontSize: '12px',
-  fontWeight: 600,
-  color: 'var(--text-secondary)',
-};
-const MVHR_MANAGER_ROW_STYLE: React.CSSProperties = {
-  ...EDITOR_FIELD_ACTION_ROW_STYLE,
-  gap: '6px',
-  minHeight: '30px',
-};
-const MVHR_MANAGER_ROLE_LABEL_STYLE: React.CSSProperties = {
-  flex: '0 0 104px',
-  minWidth: 0,
-  fontSize: '12px',
-  fontWeight: 600,
-  color: 'var(--text-primary)',
-  textTransform: 'capitalize',
-};
-const MVHR_MANAGER_CONTENT_STYLE: React.CSSProperties = {
-  flex: '1 1 180px',
-  minWidth: 0,
-  display: 'flex',
-  alignItems: 'center',
-  gap: '4px',
-  flexWrap: 'wrap',
-};
-const MVHR_MANAGER_LINK_STYLE: React.CSSProperties = {
-  flex: '0 1 180px',
-  minWidth: '140px',
-};
-const MVHR_MANAGER_LINKED_ITEM_STYLE: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '4px',
-  maxWidth: '100%',
-  minHeight: '28px',
-  padding: '2px 3px 2px 8px',
-  border: '1px solid var(--surface-control-active)',
-  borderRadius: '6px',
-  background: 'var(--surface-control)',
-  color: 'var(--text-primary)',
-};
-const MVHR_MANAGER_LINKED_NAME_STYLE: React.CSSProperties = {
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  fontSize: '12px',
-};
-const MVHR_MANAGER_EMPTY_STYLE: React.CSSProperties = {
-  ...INLINE_FIELD_NOTE_STYLE,
-  fontSize: '12px',
-};
-const MVHR_MANAGER_ICON_BUTTON_STYLE: React.CSSProperties = {
-  width: '28px',
-  minWidth: '28px',
-  height: '28px',
-  minHeight: '28px',
-  padding: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-const MVHR_MANAGER_WARNING_STYLE: React.CSSProperties = {
-  ...INLINE_FIELD_NOTE_STYLE,
-  marginLeft: '110px',
-};
-
-const LucideSvgIcon: React.FC<{ node: IconNode; size?: number; strokeWidth?: number }> = ({
-  node,
-  size = 14,
-  strokeWidth = 2,
-}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={strokeWidth}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-    focusable="false"
-  >
-    {node.map(([tag, attrs], index) =>
-      React.createElement(tag as keyof React.JSX.IntrinsicElements, {
-        key: index,
-        ...(attrs as Record<string, unknown>),
-      }),
-    )}
-  </svg>
-);
+// MVHR_MANAGER_* styles and LucideSvgIcon moved to MvhrDuctTerminalManager.tsx
+// with the manager cluster itself — see that file's header comment.
 
 function assemblyLayerToken(layer: unknown, library: BundledAssemblyLibrary | null): string {
   if (!layer || typeof layer !== 'object') return 'layer';
@@ -6068,243 +5960,23 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     );
   };
 
-  const selectedMvhrUnit = useMemo(() => {
-    if (!(selection.type === 'element' || selection.type === 'global')) return null;
-    const element = elementsById[selection.id] ?? getElementById(selection.id);
-    return element?.type === 'MechanicalVentilation' && element.vent_type === 'MVHR' ? element : null;
-  }, [selection, elementsById, getElementById]);
-
-  const selectElementById = (id: string) => {
-    const element = getElementById(id);
-    if (!element) return;
-    setSelection({ type: isGlobalObject(element) ? 'global' : 'element', id } as any);
-    setSelectedElementIds([id]);
-  };
-
-  const selectElementByNameAfterCreate = (type: Element['type'], name: string) => {
-    setTimeout(() => {
-      const state = geometryStore.getState();
-      const created = state.elementIds
-        .map((id) => state.elementsById[id])
-        .find((element) => element?.type === type && element.name === name);
-      if (!created) return;
-      state.setSelection({ type: isGlobalObject(created) ? 'global' : 'element', id: created.id } as any);
-      state.setSelectedElementIds([created.id]);
-    }, 0);
-  };
-
-  const createMvhrDuct = (role: MvhrDuctRole) => {
-    if (!selectedMvhrUnit?.name) return;
-    const existingNames = allElements.map((element) => element.name).filter((name): name is string => !!name);
-    const name = generateUniqueElementName(`${role} duct`, existingNames);
-    const anchor = selectedMvhrUnit.coordinates?.[0] ?? { x: 0, y: 0, z: 0 };
-    const z = typeof anchor.z === 'number' && Number.isFinite(anchor.z) ? anchor.z : 0;
-    addElement({
-      name,
-      type: 'MechanicalVentilationDuctwork',
-      duct_type: role,
-      length: 1,
-      parent_element: selectedMvhrUnit.name,
-      floorId: selectedMvhrUnit.floorId,
-      coordinates: [
-        { x: anchor.x + 0.5, y: anchor.y, z },
-        { x: anchor.x + 1.5, y: anchor.y, z },
-      ],
-    } as Omit<Element, 'id'>);
-    selectElementByNameAfterCreate('MechanicalVentilationDuctwork', name);
-  };
-
-  const createMvhrTerminal = (role: MvhrTerminalRole) => {
-    if (!selectedMvhrUnit?.name) return;
-    const existingNames = allElements.map((element) => element.name).filter((name): name is string => !!name);
-    const name = generateUniqueElementName(`${role} terminal`, existingNames);
-    const firstHost = allElements.find((element) => isMvhrTerminalHost(element));
-    const hostCoords = firstHost?.coordinates;
-    const hostPoint =
-      hostCoords && hostCoords.length >= 2
-        ? {
-            x: (hostCoords[0]!.x + hostCoords[1]!.x) / 2,
-            y: (hostCoords[0]!.y + hostCoords[1]!.y) / 2,
-            z: 2.4,
-          }
-        : selectedMvhrUnit.coordinates?.[0] ?? { x: 0, y: 0, z: 2.4 };
-    addElement({
-      name,
-      type: 'MechanicalVentilationTerminal',
-      terminal_type: role,
-      parent_element: selectedMvhrUnit.name,
-      host_element: firstHost?.name ?? null,
-      orientation360: firstHost ? undefined : 0,
-      pitch: firstHost ? undefined : 90,
-      floorId: firstHost?.floorId ?? selectedMvhrUnit.floorId,
-      coordinates: [hostPoint],
-    } as Omit<Element, 'id'>);
-    selectElementByNameAfterCreate('MechanicalVentilationTerminal', name);
-  };
-
-  const startMvhrDuctDraw = (role: MvhrDuctRole) => {
-    if (!selectedMvhrUnit?.name) return;
-    if (onStartMvhrDuctDraw) {
-      onStartMvhrDuctDraw({ role, parentName: selectedMvhrUnit.name });
-      return;
-    }
-    createMvhrDuct(role);
-  };
-
-  const startMvhrTerminalDraw = (role: MvhrTerminalRole) => {
-    if (!selectedMvhrUnit?.name) return;
-    if (onStartMvhrTerminalDraw) {
-      onStartMvhrTerminalDraw({ role, parentName: selectedMvhrUnit.name });
-      return;
-    }
-    createMvhrTerminal(role);
-  };
-
-  const renderMvhrDuctAndTerminalManager = () => {
-    if (!selectedMvhrUnit?.name) return null;
-    const mvhrName = selectedMvhrUnit.name;
-    const ducts = allElements.filter(
-      (element): element is ElementOfType<'MechanicalVentilationDuctwork'> =>
-        element.type === 'MechanicalVentilationDuctwork',
-    );
-    const terminals = allElements.filter(
-      (element): element is ElementOfType<'MechanicalVentilationTerminal'> =>
-        element.type === 'MechanicalVentilationTerminal',
-    );
-
-    const renderIconButton = (
-      label: string,
-      onClick: () => void,
-      icon: IconNode,
-    ) => (
-      <button
-        type="button"
-        className="btn editor-action-btn editor-action-btn--secondary"
-        style={MVHR_MANAGER_ICON_BUTTON_STYLE}
-        onClick={onClick}
-        title={label}
-        aria-label={label}
-      >
-        <LucideSvgIcon node={icon} />
-      </button>
-    );
-
-    const renderLinkedItem = (
-      element: Element,
-      kind: string,
-      onUnlink: () => void,
-    ) => {
-      const name = element.name || '(Unnamed)';
-      return (
-        <div key={element.id} style={MVHR_MANAGER_LINKED_ITEM_STYLE}>
-          <span style={MVHR_MANAGER_LINKED_NAME_STYLE} title={name}>{name}</span>
-          {renderIconButton(`Edit ${name}`, () => selectElementById(element.id), Pencil)}
-          {renderIconButton(`Unlink ${name || kind}`, onUnlink, XIcon)}
-        </div>
-      );
-    };
-
-    return (
-      <div style={MVHR_MANAGER_STYLE}>
-        <div style={MVHR_MANAGER_SECTION_STYLE}>
-          <div style={MVHR_MANAGER_SECTION_HEADER_STYLE}>MVHR ductwork</div>
-          {MVHR_DUCT_ROLES.map((role) => {
-            const linkedDucts = ducts.filter((duct) => duct.parent_element === mvhrName && duct.duct_type === role);
-            const availableDucts = ducts.filter((duct) => duct.duct_type === role && !duct.parent_element?.trim());
-            return (
-              <div key={role} style={MVHR_MANAGER_ROW_STYLE}>
-                <div style={MVHR_MANAGER_ROLE_LABEL_STYLE}>{role} ducts</div>
-                <div style={MVHR_MANAGER_CONTENT_STYLE}>
-                  {linkedDucts.length > 0 ? linkedDucts.map((duct) =>
-                    renderLinkedItem(
-                      duct,
-                      'duct',
-                      () => updateElement(duct.id, { parent_element: null } as Partial<Element>),
-                    ),
-                  ) : (
-                    <span style={MVHR_MANAGER_EMPTY_STYLE}>None linked</span>
-                  )}
-                </div>
-                {availableDucts.length > 0 ? (
-                  <div style={MVHR_MANAGER_LINK_STYLE}>
-                    <StandardDropdown
-                      value=""
-                      onChange={(value) => {
-                        const duct = ducts.find((candidate) => candidate.id === value);
-                        if (!duct) return;
-                        updateElement(duct.id, { parent_element: mvhrName } as Partial<Element>);
-                      }}
-                      options={availableDucts.map((duct) => ({ value: duct.id, label: duct.name }))}
-                      placeholder={`Link ${role} duct`}
-                      variant="ghost"
-                      size="sm"
-                    />
-                  </div>
-                ) : null}
-                {renderIconButton(`Draw ${role} duct`, () => startMvhrDuctDraw(role), Plus)}
-              </div>
-            );
-          })}
-        </div>
-
-        <div style={MVHR_MANAGER_SECTION_STYLE}>
-          <div style={MVHR_MANAGER_SECTION_HEADER_STYLE}>MVHR terminals</div>
-          {MVHR_TERMINAL_ROLES.map((role) => {
-            const linkedTerminals = terminals.filter((terminal) => terminal.parent_element === mvhrName && terminal.terminal_type === role);
-            const availableTerminals = terminals.filter(
-              (terminal) => terminal.terminal_type === role && !terminal.parent_element?.trim(),
-            );
-            return (
-              <React.Fragment key={role}>
-                <div style={MVHR_MANAGER_ROW_STYLE}>
-                  <div style={MVHR_MANAGER_ROLE_LABEL_STYLE}>{role} terminal</div>
-                  <div style={MVHR_MANAGER_CONTENT_STYLE}>
-                    {linkedTerminals.length > 0 ? linkedTerminals.map((terminal) =>
-                      renderLinkedItem(
-                        terminal,
-                        'terminal',
-                        () => updateElement(terminal.id, { parent_element: null } as Partial<Element>),
-                      ),
-                    ) : (
-                      <span style={MVHR_MANAGER_EMPTY_STYLE}>None linked</span>
-                    )}
-                  </div>
-                  {availableTerminals.length > 0 ? (
-                    <div style={MVHR_MANAGER_LINK_STYLE}>
-                    <StandardDropdown
-                      value=""
-                      onChange={(value) => {
-                        const terminal = terminals.find((candidate) => candidate.id === value);
-                        if (!terminal) return;
-                        linkedTerminals
-                          .filter((candidate) => candidate.id !== terminal.id)
-                          .forEach((candidate) => updateElement(candidate.id, { parent_element: null } as Partial<Element>));
-                        updateElement(terminal.id, {
-                          parent_element: mvhrName,
-                          terminal_type: role,
-                        } as Partial<Element>);
-                      }}
-                      options={availableTerminals.map((terminal) => ({ value: terminal.id, label: terminal.name }))}
-                      placeholder={linkedTerminals.length > 0 ? `Replace ${role}` : `Link ${role}`}
-                      variant="ghost"
-                      size="sm"
-                    />
-                    </div>
-                  ) : null}
-                  {linkedTerminals.length === 0
-                    ? renderIconButton(`Place ${role} terminal`, () => startMvhrTerminalDraw(role), Plus)
-                    : null}
-                </div>
-                {linkedTerminals.length > 1 ? (
-                  <div style={MVHR_MANAGER_WARNING_STYLE}>Multiple {role} terminals are linked; validation requires one.</div>
-                ) : null}
-              </React.Fragment>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
+  // MVHR duct/terminal manager cluster (selectedMvhrUnit, select/create/draw
+  // helpers, the manager render function, MVHR_MANAGER_* styles) moved to
+  // MvhrDuctTerminalManager.tsx — see that file's header comment. Called
+  // unconditionally here, in the same position the inline block used to
+  // occupy, so Rules of Hooks are satisfied exactly as before.
+  const renderMvhrDuctAndTerminalManager = useMvhrDuctTerminalManager({
+    selection,
+    elementsById,
+    getElementById,
+    addElement,
+    updateElement,
+    setSelection,
+    setSelectedElementIds,
+    geometryStore,
+    onStartMvhrDuctDraw,
+    onStartMvhrTerminalDraw,
+  });
 
   const renderAttributePanel = () => {
     const formRenderCtx: ElementFormRenderCtx = {

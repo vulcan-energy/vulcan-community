@@ -67,7 +67,8 @@
 // reset() — see the clearly-marked lines below.
 
 import { useState } from 'react';
-import { roundToTwoDecimals, type Element } from '../../stores/geometryStore';
+import { roundToTwoDecimals } from '../../geometry/constants';
+import type { Element } from '../../geometry/types';
 import { getParentByName } from '../../lib/parentOrientation';
 import {
   deriveMechanicalVentilationTerminalPosition,
