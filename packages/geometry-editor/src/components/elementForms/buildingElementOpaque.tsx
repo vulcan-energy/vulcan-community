@@ -294,11 +294,13 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       && Math.round(state.pitch) === 90;
 
     // baseHeightResetTarget needs the full element array (for the suspended-
-    // floor / basement lookahead helpers) — derived from elementIds/
-    // elementsById the same way the orchestrator itself does elsewhere
-    // (`elementIds.map(id => elementsById[id])`, per types.ts's own note on
-    // that pattern).
-    const allElements = elementIds.map((id) => elementsById[id]);
+    // floor / basement lookahead helpers). Object.values(elementsById), NOT
+    // elementIds.map: the legacy orchestrator's allElements used
+    // Object.values, and findLinkedGroundSlabForLineElement's final
+    // tie-break falls through to array order — iteration order is
+    // load-bearing here (the same reason mechanicalVentilationTerminal.tsx
+    // documents for its host dropdown).
+    const allElements = Object.values(elementsById);
     const baseHeightResetTarget = (() => {
       if (selection?.type === 'element') {
         const el = elementsById[selection.id];

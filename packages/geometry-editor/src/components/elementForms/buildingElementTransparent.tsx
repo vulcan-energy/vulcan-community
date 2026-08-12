@@ -330,7 +330,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
       }
     }
     prevDerivedWindowMaxOpenAreaRef.current = nextOpenArea;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ctx is a fresh object literal every render (see ElementCreator.tsx's elementFormStateCtx); depending on the whole object would defeat memoization for no benefit (same idiom as system.tsx/thermalBridgeLinear.tsx's ctx.* dep arrays).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ctx is a fresh object literal every render (see ElementCreator.tsx's elementFormStateCtx); depending on the whole object would defeat memoization for no benefit (same idiom as system.tsx/thermalBridgeLinear.tsx's ctx.* dep arrays). The legacy dep array also listed isExistingElementSelection (a useCallback); dropping it is inert because hydrate() writes the two listed input deps on every selection change, so the effect already re-runs whenever selection observably changes — the only skipped case is a redundant repair-write when consecutive selections share identical derived values.
   }, [
     ctx.elementType,
     derivedWindowMidHeight,
