@@ -83,6 +83,13 @@ function parseAirPermeabilityTestPressure(
   return undefined;
 }
 
+/**
+ * One `FloorHeightOverride` metadata row: a floor whose storey height was explicitly typed by
+ * the user (`Floor.heightUserOverride === true`) rather than derived from walls. `zIndex` matches
+ * `Floor.zIndex` — the same key `GuideOverlay`/`GuideOverlaySource` rows use per floor.
+ */
+export type FloorHeightOverrideRow = Readonly<{ zIndex: number; height: number }>;
+
 export type ParsedCsvMetadata = {
   globalOrientationOffset: number;
   schemaProfile?: ModelSchemaProfile;
@@ -94,6 +101,7 @@ export type ParsedCsvMetadata = {
   guideOverlaySource?: GuideOverlaySource | null;
   guideOverlayByFloor: GuideOverlayByFloor;
   guideOverlaySourceByFloor: GuideOverlaySourceByFloor;
+  floorHeightOverrides: readonly FloorHeightOverrideRow[];
   defaultThermalBridging?: number;
   complianceSettings: ComplianceSettings;
   creationDefaultAssemblyIds?: Partial<Record<'wall' | 'roof' | 'ground_floor', string>>;
@@ -148,6 +156,7 @@ export const parseCsvToGeometry = (
   let detectedJunctionPsiDefaultsPath: string | undefined;
   const detectedGuideOverlayByFloor: GuideOverlayByFloor = {};
   const detectedGuideOverlaySourceByFloor: GuideOverlaySourceByFloor = {};
+  const detectedFloorHeightOverrides: FloorHeightOverrideRow[] = [];
   let detectedDefaultThermalBridging: number | undefined;
   let detectedDefaultAssemblyWall: string | undefined;
   let detectedDefaultAssemblyRoof: string | undefined;
@@ -252,6 +261,22 @@ export const parseCsvToGeometry = (
       const decoded = decodeGuideOverlaySourceMetadataValue(payload);
       if (decoded) {
         detectedGuideOverlaySourceByFloor[floorIndex] = decoded;
+      }
+      continue;
+    }
+    if (line.startsWith('FloorHeightOverride,')) {
+      const parts = parseCsvLine(line);
+      // Format: `FloorHeightOverride,<zIndex>,<height>,...` — same `Type,<floorIndex>,<value>`
+      // shape as the GuideOverlay rows above. A malformed zIndex (non-integer) or a
+      // non-finite height drops the row silently; loadFromCSV additionally ignores any
+      // well-formed row whose zIndex has no matching floor.
+      const zIndexStr = (parts[1] ?? '').trim();
+      const heightStr = (parts[2] ?? '').trim();
+      if (/^-?\d+$/.test(zIndexStr)) {
+        const height = Number.parseFloat(heightStr);
+        if (Number.isFinite(height)) {
+          detectedFloorHeightOverrides.push({ zIndex: Number.parseInt(zIndexStr, 10), height });
+        }
       }
       continue;
     }
@@ -490,6 +515,7 @@ export const parseCsvToGeometry = (
       guideOverlaySource: resolveGuideOverlaySourceForFloor(detectedGuideOverlaySourceByFloor, 0).value,
       guideOverlayByFloor: detectedGuideOverlayByFloor,
       guideOverlaySourceByFloor: detectedGuideOverlaySourceByFloor,
+      floorHeightOverrides: detectedFloorHeightOverrides,
       defaultThermalBridging: detectedDefaultThermalBridging,
       complianceSettings,
       ...(Object.keys(creationDefaultAssemblyIds).length > 0 ? { creationDefaultAssemblyIds } : {}),
