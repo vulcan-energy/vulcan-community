@@ -4719,10 +4719,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       selectedElement.coordinates,
       selectedSlopedDimensions.width,
     );
-    if (!semantics?.usesEquivalentHeight) return null;
+    if (!semantics?.usesEquivalentWidth) return null;
     return {
-      width: 'Width is the low edge of this sloped shape.',
-      height: 'Height is equivalent: surface area divided by low-edge width, preserving area for tapered shapes.',
+      width: 'Width is equivalent: surface area divided by height, preserving area for tapered shapes.',
+      height: 'Height is the true up-slope length of this sloped shape.',
     };
   }, [selectedElement, selectedSlopedDimensions]);
   const selectedPvDimensionNotes = useMemo(() => {
@@ -4734,7 +4734,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       selectedElement.coordinates,
       derivedDimensions.width,
     );
-    if (!semantics?.usesEquivalentHeight) return null;
+    if (!semantics?.usesEquivalentWidth) return null;
     return {
       width: 'Width is the low edge of this PV footprint.',
       height: 'Height is equivalent: plan footprint area divided by low-edge width, then pitch-corrected.',
