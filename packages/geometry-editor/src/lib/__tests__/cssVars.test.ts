@@ -27,6 +27,24 @@ describe('readRootCssVar', () => {
     expect(readRootCssVar('--test-a', '#fallback')).toBe('#abcdef');
   });
 
+  it('follows chains deeper than one level (no depth cap)', () => {
+    // The retired GeometryCanvas3D variant capped recursion at depth 4 and could
+    // return the literal var() string; this locks the unbounded-but-cycle-safe choice.
+    document.documentElement.style.setProperty('--test-d1', 'var(--test-d2)');
+    document.documentElement.style.setProperty('--test-d2', 'var(--test-d3)');
+    document.documentElement.style.setProperty('--test-d3', 'var(--test-d4)');
+    document.documentElement.style.setProperty('--test-d4', 'var(--test-d5)');
+    document.documentElement.style.setProperty('--test-d5', 'var(--test-d6)');
+    document.documentElement.style.setProperty('--test-d6', '#0f0f0f');
+    expect(readRootCssVar('--test-d1', '#fallback')).toBe('#0f0f0f');
+  });
+
+  it('honours the inline var() fallback over the JS fallback argument', () => {
+    // The retired variant's non-capturing regex group discarded the inline fallback.
+    document.documentElement.style.setProperty('--test-inline', 'var(--test-inline-missing, #aa11bb)');
+    expect(readRootCssVar('--test-inline', '#fallback')).toBe('#aa11bb');
+  });
+
   it('falls back on a genuine cycle instead of hanging', () => {
     document.documentElement.style.setProperty('--test-cycle-a', 'var(--test-cycle-b)');
     document.documentElement.style.setProperty('--test-cycle-b', 'var(--test-cycle-a)');
