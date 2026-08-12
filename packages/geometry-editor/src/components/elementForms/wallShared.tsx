@@ -63,13 +63,14 @@
 //    other declaration keeps its original relative order, including the
 //    downstream memo/effect block that reads wallShared.widthInput.value
 //    etc.
-// 3. ADJACENT_LIKE_ELEMENT_TYPES is duplicated here (3 literal element-type
-//    strings) rather than imported from ElementCreator.tsx, which would
-//    create an orchestrator<->module import cycle; passing it as an 11th
-//    hook arg would cross the slice-6 brief's own >10-arg stop condition.
-//    The brief's Stage 6 plan already relocates this constant to a shared
-//    location once all wall-family modules exist — keep both copies in sync
-//    until then.
+// 3. ADJACENT_LIKE_ELEMENT_TYPES: RESOLVED in slice-6 STAGE 6 — was
+//    duplicated here (3 literal element-type strings) rather than imported
+//    from ElementCreator.tsx, which would create an orchestrator<->module
+//    import cycle; passing it as an 11th hook arg would cross the slice-6
+//    brief's own >10-arg stop condition. Now imported from
+//    lib/elementArea.ts, a cycle-free shared home (see that file's own
+//    comment) — no hook-arg threading needed since it's a plain constant,
+//    not per-render state.
 
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { useKeyedState } from '../../hooks/useKeyedState';
@@ -88,15 +89,8 @@ import type { BuildingElementOpaque, BuildingElementTransparent, Element, Elemen
 // hooks must run unconditionally" reasoning that motivated PR #31's own single call site.
 import { useNumericDraftInput } from '../numericDraftInput';
 import { readExtraJsonRecord, useDecimalInput, type NumericDraftInputBinding } from './formPrimitives';
+import { ADJACENT_LIKE_ELEMENT_TYPES } from '../../lib/elementArea';
 import type { ElementFormSelection } from './types';
-
-// Duplicated from ElementCreator.tsx's own ADJACENT_LIKE_ELEMENT_TYPES — see
-// header note 3 above.
-const ADJACENT_LIKE_ELEMENT_TYPES: ElementType[] = [
-  'BuildingElementAdjacentConditionedSpace',
-  'BuildingElementAdjacentUnconditionedSpace_Simple',
-  'BuildingElementPartyWall',
-];
 
 export interface WallSharedFormGroup {
   widthInput: NumericDraftInputBinding;

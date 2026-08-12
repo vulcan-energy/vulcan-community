@@ -50,6 +50,10 @@ import {
   useDecimalInput,
   decimalInputProps,
   readExtraJsonRecord,
+  readFiniteNumber,
+  parseLiveDecimalInput,
+  formatToTwoDecimals,
+  INLINE_FIELD_NOTE_STYLE,
 } from './elementForms/formPrimitives';
 // PR #31's pitchDraftInput/commitTypedPitch (useNumericDraftInput) landed in
 // elementForms/wallShared.tsx instead of here — see that file's own import comment for why.
@@ -69,6 +73,9 @@ import {
   getAreaBasedElementExportGeometry,
   getElementGrossArea,
   getTransparentExportMidHeight,
+  ADJACENT_LIKE_ELEMENT_TYPES,
+  isAdjacentLikeElement,
+  type AdjacentLikeElement,
 } from '../lib/elementArea';
 import {
   deriveSlopedElementDimensions,
@@ -105,10 +112,7 @@ import {
   computeGroundUValueFromElementModel,
 } from '../lib/groundUValueCalculator';
 import type {
-  BuildingElementAdjacentConditionedSpace,
-  BuildingElementAdjacentUnconditionedSpace_Simple,
   BuildingElementOpaque,
-  BuildingElementPartyWall,
   BuildingElementTransparent,
   OnSiteGeneration,
   SpaceLabel,
@@ -339,12 +343,9 @@ const SpaceHeatSystemEmitterDropdown: React.FC<SpaceHeatSystemEmitterDropdownPro
   );
 };
 
-// Utility function for consistent 2 decimal place formatting
-const formatToTwoDecimals = (value: number | string | undefined): string => {
-  if (value === undefined || value === null || value === '') return '0.00';
-  const num = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
-  return Number.isFinite(num) ? num.toFixed(2) : '0.00';
-};
+// formatToTwoDecimals moved to elementForms/formPrimitives.ts (slice-6 brief
+// STAGE 6 constants dedup — imported above); was duplicated across four
+// wall-family modules, see that file's own comment.
 
 const calculateZoneVolume = (
   floorArea: number | string | undefined,
@@ -364,12 +365,8 @@ const readPositiveZoneNumber = (value: number | ''): number | null => {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 };
 
-const INLINE_FIELD_NOTE_STYLE: React.CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
+// INLINE_FIELD_NOTE_STYLE moved to elementForms/formPrimitives.ts (slice-6
+// brief STAGE 6 constants dedup — imported above); see that file's comment.
 const EDITOR_FIELD_ACTION_ROW_STYLE: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -436,10 +433,8 @@ function assemblyTypeLabelFromMode(mode: unknown): string {
   }
 }
 
-const parseLiveDecimalInput = (value: string): number => {
-  const parsed = parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
+// parseLiveDecimalInput moved to elementForms/formPrimitives.ts (slice-6
+// brief STAGE 6 constants dedup — imported above); see that file's comment.
 
 function areDormerThermalOverridesEqual(
   left: Record<string, unknown> | undefined,
@@ -563,16 +558,8 @@ type AdvancedFieldsElementPatch = Partial<Element> & {
 // System's exclusive state — imported back above for the DeleteConfirmModal's
 // message text (its one remaining orchestrator call site).
 
-function readFiniteNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const t = value.trim();
-    if (t === '') return null;
-    const n = Number(t);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}
+// readFiniteNumber moved to elementForms/formPrimitives.ts (slice-6 brief
+// STAGE 6 constants dedup — imported above); see that file's comment.
 
 // unheatedPitchedRoofCeilingElevationSourceLabel moved to elementForms/
 // buildingElementOpaque.tsx (slice-6 brief STAGE 4) — its only consumer was
@@ -652,29 +639,22 @@ function readViewerElevationValue(element: Element): number | '' {
   return '';
 }
 
-const ADJACENT_LIKE_ELEMENT_TYPES: ElementType[] = [
-  'BuildingElementAdjacentConditionedSpace',
-  'BuildingElementAdjacentUnconditionedSpace_Simple',
-  'BuildingElementPartyWall',
-];
-
-type AdjacentLikeElement =
-  | BuildingElementAdjacentConditionedSpace
-  | BuildingElementAdjacentUnconditionedSpace_Simple
-  | BuildingElementPartyWall;
+// ADJACENT_LIKE_ELEMENT_TYPES / AdjacentLikeElement / isAdjacentLikeElement
+// moved to lib/elementArea.ts (slice-6 brief STAGE 6 constants dedup) —
+// imported above. That file has zero imports from components/, so it's
+// cycle-free for both this orchestrator and the wall-family modules that
+// used to carry their own duplicate (wallShared.tsx, adjacentLikeElement.tsx,
+// contextShading.tsx); see its own comment for the full writeup. NOT moved:
+// elementSupportsGenericElevationControl above is genuinely orchestrator-wide
+// (every family's "Elevation above model ground" field, including non-wall
+// types like Vents/MechanicalVentilation via DOMAIN_ELEVATION_FIELD_TYPES) —
+// verified it has no wall-exclusive shape, so it stays here rather than
+// moving alongside the adjacent-like trio.
 
 type AreaBasedExportElement =
   | BuildingElementOpaque
   | BuildingElementTransparent
   | AdjacentLikeElement;
-
-function isAdjacentLikeElement(element: Element): element is AdjacentLikeElement {
-  return (
-    element.type === 'BuildingElementAdjacentConditionedSpace'
-    || element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple'
-    || element.type === 'BuildingElementPartyWall'
-  );
-}
 
 function isAreaBasedExportElement(element: Element): element is AreaBasedExportElement {
   return (
@@ -2975,6 +2955,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   });
 
   // Helper function to check field validation issues
+  //
+  // LEFT CENTRALIZED (slice-6 brief decision 5): this is the sixth parallel
+  // structure the scoping pass found, after hydrate/buildElementData/
+  // renderAttributePanel/resetFormFields/getElementSubtype — but unlike
+  // those five, the ElementFormModule contract has no `validate` method, and
+  // every one of the 17 families extracted before the wall family (System,
+  // WetEmitter, Vents, etc.) left its own field-validation cases inline here
+  // rather than growing one. The wall-family cases below (width/height/area/
+  // totalArea/perimeter keyed off elementType, including
+  // ADJACENT_LIKE_ELEMENT_TYPES) follow that same precedent: deliberate, not
+  // an oversight, and not something stage 6 splits out.
   const getFieldValidationIssue = (fieldName: string, value: unknown): string | null => {
     const numericValue =
       typeof value === 'number'
@@ -3104,7 +3095,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // adjacentViewerBaseHeightInput's reset line now lives in
     // adjacentLikeElementFormModule.reset() (via the elementFormInstances
     // loop below) — slice-6 brief STAGE 2. partyWallCavityResistanceInput
-    // was never reset here in the legacy code either (preserved verbatim).
+    // was never reset here in the legacy code either; STAGE 6's investigation
+    // (adjacentLikeElement.tsx's header, "THE RESET-GAP INVESTIGATION")
+    // found this real but NOT REACHABLE as a leak — preserved verbatim.
     elementElevationInput.setValue('');
     // dormerBundleEditor.resetDormer() clears dormerRoofIsUnheatedPitchedRoof
     // (slice-6 brief STAGE 5) — it's the ONLY dormer field resetFormFields

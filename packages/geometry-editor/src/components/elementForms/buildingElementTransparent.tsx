@@ -160,7 +160,7 @@
 // consumer — see types.ts), parentElement/setParentElement, pitch/setPitch,
 // orientation360/setOrientation360, applyOrientationToGeometry.
 
-import { useEffect, useMemo, useRef, type CSSProperties, type MutableRefObject } from 'react';
+import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { calculateDerivedWindowMidHeight } from '../../lib/zoneDerivation';
 import {
@@ -175,6 +175,8 @@ import type { Element } from '../../geometry/types';
 import {
   decimalInputProps,
   useDecimalInput,
+  formatToTwoDecimals,
+  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import { hydrateWallSharedFields } from './wallShared';
@@ -184,22 +186,9 @@ import type {
   ElementFormStateCtx,
 } from './types';
 
-// Duplicated from ElementCreator.tsx — see buildingElementGround.tsx's
-// header for why these small style/pure-formatting constants are
-// duplicated per-module rather than imported (other callers left behind in
-// ElementCreator.tsx, so they couldn't just move).
-const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
-
-const formatToTwoDecimals = (value: number | string | undefined): string => {
-  if (value === undefined || value === null || value === '') return '0.00';
-  const num = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
-  return Number.isFinite(num) ? num.toFixed(2) : '0.00';
-};
+// INLINE_FIELD_NOTE_STYLE/formatToTwoDecimals: RESOLVED in slice-6 STAGE 6 —
+// now imported from formPrimitives.ts above instead of duplicated locally;
+// see that file's own comment.
 
 export interface BuildingElementTransparentFormState {
   /** Shared with the wall family — see module header comment. */

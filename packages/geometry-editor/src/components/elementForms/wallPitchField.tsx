@@ -72,27 +72,21 @@
 // extra behaviours still hand-written) until Stages 3-4 switch them over to
 // this same helper with their own opts.
 
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { StandardDropdown } from '../StandardDropdown';
 import { StandardInput } from '../StandardInput';
 import {
   HORIZONTAL_POLYGON_PITCH_OPTIONS,
   HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER,
   horizontalPolygonSurfaceSelectValue,
+  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import type { ElementFormRenderCtx } from './types';
 
-// Duplicated from ElementCreator.tsx — see buildingElementGround.tsx's
-// header for why these small style/pure-formatting constants are
-// duplicated per-module rather than imported (other callers left behind in
-// ElementCreator.tsx, so they couldn't just move).
-const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
+// INLINE_FIELD_NOTE_STYLE: RESOLVED in slice-6 STAGE 6 — now imported from
+// formPrimitives.ts above instead of duplicated locally; see that file's own
+// comment.
 
 export interface WallPitchFieldGroup {
   pitch: number;

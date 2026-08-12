@@ -18,26 +18,24 @@
 // component called useGeometryStore(...) at the top of ElementCreator's render);
 // this module pulls them the same way, but from inside useFormState — the one
 // hook-rule-safe call site the module contract guarantees runs every render.
+//
+// ADJACENT_LIKE_ELEMENT_TYPES: RESOLVED in slice-6 STAGE 6 — used to mirror
+// ElementCreator's own copy as a local duplicate (modules cannot import from
+// the orchestrator without an import cycle). Now imported from
+// lib/elementArea.ts, a cycle-free shared home also used by ElementCreator.tsx,
+// wallShared.tsx, and adjacentLikeElement.tsx.
 
 import { useState } from 'react';
-import type { ContextShading, Element, ElementType } from '../../geometry/types';
+import type { ContextShading, Element } from '../../geometry/types';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
 import { decimalInputProps, useIntegerInput, type NumericDraftInputBinding } from './formPrimitives';
+import { ADJACENT_LIKE_ELEMENT_TYPES } from '../../lib/elementArea';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
 type ContextShadingType = '' | 'obstacle' | 'overhang';
-
-/** Mirrors ElementCreator's own ADJACENT_LIKE_ELEMENT_TYPES — duplicated here
- * rather than imported, since modules cannot import from the orchestrator
- * component without creating an import cycle (see formPrimitives.ts header). */
-const ADJACENT_LIKE_ELEMENT_TYPES: ElementType[] = [
-  'BuildingElementAdjacentConditionedSpace',
-  'BuildingElementAdjacentUnconditionedSpace_Simple',
-  'BuildingElementPartyWall',
-];
 
 export interface ContextShadingFormState {
   contextShadingType: ContextShadingType;

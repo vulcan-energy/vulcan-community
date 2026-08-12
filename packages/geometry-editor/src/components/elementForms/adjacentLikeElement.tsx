@@ -52,19 +52,19 @@
 //   `subtype()` method is simply omitted (matching every other module that
 //   has no legacy subtype).
 //
+// ADJACENT_LIKE_ELEMENT_TYPES / isAdjacentLikeElement: RESOLVED in slice-6
+// STAGE 6 — this module used to duplicate its own small type-guard function
+// rather than importing ElementCreator's copy (orchestrator<->module import
+// cycle). Both now import from lib/elementArea.ts, a cycle-free shared home
+// also used by ElementCreator.tsx, wallShared.tsx, and contextShading.tsx —
+// see that file's own comment for the full writeup. ElementCreator.tsx still
+// has its own remaining consumers outside the per-family dispatch (the
+// width/height/area sync effect, the horizontal-pitch-healing effect, the
+// sloped-dimension memos, MultiSelectPanel-adjacent validation), so the
+// relocation is an import-source change there, not a deletion of those call
+// sites.
+//
 // NOT moved (checked, deliberately left in ElementCreator.tsx):
-// - ADJACENT_LIKE_ELEMENT_TYPES / isAdjacentLikeElement (the array constant
-//   and orchestrator-scope type guard): both still have remaining
-//   orchestrator consumers outside the per-family dispatch (e.g. the
-//   width/height/area sync effect, the horizontal-pitch-healing effect, the
-//   sloped-dimension memos, MultiSelectPanel-adjacent validation) — per the
-//   brief's item 5, the constant STAYS in ElementCreator.tsx; Stage 6
-//   relocates it once no orchestrator consumers remain. This module
-//   duplicates its own small type-guard function below instead (see note at
-//   its definition) rather than importing ElementCreator's copy, which would
-//   create an orchestrator<->module import cycle — the same reasoning
-//   wallShared.tsx's header gives for its own ADJACENT_LIKE_ELEMENT_TYPES
-//   duplicate.
 // - The "heal invalid horizontal-polygon pitch" useLayoutEffect (normalizes
 //   a polygon-shape adjacent-like element's pitch to 0/180 on load) and the
 //   width/height/area canvas-sync effect: both are generic effects that run
@@ -120,52 +120,61 @@
 // adjacentViewerBaseHeightInput` directly (a plain local, like every other
 // module's `xFormState`) rather than inventing a new ctx bridge for a
 // single write-only call site.
+//
+// THE RESET-GAP INVESTIGATION (slice-6 brief item 1, queued from stage 2) —
+// VERDICT: NOT REACHABLE. Legacy resetFormFields (ElementCreator.tsx) never
+// reset partyWallCavityResistanceInput (only adjacentViewerBaseHeightInput);
+// stage 2 preserved that verbatim in reset() below rather than fixing it
+// speculatively. This stage traced whether the gap is a reachable leak —
+// same question, same answer shape as the dormer (g).2 verdict
+// (DormerBundleEditor.tsx's header):
+// 1. Selecting an existing element runs resetFormFields() and this module's
+//    hydrate() back-to-back inside ONE synchronous effect body —
+//    ElementCreator.tsx's "Load element data" effect calls
+//    `resetFormFieldsRef.current()` then, further down the same
+//    if/else-if chain, `elementFormInstances.BuildingElementPartyWall.
+//    hydrate(element)` — with no render in between (React batches the
+//    setValue calls). hydrate() above unconditionally overwrites
+//    partyWallCavityResistanceInput from the newly-selected element's OWN
+//    extra_json.thermal_resistance_cavity every time, so the '' left by
+//    reset() is never the value the user sees for an existing selection.
+// 2. buildElementData() below never reads partyWallCavityResistanceInput
+//    (only width/height/area/pitch) — a brand-new party wall's extra_json
+//    is built with no thermal_resistance_cavity key at all, so a stale
+//    draft value can't leak into it regardless of what the input showed.
+// 3. While a placeholder (drawn-but-not-yet-"Add Element"ed) element is
+//    selected, commitPartyWallCavityResistance's own
+//    isExistingElementSelection() guard (`!isExistingElementSelection()
+//    return`) blocks every commit from this field — so a genuine user edit
+//    typed into a stale-looking field during placeholder placement is
+//    already a no-op today, independent of this reset gap.
+// Preserved verbatim in reset() below; not fixed speculatively.
 
-import type { CSSProperties } from 'react';
 import {
   decimalInputProps,
   formatConditionalDecimals,
   readExtraJsonRecord,
   useDecimalInput,
+  readFiniteNumber,
+  formatToTwoDecimals,
+  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { deriveWallProperties } from '../../stores/geometryStore';
-import { getElementGrossArea } from '../../lib/elementArea';
+import { getElementGrossArea, isAdjacentLikeElement } from '../../lib/elementArea';
 import { isAdjacentConditionedInternalFloorDoubled } from '../../lib/polygonSync';
 import { isVulcanUiPartyFloorElement } from '../../lib/assemblyMaterialFabric';
 import { ResetFieldButton } from '../ResetFieldButton';
 import { StandardDropdown } from '../StandardDropdown';
 import { StandardInput } from '../StandardInput';
-import type {
-  BuildingElementAdjacentConditionedSpace,
-  BuildingElementAdjacentUnconditionedSpace_Simple,
-  BuildingElementPartyWall,
-  Element,
-} from '../../geometry/types';
+import type { Element } from '../../geometry/types';
 import { renderWallPitchField } from './wallPitchField';
 import type {
   ElementFormModule,
   ElementFormSelection,
   ElementFormStateCtx,
 } from './types';
-
-type AdjacentLikeElement =
-  | BuildingElementAdjacentConditionedSpace
-  | BuildingElementAdjacentUnconditionedSpace_Simple
-  | BuildingElementPartyWall;
-
-// Duplicated from ElementCreator.tsx's own (orchestrator-scope, still
-// multi-consumer) `isAdjacentLikeElement` — see module header note. Same
-// three literal type comparisons, just as a locally-scoped, unexported type
-// guard rather than importing across the orchestrator<->module boundary.
-function isAdjacentLikeElement(element: Element): element is AdjacentLikeElement {
-  return (
-    element.type === 'BuildingElementAdjacentConditionedSpace'
-    || element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple'
-    || element.type === 'BuildingElementPartyWall'
-  );
-}
 
 // Moved from ElementCreator.tsx (grep-verified its only two callers were
 // both inside the adjacent-like renderPanel case).
@@ -176,34 +185,9 @@ const PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES = new Set([
   'filled_unsealed',
 ]);
 
-// Duplicated from ElementCreator.tsx — see buildingElementGround.tsx's
-// header for why these small pure helpers are duplicated per-module rather
-// than imported (other callers left behind in ElementCreator.tsx).
-function readFiniteNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const t = value.trim();
-    if (t === '') return null;
-    const n = Number(t);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}
-
-// Duplicated from ElementCreator.tsx — see note above.
-const formatToTwoDecimals = (value: number | string | undefined): string => {
-  if (value === undefined || value === null || value === '') return '0.00';
-  const num = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
-  return Number.isFinite(num) ? num.toFixed(2) : '0.00';
-};
-
-// Duplicated from ElementCreator.tsx — see note above.
-const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
+// readFiniteNumber/formatToTwoDecimals/INLINE_FIELD_NOTE_STYLE: RESOLVED in
+// slice-6 STAGE 6 — now imported from formPrimitives.ts above instead of
+// duplicated locally; see that file's own comment.
 
 export interface AdjacentLikeElementFormState {
   partyWallCavityResistanceInput: NumericDraftInputBinding;
@@ -335,10 +319,9 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
     state.adjacentViewerBaseHeightInput.setValue(viewerPlotM);
   },
 
-  // Legacy resetFormFields never reset partyWallCavityResistanceInput
-  // (only adjacentViewerBaseHeightInput) — preserved verbatim, not fixed
-  // speculatively; see ElementCreator.tsx's resetFormFields comment at this
-  // module's dispatch site.
+  // Legacy resetFormFields never reset partyWallCavityResistanceInput (only
+  // adjacentViewerBaseHeightInput) — preserved verbatim, NOT fixed
+  // speculatively; see header's THE RESET-GAP INVESTIGATION verdict.
   reset(state) {
     state.adjacentViewerBaseHeightInput.setValue('');
   },

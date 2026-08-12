@@ -68,18 +68,23 @@
 // — see the comment at its call site below for the full writeup and the
 // precondition-grep result.
 //
-// Duplicated locally (not exported from ElementCreator.tsx; importing them
-// would create an orchestrator<->module import cycle, the same reasoning
-// wallShared.tsx's header gives for ADJACENT_LIKE_ELEMENT_TYPES):
-// - readFiniteNumber, parseLiveDecimalInput, formatToTwoDecimals,
-//   INLINE_FIELD_NOTE_STYLE: tiny pure helpers/constants with other callers
-//   left behind in ElementCreator, so they couldn't just move.
-// - hasReliableGroundExposedPerimeter, numbersClose: grep-verified their
-//   ElementCreator definitions had ZERO callers outside what moved here, so
-//   these DID move (deleted from ElementCreator) rather than duplicate;
-//   `numbersClose` was a stateless `useCallback(fn, [])` there — demoted to
-//   a plain module-scope function here, since it closes over nothing and a
-//   hook wrapper was never buying it anything.
+// readFiniteNumber, parseLiveDecimalInput, formatToTwoDecimals,
+// INLINE_FIELD_NOTE_STYLE: RESOLVED in slice-6 STAGE 6 — these tiny pure
+// helpers/constants used to be duplicated locally (not exported from
+// ElementCreator.tsx; importing them would have created an
+// orchestrator<->module import cycle) because they had other callers left
+// behind in ElementCreator.tsx that couldn't just move with this module. Now
+// all four live in formPrimitives.ts — already a dependency of every
+// wall-family module, so cycle-free — and both this module and
+// ElementCreator.tsx import the same definition; see formPrimitives.ts's own
+// comment for the full writeup.
+//
+// hasReliableGroundExposedPerimeter, numbersClose: grep-verified their
+// ElementCreator definitions had ZERO callers outside what moved here, so
+// these DID move (deleted from ElementCreator) rather than duplicate;
+// `numbersClose` was a stateless `useCallback(fn, [])` there — demoted to
+// a plain module-scope function here, since it closes over nothing and a
+// hook wrapper was never buying it anything.
 //
 // selectedGroundElement/selectedGroundShape are local, Ground-narrowed
 // re-derivations of ElementCreator's own generic `selectedElement`/
@@ -98,7 +103,7 @@
 // stored callbacks avoid a stale closure, but useFormState already reruns
 // with a fresh ctx every render, so ctx.elementsById is exactly as current.
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M, roundToFourDecimals, roundToTwoDecimals } from '../../geometry/constants';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { getElementShape } from '../../lib/shapeUtils';
@@ -131,6 +136,10 @@ import {
   formatConditionalDecimals,
   readExtraJsonRecord,
   useDecimalInput,
+  readFiniteNumber,
+  parseLiveDecimalInput,
+  formatToTwoDecimals,
+  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } from './types';
@@ -145,38 +154,10 @@ type GroundFloorType =
   | 'Suspended_floor'
   | 'Unheated_basement';
 
-// Duplicated from ElementCreator.tsx — see module header note.
-const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
-
-// Duplicated from ElementCreator.tsx — see module header note.
-function readFiniteNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const t = value.trim();
-    if (t === '') return null;
-    const n = Number(t);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}
-
-// Duplicated from ElementCreator.tsx — see module header note.
-const parseLiveDecimalInput = (value: string): number => {
-  const parsed = parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-// Duplicated from ElementCreator.tsx — see module header note.
-const formatToTwoDecimals = (value: number | string | undefined): string => {
-  if (value === undefined || value === null || value === '') return '0.00';
-  const num = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
-  return Number.isFinite(num) ? num.toFixed(2) : '0.00';
-};
+// readFiniteNumber/parseLiveDecimalInput/formatToTwoDecimals/
+// INLINE_FIELD_NOTE_STYLE: RESOLVED in slice-6 STAGE 6 — all four are now
+// imported from formPrimitives.ts (imported above) instead of duplicated
+// locally; see that file's own comment for the full writeup.
 
 // Moved verbatim from ElementCreator.tsx (grep-verified zero other callers).
 function hasReliableGroundExposedPerimeter(
