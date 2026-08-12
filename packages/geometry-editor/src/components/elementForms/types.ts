@@ -11,6 +11,7 @@
 
 import type { ReactNode } from 'react';
 import type { Element, ElementType } from '../../stores/geometryStore';
+import type { NumericDraftInputBinding } from './formPrimitives';
 
 /** Mirrors the orchestrator's locally-defined `Selection` type structurally
  * (that type isn't exported, so modules use this shape instead). */
@@ -29,6 +30,39 @@ export interface OnSiteHostDerivation {
   hostId: string;
   hostName: string;
   derived: { base_height?: number; pitch?: number; orientation360?: number };
+}
+
+/** Bindings onto orchestrator state the wall family (BuildingElementOpaque/
+ * Transparent/Ground/PartyWall/Adjacent) still owns directly — it is not extracted
+ * into a module yet. WindowShading, ContextShading, and Vents share pieces of this
+ * state with the wall family and MUST read/write it only through these bindings;
+ * the orchestrator remains the sole owner of the underlying state. Captured once by
+ * a module's useFormState (which does receive ctx) and carried in its returned
+ * state so hydrate/reset/buildElementData/renderPanel (which mostly don't) can
+ * still reach it — the same passthrough precedent as OnSiteGeneration's
+ * getCurrentOrientation. */
+export interface ElementFormSharedCtx {
+  /** WindowShading/ContextShading's editable height field. */
+  heightInput: NumericDraftInputBinding;
+  /** WindowShading's editable distance field; ContextShading's read-only computed
+   * distance display. */
+  distanceInput: NumericDraftInputBinding;
+  parentElement: string;
+  setParentElement: (value: string) => void;
+  pitch: number;
+  setPitch: (value: number) => void;
+  orientation360: number;
+  setOrientation360: (value: number) => void;
+  /** Commits an edited orientation360, rotating sloped polygons/2-point lines in
+   * plan — the same wall-family geometry logic used by Vents' own copy of the
+   * pitch/orientation editing UI; stays orchestrator-owned since walls use it too. */
+  applyOrientationToGeometry: (desiredOrientationDeg: number) => void;
+  /** Vents' optimistic DISPLAY write when a parent wall/window is chosen: mirrors
+   * the parent's pitch/orientation360 into the shared inputs so the panel shows the
+   * inherited values immediately, without Vents reading or owning the shared pitch
+   * state directly. Implemented in the orchestrator as the existing
+   * setPitch/setOrientation360 calls. */
+  applyParentPitchOrientationForDisplay: (pitch: number | undefined, orientation: number | undefined) => void;
 }
 
 export interface ElementFormStateCtx {
@@ -55,6 +89,14 @@ export interface ElementFormStateCtx {
   /** Version counter bumped when the selected element's coordinates change on
    * canvas — drives OnSiteGeneration's re-sync effect. */
   selectedElementV: number;
+  /** Wall-family bindings shared with WindowShading/ContextShading/Vents — see
+   * ElementFormSharedCtx. */
+  shared: ElementFormSharedCtx;
+  /** Full element index, needed by WindowShading/ContextShading/Vents' parent-
+   * and window-by-name lookups — the same `elementIds.map(id => elementsById[id])`
+   * pattern used throughout the orchestrator. */
+  elementIds: readonly string[];
+  elementsById: Record<string, Element>;
 }
 
 export interface ElementFormBuildCtx {
@@ -88,6 +130,12 @@ export interface ElementFormRenderCtx {
   getGlobalOrientationOffset: () => number;
   onSiteHostDerivation: OnSiteHostDerivation | null;
   selectedPvDimensionNotes: { width: string; height: string } | null;
+  /** Selected element's zone, needed by WindowShading's linked-window dropdown to
+   * only list windows from the same zone. */
+  elementZoneId: string;
+  /** Full element index — see ElementFormStateCtx.elementIds/elementsById. */
+  elementIds: readonly string[];
+  elementsById: Record<string, Element>;
 }
 
 export interface ElementFormModule<S> {
