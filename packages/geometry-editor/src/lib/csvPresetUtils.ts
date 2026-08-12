@@ -7,6 +7,15 @@
  */
 
 /**
+ * extra_json marker persisting `Element._nameAutoSync === false` across save/load. Shared by the
+ * CSV parser (promotes it back onto the typed field on ingest) and `ioSlice`'s `generateCSV`
+ * (projects the typed field back onto this key at export time), so the two sides can't drift on
+ * the literal. See the entry in `EXTRA_JSON_UI_KEYS` below for why no Rust-side registration is
+ * required.
+ */
+export const NAME_AUTO_SYNC_EXTRA_JSON_KEY = '_name_auto_sync';
+
+/**
  * Keys removed from extra_json before WASM → HEM JSON merge.
  * - UI-only: presets, psi picker state, canvas PV footprint flags (`_pv_*`).
  * - Audit-only: large assembly and solver-provenance payloads — HEM does not read them; the saved
@@ -47,6 +56,19 @@ export const EXTRA_JSON_UI_KEYS = [
    * change, so this is what stops a schema-driven edit from dropping an adopted solve.
    */
   'thermal_bridge_solver',
+  /**
+   * Persists `Element._nameAutoSync === false` (see `geometry/types.ts`) across save/load: without
+   * it, `isNameAutoSyncEnabled`'s pattern heuristic re-enables auto-sync for a manual name that
+   * happens to look auto-generated (e.g. a lone appliance manually named "Fridge 1"), silently
+   * renaming it — and every name-based reference (`parent_element`, `linked_wall`, `host_element`)
+   * — on the next reload. `_`-prefixed, so `is_ui_only_extra_json_key` in
+   * `vulcan-model-transform/src/builder.rs` already strips it from the merged HEM JSON via the
+   * prefix rule alone (no Rust-side registration needed — that crate's `NAMED_UI_ONLY_EXTRA_JSON_KEYS`
+   * is deliberately non-underscore-only, see its doc comment). It is listed here only so
+   * `stripUiKeysFromCsv` — which, unlike `AdvancedFieldsEditor`, has no blanket `_`-prefix rule —
+   * also strips it, matching every other fixed-name `_`-prefixed key above.
+   */
+  NAME_AUTO_SYNC_EXTRA_JSON_KEY,
 ];
 
 /** Minimal CSV line parser that handles quoted fields. */
