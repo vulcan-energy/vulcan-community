@@ -73,21 +73,31 @@ fn is_ui_only_extra_json_key(key: &str) -> bool {
 
 fn strip_ui_only_extra_json_value(value: &Value) -> Value {
     match value {
-        Value::Object(obj) => {
-            let mut stripped = serde_json::Map::new();
-            for (key, nested) in obj {
-                if is_ui_only_extra_json_key(key) {
-                    continue;
-                }
-                stripped.insert(key.clone(), strip_ui_only_extra_json_value(nested));
-            }
-            Value::Object(stripped)
-        }
+        Value::Object(obj) => Value::Object(strip_ui_only_extra_json_map(obj)),
         Value::Array(items) => {
             Value::Array(items.iter().map(strip_ui_only_extra_json_value).collect())
         }
         _ => value.clone(),
     }
+}
+
+/// Map-typed twin of [`strip_ui_only_extra_json_value`], for the wrapped-payload branches that
+/// replace a whole HEM section from `extra_json.<Section>` wholesale. Those branches never walk the
+/// payload key by key, so without this they bypass the `is_ui_only_extra_json_key` filter the flat
+/// branches apply and a UI-only blob (e.g. `thermal_bridge_solver`) reaches the schema as an
+/// unknown property — E047. Semantics match `merge_wrapped_system_fragment`, which strips the
+/// wrapped fragment the same way.
+fn strip_ui_only_extra_json_map(
+    map: &serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    let mut stripped = serde_json::Map::new();
+    for (key, nested) in map {
+        if is_ui_only_extra_json_key(key) {
+            continue;
+        }
+        stripped.insert(key.clone(), strip_ui_only_extra_json_value(nested));
+    }
+    stripped
 }
 
 fn pitch_csv_value_is_90(v: &Value) -> bool {
@@ -5642,7 +5652,9 @@ impl JSONBuilder {
                                     if let Some(inner) =
                                         extra_json.get("HeatSourceWet").and_then(|v| v.as_object())
                                     {
-                                        let mut inner = inner.clone();
+                                        // Strip UI-only keys before the wholesale replace, exactly
+                                        // as the flat branch below does per key.
+                                        let mut inner = strip_ui_only_extra_json_map(inner);
                                         self.ensure_fhs_heat_source_wet_defaults(&mut inner);
                                         // Wrapped format: { "HeatSourceWet": { "hp": { ... } } }
                                         // Replace the entire HeatSourceWet object with the preset contents
@@ -5657,7 +5669,9 @@ impl JSONBuilder {
                                         {
                                             result_obj.insert(
                                                 "HotWaterSource".to_string(),
-                                                Value::Object(hot_water_source.clone()),
+                                                Value::Object(strip_ui_only_extra_json_map(
+                                                    hot_water_source,
+                                                )),
                                             );
                                         }
 
@@ -5746,7 +5760,7 @@ impl JSONBuilder {
                                         // Wrapped format: replace entire HotWaterSource
                                         result_obj.insert(
                                             "HotWaterSource".to_string(),
-                                            Value::Object(inner.clone()),
+                                            Value::Object(strip_ui_only_extra_json_map(inner)),
                                         );
                                     } else {
                                         // Flat extra_json fallback
@@ -5793,6 +5807,7 @@ impl JSONBuilder {
                                         .and_then(|v| v.as_object())
                                     {
                                         // Wrapped format: replace entire SpaceCoolSystem
+                                        let inner = strip_ui_only_extra_json_map(inner);
                                         result_obj.insert(
                                             "SpaceCoolSystem".to_string(),
                                             Value::Object(inner.clone()),
