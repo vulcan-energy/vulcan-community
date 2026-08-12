@@ -10,8 +10,8 @@
  * bottom of the heated space over the unheated basement and is still Table 3.7 **E6**.
  *
  * As with **E5** and ground slabs, continuous **E6** requires a **proven link** to the relevant footprint:
- * a same-storey intermediate `BuildingElementGround` / horizontal `BuildingElementAdjacentConditionedSpace`,
- * or a linked unheated-basement ground element.
+ * a same-storey horizontal `BuildingElementAdjacentConditionedSpace`, or a linked unheated-basement
+ * ground element.
  */
 
 import {
@@ -33,8 +33,8 @@ import {
 import {
   footIntervalOnWallForRole,
   gapIntervalsAlongWall,
-  isGroundContactExternalWallForContinuousTb,
   wallHasPositiveFabricExtent,
+  wallLinkedToGroundSlabForContinuousE5,
   wallLinkedToIntermediateFloorSlabForContinuousE6,
 } from './proposeWallGroundContinuous';
 
@@ -72,15 +72,13 @@ export function isUnheatedBasementWallForContinuousE6(
 }
 
 /**
- * Intermediate-slab perimeter wall: external line wall on storey index ≥ 1, wall base near that storey’s slab,
- * and not the ground continuous-E5 case.
+ * Conditioned-slab perimeter wall: external line wall with its base near that storey’s slab.
+ * Floor fabric linkage and ground-family exclusion are applied by the proposer.
  */
 export function isIntermediateSlabExternalWallForContinuousTb(w: BuildingElementOpaque, floors?: Floor[]): boolean {
   if (!floors || floors.length === 0) return false;
   if (!isExternalLineWall(w)) return false;
-  if (isGroundContactExternalWallForContinuousTb(w, floors)) return false;
   const floorZ = elementFloorZIndexForTb(w, floors);
-  if (floorZ < 1) return false;
   const baseEl = elementBaseElevationMForTb(w, floors);
   const slabElev = slabElevationMForFloorZ(floorZ, floors);
   return Math.abs(baseEl - slabElev) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
@@ -110,6 +108,7 @@ export function proposeWallIntermediateContinuous(
     if (!useUnheatedBasementE6) {
       if (!effectiveFloors) continue;
       if (!isIntermediateSlabExternalWallForContinuousTb(w, effectiveFloors)) continue;
+      if (wallLinkedToGroundSlabForContinuousE5(w, elements)) continue;
       if (!wallLinkedToIntermediateFloorSlabForContinuousE6(w, elements, effectiveFloors)) continue;
     }
 

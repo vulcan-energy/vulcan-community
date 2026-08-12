@@ -27,10 +27,10 @@ import type {
   Element,
 } from '../types';
 import {
-  findNonBasementGroundSurfaceForLineElement,
+  adjacentConditionedFloorPolygonEdgesXY,
+  findLinkedAdjacentConditionedFloorForLineElement,
   findLinkedGroundSlabForLineElement,
-  groundSlabPolygonEdgesXY,
-  GROUND_SLAB_PERIM_LINK_TOL_M,
+  nonBasementGroundSurfaceElevationM,
 } from '../../lib/suspendedFloorGeometry';
 import { isExternalLineWall } from './proposeExternalCorners';
 import {
@@ -47,10 +47,6 @@ export { GROUND_SLAB_PERIM_LINK_TOL_M, groundSlabPolygonEdgesXY } from '../../li
 
 const MIN_WALL_LEN_XY_FOR_SLAB_EDGE_M = 0.05;
 
-function dist2XYPoints(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
 /**
  * Plan boundary edges for a horizontal (`pitch` 0°) conditioned floor polygon — same footprint idea as
  * {@link groundSlabPolygonEdgesXY} but for `BuildingElementAdjacentConditionedSpace` intermediate slabs.
@@ -58,40 +54,9 @@ function dist2XYPoints(a: { x: number; y: number }, b: { x: number; y: number })
 export function adjacentConditionedHorizontalFloorPolygonEdgesXY(
   el: BuildingElementAdjacentConditionedSpace,
 ): Array<[[number, number], [number, number]]> {
-  if (el.isPlaceholder) return [];
-  const c = el.coordinates;
-  if (!c || c.length < 2) return [];
-  const pitch = el.pitch;
-  if (typeof pitch !== 'number' || !Number.isFinite(pitch) || pitch !== 0) return [];
-  const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
-  for (let i = 1; i < c.length; i++) {
-    const zi = typeof c[i]?.z === 'number' && Number.isFinite(c[i].z) ? c[i].z : 0;
-    if (Math.abs(zi - z0) > 1e-2) return [];
-  }
-  const out: Array<[[number, number], [number, number]]> = [];
-  if (c.length === 2) {
-    if (dist2XYPoints(c[0]!, c[1]!) < MIN_WALL_LEN_XY_FOR_SLAB_EDGE_M) return [];
-    return [
-      [
-        [c[0]!.x, c[0]!.y],
-        [c[1]!.x, c[1]!.y],
-      ],
-    ];
-  }
-  for (let i = 0; i < c.length - 1; i++) {
-    const a = c[i]!;
-    const b = c[i + 1]!;
-    out.push([
-      [a.x, a.y],
-      [b.x, b.y],
-    ]);
-  }
-  const p0 = c[0]!;
-  const pL = c[c.length - 1]!;
-  if (c.length >= 3 && Math.hypot(p0.x - pL.x, p0.y - pL.y) > 1e-4) {
-    out.push([[pL.x, pL.y], [p0.x, p0.y]]);
-  }
-  return out.filter(([[ax, ay], [bx, by]]) => Math.hypot(bx - ax, by - ay) >= MIN_WALL_LEN_XY_FOR_SLAB_EDGE_M);
+  return adjacentConditionedFloorPolygonEdgesXY(el).filter(
+    ([[ax, ay], [bx, by]]) => Math.hypot(bx - ax, by - ay) >= MIN_WALL_LEN_XY_FOR_SLAB_EDGE_M,
+  );
 }
 
 export function wallHasPositiveFabricExtent(w: BuildingElementOpaque): boolean {
@@ -103,51 +68,18 @@ export function wallHasPositiveFabricExtent(w: BuildingElementOpaque): boolean {
   );
 }
 
-function pointToSegmentDistanceM(
-  px: number,
-  py: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-): number {
-  const abx = bx - ax;
-  const aby = by - ay;
-  const apx = px - ax;
-  const apy = py - ay;
-  const denom = abx * abx + aby * aby;
-  const t = denom > 1e-18 ? Math.max(0, Math.min(1, (apx * abx + apy * aby) / denom)) : 0;
-  const qx = ax + t * abx;
-  const qy = ay + t * aby;
-  return Math.hypot(px - qx, py - qy);
-}
-
-function minDistancePointToEdgesM(px: number, py: number, edges: Array<[[number, number], [number, number]]>): number {
-  let minD = Infinity;
-  for (const [[ax, ay], [bx, by]] of edges) {
-    minD = Math.min(minD, pointToSegmentDistanceM(px, py, ax, ay, bx, by));
-  }
-  return minD;
-}
-
 /**
  * True when the wall is tied to a `BuildingElementGround` in the same zone by `parent_element` name,
  * or both wall endpoints lie within {@link GROUND_SLAB_PERIM_LINK_TOL_M} of that slab’s plan boundary.
  */
 export function wallLinkedToGroundSlabForContinuousE5(w: BuildingElementOpaque, elements: Element[]): boolean {
-  const zoneId = w.zoneId;
-  const grounds = elements.filter(
-    (e): e is BuildingElementGround =>
-      e.type === 'BuildingElementGround' && e.zoneId === zoneId && !isBasementGroundElement(e),
-  );
-  return findLinkedGroundSlabForLineElement(w, grounds) !== null;
+  return linkedNonBasementGroundSlabForLineElement(w, elements) !== null;
 }
 
 /**
- * True when an intermediate-storey wall is tied to a **same-storey** slab footprint by
+ * True when a wall is tied to a **same-storey** conditioned slab footprint by
  * `parent_element` name, or both wall endpoints lie within {@link GROUND_SLAB_PERIM_LINK_TOL_M} of that
- * slab’s plan boundary. Host slabs may be `BuildingElementGround` **or** a horizontal polygon
- * `BuildingElementAdjacentConditionedSpace` (typical “internal floor”).
+ * slab’s plan boundary. A `BuildingElementGround` is deliberately not an E6 host.
  */
 export function wallLinkedToIntermediateFloorSlabForContinuousE6(
   w: BuildingElementOpaque,
@@ -155,14 +87,6 @@ export function wallLinkedToIntermediateFloorSlabForContinuousE6(
   floors: Floor[],
 ): boolean {
   const floorZ = elementFloorZIndexForTb(w, floors);
-  if (floorZ < 1) return false;
-
-  const grounds = elements.filter(
-    (e): e is BuildingElementGround =>
-      e.type === 'BuildingElementGround' &&
-      e.zoneId === w.zoneId &&
-      elementFloorZIndexForTb(e, floors) === floorZ,
-  );
 
   const conditionedFloors = elements.filter(
     (e): e is BuildingElementAdjacentConditionedSpace =>
@@ -171,37 +95,7 @@ export function wallLinkedToIntermediateFloorSlabForContinuousE6(
       e.zoneId === w.zoneId &&
       elementFloorZIndexForTb(e, floors) === floorZ,
   );
-
-  if (grounds.length === 0 && conditionedFloors.length === 0) return false;
-
-  const pe = typeof w.parent_element === 'string' ? w.parent_element.trim() : '';
-  if (pe) {
-    if (grounds.some((g) => (g.name ?? '').trim() === pe)) return true;
-    if (conditionedFloors.some((f) => (f.name ?? '').trim() === pe)) return true;
-  }
-
-  const c = w.coordinates;
-  if (!c || c.length !== 2) return false;
-  const Wa = { x: c[0].x, y: c[0].y };
-  const Wb = { x: c[1].x, y: c[1].y };
-
-  for (const g of grounds) {
-    const edges = groundSlabPolygonEdgesXY(g);
-    if (edges.length === 0) continue;
-    const dA = minDistancePointToEdgesM(Wa.x, Wa.y, edges);
-    const dB = minDistancePointToEdgesM(Wb.x, Wb.y, edges);
-    if (dA <= GROUND_SLAB_PERIM_LINK_TOL_M && dB <= GROUND_SLAB_PERIM_LINK_TOL_M) return true;
-  }
-
-  for (const f of conditionedFloors) {
-    const edges = adjacentConditionedHorizontalFloorPolygonEdgesXY(f);
-    if (edges.length === 0) continue;
-    const dA = minDistancePointToEdgesM(Wa.x, Wa.y, edges);
-    const dB = minDistancePointToEdgesM(Wb.x, Wb.y, edges);
-    if (dA <= GROUND_SLAB_PERIM_LINK_TOL_M && dB <= GROUND_SLAB_PERIM_LINK_TOL_M) return true;
-  }
-
-  return false;
+  return findLinkedAdjacentConditionedFloorForLineElement(w, conditionedFloors) !== null;
 }
 
 function opaqueWallBaseElevationM(w: BuildingElementOpaque): number {
@@ -241,6 +135,30 @@ function zonesCompatible(a: string | undefined, b: string | undefined): boolean 
   return true;
 }
 
+function linkedNonBasementGroundSlabForLineElement(
+  line: Pick<BuildingElementOpaque, 'zoneId' | 'parent_element' | 'coordinates'>,
+  elements: Element[],
+): BuildingElementGround | null {
+  const grounds = elements.filter(
+    (e): e is BuildingElementGround =>
+      e.type === 'BuildingElementGround' && e.zoneId === line.zoneId && !isBasementGroundElement(e),
+  );
+  return findLinkedGroundSlabForLineElement(line, grounds);
+}
+
+function groundContactElevationMForLinkedSlab(
+  ground: BuildingElementGround,
+  floors?: Floor[],
+): number {
+  const linkedSurfaceM = nonBasementGroundSurfaceElevationM(ground);
+  if (linkedSurfaceM !== null) return linkedSurfaceM;
+  if (floors && floors.length > 0) return elementBaseElevationMForTb(ground, floors);
+  const elevations = ground.coordinates
+    .map((point) => point.z)
+    .filter((z): z is number => typeof z === 'number' && Number.isFinite(z));
+  return elevations.length > 0 ? Math.min(...elevations) : 0;
+}
+
 /** Target elevation for the ground E5 junction: floor slab, or linked local ground surface when authored. */
 export function groundContactElevationTargetMForContinuousTb(
   w: BuildingElementOpaque,
@@ -248,18 +166,19 @@ export function groundContactElevationTargetMForContinuousTb(
   floors?: Floor[],
 ): number | null {
   if (!isExternalLineWall(w)) return null;
-  const linkedGroundSurface = elements ? findNonBasementGroundSurfaceForLineElement(w, elements) : null;
+  const linkedGround = elements ? linkedNonBasementGroundSlabForLineElement(w, elements) : null;
+  if (linkedGround) return groundContactElevationMForLinkedSlab(linkedGround, floors);
   if (floors && floors.length > 0) {
     const floorZ = elementFloorZIndexForTb(w, floors);
     if (floorZ !== 0) return null;
-    return linkedGroundSurface?.surfaceM ?? slabElevationMForFloorZ(0, floors);
+    return slabElevationMForFloorZ(0, floors);
   }
   const coords = w.coordinates;
   const z0 = typeof coords[0]?.z === 'number' && Number.isFinite(coords[0].z) ? coords[0].z : 0;
   const z1 = typeof coords[1]?.z === 'number' && Number.isFinite(coords[1].z) ? coords[1].z : 0;
   const zMin = Math.min(z0, z1);
   if (zMin >= 1 - 1e-9) return null;
-  return linkedGroundSurface?.surfaceM ?? 0;
+  return 0;
 }
 
 export function isGroundContactExternalWallForContinuousTb(
@@ -424,13 +343,17 @@ export function proposeWallGroundContinuous(
 }
 
 /**
- * True when a **party wall** sits on the **ground** storey slab elevation (same band as continuous **E5**).
+ * True when a **party wall** base sits at the elevation of its linked non-basement ground slab.
  */
-export function isGroundContactPartyWallForP1Tb(pw: BuildingElementPartyWall, floors: Floor[]): boolean {
-  const floorZ = elementFloorZIndexForTb(pw, floors);
-  if (floorZ !== 0) return false;
+export function isGroundContactPartyWallForP1Tb(
+  pw: BuildingElementPartyWall,
+  floors: Floor[],
+  elements: Element[],
+): boolean {
+  const linkedGround = linkedNonBasementGroundSlabForLineElement(pw, elements);
+  if (!linkedGround) return false;
   const baseEl = elementBaseElevationMForTb(pw, floors);
-  const slabElev = slabElevationMForFloorZ(0, floors);
+  const slabElev = groundContactElevationMForLinkedSlab(linkedGround, floors);
   return Math.abs(baseEl - slabElev) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
 }
 
@@ -439,27 +362,5 @@ export function isGroundContactPartyWallForP1Tb(pw: BuildingElementPartyWall, fl
  * names the slab or both endpoints lie near the ground polygon boundary).
  */
 export function partyWallLinkedToGroundSlabForP1(pw: BuildingElementPartyWall, elements: Element[]): boolean {
-  const zoneId = pw.zoneId;
-  const grounds = elements.filter(
-    (e): e is BuildingElementGround =>
-      e.type === 'BuildingElementGround' && e.zoneId === zoneId && !isBasementGroundElement(e),
-  );
-  if (grounds.length === 0) return false;
-
-  const pe = typeof pw.parent_element === 'string' ? pw.parent_element.trim() : '';
-  if (pe && grounds.some((g) => (g.name ?? '').trim() === pe)) return true;
-
-  const c = pw.coordinates;
-  if (!c || c.length !== 2) return false;
-  const Wa = { x: c[0].x, y: c[0].y };
-  const Wb = { x: c[1].x, y: c[1].y };
-
-  for (const g of grounds) {
-    const edges = groundSlabPolygonEdgesXY(g);
-    if (edges.length === 0) continue;
-    const dA = minDistancePointToEdgesM(Wa.x, Wa.y, edges);
-    const dB = minDistancePointToEdgesM(Wb.x, Wb.y, edges);
-    if (dA <= GROUND_SLAB_PERIM_LINK_TOL_M && dB <= GROUND_SLAB_PERIM_LINK_TOL_M) return true;
-  }
-  return false;
+  return linkedNonBasementGroundSlabForLineElement(pw, elements) !== null;
 }

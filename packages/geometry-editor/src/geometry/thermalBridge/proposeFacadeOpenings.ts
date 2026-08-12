@@ -28,11 +28,22 @@ import {
 } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { Floor } from '../../geometry/types';
-import type { BuildingElementOpaque, BuildingElementTransparent, Element, ThermalBridgeLinear } from '../types';
+import type {
+  BuildingElementAdjacentConditionedSpace,
+  BuildingElementGround,
+  BuildingElementOpaque,
+  BuildingElementTransparent,
+  Element,
+  ThermalBridgeLinear,
+} from '../types';
 import { JUNCTION_TYPE_TO_PSI } from '../../lib/simplifiedFabricMap';
 import { dist3, midpoint3 } from './tbLinkage';
-import { findNonBasementGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
-import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeometry';
+import {
+  findLinkedAdjacentConditionedFloorForLineElement,
+  findLinkedGroundSlabForLineElement,
+  nonBasementGroundSurfaceElevationM,
+} from '../../lib/suspendedFloorGeometry';
+import { findLinkedBasementGroundForLineElement, isBasementGroundElement } from '../../lib/basementGeometry';
 
 import { DEFAULT_TB_DEDUPE_TOLERANCE_M } from './thermalBridgeTolerances';
 /** Re-export for callers importing from facade openings. */
@@ -347,52 +358,64 @@ export type VerticalFacadeOpeningHost = {
   base_height?: number;
 };
 
-function linkedGroundSurfaceMForFacadeOpening(
+function hostWallForFacadeOpening(
   opening: VerticalFacadeOpeningHost,
   elements: Element[],
-): number | null {
+): BuildingElementOpaque | null {
   const hostWallName =
     typeof opening.parent_element === 'string' && opening.parent_element.trim() !== ''
       ? opening.parent_element.trim()
       : null;
-  if (hostWallName) {
-    const hostWall = elements.find(
-      (el): el is BuildingElementOpaque =>
-        el.type === 'BuildingElementOpaque' &&
-        el.zoneId === opening.zoneId &&
-        (el.name ?? '').trim() === hostWallName,
-    );
-    if (hostWall) {
-      const target = findNonBasementGroundSurfaceForLineElement(hostWall, elements);
-      if (target) return target.surfaceM;
-    }
-  }
+  if (!hostWallName) return null;
+  return elements.find(
+    (el): el is BuildingElementOpaque =>
+      el.type === 'BuildingElementOpaque' &&
+      el.zoneId === opening.zoneId &&
+      (el.name ?? '').trim() === hostWallName,
+  ) ?? null;
+}
 
-  const directTarget = findNonBasementGroundSurfaceForLineElement(opening, elements);
-  return directTarget?.surfaceM ?? null;
+function linkedGroundSlabForFacadeOpening(
+  opening: VerticalFacadeOpeningHost,
+  elements: Element[],
+): BuildingElementGround | null {
+  const grounds = elements.filter(
+    (el): el is BuildingElementGround =>
+      el.type === 'BuildingElementGround' && !isBasementGroundElement(el),
+  );
+  const hostWall = hostWallForFacadeOpening(opening, elements);
+  if (hostWall) {
+    const linked = findLinkedGroundSlabForLineElement(hostWall, grounds);
+    if (linked) return linked;
+  }
+  return findLinkedGroundSlabForLineElement(opening, grounds);
+}
+
+function linkedConditionedFloorForFacadeOpening(
+  opening: VerticalFacadeOpeningHost,
+  elements: Element[],
+): BuildingElementAdjacentConditionedSpace | null {
+  const conditionedFloors = elements.filter(
+    (el): el is BuildingElementAdjacentConditionedSpace =>
+      el.type === 'BuildingElementAdjacentConditionedSpace' && !el.isPlaceholder,
+  );
+  const hostWall = hostWallForFacadeOpening(opening, elements);
+  if (hostWall) {
+    const linked = findLinkedAdjacentConditionedFloorForLineElement(hostWall, conditionedFloors);
+    if (linked) return linked;
+  }
+  return findLinkedAdjacentConditionedFloorForLineElement(opening, conditionedFloors);
 }
 
 function linkedBasementGroundForFacadeOpening(
   opening: VerticalFacadeOpeningHost,
   elements: Element[],
 ): ReturnType<typeof findLinkedBasementGroundForLineElement> {
-  const hostWallName =
-    typeof opening.parent_element === 'string' && opening.parent_element.trim() !== ''
-      ? opening.parent_element.trim()
-      : null;
-  if (hostWallName) {
-    const hostWall = elements.find(
-      (el): el is BuildingElementOpaque =>
-        el.type === 'BuildingElementOpaque' &&
-        el.zoneId === opening.zoneId &&
-        (el.name ?? '').trim() === hostWallName,
-    );
-    if (hostWall) {
-      const linked = findLinkedBasementGroundForLineElement(hostWall, elements);
-      if (linked) return linked;
-    }
+  const hostWall = hostWallForFacadeOpening(opening, elements);
+  if (hostWall) {
+    const linked = findLinkedBasementGroundForLineElement(hostWall, elements);
+    if (linked) return linked;
   }
-
   return findLinkedBasementGroundForLineElement(opening, elements);
 }
 
@@ -415,7 +438,11 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
   let zSill: number;
   let useGroundWallFloor: boolean;
   let useIntermediateWallFloor: boolean;
-  const linkedGroundSurfaceM = linkedGroundSurfaceMForFacadeOpening(t, elements);
+  const linkedGroundSlab = linkedGroundSlabForFacadeOpening(t, elements);
+  const linkedGroundSurfaceM = linkedGroundSlab
+    ? nonBasementGroundSurfaceElevationM(linkedGroundSlab)
+    : null;
+  const linkedConditionedFloor = linkedConditionedFloorForFacadeOpening(t, elements);
   const linkedBasementGround = linkedBasementGroundForFacadeOpening(t, elements);
   const linkedToBasementGround = linkedBasementGround !== null;
   const unheatedBasementWallFloorTargetM =
@@ -427,17 +454,41 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
     const sillAbsM = elementBaseElevationMForTb(t as Element, floors);
     const floorZ = elementFloorZIndexForTb(t as Element, floors);
     const slabElevM = slabElevationMForFloorZ(floorZ, floors);
-    const groundTargetM = floorZ === 0 && linkedGroundSurfaceM !== null ? linkedGroundSurfaceM : slabElevM;
-    const nearSlab = Math.abs(sillAbsM - groundTargetM) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
+    const linkedGroundTargetM = linkedGroundSlab
+      ? linkedGroundSurfaceM ?? elementBaseElevationMForTb(linkedGroundSlab, floors)
+      : null;
+    const linkedConditionedTargetM = linkedConditionedFloor
+      ? elementBaseElevationMForTb(linkedConditionedFloor, floors)
+      : null;
+    const nearStoreySlab = Math.abs(sillAbsM - slabElevM) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
+    const nearLinkedGroundSlab =
+      linkedGroundTargetM !== null &&
+      Math.abs(sillAbsM - linkedGroundTargetM) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
+    const nearLinkedConditionedFloor =
+      linkedConditionedTargetM !== null &&
+      Math.abs(sillAbsM - linkedConditionedTargetM) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
     const nearUnheatedBasementWallFloor =
       unheatedBasementWallFloorTargetM !== null &&
       Math.abs(sillAbsM - unheatedBasementWallFloorTargetM) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
-    useGroundWallFloor = nearSlab && floorZ === 0 && !linkedToBasementGround;
-    useIntermediateWallFloor = (nearSlab && floorZ >= 1) || nearUnheatedBasementWallFloor;
+    if (nearUnheatedBasementWallFloor) {
+      useGroundWallFloor = false;
+      useIntermediateWallFloor = true;
+    } else if (nearLinkedGroundSlab && !linkedToBasementGround) {
+      useGroundWallFloor = true;
+      useIntermediateWallFloor = false;
+    } else if (nearLinkedConditionedFloor) {
+      useGroundWallFloor = false;
+      useIntermediateWallFloor = true;
+    } else {
+      useGroundWallFloor = nearStoreySlab && floorZ === 0 && !linkedToBasementGround;
+      useIntermediateWallFloor = nearStoreySlab && floorZ >= 1;
+    }
     zSill = nearUnheatedBasementWallFloor
       ? unheatedBasementWallFloorTargetM
-      : useGroundWallFloor && linkedGroundSurfaceM !== null
-        ? linkedGroundSurfaceM
+      : useGroundWallFloor && linkedGroundTargetM !== null
+        ? linkedGroundTargetM
+        : useIntermediateWallFloor && nearLinkedConditionedFloor && linkedConditionedTargetM !== null
+          ? linkedConditionedTargetM
         : sillAbsM;
   } else {
     const nearLinkedGroundSurface =
