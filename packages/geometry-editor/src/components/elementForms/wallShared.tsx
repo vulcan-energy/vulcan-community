@@ -77,7 +77,7 @@ import { roundToTwoDecimals } from '../../geometry/constants';
 import { applyCompassOrientationToSlopedPolygonCoords } from '../../lib/openingSegmentOutward';
 import { convertShapeCoordinates, getElementShape } from '../../lib/shapeUtils';
 import { VULCAN_UI_PARTY_ELEMENT_KEY } from '../../lib/assemblyMaterialFabric';
-import type { Element, ElementType } from '../../geometry/types';
+import type { BuildingElementOpaque, BuildingElementTransparent, Element, ElementType } from '../../geometry/types';
 // Not formPrimitives' useDecimalInput: that wrapper doesn't forward `syncExternal`, and the
 // single-element pitch input needs it (see pitchDraftInput below) so the draft re-syncs from
 // `pitch` on selection/preset/dormer changes without threading a `.setValue()` call through
@@ -419,4 +419,65 @@ export function useWallSharedFormState(args: {
     applyOrientationToGeometry,
     applyParentPitchOrientationForDisplay,
   };
+}
+
+/** The subset of WallSharedFormGroup that hydrateWallSharedFields needs —
+ * satisfied structurally both by useWallSharedFormState's own return value
+ * (ElementCreator's still-inline Opaque hydrate branch, Stage 4's job) and
+ * by a module's captured ctx.shared fields (buildingElementTransparent.tsx's
+ * hydrate(), Stage 3). */
+export interface WallSharedHydrateTarget {
+  widthInput: NumericDraftInputBinding;
+  heightInput: NumericDraftInputBinding;
+  areaInput: NumericDraftInputBinding;
+  baseHeightInput: NumericDraftInputBinding;
+  setParentElement: (value: string) => void;
+  setPitch: (value: number) => void;
+  setOrientation360: (value: number) => void;
+}
+
+/** Slice-6 brief STAGE 3's risky seam: "Opaque↔Transparent hydrate shares
+ * code before splitting on type" (width/height/area/pitch/orientation360/
+ * base_height derivation, then the four wallShared setter calls) — factored
+ * ONCE here, verbatim from ElementCreator's old combined
+ * `if (element.type === 'BuildingElementOpaque' || element.type ===
+ * 'BuildingElementTransparent')` prefix, rather than duplicated into every
+ * wall-family module that needs it. ElementCreator's own (still-inline,
+ * Stage 4's job) Opaque hydrate branch calls this with its `wallShared`
+ * local; buildingElementTransparent.tsx's hydrate() calls it with its own
+ * captured ctx.shared fields — same function, two call sites, zero
+ * duplication (the brief's explicit instruction: "do NOT duplicate it
+ * silently"). */
+export function hydrateWallSharedFields(
+  target: WallSharedHydrateTarget,
+  // Narrower than `Element`: unlike the callers' own hydrate(state, element)
+  // signatures (which must accept the full union per the ElementFormModule
+  // contract), this helper's OWN width/height/area/base_height fallback
+  // reads (`element.width ?? ''` etc.) only type-check when TS knows every
+  // union member being read from actually HAS those fields — true for
+  // Opaque/Transparent, not for the wider Element union (e.g.
+  // ThermalBridgeLinear has no width/height/area at all). Both call sites
+  // already narrow to this pair before calling in (Opaque's inline `if
+  // (element.type === 'BuildingElementOpaque')`; Transparent's hydrate()
+  // early-returns on any other type).
+  element: BuildingElementOpaque | BuildingElementTransparent,
+  getCurrentOrientation: (element: Element) => number,
+): void {
+  const width = 'width' in element && typeof element.width === 'number' ? roundToTwoDecimals(element.width) : (element.width ?? '');
+  const height = 'height' in element && typeof element.height === 'number' ? roundToTwoDecimals(element.height) : (element.height ?? '');
+  const area = 'area' in element && typeof element.area === 'number' ? roundToTwoDecimals(element.area) : (element.area ?? '');
+  const pitch = 'pitch' in element && typeof element.pitch === 'number' ? element.pitch : (element.pitch ?? 90);
+  const orientation = Math.round(getCurrentOrientation(element));
+  const baseHeight =
+    'base_height' in element && typeof element.base_height === 'number'
+      ? roundToTwoDecimals(element.base_height)
+      : (element.base_height ?? '');
+
+  target.widthInput.setValue(width);
+  target.heightInput.setValue(height);
+  target.setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
+  target.areaInput.setValue(area);
+  target.setPitch(pitch);
+  target.setOrientation360(orientation);
+  target.baseHeightInput.setValue(baseHeight);
 }

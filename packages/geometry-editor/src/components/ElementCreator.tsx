@@ -41,9 +41,10 @@ import { waterPipeworkFormModule } from './elementForms/waterPipework';
 import { wetEmitterFormModule } from './elementForms/wetEmitter';
 import { formatSystemPresetName, systemFormModule } from './elementForms/system';
 import { useServiceLineFormState } from './elementForms/serviceLine';
-import { useWallSharedFormState } from './elementForms/wallShared';
+import { useWallSharedFormState, hydrateWallSharedFields } from './elementForms/wallShared';
 import { buildingElementGroundFormModule } from './elementForms/buildingElementGround';
 import { adjacentLikeElementFormModule } from './elementForms/adjacentLikeElement';
+import { buildingElementTransparentFormModule } from './elementForms/buildingElementTransparent';
 import {
   useDecimalInput,
   decimalInputProps,
@@ -76,10 +77,8 @@ import {
   getTransparentExportMidHeight,
 } from '../lib/elementArea';
 import {
-  buildSlopedPolygonRectangleDimensionPatch,
   deriveSlopedElementDimensions,
   getPolygonScalarDimensionSemantics,
-  slopedPolygonNeedsRectangleRebuild,
 } from '../lib/slopedElementDimensions';
 import {
   getUnheatedPitchedRoofCeilingElevationM,
@@ -96,7 +95,6 @@ import {
   calculateDerivedFloorArea,
   calculateDerivedHeight,
   calculateDerivedBaseHeight,
-  calculateDerivedWindowMidHeight,
   calculateBaseHeightPatchForFloorMove,
   withEffectiveStoreyHeights,
 } from '../lib/zoneDerivation';
@@ -1599,9 +1597,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const [selectedDormerType, setSelectedDormerType] = useState<DormerType>('mono-pitch');
   const [dormerDepth, setDormerDepth] = useState<number>(1.5);
   const [dormerRoofIsUnheatedPitchedRoof, setDormerRoofIsUnheatedPitchedRoof] = useState<boolean>(false);
-  const freeAreaHeightInput = useDecimalInput('', commitElementNumericField('free_area_height'), { commitOnChange: true });
-  const midHeightInput = useDecimalInput('', commitElementNumericField('mid_height'), { commitOnChange: true });
-  const maxWindowOpenAreaInput = useDecimalInput('', commitElementNumericField('max_window_open_area'), { commitOnChange: true });
+  // freeAreaHeightInput/midHeightInput/maxWindowOpenAreaInput (+ the
+  // midHeight/maxWindowOpenArea SetValueRef pair and their slice of this
+  // combined effect) now live in elementForms/buildingElementTransparent.tsx
+  // (slice-6 brief, Stage 3) — same "split the combined effect" precedent
+  // slice 3 set for serviceLine.tsx.
   // totalAreaInput/commitGroundPerimeter/perimeterInput/floorType/
   // depthBasementFloorInput/thicknessWallsInput/groundLineHeightInput now
   // live in elementForms/buildingElementGround.tsx (slice-6 brief, Stage 1).
@@ -1614,20 +1614,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     selectedElementV,
   });
   // widthInputSetValueRef/heightInputSetValueRef/areaInputSetValueRef now live
-  // in elementForms/wallShared.tsx (wallShared.widthInputSetValueRef etc.) —
-  // split out of this combined effect, same "split the combined effect"
-  // precedent slice 3 set for serviceLine.tsx. midHeight/maxWindowOpenArea/
-  // totalArea are Transparent/Ground-owned, not wall-shared, and keep their
-  // own effect of the same shape below.
-  const midHeightInputSetValueRef = useRef(midHeightInput.syncValue);
-  const maxWindowOpenAreaInputSetValueRef = useRef(maxWindowOpenAreaInput.syncValue);
-  useEffect(() => {
-    midHeightInputSetValueRef.current = midHeightInput.syncValue;
-    maxWindowOpenAreaInputSetValueRef.current = maxWindowOpenAreaInput.syncValue;
-  }, [
-    maxWindowOpenAreaInput.syncValue,
-    midHeightInput.syncValue,
-  ]);
+  // in elementForms/wallShared.tsx (wallShared.widthInputSetValueRef etc.).
 
   // totalAreaInputSetValueRef (+ its slice of this effect) and numbersClose
   // now live in elementForms/buildingElementGround.tsx (slice-6 brief, Stage
@@ -1729,94 +1716,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return { hostId, hostName: host.name, derived };
   }, [selection, elementsById, floors, allElements]);
 
-  const widthInputValue = wallShared.widthInput.value;
-  const heightInputValue = wallShared.heightInput.value;
-  const baseHeightInputValue = wallShared.baseHeightInput.value;
-  const freeAreaHeightInputValue = freeAreaHeightInput.value;
-
-  /** Opening mid-height: base + height/2 (matches HEM / engine convention). */
-  const derivedWindowMidHeight = useMemo(() => {
-    const h = Number(heightInputValue) || 0;
-    const baseM =
-      typeof baseHeightInputValue === 'number' &&
-      baseHeightInputValue > 0
-        ? baseHeightInputValue
-        : derivedBaseHeight;
-    return calculateDerivedWindowMidHeight(baseM, h);
-  }, [baseHeightInputValue, derivedBaseHeight, heightInputValue]);
-
-  /** Max openable area from geometry: width x free-area height, capped by total window area. */
-  const derivedWindowMaxOpenArea = useMemo(() => {
-    const w = Number(widthInputValue) || 0;
-    const h = Number(heightInputValue) || 0;
-    const freeH = Number(freeAreaHeightInputValue) || 0;
-    if (w <= 0 || freeH <= 0) return 0;
-    const raw = w * freeH;
-    const cap = h > 0 ? w * h : raw;
-    return roundToTwoDecimals(Math.min(raw, cap));
-  }, [freeAreaHeightInputValue, heightInputValue, widthInputValue]);
-
-  const prevDerivedWindowMidHeightRef = useRef<number | null>(null);
-  const prevDerivedWindowMaxOpenAreaRef = useRef<number | null>(null);
-
-  // Keep derived window fields in sync while preserving manual overrides:
-  // auto-update only when the current value still matches the previous derived value
-  // (or is empty), so user-entered custom values are not clobbered.
-  useEffect(() => {
-    if (elementType !== 'BuildingElementTransparent') {
-      prevDerivedWindowMidHeightRef.current = derivedWindowMidHeight;
-      prevDerivedWindowMaxOpenAreaRef.current = derivedWindowMaxOpenArea;
-      return;
-    }
-
-    const nextMid = derivedWindowMidHeight;
-    const prevMid = prevDerivedWindowMidHeightRef.current;
-    const currentMid = typeof midHeightInput.value === 'number' ? midHeightInput.value : null;
-    const shouldSyncMid =
-      !midHeightInput.isEditing &&
-      (currentMid == null || currentMid <= 0 || prevMid == null || Math.abs(currentMid - prevMid) <= 0.005);
-    if (nextMid > 0 && shouldSyncMid && (currentMid == null || Math.abs(currentMid - nextMid) > 0.005)) {
-      midHeightInputSetValueRef.current(nextMid);
-      // Repair legacy/stale saved values when the editor first opens. Normal edits are already
-      // canonicalized in the store, so this branch is otherwise a no-op for existing elements.
-      if (isExistingElementSelection()) {
-        commitExistingElementDraftRef.current({ mid_height: nextMid });
-      }
-    }
-    prevDerivedWindowMidHeightRef.current = nextMid;
-
-    const nextOpenArea = derivedWindowMaxOpenArea;
-    const prevOpenArea = prevDerivedWindowMaxOpenAreaRef.current;
-    const currentOpenArea =
-      typeof maxWindowOpenAreaInput.value === 'number' ? maxWindowOpenAreaInput.value : null;
-    const shouldSyncOpenArea =
-      !maxWindowOpenAreaInput.isEditing &&
-      (
-        currentOpenArea == null ||
-        (nextOpenArea > 0 && currentOpenArea <= 0) ||
-        prevOpenArea == null ||
-        Math.abs(currentOpenArea - prevOpenArea) <= 0.005
-      );
-    if (
-      shouldSyncOpenArea &&
-      (currentOpenArea == null || Math.abs(currentOpenArea - nextOpenArea) > 0.005)
-    ) {
-      maxWindowOpenAreaInputSetValueRef.current(nextOpenArea);
-      if (isExistingElementSelection()) {
-        commitExistingElementDraftRef.current({ max_window_open_area: nextOpenArea });
-      }
-    }
-    prevDerivedWindowMaxOpenAreaRef.current = nextOpenArea;
-  }, [
-    elementType,
-    derivedWindowMidHeight,
-    derivedWindowMaxOpenArea,
-    midHeightInput.value,
-    maxWindowOpenAreaInput.value,
-    midHeightInput.isEditing,
-    maxWindowOpenAreaInput.isEditing,
-    isExistingElementSelection,
-  ]);
+  // derivedWindowMidHeight/derivedWindowMaxOpenArea and the auto-sync effect
+  // that writes them now live inside buildingElementTransparentFormState
+  // (elementForms/buildingElementTransparent.tsx, slice-6 brief STAGE 3) —
+  // ElementFormStateCtx.derivedBaseHeight/getTransparentOpeningDerivedValues
+  // thread through what that module needs from here.
 
   // Auto-fill base_height when floor changes and current value is 0 (new element or unset)
   useEffect(() => {
@@ -1939,6 +1843,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       setOrientation360: wallShared.setOrientation360,
       applyOrientationToGeometry: wallShared.applyOrientationToGeometry,
       applyParentPitchOrientationForDisplay: wallShared.applyParentPitchOrientationForDisplay,
+      // Transparent's first ctx.shared consumer (slice-6 brief STAGE 3) — see
+      // ElementFormSharedCtx.baseHeightInput's doc comment in types.ts.
+      baseHeightInput: wallShared.baseHeightInput,
       spaceHeatSystem,
       setSpaceHeatSystem,
     },
@@ -1947,6 +1854,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     serviceLine,
     workspaceResourcePort,
     getZoneNameForElementZoneId,
+    derivedBaseHeight,
+    getTransparentOpeningDerivedValues: (element: BuildingElementTransparent) => {
+      const storeSnapshot = geometryStore.getState();
+      return deriveTransparentOpeningDerivedValues(
+        element,
+        {},
+        {
+          effectiveFloors: withEffectiveStoreyHeights(
+            storeSnapshot.floors || [],
+            Object.values(storeSnapshot.elementsById || {}),
+          ),
+        },
+      );
+    },
   };
   // ElectricBattery
   const electricBatteryFormState = electricBatteryFormModule.useFormState(elementFormStateCtx);
@@ -1984,6 +1905,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const systemFormState = systemFormModule.useFormState(elementFormStateCtx);
   // BuildingElementGround
   const buildingElementGroundFormState = buildingElementGroundFormModule.useFormState(elementFormStateCtx);
+  // BuildingElementTransparent
+  const buildingElementTransparentFormState = buildingElementTransparentFormModule.useFormState(elementFormStateCtx);
   // Adjacent-like trio (BuildingElementPartyWall / AdjacentConditionedSpace /
   // AdjacentUnconditionedSpace_Simple) — ONE state instance, bound ONCE below
   // and registered under all three elementFormInstances keys (slice-6 brief
@@ -1994,6 +1917,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const elementFormInstances = {
     ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
     BuildingElementGround: bindElementFormModule(buildingElementGroundFormModule, buildingElementGroundFormState),
+    BuildingElementTransparent: bindElementFormModule(buildingElementTransparentFormModule, buildingElementTransparentFormState),
     // Same bound instance under all three keys — see comment above.
     BuildingElementPartyWall: adjacentLikeElementFormInstance,
     BuildingElementAdjacentConditionedSpace: adjacentLikeElementFormInstance,
@@ -2044,9 +1968,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       adjacentLikeElementFormState.adjacentViewerBaseHeightInput.setValue(roundToTwoDecimals(heightPatch._base_height));
     }
     if (typeof heightPatch.mid_height === 'number') {
-      midHeightInput.setValue(roundToTwoDecimals(heightPatch.mid_height));
+      buildingElementTransparentFormState.midHeightInput.setValue(roundToTwoDecimals(heightPatch.mid_height));
     }
-  }, [adjacentLikeElementFormState.adjacentViewerBaseHeightInput, wallShared.baseHeightInput, midHeightInput, onSiteGenerationFormState.onSiteBaseHeightInput]);
+  }, [
+    adjacentLikeElementFormState.adjacentViewerBaseHeightInput,
+    wallShared.baseHeightInput,
+    buildingElementTransparentFormState.midHeightInput,
+    onSiteGenerationFormState.onSiteBaseHeightInput,
+  ]);
 
   // System's own exclusive state now lives in its module (via systemFormState
   // above, elementForms/system.tsx) — see that module's header for the full
@@ -2483,8 +2412,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     emptyElementPresetOptions,
   );
   const prevLoadedSelectionIdRef = useRef<string | null>(null);
+  // freeAreaFraction's slot was removed (slice-6 brief STAGE 3): it existed
+  // only for the hydrate-effect declaration-order problem
+  // buildingElementTransparent.tsx's header describes, which doesn't apply
+  // once freeAreaFractionInput is module-owned and constructed inside a
+  // single useFormState call. This ref still serves the 8 dormer-exclusive
+  // slots below (decision 2, orchestrator-retained), so it stays.
   const lateNumericInputSettersRef = useRef({
-    freeAreaFraction: (value: number | '') => { void value; },
     dormerWidth: (value: number | '') => { void value; },
     dormerFrontWallHeight: (value: number | '') => { void value; },
     dormerRoofPitch: (value: number | '') => { void value; },
@@ -2584,13 +2518,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       if (typeof storeUpdate.pitch === 'number') wallShared.setPitch(storeUpdate.pitch);
       if (typeof storeUpdate.base_height === 'number') wallShared.baseHeightInput.setValue(roundToTwoDecimals(storeUpdate.base_height));
       if (typeof storeUpdate.frame_area_fraction === 'number') {
-        lateNumericInputSettersRef.current.freeAreaFraction(
+        buildingElementTransparentFormState.freeAreaFractionInput.setValue(
           roundToTwoDecimals(storeUpdate.frame_area_fraction),
         );
       }
-      if (typeof storeUpdate.free_area_height === 'number') freeAreaHeightInput.setValue(roundToTwoDecimals(storeUpdate.free_area_height));
-      if (typeof storeUpdate.mid_height === 'number') midHeightInput.setValue(roundToTwoDecimals(storeUpdate.mid_height));
-      if (typeof storeUpdate.max_window_open_area === 'number') maxWindowOpenAreaInput.setValue(roundToTwoDecimals(storeUpdate.max_window_open_area));
+      if (typeof storeUpdate.free_area_height === 'number') buildingElementTransparentFormState.freeAreaHeightInput.setValue(roundToTwoDecimals(storeUpdate.free_area_height));
+      if (typeof storeUpdate.mid_height === 'number') buildingElementTransparentFormState.midHeightInput.setValue(roundToTwoDecimals(storeUpdate.mid_height));
+      if (typeof storeUpdate.max_window_open_area === 'number') buildingElementTransparentFormState.maxWindowOpenAreaInput.setValue(roundToTwoDecimals(storeUpdate.max_window_open_area));
       if (typeof storeUpdate.is_unheated_pitched_roof === 'boolean') setIsUnheatedPitchedRoof(storeUpdate.is_unheated_pitched_roof);
       if (typeof storeUpdate.is_external_door === 'boolean') setIsExternalDoor(storeUpdate.is_external_door);
       if (data.type === 'OnSiteGeneration') {
@@ -2814,78 +2748,39 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } catch { /* swallow: best-effort */ }
 
         // Set fields based on element type
-        if (element.type === 'BuildingElementOpaque' || element.type === 'BuildingElementTransparent') {
-          // Round numeric values to 2dp when loading from file
-          const width = 'width' in element && typeof element.width === 'number' ? roundToTwoDecimals(element.width) : (element.width ?? '');
-          const height = 'height' in element && typeof element.height === 'number' ? roundToTwoDecimals(element.height) : (element.height ?? '');
-          const area = 'area' in element && typeof element.area === 'number' ? roundToTwoDecimals(element.area) : (element.area ?? '');
-          const pitch = 'pitch' in element && typeof element.pitch === 'number' ? element.pitch : (element.pitch ?? 90);
-          const orientation = roundToInt(getCurrentOrientation(element));
-          const baseHeight = 'base_height' in element && typeof element.base_height === 'number' ? roundToTwoDecimals(element.base_height) : (element.base_height ?? '');
+        if (element.type === 'BuildingElementOpaque') {
+          // Shared Opaque/Transparent prefix, factored once — see
+          // wallShared.tsx's hydrateWallSharedFields header for the full
+          // "risky seam" writeup (Stage 4 will call this same function from
+          // Opaque's own extracted module).
+          hydrateWallSharedFields(wallShared, element, getCurrentOrientation);
 
-          wallShared.widthInput.setValue(width);
-          wallShared.heightInput.setValue(height);
-          wallShared.setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          wallShared.areaInput.setValue(area);
-          wallShared.setPitch(pitch);
-          wallShared.setOrientation360(orientation);
-          wallShared.baseHeightInput.setValue(baseHeight);
+          setIsUnheatedPitchedRoof(!!(element as any).is_unheated_pitched_roof);
+          setIsExternalDoor(!!(element as any).is_external_door);
+          unheatedPitchedRoofCeilingElevationInput.setValue(
+            readAuthoredUnheatedPitchedRoofCeilingElevationM(element) ?? '',
+          );
 
-          // Window-specific fields (only for BuildingElementTransparent)
-          if (element.type === 'BuildingElementTransparent') {
-            const frameAreaFraction = 'frame_area_fraction' in element && typeof element.frame_area_fraction === 'number'
-              ? roundToTwoDecimals(element.frame_area_fraction) : (element.frame_area_fraction ?? '');
-            const freeAreaHeight = 'free_area_height' in element && typeof element.free_area_height === 'number'
-              ? roundToTwoDecimals(element.free_area_height) : (element.free_area_height ?? '');
-            const midHeight = 'mid_height' in element && typeof element.mid_height === 'number'
-              ? roundToTwoDecimals(element.mid_height) : (element.mid_height ?? '');
-            const maxWindowOpenArea = 'max_window_open_area' in element && typeof element.max_window_open_area === 'number'
-              ? roundToTwoDecimals(element.max_window_open_area) : (element.max_window_open_area ?? '');
-
-            lateNumericInputSettersRef.current.freeAreaFraction(frameAreaFraction);
-            freeAreaHeightInput.setValue(freeAreaHeight);
-            midHeightInput.setValue(midHeight);
-            maxWindowOpenAreaInput.setValue(maxWindowOpenArea);
-
-            const storeSnapshot = geometryStore.getState();
-            const transparentDerived = deriveTransparentOpeningDerivedValues(
-              element,
-              {},
-              {
-                effectiveFloors: withEffectiveStoreyHeights(
-                  storeSnapshot.floors || [],
-                  Object.values(storeSnapshot.elementsById || {}),
-                ),
-              },
-            );
-            prevDerivedWindowMidHeightRef.current = transparentDerived.midHeight;
-            prevDerivedWindowMaxOpenAreaRef.current = transparentDerived.maxWindowOpenArea;
-          }
-
-          if (element.type === 'BuildingElementOpaque') {
-            setIsUnheatedPitchedRoof(!!(element as any).is_unheated_pitched_roof);
-            setIsExternalDoor(!!(element as any).is_external_door);
-            unheatedPitchedRoofCeilingElevationInput.setValue(
-              readAuthoredUnheatedPitchedRoofCeilingElevationM(element) ?? '',
-            );
-
-            const dormerMetadata = getDormerBundleMetadata(element);
-            if (dormerMetadata) {
-              setSelectedDormerType(dormerMetadata.dormerType);
-              lateNumericInputSettersRef.current.dormerWidth(roundToTwoDecimals(dormerMetadata.dormerWidth));
-              setDormerDepth(roundToTwoDecimals(dormerMetadata.dormerDepth));
-              lateNumericInputSettersRef.current.dormerFrontWallHeight(roundToTwoDecimals(dormerMetadata.frontWallHeight));
-              lateNumericInputSettersRef.current.dormerRoofPitch(dormerMetadata.dormerRoofPitch);
-              lateNumericInputSettersRef.current.gableRoofPitch(dormerMetadata.gableRoofPitch);
-              setDormerRoofIsUnheatedPitchedRoof(!!dormerMetadata.isUnheatedPitchedRoof);
-              lateNumericInputSettersRef.current.dormerWindowWidth(roundToTwoDecimals(dormerMetadata.windowWidth));
-              lateNumericInputSettersRef.current.dormerWindowHeight(roundToTwoDecimals(dormerMetadata.windowHeight));
-              lateNumericInputSettersRef.current.dormerWindowSillHeight(roundToTwoDecimals(dormerMetadata.windowSillHeight));
-              lateNumericInputSettersRef.current.dormerFrameAreaFraction(roundToTwoDecimals(dormerMetadata.frameAreaFraction));
-            }
+          const dormerMetadata = getDormerBundleMetadata(element);
+          if (dormerMetadata) {
+            setSelectedDormerType(dormerMetadata.dormerType);
+            lateNumericInputSettersRef.current.dormerWidth(roundToTwoDecimals(dormerMetadata.dormerWidth));
+            setDormerDepth(roundToTwoDecimals(dormerMetadata.dormerDepth));
+            lateNumericInputSettersRef.current.dormerFrontWallHeight(roundToTwoDecimals(dormerMetadata.frontWallHeight));
+            lateNumericInputSettersRef.current.dormerRoofPitch(dormerMetadata.dormerRoofPitch);
+            lateNumericInputSettersRef.current.gableRoofPitch(dormerMetadata.gableRoofPitch);
+            setDormerRoofIsUnheatedPitchedRoof(!!dormerMetadata.isUnheatedPitchedRoof);
+            lateNumericInputSettersRef.current.dormerWindowWidth(roundToTwoDecimals(dormerMetadata.windowWidth));
+            lateNumericInputSettersRef.current.dormerWindowHeight(roundToTwoDecimals(dormerMetadata.windowHeight));
+            lateNumericInputSettersRef.current.dormerWindowSillHeight(roundToTwoDecimals(dormerMetadata.windowSillHeight));
+            lateNumericInputSettersRef.current.dormerFrameAreaFraction(roundToTwoDecimals(dormerMetadata.frameAreaFraction));
           }
         } else if (element.type === 'BuildingElementGround') {
           elementFormInstances.BuildingElementGround.hydrate(element);
+        } else if (element.type === 'BuildingElementTransparent') {
+          // Moved to elementForms/buildingElementTransparent.tsx (slice-6
+          // brief STAGE 3) — see that module's hydrate().
+          elementFormInstances.BuildingElementTransparent.hydrate(element);
         } else if (isAdjacentLikeElement(element)) {
           // Moved to elementForms/adjacentLikeElement.tsx (slice-6 brief
           // STAGE 2) — see that module's hydrate(). Any of the three keys
@@ -3266,10 +3161,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     setDormerRoofIsUnheatedPitchedRoof(false);
     setIsExternalDoor(false);
     wallShared.setParentElement('');
-    lateNumericInputSettersRef.current.freeAreaFraction('');
-    freeAreaHeightInput.setValue('');
-    midHeightInput.setValue('');
-    maxWindowOpenAreaInput.setValue('');
+    // freeAreaFraction/freeAreaHeight/midHeight/maxWindowOpenArea reset
+    // lines now live in buildingElementTransparentFormModule.reset() (via
+    // the elementFormInstances loop below) — slice-6 brief STAGE 3.
     // totalAreaInput/perimeterInput/floorType/groundLineHeightInput/
     // depthBasementFloorInput/thicknessWallsInput reset lines now live in
     // buildingElementGroundFormModule.reset() (via the elementFormInstances
@@ -3827,18 +3721,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       regenerateDormerAnchor(selection.id, overrides);
     } catch { /* swallow: best-effort */ }
   };
-  const commitTransparentFrameAreaFraction = (value: number | '') => {
-    if (!isExistingElementSelection()) return;
-    commitExistingElementDraft({
-      frame_area_fraction: value === '' ? undefined : value,
-    } as Partial<Element>);
-  };
-  const freeAreaFractionInput = useDecimalInput(
-    '',
-    commitTransparentFrameAreaFraction,
-    { commitOnChange: false, formatOnBlur: 'preserve' },
-  );
-  const freeAreaFraction = freeAreaFractionInput.value;
+  // commitTransparentFrameAreaFraction/freeAreaFractionInput now live inside
+  // buildingElementTransparentFormState (elementForms/
+  // buildingElementTransparent.tsx, slice-6 brief STAGE 3).
   const commitDormerNumericParameter =
     <K extends keyof DormerBundleParameters>(key: K) =>
     (value: number | '') => {
@@ -3897,7 +3782,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const dormerFrameAreaFraction = numericDraftValueOrDefault(dormerFrameAreaFractionInput.value, 0.25);
   useLayoutEffect(() => {
     lateNumericInputSettersRef.current = {
-      freeAreaFraction: freeAreaFractionInput.setValue,
       dormerWidth: dormerWidthInput.setValue,
       dormerFrontWallHeight: dormerFrontWallHeightInput.setValue,
       dormerRoofPitch: dormerRoofPitchInput.setValue,
@@ -3932,7 +3816,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     dormerWindowSillHeightInput.setValue,
     dormerWindowWidth,
     dormerWindowWidthInput.setValue,
-    freeAreaFractionInput.setValue,
     gableRoofPitch,
     gableRoofPitchInput.setValue,
   ]);
@@ -4345,51 +4228,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       _heightUserOverride: false,
     } as Partial<Element>);
   }, [selectedSlopedDimensions, wallShared.heightInput]);
-  const selectedSlopedTransparentNeedsRebuild = useMemo(() => {
-    if (
-      selectedElement?.type !== 'BuildingElementTransparent' ||
-      selectedShape !== 'sloped-polygon' ||
-      !selectedSlopedDimensions
-    ) {
-      return false;
-    }
-    return slopedPolygonNeedsRectangleRebuild({
-      coordinates: selectedElement.coordinates,
-      widthM: selectedSlopedDimensions.width,
-      heightM: selectedSlopedDimensions.height,
-      pitchDegrees: typeof selectedElement.pitch === 'number' ? selectedElement.pitch : wallShared.pitch,
-    });
-  }, [selectedElement, selectedShape, selectedSlopedDimensions, wallShared.pitch]);
-  const showSlopedTransparentRebuildOpening =
-    selectedElement?.type === 'BuildingElementTransparent' &&
-    selectedShape === 'sloped-polygon' &&
-    selectedSlopedTransparentNeedsRebuild;
-  const rebuildSelectedSlopedTransparentOpening = () => {
-    if (
-      selectedElement?.type !== 'BuildingElementTransparent' ||
-      selectedShape !== 'sloped-polygon' ||
-      !selectedSlopedDimensions
-    ) return;
-    const nextWidth =
-      typeof wallShared.widthInput.value === 'number' && wallShared.widthInput.value > 0
-        ? wallShared.widthInput.value
-        : selectedSlopedDimensions.width;
-    const nextHeight =
-      typeof wallShared.heightInput.value === 'number' && wallShared.heightInput.value > 0
-        ? wallShared.heightInput.value
-        : selectedSlopedDimensions.height;
-    const patch = buildSlopedPolygonRectangleDimensionPatch({
-      coordinates: selectedElement.coordinates,
-      widthM: nextWidth,
-      heightM: nextHeight,
-      pitchDegrees: typeof selectedElement.pitch === 'number' ? selectedElement.pitch : wallShared.pitch,
-    });
-    if (!patch) return;
-    if (typeof patch.width === 'number') wallShared.widthInput.setValue(patch.width);
-    if (typeof patch.height === 'number') wallShared.heightInput.setValue(patch.height);
-    if (typeof patch.area === 'number') wallShared.areaInput.setValue(patch.area);
-    commitExistingElementDraftRef.current(patch);
-  };
+  // selectedSlopedTransparentNeedsRebuild/showSlopedTransparentRebuildOpening/
+  // rebuildSelectedSlopedTransparentOpening now live inline inside
+  // buildingElementTransparentFormState's renderPanel (elementForms/
+  // buildingElementTransparent.tsx, slice-6 brief STAGE 3), computed from
+  // ElementFormRenderCtx.selectedSlopedDimensions (which stays here — see
+  // types.ts, it's not Transparent-exclusive).
   const selectedFieldValidationByKey = useMemo(() => {
     const result = new Map<string, { message: string; variant: 'error' | 'warning' }>();
     if (!selectedElement) return result;
@@ -4524,7 +4368,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       wallShared.widthInput.setValue(roundToTwoDecimals(exp.width));
       wallShared.heightInput.setValue(roundToTwoDecimals(exp.height));
       if (draft.type === 'BuildingElementTransparent') {
-        midHeightInput.setValue(
+        buildingElementTransparentFormState.midHeightInput.setValue(
           roundToTwoDecimals(getTransparentExportMidHeight(draft as BuildingElementTransparent)),
         );
       }
@@ -4535,7 +4379,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       getElementById,
       wallShared.widthInput,
       wallShared.heightInput,
-      midHeightInput,
+      buildingElementTransparentFormState.midHeightInput,
     ],
   );
 
@@ -4608,25 +4452,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 		        } as Partial<Element>;
 		        }
 
-	      case 'BuildingElementTransparent':
-	        {
-	          const width = wallShared.widthInput.value;
-	          const height = wallShared.heightInput.value;
-	        return {
-	          ...baseData,
-	          width,
-	          height,
-	          area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-          pitch: wallShared.pitch,
-          orientation360: roundToInt(wallShared.orientation360),
-	          base_height: wallShared.baseHeightInput.value === '' ? undefined : wallShared.baseHeightInput.value,
-          parent_element: wallShared.parentElement,
-	          frame_area_fraction: freeAreaFraction === '' ? undefined : freeAreaFraction,
-          free_area_height: freeAreaHeightInput.value,
-          mid_height: midHeightInput.value,
-	          max_window_open_area: maxWindowOpenAreaInput.value,
-	        } as Partial<Element>;
-	        }
+      case 'BuildingElementTransparent':
+        // Moved to elementForms/buildingElementTransparent.tsx (slice-6
+        // brief STAGE 3) — see that module's buildElementData().
+        return elementFormInstances.BuildingElementTransparent.buildElementData({ baseData, elementZoneId });
 
       case 'BuildingElementGround':
         return elementFormInstances.BuildingElementGround.buildElementData({ baseData, elementZoneId });
@@ -5255,8 +5084,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       renderSpaceHeatSystemEmitterManager,
       // Wall-family generic derived render values — Adjacent-like's first
       // consumer (elementForms/adjacentLikeElement.tsx, slice-6 brief
-      // STAGE 2); Opaque/Transparent (still inline) read the same locals
-      // directly instead of through this ctx until Stages 3-4.
+      // STAGE 2); Transparent (elementForms/buildingElementTransparent.tsx,
+      // STAGE 3) is the next; Opaque (still inline) reads the same locals
+      // directly until Stage 4.
       selectedElement,
       selectedShape,
       derivedBaseHeight,
@@ -5266,6 +5096,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       liveRectArea,
       horizontalPolygonControlPitch,
       renderLinearDimensionsFields,
+      // Joined the group above in STAGE 3 — see types.ts for why these two
+      // aren't Transparent-exclusive despite this being their first
+      // extracted-module consumer.
+      selectedSlopedDimensions,
+      applyHostedParentElement,
     };
     switch (elementType) {
       case 'BuildingElementOpaque':
@@ -5719,250 +5554,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         );
 
       case 'BuildingElementTransparent':
-        return (
-          <>
-            {renderFieldLabel('Linked Wall:', elementType)}
-            <div className="element-input">
-              <ParentElementDropdown
-                value={wallShared.parentElement}
-                onChange={(value) => applyHostedParentElement(value, '')}
-                elementType={elementType}
-                zoneId={elementZoneId}
-                placeholder="Select a parent opaque element"
-                selfId={selection.type === 'element' ? selection.id : undefined}
-              />
-            </div>
-            {selectedShape !== 'polygon' && (
-              renderLinearDimensionsFields(registerBaseFieldRef, {
-                widthStep: '0.01',
-                heightStep: '0.01',
-                includeProfileTop: true,
-              })
-            )}
-            {showSlopedTransparentRebuildOpening ? (
-              <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                <button
-                  type="button"
-                  className="btn editor-action-btn editor-action-btn--secondary"
-                  onClick={rebuildSelectedSlopedTransparentOpening}
-                >
-                  Rebuild opening
-                </button>
-              </div>
-            ) : null}
-            {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
-            <div className="element-input" ref={registerBaseFieldRef('area')}>
-              <StandardInput
-	                  type="text"
-	                  inputMode="numeric"
-                value={formatToTwoDecimals(selectedShape === 'polygon' ? derivedPolygonArea : liveRectArea)}
-                unit={fieldUnit('area')}
-                readOnly
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Free Area Height (m):', elementType)}
-            <div
-              className="element-input"
-              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-              ref={registerBaseFieldRef('freeAreaHeight')}
-            >
-              <StandardInput
-                {...decimalInputProps(freeAreaHeightInput)}
-                unit={fieldUnit('free_area_height')}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('freeAreaHeight', freeAreaHeightInput.value)} issue={getFieldValidationIssue('freeAreaHeight', freeAreaHeightInput.value) || undefined} />
-            </div>
-            {renderFieldLabel('Mid Height (m):', elementType)}
-            <div
-              className="element-input"
-              style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
-              ref={registerBaseFieldRef('midHeight')}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', width: '100%' }}>
-                <div
-                  className={
-                    derivedWindowMidHeight > 0 &&
-                    typeof midHeightInput.value === 'number' &&
-                    Math.abs(midHeightInput.value - derivedWindowMidHeight) > 0.005
-                      ? 'custom-value'
-                      : ''
-                  }
-                  style={{ flex: 1 }}
-                >
-                  <StandardInput
-                    {...decimalInputProps(midHeightInput)}
-                    unit={fieldUnit('mid_height')}
-                    step="0.01"
-                    min="0"
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                    placeholder={derivedWindowMidHeight > 0 ? String(derivedWindowMidHeight) : undefined}
-                  />
-                </div>
-                {derivedWindowMidHeight > 0 &&
-                typeof midHeightInput.value === 'number' &&
-                Math.abs(midHeightInput.value - derivedWindowMidHeight) > 0.005 ? (
-                  <ResetFieldButton
-                    onClick={() => {
-                      midHeightInput.setValue(derivedWindowMidHeight);
-                      commitExistingElementDraft({ mid_height: derivedWindowMidHeight });
-                    }}
-                    align="inline"
-                    title={`Reset to ${derivedWindowMidHeight} m (base + height/2)`}
-                    ariaLabel="Reset Mid Height"
-                    label="Reset"
-                  />
-                ) : null}
-                <FieldValidationIndicator
-                  hasIssue={!!getFieldValidationIssue('midHeight', midHeightInput.value)}
-                  issue={getFieldValidationIssue('midHeight', midHeightInput.value) || undefined}
-                />
-              </div>
-              {derivedWindowMidHeight > 0 ? (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Default: {derivedWindowMidHeight} m (base_height + height / 2)
-                </div>
-              ) : null}
-            </div>
-            {renderFieldLabel('Max Window Open Area (m²):', elementType)}
-            <div
-              className="element-input"
-              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-              ref={registerBaseFieldRef('maxWindowOpenArea')}
-            >
-              <StandardInput
-                {...decimalInputProps(maxWindowOpenAreaInput)}
-                unit={fieldUnit('max_window_open_area')}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              {typeof maxWindowOpenAreaInput.value === 'number' &&
-              Math.abs(maxWindowOpenAreaInput.value - derivedWindowMaxOpenArea) > 0.005 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    maxWindowOpenAreaInput.setValue(derivedWindowMaxOpenArea);
-                    commitExistingElementDraft({ max_window_open_area: derivedWindowMaxOpenArea });
-                  }}
-                  className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"
-                  title={`Use suggested ${derivedWindowMaxOpenArea} m²`}
-                  aria-label="Use suggested max window open area"
-                >
-                  Use Suggested
-                </button>
-              ) : null}
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('maxWindowOpenArea', maxWindowOpenAreaInput.value)} issue={getFieldValidationIssue('maxWindowOpenArea', maxWindowOpenAreaInput.value) || undefined} />
-            </div>
-            <div style={INLINE_FIELD_NOTE_STYLE}>
-              Suggested from width x free area height (capped by total window area).
-            </div>
-            {renderFieldLabel('Frame Area Fraction:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRef('frame_area_fraction')}>
-              <StandardInput
-                {...decimalInputProps(freeAreaFractionInput)}
-                unit={fieldUnit('frame_area_fraction')}
-                step="0.01"
-                min="0"
-                max="1"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel(selectedShape === 'polygon' ? 'Surface facing:' : 'Pitch (degrees):', elementType, 'pitch')}
-            <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRef('pitch')}>
-              {selectedShape === 'polygon' ? (
-                <StandardDropdown
-                  value={horizontalPolygonSurfaceSelectValue(horizontalPolygonControlPitch)}
-                  unit={fieldUnit('pitch')}
-                  onChange={(value) => {
-                    if (value !== '0' && value !== '180') return;
-                    const next = value === '180' ? 180 : 0;
-                    wallShared.setPitch(next);
-                    if (selection.type === 'element') {
-                      updateElement(selection.id, { pitch: next });
-                    }
-                  }}
-                  options={HORIZONTAL_POLYGON_PITCH_OPTIONS}
-                  placeholder={HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER}
-                  variant="ghost"
-                  size="md"
-                />
-	              ) : (
-	                <StandardInput
-                  type="text"
-                  inputMode="decimal"
-                  value={wallShared.pitchDraftInput.inputValue}
-                  unit={fieldUnit('pitch')}
-                  onChange={wallShared.pitchDraftInput.handleInputChange}
-                  onBlur={wallShared.pitchDraftInput.handleBlur}
-                  min="0"
-                  max="180"
-                  variant="ghost"
-                  size="md"
-                />
-              )}
-              {selectedShape !== 'polygon' && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  {wallShared.pitch === 0
-                    ? 'Facing up (horizontal)'
-                    : wallShared.pitch === 90
-                      ? 'Vertical'
-                      : wallShared.pitch === 180
-                        ? 'Facing down (horizontal)'
-                        : 'Angled surface'}
-                </div>
-              )}
-            </div>
-            {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
-            <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRef('orientation360')}>
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                value={Number.isFinite(wallShared.orientation360) ? wallShared.orientation360 : getCurrentOrientation(getCurrentElementData() as Element)}
-                unit={fieldUnit('orientation360')}
-                onChange={(e) => wallShared.setOrientation360(Math.round(parseFloat(e.target.value) || 0))}
-                onBlur={(e) => {
-                  const parsed = Math.round(parseFloat(e.currentTarget.value) || 0);
-                  wallShared.setOrientation360(parsed);
-                  wallShared.applyOrientationToGeometry(parsed);
-                }}
-                step="1"
-                min="0"
-                max="360"
-                readOnly={!!wallShared.parentElement}
-                variant="ghost"
-                size="md"
-              />
-              {wallShared.parentElement && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {wallShared.parentElement}
-                </div>
-              )}
-            </div>
-            {renderFieldLabel('Base Height (m):', elementType, 'base_height')}
-            <div className="element-input" ref={registerBaseFieldRef('base_height')}>
-              <StandardInput
-                {...decimalInputProps(wallShared.baseHeightInput)}
-                unit={fieldUnit('base_height')}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-          </>
-        );
+        // Moved to elementForms/buildingElementTransparent.tsx (slice-6
+        // brief STAGE 3) — see that module's renderPanel().
+        return elementFormInstances.BuildingElementTransparent.renderPanel(formRenderCtx);
 
       case 'BuildingElementGround':
         return elementFormInstances.BuildingElementGround.renderPanel(formRenderCtx);
