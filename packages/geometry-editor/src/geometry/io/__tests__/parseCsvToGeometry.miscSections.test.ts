@@ -167,7 +167,7 @@ Fridge 1,Appliance,Fridge,,"1.000,2.000,0.000","{""energy_supply"":""mains_gas""
     const fridge = elements.find((e) => e.type === 'Appliance' && e.name === 'Fridge 1');
 
     expect(fridge).toBeDefined();
-    expect((fridge as any).extra_json).toEqual({ energy_supply: 'mains_gas' });
+    expect(fridge?.extra_json).toEqual({ energy_supply: 'mains_gas' });
   });
 
   it('restores Hot Water Outlets extra_json from current exports', () => {
@@ -181,10 +181,10 @@ Mixer Shower,HotWaterDemand,MixerShower,8.5,,,TRUE,"3.000,4.000,1.000","{""wwhrs
 `.trim();
 
     const { elements } = parseCsvToGeometry(csv);
-    const shower = elements.find((e) => e.type === 'HotWaterDemand' && (e as any).name === 'Mixer Shower');
+    const shower = elements.find((e) => e.type === 'HotWaterDemand' && e.name === 'Mixer Shower');
 
     expect(shower).toBeDefined();
-    expect((shower as any).extra_json).toEqual({ wwhrs: 'system_a' });
+    expect(shower?.extra_json).toEqual({ wwhrs: 'system_a' });
   });
 
   it('defaults Water Pipework rows without pipework_type to primary', () => {
