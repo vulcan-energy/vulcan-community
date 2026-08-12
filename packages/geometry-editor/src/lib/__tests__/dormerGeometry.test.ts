@@ -235,6 +235,13 @@ describe('dormerGeometry', () => {
     expect(isValidDormerHost(makeHostRoof({ pitch: 90 }))).toBe(false);
   });
 
+  it('rejects an Orientation pitch-axis sloped roof', () => {
+    expect(isValidDormerHost(makeHostRoof({
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180,
+    }))).toBe(false);
+  });
+
   it('derives host basis from the eaves edge and polygon interior', () => {
     const basis = deriveDormerHostBasis(makeHostRoof());
     expect(basis).not.toBeNull();

@@ -49,6 +49,7 @@ import {
 import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeometry';
 import { findSuspendedGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
 import { isDormerAnchorElement } from '../../lib/dormerGeometry';
+import { hasSlopePitchAxisHostedDependants, isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import {
   mergeUnheatedPitchedRoofCeilingElevationExtraJson,
   readAuthoredUnheatedPitchedRoofCeilingElevationM,
@@ -58,6 +59,7 @@ import {
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { ResetFieldButton } from '../ResetFieldButton';
 import { StandardInput } from '../StandardInput';
+import { CompactSegmentedControl } from '../WindowDetailControls';
 import type { Element } from '../../geometry/types';
 import {
   decimalInputProps,
@@ -120,6 +122,7 @@ export interface BuildingElementOpaqueFormState {
    * falls back to this (legacy's orientation360 display used a bare `0`
    * fallback, not getCurrentOrientation) — hydrate-only consumer here. */
   getCurrentOrientation: (element: Element) => number;
+  setSlopePitchAxis: ElementFormStateCtx['setSlopePitchAxis'];
   /** Opaque-exclusive state (slice-6 brief decision 7). */
   isUnheatedPitchedRoof: boolean;
   setIsUnheatedPitchedRoof: (value: boolean) => void;
@@ -164,6 +167,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementOpaqueFormState 
     setOrientation360: ctx.shared.setOrientation360,
     applyOrientationToGeometry: ctx.shared.applyOrientationToGeometry,
     getCurrentOrientation: ctx.getCurrentOrientation,
+    setSlopePitchAxis: ctx.setSlopePitchAxis,
     isUnheatedPitchedRoof,
     setIsUnheatedPitchedRoof,
     isExternalDoor,
@@ -249,6 +253,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       flipElementOrientation,
       unheatedPitchedRoofCeilingElevationSuggestion,
       renderDormerBundleEditor,
+      getGlobalOrientationOffset,
     } = ctx;
 
     // Decision 2's seam: same predicate the orchestrator's own
@@ -274,9 +279,9 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       if (!selectedElement || selectedElement.type !== 'BuildingElementOpaque') return null;
       const draftElement = { ...selectedElement, pitch: state.pitch } as Element;
       const grossArea = selectedShape === 'polygon' || selectedShape === 'sloped-polygon'
-        ? getElementGrossArea(draftElement)
+        ? getElementGrossArea(draftElement, getGlobalOrientationOffset())
         : liveRectArea;
-      const subtractedArea = getOpaqueOpeningArea(selectedElement, elementsById);
+      const subtractedArea = getOpaqueOpeningArea(selectedElement, elementsById, getGlobalOrientationOffset());
       const clampedNet = Math.max(0, grossArea - subtractedArea);
       return {
         grossArea: roundToTwoDecimals(grossArea),
@@ -347,6 +352,15 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       const [start, end] = coordinates;
       return Math.hypot(end.x - start.x, end.y - start.y) > 0.01;
     })();
+    const showSlopePitchAxis =
+      selectedElement?.type === 'BuildingElementOpaque' &&
+      selectedShape === 'sloped-polygon' &&
+      !selectedElement.parent_element;
+    const orientationPitchAxis = showSlopePitchAxis && isOrientationPitchAxis(selectedElement);
+    const slopePitchAxisEntryBlocked = showSlopePitchAxis && hasSlopePitchAxisHostedDependants(
+      selectedElement,
+      Object.values(elementsById),
+    );
 
     return (
       <>
@@ -416,6 +430,29 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
             refRegistrar: registerBaseFieldRefs,
           },
         )}
+        {showSlopePitchAxis ? (
+          <>
+            {renderFieldLabel('Pitch axis:')}
+            <div className="element-input">
+              <CompactSegmentedControl
+                value={orientationPitchAxis ? 'orientation' : 'bottom-edge'}
+                options={[
+                  { value: 'bottom-edge', label: 'Bottom edge' },
+                  {
+                    value: 'orientation',
+                    label: 'Orientation',
+                    disabled: slopePitchAxisEntryBlocked && !orientationPitchAxis,
+                  },
+                ]}
+                onChange={(axis) => state.setSlopePitchAxis(selectedElement.id, axis)}
+                ariaLabel="Pitch axis"
+              />
+              {slopePitchAxisEntryBlocked && !orientationPitchAxis ? (
+                <div style={INLINE_FIELD_NOTE_STYLE}>Remove hosted rooflights and dormers before changing the pitch axis.</div>
+              ) : null}
+            </div>
+          </>
+        ) : null}
         {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
         <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('orientation360')}>
           <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>

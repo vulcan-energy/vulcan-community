@@ -16,6 +16,7 @@ import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { roundToTwoDecimals } from '../constants';
 import { opaqueEnvelopeVerticalExtentM, zonesCompatible } from './proposeAdjacentWallJunction';
 import { isSlopedPitchedRoofElementForEavesGable } from './proposeSlopedRoofEavesGable';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { type FacadeOpeningEdgeRole, type FacadeOpeningTbProposal, psiTable37ForCode } from './proposeFacadeOpenings';
 
 const MIN_WALL_PLAN_LEN_M = 0.05;
@@ -71,6 +72,7 @@ export function proposeDormerWallToHostRoofR8R9ThermalBridges(
   for (const e of elements) {
     if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) continue;
     const o = e as BuildingElementOpaque;
+    if (isOrientationPitchAxis(o)) continue;
     if (!isSlopedPitchedRoofElementForEavesGable(o)) continue;
     const n = (o.name ?? '').trim();
     if (n) roofByName.set(n, o);

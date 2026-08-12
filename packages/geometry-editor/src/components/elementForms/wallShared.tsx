@@ -78,6 +78,7 @@ import { roundToTwoDecimals } from '../../geometry/constants';
 import { applyCompassOrientationToSlopedPolygonCoords } from '../../lib/openingSegmentOutward';
 import { convertShapeCoordinates, getElementShape } from '../../lib/shapeUtils';
 import { VULCAN_UI_PARTY_ELEMENT_KEY } from '../../lib/assemblyMaterialFabric';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, ElementType } from '../../geometry/types';
 // Not formPrimitives' useDecimalInput: that wrapper doesn't forward `syncExternal`, and the
 // single-element pitch input needs it (see pitchDraftInput below) so the draft re-syncs from
@@ -356,6 +357,10 @@ export function useWallSharedFormState(args: {
 
     const shape = getElementShape(el as Element);
     if (shape === 'sloped-polygon' && el.coordinates.length >= 3) {
+      if (isOrientationPitchAxis(el)) {
+        commitElementNumericField('orientation360')(desiredOrientationDeg);
+        return;
+      }
       const globalOffset = getGlobalOrientationOffset();
       const next = applyCompassOrientationToSlopedPolygonCoords(
         el.coordinates as Array<{ x: number; y: number; z: number }>,

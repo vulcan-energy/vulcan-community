@@ -170,6 +170,7 @@ import {
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { ResetFieldButton } from '../ResetFieldButton';
 import { StandardInput } from '../StandardInput';
+import { CompactSegmentedControl } from '../WindowDetailControls';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import type { Element } from '../../geometry/types';
 import {
@@ -181,6 +182,7 @@ import {
 } from './formPrimitives';
 import { hydrateWallSharedFields } from './wallShared';
 import { renderWallPitchField } from './wallPitchField';
+import { hasSlopePitchAxisHostedDependants, isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import type {
   ElementFormModule,
   ElementFormStateCtx,
@@ -211,6 +213,7 @@ export interface BuildingElementTransparentFormState {
    * current orientation — same precedent as adjacentLikeElement.tsx's
    * getGlobalOrientationOffset threading. */
   getCurrentOrientation: (element: Element) => number;
+  setSlopePitchAxis: ElementFormStateCtx['setSlopePitchAxis'];
   /** Captured from ElementFormStateCtx so hydrate() can seed
    * prevDerivedWindowMidHeightRef/prevDerivedWindowMaxOpenAreaRef below —
    * same threading precedent as getCurrentOrientation above. */
@@ -355,6 +358,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     setOrientation360: ctx.shared.setOrientation360,
     applyOrientationToGeometry: ctx.shared.applyOrientationToGeometry,
     getCurrentOrientation: ctx.getCurrentOrientation,
+    setSlopePitchAxis: ctx.setSlopePitchAxis,
     getTransparentOpeningDerivedValues: ctx.getTransparentOpeningDerivedValues,
     freeAreaFractionInput,
     freeAreaHeightInput,
@@ -466,6 +470,15 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
         heightM: selectedSlopedDimensions.height,
         pitchDegrees: typeof selectedElement.pitch === 'number' ? selectedElement.pitch : state.pitch,
       });
+    const showSlopePitchAxis =
+      selectedElement?.type === 'BuildingElementTransparent' &&
+      selectedShape === 'sloped-polygon' &&
+      !selectedElement.parent_element;
+    const orientationPitchAxis = showSlopePitchAxis && isOrientationPitchAxis(selectedElement);
+    const slopePitchAxisEntryBlocked = showSlopePitchAxis && hasSlopePitchAxisHostedDependants(
+      selectedElement,
+      Object.values(ctx.elementsById),
+    );
     const rebuildSelectedSlopedTransparentOpening = () => {
       if (
         selectedElement?.type !== 'BuildingElementTransparent' ||
@@ -670,6 +683,29 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             refRegistrar: registerBaseFieldRef,
           },
         )}
+        {showSlopePitchAxis ? (
+          <>
+            {renderFieldLabel('Pitch axis:')}
+            <div className="element-input">
+              <CompactSegmentedControl
+                value={orientationPitchAxis ? 'orientation' : 'bottom-edge'}
+                options={[
+                  { value: 'bottom-edge', label: 'Bottom edge' },
+                  {
+                    value: 'orientation',
+                    label: 'Orientation',
+                    disabled: slopePitchAxisEntryBlocked && !orientationPitchAxis,
+                  },
+                ]}
+                onChange={(axis) => state.setSlopePitchAxis(selectedElement.id, axis)}
+                ariaLabel="Pitch axis"
+              />
+              {slopePitchAxisEntryBlocked && !orientationPitchAxis ? (
+                <div style={INLINE_FIELD_NOTE_STYLE}>Remove hosted rooflights and dormers before changing the pitch axis.</div>
+              ) : null}
+            </div>
+          </>
+        ) : null}
         {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
         <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRef('orientation360')}>
           <StandardInput

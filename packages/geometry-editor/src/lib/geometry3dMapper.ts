@@ -25,7 +25,7 @@ import {
   isBasementGroundElement,
   readUnheatedBasementWallHeightAboveGroundM,
 } from './basementGeometry';
-import { computeSlopedPolygonInwardNormal2D } from './geometry3dSloped';
+import { isOrientationPitchAxis, slopedPolygonPlaneBasis } from './slopePitchAxis';
 import { calculateDerivedBaseHeight, withEffectiveStoreyHeights } from './zoneDerivation';
 import { getMechanicalVentilationDuctworkRoleStyle } from './mvhrDuctwork';
 import { readRootCssVar } from './cssVars';
@@ -57,6 +57,7 @@ interface BuildGeometry3DPrimitivesOptions {
   elementIds: string[];
   floors: Floor[];
   currentFloorZ?: number;
+  globalOrientationOffset?: number;
 }
 
 const WALL_DEFAULT_HEIGHT_M = 2.4;
@@ -398,12 +399,20 @@ function tryMapPolygonSlopedPrimitive(
   floors: Floor[],
   planarByZ: boolean,
   floorZLookup: FloorZLookup,
+  globalOrientationOffset: number | undefined,
   currentFloorZ?: number,
 ): PolygonSlopedPrimitive | null {
   if (element.type === 'BuildingElementGround') return null;
   if (!isPitchSlopedSurface(element)) return null;
-  const inward = computeSlopedPolygonInwardNormal2D(points);
-  if (!inward) return null;
+  const orientationAxis = isOrientationPitchAxis(element);
+  if (orientationAxis && !Number.isFinite(globalOrientationOffset)) return null;
+  const basis = slopedPolygonPlaneBasis(
+    points,
+    orientationAxis ? 'orientation' : 'bottom-edge',
+    (element as { orientation360?: number }).orientation360 ?? 0,
+    globalOrientationOffset ?? 0,
+  );
+  if (!basis) return null;
   const pitch = (element as { pitch: number }).pitch;
   const baseElevationM = getPolygonBaseElevationFor3D(element, floorElevations, floors, planarByZ, floorZLookup);
   const color = getColorForElement3D(element);
@@ -417,7 +426,9 @@ function tryMapPolygonSlopedPrimitive(
     points,
     baseElevationM,
     pitchDeg: pitch,
-    inwardNormal2D: inward,
+    hingeAnchorXY: basis.anchorXY,
+    pitchAxis: orientationAxis ? 'orientation' : 'bottom-edge',
+    inwardNormal2D: basis.upslope2D,
     thicknessM: PLANAR_ELEMENT_THICKNESS_M,
     color,
     isOpening: opening,
@@ -741,6 +752,7 @@ function mapPolygonElementToPrism(
   floorElevations: Map<number, number>,
   floors: Floor[],
   floorZLookup: FloorZLookup,
+  globalOrientationOffset: number | undefined,
   currentFloorZ?: number,
 ): PolygonPrismPrimitive | PolygonSlopedPrimitive | null {
   if (!element.coordinates || element.coordinates.length < 3) return null;
@@ -752,7 +764,7 @@ function mapPolygonElementToPrism(
   if (points.length < 3) return null;
 
   const planarByZ = isPlanarAtSingleZ(element);
-  const sloped = tryMapPolygonSlopedPrimitive(element, points, floorElevations, floors, planarByZ, floorZLookup, currentFloorZ);
+  const sloped = tryMapPolygonSlopedPrimitive(element, points, floorElevations, floors, planarByZ, floorZLookup, globalOrientationOffset, currentFloorZ);
   if (sloped) return sloped;
 
   let heightM = getElementHeight(element);
@@ -1002,6 +1014,7 @@ function mapServicePolygonToPrism(
   floorElevations: Map<number, number>,
   floors: Floor[],
   floorZLookup: FloorZLookup,
+  globalOrientationOffset: number | undefined,
   currentFloorZ?: number,
 ): PolygonPrismPrimitive | PolygonSlopedPrimitive | null {
   if (!element.coordinates || element.coordinates.length < 3) return null;
@@ -1013,7 +1026,7 @@ function mapServicePolygonToPrism(
   if (points.length < 3) return null;
 
   const planarByZ = isPlanarAtSingleZ(element);
-  const sloped = tryMapPolygonSlopedPrimitive(element, points, floorElevations, floors, planarByZ, floorZLookup, currentFloorZ);
+  const sloped = tryMapPolygonSlopedPrimitive(element, points, floorElevations, floors, planarByZ, floorZLookup, globalOrientationOffset, currentFloorZ);
   if (sloped) return sloped;
 
   return {
@@ -1036,6 +1049,7 @@ function mapNonEnvelopeElementToPrimitives(
   floorElevations: Map<number, number>,
   floorZLookup: FloorZLookup,
   _floors: Floor[],
+  globalOrientationOffset: number | undefined,
   currentFloorZ?: number,
 ): Geometry3DPrimitive[] {
   const n = element.coordinates?.length ?? 0;
@@ -1055,7 +1069,7 @@ function mapNonEnvelopeElementToPrimitives(
   if (n === 2) {
     return mapServiceLineToPrimitives(element, floorElevations, floorZLookup, currentFloorZ, _floors);
   }
-  const p = mapServicePolygonToPrism(element, floorElevations, _floors, floorZLookup, currentFloorZ);
+  const p = mapServicePolygonToPrism(element, floorElevations, _floors, floorZLookup, globalOrientationOffset, currentFloorZ);
   return p ? [p] : [];
 }
 
@@ -1066,6 +1080,7 @@ function mapElementTo3DPrimitives(
   floors: Floor[],
   floorZLookup: FloorZLookup,
   allElements: Element[],
+  globalOrientationOffset: number | undefined,
   currentFloorZ?: number,
 ): Geometry3DPrimitive[] {
   const t = element.type;
@@ -1101,7 +1116,7 @@ function mapElementTo3DPrimitives(
       getColorForElement3D(element),
     );
     if (boxes?.length) return boxes;
-    return mapNonEnvelopeElementToPrimitives(element, floorElevations, floorZLookup, floors, currentFloorZ);
+    return mapNonEnvelopeElementToPrimitives(element, floorElevations, floorZLookup, floors, globalOrientationOffset, currentFloorZ);
   }
 
   if (t === 'ContextShading') {
@@ -1117,7 +1132,7 @@ function mapElementTo3DPrimitives(
       getColorForElement3D(element),
     );
     if (prism) return [prism];
-    return mapNonEnvelopeElementToPrimitives(element, floorElevations, floorZLookup, floors, currentFloorZ);
+    return mapNonEnvelopeElementToPrimitives(element, floorElevations, floorZLookup, floors, globalOrientationOffset, currentFloorZ);
   }
 
   const coordsLength = element.coordinates?.length ?? 0;
@@ -1130,7 +1145,7 @@ function mapElementTo3DPrimitives(
       return p ? [p] : [];
     }
     if (coordsLength >= 3) {
-      const p = mapPolygonElementToPrism(element, floorElevations, floors, floorZLookup, currentFloorZ);
+      const p = mapPolygonElementToPrism(element, floorElevations, floors, floorZLookup, globalOrientationOffset, currentFloorZ);
       if (!p) return [];
       if (t === 'BuildingElementGround') {
         return [
@@ -1161,7 +1176,7 @@ function mapElementTo3DPrimitives(
       return p ? [p] : [];
     }
     if (coordsLength >= 3) {
-      const p = mapPolygonElementToPrism(element, floorElevations, floors, floorZLookup, currentFloorZ);
+      const p = mapPolygonElementToPrism(element, floorElevations, floors, floorZLookup, globalOrientationOffset, currentFloorZ);
       return p ? [p] : [];
     }
     return [];
@@ -1184,7 +1199,7 @@ function mapElementTo3DPrimitives(
   }
 
   // All other CSV / store types (lighting, ducts, PV, systems, …)
-  return mapNonEnvelopeElementToPrimitives(element, floorElevations, floorZLookup, floors, currentFloorZ);
+  return mapNonEnvelopeElementToPrimitives(element, floorElevations, floorZLookup, floors, globalOrientationOffset, currentFloorZ);
 }
 
 export function buildGeometry3DPrimitives({
@@ -1192,6 +1207,7 @@ export function buildGeometry3DPrimitives({
   elementIds,
   floors,
   currentFloorZ,
+  globalOrientationOffset,
 }: BuildGeometry3DPrimitivesOptions): Geometry3DPrimitive[] {
   // Bake wall-derived + user-override storey heights into the floors array once, then thread
   // the effective floors through the renderer. Without this, models authored under the new
@@ -1205,7 +1221,7 @@ export function buildGeometry3DPrimitives({
   for (const elementId of elementIds) {
     const element = elementsById[elementId];
     if (!element) continue;
-    primitives.push(...mapElementTo3DPrimitives(element, elementsById, floorElevations, effFloors, floorZLookup, allElements, currentFloorZ));
+    primitives.push(...mapElementTo3DPrimitives(element, elementsById, floorElevations, effFloors, floorZLookup, allElements, globalOrientationOffset, currentFloorZ));
   }
 
   return primitives;

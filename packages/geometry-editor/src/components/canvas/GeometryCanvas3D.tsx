@@ -617,6 +617,8 @@ export interface GeometryCanvas3DProps {
   elementsById: Record<string, Element>;
   elementIds: string[];
   floors: Floor[];
+  /** Required for orientation-axis sloped geometry; the live canvas always supplies the project value. */
+  globalOrientationOffset?: number;
   currentFloorZ?: number;
   selection: Selection | null;
   selectedElementIds: string[];
@@ -1881,10 +1883,9 @@ const PolygonSlopedMesh: React.FC<{
   );
   const renderOrder = meshRenderOrderForFloor(primitive.isCurrentFloor, primitive.isOpening);
   const geometry = useMemo(() => {
-    const eaves: [number, number] = [primitive.points[0][0], primitive.points[0][1]];
     return buildSlopedPolygonBufferGeometry(
       primitive.points,
-      eaves,
+      primitive.hingeAnchorXY,
       primitive.inwardNormal2D,
       primitive.baseElevationM,
       primitive.pitchDeg,
@@ -2686,6 +2687,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
   elementsById,
   elementIds,
   floors,
+  globalOrientationOffset,
   currentFloorZ,
   selection,
   selectedElementIds,
@@ -2707,9 +2709,9 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
     () => {
       void themeId;
       void customTheme;
-      return buildGeometry3DPrimitives({ elementsById, elementIds, floors, currentFloorZ });
+      return buildGeometry3DPrimitives({ elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset });
     },
-    [elementsById, elementIds, floors, currentFloorZ, themeId, customTheme],
+    [elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset, themeId, customTheme],
   );
   const editPreviewElementIds = useMemo(
     () => Object.keys(editPreviewElementsById ?? {}),
@@ -2732,9 +2734,10 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
           elementIds: editPreviewElementIds,
           floors,
           currentFloorZ,
+          globalOrientationOffset,
         })
       : [],
-    [currentFloorZ, editPreviewElementIds, editPreviewElementsById, editPreviewSceneElementsById, floors],
+    [currentFloorZ, editPreviewElementIds, editPreviewElementsById, editPreviewSceneElementsById, floors, globalOrientationOffset],
   );
 
   const center = useMemo<[number, number, number]>(() => {

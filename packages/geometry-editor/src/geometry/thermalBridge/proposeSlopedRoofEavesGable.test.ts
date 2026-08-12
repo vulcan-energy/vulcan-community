@@ -81,6 +81,16 @@ describe('proposeSlopedRoofEavesGableThermalBridges', () => {
     expect(r[0]!.junctionCode).toBe('R4');
   });
 
+  it('emits no first-edge proposals for an Orientation pitch-axis roof', () => {
+    const orientationRoof = {
+      ...warmRect,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 135,
+    } as BuildingElementOpaque;
+
+    expect(proposeSlopedRoofEavesGableThermalBridges([orientationRoof] as Element[])).toEqual([]);
+  });
+
   it('uses projected ceiling boundary for cold loft gables and suppresses ridge proposals', () => {
     const out = proposeSlopedRoofEavesGableThermalBridges([coldQuadSamePlan] as Element[]);
     const g = out.filter((o) => o.edgeRole === 'sloped_roof_gable');

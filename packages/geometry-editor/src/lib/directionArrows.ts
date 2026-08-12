@@ -7,6 +7,7 @@ import {
   orientation360FromSegmentOutwardModelXY,
   segmentTangentAndOpeningOutwardModelXY,
 } from './openingSegmentOutward';
+import { downslopeUnitModelXY, isOrientationPitchAxis } from './slopePitchAxis';
 
 export interface DirectionArrow {
   centerX: number;
@@ -25,9 +26,9 @@ export interface ArrowHeadPoints {
 /**
  * Direction arrow for line elements and sloped polygons.
  * Tip direction = opening-outward from segment sense A→B (same as 3D window shading); `orientation360` is only required to exist.
- * For sloped polygons, uses the first two coordinates (bottom edge).
+ * Orientation-axis slopes use their authored fall line; bottom-edge slopes retain the first-edge convention.
  */
-export function calculateDirectionArrow(element: Element): DirectionArrow | null {
+export function calculateDirectionArrow(element: Element, globalOrientationOffset?: number): DirectionArrow | null {
   // Process line elements and sloped polygons (BuildingElementOpaque, BuildingElementTransparent, OnSiteGeneration)
   if (element.type !== 'BuildingElementOpaque' && element.type !== 'BuildingElementTransparent' && element.type !== 'OnSiteGeneration') {
     return null;
@@ -41,6 +42,20 @@ export function calculateDirectionArrow(element: Element): DirectionArrow | null
   // Must have orientation360 property
   if (element.orientation360 === undefined || element.orientation360 === null) {
     return null;
+  }
+
+  if (isOrientationPitchAxis(element)) {
+    if (element.coordinates.length < 3 || !Number.isFinite(globalOrientationOffset)) return null;
+    const centerX = element.coordinates.reduce((sum, point) => sum + point.x, 0) / element.coordinates.length;
+    const centerY = element.coordinates.reduce((sum, point) => sum + point.y, 0) / element.coordinates.length;
+    const downslope = downslopeUnitModelXY(element.orientation360, globalOrientationOffset!);
+    return {
+      centerX,
+      centerY,
+      arrowX: centerX + 0.25 * downslope[0],
+      arrowY: centerY + 0.25 * downslope[1],
+      orientation: element.orientation360,
+    };
   }
 
   // For sloped polygons, use first two coordinates (bottom edge)

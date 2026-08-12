@@ -73,6 +73,13 @@ import {
 import { tryAxisAlignedRightAngleSnapForVertex } from '../../lib/vertexEditSnap';
 import { geometryPerf } from '../../lib/geometryPerf';
 import { getMechanicalVentilationDuctworkRoleStyle } from '../../lib/mvhrDuctwork';
+import {
+  downslopeUnitModelXY,
+  isOrientationPitchAxis,
+  slopedPolygonPlaneBasis,
+  slopeHingeContourSegment,
+} from '../../lib/slopePitchAxis';
+import { normalizeOrientation360Deg, roundToTwoDecimals } from '../../geometry/constants';
 
 type LineVertexDragHint = { handle: 0 | 1; wallSnap: boolean; vertexSnap: boolean };
 
@@ -479,6 +486,8 @@ export interface ElementRendererProps {
   spaceLabellerSuppressFabricInteraction?: boolean;
   /** Pre-projected canvas coords from the parent's elementCanvasData. Skips a redundant worldToCanvas pass per element per render. */
   canvasCoords?: Array<{ x: number; y: number }>;
+  /** Live project offset; required by Orientation-axis slope visuals and editing. */
+  globalOrientationOffset?: number;
 }
 
 function getDormerCutoutPolygonsForHost(
@@ -533,8 +542,10 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   categoryGhostOnCanvas = false,
   spaceLabellerSuppressFabricInteraction = false,
   canvasCoords: canvasCoordsProp,
+  globalOrientationOffset,
 }) => {
   const geometryStore = useGeometryStoreApi();
+  const resolvedGlobalOrientationOffset = globalOrientationOffset ?? geometryStore.getState().globalOrientationOffset;
   const coordinates = element.coordinates || [];
   const isReadOnlyDevelopmentContextShading = isDevelopmentContextGeneratedShading(element);
   const [lineVertexDragHintState, setLineVertexDragHint] = useState<{
@@ -663,9 +674,10 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
         panOffset,
         canvasCenter,
         changedElement,
+        resolvedGlobalOrientationOffset,
       );
     }
-  }, [canvasCenter, elementsById, floors, panOffset, scale]);
+  }, [canvasCenter, elementsById, floors, panOffset, resolvedGlobalOrientationOffset, scale]);
   const previewLineHostedDescendantsForCoords = useCallback((
     target: DragPreviewTarget,
     elementId: string,
@@ -806,6 +818,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             scale,
             panOffset,
             canvasCenter,
+            resolvedGlobalOrientationOffset,
           );
         }
       }
@@ -821,11 +834,12 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
         scale,
         panOffset,
         canvasCenter,
+        resolvedGlobalOrientationOffset,
       );
 
       return canvas;
     },
-    [canvasCenter, elementsById, panOffset, scale],
+    [canvasCenter, elementsById, panOffset, resolvedGlobalOrientationOffset, scale],
   );
   // Floor-aware opacity: elements on current floor are fully visible, others are 20% opacity
   const isCurrentFloor = isElementOnActiveCanvasFloor(element, currentFloorZ, floors);
@@ -842,6 +856,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
     baseFloorOpacity * spaceLabellerDim * (categoryGhostOnCanvas ? CATEGORY_GHOST_OPACITY_FACTOR : 1);
 
   const shape = getElementShape(element as any);
+  const orientationPitchAxis = shape === 'sloped-polygon' && isOrientationPitchAxis(element);
   const showDirectSelectionHandles = isSelected && getDormerBundleInfo(element) === null;
   const isRegularWallOpaque =
     element.type === 'BuildingElementOpaque' && (element as any).is_external_door !== true;
@@ -1465,6 +1480,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                         panOffset,
                         canvasCenter,
                         element,
+                        resolvedGlobalOrientationOffset,
                       );
                     previewLineHostedDescendantsForCoords(draggedNode, element.id, previewCoords);
                   }
@@ -1658,6 +1674,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       panOffset,
                       canvasCenter,
                       element,
+                      resolvedGlobalOrientationOffset,
                     );
                     previewLineHostedDescendantsForCoords(draggedNode, element.id, previewCoords);
                   }
@@ -2032,6 +2049,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       panOffset,
                       canvasCenter,
                       element,
+                      resolvedGlobalOrientationOffset,
                     );
                     }
                   });
@@ -2254,11 +2272,27 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
       );
     }
   } else if (shape === 'sloped-polygon') {
-    // Sloped polygon rendering: solid bottom edge + dashed slope edges + orientation arrow
+    // Bottom-edge state retains the historical first-edge rendering. Orientation state uses a virtual hinge contour.
     if (coordinates.length >= 3) {
       // First two coordinates define the bottom edge
       const bottomEdgeCoords = canvasCoords.slice(0, 2);
       const slopeEdgeCoords = canvasCoords.slice(2);
+      const orientationBasis = orientationPitchAxis
+        ? slopedPolygonPlaneBasis(
+            coordinates.map((point) => [point.x, point.y] as [number, number]),
+            'orientation',
+            (element as { orientation360?: number }).orientation360 ?? 0,
+            resolvedGlobalOrientationOffset,
+          )
+        : null;
+      const contourWorld = orientationBasis
+        ? slopeHingeContourSegment(
+            coordinates.map((point) => [point.x, point.y] as [number, number]),
+            orientationBasis.anchorXY,
+            orientationBasis.upslope2D,
+          )
+        : null;
+      const contourCanvas = contourWorld?.map(([x, y]) => worldToCanvas({ x, y }, scale, panOffset, canvasCenter));
 
       return (
         <Group key={element.id}
@@ -2288,7 +2322,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
           <Line
             name={`shape-${element.id}`}
             points={canvasCoords.flatMap(coord => [coord.x, coord.y])}
-            stroke={hoverStroke}
+            stroke={orientationPitchAxis && !isHoveredFromMenu ? 'transparent' : hoverStroke}
             strokeWidth={isSelected ? 3 : (isHoveredFromMenu ? 3 : 2)}
             closed={true}
             fill={elementFill}
@@ -2300,24 +2334,37 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             }}
           />
 
-          {/* Solid bottom edge (first two coordinates) */}
-          <Line
-            name={`slope-bottom-${element.id}`}
-            points={bottomEdgeCoords.flatMap(coord => [coord.x, coord.y])}
-            stroke={elementColor}
-            strokeWidth={isSelected ? 4 : 3}
-            onClick={(e) => {
-              if (drawMode !== 'none') return;
-              e.cancelBubble = true;
-              handleElementClick(element.id, e);
-            }}
-          />
+          {/* Solid authored bottom edge, or the virtual low contour for Orientation state. */}
+          {!orientationPitchAxis ? (
+            <Line
+              name={`slope-bottom-${element.id}`}
+              points={bottomEdgeCoords.flatMap(coord => [coord.x, coord.y])}
+              stroke={elementColor}
+              strokeWidth={isSelected ? 4 : 3}
+              onClick={(e) => {
+                if (drawMode !== 'none') return;
+                e.cancelBubble = true;
+                handleElementClick(element.id, e);
+              }}
+            />
+          ) : contourCanvas ? (
+            <Line
+              name={`slope-contour-${element.id}`}
+              points={contourCanvas.flatMap((coord) => [coord.x, coord.y])}
+              stroke={elementColor}
+              strokeWidth={isSelected ? 4 : 3}
+              listening={false}
+            />
+          ) : null}
 
           {/* Dashed slope edges (remaining coordinates) */}
           {slopeEdgeCoords.length > 0 && (
             <Line
               name={`slope-edges-${element.id}`}
-              points={[...bottomEdgeCoords.slice(-1), ...slopeEdgeCoords, bottomEdgeCoords[0]].flatMap(coord => [coord.x, coord.y])}
+              points={(orientationPitchAxis
+                ? [...canvasCoords, canvasCoords[0]]
+                : [...bottomEdgeCoords.slice(-1), ...slopeEdgeCoords, bottomEdgeCoords[0]]
+              ).flatMap(coord => [coord.x, coord.y])}
               stroke={elementColor}
               strokeWidth={isSelected ? 3 : 2}
               dash={[6, 3]}
@@ -2329,9 +2376,9 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             />
           )}
 
-          {/* Orientation arrow on bottom edge */}
+          {/* Fall-line arrow. */}
           {(() => {
-            const directionArrow = calculateDirectionArrow(element);
+            const directionArrow = calculateDirectionArrow(element, resolvedGlobalOrientationOffset);
             if (!directionArrow) return null;
 
             // Convert world coordinates to canvas coordinates
@@ -2373,6 +2420,70 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   lineJoin="round"
                   listening={false}
                 />
+                {orientationPitchAxis && isSelected ? (
+                  <Circle
+                    name={`orientation-arrow-handle-${element.id}`}
+                    x={arrowCanvas.x}
+                    y={arrowCanvas.y}
+                    radius={10}
+                    opacity={0}
+                    draggable
+                    onDragStart={(e) => {
+                      const session = beginCanvasInteraction({
+                        kind: 'orientation-arrow-drag',
+                        targetId: element.id,
+                        snapshot: { orientation360: (element as { orientation360?: number }).orientation360 },
+                      });
+                      writeCanvasInteractionSession(e.target, session);
+                    }}
+                    onDragMove={(e) => {
+                      const pointerWorld = canvasToWorld(e.target.position(), scale, panOffset, canvasCenter);
+                      const dx = pointerWorld.x - directionArrow.centerX;
+                      const dy = pointerWorld.y - directionArrow.centerY;
+                      if (Math.hypot(dx, dy) <= 1e-9) return;
+                      const rawBearing = normalizeOrientation360Deg(
+                        Math.atan2(dx, dy) * 180 / Math.PI - resolvedGlobalOrientationOffset,
+                      );
+                      let snappedBearing: number | null = null;
+                      let snappedDifference = Number.POSITIVE_INFINITY;
+                      for (const candidate of Object.values(elementsById)) {
+                        if (
+                          candidate.id === element.id ||
+                          (candidate.type !== 'BuildingElementOpaque' && candidate.type !== 'BuildingElementTransparent') ||
+                          getElementShape(candidate) !== 'sloped-polygon'
+                        ) continue;
+                        const candidateArrow = calculateDirectionArrow(candidate, resolvedGlobalOrientationOffset);
+                        if (!candidateArrow) continue;
+                        const difference = Math.abs(((candidateArrow.orientation - rawBearing + 540) % 360) - 180);
+                        if (difference <= 3 && difference < snappedDifference) {
+                          snappedBearing = candidateArrow.orientation;
+                          snappedDifference = difference;
+                        }
+                      }
+                      const orientation360 = normalizeOrientation360Deg(
+                        snappedBearing ?? Math.round(rawBearing / 5) * 5,
+                      );
+                      const downslope = downslopeUnitModelXY(orientation360, resolvedGlobalOrientationOffset);
+                      const snappedCanvas = worldToCanvas({
+                        x: directionArrow.centerX + downslope[0] * 0.25,
+                        y: directionArrow.centerY + downslope[1] * 0.25,
+                      }, scale, panOffset, canvasCenter);
+                      e.target.position(snappedCanvas);
+                      updateElement(element.id, { orientation360 }, true);
+                    }}
+                    onDragEnd={(e) => {
+                      const world = canvasToWorld(e.target.position(), scale, panOffset, canvasCenter);
+                      const orientation360 = roundToTwoDecimals(normalizeOrientation360Deg(
+                        Math.atan2(world.x - directionArrow.centerX, world.y - directionArrow.centerY) * 180 / Math.PI -
+                          resolvedGlobalOrientationOffset,
+                      ));
+                      updateElement(element.id, { orientation360 });
+                      const session = readCanvasInteractionSession(e.target);
+                      endCanvasInteraction(session, { committed: true });
+                      writeCanvasInteractionSession(e.target, null);
+                    }}
+                  />
+                ) : null}
               </>
             );
           })()}
@@ -2469,6 +2580,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       panOffset,
                       canvasCenter,
                       element,
+                      resolvedGlobalOrientationOffset,
                     );
                   }}
                   onDragEnd={(e) => {
@@ -2567,6 +2679,7 @@ export const ElementRenderer = memo(ElementRendererComponent, (prevProps, nextPr
   if (prevProps.panOffset.x !== nextProps.panOffset.x || prevProps.panOffset.y !== nextProps.panOffset.y) return false; // Pan changes require re-render
   if (prevProps.canvasCenter.x !== nextProps.canvasCenter.x || prevProps.canvasCenter.y !== nextProps.canvasCenter.y) return false;
   if (prevProps.currentFloorZ !== nextProps.currentFloorZ) return false;
+  if (prevProps.globalOrientationOffset !== nextProps.globalOrientationOffset) return false;
   if (prevProps.floors !== nextProps.floors) return false;
   if (prevProps.canvasElementPalette !== nextProps.canvasElementPalette) return false;
   if (prevProps.canvasInteractionPalette !== nextProps.canvasInteractionPalette) return false;

@@ -89,6 +89,16 @@ describe('computeRoofHostedOpeningPlacement', () => {
     expect(marker).toBeNull();
   });
 
+  it('does not place or move an opening on an Orientation pitch-axis roof', () => {
+    const roof = makeRoof({
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180,
+    });
+
+    expect(computeRoofHostedOpeningPlacement(makeOpening(), roof, undefined)).toBeNull();
+    expect(moveRoofHostedOpeningToSurfaceDistance(makeOpening(), roof, undefined, 1)).toBeNull();
+  });
+
   it('does not report a placement marker for unaligned opening polygons', () => {
     const marker = computeRoofHostedOpeningPlacement(
       makeOpening({

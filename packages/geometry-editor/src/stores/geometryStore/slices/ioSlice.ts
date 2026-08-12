@@ -50,6 +50,7 @@ import {
   deriveSlopedElementDimensions,
   slopedDimensionDiffers,
 } from '../../../lib/slopedElementDimensions';
+import { isOrientationPitchAxis } from '../../../lib/slopePitchAxis';
 import {
   getElementCanvasFloorZValue,
   getThermalBridgeExtraJsonFloorStorey,
@@ -456,6 +457,7 @@ const matchesDerivedAcrossPitchRounding = (
   element: Element,
   derive: typeof deriveSlopedElementDimensions,
   key: 'width' | 'height',
+  globalOrientationOffset: number,
 ): boolean => {
   const pitch = (element as { pitch?: unknown }).pitch;
   if (typeof pitch !== 'number' || !Number.isFinite(pitch)) return false;
@@ -470,7 +472,7 @@ const matchesDerivedAcrossPitchRounding = (
   for (const dp of pitchRoundingSteps) {
     const candidatePitch = pitch + dp;
     if (candidatePitch <= 0 || candidatePitch >= 90) continue;
-    const derived = derive({ coordinates, pitch: candidatePitch });
+    const derived = derive({ ...element, coordinates, pitch: candidatePitch }, globalOrientationOffset);
     if (derived) values.push(derived[key]);
   }
   if (values.length === 0) return false;
@@ -497,14 +499,17 @@ const matchesDerivedAcrossPitchRounding = (
  * Mutates elements in place, mirroring the zone floor-area/height override reconstruction this
  * runs alongside in `loadFromCSV`.
  */
-const reconstructSlopedDimensionOverrideFlags = (elements: readonly Element[]): void => {
+const reconstructSlopedDimensionOverrideFlags = (
+  elements: readonly Element[],
+  globalOrientationOffset: number,
+): void => {
   for (const element of elements) {
     if (!SLOPED_OVERRIDE_ELIGIBLE_TYPES.has(element.type)) continue;
     const extraJson = (element as { extra_json?: unknown }).extra_json;
     if (extraJson && typeof extraJson === 'object' && 'geometry_face' in (extraJson as Record<string, unknown>)) {
       continue;
     }
-    const derivedNew = deriveSlopedElementDimensions(element);
+    const derivedNew = deriveSlopedElementDimensions(element, globalOrientationOffset);
     if (!derivedNew) continue;
     const record = element as unknown as {
       width?: unknown;
@@ -515,8 +520,8 @@ const reconstructSlopedDimensionOverrideFlags = (elements: readonly Element[]): 
 
     const csvWidth = typeof record.width === 'number' && Number.isFinite(record.width) ? record.width : undefined;
     if (csvWidth) {
-      const matchesCurrent = matchesDerivedAcrossPitchRounding(csvWidth, element, deriveSlopedElementDimensions, 'width');
-      const matchesLegacy = matchesDerivedAcrossPitchRounding(csvWidth, element, deriveLegacySlopedElementDimensions, 'width');
+      const matchesCurrent = matchesDerivedAcrossPitchRounding(csvWidth, element, deriveSlopedElementDimensions, 'width', globalOrientationOffset);
+      const matchesLegacy = !isOrientationPitchAxis(element) && matchesDerivedAcrossPitchRounding(csvWidth, element, deriveLegacySlopedElementDimensions, 'width', globalOrientationOffset);
       if (!matchesCurrent && !matchesLegacy) {
         record._widthUserOverride = true;
       }
@@ -527,8 +532,8 @@ const reconstructSlopedDimensionOverrideFlags = (elements: readonly Element[]): 
 
     const csvHeight = typeof record.height === 'number' && Number.isFinite(record.height) ? record.height : undefined;
     if (csvHeight) {
-      const matchesCurrent = matchesDerivedAcrossPitchRounding(csvHeight, element, deriveSlopedElementDimensions, 'height');
-      const matchesLegacy = matchesDerivedAcrossPitchRounding(csvHeight, element, deriveLegacySlopedElementDimensions, 'height');
+      const matchesCurrent = matchesDerivedAcrossPitchRounding(csvHeight, element, deriveSlopedElementDimensions, 'height', globalOrientationOffset);
+      const matchesLegacy = !isOrientationPitchAxis(element) && matchesDerivedAcrossPitchRounding(csvHeight, element, deriveLegacySlopedElementDimensions, 'height', globalOrientationOffset);
       if (!matchesCurrent && !matchesLegacy) {
         record._heightUserOverride = true;
       }
@@ -556,6 +561,7 @@ const reconstructPvHostLinkAndOverrideFlags = (
   elements: readonly Element[],
   elementsById: Record<string, Element>,
   floors: Floor[],
+  globalOrientationOffset: number,
 ): void => {
   const effectiveFloors = withEffectiveStoreyHeights(floors, elements as Element[]);
   for (const element of elements) {
@@ -567,7 +573,7 @@ const reconstructPvHostLinkAndOverrideFlags = (
     if (!hostRoof || hostRoof.type !== 'BuildingElementOpaque') continue;
 
     panel._pvHostRoofId = hostId;
-    const derived = deriveFromHostRoof(panel, hostRoof as BuildingElementOpaque, effectiveFloors);
+    const derived = deriveFromHostRoof(panel, hostRoof as BuildingElementOpaque, effectiveFloors, globalOrientationOffset);
     Object.assign(panel, inferPvHostOverrideFlags(panel, derived));
   }
 };
@@ -975,7 +981,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         const zone = resolveZoneForExport(element);
         if (zone) {
           const exportedArea = currentState.getEffectiveArea(element.id);
-          const exportedGeometry = getOpaqueElementExportGeometry(element);
+          const exportedGeometry = getOpaqueElementExportGeometry(element, state.globalOrientationOffset);
           const exposedRow = [
             escapeCSV(element.name),
             escapeCSV(zone.name),
@@ -1014,8 +1020,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       transparentElements.forEach(element => {
         const zone = resolveZoneForExport(element);
         if (zone) {
-          const exportedGeometry = getAreaBasedElementExportGeometry(element);
-          const exportedArea = getElementGrossArea(element);
+          const exportedGeometry = getAreaBasedElementExportGeometry(element, state.globalOrientationOffset);
+          const exportedArea = getElementGrossArea(element, state.globalOrientationOffset);
           const exportedWidth = exportedGeometry.width > 0 ? exportedGeometry.width : undefined;
           const exportedHeight = exportedGeometry.height > 0 ? exportedGeometry.height : undefined;
           const exportedBaseHeight =
@@ -1904,7 +1910,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (aligned) {
         opening.coordinates = aligned;
       }
-      const derived = deriveFromHostRoof(opening, roof, effectiveFloorsForHostedTransparent);
+      const derived = deriveFromHostRoof(opening, roof, effectiveFloorsForHostedTransparent, metadata.globalOrientationOffset);
       Object.assign(opening, buildTransparentHostDerivedPatch(opening, derived));
     }
 
@@ -1912,8 +1918,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     const allElements = Object.values(elementsById) as Element[];
 
-    reconstructSlopedDimensionOverrideFlags(allElements);
-    reconstructPvHostLinkAndOverrideFlags(allElements, elementsById, get().floors);
+    reconstructSlopedDimensionOverrideFlags(allElements, metadata.globalOrientationOffset);
+    reconstructPvHostLinkAndOverrideFlags(allElements, elementsById, get().floors, metadata.globalOrientationOffset);
 
     // Before deriving zone properties, detect whether the CSV's floor_area / height
     // were user overrides by comparing them with the geometry-derived values.

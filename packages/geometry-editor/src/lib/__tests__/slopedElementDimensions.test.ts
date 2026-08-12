@@ -335,4 +335,28 @@ describe('deriveSlopedElementDimensions — equivalent-width formula for non-par
     expect(derived).toEqual(legacy);
     expect(derived?.width).toBe(4);
   });
+
+  it('uses authored orientation extent and equivalent width even for a parallelogram', () => {
+    const element = {
+      type: 'BuildingElementOpaque' as const,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+        { x: 4, y: 2, z: 0 },
+        { x: 0, y: 2, z: 0 },
+      ],
+      pitch: 30,
+      orientation360: 135,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+    };
+
+    const derived = deriveSlopedElementDimensions(element, 0);
+    const dMax = 6 / Math.sqrt(2);
+    const expectedHeight = dMax / Math.cos(Math.PI / 6);
+
+    expect(derived).not.toBeNull();
+    expect(derived?.height).toBeCloseTo(expectedHeight, 2);
+    expect(derived?.width).toBeCloseTo(derived!.area / derived!.height, 2);
+    expect(derived?.width).not.toBe(4);
+  });
 });

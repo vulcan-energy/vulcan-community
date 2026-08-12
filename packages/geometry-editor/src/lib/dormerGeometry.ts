@@ -15,6 +15,7 @@ import {
   elevationAtSlopedVertexM,
 } from './geometry3dSloped';
 import { orientation360FromSegmentOutwardModelXY, orientation360SlopedFromFirstEdge } from './openingSegmentOutward';
+import { isOrientationPitchAxis } from './slopePitchAxis';
 
 export type DormerType = 'mono-pitch' | 'gable-front' | 'hip';
 export type DormerBundleRole =
@@ -857,6 +858,7 @@ export function isDormerAnchorElement(element: Element | null | undefined): elem
 
 export function isValidDormerHost(element: Element): element is BuildingElementOpaque {
   if (element.type !== 'BuildingElementOpaque') return false;
+  if (isOrientationPitchAxis(element)) return false;
   if (!Array.isArray(element.coordinates) || element.coordinates.length < 3) return false;
   const pitch = element.pitch;
   if (typeof pitch !== 'number' || !Number.isFinite(pitch) || pitch <= 0 || pitch >= 90) return false;

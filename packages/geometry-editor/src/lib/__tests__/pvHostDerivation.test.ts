@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  alignHostedSlopedPanelToHostOrientation,
   buildHostDerivedPatch,
   deriveFromHostRoof,
   findHostRoofId,
@@ -10,6 +11,7 @@ import {
   pointInPolygon2D,
   polygonAreaM2,
 } from '../pvHostDerivation';
+import { orientation360SlopedFromFirstEdge } from '../openingSegmentOutward';
 import type {
   BuildingElementOpaque,
   BuildingElementTransparent,
@@ -153,6 +155,26 @@ describe('pvHostDerivation – isPanelFullyOnRoof', () => {
 });
 
 describe('pvHostDerivation – deriveFromHostRoof', () => {
+  it('passes through an Orientation-axis host bearing and aligns the panel to it', () => {
+    const roof = makeRoof({
+      id: 'orientation-roof',
+      orientation360: 90,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+    });
+    const panel = makePanel({ id: 'panel', coordinates: square(2, 2, 1) });
+
+    expect(deriveFromHostRoof(panel, roof, undefined, 0).orientation360).toBe(90);
+    const aligned = alignHostedSlopedPanelToHostOrientation(panel, roof, 0);
+    expect(aligned).not.toBeNull();
+    expect(orientation360SlopedFromFirstEdge(
+      aligned![0]!.x,
+      aligned![0]!.y,
+      aligned![1]!.x,
+      aligned![1]!.y,
+      0,
+    )).toBeCloseTo(90, 6);
+  });
+
   it('inherits pitch and orientation360 from a sloped roof', () => {
     const roof = makeRoof({
       id: 'r1',

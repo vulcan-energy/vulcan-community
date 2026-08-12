@@ -3,6 +3,7 @@
 
 import type { BuildingElementOpaque, Element, OnSiteGeneration } from '../geometry/types';
 import { inwardNormal2DForSlopedRoof } from './roofTopElevationAtPlanM';
+import { isOrientationPitchAxis, slopedPolygonPlaneBasis } from './slopePitchAxis';
 
 type Pt2 = { x: number; y: number };
 
@@ -42,7 +43,10 @@ function toPlanRing(coords: ReadonlyArray<{ x: number; y: number }> | undefined)
   return (coords ?? []).map((p) => ({ x: p.x, y: p.y })).filter(isFinitePoint);
 }
 
-function buildRoofSurfaceTransform(roof: BuildingElementOpaque): SurfaceTransform {
+function buildRoofSurfaceTransform(
+  roof: BuildingElementOpaque,
+  globalOrientationOffset?: number,
+): SurfaceTransform {
   const coords = roof.coordinates ?? [];
   const pitch = roof.pitch;
   if (
@@ -59,12 +63,21 @@ function buildRoofSurfaceTransform(roof: BuildingElementOpaque): SurfaceTransfor
     };
   }
 
-  const a = coords[0]!;
+  const orientationAxis = isOrientationPitchAxis(roof);
+  const basis = orientationAxis && Number.isFinite(globalOrientationOffset)
+    ? slopedPolygonPlaneBasis(
+        coords.map((point) => [point.x, point.y] as [number, number]),
+        'orientation',
+        roof.orientation360 ?? 0,
+        globalOrientationOffset!,
+      )
+    : null;
+  const a = basis ? { x: basis.anchorXY[0], y: basis.anchorXY[1] } : coords[0]!;
   const b = coords[1]!;
-  const tx = b.x - a.x;
-  const ty = b.y - a.y;
+  const tx = basis ? basis.upslope2D[1] : b.x - a.x;
+  const ty = basis ? -basis.upslope2D[0] : b.y - a.y;
   const tLen = Math.hypot(tx, ty);
-  const inward = inwardNormal2DForSlopedRoof(roof);
+  const inward = basis?.upslope2D ?? inwardNormal2DForSlopedRoof(roof, globalOrientationOffset);
   if (!inward || tLen < 1e-9) {
     return {
       kind: 'plan',
@@ -284,9 +297,10 @@ export function computePvRoofClearanceGuidance(
   panel: Pick<OnSiteGeneration, 'coordinates'>,
   hostRoof: BuildingElementOpaque,
   elements: readonly Element[] = [],
+  globalOrientationOffset?: number,
 ): PvClearanceGuidance {
   const panelRing = toPlanRing(panel.coordinates);
-  const transform = buildRoofSurfaceTransform(hostRoof);
+  const transform = buildRoofSurfaceTransform(hostRoof, globalOrientationOffset);
   const guidance: PvClearanceGuidance = {
     measurementKind: transform.kind,
     items: [],

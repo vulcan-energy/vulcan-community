@@ -12,6 +12,11 @@ import {
   getDrawModeTooltipPillWidth,
 } from '../../lib/drawModeTooltipPill';
 import { geometryPerf } from '../../lib/geometryPerf';
+import {
+  isOrientationPitchAxis,
+  slopedPolygonPlaneBasis,
+  slopeHingeContourSegment,
+} from '../../lib/slopePitchAxis';
 
 type PreviewLayerNode = {
   batchDraw?: () => void;
@@ -62,6 +67,7 @@ export type ElementShapeNodeRefs = {
   shapeNode: PreviewLineNode | null;
   shapeStrokeNode: PreviewLineNode | null;
   slopeBottomNode: PreviewLineNode | null;
+  slopeContourNode: PreviewLineNode | null;
   slopeEdgesNode: PreviewLineNode | null;
   arrowLineNode: PreviewLineNode | null;
   arrowHeadNode: PreviewLineNode | null;
@@ -338,6 +344,7 @@ export function findElementShapeNodeRefs(
     shapeNode: findPreviewLineNode(stage, `shape-${elementId}`),
     shapeStrokeNode: findPreviewLineNode(stage, `shape-stroke-${elementId}`),
     slopeBottomNode: findPreviewLineNode(stage, `slope-bottom-${elementId}`),
+    slopeContourNode: findPreviewLineNode(stage, `slope-contour-${elementId}`),
     slopeEdgesNode: findPreviewLineNode(stage, `slope-edges-${elementId}`),
     arrowLineNode: findPreviewLineNode(stage, `arrow-line-${elementId}`),
     arrowHeadNode: findPreviewLineNode(stage, `arrow-head-${elementId}`),
@@ -367,6 +374,7 @@ function refsToMovableNodes(refs: ElementShapeNodeRefs): unknown[] {
     refs.shapeNode,
     refs.shapeStrokeNode,
     refs.slopeBottomNode,
+    refs.slopeContourNode,
     refs.slopeEdgesNode,
     refs.arrowLineNode,
     refs.arrowHeadNode,
@@ -431,6 +439,7 @@ function setDraggedElementAttrs(
   target?.setAttr?.('__vulcanDraggedShapeNode', refs?.shapeNode ?? null);
   target?.setAttr?.('__vulcanDraggedShapeStrokeNode', refs?.shapeStrokeNode ?? null);
   target?.setAttr?.('__vulcanDraggedSlopeBottomNode', refs?.slopeBottomNode ?? null);
+  target?.setAttr?.('__vulcanDraggedSlopeContourNode', refs?.slopeContourNode ?? null);
   target?.setAttr?.('__vulcanDraggedSlopeEdgesNode', refs?.slopeEdgesNode ?? null);
   target?.setAttr?.('__vulcanDraggedArrowLineNode', refs?.arrowLineNode ?? null);
   target?.setAttr?.('__vulcanDraggedArrowHeadNode', refs?.arrowHeadNode ?? null);
@@ -685,6 +694,7 @@ export function cacheDraggedElementShapeNodes(
   target?.setAttr?.('__vulcanDraggedShapeNode', refs.shapeNode);
   target?.setAttr?.('__vulcanDraggedShapeStrokeNode', refs.shapeStrokeNode);
   target?.setAttr?.('__vulcanDraggedSlopeBottomNode', refs.slopeBottomNode);
+  target?.setAttr?.('__vulcanDraggedSlopeContourNode', refs.slopeContourNode);
   target?.setAttr?.('__vulcanDraggedSlopeEdgesNode', refs.slopeEdgesNode);
   target?.setAttr?.('__vulcanDraggedArrowLineNode', refs.arrowLineNode);
   target?.setAttr?.('__vulcanDraggedArrowHeadNode', refs.arrowHeadNode);
@@ -699,6 +709,7 @@ export function updateElementShapeNodeRefsFromCoords(
   scale: number,
   panOffset: { x: number; y: number },
   canvasCenter: { x: number; y: number },
+  globalOrientationOffset?: number,
 ): PreviewLayerNode | null {
   const points = coords.flatMap((coord) => {
     const canvas = worldToCanvas(coord, scale, panOffset, canvasCenter);
@@ -719,10 +730,33 @@ export function updateElementShapeNodeRefsFromCoords(
   }
 
   if (canvasCoords.length >= 3) {
-    refs.slopeBottomNode?.points?.(canvasCoords.slice(0, 2).flatMap((coord) => [coord.x, coord.y]));
-    refs.slopeEdgesNode?.points?.(
-      [canvasCoords[1], ...canvasCoords.slice(2), canvasCoords[0]].flatMap((coord) => [coord.x, coord.y]),
-    );
+    const previewElement = element
+      ? { ...element, coordinates: coords as Element['coordinates'] } as Element
+      : undefined;
+    if (previewElement && isOrientationPitchAxis(previewElement) && Number.isFinite(globalOrientationOffset)) {
+      const points = coords.map((point) => [point.x, point.y] as [number, number]);
+      const basis = slopedPolygonPlaneBasis(
+        points,
+        'orientation',
+        (previewElement as { orientation360?: number }).orientation360 ?? 0,
+        globalOrientationOffset!,
+      );
+      const contour = basis ? slopeHingeContourSegment(points, basis.anchorXY, basis.upslope2D) : null;
+      if (contour) {
+        refs.slopeContourNode?.points?.(
+          contour.flatMap(([x, y]) => {
+            const canvas = worldToCanvas({ x, y }, scale, panOffset, canvasCenter);
+            return [canvas.x, canvas.y];
+          }),
+        );
+      }
+      refs.slopeEdgesNode?.points?.([...canvasCoords, canvasCoords[0]].flatMap((coord) => [coord.x, coord.y]));
+    } else {
+      refs.slopeBottomNode?.points?.(canvasCoords.slice(0, 2).flatMap((coord) => [coord.x, coord.y]));
+      refs.slopeEdgesNode?.points?.(
+        [canvasCoords[1], ...canvasCoords.slice(2), canvasCoords[0]].flatMap((coord) => [coord.x, coord.y]),
+      );
+    }
   }
 
   canvasCoords.forEach((coord, index) => {
@@ -737,7 +771,10 @@ export function updateElementShapeNodeRefsFromCoords(
   });
 
   if ((refs.arrowLineNode?.points || refs.arrowHeadNode?.points) && element) {
-    const directionArrow = calculateDirectionArrow({ ...element, coordinates: coords as Element['coordinates'] } as Element);
+    const directionArrow = calculateDirectionArrow(
+      { ...element, coordinates: coords as Element['coordinates'] } as Element,
+      globalOrientationOffset,
+    );
     if (directionArrow) {
       const centerCanvas = worldToCanvas({ x: directionArrow.centerX, y: directionArrow.centerY }, scale, panOffset, canvasCenter);
       const arrowCanvas = worldToCanvas({ x: directionArrow.arrowX, y: directionArrow.arrowY }, scale, panOffset, canvasCenter);
@@ -762,6 +799,7 @@ export function updateElementShapeNodeRefsFromCoords(
     ?? refs.shapeNode?.getLayer?.()
     ?? refs.slopeEdgesNode?.getLayer?.()
     ?? refs.slopeBottomNode?.getLayer?.()
+    ?? refs.slopeContourNode?.getLayer?.()
     ?? refs.arrowLineNode?.getLayer?.()
     ?? refs.arrowHeadNode?.getLayer?.()
     ?? refs.pointNode?.getLayer?.()
@@ -777,6 +815,7 @@ export function updateElementShapeNodeRefsForVertex(
   scale: number,
   panOffset: { x: number; y: number },
   canvasCenter: { x: number; y: number },
+  globalOrientationOffset?: number,
 ): PreviewLayerNode | null {
   const coords = element?.coordinates?.map((coord, index) => (
     index === vertexIndex
@@ -784,7 +823,7 @@ export function updateElementShapeNodeRefsForVertex(
       : coord
   ));
   if (!coords) return null;
-  return updateElementShapeNodeRefsFromCoords(refs, element, coords, scale, panOffset, canvasCenter);
+  return updateElementShapeNodeRefsFromCoords(refs, element, coords, scale, panOffset, canvasCenter, globalOrientationOffset);
 }
 
 export function updateDraggedElementShapeFromCoords(
@@ -795,12 +834,14 @@ export function updateDraggedElementShapeFromCoords(
   panOffset: { x: number; y: number },
   canvasCenter: { x: number; y: number },
   element?: Element,
+  globalOrientationOffset?: number,
 ): void {
   const activeSessionRefs = getActiveDragPreviewSession(target)?.elementRefsById.get(elementId);
   let refs: ElementShapeNodeRefs = activeSessionRefs ?? {
     shapeNode: (target?.getAttr?.('__vulcanDraggedShapeNode') as PreviewLineNode | null | undefined) ?? null,
     shapeStrokeNode: (target?.getAttr?.('__vulcanDraggedShapeStrokeNode') as PreviewLineNode | null | undefined) ?? null,
     slopeBottomNode: (target?.getAttr?.('__vulcanDraggedSlopeBottomNode') as PreviewLineNode | null | undefined) ?? null,
+    slopeContourNode: (target?.getAttr?.('__vulcanDraggedSlopeContourNode') as PreviewLineNode | null | undefined) ?? null,
     slopeEdgesNode: (target?.getAttr?.('__vulcanDraggedSlopeEdgesNode') as PreviewLineNode | null | undefined) ?? null,
     arrowLineNode: (target?.getAttr?.('__vulcanDraggedArrowLineNode') as PreviewLineNode | null | undefined) ?? null,
     arrowHeadNode: (target?.getAttr?.('__vulcanDraggedArrowHeadNode') as PreviewLineNode | null | undefined) ?? null,
@@ -811,6 +852,7 @@ export function updateDraggedElementShapeFromCoords(
     !activeSessionRefs &&
     !refs.shapeNode &&
     !refs.slopeBottomNode &&
+    !refs.slopeContourNode &&
     !refs.slopeEdgesNode &&
     !refs.pointNode &&
     refs.vertexNodes.length === 0
@@ -820,6 +862,7 @@ export function updateDraggedElementShapeFromCoords(
       shapeNode: (target?.getAttr?.('__vulcanDraggedShapeNode') as PreviewLineNode | null | undefined) ?? null,
       shapeStrokeNode: (target?.getAttr?.('__vulcanDraggedShapeStrokeNode') as PreviewLineNode | null | undefined) ?? null,
       slopeBottomNode: (target?.getAttr?.('__vulcanDraggedSlopeBottomNode') as PreviewLineNode | null | undefined) ?? null,
+      slopeContourNode: (target?.getAttr?.('__vulcanDraggedSlopeContourNode') as PreviewLineNode | null | undefined) ?? null,
       slopeEdgesNode: (target?.getAttr?.('__vulcanDraggedSlopeEdgesNode') as PreviewLineNode | null | undefined) ?? null,
       arrowLineNode: (target?.getAttr?.('__vulcanDraggedArrowLineNode') as PreviewLineNode | null | undefined) ?? null,
       arrowHeadNode: (target?.getAttr?.('__vulcanDraggedArrowHeadNode') as PreviewLineNode | null | undefined) ?? null,
@@ -830,9 +873,10 @@ export function updateDraggedElementShapeFromCoords(
   if (
     !refs.shapeNode?.points &&
     !refs.slopeBottomNode?.points &&
+    !refs.slopeContourNode?.points &&
     !refs.slopeEdgesNode?.points &&
     !refs.pointNode &&
     refs.vertexNodes.length === 0
   ) return;
-  updateElementShapeNodeRefsFromCoords(refs, element, coords, scale, panOffset, canvasCenter)?.batchDraw?.();
+  updateElementShapeNodeRefsFromCoords(refs, element, coords, scale, panOffset, canvasCenter, globalOrientationOffset)?.batchDraw?.();
 }

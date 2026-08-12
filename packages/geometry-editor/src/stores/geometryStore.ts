@@ -203,6 +203,12 @@ import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
 } from '../lib/openingSegmentOutward';
+import {
+  hasSlopePitchAxisHostedDependants,
+  isOrientationPitchAxis,
+  SLOPE_PITCH_AXIS_EXTRA_JSON_KEY,
+  type SlopePitchAxis,
+} from '../lib/slopePitchAxis';
 import type {
   Zone,
   ElementType,
@@ -1471,6 +1477,7 @@ export interface GeometryState {
 
   addElement: (element: Omit<Element, 'id'>) => void;
   updateElement: (id: string, updates: Partial<Element>, skipAutoSave?: boolean) => void;
+  setSlopePitchAxis: (id: string, axis: SlopePitchAxis) => void;
   flipElementOrientation: (id: string, skipAutoSave?: boolean) => void;
   isElementNameManual: (id: string) => boolean;
   resetElementNameToAuto: (id: string) => string | null;
@@ -2091,6 +2098,7 @@ const coordinatesChanged = (
 const applySlopedDimensionOverrideTracking = (
   prevElement: Element,
   normalizedUpdates: Partial<Element>,
+  globalOrientationOffset: number,
 ): void => {
   const updateRecord = normalizedUpdates as Record<string, unknown>;
   const widthProvided = Object.prototype.hasOwnProperty.call(updateRecord, 'width');
@@ -2098,7 +2106,7 @@ const applySlopedDimensionOverrideTracking = (
   if (!widthProvided && !heightProvided) return;
 
   const draft = { ...prevElement, ...normalizedUpdates } as Element;
-  const derived = deriveSlopedElementDimensions(draft);
+  const derived = deriveSlopedElementDimensions(draft, globalOrientationOffset);
   if (!derived) return;
 
   if (
@@ -2131,6 +2139,7 @@ const applyTransparentOpeningSlopedDimensionGeometry = (
   prevElement: Element,
   normalizedUpdates: Partial<Element>,
   explicitCoordinatesProvided: boolean,
+  globalOrientationOffset: number,
 ): void => {
   if (prevElement.type !== 'BuildingElementTransparent') return;
   const updateRecord = normalizedUpdates as Record<string, unknown>;
@@ -2142,7 +2151,8 @@ const applyTransparentOpeningSlopedDimensionGeometry = (
 
   const draft = { ...prevElement, ...normalizedUpdates } as BuildingElementTransparent;
   if (getElementShape(draft) !== 'sloped-polygon') return;
-  const derived = deriveSlopedElementDimensions(draft);
+  if (isOrientationPitchAxis(draft)) return;
+  const derived = deriveSlopedElementDimensions(draft, globalOrientationOffset);
   const nextWidth = widthProvided
     ? widthUpdate
     : typeof prevElement.width === 'number' && Number.isFinite(prevElement.width) && prevElement.width > 0
@@ -2368,7 +2378,11 @@ const applyCoordinateDerivedElementFields = (
     (element as any).area = d.area;
     (element as any).perimeter = d.perimeter;
     (element as any).orientation360 = d.orientation360;
-  } else if (coordsChanged && isSlopedFabricEnvelopePolygon(element)) {
+  } else if (
+    coordsChanged &&
+    isSlopedFabricEnvelopePolygon(element) &&
+    !isOrientationPitchAxis(element)
+  ) {
     const o = deriveSlopedPolygonOrientation360(element, globalOrientationOffset);
     if (o !== null) {
       (element as any).orientation360 = o;
@@ -2589,6 +2603,7 @@ const applyAutoNameToElementDraft = (
     options.coordsChanged &&
     !options.userExplicitlySetOrientation360 &&
     isSlopedFabricEnvelopePolygon(draftElement as Element)
+    && !isOrientationPitchAxis(draftElement as Element)
   ) {
     const o = deriveSlopedPolygonOrientation360(draftElement as Element, globalOrientationOffset);
     if (o !== null) {
@@ -2655,6 +2670,7 @@ const validateElementForState = (
     elementsById: eb,
     zones: state.zones,
     floors: state.floors,
+    globalOrientationOffset: state.globalOrientationOffset,
     complianceValidationEnabled: complianceOn,
     complianceSettings: cs,
     numberOfBedrooms: cs?.NumberOfBedrooms,
@@ -5219,6 +5235,58 @@ const createGeometryState = (
     return result;
   },
 
+  setSlopePitchAxis: (id, axis) => {
+    const state = get();
+    const element = state.elementsById[id];
+    if (
+      !element ||
+      (element.type !== 'BuildingElementOpaque' && element.type !== 'BuildingElementTransparent') ||
+      getElementShape(element) !== 'sloped-polygon' ||
+      element.parent_element
+    ) {
+      return;
+    }
+    const currentAxis: SlopePitchAxis = isOrientationPitchAxis(element) ? 'orientation' : 'bottom-edge';
+    const persistedAxis = element.extra_json?.[SLOPE_PITCH_AXIS_EXTRA_JSON_KEY];
+    if (axis === currentAxis && !(axis === 'bottom-edge' && persistedAxis !== undefined)) return;
+    if (
+      axis === 'orientation' &&
+      hasSlopePitchAxisHostedDependants(element, Object.values(state.elementsById))
+    ) {
+      return;
+    }
+    const first = element.coordinates[0];
+    const second = element.coordinates[1];
+    const derived = first && second
+      ? orientation360SlopedFromFirstEdge(
+          first.x,
+          first.y,
+          second.x,
+          second.y,
+          state.globalOrientationOffset,
+        )
+      : null;
+    const orientation360 = roundToTwoDecimals(
+      derived ?? (typeof element.orientation360 === 'number' ? element.orientation360 : 0),
+    );
+    if (axis === 'orientation') {
+      get().updateElement(id, {
+        orientation360,
+        extra_json: {
+          ...(element.extra_json ?? {}),
+          [SLOPE_PITCH_AXIS_EXTRA_JSON_KEY]: 'orientation',
+        },
+      } as Partial<Element>);
+      return;
+    }
+    const extraJson = { ...(element.extra_json ?? {}) };
+    delete extraJson[SLOPE_PITCH_AXIS_EXTRA_JSON_KEY];
+    get().updateElement(id, {
+      orientation360,
+      extra_json: Object.keys(extraJson).length > 0 ? extraJson : undefined,
+    } as Partial<Element>);
+  },
+
   updateElement: (id, updates, skipAutoSave = false) => measureGeometryStoreAction('updateElement', () => {
     const externalNameMap = new Map<string, string>();
     set((state) => {
@@ -5634,10 +5702,11 @@ const createGeometryState = (
         prevElement,
         normalizedUpdates,
         Object.prototype.hasOwnProperty.call(updates, 'coordinates'),
+        state.globalOrientationOffset,
       );
 
       applyContextShadingCreationDerivations(prevElement, normalizedUpdates, state);
-      applySlopedDimensionOverrideTracking(prevElement, normalizedUpdates);
+      applySlopedDimensionOverrideTracking(prevElement, normalizedUpdates, state.globalOrientationOffset);
 
       const explicitNameUpdate = Object.prototype.hasOwnProperty.call(normalizedUpdates, 'name');
       if (explicitNameUpdate) {
@@ -6036,6 +6105,7 @@ const createGeometryState = (
             openingWithHost,
             parent as BuildingElementOpaque,
             withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById)),
+            state.globalOrientationOffset,
           );
           const patch = buildTransparentHostDerivedPatch(openingWithHost, derived);
           if (aligned || Object.keys(patch).length > 0) {
@@ -6131,6 +6201,7 @@ const createGeometryState = (
                 panelWithHost,
                 hostRoof,
                 withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById)),
+                state.globalOrientationOffset,
               );
               // If a previously-loaded (non-placeholder) panel is being attached to a host for the
               // first time, infer per-field override flags from the existing values so we do not
@@ -6172,14 +6243,14 @@ const createGeometryState = (
               (other as OnSiteGeneration)._pvHostRoofId === id
             ) {
               const panel = other as OnSiteGeneration;
-              const derived = deriveFromHostRoof(panel, roof, effFloorsForHostDerive);
+              const derived = deriveFromHostRoof(panel, roof, effFloorsForHostDerive, state.globalOrientationOffset);
               const patch = buildHostDerivedPatch(panel, derived);
               if (Object.keys(patch).length > 0) {
                 newElementsById[otherId] = { ...panel, ...patch } as Element;
               }
             } else if (shouldDeriveTransparentFromOpaquePolygonHost(other, roof) && other.parent_element === roof.name) {
               const opening = other as BuildingElementTransparent;
-              const derived = deriveFromHostRoof(opening, roof, effFloorsForHostDerive);
+              const derived = deriveFromHostRoof(opening, roof, effFloorsForHostDerive, state.globalOrientationOffset);
               const patch = buildTransparentHostDerivedPatch(opening, derived);
               if (Object.keys(patch).length > 0) {
                 newElementsById[otherId] = { ...opening, ...patch } as Element;
@@ -6939,6 +7010,16 @@ const createGeometryState = (
           el.coordinates &&
           el.coordinates.length >= 2
         ) {
+          if (isOrientationPitchAxis(el)) {
+            if (typeof el.orientation360 === 'number' && Number.isFinite(el.orientation360)) {
+              updatedById[el.id] = {
+                ...el,
+                orientation360: roundToTwoDecimals(normalizeOrientation360Deg(el.orientation360 - offsetDelta)),
+                _v: (el._v ?? 0) + 1,
+              } as Element;
+            }
+            return;
+          }
           const o = deriveSlopedPolygonOrientation360(el, nextOffset);
           if (o !== null) {
             updatedById[el.id] = {
@@ -7061,16 +7142,18 @@ const createGeometryState = (
     const element = state.elementsById[elementId];
     if (!element) return 0;
 
-    return getElementEffectiveArea(element, state.elementsById);
+    return getElementEffectiveArea(element, state.elementsById, state.globalOrientationOffset);
   },
 
   getAvailableParentElements: (childType: ElementType, zoneId: string, selfId = undefined) => {
     const state = get();
     if (childType === 'BuildingElementTransparent') {
-      // Windows: parent can be any wall (opaque) in the same zone
+      // Windows: parent can be any wall (opaque) in the same zone. Orientation-axis
+      // slopes are excluded — rooflight placement on them is blocked everywhere else.
       return Object.values(state.elementsById).filter(element =>
         element.zoneId === zoneId &&
-        element.type === 'BuildingElementOpaque'
+        element.type === 'BuildingElementOpaque' &&
+        !isOrientationPitchAxis(element)
       );
     }
     if (childType === 'BuildingElementOpaque') {
@@ -7360,6 +7443,7 @@ const createGeometryState = (
       elementsById: state.elementsById,
       zones: state.zones,
       floors: state.floors,
+      globalOrientationOffset: state.globalOrientationOffset,
       complianceValidationEnabled: complianceOn,
       complianceSettings: cs,
       numberOfBedrooms: cs?.NumberOfBedrooms,
@@ -7422,6 +7506,7 @@ const createGeometryState = (
         zones: state.zones,
         complianceValidationEnabled: complianceOn,
         complianceSettings: state.complianceSettings,
+        globalOrientationOffset: state.globalOrientationOffset,
       }),
     );
 
