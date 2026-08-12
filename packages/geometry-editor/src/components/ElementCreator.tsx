@@ -41,19 +41,17 @@ import { waterPipeworkFormModule } from './elementForms/waterPipework';
 import { wetEmitterFormModule } from './elementForms/wetEmitter';
 import { formatSystemPresetName, systemFormModule } from './elementForms/system';
 import { useServiceLineFormState } from './elementForms/serviceLine';
-import { useWallSharedFormState, hydrateWallSharedFields } from './elementForms/wallShared';
+import { useWallSharedFormState } from './elementForms/wallShared';
 import { buildingElementGroundFormModule } from './elementForms/buildingElementGround';
 import { adjacentLikeElementFormModule } from './elementForms/adjacentLikeElement';
 import { buildingElementTransparentFormModule } from './elementForms/buildingElementTransparent';
+import { buildingElementOpaqueFormModule } from './elementForms/buildingElementOpaque';
 import {
   useDecimalInput,
   decimalInputProps,
   numericDraftValueOrDefault,
   readExtraJsonRecord,
   formatConditionalDecimals,
-  HORIZONTAL_POLYGON_PITCH_OPTIONS,
-  HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER,
-  horizontalPolygonSurfaceSelectValue,
 } from './elementForms/formPrimitives';
 // PR #31's pitchDraftInput/commitTypedPitch (useNumericDraftInput) landed in
 // elementForms/wallShared.tsx instead of here — see that file's own import comment for why.
@@ -72,8 +70,6 @@ import { generateUniqueElementName } from '../lib/elementAutoNaming';
 import {
   getAreaBasedElementExportGeometry,
   getElementGrossArea,
-  getOpaqueOpeningArea,
-  isUnheatedPitchedRoofPlanAreaElement,
   getTransparentExportMidHeight,
 } from '../lib/elementArea';
 import {
@@ -83,9 +79,6 @@ import {
 import {
   getUnheatedPitchedRoofCeilingElevationM,
   mergeUnheatedPitchedRoofCeilingElevationExtraJson,
-  readAuthoredUnheatedPitchedRoofCeilingElevationM,
-  UNHEATED_PITCHED_ROOF_CEILING_ELEVATION_KEY,
-  type UnheatedPitchedRoofCeilingElevationSource,
 } from '../lib/unheatedPitchedRoofCeiling';
 import { buildProfileLineFaceFromTopHeights, extractTopHeightsFromExtraJson } from '../lib/profileLineFace';
 import {
@@ -154,8 +147,6 @@ import {
   derivePvDimensionsFromCoords,
 } from '../lib/pvPanelFootprint';
 import { deriveFromHostRoof } from '../lib/pvHostDerivation';
-import { findSuspendedGroundSurfaceForLineElement } from '../lib/suspendedFloorGeometry';
-import { findLinkedBasementGroundForLineElement } from '../lib/basementGeometry';
 import { fhsFloorLabelForCanvasFloor } from '../lib/storeySemantics';
 import {
   getParentByName,
@@ -530,7 +521,6 @@ import {
   type SystemElementSource,
   updateSpaceHeatSystemHeatSourceNameInExtraJson,
 } from './systemEditorUtils';
-import { isExternalLineWall } from '../geometry/thermalBridge/proposeExternalCorners';
 import { groundFloorTypeSupportsViewerElevation } from '../lib/groundFloorSubtype';
 
 const loadAdvancedFieldsEditor = () => import('./AdvancedFieldsEditor');
@@ -590,20 +580,9 @@ function readFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function unheatedPitchedRoofCeilingElevationSourceLabel(
-  source: UnheatedPitchedRoofCeilingElevationSource,
-): string {
-  switch (source) {
-    case 'authored':
-      return 'manual';
-    case 'wall-top':
-      return 'wall tops';
-    case 'storey-ceiling':
-      return 'floor stack';
-    case 'roof-base':
-      return 'roof base';
-  }
-}
+// unheatedPitchedRoofCeilingElevationSourceLabel moved to elementForms/
+// buildingElementOpaque.tsx (slice-6 brief STAGE 4) — its only consumer was
+// Opaque's own render.
 
 // Define Selection type locally
 type Selection = {
@@ -1520,20 +1499,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     getGlobalOrientationOffset: () => geometryStore.getState().globalOrientationOffset,
     getCurrentOrientation,
   });
-  const commitUnheatedPitchedRoofCeilingElevation = (value: number | '') => {
-    if (!isExistingElementSelection()) return;
-    const currentSelection = selection as Exclude<Selection, null>;
-    const element = getElementById(currentSelection.id);
-    if (!element || element.type !== 'BuildingElementOpaque') return;
-    commitExistingElementDraft({
-      extra_json: mergeUnheatedPitchedRoofCeilingElevationExtraJson(element.extra_json, value),
-    } as Partial<Element>);
-  };
-  const unheatedPitchedRoofCeilingElevationInput = useDecimalInput(
-    '',
-    commitUnheatedPitchedRoofCeilingElevation,
-    { commitOnChange: true },
-  );
+  // commitUnheatedPitchedRoofCeilingElevation/unheatedPitchedRoofCeilingElevationInput
+  // moved to elementForms/buildingElementOpaque.tsx (slice-6 brief STAGE 4)
+  // — Opaque-exclusive state (decision 7).
   // commitAdjacentViewerBaseHeight/adjacentViewerBaseHeightInput moved to
   // elementForms/adjacentLikeElement.tsx (slice-6 brief STAGE 2) — the
   // orchestrator's own syncFloorMoveHeightInputs now reads
@@ -1583,8 +1551,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   );
   // commitPartyWallCavityResistance/partyWallCavityResistanceInput moved to
   // elementForms/adjacentLikeElement.tsx (slice-6 brief STAGE 2).
-  const [isUnheatedPitchedRoof, setIsUnheatedPitchedRoof] = useState<boolean>(false);
-  const [isExternalDoor, setIsExternalDoor] = useState<boolean>(false);
+  // isUnheatedPitchedRoof/isExternalDoor moved to elementForms/
+  // buildingElementOpaque.tsx (slice-6 brief STAGE 4, decision 7) — the
+  // orchestrator's own elementFieldPresentation call below now reads
+  // buildingElementOpaqueFormState.isExternalDoor directly (same
+  // "read the module's own useFormState return value directly" precedent
+  // documented in buildingElementGround.tsx's header).
   const [assemblyCalculatorOpen, setAssemblyCalculatorOpen] = useState(false);
   /** When set, assembly modal edits this dormer thermal part (see `assemblyInitialSnapshot` after dormer helpers). */
   const [dormerAssemblySection, setDormerAssemblySection] = useState<DormerThermalSectionKey | null>(null);
@@ -1660,41 +1632,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return calculateDerivedBaseHeight(z, withEffectiveStoreyHeights(floors, allElements));
   }, [elementFloorId, floors, allElements]);
 
-  const baseHeightResetTarget = useMemo(() => {
-    if (selection?.type === 'element') {
-      const el = elementsById[selection.id];
-      if (el?.type === 'BuildingElementOpaque' && isExternalLineWall(el)) {
-        const suspendedTarget = findSuspendedGroundSurfaceForLineElement(el, allElements);
-        if (suspendedTarget) {
-          return {
-            value: roundToTwoDecimals(suspendedTarget.surfaceM),
-            note: 'suspended floor upper surface',
-            title: 'Reset to suspended floor upper surface',
-          };
-        }
-        const basementTarget = findLinkedBasementGroundForLineElement(el, allElements);
-        if (basementTarget) {
-          const isUnheatedBasement = basementTarget.ground.floor_type === 'Unheated_basement';
-          return {
-            value: roundToTwoDecimals(basementTarget.targetBaseHeightM),
-            note: isUnheatedBasement
-              ? 'unheated basement wall height above ground'
-              : 'basement floor surface',
-            title: isUnheatedBasement
-              ? 'Reset to unheated basement wall height'
-              : 'Reset to basement floor surface',
-          };
-        }
-      }
-    }
-    return derivedBaseHeight > 0
-      ? {
-          value: derivedBaseHeight,
-          note: 'cumulative floor heights',
-          title: 'Reset to height derived from floors below',
-        }
-      : null;
-  }, [selection, elementsById, allElements, derivedBaseHeight]);
+  // baseHeightResetTarget moved to elementForms/buildingElementOpaque.tsx
+  // (slice-6 brief STAGE 4) — Opaque-exclusive (decision 7), computed inline
+  // in that module's renderPanel (no useMemo — same "renderPanel is a plain
+  // function" precedent buildingElementTransparent.tsx's header documents)
+  // from ElementFormRenderCtx.selection/elementsById/elementIds/
+  // derivedBaseHeight, none of which are new ctx surface.
 
   // Soft host link: when the selected element is an OnSiteGeneration with `_pvHostRoofId`, expose
   // the derived base_height/pitch/orientation360 from that host roof so the UI can show a "From
@@ -1740,7 +1683,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // applyOrientationToGeometry now live in elementForms/wallShared.tsx
   // (wallShared.orientation360 etc.).
 
-  const roundToInt = (value: number) => Math.round(value ?? 0);
+  // roundToInt moved with buildNewElementData's Opaque case to
+  // elementForms/buildingElementOpaque.tsx (slice-6 brief STAGE 4) — that
+  // was its only remaining caller; the module uses a plain
+  // `Math.round(state.orientation360 ?? 0)` inline instead, matching
+  // buildingElementTransparent.tsx's own orientation360 rounding.
 
   // NEW: CSV v3 element state variables
   // WindowShading's own exclusive state (linkedWindow/shadingType/depthInput/
@@ -1907,6 +1854,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const buildingElementGroundFormState = buildingElementGroundFormModule.useFormState(elementFormStateCtx);
   // BuildingElementTransparent
   const buildingElementTransparentFormState = buildingElementTransparentFormModule.useFormState(elementFormStateCtx);
+  // BuildingElementOpaque (dormer bundle machinery excluded — decision 2,
+  // stage 5 territory)
+  const buildingElementOpaqueFormState = buildingElementOpaqueFormModule.useFormState(elementFormStateCtx);
   // Adjacent-like trio (BuildingElementPartyWall / AdjacentConditionedSpace /
   // AdjacentUnconditionedSpace_Simple) — ONE state instance, bound ONCE below
   // and registered under all three elementFormInstances keys (slice-6 brief
@@ -1918,6 +1868,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
     BuildingElementGround: bindElementFormModule(buildingElementGroundFormModule, buildingElementGroundFormState),
     BuildingElementTransparent: bindElementFormModule(buildingElementTransparentFormModule, buildingElementTransparentFormState),
+    BuildingElementOpaque: bindElementFormModule(buildingElementOpaqueFormModule, buildingElementOpaqueFormState),
     // Same bound instance under all three keys — see comment above.
     BuildingElementPartyWall: adjacentLikeElementFormInstance,
     BuildingElementAdjacentConditionedSpace: adjacentLikeElementFormInstance,
@@ -1991,7 +1942,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     ventilationSubtype: mechanicalVentilationFormState.ventType || undefined,
     systemSubtype: systemFormState.systemSubcategory || undefined,
     pitch: wallShared.pitch,
-    isExternalDoor,
+    isExternalDoor: buildingElementOpaqueFormState.isExternalDoor,
   });
   const resolveElementFieldPresentation = elementFieldPresentation.resolve;
   const fieldUnit = elementFieldPresentation.unit;
@@ -2525,8 +2476,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       if (typeof storeUpdate.free_area_height === 'number') buildingElementTransparentFormState.freeAreaHeightInput.setValue(roundToTwoDecimals(storeUpdate.free_area_height));
       if (typeof storeUpdate.mid_height === 'number') buildingElementTransparentFormState.midHeightInput.setValue(roundToTwoDecimals(storeUpdate.mid_height));
       if (typeof storeUpdate.max_window_open_area === 'number') buildingElementTransparentFormState.maxWindowOpenAreaInput.setValue(roundToTwoDecimals(storeUpdate.max_window_open_area));
-      if (typeof storeUpdate.is_unheated_pitched_roof === 'boolean') setIsUnheatedPitchedRoof(storeUpdate.is_unheated_pitched_roof);
-      if (typeof storeUpdate.is_external_door === 'boolean') setIsExternalDoor(storeUpdate.is_external_door);
+      if (typeof storeUpdate.is_unheated_pitched_roof === 'boolean') buildingElementOpaqueFormState.setIsUnheatedPitchedRoof(storeUpdate.is_unheated_pitched_roof);
+      if (typeof storeUpdate.is_external_door === 'boolean') buildingElementOpaqueFormState.setIsExternalDoor(storeUpdate.is_external_door);
       if (data.type === 'OnSiteGeneration') {
         if (typeof storeUpdate.peak_power === 'number') onSiteGenerationFormState.peakPowerInput.setValue(roundToTwoDecimals(storeUpdate.peak_power));
         if (typeof storeUpdate.pitch === 'number') onSiteGenerationFormState.onSitePitchInput.setValue(storeUpdate.pitch);
@@ -2749,17 +2700,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
         // Set fields based on element type
         if (element.type === 'BuildingElementOpaque') {
-          // Shared Opaque/Transparent prefix, factored once — see
-          // wallShared.tsx's hydrateWallSharedFields header for the full
-          // "risky seam" writeup (Stage 4 will call this same function from
-          // Opaque's own extracted module).
-          hydrateWallSharedFields(wallShared, element, getCurrentOrientation);
-
-          setIsUnheatedPitchedRoof(!!(element as any).is_unheated_pitched_roof);
-          setIsExternalDoor(!!(element as any).is_external_door);
-          unheatedPitchedRoofCeilingElevationInput.setValue(
-            readAuthoredUnheatedPitchedRoofCeilingElevationM(element) ?? '',
-          );
+          // Moved to elementForms/buildingElementOpaque.tsx (slice-6 brief
+          // STAGE 4) — see that module's hydrate() (shared Opaque/Transparent
+          // prefix via wallShared.tsx's hydrateWallSharedFields, plus
+          // Opaque-exclusive isUnheatedPitchedRoof/isExternalDoor/
+          // unheatedPitchedRoofCeilingElevationInput, decision 7). The dormer
+          // metadata block below stays orchestrator-side (decision 2, stage
+          // 5 territory) — it runs unconditionally after the module's own
+          // hydrate, exactly as it did inline before.
+          elementFormInstances.BuildingElementOpaque.hydrate(element);
 
           const dormerMetadata = getDormerBundleMetadata(element);
           if (dormerMetadata) {
@@ -3151,15 +3100,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     wallShared.setPitch(90);
     wallShared.setOrientation360(0);
     wallShared.baseHeightInput.setValue('');
-    unheatedPitchedRoofCeilingElevationInput.setValue('');
+    // unheatedPitchedRoofCeilingElevationInput/isUnheatedPitchedRoof/
+    // isExternalDoor reset lines now live in buildingElementOpaqueFormModule.
+    // reset() (via the elementFormInstances loop below) — slice-6 brief
+    // STAGE 4. dormerRoofIsUnheatedPitchedRoof below is dormer-exclusive
+    // state (decision 2) and stays orchestrator-owned.
     // adjacentViewerBaseHeightInput's reset line now lives in
     // adjacentLikeElementFormModule.reset() (via the elementFormInstances
     // loop below) — slice-6 brief STAGE 2. partyWallCavityResistanceInput
     // was never reset here in the legacy code either (preserved verbatim).
     elementElevationInput.setValue('');
-    setIsUnheatedPitchedRoof(false);
     setDormerRoofIsUnheatedPitchedRoof(false);
-    setIsExternalDoor(false);
     wallShared.setParentElement('');
     // freeAreaFraction/freeAreaHeight/midHeight/maxWindowOpenArea reset
     // lines now live in buildingElementTransparentFormModule.reset() (via
@@ -4064,17 +4015,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const selectedShape = useMemo(() => {
     return selectedElement ? getElementShape(selectedElement) : null;
   }, [selectedElement]);
-  const canFlipSelectedWallOrientation = useMemo(() => {
-    if (selection?.type !== 'element') return false;
-    if (!selectedElement || selectedElement.type !== 'BuildingElementOpaque') return false;
-    const opaqueElement = selectedElement as BuildingElementOpaque;
-    if (opaqueElement.parent_element || opaqueElement.is_external_door === true) return false;
-    if (selectedShape !== 'line') return false;
-    const coordinates = opaqueElement.coordinates;
-    if (!Array.isArray(coordinates) || coordinates.length !== 2) return false;
-    const [start, end] = coordinates;
-    return Math.hypot(end.x - start.x, end.y - start.y) > 0.01;
-  }, [selection?.type, selectedElement, selectedShape]);
+  // canFlipSelectedWallOrientation moved to elementForms/
+  // buildingElementOpaque.tsx (slice-6 brief STAGE 4) — Opaque-exclusive
+  // (its only consumer was the Flip 180° button in Opaque's own render),
+  // computed inline in that module's renderPanel from ctx.selection/
+  // selectedElement/selectedShape (no useMemo, same renderPanel-is-a-plain-
+  // function precedent as above). The click handler itself now calls the
+  // new ElementFormRenderCtx.flipElementOrientation (this store action
+  // can't be reconstructed generically — see types.ts).
 
   useEffect(() => {
     if (!selectedElement || (selection?.type !== 'element' && selection?.type !== 'global')) return;
@@ -4256,30 +4204,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return selectedFieldValidationByKey.get(fieldName) ?? null;
   };
 
-  // For opaque walls, show the net area that save/validation use.
-  // Gross/openings remain visible as helper information for context.
-  const selectedOpaqueAreaSummary = useMemo(() => {
-    if (!selectedElement || selectedElement.type !== 'BuildingElementOpaque') return null;
-    const draftElement = { ...selectedElement, pitch: wallShared.pitch } as Element;
-    const grossArea = selectedShape === 'polygon' || selectedShape === 'sloped-polygon'
-      ? getElementGrossArea(draftElement)
-      : liveRectArea;
-    const subtractedArea = getOpaqueOpeningArea(selectedElement, elementsById);
-    const clampedNet = Math.max(0, grossArea - subtractedArea);
-    return {
-      grossArea: roundToTwoDecimals(grossArea),
-      netArea: roundToTwoDecimals(clampedNet),
-      subtractedArea: roundToTwoDecimals(subtractedArea),
-      usesUnheatedPitchedRoofPlanArea: isUnheatedPitchedRoofPlanAreaElement(draftElement),
-    };
-  }, [selectedElement, selectedShape, wallShared.pitch, liveRectArea, elementsById]);
-
-  const canMarkUnheatedPitchedRoof = elementType === 'BuildingElementOpaque' && selectedShape === 'sloped-polygon';
-  const canMarkExternalDoor = elementType === 'BuildingElementOpaque'
-    && selectedShape === 'line'
-    && typeof wallShared.pitch === 'number'
-    && Number.isFinite(wallShared.pitch)
-    && Math.round(wallShared.pitch) === 90;
+  // selectedOpaqueAreaSummary/canMarkUnheatedPitchedRoof/canMarkExternalDoor
+  // moved to elementForms/buildingElementOpaque.tsx (slice-6 brief STAGE 4)
+  // — all three Opaque-exclusive (decision 7), computed inline in that
+  // module's renderPanel (no new ctx surface needed: elementsById is
+  // already generic, and the state.pitch/elementType/selectedShape reads
+  // are all already threaded).
+  //
+  // unheatedPitchedRoofCeilingElevationSuggestion (below) STAYS here,
+  // unchanged — it needs `floors`, which no module holds (same "computed
+  // orchestrator-side, threaded as a plain render-time value" precedent as
+  // onSiteHostDerivation/selectedPvDimensionNotes) — now exposed to Opaque's
+  // module via ElementFormRenderCtx.unheatedPitchedRoofCeilingElevationSuggestion.
   const unheatedPitchedRoofCeilingElevationSuggestion = useMemo(() => {
     if (!selectedElement || selectedElement.type !== 'BuildingElementOpaque') return null;
     const draftRoof = {
@@ -4427,30 +4363,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
 	    switch (elementType) {
 		      case 'BuildingElementOpaque':
-		        {
-		          const width = wallShared.widthInput.value;
-		          const height = wallShared.heightInput.value;
-		          const coldRoofCeilingExtraJson =
-		            isUnheatedPitchedRoof && typeof unheatedPitchedRoofCeilingElevationInput.value === 'number'
-		              ? mergeUnheatedPitchedRoofCeilingElevationExtraJson(
-		                  undefined,
-		                  unheatedPitchedRoofCeilingElevationInput.value,
-		                )
-		              : undefined;
-		        return {
-		          ...baseData,
-		          width,
-		          height,
-		          area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-		          pitch: wallShared.pitch,
-		          orientation360: roundToInt(wallShared.orientation360),
-		          base_height: wallShared.baseHeightInput.value === '' ? undefined : wallShared.baseHeightInput.value,
-	          is_unheated_pitched_roof: isUnheatedPitchedRoof,
-	          is_external_door: isExternalDoor,
-		          parent_element: wallShared.parentElement,
-		          ...(coldRoofCeilingExtraJson ? { extra_json: coldRoofCeilingExtraJson } : {}),
-		        } as Partial<Element>;
-		        }
+		        // Moved to elementForms/buildingElementOpaque.tsx (slice-6 brief
+		        // STAGE 4) — see that module's buildElementData().
+		        return elementFormInstances.BuildingElementOpaque.buildElementData({ baseData, elementZoneId });
 
       case 'BuildingElementTransparent':
         // Moved to elementForms/buildingElementTransparent.tsx (slice-6
@@ -5051,6 +4966,184 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     ) : null
   );
 
+  // Orchestrator-owned dormer bundle editor (slice-6 brief decision 2): the
+  // dormer side of Opaque's legacy dormer/non-dormer render ternary, moved
+  // verbatim as a callback so BuildingElementOpaque's module (elementForms/
+  // buildingElementOpaque.tsx, slice-6 brief STAGE 4) can invoke it without
+  // owning any of the dormer bundle machinery it closes over (dormer draft
+  // inputs, commitDormerAnchorChanges/regenerateDormerAnchor, which also
+  // write across the anchor's Transparent siblings — stage 5 territory).
+  // Same renderMvhrDuctAndTerminalManager / renderSpaceHeatSystemPicker
+  // precedent: a zero-arg `() => ReactNode` bridge on ElementFormRenderCtx.
+  const renderDormerBundleEditor = (): React.ReactNode => (
+    <>
+      {renderFieldLabel('Host Roof:', elementType, 'parent_element')}
+      <div className="element-input">
+        <ParentElementDropdown
+          value={wallShared.parentElement}
+          onChange={(value) => {
+            wallShared.setParentElement(value);
+            commitDormerAnchorChanges({ hostName: value });
+          }}
+          elementType={elementType}
+          zoneId={elementZoneId}
+          placeholder="Select the sloped roof hosting this dormer"
+          selfId={selection.type === 'element' ? selection.id : undefined}
+        />
+        <div style={INLINE_FIELD_NOTE_STYLE}>
+          Changes regenerate the dormer roof, cheek walls, window, and roof cutout instantly.
+        </div>
+      </div>
+      {renderFieldLabel('Dormer Shape:', elementType)}
+      <div className="element-input">
+        <StandardDropdown
+          value={selectedDormerType}
+          onChange={(value) => {
+            const nextValue = value as DormerType;
+            setSelectedDormerType(nextValue);
+            commitDormerAnchorChanges({ parameters: { dormerType: nextValue } });
+          }}
+          options={[
+            { value: 'mono-pitch', label: 'Mono-pitch' },
+            { value: 'gable-front', label: 'Gable-front' },
+            { value: 'hip', label: 'Hip' },
+          ]}
+          variant="ghost"
+          size="md"
+        />
+      </div>
+      {renderFieldLabel('Dormer Width (m):', elementType, 'width')}
+      <div className="element-input">
+        <StandardInput
+          {...decimalInputProps(dormerWidthInput)}
+          unit={fieldUnit('width')}
+          step="0.1"
+          min="0"
+          variant="ghost"
+          size="md"
+        />
+      </div>
+      {renderFieldLabel('Dormer Depth (derived):', elementType, 'depth')}
+      <div className="element-input">
+        <StandardInput
+          type="text"
+          inputMode="numeric"
+          value={formatConditionalDecimals(dormerDepth)}
+          unit={fieldUnit('depth')}
+          step="0.1"
+          min="0"
+          variant="ghost"
+          size="md"
+          readOnly
+        />
+      </div>
+      {renderFieldLabel('Front Wall Height (m):', elementType, 'height')}
+      <div className="element-input">
+        <StandardInput
+          {...decimalInputProps(dormerFrontWallHeightInput)}
+          unit={fieldUnit('height')}
+          step="0.1"
+          min="0"
+          variant="ghost"
+          size="md"
+        />
+      </div>
+      {selectedDormerType === 'mono-pitch' ? (
+        <>
+          {renderFieldLabel('Dormer Roof Pitch (degrees):', elementType, 'pitch')}
+          <div className="element-input">
+            <StandardInput
+              {...decimalInputProps(dormerRoofPitchInput)}
+              unit={fieldUnit('pitch')}
+              step="1"
+              min="0"
+              max="89"
+              variant="ghost"
+              size="md"
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          {renderFieldLabel('Side Roof Pitch (degrees):', elementType, 'pitch')}
+          <div className="element-input">
+            <StandardInput
+              {...decimalInputProps(gableRoofPitchInput)}
+              unit={fieldUnit('pitch')}
+              step="1"
+              min="1"
+              max="89"
+              variant="ghost"
+              size="md"
+            />
+          </div>
+        </>
+      )}
+      {renderFieldLabel('Unheated Pitched Roof', elementType)}
+      <div className="element-input">
+        <label className="checkbox-container">
+          <input
+            type="checkbox"
+            className="styled-checkbox"
+            checked={!!dormerRoofIsUnheatedPitchedRoof}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setDormerRoofIsUnheatedPitchedRoof(checked);
+              commitDormerAnchorChanges({ parameters: { isUnheatedPitchedRoof: checked } });
+            }}
+            id="dormer-unheated-pitched-roof"
+          />
+          <span className="checkbox-custom"></span>
+        </label>
+      </div>
+      {renderFieldLabel('Window Width (m):', 'BuildingElementTransparent', 'width')}
+      <div className="element-input">
+        <StandardInput
+          {...decimalInputProps(dormerWindowWidthInput)}
+          unit={fieldUnit('width', 'BuildingElementTransparent')}
+          step="0.1"
+          min="0"
+          variant="ghost"
+          size="md"
+        />
+      </div>
+      {renderFieldLabel('Window Height (m):', 'BuildingElementTransparent', 'height')}
+      <div className="element-input">
+        <StandardInput
+          {...decimalInputProps(dormerWindowHeightInput)}
+          unit={fieldUnit('height', 'BuildingElementTransparent')}
+          step="0.1"
+          min="0"
+          variant="ghost"
+          size="md"
+        />
+      </div>
+      {renderFieldLabel('Window Sill Height (m):', 'BuildingElementTransparent', 'base_height')}
+      <div className="element-input">
+        <StandardInput
+          {...decimalInputProps(dormerWindowSillHeightInput)}
+          unit={fieldUnit('base_height', 'BuildingElementTransparent')}
+          step="0.1"
+          min="0"
+          variant="ghost"
+          size="md"
+        />
+      </div>
+      {renderFieldLabel('Window Frame Area Fraction:', 'BuildingElementTransparent', 'frame_area_fraction')}
+      <div className="element-input">
+        <StandardInput
+          {...decimalInputProps(dormerFrameAreaFractionInput)}
+          unit={fieldUnit('frame_area_fraction', 'BuildingElementTransparent')}
+          step="0.01"
+          min="0"
+          max="1"
+          variant="ghost"
+          size="md"
+        />
+      </div>
+    </>
+  );
+
   const renderAttributePanel = () => {
     const formRenderCtx: ElementFormRenderCtx = {
       elementType,
@@ -5085,8 +5178,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       // Wall-family generic derived render values — Adjacent-like's first
       // consumer (elementForms/adjacentLikeElement.tsx, slice-6 brief
       // STAGE 2); Transparent (elementForms/buildingElementTransparent.tsx,
-      // STAGE 3) is the next; Opaque (still inline) reads the same locals
-      // directly until Stage 4.
+      // STAGE 3) and Opaque (elementForms/buildingElementOpaque.tsx,
+      // STAGE 4) are the next two.
       selectedElement,
       selectedShape,
       derivedBaseHeight,
@@ -5101,457 +5194,19 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       // extracted-module consumer.
       selectedSlopedDimensions,
       applyHostedParentElement,
+      // Opaque's module (slice-6 brief STAGE 4) — see types.ts for why each
+      // is a genuinely-new field.
+      renderDormerBundleEditor,
+      flipElementOrientation,
+      unheatedPitchedRoofCeilingElevationSuggestion,
     };
     switch (elementType) {
       case 'BuildingElementOpaque':
-        return selectedIsDormerAnchor ? (
-          <>
-            {renderFieldLabel('Host Roof:', elementType, 'parent_element')}
-            <div className="element-input">
-              <ParentElementDropdown
-                value={wallShared.parentElement}
-                onChange={(value) => {
-                  wallShared.setParentElement(value);
-                  commitDormerAnchorChanges({ hostName: value });
-                }}
-                elementType={elementType}
-                zoneId={elementZoneId}
-                placeholder="Select the sloped roof hosting this dormer"
-                selfId={selection.type === 'element' ? selection.id : undefined}
-              />
-              <div style={INLINE_FIELD_NOTE_STYLE}>
-                Changes regenerate the dormer roof, cheek walls, window, and roof cutout instantly.
-              </div>
-            </div>
-            {renderFieldLabel('Dormer Shape:', elementType)}
-            <div className="element-input">
-              <StandardDropdown
-                value={selectedDormerType}
-                onChange={(value) => {
-                  const nextValue = value as DormerType;
-                  setSelectedDormerType(nextValue);
-                  commitDormerAnchorChanges({ parameters: { dormerType: nextValue } });
-                }}
-                options={[
-                  { value: 'mono-pitch', label: 'Mono-pitch' },
-                  { value: 'gable-front', label: 'Gable-front' },
-                  { value: 'hip', label: 'Hip' },
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Dormer Width (m):', elementType, 'width')}
-            <div className="element-input">
-              <StandardInput
-                {...decimalInputProps(dormerWidthInput)}
-                unit={fieldUnit('width')}
-                step="0.1"
-                min="0"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Dormer Depth (derived):', elementType, 'depth')}
-            <div className="element-input">
-              <StandardInput
-	                  type="text"
-	                  inputMode="numeric"
-                value={formatConditionalDecimals(dormerDepth)}
-                unit={fieldUnit('depth')}
-                step="0.1"
-                min="0"
-                variant="ghost"
-                size="md"
-                readOnly
-              />
-            </div>
-            {renderFieldLabel('Front Wall Height (m):', elementType, 'height')}
-            <div className="element-input">
-              <StandardInput
-                {...decimalInputProps(dormerFrontWallHeightInput)}
-                unit={fieldUnit('height')}
-                step="0.1"
-                min="0"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {selectedDormerType === 'mono-pitch' ? (
-              <>
-                {renderFieldLabel('Dormer Roof Pitch (degrees):', elementType, 'pitch')}
-                <div className="element-input">
-                  <StandardInput
-                    {...decimalInputProps(dormerRoofPitchInput)}
-                    unit={fieldUnit('pitch')}
-                    step="1"
-                    min="0"
-                    max="89"
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-              </>
-            ) : (
-              <>
-                {renderFieldLabel('Side Roof Pitch (degrees):', elementType, 'pitch')}
-                <div className="element-input">
-                  <StandardInput
-                    {...decimalInputProps(gableRoofPitchInput)}
-                    unit={fieldUnit('pitch')}
-                    step="1"
-                    min="1"
-                    max="89"
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-              </>
-            )}
-            {renderFieldLabel('Unheated Pitched Roof', elementType)}
-            <div className="element-input">
-              <label className="checkbox-container">
-                <input
-                  type="checkbox"
-                  className="styled-checkbox"
-                  checked={!!dormerRoofIsUnheatedPitchedRoof}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setDormerRoofIsUnheatedPitchedRoof(checked);
-                    commitDormerAnchorChanges({ parameters: { isUnheatedPitchedRoof: checked } });
-                  }}
-                  id="dormer-unheated-pitched-roof"
-                />
-                <span className="checkbox-custom"></span>
-              </label>
-            </div>
-            {renderFieldLabel('Window Width (m):', 'BuildingElementTransparent', 'width')}
-            <div className="element-input">
-              <StandardInput
-                {...decimalInputProps(dormerWindowWidthInput)}
-                unit={fieldUnit('width', 'BuildingElementTransparent')}
-                step="0.1"
-                min="0"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Window Height (m):', 'BuildingElementTransparent', 'height')}
-            <div className="element-input">
-              <StandardInput
-                {...decimalInputProps(dormerWindowHeightInput)}
-                unit={fieldUnit('height', 'BuildingElementTransparent')}
-                step="0.1"
-                min="0"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Window Sill Height (m):', 'BuildingElementTransparent', 'base_height')}
-            <div className="element-input">
-              <StandardInput
-                {...decimalInputProps(dormerWindowSillHeightInput)}
-                unit={fieldUnit('base_height', 'BuildingElementTransparent')}
-                step="0.1"
-                min="0"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Window Frame Area Fraction:', 'BuildingElementTransparent', 'frame_area_fraction')}
-            <div className="element-input">
-              <StandardInput
-                {...decimalInputProps(dormerFrameAreaFractionInput)}
-                unit={fieldUnit('frame_area_fraction', 'BuildingElementTransparent')}
-                step="0.01"
-                min="0"
-                max="1"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
-            <div className="element-input">
-              <ParentElementDropdown
-                value={wallShared.parentElement}
-                onChange={(value) => applyHostedParentElement(value, null)}
-                elementType={elementType}
-                zoneId={elementZoneId}
-                placeholder="Select a parent opaque element (optional)"
-                selfId={selection.type === 'element' ? selection.id : undefined}
-              />
-            </div>
-            {selectedShape !== 'polygon' && (
-              renderLinearDimensionsFields(registerBaseFieldRefs, {
-                widthStep: '0.1',
-                heightStep: '0.1',
-                includeProfileTop: true,
-              })
-            )}
-            {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
-            <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRef('area')}>
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                value={formatToTwoDecimals(selectedOpaqueAreaSummary ? selectedOpaqueAreaSummary.netArea : (selectedShape === 'polygon' ? derivedPolygonArea : liveRectArea))}
-                unit={fieldUnit('area')}
-                readOnly
-                variant="ghost"
-                size="md"
-              />
-              {selectedOpaqueAreaSummary && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Gross area: {formatToTwoDecimals(selectedOpaqueAreaSummary.grossArea)} m²
-                  {selectedOpaqueAreaSummary.subtractedArea > 0
-                    ? ` · Linked openings / cutouts subtracted: ${formatToTwoDecimals(selectedOpaqueAreaSummary.subtractedArea)} m²`
-                    : ' · No linked openings or cutouts subtracted'}
-                </div>
-              )}
-              {selectedOpaqueAreaSummary?.usesUnheatedPitchedRoofPlanArea ? (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Exported as horizontal ceiling/plan area for this unheated pitched roof; the sloped roof surface is not the heat-loss area.
-                </div>
-              ) : null}
-            </div>
-            {renderFieldLabel(selectedShape === 'polygon' ? 'Surface facing:' : 'Pitch (degrees):', elementType, 'pitch')}
-            <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('pitch')}>
-              {selectedShape === 'polygon' ? (
-                <StandardDropdown
-                  value={horizontalPolygonSurfaceSelectValue(horizontalPolygonControlPitch)}
-                  onChange={(value) => {
-                    if (value !== '0' && value !== '180') return;
-                    const next = value === '180' ? 180 : 0;
-                    wallShared.setPitch(next);
-                    if (selection.type === 'element') {
-                      updateElement(selection.id, { pitch: next });
-                    }
-                  }}
-                  options={HORIZONTAL_POLYGON_PITCH_OPTIONS}
-                  placeholder={HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER}
-                  unit={fieldUnit('pitch')}
-                  variant="ghost"
-                  size="md"
-                  disabled={!!wallShared.parentElement}
-                />
-              ) : (
-                <StandardInput
-                  type="text"
-                  inputMode="decimal"
-                  value={wallShared.pitchDraftInput.inputValue}
-                  unit={fieldUnit('pitch')}
-                  onChange={wallShared.pitchDraftInput.handleInputChange}
-                  onBlur={wallShared.pitchDraftInput.handleBlur}
-                  min="0"
-                  max="180"
-                  readOnly={!!wallShared.parentElement}
-                  variant="ghost"
-                  size="md"
-                />
-              )}
-              {selectedShape !== 'polygon' && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  {wallShared.pitch === 0
-                    ? 'Facing up (horizontal)'
-                    : wallShared.pitch === 90
-                      ? 'Vertical'
-                      : wallShared.pitch === 180
-                        ? 'Facing down (horizontal)'
-                        : 'Angled surface'}
-                </div>
-              )}
-              {wallShared.parentElement && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {wallShared.parentElement}
-                </div>
-              )}
-            </div>
-            {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
-            <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('orientation360')}>
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>
-                <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-                  <StandardInput
-                    type="text"
-                    inputMode="numeric"
-                    value={Number.isFinite(wallShared.orientation360) ? wallShared.orientation360 : 0}
-                    unit={fieldUnit('orientation360')}
-                    onChange={(e) => wallShared.setOrientation360(Math.round(parseFloat(e.target.value) || 0))}
-                    onBlur={(e) => {
-                      const parsed = Math.round(parseFloat(e.currentTarget.value) || 0);
-                      wallShared.setOrientation360(parsed);
-                      wallShared.applyOrientationToGeometry(parsed);
-                    }}
-                    step="1"
-                    min="0"
-                    max="360"
-                    readOnly={!!wallShared.parentElement}
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                {canFlipSelectedWallOrientation && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm element-editor-input-action"
-                    title="Flip orientation by 180 degrees"
-                    onClick={() => {
-                      if (selection?.type === 'element') {
-                        flipElementOrientation(selection.id);
-                      }
-                    }}
-                    style={{
-                      flex: '0 0 auto',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    Flip 180°
-                  </button>
-                )}
-              </div>
-              {wallShared.parentElement && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {wallShared.parentElement}
-                </div>
-              )}
-            </div>
-            {renderFieldLabel('Base Height (m):', elementType, 'base_height')}
-            <div
-              className="element-input"
-              style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
-              ref={registerBaseFieldRefs('base_height')}
-            >
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>
-                <div
-                  className={
-                    baseHeightResetTarget && typeof wallShared.baseHeightInput.value === 'number' && Math.abs(wallShared.baseHeightInput.value - baseHeightResetTarget.value) > 0.01
-                      ? 'custom-value'
-                      : ''
-                  }
-                  style={{ flex: 1 }}
-                >
-                  <StandardInput
-                    {...decimalInputProps(wallShared.baseHeightInput)}
-                    unit={fieldUnit('base_height')}
-                    step="0.01"
-                    min={baseHeightResetTarget && baseHeightResetTarget.value < 0 ? undefined : '0'}
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                    placeholder={baseHeightResetTarget ? String(baseHeightResetTarget.value) : undefined}
-                  />
-                </div>
-                {baseHeightResetTarget && typeof wallShared.baseHeightInput.value === 'number' && Math.abs(wallShared.baseHeightInput.value - baseHeightResetTarget.value) > 0.01 && (
-                  <ResetFieldButton
-                    onClick={() => {
-                      wallShared.baseHeightInput.setValue(baseHeightResetTarget.value);
-                      commitExistingElementDraft({ base_height: baseHeightResetTarget.value });
-                    }}
-                    align="inline"
-                    title={baseHeightResetTarget.title}
-                    ariaLabel="Reset Base Height"
-                    label="Reset"
-                  />
-                )}
-              </div>
-              {baseHeightResetTarget ? (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  {typeof wallShared.baseHeightInput.value === 'number' && Math.abs(wallShared.baseHeightInput.value - baseHeightResetTarget.value) > 0.01
-                    ? `Default: ${baseHeightResetTarget.value} m · ${baseHeightResetTarget.note}`
-                    : `Suggested: ${baseHeightResetTarget.value} m · ${baseHeightResetTarget.note}`}
-                </div>
-              ) : null}
-            </div>
-            {canMarkUnheatedPitchedRoof ? (
-              <>
-                {renderFieldLabel('Unheated Pitched Roof', elementType)}
-                <div className="element-input">
-                  <label className="checkbox-container">
-                    <input
-                      type="checkbox"
-                      className="styled-checkbox"
-                      checked={!!isUnheatedPitchedRoof}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setIsUnheatedPitchedRoof(checked);
-                        if (checked) setIsExternalDoor(false);
-                        commitExistingElementDraft({
-                          is_unheated_pitched_roof: checked,
-                          ...(checked ? { is_external_door: false } : {}),
-                        });
-                      }}
-                      id="unheated-pitched-roof"
-                    />
-                    <span className="checkbox-custom"></span>
-                  </label>
-	                </div>
-	              </>
-	            ) : null}
-	            {canMarkUnheatedPitchedRoof && isUnheatedPitchedRoof ? (
-	              <>
-	                {renderFieldLabel(
-	                  'Ceiling / heat-loss boundary elevation (m):',
-	                  elementType,
-	                  UNHEATED_PITCHED_ROOF_CEILING_ELEVATION_KEY,
-	                )}
-	                <div
-	                  className="element-input"
-	                  style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
-	                  ref={registerBaseFieldRefs([
-	                    UNHEATED_PITCHED_ROOF_CEILING_ELEVATION_KEY,
-	                    'ceiling_elevation',
-	                  ])}
-	                >
-	                  <StandardInput
-	                    {...decimalInputProps(unheatedPitchedRoofCeilingElevationInput)}
-	                    unit={fieldUnit(UNHEATED_PITCHED_ROOF_CEILING_ELEVATION_KEY)}
-	                    step="0.01"
-	                    min="0"
-	                    variant="ghost"
-	                    size="md"
-	                    className="flex-1"
-	                    placeholder={
-	                      unheatedPitchedRoofCeilingElevationSuggestion
-	                        ? String(unheatedPitchedRoofCeilingElevationSuggestion.value)
-	                        : undefined
-	                    }
-	                  />
-	                  {unheatedPitchedRoofCeilingElevationSuggestion ? (
-	                    <div style={INLINE_FIELD_NOTE_STYLE}>
-	                      Blank = automatic {unheatedPitchedRoofCeilingElevationSuggestion.value} m from {unheatedPitchedRoofCeilingElevationSourceLabel(unheatedPitchedRoofCeilingElevationSuggestion.source)}. Used for 3D and auto thermal bridges; HEM base height remains the roof-plane base.
-	                    </div>
-	                  ) : null}
-	                </div>
-	              </>
-	            ) : null}
-	            {canMarkExternalDoor ? (
-	              <>
-                {renderFieldLabel('External Door', elementType)}
-                <div className="element-input">
-                  <label className="checkbox-container">
-                    <input
-                      type="checkbox"
-                      className="styled-checkbox"
-                      checked={!!isExternalDoor}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setIsExternalDoor(checked);
-                        if (checked) setIsUnheatedPitchedRoof(false);
-                        commitExistingElementDraft({
-                          is_external_door: checked,
-                          ...(checked ? { is_unheated_pitched_roof: false } : {}),
-                        });
-                      }}
-                      id="external-door"
-                    />
-                    <span className="checkbox-custom"></span>
-                  </label>
-                </div>
-              </>
-            ) : null}
-          </>
-        );
+        // Moved to elementForms/buildingElementOpaque.tsx (slice-6 brief
+        // STAGE 4) — see that module's renderPanel(). The dormer branch is
+        // now ctx.renderDormerBundleEditor() (decision 2); the dormer bundle
+        // machinery itself stays orchestrator-owned (stage 5 territory).
+        return elementFormInstances.BuildingElementOpaque.renderPanel(formRenderCtx);
 
       case 'BuildingElementTransparent':
         // Moved to elementForms/buildingElementTransparent.tsx (slice-6
@@ -5888,11 +5543,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       if (el.type === 'BuildingElementOpaque') {
                         if (shape !== 'sloped-polygon') {
                           updates.is_unheated_pitched_roof = false;
-                          setIsUnheatedPitchedRoof(false);
+                          buildingElementOpaqueFormState.setIsUnheatedPitchedRoof(false);
                         }
                         if (shape !== 'line') {
                           updates.is_external_door = false;
-                          setIsExternalDoor(false);
+                          buildingElementOpaqueFormState.setIsExternalDoor(false);
                         }
                       }
                       updateElement(el.id, updates);

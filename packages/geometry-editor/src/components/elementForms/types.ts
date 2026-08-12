@@ -19,6 +19,7 @@ import type { BuildingElementTransparent, Element, ElementType } from '../../geo
 import type { CanvasShape } from '../../lib/shapeUtils';
 import type { SlopedElementDimensions } from '../../lib/slopedElementDimensions';
 import type { TransparentOpeningDerivedValues } from '../../lib/transparentOpeningDerivedFields';
+import type { UnheatedPitchedRoofCeilingElevation } from '../../lib/unheatedPitchedRoofCeiling';
 import type { NumericDraftInputBinding } from './formPrimitives';
 import type { ServiceLineFormGroup } from './serviceLine';
 
@@ -351,6 +352,35 @@ export interface ElementFormRenderCtx {
    * holds; same renderLinearDimensionsFields-style render-bridge precedent
    * above. */
   applyHostedParentElement: (value: string, emptyParentValue: string | null) => void;
+  /** Orchestrator-owned dormer bundle machinery (slice-6 brief decision 2):
+   * renders Opaque's dormer-anchor editing fields (host roof, dormer shape/
+   * dimensions, roof pitches, window parameters). Dormers write across the
+   * Opaque anchor AND its Transparent siblings (regenerateDormerAnchor + the
+   * per-sibling regeneration loop) — no single module may own that, so this
+   * stays a zero-arg callback closing over the dormer draft inputs/
+   * commitDormerAnchorChanges/etc., same renderMvhrDuctAndTerminalManager /
+   * renderSpaceHeatSystemPicker precedent. Invoked from Opaque's module
+   * (elementForms/buildingElementOpaque.tsx, slice-6 brief STAGE 4) when
+   * `isDormerAnchorElement(selectedElement)` is true — see that module's
+   * header for how the dormer-anchor check itself reaches the module
+   * (reusing selectedElement above, not a new boolean field). Stage 5
+   * (dormer bundle proper) still owns everything this callback closes over. */
+  renderDormerBundleEditor: () => ReactNode;
+  /** Opaque's "Flip 180°" wall-orientation action (elementForms/
+   * buildingElementOpaque.tsx, slice-6 brief STAGE 4) — a dedicated
+   * geometry-aware store action (rotates coordinates, not a plain field
+   * patch), so it can't be reconstructed from the generic `updateElement`
+   * patcher above. Opaque-only consumer as of this stage. */
+  flipElementOrientation: (elementId: string) => void;
+  /** Opaque's "Ceiling / heat-loss boundary elevation" suggestion
+   * (elementForms/buildingElementOpaque.tsx, slice-6 brief STAGE 4) —
+   * orchestrator-computed because it needs the full floors + elements graph
+   * (via withEffectiveStoreyHeights), which no module holds — same
+   * "computed orchestrator-side, threaded as a plain render-time value"
+   * precedent as onSiteHostDerivation/selectedPvDimensionNotes above (not a
+   * callback: already fully resolved for the current selection by render
+   * time). Opaque-only consumer. */
+  unheatedPitchedRoofCeilingElevationSuggestion: UnheatedPitchedRoofCeilingElevation | null;
 }
 
 export interface ElementFormModule<S> {
