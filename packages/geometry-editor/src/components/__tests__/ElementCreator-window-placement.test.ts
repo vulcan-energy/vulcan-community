@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import { buildHostedLinearParentPatch, projectLinearChildOntoParentSegment } from '../ElementCreator';
+import { buildHostedLinearParentPatch, projectLinearChildOntoParentSegment } from '../../lib/parentOrientation';
 import type { BuildingElementOpaque, BuildingElementTransparent } from '../../geometry/types';
 
 const transparentElement = (

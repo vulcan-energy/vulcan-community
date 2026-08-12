@@ -125,6 +125,17 @@ export interface ElementFormRenderCtx {
    * — unlike registerBaseFieldRefs, it does not also register a camelCase key. */
   registerBaseFieldRef: (fieldKey: string) => (node: HTMLDivElement | null) => void;
   getFieldValidationIssue: (fieldName: string, value: unknown) => string | null;
+  /** Element/global-scoped source-comparison indicators for the CURRENT
+   * selection, from `sourceComparisonPort.elementInfo(selection.id)`. Same
+   * name as the orchestrator's own local (verbatim-greppability bias) —
+   * distinguish by scope, not name: this is per-selection, while
+   * globalComparisonFieldIndicators below is workspace-wide. Read by
+   * MechanicalVentilation's Ventilation Type field and by several
+   * not-yet-extracted wall-family fields (e.g. Area). */
+  comparisonFieldIndicators: Record<string, readonly string[]>;
+  /** Workspace-wide source-comparison indicators, from
+   * `sourceComparisonPort.globalInfo()` — unlike comparisonFieldIndicators
+   * above, not scoped to the current selection. */
   globalComparisonFieldIndicators: Record<string, readonly string[]>;
   commitExistingElementDraft: (overrides?: Partial<Element>) => void;
   /** Needed by Lighting's guided-mode helpers and OnSiteGeneration's
@@ -150,6 +161,13 @@ export interface ElementFormRenderCtx {
     DetailedJunctionControl: GeometryDetailedJunctionSolverContribution['Control'] | undefined;
     onHostReadinessAction: (action: { elementId: string; kind: 'assembly_calculator' | 'open_host_element' }) => void;
   };
+  /** Orchestrator-owned MVHR duct/terminal manager: creates Ductwork/Terminal
+   * elements and reads store-level state (selectedMvhrUnit, addElement,
+   * geometryStore.getState(), generateUniqueElementName, draw-mode props) with
+   * no dependency on MechanicalVentilation's own module state, so it stays in
+   * ElementCreator and is injected as a callback. Invoked from
+   * MechanicalVentilation's panel when the selected unit is an MVHR. */
+  renderMvhrDuctAndTerminalManager: () => ReactNode;
 }
 
 export interface ElementFormModule<S> {

@@ -20,7 +20,8 @@
 // the orchestrator remains the sole owner of the underlying state.
 //
 // terminalType/hostElement belong to MechanicalVentilationTerminal, a
-// separate element family that stays inline in ElementCreator for now.
+// separate element family with its own module (elementForms/
+// mechanicalVentilationTerminal.tsx, slice-4 stage 2).
 
 import { useState } from 'react';
 import type { Element } from '../../geometry/types';
