@@ -5,8 +5,6 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallba
 import ReactDOM from 'react-dom';
 import './FilesDropdownPrimitives.css';
 import './ElementCreator.css';
-import type { IconNode } from 'lucide';
-import { Pencil, Plus, X as XIcon } from 'lucide';
 import { useShallow } from 'zustand/react/shallow';
 import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M, ZONE_NAME_SUGGESTIONS, roundToTwoDecimals, roundToFourDecimals } from '../geometry/constants';
 import { normalizeHorizontalAdjacentPlanPitch } from '../geometry/adjacentPlanPitch';
@@ -37,7 +35,9 @@ import { onSiteGenerationFormModule } from './elementForms/onSiteGeneration';
 import { windowShadingFormModule } from './elementForms/windowShading';
 import { contextShadingFormModule } from './elementForms/contextShading';
 import { ventsFormModule } from './elementForms/vents';
+import { mechanicalVentilationFormModule } from './elementForms/mechanicalVentilation';
 import { mechanicalVentilationDuctworkFormModule } from './elementForms/mechanicalVentilationDuctwork';
+import { mechanicalVentilationTerminalFormModule } from './elementForms/mechanicalVentilationTerminal';
 import { waterPipeworkFormModule } from './elementForms/waterPipework';
 import { useServiceLineFormState } from './elementForms/serviceLine';
 import {
@@ -156,7 +156,6 @@ import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
 } from '../lib/openingSegmentOutward';
-import { projectSegmentOntoParent } from '../lib/snapUtils';
 import {
   getPvFootprintDimensionsFromPreset,
   readPvFootprintFlags,
@@ -168,18 +167,12 @@ import { findSuspendedGroundSurfaceForLineElement } from '../lib/suspendedFloorG
 import { findLinkedBasementGroundForLineElement } from '../lib/basementGeometry';
 import { fhsFloorLabelForCanvasFloor } from '../lib/storeySemantics';
 import {
-  applyMechanicalVentilationCsvPositionColumns,
-  canMechanicalVentilationInheritHostPlacement,
-  getMechanicalVentilationPositionValues,
-} from '../lib/mechanicalVentilationBranches';
-import {
-  MVHR_DUCT_ROLES,
-  MVHR_TERMINAL_ROLES,
-  deriveMechanicalVentilationTerminalPosition,
-  isMvhrTerminalHost,
-  type MvhrDuctRole,
-  type MvhrTerminalRole,
-} from '../lib/mvhrDuctwork';
+  getParentByName,
+  getParentOrientation360,
+  buildHostedLinearParentPatch,
+} from '../lib/parentOrientation';
+import type { MvhrDuctRole, MvhrTerminalRole } from '../lib/mvhrDuctwork';
+import { useMvhrDuctTerminalManager } from './MvhrDuctTerminalManager';
 import {
   buildDormerBundleDraft,
   computeAutoDormerBundleName,
@@ -419,109 +412,8 @@ const EDITOR_FIELD_ACTION_FIELD_STYLE: React.CSSProperties = {
   flex: '1 1 auto',
   minWidth: 0,
 };
-const MVHR_MANAGER_STYLE: React.CSSProperties = {
-  display: 'grid',
-  gap: '8px',
-  marginTop: '8px',
-};
-const MVHR_MANAGER_SECTION_STYLE: React.CSSProperties = {
-  display: 'grid',
-  gap: '4px',
-};
-const MVHR_MANAGER_SECTION_HEADER_STYLE: React.CSSProperties = {
-  ...INLINE_FIELD_NOTE_STYLE,
-  fontSize: '12px',
-  fontWeight: 600,
-  color: 'var(--text-secondary)',
-};
-const MVHR_MANAGER_ROW_STYLE: React.CSSProperties = {
-  ...EDITOR_FIELD_ACTION_ROW_STYLE,
-  gap: '6px',
-  minHeight: '30px',
-};
-const MVHR_MANAGER_ROLE_LABEL_STYLE: React.CSSProperties = {
-  flex: '0 0 104px',
-  minWidth: 0,
-  fontSize: '12px',
-  fontWeight: 600,
-  color: 'var(--text-primary)',
-  textTransform: 'capitalize',
-};
-const MVHR_MANAGER_CONTENT_STYLE: React.CSSProperties = {
-  flex: '1 1 180px',
-  minWidth: 0,
-  display: 'flex',
-  alignItems: 'center',
-  gap: '4px',
-  flexWrap: 'wrap',
-};
-const MVHR_MANAGER_LINK_STYLE: React.CSSProperties = {
-  flex: '0 1 180px',
-  minWidth: '140px',
-};
-const MVHR_MANAGER_LINKED_ITEM_STYLE: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '4px',
-  maxWidth: '100%',
-  minHeight: '28px',
-  padding: '2px 3px 2px 8px',
-  border: '1px solid var(--surface-control-active)',
-  borderRadius: '6px',
-  background: 'var(--surface-control)',
-  color: 'var(--text-primary)',
-};
-const MVHR_MANAGER_LINKED_NAME_STYLE: React.CSSProperties = {
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  fontSize: '12px',
-};
-const MVHR_MANAGER_EMPTY_STYLE: React.CSSProperties = {
-  ...INLINE_FIELD_NOTE_STYLE,
-  fontSize: '12px',
-};
-const MVHR_MANAGER_ICON_BUTTON_STYLE: React.CSSProperties = {
-  width: '28px',
-  minWidth: '28px',
-  height: '28px',
-  minHeight: '28px',
-  padding: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-const MVHR_MANAGER_WARNING_STYLE: React.CSSProperties = {
-  ...INLINE_FIELD_NOTE_STYLE,
-  marginLeft: '110px',
-};
-
-const LucideSvgIcon: React.FC<{ node: IconNode; size?: number; strokeWidth?: number }> = ({
-  node,
-  size = 14,
-  strokeWidth = 2,
-}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={strokeWidth}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-    focusable="false"
-  >
-    {node.map(([tag, attrs], index) =>
-      React.createElement(tag as keyof React.JSX.IntrinsicElements, {
-        key: index,
-        ...(attrs as Record<string, unknown>),
-      }),
-    )}
-  </svg>
-);
+// MVHR_MANAGER_* styles and LucideSvgIcon moved to MvhrDuctTerminalManager.tsx
+// with the manager cluster itself — see that file's header comment.
 
 function assemblyLayerToken(layer: unknown, library: BundledAssemblyLibrary | null): string {
   if (!layer || typeof layer !== 'object') return 'layer';
@@ -779,8 +671,6 @@ const DOMAIN_ELEVATION_FIELD_TYPES = new Set<ElementType>([
   'MechanicalVentilationTerminal',
 ]);
 
-const MVHR_TERMINAL_MANUAL_POSITION_VALUE = '__manual_external_position__';
-
 function elementUsesDedicatedElevationControls(type: ElementType): boolean {
   return (
     SCHEMA_BASE_HEIGHT_ELEVATION_TYPES.has(type) ||
@@ -892,20 +782,6 @@ interface ElementCreatorProps {
   externalDetailCataloguePort?: ExternalDetailCataloguePort;
 }
 
-// eslint-disable-next-line react-refresh/only-export-components -- geometry helper shared with tests.
-export function projectLinearChildOntoParentSegment(
-  child: Element,
-  parent: Element,
-): Array<{ x: number; y: number; z: number }> | null {
-  if (!Array.isArray(parent.coordinates) || parent.coordinates.length !== 2) return null;
-  if (!Array.isArray(child.coordinates) || child.coordinates.length !== 2) return null;
-  return projectSegmentOntoParent(child.coordinates, parent.coordinates).map((coord) => ({
-    x: roundToFourDecimals(coord.x),
-    y: roundToFourDecimals(coord.y),
-    z: coord.z,
-  }));
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -923,101 +799,6 @@ function compactSelectedValidationMessage(message: string, element: Element | nu
 }
 
 const toCamelCase = (value: string) => value.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
-
-function getParentByName(
-  elementsById: Record<string, Element>,
-  elementIds: string[],
-  parentName: string,
-): Element | undefined {
-  if (!parentName) return undefined;
-  return elementIds
-    .map((id) => elementsById[id])
-    .find((element): element is Element => !!element && element.name === parentName);
-}
-
-function getParentOrientation360(
-  parent: Element,
-  globalOrientationOffset: number,
-): number | undefined {
-  if (Array.isArray(parent.coordinates) && parent.coordinates.length === 2) {
-    try {
-      return deriveWallProperties(parent, globalOrientationOffset).orientation360;
-    } catch {
-      return undefined;
-    }
-  }
-  return 'orientation360' in parent && typeof parent.orientation360 === 'number'
-    ? parent.orientation360
-    : undefined;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- geometry helper shared with tests.
-export function buildHostedLinearParentPatch(
-  current: Element | undefined | null,
-  parent: Element | undefined,
-  parentName: string,
-  emptyParentValue: string | null,
-  globalOrientationOffset: number,
-): Partial<Element> {
-  const updates: Partial<Element> = { parent_element: parentName || emptyParentValue } as Partial<Element>;
-  if (!parentName || !current || !parent) return updates;
-
-  const canInheritHostGeometry =
-    current.type === 'BuildingElementTransparent' ||
-    (current.type === 'BuildingElementOpaque' && (current as BuildingElementOpaque).is_external_door);
-  if (!canInheritHostGeometry) return updates;
-
-  const projectedCoords = projectLinearChildOntoParentSegment(current, parent);
-  if (projectedCoords) {
-    updates.coordinates = projectedCoords;
-  }
-  if ('pitch' in parent && typeof parent.pitch === 'number') {
-    (updates as Partial<BuildingElementOpaque | BuildingElementTransparent>).pitch = parent.pitch;
-  }
-  const orientation360 = getParentOrientation360(parent, globalOrientationOffset);
-  if (typeof orientation360 === 'number') {
-    (updates as Partial<BuildingElementOpaque | BuildingElementTransparent>).orientation360 = orientation360;
-  }
-  return updates;
-}
-
-function buildMechanicalVentilationParentPatch(
-  current: Element | undefined | null,
-  parent: Element | undefined,
-  parentName: string,
-  ventType: unknown,
-  globalOrientationOffset: number,
-): Partial<Element> {
-  const normalizedParentName = parentName || null;
-  const updates: Partial<Element> = { parent_element: normalizedParentName } as Partial<Element>;
-  if (!current || current.type !== 'MechanicalVentilation') return updates;
-
-  if (!canMechanicalVentilationInheritHostPlacement(ventType)) {
-    if (normalizedParentName) return { parent_element: null } as Partial<Element>;
-    return updates;
-  }
-  if (!parent || !normalizedParentName) return updates;
-
-  const columns: Partial<Record<'orientation360' | 'pitch', number>> = {};
-  const parentOrientation = getParentOrientation360(parent, globalOrientationOffset);
-  if (typeof parentOrientation === 'number' && Number.isFinite(parentOrientation)) {
-    columns.orientation360 = Math.round(parentOrientation);
-  }
-  const parentPitch = (parent as { pitch?: unknown }).pitch;
-  if (typeof parentPitch === 'number' && Number.isFinite(parentPitch)) {
-    columns.pitch = Math.round(parentPitch);
-  }
-  if (Object.keys(columns).length === 0) return updates;
-
-  const extraJson = applyMechanicalVentilationCsvPositionColumns(
-    current.extra_json,
-    ventType,
-    columns,
-    { preservePositionMode: true },
-  );
-  updates.extra_json = Object.keys(extraJson).length > 0 ? extraJson : undefined;
-  return updates;
-}
 
 // Helper function to check if element type is global
 const isGlobalElementType = (type: ElementType): boolean => {
@@ -2260,9 +2041,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // MechanicalVentilationDuctwork's exclusive state now lives in its module
   // (elementForms/mechanicalVentilationDuctwork.tsx).
 
-  // MechanicalVentilationTerminal
-  const [terminalType, setTerminalType] = useState<'' | 'intake' | 'exhaust'>('');
-  const [hostElement, setHostElement] = useState<string>('');
+  // MechanicalVentilationTerminal's exclusive state now lives in its module
+  // (elementForms/mechanicalVentilationTerminal.tsx).
 
   // WetEmitter
   const [subcategory, setSubcategory] = useState<'' | 'radiator' | 'ufh' | 'fancoil'>('');
@@ -2310,69 +2090,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   // Vents' exclusive state now lives in its module (elementForms/vents.tsx).
 
-  // MechanicalVentilation
-  const [ventType, setVentType] = useState<string>('');
-  const commitMechanicalVentilationPositionField = (
-    field: 'mid_height_air_flow_path' | 'orientation360' | 'pitch',
-  ) => (value: number | '') => {
-    if (!isExistingElementSelection()) return;
-    const currentSelection = selection as Exclude<Selection, null>;
-    const element = getElementById(currentSelection.id);
-    if (!element || element.type !== 'MechanicalVentilation') return;
-    const nextExtra = applyMechanicalVentilationCsvPositionColumns(
-      readExtraJsonRecord(element.extra_json),
-      element.vent_type,
-      typeof value === 'number' ? { [field]: value } : {},
-      { preservePositionMode: true },
-    );
-    if (value === '') {
-      delete nextExtra[field];
-    }
-    commitExistingElementDraft({
-      extra_json: Object.keys(nextExtra).length > 0 ? nextExtra : undefined,
-    } as Partial<Element>);
-  };
-  const mechanicalVentilationMidHeightInput = useDecimalInput(
-    '',
-    commitMechanicalVentilationPositionField('mid_height_air_flow_path'),
-    { commitOnChange: true },
-  );
-  const commitMvhrTerminalMidHeightAirFlowPath = (value: number | '') => {
-    if (!isExistingElementSelection() || typeof value !== 'number') return;
-    const currentSelection = selection as Exclude<Selection, null>;
-    const element = getElementById(currentSelection.id);
-    if (!element || element.type !== 'MechanicalVentilationTerminal') return;
-    const currentPoint = element.coordinates?.[0] ?? { x: 0, y: 0, z: value };
-    commitExistingElementDraft({
-      mid_height_air_flow_path: value,
-      coordinates: [{ ...currentPoint, z: value }],
-    } as Partial<Element>);
-  };
-  const mvhrTerminalMidHeightAirFlowPathInput = useDecimalInput(
-    '',
-    commitMvhrTerminalMidHeightAirFlowPath,
-    { commitOnChange: true },
-  );
-  const commitMvhrTerminalManualPositionField = (
-    field: 'orientation360' | 'pitch',
-  ) => (value: number | '') => {
-    if (!isExistingElementSelection()) return;
-    setHostElement('');
-    commitExistingElementDraft({
-      host_element: null,
-      [field]: typeof value === 'number' ? value : undefined,
-    } as Partial<Element>);
-  };
-  const mvhrTerminalOrientationInput = useIntegerInput(
-    '',
-    commitMvhrTerminalManualPositionField('orientation360'),
-    { commitOnChange: true },
-  );
-  const mvhrTerminalPitchInput = useIntegerInput(
-    '',
-    commitMvhrTerminalManualPositionField('pitch'),
-    { commitOnChange: true },
-  );
+  // MechanicalVentilation's exclusive state now lives in its module
+  // (elementForms/mechanicalVentilation.tsx).
+
+  // MechanicalVentilationTerminal's own commit helpers/inputs now live in its
+  // module (elementForms/mechanicalVentilationTerminal.tsx).
 
   // Vents' optimistic DISPLAY write when a parent wall/window is chosen — mirrors
   // the parent's pitch/orientation360 into the shared inputs so the panel shows the
@@ -2434,8 +2156,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const contextShadingFormState = contextShadingFormModule.useFormState(elementFormStateCtx);
   // Vents
   const ventsFormState = ventsFormModule.useFormState(elementFormStateCtx);
+  // MechanicalVentilation
+  const mechanicalVentilationFormState = mechanicalVentilationFormModule.useFormState(elementFormStateCtx);
   // MechanicalVentilationDuctwork
   const mechanicalVentilationDuctworkFormState = mechanicalVentilationDuctworkFormModule.useFormState(elementFormStateCtx);
+  // MechanicalVentilationTerminal
+  const mechanicalVentilationTerminalFormState = mechanicalVentilationTerminalFormModule.useFormState(elementFormStateCtx);
   // WaterPipework
   const waterPipeworkFormState = waterPipeworkFormModule.useFormState(elementFormStateCtx);
   const elementFormInstances = {
@@ -2450,9 +2176,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     WindowShading: bindElementFormModule(windowShadingFormModule, windowShadingFormState),
     ContextShading: bindElementFormModule(contextShadingFormModule, contextShadingFormState),
     Vents: bindElementFormModule(ventsFormModule, ventsFormState),
+    MechanicalVentilation: bindElementFormModule(mechanicalVentilationFormModule, mechanicalVentilationFormState),
     MechanicalVentilationDuctwork: bindElementFormModule(
       mechanicalVentilationDuctworkFormModule,
       mechanicalVentilationDuctworkFormState,
+    ),
+    MechanicalVentilationTerminal: bindElementFormModule(
+      mechanicalVentilationTerminalFormModule,
+      mechanicalVentilationTerminalFormState,
     ),
     WaterPipework: bindElementFormModule(waterPipeworkFormModule, waterPipeworkFormState),
   } satisfies Partial<Record<ElementType, ElementFormInstance>>;
@@ -2500,7 +2231,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     floorType: floorType || undefined,
     wetEmitterSubtype: subcategory || undefined,
     hotWaterSubtype: hotWaterDemandFormState.hotWaterSubcategory || undefined,
-    ventilationSubtype: ventType || undefined,
+    ventilationSubtype: mechanicalVentilationFormState.ventType || undefined,
     systemSubtype: systemSubcategory || undefined,
     pitch,
     isExternalDoor,
@@ -3769,19 +3500,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } else if (element.type === 'MechanicalVentilationDuctwork') {
           elementFormInstances.MechanicalVentilationDuctwork.hydrate(element);
         } else if (element.type === 'MechanicalVentilationTerminal') {
-          setTerminalType('terminal_type' in element ? element.terminal_type ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          setHostElement('host_element' in element ? element.host_element ?? '' : '');
-          const point = element.coordinates?.[0];
-          mvhrTerminalMidHeightAirFlowPathInput.setValue(
-            point && typeof point.z === 'number' ? roundToTwoDecimals(point.z) : '',
-          );
-          mvhrTerminalOrientationInput.setValue(
-            typeof element.orientation360 === 'number' ? Math.round(element.orientation360) : '',
-          );
-          mvhrTerminalPitchInput.setValue(
-            typeof element.pitch === 'number' ? Math.round(element.pitch) : '',
-          );
+          elementFormInstances.MechanicalVentilationTerminal.hydrate(element);
         } else if (element.type === 'WetEmitter') {
           setSubcategory('subcategory' in element ? element.subcategory ?? '' : '');
           setSpaceHeatSystem('space_heat_system' in element ? (element.space_heat_system ?? '') : '');
@@ -3822,23 +3541,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         else if (element.type === 'Vents') {
           elementFormInstances.Vents.hydrate(element);
         } else if (element.type === 'MechanicalVentilation') {
-          setVentType('vent_type' in element ? element.vent_type ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          const positionValues = getMechanicalVentilationPositionValues(
-            readExtraJsonRecord(element.extra_json),
-            element.vent_type,
-          );
-          mechanicalVentilationMidHeightInput.setValue(
-            typeof positionValues.mid_height_air_flow_path === 'number'
-              ? roundToTwoDecimals(positionValues.mid_height_air_flow_path)
-              : '',
-          );
-          if (typeof positionValues.orientation360 === 'number') {
-            setOrientation360(Math.round(positionValues.orientation360));
-          }
-          if (typeof positionValues.pitch === 'number') {
-            setPitch(Math.round(positionValues.pitch));
-          }
+          elementFormInstances.MechanicalVentilation.hydrate(element);
         } else if (element.type === 'CombustionAppliances') {
           elementFormInstances.CombustionAppliances.hydrate(element);
         } else if (element.type === 'OnSiteGeneration') {
@@ -3887,37 +3590,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } else if (element.type === 'MechanicalVentilationDuctwork') {
           elementFormInstances.MechanicalVentilationDuctwork.hydrate(element);
         } else if (element.type === 'MechanicalVentilationTerminal') {
-          setTerminalType('terminal_type' in element ? element.terminal_type ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          setHostElement('host_element' in element ? element.host_element ?? '' : '');
-          const point = element.coordinates?.[0];
-          mvhrTerminalMidHeightAirFlowPathInput.setValue(
-            point && typeof point.z === 'number' ? roundToTwoDecimals(point.z) : '',
-          );
-          mvhrTerminalOrientationInput.setValue(
-            typeof element.orientation360 === 'number' ? Math.round(element.orientation360) : '',
-          );
-          mvhrTerminalPitchInput.setValue(
-            typeof element.pitch === 'number' ? Math.round(element.pitch) : '',
-          );
+          elementFormInstances.MechanicalVentilationTerminal.hydrate(element);
         } else if (element.type === 'MechanicalVentilation') {
-          setVentType('vent_type' in element ? element.vent_type ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          const positionValues = getMechanicalVentilationPositionValues(
-            readExtraJsonRecord(element.extra_json),
-            element.vent_type,
-          );
-          mechanicalVentilationMidHeightInput.setValue(
-            typeof positionValues.mid_height_air_flow_path === 'number'
-              ? roundToTwoDecimals(positionValues.mid_height_air_flow_path)
-              : '',
-          );
-          if (typeof positionValues.orientation360 === 'number') {
-            setOrientation360(Math.round(positionValues.orientation360));
-          }
-          if (typeof positionValues.pitch === 'number') {
-            setPitch(Math.round(positionValues.pitch));
-          }
+          elementFormInstances.MechanicalVentilation.hydrate(element);
         } else if (element.type === 'CombustionAppliances') {
           elementFormInstances.CombustionAppliances.hydrate(element);
         } else if (element.type === 'OnSiteGeneration') {
@@ -4256,9 +3931,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // MechanicalVentilationDuctwork's own reset lines now live in its module
     // (via the elementFormInstances loop below).
 
-    // MechanicalVentilationTerminal
-    setTerminalType('');
-    setHostElement('');
+    // MechanicalVentilationTerminal's own reset lines now live in its module
+    // (via the elementFormInstances loop below).
 
     // WetEmitter
     setSubcategory('');
@@ -4275,10 +3949,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // Vents' own reset lines now live in its module (via the
     // elementFormInstances loop below).
 
-    // MechanicalVentilation
-    setVentType('');
-    mechanicalVentilationMidHeightInput.setValue('');
-    mvhrTerminalMidHeightAirFlowPathInput.setValue('');
+    // MechanicalVentilation's own reset lines now live in its module (via the
+    // elementFormInstances loop below).
 
     // System
     setSystemSubcategory('');
@@ -5827,40 +5499,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 	      case 'MechanicalVentilationDuctwork':
 	        return elementFormInstances.MechanicalVentilationDuctwork.buildElementData({ baseData, elementZoneId });
 
-      case 'MechanicalVentilationTerminal': {
-        const current =
-          selection?.type === 'element' || selection?.type === 'global'
-            ? getElementById(selection.id)
-            : undefined;
-        const selectedHost = hostElement
-          ? allElements.find((element) => element.name === hostElement)
-          : undefined;
-        const eligibleHostName = isMvhrTerminalHost(selectedHost) ? hostElement : '';
-        const currentPoint = current?.coordinates?.[0] ?? { x: 0, y: 0, z: 2.4 };
-        const z =
-          typeof mvhrTerminalMidHeightAirFlowPathInput.value === 'number'
-            ? mvhrTerminalMidHeightAirFlowPathInput.value
-            : (typeof currentPoint.z === 'number' ? currentPoint.z : 2.4);
-        return {
-          ...baseData,
-          terminal_type: terminalType || undefined,
-          parent_element: parentElement || null,
-          host_element: eligibleHostName || null,
-          orientation360: eligibleHostName
-            ? undefined
-            : (typeof mvhrTerminalOrientationInput.value === 'number'
-              ? mvhrTerminalOrientationInput.value
-              : undefined),
-          pitch: eligibleHostName
-            ? undefined
-            : (typeof mvhrTerminalPitchInput.value === 'number'
-              ? mvhrTerminalPitchInput.value
-              : undefined),
-          mid_height_air_flow_path: z,
-          coordinates: [{ ...currentPoint, z }],
-          zoneId: undefined,
-        } as Partial<Element>;
-      }
+      case 'MechanicalVentilationTerminal':
+        return elementFormInstances.MechanicalVentilationTerminal.buildElementData({ baseData, elementZoneId });
 
       case 'WetEmitter':
         return {
@@ -5887,41 +5527,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       case 'Vents':
         return elementFormInstances.Vents.buildElementData({ baseData, elementZoneId });
 
-      case 'MechanicalVentilation': {
-        const parent = getParentByName(elementsById, elementIds, parentElement);
-        let extraJson: Record<string, unknown> = {};
-        if (typeof mechanicalVentilationMidHeightInput.value === 'number') {
-          extraJson = applyMechanicalVentilationCsvPositionColumns(
-            extraJson,
-            ventType,
-            { mid_height_air_flow_path: mechanicalVentilationMidHeightInput.value },
-          );
-        }
-        const draft = {
-          ...baseData,
-          type: 'MechanicalVentilation',
-          vent_type: ventType || undefined,
-          parent_element: parentElement || null,
-          extra_json: Object.keys(extraJson).length > 0 ? extraJson : undefined,
-        } as Element;
-        const parentPatch = buildMechanicalVentilationParentPatch(
-          draft,
-          parent,
-          parentElement,
-          ventType,
-          geometryStore.getState().globalOrientationOffset,
-        );
-        const nextExtra =
-          parentPatch.extra_json ??
-          (Object.keys(extraJson).length > 0 ? extraJson : undefined);
-        return {
-          ...baseData,
-	          vent_type: ventType || undefined,
-          parent_element: parentPatch.parent_element ?? (parentElement || null),
-          extra_json: nextExtra,
-          zoneId: undefined // Global object
-        } as Partial<Element>;
-      }
+      case 'MechanicalVentilation':
+        return elementFormInstances.MechanicalVentilation.buildElementData({ baseData, elementZoneId });
 
       case 'CombustionAppliances':
         return elementFormInstances.CombustionAppliances.buildElementData({ baseData, elementZoneId });
@@ -5973,7 +5580,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         return floorType || undefined;
       }
       case 'MechanicalVentilation':
-        return ventType || undefined;
+        return elementFormInstances.MechanicalVentilation.subtype();
       case 'WetEmitter':
         return subcategory || undefined;
       case 'Appliance':
@@ -6353,243 +5960,23 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     );
   };
 
-  const selectedMvhrUnit = useMemo(() => {
-    if (!(selection.type === 'element' || selection.type === 'global')) return null;
-    const element = elementsById[selection.id] ?? getElementById(selection.id);
-    return element?.type === 'MechanicalVentilation' && element.vent_type === 'MVHR' ? element : null;
-  }, [selection, elementsById, getElementById]);
-
-  const selectElementById = (id: string) => {
-    const element = getElementById(id);
-    if (!element) return;
-    setSelection({ type: isGlobalObject(element) ? 'global' : 'element', id } as any);
-    setSelectedElementIds([id]);
-  };
-
-  const selectElementByNameAfterCreate = (type: Element['type'], name: string) => {
-    setTimeout(() => {
-      const state = geometryStore.getState();
-      const created = state.elementIds
-        .map((id) => state.elementsById[id])
-        .find((element) => element?.type === type && element.name === name);
-      if (!created) return;
-      state.setSelection({ type: isGlobalObject(created) ? 'global' : 'element', id: created.id } as any);
-      state.setSelectedElementIds([created.id]);
-    }, 0);
-  };
-
-  const createMvhrDuct = (role: MvhrDuctRole) => {
-    if (!selectedMvhrUnit?.name) return;
-    const existingNames = allElements.map((element) => element.name).filter((name): name is string => !!name);
-    const name = generateUniqueElementName(`${role} duct`, existingNames);
-    const anchor = selectedMvhrUnit.coordinates?.[0] ?? { x: 0, y: 0, z: 0 };
-    const z = typeof anchor.z === 'number' && Number.isFinite(anchor.z) ? anchor.z : 0;
-    addElement({
-      name,
-      type: 'MechanicalVentilationDuctwork',
-      duct_type: role,
-      length: 1,
-      parent_element: selectedMvhrUnit.name,
-      floorId: selectedMvhrUnit.floorId,
-      coordinates: [
-        { x: anchor.x + 0.5, y: anchor.y, z },
-        { x: anchor.x + 1.5, y: anchor.y, z },
-      ],
-    } as Omit<Element, 'id'>);
-    selectElementByNameAfterCreate('MechanicalVentilationDuctwork', name);
-  };
-
-  const createMvhrTerminal = (role: MvhrTerminalRole) => {
-    if (!selectedMvhrUnit?.name) return;
-    const existingNames = allElements.map((element) => element.name).filter((name): name is string => !!name);
-    const name = generateUniqueElementName(`${role} terminal`, existingNames);
-    const firstHost = allElements.find((element) => isMvhrTerminalHost(element));
-    const hostCoords = firstHost?.coordinates;
-    const hostPoint =
-      hostCoords && hostCoords.length >= 2
-        ? {
-            x: (hostCoords[0]!.x + hostCoords[1]!.x) / 2,
-            y: (hostCoords[0]!.y + hostCoords[1]!.y) / 2,
-            z: 2.4,
-          }
-        : selectedMvhrUnit.coordinates?.[0] ?? { x: 0, y: 0, z: 2.4 };
-    addElement({
-      name,
-      type: 'MechanicalVentilationTerminal',
-      terminal_type: role,
-      parent_element: selectedMvhrUnit.name,
-      host_element: firstHost?.name ?? null,
-      orientation360: firstHost ? undefined : 0,
-      pitch: firstHost ? undefined : 90,
-      floorId: firstHost?.floorId ?? selectedMvhrUnit.floorId,
-      coordinates: [hostPoint],
-    } as Omit<Element, 'id'>);
-    selectElementByNameAfterCreate('MechanicalVentilationTerminal', name);
-  };
-
-  const startMvhrDuctDraw = (role: MvhrDuctRole) => {
-    if (!selectedMvhrUnit?.name) return;
-    if (onStartMvhrDuctDraw) {
-      onStartMvhrDuctDraw({ role, parentName: selectedMvhrUnit.name });
-      return;
-    }
-    createMvhrDuct(role);
-  };
-
-  const startMvhrTerminalDraw = (role: MvhrTerminalRole) => {
-    if (!selectedMvhrUnit?.name) return;
-    if (onStartMvhrTerminalDraw) {
-      onStartMvhrTerminalDraw({ role, parentName: selectedMvhrUnit.name });
-      return;
-    }
-    createMvhrTerminal(role);
-  };
-
-  const renderMvhrDuctAndTerminalManager = () => {
-    if (!selectedMvhrUnit?.name) return null;
-    const mvhrName = selectedMvhrUnit.name;
-    const ducts = allElements.filter(
-      (element): element is ElementOfType<'MechanicalVentilationDuctwork'> =>
-        element.type === 'MechanicalVentilationDuctwork',
-    );
-    const terminals = allElements.filter(
-      (element): element is ElementOfType<'MechanicalVentilationTerminal'> =>
-        element.type === 'MechanicalVentilationTerminal',
-    );
-
-    const renderIconButton = (
-      label: string,
-      onClick: () => void,
-      icon: IconNode,
-    ) => (
-      <button
-        type="button"
-        className="btn editor-action-btn editor-action-btn--secondary"
-        style={MVHR_MANAGER_ICON_BUTTON_STYLE}
-        onClick={onClick}
-        title={label}
-        aria-label={label}
-      >
-        <LucideSvgIcon node={icon} />
-      </button>
-    );
-
-    const renderLinkedItem = (
-      element: Element,
-      kind: string,
-      onUnlink: () => void,
-    ) => {
-      const name = element.name || '(Unnamed)';
-      return (
-        <div key={element.id} style={MVHR_MANAGER_LINKED_ITEM_STYLE}>
-          <span style={MVHR_MANAGER_LINKED_NAME_STYLE} title={name}>{name}</span>
-          {renderIconButton(`Edit ${name}`, () => selectElementById(element.id), Pencil)}
-          {renderIconButton(`Unlink ${name || kind}`, onUnlink, XIcon)}
-        </div>
-      );
-    };
-
-    return (
-      <div style={MVHR_MANAGER_STYLE}>
-        <div style={MVHR_MANAGER_SECTION_STYLE}>
-          <div style={MVHR_MANAGER_SECTION_HEADER_STYLE}>MVHR ductwork</div>
-          {MVHR_DUCT_ROLES.map((role) => {
-            const linkedDucts = ducts.filter((duct) => duct.parent_element === mvhrName && duct.duct_type === role);
-            const availableDucts = ducts.filter((duct) => duct.duct_type === role && !duct.parent_element?.trim());
-            return (
-              <div key={role} style={MVHR_MANAGER_ROW_STYLE}>
-                <div style={MVHR_MANAGER_ROLE_LABEL_STYLE}>{role} ducts</div>
-                <div style={MVHR_MANAGER_CONTENT_STYLE}>
-                  {linkedDucts.length > 0 ? linkedDucts.map((duct) =>
-                    renderLinkedItem(
-                      duct,
-                      'duct',
-                      () => updateElement(duct.id, { parent_element: null } as Partial<Element>),
-                    ),
-                  ) : (
-                    <span style={MVHR_MANAGER_EMPTY_STYLE}>None linked</span>
-                  )}
-                </div>
-                {availableDucts.length > 0 ? (
-                  <div style={MVHR_MANAGER_LINK_STYLE}>
-                    <StandardDropdown
-                      value=""
-                      onChange={(value) => {
-                        const duct = ducts.find((candidate) => candidate.id === value);
-                        if (!duct) return;
-                        updateElement(duct.id, { parent_element: mvhrName } as Partial<Element>);
-                      }}
-                      options={availableDucts.map((duct) => ({ value: duct.id, label: duct.name }))}
-                      placeholder={`Link ${role} duct`}
-                      variant="ghost"
-                      size="sm"
-                    />
-                  </div>
-                ) : null}
-                {renderIconButton(`Draw ${role} duct`, () => startMvhrDuctDraw(role), Plus)}
-              </div>
-            );
-          })}
-        </div>
-
-        <div style={MVHR_MANAGER_SECTION_STYLE}>
-          <div style={MVHR_MANAGER_SECTION_HEADER_STYLE}>MVHR terminals</div>
-          {MVHR_TERMINAL_ROLES.map((role) => {
-            const linkedTerminals = terminals.filter((terminal) => terminal.parent_element === mvhrName && terminal.terminal_type === role);
-            const availableTerminals = terminals.filter(
-              (terminal) => terminal.terminal_type === role && !terminal.parent_element?.trim(),
-            );
-            return (
-              <React.Fragment key={role}>
-                <div style={MVHR_MANAGER_ROW_STYLE}>
-                  <div style={MVHR_MANAGER_ROLE_LABEL_STYLE}>{role} terminal</div>
-                  <div style={MVHR_MANAGER_CONTENT_STYLE}>
-                    {linkedTerminals.length > 0 ? linkedTerminals.map((terminal) =>
-                      renderLinkedItem(
-                        terminal,
-                        'terminal',
-                        () => updateElement(terminal.id, { parent_element: null } as Partial<Element>),
-                      ),
-                    ) : (
-                      <span style={MVHR_MANAGER_EMPTY_STYLE}>None linked</span>
-                    )}
-                  </div>
-                  {availableTerminals.length > 0 ? (
-                    <div style={MVHR_MANAGER_LINK_STYLE}>
-                    <StandardDropdown
-                      value=""
-                      onChange={(value) => {
-                        const terminal = terminals.find((candidate) => candidate.id === value);
-                        if (!terminal) return;
-                        linkedTerminals
-                          .filter((candidate) => candidate.id !== terminal.id)
-                          .forEach((candidate) => updateElement(candidate.id, { parent_element: null } as Partial<Element>));
-                        updateElement(terminal.id, {
-                          parent_element: mvhrName,
-                          terminal_type: role,
-                        } as Partial<Element>);
-                      }}
-                      options={availableTerminals.map((terminal) => ({ value: terminal.id, label: terminal.name }))}
-                      placeholder={linkedTerminals.length > 0 ? `Replace ${role}` : `Link ${role}`}
-                      variant="ghost"
-                      size="sm"
-                    />
-                    </div>
-                  ) : null}
-                  {linkedTerminals.length === 0
-                    ? renderIconButton(`Place ${role} terminal`, () => startMvhrTerminalDraw(role), Plus)
-                    : null}
-                </div>
-                {linkedTerminals.length > 1 ? (
-                  <div style={MVHR_MANAGER_WARNING_STYLE}>Multiple {role} terminals are linked; validation requires one.</div>
-                ) : null}
-              </React.Fragment>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
+  // MVHR duct/terminal manager cluster (selectedMvhrUnit, select/create/draw
+  // helpers, the manager render function, MVHR_MANAGER_* styles) moved to
+  // MvhrDuctTerminalManager.tsx — see that file's header comment. Called
+  // unconditionally here, in the same position the inline block used to
+  // occupy, so Rules of Hooks are satisfied exactly as before.
+  const renderMvhrDuctAndTerminalManager = useMvhrDuctTerminalManager({
+    selection,
+    elementsById,
+    getElementById,
+    addElement,
+    updateElement,
+    setSelection,
+    setSelectedElementIds,
+    geometryStore,
+    onStartMvhrDuctDraw,
+    onStartMvhrTerminalDraw,
+  });
 
   const renderAttributePanel = () => {
     const formRenderCtx: ElementFormRenderCtx = {
@@ -6600,6 +5987,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       registerBaseFieldRefs,
       registerBaseFieldRef,
       getFieldValidationIssue,
+      comparisonFieldIndicators,
       globalComparisonFieldIndicators,
       commitExistingElementDraft,
       selection,
@@ -6615,6 +6003,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         DetailedJunctionControl,
         onHostReadinessAction: handleDetailedJunctionHostReadinessAction,
       },
+      renderMvhrDuctAndTerminalManager,
     };
     switch (elementType) {
       case 'BuildingElementOpaque':
@@ -7938,165 +7327,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       case 'MechanicalVentilationDuctwork':
         return elementFormInstances.MechanicalVentilationDuctwork.renderPanel(formRenderCtx);
 
-      case 'MechanicalVentilationTerminal': {
-        const hostOptions = [
-          { value: MVHR_TERMINAL_MANUAL_POSITION_VALUE, label: 'Manual external position' },
-          ...allElements
-            .filter((candidate) => isMvhrTerminalHost(candidate))
-            .map((candidate) => ({ value: candidate.name, label: candidate.name })),
-        ];
-        const currentTerminal =
-          selection?.type === 'element' || selection?.type === 'global'
-            ? getElementById(selection.id)
-            : undefined;
-        const mountedHostCandidate = hostElement
-          ? getParentByName(elementsById, elementIds, hostElement)
-          : undefined;
-        const mountedHost = isMvhrTerminalHost(mountedHostCandidate) ? mountedHostCandidate : undefined;
-        const usesManualExternalPosition = !mountedHost;
-        const derivedPosition =
-          currentTerminal?.type === 'MechanicalVentilationTerminal'
-            ? deriveMechanicalVentilationTerminalPosition(currentTerminal, mountedHost)
-            : null;
-        return (
-          <>
-            {renderFieldLabel('MVHR unit:', elementType, 'parent_element')}
-            <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element'])}>
-              <ParentElementDropdown
-                value={parentElement}
-                onChange={(value) => {
-                  setParentElement(value);
-                  if (selection && (selection.type === 'element' || selection.type === 'global')) {
-                    updateElement(selection.id, { parent_element: value || null } as Partial<Element>);
-                  }
-                }}
-                elementType={elementType}
-                zoneId={elementZoneId}
-                placeholder="Select MVHR unit"
-                selfId={selection.type === 'element' ? selection.id : undefined}
-              />
-            </div>
-            {renderFieldLabel('Terminal Type:', elementType, 'terminal_type')}
-            <div className="element-input" ref={registerBaseFieldRefs(['terminalType', 'terminal_type'])}>
-              <StandardDropdown
-                value={terminalType}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'MechanicalVentilationTerminal'>['terminal_type'];
-                  setTerminalType(nextValue);
-                  commitExistingElementDraft({ terminal_type: nextValue } as Partial<Element>);
-                }}
-                options={MVHR_TERMINAL_ROLES.map((role) => ({ value: role, label: role }))}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Mounted on:', elementType, 'host_element')}
-            <div className="element-input" ref={registerBaseFieldRefs(['hostElement', 'host_element'])}>
-              <StandardDropdown
-                value={usesManualExternalPosition ? MVHR_TERMINAL_MANUAL_POSITION_VALUE : hostElement}
-                onChange={(value) => {
-                  const nextValue = String(value || '');
-                  const useManualPosition = nextValue === MVHR_TERMINAL_MANUAL_POSITION_VALUE;
-                  const nextHostElement = useManualPosition ? '' : nextValue;
-                  setHostElement(nextHostElement);
-                  if (selection && (selection.type === 'element' || selection.type === 'global')) {
-                    if (useManualPosition) {
-                      const nextOrientation = Math.round(derivedPosition?.orientation360 ?? 0);
-                      const nextPitch = Math.round(derivedPosition?.pitch ?? 90);
-                      mvhrTerminalOrientationInput.setValue(nextOrientation);
-                      mvhrTerminalPitchInput.setValue(nextPitch);
-                      updateElement(selection.id, {
-                        host_element: null,
-                        orientation360: nextOrientation,
-                        pitch: nextPitch,
-                      } as Partial<Element>);
-                    } else {
-                      mvhrTerminalOrientationInput.setValue('');
-                      mvhrTerminalPitchInput.setValue('');
-                      updateElement(selection.id, {
-                        host_element: nextHostElement || null,
-                        orientation360: undefined,
-                        pitch: undefined,
-                      } as Partial<Element>);
-                    }
-                  }
-                }}
-                options={hostOptions}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {usesManualExternalPosition && (
-              <>
-                {renderFieldLabel('External orientation (degrees):', elementType, 'orientation360')}
-                <div className="element-input" ref={registerBaseFieldRefs('orientation360')}>
-                  <StandardInput
-                    {...integerInputProps(mvhrTerminalOrientationInput)}
-                    unit={fieldUnit('orientation360')}
-                    min="0"
-                    max="360"
-                    step="1"
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                  <FieldValidationIndicator
-                    hasIssue={!!getFieldValidationIssue('orientation360', mvhrTerminalOrientationInput.value)}
-                    issue={getFieldValidationIssue('orientation360', mvhrTerminalOrientationInput.value) || undefined}
-                  />
-                </div>
-                {renderFieldLabel('External pitch (degrees):', elementType, 'pitch')}
-                <div className="element-input" ref={registerBaseFieldRefs('pitch')}>
-                  <StandardInput
-                    {...integerInputProps(mvhrTerminalPitchInput)}
-                    unit={fieldUnit('pitch')}
-                    min="0"
-                    max="180"
-                    step="1"
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                  <FieldValidationIndicator
-                    hasIssue={!!getFieldValidationIssue('pitch', mvhrTerminalPitchInput.value)}
-                    issue={getFieldValidationIssue('pitch', mvhrTerminalPitchInput.value) || undefined}
-                  />
-                </div>
-              </>
-            )}
-            {renderFieldLabel('mid_height_air_flow_path:', elementType, 'mid_height_air_flow_path')}
-            <div className="element-input" ref={registerBaseFieldRefs(['mvhrTerminalMidHeightAirFlowPath', 'mid_height_air_flow_path'])}>
-              <StandardInput
-                {...decimalInputProps(mvhrTerminalMidHeightAirFlowPathInput)}
-                unit={fieldUnit('mid_height_air_flow_path')}
-                step="0.1"
-                min="0"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator
-                hasIssue={!!getFieldValidationIssue('mid_height_air_flow_path', mvhrTerminalMidHeightAirFlowPathInput.value)}
-                issue={getFieldValidationIssue('mid_height_air_flow_path', mvhrTerminalMidHeightAirFlowPathInput.value) || undefined}
-              />
-            </div>
-            {derivedPosition ? (
-              <div className="element-editor-note">
-                Export position: mid_height_air_flow_path {formatConditionalDecimals(derivedPosition.mid_height_air_flow_path)} m,
-                orientation {Math.round(derivedPosition.orientation360)}°, pitch {Math.round(derivedPosition.pitch)}°.
-              </div>
-            ) : mountedHost ? (
-              <div className="element-editor-note">
-                Position will export after the mounted host and terminal point are valid.
-              </div>
-            ) : (
-              <div className="element-editor-note">
-                Manual position will export after height, external orientation, and pitch are valid.
-              </div>
-            )}
-          </>
-        );
-      }
+      case 'MechanicalVentilationTerminal':
+        return elementFormInstances.MechanicalVentilationTerminal.renderPanel(formRenderCtx);
 
       case 'WetEmitter':
         return (
@@ -8197,160 +7429,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       case 'Vents':
         return elementFormInstances.Vents.renderPanel(formRenderCtx);
 
-      case 'MechanicalVentilation': {
-        const mechanicalVentilationCanBeHosted = canMechanicalVentilationInheritHostPlacement(ventType);
-        return (
-          <>
-            {renderFieldLabelWithComparisonIndicator('Ventilation Type:', elementType, comparisonFieldIndicators.vent_type)}
-            <div className="element-input" ref={registerBaseFieldRef('vent_type')}>
-              <StandardDropdown
-                value={ventType}
-                onChange={(value) => {
-                  const nextValue = value as any;
-                  setVentType(nextValue);
-                  if (!canMechanicalVentilationInheritHostPlacement(nextValue)) {
-                    setParentElement('');
-                  }
-                  if (selection?.type === 'element' || selection?.type === 'global') {
-                    const current = getElementById(selection.id);
-                    const parent = getParentByName(elementsById, elementIds, parentElement);
-                    const parentPatch = buildMechanicalVentilationParentPatch(
-                      current,
-                      parent,
-                      canMechanicalVentilationInheritHostPlacement(nextValue) ? parentElement : '',
-                      nextValue,
-                      geometryStore.getState().globalOrientationOffset,
-                    );
-                    commitExistingElementDraft({
-                      vent_type: nextValue,
-                      ...parentPatch,
-                    } as Partial<Element>);
-                  }
-                }}
-                options={[
-                  { value: 'Intermittent MEV', label: 'Intermittent MEV' },
-                  { value: 'Centralised continuous MEV', label: 'Centralised continuous MEV' },
-                  { value: 'Decentralised continuous MEV', label: 'Decentralised continuous MEV' },
-                  { value: 'MVHR', label: 'MVHR' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {mechanicalVentilationCanBeHosted && (
-              <>
-                {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
-                <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element'])}>
-                  <ParentElementDropdown
-                    value={parentElement}
-                    onChange={(value) => {
-                      setParentElement(value);
-                      const parent = getParentByName(elementsById, elementIds, value);
-                      if (parent) {
-                        const parentOrientation = getParentOrientation360(
-                          parent,
-                          geometryStore.getState().globalOrientationOffset,
-                        );
-                        const parentPitch = (parent as { pitch?: unknown }).pitch;
-                        if (typeof parentOrientation === 'number') {
-                          setOrientation360(Math.round(parentOrientation));
-                        }
-                        if (typeof parentPitch === 'number') {
-                          setPitch(Math.round(parentPitch));
-                        }
-                      }
-                      if (selection?.type === 'element' || selection?.type === 'global') {
-                        const current = getElementById(selection.id);
-                        updateElement(
-                          selection.id,
-                          buildMechanicalVentilationParentPatch(
-                            current,
-                            parent,
-                            value,
-                            ventType,
-                            geometryStore.getState().globalOrientationOffset,
-                          ),
-                        );
-                      }
-                    }}
-                    elementType={elementType}
-                    zoneId=""
-                    placeholder="Select a parent wall/window element (optional)"
-                    selfId={selection.type === 'element' ? selection.id : undefined}
-                  />
-                </div>
-                {renderFieldLabel('Mid Height Air Flow Path (m):', elementType, 'mid_height_air_flow_path')}
-                <div className="element-input" ref={registerBaseFieldRefs(['mechanicalVentilationMidHeight', 'mid_height_air_flow_path'])}>
-                  <StandardInput
-                    {...decimalInputProps(mechanicalVentilationMidHeightInput)}
-                    unit={fieldUnit('mid_height_air_flow_path')}
-                    step="0.1"
-                    min="0"
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                  <FieldValidationIndicator
-                    hasIssue={!!getFieldValidationIssue('mid_height_air_flow_path', mechanicalVentilationMidHeightInput.value)}
-                    issue={getFieldValidationIssue('mid_height_air_flow_path', mechanicalVentilationMidHeightInput.value) || undefined}
-                  />
-                </div>
-                {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
-                <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('orientation360')}>
-                  <StandardInput
-                    type="text"
-                    inputMode="numeric"
-                    value={Number.isFinite(orientation360) ? orientation360 : ''}
-                    unit={fieldUnit('orientation360')}
-                    onChange={(e) => {
-                      const parsed = Math.round(parseFloat(e.target.value) || 0);
-                      setOrientation360(parsed);
-                      commitMechanicalVentilationPositionField('orientation360')(parsed);
-                    }}
-                    step="1"
-                    min="0"
-                    max="360"
-                    readOnly={!!parentElement}
-                    variant="ghost"
-                    size="md"
-                  />
-                  {parentElement && (
-                    <div style={INLINE_FIELD_NOTE_STYLE}>
-                      Inherited from parent: {parentElement}
-                    </div>
-                  )}
-                </div>
-                {renderFieldLabel('Pitch (degrees):', elementType, 'pitch')}
-                <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('pitch')}>
-	                  <StandardInput
-	                    type="text"
-	                    inputMode="numeric"
-                    value={Number.isFinite(pitch) ? formatConditionalDecimals(pitch) : ''}
-                    unit={fieldUnit('pitch')}
-                    onChange={(e) => {
-                      const parsed = Math.round(parseFloat(e.target.value) || 0);
-                      setPitch(parsed);
-                      commitMechanicalVentilationPositionField('pitch')(parsed);
-                    }}
-                    step="1"
-                    min="0"
-                    max="180"
-                    readOnly={!!parentElement}
-                    variant="ghost"
-                    size="md"
-                  />
-                  {parentElement && (
-                    <div style={INLINE_FIELD_NOTE_STYLE}>
-                      Inherited from parent: {parentElement}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-            {ventType === 'MVHR' ? renderMvhrDuctAndTerminalManager() : null}
-          </>
-        );
-      }
+      case 'MechanicalVentilation':
+        return elementFormInstances.MechanicalVentilation.renderPanel(formRenderCtx);
 
       case 'CombustionAppliances':
         return elementFormInstances.CombustionAppliances.renderPanel(formRenderCtx);
