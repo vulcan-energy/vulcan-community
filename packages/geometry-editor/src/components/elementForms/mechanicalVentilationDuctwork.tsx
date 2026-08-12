@@ -23,7 +23,7 @@
 // separate element family that stays inline in ElementCreator for now.
 
 import { useState } from 'react';
-import { DUCT_TYPES, type Element } from '../../stores/geometryStore';
+import { DUCT_TYPES, type DuctType, type Element } from '../../stores/geometryStore';
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { StandardDropdown } from '../StandardDropdown';
 import {
@@ -39,8 +39,8 @@ import type { ElementFormModule, ElementFormStateCtx } from './types';
 type ElementOfType<T extends Element['type']> = Extract<Element, { type: T }>;
 
 export interface MechanicalVentilationDuctworkFormState {
-  ductType: '' | 'supply' | 'extract' | 'intake' | 'exhaust';
-  setDuctType: (value: '' | 'supply' | 'extract' | 'intake' | 'exhaust') => void;
+  ductType: '' | DuctType;
+  setDuctType: (value: '' | DuctType) => void;
   /** Shared with the wall family — see module header comment. */
   parentElement: string;
   setParentElement: (value: string) => void;
@@ -49,7 +49,7 @@ export interface MechanicalVentilationDuctworkFormState {
 }
 
 function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationDuctworkFormState {
-  const [ductType, setDuctType] = useState<'' | 'supply' | 'extract' | 'intake' | 'exhaust'>('');
+  const [ductType, setDuctType] = useState<'' | DuctType>('');
 
   return {
     ductType,

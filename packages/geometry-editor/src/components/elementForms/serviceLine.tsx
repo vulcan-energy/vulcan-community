@@ -37,6 +37,10 @@
 //   thermalBridgeLinear.tsx. ElementCreator keeps a small effect of its own
 //   for just those lines in the meantime, with the same dep shape and ref
 //   idiom as here.
+//
+// commitServiceLineLength's coordinate-rescale branch moved here from
+// ElementCreator's generic commitElementNumericField because lengthInput
+// (this group's) was that branch's only caller.
 
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from 'react';
 import { roundToTwoDecimals, type Element } from '../../stores/geometryStore';
@@ -46,6 +50,7 @@ import {
   syncThermalBridgeLinearLengthFromCoordinates,
 } from '../../lib/thermalBridgeLinearGeometry';
 import {
+  applyServiceLinePlanLengthToCoordinates,
   getServiceLineLengthFromCoordinates,
   getServiceLinePlanLengthFromCoordinates,
   inferServiceLineModeFromCoordinates,
@@ -61,7 +66,7 @@ export interface ServiceLineFormGroup {
   tbZ0Input: NumericDraftInputBinding;
   tbZ1Input: NumericDraftInputBinding;
   mode: 'plan' | 'vertical' | 'slope';
-  metrics: { planLength: number; actualLength: number };
+  actualLength: number;
 }
 
 export function useServiceLineFormState(args: {
@@ -122,7 +127,37 @@ export function useServiceLineFormState(args: {
     [selection, isExistingElementSelection, getElementById, commitExistingElementDraftRef],
   );
 
-  const lengthInput = useDecimalInput('', commitElementNumericField('length'), { commitOnChange: true });
+  const commitServiceLineLength = useCallback(
+    (value: number | '') => {
+      if (isExistingElementSelection()) {
+        const currentSelection = selection as ElementFormSelection;
+        const el = getElementById(currentSelection.id);
+        if (
+          el &&
+          (el.type === 'WaterPipework' || el.type === 'MechanicalVentilationDuctwork') &&
+          typeof value === 'number' &&
+          Number.isFinite(value) &&
+          value > 0
+        ) {
+          const mode = inferServiceLineModeFromCoordinates(el.coordinates);
+          if (mode !== 'vertical') {
+            const nextCoords = applyServiceLinePlanLengthToCoordinates(el.coordinates, value);
+            if (nextCoords) {
+              commitExistingElementDraftRef.current({
+                coordinates: nextCoords,
+                length: getServiceLineLengthFromCoordinates(nextCoords),
+              } as Partial<Element>);
+              return;
+            }
+          }
+        }
+      }
+      commitElementNumericField('length')(value);
+    },
+    [selection, isExistingElementSelection, getElementById, commitExistingElementDraftRef, commitElementNumericField],
+  );
+
+  const lengthInput = useDecimalInput('', commitServiceLineLength, { commitOnChange: true });
   const tbZ0Input = useDecimalInput(0, commitServiceLineEndpointZ(0), { commitOnChange: true });
   const tbZ1Input = useDecimalInput(0, commitServiceLineEndpointZ(1), { commitOnChange: true });
 
@@ -144,17 +179,12 @@ export function useServiceLineFormState(args: {
     return inferServiceLineModeFromCoordinates(el.coordinates);
   }, [selection, getElementById, selectedElementV]);
 
-  const metrics = useMemo(() => {
+  const actualLength = useMemo(() => {
     void selectedElementV;
-    if (!selection || (selection.type !== 'element' && selection.type !== 'global')) {
-      return { planLength: 0, actualLength: 0 };
-    }
+    if (!selection || (selection.type !== 'element' && selection.type !== 'global')) return 0;
     const el = getElementById(selection.id);
-    if (!el || !isServiceLineElementType(el.type)) return { planLength: 0, actualLength: 0 };
-    return {
-      planLength: getServiceLinePlanLengthFromCoordinates(el.coordinates),
-      actualLength: getServiceLineLengthFromCoordinates(el.coordinates),
-    };
+    if (!el || !isServiceLineElementType(el.type)) return 0;
+    return getServiceLineLengthFromCoordinates(el.coordinates);
   }, [selection, getElementById, selectedElementV]);
 
   useEffect(() => {
@@ -179,7 +209,7 @@ export function useServiceLineFormState(args: {
     }
   }, [selection?.type, selection?.id, selectedElementV, getElementById]);
 
-  return { lengthInput, tbZ0Input, tbZ1Input, mode, metrics };
+  return { lengthInput, tbZ0Input, tbZ1Input, mode, actualLength };
 }
 
 /** Shared hydrate lines for the trio's length + Z0/Z1 fields (the block
@@ -227,7 +257,7 @@ export function renderServiceLineCoreFields(
   ctx: ElementFormRenderCtx,
   opts: ServiceLineCoreFieldsOptions,
 ): ReactNode {
-  const { lengthInput, tbZ0Input, tbZ1Input, mode, metrics } = group;
+  const { lengthInput, tbZ0Input, tbZ1Input, mode, actualLength } = group;
   const { elementType, fieldUnit, renderFieldLabel, registerBaseFieldRefs, getFieldValidationIssue } = ctx;
   const [z0Key, z1Key] = opts.zRefKeys;
   const lengthReadOnly = opts.lengthReadOnlyWhenVertical && mode === 'vertical';
@@ -283,7 +313,7 @@ export function renderServiceLineCoreFields(
             <StandardInput
               type="text"
               inputMode="numeric"
-              value={metrics.actualLength}
+              value={actualLength}
               unit={fieldUnit('length')}
               readOnly
               step="0.01"

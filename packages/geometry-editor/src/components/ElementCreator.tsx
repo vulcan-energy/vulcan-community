@@ -138,9 +138,7 @@ import {
   thermalBridgeLinearHasPositiveRun,
 } from '../lib/thermalBridgeLinearGeometry';
 import {
-  applyServiceLinePlanLengthToCoordinates,
   getServiceLineLengthFromCoordinates,
-  inferServiceLineModeFromCoordinates,
   isServiceLineElementType,
   normalizeServiceLineCoordinatesForMode,
   serviceLineModeFromShapeValue,
@@ -1655,29 +1653,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   });
 
   const commitElementNumericField = (field: string) => (value: number | '') => {
-    if (field === 'length' && isExistingElementSelection()) {
-      const currentSelection = selection as Exclude<Selection, null>;
-      const el = getElementById(currentSelection.id);
-      if (
-        el &&
-        (el.type === 'WaterPipework' || el.type === 'MechanicalVentilationDuctwork') &&
-        typeof value === 'number' &&
-        Number.isFinite(value) &&
-        value > 0
-      ) {
-        const mode = inferServiceLineModeFromCoordinates(el.coordinates);
-        if (mode !== 'vertical') {
-          const nextCoords = applyServiceLinePlanLengthToCoordinates(el.coordinates, value);
-          if (nextCoords) {
-            commitExistingElementDraft({
-              coordinates: nextCoords,
-              length: getServiceLineLengthFromCoordinates(nextCoords),
-            } as Partial<Element>);
-            return;
-          }
-        }
-      }
-    }
     commitExistingElementDraft({ [field]: value } as Partial<Element>);
   };
 
