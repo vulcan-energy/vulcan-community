@@ -12,7 +12,7 @@ export const GROUND_SLAB_PERIM_LINK_TOL_M = 0.25;
 type LineGroundHost = {
   zoneId?: string;
   parent_element: string | null;
-  coordinates: Array<{ x: number; y: number }>;
+  coordinates: Array<{ x: number; y: number; z?: number }>;
 };
 
 function isFiniteNonNegativeNumber(value: unknown): value is number {
