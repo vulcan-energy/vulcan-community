@@ -614,6 +614,18 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         lines.push(`GuideOverlaySource,${floorIndex},${payload},,,,,,,,,,,,,`);
       }
     }
+    // Floor storey-height overrides: floors are otherwise re-created at import purely from
+    // element z-values (ensureFloorForZ) with a wall-derived effective height, so a user-typed
+    // override (Floor.heightUserOverride) has nowhere else to live in this format. Only floors
+    // carrying an explicit override need a row — everything else reconstructs itself from walls,
+    // exactly like today. Emitted in floor-index order for stable diffs, same as the GuideOverlay
+    // per-floor records above.
+    const heightOverrideFloors = [...state.floors]
+      .filter((floor) => floor.heightUserOverride === true && Number.isFinite(floor.height))
+      .sort((a, b) => a.zIndex - b.zIndex);
+    for (const floor of heightOverrideFloors) {
+      lines.push(`FloorHeightOverride,${floor.zIndex},${floor.height},,,,,,,,,,,,,`);
+    }
     if (state.junctionPsiDefaultsPath && state.junctionPsiDefaultsPath.trim() !== '') {
       lines.push(`JunctionPsiDefaultsPath,${escapeCSV(state.junctionPsiDefaultsPath.trim())},,,,,,,,,,,,,`);
     }
@@ -1748,6 +1760,32 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         element.floorId = get().ensureFloorForZ(firstZ);
       } catch { /* swallow: best-effort */ }
     });
+
+    // Apply persisted floor storey-height overrides (FloorHeightOverride metadata rows) now
+    // that every floor has been (re-)created above from element z-values. Without this, a
+    // user-typed storey height always reverted to wall-derived on reload — the CSV had nowhere
+    // to record the override, so `ensureFloorForZ` -> `addFloor(name, 0, false, z)` always
+    // recreated floors with `heightUserOverride` unset.
+    //
+    // The parsed rows are the COMPLETE override set for this document: loadFromCSV does not
+    // clear floors and the production load flows call it without clearAll, so a floor reused
+    // from a previously-open model can carry that model's heightUserOverride. Floors with no
+    // row therefore have the flag cleared — otherwise the stale override would leak into the
+    // newly loaded document and be persisted by its next save. A row whose zIndex has no
+    // matching floor (e.g. a hand-edited or truncated CSV) is ignored: it cannot happen from a
+    // save this store produced, but must not throw.
+    {
+      const overrideHeightByZIndex = new Map(
+        metadata.floorHeightOverrides.map((override) => [override.zIndex, override.height]),
+      );
+      set((state) => ({
+        floors: state.floors.map((floor) => {
+          const height = overrideHeightByZIndex.get(floor.zIndex);
+          if (height !== undefined) return { ...floor, height, heightUserOverride: true };
+          return floor.heightUserOverride ? { ...floor, heightUserOverride: false } : floor;
+        }),
+      }));
+    }
 
     if (options.schemaPort.availability === 'available') {
       newElements.forEach((element) => {

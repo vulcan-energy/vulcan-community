@@ -58,6 +58,35 @@ GuideOverlaySource,v1|pdf|input/overlay-sources/2026-04-24T15-41-22-468Z_floorpl
     });
   });
 
+  it('parses FloorHeightOverride metadata rows, including basement (negative) floors', () => {
+    const csv = `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0.0,,,,,,,,,,,,,
+FloorHeightOverride,0,2.55,,,,,,,,,,,,,
+FloorHeightOverride,-1,2.1,,,,,,,,,,,,,
+`.trim();
+
+    const parsed = parseCsvToGeometry(csv);
+
+    expect(parsed.metadata.floorHeightOverrides).toEqual([
+      { zIndex: 0, height: 2.55 },
+      { zIndex: -1, height: 2.1 },
+    ]);
+  });
+
+  it('drops a malformed FloorHeightOverride row (non-integer zIndex or non-finite height)', () => {
+    const csv = `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0.0,,,,,,,,,,,,,
+FloorHeightOverride,1.5,2.4,,,,,,,,,,,,,
+FloorHeightOverride,1,not-a-number,,,,,,,,,,,,,
+`.trim();
+
+    const parsed = parseCsvToGeometry(csv);
+
+    expect(parsed.metadata.floorHeightOverrides).toEqual([]);
+  });
+
   it('parses zone rows whose names begin with "Zone "', () => {
     const csv = `
 Metadata,,,,,,,,,,,,,

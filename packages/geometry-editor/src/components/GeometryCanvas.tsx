@@ -59,7 +59,7 @@ import { isPointInPolygon2D } from '../lib/pointInPolygon';
 import { compareElementPaintOrder } from '../lib/canvasPaintOrder';
 import { CompassRose } from './CompassRose';
 import { useDrawingMode, type DrawMode } from '../hooks/useDrawingMode';
-import { useMarqueeSelection } from '../hooks/useMarqueeSelection';
+import { roomFloorElementTypeForCanvasFloor, useMarqueeSelection } from '../hooks/useMarqueeSelection';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useDocumentSaveShortcut } from '../hooks/useDocumentSaveShortcut';
 import {
@@ -5849,11 +5849,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               });
 
               // Create floor polygon
-              const floorId = createPlaceholderElement(targetZoneId, 'BuildingElementGround');
+              const floorElementType = roomFloorElementTypeForCanvasFloor(currentFloorZ);
+              const floorId = createPlaceholderElement(targetZoneId, floorElementType);
               const coordinates = ensureCounterClockwisePolygon(
                 roomWalls.map(p => ({ x: p.x, y: p.y, z: currentFloorZ })),
               );
-              updateElement(floorId, { coordinates });
+              updateElement(floorId, {
+                coordinates,
+                ...(floorElementType === 'BuildingElementAdjacentConditionedSpace' ? { pitch: 180 } : {}),
+              });
 
               // Auto-select first wall element for naming
               if (roomWallElements.length > 0) {

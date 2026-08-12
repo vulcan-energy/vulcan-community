@@ -10,13 +10,10 @@
  * continuous **E5** / {@link partyWallLinkedToGroundSlabForP1} and ground-contact storey checks as
  * {@link isGroundContactPartyWallForP1Tb}.
  */
-import {
-  elementBaseElevationMForTb,
-  elementFloorZIndexForTb,
-  slabElevationMForFloorZ,
-} from '../../lib/geometry3dMapper';
+import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { isBasementGroundElement } from '../../lib/basementGeometry';
+import { nonBasementGroundSurfaceElevationM } from '../../lib/suspendedFloorGeometry';
 import type { Floor } from '../../geometry/types';
 import type { BuildingElementGround, BuildingElementPartyWall, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
@@ -28,7 +25,7 @@ import {
 } from './proposeWallGroundContinuous';
 import { isPartyWallVerticalEnvelopeLine, partyWallVerticalExtentM } from './proposePartyWallToExternalE18';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode, SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M } from './proposeFacadeOpenings';
 
 const MIN_PLAN_OVERLAP_M = 0.05;
 const Z_BAND_EPS_M = 0.04;
@@ -65,19 +62,22 @@ export function proposePartyWallGroundP1P6ThermalBridges(
   const out: FacadeOpeningTbProposal[] = [];
 
   for (const pw of partyWalls) {
-    if (!isGroundContactPartyWallForP1Tb(pw, floors)) continue;
+    if (!isGroundContactPartyWallForP1Tb(pw, floors, elements)) continue;
     if (!partyWallLinkedToGroundSlabForP1(pw, elements)) continue;
 
     const P = pw.coordinates;
     const Pa = P[0]!;
     const Pb = P[1]!;
     const pExt = partyWallVerticalExtentM(pw, floors);
-    const slabZElev = slabElevationMForFloorZ(0, floors);
-    if (slabZElev < pExt.zLo - Z_BAND_EPS_M || slabZElev > pExt.zHi + Z_BAND_EPS_M) continue;
+    const wallBaseM = elementBaseElevationMForTb(pw, floors);
 
     for (const g of grounds) {
       if (!zonesCompatible(pw.zoneId, g.zoneId)) continue;
-      if (elementFloorZIndexForTb(g, floors) !== 0) continue;
+      const slabZElev = nonBasementGroundSurfaceElevationM(g) ?? elementBaseElevationMForTb(g, floors);
+      if (slabZElev < pExt.zLo - Z_BAND_EPS_M || slabZElev > pExt.zHi + Z_BAND_EPS_M) continue;
+      // P1/P6 is a wall-FOOT junction: a legacy ground-typed slab higher up the wall
+      // (room-tool era upper storeys) must not mint a second P1 at the wall head.
+      if (Math.abs(slabZElev - wallBaseM) > SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M) continue;
 
       const edges = groundSlabPolygonEdgesXY(g);
       let edgeIdx = 0;
@@ -96,10 +96,7 @@ export function proposePartyWallGroundP1P6ThermalBridges(
           edgeIdx++;
           continue;
         }
-        const zSlab =
-          floors && floors.length > 0
-            ? roundToTwoDecimals(elementBaseElevationMForTb(g, floors))
-            : roundToTwoDecimals(slabZElev);
+        const zSlab = roundToTwoDecimals(slabZElev);
         const junctionCode = 'P1';
         out.push({
           proposalId: `p1:${pw.id}:${g.id}:e${edgeIdx}:${roundToTwoDecimals(overlap.tLo)}`,

@@ -5,7 +5,7 @@
  * Continuous ground wall–floor (E5) runs: real geometry and counterfactuals (no false positives/negatives).
  */
 import { describe, expect, it } from 'vitest';
-import type { BuildingElementGround, BuildingElementOpaque, BuildingElementTransparent } from '../types';
+import type { BuildingElementGround, BuildingElementOpaque, BuildingElementTransparent, Floor } from '../types';
 import { proposeFacadeOpeningThermalBridges } from './proposeFacadeOpenings';
 import {
   FOOT_ON_WALL_PERP_TOL_M,
@@ -161,6 +161,38 @@ describe('proposeWallGroundContinuous', () => {
     expect(p[0].coordinates[1]).toMatchObject({ x: 10, y: 0, z: 0 });
   });
 
+  it('links the same-storey slab regardless of element order (legacy stacked grounds)', () => {
+    // Legacy room-tool models carry ground-typed slabs on upper storeys with the same
+    // footprint as the real slab. XY distance ties, so without the storey tie-break the
+    // linked slab — and every elevation gate keyed off it — depended on array order.
+    const floors = [
+      { id: 'f0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false },
+      { id: 'f1', name: 'First', zIndex: 1, height: 2.4, isRoofSpace: false },
+    ];
+    const realGround = makeGround({ id: 'g0', name: 'Real slab' });
+    const legacyUpper = makeGround({
+      id: 'g1',
+      name: 'Legacy upper slab',
+      coordinates: [
+        { x: 0, y: 0, z: 1 },
+        { x: 10, y: 0, z: 1 },
+        { x: 10, y: 10, z: 1 },
+        { x: 0, y: 10, z: 1 },
+      ],
+    });
+    const wall = makeWall({ id: 'wall-s', name: 'South wall', base_height: 0, height: 2.4 });
+
+    for (const elements of [
+      [legacyUpper, realGround, wall],
+      [realGround, legacyUpper, wall],
+    ]) {
+      const p = proposeWallGroundContinuous(elements, [], floors);
+      expect(p).toHaveLength(1);
+      expect(p[0].junctionCode).toBe('E5');
+      expect(p[0].coordinates.every((point) => point.z === 0)).toBe(true);
+    }
+  });
+
   it('uses suspended floor upper surface for continuous E5 elevation', () => {
     const ground = makeGround({
       id: 'g',
@@ -186,6 +218,40 @@ describe('proposeWallGroundContinuous', () => {
     expect(p).toHaveLength(1);
     expect(p[0].coordinates[0]).toMatchObject({ x: 0, y: 0, z: 0.3 });
     expect(p[0].coordinates[1]).toMatchObject({ x: 10, y: 0, z: 0.3 });
+  });
+
+  it('uses the linked ground slab storey elevation even when it is authored off storey 0', () => {
+    const floors: Floor[] = [
+      { id: 'f0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false },
+      { id: 'f1', name: 'Raised ground slab', zIndex: 1, height: 2.4, isRoofSpace: false },
+    ];
+    const ground = makeGround({
+      id: 'g',
+      name: 'Raised ground slab',
+      floorId: 'f1',
+      coordinates: [
+        { x: 0, y: 0, z: 1 },
+        { x: 10, y: 0, z: 1 },
+        { x: 10, y: 10, z: 1 },
+        { x: 0, y: 10, z: 1 },
+      ],
+    });
+    const wall = makeWall({
+      id: 'wall-s',
+      name: 'South wall',
+      parent_element: 'Raised ground slab',
+      floorId: 'f1',
+      base_height: 2.4,
+      coordinates: [
+        { x: 0, y: 0, z: 1 },
+        { x: 10, y: 0, z: 1 },
+      ],
+    });
+
+    const p = proposeWallGroundContinuous([ground, wall], [], floors);
+    expect(p).toHaveLength(1);
+    expect(p[0].junctionCode).toBe('E5');
+    expect(p[0].coordinates.every((point) => point.z === 2.4)).toBe(true);
   });
 
   it('adds explicit slab elevation to suspended floor upper surface for continuous E5 elevation', () => {
