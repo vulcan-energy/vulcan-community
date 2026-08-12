@@ -8859,36 +8859,6 @@ impl JSONBuilder {
 
         Ok(env_area_sum)
     }
-
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub fn write_json(&self, output_path: &str, json_data: &Value) -> Result<(), BuildError> {
-        use std::fs;
-        use std::path::Path;
-
-        // Ensure .json extension
-        let output_path = if output_path.ends_with(".json") {
-            output_path.to_string()
-        } else {
-            format!("{output_path}.json")
-        };
-
-        // Create parent directories if they don't exist
-        if let Some(parent) = Path::new(&output_path).parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                BuildError::new("E999", &format!("Failed to create output directory: {e}"))
-            })?;
-        }
-
-        // Write JSON file
-        let json_string = serde_json::to_string_pretty(json_data)
-            .map_err(|e| BuildError::new("E999", &format!("Failed to serialize JSON: {e}")))?;
-
-        fs::write(&output_path, json_string)
-            .map_err(|e| BuildError::new("E999", &format!("Failed to write JSON file: {e}")))?;
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
