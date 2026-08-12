@@ -169,6 +169,58 @@ export function alignHostedSlopedPanelToHostOrientation(
   );
 }
 
+const PV_HOST_OVERRIDE_ANGLE_EPSILON_DEG = 0.5;
+const PV_HOST_OVERRIDE_BASE_HEIGHT_EPSILON_M = 0.01;
+
+/**
+ * Infer per-field `_baseHeightUserOverride` / `_pitchUserOverride` / `_orientationUserOverride`
+ * flags by comparing a panel's currently stored values against host-derived values. Only ever
+ * sets a flag that is not already explicitly set (`undefined`) — an explicit `true`/`false` is
+ * left untouched.
+ *
+ * Two callers, one rule: a previously-unhosted (non-placeholder) panel attaching to a roof for
+ * the first time (stores/geometryStore.ts `updateElement`'s `isFirstAttach` branch), and a panel
+ * reloaded from CSV, which never carries these flags across save/load
+ * (stores/geometryStore/slices/ioSlice.ts `loadFromCSV`). Both cases share the same question:
+ * "does this stored value already match what the host would derive, or did a human type it?"
+ */
+export function inferPvHostOverrideFlags(
+  panel: Pick<
+    OnSiteGeneration,
+    'base_height' | 'pitch' | 'orientation360' | '_baseHeightUserOverride' | '_pitchUserOverride' | '_orientationUserOverride'
+  >,
+  derived: { base_height?: number; pitch?: number; orientation360?: number },
+): Partial<Pick<OnSiteGeneration, '_baseHeightUserOverride' | '_pitchUserOverride' | '_orientationUserOverride'>> {
+  const flags: Partial<Pick<OnSiteGeneration, '_baseHeightUserOverride' | '_pitchUserOverride' | '_orientationUserOverride'>> = {};
+
+  if (
+    panel._baseHeightUserOverride === undefined &&
+    typeof panel.base_height === 'number' &&
+    typeof derived.base_height === 'number' &&
+    Math.abs(panel.base_height - derived.base_height) > PV_HOST_OVERRIDE_BASE_HEIGHT_EPSILON_M
+  ) {
+    flags._baseHeightUserOverride = true;
+  }
+  if (
+    panel._pitchUserOverride === undefined &&
+    typeof panel.pitch === 'number' &&
+    typeof derived.pitch === 'number' &&
+    Math.abs(panel.pitch - derived.pitch) > PV_HOST_OVERRIDE_ANGLE_EPSILON_DEG
+  ) {
+    flags._pitchUserOverride = true;
+  }
+  if (
+    panel._orientationUserOverride === undefined &&
+    typeof panel.orientation360 === 'number' &&
+    typeof derived.orientation360 === 'number' &&
+    Math.abs(panel.orientation360 - derived.orientation360) > PV_HOST_OVERRIDE_ANGLE_EPSILON_DEG
+  ) {
+    flags._orientationUserOverride = true;
+  }
+
+  return flags;
+}
+
 /**
  * Build a partial OnSiteGeneration patch that applies derived values only for fields the user
  * has not manually overridden. Returns an empty object when no fields are due for update.

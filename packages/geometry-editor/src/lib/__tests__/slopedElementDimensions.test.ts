@@ -31,7 +31,7 @@ describe('sloped element dimensions', () => {
     });
   });
 
-  it('keeps surface area consistent for non-rectangular sloped polygons', () => {
+  it('keeps surface area consistent for non-rectangular sloped polygons (height stays true slope length, width becomes equivalent)', () => {
     const element = {
       coordinates: [
         { x: 0, y: 0, z: 0 },
@@ -45,7 +45,9 @@ describe('sloped element dimensions', () => {
     const derived = deriveSlopedElementDimensions(element);
 
     expect(derived).not.toBeNull();
-    expect(derived?.width).toBe(4);
+    // Farthest vertex from the eaves edge is (0, 3): true up-slope length = 3 / cos(45deg).
+    expect(derived?.height).toBeCloseTo(3 / Math.cos((45 * Math.PI) / 180), 2);
+    expect(derived?.width).not.toBe(4); // no longer the low-edge length for a tapered shape
     expect(derived ? Math.abs(Number((derived.width * derived.height).toFixed(2)) - derived.area) : 0).toBeLessThanOrEqual(0.03);
   });
 
@@ -72,7 +74,7 @@ describe('sloped element dimensions', () => {
       lowEdgeWidth: 4,
       farEdgeWidth: 6,
       vertexCount: 4,
-      usesEquivalentHeight: true,
+      usesEquivalentWidth: true,
     });
   });
 
@@ -88,7 +90,7 @@ describe('sloped element dimensions', () => {
       lowEdgeWidth: 4,
       farEdgeWidth: 4,
       vertexCount: 4,
-      usesEquivalentHeight: false,
+      usesEquivalentWidth: false,
     });
   });
 
@@ -104,7 +106,7 @@ describe('sloped element dimensions', () => {
     expect(semantics).toMatchObject({
       lowEdgeWidth: 4,
       vertexCount: 5,
-      usesEquivalentHeight: true,
+      usesEquivalentWidth: true,
     });
   });
 
