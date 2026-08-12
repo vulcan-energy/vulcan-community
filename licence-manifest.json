@@ -1927,8 +1927,24 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/elementForms/mechanicalVentilation.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/mechanicalVentilation.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/elementForms/mechanicalVentilationDuctwork.tsx",
       "source_path": "packages/geometry-editor/src/components/elementForms/mechanicalVentilationDuctwork.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/elementForms/mechanicalVentilationTerminal.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/mechanicalVentilationTerminal.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -2177,6 +2193,14 @@
     {
       "path": "packages/geometry-editor/src/components/MultiSelectPanel.tsx",
       "source_path": "packages/geometry-editor/src/components/MultiSelectPanel.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/MvhrDuctTerminalManager.tsx",
+      "source_path": "packages/geometry-editor/src/components/MvhrDuctTerminalManager.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -4714,6 +4738,14 @@
     {
       "path": "packages/geometry-editor/src/lib/parentControlledFloor.ts",
       "source_path": "packages/geometry-editor/src/lib/parentControlledFloor.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/parentOrientation.ts",
+      "source_path": "packages/geometry-editor/src/lib/parentOrientation.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
