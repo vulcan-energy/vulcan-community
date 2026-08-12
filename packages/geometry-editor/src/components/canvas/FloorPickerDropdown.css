@@ -14,7 +14,10 @@
 
 .floor-picker-trigger-open {
   border-color: var(--surface-control-strong);
-  background: var(--surface-control-hover);
+  /* Longhand on purpose: the `background` shorthand resets background-image/-position,
+   * which deletes the .standard-dropdown chevron while open and replays it sliding in
+   * from top-left on close (transition: all). */
+  background-color: var(--surface-control-hover);
 }
 
 .floor-picker-trigger-label {
