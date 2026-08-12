@@ -662,6 +662,9 @@ function mapGeometryFaceToPlanarFace(
       points: [...topPoints, ...bottomPoints],
       isOpening,
       opacity: isOpening ? 0.75 : undefined,
+      // Opaque profiled-top walls (and gable-dormer front walls, which share this branch) render as
+      // solid wall-thickness prisms; transparent openings (profiled windows) stay a flat sheet.
+      thicknessM: isOpening ? undefined : WALL_DEFAULT_THICKNESS_M,
     };
   }
 

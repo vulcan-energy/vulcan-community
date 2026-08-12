@@ -45,6 +45,7 @@ import {
   meshRenderOrderForFloor,
   meshStandardFloorDimmingProps,
   meshStandardFloorDimmingPropsWithBaseOpacity,
+  planarFaceFloorDimmingProps,
 } from '../../lib/elementCanvasFloor3dMaterial';
 import { isElementOnActiveCanvasFloor } from '../../lib/elementCanvasFloor';
 import { materialDimForCategoryGhost, CATEGORY_GHOST_OPACITY_FACTOR } from '../../lib/elementCategoryVisibility';
@@ -169,8 +170,72 @@ function useHoverHalo(isInteractive: boolean): [boolean, HoverHandlers] {
   return [isInteractive && hovered, handlers];
 }
 
+/**
+ * Solid prism variant: extrudes the already-triangulated polygon symmetrically about its own plane
+ * by ±thicknessM/2 along `planeNormal`, closing the perimeter with side quads. Mirrors the
+ * top/bottom/side construction in `buildSlopedPolygonBufferGeometry` (lib/geometry3dSloped.ts),
+ * which solves the same "lifted polygon → solid slab" problem for pitched roof faces.
+ *
+ * `triangles` are index triples into `vertices` in the winding order produced by
+ * `THREE.ShapeUtils.triangulateShape` over the same vertex order used to derive `planeNormal`
+ * (cross of the first two edges from vertex 0), so the top face — using that order unchanged —
+ * is guaranteed to face +planeNormal; the bottom face reverses two indices per triangle to face
+ * -planeNormal; side quads connect corresponding top/bottom perimeter vertices.
+ */
+function buildPlanarFacePrismGeometry(
+  vertices: THREE.Vector3[],
+  planeNormal: THREE.Vector3,
+  triangles: number[][],
+  thicknessM: number,
+): THREE.BufferGeometry {
+  const n = vertices.length;
+  const half = thicknessM / 2;
+  const top = vertices.map((vertex) => vertex.clone().addScaledVector(planeNormal, half));
+  const bottom = vertices.map((vertex) => vertex.clone().addScaledVector(planeNormal, -half));
+
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const pushVert = (vertex: THREE.Vector3) => {
+    positions.push(vertex.x, vertex.y, vertex.z);
+    return positions.length / 3 - 1;
+  };
+
+  const topIdx = top.map((vertex) => pushVert(vertex));
+  const botIdx = bottom.map((vertex) => pushVert(vertex));
+
+  for (const [i, j, k] of triangles) {
+    indices.push(topIdx[i], topIdx[j], topIdx[k]);
+  }
+  for (const [i, j, k] of triangles) {
+    indices.push(botIdx[i], botIdx[k], botIdx[j]);
+  }
+  for (let i = 0; i < n; i += 1) {
+    const j = (i + 1) % n;
+    const t0 = topIdx[i];
+    const t1 = topIdx[j];
+    const b0 = botIdx[i];
+    const b1 = botIdx[j];
+    indices.push(t0, b0, t1);
+    indices.push(t1, b0, b1);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * `thicknessM`, when given, produces a solid prism (see {@link buildPlanarFacePrismGeometry})
+ * instead of a zero-thickness sheet — used for opaque profiled-top walls so they read as real
+ * walls in 3D rather than vanishing flat cards.
+ */
 // eslint-disable-next-line react-refresh/only-export-components -- geometry helper shared with tests.
-export function buildPlanarFaceGeometry(points: Array<[number, number, number]>): THREE.BufferGeometry {
+export function buildPlanarFaceGeometry(
+  points: Array<[number, number, number]>,
+  thicknessM?: number,
+): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   if (points.length < 3) return geometry;
 
@@ -202,6 +267,10 @@ export function buildPlanarFaceGeometry(points: Array<[number, number, number]>)
   });
   const triangles = THREE.ShapeUtils.triangulateShape(contour, []);
   if (triangles.length === 0) return geometry;
+
+  if (thicknessM !== undefined && thicknessM > 0) {
+    return buildPlanarFacePrismGeometry(vertices, planeNormal, triangles, thicknessM);
+  }
 
   const positions: number[] = [];
   const normals: number[] = [];
@@ -1929,18 +1998,18 @@ const PlanarFaceMesh: React.FC<{
   const isInteractive = primitive.isCurrentFloor && !categoryGhost;
   const [hovered, hoverHandlers] = useHoverHalo(isInteractive);
   const showHoverHalo = hovered && !selected && !categoryGhost;
-  const geometry = useMemo(() => buildPlanarFaceGeometry(primitive.points), [primitive.points]);
+  const hasThickness = primitive.thicknessM !== undefined;
+  const geometry = useMemo(
+    () => buildPlanarFaceGeometry(primitive.points, primitive.thicknessM),
+    [primitive.points, primitive.thicknessM],
+  );
   const displayColor = floorDimmedMeshColor(primitive.color, primitive.isCurrentFloor);
   const isOpening = primitive.isOpening;
   const renderOrder = meshRenderOrderForFloor(primitive.isCurrentFloor, isOpening);
   const opacity = primitive.opacity ?? (isOpening ? (primitive.isCurrentFloor ? 0.72 : 0.28) : 1);
-  const hasExplicitTransparency = primitive.opacity !== undefined && opacity < 1;
+  const hasExplicitTransparency = !hasThickness && primitive.opacity !== undefined && opacity < 1;
   const dim = materialDimForCategoryGhost(
-    meshStandardFloorDimmingPropsWithBaseOpacity(
-      primitive.isCurrentFloor,
-      opacity,
-      isAboveCurrentFloor,
-    ),
+    planarFaceFloorDimmingProps(hasThickness, primitive.isCurrentFloor, opacity, isAboveCurrentFloor),
     categoryGhost,
   );
 

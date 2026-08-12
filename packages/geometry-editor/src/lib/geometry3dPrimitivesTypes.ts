@@ -115,6 +115,12 @@ export interface PlanarFacePrimitive {
   points: Array<[number, number, number]>;
   isOpening: boolean;
   opacity?: number;
+  /**
+   * When present, the face renders as a solid prism extruded symmetrically about the face plane
+   * (±thicknessM/2 along the face normal) instead of a zero-thickness sheet — e.g. opaque
+   * profiled-top walls, so they read as real walls rather than vanishing flat cards.
+   */
+  thicknessM?: number;
 }
 
 export interface PointMarkerPrimitive {
