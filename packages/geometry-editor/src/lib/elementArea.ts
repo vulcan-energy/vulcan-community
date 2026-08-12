@@ -11,6 +11,7 @@ import {
 } from './slopedElementDimensions';
 import type {
   Element,
+  ElementType,
   BuildingElementOpaque,
   BuildingElementTransparent,
   BuildingElementAdjacentConditionedSpace,
@@ -48,6 +49,35 @@ type AreaBasedElement =
   | BuildingElementAdjacentConditionedSpace
   | BuildingElementAdjacentUnconditionedSpace_Simple
   | BuildingElementPartyWall;
+
+// The "adjacent-like" trio (slice-6 brief decision 4). Until slice-6 STAGE 6,
+// this constant/type/guard were duplicated verbatim in four places —
+// ElementCreator.tsx, elementForms/wallShared.tsx,
+// elementForms/adjacentLikeElement.tsx, and elementForms/contextShading.tsx —
+// each with a header comment explaining that a module cannot import
+// ElementCreator.tsx's copy without creating an orchestrator<->module import
+// cycle. This file already has zero imports from components/ and is already
+// a dependency of the orchestrator and of adjacentLikeElement.tsx
+// (getElementGrossArea) and buildingElementOpaque.tsx, so it's cycle-free for
+// every consumer; the four duplicates now import from here instead.
+export const ADJACENT_LIKE_ELEMENT_TYPES: ElementType[] = [
+  'BuildingElementAdjacentConditionedSpace',
+  'BuildingElementAdjacentUnconditionedSpace_Simple',
+  'BuildingElementPartyWall',
+];
+
+export type AdjacentLikeElement =
+  | BuildingElementAdjacentConditionedSpace
+  | BuildingElementAdjacentUnconditionedSpace_Simple
+  | BuildingElementPartyWall;
+
+export function isAdjacentLikeElement(element: Element): element is AdjacentLikeElement {
+  return (
+    element.type === 'BuildingElementAdjacentConditionedSpace'
+    || element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple'
+    || element.type === 'BuildingElementPartyWall'
+  );
+}
 
 export const HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG = 60;
 

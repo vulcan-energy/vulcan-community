@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
+import type { CSSProperties } from 'react';
 import { useNumericDraftInput } from '../numericDraftInput';
 
 // Custom hook for decimal input handling with proper typing support.
@@ -167,3 +168,58 @@ export function horizontalPolygonSurfaceSelectValue(pitch: number | undefined | 
   if (r === 180) return '180';
   return '';
 }
+
+// The following four helpers (slice-6 brief STAGE 6 constants dedup) were
+// each duplicated byte-for-byte in ElementCreator.tsx plus a subset of the
+// wall-family modules — buildingElementGround.tsx's header tracked the
+// duplication and named this file as the established home once a
+// cycle-free move was possible. Every wall-family module already imports
+// from formPrimitives.ts (it's the module contract's own dependency), so
+// there's no cycle; ElementCreator.tsx keeps its own remaining call sites,
+// now reading the same shared definition.
+
+/** Parses an unknown value (typically extra_json) to a finite number, or
+ * null if it isn't one. Was duplicated in ElementCreator.tsx,
+ * buildingElementGround.tsx, and adjacentLikeElement.tsx. */
+export function readFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const t = value.trim();
+    if (t === '') return null;
+    const n = Number(t);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/** Parses a live (mid-edit) text-input string to a number, defaulting to 0
+ * rather than NaN. Was duplicated in ElementCreator.tsx and
+ * buildingElementGround.tsx. */
+export const parseLiveDecimalInput = (value: string): number => {
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/** Formats a value to a fixed 2dp string, defaulting to '0.00' for
+ * missing/non-finite input. Was duplicated in ElementCreator.tsx,
+ * buildingElementGround.tsx, adjacentLikeElement.tsx,
+ * buildingElementOpaque.tsx, and buildingElementTransparent.tsx. */
+export const formatToTwoDecimals = (value: number | string | undefined): string => {
+  if (value === undefined || value === null || value === '') return '0.00';
+  const num = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
+  return Number.isFinite(num) ? num.toFixed(2) : '0.00';
+};
+
+/** Shared style for the small secondary-text note rendered under a field.
+ * Was duplicated in ElementCreator.tsx, buildingElementGround.tsx,
+ * adjacentLikeElement.tsx, buildingElementOpaque.tsx,
+ * buildingElementTransparent.tsx, and wallPitchField.tsx (also, outside the
+ * wall family and out of this stage's scope, in mechanicalVentilation.tsx,
+ * onSiteGeneration.tsx, and vents.tsx — left as-is; centralizing those isn't
+ * a wall-family concern). */
+export const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
+  fontSize: '11px',
+  color: 'var(--text-secondary)',
+  lineHeight: 1.35,
+  minWidth: 0,
+};

@@ -15,7 +15,11 @@ import type {
   GeometryProductCatalogueContribution,
   GeometryWorkspaceResourcePort,
 } from '../../../../geometry-editor-host/src';
-import type { Element, ElementType } from '../../geometry/types';
+import type { BuildingElementTransparent, Element, ElementType } from '../../geometry/types';
+import type { CanvasShape } from '../../lib/shapeUtils';
+import type { SlopedElementDimensions } from '../../lib/slopedElementDimensions';
+import type { TransparentOpeningDerivedValues } from '../../lib/transparentOpeningDerivedFields';
+import type { UnheatedPitchedRoofCeilingElevation } from '../../lib/unheatedPitchedRoofCeiling';
 import type { NumericDraftInputBinding } from './formPrimitives';
 import type { ServiceLineFormGroup } from './serviceLine';
 
@@ -48,20 +52,42 @@ export interface OnSiteHostDerivation {
  * still reach it — the same passthrough precedent as OnSiteGeneration's
  * getCurrentOrientation. */
 export interface ElementFormSharedCtx {
-  /** WindowShading/ContextShading's editable height field. */
+  /** WindowShading/ContextShading's editable height field; also
+   * BuildingElementGround's hydrate/buildElementData (elementForms/
+   * buildingElementGround.tsx) — Ground never renders it, but preserves the
+   * legacy hydrate write for byte-identical behaviour. */
   heightInput: NumericDraftInputBinding;
   /** WindowShading's editable distance field; ContextShading's read-only computed
    * distance display. */
   distanceInput: NumericDraftInputBinding;
+  /** The unextracted wall family's (Opaque/Transparent/adjacent) width field;
+   * also BuildingElementGround's (elementForms/buildingElementGround.tsx) —
+   * Ground is the first ctx.shared consumer to need this one (the five
+   * earlier consumers never did). */
+  widthInput: NumericDraftInputBinding;
   /** The unextracted wall family's (Opaque/Transparent/Ground/adjacent) area
    * field; also WetEmitter's UFH-only area field (elementForms/wetEmitter.tsx),
    * read/written ONLY via ctx.shared — same precedent as heightInput/
    * distanceInput above. */
   areaInput: NumericDraftInputBinding;
+  /** The wall family's (Opaque/Transparent) Base Height (m) schema field —
+   * Transparent's first ctx.shared consumer (elementForms/
+   * buildingElementTransparent.tsx, slice-6 brief STAGE 3). Distinct from
+   * Adjacent-like's own exclusive `_base_height`-backed
+   * adjacentViewerBaseHeightInput (see adjacentLikeElement.tsx's header) and
+   * from Ground, which has no schema base_height field at all. */
+  baseHeightInput: NumericDraftInputBinding;
   parentElement: string;
   setParentElement: (value: string) => void;
   pitch: number;
   setPitch: (value: number) => void;
+  /** Draft-string commit for the typed pitch input (origin/main PR #31 "Let pitch carry
+   * decimals") — one shared instance owned by wallShared.tsx, bridged the same way as
+   * `pitch`/`setPitch` above so wallPitchField.tsx's renderWallPitchField (and any future
+   * consumer) can read it via ctx.shared without each wall-family module standing up its
+   * own useNumericDraftInput call (which would violate Rules of Hooks: only one of
+   * Opaque/Transparent/Adjacent-like's build()/renderPanel() runs per render). */
+  pitchDraftInput: NumericDraftInputBinding;
   orientation360: number;
   setOrientation360: (value: number) => void;
   /** Commits an edited orientation360, rotating sloped polygons/2-point lines in
@@ -149,6 +175,28 @@ export interface ElementFormStateCtx {
    * buildElementData's equivalent need, rather than exposing the raw
    * zones/getZoneById store surface generically. System-only consumer. */
   getZoneNameForElementZoneId: (zoneId: unknown) => string | null;
+  /** Derived base_height from the selected floor's Z-level and cumulative
+   * storey heights below (effective storey heights bake in wall-derived
+   * heights + user overrides) — orchestrator-owned because it closes over
+   * elementFloorId/floors/allElements, none of which a module holds.
+   * Transparent's hydrate-time auto-sync effect (elementForms/
+   * buildingElementTransparent.tsx, slice-6 brief STAGE 3) uses it as the
+   * base_height fallback for deriving the window's mid-height when no
+   * explicit base_height is set — same underlying local already exposed at
+   * render time via ElementFormRenderCtx.derivedBaseHeight below (stage 2),
+   * now also needed at hook time. Transparent-only consumer as of this
+   * stage. */
+  derivedBaseHeight: number;
+  /** Transparent's hydrate needs the derived opening mid-height/max-open-
+   * area (computed from the full floors + elements graph via
+   * geometryStore.getState(), not the reactive per-render locals — same
+   * hydrate-time-freshness reasoning as legacy) to seed the refs its own
+   * render-time auto-sync effect guards against clobbering manual overrides
+   * with. Orchestrator-owned because it needs that full graph, same
+   * "computed orchestrator-side, threaded as a callback" precedent as
+   * getGlobalOrientationOffset/getCurrentOrientation above. Transparent-only
+   * consumer. */
+  getTransparentOpeningDerivedValues: (element: BuildingElementTransparent) => TransparentOpeningDerivedValues;
 }
 
 export interface ElementFormBuildCtx {
@@ -197,7 +245,18 @@ export interface ElementFormRenderCtx {
   selection: ElementFormSelection | null;
   getElementById: (id: string) => Element | undefined;
   updateElement: (id: string, updates: Partial<Element>, skipAutoSave?: boolean) => void;
+  /** Generic "change the current selection" capability — BuildingElementGround's
+   * panel (elementForms/buildingElementGround.tsx) uses it so clicking a source
+   * wall's name in the "From assemblies" thickness breakdown jumps selection to
+   * it. Not assembly-calculator-specific; any module may use it to navigate. */
+  setSelection: (selection: ElementFormSelection) => void;
   getGlobalOrientationOffset: () => number;
+  /** Orchestrator-wide "Elevation above model ground" field (every family's
+   * generic elevation control, see elementSupportsGenericElevationControl).
+   * BuildingElementGround's panel clears its draft value when a newly-picked
+   * floor type no longer supports a viewer elevation — same legacy behaviour,
+   * write-only use. */
+  elementElevationInput: NumericDraftInputBinding;
   onSiteHostDerivation: OnSiteHostDerivation | null;
   selectedPvDimensionNotes: { width: string; height: string } | null;
   /** Selected element's zone, needed by WindowShading's linked-window dropdown to
@@ -243,6 +302,85 @@ export interface ElementFormRenderCtx {
    * SpaceHeatSystem. Same decision/precedent as renderSpaceHeatSystemPicker
    * above. Invoked from System's (not-yet-extracted) panel. */
   renderSpaceHeatSystemEmitterManager: () => ReactNode;
+  /** Wall-family generic derived render values — computed once per render
+   * from the current selection/coordinates and shared by Opaque/Transparent
+   * (still inline) and Adjacent-like (elementForms/adjacentLikeElement.tsx,
+   * slice-6 brief STAGE 2 — its first consumer). Read-only, render-time-only
+   * values, so they live here rather than on ElementFormStateCtx.shared
+   * (which is for state multiple modules read AND write). */
+  selectedElement: Element | null;
+  selectedShape: CanvasShape | null;
+  /** Derived from the selected floor + cumulative storey heights below —
+   * also read by Opaque's (still inline) base-height reset-target helper. */
+  derivedBaseHeight: number;
+  derivedPolygonArea: number;
+  liveWidthValue: number;
+  liveHeightValue: number;
+  liveRectArea: number;
+  /** Surface-facing dropdown's pitch value for horizontal (0deg/180deg)
+   * polygons — reads from the STORE element when possible (they can diverge
+   * from local pitch state), not just `pitch`, so re-picking 0deg isn't a
+   * no-op. See the orchestrator's own comment at its definition. */
+  horizontalPolygonControlPitch: number;
+  /** Opaque/Transparent's (still inline) and Adjacent-like's shared Width +
+   * Height input pair (with sloped-shape "Use shape calculated" resets and
+   * validation). Orchestrator-owned because it closes over several
+   * not-yet-extracted locals (getFieldValidationState,
+   * selectedSlopedDimensions, profileTopControl, etc.) — same render-bridge
+   * precedent as renderMvhrDuctAndTerminalManager above. */
+  renderLinearDimensionsFields: (
+    fieldRef: (fieldKey: string) => (node: HTMLDivElement | null) => void,
+    options: { widthStep: string; heightStep: string; includeProfileTop?: boolean },
+  ) => ReactNode;
+  /** Sloped-polygon rectangle dimensions derived from the selected element's
+   * coordinates + pitch (null when not a sloped-polygon or dimensions can't
+   * be derived) — generic wall-family value, joining the group above in
+   * slice-6 brief STAGE 3. NOT Transparent-exclusive (Opaque's not-yet-
+   * extracted "Use shape-calculated sloped width/height" reset buttons read
+   * the same orchestrator local), but Transparent's sloped-opening
+   * rebuild-opening button (elementForms/buildingElementTransparent.tsx) is
+   * its first extracted-module consumer — same "generic value, first module
+   * consumer" precedent derivedBaseHeight itself set in stage 2. */
+  selectedSlopedDimensions: SlopedElementDimensions | null;
+  /** Sets the shared parentElement/pitch/orientation360 from a chosen host
+   * element by name, then patches the selected element's own coordinates/
+   * pitch/orientation to match (BuildingHostedLinearParentPatch). Used by
+   * Opaque's dormer host-roof picker (still inline) and Transparent's
+   * "Linked Wall" picker (elementForms/buildingElementTransparent.tsx,
+   * slice-6 brief STAGE 3) — orchestrator-owned because it closes over
+   * elementIds/elementsById/geometryStore/selection, none of which a module
+   * holds; same renderLinearDimensionsFields-style render-bridge precedent
+   * above. */
+  applyHostedParentElement: (value: string, emptyParentValue: string | null) => void;
+  /** Orchestrator-owned dormer bundle machinery (slice-6 brief decision 2):
+   * renders Opaque's dormer-anchor editing fields (host roof, dormer shape/
+   * dimensions, roof pitches, window parameters). Dormers write across the
+   * Opaque anchor AND its Transparent siblings (regenerateDormerAnchor + the
+   * per-sibling regeneration loop) — no single module may own that, so this
+   * stays a zero-arg callback closing over the dormer draft inputs/
+   * commitDormerAnchorChanges/etc., same renderMvhrDuctAndTerminalManager /
+   * renderSpaceHeatSystemPicker precedent. Invoked from Opaque's module
+   * (elementForms/buildingElementOpaque.tsx, slice-6 brief STAGE 4) when
+   * `isDormerAnchorElement(selectedElement)` is true — see that module's
+   * header for how the dormer-anchor check itself reaches the module
+   * (reusing selectedElement above, not a new boolean field). Stage 5
+   * (dormer bundle proper) still owns everything this callback closes over. */
+  renderDormerBundleEditor: () => ReactNode;
+  /** Opaque's "Flip 180°" wall-orientation action (elementForms/
+   * buildingElementOpaque.tsx, slice-6 brief STAGE 4) — a dedicated
+   * geometry-aware store action (rotates coordinates, not a plain field
+   * patch), so it can't be reconstructed from the generic `updateElement`
+   * patcher above. Opaque-only consumer as of this stage. */
+  flipElementOrientation: (elementId: string) => void;
+  /** Opaque's "Ceiling / heat-loss boundary elevation" suggestion
+   * (elementForms/buildingElementOpaque.tsx, slice-6 brief STAGE 4) —
+   * orchestrator-computed because it needs the full floors + elements graph
+   * (via withEffectiveStoreyHeights), which no module holds — same
+   * "computed orchestrator-side, threaded as a plain render-time value"
+   * precedent as onSiteHostDerivation/selectedPvDimensionNotes above (not a
+   * callback: already fully resolved for the current selection by render
+   * time). Opaque-only consumer. */
+  unheatedPitchedRoofCeilingElevationSuggestion: UnheatedPitchedRoofCeilingElevation | null;
 }
 
 export interface ElementFormModule<S> {
