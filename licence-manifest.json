@@ -1927,8 +1927,32 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/elementForms/mechanicalVentilationDuctwork.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/mechanicalVentilationDuctwork.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/elementForms/onSiteGeneration.tsx",
       "source_path": "packages/geometry-editor/src/components/elementForms/onSiteGeneration.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/elementForms/serviceLine.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/serviceLine.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/elementForms/thermalBridgeLinear.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/thermalBridgeLinear.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -1953,6 +1977,14 @@
     {
       "path": "packages/geometry-editor/src/components/elementForms/vents.tsx",
       "source_path": "packages/geometry-editor/src/components/elementForms/vents.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/elementForms/waterPipework.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/waterPipework.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -3842,6 +3874,14 @@
     {
       "path": "packages/geometry-editor/src/lib/__tests__/schemaRefResolver.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/schemaRefResolver.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/__tests__/schemaUtils.cyclicRefs.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/schemaUtils.cyclicRefs.test.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

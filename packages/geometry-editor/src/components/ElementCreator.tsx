@@ -15,7 +15,6 @@ import {
   useGeometryStore,
   useGeometryStoreApi,
   ZONE_NAME_SUGGESTIONS,
-  DUCT_TYPES,
   APPLIANCE_KEYS,
   validateZone,
   roundToTwoDecimals,
@@ -30,6 +29,7 @@ import {
   type ElementFormRenderCtx,
 } from './elementForms/types';
 import { electricBatteryFormModule } from './elementForms/electricBattery';
+import { thermalBridgeLinearFormModule } from './elementForms/thermalBridgeLinear';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
 import { getLightingFieldValue, lightingFormModule } from './elementForms/lighting';
 import { ParentElementDropdown } from './ParentElementDropdown';
@@ -40,6 +40,9 @@ import { onSiteGenerationFormModule } from './elementForms/onSiteGeneration';
 import { windowShadingFormModule } from './elementForms/windowShading';
 import { contextShadingFormModule } from './elementForms/contextShading';
 import { ventsFormModule } from './elementForms/vents';
+import { mechanicalVentilationDuctworkFormModule } from './elementForms/mechanicalVentilationDuctwork';
+import { waterPipeworkFormModule } from './elementForms/waterPipework';
+import { useServiceLineFormState } from './elementForms/serviceLine';
 import {
   useDecimalInput,
   useIntegerInput,
@@ -132,15 +135,10 @@ import type {
   ThermalBridgeLinear,
 } from '../geometry/types';
 import {
-  resolveThermalBridgeLineMode,
-  syncThermalBridgeLinearLengthFromCoordinates,
   thermalBridgeLinearHasPositiveRun,
 } from '../lib/thermalBridgeLinearGeometry';
 import {
-  applyServiceLinePlanLengthToCoordinates,
   getServiceLineLengthFromCoordinates,
-  getServiceLinePlanLengthFromCoordinates,
-  inferServiceLineModeFromCoordinates,
   isServiceLineElementType,
   normalizeServiceLineCoordinatesForMode,
   serviceLineModeFromShapeValue,
@@ -151,7 +149,6 @@ import {
   getParentControlledFloorZ,
   isElementFloorControlledByParent,
 } from '../lib/parentControlledFloor';
-import { writeTbLineMode } from '../lib/thermalBridgeLineMode';
 import { ProfileHeightsPopover } from './ProfileHeightsPopover';
 import { useKeyedState } from '../hooks/useKeyedState';
 import {
@@ -665,7 +662,6 @@ import {
   updateSpaceHeatSystemHeatSourceNameInExtraJson,
   uiModeForSystemSource,
 } from './systemEditorUtils';
-import { baseLinearPsiForJunction, getPApportionedLinearPsiForEditor } from '../geometry/thermalBridge/linearTbPsi';
 import { isExternalLineWall } from '../geometry/thermalBridge/proposeExternalCorners';
 import { groundFloorTypeSupportsViewerElevation } from '../lib/groundFloorSubtype';
 
@@ -695,13 +691,6 @@ const AssemblyCalculatorModal = React.lazy(async () => {
   const module = await loadAssemblyCalculatorModal();
   return { default: module.AssemblyCalculatorModal };
 });
-
-/** Compact ψ for button labels (e.g. 0.05, 1, −0.09) */
-function formatPsiButtonLabel(v: number): string {
-  if (!Number.isFinite(v)) return '';
-  const s = v.toFixed(4).replace(/\.?0+$/, '');
-  return s === '-0' ? '0' : s;
-}
 
 type PendingSystemAction =
   | { kind: 'source'; target: 'presets' | 'pcdb' }
@@ -1258,7 +1247,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   }, []);
 
   // Geometry store: data via shallow selector, stable function refs individually
-  const { zones, elementsById, elementIds, floors, complianceSettings, defaultThermalBridging, junctionPsiDefaultsPath, junctionPsiDefaultsMap, junctionPsiDefaultsLoading, bundledAssemblyLibrary } = useGeometryStore(
+  const { zones, elementsById, elementIds, floors, complianceSettings, defaultThermalBridging, bundledAssemblyLibrary } = useGeometryStore(
     useShallow((s) => ({
       zones: s.zones,
       elementsById: s.elementsById,
@@ -1266,9 +1255,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       floors: s.floors,
       complianceSettings: s.complianceSettings,
       defaultThermalBridging: s.defaultThermalBridging,
-      junctionPsiDefaultsPath: s.junctionPsiDefaultsPath,
-      junctionPsiDefaultsMap: s.junctionPsiDefaultsMap,
-      junctionPsiDefaultsLoading: s.junctionPsiDefaultsLoading,
       bundledAssemblyLibrary: s.bundledAssemblyLibrary,
     }))
   );
@@ -1667,29 +1653,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   });
 
   const commitElementNumericField = (field: string) => (value: number | '') => {
-    if (field === 'length' && isExistingElementSelection()) {
-      const currentSelection = selection as Exclude<Selection, null>;
-      const el = getElementById(currentSelection.id);
-      if (
-        el &&
-        (el.type === 'WaterPipework' || el.type === 'MechanicalVentilationDuctwork') &&
-        typeof value === 'number' &&
-        Number.isFinite(value) &&
-        value > 0
-      ) {
-        const mode = inferServiceLineModeFromCoordinates(el.coordinates);
-        if (mode !== 'vertical') {
-          const nextCoords = applyServiceLinePlanLengthToCoordinates(el.coordinates, value);
-          if (nextCoords) {
-            commitExistingElementDraft({
-              coordinates: nextCoords,
-              length: getServiceLineLengthFromCoordinates(nextCoords),
-            } as Partial<Element>);
-            return;
-          }
-        }
-      }
-    }
     commitExistingElementDraft({ [field]: value } as Partial<Element>);
   };
 
@@ -1707,47 +1670,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     }
     return getElementShape(element) === 'sloped-polygon';
   };
-
-  const commitServiceLineEndpointZ = useCallback(
-    (endpointIndex: 0 | 1) => (value: number | '') => {
-      if (!isExistingElementSelection()) return;
-      const currentSelection = selection as Exclude<Selection, null>;
-      const el = getElementById(currentSelection.id);
-      if (!el || !isServiceLineElementType(el.type)) return;
-      const c = el.coordinates;
-      if (!Array.isArray(c) || c.length !== 2) return;
-      const [a, b] = c;
-      const mode =
-        el.type === 'ThermalBridgeLinear'
-          ? resolveThermalBridgeLineMode(el as ThermalBridgeLinear)
-          : inferServiceLineModeFromCoordinates(c);
-      const prevZ = endpointIndex === 0 ? a.z : b.z;
-      const z =
-        typeof value === 'number' && Number.isFinite(value)
-          ? roundToTwoDecimals(value)
-          : typeof prevZ === 'number' && Number.isFinite(prevZ)
-            ? roundToTwoDecimals(prevZ)
-            : 0;
-      const nextCoords =
-        mode === 'plan'
-          ? [
-              { ...a, z },
-              { ...b, z },
-            ]
-          : endpointIndex === 0
-            ? [{ ...a, z }, { ...b }]
-            : [{ ...a }, { ...b, z }];
-      const len =
-        el.type === 'ThermalBridgeLinear'
-          ? syncThermalBridgeLinearLengthFromCoordinates({ ...el, coordinates: nextCoords } as ThermalBridgeLinear)
-          : getServiceLineLengthFromCoordinates(nextCoords);
-      commitExistingElementDraftRef.current({
-        coordinates: nextCoords,
-        length: len,
-      } as Partial<Element>);
-    },
-    [selection, isExistingElementSelection, getElementById],
-  );
 
   const widthInputValueForCommitRef = useRef<number | ''>('');
   const heightInputValueForCommitRef = useRef<number | ''>('');
@@ -1993,24 +1915,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       },
     } as Partial<Element>);
   }, { commitOnChange: true });
-  const lengthInput = useDecimalInput('', commitElementNumericField('length'), { commitOnChange: true });
-  const tbZ0Input = useDecimalInput(0, commitServiceLineEndpointZ(0), { commitOnChange: true });
-  const tbZ1Input = useDecimalInput(0, commitServiceLineEndpointZ(1), { commitOnChange: true });
-  const linearThermalTransmittanceInput = useDecimalInput(
-    '',
-    commitElementNumericField('linear_thermal_transmittance'),
-    { commitOnChange: false, formatOnBlur: 'preserve' },
-  );
+  const serviceLine = useServiceLineFormState({
+    commitElementNumericField,
+    selection,
+    isExistingElementSelection,
+    getElementById,
+    commitExistingElementDraftRef,
+    selectedElementV,
+  });
   const widthInputSetValueRef = useRef(widthInput.syncValue);
   const heightInputSetValueRef = useRef(heightInput.syncValue);
   const areaInputSetValueRef = useRef(areaInput.syncValue);
   const midHeightInputSetValueRef = useRef(midHeightInput.syncValue);
   const maxWindowOpenAreaInputSetValueRef = useRef(maxWindowOpenAreaInput.syncValue);
   const totalAreaInputSetValueRef = useRef(totalAreaInput.syncValue);
-  const lengthInputSetValueRef = useRef(lengthInput.syncValue);
-  const tbZ0InputSetValueRef = useRef(tbZ0Input.syncValue);
-  const tbZ1InputSetValueRef = useRef(tbZ1Input.syncValue);
-  const linearThermalTransmittanceInputSetValueRef = useRef(linearThermalTransmittanceInput.syncValue);
   useEffect(() => {
     widthInputSetValueRef.current = widthInput.syncValue;
     heightInputSetValueRef.current = heightInput.syncValue;
@@ -2018,43 +1936,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     midHeightInputSetValueRef.current = midHeightInput.syncValue;
     maxWindowOpenAreaInputSetValueRef.current = maxWindowOpenAreaInput.syncValue;
     totalAreaInputSetValueRef.current = totalAreaInput.syncValue;
-    lengthInputSetValueRef.current = lengthInput.syncValue;
-    tbZ0InputSetValueRef.current = tbZ0Input.syncValue;
-    tbZ1InputSetValueRef.current = tbZ1Input.syncValue;
-    linearThermalTransmittanceInputSetValueRef.current = linearThermalTransmittanceInput.syncValue;
   }, [
     areaInput.syncValue,
     heightInput.syncValue,
-    lengthInput.syncValue,
-    linearThermalTransmittanceInput.syncValue,
     maxWindowOpenAreaInput.syncValue,
     midHeightInput.syncValue,
-    tbZ0Input.syncValue,
-    tbZ1Input.syncValue,
     totalAreaInput.syncValue,
     widthInput.syncValue,
   ]);
-  const selectedServiceLineMode = useMemo<'plan' | 'vertical' | 'slope'>(() => {
-    void selectedElementV;
-    if (!selection || (selection.type !== 'element' && selection.type !== 'global')) return 'plan';
-    const el = getElementById(selection.id);
-    if (!el || !isServiceLineElementType(el.type)) return 'plan';
-    if (el.type === 'ThermalBridgeLinear') return resolveThermalBridgeLineMode(el as ThermalBridgeLinear);
-    return inferServiceLineModeFromCoordinates(el.coordinates);
-  }, [selection, getElementById, selectedElementV]);
-  const selectedTbLineMode = selectedServiceLineMode;
-  const selectedServiceLineMetrics = useMemo(() => {
-    void selectedElementV;
-    if (!selection || (selection.type !== 'element' && selection.type !== 'global')) {
-      return { planLength: 0, actualLength: 0 };
-    }
-    const el = getElementById(selection.id);
-    if (!el || !isServiceLineElementType(el.type)) return { planLength: 0, actualLength: 0 };
-    return {
-      planLength: getServiceLinePlanLengthFromCoordinates(el.coordinates),
-      actualLength: getServiceLineLengthFromCoordinates(el.coordinates),
-    };
-  }, [selection, getElementById, selectedElementV]);
 
   const numbersClose = useCallback((a: number | null | undefined, b: number | null | undefined, eps = 1e-6): boolean => {
     if (a == null && b == null) return true;
@@ -2246,33 +2135,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     isExistingElementSelection,
   ]);
 
-  useEffect(() => {
-    void selectedElementV;
-    if (selection?.type !== 'element' && selection?.type !== 'global') return;
-    const el = getElementById(selection.id);
-    if (!el || !isServiceLineElementType(el.type)) return;
-    if (el.type === 'WaterPipework' || el.type === 'MechanicalVentilationDuctwork') {
-      const mode = inferServiceLineModeFromCoordinates(el.coordinates);
-      lengthInputSetValueRef.current(
-        mode === 'slope'
-          ? getServiceLinePlanLengthFromCoordinates(el.coordinates)
-          : getServiceLineLengthFromCoordinates(el.coordinates),
-      );
-    } else {
-      lengthInputSetValueRef.current('length' in el ? el.length ?? '' : '');
-    }
-    if (el.type === 'ThermalBridgeLinear') {
-      linearThermalTransmittanceInputSetValueRef.current(
-        'linear_thermal_transmittance' in el ? el.linear_thermal_transmittance ?? 0 : 0,
-      );
-    }
-    const coords = el.coordinates;
-    if (Array.isArray(coords) && coords.length === 2) {
-      tbZ0InputSetValueRef.current(typeof coords[0]?.z === 'number' ? roundToTwoDecimals(coords[0].z) : 0);
-      tbZ1InputSetValueRef.current(typeof coords[1]?.z === 'number' ? roundToTwoDecimals(coords[1].z) : 0);
-    }
-  }, [selection?.type, selection?.id, selectedElementV, getElementById]);
-
   // Auto-fill base_height when floor changes and current value is 0 (new element or unset)
   useEffect(() => {
     const z = parseInt(elementFloorId, 10);
@@ -2396,8 +2258,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // family (see ElementFormSharedCtx) and stays here.
   const distanceInput = useDecimalInput('', commitElementNumericField('distance'), { commitOnChange: true });
 
-  // MechanicalVentilationDuctwork
-  const [ductType, setDuctType] = useState<'' | 'supply' | 'extract' | 'intake' | 'exhaust'>('');
+  // MechanicalVentilationDuctwork's exclusive state now lives in its module
+  // (elementForms/mechanicalVentilationDuctwork.tsx).
+
+  // MechanicalVentilationTerminal
   const [terminalType, setTerminalType] = useState<'' | 'intake' | 'exhaust'>('');
   const [hostElement, setHostElement] = useState<string>('');
 
@@ -2439,8 +2303,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     setSelectedElementIds([selectedSpaceHeatSystemForEmitter.id]);
   }, [selectedSpaceHeatSystemForEmitter, setSelection, setSelectedElementIds]);
 
-  // WaterPipework
-  const [location, setLocation] = useState<'' | 'internal' | 'external'>('');
+  // WaterPipework's exclusive state now lives in its module
+  // (elementForms/waterPipework.tsx).
 
   // ContextShading's exclusive state now lives in its module
   // (elementForms/contextShading.tsx).
@@ -2547,9 +2411,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     },
     elementIds,
     elementsById,
+    serviceLine,
   };
   // ElectricBattery
   const electricBatteryFormState = electricBatteryFormModule.useFormState(elementFormStateCtx);
+  // ThermalBridgeLinear
+  const thermalBridgeLinearFormState = thermalBridgeLinearFormModule.useFormState(elementFormStateCtx);
   // ThermalBridgePoint
   const thermalBridgePointFormState = thermalBridgePointFormModule.useFormState(elementFormStateCtx);
   // Lighting
@@ -2568,8 +2435,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const contextShadingFormState = contextShadingFormModule.useFormState(elementFormStateCtx);
   // Vents
   const ventsFormState = ventsFormModule.useFormState(elementFormStateCtx);
+  // MechanicalVentilationDuctwork
+  const mechanicalVentilationDuctworkFormState = mechanicalVentilationDuctworkFormModule.useFormState(elementFormStateCtx);
+  // WaterPipework
+  const waterPipeworkFormState = waterPipeworkFormModule.useFormState(elementFormStateCtx);
   const elementFormInstances = {
     ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
+    ThermalBridgeLinear: bindElementFormModule(thermalBridgeLinearFormModule, thermalBridgeLinearFormState),
     ThermalBridgePoint: bindElementFormModule(thermalBridgePointFormModule, thermalBridgePointFormState),
     Lighting: bindElementFormModule(lightingFormModule, lightingFormState),
     Appliance: bindElementFormModule(applianceFormModule, applianceFormState),
@@ -2579,6 +2451,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     WindowShading: bindElementFormModule(windowShadingFormModule, windowShadingFormState),
     ContextShading: bindElementFormModule(contextShadingFormModule, contextShadingFormState),
     Vents: bindElementFormModule(ventsFormModule, ventsFormState),
+    MechanicalVentilationDuctwork: bindElementFormModule(
+      mechanicalVentilationDuctworkFormModule,
+      mechanicalVentilationDuctworkFormState,
+    ),
+    WaterPipework: bindElementFormModule(waterPipeworkFormModule, waterPipeworkFormState),
   } satisfies Partial<Record<ElementType, ElementFormInstance>>;
 
   // Floor-move base-height sync, shared across several families; OnSiteGeneration's
@@ -3881,16 +3758,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           }
           adjacentViewerBaseHeightInput.setValue(viewerPlotM);
         } else if (element.type === 'ThermalBridgeLinear') {
-          lengthInput.setValue('length' in element ? element.length ?? '' : '');
-          linearThermalTransmittanceInput.setValue('linear_thermal_transmittance' in element ? element.linear_thermal_transmittance ?? '' : '');
-          const cz = element.coordinates;
-          if (Array.isArray(cz) && cz.length === 2) {
-            tbZ0Input.setValue(typeof cz[0]?.z === 'number' ? roundToTwoDecimals(cz[0].z) : 0);
-            tbZ1Input.setValue(typeof cz[1]?.z === 'number' ? roundToTwoDecimals(cz[1].z) : 0);
-          } else {
-            tbZ0Input.setValue(0);
-            tbZ1Input.setValue(0);
-          }
+          elementFormInstances.ThermalBridgeLinear.hydrate(element);
         } else if (element.type === 'ThermalBridgePoint') {
           elementFormInstances.ThermalBridgePoint.hydrate(element);
         }
@@ -3900,17 +3768,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } else if (element.type === 'Lighting') {
           elementFormInstances.Lighting.hydrate(element);
         } else if (element.type === 'MechanicalVentilationDuctwork') {
-          setDuctType('duct_type' in element ? element.duct_type ?? '' : '');
-          lengthInput.setValue('length' in element ? element.length ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          const cz = element.coordinates;
-          if (Array.isArray(cz) && cz.length === 2) {
-            tbZ0Input.setValue(typeof cz[0]?.z === 'number' ? roundToTwoDecimals(cz[0].z) : 0);
-            tbZ1Input.setValue(typeof cz[1]?.z === 'number' ? roundToTwoDecimals(cz[1].z) : 0);
-          } else {
-            tbZ0Input.setValue(0);
-            tbZ1Input.setValue(0);
-          }
+          elementFormInstances.MechanicalVentilationDuctwork.hydrate(element);
         } else if (element.type === 'MechanicalVentilationTerminal') {
           setTerminalType('terminal_type' in element ? element.terminal_type ?? '' : '');
           setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
@@ -3953,16 +3811,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             }
           } catch { /* swallow: best-effort */ }
         } else if (element.type === 'WaterPipework') {
-          setLocation('location' in element ? element.location ?? '' : '');
-          lengthInput.setValue('length' in element ? element.length ?? '' : '');
-          const cz = element.coordinates;
-          if (Array.isArray(cz) && cz.length === 2) {
-            tbZ0Input.setValue(typeof cz[0]?.z === 'number' ? roundToTwoDecimals(cz[0].z) : 0);
-            tbZ1Input.setValue(typeof cz[1]?.z === 'number' ? roundToTwoDecimals(cz[1].z) : 0);
-          } else {
-            tbZ0Input.setValue(0);
-            tbZ1Input.setValue(0);
-          }
+          elementFormInstances.WaterPipework.hydrate(element);
         } else if (element.type === 'Appliance') {
           elementFormInstances.Appliance.hydrate(element);
         } else if (element.type === 'HotWaterDemand') {
@@ -4025,16 +3874,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
         // Set fields based on global element type
         if (element.type === 'WaterPipework') {
-          setLocation('location' in element ? element.location ?? '' : '');
-          lengthInput.setValue('length' in element ? element.length ?? '' : '');
-          const cz = element.coordinates;
-          if (Array.isArray(cz) && cz.length === 2) {
-            tbZ0Input.setValue(typeof cz[0]?.z === 'number' ? roundToTwoDecimals(cz[0].z) : 0);
-            tbZ1Input.setValue(typeof cz[1]?.z === 'number' ? roundToTwoDecimals(cz[1].z) : 0);
-          } else {
-            tbZ0Input.setValue(0);
-            tbZ1Input.setValue(0);
-          }
+          elementFormInstances.WaterPipework.hydrate(element);
         } else if (element.type === 'Appliance') {
           elementFormInstances.Appliance.hydrate(element);
         } else if (element.type === 'HotWaterDemand') {
@@ -4046,17 +3886,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         else if (element.type === 'Vents') {
           elementFormInstances.Vents.hydrate(element);
         } else if (element.type === 'MechanicalVentilationDuctwork') {
-          setDuctType('duct_type' in element ? element.duct_type ?? '' : '');
-          lengthInput.setValue('length' in element ? element.length ?? '' : '');
-          setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          const cz = element.coordinates;
-          if (Array.isArray(cz) && cz.length === 2) {
-            tbZ0Input.setValue(typeof cz[0]?.z === 'number' ? roundToTwoDecimals(cz[0].z) : 0);
-            tbZ1Input.setValue(typeof cz[1]?.z === 'number' ? roundToTwoDecimals(cz[1].z) : 0);
-          } else {
-            tbZ0Input.setValue(0);
-            tbZ1Input.setValue(0);
-          }
+          elementFormInstances.MechanicalVentilationDuctwork.hydrate(element);
         } else if (element.type === 'MechanicalVentilationTerminal') {
           setTerminalType('terminal_type' in element ? element.terminal_type ?? '' : '');
           setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
@@ -4413,10 +4243,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     groundLineHeightInput.setValue('');
     depthBasementFloorInput.setValue('');
     thicknessWallsInput.setValue('');
-    lengthInput.setValue('');
-    tbZ0Input.setValue(0);
-    tbZ1Input.setValue(0);
-    linearThermalTransmittanceInput.setValue('');
+    // ThermalBridgeLinear/MechanicalVentilationDuctwork/WaterPipework each call
+    // resetServiceLine(state.serviceLine) from their own module reset() (via the
+    // elementFormInstances loop below); no direct call needed here now that all
+    // three of the group's readers own their own reset.
 
     // NEW: CSV v3 element state variables
     // WindowShading's own reset lines now live in its module (via the
@@ -4424,8 +4254,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // ContextShading and the not-yet-extracted wall family; stays here.
     distanceInput.setValue('');
 
-    // MechanicalVentilationDuctwork
-    setDuctType('');
+    // MechanicalVentilationDuctwork's own reset lines now live in its module
+    // (via the elementFormInstances loop below).
+
+    // MechanicalVentilationTerminal
     setTerminalType('');
     setHostElement('');
 
@@ -4434,8 +4266,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     setSpaceHeatSystem('');
     unitNumberInput.setValue('');
 
-    // WaterPipework
-    setLocation('');
+    // WaterPipework's own reset lines now live in its module (via the
+    // elementFormInstances loop below).
 
     // ContextShading's own reset lines now live in its module (via the
     // elementFormInstances loop below).
@@ -5981,12 +5813,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 	        }
 
 	      case 'ThermalBridgeLinear':
-	        return {
-	          ...baseData,
-	          length: lengthInput.value,
-          linear_thermal_transmittance: linearThermalTransmittanceInput.value === '' ? undefined : linearThermalTransmittanceInput.value,
-          extra_json: writeTbLineMode(undefined, 'plan'),
-        } as Partial<Element>;
+	        return elementFormInstances.ThermalBridgeLinear.buildElementData({ baseData, elementZoneId });
 
       case 'ThermalBridgePoint':
         return elementFormInstances.ThermalBridgePoint.buildElementData({ baseData, elementZoneId });
@@ -5999,12 +5826,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         return elementFormInstances.Lighting.buildElementData({ baseData, elementZoneId });
 
 	      case 'MechanicalVentilationDuctwork':
-	        return {
-	          ...baseData,
-	          duct_type: ductType || undefined,
-	          length: lengthInput.value,
-          parent_element: parentElement
-        } as Partial<Element>;
+	        return elementFormInstances.MechanicalVentilationDuctwork.buildElementData({ baseData, elementZoneId });
 
       case 'MechanicalVentilationTerminal': {
         const current =
@@ -6051,14 +5873,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } as Partial<Element>;
 
 	      case 'WaterPipework':
-	        return {
-	          ...baseData,
-	          simplified_pipework: false,
-	          location: location || undefined,
-	          pipework_type: 'primary',
-	          length: lengthInput.value,
-          zoneId: undefined // Global object
-        } as Partial<Element>;
+	        return elementFormInstances.WaterPipework.buildElementData({ baseData, elementZoneId });
 
       case 'Appliance':
         return elementFormInstances.Appliance.buildElementData({ baseData, elementZoneId });
@@ -6797,6 +6612,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       elementZoneId,
       elementIds,
       elementsById,
+      thermalBridgeJunction: {
+        DetailedJunctionControl,
+        onHostReadinessAction: handleDetailedJunctionHostReadinessAction,
+      },
     };
     switch (elementType) {
       case 'BuildingElementOpaque':
@@ -8105,223 +7924,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       }
 
       case 'ThermalBridgeLinear':
-        return (
-          <>
-            {renderFieldLabel(
-              selectedTbLineMode === 'vertical'
-                ? 'Vertical Length (m):'
-                : selectedTbLineMode === 'slope'
-                  ? 'Actual Slope Length (m):'
-                  : 'Plan Length (m):',
-              elementType,
-            )}
-            <div className="element-input" ref={registerBaseFieldRefs('length')}>
-              <StandardInput
-                {...decimalInputProps(lengthInput)}
-                unit={fieldUnit('length')}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('length', lengthInput.value)} issue={getFieldValidationIssue('length', lengthInput.value) || undefined} />
-            </div>
-            {renderFieldLabel(
-              selectedTbLineMode === 'plan' ? 'Z (m):' : 'Z at line start (m):',
-              elementType,
-            )}
-            <div className="element-input" ref={registerBaseFieldRefs('tb_z0')}>
-              <StandardInput
-                {...decimalInputProps(tbZ0Input)}
-                unit={fieldUnit('tb_z0')}
-                step="0.01"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-            </div>
-            {selectedTbLineMode !== 'plan' && (
-              <>
-                {renderFieldLabel('Z at line end (m):', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('tb_z1')}>
-                  <StandardInput
-                    {...decimalInputProps(tbZ1Input)}
-                    unit={fieldUnit('tb_z1')}
-                    step="0.01"
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                </div>
-              </>
-            )}
-            {renderFieldLabel('Linear Thermal Transmittance (W/m·K):', elementType)}
-            <div className="element-input" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '6px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <StandardInput
-                  {...decimalInputProps(linearThermalTransmittanceInput)}
-                  unit={fieldUnit('linear_thermal_transmittance')}
-                  step="any"
-                  variant="ghost"
-                  size="md"
-                  style={{ flex: 1 }}
-                />
-              </div>
-              {(() => {
-                    const element = getCurrentElementData() as Element;
-                    const rawJunctionType = element?.extra_json?.junction_type;
-                    const junctionType = typeof rawJunctionType === 'string' ? rawJunctionType : undefined;
-                    const currentPsi = linearThermalTransmittanceInput.value;
-                    const currentPsiNumber = typeof currentPsi === 'number' ? currentPsi : Number(currentPsi);
-
-                    const defaultTablePsi =
-                      junctionType &&
-                      currentPsi !== '' &&
-                      currentPsi !== undefined &&
-                      currentPsi !== null
-                        ? baseLinearPsiForJunction(junctionType, null)
-                        : undefined;
-                    const workspacePsi =
-                      junctionType &&
-                      currentPsi !== '' &&
-                      currentPsi !== undefined &&
-                      currentPsi !== null &&
-                      (junctionPsiDefaultsPath || '').trim() !== '' &&
-                      !junctionPsiDefaultsLoading
-                        ? baseLinearPsiForJunction(junctionType, junctionPsiDefaultsMap)
-                        : undefined;
-                    const pApportionedPsi =
-                      element.type === 'ThermalBridgeLinear' &&
-                      junctionType &&
-                      currentPsi !== '' &&
-                      currentPsi !== undefined &&
-                      currentPsi !== null &&
-                      !junctionPsiDefaultsLoading
-                        ? getPApportionedLinearPsiForEditor(
-                            junctionType,
-                            junctionPsiDefaultsMap,
-                            elementsById,
-                            (element as { extra_json?: unknown }).extra_json,
-                          )
-                        : undefined;
-
-                    const applyPsi = (psi: number) => {
-                      linearThermalTransmittanceInput.setValue(psi);
-                      /**
-                       * Re-read the element **at apply time**, not as this render captured it. `element`
-                       * above is a render snapshot, and spreading it re-sends that whole snapshot —
-                       * including `extra_json` — so any write landed since the render is silently
-                       * reverted. The detailed-junction solver adopts ψ and writes its
-                       * `thermal_bridge_solver` provenance while this panel is on screen, and a ψ
-                       * shortcut clicked afterwards would have thrown that provenance away. Same
-                       * apply-time-read rule as `applyThermalBridgeUpdate` in the junction contribution.
-                       */
-                      const current = getElementById(selection.id);
-                      if (current && current.type === 'ThermalBridgeLinear') {
-                        updateElement(selection.id, {
-                          ...current,
-                          linear_thermal_transmittance: psi,
-                        } as Partial<Element>);
-                      }
-                    };
-
-                    const tableShortcuts =
-                      junctionType &&
-                      currentPsi !== '' &&
-                      currentPsi !== undefined &&
-                      currentPsi !== null &&
-                      (defaultTablePsi !== undefined ||
-                        workspacePsi !== undefined ||
-                        pApportionedPsi !== undefined) ? (
-                        <>
-                          {defaultTablePsi !== undefined && currentPsiNumber !== defaultTablePsi && (
-                            <button
-                              type="button"
-                              onClick={() => applyPsi(defaultTablePsi)}
-                              className="btn btn-ghost"
-                              style={{
-                                padding: '0 6px',
-                                fontSize: '11px',
-                                height: '24px',
-                                minHeight: '24px',
-                                lineHeight: '1',
-                              }}
-                              title={`Default Table 3.7 value for ${junctionType}`}
-                            >
-                              Use default ({formatPsiButtonLabel(defaultTablePsi)})
-                            </button>
-                            )}
-                          {workspacePsi !== undefined &&
-                            (junctionPsiDefaultsPath || '').trim() !== '' &&
-                            !junctionPsiDefaultsLoading &&
-                            Math.abs(currentPsiNumber - workspacePsi) > 1e-9 && (
-                              <button
-                                type="button"
-                                onClick={() => applyPsi(workspacePsi)}
-                                className="btn btn-ghost"
-                                style={{
-                                  padding: '0 6px',
-                                  fontSize: '11px',
-                                  height: '24px',
-                                  minHeight: '24px',
-                                  lineHeight: '1',
-                                }}
-                                title={`Workspace table for ${junctionType}`}
-                              >
-                                Use workspace ({formatPsiButtonLabel(workspacePsi)})
-                              </button>
-                            )}
-                          {pApportionedPsi !== undefined &&
-                            Math.abs(currentPsiNumber - pApportionedPsi) > 1e-9 && (
-                              <button
-                                type="button"
-                                onClick={() => applyPsi(pApportionedPsi)}
-                                className="btn btn-ghost"
-                                style={{
-                                  padding: '0 6px',
-                                  fontSize: '11px',
-                                  height: '24px',
-                                  minHeight: '24px',
-                                  lineHeight: '1',
-                                }}
-                                title="P1–P3: half the tabulated ψ for party wall or adjacent conditioned (party UI), using the linked line from the suggest tool"
-                              >
-                                Use P-line (½ party) ({formatPsiButtonLabel(pApportionedPsi)})
-                              </button>
-                            )}
-                        </>
-                      ) : null;
-
-                    return (
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          flexWrap: 'wrap',
-                          fontSize: '12px',
-                          marginTop: 4,
-                        }}
-                      >
-                        {tableShortcuts}
-                        {DetailedJunctionControl ? (
-                          <DetailedJunctionControl
-                            elementId={selection.id}
-                            onAdoptPsi={(psiWPerMK) => {
-                              linearThermalTransmittanceInput.setValue(psiWPerMK);
-                            }}
-                            onHostReadinessAction={
-                              handleDetailedJunctionHostReadinessAction
-                            }
-                          />
-                        ) : null}
-                      </div>
-                    );
-                  })()}
-            </div>
-          </>
-        );
+        return elementFormInstances.ThermalBridgeLinear.renderPanel(formRenderCtx);
 
       case 'ThermalBridgePoint':
         return elementFormInstances.ThermalBridgePoint.renderPanel(formRenderCtx);
@@ -8334,107 +7937,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         return elementFormInstances.Lighting.renderPanel(formRenderCtx);
 
       case 'MechanicalVentilationDuctwork':
-        return (
-          <>
-            {renderFieldLabel('MVHR unit:', elementType, 'parent_element')}
-            <div className="element-input">
-              <ParentElementDropdown
-                value={parentElement}
-                onChange={(value) => {
-                  setParentElement(value);
-                  // Update the element in the store with the new parent_element (both placeholder and non-placeholder)
-                  if (selection && (selection.type === 'element' || selection.type === 'global')) {
-                    updateElement(selection.id, { parent_element: value });
-                  }
-                }}
-                elementType={elementType}
-                zoneId={elementZoneId}
-                placeholder="Select a Mechanical Ventilation system"
-                selfId={selection.type === 'element' ? selection.id : undefined}
-              />
-            </div>
-            {renderFieldLabel('Duct Type:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs(['ductType', 'duct_type'])}>
-              <StandardDropdown
-                value={ductType}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'MechanicalVentilationDuctwork'>['duct_type'];
-                  setDuctType(nextValue);
-                  commitExistingElementDraft({ duct_type: nextValue });
-                }}
-                options={DUCT_TYPES.map(type => ({ value: type, label: type }))}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel(
-              selectedServiceLineMode === 'vertical' ? 'Vertical Length (m):' : 'Plan Length (m):',
-              elementType,
-            )}
-            <div className="element-input" ref={registerBaseFieldRefs('length')}>
-              <StandardInput
-                {...decimalInputProps(lengthInput)}
-                unit={fieldUnit('length')}
-                onChange={selectedServiceLineMode === 'vertical' ? undefined : lengthInput.handleInputChange}
-                onBlur={selectedServiceLineMode === 'vertical' ? undefined : lengthInput.handleBlur}
-                readOnly={selectedServiceLineMode === 'vertical'}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('length', lengthInput.value)} issue={getFieldValidationIssue('length', lengthInput.value) || undefined} />
-            </div>
-            {renderFieldLabel(
-              selectedServiceLineMode === 'plan' ? 'Z (m):' : 'Z at line start (m):',
-              elementType,
-            )}
-            <div className="element-input" ref={registerBaseFieldRefs('service_line_z0')}>
-              <StandardInput
-                {...decimalInputProps(tbZ0Input)}
-                unit={fieldUnit('service_line_z0')}
-                step="0.01"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-            </div>
-            {selectedServiceLineMode !== 'plan' && (
-              <>
-                {renderFieldLabel('Z at line end (m):', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('service_line_z1')}>
-                  <StandardInput
-                    {...decimalInputProps(tbZ1Input)}
-                    unit={fieldUnit('service_line_z1')}
-                    step="0.01"
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                </div>
-              </>
-            )}
-            {selectedServiceLineMode === 'slope' && (
-              <>
-                {renderFieldLabel('Actual Length (m):', elementType)}
-                <div className="element-input">
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                    value={selectedServiceLineMetrics.actualLength}
-                    unit={fieldUnit('length')}
-                    readOnly
-                    step="0.01"
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                </div>
-              </>
-            )}
-          </>
-        );
+        return elementFormInstances.MechanicalVentilationDuctwork.renderPanel(formRenderCtx);
 
       case 'MechanicalVentilationTerminal': {
         const hostOptions = [
@@ -8680,93 +8183,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         );
 
       case 'WaterPipework':
-        return (
-          <>
-            {renderFieldLabel('Location:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs('location')}>
-              <StandardDropdown
-                value={location}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'WaterPipework'>['location'];
-                  setLocation(nextValue);
-                  commitExistingElementDraft({ location: nextValue });
-                }}
-                options={[
-                  { value: 'internal', label: 'Internal' },
-                  { value: 'external', label: 'External' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel(
-              selectedServiceLineMode === 'vertical' ? 'Vertical Length (m):' : 'Plan Length (m):',
-              elementType,
-            )}
-            <div className="element-input" ref={registerBaseFieldRefs('length')}>
-              <StandardInput
-                {...decimalInputProps(lengthInput)}
-                onChange={selectedServiceLineMode === 'vertical' ? undefined : lengthInput.handleInputChange}
-                onBlur={selectedServiceLineMode === 'vertical' ? undefined : lengthInput.handleBlur}
-                readOnly={selectedServiceLineMode === 'vertical'}
-                unit={fieldUnit('length')}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('length', lengthInput.value)} issue={getFieldValidationIssue('length', lengthInput.value) || undefined} />
-            </div>
-            {renderFieldLabel(
-              selectedServiceLineMode === 'plan' ? 'Z (m):' : 'Z at line start (m):',
-              elementType,
-            )}
-            <div className="element-input" ref={registerBaseFieldRefs('service_line_z0')}>
-              <StandardInput
-                {...decimalInputProps(tbZ0Input)}
-                unit={fieldUnit('service_line_z0')}
-                step="0.01"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-              />
-            </div>
-            {selectedServiceLineMode !== 'plan' && (
-              <>
-                {renderFieldLabel('Z at line end (m):', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs('service_line_z1')}>
-                  <StandardInput
-                    {...decimalInputProps(tbZ1Input)}
-                    unit={fieldUnit('service_line_z1')}
-                    step="0.01"
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                </div>
-              </>
-            )}
-            {selectedServiceLineMode === 'slope' && (
-              <>
-                {renderFieldLabel('Actual Length (m):', elementType)}
-                <div className="element-input">
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                    value={selectedServiceLineMetrics.actualLength}
-                    unit={fieldUnit('length')}
-                    readOnly
-                    step="0.01"
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                </div>
-              </>
-            )}
-          </>
-        );
+        return elementFormInstances.WaterPipework.renderPanel(formRenderCtx);
 
       case 'Appliance':
         return elementFormInstances.Appliance.renderPanel(formRenderCtx);
@@ -9282,7 +8699,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   <StandardDropdown
                     value={(() => {
                       if (isServiceLineElementType(elementType)) {
-                        return serviceLineShapeValueForMode(selectedServiceLineMode);
+                        return serviceLineShapeValueForMode(serviceLine.mode);
                       }
                       return selectedShape || 'line';
                     })()}
@@ -9969,7 +9386,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     </>
                   )}
                   {/* Render dynamic attribute fields based on element type */}
-                  {/* eslint-disable-next-line react-hooks/refs -- the render helper only captures refs inside event and ref callbacks. */}
                   {renderAttributePanel()}
                   {renderElementElevationField()}
                 </div>
