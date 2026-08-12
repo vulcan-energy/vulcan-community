@@ -90,13 +90,20 @@ function searchInObject(
   paramId: string,
   root: SchemaNode,
   path: string[] = [],
-  results: SchemaSearchMatch[] = []
+  results: SchemaSearchMatch[] = [],
+  visitedRefs: Set<string> = new Set()
 ): void {
   // Handle $ref
   if (obj.$ref) {
+    // Guard the active ref chain only: a repeated $ref along the current chain is a
+    // cycle and must terminate, but the same $def reached again via a sibling path
+    // is legitimate, so the ref is removed once its subtree has been searched.
+    if (visitedRefs.has(obj.$ref)) return;
     const resolved = resolveSchemaRef(root, obj.$ref);
     if (resolved) {
-      searchInObject(resolved, paramId, root, path, results);
+      visitedRefs.add(obj.$ref);
+      searchInObject(resolved, paramId, root, path, results, visitedRefs);
+      visitedRefs.delete(obj.$ref);
     }
     return;
   }
@@ -105,7 +112,7 @@ function searchInObject(
   if (obj.oneOf || obj.anyOf) {
     const options = obj.oneOf || obj.anyOf;
     for (let i = 0; options && i < options.length; i++) {
-      searchInObject(options[i], paramId, root, path, results);
+      searchInObject(options[i], paramId, root, path, results, visitedRefs);
     }
     return;
   }
@@ -113,17 +120,17 @@ function searchInObject(
   // Handle conditional / composed schemas used heavily by the FHS fabric defs.
   if (Array.isArray(obj.allOf)) {
     for (let i = 0; i < obj.allOf.length; i++) {
-      searchInObject(obj.allOf[i], paramId, root, [...path, 'allOf', String(i)], results);
+      searchInObject(obj.allOf[i], paramId, root, [...path, 'allOf', String(i)], results, visitedRefs);
     }
   }
   if (obj.if) {
-    searchInObject(obj.if, paramId, root, [...path, 'if'], results);
+    searchInObject(obj.if, paramId, root, [...path, 'if'], results, visitedRefs);
   }
   if (obj.then) {
-    searchInObject(obj.then, paramId, root, [...path, 'then'], results);
+    searchInObject(obj.then, paramId, root, [...path, 'then'], results, visitedRefs);
   }
   if (obj.else) {
-    searchInObject(obj.else, paramId, root, [...path, 'else'], results);
+    searchInObject(obj.else, paramId, root, [...path, 'else'], results, visitedRefs);
   }
 
   // Search in properties
@@ -154,19 +161,19 @@ function searchInObject(
 
       // Recursively search nested properties
       if (value && typeof value === 'object') {
-        searchInObject(value, paramId, root, newPath, results);
+        searchInObject(value, paramId, root, newPath, results, visitedRefs);
       }
     }
   }
 
   // Search in items (for arrays)
   if (obj.items) {
-    searchInObject(obj.items, paramId, root, path, results);
+    searchInObject(obj.items, paramId, root, path, results, visitedRefs);
   }
 
   // Search in additionalProperties
   if (isSchemaNode(obj.additionalProperties)) {
-    searchInObject(obj.additionalProperties, paramId, root, path, results);
+    searchInObject(obj.additionalProperties, paramId, root, path, results, visitedRefs);
   }
 }
 
