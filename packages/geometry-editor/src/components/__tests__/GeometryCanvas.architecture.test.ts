@@ -23,4 +23,12 @@ describe('GeometryCanvas architecture boundaries', () => {
     expect(geometryCanvasSource).toContain('const handleConfirmElementDelete = useCallback');
     expect(geometryCanvasSource).toContain('const handleCancelElementDelete = useCallback');
   });
+
+  it('keys free-drawn room floors from the active canvas storey', () => {
+    const geometryCanvasSource = readCanonicalEditorSource('components/GeometryCanvas.tsx');
+
+    expect(geometryCanvasSource).toContain('roomFloorElementTypeForCanvasFloor(currentFloorZ)');
+    expect(geometryCanvasSource).toContain("floorElementType === 'BuildingElementAdjacentConditionedSpace'");
+    expect(geometryCanvasSource).toContain('pitch: 180');
+  });
 });

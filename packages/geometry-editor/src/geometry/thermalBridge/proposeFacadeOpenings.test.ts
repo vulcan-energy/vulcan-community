@@ -6,7 +6,14 @@
  * UI flow lives in AutoThermalBridgePreviewModal; core logic is pure functions here.
  */
 import { describe, expect, it } from 'vitest';
-import type { BuildingElementGround, BuildingElementOpaque, BuildingElementTransparent, Floor, ThermalBridgeLinear } from '../types';
+import type {
+  BuildingElementAdjacentConditionedSpace,
+  BuildingElementGround,
+  BuildingElementOpaque,
+  BuildingElementTransparent,
+  Floor,
+  ThermalBridgeLinear,
+} from '../types';
 import type { FacadeOpeningEdgeRole } from './proposeFacadeOpenings';
 import {
   annotateProposalsWithDedupe,
@@ -139,6 +146,31 @@ function makeGround(overrides: Partial<BuildingElementGround> & Pick<BuildingEle
     isPlaceholder: false,
     ...overrides,
   } as BuildingElementGround;
+}
+
+function makeConditionedFloor(
+  overrides: Partial<BuildingElementAdjacentConditionedSpace> &
+    Pick<BuildingElementAdjacentConditionedSpace, 'id' | 'name'>,
+): BuildingElementAdjacentConditionedSpace {
+  return {
+    type: 'BuildingElementAdjacentConditionedSpace',
+    id: overrides.id,
+    name: overrides.name,
+    zoneId: overrides.zoneId ?? 'z1',
+    parent_element: null,
+    coordinates: overrides.coordinates ?? [
+      { x: 0, y: 0, z: 0 },
+      { x: 5, y: 0, z: 0 },
+      { x: 5, y: 4, z: 0 },
+      { x: 0, y: 4, z: 0 },
+    ],
+    width: overrides.width ?? 5,
+    height: overrides.height ?? 0,
+    area: overrides.area ?? 20,
+    pitch: overrides.pitch ?? 0,
+    isPlaceholder: false,
+    ...overrides,
+  } as BuildingElementAdjacentConditionedSpace;
 }
 
 describe('isWallFacadeOpening', () => {
@@ -341,6 +373,68 @@ describe('proposeFacadeOpeningThermalBridges', () => {
     expect(wg.suggestedLengthM).toBe(2);
     expect(wg.parentElementForTb).toBe('Wall 1');
     expect(wg.reason).toContain('Wall–floor');
+  });
+
+  it('uses E6, not E5, for an F1 opening foot linked to a conditioned floor', () => {
+    const floors: Floor[] = [{ id: 'f0', name: 'Flat', zIndex: 0, height: 3.5, isRoofSpace: false }];
+    const floor = makeConditionedFloor({ id: 'floor', name: 'Internal Floor', floorId: 'f0' });
+    const wall = makeWall({ id: 'wall-1', name: 'Wall 1', floorId: 'f0' });
+    const opening = makeWindow({
+      id: 'door',
+      name: 'Slab-level opening',
+      parent_element: 'Wall 1',
+      floorId: 'f0',
+      base_height: 0,
+      coordinates: [
+        { x: 1, y: 0, z: 0 },
+        { x: 3, y: 0, z: 0 },
+      ],
+    });
+
+    const p = proposeFacadeOpeningThermalBridges([floor, wall, opening], floors);
+    expect(p.some((x) => x.edgeRole === 'wall_ground_foot')).toBe(false);
+    const foot = p.find((x) => x.edgeRole === 'wall_intermediate_floor_foot');
+    expect(foot?.junctionCode).toBe('E6');
+    expect(foot?.coordinates.every((point) => point.z === 0)).toBe(true);
+  });
+
+  it('keeps E5 for an F1 opening foot linked to a ground slab', () => {
+    const floors: Floor[] = [{ id: 'f0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false }];
+    const ground = makeGround({ id: 'ground', name: 'Ground slab', floorId: 'f0' });
+    const wall = makeWall({ id: 'wall-1', name: 'Wall 1', floorId: 'f0' });
+    const opening = makeWindow({
+      id: 'door',
+      name: 'Ground door',
+      parent_element: 'Wall 1',
+      floorId: 'f0',
+      base_height: 0,
+      coordinates: [
+        { x: 1, y: 0, z: 0 },
+        { x: 3, y: 0, z: 0 },
+      ],
+    });
+
+    const p = proposeFacadeOpeningThermalBridges([ground, wall, opening], floors);
+    expect(p.some((x) => x.edgeRole === 'wall_intermediate_floor_foot')).toBe(false);
+    expect(p.find((x) => x.edgeRole === 'wall_ground_foot')?.junctionCode).toBe('E5');
+  });
+
+  it('retains the storey fallback for an F1 opening foot with no floor-element evidence', () => {
+    const floors: Floor[] = [{ id: 'f0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false }];
+    const opening = makeWindow({
+      id: 'door',
+      name: 'Sparse-model door',
+      floorId: 'f0',
+      base_height: 0,
+      coordinates: [
+        { x: 1, y: 0, z: 0 },
+        { x: 3, y: 0, z: 0 },
+      ],
+    });
+
+    const p = proposeFacadeOpeningThermalBridges([opening], floors);
+    expect(p.some((x) => x.edgeRole === 'wall_intermediate_floor_foot')).toBe(false);
+    expect(p.find((x) => x.edgeRole === 'wall_ground_foot')?.junctionCode).toBe('E5');
   });
 
   it('does not propose opening-foot E5 when the host wall is linked to a basement ground floor', () => {

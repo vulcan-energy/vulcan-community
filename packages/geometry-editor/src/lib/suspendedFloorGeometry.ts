@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { BuildingElementGround, Element } from '../geometry/types';
+import type {
+  BuildingElementAdjacentConditionedSpace,
+  BuildingElementGround,
+  Element,
+} from '../geometry/types';
 
 export const GROUND_SLAB_PERIM_LINK_TOL_M = 0.25;
 
@@ -76,6 +80,36 @@ export function groundSlabPolygonEdgesXY(g: BuildingElementGround): Array<[[numb
   return out;
 }
 
+/** Closed-plan edges for a horizontal pitch-0 conditioned floor polygon or line. */
+export function adjacentConditionedFloorPolygonEdgesXY(
+  floor: BuildingElementAdjacentConditionedSpace,
+): Array<[[number, number], [number, number]]> {
+  if (floor.isPlaceholder || floor.pitch !== 0) return [];
+  const c = floor.coordinates;
+  if (!c || c.length < 2) return [];
+  const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
+  for (let i = 1; i < c.length; i++) {
+    const zi = typeof c[i]?.z === 'number' && Number.isFinite(c[i].z) ? c[i].z : 0;
+    if (Math.abs(zi - z0) > 1e-2) return [];
+  }
+
+  const out: Array<[[number, number], [number, number]]> = [];
+  for (let i = 0; i < c.length - 1; i++) {
+    const a = c[i]!;
+    const b = c[i + 1]!;
+    out.push([
+      [a.x, a.y],
+      [b.x, b.y],
+    ]);
+  }
+  const p0 = c[0]!;
+  const pL = c[c.length - 1]!;
+  if (c.length >= 3 && Math.hypot(p0.x - pL.x, p0.y - pL.y) > 1e-4) {
+    out.push([[pL.x, pL.y], [p0.x, p0.y]]);
+  }
+  return out;
+}
+
 function minDistancePointToEdgesM(px: number, py: number, edges: Array<[[number, number], [number, number]]>): number {
   let minD = Infinity;
   for (const [[ax, ay], [bx, by]] of edges) {
@@ -140,6 +174,44 @@ export function findLinkedGroundSlabForLineElement(
     }
   }
   return best?.ground ?? null;
+}
+
+/**
+ * Find the horizontal conditioned floor footprint linked to a line by name or plan-boundary proximity.
+ * This mirrors {@link findLinkedGroundSlabForLineElement} for pitch-0 floor faces.
+ */
+export function findLinkedAdjacentConditionedFloorForLineElement(
+  line: LineGroundHost,
+  floors: BuildingElementAdjacentConditionedSpace[],
+  toleranceM: number = GROUND_SLAB_PERIM_LINK_TOL_M,
+): BuildingElementAdjacentConditionedSpace | null {
+  const sameZoneFloors = floors.filter((floor) => floor.zoneId === line.zoneId);
+  if (sameZoneFloors.length === 0) return null;
+
+  const pe = typeof line.parent_element === 'string' ? line.parent_element.trim() : '';
+  if (pe) {
+    const named = sameZoneFloors.find((floor) => (floor.name ?? '').trim() === pe);
+    if (named && adjacentConditionedFloorPolygonEdgesXY(named).length > 0) return named;
+  }
+
+  const c = line.coordinates;
+  if (!c || c.length !== 2) return null;
+  const a = c[0]!;
+  const b = c[1]!;
+
+  let best: { floor: BuildingElementAdjacentConditionedSpace; distanceM: number } | null = null;
+  for (const floor of sameZoneFloors) {
+    const edges = adjacentConditionedFloorPolygonEdgesXY(floor);
+    if (edges.length === 0) continue;
+    const dA = minDistancePointToEdgesM(a.x, a.y, edges);
+    const dB = minDistancePointToEdgesM(b.x, b.y, edges);
+    if (dA > toleranceM || dB > toleranceM) continue;
+    const distanceM = Math.max(dA, dB);
+    if (!best || distanceM < best.distanceM) {
+      best = { floor, distanceM };
+    }
+  }
+  return best?.floor ?? null;
 }
 
 export function findSuspendedGroundSurfaceForLineElement(

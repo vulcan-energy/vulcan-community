@@ -9,14 +9,13 @@
  * floor slab) where a boundary segment is **plan-coincident** with the wall, at the slab elevation.
  * **P3** when a polygon floor adjacent carries `_vulcan_ui_party_element`; otherwise **P2**.
  *
- * Party walls drawn on the **ground** storey still participate: we match any upper-storey conditioned floor
- * line (`floor` storey index ≥ 1) whose slab elevation falls within the wall vertical extent — not only walls
- * whose canvas storey matches the floor line.
+ * Party walls drawn on the **ground** storey still participate: the conditioned floor element is the family
+ * evidence, and its slab elevation only needs to fall within the wall vertical extent.
  *
  * **E7** remains the dedicated proposer for **party floor × external wall**.
  */
 import { isVulcanUiPartyFloorElement } from '../../lib/assemblyMaterialFabric';
-import { elementBaseElevationMForTb, elementFloorZIndexForTb } from '../../lib/geometry3dMapper';
+import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { Floor } from '../../geometry/types';
 import type { BuildingElementAdjacentConditionedSpace, BuildingElementPartyWall, Element } from '../types';
@@ -28,6 +27,7 @@ import {
   zonesCompatible,
 } from './proposeAdjacentWallJunction';
 import { partyWallVerticalExtentM, isPartyWallVerticalEnvelopeLine } from './proposePartyWallToExternalE18';
+import { partyWallGroundFamilyClaimsElevation } from './proposeWallGroundContinuous';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from './proposeFacadeOpenings';
 
@@ -75,12 +75,13 @@ export function proposePartyWallIntermediateFloorP2P3ThermalBridges(
 
     for (const adj of conditionedFloors) {
       if (!zonesCompatible(pw.zoneId, adj.zoneId)) continue;
-      const adjFloorZ = elementFloorZIndexForTb(adj, floors);
-      /** Ground-storey slabs use storey index 0 — P2/P3 are intermediate (upper) floor junctions only. */
-      if (adjFloorZ < 1) continue;
 
       const slabZ = elementBaseElevationMForTb(adj, floors);
       if (slabZ < pExt.zLo - Z_BAND_EPS_M || slabZ > pExt.zHi + Z_BAND_EPS_M) continue;
+      // Ground-family precedence, mirroring the continuous-E6 veto: when P1/P6 claims
+      // this elevation (linked ground slab under the wall base), a conditioned plate at
+      // the same level must not add a coincident P2/P3 for the same run.
+      if (partyWallGroundFamilyClaimsElevation(pw, elements, floors, slabZ)) continue;
 
       const aExt = adjacentEnvelopeVerticalExtentM(adj, floors);
       const zLo = Math.max(pExt.zLo, aExt.zLo);

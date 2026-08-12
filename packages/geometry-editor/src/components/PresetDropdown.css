@@ -23,7 +23,10 @@
 
 .preset-dropdown-trigger.preset-dropdown-open {
   border-color: var(--accent-primary);
-  background: var(--hover-bg);
+  /* Longhand on purpose: the `background` shorthand resets background-image/-position,
+   * which deletes the .standard-dropdown chevron while open and replays it sliding in
+   * from top-left on close (transition: all). */
+  background-color: var(--hover-bg);
   box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
 }
 
