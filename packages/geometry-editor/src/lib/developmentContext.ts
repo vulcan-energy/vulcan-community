@@ -7,7 +7,7 @@ import type {
 } from '../../../geometry-editor-host/src';
 import type { Element, Floor, SpaceLabel, Zone } from '../geometry/types';
 import { parseCsvToGeometry, type ParsedCsvMetadata } from '../geometry/io/parseCsvToGeometry';
-import { deriveFloorsFromElements } from './floorDerivation';
+import { applyFloorHeightOverrides, deriveFloorsFromElements } from './floorDerivation';
 
 export type DevelopmentContextProject = GeometryProjectContextProject;
 type GeometryListFilter = Extract<
@@ -98,11 +98,19 @@ export function getDevelopmentContextStems(
 
 export function parseDevelopmentContextModel(stem: string, csvContent: string): DevelopmentContextModel {
   const parsed = parseCsvToGeometry(csvContent);
+  // Neighbour models are read-only snapshots (no store, no `loadFromCSV`), so — unlike the primary
+  // editor model — nothing else applies `FloorHeightOverride` metadata rows onto the derived
+  // floors. Without this, a neighbour dwelling's typed storey height was silently dropped and
+  // context shading fell back to the wall-derived height instead.
+  const floors = applyFloorHeightOverrides(
+    deriveFloorsFromElements(parsed.elements),
+    parsed.metadata.floorHeightOverrides,
+  );
   return {
     stem: normalizeBaseModelStem(stem),
     elements: parsed.elements,
     zones: parsed.zones,
-    floors: deriveFloorsFromElements(parsed.elements),
+    floors,
     spaceLabels: parsed.spaceLabels,
     metadata: parsed.metadata,
   };

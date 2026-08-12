@@ -10,6 +10,7 @@ import {
   parseDevelopmentContextModel,
   type DevelopmentContextProject,
 } from '../developmentContext';
+import { getEffectiveStoreyHeight } from '../zoneDerivation';
 
 const collectionProject: DevelopmentContextProject = {
   id: 'collection',
@@ -173,5 +174,43 @@ UpperWall,Living,BuildingElementOpaque,12,90,5,2.4,0,3.1,FALSE,FALSE,,"0,0,1|5,0
     expect(model.metadata.complianceSettings.storey_of_dwelling).toBe(2);
     expect(model.metadata.complianceSettings.Ventilation_ventilation_zone_base_height).toBe(3.1);
     expect(model.floors.map((floor) => floor.zIndex)).toEqual([0, 1]);
+  });
+
+  // Wall-derived height for Floor 0 below is 2.4 (from the ground wall). A `FloorHeightOverride`
+  // row records a typed storey height that must win over that derivation — the same reconciliation
+  // `ioSlice`'s `loadFromCSV` applies for the primary editor model (see `applyFloorHeightOverrides`
+  // in `floorDerivation.ts`). Without it, a neighbour dwelling's typed storey height was silently
+  // dropped and context shading fell back to the wall-derived height instead.
+  const neighbourCsv = (floorHeightOverrideRow: string) => `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0.0,,,,,,,,,,,,,
+${floorHeightOverrideRow}
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Exposed Elements,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+GroundWall,Living,BuildingElementOpaque,9.6,90,4,2.4,180,0,FALSE,FALSE,,"0,0,0|4,0,0",
+`.trim();
+
+  it('applies a persisted FloorHeightOverride row onto a neighbour model floor', () => {
+    const model = parseDevelopmentContextModel('plot-d.csv', neighbourCsv('FloorHeightOverride,0,2.9,,,,,,,,,,,,,'));
+
+    expect(model.metadata.floorHeightOverrides).toEqual([{ zIndex: 0, height: 2.9 }]);
+    const floor0 = model.floors.find((floor) => floor.zIndex === 0)!;
+    expect(floor0.height).toBe(2.9);
+    expect(floor0.heightUserOverride).toBe(true);
+    expect(getEffectiveStoreyHeight(floor0, model.elements)).toBe(2.9);
+  });
+
+  it('leaves a neighbour model floor wall-derived when it carries no FloorHeightOverride row', () => {
+    const model = parseDevelopmentContextModel('plot-d.csv', neighbourCsv(''));
+
+    expect(model.metadata.floorHeightOverrides).toEqual([]);
+    const floor0 = model.floors.find((floor) => floor.zIndex === 0)!;
+    expect(floor0.heightUserOverride).not.toBe(true);
+    expect(getEffectiveStoreyHeight(floor0, model.elements)).toBe(2.4);
   });
 });
