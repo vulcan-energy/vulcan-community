@@ -16,6 +16,7 @@ import type {
   GeometryWorkspaceResourcePort,
 } from '../../../../geometry-editor-host/src';
 import type { Element, ElementType } from '../../geometry/types';
+import type { CanvasShape } from '../../lib/shapeUtils';
 import type { NumericDraftInputBinding } from './formPrimitives';
 import type { ServiceLineFormGroup } from './serviceLine';
 
@@ -70,6 +71,13 @@ export interface ElementFormSharedCtx {
   setParentElement: (value: string) => void;
   pitch: number;
   setPitch: (value: number) => void;
+  /** Draft-string commit for the typed pitch input (origin/main PR #31 "Let pitch carry
+   * decimals") — one shared instance owned by wallShared.tsx, bridged the same way as
+   * `pitch`/`setPitch` above so wallPitchField.tsx's renderWallPitchField (and any future
+   * consumer) can read it via ctx.shared without each wall-family module standing up its
+   * own useNumericDraftInput call (which would violate Rules of Hooks: only one of
+   * Opaque/Transparent/Adjacent-like's build()/renderPanel() runs per render). */
+  pitchDraftInput: NumericDraftInputBinding;
   orientation360: number;
   setOrientation360: (value: number) => void;
   /** Commits an edited orientation360, rotating sloped polygons/2-point lines in
@@ -262,6 +270,36 @@ export interface ElementFormRenderCtx {
    * SpaceHeatSystem. Same decision/precedent as renderSpaceHeatSystemPicker
    * above. Invoked from System's (not-yet-extracted) panel. */
   renderSpaceHeatSystemEmitterManager: () => ReactNode;
+  /** Wall-family generic derived render values — computed once per render
+   * from the current selection/coordinates and shared by Opaque/Transparent
+   * (still inline) and Adjacent-like (elementForms/adjacentLikeElement.tsx,
+   * slice-6 brief STAGE 2 — its first consumer). Read-only, render-time-only
+   * values, so they live here rather than on ElementFormStateCtx.shared
+   * (which is for state multiple modules read AND write). */
+  selectedElement: Element | null;
+  selectedShape: CanvasShape | null;
+  /** Derived from the selected floor + cumulative storey heights below —
+   * also read by Opaque's (still inline) base-height reset-target helper. */
+  derivedBaseHeight: number;
+  derivedPolygonArea: number;
+  liveWidthValue: number;
+  liveHeightValue: number;
+  liveRectArea: number;
+  /** Surface-facing dropdown's pitch value for horizontal (0deg/180deg)
+   * polygons — reads from the STORE element when possible (they can diverge
+   * from local pitch state), not just `pitch`, so re-picking 0deg isn't a
+   * no-op. See the orchestrator's own comment at its definition. */
+  horizontalPolygonControlPitch: number;
+  /** Opaque/Transparent's (still inline) and Adjacent-like's shared Width +
+   * Height input pair (with sloped-shape "Use shape calculated" resets and
+   * validation). Orchestrator-owned because it closes over several
+   * not-yet-extracted locals (getFieldValidationState,
+   * selectedSlopedDimensions, profileTopControl, etc.) — same render-bridge
+   * precedent as renderMvhrDuctAndTerminalManager above. */
+  renderLinearDimensionsFields: (
+    fieldRef: (fieldKey: string) => (node: HTMLDivElement | null) => void,
+    options: { widthStep: string; heightStep: string; includeProfileTop?: boolean },
+  ) => ReactNode;
 }
 
 export interface ElementFormModule<S> {

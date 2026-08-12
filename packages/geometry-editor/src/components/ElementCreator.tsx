@@ -8,13 +8,12 @@ import './ElementCreator.css';
 import { useShallow } from 'zustand/react/shallow';
 import { ZONE_NAME_SUGGESTIONS, roundToTwoDecimals } from '../geometry/constants';
 import { normalizeHorizontalAdjacentPlanPitch } from '../geometry/adjacentPlanPitch';
-import { calculatePolygonArea, isAdjacentConditionedInternalFloorDoubled } from '../lib/polygonSync';
+import { calculatePolygonArea } from '../lib/polygonSync';
 import {
   useGeometryStore,
   useGeometryStoreApi,
   APPLIANCE_KEYS,
   validateZone,
-  deriveWallProperties,
   isGlobalObject,
   getAdjacentPartyWallUiToggleLabel,
 } from '../stores/geometryStore';
@@ -44,6 +43,7 @@ import { formatSystemPresetName, systemFormModule } from './elementForms/system'
 import { useServiceLineFormState } from './elementForms/serviceLine';
 import { useWallSharedFormState } from './elementForms/wallShared';
 import { buildingElementGroundFormModule } from './elementForms/buildingElementGround';
+import { adjacentLikeElementFormModule } from './elementForms/adjacentLikeElement';
 import {
   useDecimalInput,
   decimalInputProps,
@@ -713,12 +713,10 @@ function isAreaBasedExportElement(element: Element): element is AreaBasedExportE
   );
 }
 
-const PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES = new Set([
-  'unfilled_unsealed',
-  'unfilled_sealed',
-  'filled_sealed',
-  'filled_unsealed',
-]);
+// PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES moved to elementForms/
+// adjacentLikeElement.tsx (slice-6 brief STAGE 2) — grep-verified its only
+// callers were both inside the adjacent-like renderAttributePanel case that
+// moved with it.
 
 interface ElementCreatorProps {
   selection: Selection;
@@ -1538,26 +1536,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     commitUnheatedPitchedRoofCeilingElevation,
     { commitOnChange: true },
   );
-  const commitAdjacentViewerBaseHeight = (value: number | '') => {
-    if (value === '') {
-      commitExistingElementDraft({
-        _base_height: undefined,
-        base_height: undefined,
-      } as Partial<Element>);
-      return;
-    }
-    if (typeof value === 'number') {
-      commitExistingElementDraft({
-        _base_height: roundToTwoDecimals(value),
-        base_height: undefined,
-      } as Partial<Element>);
-    }
-  };
-  const adjacentViewerBaseHeightInput = useDecimalInput(
-    '',
-    commitAdjacentViewerBaseHeight,
-    { commitOnChange: true },
-  );
+  // commitAdjacentViewerBaseHeight/adjacentViewerBaseHeightInput moved to
+  // elementForms/adjacentLikeElement.tsx (slice-6 brief STAGE 2) — the
+  // orchestrator's own syncFloorMoveHeightInputs now reads
+  // adjacentLikeElementFormState.adjacentViewerBaseHeightInput directly
+  // (see that module's header for the precedent).
   const commitElementElevation = (value: number | '') => {
     if (!isExistingElementSelection()) return;
     const currentSelection = selection as Exclude<Selection, null>;
@@ -1600,27 +1583,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     commitElementElevation,
     { commitOnChange: true },
   );
-  const commitPartyWallCavityResistance = (value: number | '') => {
-    if (!isExistingElementSelection()) return;
-    const currentSelection = selection as Exclude<Selection, null>;
-    const el = getElementById(currentSelection.id);
-    if (!el || el.type !== 'BuildingElementPartyWall') return;
-    const nextExtra = {
-      ...readExtraJsonRecord(el.extra_json),
-      party_wall_cavity_type: 'defined_resistance',
-    } as Record<string, unknown>;
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      nextExtra.thermal_resistance_cavity = value;
-    } else {
-      delete nextExtra.thermal_resistance_cavity;
-    }
-    commitExistingElementDraft({ extra_json: nextExtra } as Partial<Element>);
-  };
-  const partyWallCavityResistanceInput = useDecimalInput(
-    '',
-    commitPartyWallCavityResistance,
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
+  // commitPartyWallCavityResistance/partyWallCavityResistanceInput moved to
+  // elementForms/adjacentLikeElement.tsx (slice-6 brief STAGE 2).
   const [isUnheatedPitchedRoof, setIsUnheatedPitchedRoof] = useState<boolean>(false);
   const [isExternalDoor, setIsExternalDoor] = useState<boolean>(false);
   const [assemblyCalculatorOpen, setAssemblyCalculatorOpen] = useState(false);
@@ -1970,6 +1934,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       setParentElement: wallShared.setParentElement,
       pitch: wallShared.pitch,
       setPitch: wallShared.setPitch,
+      pitchDraftInput: wallShared.pitchDraftInput,
       orientation360: wallShared.orientation360,
       setOrientation360: wallShared.setOrientation360,
       applyOrientationToGeometry: wallShared.applyOrientationToGeometry,
@@ -2019,9 +1984,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const systemFormState = systemFormModule.useFormState(elementFormStateCtx);
   // BuildingElementGround
   const buildingElementGroundFormState = buildingElementGroundFormModule.useFormState(elementFormStateCtx);
+  // Adjacent-like trio (BuildingElementPartyWall / AdjacentConditionedSpace /
+  // AdjacentUnconditionedSpace_Simple) — ONE state instance, bound ONCE below
+  // and registered under all three elementFormInstances keys (slice-6 brief
+  // STAGE 2, decision 4 — see adjacentLikeElement.tsx's header for the full
+  // "first multi-key module" writeup).
+  const adjacentLikeElementFormState = adjacentLikeElementFormModule.useFormState(elementFormStateCtx);
+  const adjacentLikeElementFormInstance = bindElementFormModule(adjacentLikeElementFormModule, adjacentLikeElementFormState);
   const elementFormInstances = {
     ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
     BuildingElementGround: bindElementFormModule(buildingElementGroundFormModule, buildingElementGroundFormState),
+    // Same bound instance under all three keys — see comment above.
+    BuildingElementPartyWall: adjacentLikeElementFormInstance,
+    BuildingElementAdjacentConditionedSpace: adjacentLikeElementFormInstance,
+    BuildingElementAdjacentUnconditionedSpace_Simple: adjacentLikeElementFormInstance,
     ThermalBridgeLinear: bindElementFormModule(thermalBridgeLinearFormModule, thermalBridgeLinearFormState),
     ThermalBridgePoint: bindElementFormModule(thermalBridgePointFormModule, thermalBridgePointFormState),
     Lighting: bindElementFormModule(lightingFormModule, lightingFormState),
@@ -2048,6 +2024,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   // Floor-move base-height sync, shared across several families; OnSiteGeneration's
   // share now writes through its module state (see onSiteGeneration.tsx header).
+  // Adjacent-like's share likewise now writes through adjacentLikeElementFormState
+  // (elementForms/adjacentLikeElement.tsx, slice-6 brief STAGE 2) — same
+  // "read the module's own useFormState return value directly" precedent
+  // buildingElementGround.tsx's header documents for systemFormState.systemSubcategory
+  // / wetEmitterFormState.subcategory.
   const syncFloorMoveHeightInputs = useCallback((heightPatch: {
     base_height?: number;
     _base_height?: number;
@@ -2060,12 +2041,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       onSiteGenerationFormState.onSiteBaseHeightInput.setValue(nextBaseHeight);
     }
     if (typeof heightPatch._base_height === 'number') {
-      adjacentViewerBaseHeightInput.setValue(roundToTwoDecimals(heightPatch._base_height));
+      adjacentLikeElementFormState.adjacentViewerBaseHeightInput.setValue(roundToTwoDecimals(heightPatch._base_height));
     }
     if (typeof heightPatch.mid_height === 'number') {
       midHeightInput.setValue(roundToTwoDecimals(heightPatch.mid_height));
     }
-  }, [adjacentViewerBaseHeightInput, wallShared.baseHeightInput, midHeightInput, onSiteGenerationFormState.onSiteBaseHeightInput]);
+  }, [adjacentLikeElementFormState.adjacentViewerBaseHeightInput, wallShared.baseHeightInput, midHeightInput, onSiteGenerationFormState.onSiteBaseHeightInput]);
 
   // System's own exclusive state now lives in its module (via systemFormState
   // above, elementForms/system.tsx) — see that module's header for the full
@@ -2906,43 +2887,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } else if (element.type === 'BuildingElementGround') {
           elementFormInstances.BuildingElementGround.hydrate(element);
         } else if (isAdjacentLikeElement(element)) {
-          // Round numeric values to 2dp when loading from file
-          const derivedLineWidth =
-            element.coordinates?.length === 2
-              ? roundToTwoDecimals(
-                  deriveWallProperties(
-                    element,
-                    geometryStore.getState().globalOrientationOffset,
-                  ).width,
-                )
-              : '';
-          const width =
-            'width' in element && typeof element.width === 'number' && element.width > 0
-              ? roundToTwoDecimals(element.width)
-              : derivedLineWidth;
-          const height = typeof element.height === 'number' ? roundToTwoDecimals(element.height) : (element.height ?? '');
-          const area = typeof element.area === 'number' ? roundToTwoDecimals(element.area) : (element.area ?? '');
-          // 90° = vertical / wall convention in the model when pitch is unknown (line elements). The store/CSV
-          // may still hold 90 for an internal floor polygon until the user sets 0/180 in the surface-facing control.
-          const pitch = typeof element.pitch === 'number' ? element.pitch : (element.pitch ?? 90);
-          const adjacentExtra = readExtraJsonRecord((element as { extra_json?: unknown }).extra_json);
-          wallShared.widthInput.setValue(width);
-          wallShared.heightInput.setValue(height);
-          wallShared.setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
-          wallShared.areaInput.setValue(area);
-          wallShared.setPitch(pitch);
-          const cavityResistance = readFiniteNumber(adjacentExtra.thermal_resistance_cavity);
-          partyWallCavityResistanceInput.setValue(
-            cavityResistance == null ? '' : formatConditionalDecimals(cavityResistance),
-          );
-          const adj = element as { _base_height?: number; base_height?: number };
-          let viewerPlotM: number | '' = '';
-          if (typeof adj._base_height === 'number' && Number.isFinite(adj._base_height)) {
-            viewerPlotM = roundToTwoDecimals(adj._base_height);
-          } else if (typeof adj.base_height === 'number' && Number.isFinite(adj.base_height)) {
-            viewerPlotM = roundToTwoDecimals(adj.base_height);
-          }
-          adjacentViewerBaseHeightInput.setValue(viewerPlotM);
+          // Moved to elementForms/adjacentLikeElement.tsx (slice-6 brief
+          // STAGE 2) — see that module's hydrate(). Any of the three keys
+          // below dispatches to the same bound instance; BuildingElementPartyWall
+          // is used here for consistency with the other dispatch sites.
+          elementFormInstances.BuildingElementPartyWall.hydrate(element);
         } else if (element.type === 'ThermalBridgeLinear') {
           elementFormInstances.ThermalBridgeLinear.hydrate(element);
         } else if (element.type === 'ThermalBridgePoint') {
@@ -3308,7 +3257,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     wallShared.setOrientation360(0);
     wallShared.baseHeightInput.setValue('');
     unheatedPitchedRoofCeilingElevationInput.setValue('');
-    adjacentViewerBaseHeightInput.setValue('');
+    // adjacentViewerBaseHeightInput's reset line now lives in
+    // adjacentLikeElementFormModule.reset() (via the elementFormInstances
+    // loop below) — slice-6 brief STAGE 2. partyWallCavityResistanceInput
+    // was never reset here in the legacy code either (preserved verbatim).
     elementElevationInput.setValue('');
     setIsUnheatedPitchedRoof(false);
     setDormerRoofIsUnheatedPitchedRoof(false);
@@ -4682,17 +4634,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 	      case 'BuildingElementAdjacentConditionedSpace':
 	      case 'BuildingElementAdjacentUnconditionedSpace_Simple':
 	      case 'BuildingElementPartyWall':
-	        {
-	          const width = wallShared.widthInput.value;
-	          const height = wallShared.heightInput.value;
-	        return {
-	          ...baseData,
-	          width,
-	          height,
-	          area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-	          pitch: wallShared.pitch
-	        } as Partial<Element>;
-	        }
+	        // Moved to elementForms/adjacentLikeElement.tsx (slice-6 brief
+	        // STAGE 2) — see that module's buildElementData(). KEEPS the
+	        // legitimate pitch emission (brief decision 3's carve-out).
+	        return elementFormInstances.BuildingElementPartyWall.buildElementData({ baseData, elementZoneId });
 
 	      case 'ThermalBridgeLinear':
 	        return elementFormInstances.ThermalBridgeLinear.buildElementData({ baseData, elementZoneId });
@@ -4795,10 +4740,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return {};
   };
 
-  const getCurrentElementExtraJson = () => {
-    const current = getCurrentElementData();
-    return readExtraJsonRecord('extra_json' in current ? current.extra_json : undefined);
-  };
+  // getCurrentElementExtraJson (formerly here) moved into elementForms/
+  // adjacentLikeElement.tsx's renderPanel — it had exactly one caller, the
+  // adjacent-like renderAttributePanel case that moved with it (slice-6
+  // brief STAGE 2). getCurrentElementData stays: it has two other callers
+  // below.
 
   // resyncGroundThicknessWallsFromAssemblies/groundWallThicknessAutofill/
   // liveThicknessWallsValue now live inside buildingElementGroundFormState
@@ -5307,6 +5253,19 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       productCatalogue,
       renderSpaceHeatSystemPicker,
       renderSpaceHeatSystemEmitterManager,
+      // Wall-family generic derived render values — Adjacent-like's first
+      // consumer (elementForms/adjacentLikeElement.tsx, slice-6 brief
+      // STAGE 2); Opaque/Transparent (still inline) read the same locals
+      // directly instead of through this ctx until Stages 3-4.
+      selectedElement,
+      selectedShape,
+      derivedBaseHeight,
+      derivedPolygonArea,
+      liveWidthValue,
+      liveHeightValue,
+      liveRectArea,
+      horizontalPolygonControlPitch,
+      renderLinearDimensionsFields,
     };
     switch (elementType) {
       case 'BuildingElementOpaque':
@@ -6010,240 +5969,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
       case 'BuildingElementAdjacentConditionedSpace':
       case 'BuildingElementAdjacentUnconditionedSpace_Simple':
-      case 'BuildingElementPartyWall': {
-        const currentExtra = getCurrentElementExtraJson();
-        const partyWallCavityType =
-          typeof currentExtra.party_wall_cavity_type === 'string' ? currentExtra.party_wall_cavity_type : '';
-        const partyWallLiningType =
-          typeof currentExtra.party_wall_lining_type === 'string' ? currentExtra.party_wall_lining_type : '';
-        const showPartyWallLining =
-          elementType === 'BuildingElementPartyWall' &&
-          PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES.has(partyWallCavityType);
-        const showPartyWallCavityResistance =
-          elementType === 'BuildingElementPartyWall' &&
-          partyWallCavityType === 'defined_resistance';
-        return (
-          <>
-            {selectedShape !== 'polygon' && (
-              renderLinearDimensionsFields(registerBaseFieldRefs, {
-                widthStep: '0.01',
-                heightStep: '0.01',
-                includeProfileTop: true,
-              })
-            )}
-            {renderFieldLabel('Base Height:', elementType, '_base_height')}
-            <div
-              className="element-input"
-              style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
-              ref={registerBaseFieldRefs('_base_height')}
-            >
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>
-                <StandardInput
-                  {...decimalInputProps(adjacentViewerBaseHeightInput)}
-                  unit={fieldUnit('_base_height')}
-                  step="0.01"
-                  min="0"
-                  variant="ghost"
-                  size="md"
-                  className="flex-1"
-                  placeholder={derivedBaseHeight > 0 ? String(derivedBaseHeight) : undefined}
-                />
-                {derivedBaseHeight > 0 &&
-                  typeof adjacentViewerBaseHeightInput.value === 'number' &&
-                  Math.abs(adjacentViewerBaseHeightInput.value - derivedBaseHeight) > 0.01 && (
-                    <ResetFieldButton
-                      onClick={() => {
-                        adjacentViewerBaseHeightInput.setValue(derivedBaseHeight);
-                        commitExistingElementDraft({
-                          _base_height: derivedBaseHeight,
-                          base_height: undefined,
-                        } as Partial<Element>);
-                      }}
-                      align="inline"
-                      title="Use cumulative slab height for this storey (default 3D placement)"
-                      ariaLabel="Reset base height to slab"
-                      label="Reset"
-                    />
-                  )}
-              </div>
-              <div style={INLINE_FIELD_NOTE_STYLE}>
-                Optional. Absolute metres above ground for the 3D view only
-              </div>
-            </div>
-            {(() => {
-              const showInternalFloorDoubling =
-                selectedShape === 'polygon' &&
-                !!selectedElement &&
-                isAdjacentConditionedInternalFloorDoubled(selectedElement);
-              const shownArea = selectedElement
-                ? getElementGrossArea({
-                    ...selectedElement,
-                    width: liveWidthValue,
-                    height: liveHeightValue,
-                    pitch: wallShared.pitch,
-                  } as Element)
-                : selectedShape === 'polygon'
-                  ? showInternalFloorDoubling
-                    ? derivedPolygonArea * 2
-                    : derivedPolygonArea
-                  : liveRectArea;
-              const showInternalSurfaceDoubling =
-                !!selectedElement &&
-                selectedElement.type === 'BuildingElementAdjacentConditionedSpace' &&
-                (selectedShape === 'line' || selectedShape === 'polygon' || selectedShape === 'sloped-polygon') &&
-                !isVulcanUiPartyFloorElement(selectedElement);
-              return (
-                <>
-                  {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
-                  <div
-                    className="element-input"
-                    style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
-                    ref={registerBaseFieldRef('area')}
-                  >
-                    <StandardInput
-	                  type="text"
-	                  inputMode="numeric"
-                      value={formatToTwoDecimals(shownArea)}
-                      unit={fieldUnit('area')}
-                      readOnly
-                      variant="ghost"
-                      size="md"
-                    />
-                    {showInternalSurfaceDoubling && (
-                      <div style={INLINE_FIELD_NOTE_STYLE}>
-                        Doubled to account for both sides of the internal element
-                      </div>
-                    )}
-                  </div>
-                </>
-              );
-            })()}
-            {renderFieldLabel(selectedShape === 'polygon' ? 'Surface facing:' : 'Pitch (degrees):', elementType, 'pitch')}
-            <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('pitch')}>
-              {selectedShape === 'polygon' ? (
-                <StandardDropdown
-                  value={horizontalPolygonSurfaceSelectValue(horizontalPolygonControlPitch)}
-                  unit={fieldUnit('pitch')}
-                  onChange={(value) => {
-                    if (value !== '0' && value !== '180') return;
-                    const next = value === '180' ? 180 : 0;
-                    wallShared.setPitch(next);
-                    if (selection.type === 'element') {
-                      updateElement(selection.id, { pitch: next });
-                    }
-                  }}
-                  options={HORIZONTAL_POLYGON_PITCH_OPTIONS}
-                  placeholder={HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER}
-                  variant="ghost"
-                  size="md"
-                />
-              ) : (
-                <StandardInput
-                  type="text"
-                  inputMode="decimal"
-                  value={wallShared.pitchDraftInput.inputValue}
-                  unit={fieldUnit('pitch')}
-                  onChange={wallShared.pitchDraftInput.handleInputChange}
-                  onBlur={wallShared.pitchDraftInput.handleBlur}
-                  min="0"
-                  max="180"
-                  variant="ghost"
-                  size="md"
-                />
-              )}
-              {selectedShape !== 'polygon' && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  {wallShared.pitch === 0
-                    ? 'Facing up (horizontal)'
-                    : wallShared.pitch === 90
-                      ? 'Vertical'
-                      : wallShared.pitch === 180
-                        ? 'Facing down (horizontal)'
-                        : 'Angled surface'}
-                </div>
-              )}
-            </div>
-            {elementType === 'BuildingElementPartyWall' && (
-              <>
-                {renderFieldLabel('Party Wall Cavity Type:', elementType, 'party_wall_cavity_type')}
-                <div className="element-input">
-                  <StandardDropdown
-                    value={partyWallCavityType}
-                    onChange={(value) => {
-                      if (selection.type !== 'element') return;
-                      const nextExtra: Record<string, unknown> = {
-                        ...currentExtra,
-                        party_wall_cavity_type: value || undefined,
-                      };
-                      if (!PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES.has(String(value))) {
-                        delete nextExtra.party_wall_lining_type;
-                      }
-	                      if (value !== 'defined_resistance') {
-	                        delete nextExtra.thermal_resistance_cavity;
-	                        partyWallCavityResistanceInput.setValue('');
-	                      }
-	                      updateElement(selection.id, { extra_json: nextExtra } as Partial<Element>);
-                    }}
-                    options={[
-                      { value: 'solid', label: 'Solid' },
-                      { value: 'unfilled_unsealed', label: 'Unfilled, unsealed' },
-                      { value: 'unfilled_sealed', label: 'Unfilled, sealed' },
-                      { value: 'filled_sealed', label: 'Filled, sealed' },
-                      { value: 'filled_unsealed', label: 'Filled, unsealed' },
-                      { value: 'defined_resistance', label: 'Defined resistance' },
-                    ]}
-                    placeholder="Select cavity type..."
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                {showPartyWallLining && (
-                  <>
-                    {renderFieldLabel('Party Wall Lining Type:', elementType, 'party_wall_lining_type')}
-                    <div className="element-input">
-                      <StandardDropdown
-                        value={partyWallLiningType}
-                        onChange={(value) => {
-                          if (selection.type !== 'element') return;
-                          updateElement(selection.id, {
-                            extra_json: {
-                              ...currentExtra,
-                              party_wall_cavity_type: partyWallCavityType || undefined,
-                              party_wall_lining_type: value || undefined,
-                            },
-                          } as Partial<Element>);
-                        }}
-                        options={[
-                          { value: 'wet_plaster', label: 'Wet plaster' },
-                          { value: 'dry_lined', label: 'Dry lined' },
-                        ]}
-                        placeholder="Select lining type..."
-                        variant="ghost"
-                        size="md"
-                      />
-                    </div>
-                  </>
-                )}
-                {showPartyWallCavityResistance && (
-                  <>
-                    {renderFieldLabel('Cavity Resistance (m²K/W):', elementType, 'thermal_resistance_cavity')}
-                    <div className="element-input">
-	                      <StandardInput
-	                        {...decimalInputProps(partyWallCavityResistanceInput)}
-	                        unit={fieldUnit('thermal_resistance_cavity')}
-	                        step="0.01"
-	                        min="0"
-	                        variant="ghost"
-	                        size="md"
-                      />
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </>
-        );
-      }
+      case 'BuildingElementPartyWall':
+        // Moved to elementForms/adjacentLikeElement.tsx (slice-6 brief
+        // STAGE 2) — see that module's renderPanel(). Any of the three keys
+        // below dispatches to the same bound instance; BuildingElementPartyWall
+        // is used here for consistency with the other dispatch sites.
+        return elementFormInstances.BuildingElementPartyWall.renderPanel(formRenderCtx);
 
       case 'ThermalBridgeLinear':
         return elementFormInstances.ThermalBridgeLinear.renderPanel(formRenderCtx);

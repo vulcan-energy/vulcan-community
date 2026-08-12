@@ -249,16 +249,26 @@ export function useWallSharedFormState(args: {
   // `.setValue()` through every one of those call sites.
   //
   // The party-floor-key strip below (VULCAN_UI_PARTY_ELEMENT_KEY, on the polygon-confirm
-  // "convert to sloped polygon" branch) now runs unconditionally for all three wall-family
-  // pitch fields, matching origin/main: PR #31 collapsed what used to be three near-identical
-  // inline copies into this one shared commit function, and pre-PR31 only the Opaque copy
-  // carried the strip (Transparent/Adjacent-like's copies never had it — an accident of
-  // copy-paste history, not a deliberate per-family distinction: the strip's own purpose,
-  // "the *actual* selected element resolved to AdjacentConditionedSpace with a stale party
-  // flag", has nothing to do with which of the three forms happens to be displaying it).
-  // wallPitchField.tsx's `cleansPartyFloorKeyOnConvert` opt — which used to gate this per
-  // caller, reproducing the pre-PR31 Opaque-only behaviour — is therefore dropped: see that
-  // file's own header for the full writeup of this judgment call.
+  // "convert to sloped polygon" branch) is gated on `elementType === 'BuildingElementOpaque'`
+  // — reproducing this repo's pre-existing Opaque-only scoping (wallPitchField.tsx's
+  // `cleansPartyFloorKeyOnConvert` opt, `true` only for Opaque's caller) rather than
+  // origin/main's own (PR #31) shape: upstream collapsed what used to be three
+  // near-identical inline copies into one shared commit function *without* re-adding the
+  // Opaque-only gate that pre-PR31 had (only the Opaque copy carried the strip;
+  // Transparent/Adjacent-like's copies never had it) — so PR #31, as merged, silently
+  // widened the strip to fire for all three wall-family pitch fields whenever the
+  // *actually selected* element resolves to AdjacentConditionedSpace, regardless of which
+  // form is displaying it. Judgment call: since this repo's own dedup (wallPitchField.tsx,
+  // predating this rebase) already made that Opaque-only scoping an explicit, documented
+  // decision — not copy-paste happenstance — this port keeps that decision rather than
+  // silently inheriting upstream's incidental widening. Equivalent to gating via
+  // wallPitchField.tsx's `opts.cleansPartyFloorKeyOnConvert` per caller, since `elementType`
+  // is already threaded into this hook's args and each family's opts value is static (never
+  // user-configurable independent of which family is selected) — done here instead because
+  // commitTypedPitch itself must be a single, unconditionally-called hook instance (see
+  // above), so it is simpler for it to consult the `elementType` it already has than for
+  // three render-time callers to each carry a redundant, easy-to-drift copy of the same
+  // true/false.
   const commitTypedPitch = (parsed: number | ''): void => {
     if (parsed === '') return;
     const newPitch = roundToTwoDecimals(parsed);
@@ -276,7 +286,7 @@ export function useWallSharedFormState(args: {
           if (ok) {
             // Keep same coordinates, just update pitch - sloped-polygon uses same coordinate structure.
             const patch: Partial<Element> = { pitch: newPitch } as Partial<Element>;
-            if (currentElement.type === 'BuildingElementAdjacentConditionedSpace') {
+            if (elementType === 'BuildingElementOpaque' && currentElement.type === 'BuildingElementAdjacentConditionedSpace') {
               const extra = readExtraJsonRecord(currentElement.extra_json);
               if (VULCAN_UI_PARTY_ELEMENT_KEY in extra) {
                 const nextExtra = { ...extra };
