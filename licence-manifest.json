@@ -3464,6 +3464,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/lib/__tests__/cssVars.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/cssVars.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/__tests__/csvPresetUtils.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/csvPresetUtils.test.ts",
       "license": "AGPL-3.0-only",
@@ -4178,6 +4186,14 @@
     {
       "path": "packages/geometry-editor/src/lib/contextShadingGeometry.ts",
       "source_path": "packages/geometry-editor/src/lib/contextShadingGeometry.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/cssVars.ts",
+      "source_path": "packages/geometry-editor/src/lib/cssVars.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
