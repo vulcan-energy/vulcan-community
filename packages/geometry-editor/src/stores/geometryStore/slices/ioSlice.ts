@@ -10,6 +10,7 @@ import {
   calculateDwellingDetailsSuggestion,
   calculateSuggestedVentilationBaseHeight,
   calculateSuggestedVentilationHeight,
+  withEffectiveStoreyHeights,
 } from '../../../lib/zoneDerivation';
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
@@ -27,7 +28,7 @@ import {
 import { resolveBuildingElementPitch } from '../../../geometry/derivePitchFromGeometry';
 import { formatCoords } from '../../../geometry/coords';
 import { roundToTwoDecimals } from '../../../geometry/constants';
-import type { BuildingElementOpaque, BuildingElementTransparent, Element, SpaceLabel } from '../../../geometry/types';
+import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
 import type { GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
@@ -36,12 +37,19 @@ import {
   alignHostedSlopedPanelToHostOrientation,
   buildTransparentHostDerivedPatch,
   deriveFromHostRoof,
+  findHostRoofId,
+  inferPvHostOverrideFlags,
 } from '../../../lib/pvHostDerivation';
 import {
   getAreaBasedElementExportGeometry,
   getElementGrossArea,
   getOpaqueElementExportGeometry,
 } from '../../../lib/elementArea';
+import {
+  deriveLegacySlopedElementDimensions,
+  deriveSlopedElementDimensions,
+  slopedDimensionDiffers,
+} from '../../../lib/slopedElementDimensions';
 import {
   getElementCanvasFloorZValue,
   getThermalBridgeExtraJsonFloorStorey,
@@ -350,6 +358,148 @@ const roundOrientation360ForCsv = (raw: number | undefined | null): string => {
     return String(Math.round(raw));
   }
   return '';
+};
+
+/**
+ * Element types whose scalar width/height participate in the sloped-polygon auto-calc /
+ * `_widthUserOverride` / `_heightUserOverride` tracking (see slopedElementDimensions.ts and
+ * stores/geometryStore.ts's `applySlopedDimensionOverrideTracking`). Intentionally excludes
+ * `OnSiteGeneration`: PV panels also carry `coordinates` + `pitch` (so
+ * `deriveSlopedElementDimensions` would happily return a value for them too) but derive their
+ * scalar dimensions from `derivePvDimensionsFromCoords`, a different formula entirely.
+ */
+const SLOPED_OVERRIDE_ELIGIBLE_TYPES = new Set<Element['type']>([
+  'BuildingElementOpaque',
+  'BuildingElementTransparent',
+  'BuildingElementAdjacentConditionedSpace',
+  'BuildingElementAdjacentUnconditionedSpace_Simple',
+  'BuildingElementPartyWall',
+]);
+
+/**
+ * The CSV pitch column is written as `Math.round(pitch)` (see `formatBuildingElementPitchForCsv`)
+ * while the width/height columns were derived with the unrounded in-session pitch — so an import
+ * re-derivation with the rounded pitch can legitimately land up to half a degree away from the
+ * value the writer saw. A CSV value counts as "matching" a formula when it falls inside the
+ * envelope of that formula evaluated across the rounding window (±0.5°), padded by the usual
+ * sloped-dimension epsilon.
+ */
+const PITCH_CSV_ROUNDING_HALF_STEP_DEG = 0.5;
+const SLOPED_DIMENSION_EPSILON = 0.01;
+
+const matchesDerivedAcrossPitchRounding = (
+  csvValue: number,
+  element: Element,
+  derive: typeof deriveSlopedElementDimensions,
+  key: 'width' | 'height',
+): boolean => {
+  const pitch = (element as { pitch?: unknown }).pitch;
+  if (typeof pitch !== 'number' || !Number.isFinite(pitch)) return false;
+  const coordinates = (element as { coordinates?: unknown }).coordinates as Array<{ x: number; y: number; z: number }>;
+  const values: number[] = [];
+  for (const dp of [-PITCH_CSV_ROUNDING_HALF_STEP_DEG, 0, PITCH_CSV_ROUNDING_HALF_STEP_DEG]) {
+    const candidatePitch = pitch + dp;
+    if (candidatePitch <= 0 || candidatePitch >= 90) continue;
+    const derived = derive({ coordinates, pitch: candidatePitch });
+    if (derived) values.push(derived[key]);
+  }
+  if (values.length === 0) return false;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return csvValue >= min - SLOPED_DIMENSION_EPSILON && csvValue <= max + SLOPED_DIMENSION_EPSILON;
+};
+
+/**
+ * Reconstruct `_widthUserOverride` / `_heightUserOverride` after CSV import: the geometry CSV
+ * (geometry/io/geometryCsvLayouts.ts) has no dedicated override column, so a value that still
+ * matches an auto-calc formula is treated as auto-calculated, not a real override. Checked
+ * against both the current formula and the pre-"equivalent-width" legacy formula
+ * (`deriveLegacySlopedElementDimensions`) so models saved before that change migrate cleanly
+ * instead of getting a spurious override flag, and across the CSV pitch column's integer
+ * rounding (`matchesDerivedAcrossPitchRounding`) so a 22.5° roof does not read back as
+ * overridden. Values recognised as auto-calculated are snapped to the current formula so a
+ * load → save round trip is idempotent and the editor shows what export/HEM will actually use.
+ *
+ * Elements carrying `extra_json.geometry_face` (dormer roof faces, profiled walls) are skipped
+ * entirely: their export path (`getAreaBasedElementExportGeometry`) writes the stored
+ * construction scalars verbatim, which legitimately match neither formula.
+ *
+ * Mutates elements in place, mirroring the zone floor-area/height override reconstruction this
+ * runs alongside in `loadFromCSV`.
+ */
+const reconstructSlopedDimensionOverrideFlags = (elements: readonly Element[]): void => {
+  for (const element of elements) {
+    if (!SLOPED_OVERRIDE_ELIGIBLE_TYPES.has(element.type)) continue;
+    const extraJson = (element as { extra_json?: unknown }).extra_json;
+    if (extraJson && typeof extraJson === 'object' && 'geometry_face' in (extraJson as Record<string, unknown>)) {
+      continue;
+    }
+    const derivedNew = deriveSlopedElementDimensions(element);
+    if (!derivedNew) continue;
+    const record = element as unknown as {
+      width?: unknown;
+      height?: unknown;
+      _widthUserOverride?: boolean;
+      _heightUserOverride?: boolean;
+    };
+
+    const csvWidth = typeof record.width === 'number' && Number.isFinite(record.width) ? record.width : undefined;
+    if (csvWidth) {
+      const matchesCurrent = matchesDerivedAcrossPitchRounding(csvWidth, element, deriveSlopedElementDimensions, 'width');
+      const matchesLegacy = matchesDerivedAcrossPitchRounding(csvWidth, element, deriveLegacySlopedElementDimensions, 'width');
+      if (!matchesCurrent && !matchesLegacy) {
+        record._widthUserOverride = true;
+      }
+    }
+    if (record._widthUserOverride !== true) {
+      record.width = derivedNew.width;
+    }
+
+    const csvHeight = typeof record.height === 'number' && Number.isFinite(record.height) ? record.height : undefined;
+    if (csvHeight) {
+      const matchesCurrent = matchesDerivedAcrossPitchRounding(csvHeight, element, deriveSlopedElementDimensions, 'height');
+      const matchesLegacy = matchesDerivedAcrossPitchRounding(csvHeight, element, deriveLegacySlopedElementDimensions, 'height');
+      if (!matchesCurrent && !matchesLegacy) {
+        record._heightUserOverride = true;
+      }
+    }
+    if (record._heightUserOverride !== true) {
+      record.height = derivedNew.height;
+    }
+  }
+};
+
+/**
+ * Reconstruct a PV panel's soft host link (`_pvHostRoofId`) and its `_baseHeightUserOverride` /
+ * `_pitchUserOverride` / `_orientationUserOverride` flags after CSV import. None of these persist
+ * through the CSV format (geometry/io/geometryCsvLayouts.ts has no columns for them), so a
+ * freshly-loaded panel would otherwise silently stop tracking its host roof — the roof-side
+ * re-derivation loop in stores/geometryStore.ts's `updateElement` matches hosted panels by
+ * `_pvHostRoofId`, so editing the roof would no longer move panels until each one is next
+ * dragged — and any pinned field would need re-pinning by hand. Re-detects the host by the same
+ * plan-view centroid test `updateElement` uses on a coordinate change (`findHostRoofId`), then
+ * infers the override flags the same way a previously-unhosted panel does on its first attach
+ * (`inferPvHostOverrideFlags`, shared with `updateElement`'s `isFirstAttach` branch). No host
+ * found: leaves `_pvHostRoofId` and the override flags untouched (unset).
+ */
+const reconstructPvHostLinkAndOverrideFlags = (
+  elements: readonly Element[],
+  elementsById: Record<string, Element>,
+  floors: Floor[],
+): void => {
+  const effectiveFloors = withEffectiveStoreyHeights(floors, elements as Element[]);
+  for (const element of elements) {
+    if (element.type !== 'OnSiteGeneration') continue;
+    const panel = element as OnSiteGeneration;
+    const hostId = findHostRoofId(panel, elementsById);
+    if (!hostId) continue;
+    const hostRoof = elementsById[hostId];
+    if (!hostRoof || hostRoof.type !== 'BuildingElementOpaque') continue;
+
+    panel._pvHostRoofId = hostId;
+    const derived = deriveFromHostRoof(panel, hostRoof as BuildingElementOpaque, effectiveFloors);
+    Object.assign(panel, inferPvHostOverrideFlags(panel, derived));
+  }
 };
 
 const migrateElementsToNormalized = (
@@ -785,12 +935,34 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             (typeof element.base_height === 'number' && Number.isFinite(element.base_height))
               ? exportedGeometry.baseHeight
               : undefined;
-          const exportedMidHeight = exportedHeight !== undefined
-            ? roundToTwoDecimals((exportedBaseHeight ?? 0) + exportedHeight / 2)
+          // mid_height has no dedicated override flag (unlike sloped width/height): the editor
+          // (transparentOpeningDerivedFields.ts) keeps it auto-tracking base_height + height/2
+          // in-session until the stored value diverges from that derived counterpart, so use the
+          // same value-vs-derived check here rather than always overwriting it on export — that
+          // silently discarded custom mid_height values on the very first save.
+          const inSessionDerivedMidHeight =
+            typeof element.height === 'number' && Number.isFinite(element.height) && element.height > 0
+              ? roundToTwoDecimals(
+                  (typeof element.base_height === 'number' && Number.isFinite(element.base_height)
+                    ? element.base_height
+                    : 0) + element.height / 2,
+                )
+              : undefined;
+          const midHeightIsCustom =
+            typeof element.mid_height === 'number' &&
+            Number.isFinite(element.mid_height) &&
+            (inSessionDerivedMidHeight === undefined ||
+              slopedDimensionDiffers(element.mid_height, inSessionDerivedMidHeight));
+          const exportedMidHeight = midHeightIsCustom
+            ? element.mid_height
             : (
-                typeof element.mid_height === 'number' && Number.isFinite(element.mid_height)
-                  ? element.mid_height
-                  : undefined
+                exportedHeight !== undefined
+                  ? roundToTwoDecimals((exportedBaseHeight ?? 0) + exportedHeight / 2)
+                  : (
+                      typeof element.mid_height === 'number' && Number.isFinite(element.mid_height)
+                        ? element.mid_height
+                        : undefined
+                    )
               );
           const windowRow = [
             escapeCSV(element.name),
@@ -1623,6 +1795,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const { elementsById, elementIds } = migrateElementsToNormalized(newElements);
 
     const allElements = Object.values(elementsById) as Element[];
+
+    reconstructSlopedDimensionOverrideFlags(allElements);
+    reconstructPvHostLinkAndOverrideFlags(allElements, elementsById, get().floors);
 
     // Before deriving zone properties, detect whether the CSV's floor_area / height
     // were user overrides by comparing them with the geometry-derived values.

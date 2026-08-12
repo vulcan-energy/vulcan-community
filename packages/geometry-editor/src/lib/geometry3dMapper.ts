@@ -662,6 +662,11 @@ function mapGeometryFaceToPlanarFace(
       points: [...topPoints, ...bottomPoints],
       isOpening,
       opacity: isOpening ? 0.75 : undefined,
+      // Opaque profiled-top walls (and gable-dormer front walls, which share this branch) render
+      // as solid wall-thickness prisms. Profiled openings must protrude beyond their host wall's
+      // prism — the same openings-thicker-than-walls rule line elements use (no CSG cutouts) —
+      // or the wall front face would occlude a coplanar zero-thickness window entirely.
+      thicknessM: isOpening ? OPENING_LINE_THICKNESS_M : WALL_DEFAULT_THICKNESS_M,
     };
   }
 

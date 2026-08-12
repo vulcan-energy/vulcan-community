@@ -86,6 +86,28 @@ export function meshStandardFloorDimmingPropsWithBaseOpacity(
 }
 
 /**
+ * Planar faces split into two dimming strategies: solid opaque wall faces (profiled-top walls
+ * rendered as prisms) dim like ordinary walls, while everything else — dormer cheeks and
+ * profiled window openings, including opening prisms, which stay translucent glass — keeps
+ * multiplying in its own base opacity.
+ */
+export function planarFaceFloorDimmingProps(
+  isSolidWallFace: boolean,
+  isCurrentFloor: boolean,
+  baseOpacity: number,
+  isAboveCurrentFloor: boolean = false,
+): {
+  opacity: number;
+  transparent: boolean;
+  depthWrite: boolean;
+  wireframe: boolean;
+} {
+  return isSolidWallFace
+    ? meshStandardFloorDimmingProps(isCurrentFloor, isAboveCurrentFloor)
+    : meshStandardFloorDimmingPropsWithBaseOpacity(isCurrentFloor, baseOpacity, isAboveCurrentFloor);
+}
+
+/**
  * Draw dimmed storeys first, then the active floor; openings slightly above their own shell.
  * Reduces sorting artifacts when many semi-transparent layers overlap.
  */
