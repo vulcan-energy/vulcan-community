@@ -55,6 +55,12 @@ export interface UseMarqueeSelectionDeps {
   commitVertexPositionUpdates?: (updates: Array<{ elementId: string; vertexIndex: number; newPosition: { x: number; y: number; z: number } }>, skipAutoSave?: boolean) => void;
 }
 
+export function roomFloorElementTypeForCanvasFloor(
+  floorZ: number,
+): 'BuildingElementGround' | 'BuildingElementAdjacentConditionedSpace' {
+  return floorZ >= 1 ? 'BuildingElementAdjacentConditionedSpace' : 'BuildingElementGround';
+}
+
 export function useMarqueeSelection(deps: UseMarqueeSelectionDeps) {
   const {
     scale,
@@ -241,14 +247,18 @@ export function useMarqueeSelection(deps: UseMarqueeSelectionDeps) {
             wallIds.push(wallId);
           });
 
-          const floorId = createPlaceholderElement(targetZoneId, 'BuildingElementGround');
+          const floorElementType = roomFloorElementTypeForCanvasFloor(elementZ);
+          const floorId = createPlaceholderElement(targetZoneId, floorElementType);
           const floorCoords = [
             { x: minX, y: minY, z: elementZ },
             { x: maxX, y: minY, z: elementZ },
             { x: maxX, y: maxY, z: elementZ },
             { x: minX, y: maxY, z: elementZ },
           ];
-          updateElement(floorId, { coordinates: floorCoords });
+          updateElement(floorId, {
+            coordinates: floorCoords,
+            ...(floorElementType === 'BuildingElementAdjacentConditionedSpace' ? { pitch: 180 } : {}),
+          });
 
           setCurrentFloorZ(elementZ);
 
