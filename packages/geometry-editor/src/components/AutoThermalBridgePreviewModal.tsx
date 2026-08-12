@@ -91,7 +91,7 @@ const TB_PREVIEW_CATEGORIES: readonly {
   {
     id: 'opening_wall_floor',
     title: 'Wall–floor at openings',
-    rule: 'Where the opening meets the floor slab (ground or upper storey); the sill detail is swapped for a wall–floor junction.',
+    rule: 'Where the opening meets the floor slab; the sill detail is swapped for a wall–floor junction — ground (E5) when the linked slab is a ground-contact floor, intermediate (E6) otherwise.',
     roles: ['wall_ground_foot', 'wall_intermediate_floor_foot'],
   },
   {

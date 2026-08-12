@@ -3336,6 +3336,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/hooks/__tests__/useMarqueeSelection.test.tsx",
+      "source_path": "packages/geometry-editor/src/hooks/__tests__/useMarqueeSelection.test.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/hooks/__tests__/useOverlay.test.ts",
       "source_path": "packages/geometry-editor/src/hooks/__tests__/useOverlay.test.ts",
       "license": "AGPL-3.0-only",

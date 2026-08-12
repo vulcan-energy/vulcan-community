@@ -13,7 +13,7 @@ import type {
   Floor,
 } from '../types';
 import { proposeFacadeOpeningThermalBridges } from './proposeFacadeOpenings';
-import { FOOT_ON_WALL_PERP_TOL_M } from './proposeWallGroundContinuous';
+import { FOOT_ON_WALL_PERP_TOL_M, proposeWallGroundContinuous } from './proposeWallGroundContinuous';
 import {
   isIntermediateSlabExternalWallForContinuousTb,
   isUnheatedBasementWallForContinuousE6,
@@ -26,10 +26,12 @@ const testFloors: Floor[] = [
   { id: 'f1', name: 'First', zIndex: 1, height: 2.4, isRoofSpace: false },
 ];
 
-/** Plan polygon on storey z=1 sharing the north wall edge y=0 from x=0..10 with typical tests. */
-function makeIntermediateSlab(overrides?: Partial<BuildingElementGround>): BuildingElementGround {
+/** Conditioned floor polygon sharing the north wall edge y=0 from x=0..10 with typical tests. */
+function makeIntermediateSlab(
+  overrides?: Partial<BuildingElementAdjacentConditionedSpace>,
+): BuildingElementAdjacentConditionedSpace {
   return {
-    type: 'BuildingElementGround',
+    type: 'BuildingElementAdjacentConditionedSpace',
     id: 'slab-f1',
     name: 'First floor slab',
     zoneId: 'z1',
@@ -43,11 +45,10 @@ function makeIntermediateSlab(overrides?: Partial<BuildingElementGround>): Build
     width: 0,
     height: 0,
     area: 80,
-    total_area: 80,
-    perimeter: 36,
-    floor_type: 'Suspended_floor',
+    pitch: 0,
+    isPlaceholder: false,
     ...overrides,
-  } as BuildingElementGround;
+  } as BuildingElementAdjacentConditionedSpace;
 }
 
 /** Polygon internal floor (`BuildingElementAdjacentConditionedSpace`), same plan as {@link makeIntermediateSlab}. */
@@ -175,7 +176,7 @@ describe('isIntermediateSlabExternalWallForContinuousTb', () => {
     ).toBe(false);
   });
 
-  it('rejects ground-floor wall (same criteria as continuous E5)', () => {
+  it('accepts a ground-storey wall geometrically so conditioned-floor evidence can select E6', () => {
     expect(
       isIntermediateSlabExternalWallForContinuousTb(
         makeWall({
@@ -190,7 +191,7 @@ describe('isIntermediateSlabExternalWallForContinuousTb', () => {
         }),
         testFloors,
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('rejects internal wall', () => {
@@ -286,6 +287,130 @@ describe('proposeWallIntermediateContinuous', () => {
     expect(p).toHaveLength(1);
     expect(p[0].junctionCode).toBe('E6');
     expect(p[0].suggestedLengthM).toBe(10);
+  });
+
+  it('keeps E6 on an upper wall stacked directly above the ground-floor perimeter', () => {
+    // Ordinary two-storey geometry: the F2 wall sits on the same plan line as the
+    // F1 ground slab edge. Plan linkage alone would veto its E6 (the ground slab is
+    // 2.4 m below); the veto must require the wall to actually qualify for E5.
+    const groundSlab = {
+      type: 'BuildingElementGround',
+      id: 'ground-f0',
+      name: 'Ground slab',
+      zoneId: 'z1',
+      parent_element: null,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 10, y: 0, z: 0 },
+        { x: 10, y: 8, z: 0 },
+        { x: 0, y: 8, z: 0 },
+      ],
+      area: 80,
+      pitch: 180,
+      isPlaceholder: false,
+      floor_type: 'Slab_no_edge_insulation',
+      floorId: 'f0',
+    } as unknown as BuildingElementGround;
+    const upperSlab = makeIntermediateSlab();
+    const groundWall = makeWall({
+      id: 'wall-g',
+      name: 'Ground wall',
+      floorId: 'f0',
+      base_height: 0,
+      height: 2.4,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 10, y: 0, z: 0 },
+      ],
+    });
+    const upperWall = makeWall({
+      id: 'wall-u',
+      name: 'Upper wall',
+      floorId: 'f1',
+      base_height: 2.4,
+      coordinates: [
+        { x: 0, y: 0, z: 1 },
+        { x: 10, y: 0, z: 1 },
+      ],
+    });
+    const elements = [groundSlab, upperSlab, groundWall, upperWall];
+
+    const e6 = proposeWallIntermediateContinuous(elements, [], testFloors);
+    expect(e6).toHaveLength(1);
+    expect(e6[0].junctionCode).toBe('E6');
+    expect(e6[0].openingName).toContain('Upper wall');
+    expect(e6[0].coordinates.every((point) => point.z === 2.4)).toBe(true);
+
+    const e5 = proposeWallGroundContinuous(elements, [], testFloors);
+    expect(e5).toHaveLength(1);
+    expect(e5[0].junctionCode).toBe('E5');
+    expect(e5[0].openingName).toContain('Ground wall');
+    expect(e5[0].coordinates.every((point) => point.z === 0)).toBe(true);
+  });
+
+  it('emits E6 for a ground-storey wall linked to a conditioned floor polygon', () => {
+    const slab = makeIntermediateSlab({
+      id: 'flat-floor',
+      name: 'Flat internal floor',
+      floorId: 'f0',
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 10, y: 0, z: 0 },
+        { x: 10, y: 8, z: 0 },
+        { x: 0, y: 8, z: 0 },
+      ],
+    });
+    const wall = makeWall({
+      id: 'wall-flat',
+      name: 'Flat external wall',
+      floorId: 'f0',
+      base_height: 0,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 10, y: 0, z: 0 },
+      ],
+    });
+
+    const p = proposeWallIntermediateContinuous([slab, wall], [], testFloors);
+    expect(p).toHaveLength(1);
+    expect(p[0].junctionCode).toBe('E6');
+    expect(p[0].coordinates.every((point) => point.z === 0)).toBe(true);
+  });
+
+  it('does not use a BuildingElementGround slab as a continuous E6 host', () => {
+    const ground = {
+      ...makeUnheatedBasementGround({
+        id: 'ground-f1',
+        name: 'Ground-typed slab',
+        floor_type: 'Slab_no_edge_insulation',
+        depth_basement_floor: undefined,
+        extra_json: undefined,
+        floorId: 'f1',
+        coordinates: [
+          { x: 0, y: 0, z: 1 },
+          { x: 10, y: 0, z: 1 },
+          { x: 10, y: 8, z: 1 },
+          { x: 0, y: 8, z: 1 },
+        ],
+      }),
+    } as BuildingElementGround;
+    const wall = makeWall({
+      id: 'wall-ground-linked',
+      name: 'Ground-linked wall',
+      parent_element: 'Ground-typed slab',
+      floorId: 'f1',
+      base_height: 2.4,
+      coordinates: [
+        { x: 0, y: 0, z: 1 },
+        { x: 10, y: 0, z: 1 },
+      ],
+    });
+
+    const e5 = proposeWallGroundContinuous([ground, wall], [], testFloors);
+    const e6 = proposeWallIntermediateContinuous([ground, wall], [], testFloors);
+    expect(e5).toHaveLength(1);
+    expect(e5[0].junctionCode).toBe('E5');
+    expect(e6).toHaveLength(0);
   });
 
   it('uses slab elevation from floor stack (tall ground storey → slab at 3 m)', () => {
@@ -485,7 +610,7 @@ describe('proposeWallIntermediateContinuous', () => {
     expect(proposeWallIntermediateContinuous([slab, wall], [])).toHaveLength(0);
   });
 
-  it('emits no E6 without a linked same-storey slab footprint (ground or conditioned polygon)', () => {
+  it('emits no E6 without a linked same-storey conditioned-floor footprint', () => {
     const wall = makeWall({
       id: 'wall-n',
       name: 'North wall',
