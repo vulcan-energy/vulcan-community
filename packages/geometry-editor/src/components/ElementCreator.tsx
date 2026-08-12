@@ -26,7 +26,6 @@ import { electricBatteryFormModule } from './elementForms/electricBattery';
 import { thermalBridgeLinearFormModule } from './elementForms/thermalBridgeLinear';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
 import { getLightingFieldValue, lightingFormModule } from './elementForms/lighting';
-import { ParentElementDropdown } from './ParentElementDropdown';
 import { applianceFormModule } from './elementForms/appliance';
 import { hotWaterDemandFormModule } from './elementForms/hotWaterDemand';
 import { combustionAppliancesFormModule } from './elementForms/combustionAppliances';
@@ -46,12 +45,11 @@ import { buildingElementGroundFormModule } from './elementForms/buildingElementG
 import { adjacentLikeElementFormModule } from './elementForms/adjacentLikeElement';
 import { buildingElementTransparentFormModule } from './elementForms/buildingElementTransparent';
 import { buildingElementOpaqueFormModule } from './elementForms/buildingElementOpaque';
+import { useDormerBundleEditor } from './DormerBundleEditor';
 import {
   useDecimalInput,
   decimalInputProps,
-  numericDraftValueOrDefault,
   readExtraJsonRecord,
-  formatConditionalDecimals,
 } from './elementForms/formPrimitives';
 // PR #31's pitchDraftInput/commitTypedPitch (useNumericDraftInput) landed in
 // elementForms/wallShared.tsx instead of here — see that file's own import comment for why.
@@ -156,7 +154,6 @@ import {
 import type { MvhrDuctRole, MvhrTerminalRole } from '../lib/mvhrDuctwork';
 import { useMvhrDuctTerminalManager } from './MvhrDuctTerminalManager';
 import {
-  buildDormerBundleDraft,
   computeAutoDormerBundleName,
   getDormerBundleElementIds,
   getDormerBundleInfo,
@@ -165,12 +162,9 @@ import {
   getDormerThermalOverrideExtraJson,
   isDormerAnchorElement,
   isDormerBundleNameManual,
-  isValidDormerHost,
   type DormerBundleRole,
   type DormerThermalOverrides,
   type DormerThermalSectionKey,
-  type DormerType,
-  type DormerBundleParameters,
 } from '../lib/dormerGeometry';
 import {
   emptyGeometryInspectorContributions,
@@ -1566,9 +1560,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   );
   // selectedParentElementValue/parentElement/setParentElement now live in
   // elementForms/wallShared.tsx (wallShared.parentElement/setParentElement).
-  const [selectedDormerType, setSelectedDormerType] = useState<DormerType>('mono-pitch');
-  const [dormerDepth, setDormerDepth] = useState<number>(1.5);
-  const [dormerRoofIsUnheatedPitchedRoof, setDormerRoofIsUnheatedPitchedRoof] = useState<boolean>(false);
+  // selectedDormerType/dormerDepth/dormerRoofIsUnheatedPitchedRoof moved to
+  // components/DormerBundleEditor.tsx (slice-6 brief STAGE 5) — dormer-
+  // exclusive state, nothing outside the dormer cluster read or wrote them.
   // freeAreaHeightInput/midHeightInput/maxWindowOpenAreaInput (+ the
   // midHeight/maxWindowOpenArea SetValueRef pair and their slice of this
   // combined effect) now live in elementForms/buildingElementTransparent.tsx
@@ -1980,6 +1974,42 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return labelContent;
   };
 
+  // Orchestrator-invoked dormer bundle machinery (slice-6 brief STAGE 5,
+  // decision 2) — same useMvhrDuctTerminalManager/useServiceLineFormState
+  // single-call precedent. Called here (after renderFieldLabel/fieldUnit
+  // exist, before the "load element data" effect and resetFormFields below,
+  // both of which call into its hydrateDormerMetadata/resetDormer) so no
+  // declaration-order ref indirection is needed on this side either — see
+  // DormerBundleEditor.tsx's header for the full classification writeup, the
+  // ~12-grouped-arg accounting, and the (g).2 investigation verdict.
+  const dormerBundleEditor = useDormerBundleEditor({
+    selection,
+    elementsById,
+    getElementById,
+    elementZoneId,
+    elementFloorId,
+    elementName,
+    floors,
+    geometryStore,
+    wallShared,
+    addElement,
+    updateElement,
+    removeElement,
+    setSelectedElementIds,
+    setSelection,
+    elementType,
+    fieldUnit,
+    renderFieldLabel,
+  });
+  const {
+    renderDormerBundleEditor,
+    regenerateDormerAnchor,
+    commitDormerAnchorChanges,
+    handleSaveDormerAnchor,
+    handleDuplicateDormerBundle,
+    getDormerBundleNameIssue,
+  } = dormerBundleEditor;
+
   // traceSystemFlow moved into elementForms/system.tsx's useFormState per
   // slice-5 brief decision (f).2 — that's now the primary/canonical copy,
   // used by the moved store-sync effect/commitSystemSelectionUpdate/
@@ -2367,18 +2397,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // only for the hydrate-effect declaration-order problem
   // buildingElementTransparent.tsx's header describes, which doesn't apply
   // once freeAreaFractionInput is module-owned and constructed inside a
-  // single useFormState call. This ref still serves the 8 dormer-exclusive
-  // slots below (decision 2, orchestrator-retained), so it stays.
-  const lateNumericInputSettersRef = useRef({
-    dormerWidth: (value: number | '') => { void value; },
-    dormerFrontWallHeight: (value: number | '') => { void value; },
-    dormerRoofPitch: (value: number | '') => { void value; },
-    gableRoofPitch: (value: number | '') => { void value; },
-    dormerWindowWidth: (value: number | '') => { void value; },
-    dormerWindowHeight: (value: number | '') => { void value; },
-    dormerWindowSillHeight: (value: number | '') => { void value; },
-    dormerFrameAreaFraction: (value: number | '') => { void value; },
-  });
+  // single useFormState call. lateNumericInputSettersRef itself is now
+  // REMOVED (slice-6 brief STAGE 5): its last 8 slots (dormer-exclusive) are
+  // gone the same way — DormerBundleEditor.tsx's hydrateDormerMetadata is
+  // defined after its own useDecimalInput calls, in the same hook body, so it
+  // calls .setValue directly (grep-verified zero remaining callers of this
+  // ref).
   const resetFormFieldsRef = useRef<() => void>(() => undefined);
 
   // Build preset options by scanning files. The manifest only marks library-owned files.
@@ -2705,25 +2729,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           // prefix via wallShared.tsx's hydrateWallSharedFields, plus
           // Opaque-exclusive isUnheatedPitchedRoof/isExternalDoor/
           // unheatedPitchedRoofCeilingElevationInput, decision 7). The dormer
-          // metadata block below stays orchestrator-side (decision 2, stage
-          // 5 territory) — it runs unconditionally after the module's own
-          // hydrate, exactly as it did inline before.
+          // metadata hydrate now lives in DormerBundleEditor.tsx (slice-6
+          // brief STAGE 5) — hydrateDormerMetadata runs unconditionally after
+          // the module's own hydrate, exactly as the inline block did before
+          // (it no-ops internally when the element isn't a dormer anchor).
           elementFormInstances.BuildingElementOpaque.hydrate(element);
-
-          const dormerMetadata = getDormerBundleMetadata(element);
-          if (dormerMetadata) {
-            setSelectedDormerType(dormerMetadata.dormerType);
-            lateNumericInputSettersRef.current.dormerWidth(roundToTwoDecimals(dormerMetadata.dormerWidth));
-            setDormerDepth(roundToTwoDecimals(dormerMetadata.dormerDepth));
-            lateNumericInputSettersRef.current.dormerFrontWallHeight(roundToTwoDecimals(dormerMetadata.frontWallHeight));
-            lateNumericInputSettersRef.current.dormerRoofPitch(dormerMetadata.dormerRoofPitch);
-            lateNumericInputSettersRef.current.gableRoofPitch(dormerMetadata.gableRoofPitch);
-            setDormerRoofIsUnheatedPitchedRoof(!!dormerMetadata.isUnheatedPitchedRoof);
-            lateNumericInputSettersRef.current.dormerWindowWidth(roundToTwoDecimals(dormerMetadata.windowWidth));
-            lateNumericInputSettersRef.current.dormerWindowHeight(roundToTwoDecimals(dormerMetadata.windowHeight));
-            lateNumericInputSettersRef.current.dormerWindowSillHeight(roundToTwoDecimals(dormerMetadata.windowSillHeight));
-            lateNumericInputSettersRef.current.dormerFrameAreaFraction(roundToTwoDecimals(dormerMetadata.frameAreaFraction));
-          }
+          dormerBundleEditor.hydrateDormerMetadata(element);
         } else if (element.type === 'BuildingElementGround') {
           elementFormInstances.BuildingElementGround.hydrate(element);
         } else if (element.type === 'BuildingElementTransparent') {
@@ -2927,22 +2938,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     }
   }, [selection, getZoneById, getElementById, geometryStore, removePlaceholder]); // Add store functions to dependencies
 
-  const getDormerBundleNameIssue = (candidateName: string, currentBundleId?: string | null): string | null => {
-    const trimmed = candidateName.trim();
-    if (!trimmed) return null;
-
-    const seenBundles = new Set<string>();
-    const duplicate = Object.values(elementsById).some((element) => {
-      const metadata = getDormerBundleMetadata(element);
-      if (!metadata) return false;
-      if (seenBundles.has(metadata.bundle_id)) return false;
-      seenBundles.add(metadata.bundle_id);
-      if (metadata.bundle_id === currentBundleId) return false;
-      return (getDormerBundleName(element) || '').trim() === trimmed;
-    });
-
-    return duplicate ? `Dormer name "${trimmed}" already exists` : null;
-  };
+  // getDormerBundleNameIssue moved to components/DormerBundleEditor.tsx
+  // (slice-6 brief STAGE 5); destructured from dormerBundleEditor above.
 
   function getDuplicateNameIssue(): string | null {
     if (!selection) return null;
@@ -3103,14 +3100,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // unheatedPitchedRoofCeilingElevationInput/isUnheatedPitchedRoof/
     // isExternalDoor reset lines now live in buildingElementOpaqueFormModule.
     // reset() (via the elementFormInstances loop below) — slice-6 brief
-    // STAGE 4. dormerRoofIsUnheatedPitchedRoof below is dormer-exclusive
-    // state (decision 2) and stays orchestrator-owned.
+    // STAGE 4.
     // adjacentViewerBaseHeightInput's reset line now lives in
     // adjacentLikeElementFormModule.reset() (via the elementFormInstances
     // loop below) — slice-6 brief STAGE 2. partyWallCavityResistanceInput
     // was never reset here in the legacy code either (preserved verbatim).
     elementElevationInput.setValue('');
-    setDormerRoofIsUnheatedPitchedRoof(false);
+    // dormerBundleEditor.resetDormer() clears dormerRoofIsUnheatedPitchedRoof
+    // (slice-6 brief STAGE 5) — it's the ONLY dormer field resetFormFields
+    // ever cleared; the (g).2 investigation (DormerBundleEditor.tsx's header)
+    // found the 8 draft inputs/selectedDormerType/dormerDepth staying
+    // uncleared here is real but NOT REACHABLE as a bug (a brand-new dormer's
+    // hydrate always resyncs them before any edit can occur), so this stays
+    // verbatim rather than being widened speculatively.
+    dormerBundleEditor.resetDormer();
     wallShared.setParentElement('');
     // freeAreaFraction/freeAreaHeight/midHeight/maxWindowOpenArea reset
     // lines now live in buildingElementTransparentFormModule.reset() (via
@@ -3266,284 +3269,19 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     onElementDelete?.();
   };
 
-  const mergeDormerExtraJson = (
-    existingExtraJson: Record<string, unknown> | undefined,
-    nextExtraJson: Record<string, unknown> | undefined,
-  ) => {
-    const preserved = { ...(existingExtraJson || {}) };
-    delete preserved.dormer_bundle;
-    delete preserved.geometry_face;
-    delete preserved.parent_netting_area;
-    return { ...preserved, ...(nextExtraJson || {}) };
-  };
-
+  // mergeDormerExtraJson/dormerDraftValuesRef/regenerateDormerAnchor/
+  // handleSaveDormerAnchor/handleDuplicateDormerBundle moved to
+  // components/DormerBundleEditor.tsx (slice-6 brief STAGE 5); the latter
+  // three are destructured from dormerBundleEditor above.
+  // getDormerBundleElements STAYS here (reclassified orchestrator-shared —
+  // its only reader is selectedDormerBundleElements below, which feeds the
+  // thermal-accordion + assembly-modal wiring that also stays here per
+  // decision 10 — see DormerBundleEditor.tsx's header for the full
+  // classification writeup).
   const getDormerBundleElements = useCallback((bundleId: string) =>
     getDormerBundleElementIds(elementsById, bundleId)
       .map((id) => elementsById[id])
       .filter((element): element is Element => Boolean(element)), [elementsById]);
-
-  const dormerDraftValuesRef = useRef({
-    dormerWidth: 2,
-    frontWallHeight: 1.2,
-    dormerRoofPitch: 15,
-    gableRoofPitch: 35,
-    windowWidth: 1.2,
-    windowHeight: 1,
-    windowSillHeight: 0.6,
-    frameAreaFraction: 0.25,
-  });
-
-  const regenerateDormerAnchor = (
-    anchorId: string,
-    overrides: {
-      bundleName?: string;
-      hostName?: string;
-      parameters?: Partial<DormerBundleParameters>;
-      thermalOverrides?: DormerThermalOverrides;
-    } = {},
-  ) => {
-    const anchor = getElementById(anchorId);
-    if (!anchor || anchor.type !== 'BuildingElementOpaque') {
-      throw new Error('Dormer anchor element not found.');
-    }
-
-    const metadata = getDormerBundleMetadata(anchor);
-    if (!metadata) {
-      throw new Error('This element is not a dormer anchor.');
-    }
-
-    const targetHostName = (overrides.hostName ?? wallShared.parentElement ?? metadata.host_element_name ?? '').trim();
-    const host = Object.values(elementsById).find(
-      (element) => element.type === 'BuildingElementOpaque' && element.name === targetHostName,
-    );
-    if (!host || !isValidDormerHost(host)) {
-      throw new Error('Dormers must stay attached to a valid sloped roof polygon.');
-    }
-
-    const nextParameters: DormerBundleParameters = {
-      dormerType: selectedDormerType,
-      windowCenterPlanPoint: metadata.windowCenterPlanPoint,
-      dormerWidth: dormerDraftValuesRef.current.dormerWidth,
-      dormerDepth,
-      frontWallHeight: dormerDraftValuesRef.current.frontWallHeight,
-      dormerRoofPitch: dormerDraftValuesRef.current.dormerRoofPitch,
-      gableRoofPitch: dormerDraftValuesRef.current.gableRoofPitch,
-      isUnheatedPitchedRoof: dormerRoofIsUnheatedPitchedRoof,
-      windowWidth: dormerDraftValuesRef.current.windowWidth,
-      windowHeight: dormerDraftValuesRef.current.windowHeight,
-      windowSillHeight: dormerDraftValuesRef.current.windowSillHeight,
-      frameAreaFraction: dormerDraftValuesRef.current.frameAreaFraction,
-      ...(overrides.parameters || {}),
-    };
-
-    const names = {
-      frontWall: anchor.name,
-      leftCheekWall: metadata.cheek_wall_names[0],
-      rightCheekWall: metadata.cheek_wall_names[1],
-      roofs: metadata.roof_names,
-      window: metadata.window_name,
-    };
-    const suppliedBundleName = overrides.bundleName;
-    const bundleName = (
-      suppliedBundleName?.trim()
-      || elementName.trim()
-      || getDormerBundleName(anchor)
-      || metadata.bundle_name
-      || anchor.name
-    ).trim();
-    if (!bundleName) {
-      throw new Error('Dormer name is required.');
-    }
-    if (suppliedBundleName !== undefined) {
-      const duplicateNameIssue = getDormerBundleNameIssue(bundleName, metadata.bundle_id);
-      if (duplicateNameIssue) {
-        throw new Error(duplicateNameIssue);
-      }
-    }
-
-    const draft = buildDormerBundleDraft({
-      host,
-      dormerType: nextParameters.dormerType,
-      windowCenterPlanPoint: nextParameters.windowCenterPlanPoint,
-      placementDefaults: {
-        dormerWidth: nextParameters.dormerWidth,
-        dormerDepth: nextParameters.dormerDepth,
-        frontWallHeight: nextParameters.frontWallHeight,
-        dormerRoofPitch: nextParameters.dormerRoofPitch,
-        gableRoofPitch: nextParameters.gableRoofPitch,
-        windowWidth: nextParameters.windowWidth,
-        windowHeight: nextParameters.windowHeight,
-        windowSillHeight: nextParameters.windowSillHeight,
-        frameAreaFraction: nextParameters.frameAreaFraction,
-      },
-      names,
-      bundleName,
-      bundleId: metadata.bundle_id,
-      floors,
-      thermalOverrides: overrides.thermalOverrides ?? metadata.thermal_overrides,
-      globalOrientationOffset: geometryStore.getState().globalOrientationOffset,
-    });
-
-    if (!draft) {
-      throw new Error('Unable to regenerate this dormer from the current parameters.');
-    }
-
-    const zoneId = host.zoneId || elementZoneId || anchor.zoneId;
-    const floorId = host.floorId || elementFloorId || anchor.floorId;
-
-    updateElement(anchorId, {
-      name: names.frontWall,
-      zoneId,
-      floorId,
-      parent_element: host.name,
-      ...draft.frontWall,
-      extra_json: mergeDormerExtraJson(anchor.extra_json, draft.frontWall.extra_json),
-    });
-
-    const existingChildrenByName = new Map(
-      Object.values(elementsById)
-        .filter((element) => element.id !== anchorId)
-        .map((element) => [element.name, element] as const),
-    );
-
-    const siblingDefinitions = draft.members.filter((member) => member.role !== 'front-wall-anchor');
-    const expectedMemberNames = new Set(draft.members.map((member) => member.name));
-    Object.values(elementsById)
-      .filter((element) => element.id !== anchorId)
-      .filter((element) => getDormerBundleInfo(element)?.bundle_id === metadata.bundle_id)
-      .filter((element) => !expectedMemberNames.has(element.name))
-      .forEach((element) => removeElement(element.id));
-
-    siblingDefinitions.forEach((definition) => {
-      const existingChild = existingChildrenByName.get(definition.name);
-      const payload = {
-        name: definition.name,
-        type: definition.type,
-        zoneId,
-        floorId,
-        parent_element: definition.parent,
-        ...definition.updates,
-        extra_json: mergeDormerExtraJson(
-          existingChild?.extra_json,
-          definition.updates.extra_json,
-        ),
-      };
-
-      if (existingChild) {
-        updateElement(existingChild.id, payload as Partial<Element>, true);
-      } else {
-        addElement(payload as Omit<Element, 'id'>);
-      }
-    });
-
-    const geometryState = geometryStore.getState();
-    const regeneratedElementIds = getDormerBundleElementIds(geometryState.elementsById, metadata.bundle_id);
-    setSelectedElementIds(regeneratedElementIds);
-    setSelection({ type: 'dormer', id: metadata.bundle_id });
-  };
-
-  const handleSaveDormerAnchor = (anchorId: string) => {
-    regenerateDormerAnchor(anchorId);
-  };
-
-  const handleDuplicateDormerBundle = (anchorId: string) => {
-    const anchor = getElementById(anchorId);
-    if (!anchor || anchor.type !== 'BuildingElementOpaque') {
-      throw new Error('Dormer anchor element not found.');
-    }
-
-    const metadata = getDormerBundleMetadata(anchor);
-    if (!metadata) {
-      throw new Error('This element is not a dormer anchor.');
-    }
-
-    const hostName = (metadata.host_element_name || anchor.parent_element || '').trim();
-    const host = Object.values(elementsById).find(
-      (element) => element.type === 'BuildingElementOpaque' && element.name === hostName,
-    );
-    if (!host || !isValidDormerHost(host)) {
-      throw new Error('Dormers must stay attached to a valid sloped roof polygon.');
-    }
-
-    const existingNames = Object.values(elementsById)
-      .map((element) => element.name)
-      .filter((name): name is string => Boolean(name));
-
-    const seenBundleIds = new Set<string>();
-    const existingBundleNames = Object.values(elementsById)
-      .flatMap((element) => {
-        const bundleInfo = getDormerBundleMetadata(element);
-        if (!bundleInfo || seenBundleIds.has(bundleInfo.bundle_id)) return [];
-        seenBundleIds.add(bundleInfo.bundle_id);
-        const bundleName = getDormerBundleName(element)?.trim();
-        return bundleName ? [bundleName] : [];
-      });
-
-    const placementDefaults = {
-      dormerWidth: metadata.dormerWidth,
-      dormerDepth: metadata.dormerDepth,
-      frontWallHeight: metadata.frontWallHeight,
-      dormerRoofPitch: metadata.dormerRoofPitch,
-      gableRoofPitch: metadata.gableRoofPitch,
-      isUnheatedPitchedRoof: metadata.isUnheatedPitchedRoof,
-      windowWidth: metadata.windowWidth,
-      windowHeight: metadata.windowHeight,
-      windowSillHeight: metadata.windowSillHeight,
-      frameAreaFraction: metadata.frameAreaFraction,
-    };
-
-    const duplicateOffsets = [
-      { x: 0.5, y: 0.5 },
-      { x: 0.35, y: 0.35 },
-      { x: -0.5, y: 0.5 },
-      { x: 0.5, y: -0.5 },
-    ];
-
-    const duplicateDraft = duplicateOffsets
-      .map(({ x, y }) =>
-        buildDormerBundleDraft({
-          host,
-          dormerType: metadata.dormerType,
-          windowCenterPlanPoint: {
-            x: metadata.windowCenterPlanPoint.x + x,
-            y: metadata.windowCenterPlanPoint.y + y,
-          },
-          existingNames,
-          existingBundleNames,
-          placementDefaults,
-          floors,
-          thermalOverrides: metadata.thermal_overrides,
-          globalOrientationOffset: geometryStore.getState().globalOrientationOffset,
-        }),
-      )
-      .find((draft): draft is NonNullable<typeof draft> => Boolean(draft));
-
-    if (!duplicateDraft) {
-      throw new Error('Unable to place the duplicated dormer on the current host roof.');
-    }
-
-    const zoneId = host.zoneId || elementZoneId || anchor.zoneId;
-    const floorId = host.floorId || elementFloorId || anchor.floorId;
-
-    duplicateDraft.members.forEach((member) => {
-      addElement({
-        name: member.name,
-        type: member.type,
-        zoneId,
-        floorId,
-        parent_element: member.parent === host.name ? host.name : member.parent,
-        ...member.updates,
-      } as Omit<Element, 'id'>);
-    });
-
-    const geometryState = geometryStore.getState();
-    const duplicatedElementIds = geometryState.elementIds.filter((id) => {
-      const element = geometryState.elementsById[id];
-      return getDormerBundleMetadata(element)?.bundle_id === duplicateDraft.bundleId;
-    });
-    setSelectedElementIds(duplicatedElementIds);
-    setSelection({ type: 'dormer', id: duplicateDraft.bundleId });
-  };
 
   const selectedIsDormerAnchorRef = useRef(false);
   const buildNewElementDataRef = useRef<() => Partial<Element>>(() => ({}));
@@ -3660,116 +3398,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (!selectedDormerMetadata) return [] as Element[];
     return getDormerBundleElements(selectedDormerMetadata.bundle_id);
   }, [selectedDormerMetadata, getDormerBundleElements]);
-  const commitDormerAnchorChanges = (
-    overrides: {
-      bundleName?: string;
-      hostName?: string;
-      parameters?: Partial<DormerBundleParameters>;
-    } = {},
-  ) => {
-    if (!selection?.id || !selectedIsDormerAnchor) return;
-    try {
-      regenerateDormerAnchor(selection.id, overrides);
-    } catch { /* swallow: best-effort */ }
-  };
+  // commitDormerAnchorChanges/commitDormerNumericParameter and the 8 dormer
+  // draft inputs moved to components/DormerBundleEditor.tsx (slice-6 brief
+  // STAGE 5); commitDormerAnchorChanges is destructured from
+  // dormerBundleEditor above (handleResetDormerNameToAuto below still calls
+  // it — that helper stays orchestrator-owned, see the header writeup).
   // commitTransparentFrameAreaFraction/freeAreaFractionInput now live inside
   // buildingElementTransparentFormState (elementForms/
   // buildingElementTransparent.tsx, slice-6 brief STAGE 3).
-  const commitDormerNumericParameter =
-    <K extends keyof DormerBundleParameters>(key: K) =>
-    (value: number | '') => {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return;
-      commitDormerAnchorChanges({
-        parameters: { [key]: value } as Partial<DormerBundleParameters>,
-      });
-    };
-  const dormerWidthInput = useDecimalInput(
-    2,
-    commitDormerNumericParameter('dormerWidth'),
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
-  const dormerFrontWallHeightInput = useDecimalInput(
-    1.2,
-    commitDormerNumericParameter('frontWallHeight'),
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
-  const dormerRoofPitchInput = useDecimalInput(
-    15,
-    commitDormerNumericParameter('dormerRoofPitch'),
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
-  const gableRoofPitchInput = useDecimalInput(
-    35,
-    commitDormerNumericParameter('gableRoofPitch'),
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
-  const dormerWindowWidthInput = useDecimalInput(
-    1.2,
-    commitDormerNumericParameter('windowWidth'),
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
-  const dormerWindowHeightInput = useDecimalInput(
-    1,
-    commitDormerNumericParameter('windowHeight'),
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
-  const dormerWindowSillHeightInput = useDecimalInput(
-    0.6,
-    commitDormerNumericParameter('windowSillHeight'),
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
-  const dormerFrameAreaFractionInput = useDecimalInput(
-    0.25,
-    commitDormerNumericParameter('frameAreaFraction'),
-    { commitOnChange: true, formatOnBlur: 'preserve' },
-  );
-  const dormerWidth = numericDraftValueOrDefault(dormerWidthInput.value, 2);
-  const dormerFrontWallHeight = numericDraftValueOrDefault(dormerFrontWallHeightInput.value, 1.2);
-  const dormerRoofPitch = numericDraftValueOrDefault(dormerRoofPitchInput.value, 15);
-  const gableRoofPitch = numericDraftValueOrDefault(gableRoofPitchInput.value, 35);
-  const dormerWindowWidth = numericDraftValueOrDefault(dormerWindowWidthInput.value, 1.2);
-  const dormerWindowHeight = numericDraftValueOrDefault(dormerWindowHeightInput.value, 1);
-  const dormerWindowSillHeight = numericDraftValueOrDefault(dormerWindowSillHeightInput.value, 0.6);
-  const dormerFrameAreaFraction = numericDraftValueOrDefault(dormerFrameAreaFractionInput.value, 0.25);
-  useLayoutEffect(() => {
-    lateNumericInputSettersRef.current = {
-      dormerWidth: dormerWidthInput.setValue,
-      dormerFrontWallHeight: dormerFrontWallHeightInput.setValue,
-      dormerRoofPitch: dormerRoofPitchInput.setValue,
-      gableRoofPitch: gableRoofPitchInput.setValue,
-      dormerWindowWidth: dormerWindowWidthInput.setValue,
-      dormerWindowHeight: dormerWindowHeightInput.setValue,
-      dormerWindowSillHeight: dormerWindowSillHeightInput.setValue,
-      dormerFrameAreaFraction: dormerFrameAreaFractionInput.setValue,
-    };
-    dormerDraftValuesRef.current = {
-      dormerWidth,
-      frontWallHeight: dormerFrontWallHeight,
-      dormerRoofPitch,
-      gableRoofPitch,
-      windowWidth: dormerWindowWidth,
-      windowHeight: dormerWindowHeight,
-      windowSillHeight: dormerWindowSillHeight,
-      frameAreaFraction: dormerFrameAreaFraction,
-    };
-  }, [
-    dormerFrameAreaFraction,
-    dormerFrameAreaFractionInput.setValue,
-    dormerFrontWallHeight,
-    dormerFrontWallHeightInput.setValue,
-    dormerRoofPitch,
-    dormerRoofPitchInput.setValue,
-    dormerWidth,
-    dormerWidthInput.setValue,
-    dormerWindowHeight,
-    dormerWindowHeightInput.setValue,
-    dormerWindowSillHeight,
-    dormerWindowSillHeightInput.setValue,
-    dormerWindowWidth,
-    dormerWindowWidthInput.setValue,
-    gableRoofPitch,
-    gableRoofPitchInput.setValue,
-  ]);
 
   // Dormers have no `_nameAutoSync` flag, so the bundle name's auto/manual state
   // is inferred from its pattern. Resetting regenerates the whole bundle through
@@ -4966,183 +4602,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     ) : null
   );
 
-  // Orchestrator-owned dormer bundle editor (slice-6 brief decision 2): the
-  // dormer side of Opaque's legacy dormer/non-dormer render ternary, moved
-  // verbatim as a callback so BuildingElementOpaque's module (elementForms/
-  // buildingElementOpaque.tsx, slice-6 brief STAGE 4) can invoke it without
-  // owning any of the dormer bundle machinery it closes over (dormer draft
-  // inputs, commitDormerAnchorChanges/regenerateDormerAnchor, which also
-  // write across the anchor's Transparent siblings — stage 5 territory).
-  // Same renderMvhrDuctAndTerminalManager / renderSpaceHeatSystemPicker
-  // precedent: a zero-arg `() => ReactNode` bridge on ElementFormRenderCtx.
-  const renderDormerBundleEditor = (): React.ReactNode => (
-    <>
-      {renderFieldLabel('Host Roof:', elementType, 'parent_element')}
-      <div className="element-input">
-        <ParentElementDropdown
-          value={wallShared.parentElement}
-          onChange={(value) => {
-            wallShared.setParentElement(value);
-            commitDormerAnchorChanges({ hostName: value });
-          }}
-          elementType={elementType}
-          zoneId={elementZoneId}
-          placeholder="Select the sloped roof hosting this dormer"
-          selfId={selection.type === 'element' ? selection.id : undefined}
-        />
-        <div style={INLINE_FIELD_NOTE_STYLE}>
-          Changes regenerate the dormer roof, cheek walls, window, and roof cutout instantly.
-        </div>
-      </div>
-      {renderFieldLabel('Dormer Shape:', elementType)}
-      <div className="element-input">
-        <StandardDropdown
-          value={selectedDormerType}
-          onChange={(value) => {
-            const nextValue = value as DormerType;
-            setSelectedDormerType(nextValue);
-            commitDormerAnchorChanges({ parameters: { dormerType: nextValue } });
-          }}
-          options={[
-            { value: 'mono-pitch', label: 'Mono-pitch' },
-            { value: 'gable-front', label: 'Gable-front' },
-            { value: 'hip', label: 'Hip' },
-          ]}
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {renderFieldLabel('Dormer Width (m):', elementType, 'width')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerWidthInput)}
-          unit={fieldUnit('width')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {renderFieldLabel('Dormer Depth (derived):', elementType, 'depth')}
-      <div className="element-input">
-        <StandardInput
-          type="text"
-          inputMode="numeric"
-          value={formatConditionalDecimals(dormerDepth)}
-          unit={fieldUnit('depth')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-          readOnly
-        />
-      </div>
-      {renderFieldLabel('Front Wall Height (m):', elementType, 'height')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerFrontWallHeightInput)}
-          unit={fieldUnit('height')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {selectedDormerType === 'mono-pitch' ? (
-        <>
-          {renderFieldLabel('Dormer Roof Pitch (degrees):', elementType, 'pitch')}
-          <div className="element-input">
-            <StandardInput
-              {...decimalInputProps(dormerRoofPitchInput)}
-              unit={fieldUnit('pitch')}
-              step="1"
-              min="0"
-              max="89"
-              variant="ghost"
-              size="md"
-            />
-          </div>
-        </>
-      ) : (
-        <>
-          {renderFieldLabel('Side Roof Pitch (degrees):', elementType, 'pitch')}
-          <div className="element-input">
-            <StandardInput
-              {...decimalInputProps(gableRoofPitchInput)}
-              unit={fieldUnit('pitch')}
-              step="1"
-              min="1"
-              max="89"
-              variant="ghost"
-              size="md"
-            />
-          </div>
-        </>
-      )}
-      {renderFieldLabel('Unheated Pitched Roof', elementType)}
-      <div className="element-input">
-        <label className="checkbox-container">
-          <input
-            type="checkbox"
-            className="styled-checkbox"
-            checked={!!dormerRoofIsUnheatedPitchedRoof}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              setDormerRoofIsUnheatedPitchedRoof(checked);
-              commitDormerAnchorChanges({ parameters: { isUnheatedPitchedRoof: checked } });
-            }}
-            id="dormer-unheated-pitched-roof"
-          />
-          <span className="checkbox-custom"></span>
-        </label>
-      </div>
-      {renderFieldLabel('Window Width (m):', 'BuildingElementTransparent', 'width')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerWindowWidthInput)}
-          unit={fieldUnit('width', 'BuildingElementTransparent')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {renderFieldLabel('Window Height (m):', 'BuildingElementTransparent', 'height')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerWindowHeightInput)}
-          unit={fieldUnit('height', 'BuildingElementTransparent')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {renderFieldLabel('Window Sill Height (m):', 'BuildingElementTransparent', 'base_height')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerWindowSillHeightInput)}
-          unit={fieldUnit('base_height', 'BuildingElementTransparent')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {renderFieldLabel('Window Frame Area Fraction:', 'BuildingElementTransparent', 'frame_area_fraction')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerFrameAreaFractionInput)}
-          unit={fieldUnit('frame_area_fraction', 'BuildingElementTransparent')}
-          step="0.01"
-          min="0"
-          max="1"
-          variant="ghost"
-          size="md"
-        />
-      </div>
-    </>
-  );
+  // renderDormerBundleEditor moved to components/DormerBundleEditor.tsx
+  // (slice-6 brief STAGE 5); destructured from dormerBundleEditor above and
+  // wired onto ElementFormRenderCtx.renderDormerBundleEditor below, unchanged
+  // from BuildingElementOpaque's module's perspective.
 
   const renderAttributePanel = () => {
     const formRenderCtx: ElementFormRenderCtx = {
