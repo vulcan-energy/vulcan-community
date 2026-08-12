@@ -34,7 +34,7 @@ import { readRootCssVar } from '../../lib/cssVars';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { WindowVentilation3D } from '../../lib/geometry3dPrimitivesTypes';
 import { computeElement3DFrameTarget } from '../../lib/geometry3dFrame';
-import { buildSlopedPolygonBufferGeometry, elevationAtSlopedVertexM } from '../../lib/geometry3dSloped';
+import { buildClosedPrismGeometry, buildSlopedPolygonBufferGeometry, elevationAtSlopedVertexM } from '../../lib/geometry3dSloped';
 import { modelXYToThreeXZ, modelSegmentToThreeYaw, modelXYToExtrudeShapeXY } from '../../lib/geometryTransform';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { frameInsetFromFrameAreaFraction, rectSizeForMaxOpenArea } from '../../lib/geometryVentilationOverlay';
@@ -45,6 +45,7 @@ import {
   meshRenderOrderForFloor,
   meshStandardFloorDimmingProps,
   meshStandardFloorDimmingPropsWithBaseOpacity,
+  planarFaceFloorDimmingProps,
 } from '../../lib/elementCanvasFloor3dMaterial';
 import { isElementOnActiveCanvasFloor } from '../../lib/elementCanvasFloor';
 import { materialDimForCategoryGhost, CATEGORY_GHOST_OPACITY_FACTOR } from '../../lib/elementCategoryVisibility';
@@ -169,8 +170,17 @@ function useHoverHalo(isInteractive: boolean): [boolean, HoverHandlers] {
   return [isInteractive && hovered, handlers];
 }
 
+/**
+ * `thicknessM`, when given, produces a solid prism (via `buildClosedPrismGeometry`, extruded
+ * symmetrically ±thicknessM/2 along the face normal) instead of a zero-thickness sheet — used
+ * for profiled-top walls and their profiled openings so they read as real walls/windows in 3D
+ * rather than vanishing flat cards.
+ */
 // eslint-disable-next-line react-refresh/only-export-components -- geometry helper shared with tests.
-export function buildPlanarFaceGeometry(points: Array<[number, number, number]>): THREE.BufferGeometry {
+export function buildPlanarFaceGeometry(
+  points: Array<[number, number, number]>,
+  thicknessM?: number,
+): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   if (points.length < 3) return geometry;
 
@@ -202,6 +212,17 @@ export function buildPlanarFaceGeometry(points: Array<[number, number, number]>)
   });
   const triangles = THREE.ShapeUtils.triangulateShape(contour, []);
   if (triangles.length === 0) return geometry;
+
+  if (thicknessM !== undefined && thicknessM > 0) {
+    // Symmetric prism about the face plane. The projected contour can come out clockwise when
+    // the fan triangle at vertex 0 disagrees with the ring's overall orientation (concave
+    // profiled tops) — buildClosedPrismGeometry reverses the side winding in that case so caps
+    // and sides stay consistently outward.
+    const half = thicknessM / 2;
+    const top = vertices.map((vertex) => vertex.clone().addScaledVector(planeNormal, half));
+    const bottom = vertices.map((vertex) => vertex.clone().addScaledVector(planeNormal, -half));
+    return buildClosedPrismGeometry(top, bottom, triangles, THREE.ShapeUtils.area(contour) < 0);
+  }
 
   const positions: number[] = [];
   const normals: number[] = [];
@@ -1929,18 +1950,22 @@ const PlanarFaceMesh: React.FC<{
   const isInteractive = primitive.isCurrentFloor && !categoryGhost;
   const [hovered, hoverHandlers] = useHoverHalo(isInteractive);
   const showHoverHalo = hovered && !selected && !categoryGhost;
-  const geometry = useMemo(() => buildPlanarFaceGeometry(primitive.points), [primitive.points]);
+  const hasThickness = primitive.thicknessM !== undefined;
+  const geometry = useMemo(
+    () => buildPlanarFaceGeometry(primitive.points, primitive.thicknessM),
+    [primitive.points, primitive.thicknessM],
+  );
   const displayColor = floorDimmedMeshColor(primitive.color, primitive.isCurrentFloor);
   const isOpening = primitive.isOpening;
+  // Wall-style dimming (opaque off-floor, wireframe above) is only for solid OPAQUE faces;
+  // profiled openings carry thickness too (they must protrude beyond the host wall's prism)
+  // but keep their translucent glass treatment and base-opacity dimming.
+  const isSolidWallFace = hasThickness && !isOpening;
   const renderOrder = meshRenderOrderForFloor(primitive.isCurrentFloor, isOpening);
   const opacity = primitive.opacity ?? (isOpening ? (primitive.isCurrentFloor ? 0.72 : 0.28) : 1);
-  const hasExplicitTransparency = primitive.opacity !== undefined && opacity < 1;
+  const hasExplicitTransparency = !isSolidWallFace && primitive.opacity !== undefined && opacity < 1;
   const dim = materialDimForCategoryGhost(
-    meshStandardFloorDimmingPropsWithBaseOpacity(
-      primitive.isCurrentFloor,
-      opacity,
-      isAboveCurrentFloor,
-    ),
+    planarFaceFloorDimmingProps(isSolidWallFace, primitive.isCurrentFloor, opacity, isAboveCurrentFloor),
     categoryGhost,
   );
 
