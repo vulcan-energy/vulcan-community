@@ -39,12 +39,12 @@ import { mechanicalVentilationFormModule } from './elementForms/mechanicalVentil
 import { mechanicalVentilationDuctworkFormModule } from './elementForms/mechanicalVentilationDuctwork';
 import { mechanicalVentilationTerminalFormModule } from './elementForms/mechanicalVentilationTerminal';
 import { waterPipeworkFormModule } from './elementForms/waterPipework';
+import { wetEmitterFormModule } from './elementForms/wetEmitter';
+import { formatSystemPresetName, systemFormModule } from './elementForms/system';
 import { useServiceLineFormState } from './elementForms/serviceLine';
 import {
   useDecimalInput,
-  useIntegerInput,
   decimalInputProps,
-  integerInputProps,
   numericDraftValueOrDefault,
   readExtraJsonRecord,
   formatConditionalDecimals,
@@ -86,9 +86,7 @@ import {
 } from '../lib/unheatedPitchedRoofCeiling';
 import { buildProfileLineFaceFromTopHeights, extractTopHeightsFromExtraJson } from '../lib/profileLineFace';
 import {
-  listCategoryJsonOptions,
   listElementPresetOptions,
-  type WorkspaceSnippetOption,
 } from '../geometry/parameterLibraryCatalog';
 import {
   calculateDerivedFloorArea,
@@ -534,7 +532,6 @@ import { createElementCreatorFieldPresentationResolver } from './elementCreatorF
 import { syncSpaceHeatSystemZoneNameInExtraJson } from '../lib/spaceHeatSystemSync';
 import { formatSchemaInfoForTooltip } from '../utils/schemaTooltipHelpers';
 import {
-  buildSpaceHeatSystemSampleBaselineExtraJson,
   buildSpaceHeatSystemPresetExtraJson,
   firstSpaceHeatSystemType,
   firstRecordEntry,
@@ -544,14 +541,9 @@ import {
   spaceHeatSystemUsesHeatSourceWet,
   SYSTEM_SOURCE_META_KEY,
   readSelectedSystemElement,
-  SYSTEM_SUBCATEGORY_LABELS,
   SYSTEM_SUBCATEGORY_TO_DIR,
-  systemExtraJsonHasPcdb,
-  systemExtraJsonHasSamplePlant,
-  systemExtraJsonIsMeaningfulSampleSide,
   type SystemElementSource,
   updateSpaceHeatSystemHeatSourceNameInExtraJson,
-  uiModeForSystemSource,
 } from './systemEditorUtils';
 import { isExternalLineWall } from '../geometry/thermalBridge/proposeExternalCorners';
 import { groundFloorTypeSupportsViewerElevation } from '../lib/groundFloorSubtype';
@@ -583,10 +575,10 @@ const AssemblyCalculatorModal = React.lazy(async () => {
   return { default: module.AssemblyCalculatorModal };
 });
 
-type PendingSystemAction =
-  | { kind: 'source'; target: 'presets' | 'pcdb' }
-  | { kind: 'subcategory'; value: string }
-  | { kind: 'preset'; value: string };
+// PendingSystemAction moved to elementForms/system.tsx with the rest of
+// System's exclusive state — imported back only where the modal's title/
+// message ternaries need to read `.kind`/`.value`/`.target`, via
+// systemFormState.pendingSystemAction's own inferred type.
 
 type AdvancedFieldsElementPatch = Partial<Element> & {
   extra_json?: unknown;
@@ -594,12 +586,13 @@ type AdvancedFieldsElementPatch = Partial<Element> & {
   system_preset?: unknown;
   zoneId?: unknown;
 };
-type ElementOfType<T extends Element['type']> = Extract<Element, { type: T }>;
+// ElementOfType<T> (the WetEmitter subcategory dropdown's value-cast helper)
+// moved to elementForms/wetEmitter.tsx with its only remaining call site —
+// grep-verified zero other callers in this file.
 
-function formatSystemPresetName(preset: string): string {
-  return preset.replace(/_/g, ' ');
-}
-
+// formatSystemPresetName moved to elementForms/system.tsx with the rest of
+// System's exclusive state — imported back above for the DeleteConfirmModal's
+// message text (its one remaining orchestrator call site).
 
 function readFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -2044,10 +2037,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // MechanicalVentilationTerminal's exclusive state now lives in its module
   // (elementForms/mechanicalVentilationTerminal.tsx).
 
-  // WetEmitter
-  const [subcategory, setSubcategory] = useState<'' | 'radiator' | 'ufh' | 'fancoil'>('');
+  // WetEmitter's subcategory/unitNumberInput exclusive state now lives in its
+  // module (elementForms/wetEmitter.tsx). spaceHeatSystem stays here, bridged
+  // to that module via ElementFormSharedCtx (see that field's doc comment and
+  // the module's header "SEAM RESOLUTION" note): the picker callback below
+  // both displays and writes it, and is defined/depended-on before the
+  // module's own state would exist in render order, so it cannot receive that
+  // state as a call-time argument. spaceHeatSystemOptions/
+  // selectedSpaceHeatSystemForEmitter/handleEditSelectedWetEmitterSpaceHeatSystem
+  // also stay here: they are consumed only by the orchestrator-owned
+  // renderSpaceHeatSystemPicker callback (slice-5 brief decision (f).1), never
+  // by the module's own renderPanel.
   const [spaceHeatSystem, setSpaceHeatSystem] = useState<string>('');
-  const unitNumberInput = useIntegerInput('', commitElementNumericField('unit_number'), { commitOnChange: true });
   const spaceHeatSystemOptions = useMemo(() => {
     const options = [{ value: '', label: 'Select a SpaceHeatSystem' }];
     for (const element of allElements) {
@@ -2109,6 +2110,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   };
 
   const elementFormStateCtx = {
+    elementType,
     commitElementNumericField,
     commitExistingElementDraft,
     applianceKeyOptions,
@@ -2121,6 +2123,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     shared: {
       heightInput,
       distanceInput,
+      areaInput,
       parentElement,
       setParentElement,
       pitch,
@@ -2129,10 +2132,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       setOrientation360,
       applyOrientationToGeometry,
       applyParentPitchOrientationForDisplay,
+      spaceHeatSystem,
+      setSpaceHeatSystem,
     },
     elementIds,
     elementsById,
     serviceLine,
+    workspaceResourcePort,
+    getZoneNameForElementZoneId,
   };
   // ElectricBattery
   const electricBatteryFormState = electricBatteryFormModule.useFormState(elementFormStateCtx);
@@ -2164,6 +2171,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const mechanicalVentilationTerminalFormState = mechanicalVentilationTerminalFormModule.useFormState(elementFormStateCtx);
   // WaterPipework
   const waterPipeworkFormState = waterPipeworkFormModule.useFormState(elementFormStateCtx);
+  // WetEmitter
+  const wetEmitterFormState = wetEmitterFormModule.useFormState(elementFormStateCtx);
+  // System
+  const systemFormState = systemFormModule.useFormState(elementFormStateCtx);
   const elementFormInstances = {
     ElectricBattery: bindElementFormModule(electricBatteryFormModule, electricBatteryFormState),
     ThermalBridgeLinear: bindElementFormModule(thermalBridgeLinearFormModule, thermalBridgeLinearFormState),
@@ -2186,6 +2197,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       mechanicalVentilationTerminalFormState,
     ),
     WaterPipework: bindElementFormModule(waterPipeworkFormModule, waterPipeworkFormState),
+    WetEmitter: bindElementFormModule(wetEmitterFormModule, wetEmitterFormState),
+    System: bindElementFormModule(systemFormModule, systemFormState),
   } satisfies Partial<Record<ElementType, ElementFormInstance>>;
 
   // Floor-move base-height sync, shared across several families; OnSiteGeneration's
@@ -2209,30 +2222,19 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     }
   }, [adjacentViewerBaseHeightInput, baseHeightInput, midHeightInput, onSiteGenerationFormState.onSiteBaseHeightInput]);
 
-  // System (sample presets + PCDB)
-  const [systemSubcategory, setSystemSubcategory] = useState<string>('');
-  const [systemPreset, setSystemPreset] = useState<string>('');
-  const systemPresetDirectory = elementType === 'System'
-    ? SYSTEM_SUBCATEGORY_TO_DIR[systemSubcategory]
-    : undefined;
-  const emptySystemPresetOptions = useMemo<WorkspaceSnippetOption[]>(() => [], []);
-  const [systemPresetOptions, setSystemPresetOptions] = useKeyedState(
-    systemPresetDirectory ?? 'unsupported',
-    emptySystemPresetOptions,
-  );
-  const [systemExtraJson, setSystemExtraJson] = useState<unknown>(null);
-  const [systemUiMode, setSystemUiMode] = useState<'presets' | 'pcdb'>('presets');
-  const prevSystemSelectionIdRef = useRef<string | null>(null);
-  const [pendingSystemAction, setPendingSystemAction] = useState<PendingSystemAction | null>(null);
+  // System's own exclusive state now lives in its module (via systemFormState
+  // above, elementForms/system.tsx) — see that module's header for the full
+  // memo-partition writeup. isSystemElementType stays here (below) since
+  // handleAdvancedFieldsChange (orchestrator-retained) still needs it.
   const elementFieldPresentation = createElementCreatorFieldPresentationResolver({
     mode: useFHSSchema ? 'fhs' : 'core',
     schemaPort,
     elementType,
     floorType: floorType || undefined,
-    wetEmitterSubtype: subcategory || undefined,
+    wetEmitterSubtype: wetEmitterFormState.subcategory || undefined,
     hotWaterSubtype: hotWaterDemandFormState.hotWaterSubcategory || undefined,
     ventilationSubtype: mechanicalVentilationFormState.ventType || undefined,
-    systemSubtype: systemSubcategory || undefined,
+    systemSubtype: systemFormState.systemSubcategory || undefined,
     pitch,
     isExternalDoor,
   });
@@ -2272,6 +2274,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return labelContent;
   };
 
+  // traceSystemFlow moved into elementForms/system.tsx's useFormState per
+  // slice-5 brief decision (f).2 — that's now the primary/canonical copy,
+  // used by the moved store-sync effect/commitSystemSelectionUpdate/
+  // handlePcdbSystemApply. This reduced copy stays here only for
+  // handleAdvancedFieldsChange below (CRITICAL EXCLUSION, orchestrator-
+  // retained): it drops the localUiMode/localSubcategory/localSystemPreset
+  // debug fields, which now live exclusively in the module's state and
+  // aren't reachable from here. Dev-only console.debug instrumentation
+  // behind window.__TRACE_SYSTEM_PCDB, no test coverage — see system.tsx's
+  // module header for the full writeup of this one non-verbatim deviation.
   const traceSystemFlow = useCallback(
     (event: string, payload?: Record<string, unknown>) => {
       if (typeof window === 'undefined') return;
@@ -2303,29 +2315,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         selectionId: currentSelection?.id ?? null,
         selectionType: currentSelection?.type ?? null,
         selectionPlaceholder: !!currentSelection?.isPlaceholder,
-        localUiMode: systemUiMode,
-        localSubcategory: systemSubcategory,
-        localSystemPreset: systemPreset || null,
         storeSystemPreset: selected ? (selected.system_preset ?? null) : null,
         storeHasPcdb: hasStorePcdb,
         ...payload,
       });
     },
-    [selection, getElementById, systemUiMode, systemSubcategory, systemPreset],
+    [selection, getElementById],
   );
-  const selectedSystemElement = useMemo(() => {
-    void selectedElementV;
-    if (elementType !== 'System') return null;
-    return readSelectedSystemElement(
-      selection,
-      (id) => getElementById(id) as {
-        type?: unknown;
-        extra_json?: unknown;
-        system_preset?: unknown;
-        subcategory?: unknown;
-      } | undefined,
-    );
-  }, [elementType, selection, selectedElementV, getElementById]);
+  // selectedSystemElement (the narrower memo) moved entirely into
+  // elementForms/system.tsx — its only consumers (systemSourceFromStore, the
+  // store-sync effect) moved with it. selectedSystemElementFull stays here
+  // too: the six selectedSpaceHeatSystem* memos below (all orchestrator-
+  // retained — see system.tsx's module header for why) derive from it, while
+  // the module re-derives its own separate copy for its renderPanel's PCDB
+  // branch. See system.tsx's header for the full memo-partition table.
   const selectedSystemElementFull = useMemo(() => {
     void selectedElementV;
     if (elementType !== 'System') return null;
@@ -2402,95 +2405,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       return linkedSystem === '';
     });
   }, [allElements, selectedSpaceHeatSystemIsWetDistribution, selectedSystemElementFull]);
-  const systemSourceFromStore = useMemo<SystemElementSource>(() => {
-    if (!selectedSystemElement) return 'presets';
-    return getSystemElementSourceFromState(selectedSystemElement.system_preset, selectedSystemElement.extra_json);
-  }, [selectedSystemElement]);
-  const systemUiModeFromStore = useMemo(
-    () => uiModeForSystemSource(systemSourceFromStore),
-    [systemSourceFromStore],
-  );
-
-  const commitSystemSelectionUpdate = useCallback(
-    (params: {
-      source: SystemElementSource;
-      subcategory: string;
-      systemPreset?: string;
-      extraJson?: Record<string, unknown> | null;
-      reason: string;
-    }) => {
-      if (!isExistingElementSelection()) return;
-      const id = selection.id;
-      const nextSystemPreset = params.systemPreset && params.systemPreset.trim() ? params.systemPreset : undefined;
-      const incomingExtra =
-        params.extraJson && typeof params.extraJson === 'object' && !Array.isArray(params.extraJson)
-          ? ({ ...params.extraJson } as Record<string, unknown>)
-          : undefined;
-      let nextExtraJson: Record<string, unknown> | undefined = incomingExtra;
-      if (params.source === 'pcdb') {
-        if (!nextExtraJson) nextExtraJson = {};
-        nextExtraJson[SYSTEM_SOURCE_META_KEY] = 'pcdb';
-      } else if (params.source === 'presets') {
-        if (!nextExtraJson) nextExtraJson = {};
-        nextExtraJson[SYSTEM_SOURCE_META_KEY] = 'presets';
-      } else if (nextExtraJson) {
-        nextExtraJson[SYSTEM_SOURCE_META_KEY] = 'custom';
-      }
-      setSystemSubcategory(params.subcategory);
-      setSystemPreset(nextSystemPreset ?? '');
-      setSystemExtraJson(nextExtraJson ?? null);
-      setSystemUiMode(uiModeForSystemSource(params.source));
-      traceSystemFlow('system-commit', {
-        reason: params.reason,
-        source: params.source,
-        subcategory: params.subcategory,
-        systemPreset: nextSystemPreset ?? null,
-        hasPcdb:
-          !!nextExtraJson?._pcdb &&
-          typeof nextExtraJson._pcdb === 'object' &&
-          !Array.isArray(nextExtraJson._pcdb),
-        keys: nextExtraJson ? Object.keys(nextExtraJson) : [],
-      });
-      updateElement(id, {
-        subcategory: params.subcategory,
-        system_preset: nextSystemPreset,
-        extra_json: nextExtraJson,
-      } as Partial<Element>);
-    },
-    [selection, isExistingElementSelection, updateElement, traceSystemFlow],
-  );
-
-  // System UI mode follows persisted source-of-truth in the selected element.
-  useEffect(() => {
-    if (elementType !== 'System') {
-      prevSystemSelectionIdRef.current = null;
-      return;
-    }
-    if (!selection?.id || selection.isPlaceholder) return;
-    if (selection.type !== 'element' && selection.type !== 'global') return;
-    if (!selectedSystemElement) return;
-    const idChanged = prevSystemSelectionIdRef.current !== selection.id;
-    prevSystemSelectionIdRef.current = selection.id;
-    const nextMode = uiModeForSystemSource(systemSourceFromStore);
-    if (systemUiMode !== nextMode || idChanged) {
-      traceSystemFlow('system-ui-mode-from-store', {
-        nextMode,
-        idChanged,
-        source: systemSourceFromStore,
-      });
-      setSystemUiMode(nextMode);
-    }
-  }, [
-    elementType,
-    selection?.id,
-    selection?.type,
-    selection?.isPlaceholder,
-    selectedSystemElement,
-    systemSourceFromStore,
-    systemUiMode,
-    traceSystemFlow,
-  ]);
-
+  // systemSourceFromStore/systemUiModeFromStore, commitSystemSelectionUpdate,
+  // and the "System UI mode follows persisted source-of-truth" store-sync
+  // effect all moved into elementForms/system.tsx's useFormState (slice-5
+  // brief decision (f).2) — see that module's header. withSystemSourceMeta
+  // below is the one small pure helper duplicated in both files (this copy
+  // for createSpaceHeatSystemForCurrentEmitter just below, which stays
+  // orchestrator-owned per decision (f).1's CONSERVATIVE six).
   const withSystemSourceMeta = useCallback(
     (extraJson: Record<string, unknown> | null | undefined, source: SystemElementSource): Record<string, unknown> | null => {
       if (!extraJson || typeof extraJson !== 'object' || Array.isArray(extraJson)) return null;
@@ -2586,191 +2507,25 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     [createSpaceHeatSystemForCurrentEmitter],
   );
 
-  // Update preset options when subcategory changes. The workspace files are authoritative;
-  // manifest membership only marks which rows are library-owned.
-  useEffect(() => {
-    if (!systemPresetDirectory) return;
-    let cancelled = false;
-    (async () => {
-      const options = await listCategoryJsonOptions(workspaceResourcePort, systemPresetDirectory);
-      if (!cancelled) {
-        setSystemPresetOptions(options);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [setSystemPresetOptions, systemPresetDirectory, workspaceResourcePort]);
-
-  const systemPresetDropdownOptions = useMemo(() => {
-    const options = systemPresetOptions.map((option) => ({
-      value: option.id,
-      label: option.label,
-    }));
-    if (systemPreset && !options.some((option) => option.value === systemPreset)) {
-      return [
-        {
-          value: systemPreset,
-          label: `${systemPreset.replace(/_/g, ' ')} (missing)`,
-          disabled: true,
-        },
-        ...options,
-      ];
-    }
-    return options;
-  }, [systemPresetOptions, systemPreset]);
-
-  const selectedSystemPresetLabel = useMemo(() => {
-    if (!systemPreset) return '';
-    const option = systemPresetOptions.find((candidate) => candidate.id === systemPreset);
-    return option?.label ?? formatSystemPresetName(systemPreset);
-  }, [systemPreset, systemPresetOptions]);
+  // The preset-options-loading effect, systemPresetDropdownOptions, and
+  // selectedSystemPresetLabel all moved into elementForms/system.tsx's
+  // useFormState — their only consumer was System's own renderPanel, now
+  // module-owned.
 
   const isSystemElementType = elementType === 'System';
 
-  const systemSwitchNeedsWarning = useCallback(
-    (target: 'presets' | 'pcdb'): boolean => {
-      if (!isSystemElementType) return false;
-      if (!selection?.id || selection.isPlaceholder) return false;
-      if (selection.type !== 'element' && selection.type !== 'global') return false;
-      const el = getElementById(selection.id) as {
-        type?: string;
-        extra_json?: unknown;
-        system_preset?: string;
-      } | undefined;
-      if (!el || el.type !== 'System') return false;
-      const ex = el.extra_json;
-      if (target === 'pcdb') {
-        const sp = el.system_preset;
-        if (sp != null && String(sp).trim() !== '') return true;
-        return systemExtraJsonHasSamplePlant(ex) || systemExtraJsonIsMeaningfulSampleSide(ex);
-      }
-      return systemExtraJsonHasPcdb(ex);
-    },
-    [getElementById, isSystemElementType, selection],
-  );
-
-  const applySystemSubcategoryChange = useCallback(
-    (value: string) => {
-      setSystemSubcategory(value);
-      setSystemPreset('');
-      setSystemExtraJson(null);
-      if (
-        selection?.id
-        && !selection.isPlaceholder
-        && (selection.type === 'element' || selection.type === 'global')
-      ) {
-        updateElement(selection.id, {
-          subcategory: value || undefined,
-          system_preset: undefined,
-          extra_json: undefined,
-        } as Partial<Element>);
-      }
-    },
-    [selection, updateElement],
-  );
-
-  const handleSystemSubcategoryChange = useCallback(
-    (value: string) => {
-      if (value === systemSubcategory) return;
-      if (systemSwitchNeedsWarning('pcdb')) {
-        setPendingSystemAction({ kind: 'subcategory', value });
-        return;
-      }
-      applySystemSubcategoryChange(value);
-    },
-    [applySystemSubcategoryChange, setPendingSystemAction, systemSubcategory, systemSwitchNeedsWarning],
-  );
-
-  const applySystemPresetChange = useCallback(
-    async (value: string) => {
-      const nextPreset = value.trim();
-      if (!nextPreset) {
-        setSystemPreset('');
-        setSystemExtraJson(null);
-        if (
-          selection?.id
-          && !selection.isPlaceholder
-          && (selection.type === 'element' || selection.type === 'global')
-        ) {
-          updateElement(selection.id, {
-            system_preset: undefined,
-            extra_json: undefined,
-          } as Partial<Element>);
-        }
-        return;
-      }
-
-      const dir = SYSTEM_SUBCATEGORY_TO_DIR[systemSubcategory];
-      if (!dir) return;
-
-      try {
-        const raw = await workspaceResourcePort.readText(
-          `input/batch_parameters/${dir}/${nextPreset}.json`,
-        );
-        const parsedRaw = JSON.parse(raw) as Record<string, unknown>;
-        const selectedElement =
-          selection?.id && !selection.isPlaceholder && (selection.type === 'element' || selection.type === 'global')
-            ? getElementById(selection.id)
-            : null;
-        const selectedZoneName =
-          selectedElement?.zoneId
-            ? (getZoneById(selectedElement.zoneId)?.name?.trim() || null)
-            : null;
-        const parsed =
-          systemSubcategory === 'SpaceHeatSystem' && selectedElement?.type === 'System'
-            ? buildSpaceHeatSystemSampleBaselineExtraJson(
-                parsedRaw,
-                selectedElement.extra_json,
-                selectedElement.name || 'Space heating',
-                selectedZoneName,
-                singleHeatSourceWetReferenceName,
-              )
-            : parsedRaw;
-        const nextExtraJson = withSystemSourceMeta(parsed, 'presets') ?? {};
-        setSystemPreset(nextPreset);
-        setSystemExtraJson(nextExtraJson);
-        if (
-          selection?.id
-          && !selection.isPlaceholder
-          && (selection.type === 'element' || selection.type === 'global')
-        ) {
-          commitSystemSelectionUpdate({
-            source: 'presets',
-            subcategory: systemSubcategory,
-            systemPreset: nextPreset,
-            extraJson: parsed,
-            reason: 'preset-dropdown-change',
-          });
-        }
-      } catch (e) {
-        console.warn(`[System] Failed to load preset ${dir}/${nextPreset}.json`, e);
-        alert(`Failed to load system preset "${nextPreset}".`);
-      }
-    },
-    [
-      selection,
-      systemSubcategory,
-      updateElement,
-      getElementById,
-      getZoneById,
-      singleHeatSourceWetReferenceName,
-      commitSystemSelectionUpdate,
-      withSystemSourceMeta,
-      workspaceResourcePort,
-    ],
-  );
-
-  const handleSystemPresetChange = useCallback(
-    (value: string) => {
-      if (value.trim() === systemPreset) return;
-      if (systemSwitchNeedsWarning('pcdb')) {
-        setPendingSystemAction({ kind: 'preset', value });
-        return;
-      }
-      void applySystemPresetChange(value);
-    },
-    [applySystemPresetChange, setPendingSystemAction, systemPreset, systemSwitchNeedsWarning],
-  );
-
+  // systemSwitchNeedsWarning, applySystemSubcategoryChange/
+  // handleSystemSubcategoryChange, applySystemPresetChange/
+  // handleSystemPresetChange all moved into elementForms/system.tsx's
+  // useFormState — see that module's header.
+  //
+  // handleSpaceHeatSystemHeatSourceChange below is a deliberate exception to
+  // the brief's per-family inventory (which listed it as moving too): it
+  // shares one JSX flex-row with handleEditSelectedSpaceHeatSystemHeatSource
+  // (decision (f).1's CONSERVATIVE six, orchestrator-only) and can't be
+  // split from it without fragmenting that row across the module boundary —
+  // see the widened renderSpaceHeatSystemEmitterManager below and
+  // system.tsx's module header for the full writeup.
   const handleSpaceHeatSystemHeatSourceChange = useCallback(
     (value: string) => {
       if (!selectedSystemElementFull || selectedSystemElementFull.subcategory !== 'SpaceHeatSystem') return;
@@ -2781,12 +2536,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         value,
       );
       nextExtraJson[SYSTEM_SOURCE_META_KEY] = 'custom';
-      setSystemExtraJson(nextExtraJson);
+      systemFormState.setSystemExtraJson(nextExtraJson);
       updateElement(selectedSystemElementFull.id, {
         extra_json: nextExtraJson,
       } as Partial<Element>);
     },
-    [selectedSpaceHeatSystemUsesHeatSourceWet, selectedSystemElementFull, updateElement],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- systemFormState itself is a fresh object every render (elementForms/system.tsx's useFormState returns a plain object literal, not memoized); systemFormState.setSystemExtraJson is the stable useState setter within it, already listed.
+    [selectedSpaceHeatSystemUsesHeatSourceWet, selectedSystemElementFull, updateElement, systemFormState.setSystemExtraJson],
   );
 
   const handleEditSelectedSpaceHeatSystemHeatSource = useCallback(() => {
@@ -2859,135 +2615,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     selectedSystemElementFull,
   ]);
 
-  const handlePcdbSystemApply = useCallback(
-    (payload: { subcategory: string; extraJson: Record<string, unknown> }) => {
-      if (!isExistingElementSelection()) return;
-      traceSystemFlow('pcdb-apply-start', {
-        payloadSubcategory: payload.subcategory,
-        payloadHasPcdb:
-          !!payload.extraJson?._pcdb &&
-          typeof payload.extraJson._pcdb === 'object' &&
-          !Array.isArray(payload.extraJson._pcdb),
-        payloadKeys: Object.keys(payload.extraJson ?? {}),
-      });
-      setSystemSubcategory(payload.subcategory);
-      commitSystemSelectionUpdate({
-        source: 'pcdb',
-        subcategory: payload.subcategory,
-        systemPreset: '',
-        extraJson: payload.extraJson,
-        reason: 'pcdb-apply',
-      });
-      traceSystemFlow('pcdb-apply-committed', {
-        payloadSubcategory: payload.subcategory,
-      });
-    },
-    [isExistingElementSelection, traceSystemFlow, commitSystemSelectionUpdate],
-  );
-
-  const clearSystemToPcdbShell = useCallback(() => {
-    if (!selection?.id || selection.isPlaceholder) return;
-    if (selection.type !== 'element' && selection.type !== 'global') return;
-    commitSystemSelectionUpdate({
-      source: 'pcdb',
-      subcategory: systemSubcategory,
-      systemPreset: '',
-      extraJson: null,
-      reason: 'switch-to-pcdb-shell',
-    });
-  }, [selection, systemSubcategory, commitSystemSelectionUpdate]);
-
-  const applyFirstSamplePresetAfterPcdb = useCallback(async () => {
-    if (!selection?.id || selection.isPlaceholder) return;
-    if (selection.type !== 'element' && selection.type !== 'global') return;
-    const dir = SYSTEM_SUBCATEGORY_TO_DIR[systemSubcategory];
-    const options = dir
-      ? await listCategoryJsonOptions(workspaceResourcePort, dir)
-      : [];
-    const first = options[0]?.id || '';
-    if (!dir || !first) {
-      commitSystemSelectionUpdate({
-        source: 'custom',
-        subcategory: systemSubcategory,
-        systemPreset: '',
-        extraJson: null,
-        reason: 'switch-to-presets-empty',
-      });
-      return;
-    }
-    try {
-      const raw = await workspaceResourcePort.readText(
-        `input/batch_parameters/${dir}/${first}.json`,
-      );
-      const nextExtraJson = JSON.parse(raw);
-      commitSystemSelectionUpdate({
-        source: 'presets',
-        subcategory: systemSubcategory,
-        systemPreset: first,
-        extraJson: nextExtraJson,
-        reason: 'switch-to-presets-first',
-      });
-    } catch (e) {
-      console.warn(`[System] Failed to load default preset ${dir}/${first}.json`, e);
-      commitSystemSelectionUpdate({
-        source: 'custom',
-        subcategory: systemSubcategory,
-        systemPreset: '',
-        extraJson: null,
-        reason: 'switch-to-presets-failed',
-      });
-    }
-  }, [selection, systemSubcategory, commitSystemSelectionUpdate, workspaceResourcePort]);
-
-  const requestSystemUiMode = useCallback(
-    (target: 'presets' | 'pcdb') => {
-      if (!isSystemElementType) return;
-      if (target === systemUiModeFromStore) return;
-      if (systemSwitchNeedsWarning(target)) {
-        setPendingSystemAction({ kind: 'source', target });
-        return;
-      }
-      if (target === 'pcdb') {
-        clearSystemToPcdbShell();
-      } else {
-        void applyFirstSamplePresetAfterPcdb();
-      }
-    },
-    [
-      applyFirstSamplePresetAfterPcdb,
-      clearSystemToPcdbShell,
-      isSystemElementType,
-      setPendingSystemAction,
-      systemSwitchNeedsWarning,
-      systemUiModeFromStore,
-    ],
-  );
-
-  const confirmSystemSourceSwitch = useCallback(() => {
-    const action = pendingSystemAction;
-    setPendingSystemAction(null);
-    if (!action) return;
-    if (action.kind === 'source') {
-      if (action.target === 'pcdb') {
-        clearSystemToPcdbShell();
-      } else {
-        void applyFirstSamplePresetAfterPcdb();
-      }
-      return;
-    }
-    if (action.kind === 'subcategory') {
-      applySystemSubcategoryChange(action.value);
-      return;
-    }
-    void applySystemPresetChange(action.value);
-  }, [
-    pendingSystemAction,
-    clearSystemToPcdbShell,
-    applyFirstSamplePresetAfterPcdb,
-    applySystemSubcategoryChange,
-    applySystemPresetChange,
-    setPendingSystemAction,
-  ]);
+  // handlePcdbSystemApply, clearSystemToPcdbShell,
+  // applyFirstSamplePresetAfterPcdb, requestSystemUiMode, and
+  // confirmSystemSourceSwitch all moved into elementForms/system.tsx's
+  // useFormState — see that module's header. The orchestrator reads the
+  // module's own confirmSystemSourceSwitch via systemFormState (see the
+  // DeleteConfirmModal in the JSX tail below).
 
   const hasAppliedPcdbSystemData = useMemo(() => {
     void selectedElementV;
@@ -3502,32 +3135,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } else if (element.type === 'MechanicalVentilationTerminal') {
           elementFormInstances.MechanicalVentilationTerminal.hydrate(element);
         } else if (element.type === 'WetEmitter') {
-          setSubcategory('subcategory' in element ? element.subcategory ?? '' : '');
-          setSpaceHeatSystem('space_heat_system' in element ? (element.space_heat_system ?? '') : '');
-          areaInput.setValue('area' in element ? element.area ?? '' : '');
-          unitNumberInput.setValue(
-            'unit_number' in element
-              ? (typeof element.unit_number === 'number' ? Math.round(element.unit_number) : (element.unit_number ?? ''))
-              : ''
-          );
-          try {
-            const currentElement = element as any;
-            const coords = currentElement.coordinates || [];
-            const shape = getElementShape(currentElement);
-            if (currentElement.subcategory === 'ufh' && shape !== 'polygon' && coords.length >= 2) {
-              const ok = window.confirm('Underfloor heating works best as a polygon. Convert this to a polygon now?');
-              if (ok) {
-                const next = convertShapeCoordinates(currentElement as any, 'polygon');
-                updateElement(currentElement.id, { coordinates: next });
-              }
-            } else if ((currentElement.subcategory === 'radiator' || currentElement.subcategory === 'fancoil') && shape !== 'line' && coords.length >= 1) {
-              const ok = window.confirm('Radiator/Fan coil works best as a line. Convert this to a line now?');
-              if (ok) {
-                const next = convertShapeCoordinates(currentElement as any, 'line');
-                updateElement(currentElement.id, { coordinates: next });
-              }
-            }
-          } catch { /* swallow: best-effort */ }
+          elementFormInstances.WetEmitter.hydrate(element);
         } else if (element.type === 'WaterPipework') {
           elementFormInstances.WaterPipework.hydrate(element);
         } else if (element.type === 'Appliance') {
@@ -3549,9 +3157,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } else if (element.type === 'ElectricBattery') {
           elementFormInstances.ElectricBattery.hydrate(element);
         } else if (element.type === 'System') {
-          setSystemSubcategory(element.subcategory || '');
-          setSystemPreset(element.system_preset || '');
-          setSystemExtraJson(element.extra_json || null);
+          elementFormInstances.System.hydrate(element);
         }
       }
     } else if (selection.type === 'global' && selection.id) {
@@ -3600,9 +3206,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         } else if (element.type === 'ElectricBattery') {
           elementFormInstances.ElectricBattery.hydrate(element);
         } else if (element.type === 'System') {
-          setSystemSubcategory(element.subcategory || '');
-          setSystemPreset(element.system_preset || '');
-          setSystemExtraJson(element.extra_json || null);
+          elementFormInstances.System.hydrate(element);
         }
       }
     } else if (selection.type === 'zone' && selection.id) {
@@ -3854,7 +3458,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         case 'windowShadingDepth':
           return (!value || value === 0) && elementType === 'WindowShading' && windowShadingFormState.shadingType !== 'object' ? 'Depth cannot be 0' : null;
         case 'unitNumber':
-          return (!value || value === 0) && elementType === 'WetEmitter' && ['radiator', 'fancoil'].includes(subcategory) ? 'Unit Number cannot be 0' : null;
+          return (!value || value === 0) && elementType === 'WetEmitter' && ['radiator', 'fancoil'].includes(wetEmitterFormState.subcategory) ? 'Unit Number cannot be 0' : null;
         case 'flowrate':
           if (
             elementType === 'HotWaterDemand' &&
@@ -3934,10 +3538,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // MechanicalVentilationTerminal's own reset lines now live in its module
     // (via the elementFormInstances loop below).
 
-    // WetEmitter
-    setSubcategory('');
+    // WetEmitter's subcategory/unitNumberInput reset lines now live in its
+    // module (via the elementFormInstances loop below). spaceHeatSystem is
+    // shared with the orchestrator-owned System<->WetEmitter bridge (see
+    // ElementFormSharedCtx) and is reset directly here, like parentElement/
+    // distanceInput above.
     setSpaceHeatSystem('');
-    unitNumberInput.setValue('');
 
     // WaterPipework's own reset lines now live in its module (via the
     // elementFormInstances loop below).
@@ -3952,12 +3558,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // MechanicalVentilation's own reset lines now live in its module (via the
     // elementFormInstances loop below).
 
-    // System
-    setSystemSubcategory('');
-    setSystemPreset('');
-    setSystemExtraJson(null);
-    setSystemUiMode('presets');
-    prevSystemSelectionIdRef.current = null;
+    // System's own reset lines now live in its module (via the
+    // elementFormInstances loop below).
 
     // Floor assignment
     setElementFloorId('');
@@ -5503,13 +5105,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         return elementFormInstances.MechanicalVentilationTerminal.buildElementData({ baseData, elementZoneId });
 
       case 'WetEmitter':
-        return {
-          ...baseData,
-	          subcategory: subcategory || undefined,
-          area: areaInput.value || undefined,
-          unit_number: unitNumberInput.value || undefined,
-          space_heat_system: spaceHeatSystem || undefined,
-        } as Partial<Element>;
+        return elementFormInstances.WetEmitter.buildElementData({ baseData, elementZoneId });
 
 	      case 'WaterPipework':
 	        return elementFormInstances.WaterPipework.buildElementData({ baseData, elementZoneId });
@@ -5541,20 +5137,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         return elementFormInstances.ElectricBattery.buildElementData({ baseData, elementZoneId });
       }
 
-      case 'System': {
-        const syncedSystemExtraJson =
-          systemSubcategory === 'SpaceHeatSystem'
-            ? syncSpaceHeatSystemZoneNameInExtraJson(systemExtraJson, getZoneNameForElementZoneId(elementZoneId))
-            : null;
-        const elementData: Record<string, unknown> = {
-          ...baseData,
-          subcategory: systemSubcategory || undefined,
-          system_preset: systemPreset || undefined,
-          zoneId: elementZoneId || undefined,
-          extra_json: syncedSystemExtraJson || systemExtraJson || undefined,
-        };
-        return elementData as Partial<Element>;
-      }
+      case 'System':
+        return elementFormInstances.System.buildElementData({ baseData, elementZoneId, getZoneNameForElementZoneId });
 
       default:
         return <div>Select an element type to see attributes</div>;
@@ -5582,7 +5166,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       case 'MechanicalVentilation':
         return elementFormInstances.MechanicalVentilation.subtype();
       case 'WetEmitter':
-        return subcategory || undefined;
+        return elementFormInstances.WetEmitter.subtype();
       case 'Appliance':
         return elementFormInstances.Appliance.subtype();
       case 'HotWaterDemand':
@@ -5598,7 +5182,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       case 'ElectricBattery':
         return elementFormInstances.ElectricBattery.subtype();
       case 'System':
-        return systemSubcategory || undefined; // Subcategory drives schema resolution
+        return elementFormInstances.System.subtype();
       default:
         return undefined;
     }
@@ -5978,6 +5562,141 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     onStartMvhrTerminalDraw,
   });
 
+  // System<->WetEmitter cross-creation bridge callbacks (slice-5 brief decision
+  // (f).1, CONSERVATIVE option): the six handlers above (createSpaceHeat
+  // SystemForCurrentEmitter, handleSpaceHeatSystemDropdownChange,
+  // handleCreateRadiatorForSelectedSpaceHeatSystem,
+  // handleEditSelectedWetEmitterSpaceHeatSystem,
+  // handleEditSelectedSpaceHeatSystemHeatSource,
+  // handleSpaceHeatSystemEmitterToggle) stay orchestrator-owned — they read/
+  // write allElements, addElement, setSelection/setSelectedElementIds, none of
+  // which the generic ctx exposes — and are injected into the two per-family
+  // form modules as zero-arg render callbacks, same precedent as
+  // renderMvhrDuctAndTerminalManager above. Store-level cross-creation
+  // consolidation (stage 4) is explicitly out of scope for this slice. These
+  // wrap the exact JSX the legacy inline panels rendered, so
+  // moving/registering them here is a zero-behaviour-change step.
+  //
+  // STAGE 3 WIDENING: decision (f).1's own text maps THREE handlers — not
+  // just two — onto renderSpaceHeatSystemEmitterManager (handleEditSelected
+  // SpaceHeatSystemHeatSource, handleSpaceHeatSystemEmitterToggle,
+  // handleCreateRadiatorForSelectedSpaceHeatSystem). Stage 1 only wired the
+  // emitter-dropdown block below because System's own panel was still
+  // inline then, so the heat-source dropdown + its "Edit" jump-link were
+  // still directly reachable from the same scope. Now that
+  // elementForms/system.tsx owns System's panel, handleEditSelectedSpace
+  // HeatSystemHeatSource's call site (the "Edit" button beside the
+  // heat-source dropdown) would otherwise sit inside module code with no
+  // access to this orchestrator closure — so this callback's JSX boundary
+  // widens to cover the whole "Heat source select + Edit + Emitters"
+  // fragment, verbatim from the legacy inline panel, not just the
+  // SpaceHeatSystemEmitterDropdown. handleSpaceHeatSystemHeatSourceChange
+  // (the heat-source dropdown's onChange) stays here too as a result — it
+  // shares that one flex row with the orchestrator-only Edit button and
+  // can't be split from it without fragmenting a single JSX row across the
+  // module boundary, even though the brief's per-family inventory listed it
+  // under System's "source-switch machinery" to move. This is a pure
+  // JSX-boundary move with zero behaviour change: the legacy gate
+  // `systemSubcategory === 'SpaceHeatSystem' && selectedSpaceHeatSystemUsesHeatSourceWet`
+  // is preserved by AND-splitting it — elementForms/system.tsx's renderPanel
+  // checks `systemSubcategory === 'SpaceHeatSystem'` (module-owned state) at
+  // its call site before invoking this callback, and this callback keeps
+  // the `selectedSpaceHeatSystemUsesHeatSourceWet` half, which itself
+  // re-derives the STORE's subcategory via selectedSystemElementFull,
+  // independent of the module's local draft state. heatSourceWetReference
+  // Options/selectedSpaceHeatSystemHeatSourceName/...HeatSourceElement/
+  // ...IsWetDistribution/...LinkedEmitterElements/...AvailableEmitterElements
+  // consequently all stay orchestrator-owned too — this callback is their
+  // only remaining consumer. See elementForms/system.tsx's header for the
+  // full per-memo partition table this widening produces.
+  //
+  // Both callbacks below are now invoked exclusively through
+  // formRenderCtx.renderSpaceHeatSystemPicker() / .renderSpaceHeatSystemEmitterManager()
+  // from wetEmitter.tsx/system.tsx's own renderPanel — the eslint-plugin-
+  // react-hooks "refs" false positive noted in earlier slices (see
+  // eslint.config.js's header comment on the 7.1.1 pin) does not fire across
+  // that module boundary, confirmed by the eslint gate on both new/changed
+  // files staying clean.
+  const renderSpaceHeatSystemPicker = (): React.ReactNode => (
+    <>
+      {renderFieldLabel('Space heat system:', elementType)}
+      <div
+        className="element-input"
+        style={EDITOR_FIELD_ACTION_ROW_STYLE}
+        ref={registerBaseFieldRefs('space_heat_system')}
+      >
+        <div style={EDITOR_FIELD_ACTION_FIELD_STYLE}>
+          <StandardDropdown
+            value={spaceHeatSystem}
+            onChange={handleSpaceHeatSystemDropdownChange}
+            options={spaceHeatSystemOptions}
+            variant="ghost"
+            size="md"
+          />
+        </div>
+        {selectedSpaceHeatSystemForEmitter ? (
+          <button
+            type="button"
+            className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"
+            onClick={handleEditSelectedWetEmitterSpaceHeatSystem}
+          >
+            Edit
+          </button>
+        ) : null}
+      </div>
+    </>
+  );
+
+  const renderSpaceHeatSystemEmitterManager = (): React.ReactNode => (
+    selectedSpaceHeatSystemUsesHeatSourceWet ? (
+      <>
+        {renderFieldLabel('Heat source:', elementType)}
+        <div className="element-input" style={EDITOR_FIELD_ACTION_ROW_STYLE}>
+          <div style={EDITOR_FIELD_ACTION_FIELD_STYLE}>
+            <StandardDropdown
+              value={selectedSpaceHeatSystemHeatSourceName}
+              onChange={handleSpaceHeatSystemHeatSourceChange}
+              options={[
+                {
+                  value: '',
+                  label: heatSourceWetReferenceOptions.length > 0
+                    ? 'Select heat source'
+                    : 'Create HeatSourceWet first',
+                  disabled: heatSourceWetReferenceOptions.length === 0,
+                },
+                ...heatSourceWetReferenceOptions,
+              ]}
+              variant="ghost"
+              size="md"
+            />
+          </div>
+          {selectedSpaceHeatSystemHeatSourceElement ? (
+            <button
+              type="button"
+              className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"
+              onClick={handleEditSelectedSpaceHeatSystemHeatSource}
+            >
+              Edit
+            </button>
+          ) : null}
+        </div>
+        {selectedSpaceHeatSystemIsWetDistribution ? (
+          <>
+            {renderFieldLabel('Emitters:', elementType)}
+            <div className="element-input">
+              <SpaceHeatSystemEmitterDropdown
+                linkedEmitters={selectedSpaceHeatSystemLinkedEmitterElements}
+                availableEmitters={selectedSpaceHeatSystemAvailableEmitterElements}
+                onToggleEmitter={handleSpaceHeatSystemEmitterToggle}
+                onCreateRadiator={handleCreateRadiatorForSelectedSpaceHeatSystem}
+              />
+            </div>
+          </>
+        ) : null}
+      </>
+    ) : null
+  );
+
   const renderAttributePanel = () => {
     const formRenderCtx: ElementFormRenderCtx = {
       elementType,
@@ -6004,6 +5723,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         onHostReadinessAction: handleDetailedJunctionHostReadinessAction,
       },
       renderMvhrDuctAndTerminalManager,
+      productCatalogue,
+      renderSpaceHeatSystemPicker,
+      renderSpaceHeatSystemEmitterManager,
     };
     switch (elementType) {
       case 'BuildingElementOpaque':
@@ -7331,87 +7053,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         return elementFormInstances.MechanicalVentilationTerminal.renderPanel(formRenderCtx);
 
       case 'WetEmitter':
-        return (
-          <>
-            {renderFieldLabel('Subcategory:', elementType)}
-            <div className="element-input" ref={registerBaseFieldRefs('subcategory')}>
-              <StandardDropdown
-                value={subcategory}
-                onChange={(value) => {
-                  const nextValue = value as ElementOfType<'WetEmitter'>['subcategory'];
-                  setSubcategory(nextValue);
-                  commitExistingElementDraft({ subcategory: nextValue });
-                }}
-                options={[
-                  { value: 'radiator', label: 'Radiator' },
-                  { value: 'ufh', label: 'Underfloor Heating' },
-                  { value: 'fancoil', label: 'Fan Coil' }
-                ]}
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {renderFieldLabel('Space heat system:', elementType)}
-            <div
-              className="element-input"
-              style={EDITOR_FIELD_ACTION_ROW_STYLE}
-              ref={registerBaseFieldRefs('space_heat_system')}
-            >
-              <div style={EDITOR_FIELD_ACTION_FIELD_STYLE}>
-                <StandardDropdown
-                  value={spaceHeatSystem}
-                  onChange={handleSpaceHeatSystemDropdownChange}
-                  options={spaceHeatSystemOptions}
-                  variant="ghost"
-                  size="md"
-                />
-              </div>
-              {selectedSpaceHeatSystemForEmitter ? (
-                <button
-                  type="button"
-                  className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"
-                  onClick={handleEditSelectedWetEmitterSpaceHeatSystem}
-                >
-                  Edit
-                </button>
-              ) : null}
-            </div>
-            {subcategory === 'ufh' && (
-              <>
-                {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
-                <div className="element-input" ref={registerBaseFieldRefs('area')}>
-                  <StandardInput
-                    {...decimalInputProps(areaInput)}
-                    unit={fieldUnit('area')}
-                    step="0.01"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-              </>
-            )}
-            {(subcategory === 'radiator' || subcategory === 'fancoil') && (
-              <>
-                {renderFieldLabel('Unit Number:', elementType)}
-                <div className="element-input" ref={registerBaseFieldRefs(['unitNumber', 'unit_number'])}>
-                  <StandardInput
-                    {...integerInputProps(unitNumberInput)}
-                    unit={fieldUnit('unit_number')}
-                    step="1"
-                    min="0"
-                    required
-                    variant="ghost"
-                    size="md"
-                    className="flex-1"
-                  />
-                  <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('unitNumber', unitNumberInput.value)} issue={getFieldValidationIssue('unitNumber', unitNumberInput.value) || undefined} />
-                </div>
-              </>
-            )}
-          </>
-        );
+        return elementFormInstances.WetEmitter.renderPanel(formRenderCtx);
 
       case 'WaterPipework':
         return elementFormInstances.WaterPipework.renderPanel(formRenderCtx);
@@ -7438,127 +7080,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       case 'OnSiteGeneration':
         return elementFormInstances.OnSiteGeneration.renderPanel(formRenderCtx);
 
-      case 'System': {
-        return (
-          <>
-            {productCatalogue ? (
-              <div className="element-editor-segment">
-                <div className="element-editor-segment__label">Source</div>
-                <div className="element-editor-segment__control">
-                  <button
-                    type="button"
-                    className={`element-editor-segment__button ${systemUiMode === 'presets' ? 'element-editor-segment__button--active' : ''}`}
-                    onClick={() => requestSystemUiMode('presets')}
-                  >
-                    Sample
-                  </button>
-                  <button
-                    type="button"
-                    className={`element-editor-segment__button ${systemUiMode === 'pcdb' ? 'element-editor-segment__button--active' : ''}`}
-                    onPointerEnter={productCatalogue.prefetchSystemSource}
-                    onFocus={productCatalogue.prefetchSystemSource}
-                    onMouseDown={productCatalogue.prefetchSystemSource}
-                    onClick={() => requestSystemUiMode('pcdb')}
-                  >
-                    PCDB
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {!productCatalogue || systemUiMode === 'presets' ? (
-              <>
-                {renderFieldLabel('Category:', elementType)}
-                <div className="element-input">
-                  <StandardDropdown
-                    value={systemSubcategory}
-                    onChange={handleSystemSubcategoryChange}
-                    options={[
-                      { value: 'HeatSourceWet', label: SYSTEM_SUBCATEGORY_LABELS.HeatSourceWet },
-                      { value: 'HotWaterSource', label: SYSTEM_SUBCATEGORY_LABELS.HotWaterSource },
-                      { value: 'SpaceCoolSystem', label: SYSTEM_SUBCATEGORY_LABELS.SpaceCoolSystem },
-                      { value: 'SpaceHeatSystem', label: SYSTEM_SUBCATEGORY_LABELS.SpaceHeatSystem },
-                    ]}
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                {renderFieldLabel('Preset:', elementType)}
-                <div className="element-input">
-                  <StandardDropdown
-                    value={systemPreset}
-                    onChange={handleSystemPresetChange}
-                    options={systemPresetDropdownOptions}
-                    placeholder={systemPresetOptions.length === 0 ? 'Loading…' : 'Select preset…'}
-                    variant="ghost"
-                    size="md"
-                  />
-                </div>
-                {systemSubcategory === 'SpaceHeatSystem' && selectedSpaceHeatSystemUsesHeatSourceWet ? (
-                  <>
-                    {renderFieldLabel('Heat source:', elementType)}
-                    <div className="element-input" style={EDITOR_FIELD_ACTION_ROW_STYLE}>
-                      <div style={EDITOR_FIELD_ACTION_FIELD_STYLE}>
-                        <StandardDropdown
-                          value={selectedSpaceHeatSystemHeatSourceName}
-                          onChange={handleSpaceHeatSystemHeatSourceChange}
-                          options={[
-                            {
-                              value: '',
-                              label: heatSourceWetReferenceOptions.length > 0
-                                ? 'Select heat source'
-                                : 'Create HeatSourceWet first',
-                              disabled: heatSourceWetReferenceOptions.length === 0,
-                            },
-                            ...heatSourceWetReferenceOptions,
-                          ]}
-                          variant="ghost"
-                          size="md"
-                        />
-                      </div>
-                      {selectedSpaceHeatSystemHeatSourceElement ? (
-                        <button
-                          type="button"
-                          className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"
-                          onClick={handleEditSelectedSpaceHeatSystemHeatSource}
-                        >
-                          Edit
-                        </button>
-                      ) : null}
-                    </div>
-                    {selectedSpaceHeatSystemIsWetDistribution ? (
-                      <>
-                        {renderFieldLabel('Emitters:', elementType)}
-                        <div className="element-input">
-                          <SpaceHeatSystemEmitterDropdown
-                            linkedEmitters={selectedSpaceHeatSystemLinkedEmitterElements}
-                            availableEmitters={selectedSpaceHeatSystemAvailableEmitterElements}
-                            onToggleEmitter={handleSpaceHeatSystemEmitterToggle}
-                            onCreateRadiator={handleCreateRadiatorForSelectedSpaceHeatSystem}
-                          />
-                        </div>
-                      </>
-                    ) : null}
-                  </>
-                ) : null}
-                {systemSourceFromStore === 'custom' ? (
-                  <div className="element-editor-note">
-                    {systemPreset
-                      ? `Custom system. Started from ${selectedSystemPresetLabel}; edits are saved in this model.`
-                      : 'Custom system. Edits are saved in this model.'}
-                  </div>
-                ) : null}
-              </>
-            ) : productCatalogue.renderSystemSource({
-              active: true,
-              element: selectedSystemElementFull,
-              elementsById,
-              elementVersion: selectedElementV,
-              onApply: handlePcdbSystemApply,
-            })}
-          </>
-        );
-      }
+      case 'System':
+        return elementFormInstances.System.renderPanel(formRenderCtx);
 
       case 'ElectricBattery':
         return elementFormInstances.ElectricBattery.renderPanel(formRenderCtx);
@@ -8445,7 +7968,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   {/* Show zone for placeable elements; SpaceHeatSystem needs this even in FHS mode. */}
                   {!isGlobalElementType(elementType) &&
                     (!complianceSettings.complianceValidationEnabled ||
-                      (elementType === 'System' && systemSubcategory === 'SpaceHeatSystem')) && (
+                      (elementType === 'System' && systemFormState.systemSubcategory === 'SpaceHeatSystem')) && (
                     <>
                       <div className="element-label">Zone:</div>
                       <div className="element-input" ref={registerBaseFieldRefs(['zoneId', 'zone_id'])}>
@@ -8744,30 +8267,38 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             />
           </React.Suspense>
         )}
+      {/* pendingSystemAction lives in elementForms/system.tsx's module state now
+          (slice-5 brief item 8) — this modal stays orchestrator-tail-rendered
+          rather than moving into System's renderPanel: resetFormFields has
+          never cleared pendingSystemAction (decision (g), fixed in a later
+          simplify commit), so a pending confirm can survive a selection
+          change to ANY other element/zone/dormer, and renderPanel only
+          mounts while elementType === 'System'. See system.tsx's module
+          header for the full writeup. */}
       <DeleteConfirmModal
-        isOpen={!!pendingSystemAction}
-        onClose={() => setPendingSystemAction(null)}
-        onConfirm={confirmSystemSourceSwitch}
+        isOpen={!!systemFormState.pendingSystemAction}
+        onClose={() => systemFormState.setPendingSystemAction(null)}
+        onConfirm={systemFormState.confirmSystemSourceSwitch}
         title={
-          pendingSystemAction?.kind === 'source'
-            ? (pendingSystemAction.target === 'pcdb' ? 'Switch to PCDB?' : 'Switch to Sample?')
-            : pendingSystemAction?.kind === 'subcategory'
+          systemFormState.pendingSystemAction?.kind === 'source'
+            ? (systemFormState.pendingSystemAction.target === 'pcdb' ? 'Switch to PCDB?' : 'Switch to Sample?')
+            : systemFormState.pendingSystemAction?.kind === 'subcategory'
               ? 'Change system category?'
-              : pendingSystemAction?.value?.trim()
+              : systemFormState.pendingSystemAction?.value?.trim()
                 ? 'Apply system preset?'
                 : 'Clear system preset?'
         }
         message={
-          pendingSystemAction?.kind === 'source'
+          systemFormState.pendingSystemAction?.kind === 'source'
             ? (
-              pendingSystemAction.target === 'pcdb'
+              systemFormState.pendingSystemAction.target === 'pcdb'
                 ? 'This removes the current sample preset and any merged heating or cooling JSON on this system row. Continue?'
                 : 'This removes the PCDB selection and any merged heating or cooling JSON, then loads the first preset for the selected category. Continue?'
             )
-            : pendingSystemAction?.kind === 'subcategory'
+            : systemFormState.pendingSystemAction?.kind === 'subcategory'
               ? 'This clears the current system preset and any merged heating or cooling JSON on this system row. Continue?'
-              : pendingSystemAction?.value?.trim()
-                ? `This replaces the current system JSON with ${formatSystemPresetName(pendingSystemAction.value)}. Continue?`
+              : systemFormState.pendingSystemAction?.value?.trim()
+                ? `This replaces the current system JSON with ${formatSystemPresetName(systemFormState.pendingSystemAction.value)}. Continue?`
                 : 'This clears the current system preset and any merged heating or cooling JSON on this system row. Continue?'
         }
         itemType="element"
