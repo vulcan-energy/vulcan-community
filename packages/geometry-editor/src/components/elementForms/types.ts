@@ -10,7 +10,11 @@
 // dispatches the other operations through its registry by element type.
 
 import type { ReactNode } from 'react';
-import type { GeometryDetailedJunctionSolverContribution } from '../../../../geometry-editor-host/src';
+import type {
+  GeometryDetailedJunctionSolverContribution,
+  GeometryProductCatalogueContribution,
+  GeometryWorkspaceResourcePort,
+} from '../../../../geometry-editor-host/src';
 import type { Element, ElementType } from '../../geometry/types';
 import type { NumericDraftInputBinding } from './formPrimitives';
 import type { ServiceLineFormGroup } from './serviceLine';
@@ -49,6 +53,11 @@ export interface ElementFormSharedCtx {
   /** WindowShading's editable distance field; ContextShading's read-only computed
    * distance display. */
   distanceInput: NumericDraftInputBinding;
+  /** The unextracted wall family's (Opaque/Transparent/Ground/adjacent) area
+   * field; also WetEmitter's UFH-only area field (elementForms/wetEmitter.tsx),
+   * read/written ONLY via ctx.shared — same precedent as heightInput/
+   * distanceInput above. */
+  areaInput: NumericDraftInputBinding;
   parentElement: string;
   setParentElement: (value: string) => void;
   pitch: number;
@@ -65,9 +74,34 @@ export interface ElementFormSharedCtx {
    * state directly. Implemented in the orchestrator as the existing
    * setPitch/setOrientation360 calls. */
   applyParentPitchOrientationForDisplay: (pitch: number | undefined, orientation: number | undefined) => void;
+  /** WetEmitter's selected SpaceHeatSystem name (elementForms/wetEmitter.tsx) —
+   * NOT a wall-family field, but bridged here for the same structural reason:
+   * ElementFormRenderCtx.renderSpaceHeatSystemPicker (the orchestrator-owned
+   * System<->WetEmitter bridge, slice-5 brief decision (f).1) is a zero-arg
+   * callback that both displays and writes this value from handlers defined
+   * earlier in ElementCreator's render than WetEmitter's module state would
+   * exist, so it cannot receive that state as a call-time argument. Keeping
+   * spaceHeatSystem as orchestrator state bridged through ctx.shared — same
+   * shape as parentElement/pitch/orientation360 above — resolves the seam
+   * without changing the picker callback's locked `() => ReactNode` contract.
+   * See elementForms/wetEmitter.tsx's header for the full writeup. */
+  spaceHeatSystem: string;
+  setSpaceHeatSystem: (value: string) => void;
 }
 
 export interface ElementFormStateCtx {
+  /** The orchestrator's current "active family" UI state (the still-inline
+   * ElementTypePicker/hydrate-effect-driven `elementType` local state) — added
+   * for System's module (slice-5 stage 3): several of System's moved pieces
+   * (systemPresetDirectory's useKeyedState key, selectedSystemElement(+Full),
+   * systemSwitchNeedsWarning/requestSystemUiMode's isSystemElementType check)
+   * must gate on "is System currently the displayed family", which is this
+   * flag, not derivable from selection alone (selection can point at a System
+   * element while the user has manually retyped the *displayed* family via
+   * ElementTypePicker without an intervening selection change — a real,
+   * legacy-preserved edge case). No other extracted module has needed this;
+   * System-only consumer. */
+  elementType: ElementType;
   commitElementNumericField: (field: string) => (value: number | '') => void;
   /** Needed by modules (e.g. Lighting's powerInput) whose numeric-input commit
    * callback writes more than a single field and must go through the generic
@@ -103,11 +137,30 @@ export interface ElementFormStateCtx {
    * the orchestrator via useServiceLineFormState; the orchestrator also reads `mode`
    * for the shared shape picker, which is why it is not module-owned. */
   serviceLine: ServiceLineFormGroup;
+  /** System's preset IO (readText/list of input/batch_parameters/{dir}/*.json) —
+   * the same host-provided port ElementCreator receives as a prop, threaded
+   * through so System's module can read/write presets without the
+   * orchestrator's `workspaceResourcePort` prop leaking into the generic ctx
+   * by any other name. */
+  workspaceResourcePort: GeometryWorkspaceResourcePort;
+  /** System's `applySystemPresetChange` needs the selected element's zone
+   * NAME (not just its id) to seed a preset's `Zone` field — the same
+   * orchestrator helper reused verbatim on ElementFormBuildCtx below for
+   * buildElementData's equivalent need, rather than exposing the raw
+   * zones/getZoneById store surface generically. System-only consumer. */
+  getZoneNameForElementZoneId: (zoneId: unknown) => string | null;
 }
 
 export interface ElementFormBuildCtx {
   baseData: Record<string, unknown>;
   elementZoneId: string;
+  /** System's buildElementData syncs the SpaceHeatSystem zone name into
+   * extra_json on save — see ElementFormStateCtx's field of the same name
+   * (same underlying orchestrator closure, exposed on both narrow ctx shapes
+   * since buildElementData only receives this one). Optional because System
+   * is its only consumer; every other family's buildNewElementData call site
+   * omits it. */
+  getZoneNameForElementZoneId?: (zoneId: unknown) => string | null;
 }
 
 export interface ElementFormRenderCtx {
@@ -168,6 +221,28 @@ export interface ElementFormRenderCtx {
    * ElementCreator and is injected as a callback. Invoked from
    * MechanicalVentilation's panel when the selected unit is an MVHR. */
   renderMvhrDuctAndTerminalManager: () => ReactNode;
+  /** The host's product-catalogue contribution (inspectorContributions.
+   * productCatalogue) — System's Sample/PCDB source toggle and PCDB apply flow.
+   * Same host-contribution precedent as thermalBridgeJunction above;
+   * System-only consumer (not-yet-extracted module), nullable because the host
+   * may not provide one. */
+  productCatalogue: GeometryProductCatalogueContribution | null;
+  /** Orchestrator-owned System<->WetEmitter cross-creation bridge (slice-5
+   * brief decision (f).1, CONSERVATIVE option): renders WetEmitter's
+   * space-heat-system dropdown, including the "Create new SpaceHeatSystem..."
+   * option and the edit-jump link to the selected System element. The six
+   * underlying handlers stay in ElementCreator (they read/write allElements,
+   * addElement, setSelection/setSelectedElementIds — none of which the generic
+   * ctx exposes, matching the renderMvhrDuctAndTerminalManager precedent
+   * above). Store-level cross-creation consolidation is explicitly out of
+   * scope for this slice. Invoked from WetEmitter's panel. */
+  renderSpaceHeatSystemPicker: () => ReactNode;
+  /** Orchestrator-owned System<->WetEmitter cross-creation bridge, the System
+   * side: renders the linked-emitters dropdown (SpaceHeatSystemEmitterDropdown)
+   * and its "Create Radiator" action for a selected wet-distribution
+   * SpaceHeatSystem. Same decision/precedent as renderSpaceHeatSystemPicker
+   * above. Invoked from System's (not-yet-extracted) panel. */
+  renderSpaceHeatSystemEmitterManager: () => ReactNode;
 }
 
 export interface ElementFormModule<S> {
