@@ -99,7 +99,8 @@ function schemaAlternatives(schema: JsonRecord, key: 'oneOf' | 'anyOf'): JsonRec
   return Array.isArray(value) ? value.filter(isRecord) : null;
 }
 
-function schemaTypeList(schema: JsonRecord): string[] {
+// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
+export function schemaTypeList(schema: JsonRecord): string[] {
   const typeValue = schema.type;
   if (Array.isArray(typeValue)) return typeValue.filter((type): type is string => typeof type === 'string');
   return typeof typeValue === 'string' ? [typeValue] : [];
@@ -148,6 +149,7 @@ function coerceDropdownValue(
 }
 
 /** Per-field validation aligned with the schema mode used by this JsonForms instance (FHS vs Core). */
+// eslint-disable-next-line react-refresh/only-export-components -- data-layer validation helper shared with DirectAdvancedFields.
 export function validateAdvancedFieldPrimitive(
   config: RendererConfig | undefined,
   elementType: string | undefined,
@@ -2392,7 +2394,8 @@ const GenericControl: React.FC<ControlProps> = (props) => {
 };
 
 /** e.g. HEM `area_per_perimeter_vent`: anyOf number | null — core `isNumberControl` may be false until resolved. */
-function schemaIsNullableNumberAnyOf(schema: unknown): boolean {
+// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
+export function schemaIsNullableNumberAnyOf(schema: unknown): boolean {
   const a = readRecord(schema).anyOf;
   if (!Array.isArray(a)) return false;
   return a.some((x) => readRecord(x).type === 'number') && a.some((x) => readRecord(x).type === 'null');
@@ -2402,11 +2405,13 @@ function schemaHasIntegerType(schema: unknown): boolean {
   return schemaTypeList(readRecord(schema)).includes('integer');
 }
 
-function schemaHasEnum(schema: unknown): boolean {
+// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
+export function schemaHasEnum(schema: unknown): boolean {
   return Array.isArray(readRecord(schema).enum);
 }
 
-function schemaHasConstAlternatives(schema: unknown, key: 'oneOf' | 'anyOf'): boolean {
+// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
+export function schemaHasConstAlternatives(schema: unknown, key: 'oneOf' | 'anyOf'): boolean {
   const alts = schemaAlternatives(readRecord(schema), key);
   return !!alts && alts.every((a) => Object.prototype.hasOwnProperty.call(a, 'const'));
 }
@@ -2419,7 +2424,8 @@ function schemaIsPlainString(schema: unknown): boolean {
 
 /**
  * Advanced Fields uses both our NumberControl (hints, R_u / ground U buttons) and @jsonforms/material-renderers.
- * Material is registered second and can win ties; use a high rank so our control always renders here.
+ * Ties actually go to standardRenderers (lodash maxBy keeps the first max, and material registers second);
+ * the high rank just keeps material from ever outranking us outright here (its control testers rank ~2-5).
  */
 function advancedFieldsNumericTester(...args: Parameters<typeof isNumberControl>): boolean {
   const [uischema, schema, context] = args;

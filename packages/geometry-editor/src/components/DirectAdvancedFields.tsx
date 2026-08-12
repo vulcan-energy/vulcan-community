@@ -13,11 +13,16 @@
 
 import React from 'react';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
+import { readRecord } from '../lib/jsonTypes';
 import {
   BooleanControl,
   EnumControl,
   NumberControl,
   TextControl,
+  schemaHasConstAlternatives,
+  schemaHasEnum,
+  schemaIsNullableNumberAnyOf,
+  schemaTypeList,
   validateAdvancedFieldPrimitive,
 } from './jsonformsRenderers';
 
@@ -35,47 +40,16 @@ export type DirectAdvancedFieldsProps = {
 // control components themselves so this module never touches `@jsonforms/*` types.
 type DirectControlProps = React.ComponentProps<typeof TextControl>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readRecord(value: unknown): Record<string, unknown> {
-  return isRecord(value) ? value : {};
-}
-
-function schemaTypeList(schema: Record<string, unknown>): string[] {
-  const typeValue = schema.type;
-  if (Array.isArray(typeValue)) return typeValue.filter((t): t is string => typeof t === 'string');
-  return typeof typeValue === 'string' ? [typeValue] : [];
-}
-
-function schemaAlternatives(
-  schema: Record<string, unknown>,
-  key: 'oneOf' | 'anyOf',
-): Record<string, unknown>[] | null {
-  const value = schema[key];
-  return Array.isArray(value) ? value.filter(isRecord) : null;
-}
-
-function everyAlternativeHasConst(alternatives: Record<string, unknown>[] | null): boolean {
-  return !!alternatives && alternatives.length > 0
-    && alternatives.every((a) => Object.prototype.hasOwnProperty.call(a, 'const'));
-}
-
-/** Local port of jsonformsRenderers.tsx's `schemaIsNullableNumberAnyOf` (not exported there). */
-function isNullableNumberAnyOf(schema: Record<string, unknown>): boolean {
-  const alts = schemaAlternatives(schema, 'anyOf');
-  if (!alts) return false;
-  return alts.some((a) => a.type === 'number') && alts.some((a) => a.type === 'null');
-}
-
 /**
- * Pure port of the `standardRenderers` tester precedence in
- * `components/jsonformsRenderers.tsx:2434-2549`, as it applies in the Advanced Fields
- * context (`config.advancedEditor: true`), collapsed by rank (highest wins in JsonForms):
+ * Port of the `standardRenderers` tester precedence in
+ * `components/jsonformsRenderers.tsx` (registry near the bottom of that file), as it
+ * applies in the Advanced Fields context (`config.advancedEditor: true`), collapsed by
+ * rank (highest wins in JsonForms). The schema predicates are IMPORTED from that file —
+ * the same functions the tester table itself calls — so only the rank-collapse ordering
+ * below is hand-maintained, not the predicate logic:
  *
  *  - rank 1100 (x2): oneOf/anyOf where EVERY alternative declares `const` -> 'enum'
- *  - rank 1000: `Array.isArray(schema.enum)` -> 'enum'
+ *  - rank 1000: `schemaHasEnum` -> 'enum'
  *  - ranks 280 (`advancedFieldsNumericTester`, gated on `advancedEditor: true`) / 92
  *    (integer) / 90 (`isNumberControl`): type list includes 'number'/'integer', or a
  *    nullable-number anyOf (`schemaIsNullableNumberAnyOf`, e.g. HEM
@@ -93,15 +67,12 @@ function isNullableNumberAnyOf(schema: Record<string, unknown>): boolean {
  * ElectricBattery, are flat — no groups).
  */
 export function pickDirectControl(resolved: Record<string, unknown>): 'enum' | 'number' | 'boolean' | 'text' {
-  const oneOf = schemaAlternatives(resolved, 'oneOf');
-  const anyOf = schemaAlternatives(resolved, 'anyOf');
-  if (everyAlternativeHasConst(oneOf) || everyAlternativeHasConst(anyOf)) return 'enum';
-  if (Array.isArray(resolved.enum)) return 'enum';
+  if (schemaHasConstAlternatives(resolved, 'oneOf') || schemaHasConstAlternatives(resolved, 'anyOf')) return 'enum';
+  if (schemaHasEnum(resolved)) return 'enum';
 
   const types = schemaTypeList(resolved);
-  if (types.includes('number') || types.includes('integer') || isNullableNumberAnyOf(resolved)) return 'number';
+  if (types.includes('number') || types.includes('integer') || schemaIsNullableNumberAnyOf(resolved)) return 'number';
   if (types.includes('boolean')) return 'boolean';
-  if (types.includes('string')) return 'text';
 
   return 'text';
 }
