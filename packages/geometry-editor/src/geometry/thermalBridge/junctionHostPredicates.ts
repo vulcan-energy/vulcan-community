@@ -8,9 +8,16 @@
  * (see {@link proposeAdjacentWallJunctionThermalBridges}, {@link proposeRoofOpenings}).
  */
 import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
-import type { BuildingElementGround, BuildingElementOpaque, BuildingElementTransparent, Element } from '../types';
+import type {
+  BuildingElementAdjacentConditionedSpace,
+  BuildingElementGround,
+  BuildingElementOpaque,
+  BuildingElementTransparent,
+  Element,
+} from '../types';
 import type { JunctionProposerHostPattern } from './junctionContractRegistry';
 import {
+  horizontalConditionedFloorSlabPlanEdgesForPartyWallTb,
   isHorizontalAdjacentFloorLineForPartyTb,
 } from './proposeAdjacentWallJunction';
 import { isPartyHorizontalConditionedFloorSlabHost } from './proposeE7PartyFloorExternalWall';
@@ -102,6 +109,60 @@ function validateRoofPolygonOrWindowEdge(
 }
 
 /**
+ * P-series floor-host check for `party_wall_plus_floor_segment`, by junction code:
+ *
+ *  - P1/P6 (party wall × ground floor, normal/inverted — parallel to E5/E19 at an external wall):
+ *    the floor is a **non-basement** `BuildingElementGround`. A basement ground is E22's polygon-edge
+ *    family, not a party-wall line junction.
+ *  - P2/P3 (party wall × intermediate conditioned floor — parallel to E6/E7): the floor is a
+ *    `BuildingElementAdjacentConditionedSpace` at pitch 0° (floor) or 180° (ceiling) — the same slab
+ *    modelled from either side of the storey.
+ *  - P7/P8 and any other code sharing this pattern keep the original broad acceptance (any
+ *    `BuildingElementGround`, or {@link isHorizontalAdjacentFloorLineForPartyTb}) — nothing here
+ *    narrows their intent enough to tighten safely.
+ */
+function validatePartyWallPlusFloorSegmentHost(
+  host: Element,
+  junctionType: string | undefined,
+): { ok: boolean; detail: string } {
+  const jt = junctionType?.trim();
+  if (jt === 'P1' || jt === 'P6') {
+    if (host.type === 'BuildingElementGround' && !isBasementGroundHost(host as BuildingElementGround)) {
+      return { ok: true, detail: '' };
+    }
+    return {
+      ok: false,
+      detail:
+        'Expected a party wall segment or a non-basement BuildingElementGround slab, matching P1/P6 party-wall × ground-floor junctions.',
+    };
+  }
+  if (jt === 'P2' || jt === 'P3') {
+    // The plan-edge extractor carries the full host bar — placeholder, pitch 0/180,
+    // coplanar-Z and non-degenerate-edge checks — for both lines and polygons.
+    if (
+      host.type === 'BuildingElementAdjacentConditionedSpace' &&
+      horizontalConditionedFloorSlabPlanEdgesForPartyWallTb(
+        host as BuildingElementAdjacentConditionedSpace,
+      ).length > 0
+    ) {
+      return { ok: true, detail: '' };
+    }
+    return {
+      ok: false,
+      detail:
+        'Expected a party wall segment or a horizontal party floor/ceiling line (pitch 0° or 180°), matching P2/P3 party-wall × intermediate-floor junctions.',
+    };
+  }
+  if (host.type === 'BuildingElementGround') return { ok: true, detail: '' };
+  if (isHorizontalAdjacentFloorLineForPartyTb(host)) return { ok: true, detail: '' };
+  return {
+    ok: false,
+    detail:
+      'Expected a party wall segment, BuildingElementGround slab, or horizontal floor line (pitch 0°), matching P7/P8 party-wall junctions.',
+  };
+}
+
+/**
  * Whether `host` matches what façade / roof / party proposers attach this junction family to.
  * Dual-wall corners (E16/E17) skip this layer — handled only via {@link thermal_bridge_source} walls.
  *
@@ -180,13 +241,7 @@ export function validateHostForProposerPattern(
       };
     case 'party_wall_plus_floor_segment':
       if (isPartyWallVerticalEnvelopeLine(host)) return { ok: true, detail: '' };
-      if (host.type === 'BuildingElementGround') return { ok: true, detail: '' };
-      if (isHorizontalAdjacentFloorLineForPartyTb(host)) return { ok: true, detail: '' };
-      return {
-        ok: false,
-        detail:
-          'Expected a party wall segment, BuildingElementGround slab, or horizontal floor line (pitch 0°), matching P1/P2/P3/P6/P7/P8 party-wall junctions.',
-      };
+      return validatePartyWallPlusFloorSegmentHost(host, junctionType);
     case 'party_wall_to_external_line':
       if (isExternalLineWall(host) || isPartyWallVerticalEnvelopeLine(host)) return { ok: true, detail: '' };
       return {

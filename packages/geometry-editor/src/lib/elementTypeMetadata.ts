@@ -116,7 +116,7 @@ const ELEMENT_TYPE_DETAILS: Record<ElementType, Omit<ElementTypeMenuOption, 'typ
     diagram: 'window',
   },
   BuildingElementGround: {
-    subtitle: 'Ground-contact or exposed floor',
+    subtitle: 'Ground-contact floor',
     section: 'fabric',
     diagram: 'floor',
   },
@@ -126,7 +126,7 @@ const ELEMENT_TYPE_DETAILS: Record<ElementType, Omit<ElementTypeMenuOption, 'typ
     diagram: 'internal',
   },
   BuildingElementAdjacentUnconditionedSpace_Simple: {
-    subtitle: 'Boundary to loft, garage or void',
+    subtitle: 'Boundary to loft, garage, void or exposed floor',
     section: 'fabric',
     diagram: 'unheated',
   },

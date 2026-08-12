@@ -342,6 +342,93 @@ describe('validateHostForProposerPattern (aligned with proposers)', () => {
     } as BuildingElementAdjacentConditionedSpace;
     expect(validateHostForProposerPattern(adjPitchBad, p, 'P2').ok).toBe(false);
   });
+
+  it('P-series floor hosts follow junction family: ground for P1/P6, conditioned plate for P2/P3', () => {
+    const p = getJunctionContract('P2')!.proposerHostPattern;
+    const slab: BuildingElementGround = {
+      type: 'BuildingElementGround',
+      id: 'g-fam',
+      name: 'G',
+      zoneId: 'z',
+      parent_element: null,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 1, y: 0, z: 0 },
+        { x: 1, y: 1, z: 0 },
+        { x: 0, y: 1, z: 0 },
+      ],
+      width: 0,
+      height: 0,
+      area: 1,
+      total_area: 1,
+      perimeter: 4,
+      floor_type: 'Slab_no_edge_insulation',
+    } as BuildingElementGround;
+    const plate: BuildingElementAdjacentConditionedSpace = {
+      type: 'BuildingElementAdjacentConditionedSpace',
+      id: 'plate-fam',
+      name: 'Plate',
+      zoneId: 'z',
+      parent_element: null,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+      ],
+      width: 4,
+      height: 0.2,
+      area: 10,
+      pitch: 180,
+      isPlaceholder: false,
+    } as BuildingElementAdjacentConditionedSpace;
+
+    // Cross-family hosts are rejected...
+    expect(validateHostForProposerPattern(plate, p, 'P1').ok).toBe(false);
+    expect(validateHostForProposerPattern(slab, p, 'P2').ok).toBe(false);
+    // ...basement grounds are not P1/P6 hosts (E22's family)...
+    const basement = { ...slab, id: 'g-base', floor_type: 'Heated_basement' } as BuildingElementGround;
+    expect(validateHostForProposerPattern(basement, p, 'P1').ok).toBe(false);
+    // ...pitch-180 plates are valid P3 hosts (party ceiling), and P7 keeps broad acceptance.
+    expect(validateHostForProposerPattern(plate, p, 'P3').ok).toBe(true);
+    expect(validateHostForProposerPattern(slab, p, 'P7').ok).toBe(true);
+    expect(validateHostForProposerPattern(basement, p, 'P7').ok).toBe(true);
+
+    // Malformed conditioned hosts never validate for P2/P3: placeholder, no geometry,
+    // non-coplanar Z, degenerate edge.
+    expect(
+      validateHostForProposerPattern({ ...plate, id: 'p-ph', isPlaceholder: true }, p, 'P2').ok,
+    ).toBe(false);
+    expect(
+      validateHostForProposerPattern({ ...plate, id: 'p-empty', coordinates: [] }, p, 'P2').ok,
+    ).toBe(false);
+    expect(
+      validateHostForProposerPattern(
+        {
+          ...plate,
+          id: 'p-slope',
+          coordinates: [
+            { x: 0, y: 0, z: 0 },
+            { x: 4, y: 0, z: 1 },
+          ],
+        },
+        p,
+        'P2',
+      ).ok,
+    ).toBe(false);
+    expect(
+      validateHostForProposerPattern(
+        {
+          ...plate,
+          id: 'p-degen',
+          coordinates: [
+            { x: 0, y: 0, z: 0 },
+            { x: 0.001, y: 0, z: 0 },
+          ],
+        },
+        p,
+        'P3',
+      ).ok,
+    ).toBe(false);
+  });
 });
 
 describe('findLinearThermalBridgeIssues + realistic hosts', () => {
