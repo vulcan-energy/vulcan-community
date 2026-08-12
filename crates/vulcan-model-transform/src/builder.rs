@@ -53,13 +53,29 @@ fn coerce_mass_distribution_class_for_fhs(raw: &str) -> Option<String> {
 
 const HORIZONTAL_POLYGON_Z_MAX_SPAN: f64 = 0.03;
 
-const NAMED_UI_ONLY_EXTRA_JSON_KEYS: &[&str] =
-    &["psi_source", "vulcan_assembly_v1", "ru_calculator_state_v1"];
+/// Non-underscore UI-only `extra_json` keys. The `_`-prefixed ones are caught by the prefix rule in
+/// [`is_ui_only_extra_json_key`]; these have to be named. Mirrors `EXTRA_JSON_UI_KEYS` in
+/// `packages/geometry-editor/src/lib/csvPresetUtils.ts`, which strips them browser-side before the
+/// merge — this list is what holds the invariant on every other route into the merge (the MCP
+/// server, the batch CLI, a hand-edited CSV), where that strip never runs.
+const NAMED_UI_ONLY_EXTRA_JSON_KEYS: &[&str] = &[
+    "psi_source",
+    "vulcan_assembly_v1",
+    "ru_calculator_state_v1",
+    // Adopted detailed-junction solve provenance: ψ anatomy, flanking-term U′ provenance and audit
+    // envelope. HEM reads the adopted `linear_thermal_transmittance`, never this blob.
+    "thermal_bridge_solver",
+];
 
 fn is_ui_only_extra_json_key(key: &str) -> bool {
     key.starts_with('_') || NAMED_UI_ONLY_EXTRA_JSON_KEYS.contains(&key)
 }
 
+/// Depth-blind strip, for the callers that hand over a single HEM field's value: every key below
+/// such a value is a field name, so filtering all of them is right. Section payloads — anything
+/// that becomes a whole `HeatSourceWet`/`HotWaterSource`/… map — must go through
+/// [`strip_ui_only_extra_json_section`] instead, because those contain user-named levels this
+/// would delete.
 fn strip_ui_only_extra_json_value(value: &Value) -> Value {
     match value {
         Value::Object(obj) => {
@@ -74,6 +90,157 @@ fn strip_ui_only_extra_json_value(value: &Value) -> Value {
         }
         Value::Array(items) => {
             Value::Array(items.iter().map(strip_ui_only_extra_json_value).collect())
+        }
+        _ => value.clone(),
+    }
+}
+
+/// Matches one user-defined name in [`NAME_KEYED_LEVELS`].
+const ANY_NAME: &str = "*";
+
+/// Every level, relative to a HEM section root, at which the schema keys an object by user-defined
+/// names (`additionalProperties`) rather than by fixed field names.
+///
+/// A key at one of these levels is a name the *user* chose for a system, appliance or schedule; it
+/// is never metadata, so [`is_ui_only_extra_json_key`] must not run on it. It would delete a
+/// schema-valid heat source the user called `_boiler` or `thermal_bridge_solver` wholesale, and
+/// silently. Every other level holds HEM field names, where a UI-only key is exactly what has to
+/// go — and where getting it wrong instead fails loudly on E047.
+///
+/// Union of `data/schemas/core-input.schema.json` and `data/schemas/input_fhs.schema.json`: one
+/// merge serves both, so a level either schema keys by name is preserved. FHS pins `HotWaterSource`
+/// to the single key `hw cylinder` while core allows any name; core is the wider one and wins.
+const NAME_KEYED_LEVELS: &[(&str, &[&[&str]])] = &[
+    (
+        "HeatSourceWet",
+        &[
+            &[],
+            // A hybrid heat pump's boiler carries cost schedules keyed by schedule name.
+            &[
+                ANY_NAME,
+                "boiler",
+                "cost_schedule_hybrid",
+                "cost_schedule_boiler",
+            ],
+            &[
+                ANY_NAME,
+                "boiler",
+                "cost_schedule_hybrid",
+                "cost_schedule_hp",
+            ],
+        ],
+    ),
+    (
+        "HotWaterSource",
+        // A storage tank's immersion heaters and coils are a name-keyed map of their own.
+        &[&[], &[ANY_NAME, "HeatSource"]],
+    ),
+    ("SpaceCoolSystem", &[&[]]),
+    ("SpaceHeatSystem", &[&[]]),
+    ("WWHRS", &[&[]]),
+    // These two are fixed-field objects at the root; the appliance maps hanging off them are what
+    // the user names.
+    (
+        "HotWaterDemand",
+        &[&["Shower"], &["Bath"], &["Other"], &["Distribution"]],
+    ),
+    (
+        "InfiltrationVentilation",
+        &[&["Vents"], &["MechanicalVentilation"]],
+    ),
+];
+
+/// One step of the path from a HEM section root down to the object being filtered.
+#[derive(Clone, Copy)]
+enum ExtraJsonPathSegment<'a> {
+    Key(&'a str),
+    /// An array element. Not a schema key level, so never a name level.
+    ArrayItem,
+}
+
+fn is_name_keyed_level(section: &str, path: &[ExtraJsonPathSegment<'_>]) -> bool {
+    NAME_KEYED_LEVELS
+        .iter()
+        .find(|(name, _)| *name == section)
+        .is_some_and(|(_, levels)| {
+            levels.iter().any(|level| {
+                level.len() == path.len()
+                    && level
+                        .iter()
+                        .zip(path)
+                        .all(|(pattern, segment)| match segment {
+                            ExtraJsonPathSegment::Key(key) => {
+                                *pattern == ANY_NAME || pattern == key
+                            }
+                            ExtraJsonPathSegment::ArrayItem => false,
+                        })
+            })
+        })
+}
+
+/// Strips UI-only `extra_json` keys from a whole HEM section payload — the `{ ... }` in a wrapped
+/// `{"HeatSourceWet": { ... }}` cell, which the merge installs as the section in one `insert`
+/// instead of walking it key by key. Without this the flat branches' filter never runs on wrapped
+/// rows and a UI-only blob (`thermal_bridge_solver`, `_`-prefixed provenance) reaches the schema as
+/// an unknown property — E047. Name levels per [`NAME_KEYED_LEVELS`] are walked through, not
+/// filtered.
+fn strip_ui_only_extra_json_section(
+    section: &str,
+    map: &serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    strip_ui_only_extra_json_object(section, &mut Vec::new(), map)
+}
+
+/// Twin of [`strip_ui_only_extra_json_section`] for the flat row shape, where `extra_json` holds
+/// one named system's own fields, so the walk starts one name level in.
+fn strip_ui_only_extra_json_system_fields<'a>(
+    section: &str,
+    system_name: &'a str,
+    map: &'a serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    strip_ui_only_extra_json_object(
+        section,
+        &mut vec![ExtraJsonPathSegment::Key(system_name)],
+        map,
+    )
+}
+
+fn strip_ui_only_extra_json_object<'a>(
+    section: &str,
+    path: &mut Vec<ExtraJsonPathSegment<'a>>,
+    map: &'a serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    let name_keyed = is_name_keyed_level(section, path);
+    let mut stripped = serde_json::Map::new();
+    for (key, nested) in map {
+        if !name_keyed && is_ui_only_extra_json_key(key) {
+            continue;
+        }
+        path.push(ExtraJsonPathSegment::Key(key));
+        stripped.insert(
+            key.clone(),
+            strip_ui_only_extra_json_descend(section, path, nested),
+        );
+        path.pop();
+    }
+    stripped
+}
+
+fn strip_ui_only_extra_json_descend<'a>(
+    section: &str,
+    path: &mut Vec<ExtraJsonPathSegment<'a>>,
+    value: &'a Value,
+) -> Value {
+    match value {
+        Value::Object(obj) => Value::Object(strip_ui_only_extra_json_object(section, path, obj)),
+        Value::Array(items) => {
+            path.push(ExtraJsonPathSegment::ArrayItem);
+            let mut stripped = Vec::with_capacity(items.len());
+            for item in items {
+                stripped.push(strip_ui_only_extra_json_descend(section, path, item));
+            }
+            path.pop();
+            Value::Array(stripped)
         }
         _ => value.clone(),
     }
@@ -5631,7 +5798,14 @@ impl JSONBuilder {
                                     if let Some(inner) =
                                         extra_json.get("HeatSourceWet").and_then(|v| v.as_object())
                                     {
-                                        let mut inner = inner.clone();
+                                        // Strip UI-only keys before the wholesale replace, exactly
+                                        // as the flat branch below does per key. The top level
+                                        // here is the user's own names for their heat sources, so
+                                        // the filter starts one level down.
+                                        let mut inner = strip_ui_only_extra_json_section(
+                                            "HeatSourceWet",
+                                            inner,
+                                        );
                                         self.ensure_fhs_heat_source_wet_defaults(&mut inner);
                                         // Wrapped format: { "HeatSourceWet": { "hp": { ... } } }
                                         // Replace the entire HeatSourceWet object with the preset contents
@@ -5646,7 +5820,10 @@ impl JSONBuilder {
                                         {
                                             result_obj.insert(
                                                 "HotWaterSource".to_string(),
-                                                Value::Object(hot_water_source.clone()),
+                                                Value::Object(strip_ui_only_extra_json_section(
+                                                    "HotWaterSource",
+                                                    hot_water_source,
+                                                )),
                                             );
                                         }
 
@@ -5699,16 +5876,12 @@ impl JSONBuilder {
                                                     "HeatSourceWet is not an object",
                                                 )
                                             })?;
-                                        let mut system_data = serde_json::Map::new();
-                                        for (key, value) in extra_json {
-                                            if is_ui_only_extra_json_key(key) {
-                                                continue;
-                                            }
-                                            system_data.insert(
-                                                key.clone(),
-                                                strip_ui_only_extra_json_value(value),
+                                        let mut system_data =
+                                            strip_ui_only_extra_json_system_fields(
+                                                "HeatSourceWet",
+                                                element_name,
+                                                extra_json,
                                             );
-                                        }
                                         if self.is_fhs_schema
                                             && !system_data.contains_key("is_heat_network")
                                         {
@@ -5735,7 +5908,10 @@ impl JSONBuilder {
                                         // Wrapped format: replace entire HotWaterSource
                                         result_obj.insert(
                                             "HotWaterSource".to_string(),
-                                            Value::Object(inner.clone()),
+                                            Value::Object(strip_ui_only_extra_json_section(
+                                                "HotWaterSource",
+                                                inner,
+                                            )),
                                         );
                                     } else {
                                         // Flat extra_json fallback
@@ -5751,16 +5927,11 @@ impl JSONBuilder {
                                                     "HotWaterSource is not an object",
                                                 )
                                             })?;
-                                        let mut system_data = serde_json::Map::new();
-                                        for (key, value) in extra_json {
-                                            if is_ui_only_extra_json_key(key) {
-                                                continue;
-                                            }
-                                            system_data.insert(
-                                                key.clone(),
-                                                strip_ui_only_extra_json_value(value),
-                                            );
-                                        }
+                                        let system_data = strip_ui_only_extra_json_system_fields(
+                                            "HotWaterSource",
+                                            element_name,
+                                            extra_json,
+                                        );
                                         target.insert(
                                             element_name.to_string(),
                                             Value::Object(system_data),
@@ -5782,6 +5953,10 @@ impl JSONBuilder {
                                         .and_then(|v| v.as_object())
                                     {
                                         // Wrapped format: replace entire SpaceCoolSystem
+                                        let inner = strip_ui_only_extra_json_section(
+                                            "SpaceCoolSystem",
+                                            inner,
+                                        );
                                         result_obj.insert(
                                             "SpaceCoolSystem".to_string(),
                                             Value::Object(inner.clone()),
@@ -5810,16 +5985,11 @@ impl JSONBuilder {
                                                     "SpaceCoolSystem is not an object",
                                                 )
                                             })?;
-                                        let mut system_data = serde_json::Map::new();
-                                        for (key, value) in extra_json {
-                                            if is_ui_only_extra_json_key(key) {
-                                                continue;
-                                            }
-                                            system_data.insert(
-                                                key.clone(),
-                                                strip_ui_only_extra_json_value(value),
-                                            );
-                                        }
+                                        let system_data = strip_ui_only_extra_json_system_fields(
+                                            "SpaceCoolSystem",
+                                            element_name,
+                                            extra_json,
+                                        );
                                         target.insert(
                                             element_name.to_string(),
                                             Value::Object(system_data),
@@ -6052,7 +6222,15 @@ impl JSONBuilder {
             let target = result_obj
                 .entry(root_key.to_string())
                 .or_insert_with(|| Value::Object(serde_json::Map::new()));
-            let stripped_fragment = strip_ui_only_extra_json_value(fragment);
+            // `root_key` names the HEM section this fragment becomes, so the strip knows which of
+            // its levels the user names (`SpaceHeatSystem`/`WWHRS` at the top; the appliance maps
+            // under `HotWaterDemand`/`InfiltrationVentilation`) and leaves those keys alone.
+            let stripped_fragment = match fragment {
+                Value::Object(obj) => {
+                    Value::Object(strip_ui_only_extra_json_section(root_key, obj))
+                }
+                other => strip_ui_only_extra_json_value(other),
+            };
             Self::deep_merge_json_value(target, &stripped_fragment);
         }
     }
