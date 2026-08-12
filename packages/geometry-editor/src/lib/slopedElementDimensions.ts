@@ -320,28 +320,16 @@ export const deriveLegacySlopedElementDimensions = (
 export const deriveSlopedElementDimensions = (
   element: SlopedElementDimensionSource,
 ): SlopedElementDimensions | null => {
-  const coords = element.coordinates;
-  if (!Array.isArray(coords) || coords.length < 3) return null;
-  const pitch = element.pitch;
-  if (!isFiniteNumber(pitch) || pitch <= 0 || pitch >= 90) return null;
+  // For parallelograms the legacy formula is already exact (height = area / low-edge width =
+  // true slope length), so it doubles as the guard clauses and the parallelogram result here.
+  const parallelogramDimensions = deriveLegacySlopedElementDimensions(element);
+  if (!parallelogramDimensions) return null;
 
-  const first = coords[0];
-  const second = coords[1];
-  if (!first || !second) return null;
+  const coords = element.coordinates as ReadonlyArray<{ x: number; y: number }>;
+  const pitch = element.pitch as number;
+  const area = parallelogramDimensions.area;
 
-  const lowEdgeWidth = Math.hypot(second.x - first.x, second.y - first.y);
-  if (!Number.isFinite(lowEdgeWidth) || lowEdgeWidth <= 1e-9) return null;
-
-  const area = getSlopedPolygonSurfaceArea(coords, { coordinates: coords, pitch });
-  if (!isFiniteNumber(area) || area <= 0) return null;
-
-  const parallelogramDimensions: SlopedElementDimensions = {
-    width: roundToTwoDecimals(lowEdgeWidth),
-    height: roundToTwoDecimals(area / lowEdgeWidth),
-    area: roundToTwoDecimals(area),
-  };
-
-  const semantics = getPolygonScalarDimensionSemantics(coords, lowEdgeWidth);
+  const semantics = getPolygonScalarDimensionSemantics(coords);
   if (!semantics?.usesEquivalentWidth) return parallelogramDimensions;
 
   // Non-parallelogram (triangle/trapezoid) sloped shapes: keep HEIGHT physically true because

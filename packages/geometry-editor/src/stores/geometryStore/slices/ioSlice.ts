@@ -377,20 +377,65 @@ const SLOPED_OVERRIDE_ELIGIBLE_TYPES = new Set<Element['type']>([
 ]);
 
 /**
+ * The CSV pitch column is written as `Math.round(pitch)` (see `formatBuildingElementPitchForCsv`)
+ * while the width/height columns were derived with the unrounded in-session pitch — so an import
+ * re-derivation with the rounded pitch can legitimately land up to half a degree away from the
+ * value the writer saw. A CSV value counts as "matching" a formula when it falls inside the
+ * envelope of that formula evaluated across the rounding window (±0.5°), padded by the usual
+ * sloped-dimension epsilon.
+ */
+const PITCH_CSV_ROUNDING_HALF_STEP_DEG = 0.5;
+const SLOPED_DIMENSION_EPSILON = 0.01;
+
+const matchesDerivedAcrossPitchRounding = (
+  csvValue: number,
+  element: Element,
+  derive: typeof deriveSlopedElementDimensions,
+  key: 'width' | 'height',
+): boolean => {
+  const pitch = (element as { pitch?: unknown }).pitch;
+  if (typeof pitch !== 'number' || !Number.isFinite(pitch)) return false;
+  const coordinates = (element as { coordinates?: unknown }).coordinates as Array<{ x: number; y: number; z: number }>;
+  const values: number[] = [];
+  for (const dp of [-PITCH_CSV_ROUNDING_HALF_STEP_DEG, 0, PITCH_CSV_ROUNDING_HALF_STEP_DEG]) {
+    const candidatePitch = pitch + dp;
+    if (candidatePitch <= 0 || candidatePitch >= 90) continue;
+    const derived = derive({ coordinates, pitch: candidatePitch });
+    if (derived) values.push(derived[key]);
+  }
+  if (values.length === 0) return false;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return csvValue >= min - SLOPED_DIMENSION_EPSILON && csvValue <= max + SLOPED_DIMENSION_EPSILON;
+};
+
+/**
  * Reconstruct `_widthUserOverride` / `_heightUserOverride` after CSV import: the geometry CSV
  * (geometry/io/geometryCsvLayouts.ts) has no dedicated override column, so a value that still
  * matches an auto-calc formula is treated as auto-calculated, not a real override. Checked
  * against both the current formula and the pre-"equivalent-width" legacy formula
  * (`deriveLegacySlopedElementDimensions`) so models saved before that change migrate cleanly
- * instead of getting a spurious override flag. Mutates elements in place, mirroring the
- * zone floor-area/height override reconstruction this runs alongside in `loadFromCSV`.
+ * instead of getting a spurious override flag, and across the CSV pitch column's integer
+ * rounding (`matchesDerivedAcrossPitchRounding`) so a 22.5° roof does not read back as
+ * overridden. Values recognised as auto-calculated are snapped to the current formula so a
+ * load → save round trip is idempotent and the editor shows what export/HEM will actually use.
+ *
+ * Elements carrying `extra_json.geometry_face` (dormer roof faces, profiled walls) are skipped
+ * entirely: their export path (`getAreaBasedElementExportGeometry`) writes the stored
+ * construction scalars verbatim, which legitimately match neither formula.
+ *
+ * Mutates elements in place, mirroring the zone floor-area/height override reconstruction this
+ * runs alongside in `loadFromCSV`.
  */
 const reconstructSlopedDimensionOverrideFlags = (elements: readonly Element[]): void => {
   for (const element of elements) {
     if (!SLOPED_OVERRIDE_ELIGIBLE_TYPES.has(element.type)) continue;
+    const extraJson = (element as { extra_json?: unknown }).extra_json;
+    if (extraJson && typeof extraJson === 'object' && 'geometry_face' in (extraJson as Record<string, unknown>)) {
+      continue;
+    }
     const derivedNew = deriveSlopedElementDimensions(element);
     if (!derivedNew) continue;
-    const derivedLegacy = deriveLegacySlopedElementDimensions(element);
     const record = element as unknown as {
       width?: unknown;
       height?: unknown;
@@ -400,20 +445,26 @@ const reconstructSlopedDimensionOverrideFlags = (elements: readonly Element[]): 
 
     const csvWidth = typeof record.width === 'number' && Number.isFinite(record.width) ? record.width : undefined;
     if (csvWidth) {
-      const matchesCurrent = !slopedDimensionDiffers(csvWidth, derivedNew.width);
-      const matchesLegacy = !!derivedLegacy && !slopedDimensionDiffers(csvWidth, derivedLegacy.width);
+      const matchesCurrent = matchesDerivedAcrossPitchRounding(csvWidth, element, deriveSlopedElementDimensions, 'width');
+      const matchesLegacy = matchesDerivedAcrossPitchRounding(csvWidth, element, deriveLegacySlopedElementDimensions, 'width');
       if (!matchesCurrent && !matchesLegacy) {
         record._widthUserOverride = true;
       }
     }
+    if (record._widthUserOverride !== true) {
+      record.width = derivedNew.width;
+    }
 
     const csvHeight = typeof record.height === 'number' && Number.isFinite(record.height) ? record.height : undefined;
     if (csvHeight) {
-      const matchesCurrent = !slopedDimensionDiffers(csvHeight, derivedNew.height);
-      const matchesLegacy = !!derivedLegacy && !slopedDimensionDiffers(csvHeight, derivedLegacy.height);
+      const matchesCurrent = matchesDerivedAcrossPitchRounding(csvHeight, element, deriveSlopedElementDimensions, 'height');
+      const matchesLegacy = matchesDerivedAcrossPitchRounding(csvHeight, element, deriveLegacySlopedElementDimensions, 'height');
       if (!matchesCurrent && !matchesLegacy) {
         record._heightUserOverride = true;
       }
+    }
+    if (record._heightUserOverride !== true) {
+      record.height = derivedNew.height;
     }
   }
 };
