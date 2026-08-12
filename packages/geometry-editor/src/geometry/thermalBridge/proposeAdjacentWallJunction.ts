@@ -177,7 +177,12 @@ export function adjacentEnvelopeVerticalExtentM(
   return adjacentVerticalExtentM(adj, floors);
 }
 
-function horizontalFloorPitchOk(el: BuildingElementAdjacentConditionedSpace | BuildingElementAdjacentUnconditionedSpace_Simple): boolean {
+function horizontalConditionedFloorPitchOk(el: BuildingElementAdjacentConditionedSpace): boolean {
+  const p = el.pitch;
+  return typeof p === 'number' && Number.isFinite(p) && (p === 0 || p === 180);
+}
+
+function horizontalUnconditionedFloorPitchOk(el: BuildingElementAdjacentUnconditionedSpace_Simple): boolean {
   const p = el.pitch;
   return typeof p === 'number' && Number.isFinite(p) && p === 0;
 }
@@ -205,7 +210,7 @@ function closedHorizontalFloorPlanRingEdgesXY(
 }
 
 /**
- * Closed XY edges for a horizontal (`pitch` 0°) conditioned floor — **line or polygon** slab footprint.
+ * Closed XY edges for a horizontal (`pitch` 0° or 180°) conditioned floor — **line or polygon** slab footprint.
  * Used for party-wall **P2/P3** pairing along each coincident boundary segment.
  */
 export function horizontalConditionedFloorSlabPlanEdgesForPartyWallTb(
@@ -214,7 +219,7 @@ export function horizontalConditionedFloorSlabPlanEdgesForPartyWallTb(
   if (el.isPlaceholder) return [];
   const c = el.coordinates;
   if (!c || c.length < 2) return [];
-  if (!horizontalFloorPitchOk(el)) return [];
+  if (!horizontalConditionedFloorPitchOk(el)) return [];
   const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
   for (let i = 1; i < c.length; i++) {
     const zi = typeof c[i]?.z === 'number' && Number.isFinite(c[i].z) ? c[i].z : 0;
@@ -223,12 +228,12 @@ export function horizontalConditionedFloorSlabPlanEdgesForPartyWallTb(
   return closedHorizontalFloorPlanRingEdgesXY(c);
 }
 
-/** Horizontal pitch-0 floor line (two plan points, same Z) — conditioned host for P2/P3. */
+/** Horizontal pitch-0 or pitch-180 floor line (two plan points, same Z) — conditioned host for P2/P3. */
 export function isHorizontalConditionedFloorAdjacentLine(el: Element): el is BuildingElementAdjacentConditionedSpace {
   if (el.type !== 'BuildingElementAdjacentConditionedSpace' || el.isPlaceholder) return false;
   const c = el.coordinates;
   if (!c || c.length !== 2) return false;
-  if (!horizontalFloorPitchOk(el as BuildingElementAdjacentConditionedSpace)) return false;
+  if (!horizontalConditionedFloorPitchOk(el as BuildingElementAdjacentConditionedSpace)) return false;
   if (dist2XY(c[0]!, c[1]!) < MIN_WALL_LEN_XY_M) return false;
   const z0 = typeof c[0]!.z === 'number' && Number.isFinite(c[0]!.z) ? c[0]!.z : 0;
   const z1 = typeof c[1]!.z === 'number' && Number.isFinite(c[1]!.z) ? c[1]!.z : 0;
@@ -242,7 +247,7 @@ export function isHorizontalUnconditionedFloorAdjacentLine(
   if (el.type !== 'BuildingElementAdjacentUnconditionedSpace_Simple' || el.isPlaceholder) return false;
   const c = el.coordinates;
   if (!c || c.length !== 2) return false;
-  if (!horizontalFloorPitchOk(el as BuildingElementAdjacentUnconditionedSpace_Simple)) return false;
+  if (!horizontalUnconditionedFloorPitchOk(el as BuildingElementAdjacentUnconditionedSpace_Simple)) return false;
   if (dist2XY(c[0]!, c[1]!) < MIN_WALL_LEN_XY_M) return false;
   const z0 = typeof c[0]!.z === 'number' && Number.isFinite(c[0]!.z) ? c[0]!.z : 0;
   const z1 = typeof c[1]!.z === 'number' && Number.isFinite(c[1]!.z) ? c[1]!.z : 0;

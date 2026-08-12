@@ -18,6 +18,7 @@ import {
 import type { Floor } from '../../geometry/types';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { isBasementGroundElement } from '../../lib/basementGeometry';
+import { isVulcanUiPartyFloorElement } from '../../lib/assemblyMaterialFabric';
 import { roundToTwoDecimals } from '../constants';
 import type {
   BuildingElementAdjacentConditionedSpace,
@@ -92,6 +93,7 @@ export function wallLinkedToIntermediateFloorSlabForContinuousE6(
     (e): e is BuildingElementAdjacentConditionedSpace =>
       e.type === 'BuildingElementAdjacentConditionedSpace' &&
       !e.isPlaceholder &&
+      !isVulcanUiPartyFloorElement(e) &&
       e.zoneId === w.zoneId &&
       elementFloorZIndexForTb(e, floors) === floorZ,
   );

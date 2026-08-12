@@ -380,10 +380,17 @@ function shouldSuppressThermalBridgeColinearOverlapPair(
   const aCode = jtA.trim();
   const bCode = jtB.trim();
   const set = new Set([aCode, bCode]);
-  if (set.has('E5') && set.has('P1')) return true;
+  const isGroundFamilyPair = set.has('E5') && set.has('P1');
   // Same co-location one storey band up: an external wall's E6 run and a party
   // wall's P2/P3 legitimately share the internal floor slab edge.
-  if (set.has('E6') && (set.has('P2') || set.has('P3'))) return true;
+  const isIntermediateFamilyPair = set.has('E6') && (set.has('P2') || set.has('P3'));
+
+  if (isGroundFamilyPair || isIntermediateFamilyPair) {
+    const aIds = thermalBridgeSourceHostIdSet(extraRecord(tbA));
+    const bIds = thermalBridgeSourceHostIdSet(extraRecord(tbB));
+    if (aIds.size === 0 || bIds.size === 0) return true;
+    return !setsEqual(aIds, bIds);
+  }
 
   if (aCode === bCode) return false;
   const aIds = thermalBridgeSourceHostIdSet(extraRecord(tbA));
