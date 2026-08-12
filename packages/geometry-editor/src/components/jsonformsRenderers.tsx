@@ -148,7 +148,7 @@ function coerceDropdownValue(
 }
 
 /** Per-field validation aligned with the schema mode used by this JsonForms instance (FHS vs Core). */
-function validateAdvancedFieldPrimitive(
+export function validateAdvancedFieldPrimitive(
   config: RendererConfig | undefined,
   elementType: string | undefined,
   propKey: string | undefined,
@@ -2115,7 +2115,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
   );
 };
 
-const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, config }) => {
+export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, config }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
   const cfg = rendererConfig(config);
