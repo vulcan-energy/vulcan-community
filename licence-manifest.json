@@ -4040,6 +4040,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/lib/__tests__/slopePitchAxis.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/slopePitchAxis.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/__tests__/snapUtils.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/snapUtils.test.ts",
       "license": "AGPL-3.0-only",
@@ -5058,6 +5066,14 @@
     {
       "path": "packages/geometry-editor/src/lib/slopedElementDimensions.ts",
       "source_path": "packages/geometry-editor/src/lib/slopedElementDimensions.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/slopePitchAxis.ts",
+      "source_path": "packages/geometry-editor/src/lib/slopePitchAxis.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
