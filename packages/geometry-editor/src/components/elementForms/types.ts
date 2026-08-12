@@ -10,8 +10,10 @@
 // dispatches the other operations through its registry by element type.
 
 import type { ReactNode } from 'react';
+import type { GeometryDetailedJunctionSolverContribution } from '../../../../geometry-editor-host/src';
 import type { Element, ElementType } from '../../stores/geometryStore';
 import type { NumericDraftInputBinding } from './formPrimitives';
+import type { ServiceLineFormGroup } from './serviceLine';
 
 /** Mirrors the orchestrator's locally-defined `Selection` type structurally
  * (that type isn't exported, so modules use this shape instead). */
@@ -97,6 +99,10 @@ export interface ElementFormStateCtx {
    * pattern used throughout the orchestrator. */
   elementIds: readonly string[];
   elementsById: Record<string, Element>;
+  /** Service-line trio shared form group (TBL/MVD/WP) — single instance created by
+   * the orchestrator via useServiceLineFormState; the orchestrator also reads `mode`
+   * for the shared shape picker, which is why it is not module-owned. */
+  serviceLine: ServiceLineFormGroup;
 }
 
 export interface ElementFormBuildCtx {
@@ -136,6 +142,14 @@ export interface ElementFormRenderCtx {
   /** Full element index — see ElementFormStateCtx.elementIds/elementsById. */
   elementIds: readonly string[];
   elementsById: Record<string, Element>;
+  /** ThermalBridgeLinear's detailed-junction integration. The Control is a host
+   * inspector contribution (an ElementCreator prop) and the readiness action drives
+   * orchestrator-owned selection/assembly-calculator state, so both stay
+   * orchestrator-provided. */
+  thermalBridgeJunction: {
+    DetailedJunctionControl: GeometryDetailedJunctionSolverContribution['Control'] | undefined;
+    onHostReadinessAction: (action: { elementId: string; kind: 'assembly_calculator' | 'open_host_element' }) => void;
+  };
 }
 
 export interface ElementFormModule<S> {
