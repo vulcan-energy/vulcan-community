@@ -375,9 +375,9 @@ describe('proposeFacadeOpeningThermalBridges', () => {
     expect(wg.reason).toContain('Wall–floor');
   });
 
-  it('uses E6, not E5, for an F1 opening foot linked to a conditioned floor', () => {
+  it('uses E6, not E5, for an F1 opening foot linked to a pitch-180 conditioned floor', () => {
     const floors: Floor[] = [{ id: 'f0', name: 'Flat', zIndex: 0, height: 3.5, isRoofSpace: false }];
-    const floor = makeConditionedFloor({ id: 'floor', name: 'Internal Floor', floorId: 'f0' });
+    const floor = makeConditionedFloor({ id: 'floor', name: 'Internal Floor', floorId: 'f0', pitch: 180 });
     const wall = makeWall({ id: 'wall-1', name: 'Wall 1', floorId: 'f0' });
     const opening = makeWindow({
       id: 'door',
@@ -396,6 +396,71 @@ describe('proposeFacadeOpeningThermalBridges', () => {
     const foot = p.find((x) => x.edgeRole === 'wall_intermediate_floor_foot');
     expect(foot?.junctionCode).toBe('E6');
     expect(foot?.coordinates.every((point) => point.z === 0)).toBe(true);
+  });
+
+  it.each([
+    ['same-storey plate first', false],
+    ['upper-storey plate first', true],
+  ] as const)('links a ground-storey opening to its same-storey pitch-180 plate with %s', (_label, upperFirst) => {
+    const floors: Floor[] = [
+      { id: 'f0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false },
+      { id: 'f1', name: 'First', zIndex: 1, height: 2.4, isRoofSpace: false },
+    ];
+    const sameStoreyPlate = makeConditionedFloor({
+      id: 'plate-f0',
+      name: 'Ground-storey plate',
+      floorId: 'f0',
+      pitch: 180,
+    });
+    const upperStoreyPlate = makeConditionedFloor({
+      id: 'plate-f1',
+      name: 'Upper-storey plate',
+      floorId: 'f1',
+      pitch: 180,
+      coordinates: [
+        { x: 0, y: 0, z: 1 },
+        { x: 5, y: 0, z: 1 },
+        { x: 5, y: 4, z: 1 },
+        { x: 0, y: 4, z: 1 },
+      ],
+    });
+    const wall = makeWall({ id: 'wall-f0', name: 'Ground wall', floorId: 'f0' });
+    const opening = makeWindow({
+      id: 'opening-f0',
+      name: 'Ground opening',
+      parent_element: 'Ground wall',
+      floorId: 'f0',
+      base_height: 0,
+    });
+    const plates = upperFirst
+      ? [upperStoreyPlate, sameStoreyPlate]
+      : [sameStoreyPlate, upperStoreyPlate];
+
+    const p = proposeFacadeOpeningThermalBridges([...plates, wall, opening], floors);
+    expect(p.some((x) => x.edgeRole === 'wall_ground_foot')).toBe(false);
+    expect(p.find((x) => x.edgeRole === 'wall_intermediate_floor_foot')?.junctionCode).toBe('E6');
+  });
+
+  it('does not use a party-flagged pitch-180 plate as generic E6 opening-foot evidence', () => {
+    const floors: Floor[] = [{ id: 'f0', name: 'Flat', zIndex: 0, height: 3.5, isRoofSpace: false }];
+    const partyPlate = makeConditionedFloor({
+      id: 'party-plate',
+      name: 'Party ceiling',
+      floorId: 'f0',
+      pitch: 180,
+      extra_json: { _vulcan_ui_party_element: true },
+    });
+    const wall = makeWall({ id: 'wall-party', name: 'Party-floor wall', floorId: 'f0' });
+    const opening = makeWindow({
+      id: 'opening-party',
+      name: 'Party-floor opening',
+      parent_element: 'Party-floor wall',
+      floorId: 'f0',
+      base_height: 0,
+    });
+
+    const p = proposeFacadeOpeningThermalBridges([partyPlate, wall, opening], floors);
+    expect(p.some((x) => x.edgeRole === 'wall_intermediate_floor_foot')).toBe(false);
   });
 
   it('keeps E5 for an F1 opening foot linked to a ground slab', () => {
