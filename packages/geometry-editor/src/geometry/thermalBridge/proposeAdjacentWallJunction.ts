@@ -184,7 +184,7 @@ function horizontalConditionedFloorPitchOk(el: BuildingElementAdjacentConditione
 
 function horizontalUnconditionedFloorPitchOk(el: BuildingElementAdjacentUnconditionedSpace_Simple): boolean {
   const p = el.pitch;
-  return typeof p === 'number' && Number.isFinite(p) && p === 0;
+  return typeof p === 'number' && Number.isFinite(p) && (p === 0 || p === 180);
 }
 
 function closedHorizontalFloorPlanRingEdgesXY(
@@ -240,7 +240,7 @@ export function isHorizontalConditionedFloorAdjacentLine(el: Element): el is Bui
   return Math.abs(z0 - z1) <= 1e-2;
 }
 
-/** Horizontal pitch-0 exposed floor line — paired with external wall for **E20** / **E21**. */
+/** Horizontal pitch-0 or pitch-180 exposed floor line — paired with external wall for **E20** / **E21**. */
 export function isHorizontalUnconditionedFloorAdjacentLine(
   el: Element,
 ): el is BuildingElementAdjacentUnconditionedSpace_Simple {
@@ -316,14 +316,23 @@ export function proposeAdjacentWallJunctionThermalBridges(
 
     for (const adj of unconditionedFloors) {
       if (!zonesCompatible(wall.zoneId, adj.zoneId)) continue;
-      if (elementFloorZIndexForTb(adj, floors) !== fz) continue;
+      // Basement-filed lines are never exposed floors of an above-ground dwelling; the one
+      // real case (unheated-basement ceiling at height_basement_walls) is E6's family, and
+      // pairing it here would outrank that E6 in dedupe (tier 1 vs 7).
+      if (elementFloorZIndexForTb(adj, floors) < 0) continue;
+
+      // Wall-BASE pairing: the floor line's own elevation is the family evidence, not which
+      // canvas storey it happens to be filed on — a line re-filed to another storey via the
+      // TB preview modal (or import) still pairs with the wall standing on it. Base proximity
+      // (not anywhere-in-extent) keeps exactly one wall per stack level: a taller lower wall
+      // whose extent merely straddles the elevation must not pair, or partially overlapping
+      // stacked walls emit duplicate spans that under-overlap for global dedupe.
+      const slabZ = elementBaseElevationMForTb(adj, floors);
+      if (Math.abs(slabZ - wExt.zLo) > Z_BAND_EPS_M) continue;
 
       const A = adj.coordinates;
       const overlap = planOverlapAdjacentOnWall(Wa, Wb, A[0]!, A[1]!);
       if (!overlap) continue;
-
-      const slabZ = elementBaseElevationMForTb(adj, floors);
-      if (slabZ < wExt.zLo - Z_BAND_EPS_M || slabZ > wExt.zHi + Z_BAND_EPS_M) continue;
 
       const aExt = adjacentVerticalExtentM(adj, floors);
       const zLo = Math.max(wExt.zLo, aExt.zLo);
