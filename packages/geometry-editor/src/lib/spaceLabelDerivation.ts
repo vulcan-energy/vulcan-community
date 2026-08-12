@@ -333,15 +333,30 @@ export function fullDwellingCountsCompliancePatch(counts: SpaceLabelAggregate['d
   return patch;
 }
 
+/** Shared with ioSlice.ts's CSV-vs-geometry override reconstruction so the two stay aligned. */
+export const FLOOR_AREA_MATCH_EPSILON_M2 = 0.005;
+
 /**
  * Apply Space label metrics to the primary (first non-placeholder) zone and optionally FHS split.
  * Sets floor area driven by labels so geometry derivation does not overwrite until user clears override behaviour.
+ *
+ * `preserveManualFloorAreaOverride`: import-only escape hatch (see stores/geometryStore/slices/ioSlice.ts
+ * `loadFromCSV`). CSV-vs-geometry reconstruction (which runs before this) can mark the primary zone's
+ * floor area as a genuine user override; without this flag, a hand-typed floor area that happens to
+ * differ from the label aggregate would be silently replaced by that aggregate on every import even
+ * though the user never touched a label. When set, and the primary zone is already flagged as a user
+ * override with a floor area that does not match the label aggregate, the floor area / volume are left
+ * alone (the aggregate is still recorded in `_derivedFloorArea` / `_areaSource` for the reset button).
+ * In-session label edits (stores/geometryStore.ts `syncDerivedValuesFromSpaceLabels`) never pass this —
+ * there, editing a label IS the user's intent, so the aggregate should always win, matching prior
+ * behaviour exactly.
  */
 export function applySpaceLabelsToZonesAndCompliance(
   zones: Zone[],
   labels: SpaceLabel[],
   complianceValidationEnabled: boolean,
   geometryAnalysis?: SpaceLabelGeometryAnalysis,
+  options?: { preserveManualFloorAreaOverride?: boolean },
 ): { zones: Zone[]; compliancePatch: ComplianceSettingsShape } {
   const primary = zones.find((z) => !z.isPlaceholder);
   const compliancePatch: ComplianceSettingsShape = {};
@@ -365,21 +380,38 @@ export function applySpaceLabelsToZonesAndCompliance(
   }
 
   const height = primary.height || 0;
+
+  const keepManualFloorAreaOverride =
+    options?.preserveManualFloorAreaOverride === true &&
+    hasFloor &&
+    primary._floorAreaUserOverride === true &&
+    Math.abs((primary.floorArea || 0) - agg.totalFloorAreaM2) > FLOOR_AREA_MATCH_EPSILON_M2;
+
   const volume =
-    hasFloor && height > 0 ? roundToTwoDecimals(agg.totalFloorAreaM2 * height) : primary.volume;
+    hasFloor && height > 0 && !keepManualFloorAreaOverride
+      ? roundToTwoDecimals(agg.totalFloorAreaM2 * height)
+      : primary.volume;
 
   const updatedPrimary: Zone = {
     ...primary,
     ...(hasFloor
       ? {
-          floorArea: agg.totalFloorAreaM2,
-          volume: volume && volume > 0 ? volume : primary.volume,
+          ...(keepManualFloorAreaOverride
+            ? {}
+            : {
+                floorArea: agg.totalFloorAreaM2,
+                volume: volume && volume > 0 ? volume : primary.volume,
+              }),
           _derivedFloorArea: agg.totalFloorAreaM2,
           _areaSource: 'Space labels',
           _floorAreaUserOverride: true,
         }
       : {}),
-    ...(complianceValidationEnabled && hasFloor
+    // The FHS split areas follow the same keep decision as the floor area: validateZone requires
+    // living + rest to sum to floorArea, so rewriting the splits from the aggregate while
+    // preserving a hand-typed floor area would manufacture a hard FHS issue at import and
+    // discard CSV-carried split corrections.
+    ...(complianceValidationEnabled && hasFloor && !keepManualFloorAreaOverride
       ? {
           livingroom_area: agg.livingAreaM2,
           restofdwelling_area: agg.restAreaM2,
