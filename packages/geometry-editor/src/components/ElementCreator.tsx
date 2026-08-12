@@ -52,6 +52,12 @@ import {
   HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER,
   horizontalPolygonSurfaceSelectValue,
 } from './elementForms/formPrimitives';
+// Not formPrimitives' useDecimalInput: that wrapper doesn't forward `syncExternal`, and the
+// single-element pitch input needs it (see pitchDraftInput below) so the draft re-syncs from
+// `pitch` on selection/preset/dormer changes without threading a `.setValue()` call through
+// every one of those call sites, mirroring width/height's simpler "no confirm-dialog side
+// effects" case.
+import { useNumericDraftInput } from './numericDraftInput';
 import {
   useGeometrySchemaPort,
   useGeometrySourceComparisonPort,
@@ -1515,9 +1521,84 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const [pitch, setPitch] = useKeyedState(
     selectedDraftKey,
     typeof selectedDraftPitch === 'number' && Number.isFinite(selectedDraftPitch)
-      ? Math.round(selectedDraftPitch)
+      ? selectedDraftPitch
       : 90,
   );
+  // Draft-string commit for the single-element typed pitch input (Opaque/Transparent/
+  // Adjacent-like: the three literal-copy blocks below all bind to this one instance, since
+  // only one renders at a time for a given elementType and hooks must run unconditionally).
+  // Was previously a plain controlled `<input value={formatConditionalDecimals(pitch)}>` with
+  // `parseFloat(e.target.value)` re-deriving the displayed value every keystroke: typing "22."
+  // parsed to 22, which snapped the visible field back to "22" mid-type (the trailing "."
+  // vanished), so the next keystroke landed on the wrong digit — decimal entry was effectively
+  // impossible. `useNumericDraftInput` decouples the *displayed* raw string (`inputValue`) from
+  // the *committed* value: the field echoes exactly what was typed while editing, and only
+  // reformats (to 2dp) on blur. Values commit at 2dp (roundToTwoDecimals) to match the CSV
+  // writer/importer (both round to 2dp), so a save/load/save cycle is idempotent from the
+  // first cycle. `syncExternal: true` re-syncs the draft from `pitch` whenever it changes
+  // externally (selection change, preset load, dormer/parent inherit, etc.) without threading
+  // `.setValue()` through every one of those call sites.
+  const commitTypedPitch = (parsed: number | ''): void => {
+    if (parsed === '') return;
+    const newPitch = roundToTwoDecimals(parsed);
+
+    if (selection.type === 'element') {
+      const currentElement = getElementById(selection.id);
+      if (currentElement) {
+        const currentShape = getElementShape(currentElement);
+
+        // For polygons: only allow 0° or 180° (horizontal surfaces)
+        if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
+          const ok = window.confirm(
+            `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
+          );
+          if (ok) {
+            // Keep same coordinates, just update pitch - sloped-polygon uses same coordinate structure.
+            const patch: Partial<Element> = { pitch: newPitch } as Partial<Element>;
+            if (currentElement.type === 'BuildingElementAdjacentConditionedSpace') {
+              const extra = readExtraJsonRecord(currentElement.extra_json);
+              if (VULCAN_UI_PARTY_ELEMENT_KEY in extra) {
+                const nextExtra = { ...extra };
+                delete nextExtra[VULCAN_UI_PARTY_ELEMENT_KEY];
+                patch.extra_json = nextExtra;
+              }
+            }
+            updateElement(currentElement.id, patch);
+            setPitch(newPitch);
+            return;
+          } else {
+            // Reset to 0° if user cancels
+            setPitch(0);
+            updateElement(selection.id, { pitch: 0 });
+            return;
+          }
+        }
+
+        // For lines: suggest polygon conversion for horizontal surfaces
+        if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
+          const ok = window.confirm(
+            `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
+          );
+          if (ok) {
+            const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
+            updateElement(currentElement.id, { coordinates: nextCoords, pitch: newPitch });
+          }
+        }
+      }
+    }
+
+    // Typed pitch passes through at 2dp (exact intent); only drag interactions round to a whole degree.
+    setPitch(newPitch);
+    // Only update pitch, don't touch coordinates
+    if (selection.type === 'element') {
+      updateElement(selection.id, { pitch: newPitch });
+    }
+  };
+  const pitchDraftInput = useNumericDraftInput(pitch, commitTypedPitch, {
+    commitOnChange: true,
+    formatOnBlur: 'fixed2',
+    syncExternal: true,
+  });
   const baseHeightInput = useDecimalInput('', commitElementNumericField('base_height'), { commitOnChange: true });
   const commitUnheatedPitchedRoofCeilingElevation = (value: number | '') => {
     if (!isExistingElementSelection()) return;
@@ -2755,7 +2836,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
       if (typeof storeUpdate.width === 'number') widthInput.setValue(roundToTwoDecimals(storeUpdate.width));
       if (typeof storeUpdate.height === 'number') heightInput.setValue(roundToTwoDecimals(storeUpdate.height));
-      if (typeof storeUpdate.pitch === 'number') setPitch(Math.round(storeUpdate.pitch));
+      if (typeof storeUpdate.pitch === 'number') setPitch(storeUpdate.pitch);
       if (typeof storeUpdate.base_height === 'number') baseHeightInput.setValue(roundToTwoDecimals(storeUpdate.base_height));
       if (typeof storeUpdate.frame_area_fraction === 'number') {
         lateNumericInputSettersRef.current.freeAreaFraction(
@@ -2769,7 +2850,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       if (typeof storeUpdate.is_external_door === 'boolean') setIsExternalDoor(storeUpdate.is_external_door);
       if (data.type === 'OnSiteGeneration') {
         if (typeof storeUpdate.peak_power === 'number') onSiteGenerationFormState.peakPowerInput.setValue(roundToTwoDecimals(storeUpdate.peak_power));
-        if (typeof storeUpdate.pitch === 'number') onSiteGenerationFormState.onSitePitchInput.setValue(Math.round(storeUpdate.pitch));
+        if (typeof storeUpdate.pitch === 'number') onSiteGenerationFormState.onSitePitchInput.setValue(storeUpdate.pitch);
         if (typeof storeUpdate.orientation360 === 'number') onSiteGenerationFormState.onSiteOrientationInput.setValue(Math.round(storeUpdate.orientation360));
         if (typeof storeUpdate.base_height === 'number') onSiteGenerationFormState.onSiteBaseHeightInput.setValue(roundToTwoDecimals(storeUpdate.base_height));
         if (typeof storeUpdate.width === 'number') onSiteGenerationFormState.onSiteWidthInput.setValue(roundToTwoDecimals(storeUpdate.width));
@@ -2993,7 +3074,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           const width = 'width' in element && typeof element.width === 'number' ? roundToTwoDecimals(element.width) : (element.width ?? '');
           const height = 'height' in element && typeof element.height === 'number' ? roundToTwoDecimals(element.height) : (element.height ?? '');
           const area = 'area' in element && typeof element.area === 'number' ? roundToTwoDecimals(element.area) : (element.area ?? '');
-          const pitch = 'pitch' in element && typeof element.pitch === 'number' ? Math.round(element.pitch) : (element.pitch ?? 90);
+          const pitch = 'pitch' in element && typeof element.pitch === 'number' ? element.pitch : (element.pitch ?? 90);
           const orientation = roundToInt(getCurrentOrientation(element));
           const baseHeight = 'base_height' in element && typeof element.base_height === 'number' ? roundToTwoDecimals(element.base_height) : (element.base_height ?? '');
 
@@ -3049,8 +3130,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               lateNumericInputSettersRef.current.dormerWidth(roundToTwoDecimals(dormerMetadata.dormerWidth));
               setDormerDepth(roundToTwoDecimals(dormerMetadata.dormerDepth));
               lateNumericInputSettersRef.current.dormerFrontWallHeight(roundToTwoDecimals(dormerMetadata.frontWallHeight));
-              lateNumericInputSettersRef.current.dormerRoofPitch(Math.round(dormerMetadata.dormerRoofPitch));
-              lateNumericInputSettersRef.current.gableRoofPitch(Math.round(dormerMetadata.gableRoofPitch));
+              lateNumericInputSettersRef.current.dormerRoofPitch(dormerMetadata.dormerRoofPitch);
+              lateNumericInputSettersRef.current.gableRoofPitch(dormerMetadata.gableRoofPitch);
               setDormerRoofIsUnheatedPitchedRoof(!!dormerMetadata.isUnheatedPitchedRoof);
               lateNumericInputSettersRef.current.dormerWindowWidth(roundToTwoDecimals(dormerMetadata.windowWidth));
               lateNumericInputSettersRef.current.dormerWindowHeight(roundToTwoDecimals(dormerMetadata.windowHeight));
@@ -3101,7 +3182,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           const area = typeof element.area === 'number' ? roundToTwoDecimals(element.area) : (element.area ?? '');
           // 90° = vertical / wall convention in the model when pitch is unknown (line elements). The store/CSV
           // may still hold 90 for an internal floor polygon until the user sets 0/180 in the surface-facing control.
-          const pitch = typeof element.pitch === 'number' ? Math.round(element.pitch) : (element.pitch ?? 90);
+          const pitch = typeof element.pitch === 'number' ? element.pitch : (element.pitch ?? 90);
           const adjacentExtra = readExtraJsonRecord((element as { extra_json?: unknown }).extra_json);
           widthInput.setValue(width);
           heightInput.setValue(height);
@@ -5019,7 +5100,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 		          width,
 		          height,
 		          area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-		          pitch: Math.round(pitch),
+		          pitch,
 		          orientation360: roundToInt(orientation360),
 		          base_height: baseHeightInput.value === '' ? undefined : baseHeightInput.value,
 	          is_unheated_pitched_roof: isUnheatedPitchedRoof,
@@ -5038,7 +5119,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 	          width,
 	          height,
 	          area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-          pitch: Math.round(pitch),
+          pitch,
           orientation360: roundToInt(orientation360),
 	          base_height: baseHeightInput.value === '' ? undefined : baseHeightInput.value,
           parent_element: parentElement,
@@ -5963,69 +6044,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 />
               ) : (
                 <StandardInput
-	                  type="text"
-	                  inputMode="numeric"
-                  value={formatConditionalDecimals(pitch)}
+                  type="text"
+                  inputMode="decimal"
+                  value={pitchDraftInput.inputValue}
                   unit={fieldUnit('pitch')}
-                  onChange={(e) => {
-                    const newPitch = parseFloat(e.target.value) || 0;
-
-                    // Check for shape-pitch mismatches before updating
-                    if (selection.type === 'element') {
-                      const currentElement = getElementById(selection.id);
-                      if (currentElement) {
-                        const currentShape = getElementShape(currentElement);
-
-                        // For polygons: only allow 0° or 180° (horizontal surfaces)
-                        if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
-                          const ok = window.confirm(
-                            `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
-                          );
-                          if (ok) {
-                            // Keep same coordinates, just update pitch - sloped-polygon uses same coordinate structure
-                            const roundedPitch = Math.round(newPitch);
-                            const patch: Partial<Element> = { pitch: roundedPitch } as Partial<Element>;
-                            if (currentElement.type === 'BuildingElementAdjacentConditionedSpace') {
-                              const extra = readExtraJsonRecord(currentElement.extra_json);
-                              if (VULCAN_UI_PARTY_ELEMENT_KEY in extra) {
-                                const nextExtra = { ...extra };
-                                delete nextExtra[VULCAN_UI_PARTY_ELEMENT_KEY];
-                                patch.extra_json = nextExtra;
-                              }
-                            }
-                            updateElement(currentElement.id, patch);
-                            setPitch(roundedPitch);
-                            return;
-                          } else {
-                            // Reset to 0° if user cancels
-                            setPitch(0);
-                            updateElement(selection.id, { pitch: 0 });
-                            return;
-                          }
-                        }
-
-                        // For lines: suggest polygon conversion for horizontal surfaces
-                        if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
-                          const ok = window.confirm(
-                            `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
-                          );
-                          if (ok) {
-                            const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
-                            const roundedPitch = Math.round(newPitch);
-                            updateElement(currentElement.id, { coordinates: nextCoords, pitch: roundedPitch });
-                          }
-                        }
-                      }
-                    }
-
-                    const roundedPitch = Math.round(newPitch);
-                    setPitch(roundedPitch);
-                    // Only update pitch, don't touch coordinates
-                    if (selection.type === 'element') {
-                      updateElement(selection.id, { pitch: roundedPitch });
-                    }
-                  }}
-                  step="1"
+                  onChange={pitchDraftInput.handleInputChange}
+                  onBlur={pitchDraftInput.handleBlur}
                   min="0"
                   max="180"
                   readOnly={!!parentElement}
@@ -6417,60 +6441,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 />
 	              ) : (
 	                <StandardInput
-	                  type="text"
-	                  inputMode="numeric"
-                  value={formatConditionalDecimals(pitch)}
+                  type="text"
+                  inputMode="decimal"
+                  value={pitchDraftInput.inputValue}
                   unit={fieldUnit('pitch')}
-                  onChange={(e) => {
-                    const newPitch = parseFloat(e.target.value) || 0;
-
-                    // Check for shape-pitch mismatches before updating
-                    if (selection.type === 'element') {
-                      const currentElement = getElementById(selection.id);
-                      if (currentElement) {
-                        const currentShape = getElementShape(currentElement);
-
-                        // For polygons: only allow 0° or 180° (horizontal surfaces)
-                        if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
-                          const ok = window.confirm(
-                            `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
-                          );
-                          if (ok) {
-                            // Keep same coordinates, just update pitch - sloped-polygon uses same coordinate structure
-                            const roundedPitch = Math.round(newPitch);
-                            updateElement(currentElement.id, { pitch: roundedPitch });
-                            setPitch(roundedPitch);
-                            return;
-                          } else {
-                            // Reset to 0° if user cancels
-                            setPitch(0);
-                            updateElement(selection.id, { pitch: 0 });
-                            return;
-                          }
-                        }
-
-                        // For lines: suggest polygon conversion for horizontal surfaces
-                        if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
-                          const ok = window.confirm(
-                            `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
-                          );
-                          if (ok) {
-                            const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
-                            const roundedPitch = Math.round(newPitch);
-                            updateElement(currentElement.id, { coordinates: nextCoords, pitch: roundedPitch });
-                          }
-                        }
-                      }
-                    }
-
-                    const roundedPitch = Math.round(newPitch);
-                    setPitch(roundedPitch);
-                    // Only update pitch, don't touch coordinates
-                    if (selection.type === 'element') {
-                      updateElement(selection.id, { pitch: roundedPitch });
-                    }
-                  }}
-                  step="1"
+                  onChange={pitchDraftInput.handleInputChange}
+                  onBlur={pitchDraftInput.handleBlur}
                   min="0"
                   max="180"
                   variant="ghost"
@@ -6879,60 +6855,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 />
               ) : (
                 <StandardInput
-	                    type="text"
-	                    inputMode="numeric"
-                  value={formatConditionalDecimals(pitch)}
+                  type="text"
+                  inputMode="decimal"
+                  value={pitchDraftInput.inputValue}
                   unit={fieldUnit('pitch')}
-                  onChange={(e) => {
-                    const newPitch = parseFloat(e.target.value) || 0;
-
-                    // Check for shape-pitch mismatches before updating
-                    if (selection.type === 'element') {
-                      const currentElement = getElementById(selection.id);
-                      if (currentElement) {
-                        const currentShape = getElementShape(currentElement);
-
-                        // For polygons: only allow 0° or 180° (horizontal surfaces)
-                        if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
-                          const ok = window.confirm(
-                            `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
-                          );
-                          if (ok) {
-                            // Keep same coordinates, just update pitch - sloped-polygon uses same coordinate structure
-                            const roundedPitch = Math.round(newPitch);
-                            updateElement(currentElement.id, { pitch: roundedPitch });
-                            setPitch(roundedPitch);
-                            return;
-                          } else {
-                            // Reset to 0° if user cancels
-                            setPitch(0);
-                            updateElement(selection.id, { pitch: 0 });
-                            return;
-                          }
-                        }
-
-                        // For lines: suggest polygon conversion for horizontal surfaces
-                        if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
-                          const ok = window.confirm(
-                            `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
-                          );
-                          if (ok) {
-                            const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
-                            const roundedPitch = Math.round(newPitch);
-                            updateElement(currentElement.id, { coordinates: nextCoords, pitch: roundedPitch });
-                          }
-                        }
-                      }
-                    }
-
-                    const roundedPitch = Math.round(newPitch);
-                    setPitch(roundedPitch);
-                    // Only update pitch, don't touch coordinates
-                    if (selection.type === 'element') {
-                      updateElement(selection.id, { pitch: roundedPitch });
-                    }
-                  }}
-                  step="1"
+                  onChange={pitchDraftInput.handleInputChange}
+                  onBlur={pitchDraftInput.handleBlur}
                   min="0"
                   max="180"
                   variant="ghost"

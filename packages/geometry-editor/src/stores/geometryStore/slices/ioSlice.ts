@@ -259,16 +259,24 @@ const escapeCSVJson = (value: string): string => {
 };
 
 /**
- * Pitch in degrees, rounded to an integer (FHS schema requirement) — used for
- * building elements and on-site generation. 0 / 90 / 180 are all valid: do not
- * use `value || 90` — 0 is falsy in JavaScript and would be replaced by 90.
- * When pitch is missing, emit an empty cell (no implicit default).
- * Same class of bug: `x || default` for optional numbers (frame fraction,
- * hot-water flow, etc.); use `??`, `formatOptionalFiniteNumberForCsv`, or explicit `== null` checks.
+ * Pitch in degrees, rounded to 2dp (fractional degrees, e.g. 22.5°, are valid —
+ * both Core and FHS schemas declare pitch `"type": "number"`; integer rounding is
+ * an FHS-export-only concern handled at the correct layer: builder.rs's
+ * `coerce_building_element_value` (vulcan-model-transform), gated on `is_fhs_schema` —
+ * do not round to an integer here). 2dp matches every pitch import path
+ * (`parseOptionalPitchColumn` et al. in ingestGeometryTabularSections.ts already
+ * round to 2dp) and every typed-pitch commit point in the UI, so a save/load/save
+ * cycle is idempotent from the first cycle — without rounding here, `String(pitch)`
+ * can also emit float noise (e.g. 22.700000000000003) straight into the CSV cell.
+ * 0 / 90 / 180 are all valid: do not use `value || 90` — 0 is falsy in JavaScript
+ * and would be replaced by 90. When pitch is missing, emit an empty cell (no
+ * implicit default). Same class of bug: `x || default` for optional numbers
+ * (frame fraction, hot-water flow, etc.); use `??`, `formatOptionalFiniteNumberForCsv`,
+ * or explicit `== null` checks.
  */
 const formatBuildingElementPitchForCsv = (pitch: number | undefined | null): string => {
   if (typeof pitch === 'number' && Number.isFinite(pitch)) {
-    return String(Math.round(pitch));
+    return String(roundToTwoDecimals(pitch));
   }
   return '';
 };
@@ -377,12 +385,17 @@ const SLOPED_OVERRIDE_ELIGIBLE_TYPES = new Set<Element['type']>([
 ]);
 
 /**
- * The CSV pitch column is written as `Math.round(pitch)` (see `formatBuildingElementPitchForCsv`)
- * while the width/height columns were derived with the unrounded in-session pitch — so an import
- * re-derivation with the rounded pitch can legitimately land up to half a degree away from the
- * value the writer saw. A CSV value counts as "matching" a formula when it falls inside the
- * envelope of that formula evaluated across the rounding window (±0.5°), padded by the usual
- * sloped-dimension epsilon.
+ * Legacy tolerance, gated on integer pitch: older CSVs were written with the pitch column
+ * rounded to an integer (`Math.round(pitch)`) while the width/height columns were derived
+ * from the unrounded in-session pitch — so re-deriving from the rounded pitch on import can
+ * legitimately land up to half a degree away from the value the writer saw.
+ * `formatBuildingElementPitchForCsv` no longer rounds pitch to an integer (it writes 2dp
+ * verbatim), so a *decimal* pitch column (e.g. 22.5, 22.76) can only have come from a build
+ * that already writes exact values — there is no rounding ambiguity to absorb for it, so it
+ * gets exact matching only. An *integer* pitch column (90, 23, …) is ambiguous — it may be a
+ * genuinely whole-number pitch, or it may be what a legacy build rounded a fractional pitch
+ * down to — so it keeps the ±0.5° envelope permanently, padded by the usual sloped-dimension
+ * epsilon, so files saved by older builds still reconstruct their override flags correctly.
  */
 const PITCH_CSV_ROUNDING_HALF_STEP_DEG = 0.5;
 const SLOPED_DIMENSION_EPSILON = 0.01;
@@ -396,8 +409,14 @@ const matchesDerivedAcrossPitchRounding = (
   const pitch = (element as { pitch?: unknown }).pitch;
   if (typeof pitch !== 'number' || !Number.isFinite(pitch)) return false;
   const coordinates = (element as { coordinates?: unknown }).coordinates as Array<{ x: number; y: number; z: number }>;
+  // Only an integer pitch is ambiguous (see doc comment above) — decimal pitch gets exact
+  // matching (dp = 0 only), so a genuine user override that happens to land inside the legacy
+  // ±0.5° envelope is still correctly flagged as an override rather than silently absorbed.
+  const pitchRoundingSteps = Number.isInteger(pitch)
+    ? [-PITCH_CSV_ROUNDING_HALF_STEP_DEG, 0, PITCH_CSV_ROUNDING_HALF_STEP_DEG]
+    : [0];
   const values: number[] = [];
-  for (const dp of [-PITCH_CSV_ROUNDING_HALF_STEP_DEG, 0, PITCH_CSV_ROUNDING_HALF_STEP_DEG]) {
+  for (const dp of pitchRoundingSteps) {
     const candidatePitch = pitch + dp;
     if (candidatePitch <= 0 || candidatePitch >= 90) continue;
     const derived = derive({ coordinates, pitch: candidatePitch });
@@ -1398,8 +1417,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(element.name),
           escapeCSV(element.type),
           escapeCSV(element.generation_type),
-          // FHS requires integer pitch; round at export like building-element
-          // pitch and orientation360 so the CSV matches the merged JSON.
+          // The schema never required integer pitch (both Core and FHS declare it a
+          // fractional `number`) — this shares building-element pitch's own writer
+          // (formatBuildingElementPitchForCsv), which now rounds to 2dp, not to an
+          // integer. FHS-only integer rounding lives at the correct layer: builder.rs's
+          // `coerce_building_element_value` (vulcan-model-transform), gated on
+          // `is_fhs_schema`.
           escapeCSV(formatBuildingElementPitchForCsv(element.pitch)),
           escapeCSV(roundOrientation360ForCsv(element.orientation360)),
           escapeCSV(formatOptionalFiniteNumberForCsv(element.base_height)),

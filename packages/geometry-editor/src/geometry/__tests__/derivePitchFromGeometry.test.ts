@@ -29,6 +29,18 @@ const slopedRoof30 = [
   { x: 0, y: 4, z: 0 },
 ];
 
+// Fractional-slope roof: rises 3m over 7m horizontal run. atan(3/7) = 23.1986...° —
+// genuinely fractional before rounding, unlike slopedRoof30's clean 30.0°. Pins that the
+// `Math.round` at derivePitchFromGeometry.ts's return is doing real work, not a no-op on an
+// already-whole value: this is the "3D pitch-drag handle" case (pitch derived from raw dragged
+// vertex positions, deliberately kept whole-degree — see the decimal-pitch fix's scope notes).
+const slopedRoofFractional = [
+  { x: 0, y: 0, z: 0 },
+  { x: 7, y: 0, z: 3 },
+  { x: 7, y: 4, z: 3 },
+  { x: 0, y: 4, z: 0 },
+];
+
 describe('derivePitchFromGeometry', () => {
   it('returns 0 for a horizontal opaque polygon (flat roof)', () => {
     expect(derivePitchFromGeometry(horizontalSquare, 'BuildingElementOpaque')).toBe(0);
@@ -54,6 +66,10 @@ describe('derivePitchFromGeometry', () => {
 
   it('returns ~30 for a 30° pitched roof polygon', () => {
     expect(derivePitchFromGeometry(slopedRoof30, 'BuildingElementOpaque')).toBe(30);
+  });
+
+  it('rounds a fractional slope (rise 3 / run 7, atan = 23.1986°) to the nearest whole degree', () => {
+    expect(derivePitchFromGeometry(slopedRoofFractional, 'BuildingElementOpaque')).toBe(23);
   });
 
   it('returns undefined for fewer than 3 vertices', () => {

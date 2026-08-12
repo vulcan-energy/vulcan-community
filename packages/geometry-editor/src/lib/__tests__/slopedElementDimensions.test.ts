@@ -32,6 +32,34 @@ describe('sloped element dimensions', () => {
     });
   });
 
+  it('matches cos/tan of the exact decimal pitch, not a rounded integer', () => {
+    // Regression pin for the pitch-decimal fix: pitch is never rounded before it reaches this
+    // function (schemaCache's fallbackIntegerKeys and the CSV writer used to round it to an
+    // integer before it got here — e.g. 22.5° silently became 23°). This function itself never
+    // rounded pitch; it only rounds its *outputs* to 2dp (roundToTwoDecimals). Prove the two are
+    // distinguishable: deriving from the exact 22.5° must not collapse onto what a rounded 23°
+    // would have produced.
+    const element = {
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 6, y: 0, z: 0 },
+        { x: 6, y: 3, z: 0 },
+        { x: 0, y: 3, z: 0 },
+      ],
+      pitch: 22.5,
+    };
+
+    const derived = deriveSlopedElementDimensions(element);
+    expect(derived).not.toBeNull();
+
+    const roundToTwoDp = (n: number): number => Math.round(n * 100) / 100;
+    const exactHeight = roundToTwoDp(3 / Math.cos((22.5 * Math.PI) / 180));
+    const roundedPitchHeight = roundToTwoDp(3 / Math.cos((23 * Math.PI) / 180));
+
+    expect(derived?.height).toBe(exactHeight);
+    expect(derived?.height).not.toBe(roundedPitchHeight); // measurable divergence from rounded-pitch geometry
+  });
+
   it('keeps surface area consistent for non-rectangular sloped polygons (height stays true slope length, width becomes equivalent)', () => {
     const element = {
       coordinates: [

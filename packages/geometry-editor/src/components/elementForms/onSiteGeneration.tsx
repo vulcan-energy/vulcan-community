@@ -60,7 +60,7 @@ function roundToInt(value: number): number {
 
 export interface OnSiteGenerationFormState {
   peakPowerInput: ReturnType<typeof useDecimalInput>;
-  onSitePitchInput: ReturnType<typeof useIntegerInput>;
+  onSitePitchInput: ReturnType<typeof useDecimalInput>;
   onSiteOrientationInput: ReturnType<typeof useIntegerInput>;
   onSiteBaseHeightInput: ReturnType<typeof useDecimalInput>;
   onSiteWidthInput: ReturnType<typeof useDecimalInput>;
@@ -80,7 +80,7 @@ function useFormState(ctx: ElementFormStateCtx): OnSiteGenerationFormState {
       _pitchUserOverride: true,
     } as Partial<Element>);
   };
-  const onSitePitchInput = useIntegerInput('', commitOnSitePitchOverride, { commitOnChange: true });
+  const onSitePitchInput = useDecimalInput('', commitOnSitePitchOverride, { commitOnChange: true });
 
   /** Sloped PV/roof: typing orientation rotates the polygon in plan (like walls). Flat or degenerate: store only. */
   const commitOnSiteOrientation = (value: number | '') => {
@@ -219,7 +219,7 @@ function useFormState(ctx: ElementFormStateCtx): OnSiteGenerationFormState {
       onSiteOrientationInput.syncValue(o);
       const p = (el as { pitch?: number }).pitch;
       if (typeof p === 'number' && Number.isFinite(p)) {
-        onSitePitchInput.syncValue(Math.round(p));
+        onSitePitchInput.syncValue(p);
       }
       const bh = (el as { base_height?: number }).base_height;
       if (typeof bh === 'number' && Number.isFinite(bh)) {
@@ -260,7 +260,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
       : (element.peak_power ?? '');
     const pitch =
       'pitch' in element && typeof element.pitch === 'number'
-        ? Math.round(element.pitch)
+        ? element.pitch
         : (element.pitch ?? '');
     const orientation = roundToInt(state.getCurrentOrientation(element));
     const baseHeight =
@@ -531,9 +531,9 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                   '°',
                   <>
                     <StandardInput
-                      {...integerInputProps(onSitePitchInput)}
+                      {...decimalInputProps(onSitePitchInput)}
                       unit={fieldUnit('pitch')}
-                      step="1"
+                      step="0.5"
                       min="0"
                       max="90"
                       variant="ghost"
@@ -544,7 +544,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                   </>,
                   onSitePitchInput.value,
                   (derived) => {
-                    onSitePitchInput.setValue(Math.round(derived));
+                    onSitePitchInput.setValue(derived);
                     commitExistingElementDraft({
                       pitch: derived,
                       _pitchUserOverride: false,
