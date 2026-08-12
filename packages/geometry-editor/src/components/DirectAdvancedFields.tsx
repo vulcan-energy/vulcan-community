@@ -41,31 +41,51 @@ export type DirectAdvancedFieldsProps = {
 type DirectControlProps = React.ComponentProps<typeof TextControl>;
 
 /**
- * Port of the `standardRenderers` tester precedence in
- * `components/jsonformsRenderers.tsx` (registry near the bottom of that file), as it
- * applies in the Advanced Fields context (`config.advancedEditor: true`), collapsed by
- * rank (highest wins in JsonForms). The schema predicates are IMPORTED from that file —
- * the same functions the tester table itself calls — so only the rank-collapse ordering
- * below is hand-maintained, not the predicate logic:
+ * Control picker for the direct-render path: the `standardRenderers` tester table's
+ * WRITTEN precedence (registry near the bottom of `components/jsonformsRenderers.tsx`,
+ * ranks collapsed, highest wins), deliberately evaluated against the RESOLVED property
+ * schema. The schema predicates are IMPORTED from that file — the same functions the
+ * tester table calls — so only the rank-collapse ordering below is hand-maintained:
  *
- *  - rank 1100 (x2): oneOf/anyOf where EVERY alternative declares `const` -> 'enum'
- *  - rank 1000: `schemaHasEnum` -> 'enum'
- *  - ranks 280 (`advancedFieldsNumericTester`, gated on `advancedEditor: true`) / 92
- *    (integer) / 90 (`isNumberControl`): type list includes 'number'/'integer', or a
- *    nullable-number anyOf (`schemaIsNullableNumberAnyOf`, e.g. HEM
- *    `area_per_perimeter_vent`) -> 'number'
- *  - rank 90 (`isBooleanControl`): type list includes 'boolean' -> 'boolean'
- *  - ranks 90/80 (`isStringControl`): type list includes 'string' -> 'text'
- *  - rank 5 fallback (`GenericControl`): re-checks enum-like / boolean / number-integer,
- *    else text (minus its `window_part_list` special case, which cannot occur for
- *    ElectricBattery). Structurally unreachable here — the branches above already
- *    cover every predicate GenericControl checks — so it collapses into the trailing
- *    `return 'text'` below rather than being restated as dead code.
+ *  - ranks 1100 (oneOf/anyOf all-const) and 1000 (`schemaHasEnum`) -> 'enum'
+ *  - ranks 280/92/90: number / integer / nullable-number anyOf -> 'number'
+ *  - rank 90 (`isBooleanControl`): boolean -> 'boolean'
+ *  - ranks 90/80 (`isStringControl`) and the rank-5 GenericControl fallback -> 'text'
+ *
+ * That is NOT how the table executes under the flat generated-uischema dispatch
+ * (adversarial-review finding, verified empirically on @jsonforms 3.6.0): JsonForms
+ * hands every TESTER the unresolved PARENT object schema, so the rank-1100/1000 enum
+ * entries and the integer / nullable-number arms of rank 280 never fire there at all.
+ * What actually runs OFF-path: rank 280/90 number (`isNumberControl` resolves the
+ * scoped property itself), rank 90 boolean, rank 90/80 string, rank-5 GenericControl
+ * re-dispatching on the resolved schema it receives as props; properties whose schema
+ * derives no type (const-only) are dropped by the uischema generator before any
+ * tester runs.
+ *
+ * KNOWN, INTENTIONAL divergences from that executed OFF path — none reachable for
+ * ElectricBattery, whose advanced fields are all plain number/boolean; each is a
+ * deliberate correction the R4 retire/keep decision must sign off (see the parent
+ * repo's docs/development/Community_Repo_Refactor_Plan.md):
+ *  - boolean+enum (the `security_risk` shape): OFF renders BooleanControl's plain
+ *    checkbox (EnumControl's Yes/No branch is dead code under flat dispatch); direct
+ *    renders the EnumControl dropdown.
+ *  - anyOf number|null (`area_per_perimeter_vent`): OFF falls through to a plain text
+ *    input; direct renders NumberControl.
+ *  - inline (non-$ref) enums: OFF renders Text/NumberControl's duplicate enum
+ *    fallback (which forwards no validation errors); direct routes to EnumControl
+ *    (which does).
+ *  - const-only / type-less properties: OFF drops the field entirely; direct renders
+ *    a TextControl row.
+ *  - degenerate empty `oneOf: []` (invalid JSON Schema): the commit-1 local port fell
+ *    through to 'text'; the shared `schemaHasConstAlternatives` (`[].every` is true)
+ *    returns 'enum' — kept, because matching the registry predicate byte-for-byte is
+ *    the point of sharing it.
  *
  * The `Group` accordion renderer (rank 100) and System uischemas are deliberately NOT
  * ported: out of spike scope (generated uischemas for non-System types, including
  * ElectricBattery, are flat — no groups).
  */
+// eslint-disable-next-line react-refresh/only-export-components -- pure picker helper, not a React component.
 export function pickDirectControl(resolved: Record<string, unknown>): 'enum' | 'number' | 'boolean' | 'text' {
   if (schemaHasConstAlternatives(resolved, 'oneOf') || schemaHasConstAlternatives(resolved, 'anyOf')) return 'enum';
   if (schemaHasEnum(resolved)) return 'enum';
@@ -168,6 +188,11 @@ export function DirectAdvancedFields({
           key,
           data[key],
         );
+        // Of the four controls, only EnumControl forwards this string to its input
+        // (StandardDropdown `error`); Number/Boolean/Text ignore the prop and
+        // self-validate. On the OFF path an enum field would receive whole-schema AJV
+        // text instead — an ON/OFF divergence that is unreachable for ElectricBattery
+        // (no enum advanced fields) but must be settled at rollout.
         const errors = (validation.errors ?? []).join('\n');
 
         const controlProps = {

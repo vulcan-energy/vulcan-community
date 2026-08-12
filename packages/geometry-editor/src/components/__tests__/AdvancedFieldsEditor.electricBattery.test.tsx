@@ -250,6 +250,9 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render spike (R4.2)', () 
     };
 
     async function exercise(container: HTMLElement, onChange: ReturnType<typeof vi.fn>) {
+      // Captured while mounted — the OFF container is emptied by unmount/cleanup
+      // before the cross-path assertions run.
+      const keys = fieldKeys(container);
       const labels = CORE_ADVANCED_FIELD_KEYS.map((key) => fieldLabelText(fieldRow(container, key))).sort();
 
       const batteryAgeInput = within(fieldRow(container, 'battery_age')).getByRole('textbox');
@@ -269,7 +272,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render spike (R4.2)', () 
       await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(3));
       const unsetCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
 
-      return { labels, numberEntryCall, toggleCall, unsetCall };
+      return { keys, labels, numberEntryCall, toggleCall, unsetCall };
     }
 
     setDirectRenderFlag(false);
@@ -288,6 +291,14 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render spike (R4.2)', () 
     // Field set / label parity: DirectAdvancedFields' title-or-startCase label logic
     // matches what JsonForms' generated uischema + deriveLabel produce.
     expect(onResult.labels).toEqual(offResult.labels);
+
+    // Ordering parity, UNSORTED: the direct walk must enumerate exactly the order
+    // JsonForms' generated uischema does (Object.keys insertion order on the same
+    // filtered properties object). Ordering is load-bearing (see the module comment)
+    // and every other assertion in this file sorts or uses toContain — this is the
+    // one that would catch a reordered walk.
+    expect(onResult.keys.length).toBeGreaterThan(0);
+    expect(onResult.keys).toEqual(offResult.keys);
 
     // Number entry parity: identical payload shape (both paths run the SAME NumberControl).
     expect(onResult.numberEntryCall).toEqual(offResult.numberEntryCall);
@@ -313,11 +324,27 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render spike (R4.2)', () 
   });
 
   it('FHS mode, flag ON: three rate fields render as number inputs with schema-derived min/exclusiveMinimum attributes', () => {
+    // FHS battery fields have NO schema `title` (unlike Core), so this comparison is
+    // the one place startCaseSnakeKey is exercised against JsonForms' own
+    // lodash-startCase-derived labels — the Core parity test only ever hits the
+    // title branch.
+    setDirectRenderFlag(false);
+    const off = renderEditor({ useFHSSchema: true });
+    const offKeys = fieldKeys(off.container);
+    const offLabels = offKeys.map((key) => fieldLabelText(fieldRow(off.container, key)));
+    off.unmount();
+    cleanup();
+
     setDirectRenderFlag(true);
     const { container } = renderEditor({ useFHSSchema: true });
 
     expect(container.querySelector('[data-testid="direct-advanced-fields"]')).not.toBeNull();
     expect(fieldKeys(container).sort()).toEqual([...FHS_ADVANCED_FIELD_KEYS].sort());
+
+    // Unsorted key AND label parity against the OFF path (see ordering note in the
+    // Core parity test).
+    expect(fieldKeys(container)).toEqual(offKeys);
+    expect(offKeys.map((key) => fieldLabelText(fieldRow(container, key)))).toEqual(offLabels);
 
     // minimum_charge_rate_one_way_trip: schema declares `minimum: 0` (not exclusive).
     const minInput = within(fieldRow(container, 'minimum_charge_rate_one_way_trip')).getByRole('textbox');
