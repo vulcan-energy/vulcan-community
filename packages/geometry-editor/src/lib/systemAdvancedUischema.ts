@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { encodePointerToken } from './schemaRefResolver';
+
 /**
  * Structurally identical to the subset of `@jsonforms/core`'s `UISchemaElement` this
  * module ever produces (VerticalLayout / Control, no Group). Defined locally so this
@@ -80,7 +82,12 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
     const out: AdvancedFieldsLayoutNode[] = [];
     for (const key of keys) {
       const childSchema = (props as Record<string, unknown>)[key];
-      const childScope = `${scopePrefix}/properties/${key}`;
+      // R4.3b: escape the raw schema/plant key into an RFC-6901 pointer token before
+      // interpolating it into the scope. A no-op for well-behaved schema keys (never
+      // contain '/' or '~'); load-bearing for plant keys, which are raw user CSV
+      // names and may contain either. Labels (below) intentionally keep the RAW key —
+      // escaping applies to scopes only.
+      const childScope = `${scopePrefix}/properties/${encodePointerToken(key)}`;
       if (shouldRecurseIntoNestedObject(childSchema)) {
         const nextPathLabels = key === 'HeatSource' ? ctx.pathLabels : [...ctx.pathLabels, key];
         const childElements = buildControlsForSchema(childSchema, childScope, {
@@ -127,6 +134,20 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
  * Flat list of controls (same JsonForms path as other geometry Advanced Fields): no accordion
  * `Group` per plant. When several plants exist under one subtype, labels are prefixed with the
  * plant key so identical schema keys (e.g. `type`) stay distinguishable.
+ *
+ * R4.3b FIX: `subtype` and every `plantKey` are raw user CSV names (e.g. "Kitchen/Diner
+ * rads", "Zone 1.5 circuit") interpolated directly into JSON-Pointer scopes below. A
+ * raw '/' broke `resolveSchemaPointer` (it splits the ref on '/'); a raw '.' broke
+ * `DirectAdvancedFields.tsx`'s direct-path dot-path round-trip (the layout-spec walk
+ * used to join/split scopes on '.'). Both interpolation sites now run every key
+ * through `encodePointerToken` (RFC 6901: '~' -> '~0', '/' -> '~1') before building the
+ * scope string, and `DirectAdvancedFields.tsx` decodes each pointer segment instead of
+ * treating the scope as a dot-joinable string — see `segmentsFromLayoutScope` there.
+ * This is a no-op for ordinary schema keys (snake_case/PascalCase HEM property names
+ * never contain '/' or '~'), so it makes the builder correct by construction rather
+ * than trading one bug for another. LABELS keep the raw, unescaped key (below,
+ * unchanged by this fix) — a user reading "Kitchen/Diner rads · …" should see their
+ * own plant name, not a pointer-escaped one.
  */
 export function buildSystemAdvancedUischema(
   subtype: string,
@@ -145,7 +166,11 @@ export function buildSystemAdvancedUischema(
 
   for (const plantKey of plantKeys) {
     const plantSchema = plantProps[plantKey];
-    const baseScope = `#/properties/${subtype}/properties/${plantKey}`;
+    // R4.3b: escape both interpolated keys (see the docstring above) -- plantKey is a
+    // raw user CSV name, subtype is schema-fixed today but escaped uniformly for the
+    // same reason every other interpolation site here is: a no-op for well-behaved
+    // keys, correct by construction for ones that are not.
+    const baseScope = `#/properties/${encodePointerToken(subtype)}/properties/${encodePointerToken(plantKey)}`;
     elements.push(
       ...buildControlsForSchema(plantSchema, baseScope, { plantKey, multiPlant, pathLabels: [] }),
     );

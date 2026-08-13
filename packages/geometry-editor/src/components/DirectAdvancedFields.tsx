@@ -11,11 +11,17 @@
  * anything from `@jsonforms/*` — every prop shape below is inferred structurally from
  * the control components themselves (`React.ComponentProps<typeof TextControl>`,
  * etc.), matching the cast pattern in `__tests__/jsonformsRenderers.units.test.tsx`.
+ *
+ * R4.3b: the System layout-spec walk below is SEGMENT-safe, not dot-string-safe — see
+ * `segmentsFromLayoutScope` and `../lib/systemAdvancedUischema`'s own docstring. Raw
+ * user plant-key names (CSV-derived) may contain '/' or '.', either of which used to
+ * corrupt the walk (a '/' broke `resolveSchemaPointer`'s pointer split; a '.' broke
+ * this file's own dot-path round-trip).
  */
 
 import React from 'react';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
-import { resolveSchemaPointer } from '../lib/schemaRefResolver';
+import { decodePointerToken, resolveSchemaPointer } from '../lib/schemaRefResolver';
 import { readRecord } from '../lib/jsonTypes';
 import type { AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
@@ -53,116 +59,172 @@ export type DirectAdvancedFieldsProps = {
 type DirectControlProps = React.ComponentProps<typeof TextControl>;
 
 /**
- * Control picker for the direct-render path. R4.3 amendment (post-review design
- * change, Baz-approved): Advanced Fields UI must not change AT ALL for this slice —
- * zero intentional divergences, not even ones that look like corrections. This is
- * therefore an EXECUTED-table port, not a written-table one: it reproduces exactly
- * what the `standardRenderers` tester table (bottom of `components/jsonformsRenderers.tsx`)
- * actually dispatches to under the FLAT generated-uischema (verified empirically on
- * @jsonforms 3.6.0, adversarial-review finding kept from the R4.2 spike): JsonForms
- * hands every TESTER the unresolved PARENT object schema, not the scoped property, so
- * only testers that resolve the scope THEMSELVES (`@jsonforms/core`'s own
- * `isBooleanControl` / `isNumberControl` / `isIntegerControl` / `isStringControl`,
- * each built on `schemaMatches` -> `resolveSchema`) can ever see the real per-property
- * type; our OWN rank-1000/1100 enum testers and the rank-5 GenericControl fallback
- * either read the wrong (parent) schema or are only reached once every built-in typed
- * tester has already failed to match.
+ * Control picker for the direct-render path.
+ *
+ * HISTORY (R4.3, Baz-approved post-review design change): Advanced Fields UI was
+ * required not to change AT ALL for that slice — zero intentional divergences, not
+ * even ones that look like corrections. This function was therefore an EXECUTED-table
+ * port, not a written-table one: it reproduced exactly what the `standardRenderers`
+ * tester table (bottom of `components/jsonformsRenderers.tsx`) actually dispatched to
+ * under the FLAT generated-uischema on the (now-deleted) JsonForms mount, bugs
+ * included (verified empirically on @jsonforms 3.6.0, adversarial-review finding kept
+ * from the R4.2 spike): JsonForms hands every TESTER the unresolved PARENT object
+ * schema, not the scoped property, so only testers that resolve the scope THEMSELVES
+ * (`@jsonforms/core`'s own `isBooleanControl` / `isNumberControl` / `isIntegerControl`
+ * / `isStringControl`, each built on `schemaMatches` -> `resolveSchema`) could ever
+ * see the real per-property type; our OWN rank-1000/1100 enum testers and the rank-5
+ * GenericControl fallback either read the wrong (parent) schema or were only reached
+ * once every built-in typed tester had already failed to match. Net effect: BOOLEAN
+ * and STRING type outranked ENUM-ness outright — a boolean-with-enum
+ * (`security_risk`) rendered a plain checkbox, and a string-with-enum
+ * (`areal_heat_capacity`, `mass_distribution_class`, `shield_fact_location`,
+ * `ColdWaterSource`, the `battery_location` $ref probe, …) rendered TextControl's own
+ * `extractOptions` dropdown fallback instead of EnumControl — the identical
+ * StandardDropdown component either way, but with validation-error forwarding and
+ * helper text dropped, since only EnumControl forwards those.
+ *
+ * R4.3b (this slice, tracked in the parent repo's
+ * docs/development/Community_Repo_Refactor_Plan.md, R4 section; Baz-approved, every
+ * visual delta screenshot-reviewed before merge): the strict-preservation constraint
+ * above is DELIBERATELY LIFTED for exactly this function. Enum-like now wins outright,
+ * ahead of type — this is the "written-table correction" the R4.3 docstring used to
+ * defer to a follow-up slice; that follow-up is this one. Net effect: every
+ * enum-carrying field (boolean-with-enum or string-with-enum) now routes to
+ * EnumControl, gaining forwarded validation-error text (visible ON MOUNT for invalid
+ * persisted values, where TextControl's fallback hardcoded `error={undefined}` and
+ * only ever showed a LOCAL error after an interaction), option-description /
+ * "Default: X" helper text, and — for number-coerced enums — a unit adornment.
+ * `ecodesign_control_class` ({type:'integer', oneOf:[{const,title},…]}) is unaffected
+ * either way: it already reached EnumControl under the OLD order too, via the
+ * enum-before-integer check the old fallback rule buried at the bottom
+ * (adversarial-review REAL finding, R4.3 — an integer-before-enum order there
+ * rendered NumberControl's dropdown fallback instead, visibly diverging in the unset
+ * state). Promoting that check to the top of the function (see the function body)
+ * changes nothing for that field; it only changes the boolean/string-typed enum
+ * fields the old type-first order used to shadow.
  *
  * Net dispatch order, evaluated against the RESOLVED property schema:
  *  (a) leaf key `window_part_list` -> WindowPartListControl (handled by the caller,
  *      before this function runs — see `renderControlForProperty`).
- *  (b) type list includes 'boolean' -> BooleanControl, EVEN IF an enum/oneOf-const is
- *      also present (rank-90 `isBooleanControl` wins outright; the rank-1000/1100 enum
- *      testers never fire here since they read the parent schema's `.enum`, not the
- *      resolved property's). This is what kept `security_risk` (FHS: `{type:
- *      'boolean', enum:[true,false]}`) a plain checkbox on BOTH paths — verified, back
- *      when the JsonForms mount still existed, by mounting it directly: BooleanControl's
- *      checkbox rendered, not EnumControl's dropdown, despite the schema literally
- *      carrying `.enum`. The direct path renders it as a plain checkbox unconditionally.
- *  (c) type list includes 'string' -> TextControl, EVEN IF an enum is present (rank-80
- *      `isStringControl` wins; TextControl's OWN `extractOptions` fallback renders the
- *      identical StandardDropdown component an inline/$ref'd string enum needs — see
- *      the `battery_location` $ref probe test, now updated to assert this).
- *  (d) type list includes 'number' -> NumberControl (ranks 280/90; `isNumberControl`
- *      matches the EXACT type 'number' only — `integer` does NOT match it, see (f)).
- *  (e) anyOf number|null -> falls to (f) -> TextControl, NOT NumberControl. None of
- *      the built-in typed testers match an anyOf-only schema (their `hasType` ->
- *      `deriveTypes` does not derive a type from a bare `anyOf` — only from `type` /
- *      `properties` / `additionalProperties` / `items` / `enum` / `allOf`), and
- *      GenericControl's dispatch sees no enum/boolean/number/integer either. (No live
- *      HEM property currently has this exact shape — `area_per_perimeter_vent`, the
- *      R4.2 spike's cited example, is actually a plain `{type:'number'}` in both Core
- *      and FHS, verified by mounting both paths directly (back when the JsonForms
- *      mount still existed): BOTH already rendered NumberControl with identical
- *      `min`/`data-exclusive-minimum` attributes, so that was a stale docstring claim,
- *      never an actual divergence.)
- *  (f) everything else — integer, object, array, type-less, bare combinators — reaches
- *      rank-5 GenericControl, whose resolved-schema dispatch checks ENUM-LIKE FIRST
- *      (`.enum`, or oneOf/anyOf where every branch is a bare `const`) -> EnumControl —
- *      this is how `{type:'integer', oneOf:[{const,title},…]}`
- *      (`ecodesign_control_class`) got EnumControl on the retired JsonForms path
- *      (adversarial-review REAL finding; an earlier draft of this picker ordered
- *      integer first and diverged visibly in the unset state) — then boolean (dead
- *      here, claimed by (b)), then number/INTEGER -> NumberControl, else TextControl.
- *
- * DEFERRED to a follow-up slice (R4.3b, tracked in the parent repo's
- * docs/development/Community_Repo_Refactor_Plan.md): the WRITTEN-table corrections
- * this file's R4.2/early-R4.3 draft made — routing boolean+enum and string+enum to
- * EnumControl ahead of type, and anyOf-nullable-number to NumberControl. Those are
- * real UI improvements (EnumControl forwards validation error text; Text/NumberControl's
- * duplicate enum fallback does not) but are OUT OF SCOPE for a slice whose only job is
- * flipping the default with an UNCHANGED UI. Do not reintroduce them here.
+ *  (b) NON-EMPTY enum-like (`.enum` with >=1 member, or a non-empty oneOf/anyOf where
+ *      every branch is a bare `const`) -> EnumControl. R4.3b's new leading rule — see
+ *      above and `isNonEmptyEnumLike`'s own docstring below for why "non-empty" is
+ *      load-bearing here, not a stylistic nicety.
+ *  (c) type list includes 'boolean' -> BooleanControl.
+ *  (d) type list includes 'string' -> TextControl.
+ *  (e) type list includes 'number' OR 'integer' -> NumberControl. (On the retired
+ *      JsonForms mount, `isNumberControl` matched the EXACT type 'number' only —
+ *      `integer` needed the old fallback rule's own separate check to reach
+ *      NumberControl. Folding integer in here changes nothing observable: same
+ *      destination control, just one rule instead of two.)
+ *  (f) everything else — object, array, type-less, bare anyOf/oneOf not caught by
+ *      (b) — TextControl. anyOf number|null falls here too: no live HEM property has
+ *      that exact shape — `area_per_perimeter_vent`, the R4.2 spike's cited example,
+ *      is actually a plain `{type:'number'}` in both Core and FHS, verified by
+ *      mounting both paths directly (back when the JsonForms mount still existed):
+ *      BOTH already rendered NumberControl with identical `min`/
+ *      `data-exclusive-minimum` attributes, so that was a stale docstring claim,
+ *      never an actual divergence.
  *
  * A nested object-typed property (e.g. MechanicalVentilation FHS's `position_exhaust`
  * in its non-flat mode) needs NO special case: the generator does not recurse past the
  * schema root (verified against `generateUISchema` in node_modules/@jsonforms/core —
  * the `currentRef === '#' && types[0] === 'object'` recursion guard only ever fires
  * for the very first call), so a nested object property gets ONE flat Control bound to
- * the whole object, which falls through every typed tester (rule (b)-(e) all miss:
- * type is 'object') to rule (f) -> not enum-like -> 'text' -> TextControl's own
- * `isJsonLike` branch JSON.stringifies the object. Mounting both paths against the
- * same MechanicalVentilation FHS position_exhaust fixture confirmed the retired
- * JsonForms path and the direct path rendered the identical single blob row,
+ * the whole object. An object schema carries no `.enum`/oneOf-const of its own, so
+ * rule (b) still misses it and it still falls through to (f) -> TextControl's own
+ * `isJsonLike` branch JSON.stringifies the object — unaffected by R4.3b's reordering,
+ * since enum-like-ness was never true for it under either order. Mounting both paths
+ * against the same MechanicalVentilation FHS position_exhaust fixture confirmed the
+ * retired JsonForms path and the direct path rendered the identical single blob row,
  * byte-for-byte, with zero code here dedicated to it (see
  * `AdvancedFieldsEditor.directRender.test.tsx`, "MechanicalVentilation, non-MVHR:
  * position_exhaust nested-object blob" — config 5 in the matrix is MVHR specifically,
  * per the brief, which never reaches position-object mode; this is exercised in a
  * dedicated adjacent test instead).
  *
- * Remaining KNOWN divergence, judged unreachable rather than fixed (kept from the
- * R4.2 spike, still applies): degenerate empty `oneOf: []` (invalid JSON Schema) — the
- * commit-1 local port fell through to 'text'; the shared `schemaHasConstAlternatives`
- * (`[].every` is vacuously true) returns 'enum'. No live HEM schema has this shape.
+ * FIXED (R4.3b adversarial review round 2, REAL finding — this used to be documented
+ * here as an unreachable divergence; it was neither): empty `.enum: []` / `oneOf: []`
+ * / `anyOf: []` are NOT enum-like for this picker. The shared `schemaHasEnum` /
+ * `schemaHasConstAlternatives` exports are vacuously true on an empty array
+ * (`[].every(...)` is true) — harmless under the OLD type-first order (a type-bearing
+ * schema matched rule (c)/(d) first regardless), but under R4.3b's enum-first
+ * promotion that vacuous truth would fire FIRST, routing an empty-alternatives field
+ * to EnumControl with ZERO options — permanently uneditable, not merely different.
+ * This IS reachable: `lib/systemHotWaterAdvancedSchema.ts`'s
+ * `inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema` manufactures
+ * `HeatSourceWet: {type:'string', oneOf: []}` whenever an FHS project has a
+ * CombiBoiler/HIU/HeatBattery `hw cylinder` and ZERO wet heat-source plants defined
+ * yet (its own hint text literally asks the user to type a name: "No defined heat
+ * source (wet) names yet. Add a Heat source (wet) system that defines a plant key,
+ * then link here." — EnumControl with no options cannot accept that input). `pickDirectControl`
+ * therefore requires NON-EMPTY alternatives (`isNonEmptyEnumLike`, mirroring
+ * GenericControl's own inline guards on the retired JsonForms path — see its
+ * docstring below), so this shape falls through to type dispatch exactly as both the
+ * old type-first port and the retired JsonForms path always did: string ->
+ * TextControl, a free-text input the user can still type a link name into.
  *
  * The `Group` accordion renderer (rank 100) is deliberately NOT ported: no Advanced
  * Fields uischema (generated OR manually-built System layout spec) ever emits one.
  */
+
+/**
+ * NON-EMPTY enum-like, deliberately stricter than the shared `schemaHasEnum` /
+ * `schemaHasConstAlternatives` exports from `./jsonformsRenderers`, which are
+ * vacuously true on an empty array (`[].every(...)` is true) — exactly matching
+ * GenericControl's OWN inline guards instead (`s.enum.length > 0`,
+ * `oneOfAnyOfConsts.length > 0`, jsonformsRenderers.tsx ~2386-2389), the control this
+ * picker's enum-first rule is standing in for.
+ *
+ * R4.3b BUGFIX (adversarial review round 2, REAL finding): the shared predicates'
+ * vacuous truth is harmless where they're actually used elsewhere (the rank-1000/1100
+ * EnumControl registry testers web/ still mounts through `standardRenderers` until
+ * R4.5 — pre-existing registry behaviour, deliberately NOT touched by this fix) and
+ * was ALSO harmless in this file through R4.3's type-first order (a type-bearing
+ * schema matched boolean/string/number before enum-ness was ever consulted). R4.3b's
+ * enum-first promotion changed that: without this non-emptiness guard, an
+ * empty-alternatives schema would route to EnumControl with ZERO options —
+ * permanently uneditable, not merely a cosmetic divergence. This shape is REACHABLE
+ * in production, not synthetic: `lib/systemHotWaterAdvancedSchema.ts`'s
+ * `inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema` manufactures
+ * `HeatSourceWet: {type:'string', oneOf: []}` whenever an FHS project has a
+ * CombiBoiler/HIU/HeatBattery `hw cylinder` and ZERO wet heat-source plants defined
+ * yet — its own hint text asks the user to type a name ("No defined heat source (wet)
+ * names yet. Add a Heat source (wet) system that defines a plant key, then link
+ * here."), which a zero-option dropdown cannot accept. With this guard, that shape
+ * falls through to ordinary type dispatch (string -> TextControl, a free-text input),
+ * matching both the old type-first port and the retired JsonForms path (GenericControl
+ * was never vacuous here, so it never diverged either).
+ */
+function isNonEmptyEnumLike(resolved: Record<string, unknown>): boolean {
+  const enumValues = resolved.enum;
+  if (schemaHasEnum(resolved) && Array.isArray(enumValues) && enumValues.length > 0) return true;
+  const oneOf = resolved.oneOf;
+  if (schemaHasConstAlternatives(resolved, 'oneOf') && Array.isArray(oneOf) && oneOf.length > 0) return true;
+  const anyOf = resolved.anyOf;
+  if (schemaHasConstAlternatives(resolved, 'anyOf') && Array.isArray(anyOf) && anyOf.length > 0) return true;
+  return false;
+}
+
 // eslint-disable-next-line react-refresh/only-export-components -- pure picker helper, not a React component.
 export function pickDirectControl(resolved: Record<string, unknown>): 'enum' | 'number' | 'boolean' | 'text' {
+  // R4.3b: NON-EMPTY enum-like wins outright, ahead of type — see the module
+  // docstring above and `isNonEmptyEnumLike`'s own docstring for the full
+  // before/after rationale (including why "non-empty" is load-bearing, not
+  // stylistic). This is also where `ecodesign_control_class`
+  // ({type:'integer', oneOf:[{const,title},…]} via applyEcodesignControlClassEnum)
+  // has always landed (adversarial-review REAL finding, R4.3: an integer-before-enum
+  // order rendered NumberControl's dropdown fallback instead, visibly diverging in
+  // the unset state) — promoting the check to the top of the function changes
+  // nothing for that field, only for the boolean/string-typed enum fields the old
+  // type-first order used to shadow.
+  if (isNonEmptyEnumLike(resolved)) {
+    return 'enum';
+  }
   const types = schemaTypeList(resolved);
   if (types.includes('boolean')) return 'boolean';
   if (types.includes('string')) return 'text';
-  if (types.includes('number')) return 'number';
-
-  // Everything else — integer, object, array, type-less, bare anyOf/oneOf — used to
-  // fall through every built-in typed tester on the retired JsonForms path
-  // (isNumberControl matches the exact type 'number' only; deriveTypes derives
-  // nothing from a bare anyOf) and reach rank-5 GenericControl, whose own dispatch
-  // checks enum-like BEFORE type. Adversarial-review REAL finding (R4.3):
-  // `ecodesign_control_class` ({type:'integer', oneOf:[{const,title},…]} via
-  // applyEcodesignControlClassEnum) therefore got EnumControl on the retired
-  // JsonForms path — an integer-before-enum order here rendered NumberControl's
-  // dropdown fallback instead, visibly diverging in the unset state (placeholder
-  // text, the "Copy example" action, and the forwarded required-error).
-  // Enum-before-integer below is load-bearing.
-  if (
-    schemaHasEnum(resolved) ||
-    schemaHasConstAlternatives(resolved, 'oneOf') ||
-    schemaHasConstAlternatives(resolved, 'anyOf')
-  ) {
-    return 'enum';
-  }
-  if (types.includes('integer')) return 'number';
+  if (types.includes('number') || types.includes('integer')) return 'number';
   return 'text';
 }
 
@@ -262,21 +324,38 @@ function labelForProperty(key: string, resolved: Record<string, unknown>): strin
   return typeof title === 'string' && title.trim() ? title : startCaseKey(key);
 }
 
-/** `#/properties/a/properties/b/properties/c` -> `a.b.c` (System layout-spec scopes). */
-function pathFromLayoutScope(scope: string): string {
-  const stripped = scope.startsWith('#/properties/') ? scope.slice('#/properties/'.length) : scope;
-  return stripped.split('/properties/').join('.');
+/**
+ * Splits a System layout-spec scope (`#/properties/a/properties/b/properties/c`,
+ * every token RFC-6901-escaped by `buildSystemAdvancedUischema`) into raw path
+ * segments (`['a', 'b', 'c']`). Splitting on the literal '/properties/' delimiter is
+ * safe here because escaping turned every raw '/' into '~1' first — no token can
+ * contain an unescaped '/' by construction (see
+ * `../lib/systemAdvancedUischema`'s docstring). Each segment is then RFC-6901-decoded
+ * back to the raw key ('~1' -> '/', '~0' -> '~') the schema/data actually use. Keeps
+ * the defensive shape of the function this replaces for a scope that does not start
+ * with '#/properties/' (should not happen; every scope here is built by
+ * `buildSystemAdvancedUischema` or the flat walk's own literal `#/properties/${key}`)
+ * — such a scope is split as-is rather than having a leading segment dropped.
+ *
+ * R4.3b: replaces the old `pathFromLayoutScope`/`leafKeyFromPath` pair, which joined
+ * segments into a single dot-separated string and split it back apart downstream —
+ * exactly the scheme a '.' in a raw plant key (e.g. "Zone 1.5 circuit") would corrupt.
+ * Everything downstream of this function now carries `segments: string[]` instead of
+ * a joined path, until the point (`path = segments.join('.')`, in
+ * `renderControlForProperty`) where a dot-joined string is still handed to the control
+ * components themselves for their OWN id/propKey derivation — see the residual note
+ * there.
+ */
+function segmentsFromLayoutScope(scope: string): string[] {
+  const tokens = scope.split('/properties/');
+  const segments = scope.startsWith('#/properties/') ? tokens.slice(1) : tokens;
+  return segments.map(decodePointerToken);
 }
 
-function leafKeyFromPath(path: string): string {
-  const segments = path.split('.');
-  return segments[segments.length - 1] ?? path;
-}
-
-/** Walk `data` along a dot-separated path; undefined at any missing/non-object hop. */
-function getAtPath(data: Record<string, unknown>, path: string): unknown {
+/** Walk `data` along path segments; undefined at any missing/non-object hop. */
+function getAtPath(data: Record<string, unknown>, segments: string[]): unknown {
   let current: unknown = data;
-  for (const segment of path.split('.')) {
+  for (const segment of segments) {
     if (current === null || typeof current !== 'object' || Array.isArray(current)) return undefined;
     current = (current as Record<string, unknown>)[segment];
   }
@@ -324,8 +403,7 @@ function setAtPath(obj: Record<string, unknown>, segments: string[], value: unkn
  * …) keeps their identity stable across renders instead.
  */
 function renderControlForProperty(args: {
-  path: string;
-  leafKey: string;
+  segments: string[];
   resolved: Record<string, unknown>;
   value: unknown;
   label: string;
@@ -343,11 +421,25 @@ function renderControlForProperty(args: {
    * `ventilation_strategy` IS required in the schema, was probed unset, and rendered
    * error-free on both paths). Replicating the message in flat mode would therefore
    * CREATE a divergence, not fix one.
+   *
+   * R4.3b: NOT superseded by the enum-first `pickDirectControl` reorder —
+   * `validateAdvancedFieldPrimitive` deliberately never emits required errors
+   * (Advanced Fields are mostly-empty-by-design), so the System layout-spec path
+   * still needs this replicated message. It now ALSO fires for System fields that
+   * only became enum-routed because of R4.3b's reordering (any required-and-unset
+   * boolean/string-typed enum field in a System plant, not just
+   * `ecodesign_control_class`'s pre-existing integer+oneOf shape): on the retired
+   * JsonForms path those fields rendered via BooleanControl/TextControl, which
+   * ignored the `errors` prop outright, so no required-error ever showed for them.
+   * Showing one now is a deliberate R4.3b improvement, not a parity gap.
    */
   replicateRequiredError: boolean;
-  handleChange: (path: string, value: unknown) => void;
+  applyChange: (segments: string[], value: unknown) => void;
 }): React.ReactElement {
-  const { path, leafKey, resolved, value, label, scope, schema, config, elementType, required, replicateRequiredError, handleChange } = args;
+  const { segments, resolved, value, label, scope, schema, config, elementType, required, replicateRequiredError, applyChange } = args;
+
+  const path = segments.join('.');
+  const leafKey = segments[segments.length - 1] ?? path;
 
   const baseProps = {
     data: value,
@@ -360,9 +452,27 @@ function renderControlForProperty(args: {
     visible: true,
     required,
     id: `direct-${path}`,
-    handleChange,
+    // R4.3b: ignore the string `path` argument a control hands back to its own
+    // `handleChange(path, value)` call — that string is the SAME dot-joined `path`
+    // above, re-derived by the control itself, and carries the residual '.'-in-a-
+    // leaf-segment risk noted below. `segments` is this function's own closed-over,
+    // pre-decoded source of truth for where to write, so route every control's
+    // change straight through it instead of trusting the string it echoes back.
+    handleChange: (_path: string, v: unknown) => applyChange(segments, v),
     rootSchema: schema,
   };
+  // R4.3b residual (accepted, out of scope): `path = segments.join('.')` above is
+  // still safe for the control components' OWN id/propKey derivation
+  // (`jsonformsRenderers.tsx`'s controls each do `path.split('.').pop()`) only
+  // because leaf keys are HEM schema property keys, never user names — with one
+  // pre-existing exception: the degenerate no-properties-plant Control
+  // (`systemAdvancedUischema.ts`'s `buildControlsForSchema` returns
+  // `[{ type: 'Control', scope: scopePrefix }]` when a plant schema itself has no
+  // `.properties`), where the scope's final segment IS the raw plant key. A plant
+  // key containing '.' would still corrupt that downstream split. This is
+  // pre-existing and out of scope until the controls stop parsing path strings of
+  // their own (R4.5+) — this slice's segment-safety work protects THIS module's own
+  // walk/apply, not every control's internal path parsing.
 
   // Stage 2.2: window_part_list routes to WindowPartListControl BEFORE the type-based
   // picker, mirroring GenericControl's own special case (jsonformsRenderers.tsx:2384)
@@ -384,11 +494,14 @@ function renderControlForProperty(args: {
   );
   // Of the five controls, only EnumControl forwards this string to its input
   // (StandardDropdown `error`); Number/Boolean/Text/WindowPartListControl ignore the
-  // prop and self-validate. Control IDENTITY parity (this slice's whole point) did
-  // not depend on this string's exact contents; whatever nuance remains between this
-  // field-scoped validation and the retired JsonForms path's own Ajv-driven `errors`
-  // plumbing is deferred alongside the written-table corrections noted in the module
-  // docstring.
+  // prop and self-validate. Through R4.3, that forwarding only ever reached a
+  // handful of fields (rules (b)-(e) in `pickDirectControl` sent most enum-carrying
+  // fields to Boolean/TextControl instead). R4.3b's enum-first `pickDirectControl`
+  // means EnumControl now wins for EVERY enum-carrying field, not just the ones
+  // type-dispatch used to miss — so this forwarding, previously the exception, is now
+  // the common case. That is the headline of this slice: validation errors for an
+  // invalid persisted enum value become visible ON MOUNT instead of silently hidden
+  // behind TextControl's own hardcoded `error={undefined}`.
   let errors = (validation.errors ?? []).join('\n');
   if (replicateRequiredError && control === 'enum' && required && value === undefined && !errors) {
     // Retired-JsonForms-path parity (adversarial probe, System/ecodesign_control_class):
@@ -399,9 +512,13 @@ function renderControlForProperty(args: {
     // for this one state. Set-but-invalid values could differ in message TEXT between
     // the two validators, but no live shape reaches that state through the dropdown
     // UI (options are schema-sourced). R4.4 retired the JsonForms mount and its
-    // fallback flags, so this replication is now permanent behaviour of the
-    // layout-spec path, not a transitional parity shim -- revisit only alongside
-    // R4.3b's broader enum error-forwarding work.
+    // fallback flags, so this replication is permanent behaviour of the layout-spec
+    // path, not a transitional parity shim. R4.3b's enum-first `pickDirectControl`
+    // widens which fields reach this branch (`control === 'enum'` now also holds for
+    // required-and-unset boolean/string-typed enum System fields, not just
+    // integer+oneOf ones like `ecodesign_control_class`) — a deliberate R4.3b
+    // improvement, since those fields rendered via BooleanControl/TextControl on the
+    // retired JsonForms path and neither ever surfaced a required error.
     errors = 'is a required property';
   }
   const controlProps = { ...baseProps, errors } as unknown as DirectControlProps;
@@ -439,9 +556,9 @@ export function DirectAdvancedFields({
   const defs = (schema as { $defs?: unknown }).$defs ?? (config as { $defs?: unknown }).$defs;
   const resolutionRoot = { $defs: defs };
 
-  const handleChange = React.useCallback(
-    (path: string, value: unknown) => {
-      onDataChange(setAtPath(data, path.split('.'), value));
+  const applyChange = React.useCallback(
+    (segments: string[], value: unknown) => {
+      onDataChange(setAtPath(data, segments, value));
     },
     [data, onDataChange],
   );
@@ -453,21 +570,29 @@ export function DirectAdvancedFields({
       return <div key={key}>{(node.elements ?? []).map((child, i) => renderLayoutNode(child, i))}</div>;
     }
     if (!node.scope) return null;
-    const path = pathFromLayoutScope(node.scope);
-    const leafKey = leafKeyFromPath(path);
+    // R4.3b: decoded SEGMENTS, not a dot-joined path — see `segmentsFromLayoutScope`.
+    // node.scope's tokens are RFC-6901-escaped by `buildSystemAdvancedUischema`, so a
+    // raw '/' or '.' in a user plant-key name round-trips correctly here.
+    const segments = segmentsFromLayoutScope(node.scope);
+    const leafKey = segments[segments.length - 1] ?? '';
     // Stage 2.3: resolve the property schema by walking the SAME pointer (the node's
     // `scope`) through `schema` that buildSystemAdvancedUischema used to build the
     // scope in the first place, then $ref-resolve exactly like the flat walk does.
     const propertySchemaNode = resolveSchemaPointer(schema, node.scope);
     const resolved = readRecord(dereferenceSchemaNodeInRoot(propertySchemaNode, resolutionRoot));
     const label = node.label ?? labelForProperty(leafKey, resolved);
-    const value = getAtPath(data, path);
+    const value = getAtPath(data, segments);
     // Required from the PARENT schema's `required` list, mirroring how the retired
     // JsonForms path's Ajv required-missing errors used to attach to this control
     // (adversarial-review finding: the required-error replication in
     // renderControlForProperty needs this to fire for nested System fields like
     // ecodesign_control_class; the `required` PROP itself is still unused by every
     // control).
+    //
+    // R4.3b: this lookup still works unchanged on an escaped `node.scope` — every
+    // escaped token has had its own raw '/' turned into '~1', so no token can contain
+    // an unescaped '/' by construction, meaning `lastIndexOf('/properties/')` still
+    // finds the true last hop rather than a false match inside a raw plant-key name.
     const parentScopeEnd = node.scope.lastIndexOf('/properties/');
     const parentSchema =
       parentScopeEnd > 0
@@ -479,8 +604,7 @@ export function DirectAdvancedFields({
       ? (parentSchema.required as unknown[]).filter((v): v is string => typeof v === 'string')
       : [];
     return renderControlForProperty({
-      path,
-      leafKey,
+      segments,
       resolved,
       value,
       label,
@@ -490,7 +614,7 @@ export function DirectAdvancedFields({
       elementType,
       required: parentRequired.includes(leafKey),
       replicateRequiredError: true,
-      handleChange,
+      applyChange,
     });
   }
 
@@ -514,8 +638,11 @@ export function DirectAdvancedFields({
         ? renderLayoutNode(layout, 'root')
         : flatEntries.map(({ key, resolved }) =>
             renderControlForProperty({
-              path: key,
-              leafKey: key,
+              // R4.3b: flat mode's segments are always a single-element array — this
+              // is what keeps the whole component dot-safe uniformly across both
+              // modes, even though a flat-schema property key is never a raw user
+              // name in practice.
+              segments: [key],
               resolved,
               value: data[key],
               label: labelForProperty(key, resolved),
@@ -525,7 +652,7 @@ export function DirectAdvancedFields({
               elementType,
               required: requiredList.includes(key),
               replicateRequiredError: false,
-              handleChange,
+              applyChange,
             }),
           )}
     </div>

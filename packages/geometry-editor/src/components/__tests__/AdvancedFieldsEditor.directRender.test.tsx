@@ -47,7 +47,7 @@ import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
-import { DirectAdvancedFields } from '../DirectAdvancedFields';
+import { DirectAdvancedFields, pickDirectControl } from '../DirectAdvancedFields';
 import { standardRenderers } from '../jsonformsRenderers';
 import { getAjvInstance } from '../../lib/ajvCache';
 
@@ -144,6 +144,21 @@ function fieldRow(container: HTMLElement, key: string): HTMLElement {
   const row = container.querySelector<HTMLElement>(`[data-field-key="${key}"]`);
   if (!row) throw new Error(`field row not found for key: ${key}`);
   return row;
+}
+
+/**
+ * Same leaf `key` can legitimately repeat across plants in multi-plant System mode
+ * (each plant gets its own control set) -- `fieldRow` above picks the first DOM match
+ * only, so a multi-plant test that edits a specific plant's field needs to disambiguate
+ * by the plant-key label prefix instead.
+ */
+function fieldRowByLabel(container: HTMLElement, key: string, labelSubstring: string): HTMLElement {
+  const rows = Array.from(container.querySelectorAll<HTMLElement>(`[data-field-key="${key}"]`));
+  const match = rows.find((r) => fieldLabelText(r).includes(labelSubstring));
+  if (!match) {
+    throw new Error(`no row for key="${key}" with label containing "${labelSubstring}"`);
+  }
+  return match;
 }
 
 /** See `AdvancedFieldsEditor.electricBattery.test.tsx` for the DOM-shape rationale. */
@@ -339,26 +354,35 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     );
   });
 
-  it('config 3 -- BuildingElementTransparent, FHS: window_part_list + security_risk direct-render characterization', () => {
+  it('config 3 -- BuildingElementTransparent, FHS: window_part_list + security_risk direct-render characterization', async () => {
+    const baseExtraJson = {
+      frame_area_fraction: 0.3,
+      g_value: 0.5,
+      free_area_height: 0.5,
+      mid_height: 1.2,
+      max_window_open_area: 0.5,
+      security_risk: false,
+      window_part_list: [{ mid_height_air_flow_path: 1.5 }],
+    };
+    const onChange = vi.fn();
     const { container } = assertDirectCharacterization(
       {
         elementType: 'BuildingElementTransparent',
         useFHSSchema: true,
-        extraJson: {
-          frame_area_fraction: 0.3,
-          g_value: 0.5,
-          free_area_height: 0.5,
-          mid_height: 1.2,
-          max_window_open_area: 0.5,
-          security_risk: false,
-          window_part_list: [{ mid_height_air_flow_path: 1.5 }],
-        },
+        extraJson: baseExtraJson,
+        onChange,
       },
       [
         row('treatment', 'Blinds / curtains', OTHER('DIV')),
         row('u_value', 'U Value', TEXT('0.01')),
         row('g_value', 'G Value', TEXT('0')),
-        row('security_risk', 'Security Risk?', CHECKBOX),
+        // R4.3b CHARACTERIZATION CHANGE: was CHECKBOX under R4.3's executed-table
+        // pickDirectControl (BooleanControl won on type before enum was ever
+        // consulted). R4.3b's enum-first dispatch routes this FHS boolean-with-enum
+        // (`{type:'boolean', enum:[true,false]}`, inlined by AdvancedFieldsEditor's
+        // subschema memo -- see the inline comment there) to EnumControl instead --
+        // an expected delta, not a surprise (see the R4.3b brief's "Known effects").
+        row('security_risk', 'Security Risk?', SELECT),
         row('window_part_list', 'Window Part List', TEXT(null)),
       ],
     );
@@ -369,54 +393,83 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     expect(windowPartRow.querySelector('select')).toBeNull();
     expect(windowPartRow.querySelector('input[type="checkbox"]')).toBeNull();
 
-    // security_risk: with the R4.3 executed-table pickDirectControl, this is a plain
-    // checkbox (BooleanControl wins on type before enum is ever consulted).
+    // security_risk: R4.3b routes this to EnumControl -- a real <select>, not a
+    // checkbox. EnumControl's propKey-gated Yes/No label mapping
+    // (jsonformsRenderers.tsx) was dead code until this slice made this field
+    // reachable through it; the underlying option VALUES stay 'true'/'false'
+    // (String(v) off the schema's `enum: [true, false]`).
     const securityRow = fieldRow(container, 'security_risk');
-    expect(securityRow.querySelector('input[type="checkbox"]')).not.toBeNull();
-    expect(securityRow.querySelector('select')).toBeNull();
+    expect(securityRow.querySelector('input[type="checkbox"]')).toBeNull();
+    const select = within(securityRow).getByRole('combobox');
+    const options = Array.from(select.querySelectorAll('option')) as HTMLOptionElement[];
+    expect(options.map((o) => ({ value: o.value, label: o.textContent }))).toEqual(
+      expect.arrayContaining([
+        { value: 'true', label: 'Yes' },
+        { value: 'false', label: 'No' },
+      ]),
+    );
+
+    // Interaction: selecting "Yes" coerces the dropdown's string value back to a real
+    // boolean (EnumControl's `coerceDropdownValue`, coerceType derived from the enum
+    // being all-boolean) -- the onChange payload carries `security_risk: true`, not
+    // the string 'true'.
+    fireEvent.change(select, { target: { value: 'true' } });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith({
+        type: 'BuildingElementTransparent',
+        extra_json: { ...baseExtraJson, security_risk: true },
+      }),
+    );
   });
 
   it('config 4 -- BuildingElementGround, Suspended_floor, FHS: shield_fact_location dropdown + area_per_perimeter_vent direct-render characterization', () => {
+    const baseExtraJson = {
+      u_value: 0.2,
+      total_area: 80,
+      floor_type: 'Suspended_floor',
+      thickness_walls: 0.3,
+      perimeter: 40,
+      psi_wall_floor_junc: 0.1,
+      thermal_resistance_floor_construction: 0.5,
+      areal_heat_capacity: 'Medium',
+      mass_distribution_class: 'I',
+      height_upper_surface: 0.5,
+      thermal_transm_walls: 0.3,
+      area_per_perimeter_vent: 0.003,
+      shield_fact_location: 'Average',
+      thermal_resist_insul: 1,
+    };
+    const expectedRows = [
+      row('u_value', 'U Value', TEXT('0.01')),
+      row('psi_wall_floor_junc', 'Psi Wall Floor Junc', TEXT('0')),
+      row('thermal_resistance_floor_construction', 'Thermal Resistance Floor Construction', TEXT('0.000001')),
+      row('areal_heat_capacity', 'Areal Heat Capacity', SELECT),
+      row('mass_distribution_class', 'MassDistributionClass', SELECT),
+      row('height_upper_surface', 'Height Upper Surface', TEXT('0')),
+      row('thermal_transm_walls', 'Thermal Transm Walls', TEXT('0')),
+      row('area_per_perimeter_vent', 'Area Per Perimeter Vent', TEXT(null)),
+      row('shield_fact_location', 'Shield Fact Location', SELECT),
+      row('thermal_resist_insul', 'Thermal Resist Insul', TEXT('0')),
+    ];
     const { container } = assertDirectCharacterization(
       {
         elementType: 'BuildingElementGround',
         subtype: 'Suspended_floor',
         useFHSSchema: true,
-        extraJson: {
-          u_value: 0.2,
-          total_area: 80,
-          floor_type: 'Suspended_floor',
-          thickness_walls: 0.3,
-          perimeter: 40,
-          psi_wall_floor_junc: 0.1,
-          thermal_resistance_floor_construction: 0.5,
-          areal_heat_capacity: 'Medium',
-          mass_distribution_class: 'I',
-          height_upper_surface: 0.5,
-          thermal_transm_walls: 0.3,
-          area_per_perimeter_vent: 0.003,
-          shield_fact_location: 'Average',
-          thermal_resist_insul: 1,
-        },
+        extraJson: baseExtraJson,
       },
-      [
-        row('u_value', 'U Value', TEXT('0.01')),
-        row('psi_wall_floor_junc', 'Psi Wall Floor Junc', TEXT('0')),
-        row('thermal_resistance_floor_construction', 'Thermal Resistance Floor Construction', TEXT('0.000001')),
-        row('areal_heat_capacity', 'Areal Heat Capacity', SELECT),
-        row('mass_distribution_class', 'MassDistributionClass', SELECT),
-        row('height_upper_surface', 'Height Upper Surface', TEXT('0')),
-        row('thermal_transm_walls', 'Thermal Transm Walls', TEXT('0')),
-        row('area_per_perimeter_vent', 'Area Per Perimeter Vent', TEXT(null)),
-        row('shield_fact_location', 'Shield Fact Location', SELECT),
-        row('thermal_resist_insul', 'Thermal Resist Insul', TEXT('0')),
-      ],
+      expectedRows,
     );
 
     // shield_fact_location: inlined as a plain string enum with WIND_SHIELD_LOCATION_ENUM
-    // by AdvancedFieldsEditor's own subschema memo -- a dropdown, since the resolved
-    // schema is `{type:'string', enum:[...]}` and TextControl's own `extractOptions`
-    // fallback renders it (see the reworded comment at the inline site).
+    // by AdvancedFieldsEditor's own subschema memo -- still a dropdown (SELECT), but
+    // R4.3b changed WHICH control renders it: through R4.3, the resolved
+    // `{type:'string', enum:[...]}` schema reached TextControl's own `extractOptions`
+    // dropdown fallback (rule (d) won on type before enum was consulted); R4.3b's
+    // enum-first `pickDirectControl` now routes it to EnumControl proper instead (see
+    // the reworded comment at the inline site in AdvancedFieldsEditor.tsx). Same
+    // underlying `<StandardDropdown>` component either way -- the row check above
+    // already confirms SELECT; this assertion is just an explicit marker.
     const shieldRow = fieldRow(container, 'shield_fact_location');
     expect(shieldRow.querySelector('select')).not.toBeNull();
 
@@ -425,6 +478,27 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     const ventRow = fieldRow(container, 'area_per_perimeter_vent');
     expect(ventRow.querySelector('select')).toBeNull();
     expect(ventRow.querySelector('input[type="checkbox"]')).toBeNull();
+    cleanup();
+
+    // R4.3b HEADLINE RESTORATION: with an INVALID persisted string-enum value,
+    // EnumControl forwards `validateAdvancedFieldPrimitive`'s error text to its
+    // `<StandardDropdown error=...>` prop and it is visible ON MOUNT -- no interaction
+    // needed. Through R4.3, this same field reached TextControl's fallback dropdown
+    // instead, which hardcodes `error={undefined}` on its <StandardDropdown> and only
+    // ever surfaces a LOCAL error after an onChange/onBlur interaction (see
+    // `TextControl` in jsonformsRenderers.tsx) -- an invalid persisted value was
+    // therefore invisible until the user touched the field. Row shape (labels,
+    // control kinds) is identical to the valid-value fixture above; only this one
+    // field's runtime value/error differs, so this mount is NOT re-run through
+    // `assertDirectCharacterization`'s full-row comparison.
+    const { container: invalidContainer } = renderEditor({
+      elementType: 'BuildingElementGround',
+      subtype: 'Suspended_floor',
+      useFHSSchema: true,
+      extraJson: { ...baseExtraJson, areal_heat_capacity: 'Bogus' },
+    });
+    const invalidRow = fieldRow(invalidContainer, 'areal_heat_capacity');
+    expect(invalidRow.textContent).toContain('must be equal to one of the allowed values');
   });
 
   it('config 5 -- MechanicalVentilation, MVHR, FHS: measured + sfp fan modes, + interaction characterization (number-entry / unset)', async () => {
@@ -748,13 +822,18 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     });
     cleanup();
 
-    // Adversarial-review REAL finding (R4.3): with ecodesign_control_class UNSET (the
-    // state every newly-added wet system starts in), the picker renders EnumControl
-    // (integer+oneOf-const reaches rank-5 GenericControl, whose dispatch is
-    // enum-BEFORE-type) including its forwarded "is a required property" error text
-    // (see `replicateRequiredError` in DirectAdvancedFields.tsx -- this replication is
-    // now permanent layout-spec-path behaviour, not an A/B parity shim). Row shape is
-    // identical to the set-value fixture above; only the runtime value/error differs.
+    // Adversarial-review REAL finding (R4.3), still holds under R4.3b: with
+    // ecodesign_control_class UNSET (the state every newly-added wet system starts
+    // in), the picker renders EnumControl (integer+oneOf-const). Through R4.3 this
+    // was GenericControl's rank-5 dispatch on the retired JsonForms mount, whose own
+    // internal check was enum-BEFORE-type; R4.3b promoted that same enum-first rule
+    // to be `pickDirectControl`'s OWN top-level rule (see its docstring in
+    // DirectAdvancedFields.tsx), so this row is unaffected by the R4.3b reorder --
+    // it already routed here either way. It includes the forwarded "is a required
+    // property" error text (see `replicateRequiredError` in DirectAdvancedFields.tsx
+    // -- this replication is permanent layout-spec-path behaviour, not a parity
+    // shim). Row shape is identical to the set-value fixture above; only the runtime
+    // value/error differs.
     const unsetClassPlant = {
       'Zone 1 circuit': {
         ...singlePlant['Zone 1 circuit'],
@@ -810,6 +889,133 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         row('variable_flow', 'Zone 1 circuit · variable_flow', CHECKBOX),
       ],
     );
+  });
+
+  it('R4.3b: System plant keys containing "/" and "." round-trip through RFC-6901-escaped scopes (adjacent to configs 10/11)', async () => {
+    // R4.3b FIX (see systemAdvancedUischema.ts + DirectAdvancedFields.tsx): plant
+    // keys are raw user CSV names. A raw '/' in a plant key used to break
+    // `resolveSchemaPointer` (it splits the ref on '/'); a raw '.' used to break this
+    // component's own dot-path round-trip (`pathFromLayoutScope`/`leafKeyFromPath`,
+    // now replaced by `segmentsFromLayoutScope`). Two synthesized plants below exercise
+    // both: 'Kitchen/Diner rads' (a WetDistribution plant, same shape as config 10's
+    // single-plant fixture) and 'Zone 1.5 circuit' (a WarmAir plant, same shape as
+    // config 10's two-plant case) -- no real two-'/'-or-'.'-containing-key
+    // SpaceHeatSystem fixture exists in the repo, synthesized the same way config 10's
+    // second plant already is.
+    const twoEscapedPlants = {
+      'Kitchen/Diner rads': {
+        type: 'WetDistribution',
+        Zone: 'Zone 1',
+        temp_diff_emit_dsgn: 10,
+        variable_flow: true,
+        min_flow_rate: 3,
+        max_flow_rate: 18,
+        HeatSource: { name: 'hp', temp_flow_limit_upper: 65 },
+        ecodesign_controller: {
+          ecodesign_control_class: 2,
+          min_outdoor_temp: -4,
+          max_outdoor_temp: 20,
+          min_flow_temp: 30,
+        },
+        design_flow_temp: 55,
+      },
+      'Zone 1.5 circuit': { type: 'WarmAir', HeatSource: { name: 'a2a_hp' } },
+    };
+
+    const onChange = vi.fn();
+    // Plant-key sort is alphabetical (`sortPropertyKeys` in systemAdvancedUischema.ts):
+    // 'Kitchen/Diner rads' (K) sorts before 'Zone 1.5 circuit' (Z), same ordering rule
+    // config 10's two-plant case already exercises ('Living warm air' before 'Zone 1
+    // circuit').
+    const { container } = assertDirectCharacterization(
+      {
+        elementType: 'System',
+        subtype: 'SpaceHeatSystem',
+        useFHSSchema: true,
+        extraJson: { SpaceHeatSystem: twoEscapedPlants },
+        onChange,
+      },
+      [
+        row('bypass_fraction_recirculated', 'Kitchen/Diner rads · bypass_fraction_recirculated', TEXT('0')),
+        row('design_flow_temp', 'Kitchen/Diner rads · design_flow_temp', TEXT('20')),
+        row('ecodesign_control_class', 'Kitchen/Diner rads · ecodesign_controller · ecodesign_control_class', SELECT),
+        row('max_outdoor_temp', 'Kitchen/Diner rads · ecodesign_controller · max_outdoor_temp', TEXT('10')),
+        row('min_flow_temp', 'Kitchen/Diner rads · ecodesign_controller · min_flow_temp', TEXT('20')),
+        row('min_outdoor_temp', 'Kitchen/Diner rads · ecodesign_controller · min_outdoor_temp', TEXT('-60')),
+        row('temp_flow_limit_upper', 'Kitchen/Diner rads · temp_flow_limit_upper', TEXT('0', '0')),
+        row('max_flow_rate', 'Kitchen/Diner rads · max_flow_rate', TEXT('0', '0')),
+        row('min_flow_rate', 'Kitchen/Diner rads · min_flow_rate', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Kitchen/Diner rads · temp_diff_emit_dsgn', TEXT('0', '0')),
+        row('variable_flow', 'Kitchen/Diner rads · variable_flow', CHECKBOX),
+        row('frac_convective', 'Zone 1.5 circuit · frac_convective', TEXT('0.1')),
+        row('temp_flow_limit_upper', 'Zone 1.5 circuit · temp_flow_limit_upper', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Zone 1.5 circuit · temp_diff_emit_dsgn', TEXT(null)),
+      ],
+    );
+
+    // "Real field rows render, not junk 'properties' rows": the full ordered-key
+    // comparison above already proves this (a broken pointer resolution would produce
+    // wrong keys/labels or throw), but assert the negative directly too, and that no
+    // control fell back to an opaque JSON blob anywhere in the grid.
+    expect(fieldKeys(container)).not.toContain('properties');
+    expect(container.textContent).not.toContain('[object Object]');
+
+    // Labels carry the RAW plant-key prefix (unescaped) -- escaping applies to scopes
+    // only, per systemAdvancedUischema.ts's docstring; a user reading this grid should
+    // see their own plant names, not pointer-escaped ones.
+    expect(fieldLabelText(fieldRowByLabel(container, 'variable_flow', 'Kitchen/Diner rads'))).toBe(
+      'Kitchen/Diner rads · variable_flow',
+    );
+    expect(fieldLabelText(fieldRowByLabel(container, 'frac_convective', 'Zone 1.5 circuit'))).toBe(
+      'Zone 1.5 circuit · frac_convective',
+    );
+
+    // Edit round-trip #1: a NESTED field (HeatSource.temp_flow_limit_upper, hoisted)
+    // under the '/'-containing plant key -- exercises the escaped scope AND the
+    // multi-hop segment walk together.
+    const kitchenNestedInput = within(
+      fieldRowByLabel(container, 'temp_flow_limit_upper', 'Kitchen/Diner rads'),
+    ).getByRole('textbox');
+    fireEvent.change(kitchenNestedInput, { target: { value: '70' } });
+    await waitFor(() =>
+      expect((onChange.mock.calls[onChange.mock.calls.length - 1][0] as { extra_json: Record<string, unknown> })
+        .extra_json).toMatchObject({
+        SpaceHeatSystem: {
+          'Kitchen/Diner rads': expect.objectContaining({
+            HeatSource: { name: 'hp', temp_flow_limit_upper: 70 },
+          }),
+        },
+      }),
+    );
+    expect(typeof (onChange.mock.calls[onChange.mock.calls.length - 1][0] as {
+      extra_json: { SpaceHeatSystem: Record<string, { HeatSource: { temp_flow_limit_upper: unknown } }> };
+    }).extra_json.SpaceHeatSystem['Kitchen/Diner rads'].HeatSource.temp_flow_limit_upper).toBe('number');
+
+    // Edit round-trip #2: a TOP-LEVEL field under the '.'-containing plant key --
+    // exercises single-hop segment safety for a plant key `pathFromLayoutScope`'s old
+    // dot-join would have corrupted ("Zone 1.5 circuit".split('.') used to produce
+    // ['Zone 1', '5 circuit'], two bogus hops instead of one real plant key).
+    const zoneInput = within(fieldRowByLabel(container, 'frac_convective', 'Zone 1.5 circuit')).getByRole(
+      'textbox',
+    );
+    fireEvent.change(zoneInput, { target: { value: '0.55' } });
+    await waitFor(() => {
+      const lastExtraJson = (onChange.mock.calls[onChange.mock.calls.length - 1][0] as {
+        extra_json: { SpaceHeatSystem: Record<string, { frac_convective?: unknown }> };
+      }).extra_json;
+      expect(lastExtraJson.SpaceHeatSystem['Zone 1.5 circuit'].frac_convective).toBe(0.55);
+    });
+    // Both edits landed cumulatively (controlled harness re-feeds each onChange
+    // payload back in as the next render's data) -- the nested Kitchen/Diner rads
+    // edit from round-trip #1 is still present after round-trip #2's independent
+    // top-level Zone 1.5 circuit edit.
+    const finalExtraJson = (onChange.mock.calls[onChange.mock.calls.length - 1][0] as {
+      extra_json: {
+        SpaceHeatSystem: Record<string, { HeatSource?: { temp_flow_limit_upper?: unknown }; frac_convective?: unknown }>;
+      };
+    }).extra_json;
+    expect(finalExtraJson.SpaceHeatSystem['Kitchen/Diner rads'].HeatSource?.temp_flow_limit_upper).toBe(70);
+    expect(finalExtraJson.SpaceHeatSystem['Zone 1.5 circuit'].frac_convective).toBe(0.55);
   });
 
   it('config 11 -- System, HotWaterSource, FHS: HeatSource map is skipped (CHARACTERIZATION)', () => {
@@ -941,6 +1147,65 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         el.getAttribute('data-field-key'),
       );
       expect(keys).toEqual(['battery_age']);
+    });
+
+    it('R4.3b bugfix (adversarial review round 2): empty-alternatives string properties fall through to a free-text input, not a zero-option dropdown', () => {
+      // REACHABLE state, not synthetic-only: `lib/systemHotWaterAdvancedSchema.ts`'s
+      // `inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema` manufactures
+      // exactly `HeatSourceWet: {type:'string', oneOf: []}` on an FHS
+      // CombiBoiler/HIU/HeatBattery `hw cylinder` whenever the project has ZERO wet
+      // heat-source plants defined yet -- its own hint text asks the user to type a
+      // name ("No defined heat source (wet) names yet. Add a Heat source (wet)
+      // system that defines a plant key, then link here."). The shared
+      // `schemaHasEnum`/`schemaHasConstAlternatives` predicates are vacuously true on
+      // an empty array, which was harmless under R4.3's type-first `pickDirectControl`
+      // order but would route this straight to a ZERO-OPTION EnumControl dropdown
+      // under R4.3b's enum-first order without the `isNonEmptyEnumLike` guard --
+      // permanently uneditable, right next to help text asking for exactly the input
+      // it no longer accepts. Exercises `pickDirectControl` directly (unit-level, the
+      // fastest signal) AND through a full DirectAdvancedFields mount (DOM-level, the
+      // signal that would have actually caught this in the field).
+      expect(pickDirectControl({ type: 'string', oneOf: [] })).toBe('text');
+      expect(pickDirectControl({ type: 'string', enum: [] })).toBe('text');
+      // Non-empty alternatives still win as EnumControl -- this guard is about
+      // emptiness, not a blanket demotion of oneOf/enum.
+      expect(pickDirectControl({ type: 'string', oneOf: [{ const: 'a' }] })).toBe('enum');
+
+      const zeroNamesSchema = {
+        type: 'object',
+        properties: {
+          // `oneOf: []` -- the exact manufactured shape from
+          // inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema.
+          HeatSourceWet: { type: 'string', oneOf: [], title: 'Heat source (wet)' },
+          // `enum: []` -- cheap sibling case for the same guard, same failure mode.
+          empty_enum_field: { type: 'string', enum: [], title: 'Empty Enum Field' },
+        },
+      };
+      const onDataChange = vi.fn();
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      const { container } = render(
+        <GeometryEditorServicePortsProvider
+          schemaPort={canonicalGeometrySchemaPort}
+          workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
+        >
+          <GeometryStoreProvider store={store}>
+            <DirectAdvancedFields
+              schema={zeroNamesSchema}
+              data={{}}
+              config={{ advancedEditor: true, elementType: 'System' }}
+              onDataChange={onDataChange}
+            />
+          </GeometryStoreProvider>
+        </GeometryEditorServicePortsProvider>,
+      );
+
+      for (const key of ['HeatSourceWet', 'empty_enum_field']) {
+        const fieldRowEl = fieldRow(container, key);
+        // Free-text input (TextControl), NOT a select and NOT a checkbox -- reuses
+        // the same `inputSignatureForRow` classifier every other config in this file
+        // asserts against.
+        expect(inputSignatureForRow(fieldRowEl)).toEqual(TEXT(null));
+      }
     });
   });
 });
