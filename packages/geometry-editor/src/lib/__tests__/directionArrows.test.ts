@@ -21,11 +21,30 @@ describe('Direction Arrow Calculations', () => {
 
       const result = calculateDirectionArrow(element as any, 30);
 
+      // Drag-control arrow scales with the footprint: 0.35 * sqrt(area 6), floor 0.25.
+      const arrowLength = 0.35 * Math.sqrt(6);
       expect(result?.centerX).toBeCloseTo(2, 12);
       expect(result?.centerY).toBeCloseTo(1, 12);
-      expect(result?.arrowX).toBeCloseTo(2.25, 12);
+      expect(result?.arrowX).toBeCloseTo(2 + arrowLength, 12);
       expect(result?.arrowY).toBeCloseTo(1, 12);
       expect(result?.orientation).toBe(60);
+    });
+
+    it('never shrinks the Orientation-axis arrow below the fixed-length convention', () => {
+      const element = {
+        type: 'BuildingElementOpaque' as const,
+        coordinates: [
+          { x: 0, y: 0, z: 0 },
+          { x: 0.4, y: 0, z: 0 },
+          { x: 0.2, y: 0.3, z: 0 },
+        ],
+        pitch: 30,
+        orientation360: 90,
+        extra_json: { _slope_pitch_axis: 'orientation' },
+      };
+
+      const result = calculateDirectionArrow(element as any, 0);
+      expect(result?.arrowX).toBeCloseTo(0.2 + 0.25, 12);
     });
 
     it('keeps the bottom-edge sloped arrow on the first-edge midpoint', () => {

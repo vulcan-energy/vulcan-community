@@ -8,6 +8,7 @@ import {
   segmentTangentAndOpeningOutwardModelXY,
 } from './openingSegmentOutward';
 import { downslopeUnitModelXY, isOrientationPitchAxis } from './slopePitchAxis';
+import { calculatePolygonArea } from './polygonSync';
 
 export interface DirectionArrow {
   centerX: number;
@@ -49,11 +50,14 @@ export function calculateDirectionArrow(element: Element, globalOrientationOffse
     const centerX = element.coordinates.reduce((sum, point) => sum + point.x, 0) / element.coordinates.length;
     const centerY = element.coordinates.reduce((sum, point) => sum + point.y, 0) / element.coordinates.length;
     const downslope = downslopeUnitModelXY(element.orientation360, globalOrientationOffset!);
+    // The fall-line arrow is a drag control here, not just an annotation; scale it with
+    // the footprint so it stays visible, never below the fixed-length convention.
+    const arrowLength = Math.max(0.25, 0.35 * Math.sqrt(calculatePolygonArea(element.coordinates)));
     return {
       centerX,
       centerY,
-      arrowX: centerX + 0.25 * downslope[0],
-      arrowY: centerY + 0.25 * downslope[1],
+      arrowX: centerX + arrowLength * downslope[0],
+      arrowY: centerY + arrowLength * downslope[1],
       orientation: element.orientation360,
     };
   }
