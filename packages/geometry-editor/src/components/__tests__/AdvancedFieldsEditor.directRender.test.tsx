@@ -31,11 +31,6 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-// Raw JsonForms import — allowed HERE ONLY, for the Stage 2.5 raw-registry comparison
-// mount below (matches the pattern in AdvancedFieldsEditor.electricBattery.test.tsx's
-// own $ref probe). No other file in this test suite imports @jsonforms/*.
-import { JsonForms } from '@jsonforms/react';
-import { materialRenderers } from '@jsonforms/material-renderers';
 import coreSchema from '../../../../../data/schemas/core-input.schema.json';
 import fhsSchema from '../../../../../data/schemas/input_fhs.schema.json';
 import {
@@ -47,9 +42,13 @@ import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
-import { DirectAdvancedFields, pickDirectControl } from '../DirectAdvancedFields';
-import { standardRenderers } from '../jsonformsRenderers';
-import { getAjvInstance } from '../../lib/ajvCache';
+import {
+  DirectAdvancedFields,
+  DirectSpecFields,
+  pickDirectControl,
+  type DirectSpecNode,
+} from '../DirectAdvancedFields';
+import { GroupAccordion } from '../jsonformsRenderers';
 
 beforeAll(async () => {
   configureGeometrySchemaAssetSource({
@@ -1109,14 +1108,16 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     // (checked directly against both schema files: every `const` found sits inside an
     // `if`/`allOf` conditional block, never as a standalone Advanced Field property),
     // so this is a synthetic schema exercising `schemaEmitsControl`'s gate directly --
-    // matching the pattern the $ref probe tests in
-    // AdvancedFieldsEditor.electricBattery.test.tsx already use for isolated
-    // DirectAdvancedFields/JsonForms mounts, since no real element type reaches it.
+    // matching the pattern the $ref probe test in
+    // AdvancedFieldsEditor.electricBattery.test.tsx already uses for an isolated
+    // DirectAdvancedFields mount, since no real element type reaches it.
     const syntheticSchema = {
       type: 'object',
       properties: {
-        // Const-only, no `type`/`enum`/`properties`/`items` -- @jsonforms/core's
-        // generator derives no type for this and emits no control at all.
+        // Const-only, no `type`/`enum`/`properties`/`items` -- this shape derives no
+        // type at all (see `schemaEmitsControl`'s own docstring in
+        // DirectAdvancedFields.tsx, verified against the real `@jsonforms/core`
+        // generator this gate was built to match before R4.5 deleted that dependency).
         mode_marker: { const: 'v1' },
         battery_age: { type: 'number', title: 'Battery Age' },
       },
@@ -1136,38 +1137,6 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
               data={{ mode_marker: 'v1', battery_age: 5 }}
               config={{ advancedEditor: true, elementType: 'ElectricBattery' }}
               onDataChange={onDataChange}
-            />
-          </GeometryStoreProvider>
-        </GeometryEditorServicePortsProvider>,
-      );
-      const keys = Array.from(container.querySelectorAll('[data-field-key]')).map((el) =>
-        el.getAttribute('data-field-key'),
-      );
-      expect(keys).toEqual(['battery_age']);
-    });
-
-    it('raw JsonForms registry mount (generated uischema, no explicit uischema prop): mode_marker is ALSO skipped -- confirms schemaEmitsControl matches @jsonforms/core\'s own generator, documenting behaviour web/\'s JsonForms mount still depends on until R4.5', () => {
-      // Mounts the shared jsonformsRenderers REGISTRY directly (not AdvancedFieldsEditor,
-      // which no longer offers a JsonForms path since R4.4) -- this is the same
-      // registry web/'s SnippetEditor and SimplifiedFabricEditor still import via
-      // `standardRenderers`/`jsonformsRenderers.tsx`. It verifies DirectAdvancedFields'
-      // own `schemaEmitsControl` gate was built to match @jsonforms/core's real
-      // `generateUISchema` behaviour, not a guess -- see the `schemaEmitsControl`
-      // docstring in DirectAdvancedFields.tsx.
-      const store = createGeometryStore({ defaultDefaultsPath: null });
-      const { container } = render(
-        <GeometryEditorServicePortsProvider
-          schemaPort={canonicalGeometrySchemaPort}
-          workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
-        >
-          <GeometryStoreProvider store={store}>
-            <JsonForms
-              schema={syntheticSchema as never}
-              data={{ mode_marker: 'v1', battery_age: 5 }}
-              renderers={[...standardRenderers, ...materialRenderers]}
-              ajv={getAjvInstance()}
-              config={{ advancedEditor: true, elementType: 'ElectricBattery' }}
-              onChange={() => {}}
             />
           </GeometryStoreProvider>
         </GeometryEditorServicePortsProvider>,
@@ -1236,5 +1205,203 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         expect(inputSignatureForRow(fieldRowEl)).toEqual(TEXT(null));
       }
     });
+  });
+});
+
+/**
+ * R4.5: `DirectSpecFields` interprets the EXPLICIT uischema-spec trees web's
+ * SnippetEditor (`lib/jsonFormsPresentUi.ts`) and SimplifiedFabricEditor
+ * (`components/SimplifiedFabricEditor.tsx`'s `ui` memo, parent repo) build by hand --
+ * distinct from every config above, which exercises `DirectAdvancedFields`' own
+ * resolved-subschema walk. Fixtures below are shaped to match those two builders
+ * exactly (verified directly against both, parent repo, read-only), not invented.
+ */
+function renderDirectSpecFields(props: {
+  schema: Record<string, unknown>;
+  data: Record<string, unknown>;
+  spec: DirectSpecNode;
+  config?: Record<string, unknown>;
+  onDataChange?: ReturnType<typeof vi.fn>;
+}) {
+  const onDataChange = props.onDataChange ?? vi.fn();
+  const store = createGeometryStore({ defaultDefaultsPath: null });
+  const utils = render(
+    <GeometryEditorServicePortsProvider
+      schemaPort={canonicalGeometrySchemaPort}
+      workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
+    >
+      <GeometryStoreProvider store={store}>
+        <DirectSpecFields
+          schema={props.schema}
+          data={props.data}
+          config={props.config ?? { advancedEditor: true, elementType: 'ThermalBridgeLinear' }}
+          spec={props.spec}
+          onDataChange={onDataChange}
+        />
+      </GeometryStoreProvider>
+    </GeometryEditorServicePortsProvider>,
+  );
+  return { onDataChange, ...utils };
+}
+
+describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec trees directly', () => {
+  it('flat snippet-style spec: rows render in SPEC order (not schema property-declaration order), an object-typed property JSON-blobs via TextControl, edits round-trip, and nothing fires on mount', () => {
+    // Schema declares zeta/alpha/meta in THAT order; the snippet spec (mirroring
+    // `buildPresentUiForJsonForms`'s `Object.keys(props).sort()`) lists them
+    // alpha/meta/zeta -- deliberately different orders, so a DOM-order match proves
+    // the walker follows the spec, not `Object.keys(schema.properties)`.
+    const snippetSchema = {
+      type: 'object',
+      properties: {
+        zeta: { type: 'number', title: 'Zeta' },
+        alpha: { type: 'string', title: 'Alpha' },
+        meta: { type: 'object' },
+      },
+    };
+    // Snippet Controls carry no `options` at all (see `jsonFormsPresentUi.ts`) --
+    // resolution falls through to the "walk contextSchema through the tokens"
+    // branch, not `options.schemaOverride`.
+    const snippetSpec: DirectSpecNode = {
+      type: 'VerticalLayout',
+      elements: ['alpha', 'meta', 'zeta'].map((key) => ({
+        type: 'Control',
+        scope: `#/properties/${key}`,
+      })),
+    };
+    const initialData = { zeta: 5, alpha: 'hi', meta: { a: 1 } };
+    const onDataChange = vi.fn();
+    const { container } = renderDirectSpecFields({
+      schema: snippetSchema,
+      data: initialData,
+      spec: snippetSpec,
+      onDataChange,
+    });
+
+    expect(fieldKeys(container)).toEqual(['alpha', 'meta', 'zeta']);
+    expect(onDataChange).not.toHaveBeenCalled();
+
+    // meta: object-typed with no options.schemaOverride -- resolves via the walked
+    // contextSchema, lands on TextControl's isJsonLike branch (JSON.stringify blob),
+    // same as DirectAdvancedFields' own nested-object characterization elsewhere in
+    // this file.
+    const metaRow = fieldRow(container, 'meta');
+    expect(fieldLabelText(metaRow)).toBe('Meta');
+    const metaInput = within(metaRow).getByRole('textbox') as HTMLInputElement;
+    expect(metaInput.value).toBe(JSON.stringify({ a: 1 }));
+
+    // Edit round-trip on the plain string field, and confirm the sibling keys
+    // (zeta, meta) survive untouched in the emitted payload.
+    const alphaRow = fieldRow(container, 'alpha');
+    expect(fieldLabelText(alphaRow)).toBe('Alpha');
+    const alphaInput = within(alphaRow).getByRole('textbox');
+    fireEvent.change(alphaInput, { target: { value: 'bye' } });
+    expect(onDataChange).toHaveBeenCalledWith({ zeta: 5, alpha: 'bye', meta: { a: 1 } });
+  });
+
+  it('fabric-style spec: a Group with schemaOverride/pathOverride/openInitially renders an open accordion, and its Controls resolve against their own schemaOverride and write to pathOverride-prefixed segments (enum Control routes to EnumControl, R4.3b enum-first)', () => {
+    const junctionTypeSchema = { type: 'string', enum: ['E1', 'E2'], title: 'Junction Type' };
+    const lengthSchema = { type: 'number', title: 'Length' };
+    // Mirrors SimplifiedFabricEditor's `ui` memo: every leaf Control carries its OWN
+    // `options.schemaOverride` (the exact resolved per-field schema), and the
+    // enclosing Group carries `schemaOverride` (the section's own object schema) +
+    // `pathOverride` (the dot-joined ABSOLUTE instance path) + `openInitially`.
+    const fabricSpec: DirectSpecNode = {
+      type: 'VerticalLayout',
+      elements: [
+        {
+          type: 'Group',
+          label: 'Thermal bridge (linear)',
+          elements: [
+            {
+              type: 'Control',
+              label: 'Junction Type',
+              scope: '#/properties/junction_type',
+              options: { schemaOverride: junctionTypeSchema },
+            },
+            {
+              type: 'Control',
+              label: 'Length',
+              scope: '#/properties/length',
+              options: { schemaOverride: lengthSchema },
+            },
+          ],
+          options: {
+            schemaOverride: {
+              type: 'object',
+              properties: { junction_type: junctionTypeSchema, length: lengthSchema },
+            },
+            pathOverride: 'ThermalBridging.TB_linear',
+            openInitially: true,
+          },
+        },
+      ],
+    };
+    const initialData = { ThermalBridging: { TB_linear: { junction_type: 'E1', length: 2.5 } } };
+    const onDataChange = vi.fn();
+    const { container } = renderDirectSpecFields({
+      schema: { type: 'object', properties: {} },
+      data: initialData,
+      spec: fabricSpec,
+      onDataChange,
+    });
+
+    const details = container.querySelector('details');
+    expect(details).not.toBeNull();
+    expect((details as HTMLDetailsElement).open).toBe(true);
+    const summary = details!.querySelector('summary')!;
+    expect(summary.textContent).toContain('Thermal bridge (linear)');
+    expect(summary.textContent).toContain('2'); // count badge (2 elements in the Group)
+
+    // Data-path resolution: the leaf field keys are 'junction_type'/'length' (path
+    // segments end there), prefixed by the Group's pathOverride.
+    expect(fieldKeys(container)).toEqual(['junction_type', 'length']);
+
+    // junction_type: schemaOverride carries a non-empty enum -> EnumControl
+    // (R4.3b enum-first `pickDirectControl`), a real <select>, not a checkbox/textbox.
+    const junctionRow = fieldRow(container, 'junction_type');
+    const select = within(junctionRow).getByRole('combobox');
+    const optionValues = Array.from(select.querySelectorAll('option')).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(optionValues).toEqual(expect.arrayContaining(['E1', 'E2']));
+
+    // length: plain number schemaOverride -> NumberControl (textbox).
+    const lengthRow = fieldRow(container, 'length');
+    within(lengthRow).getByRole('textbox');
+
+    // Edit round-trip: the write lands at the pathOverride-prefixed nested segments,
+    // not at the top of `data`.
+    fireEvent.change(select, { target: { value: 'E2' } });
+    expect(onDataChange).toHaveBeenCalledWith({
+      ThermalBridging: { TB_linear: { junction_type: 'E2', length: 2.5 } },
+    });
+  });
+});
+
+describe('GroupAccordion (R4.5): plain collapsible chrome extracted from the retired Group registry renderer', () => {
+  it('openInitially false starts closed, toggling opens it, and no add-field affordance ever renders', () => {
+    const { container } = render(
+      <GroupAccordion label="Section" count={3} openInitially={false}>
+        <div data-testid="accordion-child">child content</div>
+      </GroupAccordion>,
+    );
+
+    const details = container.querySelector('details') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(container.querySelector('[data-testid="accordion-child"]')).toBeNull();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).not.toContain('Add field');
+
+    // Native <details>/<summary> toggling: a real click flips `.open` and fires a
+    // 'toggle' event on the <details> element; jsdom does not reliably synthesize
+    // that from a click, so this drives the same event GroupAccordion's own
+    // `onToggle` handler listens for directly.
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+
+    expect(details.open).toBe(true);
+    expect(container.querySelector('[data-testid="accordion-child"]')).not.toBeNull();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).not.toContain('Add field');
   });
 });

@@ -17,16 +17,28 @@
  * user plant-key names (CSV-derived) may contain '/' or '.', either of which used to
  * corrupt the walk (a '/' broke `resolveSchemaPointer`'s pointer split; a '.' broke
  * this file's own dot-path round-trip).
+ *
+ * R4.5: this file also exports `DirectSpecFields`, a second direct renderer, sibling
+ * to `DirectAdvancedFields` above and living here for the same reason — it shares
+ * `renderControlForProperty`, `getAtPath`, `setAtPath`, `labelForProperty`, and
+ * `segmentsFromLayoutScope` rather than duplicating them. Where `DirectAdvancedFields`
+ * interprets a resolved SUBSCHEMA, `DirectSpecFields` interprets an EXPLICIT
+ * uischema-spec tree — the shape web's SnippetEditor and SimplifiedFabricEditor
+ * (parent repo) build by hand and used to mount as a raw JsonForms `uischema` prop
+ * through the now-deleted `standardRenderers` registry (see `jsonformsRenderers.tsx`'s
+ * own R4.5 deletion note). See `DirectSpecFields`'s own docstring below for the walk
+ * semantics.
  */
 
 import React from 'react';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
 import { decodePointerToken, resolveSchemaPointer } from '../lib/schemaRefResolver';
-import { readRecord } from '../lib/jsonTypes';
+import { isRecord, readRecord } from '../lib/jsonTypes';
 import type { AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
   BooleanControl,
   EnumControl,
+  GroupAccordion,
   NumberControl,
   TextControl,
   WindowPartListControl,
@@ -37,11 +49,11 @@ import {
 } from './jsonformsRenderers';
 
 export type DirectAdvancedFieldsProps = {
-  /** The built subschema (has .properties, maybe .$defs, maybe .required) — same object AdvancedFieldsEditor passes to <JsonForms schema={...}>. */
+  /** The built subschema (has .properties, maybe .$defs, maybe .required) — same object AdvancedFieldsEditor's retired <JsonForms> mount used to receive as its `schema` prop. */
   schema: Record<string, unknown>;
   /** advancedFieldsData — the flat extra_json record for this element. */
   data: Record<string, unknown>;
-  /** The SAME jsonFormsConfig object the JsonForms mount gets. */
+  /** The SAME `advancedFieldsConfig` object AdvancedFieldsEditor builds (elementType, schemaPort, …). */
   config: Record<string, unknown>;
   /**
    * System only: the manually-built layout spec from `buildSystemAdvancedUischema`.
@@ -158,11 +170,31 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  * yet (its own hint text literally asks the user to type a name: "No defined heat
  * source (wet) names yet. Add a Heat source (wet) system that defines a plant key,
  * then link here." — EnumControl with no options cannot accept that input). `pickDirectControl`
- * therefore requires NON-EMPTY alternatives (`isNonEmptyEnumLike`, mirroring
- * GenericControl's own inline guards on the retired JsonForms path — see its
- * docstring below), so this shape falls through to type dispatch exactly as both the
- * old type-first port and the retired JsonForms path always did: string ->
- * TextControl, a free-text input the user can still type a link name into.
+ * therefore requires NON-EMPTY alternatives (`isNonEmptyEnumLike`, mirroring the
+ * retired JsonForms registry's own GenericControl fallback's inline guards — see the
+ * R4.5 deletion note above `schemaHasIntegerType` in `jsonformsRenderers.tsx`), so
+ * this shape falls through to type dispatch exactly as both the old type-first port
+ * and the retired JsonForms path always did: string -> TextControl, a free-text input
+ * the user can still type a link name into.
+ *
+ * ACCEPTED DIVERGENCE, NO LIVE INSTANCE (R4.5, commit-3 dead-code harvest): one
+ * residual shape neither `isNonEmptyEnumLike` NOR type dispatch ever routes to
+ * EnumControl — `anyOf: [{enum: [...]}, {type: 'null'}]` with no TOP-LEVEL `type`.
+ * `isNonEmptyEnumLike` only recognizes a bare `.enum` or oneOf/anyOf where EVERY
+ * branch carries `const`; an anyOf branch that itself carries `.enum` (one branch
+ * enum-typed, the other `{type:'null'}`) matches neither, and with no top-level type
+ * to dispatch on either, this falls to rule (f) -> TextControl. Through R4.3/R4.3b
+ * this shape still got a dropdown via TextControl's own `extractOptions` "Case 2"
+ * fallback (one alternative carries an enum) — deleted in R4.5's commit-3 alongside
+ * the rest of that fallback (see the R4.5 deletion notes on TextControl/NumberControl
+ * in `jsonformsRenderers.tsx`), so this shape now renders a plain text input instead.
+ * Accepted, not fixed: this shape's only known historical case was
+ * `shield_fact_location` (HEM's `$defs/WindShieldLocation`, `$ref`'d inside an
+ * `anyOf`), and `AdvancedFieldsEditor.tsx`'s own subschema memo has ALWAYS inlined a
+ * plain `{type:'string', enum:[...]}` override for that field before it ever reaches
+ * this picker (see the inline comment there) — verified directly against both live
+ * schemas that no OTHER Advanced Field property has this exact anyOf-with-nested-enum
+ * shape, so the divergence has zero live instances to regress.
  *
  * The `Group` accordion renderer (rank 100) is deliberately NOT ported: no Advanced
  * Fields uischema (generated OR manually-built System layout spec) ever emits one.
@@ -171,16 +203,19 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
 /**
  * NON-EMPTY enum-like, deliberately stricter than the shared `schemaHasEnum` /
  * `schemaHasConstAlternatives` exports from `./jsonformsRenderers`, which are
- * vacuously true on an empty array (`[].every(...)` is true) — exactly matching
- * GenericControl's OWN inline guards instead (`s.enum.length > 0`,
- * `oneOfAnyOfConsts.length > 0`, jsonformsRenderers.tsx ~2386-2389), the control this
- * picker's enum-first rule is standing in for.
+ * vacuously true on an empty array (`[].every(...)` is true) — exactly matching the
+ * retired JsonForms registry's own GenericControl fallback's inline guards instead
+ * (`s.enum.length > 0`, `oneOfAnyOfConsts.length > 0` — GenericControl itself is
+ * deleted as of R4.5, see the deletion note above `schemaHasIntegerType` in
+ * `jsonformsRenderers.tsx`), the control this picker's enum-first rule is standing in
+ * for.
  *
  * R4.3b BUGFIX (adversarial review round 2, REAL finding): the shared predicates'
  * vacuous truth is harmless where they're actually used elsewhere (the rank-1000/1100
- * EnumControl registry testers web/ still mounts through `standardRenderers` until
- * R4.5 — pre-existing registry behaviour, deliberately NOT touched by this fix) and
- * was ALSO harmless in this file through R4.3's type-first order (a type-bearing
+ * EnumControl registry testers web/ used to mount through `standardRenderers` before
+ * R4.5 deleted that registry entirely — pre-existing registry behaviour, deliberately
+ * NOT touched by this R4.3b fix, and moot now that the registry is gone) and was ALSO
+ * harmless in this file through R4.3's type-first order (a type-bearing
  * schema matched boolean/string/number before enum-ness was ever consulted). R4.3b's
  * enum-first promotion changed that: without this non-emptiness guard, an
  * empty-alternatives schema would route to EnumControl with ZERO options —
@@ -294,7 +329,8 @@ function schemaEmitsControl(resolved: Record<string, unknown>): boolean {
  * `words()`'s full Unicode-script handling is out of scope, nothing in these schemas
  * needs it.
  */
-function startCaseKey(key: string): string {
+// eslint-disable-next-line react-refresh/only-export-components -- R4.5: exported so web's migration can reuse it in place of SimplifiedFabricEditor's local `labelize`; no behaviour change.
+export function startCaseKey(key: string): string {
   const words = key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
@@ -550,7 +586,7 @@ export function DirectAdvancedFields({
 
   // Resolution root for $ref lookups, built once per render (cheap: just wraps the
   // $defs the property schemas point into). Falls back to config.$defs the same way
-  // AdvancedFieldsEditor's jsonFormsConfig does ("Pass $defs through config so
+  // AdvancedFieldsEditor's advancedFieldsConfig does ("Pass $defs through config so
   // TextControl can resolve references") for callers that hand DirectAdvancedFields an
   // unfiltered subschema without its own $defs (see the EnumControl $ref probe test).
   const defs = (schema as { $defs?: unknown }).$defs ?? (config as { $defs?: unknown }).$defs;
@@ -657,4 +693,210 @@ export function DirectAdvancedFields({
           )}
     </div>
   );
+}
+
+/**
+ * The explicit uischema-spec tree `DirectSpecFields` interprets, structurally
+ * matching what `web/src/components/SimplifiedFabricEditor.tsx`'s `ui` memo and
+ * `web/src/lib/jsonFormsPresentUi.ts` (parent repo, read-only) build by hand and used
+ * to mount as a raw JsonForms `uischema` prop. Unknown `options` keys are ignored —
+ * see `DirectSpecFields`'s own docstring for the one that matters (`helperText`).
+ */
+export type DirectSpecNode =
+  | { type: 'VerticalLayout'; elements: DirectSpecNode[] }
+  | {
+      type: 'Group';
+      label?: string;
+      elements: DirectSpecNode[];
+      options?: { schemaOverride?: object; pathOverride?: string; openInitially?: boolean };
+    }
+  | {
+      type: 'Control';
+      scope: string;
+      label?: string;
+      options?: { schemaOverride?: object };
+    };
+
+export type DirectSpecFieldsProps = {
+  /** Resolution root for `Control` nodes with no `options.schemaOverride` of their
+   * own — walked-through-tokens schemas $ref-resolve against this (see
+   * `walkSchemaPropertiesByTokens` below), the same pattern `DirectAdvancedFields`'
+   * System layout walk uses against this same prop. */
+  schema: Record<string, unknown>;
+  /** The full flat data record the spec edits (e.g. web's own extra_json / snippet payload). */
+  data: Record<string, unknown>;
+  /** The SAME config object DirectAdvancedFields' controls read (elementType, schemaPort, …). */
+  config: Record<string, unknown>;
+  /** The explicit uischema-spec tree — see the module docstring and this component's own. */
+  spec: DirectSpecNode;
+  onDataChange: (next: Record<string, unknown>) => void;
+};
+
+/**
+ * `options.schemaOverride`, narrowed to a record. `options` is typed with the
+ * deliberately loose `object` for `schemaOverride` (see `DirectSpecNode`), so this is
+ * a defensive narrow, not just a cast.
+ */
+function directSpecSchemaOverride(
+  options: { schemaOverride?: object } | undefined,
+): Record<string, unknown> | undefined {
+  const override = options?.schemaOverride;
+  return isRecord(override) ? override : undefined;
+}
+
+/**
+ * Walks `schema` through `tokens` one `.properties` hop at a time — deliberately NOT
+ * a pointer-resolve against a fixed root (unlike `resolveSchemaPointer`), because
+ * `schema` here may already be a NARROWED `contextSchema` (a `Group`'s
+ * `options.schemaOverride`) with no reachable pointer back to the outer
+ * `DirectSpecFieldsProps.schema` root at all. $ref-resolution happens once, on the
+ * final walked node — see the caller.
+ */
+function walkSchemaPropertiesByTokens(schema: Record<string, unknown>, tokens: string[]): Record<string, unknown> {
+  let node: Record<string, unknown> = schema;
+  for (const token of tokens) {
+    node = readRecord(readRecord(node.properties)[token]);
+  }
+  return node;
+}
+
+/**
+ * R4.5: the second direct renderer — see the module docstring above for how this
+ * relates to `DirectAdvancedFields`. Interprets the EXPLICIT uischema-spec trees
+ * web's SnippetEditor (`lib/jsonFormsPresentUi.ts`) and SimplifiedFabricEditor
+ * (`components/SimplifiedFabricEditor.tsx`'s `ui` memo, parent repo, read-only) build
+ * by hand, the way `DirectAdvancedFields.layout` above interprets
+ * `buildSystemAdvancedUischema`'s System layout spec.
+ *
+ * WALK CONTEXT: `contextSchema` (starts at `schema`) and `contextSegments: string[]`
+ * (starts `[]`) thread through the recursion below.
+ *  - `VerticalLayout`: plain `<div>` wrapper, context passed through unchanged.
+ *  - `Group`: renders `GroupAccordion` (label = `node.label ?? ''`, count =
+ *    `node.elements.length`, `openInitially` from `options`); its children see a
+ *    NARROWED context — `contextSchema = options.schemaOverride ?? contextSchema`,
+ *    `contextSegments = options.pathOverride != null ? options.pathOverride.split('.')
+ *    : contextSegments`. `pathOverride` is a dot-joined ABSOLUTE instance path built
+ *    by web from object keys (REPLACE, not append) — a '.' inside a raw data key is a
+ *    pre-existing limitation of the WEB BUILDERS' own dot-joined `pathOverride`, not
+ *    of this walker; noted here, not fixed here (out of scope — this module does not
+ *    own that encoding).
+ *  - `Control`: `scope` is decoded into segments by the SAME `segmentsFromLayoutScope`
+ *    the System layout walk above uses. Both real builders always emit scopes
+ *    prefixed `'#/properties/'` (fabric: `'#/properties/k'` and
+ *    `'#/properties/k/properties/j'`; snippet: `'#/properties/k'` — verified directly
+ *    against both, parent repo, read-only), so `segmentsFromLayoutScope`'s existing
+ *    `'#/properties/'`-prefix assumption did not need loosening here. Resolved
+ *    property schema = `options.schemaOverride` if present, else `contextSchema`
+ *    walked through those same tokens' `.properties` hops and then $ref-resolved via
+ *    `dereferenceSchemaNodeInRoot` against `schema` (the same pattern
+ *    `renderLayoutNode` above uses for System). Full data-path segments =
+ *    `contextSegments.concat(tokens)` — reuses `renderControlForProperty` verbatim
+ *    (same five controls, same enum-first `pickDirectControl` dispatch as every other
+ *    walk in this file).
+ *
+ * FIDELITY NOTE (verified against real `@jsonforms/core`, not a bug introduced here):
+ * concatenating `contextSegments` with a `Control`'s FULL token list — not just its
+ * last hop — genuinely reproduces `@jsonforms/core`'s own path composition
+ * (`Paths.compose`/`toDataPathSegments` concatenates every scope segment onto the
+ * parent path unconditionally, with no de-duplication against what the parent already
+ * carries). For a `Control` whose scope was built cumulatively two `Group`-levels
+ * deep (a nested-object `Group` under a top-level `Group`), this WOULD re-walk a
+ * segment the enclosing `Group`'s own `pathOverride` already supplied — inherited
+ * JsonForms behaviour, faithfully mirrored, not something this slice's brief asks to
+ * correct ("mirror what the retired JsonForms path actually did with these specs").
+ * Neither web builder actually nests a `Group` two levels deep today (verified
+ * directly against both), so the shape does not surface in production.
+ *
+ * DEAD OPTION, DELIBERATELY UNHANDLED: web's fabric builder also passes an
+ * `options.helperText` React node on `Control` nodes. It was ALREADY DEAD on the
+ * retired JsonForms path — no control in `jsonformsRenderers.tsx` ever reads
+ * `options.helperText` off its `uischema`; `TextControl`/`NumberControl` both
+ * hardcode `helperText={undefined}` on their own StandardInput element regardless of
+ * what the uischema carries. This component does not read it either. Reviving
+ * `helperText` support is a product decision for a future slice, not a migration
+ * default this walker should invent.
+ *
+ * HOST-VISIBLE SIMPLIFICATION: the retired JsonForms mount echoed an initial
+ * `onChange` call on mount (its own internal Ajv-validated data round-trip), which is
+ * why both `SnippetEditor` and `SimplifiedFabricEditor` carried suppress-first-change
+ * guards around their `onChange` handlers. `DirectSpecFields` emits NOTHING until a
+ * real user edit — `applyChange` only ever fires from a control's own `handleChange` —
+ * so web's migration can drop those guards; that is this component's business, not a
+ * regression to replicate.
+ */
+export function DirectSpecFields({
+  schema,
+  data,
+  config,
+  spec,
+  onDataChange,
+}: DirectSpecFieldsProps): React.ReactElement {
+  const elementType = typeof config.elementType === 'string' ? config.elementType : undefined;
+
+  // Same resolution-root pattern as DirectAdvancedFields above.
+  const defs = (schema as { $defs?: unknown }).$defs ?? (config as { $defs?: unknown }).$defs;
+  const resolutionRoot = { $defs: defs };
+
+  const applyChange = React.useCallback(
+    (segments: string[], value: unknown) => {
+      onDataChange(setAtPath(data, segments, value));
+    },
+    [data, onDataChange],
+  );
+
+  function renderNode(
+    node: DirectSpecNode,
+    key: React.Key,
+    contextSchema: Record<string, unknown>,
+    contextSegments: string[],
+  ): React.ReactElement {
+    if (node.type === 'VerticalLayout') {
+      return (
+        <div key={key}>
+          {node.elements.map((child, i) => renderNode(child, i, contextSchema, contextSegments))}
+        </div>
+      );
+    }
+    if (node.type === 'Group') {
+      const nextSchema = directSpecSchemaOverride(node.options) ?? contextSchema;
+      const nextSegments =
+        node.options?.pathOverride != null ? node.options.pathOverride.split('.') : contextSegments;
+      return (
+        <GroupAccordion
+          key={key}
+          label={node.label ?? ''}
+          count={node.elements.length}
+          openInitially={node.options?.openInitially}
+        >
+          {node.elements.map((child, i) => renderNode(child, i, nextSchema, nextSegments))}
+        </GroupAccordion>
+      );
+    }
+
+    // Control.
+    const tokens = segmentsFromLayoutScope(node.scope);
+    const leafKey = tokens[tokens.length - 1] ?? node.scope;
+    const schemaOverride = directSpecSchemaOverride(node.options);
+    const resolved =
+      schemaOverride ??
+      readRecord(dereferenceSchemaNodeInRoot(walkSchemaPropertiesByTokens(contextSchema, tokens), resolutionRoot));
+    const fullSegments = [...contextSegments, ...tokens];
+    const label = node.label ?? labelForProperty(leafKey, resolved);
+    const value = getAtPath(data, fullSegments);
+    return renderControlForProperty({
+      segments: fullSegments,
+      resolved,
+      value,
+      label,
+      scope: node.scope,
+      schema,
+      config,
+      elementType,
+      required: false,
+      replicateRequiredError: false,
+      applyChange,
+    });
+  }
+
+  return renderNode(spec, 'root', schema, []);
 }

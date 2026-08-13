@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import React, { useState } from 'react';
-import { rankWith, isStringControl, isNumberControl, isBooleanControl, uiTypeIs } from '@jsonforms/core';
-import type { ControlProps, JsonFormsRendererRegistryEntry, LayoutProps } from '@jsonforms/core';
-import { withJsonFormsControlProps, withJsonFormsLayoutProps, JsonFormsDispatch } from '@jsonforms/react';
 import { StandardInput } from './StandardInput';
 import { ResetFieldButton } from './ResetFieldButton';
 import { numericInputAttributesFromSchema, useNumericDraftInput } from './numericDraftInput';
@@ -80,7 +77,32 @@ type RendererConfig = {
   useFHSSchemaForValidation?: boolean;
 };
 
-type AdvancedControlProps = ControlProps & { config?: RendererConfig };
+/**
+ * R4.5: replaces `ControlProps & { config?: RendererConfig }` (`ControlProps` was
+ * `@jsonforms/core`'s own control-prop type). This module no longer imports anything
+ * from `@jsonforms/*` — the registry that used to feed these five controls props via
+ * `withJsonFormsControlProps`/JsonForms' own reducer is gone (see the R4.5 deletion
+ * note above `schemaHasIntegerType`), and `DirectAdvancedFields.tsx` /
+ * `DirectSpecFields` have supplied every one of these fields by hand since R4.3.
+ * A LOCAL structural type covering exactly what the five kept controls destructure
+ * (checked against each control body below) — not a guess at `ControlProps`' full
+ * shape. `visible`, `required`, `id`, and `rootSchema` are still populated by
+ * `renderControlForProperty`'s `baseProps` in `DirectAdvancedFields.tsx` (kept there
+ * for parity with the original JsonForms `ControlProps` shape / possible future use)
+ * but are read by none of these five controls — deliberately omitted here rather than
+ * carried forward as unused surface.
+ */
+type AdvancedControlProps = {
+  data: unknown;
+  handleChange: (path: string, value: unknown) => void;
+  path: string;
+  label: string;
+  errors?: string;
+  schema?: unknown;
+  uischema?: unknown;
+  config?: RendererConfig;
+  enabled?: boolean;
+};
 
 function rendererConfig(config: unknown): RendererConfig {
   return isRecord(config) ? config as RendererConfig : {};
@@ -1382,35 +1404,13 @@ function groupSuspendedThermalSourcesByUValue(
   );
 }
 
-function extractOptions(s: unknown): { options: { value: string; label: string }[]; coerce?: 'string' | 'number' | 'boolean' } {
-  const schema = readRecord(s);
-  const fromEnum = Array.isArray(schema.enum) ? schema.enum : null;
-  const fromOneOf = schemaAlternatives(schema, 'oneOf');
-  const fromAnyOf = schemaAlternatives(schema, 'anyOf');
-  if (fromEnum) {
-    const num = fromEnum.length > 0 && fromEnum.every((v) => typeof v === 'number');
-    const bool = fromEnum.length > 0 && fromEnum.every((v) => typeof v === 'boolean');
-    return { options: fromEnum.map((v) => ({ value: String(v), label: String(v) })), coerce: num ? 'number' : bool ? 'boolean' : 'string' };
-  }
-  const alts = fromOneOf || fromAnyOf;
-  if (alts && alts.length > 0) {
-    // Case 1: const-based alternatives
-    if (alts.every((a) => Object.prototype.hasOwnProperty.call(a, 'const'))) {
-      const first = alts[0].const;
-      const coerce: 'string' | 'number' | 'boolean' = typeof first === 'number' ? 'number' : typeof first === 'boolean' ? 'boolean' : 'string';
-      return { options: alts.map((a) => ({ value: String(a.const), label: String(a.title ?? a.const) })), coerce };
-    }
-    // Case 2: one alternative carries an enum (e.g., [ {type:string, enum:[...]}, {type:null} ])
-    const withEnum = alts.find((a) => Array.isArray(a?.enum));
-    if (withEnum) {
-      const enumVals = Array.isArray(withEnum.enum) ? withEnum.enum : [];
-      const num = enumVals.length > 0 && enumVals.every((v) => typeof v === 'number');
-      const bool = enumVals.length > 0 && enumVals.every((v) => typeof v === 'boolean');
-      return { options: enumVals.map((v) => ({ value: String(v), label: String(v) })), coerce: num ? 'number' : bool ? 'boolean' : 'string' };
-    }
-  }
-  return { options: [] };
-}
+// R4.5 DELETION NOTE: `extractOptions` used to live here — the shared helper behind
+// TextControl's and NumberControl's own `options.length > 0` dropdown-fallback
+// branches (both deleted, see the R4.5 deletion notes at their call sites). Deleted
+// once both consumers were gone; `EnumControl` builds its own options inline and
+// never called this. `coerceDropdownValue` (above, near the top of this file) is
+// unrelated and stays — EnumControl still uses it to coerce a selected dropdown
+// VALUE, not to derive the option list.
 
 export { ResetFieldButton };
 
@@ -1483,7 +1483,6 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
   const isCompact = Boolean(cfg.compact);
 
   // (Debug logs removed; re-add targeted diagnostics when needed.)
-  const { options, coerce } = extractOptions(s);
   const types = schemaTypeList(s);
   const anyOf = schemaAlternatives(s, 'anyOf') ?? [];
   const oneOf = schemaAlternatives(s, 'oneOf') ?? [];
@@ -1552,62 +1551,15 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
   const isCustom = presentation.isCustom && !matchesGroundCalc;
   const showReset = presentation.showReset;
 
-  if (options.length > 0) {
-    return renderAdvancedFieldRow(
-      propKey,
-      isCompact,
-      <>
-        <StandardDropdown
-          label={undefined}
-          value={valueString}
-          onChange={(v) => {
-            let next: unknown = v;
-            if (coerce === 'number') next = v === '' ? undefined : Number(v);
-            else if (coerce === 'boolean') next = v === '' ? undefined : v === 'true';
-            if (elementType && propKey && !isJsonLike) {
-              const res = validateAdvancedFieldPrimitive(cfg, elementType, propKey, next);
-              setLocalError(res.valid ? null : (res.errors?.[0] ?? 'Invalid value'));
-            }
-            handleChange(path, next);
-          }}
-          options={options}
-          error={undefined}
-          size="md"
-          variant="ghost"
-          placeholder={(() => {
-            if (valueString !== '') return undefined;
-            if (defaultValue !== undefined) return String(defaultValue);
-            if (isJsonLike) return expectsArray ? '[1, 2, 3]' : '{"key":"value"}';
-            return undefined;
-          })()}
-          className={isCustom ? 'custom-value' : ''}
-        />
-        {localError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{localError}</div>)}
-      </>,
-      showReset
-        ? [
-            renderAdvancedFieldResetToSourceButton(handleChange, path, fieldSource, {
-              show: true,
-              isGroundUField,
-              groundUComputedWPerM2K,
-              groundUControlData: data,
-            }),
-          ]
-        : [],
-      'flex-end',
-      0,
-      renderAdvancedFieldLabelRow(
-        label,
-        elementType,
-        indicatorMessages,
-        hasEvidence,
-        statusPillType,
-        statusPillLabelOverride,
-        cfg.useFHSSchemaForValidation,
-      ),
-    );
-  }
-
+  // R4.5 DELETION NOTE: TextControl used to have its own `options.length > 0` ->
+  // StandardDropdown escape hatch here (`extractOptions(s)`, deleted alongside this
+  // branch — see `pickDirectControl`'s docstring in DirectAdvancedFields.tsx for the
+  // full history of why it ever mattered). Post-R4.3b, `pickDirectControl` routes
+  // every NON-EMPTY enum-like resolved schema to EnumControl before TextControl is
+  // ever reached, so this branch was reachable ONLY through the registry's rank-80
+  // TextControl-wins dispatch quirk (deleted with `standardRenderers` itself) — dead
+  // on the only render path left. Its inline value-coercion duplicated
+  // `coerceDropdownValue` (still used by EnumControl, kept).
   return renderAdvancedFieldRow(
     propKey,
     isCompact,
@@ -1743,7 +1695,6 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
   const cfg = rendererConfig(config);
   const s = schemaWithOverride(uischema, schema);
   const isCompact = Boolean(cfg.compact);
-  const { options, coerce } = extractOptions(s);
   const valueString = data === undefined || data === null ? '' : String(data);
   const elementType = cfg.elementType;
   const subtype = cfg.subtype;
@@ -1900,132 +1851,17 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
       />
     ) : null;
 
-  if (options.length > 0) {
-    return renderAdvancedFieldRow(
-      propKey,
-      isCompact,
-      <>
-        <StandardDropdown
-          label={undefined}
-          value={valueString}
-          onChange={(v) => {
-            let next: unknown = v;
-            if (coerce === 'boolean') next = v === '' ? undefined : v === 'true';
-            else {
-              if (v === '') { next = undefined; }
-              else {
-                const num = Number(v);
-                next = Number.isNaN(num) ? null : num;
-              }
-            }
-            if (elementType && propKey) {
-              const res = validateAdvancedFieldPrimitive(cfg, elementType, propKey, next);
-              setLocalError(res.valid ? null : (res.errors?.[0] ?? 'Invalid value'));
-            }
-            handleChange(path, next);
-          }}
-          options={options}
-          error={undefined}
-          size="md"
-          variant="ghost"
-          unit={fieldUnit}
-            placeholder={(() => {
-              // Don't show placeholder if field has content
-              if (valueString !== '') {
-                return undefined;
-              }
-
-              // PRIORITY 1: Use default value if available (this takes precedence over schema generation)
-              if (defaultValue !== undefined && defaultValue !== null) {
-                return String(defaultValue);
-              }
-
-              // PRIORITY 2: Try schema-driven placeholder generation
-              const defs =
-                schemaDefs(s.$defs) ||
-                schemaDefs(cfg.$defs);
-              if (s && defs) {
-                const robustPlaceholder = generateRobustPlaceholder(propKey || '', s, defs);
-                if (robustPlaceholder && robustPlaceholder !== '[]' && robustPlaceholder !== '{}') {
-                  return String(robustPlaceholder);
-                }
-              }
-
-              return undefined;
-            })()}
-            className={isCustom ? 'custom-value' : ''}
-          />
-          {localError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{localError}</div>)}
-          {suspendedThermalTransmSourcesInfo}
-      </>,
-      [
-        !isRuField && !isGroundUField && !isSuspendedGroundThermalTransmWallsFieldActive && valueString === '' && (() => {
-          // PRIORITY 1: Use default value if available
-          if (defaultValue !== undefined && defaultValue !== null) {
-            return (
-              <button
-                type="button"
-                onClick={() => navigator.clipboard.writeText(String(defaultValue))}
-                className="btn btn-ghost btn-sm element-editor-input-action element-editor-input-action--icon"
-                title="Copy default"
-                aria-label="Copy default"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke="currentColor" strokeWidth="2"/>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2"/>
-                </svg>
-              </button>
-            );
-          }
-
-          // PRIORITY 2: Use schema-generated placeholder
-          const defs =
-            schemaDefs(s.$defs) ||
-            schemaDefs(cfg.$defs);
-          const placeholder = generateRobustPlaceholder(propKey || '', s, defs);
-          return placeholder ? (
-            <button
-              type="button"
-              onClick={() => navigator.clipboard.writeText(placeholder)}
-              className="btn btn-ghost btn-sm element-editor-input-action element-editor-input-action--icon"
-              title="Copy example"
-              aria-label="Copy example"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke="currentColor" strokeWidth="2"/>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2"/>
-              </svg>
-            </button>
-          ) : null;
-        })(),
-        isRuField && openRuCalculator ? (
-          <RuCalculatorButton key="ru-calculator" onClick={openRuCalculator} hasValue={valueString !== ''} />
-        ) : null,
-        isGroundUField && openGroundUCalculator ? (
-          <GroundUCalculatorButton key="ground-u-calculator" onClick={openGroundUCalculator} hasValue={valueString !== ''} />
-        ) : null,
-        renderAdvancedFieldResetToSourceButton(handleChange, path, fieldSource, {
-          show: !isSuspendedGroundThermalTransmWallsFieldActive && showFieldSourceReset,
-          isGroundUField,
-          groundUComputedWPerM2K,
-          groundUControlData: data,
-        }),
-      ],
-      'flex-end',
-      0,
-      renderAdvancedFieldLabelRow(
-        label,
-        elementType,
-        indicatorMessages,
-        hasEvidence,
-        statusPillType,
-        statusPillLabelOverride,
-        cfg.useFHSSchemaForValidation,
-        fieldPresentation,
-      ),
-    );
-  }
-
+  // R4.5 DELETION NOTE: NumberControl used to have its own `options.length > 0` ->
+  // StandardDropdown escape hatch here (`extractOptions(s)`, deleted alongside this
+  // branch — see `pickDirectControl`'s docstring in DirectAdvancedFields.tsx). Its
+  // inline value-coercion DIVERGED from `coerceDropdownValue` (still used by
+  // EnumControl, kept): an unparseable numeric string coerced to `null` here, where
+  // `coerceDropdownValue` yields `NaN` — that divergence dies with this branch, not
+  // just the branch itself. Post-R4.3b, `pickDirectControl` routes every NON-EMPTY
+  // enum-like resolved schema to EnumControl before NumberControl is ever reached, so
+  // this branch was reachable ONLY through the registry's rank-80 TextControl-wins /
+  // rank-90 NumberControl dispatch quirks (deleted with `standardRenderers` itself) —
+  // dead on the only render path left.
   return renderAdvancedFieldRow(
     propKey,
     isCompact,
@@ -2402,29 +2238,77 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
   );
 };
 
-// Fallback control that enforces global styling for ANY primitive
-const GenericControl: React.FC<ControlProps> = (props) => {
-  const propKey = props.path?.split('.')?.pop();
-  if (propKey === 'window_part_list') return <WindowPartListControl {...props} />;
-  const s = schemaWithOverride(props.uischema, props.schema);
-  const types = schemaTypeList(s);
-  const hasEnum = Array.isArray(s.enum) && s.enum.length > 0;
-  const oneOfAnyOfConsts = schemaAlternatives(s, 'oneOf') ?? schemaAlternatives(s, 'anyOf') ?? [];
-  const isEnumLike = hasEnum || (oneOfAnyOfConsts.length > 0 && oneOfAnyOfConsts.every((a) => Object.prototype.hasOwnProperty.call(a, 'const')));
-  if (isEnumLike) return <EnumControl {...props} />;
-  if (types.includes('boolean')) return <BooleanControl {...props} />;
-  if (types.includes('number') || types.includes('integer')) return <NumberControl {...props} />;
-  return <TextControl {...props} />;
+/**
+ * Plain collapsible-section chrome, extracted (R4.5) from the retired `rankWith(100,
+ * uiTypeIs('Group'))` registry renderer — the entire `standardRenderers` registry this
+ * lived in was deleted in the same slice (see the R4.5 deletion note above
+ * `schemaHasIntegerType`) — so `DirectAdvancedFields.tsx`'s new `DirectSpecFields`
+ * (the direct-render replacement for web's Group-carrying fabric uischema spec) gets
+ * the identical details/summary look without a `<JsonForms>` dispatch underneath it.
+ * Children are supplied as plain `ReactNode` by the caller — the retired registry
+ * renderer's own `JsonFormsDispatch` child-rendering has no equivalent here, since
+ * there is no schema/uischema pair left to dispatch.
+ *
+ * DELETED, NOT PORTED (verified dead at extraction time): the `missingOptional` /
+ * `addField` / "+ Add field" palette and its `CustomEvent('jsonforms-add-field')`
+ * dispatch — nothing in either repo ever populates a `missingOptional` uischema
+ * option, so the palette could never render a field to add.
+ */
+export const GroupAccordion: React.FC<{
+  label: string;
+  count?: number;
+  openInitially?: boolean;
+  children: React.ReactNode;
+}> = ({ label, count, openInitially, children }) => {
+  const [open, setOpen] = useState<boolean>(!!openInitially);
+  return (
+    <details
+      style={{ margin: '0.75rem 0', border: '1px solid var(--border-subtle)', borderRadius: '6px' }}
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <summary
+        style={{
+          position: 'relative',
+          top: 'auto',
+          zIndex: 1,
+          background: 'var(--bg-secondary)',
+          cursor: 'pointer',
+          listStyle: 'none',
+          padding: '0.7rem 0.85rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          borderBottom: '2px solid var(--border-medium)',
+          fontWeight: 700,
+        }}
+      >
+        <span style={{ fontWeight: 600 }}>{label}</span>
+        {count !== undefined && count > 0 ? (
+          <span className="badge" style={{ marginLeft: 'auto' }}>{count}</span>
+        ) : null}
+      </summary>
+      <div style={{ padding: '1rem 0.85rem', background: 'var(--bg-secondary)' }}>
+        {open ? children : null}
+      </div>
+    </details>
+  );
 };
 
-/** e.g. HEM `area_per_perimeter_vent`: anyOf number | null — core `isNumberControl` may be false until resolved. */
-// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
-export function schemaIsNullableNumberAnyOf(schema: unknown): boolean {
-  const a = readRecord(schema).anyOf;
-  if (!Array.isArray(a)) return false;
-  return a.some((x) => readRecord(x).type === 'number') && a.some((x) => readRecord(x).type === 'null');
-}
-
+/**
+ * R4.5 DELETION NOTE: this is where `GenericControl` (the registry's rank-5 fallback
+ * Control), `advancedFieldsNumericTester`, and the entire `standardRenderers`
+ * `JsonFormsRendererRegistryEntry[]` array (Group accordion renderer included — see
+ * `GroupAccordion` above for its surviving replacement) used to live. Nothing in
+ * either repo mounts `<JsonForms>` with this registry any more — web's SnippetEditor
+ * and SimplifiedFabricEditor (parent repo) migrated to `DirectSpecFields` in this same
+ * slice — so every `@jsonforms/react` / `@jsonforms/core` import this file used to
+ * carry died with them. Two schema predicates that existed only to feed the deleted
+ * registry (`schemaIsNullableNumberAnyOf`, `advancedFieldsNumericTester`'s own
+ * `anyOf`-nullable-number check; `schemaIsPlainString`, the deleted rank-90
+ * plain-string tester's own guard) had no other caller and were deleted alongside it,
+ * not carried forward as unused surface.
+ */
 function schemaHasIntegerType(schema: unknown): boolean {
   return schemaTypeList(readRecord(schema)).includes('integer');
 }
@@ -2439,141 +2323,3 @@ export function schemaHasConstAlternatives(schema: unknown, key: 'oneOf' | 'anyO
   const alts = schemaAlternatives(readRecord(schema), key);
   return !!alts && alts.every((a) => Object.prototype.hasOwnProperty.call(a, 'const'));
 }
-
-function schemaIsPlainString(schema: unknown): boolean {
-  const schemaRecord = readRecord(schema);
-  const types = schemaTypeList(schemaRecord);
-  return types.includes('string') && !Array.isArray(schemaRecord.enum);
-}
-
-/**
- * Advanced Fields uses both our NumberControl (hints, R_u / ground U buttons) and @jsonforms/material-renderers.
- * Ties actually go to standardRenderers (lodash maxBy keeps the first max, and material registers second);
- * the high rank just keeps material from ever outranking us outright here (its control testers rank ~2-5).
- */
-function advancedFieldsNumericTester(...args: Parameters<typeof isNumberControl>): boolean {
-  const [uischema, schema, context] = args;
-  if (!rendererConfig(readRecord(context).config).advancedEditor) return false;
-  if (isNumberControl(uischema, schema, context)) return true;
-  if (schemaHasIntegerType(schema)) return true;
-  if (schemaIsNullableNumberAnyOf(schema)) return true;
-  return false;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- JsonForms renderer registry, not a React component.
-export const standardRenderers: JsonFormsRendererRegistryEntry[] = [
-  // Group layout as collapsible accordion
-  { tester: rankWith(100, uiTypeIs('Group')), renderer: withJsonFormsLayoutProps((props: LayoutProps) => {
-    const { uischema, schema, path, renderers, cells, visible, enabled } = props;
-    const uiRecord = readRecord(uischema);
-    const label = typeof uiRecord.label === 'string' ? uiRecord.label : '';
-    const options = readRecord(uiRecord.options);
-    const localSchema = options.schemaOverride ?? schema;
-    const localPath = options.pathOverride ?? path;
-    const missingOptional: string[] = Array.isArray(options.missingOptional) ? options.missingOptional : [];
-    const addField = typeof options.addField === 'function'
-      ? options.addField as (path: string, key: string) => void
-      : undefined;
-    const childElements = Array.isArray(uiRecord.elements) ? uiRecord.elements : [];
-    const [open, setOpen] = React.useState<boolean>(!!options.openInitially);
-    const [showPalette, setShowPalette] = React.useState<boolean>(false);
-    const onAddField = (key: string) => {
-      const ev = new CustomEvent('jsonforms-add-field', {
-        bubbles: true,
-        detail: { path: localPath, key },
-      });
-      // Dispatch on the summary element
-      try {
-        (document.activeElement || document.body).dispatchEvent(ev);
-      } catch {
-        document.body.dispatchEvent(ev);
-      }
-    };
-    return (
-      <details style={{ margin: '0.75rem 0', border: '1px solid var(--border-subtle)', borderRadius: '6px' }} open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-        <summary style={{ /* sticky disabled per UX */ position: 'relative', top: 'auto', zIndex: 1, background: 'var(--bg-secondary)', cursor: 'pointer', listStyle: 'none', padding: '0.7rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '2px solid var(--border-medium)', fontWeight: 700 }}>
-          <span style={{ fontWeight: 600 }}>{label}</span>
-          {childElements.length > 0 ? (
-            <span className="badge" style={{ marginLeft: 'auto' }}>{childElements.length}</span>
-          ) : null}
-        </summary>
-        <div style={{ padding: '1rem 0.85rem', background: 'var(--bg-secondary)' }}>
-          {open && childElements.map((child, idx) => (
-            <JsonFormsDispatch
-              key={idx}
-              uischema={child as LayoutProps['uischema']}
-              schema={localSchema}
-              path={typeof localPath === 'string' ? localPath : path}
-              renderers={renderers}
-              cells={cells}
-              enabled={enabled}
-              visible={visible}
-            />
-          ))}
-          {missingOptional.length > 0 && (
-            <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', position: 'sticky', bottom: 0, background: 'var(--bg-secondary)', paddingTop: '0.25rem' }}>
-              <button type="button" className="btn btn-ghost btn-standard" onClick={() => setShowPalette(true)}>
-                + Add field
-              </button>
-            </div>
-          )}
-        </div>
-        {showPalette && (
-          <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setShowPalette(false); }}>
-            <div className="modal-container" style={{ maxWidth: 520 }}>
-              <div className="modal-header">
-                <h2 className="modal-title">Add field</h2>
-                <button className="modal-close-button" onClick={() => setShowPalette(false)} aria-label="Close">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                    <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2"/>
-                    <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="2"/>
-                  </svg>
-                </button>
-              </div>
-              <div style={{ padding: '0.75rem' }}>
-                <div style={{ maxHeight: '40vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {missingOptional.map((k) => (
-                    <button key={k} className="btn btn-ghost btn-standard" title={k} onClick={() => {
-                      try {
-                        if (addField) addField(typeof localPath === 'string' ? localPath : path, k);
-                        else onAddField(k);
-                      } catch (e) {
-                        console.error('[AddField] failed to add', k, e);
-                      }
-                      setShowPalette(false);
-                    }}>+ {k}</button>
-                  ))}
-                  {missingOptional.length === 0 && (
-                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No fields available</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </details>
-    );
-  }) },
-  // Enum dropdowns (highest priority for string/number/boolean with enum)
-  // Very high rank (1000) to ensure our EnumControl takes precedence over materialRenderers
-  // Also check config.elementType to make it more specific for ThermalBridgeLinear
-  { tester: rankWith(1000, (_uischema, schema) => schemaHasEnum(schema)), renderer: withJsonFormsControlProps(EnumControl) },
-  // Advanced Fields: must beat @jsonforms/material-renderers (registered after this list) for number / integer / anyOf number|null
-  { tester: rankWith(280, advancedFieldsNumericTester), renderer: withJsonFormsControlProps(NumberControl) },
-  // Integer controls → styled like numbers
-  { tester: rankWith(92, (_u, s) => schemaHasIntegerType(s)), renderer: withJsonFormsControlProps(NumberControl) },
-  // oneOf/anyOf with const → dropdown
-  // Very high rank to ensure our EnumControl takes precedence over materialRenderers
-  { tester: rankWith(1100, (_u, schema) => schemaHasConstAlternatives(schema, 'oneOf')), renderer: withJsonFormsControlProps(EnumControl) },
-  { tester: rankWith(1100, (_u, schema) => schemaHasConstAlternatives(schema, 'anyOf')), renderer: withJsonFormsControlProps(EnumControl) },
-  // String controls with explicit string type (non-enum)
-  { tester: rankWith(90, (u, s, c) => isStringControl(u, s, c) && schemaIsPlainString(s)), renderer: withJsonFormsControlProps(TextControl) },
-  // Numbers
-  { tester: rankWith(90, (u, s, c) => isNumberControl(u, s, c)), renderer: withJsonFormsControlProps(NumberControl) },
-  // Booleans
-  { tester: rankWith(90, (u, s, c) => isBooleanControl(u, s, c)), renderer: withJsonFormsControlProps(BooleanControl) },
-  // Plain strings (no enum)
-  { tester: rankWith(80, (u, s, c) => isStringControl(u, s, c) && !schemaHasEnum(s)), renderer: withJsonFormsControlProps(TextControl) },
-  // Absolute fallback to enforce global styling for any remaining Control
-  { tester: rankWith(5, uiTypeIs('Control')), renderer: withJsonFormsControlProps(GenericControl) },
-];
