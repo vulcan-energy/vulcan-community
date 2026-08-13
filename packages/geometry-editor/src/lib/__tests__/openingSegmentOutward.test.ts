@@ -6,6 +6,7 @@ import {
   applyCompassOrientationToSlopedPolygonCoords,
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
+  polygonEdgeOutwardBearings,
   rotatePolygonPlanXYAroundFirstVertex,
   segmentTangentAndOpeningOutwardModelXY,
 } from '../openingSegmentOutward';
@@ -66,6 +67,37 @@ describe('orientation360SlopedFromFirstEdge', () => {
     const { tangent, openingOutward } = segmentTangentAndOpeningOutwardModelXY(0, 0, 1, 0);
     const dot = tangent[0] * openingOutward[0] + tangent[1] * openingOutward[1];
     expect(dot).toBeCloseTo(0, 8);
+  });
+});
+
+describe('polygonEdgeOutwardBearings', () => {
+  it('returns the outward-normal bearing and edge index for every square edge', () => {
+    const bearings = polygonEdgeOutwardBearings([
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 1, y: 1 },
+      { x: 0, y: 1 },
+    ], 0);
+
+    expect(bearings).toEqual([
+      { edgeIndex: 0, bearing: 180 },
+      { edgeIndex: 1, bearing: 90 },
+      { edgeIndex: 2, bearing: 0 },
+      { edgeIndex: 3, bearing: 270 },
+    ]);
+  });
+
+  it('skips degenerate edges and applies the global orientation offset', () => {
+    const bearings = polygonEdgeOutwardBearings([
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+    ], 15);
+
+    expect(bearings).toEqual([
+      { edgeIndex: 1, bearing: 195 },
+      { edgeIndex: 2, bearing: 15 },
+    ]);
   });
 });
 

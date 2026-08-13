@@ -6,6 +6,12 @@ import type { Element } from '../geometry/types';
 const MIN_EDGE_LEN = 1e-5;
 
 export type PointXY = { x: number; y: number };
+export type AxisAlignedRightAngleSnap = {
+  point: PointXY;
+  snapped: true;
+  neighbors: [PointXY, PointXY];
+  axes: ['H' | 'V', 'H' | 'V'];
+};
 
 /**
  * All distinct neighbour positions (other ends of edges incident to B) for vertex drag,
@@ -124,10 +130,10 @@ export function tryAxisAlignedRightAngleSnap(
   b: PointXY,
   neighborPoints: PointXY[],
   angleTolDeg: number,
-): PointXY | null {
+): AxisAlignedRightAngleSnap | null {
   if (neighborPoints.length < 2) return null;
 
-  let best: PointXY | null = null;
+  let best: AxisAlignedRightAngleSnap | null = null;
   let bestD = Infinity;
 
   for (let i = 0; i < neighborPoints.length; i++) {
@@ -149,7 +155,12 @@ export function tryAxisAlignedRightAngleSnap(
       const d = Math.hypot(p.x - b.x, p.y - b.y);
       if (d < bestD) {
         bestD = d;
-        best = p;
+        best = {
+          point: p,
+          snapped: true,
+          neighbors: [a, c],
+          axes: [axisA, axisC],
+        };
       }
     }
   }
@@ -168,7 +179,7 @@ export function tryAxisAlignedRightAngleSnapForVertex(
   elementsById: Record<string, Element | undefined>,
   angleTolDeg: number,
   positionMatchTol: number,
-): PointXY | null {
+): AxisAlignedRightAngleSnap | null {
   const neighbors = getIncidentNeighborPointsXY(
     element,
     vertexIndex,

@@ -12,6 +12,7 @@ import {
   resolveDrawSnapPoint,
   getExactSnappedVertices,
   getWallSupportedSnappedVertices,
+  snapCornerToOtherCornersFromCache,
 } from '../snapUtils';
 
 describe('constrainPointOrthogonally', () => {
@@ -38,8 +39,50 @@ describe('applyAngleSnapIfClose', () => {
   it('snaps a near-orthogonal segment to a cardinal direction', () => {
     const result = applyAngleSnapIfClose({ x: 4, y: 1.05 }, { x: 1, y: 1 }, 2);
     expect(result.snapped).toBe(true);
+    expect(result.cardinal).toBe(0);
     expect(result.point.x).toBeCloseTo(4.0004166377355);
     expect(result.point.y).toBe(1);
+  });
+});
+
+describe('snapCornerToOtherCornersFromCache', () => {
+  it('returns the winning source element and source vertex order', () => {
+    const elementsById = {
+      first: {
+        id: 'first',
+        type: 'BuildingElementOpaque',
+        name: 'First',
+        coordinates: [
+          { x: -10, y: -10, z: 0 },
+          { x: -9, y: -10, z: 0 },
+        ],
+      },
+      target: {
+        id: 'target',
+        type: 'BuildingElementOpaque',
+        name: 'Target',
+        coordinates: [
+          { x: 5, y: 5, z: 0 },
+          { x: 6, y: 5, z: 0 },
+          { x: 6, y: 6, z: 0 },
+        ],
+      },
+    } as unknown as Parameters<typeof buildGeometrySnapCache>[0];
+
+    const result = snapCornerToOtherCornersFromCache(
+      { x: 6.01, y: 6 },
+      '__draw__',
+      buildGeometrySnapCache(elementsById),
+      0.05,
+    );
+
+    expect(result).toMatchObject({
+      x: 6,
+      y: 6,
+      elementId: 'target',
+      order: 4,
+      sourceVertexOrder: 2,
+    });
   });
 });
 
@@ -71,6 +114,7 @@ describe('resolveDrawSnapPoint', () => {
     expect(r.geometrySnap).toBe(true);
     expect(r.point.x).toBeCloseTo(5);
     expect(r.point.y).toBeCloseTo(0);
+    expect(r.snap).toEqual({ kind: 'parent-edge', sourceElementId: 'w1' });
   });
 
   it('prefers a corner over an edge when both are within tolerance', () => {
@@ -106,6 +150,11 @@ describe('resolveDrawSnapPoint', () => {
     expect(r.geometrySnap).toBe(true);
     expect(r.point.x).toBe(10);
     expect(r.point.y).toBe(0);
+    expect(r.snap).toEqual({
+      kind: 'corner',
+      sourceElementId: 'w1',
+      sourceVertexOrder: 1,
+    });
   });
 
   it('with Shift orthogonal, snaps to edge on the axis-aligned ray', () => {
@@ -133,6 +182,7 @@ describe('resolveDrawSnapPoint', () => {
     expect(r.geometrySnap).toBe(true);
     expect(r.point.x).toBeCloseTo(5);
     expect(r.point.y).toBeCloseTo(0);
+    expect(r.snap).toEqual({ kind: 'ortho-lock', sourceElementId: 'w1' });
   });
 
   it('returns the same result with a precomputed snap cache', () => {
@@ -201,6 +251,63 @@ describe('resolveDrawSnapPoint', () => {
 
     expect(result.geometrySnap).toBe(true);
     expect(result.point).toEqual({ x: 0.49, y: 0 });
+    expect(result.snap).toEqual({
+      kind: 'corner',
+      sourceElementId: 'wall',
+      sourceVertexOrder: 0,
+    });
+  });
+
+  it('identifies perpendicular-foot and cardinal tiers', () => {
+    const elementsById = {
+      wall: {
+        id: 'wall',
+        type: 'BuildingElementOpaque',
+        name: 'Wall',
+        coordinates: [
+          { x: 0, y: 0, z: 0 },
+          { x: 10, y: 0, z: 0 },
+        ],
+      },
+    } as unknown as Parameters<typeof buildGeometrySnapCache>[0];
+    const snapCache = buildGeometrySnapCache(elementsById);
+
+    const perpendicular = resolveDrawSnapPoint({
+      mouseWorld: { x: 5, y: 0.02 },
+      lastPoint: { x: 5, y: 4 },
+      elementsById,
+      snapCache,
+      excludeElementId: '__draw__',
+      snapTol: tol,
+      orthogonalModifierHeld: false,
+      angleTolDeg: angleTol,
+    });
+    expect(perpendicular.snap).toEqual({ kind: 'perp-foot', sourceElementId: 'wall' });
+
+    const cardinal = resolveDrawSnapPoint({
+      mouseWorld: { x: 4, y: 0.1 },
+      lastPoint: { x: 0, y: 0 },
+      elementsById: {},
+      excludeElementId: '__draw__',
+      snapTol: tol,
+      orthogonalModifierHeld: false,
+      angleTolDeg: angleTol,
+    });
+    expect(cardinal.snap).toEqual({ kind: 'cardinal', value: 0 });
+  });
+
+  it('identifies a plain orthogonal axis lock when no geometry tier wins', () => {
+    const result = resolveDrawSnapPoint({
+      mouseWorld: { x: 4, y: 1 },
+      lastPoint: { x: 0, y: 0 },
+      elementsById: {},
+      excludeElementId: '__draw__',
+      snapTol: tol,
+      orthogonalModifierHeld: true,
+      angleTolDeg: angleTol,
+    });
+
+    expect(result.snap).toEqual({ kind: 'ortho-lock' });
   });
 });
 
@@ -467,15 +574,20 @@ describe('findClosestSnapCorner', () => {
   // SnapCornerTarget[], so the cache is built directly from targets rather than Element fixtures.
   const cache = buildGeometrySnapCacheFromTargets(
     [
-      { elementId: 'near', order: 0, x: 1, y: 0, z: 0 },
-      { elementId: 'far', order: 1, x: 5, y: 0, z: 0 },
+      { elementId: 'near', order: 0, sourceVertexOrder: 3, x: 1, y: 0, z: 0 },
+      { elementId: 'far', order: 1, sourceVertexOrder: 4, x: 5, y: 0, z: 0 },
     ],
     [],
   );
 
   it('returns the closest corner within tolerance', () => {
     const result = findClosestSnapCorner({ x: 0.95, y: 0 }, cache, 0.5);
-    expect(result).toMatchObject({ x: 1, y: 0, elementId: 'near' });
+    expect(result).toMatchObject({
+      x: 1,
+      y: 0,
+      elementId: 'near',
+      sourceVertexOrder: 3,
+    });
   });
 
   it('returns null when nothing is within tolerance', () => {
@@ -485,8 +597,8 @@ describe('findClosestSnapCorner', () => {
   it('breaks distance ties by insertion order', () => {
     const tiedCache = buildGeometrySnapCacheFromTargets(
       [
-        { elementId: 'first', order: 0, x: 0, y: 1, z: 0 },
-        { elementId: 'second', order: 1, x: 0, y: -1, z: 0 },
+        { elementId: 'first', order: 0, sourceVertexOrder: 0, x: 0, y: 1, z: 0 },
+        { elementId: 'second', order: 1, sourceVertexOrder: 0, x: 0, y: -1, z: 0 },
       ],
       [],
     );
@@ -511,7 +623,7 @@ describe('findClosestSnapCorner', () => {
 
   it('includes a target exactly at the tolerance boundary', () => {
     const boundaryCache = buildGeometrySnapCacheFromTargets(
-      [{ elementId: 'target', order: 0, x: 1, y: 0, z: 0 }],
+      [{ elementId: 'target', order: 0, sourceVertexOrder: 0, x: 1, y: 0, z: 0 }],
       [],
     );
     expect(findClosestSnapCorner({ x: 0, y: 0 }, boundaryCache, 1)?.elementId).toBe('target');

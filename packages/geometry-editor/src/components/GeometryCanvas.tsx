@@ -156,8 +156,10 @@ import {
   writeCanvasInteractionSession,
 } from './canvas/canvasInteractionSession';
 import { LiveDrawingPreview } from './canvas/LiveDrawingPreview';
+import { LiveSnapFeedback } from './canvas/LiveSnapFeedback';
 import { LiveMarqueeSelection } from './canvas/LiveMarqueeSelection';
 import { CanvasLivePreviewLayer } from './canvas/CanvasLivePreviewLayer';
+import { renderDrawModeTooltipPill } from './canvas/DrawingPreview';
 import {
   canCanvasInteractionUpdateElementHover,
   canCanvasInteractionRunStageMouseMove,
@@ -175,6 +177,7 @@ import {
   createDrawingPreviewSignal,
   type DrawingPreviewSegment,
 } from './canvas/drawingPreviewSignal';
+import { createSnapFeedbackSignal } from './canvas/snapFeedbackSignal';
 import {
   hasGeometryCanvasSelectionRenderStateChanged,
   shouldMarkGeometryCanvasModelRenderState,
@@ -611,10 +614,12 @@ function buildDevelopmentContextSnapCache(
       const coords = element.coordinates || [];
       if (coords.length < 2) continue;
       const contextElementId = buildDevelopmentContextElementId(model.stem, element.id);
-      for (const coord of coords) {
+      for (let sourceVertexOrder = 0; sourceVertexOrder < coords.length; sourceVertexOrder++) {
+        const coord = coords[sourceVertexOrder]!;
         cornerTargets.push({
           elementId: contextElementId,
           order: cornerOrder++,
+          sourceVertexOrder,
           x: coord.x,
           y: coord.y,
           z: coord.z,
@@ -1001,44 +1006,6 @@ const renderSmartLabel = (
   );
 };
 
-// Render minimal pill tooltip (white text on blue background)
-const renderDrawModeTooltipPill = (
-  text: string,
-  position: {x: number, y: number}
-) => {
-  const width = getDrawModeTooltipPillWidth(text);
-  const innerW = width - DRAW_MODE_TOOLTIP_PILL_PADDING * 2;
-
-  return (
-    <Group key="draw-mode-tooltip-pill">
-      {/* Blue pill background */}
-      <Rect
-        x={position.x}
-        y={position.y}
-        width={width}
-        height={DRAW_MODE_TOOLTIP_PILL_HEIGHT}
-        fill={readRootCssVar('--semantic-snap', '#1E90FF')}
-        cornerRadius={10}
-        listening={false}
-      />
-
-      {/* White text */}
-      <Text
-        x={position.x + DRAW_MODE_TOOLTIP_PILL_PADDING}
-        y={position.y + 4}
-        text={text}
-        fontSize={11}
-        fill={readRootCssVar('--semantic-on-color', '#FFFFFF')}
-        fontStyle="normal"
-        fontFamily={DRAW_MODE_TOOLTIP_PILL_FONT_FAMILY}
-        width={innerW}
-        align="center"
-        listening={false}
-      />
-    </Group>
-  );
-};
-
 const renderCanvasMeasurementPill = (
   text: string,
   position: { x: number; y: number },
@@ -1247,7 +1214,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const [serviceLineDraftStartZ, setServiceLineDraftStartZ] = useState('');
   const [serviceLineDraftEndZ, setServiceLineDraftEndZ] = useState('');
   const serviceLineDraftAnchorKeyRef = useRef<string | null>(null);
-  const [orthogonalModifierHeld, setOrthogonalModifierHeld] = useState(false);
   const [multiDrawModifierHeld, setMultiDrawModifierHeld] = useState(false);
   const [panModifierHeld, setPanModifierHeld] = useState(false);
   const [isCanvasPanning, setIsCanvasPanning] = useState(false);
@@ -1291,6 +1257,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     position: {x: number, y: number};
   }>({ visible: false, text: '', position: {x: 0, y: 0} });
   const [drawingPreviewSignal] = useState(createDrawingPreviewSignal);
+  const [snapFeedbackSignal] = useState(createSnapFeedbackSignal);
   const drawingPreviewSessionRef = useRef<CanvasInteractionSession | null>(null);
   const beginDrawingPreviewInteraction = useCallback(() => {
     if (drawingPreviewSessionRef.current?.isActive()) return;
@@ -1532,7 +1499,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       }
       if (event.key === 'Shift') {
         orthogonalModifierHeldRef.current = true;
-        setOrthogonalModifierHeld(true);
       } else if (event.key === 'Alt') {
         multiDrawModifierHeldRef.current = true;
         setMultiDrawModifierHeld(true);
@@ -1544,7 +1510,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.key === 'Shift') {
         orthogonalModifierHeldRef.current = false;
-        setOrthogonalModifierHeld(false);
       } else if (event.key === 'Alt') {
         multiDrawModifierHeldRef.current = false;
         setMultiDrawModifierHeld(false);
@@ -1557,7 +1522,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       orthogonalModifierHeldRef.current = false;
       multiDrawModifierHeldRef.current = false;
       panModifierHeldRef.current = false;
-      setOrthogonalModifierHeld(false);
       setMultiDrawModifierHeld(false);
       setPanModifierHeld(false);
     };
@@ -2504,10 +2468,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       const coords = label.coordinates ?? [];
       if (coords.length < 2) continue;
       const snapId = `space-label:${label.id}`;
-      coords.forEach((coord) => {
+      coords.forEach((coord, sourceVertexOrder) => {
         cornerTargets.push({
           elementId: snapId,
           order: cornerOrder++,
+          sourceVertexOrder,
           x: coord.x,
           y: coord.y,
           z: coord.z,
@@ -3741,7 +3706,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       });
       const chosen = snapRes.point;
       const nextDrawAngleSnapped =
-        snapRes.geometrySnap || snapRes.cardinalSnap || snapRes.orthogonalAxisLock;
+        snapRes.snap !== undefined || snapRes.orthogonalAxisLock;
       let nextSegmentLengthPreview: DrawingPreviewSegment = EMPTY_SEGMENT_LENGTH_PREVIEW;
       drawSnapTargetRef.current = chosen as any;
 
@@ -5234,7 +5199,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         snapCache: spaceLabelSnapCache,
         excludeElementId: '__draw__',
         snapTol: pdSnap.snapTol,
-        orthogonalModifierHeld,
+        orthogonalModifierHeld: orthogonalModifierHeldRef.current,
         angleTolDeg: pdSnap.angleTol,
       });
       const mouseWorld = drawSnapClick.point;
@@ -6018,6 +5983,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           snapCache={geometrySnapCache}
           canvasElementPalette={canvasElementPalette}
           canvasInteractionPalette={canvasInteractionPalette}
+          snapFeedbackSignal={snapFeedbackSignal}
           globalOrientationOffset={globalOrientationOffset}
           vertexSnapMode={vertexSnapMode}
           commitVertexPositionUpdates={commitVertexPositionUpdates}
@@ -6054,6 +6020,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     geometrySnapCache,
     canvasElementPalette,
     canvasInteractionPalette,
+    snapFeedbackSignal,
     vertexSnapMode,
     commitVertexPositionUpdates,
     spaceLabellerOpen,
@@ -7578,6 +7545,26 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               <LiveMarqueeSelection previewSignal={marqueePreviewSignal} />,
             )}
             {profileGeometryCanvasNode(
+              'GeometryCanvas.liveSnapFeedback',
+              <LiveSnapFeedback
+                previewSignal={snapFeedbackSignal}
+                elementsById={elementsById as Record<string, Element>}
+                activeElementId={
+                  selection?.type === 'element' || selection?.type === 'global'
+                    ? selection.id
+                    : selectedElementIds.length === 1
+                      ? selectedElementIds[0]
+                      : undefined
+                }
+                scale={scale}
+                panOffset={panOffset}
+                canvasCenter={canvasCenter}
+                canvasInteractionPalette={canvasInteractionPalette}
+                drawingCanvasPalette={drawingCanvasPalette}
+                globalOrientationOffset={globalOrientationOffset}
+              />,
+            )}
+            {profileGeometryCanvasNode(
               'GeometryCanvas.liveDrawingPreview',
               <LiveDrawingPreview
                 previewSignal={drawingPreviewSignal}
@@ -7698,7 +7685,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                             {
                               x: overlayHintCanvasPos.x - width / 2,
                               y: overlayHintCanvasPos.y - tooltipOffset - DRAW_MODE_TOOLTIP_PILL_HEIGHT
-                            }
+                            },
+                            drawingCanvasPalette,
                           );
                         })()}
                       </>
@@ -7878,7 +7866,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                             {
                               x: overlayHintCanvasPos.x - width / 2,
                               y: overlayHintCanvasPos.y - tooltipOffset - DRAW_MODE_TOOLTIP_PILL_HEIGHT
-                            }
+                            },
+                            drawingCanvasPalette,
                           );
                         })()}
                       </>
