@@ -2274,15 +2274,38 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
   const isReadOnly = uiOptions(uischema).readOnly === true || enabled === false;
   const selectedLabel = options.find((o) => o.value === valueString)?.label ?? valueString;
   const selectedOptionDescription = optionDescriptions.get(valueString);
-  const sourceHelperText =
+  // The value actually shown as "the default" -- prefers a resolved `fieldSource`
+  // (kind 'default', a defined/non-empty value) and otherwise falls back to the raw
+  // `defaultValue`. Factored out so the "Default: X" helper line below and the
+  // R4.3b placeholder just below it read the exact same source; this is a pure
+  // refactor of the ternary that used to be inlined into `sourceHelperText` alone --
+  // behaviourally identical for every existing case.
+  const effectiveDefaultForDisplay =
     fieldSource.kind === 'default' &&
     fieldSource.value !== undefined &&
     fieldSource.value !== null &&
     String(fieldSource.value) !== ''
-      ? `${cfg.systemSampleMode ? 'Preset' : 'Default'}: ${String(fieldSource.value)}`
-      : defaultValue !== undefined
-        ? `${cfg.systemSampleMode ? 'Preset' : 'Default'}: ${String(defaultValue)}`
-        : undefined;
+      ? fieldSource.value
+      : defaultValue;
+  const sourceHelperText =
+    effectiveDefaultForDisplay !== undefined
+      ? `${cfg.systemSampleMode ? 'Preset' : 'Default'}: ${String(effectiveDefaultForDisplay)}`
+      : undefined;
+  // R4.3b (Baz-requested presentation amendment, post-screenshot-review): an unset
+  // enum field with a resolvable default shows that default INLINE in the closed
+  // select, label-mapped through `options` (e.g. mass_distribution_class's raw
+  // default code 'D' displays as "D: Mass equally distributed", not the bare code) --
+  // matching the look the retired TextControl-fallback dropdown had (its own
+  // `extractOptions` placeholder resolved the same way, see TextControl below). The
+  // "Default: X" helper line stays as well; showing both was already the old path's
+  // behaviour for fields that had one, and dropping either is out of scope here. Uses
+  // the SAME `effectiveDefaultForDisplay` source as the helper line above -- no
+  // second default lookup.
+  const placeholder =
+    valueString === '' && effectiveDefaultForDisplay !== undefined
+      ? (options.find((o) => o.value === String(effectiveDefaultForDisplay))?.label ??
+          String(effectiveDefaultForDisplay))
+      : undefined;
   const shouldShowOptionDescription = propKey !== 'ecodesign_control_class';
   const helperText = propKey === 'security_risk'
     ? WINDOW_SECURITY_RISK_HELPER
@@ -2360,6 +2383,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       variant="ghost"
       unit={fieldUnit}
       helperText={helperText}
+      placeholder={placeholder}
       className={isCustom ? 'custom-value' : ''}
     />,
     showReset ? [renderResetToSourceButton(handleChange, path, fieldSource)] : [],

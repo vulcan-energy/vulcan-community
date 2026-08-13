@@ -420,6 +420,35 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         extra_json: { ...baseExtraJson, security_risk: true },
       }),
     );
+    cleanup();
+
+    // R4.3b presentation amendment (Baz-requested, post-screenshot-review): an unset
+    // enum field with a RESOLVABLE default should show that default INLINE in the
+    // closed select (label-mapped), matching the look the retired TextControl-fallback
+    // dropdown had -- not just the "Default: X" helper line underneath. security_risk
+    // is the one enum field this test harness (`createGeometryStore({
+    // defaultDefaultsPath: null })`, no defaults file loaded) can actually resolve a
+    // default for: `getAdvancedDefaultValue` special-cases it
+    // (`windowSecurityRiskDefaultForElement`, storey-derived) independent of the
+    // defaults store, and ALWAYS returns a boolean. This fixture has no
+    // coordinates/floorId, so the resolved storey is undefined ->
+    // `windowSecurityRiskDefaultForStorey(undefined)` === false -- the placeholder
+    // option should therefore read "No" (the Yes/No-mapped label for `false`), not the
+    // raw "false".
+    const { security_risk: _unsetSecurityRisk, ...extraJsonWithoutSecurityRisk } = baseExtraJson;
+    void _unsetSecurityRisk;
+    const { container: unsetContainer } = renderEditor({
+      elementType: 'BuildingElementTransparent',
+      useFHSSchema: true,
+      extraJson: extraJsonWithoutSecurityRisk,
+    });
+    const unsetSecurityRow = fieldRow(unsetContainer, 'security_risk');
+    const unsetSelect = within(unsetSecurityRow).getByRole('combobox') as HTMLSelectElement;
+    expect(unsetSelect.value).toBe('');
+    const placeholderOption = unsetSelect.querySelector('option[value=""]');
+    expect(placeholderOption).not.toBeNull();
+    expect(placeholderOption?.textContent).toBe('No');
+    expect(placeholderOption).toHaveAttribute('disabled');
   });
 
   it('config 4 -- BuildingElementGround, Suspended_floor, FHS: shield_fact_location dropdown + area_per_perimeter_vent direct-render characterization', () => {
