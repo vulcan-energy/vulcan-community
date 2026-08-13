@@ -100,7 +100,7 @@ describe('defaultJunctionCodeForEdge / junctionOptions (roof roles)', () => {
 });
 
 describe('proposeRoofOpeningThermalBridges', () => {
-  it('emits nothing for Orientation pitch-axis openings or hosts (lengths would flatten)', () => {
+  it('emits slope-true proposals for Orientation pitch-axis openings and hosts', () => {
     const standalone = {
       ...makeRoofOpening({
         id: 'sk-orient',
@@ -117,12 +117,13 @@ describe('proposeRoofOpeningThermalBridges', () => {
       extra_json: { _slope_pitch_axis: 'orientation' },
       orientation360: 135,
     } as BuildingElementTransparent;
+    expect(proposeRoofOpeningThermalBridges([standalone], undefined, 0)).toHaveLength(5);
     expect(proposeRoofOpeningThermalBridges([standalone])).toEqual([]);
 
     const orientationHost = {
       ...makeHostRoof(),
       extra_json: { _slope_pitch_axis: 'orientation' },
-      orientation360: 135,
+      orientation360: 180,
     };
     const hosted = makeRoofOpening({
       id: 'sk-hosted',
@@ -136,7 +137,59 @@ describe('proposeRoofOpeningThermalBridges', () => {
         { x: 1, y: 2, z: 0 },
       ],
     });
-    expect(proposeRoofOpeningThermalBridges([orientationHost, hosted])).toEqual([]);
+    const proposals = proposeRoofOpeningThermalBridges([orientationHost, hosted], undefined, 0);
+    expect(proposals).toHaveLength(5);
+    expect(proposals.find((row) => row.edgeRole === 'roof_window_jamb_first')?.suggestedLengthM)
+      .toBeCloseTo(Math.SQRT2, 2);
+  });
+
+  it('keeps a legacy 2-point opening on an Orientation host unproposed', () => {
+    const orientationHost = {
+      ...makeHostRoof(),
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180,
+    };
+    const legacy = makeRoofOpening({
+      id: 'legacy-2pt',
+      name: 'Legacy Rooflight',
+      pitch: 45,
+      parent_element: orientationHost.name,
+      coordinates: [
+        { x: 1, y: 2, z: 5 },
+        { x: 3, y: 2, z: 5 },
+      ],
+    });
+
+    expect(proposeRoofOpeningThermalBridges([orientationHost, legacy], undefined, 0)).toEqual([]);
+    expect(proposeRoofOpeningThermalBridges([orientationHost, legacy])).toEqual([]);
+  });
+
+  it('classifies sill, head, and jamb roles against the authored upslope direction', () => {
+    const orientationHost = {
+      ...makeHostRoof(),
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 270,
+    };
+    const hosted = makeRoofOpening({
+      id: 'rotated-hosted',
+      name: 'Rotated Hosted Skylight',
+      pitch: 45,
+      parent_element: orientationHost.name,
+      coordinates: [
+        { x: 1, y: 1, z: 0 },
+        { x: 2, y: 1, z: 0 },
+        { x: 2, y: 2, z: 0 },
+        { x: 1, y: 2, z: 0 },
+      ],
+    });
+
+    const proposals = proposeRoofOpeningThermalBridges([orientationHost, hosted], undefined, 0);
+    expect(proposals.find((row) => row.edgeRole === 'roof_window_sill')?.coordinates.map(({ x, y }) => [x, y]))
+      .toEqual([[1, 2], [1, 1]]);
+    expect(proposals.find((row) => row.edgeRole === 'roof_window_head')?.coordinates.map(({ x, y }) => [x, y]))
+      .toEqual([[2, 1], [2, 2]]);
+    expect(proposals.filter((row) => row.edgeRole.startsWith('roof_window_jamb')).map((row) => row.coordinates.map(({ x, y }) => [x, y])))
+      .toEqual([[[1, 1], [2, 1]], [[2, 2], [1, 2]]]);
   });
 
   it('emits five R-series proposals per roof opening (incl. R11 kerb line)', () => {

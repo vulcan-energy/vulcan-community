@@ -177,7 +177,10 @@ function segmentsSubstantiallyMatch(
  * persists those ids. Rebind source ids from the same coordinate-driven auto-TB proposals
  * used to create them, leaving ambiguous or unlocated cases visible to validation.
  */
-export function normalizeThermalBridgeSourceLinks(elements: Element[]): Element[] {
+export function normalizeThermalBridgeSourceLinks(
+  elements: Element[],
+  globalOrientationOffset?: number,
+): Element[] {
   const elementsById: Record<string, Element> = {};
   for (const element of elements) {
     elementsById[element.id] = element;
@@ -191,7 +194,7 @@ export function normalizeThermalBridgeSourceLinks(elements: Element[]): Element[
   );
   if (sourceCandidates.length === 0) return elements;
 
-  const proposals = proposeAutoThermalBridges(elements)
+  const proposals = proposeAutoThermalBridges(elements, undefined, globalOrientationOffset)
     .map((proposal) => ({ proposal, source: sourceFromProposal(proposal, elementsById) }))
     .filter((row): row is { proposal: FacadeOpeningTbProposal; source: ThermalBridgeSource } => row.source !== undefined);
   if (proposals.length === 0) return elements;

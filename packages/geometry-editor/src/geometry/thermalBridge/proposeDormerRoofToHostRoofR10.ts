@@ -66,13 +66,13 @@ function isOtherDormerRoofEdge(
 export function proposeDormerRoofToHostRoofR10ThermalBridges(
   elements: Element[],
   floors?: Floor[],
+  globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   floors = withEffectiveStoreyHeights(floors, elements);
   const roofByName = new Map<string, BuildingElementOpaque>();
   for (const e of elements) {
     if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) continue;
     const roof = e as BuildingElementOpaque;
-    if (isOrientationPitchAxis(roof)) continue;
     if (!isSlopedPitchedRoofElementForEavesGable(roof)) continue;
     const name = roof.name?.trim();
     if (name) roofByName.set(name, roof);
@@ -82,6 +82,7 @@ export function proposeDormerRoofToHostRoofR10ThermalBridges(
   for (const e of elements) {
     if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) continue;
     const dormerRoof = e as BuildingElementOpaque;
+    // Generated dormer roofs use their first edge; a hand-toggled plane would invalidate that classification.
     if (isOrientationPitchAxis(dormerRoof)) continue;
     if (!isDormerRoofPlane(dormerRoof)) continue;
     if (!isSlopedPitchedRoofElementForEavesGable(dormerRoof)) continue;
@@ -101,8 +102,8 @@ export function proposeDormerRoofToHostRoofR10ThermalBridges(
       if (!isOtherDormerRoofEdge(c, i, eavesUnit)) continue;
       const a = c[i]!;
       const b = c[(i + 1) % c.length]!;
-      const z0 = roofTopElevationAtPlanM(hostRoof, a.x, a.y, floors);
-      const z1 = roofTopElevationAtPlanM(hostRoof, b.x, b.y, floors);
+      const z0 = roofTopElevationAtPlanM(hostRoof, a.x, a.y, floors, globalOrientationOffset);
+      const z1 = roofTopElevationAtPlanM(hostRoof, b.x, b.y, floors, globalOrientationOffset);
       if (z0 === null || z1 === null) continue;
       const coords = [
         { x: a.x, y: a.y, z: z0 },

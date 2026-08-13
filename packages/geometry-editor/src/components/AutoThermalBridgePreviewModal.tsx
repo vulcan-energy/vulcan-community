@@ -220,14 +220,15 @@ export const AutoThermalBridgePreviewModal: React.FC<AutoThermalBridgePreviewMod
   const floorsForAutoTb = useGeometryStore((s) => s.floors);
   const junctionPsiDefaultsMap = useGeometryStore((s) => s.junctionPsiDefaultsMap);
   const detailedBridgePsiProfile = useGeometryStore((s) => s.detailedBridgePsiProfile);
+  const globalOrientationOffset = useGeometryStore((s) => s.globalOrientationOffset);
 
   const allElements = useMemo(() => Object.values(elementsById) as Element[], [elementsById]);
 
   const linearTbIssues = useMemo(() => findLinearThermalBridgeIssues(allElements), [allElements]);
 
   const baseProposals = useMemo(() => {
-    return proposeAutoThermalBridges(allElements, floors);
-  }, [allElements, floors]);
+    return proposeAutoThermalBridges(allElements, floors, globalOrientationOffset);
+  }, [allElements, floors, globalOrientationOffset]);
 
   const proposalDraft = useMemo(() => {
     const junctionOverride: Record<string, string> = {};

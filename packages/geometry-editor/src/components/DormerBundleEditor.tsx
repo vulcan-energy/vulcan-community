@@ -318,7 +318,7 @@ export function useDormerBundleEditor(args: {
     const host = Object.values(elementsById).find(
       (element) => element.type === 'BuildingElementOpaque' && element.name === targetHostName,
     );
-    if (!host || !isValidDormerHost(host)) {
+    if (!host || !isValidDormerHost(host, geometryStore.getState().globalOrientationOffset)) {
       throw new Error('Dormers must stay attached to a valid sloped roof polygon.');
     }
 
@@ -466,7 +466,7 @@ export function useDormerBundleEditor(args: {
     const host = Object.values(elementsById).find(
       (element) => element.type === 'BuildingElementOpaque' && element.name === hostName,
     );
-    if (!host || !isValidDormerHost(host)) {
+    if (!host || !isValidDormerHost(host, geometryStore.getState().globalOrientationOffset)) {
       throw new Error('Dormers must stay attached to a valid sloped roof polygon.');
     }
 

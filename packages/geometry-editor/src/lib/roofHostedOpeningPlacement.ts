@@ -3,7 +3,11 @@
 
 import type { BuildingElementOpaque, BuildingElementTransparent, Floor } from '../geometry/types';
 import { inwardNormal2DForSlopedRoof, roofTopElevationAtPlanM } from './roofTopElevationAtPlanM';
-import { isOrientationPitchAxis } from './slopePitchAxis';
+import {
+  isOrientationPitchAxis,
+  slopeHingeContourSegment,
+  slopedPolygonPlaneBasis,
+} from './slopePitchAxis';
 
 type Pt2 = { x: number; y: number };
 
@@ -56,8 +60,10 @@ export function computeRoofHostedOpeningPlacement(
   opening: Pick<BuildingElementTransparent, 'coordinates'>,
   roof: BuildingElementOpaque,
   floors: Floor[] | undefined,
+  globalOrientationOffset?: number,
 ): RoofHostedOpeningPlacement | null {
-  if (isOrientationPitchAxis(roof)) return null;
+  const orientationAxis = isOrientationPitchAxis(roof);
+  if (orientationAxis && !Number.isFinite(globalOrientationOffset)) return null;
   const pitch = roof.pitch;
   if (typeof pitch !== 'number' || !Number.isFinite(pitch) || pitch <= 0 || pitch >= 90) {
     return null;
@@ -67,10 +73,31 @@ export function computeRoofHostedOpeningPlacement(
   const roofRing = toPlanRing(roof.coordinates);
   if (openingRing.length < 3 || roofRing.length < 2) return null;
 
-  const roofA = roofRing[0]!;
-  const roofB = roofRing[1]!;
-  const inward = inwardNormal2DForSlopedRoof(roof);
+  let roofA = roofRing[0]!;
+  let roofB = roofRing[1]!;
+  let measurementAnchor = roofA;
+  let inward = inwardNormal2DForSlopedRoof(roof, globalOrientationOffset);
   if (!inward) return null;
+
+  if (orientationAxis) {
+    const basis = slopedPolygonPlaneBasis(
+      roofRing.map((point) => [point.x, point.y] as [number, number]),
+      'orientation',
+      roof.orientation360 ?? 0,
+      globalOrientationOffset as number,
+    );
+    if (!basis) return null;
+    const contour = slopeHingeContourSegment(
+      roofRing.map((point) => [point.x, point.y] as [number, number]),
+      basis.anchorXY,
+      basis.upslope2D,
+    );
+    if (!contour) return null;
+    inward = basis.upslope2D;
+    measurementAnchor = { x: basis.anchorXY[0], y: basis.anchorXY[1] };
+    roofA = { x: contour[0][0], y: contour[0][1] };
+    roofB = { x: contour[1][0], y: contour[1][1] };
+  }
 
   const roofDx = roofB.x - roofA.x;
   const roofDy = roofB.y - roofA.y;
@@ -93,7 +120,8 @@ export function computeRoofHostedOpeningPlacement(
     const edgeMid = midpoint(edge[0], edge[1]);
     const planDistanceM = Math.max(
       0,
-      (edgeMid.x - roofA.x) * inward[0] + (edgeMid.y - roofA.y) * inward[1],
+      (edgeMid.x - measurementAnchor.x) * inward[0] +
+        (edgeMid.y - measurementAnchor.y) * inward[1],
     );
     const alignment = segmentAlignment(edge[0], edge[1], roofA, roofB);
     if (
@@ -116,8 +144,24 @@ export function computeRoofHostedOpeningPlacement(
     x: best.midpoint.x - inward[0] * best.planDistanceM,
     y: best.midpoint.y - inward[1] * best.planDistanceM,
   };
-  const lowElevation = roofTopElevationAtPlanM(roof, roofPoint.x, roofPoint.y, floors);
-  const openingElevation = roofTopElevationAtPlanM(roof, best.midpoint.x, best.midpoint.y, floors);
+  const lowElevation = roofTopElevationAtPlanM(
+    roof,
+    roofPoint.x,
+    roofPoint.y,
+    floors,
+    globalOrientationOffset,
+  );
+  const openingElevation = roofTopElevationAtPlanM(
+    roof,
+    best.midpoint.x,
+    best.midpoint.y,
+    floors,
+    globalOrientationOffset,
+  );
+  if (
+    orientationAxis &&
+    (!Number.isFinite(lowElevation) || !Number.isFinite(openingElevation))
+  ) return null;
   const fallbackRise = best.planDistanceM * Math.tan((pitch * Math.PI) / 180);
   const verticalRiseM =
     typeof lowElevation === 'number' &&
@@ -144,11 +188,12 @@ export function moveRoofHostedOpeningToSurfaceDistance(
   roof: BuildingElementOpaque,
   floors: Floor[] | undefined,
   targetDistanceM: number,
+  globalOrientationOffset?: number,
 ): OpeningCoordinate[] | null {
-  if (isOrientationPitchAxis(roof)) return null;
+  if (isOrientationPitchAxis(roof) && !Number.isFinite(globalOrientationOffset)) return null;
   if (!Number.isFinite(targetDistanceM) || targetDistanceM < 0) return null;
 
-  const placement = computeRoofHostedOpeningPlacement(opening, roof, floors);
+  const placement = computeRoofHostedOpeningPlacement(opening, roof, floors, globalOrientationOffset);
   if (!placement) return null;
 
   const pitch = roof.pitch;
@@ -156,7 +201,7 @@ export function moveRoofHostedOpeningToSurfaceDistance(
     return null;
   }
 
-  const inward = inwardNormal2DForSlopedRoof(roof);
+  const inward = inwardNormal2DForSlopedRoof(roof, globalOrientationOffset);
   if (!inward) return null;
 
   const cosPitch = Math.cos((pitch * Math.PI) / 180);

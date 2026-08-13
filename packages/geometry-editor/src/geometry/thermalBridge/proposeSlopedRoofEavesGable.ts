@@ -4,9 +4,10 @@
 /**
  * **E10 / E11** (eaves) and **E12 / E13** (gable) for **sloped** roof opaques (`0 < pitch < 90`).
  *
- * - **Eaves (first plan edge)**: `coords[0]→coords[1]` is the **low eaves** line, matching the 3D
+ * - **Bottom-edge axis**: `coords[0]→coords[1]` is the **low eaves** line, matching the 3D
  *   sloped-polygon convention (`computeSlopedPolygonInwardNormal2D`).
- * - **Gable**: plan edges **nearly perpendicular** to that eaves direction (typical 4+ vertex envelope).
+ * - **Orientation axis**: contour-parallel low boundary edges are eaves; non-eaves edges nearly
+ *   perpendicular to that contour direction are gables (typical 4+ vertex envelope).
  *   Warm roofs follow the roof top plane; cold unheated pitched roofs use the projected ceiling boundary.
  * - **Cold vs warm roof (insulation line)** — user rule:
  *   - `is_unheated_pitched_roof` = cold roof, insulation at **ceiling** → default **E10** / **E12**
@@ -19,7 +20,7 @@ import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { computeSlopedPolygonInwardNormal2D } from '../../lib/geometry3dSloped';
 import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
-import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
+import { isOrientationPitchAxis, slopedPolygonPlaneBasis } from '../../lib/slopePitchAxis';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
@@ -106,7 +107,6 @@ function isRidgeEdgeRelativeToEaves(
   eavesUnit: { x: number; y: number },
 ): boolean {
   if (n < 4) return false;
-  if (edgeIndex === 0) return false;
   const a = c[edgeIndex]!;
   const b = c[(edgeIndex + 1) % n]!;
   const e = planUnit(a, b);
@@ -120,10 +120,15 @@ function zEavesM(o: BuildingElementOpaque, floors: Floor[] | undefined): number 
     return elementBaseElevationMForTb(o, floors);
   }
   const c = o.coordinates;
-  const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
-  const z1 = typeof c[1]?.z === 'number' && Number.isFinite(c[1].z) ? c[1].z : 0;
   const bh = o.base_height;
   if (typeof bh === 'number' && Number.isFinite(bh) && bh >= 0) return bh;
+  if (isOrientationPitchAxis(o)) {
+    // The first edge is not the hinge in Orientation state; take the lowest stored z.
+    const zs = c.map((p) => (typeof p?.z === 'number' && Number.isFinite(p.z) ? p.z : 0));
+    return zs.length > 0 ? Math.min(...zs) : 0;
+  }
+  const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
+  const z1 = typeof c[1]?.z === 'number' && Number.isFinite(c[1].z) ? c[1].z : 0;
   return Math.min(z0, z1);
 }
 
@@ -132,8 +137,8 @@ function pushEavesGableProposals(
   floors: Floor[] | undefined,
   elements: Element[],
   out: FacadeOpeningTbProposal[],
+  globalOrientationOffset?: number,
 ): void {
-  if (isOrientationPitchAxis(o)) return;
   const c = o.coordinates;
   if (!c || c.length < 2) return;
   if (!isSlopedPitchedRoofElementForEavesGable(o)) return;
@@ -169,7 +174,135 @@ function pushEavesGableProposals(
   }
 
   const planPts: Array<[number, number]> = c.map((p) => [p.x, p.y] as [number, number]);
-  if (computeSlopedPolygonInwardNormal2D(planPts) === null) return;
+  const orientationAxis = isOrientationPitchAxis(o);
+  const basis = orientationAxis
+    ? slopedPolygonPlaneBasis(
+        planPts,
+        'orientation',
+        o.orientation360 ?? 0,
+        globalOrientationOffset as number,
+      )
+    : null;
+  if (orientationAxis ? basis === null : computeSlopedPolygonInwardNormal2D(planPts) === null) return;
+
+  if (orientationAxis && basis) {
+    const eavesUnit = { x: basis.upslope2D[1], y: -basis.upslope2D[0] };
+    const rises = c.map((p) =>
+      (p.x - basis.anchorXY[0]) * basis.upslope2D[0] +
+      (p.y - basis.anchorXY[1]) * basis.upslope2D[1]);
+    const riseMax = Math.max(...rises);
+    // Snap and float noise in an authored bearing lifts contour-parallel edges
+    // slightly off the exact contour; classify "at the bottom/top" within 1% of the
+    // plane's total rise so a near-aligned low edge stays eaves instead of drifting
+    // into the ridge bucket (a wrong-but-plausible junction). Edges parallel to the
+    // contour but mid-slope match neither band and emit nothing, per the plan.
+    const contourRiseTol = Math.max(1e-6, riseMax * 0.01);
+    const eavesEdgeIndexes = new Set<number>();
+    for (let i = 0; i < n; i++) {
+      const p0 = c[i]!;
+      const p1 = c[(i + 1) % n]!;
+      const edgeUnit = planUnit(p0, p1);
+      if (!edgeUnit) continue;
+      const parallel = Math.abs(eavesUnit.x * edgeUnit.x + eavesUnit.y * edgeUnit.y);
+      const p0Rise = rises[i]!;
+      const p1Rise = rises[(i + 1) % n]!;
+      if (parallel <= RIDGE_PARALLEL_COS || p0Rise > contourRiseTol || p1Rise > contourRiseTol) continue;
+      const length = dist2XY(p0, p1);
+      if (length < MIN_LEN_M) continue;
+      eavesEdgeIndexes.add(i);
+      out.push({
+        proposalId: `${o.id}:eaves:${i}`,
+        openingId: o.id,
+        openingName: o.name,
+        zoneId: o.zoneId,
+        edgeRole: 'sloped_roof_eaves',
+        junctionCode: eaves,
+        suggestedLengthM: roundToTwoDecimals(length),
+        linearThermalTransmittance: psiTable37ForCode(eaves),
+        reason: `Eaves ${eaves} along edge ${i} on the authored low contour of "${o.name}"; E11 = warm, E10 = cold`,
+        coordinates: [
+          { x: p0.x, y: p0.y, z: zB },
+          { x: p1.x, y: p1.y, z: zB },
+        ],
+        parentElementForTb: o.name,
+      });
+    }
+
+    if (n < 4) return;
+    for (let i = 0; i < n; i++) {
+      if (eavesEdgeIndexes.has(i) || !isGableEdgeRelativeToEaves(c, n, i, eavesUnit)) continue;
+      const p0 = c[i]!;
+      const p1 = c[(i + 1) % n]!;
+      const gLenPlan = dist2XY(p0, p1);
+      if (gLenPlan < MIN_LEN_M) continue;
+      const z0 = cold ? zB : roofTopElevationAtPlanM(o, p0.x, p0.y, floors, globalOrientationOffset);
+      const z1 = cold ? zB : roofTopElevationAtPlanM(o, p1.x, p1.y, floors, globalOrientationOffset);
+      if (z0 === null || z1 === null) continue;
+      const gCoords = [
+        { x: p0.x, y: p0.y, z: z0 },
+        { x: p1.x, y: p1.y, z: z1 },
+      ] as const;
+      const gLen3d = cold ? gLenPlan : computeThermalBridgeLinearRunLengthM([...gCoords]);
+      out.push({
+        proposalId: `${o.id}:gable:${i}`,
+        openingId: o.id,
+        openingName: o.name,
+        zoneId: o.zoneId,
+        edgeRole: 'sloped_roof_gable',
+        junctionCode: gable,
+        suggestedLengthM: roundToTwoDecimals(gLen3d),
+        linearThermalTransmittance: psiTable37ForCode(gable),
+        reason: cold
+          ? `Gable ${gable} on edge ${i} of "${o.name}" (cold roof; projected ceiling boundary, plan length)`
+          : `Gable ${gable} on edge ${i} of "${o.name}" (perpendicular to the authored low contour; roof-plane line; E12 cold / E13 warm)`,
+        coordinates: [
+          { x: p0.x, y: p0.y, z: roundToTwoDecimals(z0) },
+          { x: p1.x, y: p1.y, z: roundToTwoDecimals(z1) },
+        ],
+        parentElementForTb: o.name,
+      });
+    }
+    if (cold) return;
+    for (let i = 0; i < n; i++) {
+      if (
+        eavesEdgeIndexes.has(i) ||
+        !isRidgeEdgeRelativeToEaves(c, n, i, eavesUnit) ||
+        isGableEdgeRelativeToEaves(c, n, i, eavesUnit) ||
+        rises[i]! < riseMax - contourRiseTol ||
+        rises[(i + 1) % n]! < riseMax - contourRiseTol
+      ) continue;
+      const p0 = c[i]!;
+      const p1 = c[(i + 1) % n]!;
+      const rLenPlan = dist2XY(p0, p1);
+      if (rLenPlan < MIN_LEN_M) continue;
+      const zR0 = roofTopElevationAtPlanM(o, p0.x, p0.y, floors, globalOrientationOffset);
+      const zR1 = roofTopElevationAtPlanM(o, p1.x, p1.y, floors, globalOrientationOffset);
+      if (zR0 === null || zR1 === null) continue;
+      const ridgeCoords = [
+        { x: p0.x, y: p0.y, z: zR0 },
+        { x: p1.x, y: p1.y, z: zR1 },
+      ] as const;
+      const junctionCode = defaultRidgeCodeForRoof(o);
+      const alt = junctionCode === 'R4' ? 'R5' : 'R4';
+      out.push({
+        proposalId: `${o.id}:ridge:${i}`,
+        openingId: o.id,
+        openingName: o.name,
+        zoneId: o.zoneId,
+        edgeRole: 'sloped_roof_ridge',
+        junctionCode,
+        suggestedLengthM: roundToTwoDecimals(computeThermalBridgeLinearRunLengthM([...ridgeCoords])),
+        linearThermalTransmittance: psiTable37ForCode(junctionCode),
+        reason: `${junctionCode} ridge on edge ${i} of "${o.name}" (parallel to the authored low contour, roof-top plane; cold loft → R5 / warm roof → R4 — choose **${alt}** if the junction detail differs)`,
+        coordinates: [
+          { x: p0.x, y: p0.y, z: roundToTwoDecimals(zR0) },
+          { x: p1.x, y: p1.y, z: roundToTwoDecimals(zR1) },
+        ],
+        parentElementForTb: o.name,
+      });
+    }
+    return;
+  }
 
   const a0 = c[0]!;
   const a1 = c[1]!;
@@ -271,13 +404,14 @@ function pushEavesGableProposals(
 export function proposeSlopedRoofEavesGableThermalBridges(
   elements: Element[],
   floors?: Floor[],
+  globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   floors = withEffectiveStoreyHeights(floors, elements);
   const out: FacadeOpeningTbProposal[] = [];
   for (const el of elements) {
     if (el.type !== 'BuildingElementOpaque' || el.isPlaceholder) continue;
     const o = el as BuildingElementOpaque;
-    pushEavesGableProposals(o, floors, elements, out);
+    pushEavesGableProposals(o, floors, elements, out, globalOrientationOffset);
   }
   return out;
 }

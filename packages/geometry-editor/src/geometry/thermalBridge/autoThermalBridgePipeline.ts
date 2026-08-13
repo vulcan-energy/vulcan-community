@@ -32,11 +32,12 @@ export interface AutoThermalBridgePipelineResult {
 export function proposeAutoThermalBridgesWithRaw(
   elements: Element[],
   floors?: Floor[],
+  globalOrientationOffset?: number,
 ): AutoThermalBridgePipelineResult {
   const openings = proposeFacadeOpeningThermalBridges(elements, floors);
-  const roofOpenings = proposeRoofOpeningThermalBridges(elements, floors);
+  const roofOpenings = proposeRoofOpeningThermalBridges(elements, floors, globalOrientationOffset);
   const flatRoofEdges = proposeFlatRoofEdgeThermalBridges(elements, floors);
-  const slopedEavesGable = proposeSlopedRoofEavesGableThermalBridges(elements, floors);
+  const slopedEavesGable = proposeSlopedRoofEavesGableThermalBridges(elements, floors, globalOrientationOffset);
   const groundContinuous = proposeWallGroundContinuous(elements, openings, floors);
   const intermediateContinuous = proposeWallIntermediateContinuous(elements, openings, floors);
   const corners = proposeExternalCornerThermalBridges(elements);
@@ -45,12 +46,12 @@ export function proposeAutoThermalBridgesWithRaw(
   const partyWallGroundP16 = proposePartyWallGroundP1P6ThermalBridges(elements, floors);
   const basementE22 = proposeBasementGroundE22ThermalBridges(elements, floors);
   const e7PartyFloor = proposeE7PartyFloorToExternalWallThermalBridges(elements, floors);
-  const partyWallToRoofP45 = proposePartyWallToSlopedRoofP4P5ThermalBridges(elements, floors);
+  const partyWallToRoofP45 = proposePartyWallToSlopedRoofP4P5ThermalBridges(elements, floors, globalOrientationOffset);
   const partyWallToFlatRoofP4 = proposePartyWallToFlatRoofP4ThermalBridges(elements, floors);
   const adjacentJunctions = proposeAdjacentWallJunctionThermalBridges(elements, floors);
-  const roomInRoofR89 = proposeRoomInRoofRoofToWallR8R9ThermalBridges(elements, floors);
-  const dormerHostR89 = proposeDormerWallToHostRoofR8R9ThermalBridges(elements, floors);
-  const dormerRoofHostR10 = proposeDormerRoofToHostRoofR10ThermalBridges(elements, floors);
+  const roomInRoofR89 = proposeRoomInRoofRoofToWallR8R9ThermalBridges(elements, floors, globalOrientationOffset);
+  const dormerHostR89 = proposeDormerWallToHostRoofR8R9ThermalBridges(elements, floors, globalOrientationOffset);
+  const dormerRoofHostR10 = proposeDormerRoofToHostRoofR10ThermalBridges(elements, floors, globalOrientationOffset);
 
   const rawProposals = [
     ...openings,
@@ -79,6 +80,10 @@ export function proposeAutoThermalBridgesWithRaw(
   };
 }
 
-export function proposeAutoThermalBridges(elements: Element[], floors?: Floor[]): FacadeOpeningTbProposal[] {
-  return proposeAutoThermalBridgesWithRaw(elements, floors).dedupedProposals;
+export function proposeAutoThermalBridges(
+  elements: Element[],
+  floors?: Floor[],
+  globalOrientationOffset?: number,
+): FacadeOpeningTbProposal[] {
+  return proposeAutoThermalBridgesWithRaw(elements, floors, globalOrientationOffset).dedupedProposals;
 }

@@ -126,7 +126,6 @@ import {
   getPvFootprintDimensionsFromPreset,
 } from '../lib/pvPanelFootprint';
 import { findHostRoofId, isPanelFullyOnRoof } from '../lib/pvHostDerivation';
-import { isOrientationPitchAxis } from '../lib/slopePitchAxis';
 import { computePvRoofClearanceGuidance } from '../lib/pvRoofClearance';
 import {
   computeRoofHostedOpeningPlacement,
@@ -3027,27 +3026,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     (coordinates: Array<{ x: number; y: number; z: number }>): { parent_element: string } | Record<string, never> => {
       const roofId = findHostRoofId({ coordinates }, elementsById as Record<string, Element>);
       const roof = roofId ? elementsById[roofId] : undefined;
-      if (roof && isOrientationPitchAxis(roof)) {
-        const center = coordinates.reduce(
-          (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
-          { x: 0, y: 0 },
-        );
-        const canvas = worldToCanvas(
-          { x: center.x / coordinates.length, y: center.y / coordinates.length },
-          scale,
-          panOffset,
-          canvasCenter,
-        );
-        setDrawingTooltip({
-          visible: true,
-          text: "Rooflights can't be placed on a roof using the Orientation pitch axis",
-          position: { x: canvas.x + 10, y: canvas.y - 10 },
-        });
-        return {};
-      }
       return roof?.name ? { parent_element: roof.name } : {};
     },
-    [elementsById, setDrawingTooltip, scale, panOffset, canvasCenter],
+    [elementsById],
   );
   const overlapBadgeMenuLayerStyle = overlapBadgeMenu
     ? getOverlapBadgeMenuLayerStyle(overlapBadgeMenu.anchor, { scale, panOffset, canvasCenter })
@@ -4347,20 +4328,25 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       const candidate = sortedElementCanvasData[index]?.element;
       if (!candidate) continue;
       if (!isElementOnActiveCanvasFloor(candidate, currentFloorZ, floors)) continue;
-      if (!isValidDormerHost(candidate)) continue;
+      if (!isValidDormerHost(candidate, globalOrientationOffset)) continue;
       if (!isPointInPolygon2D(point, candidate.coordinates)) continue;
       return candidate;
     }
 
     return null;
-  }, [currentFloorZ, floors, sortedElementCanvasData]);
+  }, [currentFloorZ, floors, globalOrientationOffset, sortedElementCanvasData]);
 
   const dormerDrawPreviewCutout = useMemo(() => {
     if (drawMode !== 'dormer' || !drawCursor) return null;
     const host = findDormerHostAtPoint(drawCursor);
     if (!host) return null;
-    return getDormerDrawPreviewCutoutPolygon(host, { x: drawCursor.x, y: drawCursor.y }, floors);
-  }, [drawMode, drawCursor, findDormerHostAtPoint, floors]);
+    return getDormerDrawPreviewCutoutPolygon(
+      host,
+      { x: drawCursor.x, y: drawCursor.y },
+      floors,
+      globalOrientationOffset,
+    );
+  }, [drawMode, drawCursor, findDormerHostAtPoint, floors, globalOrientationOffset]);
 
   const selectedPointDragTarget = useMemo(() => {
     if (drawMode !== 'none') return null;
@@ -4432,8 +4418,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       (element) => element.type === 'BuildingElementOpaque',
     );
     if (!host || host.type !== 'BuildingElementOpaque') return null;
-    return computeRoofHostedOpeningPlacement(opening as any, host as any, floors);
-  }, [selection, elementsById, findElementByName, currentFloorZ, floors]);
+    return computeRoofHostedOpeningPlacement(opening as any, host as any, floors, globalOrientationOffset);
+  }, [selection, elementsById, findElementByName, currentFloorZ, floors, globalOrientationOffset]);
   const roofWindowDistanceEditor = roofWindowDistanceEditorState
     && selection?.type === 'element'
     && selection.id === roofWindowDistanceEditorState.elementId
@@ -4479,6 +4465,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       host as any,
       floors,
       requestedDistanceM,
+      globalOrientationOffset,
     );
     if (!coordinates || !isPanelFullyOnRoof({ coordinates }, host as any)) {
       setRoofWindowDistanceEditor((prev) => (prev ? { ...prev, error: true } : prev));
@@ -4487,7 +4474,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
     updateElement(opening.id, { coordinates });
     setRoofWindowDistanceEditor(null);
-  }, [roofWindowDistanceEditor, elementsById, findElementByName, floors, setRoofWindowDistanceEditor, updateElement]);
+  }, [roofWindowDistanceEditor, elementsById, findElementByName, floors, globalOrientationOffset, setRoofWindowDistanceEditor, updateElement]);
 
   const roofWindowDistanceEditorGeometry = useMemo(() => {
     if (
@@ -7257,26 +7244,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 const roofHostId = isRoofHostableShape(dragEl, snappedCoords)
                   ? findHostRoofId({ coordinates: snappedCoords }, elementsById as Record<string, Element>)
                   : null;
-                const roofHost = roofHostId ? elementsById[roofHostId] : undefined;
-                const orientationAxisRoofHost = roofHost && isOrientationPitchAxis(roofHost) ? roofHost : null;
-
-                if (orientationAxisRoofHost) {
-                  const center = snappedCoords.reduce(
-                    (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
-                    { x: 0, y: 0 },
-                  );
-                  const canvas = worldToCanvas(
-                    { x: center.x / snappedCoords.length, y: center.y / snappedCoords.length },
-                    scale,
-                    panOffset,
-                    canvasCenter,
-                  );
-                  setDrawingTooltip({
-                    visible: true,
-                    text: "Rooflights can't be placed on a roof using the Orientation pitch axis",
-                    position: { x: canvas.x + 10, y: canvas.y - 10 },
-                  });
-                }
 
                 if (!isFinal) {
                   if (shouldSnapToParent(dragEl) && !(dragEl as any).parent_element && snappedCoords.length === 2) {
@@ -7312,7 +7279,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                           }
                         : null,
                     );
-                  } else if (roofHostId && !orientationAxisRoofHost) {
+                  } else if (roofHostId) {
                     setShapeDragCentroidHostSnapIfChanged('roof');
                     setLineOpeningClearancePreviewIfChanged(null);
                   } else {
@@ -7407,8 +7374,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 if (
                   isFinal &&
                   dragEl.type === 'BuildingElementTransparent' &&
-                  roofHostId &&
-                  !orientationAxisRoofHost
+                  roofHostId
                 ) {
                   const roof = elementsById[roofHostId];
                   if (roof?.name) {

@@ -34,7 +34,6 @@ import type {
 import { isExternalLineWall } from './proposeExternalCorners';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
 import { inwardNormal2DForSlopedRoof, roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
-import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { roundToTwoDecimals } from '../constants';
@@ -129,11 +128,11 @@ const EDGE_ROLE: FacadeOpeningEdgeRole = 'sloped_roof_to_adjacent_wall_r8_r9';
 export function proposeRoomInRoofRoofToWallR8R9ThermalBridges(
   elements: Element[],
   floors?: Floor[],
+  globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   floors = withEffectiveStoreyHeights(floors, elements);
   const roofs = elements.filter((e): e is BuildingElementOpaque => {
     if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) return false;
-    if (isOrientationPitchAxis(e)) return false;
     return isSlopedPitchedRoofElementForEavesGable(e);
   });
 
@@ -152,7 +151,7 @@ export function proposeRoomInRoofRoofToWallR8R9ThermalBridges(
     const coords = roof.coordinates;
     if (!coords || coords.length < 2) continue;
 
-    const inward = inwardNormal2DForSlopedRoof(roof);
+    const inward = inwardNormal2DForSlopedRoof(roof, globalOrientationOffset);
     if (!inward) continue;
 
     const junctionCode = junctionR8OrR9ForRoof(roof);
@@ -189,8 +188,8 @@ export function proposeRoomInRoofRoofToWallR8R9ThermalBridges(
         const pLo = pointOnSegmentAtT(Wa, Wb, overlap.tLo, overlap.wallLen);
         const pHi = pointOnSegmentAtT(Wa, Wb, overlap.tHi, overlap.wallLen);
 
-        const z0 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, pLo.x, pLo.y, floors);
-        const z1 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, pHi.x, pHi.y, floors);
+        const z0 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, pLo.x, pLo.y, floors, globalOrientationOffset);
+        const z1 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, pHi.x, pHi.y, floors, globalOrientationOffset);
         if (z0 === null || z1 === null) continue;
 
         const c0 = { x: pLo.x, y: pLo.y, z: z0 };
@@ -234,8 +233,8 @@ export function proposeRoomInRoofRoofToWallR8R9ThermalBridges(
         const pLo = pointOnSegmentAtT(Wa, Wb, overlap.tLo, overlap.wallLen);
         const pHi = pointOnSegmentAtT(Wa, Wb, overlap.tHi, overlap.wallLen);
 
-        const z0 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, pLo.x, pLo.y, floors);
-        const z1 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, pHi.x, pHi.y, floors);
+        const z0 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, pLo.x, pLo.y, floors, globalOrientationOffset);
+        const z1 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, pHi.x, pHi.y, floors, globalOrientationOffset);
         if (z0 === null || z1 === null) continue;
 
         const c0w = { x: pLo.x, y: pLo.y, z: z0 };
