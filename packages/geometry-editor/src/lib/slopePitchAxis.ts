@@ -15,32 +15,6 @@ export function isOrientationPitchAxis(element: Element): boolean {
     getElementShape(element) === 'sloped-polygon';
 }
 
-export function hasSlopePitchAxisHostedDependants(
-  host: Element,
-  elements: Iterable<Element>,
-): boolean {
-  const hostName = host.name?.trim();
-  if (!hostName) return false;
-  for (const candidate of elements) {
-    if (
-      candidate.type === 'BuildingElementTransparent' &&
-      candidate.parent_element?.trim() === hostName
-    ) {
-      return true;
-    }
-    const dormerBundle = candidate.extra_json?.dormer_bundle;
-    if (
-      dormerBundle &&
-      typeof dormerBundle === 'object' &&
-      !Array.isArray(dormerBundle) &&
-      (dormerBundle as { host_element_name?: unknown }).host_element_name === hostName
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function cleanUnitComponent(value: number): number {
   if (Math.abs(value) < 1e-12) return 0;
   if (Math.abs(value - 1) < 1e-12) return 1;

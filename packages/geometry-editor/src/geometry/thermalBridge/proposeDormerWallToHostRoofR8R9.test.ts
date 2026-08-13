@@ -127,6 +127,22 @@ describe('proposeDormerWallToHostRoofR8R9ThermalBridges', () => {
     expect(row.reason).toContain('footprint on roof plane');
   });
 
+  it('emits warm R8 at authored-plane elevations for an Orientation-state host', () => {
+    const roof = {
+      ...hostSlopedRoof(),
+      is_unheated_pitched_roof: false,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180,
+    } as BuildingElementOpaque;
+    const cheek = { ...dormerCheekOnHost(), height: 3 } as BuildingElementOpaque;
+    const proposals = proposeDormerWallToHostRoofR8R9ThermalBridges([roof, cheek] as Element[], undefined, 0);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.junctionCode).toBe('R8');
+    expect(proposals[0]?.coordinates[0].z).toBeCloseTo(2 + Math.tan((32 * Math.PI) / 180), 6);
+    expect(proposals[0]?.coordinates[1].z).toBeCloseTo(2 + 3.5 * Math.tan((32 * Math.PI) / 180), 6);
+    expect(proposeDormerWallToHostRoofR8R9ThermalBridges([roof, cheek] as Element[])).toEqual([]);
+  });
+
   it('returns nothing when host name does not match any sloped roof', () => {
     const roof = hostSlopedRoof();
     const cheek = {

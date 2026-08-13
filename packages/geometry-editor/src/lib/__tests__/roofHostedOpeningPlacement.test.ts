@@ -89,14 +89,59 @@ describe('computeRoofHostedOpeningPlacement', () => {
     expect(marker).toBeNull();
   });
 
-  it('does not place or move an opening on an Orientation pitch-axis roof', () => {
+  it('matches bottom-edge placement when the authored fall line agrees with edge 0', () => {
     const roof = makeRoof({
       extra_json: { _slope_pitch_axis: 'orientation' },
       orientation360: 180,
     });
 
+    expect(computeRoofHostedOpeningPlacement(makeOpening(), roof, undefined, 0))
+      .toEqual(computeRoofHostedOpeningPlacement(makeOpening(), makeRoof(), undefined));
     expect(computeRoofHostedOpeningPlacement(makeOpening(), roof, undefined)).toBeNull();
-    expect(moveRoofHostedOpeningToSurfaceDistance(makeOpening(), roof, undefined, 1)).toBeNull();
+  });
+
+  it('measures from an apex-down hinge contour and moves round-trip along the authored upslope', () => {
+    const roof = makeRoof({
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+        { x: 2, y: 4, z: 0 },
+      ],
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 0,
+    });
+    const opening = makeOpening({
+      coordinates: square(1.5, 2, 1),
+    });
+    const placement = computeRoofHostedOpeningPlacement(opening, roof, undefined, 0);
+    expect(placement?.planDistanceM).toBeCloseTo(1, 6);
+    expect(placement?.roofPoint).toEqual({ x: 2, y: 4 });
+    expect(placement?.roofLowEdgeSegment).toEqual([
+      { x: 4, y: 4 },
+      { x: 0, y: 4 },
+    ]);
+
+    const target = 2 / Math.cos(Math.PI / 6);
+    const moved = moveRoofHostedOpeningToSurfaceDistance(opening, roof, undefined, target, 0);
+    expect(moved).not.toBeNull();
+    expect(computeRoofHostedOpeningPlacement({ coordinates: moved! }, roof, undefined, 0)?.distanceM)
+      .toBeCloseTo(target, 6);
+  });
+
+  it('rejects an Orientation-hosted opening whose edges are skewed from the contour tangent', () => {
+    const roof = makeRoof({
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180,
+    });
+    const opening = makeOpening({
+      coordinates: [
+        { x: 2.5, y: 2, z: 0 },
+        { x: 3, y: 2.5, z: 0 },
+        { x: 2.5, y: 3, z: 0 },
+        { x: 2, y: 2.5, z: 0 },
+      ],
+    });
+    expect(computeRoofHostedOpeningPlacement(opening, roof, undefined, 0)).toBeNull();
   });
 
   it('does not report a placement marker for unaligned opening polygons', () => {

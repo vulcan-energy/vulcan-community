@@ -39,6 +39,7 @@ import { modelXYToThreeXZ, modelSegmentToThreeYaw, modelXYToExtrudeShapeXY } fro
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { frameInsetFromFrameAreaFraction, rectSizeForMaxOpenArea } from '../../lib/geometryVentilationOverlay';
 import { deriveDormerHostBasis, getDormerBundleInfo, getDormerHostBaseElevationM } from '../../lib/dormerGeometry';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import {
   floorDimmedMeshColor,
   floorDimmingOverlayScale,
@@ -251,13 +252,14 @@ function getDormerCutoutOutlinePoints(
   hostElement: Element,
   cutoutPolygon: Array<{ x: number; y: number; z: number }>,
   floors: Floor[],
+  globalOrientationOffset?: number,
 ): Array<[number, number, number]> {
   if (hostElement.type !== 'BuildingElementOpaque' || cutoutPolygon.length < 3) return [];
   const hostBaseElevationM = getDormerHostBaseElevationM(hostElement, floors);
 
   const hostPitch = hostElement.pitch;
   if (typeof hostPitch === 'number' && Number.isFinite(hostPitch) && hostPitch > 0 && hostPitch < 90) {
-    const hostBasis = deriveDormerHostBasis(hostElement);
+    const hostBasis = deriveDormerHostBasis(hostElement, globalOrientationOffset);
     if (hostBasis) {
       return cutoutPolygon.map((point) => {
         const [x, z] = modelXYToThreeXZ([point.x, point.y]);
@@ -274,6 +276,7 @@ function getDormerCutoutOutlinePoints(
         ];
       });
     }
+    if (isOrientationPitchAxis(hostElement)) return [];
   }
 
   return cutoutPolygon.map((point) => {
@@ -286,6 +289,7 @@ function collectDormerCutoutOverlays(
   elementsById: Record<string, Element>,
   floors: Floor[],
   selection: Selection | null,
+  globalOrientationOffset?: number,
 ): DormerCutoutOverlay[] {
   if (!selection) return [];
 
@@ -310,7 +314,12 @@ function collectDormerCutoutOverlays(
     const overlayKey = `${hostElement.id}:${bundleInfo.bundle_id}`;
     if (seen.has(overlayKey)) return;
 
-    const points = getDormerCutoutOutlinePoints(hostElement, bundleInfo.cutout_polygon, effectiveFloors);
+    const points = getDormerCutoutOutlinePoints(
+      hostElement,
+      bundleInfo.cutout_polygon,
+      effectiveFloors,
+      globalOrientationOffset,
+    );
     if (points.length < 3) return;
 
     seen.add(overlayKey);
@@ -2813,8 +2822,8 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
     primitivesRef.current = primitives;
   }, [orbitTarget, primitives]);
   const dormerCutoutOverlays = useMemo(
-    () => collectDormerCutoutOverlays(elementsById, floors, selection),
-    [elementsById, floors, selection],
+    () => collectDormerCutoutOverlays(elementsById, floors, selection, globalOrientationOffset),
+    [elementsById, floors, selection, globalOrientationOffset],
   );
   const editHandleModel = useMemo(() => {
     if (selection?.type !== 'element') return null;

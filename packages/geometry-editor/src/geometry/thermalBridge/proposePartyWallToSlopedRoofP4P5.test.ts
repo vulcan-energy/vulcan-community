@@ -50,6 +50,18 @@ describe('proposePartyWallToSlopedRoofP4P5ThermalBridges', () => {
     expect(p[0]!.hostElementIds).toEqual(['r2', 'pw']);
   });
 
+  it('proposes against an Orientation-state roof only when its plane basis is available', () => {
+    const roof = {
+      ...slopedFixed,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 270,
+    } as BuildingElementOpaque;
+    expect(proposePartyWallToSlopedRoofP4P5ThermalBridges([roof, party] as Element[], undefined, 0))
+      .toHaveLength(1);
+    expect(proposePartyWallToSlopedRoofP4P5ThermalBridges([roof, party] as Element[]))
+      .toEqual([]);
+  });
+
   it('uses the inferred ceiling elevation for cold P4 when the roof base is higher', () => {
     const floors: Floor[] = [
       { id: 'f1', name: 'Upper', zIndex: 1, height: 2.8, isRoofSpace: false },

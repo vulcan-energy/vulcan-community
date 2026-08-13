@@ -72,6 +72,30 @@ describe('proposeDormerRoofToHostRoofR10ThermalBridges', () => {
     expect(row.hostElementIds).toEqual(['host-roof', 'dormer-roof']);
   });
 
+  it('emits R10 against an Orientation-state host and keeps Orientation dormer roofs skipped', () => {
+    const roof = {
+      ...hostSlopedRoof(),
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180,
+    } as BuildingElementOpaque;
+    const dormerRoof = dormerRoofOnHost();
+    const proposals = proposeDormerRoofToHostRoofR10ThermalBridges([roof, dormerRoof] as Element[], undefined, 0);
+    expect(proposals.length).toBeGreaterThanOrEqual(1);
+    expect(proposals.every((row) => row.coordinates.every((point) => Number.isFinite(point.z)))).toBe(true);
+    expect(proposeDormerRoofToHostRoofR10ThermalBridges([roof, dormerRoof] as Element[])).toEqual([]);
+
+    const handToggledDormer = {
+      ...dormerRoof,
+      extra_json: {
+        ...dormerRoof.extra_json,
+        _slope_pitch_axis: 'orientation',
+      },
+      orientation360: 180,
+    } as BuildingElementOpaque;
+    expect(proposeDormerRoofToHostRoofR10ThermalBridges([roof, handToggledDormer] as Element[], undefined, 0))
+      .toEqual([]);
+  });
+
   it('returns nothing when the host roof is an unheated pitched roof', () => {
     const roof = {
       ...hostSlopedRoof(),

@@ -508,7 +508,7 @@ export const parseCsvToGeometry = (
       el._nameAutoSync = false;
     }
   }
-  const normalizedElements = normalizeThermalBridgeSourceLinks(newElements);
+  const normalizedElements = normalizeThermalBridgeSourceLinks(newElements, globalOffset);
 
   return {
     zones: newZones,

@@ -10,7 +10,7 @@
 import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
-import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
+import { inwardNormal2DForSlopedRoof, roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { roundToTwoDecimals } from '../constants';
@@ -66,13 +66,14 @@ function coldPitchedRoofBoundaryZM(
 export function proposeDormerWallToHostRoofR8R9ThermalBridges(
   elements: Element[],
   floors?: Floor[],
+  globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   floors = withEffectiveStoreyHeights(floors, elements);
   const roofByName = new Map<string, BuildingElementOpaque>();
   for (const e of elements) {
     if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) continue;
     const o = e as BuildingElementOpaque;
-    if (isOrientationPitchAxis(o)) continue;
+    if (isOrientationPitchAxis(o) && !inwardNormal2DForSlopedRoof(o, globalOrientationOffset)) continue;
     if (!isSlopedPitchedRoofElementForEavesGable(o)) continue;
     const n = (o.name ?? '').trim();
     if (n) roofByName.set(n, o);
@@ -98,8 +99,8 @@ export function proposeDormerWallToHostRoofR8R9ThermalBridges(
 
     const cold = !!(roof as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof;
     const coldBoundaryZM = cold ? coldPitchedRoofBoundaryZM(roof, elements, floors) : null;
-    const z0 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, A.x, A.y, floors);
-    const z1 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, B.x, B.y, floors);
+    const z0 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, A.x, A.y, floors, globalOrientationOffset);
+    const z1 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, B.x, B.y, floors, globalOrientationOffset);
     if (z0 === null || z1 === null) continue;
 
     const wExt = opaqueEnvelopeVerticalExtentM(w, floors);

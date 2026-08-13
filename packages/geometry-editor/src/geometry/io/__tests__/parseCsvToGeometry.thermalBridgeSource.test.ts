@@ -40,4 +40,31 @@ Corner,Living,ThermalBridgeLinear,,2.4,0.05,,"0,0,0|0,0,2.4","{""junction_type""
       findLinearThermalBridgeIssues(elements).some((issue) => issue.kind === 'orphan_e16e17_incomplete_walls'),
     ).toBe(false);
   });
+
+  it('threads GlobalOrientationOffset while normalising an Orientation-roof eaves source', () => {
+    const csv = `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,45,,,,,,,,,,,,,
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Exposed Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Orientation Roof,Living,BuildingElementOpaque,12,30,4,3,135,2,FALSE,FALSE,,"0,0,2|4,0,2|4,3,2|0,3,2","{""_slope_pitch_axis"":""orientation""}"
+
+Thermal Bridging Elements,,,,,,,,,
+Name,Zone,Type,heat_transfer_coeff,length,linear_thermal_transmittance,parent_element,coords,extra_json
+Eaves,Living,ThermalBridgeLinear,,4,0.04,,"0,0,2|4,0,2","{""junction_type"":""E11"",""thermal_bridge_source"":{""host_wall_id"":""old-roof-id""}}"
+`.trim();
+
+    const { elements, metadata } = parseCsvToGeometry(csv);
+    const roof = elements.find((element) => element.name === 'Orientation Roof') as BuildingElementOpaque;
+    const bridge = elements.find((element) => element.name === 'Eaves') as ThermalBridgeLinear;
+    const source = bridge.extra_json?.thermal_bridge_source as Record<string, unknown>;
+    expect(metadata.globalOrientationOffset).toBe(45);
+    expect(roof.extra_json?._slope_pitch_axis).toBe('orientation');
+    expect(source.host_wall_id).toBe(roof.id);
+  });
 });

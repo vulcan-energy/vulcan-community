@@ -204,7 +204,6 @@ import {
   orientation360SlopedFromFirstEdge,
 } from '../lib/openingSegmentOutward';
 import {
-  hasSlopePitchAxisHostedDependants,
   isOrientationPitchAxis,
   SLOPE_PITCH_AXIS_EXTRA_JSON_KEY,
   type SlopePitchAxis,
@@ -5249,12 +5248,6 @@ const createGeometryState = (
     const currentAxis: SlopePitchAxis = isOrientationPitchAxis(element) ? 'orientation' : 'bottom-edge';
     const persistedAxis = element.extra_json?.[SLOPE_PITCH_AXIS_EXTRA_JSON_KEY];
     if (axis === currentAxis && !(axis === 'bottom-edge' && persistedAxis !== undefined)) return;
-    if (
-      axis === 'orientation' &&
-      hasSlopePitchAxisHostedDependants(element, Object.values(state.elementsById))
-    ) {
-      return;
-    }
     const first = element.coordinates[0];
     const second = element.coordinates[1];
     const derived = first && second
@@ -7148,12 +7141,10 @@ const createGeometryState = (
   getAvailableParentElements: (childType: ElementType, zoneId: string, selfId = undefined) => {
     const state = get();
     if (childType === 'BuildingElementTransparent') {
-      // Windows: parent can be any wall (opaque) in the same zone. Orientation-axis
-      // slopes are excluded — rooflight placement on them is blocked everywhere else.
+      // Windows: parent can be any wall (opaque) in the same zone.
       return Object.values(state.elementsById).filter(element =>
         element.zoneId === zoneId &&
-        element.type === 'BuildingElementOpaque' &&
-        !isOrientationPitchAxis(element)
+        element.type === 'BuildingElementOpaque'
       );
     }
     if (childType === 'BuildingElementOpaque') {

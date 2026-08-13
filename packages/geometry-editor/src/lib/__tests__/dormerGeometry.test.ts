@@ -235,11 +235,13 @@ describe('dormerGeometry', () => {
     expect(isValidDormerHost(makeHostRoof({ pitch: 90 }))).toBe(false);
   });
 
-  it('rejects an Orientation pitch-axis sloped roof', () => {
-    expect(isValidDormerHost(makeHostRoof({
+  it('accepts an Orientation pitch-axis sloped roof only with a finite offset', () => {
+    const host = makeHostRoof({
       extra_json: { _slope_pitch_axis: 'orientation' },
       orientation360: 180,
-    }))).toBe(false);
+    });
+    expect(isValidDormerHost(host, 0)).toBe(true);
+    expect(isValidDormerHost(host)).toBe(false);
   });
 
   it('derives host basis from the eaves edge and polygon interior', () => {
@@ -249,6 +251,70 @@ describe('dormerGeometry', () => {
     expect(basis?.uAxis[1]).toBeCloseTo(0, 6);
     expect(basis?.vAxis[0]).toBeCloseTo(0, 6);
     expect(basis?.vAxis[1]).toBeCloseTo(1, 6);
+  });
+
+  it('preserves the dormer host basis for an aligned Orientation fall line', () => {
+    const bottomEdge = deriveDormerHostBasis(makeHostRoof());
+    const orientation = deriveDormerHostBasis(makeHostRoof({
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180,
+    }), 0);
+    expect(orientation).toEqual(bottomEdge);
+  });
+
+  it('derives axes and contour endpoints from an apex-down authored bearing', () => {
+    const basis = deriveDormerHostBasis(makeHostRoof({
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+        { x: 2, y: 4, z: 0 },
+      ],
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 0,
+    }), 0);
+    expect(basis).toEqual({
+      uAxis: [-1, 0],
+      vAxis: [0, -1],
+      eavesStart: [4, 4],
+      eavesEnd: [0, 4],
+    });
+  });
+
+  it('resolves an Orientation-host dormer front at the absolute authored-plane elevation', () => {
+    const host = makeHostRoof({
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 0, z: 0 },
+        { x: 2, y: 4, z: 0 },
+      ],
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 0,
+    });
+    const resolved = resolveDormerGeometry({
+      host,
+      dormerType: 'mono-pitch',
+      windowCenterPlanPoint: { x: 2, y: 3 },
+      hostBaseElevationM: 2.4,
+      globalOrientationOffset: 0,
+    });
+    expect(resolved).not.toBeNull();
+    expect(resolved?.frontBaseHeight).toBeCloseTo(2.4 + Math.tan((35 * Math.PI) / 180), 3);
+  });
+
+  it('does not degrade an Orientation-host cutout to projected area without an offset', () => {
+    const host = makeHostRoof({
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180,
+    });
+    const polygon = buildDormerCutoutPolygon(host, {
+      dormerType: 'mono-pitch',
+      windowCenterPlanPoint: { x: 2, y: 1 },
+      dormerWidth: 2,
+      dormerDepth: 1.5,
+    }, 0);
+    expect(polygon).not.toBeNull();
+    expect(getDormerCutoutSurfaceArea(host, polygon ?? [])).toBe(0);
+    expect(getDormerCutoutSurfaceArea(host, polygon ?? [], 0)).toBeGreaterThan(3);
   });
 
   it('builds a rectangular cutout polygon centered on the clicked window point', () => {

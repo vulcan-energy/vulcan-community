@@ -152,6 +152,20 @@ describe('proposeRoomInRoofRoofToWallR8R9ThermalBridges', () => {
     expect(bottomEdge[0]!.junctionCode).toBe('R8');
   });
 
+  it('emits roof-plane R8 elevations for an Orientation-state host', () => {
+    const roof = {
+      ...warmSlopedRoof(),
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180,
+    } as BuildingElementOpaque;
+    const knee = kneeWallAlongRoofBottomEdge();
+    const proposals = proposeRoomInRoofRoofToWallR8R9ThermalBridges([roof, knee], undefined, 0);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.junctionCode).toBe('R8');
+    expect(proposals[0]?.coordinates.map((point) => point.z)).toEqual([1, 1]);
+    expect(proposeRoomInRoofRoofToWallR8R9ThermalBridges([roof, knee])).toEqual([]);
+  });
+
   it('pairs sloped roof edges with vertical opaque dormer cheek walls (not only BuildingElementAdjacent)', () => {
     const roof = coldSlopedRoof();
     const cheek = dormerCheekOpaqueAlongRoofBottomEdge();

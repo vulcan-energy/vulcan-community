@@ -81,14 +81,85 @@ describe('proposeSlopedRoofEavesGableThermalBridges', () => {
     expect(r[0]!.junctionCode).toBe('R4');
   });
 
-  it('emits no first-edge proposals for an Orientation pitch-axis roof', () => {
+  it('matches bottom-edge classification when the authored fall line agrees with edge 0', () => {
     const orientationRoof = {
       ...warmRect,
       extra_json: { _slope_pitch_axis: 'orientation' },
-      orientation360: 135,
+      orientation360: 180,
     } as BuildingElementOpaque;
 
-    expect(proposeSlopedRoofEavesGableThermalBridges([orientationRoof] as Element[])).toEqual([]);
+    const comparable = (rows: ReturnType<typeof proposeSlopedRoofEavesGableThermalBridges>) => rows.map((row) => ({
+      edgeRole: row.edgeRole,
+      junctionCode: row.junctionCode,
+      suggestedLengthM: row.suggestedLengthM,
+      coordinates: row.coordinates,
+    }));
+    expect(comparable(proposeSlopedRoofEavesGableThermalBridges([orientationRoof] as Element[], undefined, 0)))
+      .toEqual(comparable(proposeSlopedRoofEavesGableThermalBridges([warmRect] as Element[])));
+  });
+
+  it('moves eaves to the authored low contour and classifies every other edge against the contour tangent', () => {
+    const orientationRoof = {
+      ...warmRect,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 270,
+    } as BuildingElementOpaque;
+
+    const out = proposeSlopedRoofEavesGableThermalBridges([orientationRoof] as Element[], undefined, 0);
+    expect(out.filter((row) => row.edgeRole === 'sloped_roof_eaves').map((row) => row.proposalId)).toEqual(['wr:eaves:3']);
+    expect(out.filter((row) => row.edgeRole === 'sloped_roof_gable').map((row) => row.proposalId)).toEqual(['wr:gable:0', 'wr:gable:2']);
+    expect(out.filter((row) => row.edgeRole === 'sloped_roof_ridge').map((row) => row.proposalId)).toEqual(['wr:ridge:1']);
+  });
+
+  it('emits nothing for an apex-down triangle or when the Orientation offset is unavailable', () => {
+    const apexDown = {
+      ...warmRect,
+      coordinates: [
+        { x: 0, y: 0, z: 3 },
+        { x: 4, y: 0, z: 3 },
+        { x: 2, y: 3, z: 3 },
+      ],
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 0,
+    } as BuildingElementOpaque;
+    expect(proposeSlopedRoofEavesGableThermalBridges([apexDown] as Element[], undefined, 0)).toEqual([]);
+    expect(proposeSlopedRoofEavesGableThermalBridges([apexDown] as Element[])).toEqual([]);
+  });
+
+  it('keeps a snap-noise bearing low edge as eaves instead of drifting it into the ridge bucket', () => {
+    const orientationRoof = {
+      ...warmRect,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 180.05,
+    } as BuildingElementOpaque;
+
+    const out = proposeSlopedRoofEavesGableThermalBridges([orientationRoof] as Element[], undefined, 0);
+    expect(out.filter((row) => row.edgeRole === 'sloped_roof_eaves').map((row) => row.proposalId)).toEqual(['wr:eaves:0']);
+    expect(out.filter((row) => row.edgeRole === 'sloped_roof_ridge').map((row) => row.proposalId)).toEqual(['wr:ridge:2']);
+  });
+
+  it('leaves a genuinely skewed bearing with neither eaves nor ridge on the contour-parallel edges', () => {
+    const orientationRoof = {
+      ...warmRect,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 184,
+    } as BuildingElementOpaque;
+
+    const out = proposeSlopedRoofEavesGableThermalBridges([orientationRoof] as Element[], undefined, 0);
+    expect(out.filter((row) => row.edgeRole === 'sloped_roof_eaves')).toEqual([]);
+    expect(out.filter((row) => row.edgeRole === 'sloped_roof_ridge')).toEqual([]);
+    expect(out.filter((row) => row.edgeRole === 'sloped_roof_gable').map((row) => row.proposalId)).toEqual(['wr:gable:1', 'wr:gable:3']);
+  });
+
+  it('combines the stored bearing with a non-zero global offset', () => {
+    const orientationRoof = {
+      ...warmRect,
+      extra_json: { _slope_pitch_axis: 'orientation' },
+      orientation360: 225,
+    } as BuildingElementOpaque;
+
+    const out = proposeSlopedRoofEavesGableThermalBridges([orientationRoof] as Element[], undefined, 45);
+    expect(out.find((row) => row.edgeRole === 'sloped_roof_eaves')?.proposalId).toBe('wr:eaves:3');
   });
 
   it('uses projected ceiling boundary for cold loft gables and suppresses ridge proposals', () => {

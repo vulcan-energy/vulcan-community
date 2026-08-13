@@ -49,7 +49,7 @@ import {
 import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeometry';
 import { findSuspendedGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
 import { isDormerAnchorElement } from '../../lib/dormerGeometry';
-import { hasSlopePitchAxisHostedDependants, isOrientationPitchAxis } from '../../lib/slopePitchAxis';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import {
   mergeUnheatedPitchedRoofCeilingElevationExtraJson,
   readAuthoredUnheatedPitchedRoofCeilingElevationM,
@@ -357,10 +357,6 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       selectedShape === 'sloped-polygon' &&
       !selectedElement.parent_element;
     const orientationPitchAxis = showSlopePitchAxis && isOrientationPitchAxis(selectedElement);
-    const slopePitchAxisEntryBlocked = showSlopePitchAxis && hasSlopePitchAxisHostedDependants(
-      selectedElement,
-      Object.values(elementsById),
-    );
 
     return (
       <>
@@ -438,18 +434,11 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
                 value={orientationPitchAxis ? 'orientation' : 'bottom-edge'}
                 options={[
                   { value: 'bottom-edge', label: 'Bottom edge' },
-                  {
-                    value: 'orientation',
-                    label: 'Orientation',
-                    disabled: slopePitchAxisEntryBlocked && !orientationPitchAxis,
-                  },
+                  { value: 'orientation', label: 'Orientation' },
                 ]}
                 onChange={(axis) => state.setSlopePitchAxis(selectedElement.id, axis)}
                 ariaLabel="Pitch axis"
               />
-              {slopePitchAxisEntryBlocked && !orientationPitchAxis ? (
-                <div style={INLINE_FIELD_NOTE_STYLE}>Remove hosted rooflights and dormers before changing the pitch axis.</div>
-              ) : null}
             </div>
           </>
         ) : null}

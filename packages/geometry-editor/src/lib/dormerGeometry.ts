@@ -15,7 +15,11 @@ import {
   elevationAtSlopedVertexM,
 } from './geometry3dSloped';
 import { orientation360FromSegmentOutwardModelXY, orientation360SlopedFromFirstEdge } from './openingSegmentOutward';
-import { isOrientationPitchAxis } from './slopePitchAxis';
+import {
+  isOrientationPitchAxis,
+  slopeHingeContourSegment,
+  slopedPolygonPlaneBasis,
+} from './slopePitchAxis';
 
 export type DormerType = 'mono-pitch' | 'gable-front' | 'hip';
 export type DormerBundleRole =
@@ -626,6 +630,7 @@ export function getDormerDrawPreviewCutoutPolygon(
   host: BuildingElementOpaque,
   windowCenterPlanPoint: DormerPlanPoint,
   floors: Floor[] = [],
+  globalOrientationOffset?: number,
 ): Array<{ x: number; y: number; z: number }> | null {
   const resolved = resolveDormerGeometry({
     host,
@@ -633,6 +638,7 @@ export function getDormerDrawPreviewCutoutPolygon(
     windowCenterPlanPoint,
     placementDefaults: getDormerPlacementDefaults(),
     hostBaseElevationM: getDormerHostBaseElevationM(host, floors),
+    globalOrientationOffset,
   });
   if (!resolved?.cutoutPolygon?.length) return null;
   return resolved.cutoutPolygon;
@@ -856,14 +862,24 @@ export function isDormerAnchorElement(element: Element | null | undefined): elem
   return element?.type === 'BuildingElementOpaque' && getDormerBundleMetadata(element) !== null;
 }
 
-export function isValidDormerHost(element: Element): element is BuildingElementOpaque {
+export function isValidDormerHost(
+  element: Element,
+  globalOrientationOffset?: number,
+): element is BuildingElementOpaque {
   if (element.type !== 'BuildingElementOpaque') return false;
-  if (isOrientationPitchAxis(element)) return false;
   if (!Array.isArray(element.coordinates) || element.coordinates.length < 3) return false;
   const pitch = element.pitch;
   if (typeof pitch !== 'number' || !Number.isFinite(pitch) || pitch <= 0 || pitch >= 90) return false;
 
   const pts = getHostPlanPoints(element);
+  if (isOrientationPitchAxis(element)) {
+    return slopedPolygonPlaneBasis(
+      pts,
+      'orientation',
+      element.orientation360 ?? 0,
+      globalOrientationOffset as number,
+    ) !== null;
+  }
   const eavesStart = pts[0];
   const eavesEnd = pts[1];
   if (!eavesStart || !eavesEnd) return false;
@@ -872,10 +888,34 @@ export function isValidDormerHost(element: Element): element is BuildingElementO
   return computeSlopedPolygonInwardNormal2D(pts) !== null;
 }
 
-export function deriveDormerHostBasis(host: BuildingElementOpaque): DormerHostBasis | null {
-  if (!isValidDormerHost(host)) return null;
+export function deriveDormerHostBasis(
+  host: BuildingElementOpaque,
+  globalOrientationOffset?: number,
+): DormerHostBasis | null {
+  if (!isValidDormerHost(host, globalOrientationOffset)) return null;
 
   const pts = getHostPlanPoints(host);
+  if (isOrientationPitchAxis(host)) {
+    const basis = slopedPolygonPlaneBasis(
+      pts,
+      'orientation',
+      host.orientation360 ?? 0,
+      globalOrientationOffset as number,
+    );
+    if (!basis) return null;
+    const contour = slopeHingeContourSegment(pts, basis.anchorXY, basis.upslope2D);
+    if (!contour) return null;
+    const contourTangent: [number, number] = [
+      basis.upslope2D[1] === 0 ? 0 : basis.upslope2D[1],
+      basis.upslope2D[0] === 0 ? 0 : -basis.upslope2D[0],
+    ];
+    return {
+      uAxis: contourTangent,
+      vAxis: basis.upslope2D,
+      eavesStart: contour[0],
+      eavesEnd: contour[1],
+    };
+  }
   const [ax, ay] = pts[0];
   const [bx, by] = pts[1];
   const uAxis = normalize2D(bx - ax, by - ay);
@@ -894,8 +934,9 @@ export function deriveDormerHostBasis(host: BuildingElementOpaque): DormerHostBa
 export function buildDormerCutoutPolygon(
   host: BuildingElementOpaque,
   params: DormerCutoutParams,
+  globalOrientationOffset?: number,
 ): Array<{ x: number; y: number; z: number }> | null {
-  const basis = deriveDormerHostBasis(host);
+  const basis = deriveDormerHostBasis(host, globalOrientationOffset);
   if (!basis) return null;
 
   const { windowCenterPlanPoint, dormerWidth, dormerDepth } = params;
@@ -939,11 +980,13 @@ export function getDormerCutoutProjectedArea(
 export function getDormerCutoutSurfaceArea(
   host: BuildingElementOpaque,
   polygon: Array<{ x: number; y: number; z: number }>,
+  globalOrientationOffset?: number,
 ): number {
   if (polygon.length < 3) return 0;
-  const hostBasis = deriveDormerHostBasis(host);
+  const hostBasis = deriveDormerHostBasis(host, globalOrientationOffset);
   const hostPitch = host.pitch;
   if (!hostBasis || !isFiniteNumber(hostPitch) || hostPitch <= 0 || hostPitch >= 90) {
+    if (isOrientationPitchAxis(host)) return 0;
     return getDormerCutoutProjectedArea(polygon);
   }
 
@@ -968,6 +1011,7 @@ export function resolveDormerGeometry(params: {
   windowCenterPlanPoint: DormerPlanPoint;
   placementDefaults?: Partial<DormerPlacementDefaults>;
   hostBaseElevationM?: number;
+  globalOrientationOffset?: number;
 }): DormerResolvedGeometry | null {
   const {
     host,
@@ -975,6 +1019,7 @@ export function resolveDormerGeometry(params: {
     windowCenterPlanPoint,
     placementDefaults = {},
     hostBaseElevationM,
+    globalOrientationOffset,
   } = params;
 
   const requested: DormerPlacementDefaults = {
@@ -982,7 +1027,7 @@ export function resolveDormerGeometry(params: {
     ...placementDefaults,
   };
 
-  const hostBasis = deriveDormerHostBasis(host);
+  const hostBasis = deriveDormerHostBasis(host, globalOrientationOffset);
   if (!hostBasis) return null;
 
   const dormerWidth = Math.max(0.2, requested.dormerWidth);
@@ -1220,7 +1265,7 @@ export function resolveDormerGeometry(params: {
     hostBaseElevationM: resolvedHostBaseElevationM,
     cutoutPolygon,
     hostCutoutProjectedArea: getDormerCutoutProjectedArea(cutoutPolygon),
-    hostCutoutSurfaceArea: getDormerCutoutSurfaceArea(host, cutoutPolygon),
+    hostCutoutSurfaceArea: getDormerCutoutSurfaceArea(host, cutoutPolygon, globalOrientationOffset),
     frontLeft,
     frontRight,
     backRight,
@@ -1313,6 +1358,7 @@ export function buildDormerBundleDraft(params: {
     windowCenterPlanPoint,
     placementDefaults,
     hostBaseElevationM: effectiveHostBaseElevationM,
+    globalOrientationOffset,
   });
   if (!resolved) return null;
 

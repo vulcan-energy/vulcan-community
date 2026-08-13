@@ -20,7 +20,7 @@ import { roundToTwoDecimals } from '../constants';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element } from '../types';
 import type { Floor } from '../../geometry/types';
 import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
-import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
+import { isOrientationPitchAxis, slopedPolygonPlaneBasis } from '../../lib/slopePitchAxis';
 import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import {
@@ -82,12 +82,14 @@ function roofOpeningVertex(
   host: BuildingElementOpaque | null,
   point: { x: number; y: number; z: number },
   floors: Floor[] | undefined,
-): { x: number; y: number; z: number } {
+  globalOrientationOffset?: number,
+): { x: number; y: number; z: number } | null {
   const source = host ?? (t as unknown as BuildingElementOpaque);
-  const zOnRoof = roofTopElevationAtPlanM(source, point.x, point.y, floors);
+  const zOnRoof = roofTopElevationAtPlanM(source, point.x, point.y, floors, globalOrientationOffset);
   if (typeof zOnRoof === 'number' && Number.isFinite(zOnRoof)) {
     return { x: point.x, y: point.y, z: zOnRoof };
   }
+  if (isOrientationPitchAxis(source)) return null;
   if (typeof t.base_height === 'number' && Number.isFinite(t.base_height)) {
     return { x: point.x, y: point.y, z: t.base_height };
   }
@@ -98,47 +100,90 @@ function polygonRoofOpeningProposals(
   t: BuildingElementTransparent,
   elements: Element[],
   floors: Floor[] | undefined,
+  globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   const coords = t.coordinates;
   if (!coords || coords.length < 4) return [];
   const host = findRoofHost(t, elements);
-  const p0 = roofOpeningVertex(t, host, coords[0], floors);
-  const p1 = roofOpeningVertex(t, host, coords[1], floors);
-  const p2 = roofOpeningVertex(t, host, coords[2], floors);
-  const p3 = roofOpeningVertex(t, host, coords[3], floors);
+  const p0 = roofOpeningVertex(t, host, coords[0], floors, globalOrientationOffset);
+  const p1 = roofOpeningVertex(t, host, coords[1], floors, globalOrientationOffset);
+  const p2 = roofOpeningVertex(t, host, coords[2], floors, globalOrientationOffset);
+  const p3 = roofOpeningVertex(t, host, coords[3], floors, globalOrientationOffset);
+  if (!p0 || !p1 || !p2 || !p3) return [];
+  const points = [p0, p1, p2, p3] as const;
+  const governingPlane = host ?? (t as unknown as BuildingElementOpaque);
+  let headEdgeIndex = 2;
+  let sillEdgeIndex = 0;
+  let jambEdgeIndexes: [number, number] = [1, 3];
+  if (isOrientationPitchAxis(governingPlane)) {
+    const planePoints = governingPlane.coordinates.map((point) => [point.x, point.y] as [number, number]);
+    const basis = slopedPolygonPlaneBasis(
+      planePoints,
+      'orientation',
+      governingPlane.orientation360 ?? 0,
+      globalOrientationOffset as number,
+    );
+    if (!basis) return [];
+    const edgeProjections = points.map((point, index) => {
+      const next = points[(index + 1) % points.length]!;
+      const midX = (point.x + next.x) / 2;
+      const midY = (point.y + next.y) / 2;
+      return (midX - basis.anchorXY[0]) * basis.upslope2D[0] +
+        (midY - basis.anchorXY[1]) * basis.upslope2D[1];
+    });
+    sillEdgeIndex = edgeProjections.reduce(
+      (best, value, index) => value < edgeProjections[best]! - 1e-9 ? index : best,
+      0,
+    );
+    headEdgeIndex = edgeProjections.reduce(
+      (best, value, index) => value > edgeProjections[best]! + 1e-9 ? index : best,
+      0,
+    );
+    const remaining = [0, 1, 2, 3].filter((index) => index !== sillEdgeIndex && index !== headEdgeIndex);
+    if (remaining.length !== 2) return [];
+    jambEdgeIndexes = [remaining[0]!, remaining[1]!];
+  }
+  const edge = (index: number): [typeof p0, typeof p0] => [
+    points[index]!,
+    points[(index + 1) % points.length]!,
+  ];
+  const head = edge(headEdgeIndex);
+  const sill = edge(sillEdgeIndex);
+  const jambFirst = edge(jambEdgeIndexes[0]);
+  const jambSecond = edge(jambEdgeIndexes[1]);
   const roles = [
     {
       role: 'roof_window_head' as const,
-      coords: [p2, p3] as [typeof p2, typeof p3],
-      length: dist3(p2, p3),
+      coords: head,
+      length: dist3(head[0], head[1]),
       junctionCode: 'R1',
       reason: `Roof window head (R1) along upper edge of "${t.name}"${host ? ` on "${host.name}"` : ''}`,
     },
     {
       role: 'roof_window_sill' as const,
-      coords: [p0, p1] as [typeof p0, typeof p1],
-      length: dist3(p0, p1),
+      coords: sill,
+      length: dist3(sill[0], sill[1]),
       junctionCode: 'R2',
       reason: `Roof window sill (R2) along lower edge of "${t.name}"${host ? ` on "${host.name}"` : ''}`,
     },
     {
       role: 'rooflight_kerb' as const,
-      coords: [p0, p1] as [typeof p0, typeof p1],
-      length: dist3(p0, p1),
+      coords: sill,
+      length: dist3(sill[0], sill[1]),
       junctionCode: 'R11',
       reason: `Kerb or upstand (R11) along lower edge of "${t.name}" — if your detail is a sill, use R2; else R11 for kerb/upstand per Table 3.7`,
     },
     {
       role: 'roof_window_jamb_first' as const,
-      coords: [p1, p2] as [typeof p1, typeof p2],
-      length: dist3(p1, p2),
+      coords: jambFirst,
+      length: dist3(jambFirst[0], jambFirst[1]),
       junctionCode: 'R3',
       reason: `Roof window jamb (R3) along first side edge of "${t.name}"`,
     },
     {
       role: 'roof_window_jamb_second' as const,
-      coords: [p3, p0] as [typeof p3, typeof p0],
-      length: dist3(p3, p0),
+      coords: jambSecond,
+      length: dist3(jambSecond[0], jambSecond[1]),
       junctionCode: 'R3',
       reason: `Roof window jamb (R3) along second side edge of "${t.name}"`,
     },
@@ -162,6 +207,7 @@ function polygonRoofOpeningProposals(
 export function proposeRoofOpeningThermalBridges(
   elements: Element[],
   floors?: Floor[],
+  globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   floors = withEffectiveStoreyHeights(floors, elements);
   const out: FacadeOpeningTbProposal[] = [];
@@ -170,15 +216,16 @@ export function proposeRoofOpeningThermalBridges(
     if (el.type !== 'BuildingElementTransparent') continue;
     const t = el as BuildingElementTransparent;
     if (!isRoofWindowOpening(t)) continue;
-    // T1 safe guard: an Orientation-axis plane hinges on the authored fall line, and
-    // roofTopElevationAtPlanM has no offset here, so jamb lengths would silently
-    // flatten to plan lengths. Skip; the opening surfaces as unproposed until T2.
-    const orientationHost = findRoofHost(t, elements);
-    if (isOrientationPitchAxis(t) || (orientationHost && isOrientationPitchAxis(orientationHost))) continue;
     if (t.coordinates.length >= 4) {
-      out.push(...polygonRoofOpeningProposals(t, elements, floors));
+      out.push(...polygonRoofOpeningProposals(t, elements, floors, globalOrientationOffset));
       continue;
     }
+
+    // The legacy 2-point form never consults the host plane, so it cannot be made
+    // Orientation-aware; keep such openings unproposed rather than emit first-edge
+    // approximations against a re-hinged roof.
+    const legacyHost = findRoofHost(t, elements);
+    if (legacyHost && isOrientationPitchAxis(legacyHost)) continue;
 
     const coords = t.coordinates;
     const p0 = coords[0];

@@ -182,7 +182,7 @@ import {
 } from './formPrimitives';
 import { hydrateWallSharedFields } from './wallShared';
 import { renderWallPitchField } from './wallPitchField';
-import { hasSlopePitchAxisHostedDependants, isOrientationPitchAxis } from '../../lib/slopePitchAxis';
+import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import type {
   ElementFormModule,
   ElementFormStateCtx,
@@ -475,10 +475,6 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       selectedShape === 'sloped-polygon' &&
       !selectedElement.parent_element;
     const orientationPitchAxis = showSlopePitchAxis && isOrientationPitchAxis(selectedElement);
-    const slopePitchAxisEntryBlocked = showSlopePitchAxis && hasSlopePitchAxisHostedDependants(
-      selectedElement,
-      Object.values(ctx.elementsById),
-    );
     const rebuildSelectedSlopedTransparentOpening = () => {
       if (
         selectedElement?.type !== 'BuildingElementTransparent' ||
@@ -691,18 +687,11 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
                 value={orientationPitchAxis ? 'orientation' : 'bottom-edge'}
                 options={[
                   { value: 'bottom-edge', label: 'Bottom edge' },
-                  {
-                    value: 'orientation',
-                    label: 'Orientation',
-                    disabled: slopePitchAxisEntryBlocked && !orientationPitchAxis,
-                  },
+                  { value: 'orientation', label: 'Orientation' },
                 ]}
                 onChange={(axis) => state.setSlopePitchAxis(selectedElement.id, axis)}
                 ariaLabel="Pitch axis"
               />
-              {slopePitchAxisEntryBlocked && !orientationPitchAxis ? (
-                <div style={INLINE_FIELD_NOTE_STYLE}>Remove hosted rooflights and dormers before changing the pitch axis.</div>
-              ) : null}
             </div>
           </>
         ) : null}

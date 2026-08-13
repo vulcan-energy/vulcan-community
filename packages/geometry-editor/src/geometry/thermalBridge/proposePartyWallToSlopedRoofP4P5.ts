@@ -9,8 +9,7 @@
  */
 import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
-import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
-import { computeSlopedPolygonInwardNormal2D } from '../../lib/geometry3dSloped';
+import { isOrientationPitchAxis, slopedPolygonPlaneBasis } from '../../lib/slopePitchAxis';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { Floor } from '../../geometry/types';
@@ -43,16 +42,22 @@ export function isSlopedRoofOpaqueForP4P5(o: BuildingElementOpaque): boolean {
 function zEavesM(o: BuildingElementOpaque, floors: Floor[] | undefined): number {
   if (floors && floors.length > 0) return elementBaseElevationMForTb(o, floors);
   const c = o.coordinates;
-  const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
-  const z1 = typeof c[1]?.z === 'number' && Number.isFinite(c[1].z) ? c[1].z : 0;
   const bh = o.base_height;
   if (typeof bh === 'number' && Number.isFinite(bh) && bh >= 0) return bh;
+  if (isOrientationPitchAxis(o)) {
+    // The first edge is not the hinge in Orientation state; take the lowest stored z.
+    const zs = c.map((p) => (typeof p?.z === 'number' && Number.isFinite(p.z) ? p.z : 0));
+    return zs.length > 0 ? Math.min(...zs) : 0;
+  }
+  const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
+  const z1 = typeof c[1]?.z === 'number' && Number.isFinite(c[1].z) ? c[1].z : 0;
   return Math.min(z0, z1);
 }
 
 export function proposePartyWallToSlopedRoofP4P5ThermalBridges(
   elements: Element[],
   floors?: Floor[] | undefined,
+  globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   floors = withEffectiveStoreyHeights(floors, elements);
   const out: FacadeOpeningTbProposal[] = [];
@@ -61,12 +66,17 @@ export function proposePartyWallToSlopedRoofP4P5ThermalBridges(
   for (const el of elements) {
     if (el.type !== 'BuildingElementOpaque' || el.isPlaceholder) continue;
     const o = el as BuildingElementOpaque;
-    if (isOrientationPitchAxis(o)) continue;
     if (!isSlopedRoofOpaqueForP4P5(o)) continue;
     const c = o.coordinates;
     if (!c || c.length < 3) continue;
     const planPts: Array<[number, number]> = c.map((p) => [p.x, p.y] as [number, number]);
-    if (computeSlopedPolygonInwardNormal2D(planPts) === null) continue;
+    const orientationAxis = isOrientationPitchAxis(o);
+    if (!slopedPolygonPlaneBasis(
+      planPts,
+      orientationAxis ? 'orientation' : 'bottom-edge',
+      o.orientation360 ?? 0,
+      globalOrientationOffset as number,
+    )) continue;
 
     const junctionCode = defaultP4P5CodeForRoof(o);
     const cold = !!(o as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof;
