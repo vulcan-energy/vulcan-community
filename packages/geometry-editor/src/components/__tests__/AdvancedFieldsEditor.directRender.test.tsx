@@ -28,7 +28,7 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import coreSchema from '../../../../../data/schemas/core-input.schema.json';
@@ -41,6 +41,7 @@ import {
 import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
 import {
   DirectAdvancedFields,
@@ -48,7 +49,7 @@ import {
   pickDirectControl,
   type DirectSpecNode,
 } from '../DirectAdvancedFields';
-import { GroupAccordion } from '../jsonformsRenderers';
+import { GroupAccordion, WindowPartListControl } from '../jsonformsRenderers';
 
 beforeAll(async () => {
   configureGeometrySchemaAssetSource({
@@ -1548,6 +1549,127 @@ describe('GroupAccordion (R4.5): plain collapsible chrome extracted from the ret
     expect(container.querySelector('[data-testid="accordion-child"]')).not.toBeNull();
     expect(container.querySelector('button')).toBeNull();
     expect(container.textContent).not.toContain('Add field');
+  });
+});
+
+/**
+ * Ported from the deleted web `jsonformsRenderers.test.tsx` (parent repo, R4.5 —
+ * that file mounted through `<JsonForms renderers={[...standardRenderers,
+ * ...materialRenderers]}>`, which no longer exists anywhere; the paired parent PR
+ * deletes the whole file). Per this repo's test-move policy, coverage for community
+ * code lives IN community, so these two are re-seated here as direct
+ * `WindowPartListControl` mounts (this file's own established `GeometryStoreProvider`
+ * + `GeometryEditorServicePortsProvider` harness — `WindowPartListControl` reads the
+ * current window element's `base_height`/`height` off the geometry store directly,
+ * not off its own props, and renders a field label via `useGeometrySchemaPort()`)
+ * instead of through the deleted registry. Assertions and fixture values are
+ * unchanged from the original.
+ */
+describe('WindowPartListControl interactions (ported from the deleted web registry test, R4.5)', () => {
+  function renderWindowPartListControl({
+    data,
+    handleChange,
+    baseHeightM,
+    heightM,
+  }: {
+    data: unknown;
+    handleChange: ReturnType<typeof vi.fn>;
+    baseHeightM: number;
+    heightM: number;
+  }) {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const windowElement = {
+      id: 'window-1',
+      name: 'window-1',
+      type: 'BuildingElementTransparent',
+      zoneId: 'zone-1',
+      parent_element: null,
+      coordinates: [],
+      base_height: baseHeightM,
+      height: heightM,
+      width: 1.0,
+    } as unknown as Element;
+    act(() => {
+      store.setState({
+        selection: { type: 'element', id: 'window-1' },
+        elementsById: { 'window-1': windowElement },
+        elementIds: ['window-1'],
+      });
+    });
+    const utils = render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={canonicalGeometrySchemaPort}
+        workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
+      >
+        <GeometryStoreProvider store={store}>
+          <WindowPartListControl
+            data={data}
+            handleChange={handleChange}
+            path="window_part_list"
+            label="Window Part List"
+            config={{ advancedEditor: true, elementType: 'BuildingElementTransparent' }}
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+    return { store, ...utils };
+  }
+
+  it('preserves midpoint-above-base when window base height changes', async () => {
+    const handleChange = vi.fn();
+    const { store } = renderWindowPartListControl({
+      data: [{ mid_height_air_flow_path: 1.5 }],
+      handleChange,
+      baseHeightM: 1.0,
+      heightM: 1.2,
+    });
+
+    handleChange.mockClear();
+
+    act(() => {
+      store.setState({
+        // A freshly-created `selection` object (same id, same shape) is what forces
+        // `WindowPartListControl`'s `useGeometryStore((state) => state.selection)`
+        // subscription to see a change and re-render with fresh `elementsById` --
+        // mirrors the original (deleted) test's own identical trick against the
+        // singleton `useGeometryStore.setState`.
+        selection: { type: 'element', id: 'window-1' },
+        elementsById: {
+          'window-1': { ...(store.getState().elementsById['window-1'] as Element), base_height: 1.2 },
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(handleChange).toHaveBeenCalled();
+    });
+
+    expect(handleChange).toHaveBeenLastCalledWith('window_part_list', [{ mid_height_air_flow_path: 1.7 }]);
+  });
+
+  it('preserves decimal-zero window part midpoint drafts above the window base', async () => {
+    const handleChange = vi.fn();
+    const { container } = renderWindowPartListControl({
+      data: [{ mid_height_air_flow_path: 1.5 }],
+      handleChange,
+      baseHeightM: 1.0,
+      heightM: 1.2,
+    });
+
+    const midpointInput = within(container).getByLabelText(
+      'Window part 1 midpoint in metres above window base',
+    ) as HTMLInputElement;
+    expect(midpointInput).toHaveAttribute('type', 'text');
+
+    fireEvent.change(midpointInput, { target: { value: '0.0' } });
+    await waitFor(() => expect(handleChange).toHaveBeenCalled());
+    expect(midpointInput.value).toBe('0.0');
+
+    fireEvent.change(midpointInput, { target: { value: '0.05' } });
+    await waitFor(() => {
+      expect(handleChange).toHaveBeenLastCalledWith('window_part_list', [{ mid_height_air_flow_path: 1.05 }]);
+    });
+    expect(midpointInput.value).toBe('0.05');
   });
 });
 
