@@ -1021,7 +1021,7 @@ function windowPartRowsEqual(a: WindowPartListItem[], b: WindowPartListItem[]): 
   return a.every((row, index) => Math.abs(row.mid_height_air_flow_path - b[index].mid_height_air_flow_path) <= 1e-6);
 }
 
-const WindowPartListControl: React.FC<AdvancedControlProps> = ({
+export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
   data,
   handleChange,
   path,

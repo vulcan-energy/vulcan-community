@@ -7,7 +7,7 @@ import { materialRenderers } from '@jsonforms/material-renderers';
 import type { JsonSchema, UISchemaElement, ValidationMode } from '@jsonforms/core';
 import { standardRenderers, renderFieldLabelWithTooltip } from './jsonformsRenderers';
 import { DirectAdvancedFields } from './DirectAdvancedFields';
-import { isDirectRenderAdvancedFieldsEnabled } from '../lib/directRenderAdvancedFieldsFlag';
+import { isAdvancedFieldsJsonformsFallbackEnabled } from '../lib/directRenderAdvancedFieldsFlag';
 import { StandardDropdown } from './StandardDropdown';
 import { getAjvInstance, ensureRootSchema } from '../lib/ajvCache';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
@@ -18,7 +18,7 @@ import {
 } from '../lib/systemAdvancedSchemaExpand';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
 import { flattenSystemSubtypePlantSchemas } from '../lib/systemSchemaFlatten';
-import { buildSystemAdvancedUischema } from '../lib/systemAdvancedUischema';
+import { buildSystemAdvancedUischema, type AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
   collectHeatSourceWetNameLabelsFromProject,
   collectHeatSourceWetNamesFromProject,
@@ -1312,7 +1312,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     projectHeatSourceWetNames,
   ]);
 
-  const systemAdvancedUischema = useMemo<UISchemaElement | undefined>(() => {
+  const systemAdvancedUischema = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {
     if (elementType !== 'System' || !subtype || !subschema) return undefined;
     return buildSystemAdvancedUischema(subtype, subschema as Record<string, unknown>);
   }, [elementType, subtype, subschema]);
@@ -2348,25 +2348,27 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           </>
         )}
 
-      {elementType === 'ElectricBattery' && isDirectRenderAdvancedFieldsEnabled() ? (
-        // R4.2 spike: direct-render off the resolved subschema, no <JsonForms> dispatch.
-        // Default-OFF; see lib/directRenderAdvancedFieldsFlag.ts.
-        <DirectAdvancedFields
-          schema={subschema as Record<string, unknown>}
-          data={advancedFieldsData as Record<string, unknown>}
-          config={jsonFormsConfig}
-          onDataChange={(data) => handleJsonFormsChange({ data, errors: [] })}
-        />
-      ) : (
+      {isAdvancedFieldsJsonformsFallbackEnabled() ? (
         <JsonForms
           schema={subschema}
-          {...(systemAdvancedUischema ? { uischema: systemAdvancedUischema } : {})}
+          {...(systemAdvancedUischema ? { uischema: systemAdvancedUischema as UISchemaElement } : {})}
           data={advancedFieldsData}
           renderers={jsonFormsRenderers}
           ajv={getAjvInstance()}
           config={jsonFormsConfig}
           validationMode={JSON_FORMS_VALIDATION_MODE}
           onChange={handleJsonFormsChange}
+        />
+      ) : (
+        // R4.3: direct-render off the resolved subschema (or, for System, the layout
+        // spec from systemAdvancedUischema.ts), no <JsonForms> dispatch. Default-ON;
+        // see lib/directRenderAdvancedFieldsFlag.ts for the fallback kill-switch.
+        <DirectAdvancedFields
+          schema={subschema as Record<string, unknown>}
+          data={advancedFieldsData as Record<string, unknown>}
+          config={jsonFormsConfig}
+          layout={systemAdvancedUischema}
+          onDataChange={(data) => handleJsonFormsChange({ data, errors: [] })}
         />
       )}
       {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && (

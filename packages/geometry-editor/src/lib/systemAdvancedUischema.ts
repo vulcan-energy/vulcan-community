@@ -1,7 +1,19 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { UISchemaElement } from '@jsonforms/core';
+/**
+ * Structurally identical to the subset of `@jsonforms/core`'s `UISchemaElement` this
+ * module ever produces (VerticalLayout / Control, no Group). Defined locally so this
+ * module carries no `@jsonforms/core` dependency; the JsonForms mount at the single
+ * call site in `AdvancedFieldsEditor.tsx` accepts the result via a cast, since the
+ * shape is unchanged.
+ */
+export type AdvancedFieldsLayoutNode = {
+  type: 'VerticalLayout' | 'Control';
+  scope?: string;
+  label?: string;
+  elements?: AdvancedFieldsLayoutNode[];
+};
 
 function shouldRecurseIntoNestedObject(childSchema: unknown): boolean {
   if (!childSchema || typeof childSchema !== 'object' || Array.isArray(childSchema)) return false;
@@ -57,7 +69,7 @@ function leafControlLabel(key: string, childSchema: unknown, ctx: PlantControlCt
  * VerticalLayout + Control only (no `Group` — Group maps to accordion chrome in
  * {@link standardRenderers} and reads Scenario-style, not normal Advanced Fields).
  */
-function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: PlantControlCtx): UISchemaElement[] {
+function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: PlantControlCtx): AdvancedFieldsLayoutNode[] {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
     return [{ type: 'Control', scope: scopePrefix }];
   }
@@ -65,7 +77,7 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
   const props = s.properties;
   if (props && typeof props === 'object' && !Array.isArray(props) && Object.keys(props).length > 0) {
     const keys = sortPropertyKeys(Object.keys(props as Record<string, unknown>));
-    const out: UISchemaElement[] = [];
+    const out: AdvancedFieldsLayoutNode[] = [];
     for (const key of keys) {
       const childSchema = (props as Record<string, unknown>)[key];
       const childScope = `${scopePrefix}/properties/${key}`;
@@ -98,7 +110,7 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
           continue;
         }
         const label = leafControlLabel(key, childSchema, ctx);
-        const control: UISchemaElement = {
+        const control: AdvancedFieldsLayoutNode = {
           type: 'Control',
           scope: childScope,
           ...(label ? { label } : {}),
@@ -119,7 +131,7 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
 export function buildSystemAdvancedUischema(
   subtype: string,
   subschema: Record<string, unknown>,
-): UISchemaElement {
+): AdvancedFieldsLayoutNode {
   const rootProps = subschema.properties as Record<string, unknown> | undefined;
   const inner = rootProps?.[subtype] as Record<string, unknown> | undefined;
   const plantProps = inner?.properties as Record<string, unknown> | undefined;
@@ -129,7 +141,7 @@ export function buildSystemAdvancedUischema(
 
   const plantKeys = sortPropertyKeys(Object.keys(plantProps));
   const multiPlant = plantKeys.length > 1;
-  const elements: UISchemaElement[] = [];
+  const elements: AdvancedFieldsLayoutNode[] = [];
 
   for (const plantKey of plantKeys) {
     const plantSchema = plantProps[plantKey];
