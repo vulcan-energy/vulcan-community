@@ -1343,8 +1343,8 @@
       "classification": "public_canonical_editor_package_manifest"
     },
     {
-      "path": "packages/geometry-editor/src/components/__tests__/AdvancedFieldsEditor.directParity.test.tsx",
-      "source_path": "packages/geometry-editor/src/components/__tests__/AdvancedFieldsEditor.directParity.test.tsx",
+      "path": "packages/geometry-editor/src/components/__tests__/AdvancedFieldsEditor.directRender.test.tsx",
+      "source_path": "packages/geometry-editor/src/components/__tests__/AdvancedFieldsEditor.directRender.test.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -4386,14 +4386,6 @@
     {
       "path": "packages/geometry-editor/src/lib/directionArrows.ts",
       "source_path": "packages/geometry-editor/src/lib/directionArrows.ts",
-      "license": "AGPL-3.0-only",
-      "additional_terms": "Vulcan-Origin-Terms-1.0",
-      "rights_status": "approved",
-      "classification": "public_canonical_editor_dependency"
-    },
-    {
-      "path": "packages/geometry-editor/src/lib/directRenderAdvancedFieldsFlag.ts",
-      "source_path": "packages/geometry-editor/src/lib/directRenderAdvancedFieldsFlag.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
