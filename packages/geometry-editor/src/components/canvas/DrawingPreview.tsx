@@ -215,7 +215,8 @@ function renderDrawingTooltip(
   );
 }
 
-function renderDrawModeTooltipPill(
+// eslint-disable-next-line react-refresh/only-export-components -- shared by canvas live overlays without duplicating pixel styling.
+export function renderDrawModeTooltipPill(
   text: string,
   position: { x: number; y: number },
   palette: DrawingCanvasPalette,

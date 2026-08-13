@@ -18,12 +18,6 @@ export const CANVAS_CONSTANTS = {
     SPACING: 6,
   },
 
-  // Snap tolerances
-  SNAP: {
-    TOLERANCE: 0.1,
-    ANGLE_TOLERANCE: 2,
-  },
-
   // Colors
   COLORS: {
     WALL: '#EAFD5A',
@@ -33,8 +27,6 @@ export const CANVAS_CONSTANTS = {
     HANDLE: '#FFD93D',
     TEXT: '#FFFFFF',
     DRAWING_PREVIEW: '#FFD93D',
-    ANGLE_SNAPPED: '#1E90FF',
-    SNAP_TARGET: '#1E90FF',
     VALIDATION_ERROR: '#E74C3C',
     VALIDATION_WARNING: '#F59E0B',
     VALIDATION_WARNING_BORDER: '#D97706',
