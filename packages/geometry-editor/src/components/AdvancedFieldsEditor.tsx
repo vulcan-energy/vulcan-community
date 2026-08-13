@@ -2,14 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import React, { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { JsonForms } from '@jsonforms/react';
-import { materialRenderers } from '@jsonforms/material-renderers';
-import type { JsonSchema, UISchemaElement, ValidationMode } from '@jsonforms/core';
-import { standardRenderers, renderFieldLabelWithTooltip } from './jsonformsRenderers';
+import type { JsonSchema } from '@jsonforms/core';
+import { renderFieldLabelWithTooltip } from './jsonformsRenderers';
 import { DirectAdvancedFields } from './DirectAdvancedFields';
-import { isAdvancedFieldsJsonformsFallbackEnabled } from '../lib/directRenderAdvancedFieldsFlag';
 import { StandardDropdown } from './StandardDropdown';
-import { getAjvInstance, ensureRootSchema } from '../lib/ajvCache';
+import { ensureRootSchema } from '../lib/ajvCache';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import { EXTRA_JSON_UI_KEYS } from '../lib/csvPresetUtils';
 import {
@@ -129,7 +126,6 @@ const PARTY_WALL_HALF_CONSTRUCTION_NOTE =
   'Enter dwelling-side half-construction values: U from the half build-up, half areal heat capacity, and the matching mass class. If using construction R, enter half R. Set cavity treatment separately.';
 const INTERNAL_HALF_CONSTRUCTION_NOTE =
   'Enter half-construction values for this side: U from the half build-up, half areal heat capacity, and the matching mass class. If using construction R, enter half R.';
-const JSON_FORMS_VALIDATION_MODE: ValidationMode = 'ValidateAndShow';
 
 type AdvancedEditorData = Partial<Element> & {
   area?: unknown;
@@ -971,7 +967,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   );
   const selectedExternalDetailKey =
     constructionDetails?.selectedCandidateKey(advancedFieldsData) ?? '';
-  const jsonFormsRenderers = useMemo(() => [...standardRenderers, ...materialRenderers], []);
 
   useEffect(() => {
     if (!shouldRenderMechanicalVentilationFixedEnergySupply) return;
@@ -1210,8 +1205,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       };
     }
 
-    // JsonForms does not resolve `$ref` inside `anyOf`; shield_fact_location would render as a plain string.
-    // Inline the same enum as HEM `$defs/WindShieldLocation` so we get a dropdown + validation.
+    // A bare `anyOf` (HEM's shield_fact_location is `$ref`'d inside one) derives no type under
+    // DirectAdvancedFields' executed-table picker (see pickDirectControl in DirectAdvancedFields.tsx),
+    // so the field would fall through to a plain TextControl with no dropdown or validation. Inline the
+    // same enum as HEM `$defs/WindShieldLocation` directly so it gets a real dropdown + validation.
     if (elementType === 'BuildingElementGround' && subtype === 'Suspended_floor' && advancedProperties.shield_fact_location) {
       const sh = advancedProperties.shield_fact_location as Record<string, unknown>;
       advancedProperties.shield_fact_location = {
@@ -1222,12 +1219,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       };
     }
 
-    // Remove allOf from schema passed to JsonForms - JsonForms doesn't handle allOf well
-    // and can fall back to ObjectControl. We've already merged conditional properties where needed.
-    const schemaWithoutAllOf = { ...fullSchema };
-    delete schemaWithoutAllOf.allOf;
     let result: SchemaNode = {
-      ...schemaWithoutAllOf,
+      ...fullSchema,
       properties: advancedProperties
     };
     if (mechanicalVentilationRequiredFields) {
@@ -2348,29 +2341,16 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           </>
         )}
 
-      {isAdvancedFieldsJsonformsFallbackEnabled() ? (
-        <JsonForms
-          schema={subschema}
-          {...(systemAdvancedUischema ? { uischema: systemAdvancedUischema as UISchemaElement } : {})}
-          data={advancedFieldsData}
-          renderers={jsonFormsRenderers}
-          ajv={getAjvInstance()}
-          config={jsonFormsConfig}
-          validationMode={JSON_FORMS_VALIDATION_MODE}
-          onChange={handleJsonFormsChange}
-        />
-      ) : (
-        // R4.3: direct-render off the resolved subschema (or, for System, the layout
-        // spec from systemAdvancedUischema.ts), no <JsonForms> dispatch. Default-ON;
-        // see lib/directRenderAdvancedFieldsFlag.ts for the fallback kill-switch.
-        <DirectAdvancedFields
-          schema={subschema as Record<string, unknown>}
-          data={advancedFieldsData as Record<string, unknown>}
-          config={jsonFormsConfig}
-          layout={systemAdvancedUischema}
-          onDataChange={(data) => handleJsonFormsChange({ data, errors: [] })}
-        />
-      )}
+      {/* R4.3/R4.4: direct-render off the resolved subschema (or, for System, the layout
+          spec from systemAdvancedUischema.ts), no <JsonForms> dispatch. R4.4 retired the
+          legacy JsonForms mount and its fallback kill-switch; this is now the only path. */}
+      <DirectAdvancedFields
+        schema={subschema as Record<string, unknown>}
+        data={advancedFieldsData as Record<string, unknown>}
+        config={jsonFormsConfig}
+        layout={systemAdvancedUischema}
+        onDataChange={(data) => handleJsonFormsChange({ data, errors: [] })}
+      />
       {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && (
         <UnheatedSpaceRuCalculatorModal
           workspaceResourcePort={workspaceResourcePort}
