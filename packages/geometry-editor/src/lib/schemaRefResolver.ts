@@ -14,9 +14,25 @@ export function isInternalSchemaRef(ref: unknown): ref is string {
   return typeof ref === 'string' && (ref === '#' || ref.startsWith('#/'));
 }
 
-// JSON Pointer token decode per RFC 6901 (~1 => /, ~0 => ~)
-function decodePointerToken(token: string): string {
+// JSON Pointer token decode per RFC 6901 (~1 => /, ~0 => ~). Order matters: ~1 must
+// decode before ~0, otherwise a token that started life as "~01" (an escaped literal
+// "~1") would wrongly decode to "/" instead of "~1".
+//
+// R4.3b (vulcan-community: retiring JsonForms' Advanced Fields render path): exported
+// alongside its inverse `encodePointerToken` so `lib/systemAdvancedUischema.ts` can
+// escape raw user plant-key names (CSV-derived, may contain '/' or '.') into scope
+// tokens that survive both this resolver's pointer walk and the dot-path plumbing in
+// `components/DirectAdvancedFields.tsx`'s layout-spec mode. Still used internally by
+// `resolveSchemaPointer` below, unchanged.
+export function decodePointerToken(token: string): string {
   return token.replace(/~1/g, '/').replace(/~0/g, '~');
+}
+
+// Inverse of `decodePointerToken`. Encode order is deliberately the opposite of
+// decode: '~' must become '~0' BEFORE a raw '/' becomes '~1', otherwise a raw '/'
+// would produce a literal "~1" that a later '~' pass would re-escape into "~01".
+export function encodePointerToken(token: string): string {
+  return token.replace(/~/g, '~0').replace(/\//g, '~1');
 }
 
 /**

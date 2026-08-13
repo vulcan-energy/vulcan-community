@@ -1196,6 +1196,12 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     }
 
     // `security_risk`: FHS boolean — show Yes/No dropdown + official guidance (EnumControl).
+    // R4.3b: this intent is finally REALIZED, not just aspirational. Through R4.3,
+    // DirectAdvancedFields' executed-table `pickDirectControl` routed boolean type
+    // ahead of enum, so this inlined `.enum` was inert here -- BooleanControl's plain
+    // checkbox won regardless. R4.3b's enum-first dispatch order means this field now
+    // actually reaches EnumControl, whose propKey-gated Yes/No label mapping
+    // (jsonformsRenderers.tsx) was itself dead code until this slice made it reachable.
     if (elementType === 'BuildingElementTransparent' && advancedProperties.security_risk) {
       advancedProperties.security_risk = {
         type: 'boolean',
@@ -1205,10 +1211,18 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       };
     }
 
-    // A bare `anyOf` (HEM's shield_fact_location is `$ref`'d inside one) derives no type under
-    // DirectAdvancedFields' executed-table picker (see pickDirectControl in DirectAdvancedFields.tsx),
-    // so the field would fall through to a plain TextControl with no dropdown or validation. Inline the
-    // same enum as HEM `$defs/WindShieldLocation` directly so it gets a real dropdown + validation.
+    // shield_fact_location renders as a dropdown either way (SELECT, both pre- and
+    // post-R4.3b), but the CONTROL behind it changed: through R4.3, DirectAdvancedFields'
+    // executed-table `pickDirectControl` routed 'string' type ahead of enum, so this
+    // field reached TextControl's own `extractOptions` dropdown fallback -- validation
+    // errors and helper text dropped, since only EnumControl forwards those. R4.3b's
+    // enum-first dispatch now routes it to EnumControl proper instead. The inline
+    // enum below is still required either way: a bare `anyOf` (HEM's
+    // shield_fact_location is `$ref`'d inside one) derives no `.enum`/type for
+    // `pickDirectControl` to see at all, so without inlining the field would still
+    // fall through to a plain TextControl with no dropdown or validation, regardless
+    // of dispatch order. Inline the same enum as HEM `$defs/WindShieldLocation`
+    // directly so it gets a real dropdown + validation.
     if (elementType === 'BuildingElementGround' && subtype === 'Suspended_floor' && advancedProperties.shield_fact_location) {
       const sh = advancedProperties.shield_fact_location as Record<string, unknown>;
       advancedProperties.shield_fact_location = {

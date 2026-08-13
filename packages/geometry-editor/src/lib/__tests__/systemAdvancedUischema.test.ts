@@ -156,4 +156,52 @@ describe('buildSystemAdvancedUischema', () => {
     const controls = walk(ui.elements).filter((e) => e.type === 'Control');
     expect(controls.some((c) => c.scope?.endsWith('/properties/HeatSource'))).toBe(false);
   });
+
+  it('R4.3b: plant keys containing "/" and "~" produce RFC-6901-escaped scopes, but RAW labels', () => {
+    // Raw user CSV plant names. A literal '/' would otherwise break resolveSchemaPointer
+    // (it splits the pointer ref on '/'); a literal '~' would collide with the escape
+    // character itself if left unescaped/mis-escaped.
+    const subschema = {
+      type: 'object',
+      properties: {
+        HeatSourceWet: {
+          type: 'object',
+          properties: {
+            'Kitchen/Diner boiler': {
+              type: 'object',
+              properties: {
+                rated_power: { type: 'number', title: 'Rated power' },
+              },
+            },
+            'a~b tilde heater': {
+              type: 'object',
+              properties: {
+                rated_power: { type: 'number', title: 'Rated power' },
+              },
+            },
+          },
+        },
+      },
+    };
+    const ui = buildSystemAdvancedUischema('HeatSourceWet', subschema as Record<string, unknown>) as {
+      type: string;
+      elements: { type: string; scope?: string; label?: string }[];
+    };
+    const controls = ui.elements.filter((e) => e.type === 'Control');
+    const scopes = controls.map((c) => c.scope);
+
+    // '/' -> '~1' in the plant-key token; the surrounding schema-keyword tokens
+    // ('properties') are untouched. Splitting this exact string back on the literal
+    // delimiter '/properties/' -- exactly what `segmentsFromLayoutScope` in
+    // DirectAdvancedFields.tsx does -- now yields the real plant key as ONE segment
+    // ('Kitchen/Diner boiler'), not two bogus ones split on the raw '/'.
+    expect(scopes).toContain('#/properties/HeatSourceWet/properties/Kitchen~1Diner boiler/properties/rated_power');
+    // '~' -> '~0' in the plant-key token.
+    expect(scopes).toContain('#/properties/HeatSourceWet/properties/a~0b tilde heater/properties/rated_power');
+
+    // Labels keep the RAW, unescaped plant key -- escaping applies to scopes only.
+    const labels = controls.map((c) => c.label);
+    expect(labels).toContain('Kitchen/Diner boiler · Rated power');
+    expect(labels).toContain('a~b tilde heater · Rated power');
+  });
 });

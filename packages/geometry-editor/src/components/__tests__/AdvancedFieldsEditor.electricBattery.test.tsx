@@ -341,7 +341,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
   });
 
   describe('$ref probe: DirectAdvancedFields vs the shared JsonForms registry (web/ still depends on the registry until R4.5)', () => {
-    it('DirectAdvancedFields resolves battery_location $ref to an inside/outside dropdown via TextControl, emitting an uncoerced string', () => {
+    it('DirectAdvancedFields resolves battery_location $ref to an inside/outside dropdown via EnumControl (R4.3b), emitting a coerced string', () => {
       const unfiltered = canonicalGeometrySchemaPort.getElementSubschema('core', 'ElectricBattery') as Record<
         string,
         unknown
@@ -373,13 +373,22 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
         </GeometryEditorServicePortsProvider>,
       );
 
-      // R4.3 amendment: pickDirectControl is now an EXECUTED-table port (see the
-      // DirectAdvancedFields.tsx docstring) -- the resolved battery_location schema
-      // has `type: 'string'` (BatteryLocation's own declared type, dereferenced), so
-      // rule (c) routes it to TextControl, EVEN THOUGH the resolved schema also
-      // carries `.enum`. This dropdown is therefore TextControl's OWN `extractOptions`
-      // fallback (`<StandardDropdown>`), not EnumControl -- the exact same component
-      // and code path the raw JsonForms registry test below exercises, verified next.
+      // R4.3b CHARACTERIZATION CHANGE (was TextControl through R4.3, see below):
+      // `pickDirectControl`'s enum-first dispatch (DirectAdvancedFields.tsx) now
+      // checks enum-like BEFORE type -- the resolved battery_location schema carries
+      // `.enum` (`['inside', 'outside']`, BatteryLocation's own declared shape,
+      // dereferenced), so it now routes to EnumControl outright, ahead of its also-true
+      // `type: 'string'` match. Same combobox, same options, SAME emitted value
+      // ('outside', a string): EnumControl's `coerceDropdownValue` coerces by the
+      // enum's inferred value type, which is 'string' here (every enum member is a
+      // string) -- so this assertion is unchanged even though the CONTROL behind it
+      // changed. (Through R4.3, rule (c) routed this to TextControl instead, EVEN
+      // THOUGH the resolved schema also carried `.enum` -- that dropdown was
+      // TextControl's OWN `extractOptions` fallback, the exact same underlying
+      // `<StandardDropdown>` component the raw JsonForms registry test below still
+      // exercises via ITS OWN TextControl-wins dispatch quirk, verified next -- these
+      // two tests intentionally diverge now: this one shows the direct path's new
+      // enum-first behaviour, the other documents the registry's unchanged one.)
       const select = within(fieldRow(container, 'battery_location')).getByRole('combobox');
       const optionValues = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
       expect(optionValues).toEqual(expect.arrayContaining(['inside', 'outside']));
