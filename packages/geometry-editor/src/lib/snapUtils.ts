@@ -3,6 +3,7 @@
 
 import type { Element } from '../geometry/types';
 import { normalizeStoreyIndex } from './elementCanvasFloor';
+import type { SnapEvent } from './snapEvent';
 
 /** Two-point “wall line” types that participate in mutual segment snapping while drawing. */
 const LINE_WALL_SNAP_TYPES = new Set<string>([
@@ -53,6 +54,7 @@ function forEachWallSegmentXY(
 export type SnapCornerTarget = {
   elementId: string;
   order: number;
+  sourceVertexOrder: number;
   x: number;
   y: number;
   z?: number;
@@ -240,7 +242,13 @@ export type FindClosestSnapCornerOptions = {
   isEligible?: (target: SnapCornerTarget) => boolean;
 };
 
-export type ClosestSnapCorner = { x: number; y: number; elementId: string; order: number };
+export type ClosestSnapCorner = {
+  x: number;
+  y: number;
+  elementId: string;
+  order: number;
+  sourceVertexOrder: number;
+};
 
 /**
  * Closest corner target within `tol` of `point`: nearest by squared XY distance, ties broken by
@@ -266,7 +274,14 @@ export function findClosestSnapCorner(
     const distSq = dx * dx + dy * dy;
     if (distSq > tolSq) continue;
     if (!best || distSq < best.distSq || (distSq === best.distSq && target.order < best.order)) {
-      best = { x: target.x, y: target.y, elementId: target.elementId, order: target.order, distSq };
+      best = {
+        x: target.x,
+        y: target.y,
+        elementId: target.elementId,
+        order: target.order,
+        sourceVertexOrder: target.sourceVertexOrder,
+        distSq,
+      };
     }
   }
 
@@ -282,10 +297,12 @@ export function buildGeometrySnapCache(elementsById: Record<string, Element>): G
   for (const id of Object.keys(elementsById)) {
     const el = elementsById[id];
     const coords = el?.coordinates || [];
-    for (const coord of coords) {
+    for (let sourceVertexOrder = 0; sourceVertexOrder < coords.length; sourceVertexOrder++) {
+      const coord = coords[sourceVertexOrder]!;
       cornerTargets.push({
         elementId: id,
         order: cornerOrder++,
+        sourceVertexOrder,
         x: coord.x,
         y: coord.y,
         z: coord.z,
@@ -420,17 +437,20 @@ export const snapCornerToOtherCorners = (
   elementsById: Record<string, Element>,
   tol: number
 ) => {
-  let best: {x:number,y:number}|null = null;
+  let best: {x:number,y:number,elementId:string,order:number,sourceVertexOrder:number}|null = null;
   let bestD = Infinity;
   for (const otherId of Object.keys(elementsById)) {
     if (otherId === selfElementId) continue;
     const oc = elementsById[otherId].coordinates || [];
     for (let k=0;k<oc.length;k++) {
       const d = Math.hypot(oc[k].x - point.x, oc[k].y - point.y);
-      if (d < bestD && d <= tol) { bestD = d; best = { x: oc[k].x, y: oc[k].y }; }
+      if (d < bestD && d <= tol) {
+        bestD = d;
+        best = { x: oc[k].x, y: oc[k].y, elementId: otherId, order: k, sourceVertexOrder: k };
+      }
     }
   }
-  return best as {x:number,y:number} | null;
+  return best;
 };
 
 export const snapCornerToOtherCornersFromCache = (
@@ -443,7 +463,7 @@ export const snapCornerToOtherCornersFromCache = (
   const minDistance = options?.minDistance ?? 0;
   const minDistanceSq = minDistance * minDistance;
   const tolSq = tol * tol;
-  let best: {x:number,y:number}|null = null;
+  let best: {x:number,y:number,elementId:string,order:number,sourceVertexOrder:number}|null = null;
   let bestDSq = Infinity;
   let bestOrder = Infinity;
   for (const target of getNearbySnapCornerTargets(snapCache, point, tol)) {
@@ -455,10 +475,16 @@ export const snapCornerToOtherCornersFromCache = (
     if (dSq < bestDSq || (dSq === bestDSq && target.order < bestOrder)) {
       bestDSq = dSq;
       bestOrder = target.order;
-      best = { x: target.x, y: target.y };
+      best = {
+        x: target.x,
+        y: target.y,
+        elementId: target.elementId,
+        order: target.order,
+        sourceVertexOrder: target.sourceVertexOrder,
+      };
     }
   }
-  return best as {x:number,y:number} | null;
+  return best;
 };
 
 export const applyAngleSnapIfClose = (
@@ -479,7 +505,11 @@ export const applyAngleSnapIfClose = (
   }
   if (bestDiff <= angleTolDeg) {
     const rad = nearest * Math.PI / 180;
-    return { point: { x: fixed.x + len * Math.cos(rad), y: fixed.y + len * Math.sin(rad) }, snapped: true } as const;
+    return {
+      point: { x: fixed.x + len * Math.cos(rad), y: fixed.y + len * Math.sin(rad) },
+      snapped: true,
+      cardinal: nearest,
+    } as const;
   }
   return { point: moving, snapped: false } as const;
 };
@@ -725,6 +755,7 @@ export type DrawSnapResult = {
   cardinalSnap: boolean;
   /** Shift-held orthogonal axis lock from last point */
   orthogonalAxisLock: boolean;
+  snap?: SnapEvent;
 };
 
 function resolveOrthogonalDrawSnap(params: {
@@ -740,11 +771,20 @@ function resolveOrthogonalDrawSnap(params: {
   const rayEps = Math.max(1e-9, snapTol * 1e-5);
   const snapTolSq = snapTol * snapTol;
 
-  type Hit = { p: { x: number; y: number }; dSq: number };
+  type Hit = {
+    p: { x: number; y: number };
+    dSq: number;
+    sourceElementId?: string;
+    sourceVertexOrder?: number;
+  };
 
-  const maybeBetter = (prev: Hit | null, p: { x: number; y: number }): Hit | null => {
+  const maybeBetter = (
+    prev: Hit | null,
+    p: { x: number; y: number },
+    source?: Pick<Hit, 'sourceElementId' | 'sourceVertexOrder'>,
+  ): Hit | null => {
     const dSq = distanceSq(p, mouseWorld);
-    if (dSq <= snapTolSq && (!prev || dSq < prev.dSq)) return { p, dSq };
+    if (dSq <= snapTolSq && (!prev || dSq < prev.dSq)) return { p, dSq, ...source };
     return prev;
   };
 
@@ -754,7 +794,10 @@ function resolveOrthogonalDrawSnap(params: {
     for (const v of getNearbySnapCornerTargets(snapCache, mouseWorld, snapTol)) {
       if (v.elementId === excludeElementId) continue;
       if (!pointOnOrthogonalRayForDraw(lastPoint, mouseWorld, v, rayEps)) continue;
-      hit1 = maybeBetter(hit1, { x: v.x, y: v.y });
+      hit1 = maybeBetter(hit1, { x: v.x, y: v.y }, {
+        sourceElementId: v.elementId,
+        sourceVertexOrder: v.sourceVertexOrder,
+      });
     }
   } else {
     for (const id of Object.keys(elementsById)) {
@@ -764,7 +807,10 @@ function resolveOrthogonalDrawSnap(params: {
       for (let k = 0; k < oc.length; k++) {
         const v = oc[k];
         if (!pointOnOrthogonalRayForDraw(lastPoint, mouseWorld, v, rayEps)) continue;
-        hit1 = maybeBetter(hit1, { x: v.x, y: v.y });
+        hit1 = maybeBetter(hit1, { x: v.x, y: v.y }, {
+          sourceElementId: id,
+          sourceVertexOrder: k,
+        });
       }
     }
   }
@@ -774,15 +820,30 @@ function resolveOrthogonalDrawSnap(params: {
       geometrySnap: true,
       cardinalSnap: false,
       orthogonalAxisLock: true,
+      snap: {
+        kind: 'ortho-lock',
+        sourceElementId: hit1.sourceElementId,
+        sourceVertexOrder: hit1.sourceVertexOrder,
+      },
     };
   }
 
   // Tier 2: perpendicular feet (closest point on segment to lastPoint) that lie on the ray
   let hit2: Hit | null = null;
-  const collectTier2 = ({ A, B }: { A: { x: number; y: number }; B: { x: number; y: number } }) => {
+  const collectTier2 = ({
+    A,
+    B,
+    id,
+    elementId,
+  }: {
+    A: { x: number; y: number };
+    B: { x: number; y: number };
+    id?: string;
+    elementId?: string;
+  }) => {
     const foot = projectPointOntoSegmentXY(lastPoint, A, B);
     if (!pointOnOrthogonalRayForDraw(lastPoint, mouseWorld, foot, rayEps)) return;
-    hit2 = maybeBetter(hit2, foot);
+    hit2 = maybeBetter(hit2, foot, { sourceElementId: elementId ?? id });
   };
   if (snapCache) {
     forEachCachedWallSegmentXY(snapCache, excludeElementId, collectTier2, mouseWorld, snapTol);
@@ -796,14 +857,25 @@ function resolveOrthogonalDrawSnap(params: {
       geometrySnap: true,
       cardinalSnap: false,
       orthogonalAxisLock: true,
+      snap: { kind: 'ortho-lock', sourceElementId: resolvedHit2.sourceElementId },
     };
   }
 
   // Tier 3: intersection of orthogonal ray with wall segments
   let hit3: Hit | null = null;
-  const collectTier3 = ({ A, B }: { A: { x: number; y: number }; B: { x: number; y: number } }) => {
+  const collectTier3 = ({
+    A,
+    B,
+    id,
+    elementId,
+  }: {
+    A: { x: number; y: number };
+    B: { x: number; y: number };
+    id?: string;
+    elementId?: string;
+  }) => {
     const hit = intersectOrthogonalRayWithSegment(lastPoint, mouseWorld, A, B);
-    if (hit) hit3 = maybeBetter(hit3, hit);
+    if (hit) hit3 = maybeBetter(hit3, hit, { sourceElementId: elementId ?? id });
   };
   if (snapCache) {
     forEachCachedWallSegmentXY(snapCache, excludeElementId, collectTier3, mouseWorld, snapTol);
@@ -817,6 +889,7 @@ function resolveOrthogonalDrawSnap(params: {
       geometrySnap: true,
       cardinalSnap: false,
       orthogonalAxisLock: true,
+      snap: { kind: 'ortho-lock', sourceElementId: resolvedHit3.sourceElementId },
     };
   }
 
@@ -825,6 +898,7 @@ function resolveOrthogonalDrawSnap(params: {
     geometrySnap: false,
     cardinalSnap: false,
     orthogonalAxisLock: true,
+    snap: { kind: 'ortho-lock' },
   };
 }
 
@@ -859,10 +933,15 @@ export function resolveDrawSnapPoint(params: {
       : snapCornerToOtherCorners(mouseWorld, excludeElementId, elementsById, snapTol);
     if (corner) {
       return {
-        point: corner,
+        point: { x: corner.x, y: corner.y },
         geometrySnap: true,
         cardinalSnap: false,
         orthogonalAxisLock: false,
+        snap: {
+          kind: 'corner',
+          sourceElementId: corner.elementId,
+          sourceVertexOrder: corner.sourceVertexOrder,
+        },
       };
     }
     const edge = snapCache
@@ -874,6 +953,7 @@ export function resolveDrawSnapPoint(params: {
         geometrySnap: true,
         cardinalSnap: false,
         orthogonalAxisLock: false,
+        snap: { kind: 'parent-edge', sourceElementId: edge.parentId },
       };
     }
     return {
@@ -900,10 +980,15 @@ export function resolveDrawSnapPoint(params: {
     : snapCornerToOtherCorners(mouseWorld, excludeElementId, elementsById, snapTol);
   if (corner) {
     return {
-      point: corner,
+      point: { x: corner.x, y: corner.y },
       geometrySnap: true,
       cardinalSnap: false,
       orthogonalAxisLock: false,
+      snap: {
+        kind: 'corner',
+        sourceElementId: corner.elementId,
+        sourceVertexOrder: corner.sourceVertexOrder,
+      },
     };
   }
 
@@ -928,6 +1013,7 @@ export function resolveDrawSnapPoint(params: {
       geometrySnap: true,
       cardinalSnap: false,
       orthogonalAxisLock: false,
+      snap: { kind: 'perp-foot', sourceElementId: perp.parentId },
     };
   }
 
@@ -940,6 +1026,7 @@ export function resolveDrawSnapPoint(params: {
       geometrySnap: true,
       cardinalSnap: false,
       orthogonalAxisLock: false,
+      snap: { kind: 'parent-edge', sourceElementId: edge.parentId },
     };
   }
 
@@ -949,6 +1036,7 @@ export function resolveDrawSnapPoint(params: {
     geometrySnap: false,
     cardinalSnap: res.snapped,
     orthogonalAxisLock: false,
+    snap: res.snapped ? { kind: 'cardinal', value: res.cardinal } : undefined,
   };
 }
 
@@ -1187,33 +1275,4 @@ export const isAll90DegreeConnections = (
   }
 
   return true; // All connections are 90°
-};
-
-export const findBestSnapPositionFromCache = (
-  element: Element,
-  newCoords: Array<{x: number, y: number, z: number}>,
-  snapCache: GeometrySnapCache,
-  snapTol: number
-): Array<{x: number, y: number, z: number}> => {
-  const finalCoords = [...newCoords];
-
-  newCoords.forEach((coord, index) => {
-    let closestSnap: {x: number, y: number, z?: number} | null = null;
-    let closestDist = snapTol;
-
-    for (const target of snapCache.cornerTargets) {
-      if (target.elementId === element.id) continue;
-      const dist = Math.hypot(coord.x - target.x, coord.y - target.y);
-      if (dist < closestDist) {
-        closestDist = dist;
-        closestSnap = { x: target.x, y: target.y, z: target.z };
-      }
-    }
-
-    if (closestSnap !== null) {
-      finalCoords[index] = { x: closestSnap.x, y: closestSnap.y, z: coord.z };
-    }
-  });
-
-  return finalCoords;
 };

@@ -1543,6 +1543,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/components/canvas/__tests__/snapFeedbackSignal.test.ts",
+      "source_path": "packages/geometry-editor/src/components/canvas/__tests__/snapFeedbackSignal.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/components/canvas/__tests__/stageMouseMoveWork.test.ts",
       "source_path": "packages/geometry-editor/src/components/canvas/__tests__/stageMouseMoveWork.test.ts",
       "license": "AGPL-3.0-only",
@@ -1735,6 +1743,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/canvas/LiveSnapFeedback.tsx",
+      "source_path": "packages/geometry-editor/src/components/canvas/LiveSnapFeedback.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/canvas/marqueeSelectionSignal.ts",
       "source_path": "packages/geometry-editor/src/components/canvas/marqueeSelectionSignal.ts",
       "license": "AGPL-3.0-only",
@@ -1761,6 +1777,14 @@
     {
       "path": "packages/geometry-editor/src/components/canvas/OverlayPdfImportModal.tsx",
       "source_path": "packages/geometry-editor/src/components/canvas/OverlayPdfImportModal.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/snapFeedbackSignal.ts",
+      "source_path": "packages/geometry-editor/src/components/canvas/snapFeedbackSignal.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -4056,6 +4080,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/lib/__tests__/snapEvent.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/snapEvent.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/__tests__/snapUtils.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/snapUtils.test.ts",
       "license": "AGPL-3.0-only",
@@ -5074,6 +5106,14 @@
     {
       "path": "packages/geometry-editor/src/lib/slopePitchAxis.ts",
       "source_path": "packages/geometry-editor/src/lib/slopePitchAxis.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/snapEvent.ts",
+      "source_path": "packages/geometry-editor/src/lib/snapEvent.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

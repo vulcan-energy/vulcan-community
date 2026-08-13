@@ -47,6 +47,28 @@ export function orientation360FromSegmentOutwardModelXY(
   return wrapOrientation360(bearing + globalOrientationOffset);
 }
 
+/** Outward-normal compass bearings for every non-degenerate edge in a closed polygon. */
+export function polygonEdgeOutwardBearings(
+  coords: Array<{ x: number; y: number }>,
+  globalOrientationOffset = 0,
+): Array<{ edgeIndex: number; bearing: number }> {
+  if (coords.length < 2) return [];
+  const bearings: Array<{ edgeIndex: number; bearing: number }> = [];
+  for (let edgeIndex = 0; edgeIndex < coords.length; edgeIndex++) {
+    const a = coords[edgeIndex]!;
+    const b = coords[(edgeIndex + 1) % coords.length]!;
+    const bearing = orientation360FromSegmentOutwardModelXY(
+      a.x,
+      a.y,
+      b.x,
+      b.y,
+      globalOrientationOffset,
+    );
+    if (bearing !== null) bearings.push({ edgeIndex, bearing });
+  }
+  return bearings;
+}
+
 /**
  * Plan `orientation360` for sloped PV / sloped roof polygons (first edge A→B = bottom edge).
  *

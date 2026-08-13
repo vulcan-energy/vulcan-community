@@ -15,7 +15,11 @@ import {
 } from '../../stores/geometryStore';
 import { calculateDirectionArrow, calculateArrowPoints } from '../../lib/directionArrows';
 import type { DrawMode } from '../../hooks/useDrawingMode';
-import { segmentTangentAndOpeningOutwardModelXY } from '../../lib/openingSegmentOutward';
+import {
+  polygonEdgeOutwardBearings,
+  segmentTangentAndOpeningOutwardModelXY,
+  shortestSignedCompassDeltaDeg,
+} from '../../lib/openingSegmentOutward';
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { CATEGORY_GHOST_OPACITY_FACTOR } from '../../lib/elementCategoryVisibility';
 import { getDormerBundleInfo } from '../../lib/dormerGeometry';
@@ -69,8 +73,11 @@ import {
   findClosestSnapCorner as utilFindClosestSnapCorner,
   getNearbySnapWallSegments as utilGetNearbySnapWallSegments,
   type GeometrySnapCache,
+  type ClosestSnapCorner,
 } from '../../lib/snapUtils';
 import { tryAxisAlignedRightAngleSnapForVertex } from '../../lib/vertexEditSnap';
+import type { SnapEvent } from '../../lib/snapEvent';
+import type { SnapFeedbackSignal } from './snapFeedbackSignal';
 import { geometryPerf } from '../../lib/geometryPerf';
 import { getMechanicalVentilationDuctworkRoleStyle } from '../../lib/mvhrDuctwork';
 import {
@@ -139,13 +146,13 @@ function findCornerVertexSnapTarget(
   elementsById: Record<string, Element>,
   snapCache: GeometrySnapCache,
   snapTol: number,
-): { x: number; y: number } | null {
+): ClosestSnapCorner | null {
   const sourceZ = element.coordinates?.[vertexIndex]?.z;
   const best = utilFindClosestSnapCorner(world, snapCache, snapTol, {
     isExcluded: (target) => target.elementId === element.id,
     isEligible: (target) => isSameSnapFloor(element, sourceZ, elementsById[target.elementId], target.z),
   });
-  return best ? { x: best.x, y: best.y } : null;
+  return best;
 }
 
 function findWallSegmentVertexSnapTarget(
@@ -155,9 +162,9 @@ function findWallSegmentVertexSnapTarget(
   elementsById: Record<string, Element>,
   snapCache: GeometrySnapCache,
   snapTol: number,
-): { x: number; y: number } | null {
+): { x: number; y: number; elementId: string } | null {
   const sourceZ = element.coordinates?.[vertexIndex]?.z;
-  let best: { x: number; y: number } | null = null;
+  let best: { x: number; y: number; elementId: string } | null = null;
   let bestDSq = Infinity;
   let bestOrder = Infinity;
   const snapTolSq = snapTol * snapTol;
@@ -189,7 +196,7 @@ function findWallSegmentVertexSnapTarget(
     if (dSq < bestDSq || (dSq === bestDSq && segment.order < bestOrder)) {
       bestDSq = dSq;
       bestOrder = segment.order;
-      best = proj;
+      best = { ...proj, elementId: segment.elementId };
     }
   }
 
@@ -211,21 +218,52 @@ function applyPlanVertexRightAngleSnap(
   vertexIndex: number,
   elementsById: Record<string, Element>,
   store: GeometryStoreApi,
-): { x: number; y: number } {
+): { point: { x: number; y: number }; snapped: boolean } {
   if (shouldSnapToParent(element) && (element as any).parent_element) {
-    return w;
+    return { point: w, snapped: false };
   }
   const d = getProjectDefaults(store);
   const matchTol = Math.max(0.12, d.snapTol * 3);
-  return tryAxisAlignedRightAngleSnapForVertex(
+  const result = tryAxisAlignedRightAngleSnapForVertex(
     w,
     element,
     vertexIndex,
     elementsById,
     d.angleTol,
     matchTol,
-  ) ?? w;
+  );
+  return result
+    ? { point: result.point, snapped: result.snapped }
+    : { point: w, snapped: false };
 }
+
+/** Parent hosting is a structural constraint, so it applies even when Shift suppresses snap tiers. */
+function constrainLineVertexToParent(
+  point: { x: number; y: number },
+  element: Element,
+  parentElement: Element | undefined,
+): { x: number; y: number } {
+  if (
+    !shouldSnapToParent(element) ||
+    !(element as { parent_element?: string | null }).parent_element ||
+    parentElement?.coordinates?.length !== 2
+  ) {
+    return point;
+  }
+  const [a, b] = parentElement.coordinates;
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const lengthSq = vx * vx + vy * vy;
+  if (lengthSq <= 1e-18) return point;
+  const rawT = ((point.x - a.x) * vx + (point.y - a.y) * vy) / lengthSq;
+  const t = Math.max(0, Math.min(1, rawT));
+  return { x: a.x + t * vx, y: a.y + t * vy };
+}
+
+type VertexSnapResolution = {
+  point: { x: number; y: number };
+  event: SnapEvent | null;
+};
 
 /**
  * Snap pipeline for dragging one end of a two-point line: nearest corner, then angle snap
@@ -241,13 +279,19 @@ function resolveLineVertexDragWorld(
   elementsById: Record<string, Element>,
   snapCache: GeometrySnapCache,
   store: GeometryStoreApi,
-  options: { snapCorners: boolean; snapAngles: boolean },
-): { x: number; y: number } {
+  options: {
+    snapCorners: boolean;
+    snapAngles: boolean;
+    suppressSnapping: boolean;
+    parentElement?: Element;
+  },
+): VertexSnapResolution {
   const coordinates = element.coordinates ?? [];
   const defaults = getProjectDefaults(store);
   let next = world;
+  let event: SnapEvent | null = null;
 
-  if (options.snapCorners) {
+  if (!options.suppressSnapping && options.snapCorners) {
     const best = perfMeasure('snapCornerToOtherCorners-line-vertex', () =>
       findCornerVertexSnapTarget(
         element,
@@ -258,10 +302,17 @@ function resolveLineVertexDragWorld(
         defaults.snapTol,
       ),
     );
-    if (best) next = best;
+    if (best) {
+      next = best;
+      event = {
+        kind: 'corner',
+        sourceElementId: best.elementId,
+        sourceVertexOrder: best.sourceVertexOrder,
+      };
+    }
   }
 
-  if (options.snapAngles && coordinates.length === 2) {
+  if (!options.suppressSnapping && options.snapAngles && coordinates.length === 2) {
     const other = coordinates[vertexIndex === 0 ? 1 : 0];
     if (other) {
       const angleSnapped = utilApplyAngleSnapIfClose(
@@ -269,11 +320,71 @@ function resolveLineVertexDragWorld(
         { x: other.x, y: other.y },
         defaults.angleTol,
       );
-      if (angleSnapped.snapped) next = angleSnapped.point;
+      if (angleSnapped.snapped) {
+        next = angleSnapped.point;
+        event = { kind: 'cardinal', value: angleSnapped.cardinal };
+      }
     }
   }
 
-  return applyPlanVertexRightAngleSnap(next, element, vertexIndex, elementsById, store);
+  if (!options.suppressSnapping) {
+    const rightAngle = applyPlanVertexRightAngleSnap(next, element, vertexIndex, elementsById, store);
+    if (rightAngle.snapped) {
+      next = rightAngle.point;
+      event = { kind: 'right-angle', value: 90 };
+    }
+  }
+  const beforeConstraint = next;
+  next = constrainLineVertexToParent(next, element, options.parentElement);
+  // The parent constraint can override a snapped point; a snap the constraint undid
+  // must not be reported as engaged.
+  const constraintMovedPoint =
+    Math.abs(next.x - beforeConstraint.x) > 1e-9 || Math.abs(next.y - beforeConstraint.y) > 1e-9;
+  return {
+    point: next,
+    event: event && !constraintMovedPoint
+      ? { ...event, position: { x: next.x, y: next.y } }
+      : null,
+  };
+}
+
+type SnapDragNodeLike = {
+  position: () => { x: number; y: number };
+  getParent?: () => { findOne?: (selector: string) => unknown } | null;
+  getStage?: () => {
+    getPointerPosition?: () => { x: number; y: number } | null;
+    findOne?: (selector: string) => unknown;
+  } | null;
+};
+
+type SnapDragEventLike = {
+  evt?: { shiftKey?: boolean };
+  target: SnapDragNodeLike;
+};
+
+function dragEventCanvasPosition(e: SnapDragEventLike): { x: number; y: number } {
+  if (e.evt?.shiftKey) {
+    const pointer = e.target.getStage?.()?.getPointerPosition?.();
+    if (pointer) return pointer;
+  }
+  return e.target.position();
+}
+
+function setOrientationArrowGripFill(
+  target: SnapDragNodeLike,
+  elementId: string,
+  fill: string,
+): void {
+  const selector = `.orientation-arrow-grip-${elementId}`;
+  const grip = (target.getParent?.()?.findOne?.(selector) ?? target.getStage?.()?.findOne?.(selector)) as {
+    fill?: (value: string) => void;
+    setAttr?: (key: string, value: unknown) => void;
+    getLayer?: () => { batchDraw?: () => void } | null;
+  } | null | undefined;
+  if (!grip) return;
+  if (typeof grip.fill === 'function') grip.fill(fill);
+  else grip.setAttr?.('fill', fill);
+  grip.getLayer?.()?.batchDraw?.();
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -481,6 +592,7 @@ export interface ElementRendererProps {
   snapCache: GeometrySnapCache;
   canvasElementPalette: CanvasElementRendererPalette;
   canvasInteractionPalette: CanvasInteractionPalette;
+  snapFeedbackSignal: SnapFeedbackSignal;
   /** 2D/3D: fully hidden on canvas (opacity 0) and non-interactive; list/inspector unchanged. */
   categoryGhostOnCanvas?: boolean;
   /** Space Labeller mode: dim fabric on the active floor and block hits so footprints stay the focus. */
@@ -540,6 +652,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   snapCache,
   canvasElementPalette,
   canvasInteractionPalette,
+  snapFeedbackSignal,
   categoryGhostOnCanvas = false,
   spaceLabellerSuppressFabricInteraction = false,
   canvasCoords: canvasCoordsProp,
@@ -548,6 +661,10 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   const geometryStore = useGeometryStoreApi();
   const resolvedGlobalOrientationOffset = globalOrientationOffset ?? geometryStore.getState().globalOrientationOffset;
   const coordinates = element.coordinates || [];
+  const parentElementName = (element as { parent_element?: string | null }).parent_element;
+  const lineParentElement = parentElementName
+    ? elementsById[nameToId[parentElementName]]
+    : undefined;
   const isReadOnlyDevelopmentContextShading = isDevelopmentContextGeneratedShading(element);
   const [lineVertexDragHintState, setLineVertexDragHint] = useState<{
     elementId: string;
@@ -631,14 +748,15 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
         coordinateCount: elementsById[elementId]?.coordinates?.length,
       })),
     ];
-    beginVertexCanvasInteraction({
+    const session = beginVertexCanvasInteraction({
       target,
       elementId: element.id,
       vertexIndex,
       coordinates: previewCoordinates,
       elements: elementsForPreview,
     });
-  }, [element.coordinates, element.id, elementsById, getLineHostedDescendantPreviewParentIds]);
+    session?.addCleanup(() => snapFeedbackSignal.reset());
+  }, [element.coordinates, element.id, elementsById, getLineHostedDescendantPreviewParentIds, snapFeedbackSignal]);
   const cleanupVertexInteractionAfterDragEnd = useCallback((target: DragPreviewTarget) => {
     if (getVertexDragState()) {
       finalizeVertexDragFromState(undefined, () => clearLengthPillPreview(target));
@@ -925,6 +1043,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
           snapCache={snapCache}
           canvasElementPalette={canvasElementPalette}
           canvasInteractionPalette={canvasInteractionPalette}
+          snapFeedbackSignal={snapFeedbackSignal}
           categoryGhostOnCanvas={categoryGhostOnCanvas}
           spaceLabellerSuppressFabricInteraction={spaceLabellerSuppressFabricInteraction}
         />
@@ -1367,6 +1486,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   strokeWidth={2}
                   draggable={!isReadOnlyDevelopmentContextShading}
                   onDragStart={(e) => {
+                    snapFeedbackSignal.reset();
                     beginVertexDrag();
                     setVertexDragState(
                       vertexSnapMode
@@ -1419,18 +1539,26 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
 
                   // Same snap pipeline as the end vertex, applied before either branch so the
                   // ghost matches what `onDragEnd` will commit.
-                  const finalWorldPos = resolveLineVertexDragWorld(
-                    canvasToWorld(draggedNode.position(), scale, panOffset, canvasCenter),
+                  const resolution = resolveLineVertexDragWorld(
+                    canvasToWorld(dragEventCanvasPosition(e), scale, panOffset, canvasCenter),
                     element,
                     0,
                     elementsById,
                     snapCache,
                     geometryStore,
-                    { snapCorners: !!snapCorners, snapAngles: !!snapAngles },
+                    {
+                      snapCorners: !!snapCorners,
+                      snapAngles: !!snapAngles,
+                      suppressSnapping: !!e.evt?.shiftKey,
+                      parentElement: lineParentElement,
+                    },
                   );
+                  const finalWorldPos = resolution.point;
+                  snapFeedbackSignal.set({ event: resolution.event });
                   const snappedCanvas = worldToCanvas(finalWorldPos, scale, panOffset, canvasCenter);
                   draggedNode.position({ x: snappedCanvas.x, y: snappedCanvas.y });
-                  applyLineVertexSnapHint(0, { x: finalWorldPos.x, y: finalWorldPos.y });
+                  if (e.evt?.shiftKey) setLineVertexDragHintIfChanged(null);
+                  else applyLineVertexSnapHint(0, { x: finalWorldPos.x, y: finalWorldPos.y });
 
                   // IMPERATIVE: Update connected nodes directly if vertex snap mode is active
                   if (vertexSnapMode && vertexDragState && vertexDragState.elementId === element.id && vertexDragState.vertexIndex === 0) {
@@ -1488,14 +1616,21 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                 }}
                 onDragEnd={(e) => {
                   endVertexDrag();
+                  snapFeedbackSignal.reset();
                   setLineVertexDragHintIfChanged(null);
                   // IMPERATIVE DRAG END: Sync final positions from Konva nodes to store
                   const draggedNode = e.target;
-                  let newWorld = canvasToWorld({x: draggedNode.x(), y: draggedNode.y()}, scale, panOffset, canvasCenter);
+                  const suppressSnapping = !!e.evt?.shiftKey;
+                  let newWorld = canvasToWorld(
+                    suppressSnapping ? dragEventCanvasPosition(e) : { x: draggedNode.x(), y: draggedNode.y() },
+                    scale,
+                    panOffset,
+                    canvasCenter,
+                  );
                   const snapTol = getProjectDefaults(geometryStore).snapTol;
 
                   // Re-snap on drop for precision with precedence: perp-to-wall (infinite) -> corner -> angle
-                  if (!(shouldSnapToParent(element) && (element as any).parent_element)) {
+                  if (!suppressSnapping && !(shouldSnapToParent(element) && (element as any).parent_element)) {
                     const other = { x: coordinates[1].x, y: coordinates[1].y };
                     const perp = perfMeasure('findPerpFootOnWallInfinite-line-start', () =>
                       utilFindPerpFootOnWallInfiniteFromCache(other as any, newWorld as any, snapCache, element.id, snapTol)
@@ -1521,8 +1656,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       0,
                       elementsById,
                       geometryStore,
-                    ) as any;
-                  } else {
+                    ).point as any;
+                  } else if (!suppressSnapping) {
                     if (snapCorners) {
                       const best = perfMeasure('snapCornerToOtherCorners-onDragEnd-line-start-parented', () =>
                         findCornerVertexSnapTarget(element, 0, newWorld, elementsById, snapCache, snapTol)
@@ -1531,6 +1666,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     }
                   }
 
+                  newWorld = constrainLineVertexToParent(newWorld, element, lineParentElement);
                   // Update dragged node position if snapped
                   const finalCanvasPos = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
                   draggedNode.position({ x: finalCanvasPos.x, y: finalCanvasPos.y });
@@ -1571,6 +1707,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   strokeWidth={2}
                   draggable={!isReadOnlyDevelopmentContextShading}
                   onDragStart={(e) => {
+                    snapFeedbackSignal.reset();
                     beginVertexDrag();
                     setVertexDragState(
                       vertexSnapMode
@@ -1621,18 +1758,26 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     const vertexDragState = getVertexDragState();
 
                     // Same snap pipeline as the start vertex.
-                    const newWorld = resolveLineVertexDragWorld(
-                      canvasToWorld(draggedNode.position(), scale, panOffset, canvasCenter),
+                    const resolution = resolveLineVertexDragWorld(
+                      canvasToWorld(dragEventCanvasPosition(e), scale, panOffset, canvasCenter),
                       element,
                       1,
                       elementsById,
                       snapCache,
                       geometryStore,
-                      { snapCorners: !!snapCorners, snapAngles: !!snapAngles },
+                      {
+                        snapCorners: !!snapCorners,
+                        snapAngles: !!snapAngles,
+                        suppressSnapping: !!e.evt?.shiftKey,
+                        parentElement: lineParentElement,
+                      },
                     );
+                    const newWorld = resolution.point;
+                    snapFeedbackSignal.set({ event: resolution.event });
                     const snappedCanvas = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
                     draggedNode.position({ x: snappedCanvas.x, y: snappedCanvas.y });
-                    applyLineVertexSnapHint(1, { x: newWorld.x, y: newWorld.y });
+                    if (e.evt?.shiftKey) setLineVertexDragHintIfChanged(null);
+                    else applyLineVertexSnapHint(1, { x: newWorld.x, y: newWorld.y });
 
                   // IMPERATIVE: Update connected nodes directly if vertex snap mode is active
                   if (vertexSnapMode && vertexDragState && vertexDragState.elementId === element.id && vertexDragState.vertexIndex === 1) {
@@ -1683,14 +1828,21 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                 }}
                 onDragEnd={(e) => {
                   endVertexDrag();
+                  snapFeedbackSignal.reset();
                   setLineVertexDragHintIfChanged(null);
                   // IMPERATIVE DRAG END: Sync final positions from Konva nodes to store
                   const draggedNode = e.target;
-                  let newWorld = canvasToWorld({x: draggedNode.x(), y: draggedNode.y()}, scale, panOffset, canvasCenter);
+                  const suppressSnapping = !!e.evt?.shiftKey;
+                  let newWorld = canvasToWorld(
+                    suppressSnapping ? dragEventCanvasPosition(e) : { x: draggedNode.x(), y: draggedNode.y() },
+                    scale,
+                    panOffset,
+                    canvasCenter,
+                  );
                   const snapTol = getProjectDefaults(geometryStore).snapTol;
 
                   // Re-snap on drop for precision with precedence: perp-to-wall (infinite) -> corner -> angle
-                  if (!(shouldSnapToParent(element) && (element as any).parent_element)) {
+                  if (!suppressSnapping && !(shouldSnapToParent(element) && (element as any).parent_element)) {
                     const other = { x: coordinates[0].x, y: coordinates[0].y };
                     const perp = utilFindPerpFootOnWallInfiniteFromCache(other as any, newWorld as any, snapCache, element.id, snapTol);
                     if (perp) {
@@ -1712,14 +1864,15 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       1,
                       elementsById,
                       geometryStore,
-                    ) as any;
-                  } else {
+                    ).point as any;
+                  } else if (!suppressSnapping) {
                     if (snapCorners) {
                       const best = findCornerVertexSnapTarget(element, 1, newWorld, elementsById, snapCache, snapTol);
                       if (best) newWorld = best as any;
                     }
                   }
 
+                  newWorld = constrainLineVertexToParent(newWorld, element, lineParentElement);
                   // Update dragged node position if snapped
                   const finalCanvasPos = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
                   draggedNode.position({ x: finalCanvasPos.x, y: finalCanvasPos.y });
@@ -1918,6 +2071,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     setSelectedVertex?.({ elementId: element.id, vertexIndex: index });
                   }}
                   onDragStart={(e) => {
+                    snapFeedbackSignal.reset();
                     beginVertexDrag();
                     setVertexDragState(
                       vertexSnapMode
@@ -1937,13 +2091,17 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   return perfMeasure('onDragMove-polygon-vertex', () => {
                     // IMPERATIVE DRAG: Update Konva nodes directly, no React re-renders!
                     const draggedNode = e.target;
-                    const newCanvasPos = { x: draggedNode.x(), y: draggedNode.y() };
+                    const suppressSnapping = !!e.evt?.shiftKey;
+                    const newCanvasPos = suppressSnapping
+                      ? dragEventCanvasPosition(e)
+                      : { x: draggedNode.x(), y: draggedNode.y() };
                     let newWorld = canvasToWorld(newCanvasPos, scale, panOffset, canvasCenter);
                     const vertexDragState = getVertexDragState();
+                    let snapEvent: SnapEvent | null = null;
 
                     // Corner-to-corner snapping to any other element's corners
                   const snapTol = (geometryStore.getState() as any).PROJECT_DEFAULTS?.snap_m || 0.1;
-                    let didSnap = perfMeasure('snapCornerToOtherCorners-polygon-inline', () => {
+                    let didSnap = !suppressSnapping && perfMeasure('snapCornerToOtherCorners-polygon-inline', () => {
                   const best = utilSnapCornerToOtherCornersFromCache(
                     newWorld,
                     element.id,
@@ -1953,6 +2111,11 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   );
                       if (best) {
                         newWorld = best as {x:number,y:number};
+                        snapEvent = {
+                          kind: 'corner',
+                          sourceElementId: best.elementId,
+                          sourceVertexOrder: best.sourceVertexOrder,
+                        };
                         const snappedCanvas = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
                         draggedNode.position({ x: snappedCanvas.x, y: snappedCanvas.y });
                         return true;
@@ -1961,7 +2124,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     });
 
                     let didWallSegmentSnap = false;
-                    if (!didSnap) {
+                    if (!suppressSnapping && !didSnap) {
                       const wallTarget = findWallSegmentVertexSnapTarget(
                         element,
                         index,
@@ -1974,12 +2137,16 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                         newWorld = wallTarget;
                         didSnap = true;
                         didWallSegmentSnap = true;
+                        snapEvent = {
+                          kind: 'wall-segment',
+                          sourceElementId: wallTarget.elementId,
+                        };
                         const snappedCanvas = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
                         draggedNode.position({ x: snappedCanvas.x, y: snappedCanvas.y });
                       }
                     }
 
-                    if (!didWallSegmentSnap) {
+                    if (!suppressSnapping && !didWallSegmentSnap) {
                       const rightWorld = applyPlanVertexRightAngleSnap(
                         { x: newWorld.x, y: newWorld.y },
                         element,
@@ -1987,13 +2154,19 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                         elementsById,
                         geometryStore,
                       );
-                      if (rightWorld.x !== newWorld.x || rightWorld.y !== newWorld.y) {
-                        newWorld = rightWorld;
+                      if (rightWorld.snapped) {
+                        newWorld = rightWorld.point;
                         didSnap = true;
+                        snapEvent = { kind: 'right-angle', value: 90 };
                         const snappedCanvas = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
                         draggedNode.position({ x: snappedCanvas.x, y: snappedCanvas.y });
                       }
                     }
+                    snapFeedbackSignal.set({
+                      event: snapEvent
+                        ? { ...snapEvent, position: { x: newWorld.x, y: newWorld.y } }
+                        : null,
+                    });
 
                     // Visual: change handle color while snapped (no batchDraw here - will batch at end)
                     try {
@@ -2057,6 +2230,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                 }}
                 onDragEnd={(e) => {
                   endVertexDrag();
+                  snapFeedbackSignal.reset();
                   // IMPERATIVE DRAG END: Sync final positions from Konva nodes to store
                   const draggedNode = e.target;
                   try {
@@ -2065,14 +2239,22 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     // No batchDraw here - will be handled by store update or final sync
                   } catch { /* swallow: best-effort */ }
 
-                  let newWorld = canvasToWorld({x: draggedNode.x(), y: draggedNode.y()}, scale, panOffset, canvasCenter);
+                  const suppressSnapping = !!e.evt?.shiftKey;
+                  let newWorld = canvasToWorld(
+                    suppressSnapping ? dragEventCanvasPosition(e) : { x: draggedNode.x(), y: draggedNode.y() },
+                    scale,
+                    panOffset,
+                    canvasCenter,
+                  );
                   // Re-snap on drop for precision
                   const snapTol = getProjectDefaults(geometryStore).snapTol;
-                  const best = utilSnapCornerToOtherCornersFromCache(newWorld, element.id, snapCache, snapTol);
+                  const best = suppressSnapping
+                    ? null
+                    : utilSnapCornerToOtherCornersFromCache(newWorld, element.id, snapCache, snapTol);
                   let didWallSegmentSnap = false;
                   if (best) {
                     newWorld = best;
-                  } else {
+                  } else if (!suppressSnapping) {
                     const wallTarget = findWallSegmentVertexSnapTarget(
                       element,
                       index,
@@ -2086,14 +2268,14 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       didWallSegmentSnap = true;
                     }
                   }
-                  if (!didWallSegmentSnap) {
+                  if (!suppressSnapping && !didWallSegmentSnap) {
                     newWorld = applyPlanVertexRightAngleSnap(
                       { x: newWorld.x, y: newWorld.y },
                       element,
                       index,
                       elementsById,
                       geometryStore,
-                    );
+                    ).point;
                   }
 
                   const finalCanvasPos = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
@@ -2447,10 +2629,19 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     opacity={0}
                     draggable
                     onDragStart={(e) => {
+                      snapFeedbackSignal.reset();
                       const session = beginCanvasInteraction({
                         kind: 'orientation-arrow-drag',
                         targetId: element.id,
                         snapshot: { orientation360: (element as { orientation360?: number }).orientation360 },
+                        cleanup: () => {
+                          snapFeedbackSignal.reset();
+                          setOrientationArrowGripFill(
+                            e.target,
+                            element.id,
+                            canvasInteractionPalette.handleFill,
+                          );
+                        },
                       });
                       writeCanvasInteractionSession(e.target, session);
                     }}
@@ -2462,8 +2653,10 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       const rawBearing = normalizeOrientation360Deg(
                         Math.atan2(dx, dy) * 180 / Math.PI - resolvedGlobalOrientationOffset,
                       );
-                      let snappedBearing: number | null = null;
-                      let snappedDifference = Number.POSITIVE_INFINITY;
+                      type BearingCandidate =
+                        | { kind: 'neighbour'; bearing: number; sourceElementId: string }
+                        | { kind: 'own-edge'; bearing: number; sourceEdgeIndex: number };
+                      const candidates: BearingCandidate[] = [];
                       for (const candidate of Object.values(elementsById)) {
                         if (
                           candidate.id === element.id ||
@@ -2472,14 +2665,58 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                         ) continue;
                         const candidateArrow = calculateDirectionArrow(candidate, resolvedGlobalOrientationOffset);
                         if (!candidateArrow) continue;
-                        const difference = Math.abs(((candidateArrow.orientation - rawBearing + 540) % 360) - 180);
+                        candidates.push({
+                          kind: 'neighbour',
+                          bearing: candidateArrow.orientation,
+                          sourceElementId: candidate.id,
+                        });
+                      }
+                      for (const { edgeIndex, bearing } of polygonEdgeOutwardBearings(
+                        coordinates,
+                        resolvedGlobalOrientationOffset,
+                      )) {
+                        candidates.push({ kind: 'own-edge', bearing, sourceEdgeIndex: edgeIndex });
+                      }
+
+                      let snappedCandidate: BearingCandidate | null = null;
+                      let snappedDifference = Number.POSITIVE_INFINITY;
+                      for (const candidate of candidates) {
+                        const difference = Math.abs(shortestSignedCompassDeltaDeg(rawBearing, candidate.bearing));
                         if (difference <= 3 && difference < snappedDifference) {
-                          snappedBearing = candidateArrow.orientation;
+                          snappedCandidate = candidate;
                           snappedDifference = difference;
                         }
                       }
+                      // Shift suppresses snaps only for vertex/arrow drags; draw mode keeps Shift ortho-lock.
+                      const suppressSnapping = !!e.evt?.shiftKey;
                       const orientation360 = normalizeOrientation360Deg(
-                        snappedBearing ?? Math.round(rawBearing / 5) * 5,
+                        suppressSnapping
+                          ? rawBearing
+                          : snappedCandidate?.bearing ?? Math.round(rawBearing / 5) * 5,
+                      );
+                      const snapEvent: SnapEvent | null = suppressSnapping
+                        ? null
+                        : snappedCandidate?.kind === 'neighbour'
+                          ? {
+                              kind: 'neighbour-bearing',
+                              sourceElementId: snappedCandidate.sourceElementId,
+                              value: orientation360,
+                            }
+                          : snappedCandidate?.kind === 'own-edge'
+                            ? {
+                                kind: 'edge-normal',
+                                sourceElementId: element.id,
+                                sourceEdgeIndex: snappedCandidate.sourceEdgeIndex,
+                                value: orientation360,
+                              }
+                            : { kind: 'angle-step', value: orientation360 };
+                      snapFeedbackSignal.set({ event: snapEvent });
+                      setOrientationArrowGripFill(
+                        e.target,
+                        element.id,
+                        snapEvent?.kind === 'neighbour-bearing' || snapEvent?.kind === 'edge-normal'
+                          ? canvasInteractionPalette.snap
+                          : canvasInteractionPalette.handleFill,
                       );
                       const downslope = downslopeUnitModelXY(orientation360, resolvedGlobalOrientationOffset);
                       const arrowLength = Math.hypot(
@@ -2503,6 +2740,12 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       const session = readCanvasInteractionSession(e.target);
                       endCanvasInteraction(session, { committed: true });
                       writeCanvasInteractionSession(e.target, null);
+                      snapFeedbackSignal.reset();
+                      setOrientationArrowGripFill(
+                        e.target,
+                        element.id,
+                        canvasInteractionPalette.handleFill,
+                      );
                     }}
                   />
                 ) : null}
@@ -2538,6 +2781,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     setSelectedVertex?.({ elementId: element.id, vertexIndex: index });
                   }}
                   onDragStart={(e) => {
+                    snapFeedbackSignal.reset();
                     beginVertexDrag();
                     setVertexDragState(
                       vertexSnapMode
@@ -2554,11 +2798,18 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     clearLengthPillPreview(e.target);
                   }}
                   onDragMove={(e) => {
-                    let newWorld = canvasToWorld({x: e.target.x(), y: e.target.y()}, scale, panOffset, canvasCenter);
+                    const suppressSnapping = !!e.evt?.shiftKey;
+                    let newWorld = canvasToWorld(
+                      suppressSnapping ? dragEventCanvasPosition(e) : { x: e.target.x(), y: e.target.y() },
+                      scale,
+                      panOffset,
+                      canvasCenter,
+                    );
                     const vertexDragState = getVertexDragState();
+                    let snapEvent: SnapEvent | null = null;
                     // Corner-to-corner snapping to any other element's corners (no segment projection, no self-snap)
                     const snapTol = (geometryStore.getState() as any).PROJECT_DEFAULTS?.snap_m || 0.1;
-                    const best = utilSnapCornerToOtherCornersFromCache(
+                    const best = suppressSnapping ? null : utilSnapCornerToOtherCornersFromCache(
                       newWorld,
                       element.id,
                       snapCache,
@@ -2566,18 +2817,33 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       { minDistance: 1e-6 },
                     );
                     let didSnap = !!best;
-                    if (didSnap) { newWorld = best as {x:number,y:number}; }
-                    const rightWorld = applyPlanVertexRightAngleSnap(
-                      { x: newWorld.x, y: newWorld.y },
-                      element,
-                      index,
-                      elementsById,
-                      geometryStore,
-                    );
-                    if (rightWorld.x !== newWorld.x || rightWorld.y !== newWorld.y) {
-                      newWorld = rightWorld;
-                      didSnap = true;
+                    if (best) {
+                      newWorld = best;
+                      snapEvent = {
+                        kind: 'corner',
+                        sourceElementId: best.elementId,
+                        sourceVertexOrder: best.sourceVertexOrder,
+                      };
                     }
+                    if (!suppressSnapping) {
+                      const rightWorld = applyPlanVertexRightAngleSnap(
+                        { x: newWorld.x, y: newWorld.y },
+                        element,
+                        index,
+                        elementsById,
+                        geometryStore,
+                      );
+                      if (rightWorld.snapped) {
+                        newWorld = rightWorld.point;
+                        didSnap = true;
+                        snapEvent = { kind: 'right-angle', value: 90 };
+                      }
+                    }
+                    snapFeedbackSignal.set({
+                      event: snapEvent
+                        ? { ...snapEvent, position: { x: newWorld.x, y: newWorld.y } }
+                        : null,
+                    });
                     const snappedCanvas = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
                     e.target.position({ x: snappedCanvas.x, y: snappedCanvas.y });
                     try { (e.target as any).attrs.fill = didSnap ? canvasInteractionPalette.snap : canvasInteractionPalette.handleFill; (e.target as any).getLayer()?.batchDraw?.(); } catch { /* swallow: best-effort */ }
@@ -2607,18 +2873,29 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   }}
                   onDragEnd={(e) => {
                     endVertexDrag();
+                    snapFeedbackSignal.reset();
                     try { (e.target as any).attrs.fill = canvasInteractionPalette.handleFill; (e.target as any).getLayer()?.batchDraw?.(); } catch { /* swallow: best-effort */ }
                     // Re-snap on drop for precision
-                    let newWorld = canvasToWorld({x: e.target.x(), y: e.target.y()}, scale, panOffset, canvasCenter);
-                    const best = utilSnapCornerToOtherCornersFromCache(newWorld, element.id, snapCache, getProjectDefaults(geometryStore).snapTol);
-                    if (best) newWorld = best;
-                    newWorld = applyPlanVertexRightAngleSnap(
-                      { x: newWorld.x, y: newWorld.y },
-                      element,
-                      index,
-                      elementsById,
-                      geometryStore,
+                    const suppressSnapping = !!e.evt?.shiftKey;
+                    let newWorld = canvasToWorld(
+                      suppressSnapping ? dragEventCanvasPosition(e) : { x: e.target.x(), y: e.target.y() },
+                      scale,
+                      panOffset,
+                      canvasCenter,
                     );
+                    const best = suppressSnapping
+                      ? null
+                      : utilSnapCornerToOtherCornersFromCache(newWorld, element.id, snapCache, getProjectDefaults(geometryStore).snapTol);
+                    if (best) newWorld = best;
+                    if (!suppressSnapping) {
+                      newWorld = applyPlanVertexRightAngleSnap(
+                        { x: newWorld.x, y: newWorld.y },
+                        element,
+                        index,
+                        elementsById,
+                        geometryStore,
+                      ).point;
+                    }
                     const finalCanvasPos = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
                     e.target.position({ x: finalCanvasPos.x, y: finalCanvasPos.y });
                     const vertexDragState = getVertexDragState();
@@ -2705,6 +2982,7 @@ export const ElementRenderer = memo(ElementRendererComponent, (prevProps, nextPr
   if (prevProps.floors !== nextProps.floors) return false;
   if (prevProps.canvasElementPalette !== nextProps.canvasElementPalette) return false;
   if (prevProps.canvasInteractionPalette !== nextProps.canvasInteractionPalette) return false;
+  if (prevProps.snapFeedbackSignal !== nextProps.snapFeedbackSignal) return false;
   if (
     prevProps.snapCache !== nextProps.snapCache &&
     (usesSnapCacheInRenderedInteraction(prevProps) || usesSnapCacheInRenderedInteraction(nextProps))
