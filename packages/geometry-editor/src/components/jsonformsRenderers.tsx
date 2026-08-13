@@ -2300,12 +2300,17 @@ export const GroupAccordion: React.FC<{
  * Control), `advancedFieldsNumericTester`, and the entire `standardRenderers`
  * `JsonFormsRendererRegistryEntry[]` array (Group accordion renderer included — see
  * `GroupAccordion` above for its surviving replacement) used to live. Nothing in
- * either repo mounts `<JsonForms>` with this registry any more — web's SnippetEditor
- * and SimplifiedFabricEditor (parent repo) migrated to `DirectSpecFields` in this same
- * slice — so every `@jsonforms/react` / `@jsonforms/core` import this file used to
- * carry died with them. Two schema predicates that existed only to feed the deleted
- * registry (`schemaIsNullableNumberAnyOf`, `advancedFieldsNumericTester`'s own
- * `anyOf`-nullable-number check; `schemaIsPlainString`, the deleted rank-90
+ * COMMUNITY mounts `<JsonForms>` with this registry any more, as of this PR. Web's two
+ * mounts (SnippetEditor, SimplifiedFabricEditor) and its own
+ * `jsonformsRenderers.test.tsx` registry-comparison test are deleted in the PAIRED
+ * parent-repo PR, which migrates both editors to `DirectSpecFields` and lands together
+ * with the pointer bump onto this commit (ordering: this community PR merges FIRST,
+ * so `standardRenderers` is not actually gone from every consumer until the paired PR
+ * merges right after) — every `@jsonforms/react` / `@jsonforms/core` import this file
+ * used to carry died with THIS deletion regardless, since community's own only
+ * consumer (the registry itself) is gone. Two schema predicates that existed only to
+ * feed the deleted registry (`schemaIsNullableNumberAnyOf`, `advancedFieldsNumericTester`'s
+ * own `anyOf`-nullable-number check; `schemaIsPlainString`, the deleted rank-90
  * plain-string tester's own guard) had no other caller and were deleted alongside it,
  * not carried forward as unused surface.
  */

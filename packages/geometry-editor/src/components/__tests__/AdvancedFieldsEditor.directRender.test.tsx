@@ -653,6 +653,65 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     );
   });
 
+  it('R4.5 review round 1 fix: MechanicalVentilation, Core: mvhr_location renders EnumControl, not a free-text blob (adjacent to config 5)', () => {
+    // REGRESSION, caught in adversarial review round 1: HEM's
+    // `$defs/MechanicalVentilation.properties.mvhr_location` is
+    // `{anyOf:[{$ref:'#/$defs/MVHRLocation'},{type:'null'}]}` on the CORE profile --
+    // the exact anyOf-wraps-a-$ref-to-an-enum shape `pickDirectControl`'s own
+    // docstring already documents as reachable neither by `isNonEmptyEnumLike` nor by
+    // type dispatch (no top-level `.type`/`.enum` on the anyOf wrapper itself). R4.5's
+    // commit-3 deleted the `extractOptions` "Case 2" fallback that used to paper over
+    // this on TextControl, and the shape's live-instance audit at the time only
+    // checked FHS (where `mvhr_location` happens to already be a bare
+    // `{enum:['inside','outside']}` with no anyOf wrapper) -- Core was never actually
+    // exercised for this field, so the regression shipped. Fixed by inlining a flat
+    // `{type:'string', enum:[...]}` override in AdvancedFieldsEditor.tsx's subschema
+    // memo, the same pattern `shield_fact_location` already used (see the inline
+    // comments at both sites, and `pickDirectControl`'s corrected docstring in
+    // DirectAdvancedFields.tsx).
+    //
+    // No subtype passed, matching config 5's own mounting pattern immediately above
+    // (and MechanicalVentilation's base-field exclusion, `['vent_type']`, is the same
+    // on both profiles) -- Core does none of FHS's fan/position-mode property pruning,
+    // so every property in the undiscriminated union schema renders. Row set/labels
+    // captured verbatim from a real render (this is a NEW characterization, not a
+    // parity check against a deleted comparator).
+    const { container } = assertDirectCharacterization(
+      {
+        elementType: 'MechanicalVentilation',
+        useFHSSchema: false,
+        currentDataExtra: { vent_type: 'MVHR' },
+        extraJson: { vent_type: 'MVHR', mvhr_location: 'inside' },
+      },
+      [
+        row('Control', 'Control', TEXT(null)),
+        row('SFP', 'SFP', TEXT('0', '0')),
+        row('SFP_in_use_factor', 'SFP In Use Factor', TEXT('1')),
+        row('design_outdoor_air_flow_rate', 'Design Outdoor Air Flow Rate', TEXT('0', '0')),
+        row('ductwork', 'Ductwork', TEXT(null)),
+        row('mvhr_eff', 'MVHR Efficiency', TEXT(null)),
+        row('mvhr_location', 'MVHRLocation', SELECT),
+        row('sup_air_flw_ctrl', 'SupplyAirFlowRateControlType', SELECT),
+        row('sup_air_temp_ctrl', 'SupplyAirTemperatureControlType', SELECT),
+        row('position_intake', 'Position Intake', TEXT(null)),
+        row('position_exhaust', 'Position Exhaust', TEXT(null)),
+        row('mid_height_air_flow_path', 'Mid Height Air Flow Path', TEXT(null)),
+        row('orientation360', 'Orientation360', TEXT(null)),
+        row('pitch', 'Pitch', TEXT(null)),
+      ],
+    );
+
+    // The headline assertion: a real <select> with the schema's own enum values, not
+    // a JSON.stringify'd free-text blob.
+    const mvhrRow = fieldRow(container, 'mvhr_location');
+    const select = within(mvhrRow).getByRole('combobox') as HTMLSelectElement;
+    const optionValues = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
+    expect(optionValues).toEqual(expect.arrayContaining(['inside', 'outside']));
+
+    fireEvent.change(select, { target: { value: 'outside' } });
+    expect(select.value).toBe('outside');
+  });
+
   it('config 6 -- WetEmitter, radiator, FHS: per_metre and lumped thermal-mode pruning direct-render characterization', () => {
     assertDirectCharacterization(
       {
@@ -1376,6 +1435,92 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
       ThermalBridging: { TB_linear: { junction_type: 'E2', length: 2.5 } },
     });
   });
+
+  it('array-shaped fabric spec: self-rooted per-item Groups bind values per index; editing one item preserves the other byte-for-byte; unset leaves siblings intact (R4.5 review round 1 fix -- setAtPath/getAtPath array-hop support)', () => {
+    // REGRESSION, caught in adversarial review round 1: `setAtPath` used to treat
+    // every array CHILD as "not a valid container" and silently replace the WHOLE
+    // array with `{}` on any nested write under it -- an edit under a per-item
+    // Group's `pathOverride` (e.g. 'sec.list.0') would have destroyed every sibling
+    // item. Fixed in `setAtPathNode` (array hop preserved via `.slice()` + index
+    // write when the existing child is an array and the segment is a canonical
+    // non-negative integer); `getAtPath` gets the matching read-side.
+    //
+    // Shape: the PAIRED web PR changes its array-of-objects builder to emit
+    // SELF-ROOTED per-item Groups -- each item is its own Group
+    // (`options: {schemaOverride: itemSchema, pathOverride: 'sec.list.<i>'}`) whose
+    // children are single-hop Controls scoped `#/properties/<leaf>` relative to that
+    // item's OWN schema (not accumulated through an outer basePtr the way a nested
+    // -object Group's children are elsewhere in this file) -- exactly the shape this
+    // fixture reproduces.
+    const nameSchema = { type: 'string', title: 'Name' };
+    const valueSchema = { type: 'number', title: 'Value' };
+    const itemSchema = { type: 'object', properties: { name: nameSchema, value: valueSchema } };
+
+    function itemGroup(index: number): DirectSpecNode {
+      return {
+        type: 'Group',
+        label: `Item ${index}`,
+        elements: [
+          {
+            type: 'Control',
+            label: `Item ${index} · Name`,
+            scope: '#/properties/name',
+            options: { schemaOverride: nameSchema },
+          },
+          {
+            type: 'Control',
+            label: `Item ${index} · Value`,
+            scope: '#/properties/value',
+            options: { schemaOverride: valueSchema },
+          },
+        ],
+        options: { schemaOverride: itemSchema, pathOverride: `sec.list.${index}`, openInitially: true },
+      };
+    }
+    const arraySpec: DirectSpecNode = {
+      type: 'VerticalLayout',
+      elements: [itemGroup(0), itemGroup(1)],
+    };
+    const initialData = {
+      sec: { list: [{ name: 'Alpha', value: 1 }, { name: 'Beta', value: 2 }] },
+    };
+    const onDataChange = vi.fn();
+    const { container } = renderDirectSpecFields({
+      schema: { type: 'object', properties: {} },
+      data: initialData,
+      spec: arraySpec,
+      onDataChange,
+    });
+
+    // Both items render, values bound per index -- not both showing item 0's values,
+    // and not the whole-array-replaced-with-{} failure mode (which would render zero
+    // rows or throw resolving `sec.list.<i>` against a plain object).
+    const item0NameInput = within(fieldRowByLabel(container, 'name', 'Item 0')).getByRole('textbox') as HTMLInputElement;
+    const item1NameInput = within(fieldRowByLabel(container, 'name', 'Item 1')).getByRole('textbox') as HTMLInputElement;
+    expect(item0NameInput.value).toBe('Alpha');
+    expect(item1NameInput.value).toBe('Beta');
+
+    // Edit round-trip: editing item 0's name preserves item 1 BYTE-FOR-BYTE (the old
+    // whole-array-replacement bug would have dropped item 1 entirely).
+    fireEvent.change(item0NameInput, { target: { value: 'Alpha 2' } });
+    expect(onDataChange).toHaveBeenLastCalledWith({
+      sec: { list: [{ name: 'Alpha 2', value: 1 }, { name: 'Beta', value: 2 }] },
+    });
+
+    // Unset (reset-to-undefined) on item 0's value: mirrors lodash/fp `unset` --
+    // deletes the leaf, leaving a hole at index 0 (not a splice that would shift item
+    // 1 down to index 0) -- item 1 stays intact at index 1.
+    const resetButton = within(fieldRowByLabel(container, 'value', 'Item 0')).getByRole('button', {
+      name: 'Reset to default',
+    });
+    fireEvent.click(resetButton);
+    const lastCall = onDataChange.mock.calls[onDataChange.mock.calls.length - 1][0] as {
+      sec: { list: Array<Record<string, unknown> | undefined> };
+    };
+    expect(lastCall.sec.list.length).toBe(2);
+    expect(lastCall.sec.list[1]).toEqual({ name: 'Beta', value: 2 });
+    expect(Object.prototype.hasOwnProperty.call(lastCall.sec.list[0] ?? {}, 'value')).toBe(false);
+  });
 });
 
 describe('GroupAccordion (R4.5): plain collapsible chrome extracted from the retired Group registry renderer', () => {
@@ -1405,3 +1550,4 @@ describe('GroupAccordion (R4.5): plain collapsible chrome extracted from the ret
     expect(container.textContent).not.toContain('Add field');
   });
 });
+

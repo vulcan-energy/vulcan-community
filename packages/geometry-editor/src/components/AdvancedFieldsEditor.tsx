@@ -1240,6 +1240,50 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       };
     }
 
+    // mvhr_location: same shield_fact_location-style problem, different profile.
+    // HEM's `$defs/MechanicalVentilation.properties.mvhr_location` is
+    // `{anyOf:[{$ref:'#/$defs/MVHRLocation'},{type:'null'}]}` on Core -- a bare anyOf
+    // derives no `.enum`/type for `pickDirectControl` to see at all, even after $ref
+    // dereferencing (the anyOf wrapper itself never collapses into a flat type/enum),
+    // so without inlining this field falls through to a plain TextControl with no
+    // dropdown or validation. MechanicalVentilation's base-field exclusion is only
+    // `['vent_type']` (`getBaseFieldsForElementType`), on BOTH profiles, so nothing
+    // upstream prunes this field away on Core. UNLIKE shield_fact_location this is NOT
+    // FHS-only: FHS's own mvhr_location is ALREADY a bare `{enum:['inside','outside']}`
+    // with no anyOf wrapper (HEM flattens it differently there), so it already reaches
+    // EnumControl unaided on that profile -- verified directly against both schema
+    // files, and the guard below is a no-op in that case (no anyOf/oneOf branch to
+    // read an enum out of). Dereference against the active root schema and read the
+    // enum out of whichever anyOf/oneOf branch carries one, rather than hardcoding
+    // HEM's `$defs/MVHRLocation` values, so a future HEM schema change (new location,
+    // renamed value) keeps tracking the schema instead of quietly drifting from it.
+    if (elementType === 'MechanicalVentilation' && advancedProperties.mvhr_location) {
+      const mv = advancedProperties.mvhr_location as Record<string, unknown>;
+      const rootFull = getActiveRootSchema();
+      const derefedMv = (rootFull ? dereferenceSchemaNodeInRoot(mv, rootFull) : mv) as Record<string, unknown>;
+      const alternatives = Array.isArray(derefedMv.anyOf)
+        ? (derefedMv.anyOf as Record<string, unknown>[])
+        : Array.isArray(derefedMv.oneOf)
+          ? (derefedMv.oneOf as Record<string, unknown>[])
+          : [];
+      const enumBranch = alternatives.find(
+        (branch) => branch && Array.isArray(branch.enum) && (branch.enum as unknown[]).length > 0,
+      );
+      if (enumBranch) {
+        advancedProperties.mvhr_location = {
+          type: 'string',
+          enum: [...(enumBranch.enum as unknown[])],
+          title:
+            typeof mv.title === 'string'
+              ? mv.title
+              : typeof enumBranch.title === 'string'
+                ? enumBranch.title
+                : 'Mvhr Location',
+          ...(typeof mv.description === 'string' ? { description: mv.description } : {}),
+        };
+      }
+    }
+
     let result: SchemaNode = {
       ...fullSchema,
       properties: advancedProperties

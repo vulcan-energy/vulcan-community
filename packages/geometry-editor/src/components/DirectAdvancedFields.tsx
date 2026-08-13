@@ -177,24 +177,40 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  * and the retired JsonForms path always did: string -> TextControl, a free-text input
  * the user can still type a link name into.
  *
- * ACCEPTED DIVERGENCE, NO LIVE INSTANCE (R4.5, commit-3 dead-code harvest): one
- * residual shape neither `isNonEmptyEnumLike` NOR type dispatch ever routes to
- * EnumControl — `anyOf: [{enum: [...]}, {type: 'null'}]` with no TOP-LEVEL `type`.
- * `isNonEmptyEnumLike` only recognizes a bare `.enum` or oneOf/anyOf where EVERY
- * branch carries `const`; an anyOf branch that itself carries `.enum` (one branch
- * enum-typed, the other `{type:'null'}`) matches neither, and with no top-level type
- * to dispatch on either, this falls to rule (f) -> TextControl. Through R4.3/R4.3b
- * this shape still got a dropdown via TextControl's own `extractOptions` "Case 2"
- * fallback (one alternative carries an enum) — deleted in R4.5's commit-3 alongside
- * the rest of that fallback (see the R4.5 deletion notes on TextControl/NumberControl
- * in `jsonformsRenderers.tsx`), so this shape now renders a plain text input instead.
- * Accepted, not fixed: this shape's only known historical case was
- * `shield_fact_location` (HEM's `$defs/WindShieldLocation`, `$ref`'d inside an
- * `anyOf`), and `AdvancedFieldsEditor.tsx`'s own subschema memo has ALWAYS inlined a
- * plain `{type:'string', enum:[...]}` override for that field before it ever reaches
- * this picker (see the inline comment there) — verified directly against both live
- * schemas that no OTHER Advanced Field property has this exact anyOf-with-nested-enum
- * shape, so the divergence has zero live instances to regress.
+ * KNOWN GAP, TWO LIVE INSTANCES, BOTH INLINED UPSTREAM: neither `isNonEmptyEnumLike`
+ * NOR type dispatch ever routes `anyOf: [{$ref/enum...}, {type: 'null'}]` with no
+ * TOP-LEVEL `type` to EnumControl — `isNonEmptyEnumLike` only recognizes a bare
+ * `.enum` or oneOf/anyOf where EVERY branch carries `const`; an anyOf branch that
+ * itself resolves to `.enum` (one branch enum-typed, the other `{type:'null'}`)
+ * matches neither, and with no top-level type to dispatch on either, this falls to
+ * rule (f) -> TextControl. Through R4.3/R4.3b this shape still got a dropdown via
+ * TextControl's own `extractOptions` "Case 2" fallback (one alternative carries an
+ * enum) — deleted in R4.5's commit-3 alongside the rest of that fallback (see the
+ * R4.5 deletion notes on TextControl/NumberControl in `jsonformsRenderers.tsx`), so
+ * this shape now renders a plain text input UNLESS something upstream inlines a flat
+ * `{type:'string', enum:[...]}` override before the property ever reaches this
+ * picker. `AdvancedFieldsEditor.tsx`'s own subschema memo does exactly that for the
+ * shape's two verified LIVE instances — `shield_fact_location` (HEM's
+ * `$defs/WindShieldLocation`, FHS-only, Suspended_floor) and `mvhr_location` (HEM's
+ * `$defs/MVHRLocation`, Core-only — R4.5 review round 1 finding: this one was missed
+ * on first landing, since FHS's OWN `mvhr_location` happens to already be a bare
+ * `{enum:[...]}` with no anyOf wrapper, so verifying only against FHS made the shape
+ * look non-live) — see the inline comments at both override sites.
+ *
+ * VERIFIED NOT LIVE, four other `$defs` properties carry this exact
+ * anyOf-wraps-a-$ref-to-an-enum shape in `core-input.schema.json` but are unreachable
+ * through any element's Advanced Fields subschema, so they never reach this picker at
+ * all (not accepted divergences — genuinely dead paths, checked directly):
+ *  - `BuildingElementPartyWall.party_wall_lining_type` — a PartyWall BASE field
+ *    (`getBaseFieldsForElementType`, `lib/schemaCache.ts` ~1680-1691), filtered out of
+ *    `advancedProperties` before this picker ever sees it.
+ *  - `ControlChargeTarget.logic_type` — `ControlChargeTarget` is a nested `$def`, not
+ *    an element type `getElementSubschema` ever resolves to directly; no
+ *    element-subschema route reaches it.
+ *  - `ShowerMixer.WWHRS_configuration` — same reason: `ShowerMixer` has no
+ *    element-subschema route of its own.
+ *  - `Zone.temp_setpnt_basis` — `Zone` is not an HEM element type this editor ever
+ *    mounts Advanced Fields for.
  *
  * The `Group` accordion renderer (rank 100) is deliberately NOT ported: no Advanced
  * Fields uischema (generated OR manually-built System layout spec) ever emits one.
@@ -388,45 +404,108 @@ function segmentsFromLayoutScope(scope: string): string[] {
   return segments.map(decodePointerToken);
 }
 
-/** Walk `data` along path segments; undefined at any missing/non-object hop. */
+/**
+ * A path segment is a valid ARRAY index (not an object key) only when canonical:
+ * '0', '1', '2', … — never '01' (leading zero), '-1', or a non-numeric string like a
+ * plant key that just happens to read as a number in some other base. Shared by
+ * `getAtPath` and `setAtPath`'s array-hop support (R4.5 review round 1 fix) so both
+ * sides agree on exactly the same set of segments that mean "array index."
+ */
+function isCanonicalArrayIndexSegment(segment: string): boolean {
+  return /^(0|[1-9]\d*)$/.test(segment);
+}
+
+/**
+ * Walk `data` along path segments; undefined at any missing hop.
+ *
+ * R4.5 review round 1 fix: array hops are now supported, matching `setAtPath`'s own
+ * contract below (both must agree, or a value written via one would read back as
+ * undefined via the other). When the CURRENT node at a hop is an array, a canonical
+ * non-negative-integer segment (see `isCanonicalArrayIndexSegment`) indexes into it;
+ * a non-canonical segment against an array (should not happen — every array-hop
+ * segment in this file comes from a decoded plant/instance-path token that is
+ * genuinely a numeric array index, e.g. a per-item Group's `pathOverride`) returns
+ * undefined rather than guessing. A non-array, non-null object hop still uses
+ * ordinary record property lookup as before.
+ */
 function getAtPath(data: Record<string, unknown>, segments: string[]): unknown {
   let current: unknown = data;
   for (const segment of segments) {
-    if (current === null || typeof current !== 'object' || Array.isArray(current)) return undefined;
+    if (Array.isArray(current)) {
+      if (!isCanonicalArrayIndexSegment(segment)) return undefined;
+      current = current[Number(segment)];
+      continue;
+    }
+    if (current === null || typeof current !== 'object') return undefined;
     current = (current as Record<string, unknown>)[segment];
   }
   return current;
 }
 
 /**
- * Immutable nested set/delete along a dot-separated path (Stage 2.1): clones each
- * object hop with `{...}`, and either sets or deletes the leaf. `value === undefined`
- * deletes the leaf key outright (matches the top-level spike behaviour, extended to
- * every hop). Intermediate objects are left in place even if the delete empties them
- * — this is NOT a stylistic choice, it matches what the retired JsonForms path's own
- * JsonForms core reducer did: `UPDATE_DATA`'s unset branch is `lodash/fp/unset(path,
- * data)` (verified in node_modules/@jsonforms/core), which only removes the leaf and
- * never prunes now-empty ancestors. A missing intermediate hop is created as `{}` on set,
+ * Immutable nested set/delete along path segments (Stage 2.1): clones each hop, and
+ * either sets or deletes the leaf. `value === undefined` deletes the leaf key
+ * outright (matches the top-level spike behaviour, extended to every hop).
+ * Intermediate containers are left in place even if the delete empties them — this is
+ * NOT a stylistic choice, it matches what the retired JsonForms path's own JsonForms
+ * core reducer did: `UPDATE_DATA`'s unset branch is `lodash/fp/unset(path, data)`
+ * (verified in node_modules/@jsonforms/core), which only removes the leaf and never
+ * prunes now-empty ancestors. A missing intermediate hop is created as `{}` on set,
  * matching `lodash/fp/set`'s own auto-vivification. One divergence, currently
  * unreachable (reset buttons only render when a value exists): DELETE along a missing
  * intermediate hop vivifies `{}` ancestors here where `lodash/fp/unset` is a no-op.
+ *
+ * R4.5 review round 1 fix (REAL finding, adversarial review round 1): array hops are
+ * now preserved instead of destroyed. `lodash/fp`'s own `set`/`unset` — the contract
+ * this function has always cited above — PRESERVES an array for an integer key (it
+ * only auto-vivifies a plain object for a NON-numeric key), but this function used to
+ * treat every array child as "not a valid container" and silently replace the WHOLE
+ * array with `{}` on any nested write under it. A per-item Group's `pathOverride`
+ * (e.g. `'window.window_part_list.0'`, from `DirectSpecFields`' self-rooted array
+ * shape) would therefore have destroyed every sibling item on the very first edit to
+ * item 0. Fixed via `setAtPathNode`: when the EXISTING child at a hop is an array and
+ * the next segment is a canonical index (`isCanonicalArrayIndexSegment`), clone the
+ * array (`.slice()`) and recurse into that index instead of falling through to record
+ * semantics; unsetting a leaf INSIDE an array mirrors `lodash/fp/unset` exactly —
+ * `delete arr[i]`, leaving a hole (`undefined`, serializes as JSON `null`), not a
+ * splice that would shift every later sibling's index. A data/plant key that happens
+ * to be the literal string `'0'` over an OBJECT (not an array) is UNAFFECTED — this
+ * only activates when the value ALREADY THERE is an array; a key still only means an
+ * array index when the parent it hangs off actually is one.
  */
-function setAtPath(obj: Record<string, unknown>, segments: string[], value: unknown): Record<string, unknown> {
+function setAtPathNode(node: unknown, segments: string[], value: unknown): unknown {
   const [head, ...rest] = segments;
-  const next = { ...obj };
+  if (Array.isArray(node) && isCanonicalArrayIndexSegment(head)) {
+    const index = Number(head);
+    const nextArray = node.slice();
+    if (rest.length === 0) {
+      if (value === undefined) {
+        delete nextArray[index];
+      } else {
+        nextArray[index] = value;
+      }
+      return nextArray;
+    }
+    nextArray[index] = setAtPathNode(nextArray[index], rest, value);
+    return nextArray;
+  }
+  const record =
+    node && typeof node === 'object' && !Array.isArray(node) ? (node as Record<string, unknown>) : {};
+  const nextRecord: Record<string, unknown> = { ...record };
   if (rest.length === 0) {
     if (value === undefined) {
-      delete next[head];
+      delete nextRecord[head];
     } else {
-      next[head] = value;
+      nextRecord[head] = value;
     }
-    return next;
+    return nextRecord;
   }
-  const childRaw = next[head];
-  const child =
-    childRaw && typeof childRaw === 'object' && !Array.isArray(childRaw) ? (childRaw as Record<string, unknown>) : {};
-  next[head] = setAtPath(child, rest, value);
-  return next;
+  nextRecord[head] = setAtPathNode(nextRecord[head], rest, value);
+  return nextRecord;
+}
+
+function setAtPath(obj: Record<string, unknown>, segments: string[], value: unknown): Record<string, unknown> {
+  return setAtPathNode(obj, segments, value) as Record<string, unknown>;
 }
 
 /**
@@ -511,10 +590,13 @@ function renderControlForProperty(args: {
   // walk/apply, not every control's internal path parsing.
 
   // Stage 2.2: window_part_list routes to WindowPartListControl BEFORE the type-based
-  // picker, mirroring GenericControl's own special case (jsonformsRenderers.tsx:2384)
-  // — it is an array-typed property that would otherwise never reach a sane control
-  // via pickDirectControl (no enum/number/boolean match, falls to 'text', which would
-  // JSON-blob the row instead of the real multi-row editor).
+  // picker — it is an array-typed property that would otherwise never reach a sane
+  // control via pickDirectControl (no enum/number/boolean match, falls to 'text',
+  // which would JSON-blob the row instead of the real multi-row editor). HISTORY: this
+  // special case originally mirrored one the retired JsonForms registry's own
+  // GenericControl fallback carried (`jsonformsRenderers.tsx`, deleted in R4.5 — see
+  // the R4.5 deletion note above `schemaHasIntegerType` there); this file has owned
+  // the check outright since R4.3, and GenericControl no longer exists to mirror.
   if (leafKey === 'window_part_list') {
     return (
       <WindowPartListControl key={path} {...({ ...baseProps, errors: '' } as unknown as DirectControlProps)} />
@@ -781,31 +863,55 @@ function walkSchemaPropertiesByTokens(schema: Record<string, unknown>, tokens: s
  *    of this walker; noted here, not fixed here (out of scope — this module does not
  *    own that encoding).
  *  - `Control`: `scope` is decoded into segments by the SAME `segmentsFromLayoutScope`
- *    the System layout walk above uses. Both real builders always emit scopes
- *    prefixed `'#/properties/'` (fabric: `'#/properties/k'` and
- *    `'#/properties/k/properties/j'`; snippet: `'#/properties/k'` — verified directly
- *    against both, parent repo, read-only), so `segmentsFromLayoutScope`'s existing
- *    `'#/properties/'`-prefix assumption did not need loosening here. Resolved
- *    property schema = `options.schemaOverride` if present, else `contextSchema`
- *    walked through those same tokens' `.properties` hops and then $ref-resolved via
+ *    the System layout walk above uses. Every scope either builder emits is prefixed
+ *    `'#/properties/'` (the prefix itself never varies — both builders always start
+ *    from `'#'` and append `/properties/<key>` repeatedly), so
+ *    `segmentsFromLayoutScope`'s existing `'#/properties/'`-prefix assumption did not
+ *    need loosening here — see the FIDELITY NOTE below for the DEPTH/NESTING
+ *    corrections to this claim from review round 1 (the prefix always holds; how many
+ *    hops and what they contain does not). Resolved property schema =
+ *    `options.schemaOverride` if present, else `contextSchema` walked through those
+ *    same tokens' `.properties` hops and then $ref-resolved via
  *    `dereferenceSchemaNodeInRoot` against `schema` (the same pattern
  *    `renderLayoutNode` above uses for System). Full data-path segments =
  *    `contextSegments.concat(tokens)` — reuses `renderControlForProperty` verbatim
  *    (same five controls, same enum-first `pickDirectControl` dispatch as every other
  *    walk in this file).
  *
- * FIDELITY NOTE (verified against real `@jsonforms/core`, not a bug introduced here):
+ * FIDELITY NOTE (CORRECTED, R4.5 review round 1 — the original version of this note
+ * both undersold the scope shapes AND overstated what was verified; both builders
+ * were re-read line-by-line for this correction, not just the bundled flat fixtures):
  * concatenating `contextSegments` with a `Control`'s FULL token list — not just its
  * last hop — genuinely reproduces `@jsonforms/core`'s own path composition
  * (`Paths.compose`/`toDataPathSegments` concatenates every scope segment onto the
  * parent path unconditionally, with no de-duplication against what the parent already
- * carries). For a `Control` whose scope was built cumulatively two `Group`-levels
- * deep (a nested-object `Group` under a top-level `Group`), this WOULD re-walk a
- * segment the enclosing `Group`'s own `pathOverride` already supplied — inherited
- * JsonForms behaviour, faithfully mirrored, not something this slice's brief asks to
- * correct ("mirror what the retired JsonForms path actually did with these specs").
- * Neither web builder actually nests a `Group` two levels deep today (verified
- * directly against both), so the shape does not surface in production.
+ * carries). This is BYTE-IDENTICAL to the old `composeWithUi` behaviour on BOTH the
+ * retired JsonForms path and this one — broken (or at least redundant) on both sides
+ * alike, not a regression this walker introduces. Two shapes this note previously
+ * claimed did not occur, DO occur in `SimplifiedFabricEditor.tsx`'s `ui` memo (parent
+ * repo) as currently written:
+ *  - its OBJECT branch (nested-object properties) DOES emit a `Group` nested two
+ *    levels deep, with the inner Controls' scopes accumulated through the OUTER
+ *    `basePtr` (not reset at the inner `Group`) — exactly the double-walk this note
+ *    describes above, genuinely reachable, not hypothetical.
+ *  - its ARRAY branch nests a `Group`-of-`Group`s THREE deep and uses the JSON-schema
+ *    keyword `items` INSIDE the scope pointer itself (e.g.
+ *    `'#/properties/layers/items/properties/thickness'`) — `segmentsFromLayoutScope`'s
+ *    literal `'/properties/'`-split glues `'layers/items'` into one bogus segment
+ *    there (no real data key is named that), a DIFFERENT kind of garbage than the
+ *    object branch's double-walk, but garbage on the RETIRED JsonForms path too (its
+ *    own `Paths.compose` would have composed the identical nonsense segment) — not a
+ *    new divergence.
+ * Both are moot for what ships: the PAIRED web PR changes BOTH the object and array
+ * branches to self-root each nested/per-item `Group` (fresh `schemaOverride` +
+ * absolute `pathOverride`, single-hop child `Control` scopes) before the migration to
+ * `DirectSpecFields` lands, so neither the double-walk nor the `items`-laden pointer
+ * ever reaches this file in the migrated specs — see
+ * `AdvancedFieldsEditor.directRender.test.tsx`'s array-shaped-fabric-spec test for the
+ * shape that DOES ship. That self-rooted array shape only writes correctly because of
+ * this SAME review round's `setAtPath`/`getAtPath` array-hop fix (see their
+ * docstrings below) — without it, a self-rooted per-item `Group`'s first edit would
+ * have silently replaced the whole array with `{}`.
  *
  * DEAD OPTION, DELIBERATELY UNHANDLED: web's fabric builder also passes an
  * `options.helperText` React node on `Control` nodes. It was ALREADY DEAD on the
