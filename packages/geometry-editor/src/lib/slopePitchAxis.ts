@@ -7,6 +7,9 @@ import { computeSlopedPolygonInwardNormal2D } from './geometry3dSloped';
 
 export const SLOPE_PITCH_AXIS_EXTRA_JSON_KEY = '_slope_pitch_axis';
 
+/** Datum-line overshoot for the rendered hinge contour (canvas affordance only). */
+export const SLOPE_CONTOUR_OVERSHOOT_M = 0.25;
+
 export type SlopePitchAxis = 'bottom-edge' | 'orientation';
 
 export function isOrientationPitchAxis(element: Element): boolean {
@@ -74,11 +77,14 @@ export function slopedPolygonPlaneBasis(
   };
 }
 
-/** Horizontal contour through the plane hinge, spanning all plan-point projections. */
+/** Horizontal contour through the plane hinge, spanning all plan-point projections.
+ * `overshootM` extends both ends past the span (datum-line rendering); geometry
+ * consumers leave it 0. */
 export function slopeHingeContourSegment(
   points: Array<[number, number]>,
   anchorXY: [number, number],
   upslope2D: [number, number],
+  overshootM = 0,
 ): [[number, number], [number, number]] | null {
   if (points.length === 0) return null;
   const contour: [number, number] = [upslope2D[1], -upslope2D[0]];
@@ -92,6 +98,8 @@ export function slopeHingeContourSegment(
     max = Math.max(max, projection);
   }
   if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  min -= overshootM;
+  max += overshootM;
   return [
     [anchorXY[0] + contour[0] * min, anchorXY[1] + contour[1] * min],
     [anchorXY[0] + contour[0] * max, anchorXY[1] + contour[1] * max],

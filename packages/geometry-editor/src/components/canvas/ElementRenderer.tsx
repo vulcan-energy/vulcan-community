@@ -78,6 +78,7 @@ import {
   isOrientationPitchAxis,
   slopedPolygonPlaneBasis,
   slopeHingeContourSegment,
+  SLOPE_CONTOUR_OVERSHOOT_M,
 } from '../../lib/slopePitchAxis';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../../geometry/constants';
 
@@ -2285,11 +2286,14 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             resolvedGlobalOrientationOffset,
           )
         : null;
-      const contourWorld = orientationBasis
+      // The hinge contour is a selection-time datum line, not fabric: dash-dot, faded,
+      // and overshooting the outline so it cannot read as a wall.
+      const contourWorld = orientationBasis && isSelected
         ? slopeHingeContourSegment(
             coordinates.map((point) => [point.x, point.y] as [number, number]),
             orientationBasis.anchorXY,
             orientationBasis.upslope2D,
+            SLOPE_CONTOUR_OVERSHOOT_M,
           )
         : null;
       const contourCanvas = contourWorld?.map(([x, y]) => worldToCanvas({ x, y }, scale, panOffset, canvasCenter));
@@ -2352,7 +2356,9 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               name={`slope-contour-${element.id}`}
               points={contourCanvas.flatMap((coord) => [coord.x, coord.y])}
               stroke={elementColor}
-              strokeWidth={isSelected ? 4 : 3}
+              strokeWidth={3}
+              dash={[10, 4, 2, 4]}
+              opacity={0.75}
               listening={false}
             />
           ) : null}
@@ -2422,10 +2428,22 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                 />
                 {orientationPitchAxis && isSelected ? (
                   <Circle
+                    name={`orientation-arrow-grip-${element.id}`}
+                    x={arrowCanvas.x}
+                    y={arrowCanvas.y}
+                    radius={5}
+                    fill={canvasInteractionPalette.handleFill}
+                    stroke={canvasInteractionPalette.handleStroke}
+                    strokeWidth={2}
+                    listening={false}
+                  />
+                ) : null}
+                {orientationPitchAxis && isSelected ? (
+                  <Circle
                     name={`orientation-arrow-handle-${element.id}`}
                     x={arrowCanvas.x}
                     y={arrowCanvas.y}
-                    radius={10}
+                    radius={16}
                     opacity={0}
                     draggable
                     onDragStart={(e) => {
@@ -2464,9 +2482,13 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                         snappedBearing ?? Math.round(rawBearing / 5) * 5,
                       );
                       const downslope = downslopeUnitModelXY(orientation360, resolvedGlobalOrientationOffset);
+                      const arrowLength = Math.hypot(
+                        directionArrow.arrowX - directionArrow.centerX,
+                        directionArrow.arrowY - directionArrow.centerY,
+                      );
                       const snappedCanvas = worldToCanvas({
-                        x: directionArrow.centerX + downslope[0] * 0.25,
-                        y: directionArrow.centerY + downslope[1] * 0.25,
+                        x: directionArrow.centerX + downslope[0] * arrowLength,
+                        y: directionArrow.centerY + downslope[1] * arrowLength,
                       }, scale, panOffset, canvasCenter);
                       e.target.position(snappedCanvas);
                       updateElement(element.id, { orientation360 }, true);

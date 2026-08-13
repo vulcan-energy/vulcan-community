@@ -16,6 +16,7 @@ import {
   isOrientationPitchAxis,
   slopedPolygonPlaneBasis,
   slopeHingeContourSegment,
+  SLOPE_CONTOUR_OVERSHOOT_M,
 } from '../../lib/slopePitchAxis';
 
 type PreviewLayerNode = {
@@ -68,6 +69,7 @@ export type ElementShapeNodeRefs = {
   shapeStrokeNode: PreviewLineNode | null;
   slopeBottomNode: PreviewLineNode | null;
   slopeContourNode: PreviewLineNode | null;
+  orientationGripNode: PreviewPositionNode | null;
   slopeEdgesNode: PreviewLineNode | null;
   arrowLineNode: PreviewLineNode | null;
   arrowHeadNode: PreviewLineNode | null;
@@ -345,6 +347,7 @@ export function findElementShapeNodeRefs(
     shapeStrokeNode: findPreviewLineNode(stage, `shape-stroke-${elementId}`),
     slopeBottomNode: findPreviewLineNode(stage, `slope-bottom-${elementId}`),
     slopeContourNode: findPreviewLineNode(stage, `slope-contour-${elementId}`),
+    orientationGripNode: findPreviewPositionNode(stage, `orientation-arrow-grip-${elementId}`),
     slopeEdgesNode: findPreviewLineNode(stage, `slope-edges-${elementId}`),
     arrowLineNode: findPreviewLineNode(stage, `arrow-line-${elementId}`),
     arrowHeadNode: findPreviewLineNode(stage, `arrow-head-${elementId}`),
@@ -378,6 +381,8 @@ function refsToMovableNodes(refs: ElementShapeNodeRefs): unknown[] {
     refs.slopeEdgesNode,
     refs.arrowLineNode,
     refs.arrowHeadNode,
+    // After the arrowhead so drag-layer moveToTop keeps the static stacking order.
+    refs.orientationGripNode,
     refs.pointNode,
     ...refs.vertexNodes,
   ];
@@ -440,6 +445,7 @@ function setDraggedElementAttrs(
   target?.setAttr?.('__vulcanDraggedShapeStrokeNode', refs?.shapeStrokeNode ?? null);
   target?.setAttr?.('__vulcanDraggedSlopeBottomNode', refs?.slopeBottomNode ?? null);
   target?.setAttr?.('__vulcanDraggedSlopeContourNode', refs?.slopeContourNode ?? null);
+  target?.setAttr?.('__vulcanDraggedOrientationGripNode', refs?.orientationGripNode ?? null);
   target?.setAttr?.('__vulcanDraggedSlopeEdgesNode', refs?.slopeEdgesNode ?? null);
   target?.setAttr?.('__vulcanDraggedArrowLineNode', refs?.arrowLineNode ?? null);
   target?.setAttr?.('__vulcanDraggedArrowHeadNode', refs?.arrowHeadNode ?? null);
@@ -695,6 +701,7 @@ export function cacheDraggedElementShapeNodes(
   target?.setAttr?.('__vulcanDraggedShapeStrokeNode', refs.shapeStrokeNode);
   target?.setAttr?.('__vulcanDraggedSlopeBottomNode', refs.slopeBottomNode);
   target?.setAttr?.('__vulcanDraggedSlopeContourNode', refs.slopeContourNode);
+  target?.setAttr?.('__vulcanDraggedOrientationGripNode', refs.orientationGripNode);
   target?.setAttr?.('__vulcanDraggedSlopeEdgesNode', refs.slopeEdgesNode);
   target?.setAttr?.('__vulcanDraggedArrowLineNode', refs.arrowLineNode);
   target?.setAttr?.('__vulcanDraggedArrowHeadNode', refs.arrowHeadNode);
@@ -741,7 +748,7 @@ export function updateElementShapeNodeRefsFromCoords(
         (previewElement as { orientation360?: number }).orientation360 ?? 0,
         globalOrientationOffset!,
       );
-      const contour = basis ? slopeHingeContourSegment(points, basis.anchorXY, basis.upslope2D) : null;
+      const contour = basis ? slopeHingeContourSegment(points, basis.anchorXY, basis.upslope2D, SLOPE_CONTOUR_OVERSHOOT_M) : null;
       if (contour) {
         refs.slopeContourNode?.points?.(
           contour.flatMap(([x, y]) => {
@@ -786,6 +793,12 @@ export function updateElementShapeNodeRefsFromCoords(
         orientation: directionArrow.orientation,
       });
       refs.arrowLineNode?.points?.([centerCanvas.x, centerCanvas.y, arrowCanvas.x, arrowCanvas.y]);
+      if (refs.orientationGripNode?.position) {
+        refs.orientationGripNode.position({ x: arrowCanvas.x, y: arrowCanvas.y });
+      } else {
+        refs.orientationGripNode?.x?.(arrowCanvas.x);
+        refs.orientationGripNode?.y?.(arrowCanvas.y);
+      }
       refs.arrowHeadNode?.points?.([
         arrowPoints.tip.x, arrowPoints.tip.y,
         arrowPoints.left.x, arrowPoints.left.y,
@@ -842,6 +855,7 @@ export function updateDraggedElementShapeFromCoords(
     shapeStrokeNode: (target?.getAttr?.('__vulcanDraggedShapeStrokeNode') as PreviewLineNode | null | undefined) ?? null,
     slopeBottomNode: (target?.getAttr?.('__vulcanDraggedSlopeBottomNode') as PreviewLineNode | null | undefined) ?? null,
     slopeContourNode: (target?.getAttr?.('__vulcanDraggedSlopeContourNode') as PreviewLineNode | null | undefined) ?? null,
+    orientationGripNode: (target?.getAttr?.('__vulcanDraggedOrientationGripNode') as PreviewPositionNode | null | undefined) ?? null,
     slopeEdgesNode: (target?.getAttr?.('__vulcanDraggedSlopeEdgesNode') as PreviewLineNode | null | undefined) ?? null,
     arrowLineNode: (target?.getAttr?.('__vulcanDraggedArrowLineNode') as PreviewLineNode | null | undefined) ?? null,
     arrowHeadNode: (target?.getAttr?.('__vulcanDraggedArrowHeadNode') as PreviewLineNode | null | undefined) ?? null,
@@ -863,6 +877,7 @@ export function updateDraggedElementShapeFromCoords(
       shapeStrokeNode: (target?.getAttr?.('__vulcanDraggedShapeStrokeNode') as PreviewLineNode | null | undefined) ?? null,
       slopeBottomNode: (target?.getAttr?.('__vulcanDraggedSlopeBottomNode') as PreviewLineNode | null | undefined) ?? null,
       slopeContourNode: (target?.getAttr?.('__vulcanDraggedSlopeContourNode') as PreviewLineNode | null | undefined) ?? null,
+    orientationGripNode: (target?.getAttr?.('__vulcanDraggedOrientationGripNode') as PreviewPositionNode | null | undefined) ?? null,
       slopeEdgesNode: (target?.getAttr?.('__vulcanDraggedSlopeEdgesNode') as PreviewLineNode | null | undefined) ?? null,
       arrowLineNode: (target?.getAttr?.('__vulcanDraggedArrowLineNode') as PreviewLineNode | null | undefined) ?? null,
       arrowHeadNode: (target?.getAttr?.('__vulcanDraggedArrowHeadNode') as PreviewLineNode | null | undefined) ?? null,
