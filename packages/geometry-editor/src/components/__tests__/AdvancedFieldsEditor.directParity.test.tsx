@@ -679,6 +679,35 @@ describe('AdvancedFieldsEditor: direct-render parity matrix (R4.3)', () => {
     });
     cleanup();
 
+    // Adversarial-review REAL finding (R4.3): with ecodesign_control_class UNSET (the
+    // state every newly-added wet system starts in), the OFF path renders EnumControl
+    // (integer+oneOf-const reaches rank-5 GenericControl, whose dispatch is
+    // enum-BEFORE-type) including its forwarded "is a required property" error text.
+    // An earlier picker draft rendered NumberControl's dropdown fallback here —
+    // different placeholder, an extra "Copy example" action, no error. Row-DOM parity
+    // on this fixture pins both the control identity AND the replicated required
+    // error (see renderControlForProperty's replicateRequiredError).
+    const unsetClassPlant = {
+      'Zone 1 circuit': {
+        ...singlePlant['Zone 1 circuit'],
+        ecodesign_controller: { min_outdoor_temp: -4, max_outdoor_temp: 20, min_flow_temp: 30 },
+      },
+    };
+    const { container: unsetClassContainer } = await assertGenericParity({
+      elementType: 'System',
+      subtype: 'SpaceHeatSystem',
+      useFHSSchema: true,
+      extraJson: { SpaceHeatSystem: unsetClassPlant },
+    });
+    // Disambiguate the parity pass: both paths must AGREE by both SHOWING the
+    // required error (the reviewer's live-probe behaviour), not by both omitting it —
+    // the latter would mean replicateRequiredError silently failed to fire (e.g.
+    // parentRequired missed the flattened `required` list) while the harness OFF
+    // path also happened to differ from production.
+    const unsetClassRow = unsetClassContainer.querySelector('[data-field-key="ecodesign_control_class"]');
+    expect(unsetClassRow?.textContent).toContain('is a required property');
+    cleanup();
+
     // Two plants (second plant synthesized -- no real two-plant SpaceHeatSystem
     // fixture exists in the repo, per the WarmAir shape used in
     // lib/__tests__/spaceHeatSystemSync.test.ts): buildSystemAdvancedUischema's

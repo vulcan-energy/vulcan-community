@@ -25,7 +25,6 @@ import {
   WindowPartListControl,
   schemaHasConstAlternatives,
   schemaHasEnum,
-  schemaIsNullableNumberAnyOf,
   schemaTypeList,
   validateAdvancedFieldPrimitive,
 } from './jsonformsRenderers';
@@ -82,25 +81,26 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  *      `isStringControl` wins; TextControl's OWN `extractOptions` fallback renders the
  *      identical StandardDropdown component an inline/$ref'd string enum needs — see
  *      the `battery_location` $ref probe test, now updated to assert this).
- *  (d) type list includes 'number' or 'integer' -> NumberControl (ranks 280/92/90).
- *  (e) anyOf number|null -> TextControl, NOT NumberControl. None of the built-in typed
- *      testers match an anyOf-only schema (their `hasType` -> `deriveTypes` does not
- *      derive a type from a bare `anyOf` — only from `type` / `properties` /
- *      `additionalProperties` / `items` / `enum` / `allOf` — so the Control falls
- *      through every one of them) -> rank-5 GenericControl's own resolved-schema
- *      dispatch sees no boolean/number/integer/enum either -> its default is
- *      TextControl. (No live HEM property currently has this exact shape --
- *      `area_per_perimeter_vent`, the R4.2 spike's cited example, is actually a plain
- *      `{type:'number'}` in both Core and FHS, verified by mounting both paths
- *      directly: BOTH already render NumberControl with identical `min`/
- *      `data-exclusive-minimum` attributes, so this was a stale docstring claim, never
- *      an actual divergence. The rule is kept anyway for defensive parity against any
- *      OTHER anyOf-nullable-number property, current or future.)
- *  (f) everything else that reaches rank-5 GenericControl's resolved-schema dispatch:
- *      enum-like first (`.enum`, or oneOf/anyOf where every branch is a bare `const`)
- *      -> EnumControl; otherwise -> TextControl (GenericControl's own boolean/number
- *      checks after the enum check are dead code by construction here, since (b)/(d)
- *      already claimed every boolean/number/integer resolved type before this point).
+ *  (d) type list includes 'number' -> NumberControl (ranks 280/90; `isNumberControl`
+ *      matches the EXACT type 'number' only — `integer` does NOT match it, see (f)).
+ *  (e) anyOf number|null -> falls to (f) -> TextControl, NOT NumberControl. None of
+ *      the built-in typed testers match an anyOf-only schema (their `hasType` ->
+ *      `deriveTypes` does not derive a type from a bare `anyOf` — only from `type` /
+ *      `properties` / `additionalProperties` / `items` / `enum` / `allOf`), and
+ *      GenericControl's dispatch sees no enum/boolean/number/integer either. (No live
+ *      HEM property currently has this exact shape — `area_per_perimeter_vent`, the
+ *      R4.2 spike's cited example, is actually a plain `{type:'number'}` in both Core
+ *      and FHS, verified by mounting both paths directly: BOTH already render
+ *      NumberControl with identical `min`/`data-exclusive-minimum` attributes, so
+ *      that was a stale docstring claim, never an actual divergence.)
+ *  (f) everything else — integer, object, array, type-less, bare combinators — reaches
+ *      rank-5 GenericControl, whose resolved-schema dispatch checks ENUM-LIKE FIRST
+ *      (`.enum`, or oneOf/anyOf where every branch is a bare `const`) -> EnumControl —
+ *      this is how `{type:'integer', oneOf:[{const,title},…]}`
+ *      (`ecodesign_control_class`) gets EnumControl on the OFF path (adversarial-review
+ *      REAL finding; an earlier draft of this picker ordered integer first and
+ *      diverged visibly in the unset state) — then boolean (dead here, claimed by (b)),
+ *      then number/INTEGER -> NumberControl, else TextControl.
  *
  * DEFERRED to a follow-up slice (R4.3b, tracked in the parent repo's
  * docs/development/Community_Repo_Refactor_Plan.md): the WRITTEN-table corrections
@@ -138,9 +138,18 @@ export function pickDirectControl(resolved: Record<string, unknown>): 'enum' | '
   const types = schemaTypeList(resolved);
   if (types.includes('boolean')) return 'boolean';
   if (types.includes('string')) return 'text';
-  if (types.includes('number') || types.includes('integer')) return 'number';
-  if (schemaIsNullableNumberAnyOf(resolved)) return 'text';
+  if (types.includes('number')) return 'number';
 
+  // Everything else — integer, object, array, type-less, bare anyOf/oneOf — fell
+  // through every built-in typed tester on the OFF path (isNumberControl matches the
+  // exact type 'number' only; deriveTypes derives nothing from a bare anyOf) and
+  // reached rank-5 GenericControl, whose own dispatch checks enum-like BEFORE type.
+  // Adversarial-review REAL finding (R4.3): `ecodesign_control_class`
+  // ({type:'integer', oneOf:[{const,title},…]} via applyEcodesignControlClassEnum)
+  // therefore renders EnumControl on the OFF path — an integer-before-enum order here
+  // rendered NumberControl's dropdown fallback instead, visibly diverging in the
+  // unset state (placeholder text, the "Copy example" action, and the forwarded
+  // required-error). Enum-before-integer below is load-bearing.
   if (
     schemaHasEnum(resolved) ||
     schemaHasConstAlternatives(resolved, 'oneOf') ||
@@ -148,6 +157,7 @@ export function pickDirectControl(resolved: Record<string, unknown>): 'enum' | '
   ) {
     return 'enum';
   }
+  if (types.includes('integer')) return 'number';
   return 'text';
 }
 
@@ -158,10 +168,16 @@ export function pickDirectControl(resolved: Record<string, unknown>): 'enum' | '
  * oneOf/anyOf/allOf) always get a control (`isCombinator` short-circuits before
  * `deriveTypes` runs); otherwise a property needs some derivable type — an
  * explicit/array `type`, non-empty `properties`/`additionalProperties` (implies
- * object), non-empty `items` (implies array), or a non-empty `enum` — matching
+ * object), non-empty `items` (implies array), or a non-empty `enum` — approximating
  * `deriveTypes`. A schema with none of these (const-only, or genuinely type-less)
  * derives no type; the generator's `types.length === 0` branch returns null without
  * pushing anything to `schemaElements`, so the property never gets a control at all.
+ * KNOWN over-approximation (adversarial review, unreachable in both live schemas):
+ * `deriveTypes` derives enum types from the enum VALUES via lodash `isEmpty`, so an
+ * all-numeric/boolean enum ({enum:[1,2]}), `additionalProperties: true`, or empty
+ * `items` derive NOTHING there (generator drops the property) while this gate emits a
+ * control. Every live type-less enum is all-string; tighten alongside R4.3b if a
+ * schema update ever adds such a shape.
  *
  * System's layout-spec mode does NOT use this gate: its Control nodes come from
  * `buildSystemAdvancedUischema` (unchanged, no type gate of its own — every property
@@ -270,7 +286,9 @@ function getAtPath(data: Record<string, unknown>, path: string): unknown {
  * reducer does: `UPDATE_DATA`'s unset branch is `lodash/fp/unset(path, data)`
  * (verified in node_modules/@jsonforms/core), which only removes the leaf and never
  * prunes now-empty ancestors. A missing intermediate hop is created as `{}` on set,
- * matching `lodash/fp/set`'s own auto-vivification.
+ * matching `lodash/fp/set`'s own auto-vivification. One divergence, currently
+ * unreachable (reset buttons only render when a value exists): DELETE along a missing
+ * intermediate hop vivifies `{}` ancestors here where `lodash/fp/unset` is a no-op.
  */
 function setAtPath(obj: Record<string, unknown>, segments: string[], value: unknown): Record<string, unknown> {
   const [head, ...rest] = segments;
@@ -310,9 +328,20 @@ function renderControlForProperty(args: {
   config: Record<string, unknown>;
   elementType: string | undefined;
   required: boolean;
+  /**
+   * Layout-spec (System) mode only. Empirical asymmetry (adversarial probes, both
+   * verified live): the OFF path's Ajv errors DO reach EnumControl for
+   * required-and-unset fields in System's layout-spec mount
+   * (`ecodesign_control_class` shows "is a required property"), but do NOT in flat
+   * generated-uischema mounts (OnSiteGeneration FHS's `ventilation_strategy` IS
+   * required in the schema, was probed unset, and renders error-free on both paths).
+   * Replicating the message in flat mode would therefore CREATE a divergence, not fix
+   * one.
+   */
+  replicateRequiredError: boolean;
   handleChange: (path: string, value: unknown) => void;
 }): React.ReactElement {
-  const { path, leafKey, resolved, value, label, scope, schema, config, elementType, required, handleChange } = args;
+  const { path, leafKey, resolved, value, label, scope, schema, config, elementType, required, replicateRequiredError, handleChange } = args;
 
   const baseProps = {
     data: value,
@@ -353,7 +382,18 @@ function renderControlForProperty(args: {
   // not depend on this string's exact contents; whatever nuance remains between this
   // field-scoped validation and the OFF path's own Ajv-driven `errors` plumbing is
   // deferred alongside the written-table corrections noted in the module docstring.
-  const errors = (validation.errors ?? []).join('\n');
+  let errors = (validation.errors ?? []).join('\n');
+  if (replicateRequiredError && control === 'enum' && required && value === undefined && !errors) {
+    // OFF-path parity (adversarial probe, System/ecodesign_control_class): for a
+    // required-and-unset field, EnumControl on the JsonForms path forwards
+    // @jsonforms/core's defaultErrorTranslator required message verbatim.
+    // validateAdvancedFieldPrimitive deliberately never emits required errors
+    // (Advanced Fields are mostly-empty-by-design), so replicate the exact message
+    // for this one state. Set-but-invalid values could differ in message TEXT between
+    // the two validators, but no live shape reaches that state through the dropdown
+    // UI (options are schema-sourced). Goes away with the flags in R4.4.
+    errors = 'is a required property';
+  }
   const controlProps = { ...baseProps, errors } as unknown as DirectControlProps;
 
   switch (control) {
@@ -412,6 +452,21 @@ export function DirectAdvancedFields({
     const resolved = readRecord(dereferenceSchemaNodeInRoot(propertySchemaNode, resolutionRoot));
     const label = node.label ?? labelForProperty(leafKey, resolved);
     const value = getAtPath(data, path);
+    // Required from the PARENT schema's `required` list, mirroring how the OFF path's
+    // Ajv required-missing errors attach to this control (adversarial-review finding:
+    // the required-error replication in renderControlForProperty needs this to fire
+    // for nested System fields like ecodesign_control_class; the `required` PROP
+    // itself is still unused by every control).
+    const parentScopeEnd = node.scope.lastIndexOf('/properties/');
+    const parentSchema =
+      parentScopeEnd > 0
+        ? readRecord(
+            dereferenceSchemaNodeInRoot(resolveSchemaPointer(schema, node.scope.slice(0, parentScopeEnd)), resolutionRoot),
+          )
+        : schema;
+    const parentRequired = Array.isArray(parentSchema.required)
+      ? (parentSchema.required as unknown[]).filter((v): v is string => typeof v === 'string')
+      : [];
     return renderControlForProperty({
       path,
       leafKey,
@@ -422,10 +477,8 @@ export function DirectAdvancedFields({
       schema,
       config,
       elementType,
-      // Not meaningful for a nested layout-spec path against a flat top-level
-      // `schema.required` list, and unused by every control regardless (see
-      // labelForProperty's SPIKE FINDING above) — left false rather than guessed.
-      required: false,
+      required: parentRequired.includes(leafKey),
+      replicateRequiredError: true,
       handleChange,
     });
   }
@@ -460,6 +513,7 @@ export function DirectAdvancedFields({
               config,
               elementType,
               required: requiredList.includes(key),
+              replicateRequiredError: false,
               handleChange,
             }),
           )}
