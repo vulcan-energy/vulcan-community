@@ -2,26 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * R4.2/R4.3 characterization: ElectricBattery Advanced Fields, DirectAdvancedFields
- * (ON, default since R4.3) vs. JsonForms (OFF, legacy fallback behind
- * `vulcan:advanced-fields-jsonforms-fallback`). Harness combines the schema-loading
- * pattern from `lib/__tests__/modelAuthoringFieldAudit.test.ts` with the
+ * R4.2/R4.3/R4.4 characterization: ElectricBattery Advanced Fields via
+ * DirectAdvancedFields, the only render path since R4.4 retired the legacy JsonForms
+ * mount and its fallback flag (formerly `vulcan:advanced-fields-jsonforms-fallback`,
+ * `lib/directRenderAdvancedFieldsFlag.ts`, now deleted). Harness combines the
+ * schema-loading pattern from `lib/__tests__/modelAuthoringFieldAudit.test.ts` with the
  * control-mounting pattern from `jsonformsRenderers.units.test.tsx`.
  *
- * R4.3 flag inversion: the R4.2 spike's key (`vulcan:direct-render-advanced-fields`,
- * default OFF) has been REPLACED by `vulcan:advanced-fields-jsonforms-fallback`
- * (default OFF = direct-render is now the default; setting it to '1' restores the
- * legacy JsonForms mount). See `lib/directRenderAdvancedFieldsFlag.ts`.
- *
- * SPIKE FINDING (applies to every JsonForms-path onChange assertion below):
- * `@jsonforms/react`'s `JsonFormsStateProvider` emits the `<JsonForms onChange>`
- * callback through `debounce((...args) => onChangeRef.current?.(...args), 10)` (see
- * node_modules/@jsonforms/react .../jsonforms-react.esm.js, `debouncedEmit`). The
- * JsonForms path therefore only calls `onChange` ~10ms after the LAST edit in a burst.
- * DirectAdvancedFields has no such debounce -- `handleChange` -> `onDataChange` ->
- * `handleJsonFormsChange` -> `onChange` all run synchronously inside the same event.
- * Every JsonForms-path interaction below is followed by `await waitFor(...)` for this
- * reason; the direct-render path never needs it (asserting immediately still passes).
+ * The `$ref probe` describe block below is the one place this file still mounts raw
+ * `<JsonForms>` directly (not through AdvancedFieldsEditor, which no longer offers
+ * that path) -- it documents behaviour web/'s SnippetEditor and SimplifiedFabricEditor
+ * still depend on via the shared `jsonformsRenderers.tsx` registry until R4.5.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -46,7 +37,6 @@ import { getAjvInstance } from '../../lib/ajvCache';
 import { standardRenderers } from '../jsonformsRenderers';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
 import { DirectAdvancedFields } from '../DirectAdvancedFields';
-import { ADVANCED_FIELDS_JSONFORMS_FALLBACK_STORAGE_KEY } from '../../lib/directRenderAdvancedFieldsFlag';
 
 beforeAll(async () => {
   configureGeometrySchemaAssetSource({
@@ -62,7 +52,6 @@ afterAll(() => resetGeometrySchemaAssetsForTests());
 
 afterEach(() => {
   cleanup();
-  localStorage.removeItem(ADVANCED_FIELDS_JSONFORMS_FALLBACK_STORAGE_KEY);
 });
 
 const CORE_ADVANCED_FIELD_KEYS = [
@@ -80,21 +69,11 @@ const FHS_ADVANCED_FIELD_KEYS = [
 ];
 
 /**
- * `enabled: true` sets the fallback flag, restoring the legacy JsonForms mount.
- * `enabled: false` clears it, the default state, which is now direct-render.
- */
-function setJsonformsFallbackFlag(enabled: boolean): void {
-  if (enabled) localStorage.setItem(ADVANCED_FIELDS_JSONFORMS_FALLBACK_STORAGE_KEY, '1');
-  else localStorage.removeItem(ADVANCED_FIELDS_JSONFORMS_FALLBACK_STORAGE_KEY);
-}
-
-/**
  * Controlled wrapper feeding each `onChange` payload back into `currentData`, the way
  * the real host (AdvancedFieldsEditor's caller, backed by the geometry store)
  * re-renders with fresh element data after every edit. Without this, a *second*
  * interaction in the same test would still see the *original* `extra_json` --
- * DirectAdvancedFields (see SPIKE FINDING in the file banner) is fully controlled and
- * has no state of its own, unlike JsonForms's internal store (below).
+ * DirectAdvancedFields is fully controlled and has no state of its own.
  */
 function ControlledHarness({
   useFHSSchema,
@@ -176,13 +155,12 @@ function hasVisibleInlineError(container: HTMLElement): boolean {
   return Array.from(container.querySelectorAll('div')).some((el) => el.style.color === 'var(--error)');
 }
 
-describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3 rollout)', () => {
-  it('JsonForms-path characterization (fallback flag set): Core mode field set, base-field hiding, onChange wiring, and error presentation', async () => {
-    setJsonformsFallbackFlag(true);
+describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3 rollout / R4.4 sole path)', () => {
+  it('direct-render characterization: Core mode field set, base-field hiding, onChange wiring, and error presentation', async () => {
     const onChange = vi.fn();
     const { container } = renderEditor({ onChange, extraJson: {} });
 
-    expect(container.querySelector('[data-testid="direct-advanced-fields"]')).toBeNull();
+    expect(container.querySelector('[data-testid="direct-advanced-fields"]')).not.toBeNull();
 
     const keys = fieldKeys(container);
     for (const key of CORE_ADVANCED_FIELD_KEYS) {
@@ -199,8 +177,10 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
     expect(hasVisibleInlineError(container)).toBe(false);
 
     // battery_age: typing a valid number fires onChange with extra_json.battery_age
-    // as a NUMBER (coerced by useNumericDraftInput's commit, not by anything
-    // JsonForms-specific). Debounced ~10ms by JsonFormsStateProvider -- see file banner.
+    // as a NUMBER (coerced by useNumericDraftInput's commit). DirectAdvancedFields'
+    // handleChange -> onDataChange -> handleJsonFormsChange -> onChange all run
+    // synchronously inside the same event; `waitFor` below is kept for harness
+    // consistency, not because it's needed.
     const batteryAgeInput = within(fieldRow(container, 'battery_age')).getByRole('textbox');
     fireEvent.change(batteryAgeInput, { target: { value: '5' } });
     await waitFor(() =>
@@ -212,8 +192,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
     // Invalid value (schema: battery_age minimum 0): typing "-5" is a syntactically
     // complete number so it commits, but validateAdvancedFieldPrimitive
     // (schemaPort-backed AJV validation) flags it and NumberControl shows its own
-    // localError text. This is plain useState inside NumberControl -- NOT wired
-    // through JsonForms' onChange/debounce at all -- so it's visible synchronously.
+    // localError text -- plain useState inside NumberControl, visible synchronously.
     fireEvent.change(batteryAgeInput, { target: { value: '-5' } });
     expect(hasVisibleInlineError(container)).toBe(true);
 
@@ -228,30 +207,24 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
 
     // Reset/unset payload shape: with no defaults configured, any field holding a
     // meaningful value shows a "Reset to default" button; clicking it calls
-    // handleChange(path, undefined). Record what shape that leaves in extra_json.
+    // handleChange(path, undefined). Record what shape that leaves in extra_json --
+    // the key is dropped entirely (explicit `delete`), not left present-with-`undefined`.
     const resetButton = within(fieldRow(container, 'grid_charging_possible')).getByRole('button', {
       name: 'Reset to default',
     });
     fireEvent.click(resetButton);
     await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(3));
     const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as { extra_json: Record<string, unknown> };
-    // Reset/unset: JsonForms' own core reducer drops the key entirely (verified
-    // empirically -- NOT left present-with-`undefined`, despite a plain object spread
-    // ordinarily preserving `undefined`-valued keys; JsonForms' `Resolve`-based data
-    // update evidently deletes rather than assigns `undefined`). This is the same
-    // shape DirectAdvancedFields' own `handleChange` produces (explicit `delete`) --
-    // see the "Unset parity" assertion in the parity test below.
     expect(Object.prototype.hasOwnProperty.call(lastCall.extra_json, 'grid_charging_possible')).toBe(false);
   });
 
-  it('fallback flag set: direct-advanced-fields testid absent, JsonForms path renders', () => {
-    setJsonformsFallbackFlag(true);
+  it('renders the direct wrapper by default', () => {
     const { container } = renderEditor({});
-    expect(container.querySelector('[data-testid="direct-advanced-fields"]')).toBeNull();
+    expect(container.querySelector('[data-testid="direct-advanced-fields"]')).not.toBeNull();
     expect(fieldKeys(container)).toContain('battery_age');
   });
 
-  it('parity direct-render vs JsonForms: same field set/labels, same onChange payloads for entry / toggle / unset', async () => {
+  it('direct-render characterization: field set/labels + onChange payloads for entry / toggle / unset', async () => {
     const sharedExtraJson = {
       battery_age: 5,
       grid_charging_possible: true,
@@ -260,103 +233,96 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
       minimum_charge_rate_one_way_trip: 1,
     };
 
-    async function exercise(container: HTMLElement, onChange: ReturnType<typeof vi.fn>) {
-      // Captured while mounted — the JsonForms container is emptied by unmount/cleanup
-      // before the cross-path assertions run.
-      const keys = fieldKeys(container);
-      const labels = CORE_ADVANCED_FIELD_KEYS.map((key) => fieldLabelText(fieldRow(container, key))).sort();
+    const onChange = vi.fn();
+    const { container } = renderEditor({ onChange, extraJson: sharedExtraJson });
+    expect(container.querySelector('[data-testid="direct-advanced-fields"]')).not.toBeNull();
 
-      const batteryAgeInput = within(fieldRow(container, 'battery_age')).getByRole('textbox');
-      fireEvent.change(batteryAgeInput, { target: { value: '9' } });
-      await waitFor(() => expect(onChange).toHaveBeenCalled());
-      const numberEntryCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    // Field set / label / ordering characterization, captured verbatim from the last
+    // A/B GREEN run (before R4.4 deleted the JsonForms comparator). Ordering is
+    // load-bearing (see the project convention noted throughout this file).
+    expect(fieldKeys(container)).toEqual(CORE_ADVANCED_FIELD_KEYS);
+    expect(CORE_ADVANCED_FIELD_KEYS.map((key) => fieldLabelText(fieldRow(container, key)))).toEqual([
+      'Battery Age',
+      'Grid Charging Possible',
+      'Maximum Charge Rate One Way Trip',
+      'Maximum Discharge Rate One Way Trip',
+      'Minimum Charge Rate One Way Trip',
+    ]);
 
-      const gridCharging = within(fieldRow(container, 'grid_charging_possible')).getByRole('checkbox');
-      fireEvent.click(gridCharging);
-      await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(2));
-      const toggleCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
-
-      const resetButton = within(fieldRow(container, 'battery_age')).getByRole('button', {
-        name: 'Reset to default',
-      });
-      fireEvent.click(resetButton);
-      await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(3));
-      const unsetCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
-
-      return { keys, labels, numberEntryCall, toggleCall, unsetCall };
-    }
-
-    setJsonformsFallbackFlag(true);
-    const offOnChange = vi.fn();
-    const off = renderEditor({ onChange: offOnChange, extraJson: sharedExtraJson });
-    const offResult = await exercise(off.container, offOnChange);
-    off.unmount();
-    cleanup();
-
-    setJsonformsFallbackFlag(false);
-    const onOnChange = vi.fn();
-    const on = renderEditor({ onChange: onOnChange, extraJson: sharedExtraJson });
-    expect(on.container.querySelector('[data-testid="direct-advanced-fields"]')).not.toBeNull();
-    const onResult = await exercise(on.container, onOnChange);
-
-    // Field set / label parity: DirectAdvancedFields' title-or-startCase label logic
-    // matches what JsonForms' generated uischema + deriveLabel produce.
-    expect(onResult.labels).toEqual(offResult.labels);
-
-    // Ordering parity, UNSORTED: the direct walk must enumerate exactly the order
-    // JsonForms' generated uischema does (Object.keys insertion order on the same
-    // filtered properties object). Ordering is load-bearing (see the module comment)
-    // and every other assertion in this file sorts or uses toContain — this is the
-    // one that would catch a reordered walk.
-    expect(onResult.keys.length).toBeGreaterThan(0);
-    expect(onResult.keys).toEqual(offResult.keys);
-
-    // Number entry parity: identical payload shape (both paths run the SAME NumberControl).
-    expect(onResult.numberEntryCall).toEqual(offResult.numberEntryCall);
-
-    // Boolean toggle parity: identical payload shape (both paths run the SAME BooleanControl).
-    expect(onResult.toggleCall).toEqual(offResult.toggleCall);
-
-    // Unset parity: both drop the key entirely (verified with hasOwnProperty, not
-    // just toEqual, since toEqual alone would treat a present-but-undefined key the
-    // same as an absent one and mask a real divergence -- see test 1's
-    // characterization, which found the JsonForms path also deletes rather than
-    // nulls it).
-    expect(onResult.unsetCall).toEqual(offResult.unsetCall);
-    const offHasKey = Object.prototype.hasOwnProperty.call(
-      (offResult.unsetCall as { extra_json: Record<string, unknown> }).extra_json,
-      'battery_age',
+    const batteryAgeInput = within(fieldRow(container, 'battery_age')).getByRole('textbox');
+    fireEvent.change(batteryAgeInput, { target: { value: '9' } });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith({
+        type: 'ElectricBattery',
+        extra_json: {
+          battery_age: 9,
+          grid_charging_possible: true,
+          maximum_charge_rate_one_way_trip: 2,
+          maximum_discharge_rate_one_way_trip: 2,
+          minimum_charge_rate_one_way_trip: 1,
+        },
+      }),
     );
-    const onHasKey = Object.prototype.hasOwnProperty.call(
-      (onResult.unsetCall as { extra_json: Record<string, unknown> }).extra_json,
-      'battery_age',
-    );
-    expect(offHasKey).toBe(false);
-    expect(onHasKey).toBe(false);
+
+    const gridCharging = within(fieldRow(container, 'grid_charging_possible')).getByRole('checkbox');
+    fireEvent.click(gridCharging);
+    await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(onChange.mock.calls[onChange.mock.calls.length - 1][0]).toEqual({
+      type: 'ElectricBattery',
+      extra_json: {
+        battery_age: 9,
+        grid_charging_possible: false,
+        maximum_charge_rate_one_way_trip: 2,
+        maximum_discharge_rate_one_way_trip: 2,
+        minimum_charge_rate_one_way_trip: 1,
+      },
+    });
+
+    const resetButton = within(fieldRow(container, 'battery_age')).getByRole('button', {
+      name: 'Reset to default',
+    });
+    fireEvent.click(resetButton);
+    await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(3));
+    const unsetCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as {
+      extra_json: Record<string, unknown>;
+    };
+    // Unset: the key is dropped entirely (verified with hasOwnProperty, not just
+    // toEqual, since toEqual alone would treat a present-but-undefined key the same
+    // as an absent one and mask a real regression).
+    expect(unsetCall).toEqual({
+      type: 'ElectricBattery',
+      extra_json: {
+        grid_charging_possible: false,
+        maximum_charge_rate_one_way_trip: 2,
+        maximum_discharge_rate_one_way_trip: 2,
+        minimum_charge_rate_one_way_trip: 1,
+      },
+    });
+    expect(Object.prototype.hasOwnProperty.call(unsetCall.extra_json, 'battery_age')).toBe(false);
   });
 
-  it('FHS mode, default (fallback flag unset): three rate fields render as number inputs with schema-derived min/exclusiveMinimum attributes', () => {
-    // FHS battery fields have NO schema `title` (unlike Core), so this comparison is
-    // the one place startCaseKey is exercised against JsonForms' own
-    // lodash-startCase-derived labels — the Core parity test only ever hits the
-    // title branch.
-    setJsonformsFallbackFlag(true);
-    const off = renderEditor({ useFHSSchema: true });
-    const offKeys = fieldKeys(off.container);
-    const offLabels = offKeys.map((key) => fieldLabelText(fieldRow(off.container, key)));
-    off.unmount();
-    cleanup();
-
-    setJsonformsFallbackFlag(false);
+  it('FHS mode: three rate fields render as number inputs with schema-derived min/exclusiveMinimum attributes', () => {
+    // FHS battery fields have NO schema `title` (unlike Core), so this is the one
+    // place startCaseKey's own label derivation is exercised, rather than the
+    // schema-`title` branch the Core test above hits.
     const { container } = renderEditor({ useFHSSchema: true });
 
     expect(container.querySelector('[data-testid="direct-advanced-fields"]')).not.toBeNull();
     expect(fieldKeys(container).sort()).toEqual([...FHS_ADVANCED_FIELD_KEYS].sort());
 
-    // Unsorted key AND label parity against the JsonForms path (see ordering note in
-    // the Core parity test).
-    expect(fieldKeys(container)).toEqual(offKeys);
-    expect(offKeys.map((key) => fieldLabelText(fieldRow(container, key)))).toEqual(offLabels);
+    // Ordering + label characterization, captured verbatim from the last A/B GREEN
+    // run (see ordering note in the test above).
+    const orderedKeys = [
+      'minimum_charge_rate_one_way_trip',
+      'maximum_charge_rate_one_way_trip',
+      'maximum_discharge_rate_one_way_trip',
+    ];
+    expect(fieldKeys(container)).toEqual(orderedKeys);
+    expect(orderedKeys.map((key) => fieldLabelText(fieldRow(container, key)))).toEqual([
+      'Minimum Charge Rate One Way Trip',
+      'Maximum Charge Rate One Way Trip',
+      'Maximum Discharge Rate One Way Trip',
+    ]);
 
     // minimum_charge_rate_one_way_trip: schema declares `minimum: 0` (not exclusive).
     const minInput = within(fieldRow(container, 'minimum_charge_rate_one_way_trip')).getByRole('textbox');
@@ -374,7 +340,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
     }
   });
 
-  describe('$ref probe: cross-path component parity (R4.3 executed-table amendment)', () => {
+  describe('$ref probe: DirectAdvancedFields vs the shared JsonForms registry (web/ still depends on the registry until R4.5)', () => {
     it('DirectAdvancedFields resolves battery_location $ref to an inside/outside dropdown via TextControl, emitting an uncoerced string', () => {
       const unfiltered = canonicalGeometrySchemaPort.getElementSubschema('core', 'ElectricBattery') as Record<
         string,
@@ -413,7 +379,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
       // rule (c) routes it to TextControl, EVEN THOUGH the resolved schema also
       // carries `.enum`. This dropdown is therefore TextControl's OWN `extractOptions`
       // fallback (`<StandardDropdown>`), not EnumControl -- the exact same component
-      // and code path the OFF (JsonForms) test below exercises, verified next.
+      // and code path the raw JsonForms registry test below exercises, verified next.
       const select = within(fieldRow(container, 'battery_location')).getByRole('combobox');
       const optionValues = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
       expect(optionValues).toEqual(expect.arrayContaining(['inside', 'outside']));
@@ -422,7 +388,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
       expect(onDataChange).toHaveBeenCalledWith({ battery_location: 'outside' });
     });
 
-    it('raw JsonForms renders the same $ref property via the identical TextControl enum fallback -- cross-path component parity is exact', async () => {
+    it('raw JsonForms registry mount renders the same $ref property via the identical TextControl enum fallback -- documents behaviour web/\'s SnippetEditor/SimplifiedFabricEditor still depend on until R4.5', async () => {
       const unfiltered = canonicalGeometrySchemaPort.getElementSubschema('core', 'ElectricBattery') as Record<
         string,
         unknown
@@ -456,8 +422,8 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
 
       // SPIKE FINDING (probe 5b -- verified empirically by evaluating every
       // standardRenderers/materialRenderers tester against the real
-      // uischema/schema/context for this control), now the DESIGN R4.3's
-      // executed-table `pickDirectControl` deliberately reproduces:
+      // uischema/schema/context for this control), which R4.3's executed-table
+      // `pickDirectControl` deliberately reproduces (see the test above):
       //
       // JsonForms' renderer-registry DISPATCH passes each Control's TESTER the
       // *unresolved* parent object schema (jsonforms-react's
@@ -490,24 +456,25 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
       // schema it receives carries `.enum`/oneOf-const alternatives -- the exact same
       // underlying component EnumControl uses, hence the identical CSS classes.
       //
-      // R4.3 (this test's whole point, updated from the R4.2 spike's "accidental
-      // parity" framing): DirectAdvancedFields' `pickDirectControl` now checks the
-      // resolved property's type list BEFORE checking enum-ness (rule (c): 'string' ->
-      // TextControl, unconditionally) -- so for battery_location it ALSO lands on
+      // This is why DirectAdvancedFields' `pickDirectControl` checks the resolved
+      // property's type list BEFORE checking enum-ness (rule (c): 'string' ->
+      // TextControl, unconditionally): so for battery_location it ALSO lands on
       // TextControl, the exact same component, exercising the exact same
-      // `extractOptions` dropdown fallback as this JsonForms mount. The parity is no
-      // longer accidental cross-component convergence; it is the SAME component on
-      // both paths, by explicit design (see the "executed-table port" docstring on
-      // `pickDirectControl` in DirectAdvancedFields.tsx). EnumControl is never reached
-      // for this property on EITHER path.
+      // `extractOptions` dropdown fallback this raw JsonForms registry mount does.
+      // web/'s SnippetEditor and SimplifiedFabricEditor still mount this same
+      // `standardRenderers`/`materialRenderers` registry through their own
+      // `<JsonForms>` usage (see `jsonformsRenderers.tsx`) -- this test is the
+      // community-side guarantee that the registry keeps behaving this way until
+      // R4.5 migrates them too.
       const row = fieldRow(container, 'battery_location');
       const select = within(row).getByRole('combobox');
       expect(select.tagName).toBe('SELECT');
       const optionValues = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
       expect(optionValues).toEqual(expect.arrayContaining(['inside', 'outside']));
 
-      // Same ~10ms debounce as every other raw-<JsonForms> onChange in this file
-      // (JsonFormsStateProvider's debouncedEmit) -- see file banner.
+      // ~10ms debounce: `@jsonforms/react`'s `JsonFormsStateProvider` emits the
+      // `<JsonForms onChange>` callback through `debounce(..., 10)` (see
+      // node_modules/@jsonforms/react .../jsonforms-react.esm.js, `debouncedEmit`).
       fireEvent.change(select, { target: { value: 'outside' } });
       await waitFor(() =>
         expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ battery_location: 'outside' })),

@@ -5,8 +5,9 @@
  * R4.3: render the existing custom JsonForms Advanced Fields controls directly off a
  * resolved subschema (or, for System, a layout spec from `../lib/systemAdvancedUischema`),
  * with no <JsonForms> dispatch and no generated uischema. Generalized from the R4.2
- * ElectricBattery-only spike to every element type; default-ON, behind the fallback
- * kill-switch in `../lib/directRenderAdvancedFieldsFlag`. This module must not import
+ * ElectricBattery-only spike to every element type. R4.4 retired the legacy JsonForms
+ * mount and its fallback kill-switch (formerly `../lib/directRenderAdvancedFieldsFlag`),
+ * so this is now the only Advanced Fields render path. This module must not import
  * anything from `@jsonforms/*` — every prop shape below is inferred structurally from
  * the control components themselves (`React.ComponentProps<typeof TextControl>`,
  * etc.), matching the cast pattern in `__tests__/jsonformsRenderers.units.test.tsx`.
@@ -39,9 +40,9 @@ export type DirectAdvancedFieldsProps = {
   /**
    * System only: the manually-built layout spec from `buildSystemAdvancedUischema`.
    * When present, the property walk below is driven by this tree instead of
-   * `schema.properties` — System's OFF path mounts this SAME spec as the JsonForms
-   * `uischema` prop rather than letting JsonForms auto-generate one, so matching it
-   * here (not `schema.properties`) is what parity means for System.
+   * `schema.properties` — System's retired JsonForms path mounted this SAME spec as
+   * the JsonForms `uischema` prop rather than letting JsonForms auto-generate one, so
+   * matching it here (not `schema.properties`) is what parity meant for System.
    */
   layout?: AdvancedFieldsLayoutNode;
   onDataChange: (next: Record<string, unknown>) => void;
@@ -73,10 +74,11 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  *  (b) type list includes 'boolean' -> BooleanControl, EVEN IF an enum/oneOf-const is
  *      also present (rank-90 `isBooleanControl` wins outright; the rank-1000/1100 enum
  *      testers never fire here since they read the parent schema's `.enum`, not the
- *      resolved property's). This is what keeps `security_risk` (FHS: `{type:
- *      'boolean', enum:[true,false]}`) a plain checkbox on BOTH paths — verified by
- *      mounting OFF directly: BooleanControl's checkbox renders, not EnumControl's
- *      dropdown, despite the schema literally carrying `.enum`.
+ *      resolved property's). This is what kept `security_risk` (FHS: `{type:
+ *      'boolean', enum:[true,false]}`) a plain checkbox on BOTH paths — verified, back
+ *      when the JsonForms mount still existed, by mounting it directly: BooleanControl's
+ *      checkbox rendered, not EnumControl's dropdown, despite the schema literally
+ *      carrying `.enum`. The direct path renders it as a plain checkbox unconditionally.
  *  (c) type list includes 'string' -> TextControl, EVEN IF an enum is present (rank-80
  *      `isStringControl` wins; TextControl's OWN `extractOptions` fallback renders the
  *      identical StandardDropdown component an inline/$ref'd string enum needs — see
@@ -90,17 +92,18 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  *      GenericControl's dispatch sees no enum/boolean/number/integer either. (No live
  *      HEM property currently has this exact shape — `area_per_perimeter_vent`, the
  *      R4.2 spike's cited example, is actually a plain `{type:'number'}` in both Core
- *      and FHS, verified by mounting both paths directly: BOTH already render
- *      NumberControl with identical `min`/`data-exclusive-minimum` attributes, so
- *      that was a stale docstring claim, never an actual divergence.)
+ *      and FHS, verified by mounting both paths directly (back when the JsonForms
+ *      mount still existed): BOTH already rendered NumberControl with identical
+ *      `min`/`data-exclusive-minimum` attributes, so that was a stale docstring claim,
+ *      never an actual divergence.)
  *  (f) everything else — integer, object, array, type-less, bare combinators — reaches
  *      rank-5 GenericControl, whose resolved-schema dispatch checks ENUM-LIKE FIRST
  *      (`.enum`, or oneOf/anyOf where every branch is a bare `const`) -> EnumControl —
  *      this is how `{type:'integer', oneOf:[{const,title},…]}`
- *      (`ecodesign_control_class`) gets EnumControl on the OFF path (adversarial-review
- *      REAL finding; an earlier draft of this picker ordered integer first and
- *      diverged visibly in the unset state) — then boolean (dead here, claimed by (b)),
- *      then number/INTEGER -> NumberControl, else TextControl.
+ *      (`ecodesign_control_class`) got EnumControl on the retired JsonForms path
+ *      (adversarial-review REAL finding; an earlier draft of this picker ordered
+ *      integer first and diverged visibly in the unset state) — then boolean (dead
+ *      here, claimed by (b)), then number/INTEGER -> NumberControl, else TextControl.
  *
  * DEFERRED to a follow-up slice (R4.3b, tracked in the parent repo's
  * docs/development/Community_Repo_Refactor_Plan.md): the WRITTEN-table corrections
@@ -118,9 +121,10 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  * the whole object, which falls through every typed tester (rule (b)-(e) all miss:
  * type is 'object') to rule (f) -> not enum-like -> 'text' -> TextControl's own
  * `isJsonLike` branch JSON.stringifies the object. Mounting both paths against the
- * same MechanicalVentilation FHS position_exhaust fixture confirms OFF and ON render
- * the identical single blob row, byte-for-byte, with zero code here dedicated to it
- * (see `AdvancedFieldsEditor.directParity.test.tsx`, "MechanicalVentilation, non-MVHR:
+ * same MechanicalVentilation FHS position_exhaust fixture confirmed the retired
+ * JsonForms path and the direct path rendered the identical single blob row,
+ * byte-for-byte, with zero code here dedicated to it (see
+ * `AdvancedFieldsEditor.directRender.test.tsx`, "MechanicalVentilation, non-MVHR:
  * position_exhaust nested-object blob" — config 5 in the matrix is MVHR specifically,
  * per the brief, which never reaches position-object mode; this is exercised in a
  * dedicated adjacent test instead).
@@ -140,16 +144,17 @@ export function pickDirectControl(resolved: Record<string, unknown>): 'enum' | '
   if (types.includes('string')) return 'text';
   if (types.includes('number')) return 'number';
 
-  // Everything else — integer, object, array, type-less, bare anyOf/oneOf — fell
-  // through every built-in typed tester on the OFF path (isNumberControl matches the
-  // exact type 'number' only; deriveTypes derives nothing from a bare anyOf) and
-  // reached rank-5 GenericControl, whose own dispatch checks enum-like BEFORE type.
-  // Adversarial-review REAL finding (R4.3): `ecodesign_control_class`
-  // ({type:'integer', oneOf:[{const,title},…]} via applyEcodesignControlClassEnum)
-  // therefore renders EnumControl on the OFF path — an integer-before-enum order here
-  // rendered NumberControl's dropdown fallback instead, visibly diverging in the
-  // unset state (placeholder text, the "Copy example" action, and the forwarded
-  // required-error). Enum-before-integer below is load-bearing.
+  // Everything else — integer, object, array, type-less, bare anyOf/oneOf — used to
+  // fall through every built-in typed tester on the retired JsonForms path
+  // (isNumberControl matches the exact type 'number' only; deriveTypes derives
+  // nothing from a bare anyOf) and reach rank-5 GenericControl, whose own dispatch
+  // checks enum-like BEFORE type. Adversarial-review REAL finding (R4.3):
+  // `ecodesign_control_class` ({type:'integer', oneOf:[{const,title},…]} via
+  // applyEcodesignControlClassEnum) therefore got EnumControl on the retired
+  // JsonForms path — an integer-before-enum order here rendered NumberControl's
+  // dropdown fallback instead, visibly diverging in the unset state (placeholder
+  // text, the "Copy example" action, and the forwarded required-error).
+  // Enum-before-integer below is load-bearing.
   if (
     schemaHasEnum(resolved) ||
     schemaHasConstAlternatives(resolved, 'oneOf') ||
@@ -182,9 +187,9 @@ export function pickDirectControl(resolved: Record<string, unknown>): 'enum' | '
  * System's layout-spec mode does NOT use this gate: its Control nodes come from
  * `buildSystemAdvancedUischema` (unchanged, no type gate of its own — every property
  * present in the plant schema gets a Control), which is exactly the uischema the
- * JsonForms OFF mount for System renders verbatim (it is passed as the `uischema`
- * prop, bypassing JsonForms' own generator entirely). Matching that spec exactly,
- * gate-free, is what parity means for System.
+ * retired JsonForms mount rendered verbatim for System (it was passed as the
+ * `uischema` prop, bypassing JsonForms' own generator entirely). Matching that spec
+ * exactly, gate-free, is what parity meant for System.
  */
 function schemaEmitsControl(resolved: Record<string, unknown>): boolean {
   if (Object.keys(resolved).length === 0) return false;
@@ -216,9 +221,9 @@ function schemaEmitsControl(resolved: Record<string, unknown>): boolean {
  * R4.3 FINDING (generalizing past ElectricBattery surfaced this): the R4.2 spike's
  * original version only split on `_`, since every ElectricBattery key was snake_case.
  * OnSiteGeneration FHS's `EnergySupply` (a PascalCase key with no schema `title`)
- * broke that: OFF -- JsonForms' own `addLabel`/label-derivation for a Control with no
- * explicit uischema `label` falls back to `title` if present, else lodash
- * `startCase(scopeSegment)` (see node_modules/@jsonforms/core), which DOES split
+ * broke that: on the retired JsonForms path, JsonForms' own `addLabel`/label-derivation
+ * for a Control with no explicit uischema `label` fell back to `title` if present, else
+ * lodash `startCase(scopeSegment)` (see node_modules/@jsonforms/core), which DOES split
  * camelCase/PascalCase boundaries -- rendered "Energy Supply"; the R4.2-era version
  * here rendered "EnergySupply" verbatim. This is now fixed by splitting at
  * lowercase->uppercase and acronym-run->titlecase boundaries too, matching lodash
@@ -241,15 +246,16 @@ function startCaseKey(key: string): string {
 /**
  * Label for one property: `resolved.title` if present, else start-cased key.
  *
- * SPIKE FINDING (still holds under R4.3): no `*` is appended for required fields,
+ * SPIKE FINDING (still holds under R4.3/R4.4): no `*` is appended for required fields,
  * even though JsonForms core's own `computeLabel(label, required, hideRequiredAsterisk)`
  * would append one. None of TextControl / NumberControl / BooleanControl / EnumControl
- * in jsonformsRenderers.tsx read the `required` prop or call `computeLabel` — the OFF
- * path never renders a required-asterisk today (verified in
- * `AdvancedFieldsEditor.electricBattery.test.tsx`, "OFF-path characterization"). The
- * R4.2 brief's original spec ("append '*' … mirrors JsonForms' computeLabel") does not
- * hold for this renderer stack; matching the OFF path (not the brief) is what parity
- * means.
+ * in jsonformsRenderers.tsx read the `required` prop or call `computeLabel` — the
+ * retired JsonForms path never rendered a required-asterisk either (verified in
+ * `AdvancedFieldsEditor.electricBattery.test.tsx`'s direct-render characterization
+ * test, back when it still compared against the JsonForms mount). The R4.2 brief's
+ * original spec ("append '*' … mirrors JsonForms' computeLabel") did not hold for this
+ * renderer stack; matching what the JsonForms path actually did (not the brief) was
+ * what parity meant, and the direct path still renders no asterisk today.
  */
 function labelForProperty(key: string, resolved: Record<string, unknown>): string {
   const title = resolved.title;
@@ -282,10 +288,10 @@ function getAtPath(data: Record<string, unknown>, path: string): unknown {
  * object hop with `{...}`, and either sets or deletes the leaf. `value === undefined`
  * deletes the leaf key outright (matches the top-level spike behaviour, extended to
  * every hop). Intermediate objects are left in place even if the delete empties them
- * — this is NOT a stylistic choice, it matches what the OFF path's own JsonForms core
- * reducer does: `UPDATE_DATA`'s unset branch is `lodash/fp/unset(path, data)`
- * (verified in node_modules/@jsonforms/core), which only removes the leaf and never
- * prunes now-empty ancestors. A missing intermediate hop is created as `{}` on set,
+ * — this is NOT a stylistic choice, it matches what the retired JsonForms path's own
+ * JsonForms core reducer did: `UPDATE_DATA`'s unset branch is `lodash/fp/unset(path,
+ * data)` (verified in node_modules/@jsonforms/core), which only removes the leaf and
+ * never prunes now-empty ancestors. A missing intermediate hop is created as `{}` on set,
  * matching `lodash/fp/set`'s own auto-vivification. One divergence, currently
  * unreachable (reset buttons only render when a value exists): DELETE along a missing
  * intermediate hop vivifies `{}` ancestors here where `lodash/fp/unset` is a no-op.
@@ -330,13 +336,13 @@ function renderControlForProperty(args: {
   required: boolean;
   /**
    * Layout-spec (System) mode only. Empirical asymmetry (adversarial probes, both
-   * verified live): the OFF path's Ajv errors DO reach EnumControl for
-   * required-and-unset fields in System's layout-spec mount
-   * (`ecodesign_control_class` shows "is a required property"), but do NOT in flat
-   * generated-uischema mounts (OnSiteGeneration FHS's `ventilation_strategy` IS
-   * required in the schema, was probed unset, and renders error-free on both paths).
-   * Replicating the message in flat mode would therefore CREATE a divergence, not fix
-   * one.
+   * verified live before the JsonForms mount was retired): the JsonForms path's Ajv
+   * errors DID reach EnumControl for required-and-unset fields in System's
+   * layout-spec mount (`ecodesign_control_class` showed "is a required property"),
+   * but did NOT in flat generated-uischema mounts (OnSiteGeneration FHS's
+   * `ventilation_strategy` IS required in the schema, was probed unset, and rendered
+   * error-free on both paths). Replicating the message in flat mode would therefore
+   * CREATE a divergence, not fix one.
    */
   replicateRequiredError: boolean;
   handleChange: (path: string, value: unknown) => void;
@@ -378,20 +384,24 @@ function renderControlForProperty(args: {
   );
   // Of the five controls, only EnumControl forwards this string to its input
   // (StandardDropdown `error`); Number/Boolean/Text/WindowPartListControl ignore the
-  // prop and self-validate. Control IDENTITY parity (this slice's whole point) does
+  // prop and self-validate. Control IDENTITY parity (this slice's whole point) did
   // not depend on this string's exact contents; whatever nuance remains between this
-  // field-scoped validation and the OFF path's own Ajv-driven `errors` plumbing is
-  // deferred alongside the written-table corrections noted in the module docstring.
+  // field-scoped validation and the retired JsonForms path's own Ajv-driven `errors`
+  // plumbing is deferred alongside the written-table corrections noted in the module
+  // docstring.
   let errors = (validation.errors ?? []).join('\n');
   if (replicateRequiredError && control === 'enum' && required && value === undefined && !errors) {
-    // OFF-path parity (adversarial probe, System/ecodesign_control_class): for a
-    // required-and-unset field, EnumControl on the JsonForms path forwards
-    // @jsonforms/core's defaultErrorTranslator required message verbatim.
+    // Retired-JsonForms-path parity (adversarial probe, System/ecodesign_control_class):
+    // for a required-and-unset field, EnumControl on the (now-deleted) JsonForms mount
+    // forwarded @jsonforms/core's defaultErrorTranslator required message verbatim.
     // validateAdvancedFieldPrimitive deliberately never emits required errors
     // (Advanced Fields are mostly-empty-by-design), so replicate the exact message
     // for this one state. Set-but-invalid values could differ in message TEXT between
     // the two validators, but no live shape reaches that state through the dropdown
-    // UI (options are schema-sourced). Goes away with the flags in R4.4.
+    // UI (options are schema-sourced). R4.4 retired the JsonForms mount and its
+    // fallback flags, so this replication is now permanent behaviour of the
+    // layout-spec path, not a transitional parity shim -- revisit only alongside
+    // R4.3b's broader enum error-forwarding work.
     errors = 'is a required property';
   }
   const controlProps = { ...baseProps, errors } as unknown as DirectControlProps;
@@ -452,11 +462,12 @@ export function DirectAdvancedFields({
     const resolved = readRecord(dereferenceSchemaNodeInRoot(propertySchemaNode, resolutionRoot));
     const label = node.label ?? labelForProperty(leafKey, resolved);
     const value = getAtPath(data, path);
-    // Required from the PARENT schema's `required` list, mirroring how the OFF path's
-    // Ajv required-missing errors attach to this control (adversarial-review finding:
-    // the required-error replication in renderControlForProperty needs this to fire
-    // for nested System fields like ecodesign_control_class; the `required` PROP
-    // itself is still unused by every control).
+    // Required from the PARENT schema's `required` list, mirroring how the retired
+    // JsonForms path's Ajv required-missing errors used to attach to this control
+    // (adversarial-review finding: the required-error replication in
+    // renderControlForProperty needs this to fire for nested System fields like
+    // ecodesign_control_class; the `required` PROP itself is still unused by every
+    // control).
     const parentScopeEnd = node.scope.lastIndexOf('/properties/');
     const parentSchema =
       parentScopeEnd > 0
