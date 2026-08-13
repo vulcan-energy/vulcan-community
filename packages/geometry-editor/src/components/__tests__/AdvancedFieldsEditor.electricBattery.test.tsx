@@ -9,19 +9,18 @@
  * schema-loading pattern from `lib/__tests__/modelAuthoringFieldAudit.test.ts` with the
  * control-mounting pattern from `jsonformsRenderers.units.test.tsx`.
  *
- * The `$ref probe` describe block below is the one place this file still mounts raw
- * `<JsonForms>` directly (not through AdvancedFieldsEditor, which no longer offers
- * that path) -- it documents behaviour web/'s SnippetEditor and SimplifiedFabricEditor
- * still depend on via the shared `jsonformsRenderers.tsx` registry until R4.5.
+ * R4.5: the `$ref probe` describe block below used to be the one place this file
+ * mounted raw `<JsonForms>` directly, documenting behaviour web/'s SnippetEditor and
+ * SimplifiedFabricEditor depended on via the shared `jsonformsRenderers.tsx`
+ * `standardRenderers` registry. That registry (and the raw-JsonForms comparison test)
+ * is deleted in this slice -- both editors migrated to `DirectSpecFields`
+ * (`components/DirectAdvancedFields.tsx`) instead. The surviving `$ref probe` test
+ * below documents the direct path alone.
  */
 
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import React from 'react';
-// Raw JsonForms import — allowed HERE ONLY, for the probe-5b comparison mount. No
-// other file in this spike imports @jsonforms/*.
-import { JsonForms } from '@jsonforms/react';
-import { materialRenderers } from '@jsonforms/material-renderers';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import coreSchema from '../../../../../data/schemas/core-input.schema.json';
 import fhsSchema from '../../../../../data/schemas/input_fhs.schema.json';
@@ -33,8 +32,6 @@ import {
 import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
-import { getAjvInstance } from '../../lib/ajvCache';
-import { standardRenderers } from '../jsonformsRenderers';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
 import { DirectAdvancedFields } from '../DirectAdvancedFields';
 
@@ -178,7 +175,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
 
     // battery_age: typing a valid number fires onChange with extra_json.battery_age
     // as a NUMBER (coerced by useNumericDraftInput's commit). DirectAdvancedFields'
-    // handleChange -> onDataChange -> handleJsonFormsChange -> onChange all run
+    // handleChange -> onDataChange -> handleAdvancedFieldsChange -> onChange all run
     // synchronously inside the same event; `waitFor` below is kept for harness
     // consistency, not because it's needed.
     const batteryAgeInput = within(fieldRow(container, 'battery_age')).getByRole('textbox');
@@ -340,7 +337,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
     }
   });
 
-  describe('$ref probe: DirectAdvancedFields vs the shared JsonForms registry (web/ still depends on the registry until R4.5)', () => {
+  describe('$ref probe: DirectAdvancedFields resolves a $ref-hidden enum via EnumControl (R4.3b)', () => {
     it('DirectAdvancedFields resolves battery_location $ref to an inside/outside dropdown via EnumControl (R4.3b), emitting a coerced string', () => {
       const unfiltered = canonicalGeometrySchemaPort.getElementSubschema('core', 'ElectricBattery') as Record<
         string,
@@ -373,7 +370,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
         </GeometryEditorServicePortsProvider>,
       );
 
-      // R4.3b CHARACTERIZATION CHANGE (was TextControl through R4.3, see below):
+      // R4.3b CHARACTERIZATION CHANGE (was TextControl through R4.3):
       // `pickDirectControl`'s enum-first dispatch (DirectAdvancedFields.tsx) now
       // checks enum-like BEFORE type -- the resolved battery_location schema carries
       // `.enum` (`['inside', 'outside']`, BatteryLocation's own declared shape,
@@ -385,109 +382,16 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
       // changed. (Through R4.3, rule (c) routed this to TextControl instead, EVEN
       // THOUGH the resolved schema also carried `.enum` -- that dropdown was
       // TextControl's OWN `extractOptions` fallback, the exact same underlying
-      // `<StandardDropdown>` component the raw JsonForms registry test below still
-      // exercises via ITS OWN TextControl-wins dispatch quirk, verified next -- these
-      // two tests intentionally diverge now: this one shows the direct path's new
-      // enum-first behaviour, the other documents the registry's unchanged one.)
+      // `<StandardDropdown>` component EnumControl uses. R4.5 deleted the raw
+      // `standardRenderers` registry this comparison used to run against alongside
+      // this test -- see this file's module docstring; this assertion alone is now
+      // the surviving record of the direct path's enum-first behaviour.)
       const select = within(fieldRow(container, 'battery_location')).getByRole('combobox');
       const optionValues = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
       expect(optionValues).toEqual(expect.arrayContaining(['inside', 'outside']));
 
       fireEvent.change(select, { target: { value: 'outside' } });
       expect(onDataChange).toHaveBeenCalledWith({ battery_location: 'outside' });
-    });
-
-    it('raw JsonForms registry mount renders the same $ref property via the identical TextControl enum fallback -- documents behaviour web/\'s SnippetEditor/SimplifiedFabricEditor still depend on until R4.5', async () => {
-      const unfiltered = canonicalGeometrySchemaPort.getElementSubschema('core', 'ElectricBattery') as Record<
-        string,
-        unknown
-      >;
-      const rootSchema = canonicalGeometrySchemaPort.getRootSchema('core') as Record<string, unknown>;
-      const onChange = vi.fn();
-      const store = createGeometryStore({ defaultDefaultsPath: null });
-
-      const { container } = render(
-        <GeometryEditorServicePortsProvider
-          schemaPort={canonicalGeometrySchemaPort}
-          workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
-        >
-          <GeometryStoreProvider store={store}>
-            <JsonForms
-              schema={unfiltered as never}
-              data={{}}
-              renderers={[...standardRenderers, ...materialRenderers]}
-              ajv={getAjvInstance()}
-              config={{
-                advancedEditor: true,
-                elementType: 'ElectricBattery',
-                schemaPort: canonicalGeometrySchemaPort,
-                $defs: rootSchema.$defs,
-              }}
-              onChange={({ data }) => onChange(data)}
-            />
-          </GeometryStoreProvider>
-        </GeometryEditorServicePortsProvider>,
-      );
-
-      // SPIKE FINDING (probe 5b -- verified empirically by evaluating every
-      // standardRenderers/materialRenderers tester against the real
-      // uischema/schema/context for this control), which R4.3's executed-table
-      // `pickDirectControl` deliberately reproduces (see the test above):
-      //
-      // JsonForms' renderer-registry DISPATCH passes each Control's TESTER the
-      // *unresolved* parent object schema (jsonforms-react's
-      // `mapStateToJsonFormsRendererProps`: `schema: ownProps.schema || getSchema(state)`,
-      // passed unchanged to every child via `renderLayoutElements`). Confirmed:
-      // `schema.enum === undefined`, `schema.type === 'object'` at the point our
-      // testers run for `battery_location`. Our own rank-1000/1100 EnumControl
-      // testers (`schemaHasEnum`/`schemaHasConstAlternatives`) read `.enum` directly
-      // off THAT schema and so never see the enum hidden behind the `$ref` -- they
-      // never match (verified: rank -1 for both).
-      //
-      // The tester that actually wins is our OWN rank-80 TextControl entry
-      // (`isStringControl(u,s,c) && !schemaHasEnum(rawParentSchema)`): `isStringControl`
-      // is `@jsonforms/core`'s own tester, which DOES resolve $ref internally via
-      // `schemaMatches` -> `resolveSchema` (true, since BatteryLocation.type ===
-      // 'string'), and the `!schemaHasEnum(rawParentSchema)` gate is trivially true
-      // (the *parent* object has no top-level `enum`). Material's own
-      // `materialEnumControlTester` (`isEnumControl`, which ALSO correctly resolves
-      // $ref) only ranks 2 -- far below our rank-80 TextControl -- so it never gets a
-      // chance. Verified via direct rank evaluation: standardRenderers TextControl
-      // (rank 80) wins; materialEnumControlTester scores rank 2.
-      //
-      // BUT: once TextControl is the winning renderer, `withJsonFormsControlProps`'
-      // OWN `mapStateToControlProps` does its own, SEPARATE resolution
-      // (`Resolve.schema(ownProps.schema, controlElement.scope, rootSchema)`) before
-      // handing TextControl its props -- so TextControl's `schema` PROP (unlike what
-      // its tester saw) IS the resolved `{enum: ['inside','outside'], type: 'string',
-      // ...}`. TextControl has its own dropdown fallback (`extractOptions(s)`, checked
-      // before its plain-input branch) that renders `<StandardDropdown>` whenever the
-      // schema it receives carries `.enum`/oneOf-const alternatives -- the exact same
-      // underlying component EnumControl uses, hence the identical CSS classes.
-      //
-      // This is why DirectAdvancedFields' `pickDirectControl` checks the resolved
-      // property's type list BEFORE checking enum-ness (rule (c): 'string' ->
-      // TextControl, unconditionally): so for battery_location it ALSO lands on
-      // TextControl, the exact same component, exercising the exact same
-      // `extractOptions` dropdown fallback this raw JsonForms registry mount does.
-      // web/'s SnippetEditor and SimplifiedFabricEditor still mount this same
-      // `standardRenderers`/`materialRenderers` registry through their own
-      // `<JsonForms>` usage (see `jsonformsRenderers.tsx`) -- this test is the
-      // community-side guarantee that the registry keeps behaving this way until
-      // R4.5 migrates them too.
-      const row = fieldRow(container, 'battery_location');
-      const select = within(row).getByRole('combobox');
-      expect(select.tagName).toBe('SELECT');
-      const optionValues = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
-      expect(optionValues).toEqual(expect.arrayContaining(['inside', 'outside']));
-
-      // ~10ms debounce: `@jsonforms/react`'s `JsonFormsStateProvider` emits the
-      // `<JsonForms onChange>` callback through `debounce(..., 10)` (see
-      // node_modules/@jsonforms/react .../jsonforms-react.esm.js, `debouncedEmit`).
-      fireEvent.change(select, { target: { value: 'outside' } });
-      await waitFor(() =>
-        expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ battery_location: 'outside' })),
-      );
     });
   });
 });

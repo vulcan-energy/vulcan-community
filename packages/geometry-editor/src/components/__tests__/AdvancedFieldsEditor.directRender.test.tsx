@@ -28,14 +28,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-// Raw JsonForms import — allowed HERE ONLY, for the Stage 2.5 raw-registry comparison
-// mount below (matches the pattern in AdvancedFieldsEditor.electricBattery.test.tsx's
-// own $ref probe). No other file in this test suite imports @jsonforms/*.
-import { JsonForms } from '@jsonforms/react';
-import { materialRenderers } from '@jsonforms/material-renderers';
 import coreSchema from '../../../../../data/schemas/core-input.schema.json';
 import fhsSchema from '../../../../../data/schemas/input_fhs.schema.json';
 import {
@@ -46,10 +41,15 @@ import {
 import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
+import type { Element } from '../../geometry/types';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
-import { DirectAdvancedFields, pickDirectControl } from '../DirectAdvancedFields';
-import { standardRenderers } from '../jsonformsRenderers';
-import { getAjvInstance } from '../../lib/ajvCache';
+import {
+  DirectAdvancedFields,
+  DirectSpecFields,
+  pickDirectControl,
+  type DirectSpecNode,
+} from '../DirectAdvancedFields';
+import { GroupAccordion, WindowPartListControl } from '../jsonformsRenderers';
 
 beforeAll(async () => {
   configureGeometrySchemaAssetSource({
@@ -654,6 +654,65 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     );
   });
 
+  it('R4.5 review round 1 fix: MechanicalVentilation, Core: mvhr_location renders EnumControl, not a free-text blob (adjacent to config 5)', () => {
+    // REGRESSION, caught in adversarial review round 1: HEM's
+    // `$defs/MechanicalVentilation.properties.mvhr_location` is
+    // `{anyOf:[{$ref:'#/$defs/MVHRLocation'},{type:'null'}]}` on the CORE profile --
+    // the exact anyOf-wraps-a-$ref-to-an-enum shape `pickDirectControl`'s own
+    // docstring already documents as reachable neither by `isNonEmptyEnumLike` nor by
+    // type dispatch (no top-level `.type`/`.enum` on the anyOf wrapper itself). R4.5's
+    // commit-3 deleted the `extractOptions` "Case 2" fallback that used to paper over
+    // this on TextControl, and the shape's live-instance audit at the time only
+    // checked FHS (where `mvhr_location` happens to already be a bare
+    // `{enum:['inside','outside']}` with no anyOf wrapper) -- Core was never actually
+    // exercised for this field, so the regression shipped. Fixed by inlining a flat
+    // `{type:'string', enum:[...]}` override in AdvancedFieldsEditor.tsx's subschema
+    // memo, the same pattern `shield_fact_location` already used (see the inline
+    // comments at both sites, and `pickDirectControl`'s corrected docstring in
+    // DirectAdvancedFields.tsx).
+    //
+    // No subtype passed, matching config 5's own mounting pattern immediately above
+    // (and MechanicalVentilation's base-field exclusion, `['vent_type']`, is the same
+    // on both profiles) -- Core does none of FHS's fan/position-mode property pruning,
+    // so every property in the undiscriminated union schema renders. Row set/labels
+    // captured verbatim from a real render (this is a NEW characterization, not a
+    // parity check against a deleted comparator).
+    const { container } = assertDirectCharacterization(
+      {
+        elementType: 'MechanicalVentilation',
+        useFHSSchema: false,
+        currentDataExtra: { vent_type: 'MVHR' },
+        extraJson: { vent_type: 'MVHR', mvhr_location: 'inside' },
+      },
+      [
+        row('Control', 'Control', TEXT(null)),
+        row('SFP', 'SFP', TEXT('0', '0')),
+        row('SFP_in_use_factor', 'SFP In Use Factor', TEXT('1')),
+        row('design_outdoor_air_flow_rate', 'Design Outdoor Air Flow Rate', TEXT('0', '0')),
+        row('ductwork', 'Ductwork', TEXT(null)),
+        row('mvhr_eff', 'MVHR Efficiency', TEXT(null)),
+        row('mvhr_location', 'MVHRLocation', SELECT),
+        row('sup_air_flw_ctrl', 'SupplyAirFlowRateControlType', SELECT),
+        row('sup_air_temp_ctrl', 'SupplyAirTemperatureControlType', SELECT),
+        row('position_intake', 'Position Intake', TEXT(null)),
+        row('position_exhaust', 'Position Exhaust', TEXT(null)),
+        row('mid_height_air_flow_path', 'Mid Height Air Flow Path', TEXT(null)),
+        row('orientation360', 'Orientation360', TEXT(null)),
+        row('pitch', 'Pitch', TEXT(null)),
+      ],
+    );
+
+    // The headline assertion: a real <select> with the schema's own enum values, not
+    // a JSON.stringify'd free-text blob.
+    const mvhrRow = fieldRow(container, 'mvhr_location');
+    const select = within(mvhrRow).getByRole('combobox') as HTMLSelectElement;
+    const optionValues = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
+    expect(optionValues).toEqual(expect.arrayContaining(['inside', 'outside']));
+
+    fireEvent.change(select, { target: { value: 'outside' } });
+    expect(select.value).toBe('outside');
+  });
+
   it('config 6 -- WetEmitter, radiator, FHS: per_metre and lumped thermal-mode pruning direct-render characterization', () => {
     assertDirectCharacterization(
       {
@@ -1109,14 +1168,16 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     // (checked directly against both schema files: every `const` found sits inside an
     // `if`/`allOf` conditional block, never as a standalone Advanced Field property),
     // so this is a synthetic schema exercising `schemaEmitsControl`'s gate directly --
-    // matching the pattern the $ref probe tests in
-    // AdvancedFieldsEditor.electricBattery.test.tsx already use for isolated
-    // DirectAdvancedFields/JsonForms mounts, since no real element type reaches it.
+    // matching the pattern the $ref probe test in
+    // AdvancedFieldsEditor.electricBattery.test.tsx already uses for an isolated
+    // DirectAdvancedFields mount, since no real element type reaches it.
     const syntheticSchema = {
       type: 'object',
       properties: {
-        // Const-only, no `type`/`enum`/`properties`/`items` -- @jsonforms/core's
-        // generator derives no type for this and emits no control at all.
+        // Const-only, no `type`/`enum`/`properties`/`items` -- this shape derives no
+        // type at all (see `schemaEmitsControl`'s own docstring in
+        // DirectAdvancedFields.tsx, verified against the real `@jsonforms/core`
+        // generator this gate was built to match before R4.5 deleted that dependency).
         mode_marker: { const: 'v1' },
         battery_age: { type: 'number', title: 'Battery Age' },
       },
@@ -1136,38 +1197,6 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
               data={{ mode_marker: 'v1', battery_age: 5 }}
               config={{ advancedEditor: true, elementType: 'ElectricBattery' }}
               onDataChange={onDataChange}
-            />
-          </GeometryStoreProvider>
-        </GeometryEditorServicePortsProvider>,
-      );
-      const keys = Array.from(container.querySelectorAll('[data-field-key]')).map((el) =>
-        el.getAttribute('data-field-key'),
-      );
-      expect(keys).toEqual(['battery_age']);
-    });
-
-    it('raw JsonForms registry mount (generated uischema, no explicit uischema prop): mode_marker is ALSO skipped -- confirms schemaEmitsControl matches @jsonforms/core\'s own generator, documenting behaviour web/\'s JsonForms mount still depends on until R4.5', () => {
-      // Mounts the shared jsonformsRenderers REGISTRY directly (not AdvancedFieldsEditor,
-      // which no longer offers a JsonForms path since R4.4) -- this is the same
-      // registry web/'s SnippetEditor and SimplifiedFabricEditor still import via
-      // `standardRenderers`/`jsonformsRenderers.tsx`. It verifies DirectAdvancedFields'
-      // own `schemaEmitsControl` gate was built to match @jsonforms/core's real
-      // `generateUISchema` behaviour, not a guess -- see the `schemaEmitsControl`
-      // docstring in DirectAdvancedFields.tsx.
-      const store = createGeometryStore({ defaultDefaultsPath: null });
-      const { container } = render(
-        <GeometryEditorServicePortsProvider
-          schemaPort={canonicalGeometrySchemaPort}
-          workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
-        >
-          <GeometryStoreProvider store={store}>
-            <JsonForms
-              schema={syntheticSchema as never}
-              data={{ mode_marker: 'v1', battery_age: 5 }}
-              renderers={[...standardRenderers, ...materialRenderers]}
-              ajv={getAjvInstance()}
-              config={{ advancedEditor: true, elementType: 'ElectricBattery' }}
-              onChange={() => {}}
             />
           </GeometryStoreProvider>
         </GeometryEditorServicePortsProvider>,
@@ -1238,3 +1267,409 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     });
   });
 });
+
+/**
+ * R4.5: `DirectSpecFields` interprets the EXPLICIT uischema-spec trees web's
+ * SnippetEditor (`lib/jsonFormsPresentUi.ts`) and SimplifiedFabricEditor
+ * (`components/SimplifiedFabricEditor.tsx`'s `ui` memo, parent repo) build by hand --
+ * distinct from every config above, which exercises `DirectAdvancedFields`' own
+ * resolved-subschema walk. Fixtures below are shaped to match those two builders
+ * exactly (verified directly against both, parent repo, read-only), not invented.
+ */
+function renderDirectSpecFields(props: {
+  schema: Record<string, unknown>;
+  data: Record<string, unknown>;
+  spec: DirectSpecNode;
+  config?: Record<string, unknown>;
+  onDataChange?: ReturnType<typeof vi.fn>;
+}) {
+  const onDataChange = props.onDataChange ?? vi.fn();
+  const store = createGeometryStore({ defaultDefaultsPath: null });
+  const utils = render(
+    <GeometryEditorServicePortsProvider
+      schemaPort={canonicalGeometrySchemaPort}
+      workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
+    >
+      <GeometryStoreProvider store={store}>
+        <DirectSpecFields
+          schema={props.schema}
+          data={props.data}
+          config={props.config ?? { advancedEditor: true, elementType: 'ThermalBridgeLinear' }}
+          spec={props.spec}
+          onDataChange={onDataChange}
+        />
+      </GeometryStoreProvider>
+    </GeometryEditorServicePortsProvider>,
+  );
+  return { onDataChange, ...utils };
+}
+
+describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec trees directly', () => {
+  it('flat snippet-style spec: rows render in SPEC order (not schema property-declaration order), an object-typed property JSON-blobs via TextControl, edits round-trip, and nothing fires on mount', () => {
+    // Schema declares zeta/alpha/meta in THAT order; the snippet spec (mirroring
+    // `buildPresentUiForJsonForms`'s `Object.keys(props).sort()`) lists them
+    // alpha/meta/zeta -- deliberately different orders, so a DOM-order match proves
+    // the walker follows the spec, not `Object.keys(schema.properties)`.
+    const snippetSchema = {
+      type: 'object',
+      properties: {
+        zeta: { type: 'number', title: 'Zeta' },
+        alpha: { type: 'string', title: 'Alpha' },
+        meta: { type: 'object' },
+      },
+    };
+    // Snippet Controls carry no `options` at all (see `jsonFormsPresentUi.ts`) --
+    // resolution falls through to the "walk contextSchema through the tokens"
+    // branch, not `options.schemaOverride`.
+    const snippetSpec: DirectSpecNode = {
+      type: 'VerticalLayout',
+      elements: ['alpha', 'meta', 'zeta'].map((key) => ({
+        type: 'Control',
+        scope: `#/properties/${key}`,
+      })),
+    };
+    const initialData = { zeta: 5, alpha: 'hi', meta: { a: 1 } };
+    const onDataChange = vi.fn();
+    const { container } = renderDirectSpecFields({
+      schema: snippetSchema,
+      data: initialData,
+      spec: snippetSpec,
+      onDataChange,
+    });
+
+    expect(fieldKeys(container)).toEqual(['alpha', 'meta', 'zeta']);
+    expect(onDataChange).not.toHaveBeenCalled();
+
+    // meta: object-typed with no options.schemaOverride -- resolves via the walked
+    // contextSchema, lands on TextControl's isJsonLike branch (JSON.stringify blob),
+    // same as DirectAdvancedFields' own nested-object characterization elsewhere in
+    // this file.
+    const metaRow = fieldRow(container, 'meta');
+    expect(fieldLabelText(metaRow)).toBe('Meta');
+    const metaInput = within(metaRow).getByRole('textbox') as HTMLInputElement;
+    expect(metaInput.value).toBe(JSON.stringify({ a: 1 }));
+
+    // Edit round-trip on the plain string field, and confirm the sibling keys
+    // (zeta, meta) survive untouched in the emitted payload.
+    const alphaRow = fieldRow(container, 'alpha');
+    expect(fieldLabelText(alphaRow)).toBe('Alpha');
+    const alphaInput = within(alphaRow).getByRole('textbox');
+    fireEvent.change(alphaInput, { target: { value: 'bye' } });
+    expect(onDataChange).toHaveBeenCalledWith({ zeta: 5, alpha: 'bye', meta: { a: 1 } });
+  });
+
+  it('fabric-style spec: a Group with schemaOverride/pathOverride/openInitially renders an open accordion, and its Controls resolve against their own schemaOverride and write to pathOverride-prefixed segments (enum Control routes to EnumControl, R4.3b enum-first)', () => {
+    const junctionTypeSchema = { type: 'string', enum: ['E1', 'E2'], title: 'Junction Type' };
+    const lengthSchema = { type: 'number', title: 'Length' };
+    // Mirrors SimplifiedFabricEditor's `ui` memo: every leaf Control carries its OWN
+    // `options.schemaOverride` (the exact resolved per-field schema), and the
+    // enclosing Group carries `schemaOverride` (the section's own object schema) +
+    // `pathOverride` (the dot-joined ABSOLUTE instance path) + `openInitially`.
+    const fabricSpec: DirectSpecNode = {
+      type: 'VerticalLayout',
+      elements: [
+        {
+          type: 'Group',
+          label: 'Thermal bridge (linear)',
+          elements: [
+            {
+              type: 'Control',
+              label: 'Junction Type',
+              scope: '#/properties/junction_type',
+              options: { schemaOverride: junctionTypeSchema },
+            },
+            {
+              type: 'Control',
+              label: 'Length',
+              scope: '#/properties/length',
+              options: { schemaOverride: lengthSchema },
+            },
+          ],
+          options: {
+            schemaOverride: {
+              type: 'object',
+              properties: { junction_type: junctionTypeSchema, length: lengthSchema },
+            },
+            pathOverride: 'ThermalBridging.TB_linear',
+            openInitially: true,
+          },
+        },
+      ],
+    };
+    const initialData = { ThermalBridging: { TB_linear: { junction_type: 'E1', length: 2.5 } } };
+    const onDataChange = vi.fn();
+    const { container } = renderDirectSpecFields({
+      schema: { type: 'object', properties: {} },
+      data: initialData,
+      spec: fabricSpec,
+      onDataChange,
+    });
+
+    const details = container.querySelector('details');
+    expect(details).not.toBeNull();
+    expect((details as HTMLDetailsElement).open).toBe(true);
+    const summary = details!.querySelector('summary')!;
+    expect(summary.textContent).toContain('Thermal bridge (linear)');
+    expect(summary.textContent).toContain('2'); // count badge (2 elements in the Group)
+
+    // Data-path resolution: the leaf field keys are 'junction_type'/'length' (path
+    // segments end there), prefixed by the Group's pathOverride.
+    expect(fieldKeys(container)).toEqual(['junction_type', 'length']);
+
+    // junction_type: schemaOverride carries a non-empty enum -> EnumControl
+    // (R4.3b enum-first `pickDirectControl`), a real <select>, not a checkbox/textbox.
+    const junctionRow = fieldRow(container, 'junction_type');
+    const select = within(junctionRow).getByRole('combobox');
+    const optionValues = Array.from(select.querySelectorAll('option')).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(optionValues).toEqual(expect.arrayContaining(['E1', 'E2']));
+
+    // length: plain number schemaOverride -> NumberControl (textbox).
+    const lengthRow = fieldRow(container, 'length');
+    within(lengthRow).getByRole('textbox');
+
+    // Edit round-trip: the write lands at the pathOverride-prefixed nested segments,
+    // not at the top of `data`.
+    fireEvent.change(select, { target: { value: 'E2' } });
+    expect(onDataChange).toHaveBeenCalledWith({
+      ThermalBridging: { TB_linear: { junction_type: 'E2', length: 2.5 } },
+    });
+  });
+
+  it('array-shaped fabric spec: self-rooted per-item Groups bind values per index; editing one item preserves the other byte-for-byte; unset leaves siblings intact (R4.5 review round 1 fix -- setAtPath/getAtPath array-hop support)', () => {
+    // REGRESSION, caught in adversarial review round 1: `setAtPath` used to treat
+    // every array CHILD as "not a valid container" and silently replace the WHOLE
+    // array with `{}` on any nested write under it -- an edit under a per-item
+    // Group's `pathOverride` (e.g. 'sec.list.0') would have destroyed every sibling
+    // item. Fixed in `setAtPathNode` (array hop preserved via `.slice()` + index
+    // write when the existing child is an array and the segment is a canonical
+    // non-negative integer); `getAtPath` gets the matching read-side.
+    //
+    // Shape: the PAIRED web PR changes its array-of-objects builder to emit
+    // SELF-ROOTED per-item Groups -- each item is its own Group
+    // (`options: {schemaOverride: itemSchema, pathOverride: 'sec.list.<i>'}`) whose
+    // children are single-hop Controls scoped `#/properties/<leaf>` relative to that
+    // item's OWN schema (not accumulated through an outer basePtr the way a nested
+    // -object Group's children are elsewhere in this file) -- exactly the shape this
+    // fixture reproduces.
+    const nameSchema = { type: 'string', title: 'Name' };
+    const valueSchema = { type: 'number', title: 'Value' };
+    const itemSchema = { type: 'object', properties: { name: nameSchema, value: valueSchema } };
+
+    function itemGroup(index: number): DirectSpecNode {
+      return {
+        type: 'Group',
+        label: `Item ${index}`,
+        elements: [
+          {
+            type: 'Control',
+            label: `Item ${index} · Name`,
+            scope: '#/properties/name',
+            options: { schemaOverride: nameSchema },
+          },
+          {
+            type: 'Control',
+            label: `Item ${index} · Value`,
+            scope: '#/properties/value',
+            options: { schemaOverride: valueSchema },
+          },
+        ],
+        options: { schemaOverride: itemSchema, pathOverride: `sec.list.${index}`, openInitially: true },
+      };
+    }
+    const arraySpec: DirectSpecNode = {
+      type: 'VerticalLayout',
+      elements: [itemGroup(0), itemGroup(1)],
+    };
+    const initialData = {
+      sec: { list: [{ name: 'Alpha', value: 1 }, { name: 'Beta', value: 2 }] },
+    };
+    const onDataChange = vi.fn();
+    const { container } = renderDirectSpecFields({
+      schema: { type: 'object', properties: {} },
+      data: initialData,
+      spec: arraySpec,
+      onDataChange,
+    });
+
+    // Both items render, values bound per index -- not both showing item 0's values,
+    // and not the whole-array-replaced-with-{} failure mode (which would render zero
+    // rows or throw resolving `sec.list.<i>` against a plain object).
+    const item0NameInput = within(fieldRowByLabel(container, 'name', 'Item 0')).getByRole('textbox') as HTMLInputElement;
+    const item1NameInput = within(fieldRowByLabel(container, 'name', 'Item 1')).getByRole('textbox') as HTMLInputElement;
+    expect(item0NameInput.value).toBe('Alpha');
+    expect(item1NameInput.value).toBe('Beta');
+
+    // Edit round-trip: editing item 0's name preserves item 1 BYTE-FOR-BYTE (the old
+    // whole-array-replacement bug would have dropped item 1 entirely).
+    fireEvent.change(item0NameInput, { target: { value: 'Alpha 2' } });
+    expect(onDataChange).toHaveBeenLastCalledWith({
+      sec: { list: [{ name: 'Alpha 2', value: 1 }, { name: 'Beta', value: 2 }] },
+    });
+
+    // Unset (reset-to-undefined) on item 0's value: mirrors lodash/fp `unset` --
+    // deletes the leaf, leaving a hole at index 0 (not a splice that would shift item
+    // 1 down to index 0) -- item 1 stays intact at index 1.
+    const resetButton = within(fieldRowByLabel(container, 'value', 'Item 0')).getByRole('button', {
+      name: 'Reset to default',
+    });
+    fireEvent.click(resetButton);
+    const lastCall = onDataChange.mock.calls[onDataChange.mock.calls.length - 1][0] as {
+      sec: { list: Array<Record<string, unknown> | undefined> };
+    };
+    expect(lastCall.sec.list.length).toBe(2);
+    expect(lastCall.sec.list[1]).toEqual({ name: 'Beta', value: 2 });
+    expect(Object.prototype.hasOwnProperty.call(lastCall.sec.list[0] ?? {}, 'value')).toBe(false);
+  });
+});
+
+describe('GroupAccordion (R4.5): plain collapsible chrome extracted from the retired Group registry renderer', () => {
+  it('openInitially false starts closed, toggling opens it, and no add-field affordance ever renders', () => {
+    const { container } = render(
+      <GroupAccordion label="Section" count={3} openInitially={false}>
+        <div data-testid="accordion-child">child content</div>
+      </GroupAccordion>,
+    );
+
+    const details = container.querySelector('details') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(container.querySelector('[data-testid="accordion-child"]')).toBeNull();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).not.toContain('Add field');
+
+    // Native <details>/<summary> toggling: a real click flips `.open` and fires a
+    // 'toggle' event on the <details> element; jsdom does not reliably synthesize
+    // that from a click, so this drives the same event GroupAccordion's own
+    // `onToggle` handler listens for directly.
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+
+    expect(details.open).toBe(true);
+    expect(container.querySelector('[data-testid="accordion-child"]')).not.toBeNull();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).not.toContain('Add field');
+  });
+});
+
+/**
+ * Ported from the deleted web `jsonformsRenderers.test.tsx` (parent repo, R4.5 —
+ * that file mounted through `<JsonForms renderers={[...standardRenderers,
+ * ...materialRenderers]}>`, which no longer exists anywhere; the paired parent PR
+ * deletes the whole file). Per this repo's test-move policy, coverage for community
+ * code lives IN community, so these two are re-seated here as direct
+ * `WindowPartListControl` mounts (this file's own established `GeometryStoreProvider`
+ * + `GeometryEditorServicePortsProvider` harness — `WindowPartListControl` reads the
+ * current window element's `base_height`/`height` off the geometry store directly,
+ * not off its own props, and renders a field label via `useGeometrySchemaPort()`)
+ * instead of through the deleted registry. Assertions and fixture values are
+ * unchanged from the original.
+ */
+describe('WindowPartListControl interactions (ported from the deleted web registry test, R4.5)', () => {
+  function renderWindowPartListControl({
+    data,
+    handleChange,
+    baseHeightM,
+    heightM,
+  }: {
+    data: unknown;
+    handleChange: ReturnType<typeof vi.fn>;
+    baseHeightM: number;
+    heightM: number;
+  }) {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const windowElement = {
+      id: 'window-1',
+      name: 'window-1',
+      type: 'BuildingElementTransparent',
+      zoneId: 'zone-1',
+      parent_element: null,
+      coordinates: [],
+      base_height: baseHeightM,
+      height: heightM,
+      width: 1.0,
+    } as unknown as Element;
+    act(() => {
+      store.setState({
+        selection: { type: 'element', id: 'window-1' },
+        elementsById: { 'window-1': windowElement },
+        elementIds: ['window-1'],
+      });
+    });
+    const utils = render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={canonicalGeometrySchemaPort}
+        workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
+      >
+        <GeometryStoreProvider store={store}>
+          <WindowPartListControl
+            data={data}
+            handleChange={handleChange}
+            path="window_part_list"
+            label="Window Part List"
+            config={{ advancedEditor: true, elementType: 'BuildingElementTransparent' }}
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+    return { store, ...utils };
+  }
+
+  it('preserves midpoint-above-base when window base height changes', async () => {
+    const handleChange = vi.fn();
+    const { store } = renderWindowPartListControl({
+      data: [{ mid_height_air_flow_path: 1.5 }],
+      handleChange,
+      baseHeightM: 1.0,
+      heightM: 1.2,
+    });
+
+    handleChange.mockClear();
+
+    act(() => {
+      store.setState({
+        // A freshly-created `selection` object (same id, same shape) is what forces
+        // `WindowPartListControl`'s `useGeometryStore((state) => state.selection)`
+        // subscription to see a change and re-render with fresh `elementsById` --
+        // mirrors the original (deleted) test's own identical trick against the
+        // singleton `useGeometryStore.setState`.
+        selection: { type: 'element', id: 'window-1' },
+        elementsById: {
+          'window-1': { ...(store.getState().elementsById['window-1'] as Element), base_height: 1.2 },
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(handleChange).toHaveBeenCalled();
+    });
+
+    expect(handleChange).toHaveBeenLastCalledWith('window_part_list', [{ mid_height_air_flow_path: 1.7 }]);
+  });
+
+  it('preserves decimal-zero window part midpoint drafts above the window base', async () => {
+    const handleChange = vi.fn();
+    const { container } = renderWindowPartListControl({
+      data: [{ mid_height_air_flow_path: 1.5 }],
+      handleChange,
+      baseHeightM: 1.0,
+      heightM: 1.2,
+    });
+
+    const midpointInput = within(container).getByLabelText(
+      'Window part 1 midpoint in metres above window base',
+    ) as HTMLInputElement;
+    expect(midpointInput).toHaveAttribute('type', 'text');
+
+    fireEvent.change(midpointInput, { target: { value: '0.0' } });
+    await waitFor(() => expect(handleChange).toHaveBeenCalled());
+    expect(midpointInput.value).toBe('0.0');
+
+    fireEvent.change(midpointInput, { target: { value: '0.05' } });
+    await waitFor(() => {
+      expect(handleChange).toHaveBeenLastCalledWith('window_part_list', [{ mid_height_air_flow_path: 1.05 }]);
+    });
+    expect(midpointInput.value).toBe('0.05');
+  });
+});
+

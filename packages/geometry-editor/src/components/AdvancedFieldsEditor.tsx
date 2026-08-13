@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import React, { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import type { JsonSchema } from '@jsonforms/core';
 import { renderFieldLabelWithTooltip } from './jsonformsRenderers';
 import { DirectAdvancedFields } from './DirectAdvancedFields';
 import { StandardDropdown } from './StandardDropdown';
@@ -139,12 +138,16 @@ type AdvancedEditorData = Partial<Element> & {
   zoneId?: unknown;
 };
 
-type JsonFormsChangePayload = {
+type AdvancedFieldsChangePayload = {
   data: unknown;
   errors?: unknown[];
 };
 
-type AdvancedFieldsSchema = SchemaNode & JsonSchema;
+// R4.5: was `SchemaNode & JsonSchema` (`JsonSchema` from `@jsonforms/core`); `SchemaNode`
+// already covers everything this file reads off a subschema (properties, $defs,
+// oneOf/anyOf/allOf, required, additionalProperties, …), so the intersection was
+// redundant once the `@jsonforms/core` dependency itself was removed.
+type AdvancedFieldsSchema = SchemaNode;
 
 function currentDataAsElement(data: AdvancedEditorData): Element | null {
   return typeof data.id === 'string' && typeof data.type === 'string'
@@ -879,8 +882,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     })),
   );
 
-  // Extract advanced fields from currentData. Keep the empty value referentially stable because JsonForms
-  // treats data/config identity changes as reasons to dispatch internal state updates.
+  // Extract advanced fields from currentData. Keep the empty value referentially stable —
+  // this object feeds numerous useMemo/useCallback dependency arrays below (and is
+  // handed straight through to DirectAdvancedFields as `data`), so a fresh `{}` on
+  // every render would defeat that memoization and force needless recomputation.
   const advancedFieldsDataRaw = currentData.extra_json ?? EMPTY_ADVANCED_FIELDS;
   const advancedFieldsData = isPlainRecord(advancedFieldsDataRaw)
     ? advancedFieldsDataRaw
@@ -1041,8 +1046,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         ? (advancedFieldsData as Record<string, unknown>)[subtype]
         : undefined;
 
-    // System: merge maps (HeatSourceWet / …) use `additionalProperties` in schema — JsonForms would show one
-    // blob. Hoist each key present in `extra_json[subtype]` to explicit `properties` so fields enumerate.
+    // System: merge maps (HeatSourceWet / …) use `additionalProperties` in schema —
+    // DirectAdvancedFields' flat walk only iterates explicit `.properties`, so an
+    // unexpanded merge map would show as one opaque JSON blob. Hoist each key present
+    // in `extra_json[subtype]` to explicit `properties` so fields enumerate.
     if (elementType === 'System' && subtype) {
       const expanded = expandSystemMergeMapSchemaForJsonForms(
         fullSchema as Record<string, unknown>,
@@ -1063,7 +1070,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
 
     // For ThermalBridgeLinear, remove junction_type from schema so we can render it manually
     if (elementType === 'ThermalBridgeLinear' && advancedProperties.junction_type) {
-      // Store the schema info but remove it from properties so JsonForms doesn't render it
+      // Remove it from properties so DirectAdvancedFields' flat walk doesn't render it
       delete advancedProperties.junction_type;
     }
 
@@ -1231,6 +1238,50 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         title: typeof sh.title === 'string' ? sh.title : 'Shield Fact Location',
         ...(typeof sh.description === 'string' ? { description: sh.description } : {}),
       };
+    }
+
+    // mvhr_location: same shield_fact_location-style problem, different profile.
+    // HEM's `$defs/MechanicalVentilation.properties.mvhr_location` is
+    // `{anyOf:[{$ref:'#/$defs/MVHRLocation'},{type:'null'}]}` on Core -- a bare anyOf
+    // derives no `.enum`/type for `pickDirectControl` to see at all, even after $ref
+    // dereferencing (the anyOf wrapper itself never collapses into a flat type/enum),
+    // so without inlining this field falls through to a plain TextControl with no
+    // dropdown or validation. MechanicalVentilation's base-field exclusion is only
+    // `['vent_type']` (`getBaseFieldsForElementType`), on BOTH profiles, so nothing
+    // upstream prunes this field away on Core. UNLIKE shield_fact_location this is NOT
+    // FHS-only: FHS's own mvhr_location is ALREADY a bare `{enum:['inside','outside']}`
+    // with no anyOf wrapper (HEM flattens it differently there), so it already reaches
+    // EnumControl unaided on that profile -- verified directly against both schema
+    // files, and the guard below is a no-op in that case (no anyOf/oneOf branch to
+    // read an enum out of). Dereference against the active root schema and read the
+    // enum out of whichever anyOf/oneOf branch carries one, rather than hardcoding
+    // HEM's `$defs/MVHRLocation` values, so a future HEM schema change (new location,
+    // renamed value) keeps tracking the schema instead of quietly drifting from it.
+    if (elementType === 'MechanicalVentilation' && advancedProperties.mvhr_location) {
+      const mv = advancedProperties.mvhr_location as Record<string, unknown>;
+      const rootFull = getActiveRootSchema();
+      const derefedMv = (rootFull ? dereferenceSchemaNodeInRoot(mv, rootFull) : mv) as Record<string, unknown>;
+      const alternatives = Array.isArray(derefedMv.anyOf)
+        ? (derefedMv.anyOf as Record<string, unknown>[])
+        : Array.isArray(derefedMv.oneOf)
+          ? (derefedMv.oneOf as Record<string, unknown>[])
+          : [];
+      const enumBranch = alternatives.find(
+        (branch) => branch && Array.isArray(branch.enum) && (branch.enum as unknown[]).length > 0,
+      );
+      if (enumBranch) {
+        advancedProperties.mvhr_location = {
+          type: 'string',
+          enum: [...(enumBranch.enum as unknown[])],
+          title:
+            typeof mv.title === 'string'
+              ? mv.title
+              : typeof enumBranch.title === 'string'
+                ? enumBranch.title
+                : 'Mvhr Location',
+          ...(typeof mv.description === 'string' ? { description: mv.description } : {}),
+        };
+      }
     }
 
     let result: SchemaNode = {
@@ -1549,7 +1600,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     return classifyOpaqueFabricVariantFromElement((currentData ?? {}) as Record<string, unknown>);
   }, [elementType, currentData]);
 
-  const jsonFormsConfig = useMemo<Record<string, unknown>>(
+  const advancedFieldsConfig = useMemo<Record<string, unknown>>(
     () =>
       ({
         advancedEditor: true,
@@ -1766,11 +1817,14 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     return () => window.clearTimeout(timer);
   }, [focusFieldKey, focusFieldVersion]);
 
-  // Handle JsonForms changes
-  const handleJsonFormsChange = ({ data }: JsonFormsChangePayload) => {
+  // Handle Advanced Fields data changes (from DirectAdvancedFields and the several
+  // manually-rendered fields below that share this same commit path).
+  const handleAdvancedFieldsChange = ({ data }: AdvancedFieldsChangePayload) => {
     const dataRecord: Record<string, unknown> = isPlainRecord(data) ? { ...data } : {};
-    // Preserve UI-only metadata keys that JsonForms strips because they aren't
-    // part of the element schema (for example _element_preset and psi_source).
+    // Preserve UI-only metadata keys that aren't part of the element schema (for
+    // example _element_preset and psi_source), in case the incoming `data` omits
+    // them — defensive against any caller that rebuilds `data` without carrying them
+    // forward, rather than relying on every call site's own spread of the prior value.
     const existingExtra = currentData.extra_json;
     if (isPlainRecord(existingExtra)) {
       for (const [k, v] of Object.entries(existingExtra)) {
@@ -1818,7 +1872,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         nextExtra = { ...(nextExtra as Record<string, unknown>), shield_fact_location: parsed };
       }
     }
-    // JsonForms omits `edge_insulation` when it is not in the schema; keep the manual field.
+    // edge_insulation is deleted from advancedProperties above, so DirectAdvancedFields'
+    // flat walk never emits a control for it (and never carries it through an edit) —
+    // restore it here so the manually-rendered EdgeInsulationFields control's own value
+    // for this key survives an unrelated Advanced Fields edit.
     if (
       elementType === 'BuildingElementGround' &&
       subtype === 'Slab_edge_insulation' &&
@@ -2126,7 +2183,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         <EdgeInsulationFields
           value={advancedFieldsData.edge_insulation}
           onChange={(next) => {
-            handleJsonFormsChange({
+            handleAdvancedFieldsChange({
               data: { ...advancedFieldsData, edge_insulation: next },
               errors: [],
             });
@@ -2141,7 +2198,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           treatment={advancedFieldsData.treatment}
           treatmentUi={advancedFieldsData[TREATMENT_UI_KEY]}
           onPatch={(patch) => {
-            handleJsonFormsChange({
+            handleAdvancedFieldsChange({
               data: { ...advancedFieldsData, ...patch },
               errors: [],
             });
@@ -2168,7 +2225,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         <FancoilTestDataFields
           value={(advancedFieldsData as Record<string, unknown>).fancoil_test_data}
           onChange={(next) => {
-            handleJsonFormsChange({
+            handleAdvancedFieldsChange({
               data: { ...advancedFieldsData, fancoil_test_data: next },
               errors: [],
             });
@@ -2230,7 +2287,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
                 }
               }
 
-              handleJsonFormsChange({
+              handleAdvancedFieldsChange({
                 data: constructionDetails?.mergeCandidate(
                   updatedExtraJson,
                   undefined,
@@ -2357,13 +2414,17 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
 
       {/* R4.3/R4.4: direct-render off the resolved subschema (or, for System, the layout
           spec from systemAdvancedUischema.ts), no <JsonForms> dispatch. R4.4 retired the
-          legacy JsonForms mount and its fallback kill-switch; this is now the only path. */}
+          legacy JsonForms mount and its fallback kill-switch; this is now the only path.
+          R4.5 finished the retirement community-wide: the `standardRenderers` registry
+          those two slices left behind for web's SnippetEditor/SimplifiedFabricEditor is
+          deleted from jsonformsRenderers.tsx, and this package carries no `@jsonforms/*`
+          dependency at all any more. */}
       <DirectAdvancedFields
         schema={subschema as Record<string, unknown>}
         data={advancedFieldsData as Record<string, unknown>}
-        config={jsonFormsConfig}
+        config={advancedFieldsConfig}
         layout={systemAdvancedUischema}
-        onDataChange={(data) => handleJsonFormsChange({ data, errors: [] })}
+        onDataChange={(data) => handleAdvancedFieldsChange({ data, errors: [] })}
       />
       {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && (
         <UnheatedSpaceRuCalculatorModal
@@ -2386,7 +2447,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
               if (v === undefined) delete data[k];
               else data[k] = v;
             }
-            handleJsonFormsChange({
+            handleAdvancedFieldsChange({
               data,
               errors: [],
             });
@@ -2404,7 +2465,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             const next: Record<string, unknown> = { ...advancedFieldsData, u_value: patch.u_value };
             if (patch.wind_speed_mps !== undefined) next.wind_speed_mps = patch.wind_speed_mps;
             if (patch.thermal_resist_insul !== undefined) next.thermal_resist_insul = patch.thermal_resist_insul;
-            handleJsonFormsChange({
+            handleAdvancedFieldsChange({
               data: next,
               errors: [],
             });

@@ -160,4 +160,44 @@ describe('advanced numeric field presentations', () => {
     expect(button).not.toHaveClass('btn-nav');
     expect(button).not.toHaveAttribute('style');
   });
+
+  // Ported from the deleted web jsonformsRenderers.test.tsx's "R_u field action
+  // button" describe block (parent repo, R4.5) -- the it.each above only covers the
+  // no-value ("Calculate R_u") branch and only asserts CSS classes; this is the
+  // has-value label flip, asserted on the button's actual text.
+  it('shows Edit R_u once the unheated-space resistance field has a value', () => {
+    renderControl(NumberControl, {
+      data: 0.45,
+      path: 'thermal_resistance_unconditioned_space',
+      label: 'thermal_resistance_unconditioned_space',
+      config: {
+        elementType: 'BuildingElementAdjacentUnconditionedSpace_Simple',
+        openRuCalculator: vi.fn(),
+      },
+    });
+
+    const button = screen.getByRole('button', { name: 'Edit R_u' });
+    expect(button.textContent).toBe('Edit R_u');
+    expect(button).toHaveAttribute('title', 'Edit calculated R_u');
+  });
+
+  // Ported from the deleted web jsonformsRenderers.test.tsx's "JsonForms Renderers -
+  // Number Draft Editing" describe block (parent repo, R4.5): schema `minimum`/
+  // `maximum` map to `min`/`max`, and with no `multipleOf` the step stays the generic
+  // `'any'` -- `numericInputAttributesFromSchema` must not invent a precision the
+  // schema never declared.
+  it('maps schema number ranges to input constraints without inventing precision', () => {
+    renderControl(NumberControl, {
+      data: 0.16,
+      path: 'psi_wall_floor_junc',
+      label: 'psi_wall_floor_junc',
+      schema: { type: 'number', minimum: 0, maximum: 2 },
+      config: { elementType: 'BuildingElementGround' },
+    });
+
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    expect(input.getAttribute('min')).toBe('0');
+    expect(input.getAttribute('max')).toBe('2');
+    expect(input.getAttribute('step')).toBe('any');
+  });
 });
