@@ -8,7 +8,9 @@ import {
   segmentTangentAndOpeningOutwardModelXY,
 } from './openingSegmentOutward';
 import { downslopeUnitModelXY, isOrientationPitchAxis } from './slopePitchAxis';
-import { calculatePolygonArea } from './polygonSync';
+
+/** One arrow length for every direction arrow: lines, bottom-edge slopes, fall lines. */
+const FIXED_ARROW_LENGTH_M = 0.25;
 
 export interface DirectionArrow {
   centerX: number;
@@ -50,9 +52,9 @@ export function calculateDirectionArrow(element: Element, globalOrientationOffse
     const centerX = element.coordinates.reduce((sum, point) => sum + point.x, 0) / element.coordinates.length;
     const centerY = element.coordinates.reduce((sum, point) => sum + point.y, 0) / element.coordinates.length;
     const downslope = downslopeUnitModelXY(element.orientation360, globalOrientationOffset!);
-    // The fall-line arrow is a drag control here, not just an annotation; scale it with
-    // the footprint so it stays visible, never below the fixed-length convention.
-    const arrowLength = Math.max(0.25, 0.35 * Math.sqrt(calculatePolygonArea(element.coordinates)));
+    // Same fixed-length convention as the bottom-edge and line arrows: the grip is
+    // sized in screen space, so the shaft does not have to grow with the footprint.
+    const arrowLength = FIXED_ARROW_LENGTH_M;
     return {
       centerX,
       centerY,
@@ -68,7 +70,7 @@ export function calculateDirectionArrow(element: Element, globalOrientationOffse
   const centerX = (point1.x + point2.x) / 2;
   const centerY = (point1.y + point2.y) / 2;
 
-  const arrowLength = 0.25;
+  const arrowLength = FIXED_ARROW_LENGTH_M;
   const dx = point2.x - point1.x;
   const dy = point2.y - point1.y;
 
@@ -149,7 +151,7 @@ export function calculateDrawingPreviewArrow(
   const centerX = (point1.x + point2.x) / 2;
   const centerY = (point1.y + point2.y) / 2;
 
-  const arrowLength = 0.25;
+  const arrowLength = FIXED_ARROW_LENGTH_M;
 
   const dx = point2.x - point1.x;
   const dy = point2.y - point1.y;

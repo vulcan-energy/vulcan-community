@@ -6,7 +6,7 @@ import {
   applyCompassOrientationToSlopedPolygonCoords,
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
-  polygonEdgeOutwardBearings,
+  polygonEdgePerpendicularBearings,
   rotatePolygonPlanXYAroundFirstVertex,
   segmentTangentAndOpeningOutwardModelXY,
 } from '../openingSegmentOutward';
@@ -70,9 +70,9 @@ describe('orientation360SlopedFromFirstEdge', () => {
   });
 });
 
-describe('polygonEdgeOutwardBearings', () => {
-  it('returns the outward-normal bearing and edge index for every square edge', () => {
-    const bearings = polygonEdgeOutwardBearings([
+describe('polygonEdgePerpendicularBearings', () => {
+  it('offers both square alignments per edge, roled by which end of the plane the edge lands on', () => {
+    const bearings = polygonEdgePerpendicularBearings([
       { x: 0, y: 0 },
       { x: 1, y: 0 },
       { x: 1, y: 1 },
@@ -80,24 +80,81 @@ describe('polygonEdgeOutwardBearings', () => {
     ], 0);
 
     expect(bearings).toEqual([
-      { edgeIndex: 0, bearing: 180 },
-      { edgeIndex: 1, bearing: 90 },
-      { edgeIndex: 2, bearing: 0 },
-      { edgeIndex: 3, bearing: 270 },
+      { edgeIndex: 0, bearing: 180, edgeRole: 'low' },
+      { edgeIndex: 0, bearing: 0, edgeRole: 'top' },
+      { edgeIndex: 1, bearing: 90, edgeRole: 'low' },
+      { edgeIndex: 1, bearing: 270, edgeRole: 'top' },
+      { edgeIndex: 2, bearing: 0, edgeRole: 'low' },
+      { edgeIndex: 2, bearing: 180, edgeRole: 'top' },
+      { edgeIndex: 3, bearing: 270, edgeRole: 'low' },
+      { edgeIndex: 3, bearing: 90, edgeRole: 'top' },
     ]);
   });
 
-  it('skips degenerate edges and applies the global orientation offset', () => {
-    const bearings = polygonEdgeOutwardBearings([
+  it('reaches the apex-down alignment a bottom-edge-only set cannot', () => {
+    // Falling north off this triangle's bottom edge hinges the plane on the far
+    // apex, which is the alignment the outward-normal-only set never offered.
+    const bearings = polygonEdgePerpendicularBearings([
       { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 2, y: 3 },
+    ], 0);
+
+    expect(bearings).toContainEqual({ edgeIndex: 0, bearing: 180, edgeRole: 'low' });
+    expect(bearings).toContainEqual({ edgeIndex: 0, bearing: 0, edgeRole: 'top' });
+  });
+
+  it('roles the same bearing identically whichever way the polygon is wound', () => {
+    const clockwise = polygonEdgePerpendicularBearings([
+      { x: 0, y: 0 },
+      { x: 2, y: 3 },
+      { x: 4, y: 0 },
+    ], 0);
+
+    // The bottom edge is traversed 4,0 -> 0,0 here, flipping the formula's normal;
+    // the roles must still describe the geometry, not the winding.
+    expect(clockwise).toContainEqual({ edgeIndex: 2, bearing: 180, edgeRole: 'low' });
+    expect(clockwise).toContainEqual({ edgeIndex: 2, bearing: 0, edgeRole: 'top' });
+  });
+
+  it('subtracts the site offset, the way the store derives orientation360', () => {
+    const bearings = polygonEdgePerpendicularBearings([
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 2, y: 3 },
+    ], 30);
+
+    // The bottom edge's outward normal is geometric 180; stored space is
+    // geometric − offset, and downslopeUnitModelXY adds the offset back when it
+    // points the arrow. Adding it here instead would be wrong by twice the offset.
+    expect(bearings).toContainEqual({ edgeIndex: 0, bearing: 150, edgeRole: 'low' });
+    expect(bearings).toContainEqual({ edgeIndex: 0, bearing: 330, edgeRole: 'top' });
+  });
+
+  it('offers nothing for an edge that is neither end of the plane', () => {
+    // Concave L. Falling east squares off both edge 3 and edge 5, but only edge 5
+    // is the top of the plane; edge 3 sits mid-plane, where a centroid test
+    // mislabels it as the top and highlights the wrong edge.
+    const bearings = polygonEdgePerpendicularBearings([
+      { x: 0, y: 0 },
+      { x: 6, y: 0 },
+      { x: 6, y: 2 },
+      { x: 2, y: 2 },
+      { x: 2, y: 6 },
+      { x: 0, y: 6 },
+    ], 0);
+
+    expect(bearings).toContainEqual({ edgeIndex: 5, bearing: 90, edgeRole: 'top' });
+    expect(bearings.filter((entry) => entry.edgeIndex === 3)).toEqual([]);
+  });
+
+  it('returns nothing for a ring that encloses no plane', () => {
+    expect(polygonEdgePerpendicularBearings([{ x: 0, y: 0 }, { x: 1, y: 0 }], 0)).toEqual([]);
+    expect(polygonEdgePerpendicularBearings([
       { x: 0, y: 0 },
       { x: 1, y: 0 },
-    ], 15);
-
-    expect(bearings).toEqual([
-      { edgeIndex: 1, bearing: 195 },
-      { edgeIndex: 2, bearing: 15 },
-    ]);
+      { x: 2, y: 0 },
+    ], 0)).toEqual([]);
   });
 });
 
