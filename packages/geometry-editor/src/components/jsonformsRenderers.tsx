@@ -9,7 +9,6 @@ import { StandardDropdown } from './StandardDropdown';
 import { StandardControlShell } from './StandardControlShell';
 import { StatusPill } from './StatusPill';
 import type { StatusPillType } from './StatusPill';
-import { Tooltip } from './Tooltip';
 import { ValidationIndicator } from './ValidationIndicator';
 import { generateRobustPlaceholder } from '../lib/schemaPlaceholders';
 import { getSchemaParamIdForField } from '../lib/fieldTooltipMap';
@@ -18,7 +17,6 @@ import {
   resolveFieldPresentation,
   type ResolvedFieldPresentation,
 } from '../lib/fieldPresentation';
-import { formatSchemaInfoForTooltip } from '../utils/schemaTooltipHelpers';
 import { JUNCTION_TYPE_DESCRIPTIONS } from '../lib/simplifiedFabricMap';
 import { WINDOW_SECURITY_RISK_HELPER } from '../lib/schemaDescriptionOverrides';
 import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M } from '../geometry/constants';
@@ -201,6 +199,26 @@ function useDefaultsLookup() {
   return useGeometryStore((state) => state.getDefaultsLookup());
 }
 
+/**
+ * LABEL-ONLY resolution: the caller has a DISPLAY LABEL and nothing else, so the
+ * property key is reverse-engineered from it (`getSchemaParamIdForField`) and there is
+ * no schema node, subtype or fabric variant to scope the lookup with.
+ *
+ * That is lossy — a curated `title` that is not a start-case of its key resolves to the
+ * wrong parameter, or to none — and it is deliberately NOT what Advanced Fields control
+ * rows use. Since R4.6b-1 all five controls (Text/Number/Boolean/Enum/WindowPartList)
+ * resolve their presentation from the REAL property key via
+ * `resolveAdvancedControlFieldPresentation` and render it through `ResolvedFieldLabel`.
+ * This function survives for the hand-rendered field groups that genuinely have only a
+ * label — `AdvancedFieldsEditor`'s own group headers, `EdgeInsulationFields`,
+ * `FancoilTestDataFields`, `DhwStorageHeatSourcePicker`, `WindowTreatmentFields` — plus
+ * `renderFieldLabelWithIndicator`'s no-presentation fallback arm.
+ *
+ * R4.6b-1 also deleted the copy of `ResolvedFieldLabel`'s JSX that used to live here.
+ * The markup was byte-identical to that component; keeping two copies meant a label or
+ * tooltip tweak had to be made twice, with only the lossy resolver telling them apart.
+ * The resolver stays here; the rendering is delegated.
+ */
 function renderFieldLabelWithTooltipForMode(
   label: string,
   elementType: string | undefined,
@@ -214,24 +232,7 @@ function renderFieldLabelWithTooltipForMode(
     elementType,
     label,
   }, schemaPort);
-
-  const labelSpan = (
-    <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>{presentation.label}</span>
-  );
-
-  if (presentation.tooltipInfo) {
-    return (
-      <Tooltip
-        content={formatSchemaInfoForTooltip(presentation.tooltipInfo)}
-        useFHSSchema={useFHSSchema}
-        position="right"
-        maxWidth={350}
-      >
-        {labelSpan}
-      </Tooltip>
-    );
-  }
-  return labelSpan;
+  return <ResolvedFieldLabel presentation={presentation} useFHSSchema={useFHSSchema} />;
 }
 
 function resolveAdvancedControlFieldPresentation(
@@ -284,6 +285,16 @@ export function renderFieldLabelWithTooltip(
   );
 }
 
+/**
+ * R4.6b-1 residual, flagged rather than silently left: every one of the six
+ * `renderAdvancedFieldLabelRow` call sites now supplies `presentation`, so the
+ * label-only arm below is no longer reachable from any control. It is kept as the
+ * documented fallback for a caller that has nothing but a display label — the same
+ * situation `renderFieldLabelWithTooltip`'s hand-rendered consumers are in — and
+ * making the parameter REQUIRED (deleting the arm, and with it the last lossy
+ * resolution inside the Advanced Fields grid) is a clean follow-up, deliberately not
+ * folded into this slice's measured surface.
+ */
 function renderFieldLabelWithIndicator(
   label: string,
   elementType: string | undefined,
@@ -875,6 +886,171 @@ function computeFieldPresentationState(args: {
   return { fieldSource, statusPillType, isCustom, showReset };
 }
 
+/**
+ * True when the resolved schema wants an object/array rather than a scalar, i.e. the
+ * row is a JSON blob edited as text. Read off the top-level `type` and off any
+ * `anyOf`/`oneOf` branch, because HEM writes both shapes.
+ */
+function schemaIsJsonLike(s: JsonRecord): boolean {
+  const types = schemaTypeList(s);
+  const anyOf = schemaAlternatives(s, 'anyOf') ?? [];
+  const oneOf = schemaAlternatives(s, 'oneOf') ?? [];
+  const expectsObject =
+    types.includes('object') ||
+    anyOf.some((a) => a.type === 'object' || a.properties !== undefined) ||
+    oneOf.some((a) => a.type === 'object' || a.properties !== undefined);
+  const expectsArray =
+    types.includes('array') ||
+    anyOf.some((a) => a.type === 'array' || a.items !== undefined) ||
+    oneOf.some((a) => a.type === 'array' || a.items !== undefined);
+  return expectsObject || expectsArray;
+}
+
+/** Everything the Advanced Fields controls derive identically from their props. */
+type AdvancedControlPreamble = {
+  cfg: RendererConfig;
+  /** Resolved schema node for this property (uischema `schemaOverride` wins). */
+  s: JsonRecord;
+  isCompact: boolean;
+  elementType: string | undefined;
+  subtype: string | undefined;
+  opaqueFabricVariant: OpaqueFabricVariant | undefined;
+  propKey: string | undefined;
+  isJsonLike: boolean;
+  valueString: string;
+  fieldPresentation: ResolvedFieldPresentation;
+  fieldUnit: string | undefined;
+  indicatorMessages: readonly string[] | undefined;
+  hasEvidence: boolean;
+  defaultValue: unknown;
+  fieldSource: FieldSourceInfo;
+  statusPillType: StatusPillType;
+  statusPillLabelOverride: string | undefined;
+  isCustom: boolean;
+  showReset: boolean;
+  isRuField: boolean;
+  isGroundUField: boolean;
+  groundUComputedWPerM2K: number | null | undefined;
+};
+
+/**
+ * The ~25 lines every Advanced Fields control opened with, written once.
+ *
+ * R4.6b-1 (audit finding 2): TextControl, NumberControl, BooleanControl and
+ * EnumControl each carried their own copy of this derivation, plus four copies of the
+ * `systemSampleMode` "Preset" status-pill ternary. Copies drift, and these had: only
+ * Number and Enum resolved their label from the real property key before this slice,
+ * Text/Boolean reverse-engineered it from the display label instead; and the status
+ * pill was spelled two different ways (`presentation.statusPillType` in Boolean/Enum,
+ * an explicit `getStatusPillType` call in Text/Number) that happened to agree.
+ *
+ * PLAIN FUNCTION, NOT A HOOK, deliberately: every line here is pure derivation from
+ * props. The two store reads (`useDefaultValues`, `useDefaultsLookup`) stay at each
+ * control's own top level and are passed in, so this stays outside the rules-of-hooks
+ * contract and each control keeps its own `useState`/`useNumericDraftInput` calls where
+ * a reader expects to find them.
+ *
+ * TWO PREVIOUSLY-DIVERGENT LINES ARE UNIFIED HERE, both verified inert by the rendered-
+ * row sweep in `AdvancedFieldsEditor.directRender.test.tsx`:
+ *  - `statusPillType` now always goes through the ground-U-aware `getStatusPillType`
+ *    branch (Boolean/Enum used `computeFieldPresentationState`'s own result). Identical
+ *    output: `isGroundUField` requires `BuildingElementGround.u_value`, a NUMBER, which
+ *    only ever reaches NumberControl, so the extra argument is `undefined` for
+ *    Boolean/Enum and the two expressions collapse to the same call.
+ *  - `isCustom` now always subtracts `matchesGroundCalc`, for the same reason.
+ * Unifying beats a `groundAware: boolean` flag that only one caller could ever set.
+ */
+function advancedControlPreamble(
+  props: Pick<AdvancedControlProps, 'data' | 'path' | 'label' | 'schema' | 'uischema' | 'config'>,
+  defaults: unknown,
+  defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
+): AdvancedControlPreamble {
+  const { data, path, label, schema, uischema, config } = props;
+  const cfg = rendererConfig(config);
+  const s = schemaWithOverride(uischema, schema);
+  const elementType = cfg.elementType;
+  const subtype = cfg.subtype;
+  const opaqueFabricVariant = cfg.opaqueFabricVariant;
+  const propKey = path?.split('.')?.pop();
+  const isJsonLike = schemaIsJsonLike(s);
+  const groundUComputedWPerM2K = cfg.groundUComputedWPerM2K;
+  const isGroundUField = isGroundUValueField(propKey, elementType);
+
+  const fieldPresentation = resolveAdvancedControlFieldPresentation(label, propKey, s, cfg);
+  const defaultValue = getAdvancedDefaultValue(
+    defaults,
+    defaultsLookup,
+    path,
+    elementType,
+    subtype,
+    opaqueFabricVariant,
+    propKey,
+    cfg,
+  );
+  const state = computeFieldPresentationState({
+    data,
+    isJsonLike,
+    fieldSource: resolveFieldSource(propKey, defaultValue, cfg),
+    config: cfg,
+    path,
+  });
+  const fieldSource = state.fieldSource;
+  const groundPillArg = isGroundUField ? { isGroundUField: true, groundUComputedWPerM2K } : undefined;
+  const statusPillType = cfg.systemSampleMode
+    ? state.statusPillType
+    : getStatusPillType(data, fieldSource.value, fieldSource.kind, isJsonLike, groundPillArg);
+  const matchesGroundCalc =
+    isGroundUField && groundAdvancedUValueMatchesComputed(data, groundUComputedWPerM2K);
+
+  return {
+    cfg,
+    s,
+    isCompact: Boolean(cfg.compact),
+    elementType,
+    subtype,
+    opaqueFabricVariant,
+    propKey,
+    isJsonLike,
+    valueString: advancedControlValueString(data, isJsonLike),
+    fieldPresentation,
+    fieldUnit: fieldUnitForAdornment(fieldPresentation),
+    indicatorMessages: fieldIndicatorsFor(cfg, propKey),
+    hasEvidence: hasEvidenceFor(cfg, propKey),
+    defaultValue,
+    fieldSource,
+    statusPillType,
+    statusPillLabelOverride:
+      cfg.systemSampleMode && statusPillType === 'default-used' ? 'Preset' : undefined,
+    isCustom: state.isCustom && !matchesGroundCalc,
+    showReset: state.showReset,
+    isRuField: isRuUnheatedSpaceField(propKey),
+    isGroundUField,
+    groundUComputedWPerM2K,
+  };
+}
+
+/**
+ * Text shown in the input for `data`. A JSON-blob row stringifies its value and treats
+ * an empty array/object as "no data" (that is what makes an unset `shading: []` render
+ * as a placeholder rather than as `[]`); a scalar row is plain `String(data)`.
+ */
+function advancedControlValueString(data: unknown, isJsonLike: boolean): string {
+  if (data === undefined || data === null) return '';
+  if (!isJsonLike) return String(data);
+  if (Array.isArray(data)) return data.length === 0 ? '' : safeJsonStringify(data);
+  if (typeof data === 'string') return data;
+  if (typeof data === 'object') return Object.keys(data).length === 0 ? '' : safeJsonStringify(data);
+  return safeJsonStringify(data);
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return '';
+  }
+}
+
 function renderResetToSourceButton(
   handleChange: (path: string, value: unknown) => void,
   path: string,
@@ -1048,14 +1224,24 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
   handleChange,
   path,
   label,
+  schema,
+  uischema,
   config,
 }) => {
-  const cfg = rendererConfig(config);
-  const isCompact = Boolean(cfg.compact);
-  const elementType = cfg.elementType;
-  const propKey = path?.split('.')?.pop();
-  const indicatorMessages = fieldIndicatorsFor(cfg, propKey);
-  const hasEvidence = hasEvidenceFor(cfg, propKey);
+  const defaults = useDefaultValues();
+  const defaultsLookup = useDefaultsLookup();
+  // Uses only the label/indicator half of the preamble: the row is a repeating editor
+  // with no single value, so it has no status pill of its own (`'default-used'` is
+  // hard-coded below) and no defaults/reset affordance.
+  const {
+    cfg,
+    isCompact,
+    elementType,
+    propKey,
+    fieldPresentation,
+    indicatorMessages,
+    hasEvidence,
+  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
   const midpointPresentation = resolveFieldPresentation({
     mode: cfg.useFHSSchemaForValidation ? 'fhs' : 'core',
     propertyKey: 'mid_height_air_flow_path',
@@ -1328,6 +1514,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
       'default-used',
       undefined,
       cfg.useFHSSchemaForValidation,
+      fieldPresentation,
     ),
   );
 };
@@ -1476,80 +1663,68 @@ function GroundUCalculatorButton({
   );
 }
 
+/**
+ * Copies the text an empty JSON-blob row is showing as its placeholder. One component
+ * for both wordings — R4.6b-1 folded two byte-identical copies of this markup (the
+ * only difference being "Copy default" vs "Copy example") into this parameterised one.
+ */
+function CopyPlaceholderButton({ kind, text }: { kind: 'default' | 'example'; text: string }) {
+  const wording = kind === 'default' ? 'Copy default' : 'Copy example';
+  return (
+    <button
+      type="button"
+      onClick={() => navigator.clipboard.writeText(text)}
+      className="btn btn-ghost btn-sm element-editor-input-action element-editor-input-action--icon"
+      title={wording}
+      aria-label={wording}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke="currentColor" strokeWidth="2"/>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2"/>
+      </svg>
+    </button>
+  );
+}
+
 export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, schema, uischema, config }) => {
   const [localError, setLocalError] = useState<string | null>(null);
-  const cfg = rendererConfig(config);
-  const s = schemaWithOverride(uischema, schema);
-  const isCompact = Boolean(cfg.compact);
-
-  // (Debug logs removed; re-add targeted diagnostics when needed.)
-  const types = schemaTypeList(s);
-  const anyOf = schemaAlternatives(s, 'anyOf') ?? [];
-  const oneOf = schemaAlternatives(s, 'oneOf') ?? [];
-  const expectsObject =
-    types.includes('object') ||
-    anyOf.some((a) => a.type === 'object' || a.properties !== undefined) ||
-    oneOf.some((a) => a.type === 'object' || a.properties !== undefined);
-  const expectsArray =
-    types.includes('array') ||
-    anyOf.some((a) => a.type === 'array' || a.items !== undefined) ||
-    oneOf.some((a) => a.type === 'array' || a.items !== undefined);
-  const isJsonLike = expectsObject || expectsArray;
-
-  const valueString = isJsonLike
-    ? (data === undefined || data === null
-      ? ''
-      : // Treat empty arrays/objects (e.g. default shading: []) as "no data" in the editor
-        (Array.isArray(data) && data.length === 0)
-        ? ''
-        : (typeof data === 'object' && !Array.isArray(data) && Object.keys(data || {}).length === 0)
-        ? ''
-        : (typeof data === 'string'
-          ? data
-          : (() => {
-              try {
-                return JSON.stringify(data);
-              } catch {
-                return '';
-              }
-            })()))
-    : (data === undefined || data === null ? '' : String(data));
-  const elementType = cfg.elementType;
-  const subtype = cfg.subtype;
-  const opaqueFabricVariant = cfg.opaqueFabricVariant;
-  const propKey = path?.split('.')?.pop();
-  const indicatorMessages = fieldIndicatorsFor(cfg, propKey);
-  const hasEvidence = hasEvidenceFor(cfg, propKey);
-  const openRuCalculator = cfg.openRuCalculator;
-  const openGroundUCalculator = cfg.openGroundUCalculator;
-  const groundUComputedWPerM2K = cfg.groundUComputedWPerM2K;
-  const isRuField = isRuUnheatedSpaceField(propKey);
-  const isGroundUField = isGroundUValueField(propKey, elementType);
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
-  const defaultValue = getAdvancedDefaultValue(defaults, defaultsLookup, path, elementType, subtype, opaqueFabricVariant, propKey, cfg);
-  const defaultFieldSource = resolveFieldSource(propKey, defaultValue, cfg);
-
-  // (Debug logs removed; re-add targeted diagnostics when needed.)
-  const presentation = computeFieldPresentationState({
-    data,
+  const {
+    cfg,
+    s,
+    isCompact,
+    elementType,
+    propKey,
     isJsonLike,
-    fieldSource: defaultFieldSource,
-    config: cfg,
-    path,
-  });
-  const fieldSource = presentation.fieldSource;
-  const groundPillArg = isGroundUField ? { isGroundUField: true, groundUComputedWPerM2K } : undefined;
-  const statusPillType =
-    cfg.systemSampleMode
-      ? presentation.statusPillType
-      : getStatusPillType(data, fieldSource.value, fieldSource.kind, isJsonLike, groundPillArg);
-  const statusPillLabelOverride =
-    cfg.systemSampleMode && statusPillType === 'default-used' ? 'Preset' : undefined;
-  const matchesGroundCalc =
-    isGroundUField && groundAdvancedUValueMatchesComputed(data, groundUComputedWPerM2K);
-  const isCustom = presentation.isCustom && !matchesGroundCalc;
-  const showReset = presentation.showReset;
+    valueString,
+    fieldPresentation,
+    indicatorMessages,
+    hasEvidence,
+    defaultValue,
+    fieldSource,
+    statusPillType,
+    statusPillLabelOverride,
+    isCustom,
+    showReset,
+    isRuField,
+    isGroundUField,
+    groundUComputedWPerM2K,
+  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  const openRuCalculator = cfg.openRuCalculator;
+  const openGroundUCalculator = cfg.openGroundUCalculator;
+  // One derivation feeding both the input placeholder and the copy button beside it.
+  // These were two copies of the same priority rule (configured default first, else a
+  // schema-generated example), each calling `generateRobustPlaceholder` for itself.
+  const defaultPlaceholder =
+    defaultValue !== undefined && defaultValue !== null
+      ? (typeof defaultValue === 'object' ? JSON.stringify(defaultValue) : String(defaultValue))
+      : undefined;
+  const examplePlaceholder =
+    defaultPlaceholder === undefined
+      ? generateRobustPlaceholder(propKey || '', s, schemaDefs(s.$defs) || schemaDefs(cfg.$defs))
+      : undefined;
+  const isBlank = valueString === '' || valueString === '{}' || valueString === '[]';
 
   // R4.5 DELETION NOTE: TextControl used to have its own `options.length > 0` ->
   // StandardDropdown escape hatch here (`extractOptions(s)`, deleted alongside this
@@ -1644,70 +1819,19 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
           error={undefined}
           size="md"
           helperText={undefined}
-          placeholder={(() => {
-            // Don't show placeholder if field has content
-            if (valueString !== '' && valueString !== '{}' && valueString !== '[]') {
-              return undefined;
-            }
-
-            // PRIORITY 1: Use default value if available
-            if (defaultValue !== undefined && defaultValue !== null) {
-              return typeof defaultValue === 'object' ? JSON.stringify(defaultValue) : String(defaultValue);
-            }
-
-            // PRIORITY 2: Generate schema-driven placeholder
-            const defs =
-              schemaDefs(s.$defs) ||
-              schemaDefs(cfg.$defs);
-            const placeholder = generateRobustPlaceholder(propKey || '', s, defs);
-
-            return placeholder;
-          })()}
+          placeholder={isBlank ? (defaultPlaceholder ?? examplePlaceholder) : undefined}
           className={isCustom ? 'custom-value' : ''}
         />
         {localError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{localError}</div>)}
       </>,
       [
-        !isRuField && !isGroundUField && (valueString === '' || valueString === '{}' || valueString === '[]') && (() => {
-        // PRIORITY 1: Use default value if available
-        if (defaultValue !== undefined && defaultValue !== null) {
-          const defaultPlaceholder = typeof defaultValue === 'object' ? JSON.stringify(defaultValue) : String(defaultValue);
-          return (
-            <button
-              type="button"
-              onClick={() => navigator.clipboard.writeText(defaultPlaceholder)}
-              className="btn btn-ghost btn-sm element-editor-input-action element-editor-input-action--icon"
-              title="Copy default"
-              aria-label="Copy default"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke="currentColor" strokeWidth="2"/>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2"/>
-              </svg>
-            </button>
-          );
-        }
-
-        // PRIORITY 2: Use schema-generated placeholder
-        const defs =
-          schemaDefs(s.$defs) ||
-          schemaDefs(cfg.$defs);
-        const placeholder = generateRobustPlaceholder(propKey || '', s, defs);
-        return placeholder ? (
-          <button
-            type="button"
-            onClick={() => navigator.clipboard.writeText(placeholder)}
-            className="btn btn-ghost btn-sm element-editor-input-action element-editor-input-action--icon"
-            title="Copy example"
-            aria-label="Copy example"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke="currentColor" strokeWidth="2"/>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2"/>
-            </svg>
-          </button>
-        ) : null;
-      })(),
+        !isRuField && !isGroundUField && isBlank && (
+          defaultPlaceholder !== undefined
+            ? <CopyPlaceholderButton key="copy-default" kind="default" text={defaultPlaceholder} />
+            : examplePlaceholder
+              ? <CopyPlaceholderButton key="copy-example" kind="example" text={examplePlaceholder} />
+              : null
+        ),
         isRuField && openRuCalculator ? (
           <RuCalculatorButton key="ru-calculator" onClick={openRuCalculator} hasValue={valueString !== ''} />
         ) : null,
@@ -1731,33 +1855,43 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       statusPillType,
       statusPillLabelOverride,
       cfg.useFHSSchemaForValidation,
+      fieldPresentation,
     ),
     );
 };
 
 export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, schema, uischema, config }) => {
   const [localError, setLocalError] = useState<string | null>(null);
-  const cfg = rendererConfig(config);
-  const s = schemaWithOverride(uischema, schema);
-  const isCompact = Boolean(cfg.compact);
-  const valueString = data === undefined || data === null ? '' : String(data);
-  const elementType = cfg.elementType;
-  const subtype = cfg.subtype;
-  const opaqueFabricVariant = cfg.opaqueFabricVariant;
-  const propKey = path?.split('.')?.pop();
-  const fieldPresentation = resolveAdvancedControlFieldPresentation(label, propKey, s, cfg);
-  const fieldUnit = fieldUnitForAdornment(fieldPresentation);
-  const indicatorMessages = fieldIndicatorsFor(cfg, propKey);
-  const hasEvidence = hasEvidenceFor(cfg, propKey);
+  const defaults = useDefaultValues();
+  const defaultsLookup = useDefaultsLookup();
+  const {
+    cfg,
+    s,
+    isCompact,
+    elementType,
+    subtype,
+    propKey,
+    valueString,
+    fieldPresentation,
+    fieldUnit,
+    indicatorMessages,
+    hasEvidence,
+    defaultValue,
+    fieldSource,
+    statusPillType,
+    statusPillLabelOverride,
+    isCustom,
+    showReset: showFieldSourceReset,
+    isRuField,
+    isGroundUField,
+    groundUComputedWPerM2K,
+  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
   const openRuCalculator = cfg.openRuCalculator;
   const openGroundUCalculator = cfg.openGroundUCalculator;
-  const groundUComputedWPerM2K = cfg.groundUComputedWPerM2K;
   const resyncSuspendedThermalTransmWalls = cfg.resyncSuspendedThermalTransmWalls;
   const suspendedThermalTransmWallsAutoValue = cfg.suspendedThermalTransmWallsAutoValue;
   const suspendedThermalTransmWallsAutofillSources = cfg.suspendedThermalTransmWallsAutofillSources ?? [];
   const focusSourceElement = cfg.focusSourceElement;
-  const isRuField = isRuUnheatedSpaceField(propKey);
-  const isGroundUField = isGroundUValueField(propKey, elementType);
   const isSuspendedGroundThermalTransmWallsFieldActive = isSuspendedGroundThermalTransmWallsField(
     propKey,
     elementType,
@@ -1769,25 +1903,6 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     isAdvancedEditor &&
     isSuspendedGroundThermalTransmWallsFieldActive &&
     suspendedThermalTransmWallsAutofillHasSources === false;
-  const defaults = useDefaultValues();
-  const defaultsLookup = useDefaultsLookup();
-  const defaultValue = getAdvancedDefaultValue(defaults, defaultsLookup, path, elementType, subtype, opaqueFabricVariant, propKey, cfg);
-  const defaultFieldSource = resolveFieldSource(propKey, defaultValue, cfg);
-  const presentation = computeFieldPresentationState({
-    data,
-    isJsonLike: false,
-    fieldSource: defaultFieldSource,
-    config: cfg,
-    path,
-  });
-  const fieldSource = presentation.fieldSource;
-  const groundPillArg = isGroundUField ? { isGroundUField: true, groundUComputedWPerM2K } : undefined;
-  const statusPillType =
-    cfg.systemSampleMode
-      ? presentation.statusPillType
-      : getStatusPillType(data, fieldSource.value, fieldSource.kind, false, groundPillArg);
-  const statusPillLabelOverride =
-    cfg.systemSampleMode && statusPillType === 'default-used' ? 'Preset' : undefined;
   const isIntegerSchema = schemaHasIntegerType(s);
   const numberInputAttributes = numericInputAttributesFromSchema(s, { integer: isIntegerSchema });
   const numberDraftInput = useNumericDraftInput(
@@ -1819,10 +1934,6 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     // (Debug logs removed)
   }
 
-  const matchesGroundCalc =
-    isGroundUField && groundAdvancedUValueMatchesComputed(data, groundUComputedWPerM2K);
-  const isCustom = presentation.isCustom && !matchesGroundCalc;
-  const showFieldSourceReset = presentation.showReset;
   const showSuspendedThermalTransmSyncReset =
     isSuspendedGroundThermalTransmWallsFieldActive &&
     suspendedThermalTransmWallsAutoValue != null &&
@@ -1998,35 +2109,24 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
   );
 };
 
-export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, config }) => {
+export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, schema, uischema, config }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
-  const cfg = rendererConfig(config);
-  const elementType = cfg.elementType;
-  const subtype = cfg.subtype;
-  const opaqueFabricVariant = cfg.opaqueFabricVariant;
-  const isCompact = Boolean(cfg.compact);
-  const propKey = path?.split('.')?.pop();
-  const indicatorMessages = fieldIndicatorsFor(cfg, propKey);
-  const hasEvidence = hasEvidenceFor(cfg, propKey);
-  const defaultValue = getAdvancedDefaultValue(defaults, defaultsLookup, path, elementType, subtype, opaqueFabricVariant, propKey, cfg);
-  const defaultFieldSource = resolveFieldSource(propKey, defaultValue, cfg);
-  const presentation = computeFieldPresentationState({
-    data,
-    isJsonLike: false,
-    fieldSource: defaultFieldSource,
-    config: cfg,
-    path,
-  });
-  const fieldSource = presentation.fieldSource;
-
-  // Determine status pill type (booleans are not JSON-like)
-  const statusPillType = presentation.statusPillType;
-  const statusPillLabelOverride =
-    cfg.systemSampleMode && statusPillType === 'default-used' ? 'Preset' : undefined;
-
-  const isCustom = presentation.isCustom;
-  const showReset = presentation.showReset;
+  const {
+    cfg,
+    isCompact,
+    elementType,
+    propKey,
+    fieldPresentation,
+    indicatorMessages,
+    hasEvidence,
+    defaultValue,
+    fieldSource,
+    statusPillType,
+    statusPillLabelOverride,
+    isCustom,
+    showReset,
+  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
 
   return renderAdvancedFieldRow(
     propKey,
@@ -2055,19 +2155,32 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
       statusPillType,
       statusPillLabelOverride,
       cfg.useFHSSchemaForValidation,
+      fieldPresentation,
     ),
   );
 };
 
 export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, errors, schema, uischema, config, enabled }) => {
-  const cfg = rendererConfig(config);
-  const s = schemaWithOverride(uischema, schema);
-  const isCompact = Boolean(cfg.compact);
-  const elementType = cfg.elementType;
-  const propKey = path?.split('.')?.pop();
-  const fieldPresentation = resolveAdvancedControlFieldPresentation(label, propKey, s, cfg);
-  const indicatorMessages = fieldIndicatorsFor(cfg, propKey);
-  const hasEvidence = hasEvidenceFor(cfg, propKey);
+  const defaults = useDefaultValues();
+  const defaultsLookup = useDefaultsLookup();
+  const {
+    cfg,
+    s,
+    isCompact,
+    elementType,
+    propKey,
+    valueString,
+    fieldPresentation,
+    fieldUnit: resolvedFieldUnit,
+    indicatorMessages,
+    hasEvidence,
+    defaultValue,
+    fieldSource,
+    statusPillType,
+    statusPillLabelOverride,
+    isCustom,
+    showReset,
+  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
   const fromEnum = Array.isArray(s.enum) ? s.enum : null;
   const fromOneOf = schemaAlternatives(s, 'oneOf');
   const fromAnyOf = schemaAlternatives(s, 'anyOf');
@@ -2129,29 +2242,6 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     }));
   }
 
-  const defaults = useDefaultValues();
-  const defaultsLookup = useDefaultsLookup();
-  const subtype = cfg.subtype;
-  const opaqueFabricVariant = cfg.opaqueFabricVariant;
-  const defaultValue = getAdvancedDefaultValue(defaults, defaultsLookup, path, elementType, subtype, opaqueFabricVariant, propKey, cfg);
-  const defaultFieldSource = resolveFieldSource(propKey, defaultValue, cfg);
-  const presentation = computeFieldPresentationState({
-    data,
-    isJsonLike: false,
-    fieldSource: defaultFieldSource,
-    config: cfg,
-    path,
-  });
-  const fieldSource = presentation.fieldSource;
-
-  // Determine status pill type (enums are not JSON-like)
-  const statusPillType = presentation.statusPillType;
-  const statusPillLabelOverride =
-    cfg.systemSampleMode && statusPillType === 'default-used' ? 'Preset' : undefined;
-
-  const valueString = data === undefined || data === null ? '' : String(data);
-  const isCustom = presentation.isCustom;
-  const showReset = presentation.showReset;
   const isReadOnly = uiOptions(uischema).readOnly === true || enabled === false;
   const selectedLabel = options.find((o) => o.value === valueString)?.label ?? valueString;
   const selectedOptionDescription = optionDescriptions.get(valueString);
@@ -2199,9 +2289,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
           </>
         )
       : (shouldShowOptionDescription ? selectedOptionDescription : undefined) ?? sourceHelperText;
-  const fieldUnit = coerceType === 'number'
-    ? fieldUnitForAdornment(fieldPresentation)
-    : undefined;
+  const fieldUnit = coerceType === 'number' ? resolvedFieldUnit : undefined;
 
   if (isReadOnly) {
     return renderAdvancedFieldRow(

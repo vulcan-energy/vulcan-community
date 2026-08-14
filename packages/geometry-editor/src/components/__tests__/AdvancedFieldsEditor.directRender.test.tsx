@@ -668,6 +668,530 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
   });
 });
 
+/**
+ * R4.6b-1 STANDING INVARIANT — the RENDERED ROW, not the picked control.
+ *
+ * WHY A SECOND SWEEP EXISTS BESIDE THE R4.6a ONE ABOVE. That sweep stops at
+ * `pickDirectControl`: it proves the right CONTROL is chosen for a schema shape. Three
+ * of R4.6b's defects walked straight through it, because every one of them was
+ * downstream of the choice — TextControl/BooleanControl/WindowPartListControl resolved
+ * their label and tooltip by reverse-engineering a property key out of the DISPLAY
+ * LABEL (`getSchemaParamIdForField`), which silently mismatched or missed whenever the
+ * label was not a start-case of its key; and the System walk rendered raw snake_case
+ * keys for any property with no schema `title`. Neither is visible in a
+ * `pickDirectControl` outcome. The row is the contract, so the row is what is pinned.
+ *
+ * WHAT IS RECORDED per rendered row, in DOM order, for every route: property key
+ * (`data-field-key`), the control kind ACTUALLY rendered, the `min`/`max` and
+ * `placeholder` attributes of its first input, the LABEL TEXT a user reads, and whether
+ * a tooltip trigger is attached to that label. Tooltip CONTENT is deliberately not
+ * pinned here: it renders lazily into a portal on hover, so capturing it means driving
+ * ~1800 hover interactions, and the affordance's presence is what this invariant is
+ * about. (Content was measured out-of-band for R4.6b-1's before/after diff.)
+ *
+ * WHAT IS SWEPT: the SAME population as the R4.6a sweep above — every element type in
+ * `ELEMENT_TYPE_ORDER` × every subtype in `SWEPT_SUBTYPES` × both profiles for the flat
+ * walk, and every `SWEPT_SYSTEM_SUBTYPES` entry × both profiles for the System layout
+ * walk, with the same `SYSTEM_PLANT_FIXTURES` discriminator stubs — but MOUNTED for
+ * real through `AdvancedFieldsEditor` rather than resolved at the schema level.
+ *
+ * FIXTURE-BOUNDED, exactly as the sweep above is, and for the same reason: the System
+ * half only sees the branches `SYSTEM_PLANT_FIXTURES` opens. Read every count below as
+ * "what these fixtures render", never "what the schemas hold". Two specifics worth
+ * knowing rather than re-deriving:
+ *  - `WWHRS` has no fixture and renders ZERO rows on both profiles, so it appears
+ *    nowhere in the inventory.
+ *  - `HotWaterDemand` needs no fixture (it is a plain object, not a discriminated
+ *    map) and DOES render: 4 rows on Core, 3 on FHS. R4.6b-1's brief expected to have
+ *    to add a fixture for it; measurement said otherwise, so none was added.
+ *
+ * DEDUPLICATION IS MEASURED, NOT ASSUMED. Most subtypes resolve the same subschema for
+ * a given element type, so routes are grouped by their rendered row-set and the group's
+ * SUBTYPE LIST is part of the pinned key. A subtype that starts or stops diverging
+ * therefore moves between keys and fails the comparison; it cannot hide inside a group.
+ * The two counts asserted alongside close the remaining gap in both directions: a route
+ * that goes empty drops out of its group, a route that gains rows joins or forms one,
+ * and a route added to or removed from the sweep itself moves `routesSwept`.
+ */
+type RenderedRowInventory = Record<string, string[]>;
+
+/** `key | label | control | min | max | placeholder | tooltip`, one line per row. */
+function renderedRowLine(row: HTMLElement): string {
+  const input = row.querySelector('input');
+  return [
+    row.getAttribute('data-field-key') ?? '',
+    fieldLabelText(row),
+    renderedControlKind(row),
+    input?.getAttribute('min') ?? '-',
+    input?.getAttribute('max') ?? '-',
+    input?.getAttribute('placeholder') ?? '-',
+    row.children[0]?.children[0]?.children[0]?.querySelector('.tooltip-container') ? 'tip' : 'no-tip',
+  ].join(' | ');
+}
+
+/**
+ * What the row actually rendered, read off the DOM rather than re-derived from schema.
+ * `other:` covers the composite rows (WindowPartListControl, WindowTreatmentFields)
+ * that have no single top-level input of their own.
+ */
+function renderedControlKind(row: HTMLElement): string {
+  if (row.querySelector('select')) return 'select';
+  if (row.querySelector('input[type="checkbox"]')) return 'checkbox';
+  if (row.querySelector('input')) return 'textbox';
+  return `other:${row.firstElementChild?.tagName ?? 'unknown'}`;
+}
+
+function sweepRenderedRows(): {
+  inventory: RenderedRowInventory;
+  routesSwept: number;
+  routesWithRows: number;
+} {
+  /** container -> row-set signature -> the subtypes that produced it ('' for System). */
+  const containers = new Map<string, Map<string, string[]>>();
+  let routesSwept = 0;
+  let routesWithRows = 0;
+
+  const record = (container: string, subtype: string, container_el: HTMLElement) => {
+    routesSwept += 1;
+    const rows = Array.from(container_el.querySelectorAll<HTMLElement>('[data-field-key]'));
+    if (rows.length === 0) return;
+    routesWithRows += 1;
+    const signature = rows.map(renderedRowLine).join('\n');
+    const variants = containers.get(container) ?? new Map<string, string[]>();
+    containers.set(container, variants);
+    variants.set(signature, [...(variants.get(signature) ?? []), subtype]);
+  };
+
+  for (const mode of ['core', 'fhs'] as const) {
+    const useFHSSchema = mode === 'fhs';
+    for (const elementType of ADVANCED_FIELD_ELEMENT_TYPES) {
+      if (elementType === 'System') continue;
+      for (const subtype of SWEPT_SUBTYPES) {
+        const { container } = renderEditor({ elementType, subtype, useFHSSchema, extraJson: {} });
+        record(`${mode}/${elementType}`, subtype ?? '-', container);
+        cleanup();
+      }
+    }
+    for (const subtype of SWEPT_SYSTEM_SUBTYPES) {
+      const { container } = renderEditor({
+        elementType: 'System',
+        subtype,
+        useFHSSchema,
+        extraJson: { [subtype]: SYSTEM_PLANT_FIXTURES[subtype] ?? {} },
+      });
+      record(`${mode}/System:${subtype}`, '', container);
+      cleanup();
+    }
+  }
+
+  const inventory: RenderedRowInventory = {};
+  for (const [container, variants] of containers) {
+    for (const [signature, subtypes] of variants) {
+      const key = subtypes[0] === ''
+        ? container
+        : `${container} [${subtypes.length === SWEPT_SUBTYPES.length ? 'every subtype' : [...subtypes].sort().join(' ')}]`;
+      inventory[key] = signature.split('\n');
+    }
+  }
+  return { inventory, routesSwept, routesWithRows };
+}
+
+/**
+ * Captured from a real mount, then read line by line before being pinned. The four
+ * `Leaks · …` rows and every `boiler · …`/`hp · …` tail below are R4.6b-1's start-casing
+ * (they were raw snake_case); the plant keys in front of them stay exactly as a user
+ * would have typed them in their CSV, which is the point of that exclusion.
+ */
+const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
+  'core/BuildingElementAdjacentConditionedSpace [every subtype]': [
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
+  ],
+  'core/BuildingElementGround [- Exposed_floor Heated_basement ceiling door fancoil floor radiator roof ufh wall]': [
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
+    'thermal_resist_walls_base | Thermal Resist Walls Base | textbox | 0 | - | - | tip',
+  ],
+  'core/BuildingElementGround [Slab_no_edge_insulation]': [
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
+  ],
+  'core/BuildingElementGround [Slab_edge_insulation]': [
+    'edge_insulation | Edge Insulation | select | - | - | - | no-tip',
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
+  ],
+  'core/BuildingElementGround [Suspended_floor]': [
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
+    'area_per_perimeter_vent | Area Per Perimeter Vent | textbox | 0 | - | - | tip',
+    'thermal_resist_insul | Thermal Resist Insul | textbox | 0 | - | - | tip',
+    'thermal_transm_walls | Thermal Transm Walls | textbox | 0 | - | - | tip',
+    'height_upper_surface | Height Upper Surface | textbox | 0 | - | - | tip',
+    'shield_fact_location | Shield Fact Location | select | - | - | - | tip',
+  ],
+  'core/BuildingElementGround [Unheated_basement]': [
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
+    'height_basement_walls | Height Basement Walls | textbox | 0 | - | - | tip',
+    'thermal_resist_walls_base | Thermal Resist Walls Base | textbox | 0 | - | - | tip',
+    'thermal_transm_envi_base | Thermal Transm Envi Base | textbox | 0 | - | - | tip',
+    'thermal_transm_walls | Thermal Transm Walls | textbox | 0 | - | - | tip',
+  ],
+  'core/BuildingElementOpaque [every subtype]': [
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
+    'solar_absorption_coeff | Solar Absorption Coeff | textbox | 0 | 1 | - | tip',
+  ],
+  'core/BuildingElementPartyWall [every subtype]': [
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
+  ],
+  'core/BuildingElementTransparent [every subtype]': [
+    'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'g_value | G-Value | textbox | 0 | 1 | - | tip',
+    'window_part_list | Window Part List | other:DIV | - | - | - | tip',
+  ],
+  'core/ElectricBattery [every subtype]': [
+    'battery_age | Battery Age | textbox | 0 | - | - | tip',
+    'grid_charging_possible | Grid Charging Possible | checkbox | - | - | - | tip',
+    'maximum_charge_rate_one_way_trip | Maximum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
+    'maximum_discharge_rate_one_way_trip | Maximum Discharge Rate One Way Trip | textbox | 0 | - | - | tip',
+    'minimum_charge_rate_one_way_trip | Minimum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
+  ],
+  'core/MechanicalVentilation [every subtype]': [
+    'Control | Control | textbox | - | - | "example" | tip',
+    'EnergySupply | Energysupply | textbox | - | - | "example" | tip',
+    'SFP | SFP | textbox | 0 | - | - | tip',
+    'SFP_in_use_factor | SFP In Use Factor | textbox | 1 | - | - | tip',
+    'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
+    'ductwork | Ductwork | textbox | - | - | [{"cross_section_shape":"circular","duct_type":"intake","insulation_thermal_conductivity":1,"insulation_thickness_mm":0,"length":1,"reflective":false,"duct_perimeter_mm":1,"external_diameter_mm":1,"internal_diameter_mm":1}] | tip',
+    'mvhr_eff | MVHR Efficiency | textbox | 0 | 1 | - | tip',
+    'mvhr_location | Mvhr Location | select | - | - | - | tip',
+    'sup_air_flw_ctrl | SupplyAirFlowRateControlType | select | - | - | - | tip',
+    'sup_air_temp_ctrl | SupplyAirTemperatureControlType | select | - | - | - | tip',
+    'position_intake | Position Intake | textbox | - | - | {"orientation360":0,"pitch":0,"mid_height_air_flow_path":1} | tip',
+    'position_exhaust | Position Exhaust | textbox | - | - | {"orientation360":0,"pitch":0,"mid_height_air_flow_path":1} | tip',
+    'mid_height_air_flow_path | Mid Height Air Flow Path | textbox | 0 | - | - | tip',
+    'orientation360 | Orientation360 | textbox | 0 | 360 | - | tip',
+    'pitch | Pitch | textbox | 0 | 180 | - | tip',
+  ],
+  'core/MechanicalVentilationDuctwork [every subtype]': [
+    'cross_section_shape | DuctShape | select | - | - | - | tip',
+    'duct_perimeter_mm | Duct Perimeter | textbox | 0 | - | - | tip',
+    'external_diameter_mm | External Diameter | textbox | 0 | - | - | tip',
+    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
+    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
+    'internal_diameter_mm | Internal Diameter | textbox | 0 | - | - | tip',
+    'reflective | Reflective | checkbox | - | - | - | tip',
+  ],
+  'core/System:HeatSourceWet': [
+    'boiler | Boiler | textbox | - | - | - | tip',
+    'hp | Hp | textbox | - | - | - | tip',
+  ],
+  'core/System:HotWaterDemand': [
+    'Bath | Bath | textbox | - | - | {} | tip',
+    'Distribution | Distribution | textbox | - | - | {} | tip',
+    'Other | Other | textbox | - | - | {} | tip',
+    'Shower | Shower | textbox | - | - | {} | tip',
+  ],
+  'core/System:HotWaterSource': [
+    'hw cylinder | Hw Cylinder | textbox | - | - | - | no-tip',
+  ],
+  'core/System:InfiltrationVentilation': [
+    'ach_max_static_calcs | ACH Maximum Static Calcs | textbox | 0 | - | - | tip',
+    'ach_min_static_calcs | ACH Minimum Static Calcs | textbox | 0 | - | - | tip',
+    'altitude | Altitude | textbox | - | - | - | tip',
+    'Control_VentAdjustMax | Control Ventadjustmax | textbox | - | - | "example" | tip',
+    'Control_VentAdjustMin | Control Ventadjustmin | textbox | - | - | "example" | tip',
+    'Control_WindowAdjust | Control Windowadjust | textbox | - | - | "example" | tip',
+    'cross_vent_possible | Cross Vent Possible | checkbox | - | - | - | tip',
+    'env_area | Leaks · Env Area | textbox | 0 | - | - | tip',
+    'test_pressure | Leaks · Test Pressure | textbox | 0 | - | - | tip',
+    'test_result | Leaks · Test Result | textbox | 0 | - | - | tip',
+    'ventilation_zone_height | Leaks · Ventilation Zone Height | textbox | 0 | - | - | tip',
+    'MechanicalVentilation | Mechanicalventilation | textbox | - | - | {} | tip',
+    'shield_class | VentilationShieldClass | select | - | - | - | tip',
+    'terrain_class | TerrainClass | select | - | - | - | tip',
+    'vent_opening_ratio_init | Vent Opening Ratio Init | textbox | 0 | 1 | - | tip',
+    'ventilation_zone_base_height | Ventilation Zone Base Height | textbox | - | - | - | tip',
+    'Vents | Vents | textbox | - | - | {} | tip',
+  ],
+  'core/System:SpaceCoolSystem': [
+    'cooler | Cooler | textbox | - | - | - | no-tip',
+  ],
+  'core/System:SpaceHeatSystem': [
+    'Zone 1 circuit | Zone 1 Circuit | textbox | - | - | - | no-tip',
+  ],
+  'core/WaterPipework [every subtype]': [
+    'external_diameter_mm | External Diameter | textbox | 0 | - | - | tip',
+    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
+    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
+    'internal_diameter_mm | Internal Diameter | textbox | 0 | - | - | tip',
+    'pipe_contents | PipeworkContents | select | - | - | - | tip',
+    'surface_reflectivity | Surface Reflectivity | checkbox | - | - | - | tip',
+  ],
+  'fhs/BuildingElementAdjacentConditionedSpace [every subtype]': [
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+  ],
+  'fhs/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | 3 | - | tip',
+  ],
+  'fhs/BuildingElementGround [- Exposed_floor Slab_no_edge_insulation ceiling door fancoil floor radiator roof ufh wall]': [
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+  ],
+  'fhs/BuildingElementGround [Slab_edge_insulation]': [
+    'edge_insulation | Edge Insulation | select | - | - | - | no-tip',
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+  ],
+  'fhs/BuildingElementGround [Suspended_floor]': [
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'height_upper_surface | Height Upper Surface | textbox | 0 | 100 | - | tip',
+    'thermal_transm_walls | Thermal Transm Walls | textbox | 0 | 100 | - | tip',
+    'area_per_perimeter_vent | Area Per Perimeter Vent | textbox | - | - | - | tip',
+    'shield_fact_location | Shield Fact Location | select | - | - | - | tip',
+    'thermal_resist_insul | Thermal Resist Insul | textbox | 0 | 100 | - | tip',
+  ],
+  'fhs/BuildingElementGround [Heated_basement]': [
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'thermal_resist_walls_base | Thermal Resist Walls Base | textbox | - | - | - | tip',
+  ],
+  'fhs/BuildingElementGround [Unheated_basement]': [
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
+    'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+    'thermal_resist_walls_base | Thermal Resist Walls Base | textbox | - | - | - | tip',
+    'thermal_transm_envi_base | Thermal Transm Envi Base | textbox | - | - | - | tip',
+    'thermal_transm_walls | Thermal Transm Walls | textbox | - | - | - | tip',
+    'height_basement_walls | Height Basement Walls | textbox | - | - | - | tip',
+  ],
+  'fhs/BuildingElementOpaque [every subtype]': [
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'colour | Colour | select | - | - | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+  ],
+  'fhs/BuildingElementPartyWall [every subtype]': [
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | MassDistributionClass | select | - | - | - | tip',
+  ],
+  'fhs/BuildingElementTransparent [every subtype]': [
+    'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
+    'u_value | U Value | textbox | 0.01 | 10 | - | tip',
+    'g_value | G Value | textbox | 0 | 1 | - | tip',
+    'security_risk | Security Risk? | select | - | - | - | tip',
+    'window_part_list | Window Part List | other:DIV | - | - | - | no-tip',
+  ],
+  'fhs/ElectricBattery [every subtype]': [
+    'minimum_charge_rate_one_way_trip | Minimum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
+    'maximum_charge_rate_one_way_trip | Maximum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
+    'maximum_discharge_rate_one_way_trip | Maximum Discharge Rate One Way Trip | textbox | 0 | - | - | tip',
+  ],
+  'fhs/MechanicalVentilation [-]': [
+    'design_zone_cooling_covered_by_mech_vent | Design Zone Cooling Covered By Mech Vent | textbox | - | - | - | tip',
+    'design_zone_heating_covered_by_mech_vent | Design Zone Heating Covered By Mech Vent | textbox | - | - | - | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
+    'SFP_in_use_factor | Sfp In Use Factor | textbox | 1 | - | - | tip',
+  ],
+  'fhs/MechanicalVentilation [Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door fancoil floor radiator roof ufh wall]': [
+    'design_zone_cooling_covered_by_mech_vent | Design Zone Cooling Covered By Mech Vent | textbox | - | - | - | tip',
+    'design_zone_heating_covered_by_mech_vent | Design Zone Heating Covered By Mech Vent | textbox | - | - | - | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
+    'SFP_in_use_factor | Sfp In Use Factor | textbox | 1 | - | - | tip',
+    'mid_height_air_flow_path | Mid Height Air Flow Path | textbox | 1 | 60 | - | tip',
+    'orientation360 | Orientation 360 | textbox | 0 | 360 | - | tip',
+    'pitch | Pitch | textbox | 0 | 180 | - | tip',
+  ],
+  'fhs/MechanicalVentilationDuctwork [every subtype]': [
+    'cross_section_shape | Cross Section Shape | select | - | - | - | tip',
+    'internal_diameter_mm | Internal Diameter Mm | textbox | 0 | 1000 | - | tip',
+    'external_diameter_mm | External Diameter Mm | textbox | 0 | 1000 | - | tip',
+    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
+    'insulation_thickness_mm | Insulation Thickness Mm | textbox | 0 | 100 | - | tip',
+    'reflective | Reflective | checkbox | - | - | - | tip',
+  ],
+  'fhs/OnSiteGeneration [every subtype]': [
+    'ventilation_strategy | Ventilation Strategy | select | - | - | - | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'shading | Shading | textbox | - | - | [{"type":null,"distance":0}] | tip',
+    'inverter_peak_power_dc | Inverter Peak Power Dc | textbox | 0 | - | - | tip',
+    'inverter_peak_power_ac | Inverter Peak Power Ac | textbox | 0 | - | - | tip',
+    'inverter_is_inside | Inverter Is Inside | checkbox | - | - | - | tip',
+    'inverter_type | Inverter Type | select | - | - | - | tip',
+  ],
+  'fhs/System:HeatSourceWet': [
+    'boiler_location | boiler · Boiler Location | select | - | - | - | tip',
+    'efficiency_full_load | boiler · Efficiency Full Load | textbox | 0.1 | 1 | - | tip',
+    'efficiency_part_load | boiler · Efficiency Part Load | textbox | 0.1 | 1.12 | - | tip',
+    'electricity_circ_pump | boiler · Electricity Circ Pump | textbox | 0.001 | 1 | - | tip',
+    'electricity_full_load | boiler · Electricity Full Load | textbox | 0 | 1 | - | tip',
+    'electricity_part_load | boiler · Electricity Part Load | textbox | 0 | 1 | - | tip',
+    'electricity_standby | boiler · Electricity Standby | textbox | 0 | 0.1 | - | tip',
+    'EnergySupply | boiler · Energy Supply | textbox | - | - | "example" | tip',
+    'EnergySupply_aux | boiler · Energy Supply Aux | textbox | - | - | "example" | tip',
+    'is_heat_network | boiler · Is Heat Network | checkbox | - | - | - | tip',
+    'modulation_load | boiler · Modulation Load | textbox | 0.1 | 1 | - | tip',
+    'rated_power | boiler · Rated Power | textbox | 0 | - | - | tip',
+    'backup_ctrl_type | hp · Backup Ctrl Type | select | - | - | - | tip',
+    'EnergySupply | hp · Energy Supply | textbox | - | - | "example" | tip',
+    'is_heat_network | hp · Is Heat Network | checkbox | - | - | - | tip',
+    'min_modulation_rate_20 | hp · Min Modulation Rate 20 | textbox | 0 | 1 | - | tip',
+    'min_modulation_rate_35 | hp · Min Modulation Rate 35 | textbox | 0 | 1 | - | tip',
+    'min_modulation_rate_55 | hp · Min Modulation Rate 55 | textbox | 0 | 1 | - | tip',
+    'min_temp_diff_flow_return_for_hp_to_operate | hp · Min Temp Diff Flow Return For Hp To Operate | textbox | 0 | 50 | - | tip',
+    'modulating_control | hp · Modulating Control | checkbox | - | - | - | tip',
+    'power_crankcase_heater | hp · Power Crankcase Heater | textbox | 0 | - | - | tip',
+    'power_heating_circ_pump | hp · Power Heating Circ Pump | textbox | 0 | 1 | - | tip',
+    'power_heating_warm_air_fan | hp · Power Heating Warm Air Fan | textbox | 0 | - | - | tip',
+    'power_max_backup | hp · Power Max Backup | textbox | 0 | - | - | no-tip',
+    'power_off | hp · Power Off | textbox | 0 | - | - | tip',
+    'power_source_circ_pump | hp · Power Source Circ Pump | textbox | 0 | 1 | - | tip',
+    'power_standby | hp · Power Standby | textbox | 0 | - | - | tip',
+    'sink_type | hp · Sink Type | select | - | - | - | tip',
+    'source_type | hp · Source Type | select | - | - | - | tip',
+    'temp_lower_operating_limit | hp · Temp Lower Operating Limit | textbox | -30 | 0 | - | tip',
+    'temp_return_feed_max | hp · Temp Return Feed Max | textbox | 4 | 80 | - | tip',
+    'test_data_EN14825 | hp · Test Data EN 14825 | textbox | - | - | [{"test_letter":null,"capacity":1,"cop":1,"design_flow_temp":1,"temp_outlet":1,"temp_source":-273.15,"temp_test":-273.15,"air_flow_rate":1}] | tip',
+    'time_constant_onoff_operation | hp · Time Constant Onoff Operation | textbox | 0 | - | - | tip',
+    'var_flow_temp_ctrl_during_test | hp · Var Flow Temp Ctrl During Test | checkbox | - | - | - | tip',
+  ],
+  'fhs/System:HotWaterDemand': [
+    'Bath | Bath | textbox | - | - | {} | tip',
+    'Other | Other | textbox | - | - | {} | tip',
+    'Shower | Shower | textbox | - | - | {} | tip',
+  ],
+  'fhs/System:HotWaterSource': [
+    'ColdWaterSource | Cold Water Source | select | - | - | - | tip',
+    'HeatSourceWet | Heatsourcewet | textbox | - | - | null | tip',
+    'rejected_energy_1 | Rejected Energy 1 | textbox | 0 | - | - | tip',
+    'rejected_factor_3 | Rejected Factor 3 | textbox | 0 | - | - | tip',
+    'separate_DHW_tests | Separate DHW Tests | select | - | - | - | tip',
+    'storage_loss_factor_1 | Storage Loss Factor 1 | textbox | 0 | - | - | tip',
+    'storage_loss_factor_2 | Storage Loss Factor 2 | textbox | 0 | - | - | tip',
+  ],
+  'fhs/System:InfiltrationVentilation': [
+    'ach_max_static_calcs | Ach Max Static Calcs | textbox | 0 | - | - | tip',
+    'ach_min_static_calcs | Ach Min Static Calcs | textbox | 0 | - | - | tip',
+    'altitude | Altitude | textbox | -150 | 7200 | - | tip',
+    'env_area | Leaks · Env Area | textbox | 5 | 72000 | - | tip',
+    'test_pressure | Leaks · Test Pressure | select | - | - | - | tip',
+    'test_result | Leaks · Test Result | textbox | 0 | - | - | tip',
+    'ventilation_zone_height | Leaks · Ventilation Zone Height | textbox | 1 | 120 | - | tip',
+    'MechanicalVentilation | Mechanical Ventilation | textbox | - | - | {} | tip',
+    'noise_nuisance | Noise Nuisance | checkbox | - | - | - | tip',
+    'shield_class | Shield Class | select | - | - | - | tip',
+    'terrain_class | Terrain Class | select | - | - | - | tip',
+    'ventilation_zone_base_height | Ventilation Zone Base Height | textbox | -150 | 750 | - | tip',
+    'Vents | Vents | textbox | - | - | {} | tip',
+  ],
+  'fhs/System:SpaceCoolSystem': [
+    'advanced_start | Advanced Start | textbox | - | - | - | tip',
+    'cooling_capacity | Cooling Capacity | textbox | 0 | - | - | tip',
+    'efficiency | Efficiency | textbox | 0 | 25 | - | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
+    'temp_setback | Temp Setback | textbox | - | - | - | tip',
+  ],
+  'fhs/System:SpaceHeatSystem': [
+    'bypass_fraction_recirculated | Bypass Fraction Recirculated | textbox | 0 | 1 | - | tip',
+    'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | tip',
+    'design_flow_temp | Design Flow Temp | textbox | 20 | 120 | - | tip',
+    'temp_diff_emit_dsgn | Temp Diff Emit Dsgn | textbox | 0 | 70 | - | tip',
+    'variable_flow | Variable Flow | checkbox | - | - | - | tip',
+  ],
+  'fhs/WaterPipework [every subtype]': [
+    'internal_diameter_mm | Internal Diameter Mm | textbox | 5 | 50 | - | tip',
+    'external_diameter_mm | External Diameter Mm | textbox | 5 | 50 | - | tip',
+    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
+    'insulation_thickness_mm | Insulation Thickness Mm | textbox | 0 | - | - | tip',
+    'surface_reflectivity | Surface Reflectivity | checkbox | - | - | - | tip',
+    'pipe_contents | Pipe Contents | select | - | - | - | tip',
+  ],
+  'fhs/WetEmitter [- Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door floor roof wall]': [
+    'frac_convective | Frac Convective | textbox | - | - | - | tip',
+  ],
+  'fhs/WetEmitter [radiator]': [
+    'frac_convective | Frac Convective | textbox | - | - | - | tip',
+    'n | N | textbox | 0 | 2 | - | tip',
+    'c | C | textbox | 0 | 2 | - | tip',
+    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+  ],
+  'fhs/WetEmitter [ufh]': [
+    'frac_convective | Frac Convective | textbox | - | - | - | tip',
+    'equivalent_specific_thermal_mass | Equivalent Specific Thermal Mass | textbox | 0 | - | - | tip',
+    'system_performance_factor | System Performance Factor | textbox | 0 | - | - | tip',
+  ],
+  'fhs/WetEmitter [fancoil]': [
+    'fancoil_test_data | Fancoil test data | textbox | 0.01 | - | - | no-tip',
+    'frac_convective | Frac Convective | textbox | - | - | - | tip',
+  ],
+};
+
+describe('R4.6b-1 standing invariant: what every Advanced Fields row actually renders', () => {
+  it('pins property key, control kind, min/max, placeholder, label text and tooltip presence for every swept route', () => {
+    const { inventory, routesSwept, routesWithRows } = sweepRenderedRows();
+
+    // Floors would let this pass vacuously; these are the exact populations the pinned
+    // inventory below was captured from, so they are equalities.
+    expect(routesSwept).toBe(674);
+    expect(routesWithRows).toBe(327);
+
+    expect(inventory).toEqual(EXPECTED_RENDERED_ROWS);
+  });
+});
+
 describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
   it('config 1 -- ElectricBattery, Core and FHS (regression anchor)', () => {
     assertDirectCharacterization(
@@ -1419,10 +1943,10 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     const singlePlantRows = [
       row('bypass_fraction_recirculated', 'Bypass Fraction Recirculated', TEXT('0')),
       row('design_flow_temp', 'Design Flow Temp', TEXT('20')),
-      row('ecodesign_control_class', 'ecodesign_controller · ecodesign_control_class', SELECT),
-      row('max_outdoor_temp', 'ecodesign_controller · max_outdoor_temp', TEXT('10')),
-      row('min_flow_temp', 'ecodesign_controller · min_flow_temp', TEXT('20')),
-      row('min_outdoor_temp', 'ecodesign_controller · min_outdoor_temp', TEXT('-60')),
+      row('ecodesign_control_class', 'Ecodesign Controller · Ecodesign Control Class', SELECT),
+      row('max_outdoor_temp', 'Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
+      row('min_flow_temp', 'Ecodesign Controller · Min Flow Temp', TEXT('20')),
+      row('min_outdoor_temp', 'Ecodesign Controller · Min Outdoor Temp', TEXT('-60')),
       row('temp_flow_limit_upper', 'Temp Flow Limit Upper', TEXT('0', '0')),
       row('max_flow_rate', 'Max Flow Rate', TEXT('0', '0')),
       row('min_flow_rate', 'Min Flow Rate', TEXT('0', '0')),
@@ -1508,8 +2032,11 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     // fixture exists in the repo, per the WarmAir shape used in
     // lib/__tests__/spaceHeatSystemSync.test.ts): buildSystemAdvancedUischema's
     // `multiPlant` flag flips on with 2+ plant keys, and EVERY control in EVERY plant
-    // gets a `plantKey · label` prefix (leafControlLabel, unchanged/not-touched by
-    // this slice). Row order (Living warm air's fields before Zone 1 circuit's,
+    // gets a `plantKey · label` prefix (leafControlLabel). R4.6b-1 start-cased the
+    // SCHEMA-derived halves of that label — the nested-object prefix parts and the leaf
+    // tail — while leaving the plant key exactly as the user typed it, which is why
+    // "Living warm air" and "Zone 1 circuit" below are untouched but every tail after
+    // them is now title case. Row order (Living warm air's fields before Zone 1 circuit's,
     // captured verbatim from the last A/B GREEN run) is whatever
     // buildSystemAdvancedUischema produces -- not naive data-insertion order.
     const twoPlants = {
@@ -1524,20 +2051,20 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         extraJson: { SpaceHeatSystem: twoPlants },
       },
       [
-        row('frac_convective', 'Living warm air · frac_convective', TEXT('0.1')),
-        row('temp_flow_limit_upper', 'Living warm air · temp_flow_limit_upper', TEXT('0', '0')),
-        row('temp_diff_emit_dsgn', 'Living warm air · temp_diff_emit_dsgn', TEXT(null)),
-        row('bypass_fraction_recirculated', 'Zone 1 circuit · bypass_fraction_recirculated', TEXT('0')),
-        row('design_flow_temp', 'Zone 1 circuit · design_flow_temp', TEXT('20')),
-        row('ecodesign_control_class', 'Zone 1 circuit · ecodesign_controller · ecodesign_control_class', SELECT),
-        row('max_outdoor_temp', 'Zone 1 circuit · ecodesign_controller · max_outdoor_temp', TEXT('10')),
-        row('min_flow_temp', 'Zone 1 circuit · ecodesign_controller · min_flow_temp', TEXT('20')),
-        row('min_outdoor_temp', 'Zone 1 circuit · ecodesign_controller · min_outdoor_temp', TEXT('-60')),
-        row('temp_flow_limit_upper', 'Zone 1 circuit · temp_flow_limit_upper', TEXT('0', '0')),
-        row('max_flow_rate', 'Zone 1 circuit · max_flow_rate', TEXT('0', '0')),
-        row('min_flow_rate', 'Zone 1 circuit · min_flow_rate', TEXT('0', '0')),
-        row('temp_diff_emit_dsgn', 'Zone 1 circuit · temp_diff_emit_dsgn', TEXT('0', '0')),
-        row('variable_flow', 'Zone 1 circuit · variable_flow', CHECKBOX),
+        row('frac_convective', 'Living warm air · Frac Convective', TEXT('0.1')),
+        row('temp_flow_limit_upper', 'Living warm air · Temp Flow Limit Upper', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Living warm air · Temp Diff Emit Dsgn', TEXT(null)),
+        row('bypass_fraction_recirculated', 'Zone 1 circuit · Bypass Fraction Recirculated', TEXT('0')),
+        row('design_flow_temp', 'Zone 1 circuit · Design Flow Temp', TEXT('20')),
+        row('ecodesign_control_class', 'Zone 1 circuit · Ecodesign Controller · Ecodesign Control Class', SELECT),
+        row('max_outdoor_temp', 'Zone 1 circuit · Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
+        row('min_flow_temp', 'Zone 1 circuit · Ecodesign Controller · Min Flow Temp', TEXT('20')),
+        row('min_outdoor_temp', 'Zone 1 circuit · Ecodesign Controller · Min Outdoor Temp', TEXT('-60')),
+        row('temp_flow_limit_upper', 'Zone 1 circuit · Temp Flow Limit Upper', TEXT('0', '0')),
+        row('max_flow_rate', 'Zone 1 circuit · Max Flow Rate', TEXT('0', '0')),
+        row('min_flow_rate', 'Zone 1 circuit · Min Flow Rate', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Zone 1 circuit · Temp Diff Emit Dsgn', TEXT('0', '0')),
+        row('variable_flow', 'Zone 1 circuit · Variable Flow', CHECKBOX),
       ],
     );
   });
@@ -1587,20 +2114,20 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         onChange,
       },
       [
-        row('bypass_fraction_recirculated', 'Kitchen/Diner rads · bypass_fraction_recirculated', TEXT('0')),
-        row('design_flow_temp', 'Kitchen/Diner rads · design_flow_temp', TEXT('20')),
-        row('ecodesign_control_class', 'Kitchen/Diner rads · ecodesign_controller · ecodesign_control_class', SELECT),
-        row('max_outdoor_temp', 'Kitchen/Diner rads · ecodesign_controller · max_outdoor_temp', TEXT('10')),
-        row('min_flow_temp', 'Kitchen/Diner rads · ecodesign_controller · min_flow_temp', TEXT('20')),
-        row('min_outdoor_temp', 'Kitchen/Diner rads · ecodesign_controller · min_outdoor_temp', TEXT('-60')),
-        row('temp_flow_limit_upper', 'Kitchen/Diner rads · temp_flow_limit_upper', TEXT('0', '0')),
-        row('max_flow_rate', 'Kitchen/Diner rads · max_flow_rate', TEXT('0', '0')),
-        row('min_flow_rate', 'Kitchen/Diner rads · min_flow_rate', TEXT('0', '0')),
-        row('temp_diff_emit_dsgn', 'Kitchen/Diner rads · temp_diff_emit_dsgn', TEXT('0', '0')),
-        row('variable_flow', 'Kitchen/Diner rads · variable_flow', CHECKBOX),
-        row('frac_convective', 'Zone 1.5 circuit · frac_convective', TEXT('0.1')),
-        row('temp_flow_limit_upper', 'Zone 1.5 circuit · temp_flow_limit_upper', TEXT('0', '0')),
-        row('temp_diff_emit_dsgn', 'Zone 1.5 circuit · temp_diff_emit_dsgn', TEXT(null)),
+        row('bypass_fraction_recirculated', 'Kitchen/Diner rads · Bypass Fraction Recirculated', TEXT('0')),
+        row('design_flow_temp', 'Kitchen/Diner rads · Design Flow Temp', TEXT('20')),
+        row('ecodesign_control_class', 'Kitchen/Diner rads · Ecodesign Controller · Ecodesign Control Class', SELECT),
+        row('max_outdoor_temp', 'Kitchen/Diner rads · Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
+        row('min_flow_temp', 'Kitchen/Diner rads · Ecodesign Controller · Min Flow Temp', TEXT('20')),
+        row('min_outdoor_temp', 'Kitchen/Diner rads · Ecodesign Controller · Min Outdoor Temp', TEXT('-60')),
+        row('temp_flow_limit_upper', 'Kitchen/Diner rads · Temp Flow Limit Upper', TEXT('0', '0')),
+        row('max_flow_rate', 'Kitchen/Diner rads · Max Flow Rate', TEXT('0', '0')),
+        row('min_flow_rate', 'Kitchen/Diner rads · Min Flow Rate', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Kitchen/Diner rads · Temp Diff Emit Dsgn', TEXT('0', '0')),
+        row('variable_flow', 'Kitchen/Diner rads · Variable Flow', CHECKBOX),
+        row('frac_convective', 'Zone 1.5 circuit · Frac Convective', TEXT('0.1')),
+        row('temp_flow_limit_upper', 'Zone 1.5 circuit · Temp Flow Limit Upper', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Zone 1.5 circuit · Temp Diff Emit Dsgn', TEXT(null)),
       ],
     );
 
@@ -1611,14 +2138,17 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     expect(fieldKeys(container)).not.toContain('properties');
     expect(container.textContent).not.toContain('[object Object]');
 
-    // Labels carry the RAW plant-key prefix (unescaped) -- escaping applies to scopes
-    // only, per systemAdvancedUischema.ts's docstring; a user reading this grid should
-    // see their own plant names, not pointer-escaped ones.
+    // Labels carry the RAW plant-key prefix -- unescaped (escaping applies to scopes
+    // only, per systemAdvancedUischema.ts's docstring) AND un-start-cased (R4.6b-1's
+    // exclusion: a plant key is the user's own CSV name, not schema text). A user
+    // reading this grid should see their own plant names back verbatim, so '/' survives
+    // as '/' and the casing/spacing survives as typed, while the schema-derived tail
+    // beside it is title-cased.
     expect(fieldLabelText(fieldRowByLabel(container, 'variable_flow', 'Kitchen/Diner rads'))).toBe(
-      'Kitchen/Diner rads · variable_flow',
+      'Kitchen/Diner rads · Variable Flow',
     );
     expect(fieldLabelText(fieldRowByLabel(container, 'frac_convective', 'Zone 1.5 circuit'))).toBe(
-      'Zone 1.5 circuit · frac_convective',
+      'Zone 1.5 circuit · Frac Convective',
     );
 
     // Edit round-trip #1: a NESTED field (HeatSource.temp_flow_limit_upper, hoisted)

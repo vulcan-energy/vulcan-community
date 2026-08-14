@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { startCaseKey } from '../components/DirectAdvancedFields';
 import { encodePointerToken } from './schemaRefResolver';
 
 /**
@@ -48,21 +49,42 @@ function sortPropertyKeys(keys: string[]): string[] {
   });
 }
 
+/**
+ * R4.6b-1 (step 0): the no-title fallback is START-CASED, not the raw schema key.
+ *
+ * A real `title` still wins outright — this only changes what a property with no title
+ * renders as. It brings the System walk into line with the flat walk, whose
+ * `labelForProperty` (`../components/DirectAdvancedFields`) has always fallen back to
+ * `startCaseKey`. The divergence was visible: an UNPREFIXED System row already went
+ * through `labelForProperty` (because `leafControlLabel` returns `undefined` with no
+ * prefix parts, leaving the Control without a `label`) and rendered "Design Flow Temp",
+ * while the same schema shape one nesting level down rendered `min_outdoor_temp` raw.
+ */
 function titleOrKeyFromSchema(key: string, childSchema: unknown): string {
   if (childSchema && typeof childSchema === 'object' && !Array.isArray(childSchema)) {
     const t = (childSchema as { title?: string }).title;
     if (typeof t === 'string' && t.trim()) return t.trim();
   }
-  return key;
+  return startCaseKey(key);
 }
 
 type PlantControlCtx = {
   plantKey: string;
   multiPlant: boolean;
-  /** Nested object keys from the plant root (not including the leaf property key). */
+  /**
+   * Nested object keys from the plant root (not including the leaf property key),
+   * already start-cased at append time in `buildControlsForSchema` — see the note on
+   * `titleOrKeyFromSchema` above, and the `plantKey` exclusion on `leafControlLabel`.
+   */
   pathLabels: string[];
 };
 
+/**
+ * `ctx.plantKey` is deliberately NOT start-cased: it is the user's own CSV plant name
+ * ("hw cylinder", "Kitchen/Diner rads"), not schema text, and a user reading this grid
+ * should see the name they typed. Only the schema-derived parts — the nested-object
+ * prefix parts and the leaf tail — are start-cased.
+ */
 function leafControlLabel(key: string, childSchema: unknown, ctx: PlantControlCtx): string | undefined {
   const tail = titleOrKeyFromSchema(key, childSchema);
   const prefixParts: string[] = [];
@@ -96,11 +118,14 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
       // R4.3b: escape the raw schema/plant key into an RFC-6901 pointer token before
       // interpolating it into the scope. A no-op for well-behaved schema keys (never
       // contain '/' or '~'); load-bearing for plant keys, which are raw user CSV
-      // names and may contain either. Labels (below) intentionally keep the RAW key —
-      // escaping applies to scopes only.
+      // names and may contain either. Labels (below) are never pointer-escaped —
+      // escaping applies to scopes only. (R4.6b-1 start-cases the schema-derived label
+      // parts; that is display formatting, not escaping, and the plant key stays raw.)
       const childScope = `${scopePrefix}/properties/${encodePointerToken(key)}`;
       if (shouldRecurseIntoNestedObject(childSchema)) {
-        const nextPathLabels = key === 'HeatSource' ? ctx.pathLabels : [...ctx.pathLabels, key];
+        const nextPathLabels = key === 'HeatSource'
+          ? ctx.pathLabels
+          : [...ctx.pathLabels, startCaseKey(key)];
         const childElements = buildControlsForSchema(childSchema, childScope, {
           ...ctx,
           pathLabels: nextPathLabels,
@@ -156,9 +181,10 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
  * treating the scope as a dot-joinable string — see `segmentsFromLayoutScope` there.
  * This is a no-op for ordinary schema keys (snake_case/PascalCase HEM property names
  * never contain '/' or '~'), so it makes the builder correct by construction rather
- * than trading one bug for another. LABELS keep the raw, unescaped key (below,
- * unchanged by this fix) — a user reading "Kitchen/Diner rads · …" should see their
- * own plant name, not a pointer-escaped one.
+ * than trading one bug for another. LABELS keep the raw, unescaped PLANT key (below,
+ * unchanged by this fix and by R4.6b-1's start-casing, which touches schema-derived
+ * label parts only) — a user reading "Kitchen/Diner rads · …" should see their own
+ * plant name, neither pointer-escaped nor re-cased.
  */
 export function buildSystemAdvancedUischema(
   subtype: string,
