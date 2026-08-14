@@ -6,9 +6,14 @@ import { encodePointerToken } from './schemaRefResolver';
 /**
  * Structurally identical to the subset of `@jsonforms/core`'s `UISchemaElement` this
  * module ever produces (VerticalLayout / Control, no Group). Defined locally so this
- * module carries no `@jsonforms/core` dependency; the JsonForms mount at the single
- * call site in `AdvancedFieldsEditor.tsx` accepts the result via a cast, since the
- * shape is unchanged.
+ * module carries no `@jsonforms/core` dependency — the reason the type is declared here
+ * rather than imported, and the only reason it needs to exist at all.
+ *
+ * The single call site in `AdvancedFieldsEditor.tsx` passes the result to
+ * `DirectAdvancedFields`' `layout` prop, which is typed as this same
+ * `AdvancedFieldsLayoutNode`, so it goes through as itself — no cast, and no JsonForms
+ * mount to accept it (retired in R4.4; R4.5 removed the last `@jsonforms/*` dependency
+ * from this package).
  */
 export type AdvancedFieldsLayoutNode = {
   type: 'VerticalLayout' | 'Control';
@@ -68,8 +73,14 @@ function leafControlLabel(key: string, childSchema: unknown, ctx: PlantControlCt
 }
 
 /**
- * VerticalLayout + Control only (no `Group` — Group maps to accordion chrome in
- * {@link standardRenderers} and reads Scenario-style, not normal Advanced Fields).
+ * VerticalLayout + Control only, deliberately no `Group`: a `Group` means collapsible
+ * accordion chrome, which reads Scenario-style rather than like normal Advanced Fields,
+ * where every plant's rows are visible at once. Groups are still rendered elsewhere —
+ * `DirectSpecFields`' `Group` branch (`components/DirectAdvancedFields.tsx`) mounts
+ * `GroupAccordion` (`components/jsonformsRenderers.tsx`) for web's fabric/snippet specs
+ * — but the System layout walk this module feeds (`renderLayoutNode`, same file) has no
+ * `Group` branch at all, which is why `AdvancedFieldsLayoutNode` above does not name
+ * one either.
  */
 function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: PlantControlCtx): AdvancedFieldsLayoutNode[] {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
