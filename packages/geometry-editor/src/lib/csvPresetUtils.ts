@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { SLOPE_PITCH_AXIS_EXTRA_JSON_KEY } from './slopePitchAxis';
+import {
+  ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR,
+  EXTRA_JSON_OVERRIDE_MARKER_KEYS,
+} from './overrideProvenance';
 
 export { SLOPE_PITCH_AXIS_EXTRA_JSON_KEY } from './slopePitchAxis';
 
@@ -17,7 +21,7 @@ export { SLOPE_PITCH_AXIS_EXTRA_JSON_KEY } from './slopePitchAxis';
  * the literal. See the entry in `EXTRA_JSON_UI_KEYS` below for why no Rust-side registration is
  * required.
  */
-export const NAME_AUTO_SYNC_EXTRA_JSON_KEY = '_name_auto_sync';
+export const NAME_AUTO_SYNC_EXTRA_JSON_KEY = ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR.key;
 
 /**
  * Keys removed from extra_json before WASM → HEM JSON merge.
@@ -72,7 +76,7 @@ export const EXTRA_JSON_UI_KEYS = [
    * `stripUiKeysFromCsv` — which, unlike `AdvancedFieldsEditor`, has no blanket `_`-prefix rule —
    * also strips it, matching every other fixed-name `_`-prefixed key above.
    */
-  NAME_AUTO_SYNC_EXTRA_JSON_KEY,
+  ...EXTRA_JSON_OVERRIDE_MARKER_KEYS,
   SLOPE_PITCH_AXIS_EXTRA_JSON_KEY,
 ];
 

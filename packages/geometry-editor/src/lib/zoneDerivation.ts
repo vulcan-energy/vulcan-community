@@ -813,6 +813,14 @@ export function calculateBaseHeightPatchForFloorMove(
 export const BASE_HEIGHT_AUTOSYNC_TOLERANCE_M = 0.01;
 
 /**
+ * Tolerance for treating a zone's floorArea (m²) or height (m) as equal to its geometry-derived
+ * value when deciding whether a submitted/loaded number is a user override. Lives here — beside
+ * the derivations it compares against — so both the store's in-session inference and ioSlice's
+ * legacy-import reconstruction share one constant without a store↔slice import cycle.
+ */
+export const ZONE_OVERRIDE_EPSILON = 0.005;
+
+/**
  * Build a patch for one element when the floor stack height changes underneath it.
  *
  * **Preserves the offset above the old slab.** A wall sitting on the slab (offset 0) moves with

@@ -17,6 +17,7 @@ import {
   isGlobalObject,
   getAdjacentPartyWallUiToggleLabel,
 } from '../stores/geometryStore';
+import { ZONE_OVERRIDE_EPSILON } from '../lib/zoneDerivation';
 import {
   bindElementFormModule,
   type ElementFormInstance,
@@ -3206,11 +3207,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         const allElements = Object.values(elementsById) as import('../geometry/types').Element[];
         const { floorArea: derivedArea } = calculateDerivedFloorArea(selection.id, allElements);
         floorAreaUserOverride = derivedArea > 0 && submittedFloorArea !== undefined && submittedFloorArea > 0
-          && Math.abs(submittedFloorArea - derivedArea) > 0.005;
+          && Math.abs(submittedFloorArea - derivedArea) > ZONE_OVERRIDE_EPSILON;
 
         const derivedH = calculateDerivedHeight(selection.id, allElements);
         heightUserOverride = derivedH > 0 && submittedHeight !== undefined && submittedHeight > 0
-          && Math.abs(submittedHeight - derivedH) > 0.005;
+          && Math.abs(submittedHeight - derivedH) > ZONE_OVERRIDE_EPSILON;
       }
 
       if (selection && selection.type === 'zone') {
