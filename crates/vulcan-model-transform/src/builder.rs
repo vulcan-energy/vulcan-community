@@ -703,9 +703,8 @@ fn overlay_row_onto_seed(
             if !allowed.is_empty() && !allowed.contains(k) {
                 continue;
             }
-            if !csv_cell_is_set(v) {
-                continue;
-            }
+            // No blank check here: `sanitize_csv_extra_json` already removed cleared
+            // `extra_json` values, at every depth, before the merge started.
             seed.insert(k.clone(), v.clone());
         }
     }
@@ -1995,16 +1994,14 @@ impl JSONBuilder {
                                 // Only merge if:
                                 // 1. Property is valid for this element type
                                 // 2. Property is not already set by CSV columns (CSV takes precedence)
-                                // 3. Value is not null/empty
-                                // 4. Property is not position_xyz (CSV-only field)
+                                // 3. Property is not position_xyz (CSV-only field)
+                                // Cleared values need no check here: `sanitize_csv_extra_json`
+                                // removed them, at every depth, before the merge started.
                                 if allowed_building_element_props.contains(&storage_key)
                                     && !csv_set_keys.contains(&storage_key)
                                     && key != "position_xyz"
                                     && key != "pitch"
                                     && key != "is_external_door"
-                                    && !(value.is_null()
-                                        || (value.is_string()
-                                            && value.as_str().unwrap().is_empty()))
                                 {
                                     let processed_value = self.coerce_building_element_value(
                                         key,
@@ -3414,9 +3411,7 @@ impl JSONBuilder {
                                 if is_ui_only_extra_json_key(k) {
                                     continue;
                                 }
-                                if !csv_cell_is_set(v) {
-                                    continue;
-                                }
+                                // Cleared values are already gone: `sanitize_csv_extra_json`.
                                 if csv_set_keys.contains(k) {
                                     continue;
                                 }
@@ -3525,9 +3520,7 @@ impl JSONBuilder {
                                 if is_ui_only_extra_json_key(k) {
                                     continue;
                                 }
-                                if !csv_cell_is_set(v) {
-                                    continue;
-                                }
+                                // Cleared values are already gone: `sanitize_csv_extra_json`.
                                 // Skip only if this key was set by CSV columns (not defaults)
                                 if csv_set_keys.contains(k) {
                                     continue;
@@ -3687,9 +3680,8 @@ impl JSONBuilder {
                                         if is_ui_only_extra_json_key(k) {
                                             continue;
                                         }
-                                        if !csv_cell_is_set(v) {
-                                            continue;
-                                        }
+                                        // Cleared values are already gone:
+                                        // `sanitize_csv_extra_json`.
                                         if csv_set_keys.contains(k) {
                                             continue;
                                         }
