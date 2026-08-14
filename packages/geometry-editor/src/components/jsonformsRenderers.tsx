@@ -1578,10 +1578,29 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
             }
             handleChange(path, next);
           }}
+          // R4.5 FOLLOW-UP (R4.6a): this handler is what turns the typed text of a
+          // JSON-blob row back into a real object/array before it is committed. It
+          // used to open with `if (!elementType || !propKey) return;` — ABOVE the
+          // parse — so a host that supplies neither never got a parse at all, and the
+          // only thing that ever reached the data was the raw STRING written by
+          // `onChange` above on every keystroke. web's `SnippetEditor` (parent repo)
+          // is exactly that host: it mounts with `config={{}}`, so editing a snippet's
+          // nested object wrote `{"orientation":"{\"add_degrees\":42}"}` — a
+          // JSON-encoded string where an object belongs — instead of
+          // `{"orientation":{"add_degrees":42}}`. Nothing about parsing needs
+          // `elementType`/`propKey`; only `validateAdvancedFieldPrimitive` does. So
+          // the guard moved down to the one thing it guards:
+          //  - empty input unsets, host-independent (unchanged for the element editor,
+          //    newly reachable for a config-less host);
+          //  - the parse always runs, and invalid JSON always sets the local error;
+          //  - WITH elementType+propKey: validate, commit only if valid — byte-identical
+          //    to the previous behaviour on the Advanced Fields path;
+          //  - WITHOUT them: commit the parsed value unvalidated, because there is no
+          //    element context to validate against. Committing something correctly
+          //    typed beats committing a string that is wrong in every host.
           onBlur={(e) => {
             if (!isJsonLike) return;
             const raw = e.currentTarget.value.trim();
-            if (!elementType || !propKey) return;
             if (raw === '') {
               setLocalError(null);
               handleChange(path, undefined);
@@ -1589,9 +1608,14 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
             }
             try {
               const parsed = JSON.parse(raw);
-              const res = validateAdvancedFieldPrimitive(cfg, elementType, propKey, parsed);
-              setLocalError(res.valid ? null : (res.errors?.[0] ?? 'Invalid value'));
-              if (res.valid) handleChange(path, parsed);
+              if (elementType && propKey) {
+                const res = validateAdvancedFieldPrimitive(cfg, elementType, propKey, parsed);
+                setLocalError(res.valid ? null : (res.errors?.[0] ?? 'Invalid value'));
+                if (res.valid) handleChange(path, parsed);
+                return;
+              }
+              setLocalError(null);
+              handleChange(path, parsed);
             } catch (err) {
               setLocalError(`Invalid JSON: ${errorMessageFromUnknown(err)}`);
             }

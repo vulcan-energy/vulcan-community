@@ -28,6 +28,21 @@
  * through the now-deleted `standardRenderers` registry (see `jsonformsRenderers.tsx`'s
  * own R4.5 deletion note). See `DirectSpecFields`'s own docstring below for the walk
  * semantics.
+ *
+ * R4.6a: the first slice to CORRECT this renderer rather than port or extend it. With
+ * JsonForms gone there is no longer a second implementation to hold parity with, so
+ * "what the old path did" stopped being an argument and the behaviour had to stand on
+ * its own. Two things did not: HEM Core's nullable-wrapped properties
+ * (`anyOf:[X,{type:'null'}]`) were dispatching to TextControl as a whole class — 19
+ * properties, sixteen of them numbers rendering without their schema minima — and the
+ * two review-driven, one-field-at-a-time patches that had papered over the enum
+ * corner of it were still accumulating. `unwrapNullableSchema` (below) replaces both
+ * with one normalization applied at all three resolution sites; one of the two inline
+ * overrides is deleted as redundant, the other kept with a corrected rationale. Two
+ * smaller R4.5 review notes are closed in the same slice: `setAtPathNode`'s
+ * array-index unset now splices instead of leaving a JSON `null` hole (below), and
+ * TextControl's JSON-blob commit no longer skips PARSING when the host supplies no
+ * `elementType` (`jsonformsRenderers.tsx`).
  */
 
 import React from 'react';
@@ -115,7 +130,10 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  * changes nothing for that field; it only changes the boolean/string-typed enum
  * fields the old type-first order used to shadow.
  *
- * Net dispatch order, evaluated against the RESOLVED property schema:
+ * Net dispatch order, evaluated against the RESOLVED, NULLABLE-UNWRAPPED property
+ * schema (R4.6a: every caller passes the node through `unwrapNullableSchema` first, so
+ * no rule below has to know that HEM writes optional scalars as
+ * `anyOf:[X,{type:'null'}]` — see that function and the CLOSED IN R4.6a section):
  *  (a) leaf key `window_part_list` -> WindowPartListControl (handled by the caller,
  *      before this function runs — see `renderControlForProperty`).
  *  (b) NON-EMPTY enum-like (`.enum` with >=1 member, or a non-empty oneOf/anyOf where
@@ -129,14 +147,19 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  *      `integer` needed the old fallback rule's own separate check to reach
  *      NumberControl. Folding integer in here changes nothing observable: same
  *      destination control, just one rule instead of two.)
- *  (f) everything else — object, array, type-less, bare anyOf/oneOf not caught by
- *      (b) — TextControl. anyOf number|null falls here too: no live HEM property has
- *      that exact shape — `area_per_perimeter_vent`, the R4.2 spike's cited example,
- *      is actually a plain `{type:'number'}` in both Core and FHS, verified by
- *      mounting both paths directly (back when the JsonForms mount still existed):
- *      BOTH already rendered NumberControl with identical `min`/
- *      `data-exclusive-minimum` attributes, so that was a stale docstring claim,
- *      never an actual divergence.
+ *  (f) everything else — object, array, type-less, combinators not caught by (b) or
+ *      collapsed by `unwrapNullableSchema` (3+ branches, no null branch, …) —
+ *      TextControl.
+ *      R4.6a CORRECTION: this rule used to claim "anyOf number|null falls here too:
+ *      no live HEM property has that exact shape", citing `area_per_perimeter_vent`
+ *      (a plain `{type:'number'}` in both profiles, correctly) as evidence that the
+ *      R4.2 spike's example had been a stale docstring claim. The example was stale;
+ *      the generalization from it was wrong. Core declares SIXTEEN live
+ *      `anyOf:[{type:'number',…},{type:'null'}]` properties across five element types
+ *      — including every `u_value` — and each of them landed here, on a text box with
+ *      no `min`/`max`. The single field checked happened to be one of the ones HEM
+ *      does NOT wrap. Nullable wrappers no longer reach this rule at all; they are
+ *      collapsed before dispatch.
  *
  * A nested object-typed property (e.g. MechanicalVentilation FHS's `position_exhaust`
  * in its non-flat mode) needs NO special case: the generator does not recurse past the
@@ -177,33 +200,65 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  * and the retired JsonForms path always did: string -> TextControl, a free-text input
  * the user can still type a link name into.
  *
- * KNOWN GAP, TWO LIVE INSTANCES, BOTH INLINED UPSTREAM: neither `isNonEmptyEnumLike`
- * NOR type dispatch ever routes `anyOf: [{$ref/enum...}, {type: 'null'}]` with no
- * TOP-LEVEL `type` to EnumControl — `isNonEmptyEnumLike` only recognizes a bare
- * `.enum` or oneOf/anyOf where EVERY branch carries `const`; an anyOf branch that
- * itself resolves to `.enum` (one branch enum-typed, the other `{type:'null'}`)
- * matches neither, and with no top-level type to dispatch on either, this falls to
- * rule (f) -> TextControl. Through R4.3/R4.3b this shape still got a dropdown via
- * TextControl's own `extractOptions` "Case 2" fallback (one alternative carries an
- * enum) — deleted in R4.5's commit-3 alongside the rest of that fallback (see the
- * R4.5 deletion notes on TextControl/NumberControl in `jsonformsRenderers.tsx`), so
- * this shape now renders a plain text input UNLESS something upstream inlines a flat
- * `{type:'string', enum:[...]}` override before the property ever reaches this
- * picker. `AdvancedFieldsEditor.tsx`'s own subschema memo does exactly that for the
- * shape's two verified LIVE instances — `shield_fact_location` (HEM's
- * `$defs/WindShieldLocation`, FHS-only, Suspended_floor) and `mvhr_location` (HEM's
- * `$defs/MVHRLocation`, Core-only — R4.5 review round 1 finding: this one was missed
- * on first landing, since FHS's OWN `mvhr_location` happens to already be a bare
- * `{enum:[...]}` with no anyOf wrapper, so verifying only against FHS made the shape
- * look non-live) — see the inline comments at both override sites.
+ * CLOSED IN R4.6a — the whole nullable-wrapper class, not one field at a time. The
+ * paragraphs this replaces described a "KNOWN GAP" with "TWO LIVE INSTANCES, BOTH
+ * INLINED UPSTREAM": neither `isNonEmptyEnumLike` NOR type dispatch routes
+ * `anyOf: [X, {type:'null'}]` anywhere sensible, because the WRAPPER carries no
+ * top-level `type`/`enum` of its own — `isNonEmptyEnumLike` only recognizes a bare
+ * `.enum` or oneOf/anyOf where EVERY branch carries `const`, and rule (c)-(e) have no
+ * type to read, so every such property fell to rule (f) -> TextControl. That framing
+ * was too narrow twice over, as R4.6a's full dispatch sweep across both published
+ * schemas showed (`AdvancedFieldsEditor.directRender.test.tsx`, "R4.6a standing
+ * invariant"): the shape is not rare (28 properties in `core-input.schema.json`'s
+ * element subschemas carry it; FHS carries none — HEM's FHS wrapper flattens
+ * nullables away, which is exactly why FHS-only verification kept missing this), and
+ * it is not an ENUM problem — 16 of the 19 misrouted properties are NUMBERS
+ * (`u_value`, `thermal_resistance_construction`, `mvhr_eff`, `orientation360`,
+ * `pitch`, the duct dimensions, …), where TextControl silently drops `min`/`max`/the
+ * numeric draft buffer/the unit adornment that the identical FHS field (a plain
+ * `{type:'number'}`) has always had. Chasing that one $ref-to-enum field at a time —
+ * `shield_fact_location`, then `mvhr_location` a slice later — was never going to
+ * converge.
  *
- * VERIFIED NOT LIVE, four other `$defs` properties carry this exact
+ * `unwrapNullableSchema` (below) now collapses the wrapper to its non-null branch at
+ * the three points where a property schema is RESOLVED, so `pickDirectControl` and
+ * every control downstream see the real node. No rule in this picker knows about
+ * nullability at all; see that function's docstring for the exact pattern it matches
+ * and for why unwrapping the resolved NODE (rather than special-casing dispatch) is
+ * the load-bearing half of the fix.
+ *
+ * PRE-EXISTING, NOT INTRODUCED BY THE R4.3 PORT (checked against the deleted registry
+ * itself, `git show ba61e8c^:…/jsonformsRenderers.tsx`, not from memory): the retired
+ * rank-280 `advancedFieldsNumericTester` DID carry a `schemaIsNullableNumberAnyOf`
+ * arm for exactly this shape, but it read the schema argument JsonForms hands
+ * TESTERS — the unresolved PARENT object schema (the flat-dispatch quirk this
+ * docstring opens with) — which has no top-level `anyOf`, so the arm never fired for
+ * any per-property nullable wrapper. Dispatch then fell through rank 1000/1100
+ * (parent again, no `enum`/const-alternatives), rank 90/80 (`isNumberControl` /
+ * `isStringControl` / `isBooleanControl` DO resolve the scope, and a wrapper with no
+ * top-level `type` matches none of them) to the rank-5 `GenericControl` fallback,
+ * whose own enum/boolean/number checks read the RESOLVED wrapper and all missed it
+ * too -> TextControl. Same wrong control, same missing `min`/`max`, on both paths.
+ * The A/B parity matrix DID cover core-mode `BuildingElementOpaque` (config 2) and
+ * captured `row('u_value', 'U-Value', TEXT(null))` from a GREEN run with the
+ * JsonForms mount still live — a literal recording of the JsonForms path rendering
+ * this field as a bare, constraint-free text box. R4.3's executed-table port
+ * reproduced the bug faithfully, which is what it was asked to do; what nobody did
+ * until R4.6a was ask whether the behaviour being preserved was correct.
+ *
+ * STILL INLINED UPSTREAM, DELIBERATELY: `shield_fact_location`'s flat-enum override in
+ * `AdvancedFieldsEditor.tsx`'s subschema memo survives R4.6a and is NOT redundant —
+ * it is not a nullable wrapper on either profile (FHS: a bare `{enum:[…]}`; Core: a
+ * bare `$ref` with a sibling `description`), so `unwrapNullableSchema` never touches
+ * it, and what it actually pins is the LABEL. See the corrected comment at that site.
+ * `mvhr_location`'s override, added in R4.5 review round 1 for the Core-only
+ * `anyOf:[{$ref:'#/$defs/MVHRLocation'},{type:'null'}]` shape, WAS redundant once the
+ * generic unwrap landed and is gone.
+ *
+ * VERIFIED NOT LIVE, three other `$defs` properties carry the
  * anyOf-wraps-a-$ref-to-an-enum shape in `core-input.schema.json` but are unreachable
  * through any element's Advanced Fields subschema, so they never reach this picker at
  * all (not accepted divergences — genuinely dead paths, checked directly):
- *  - `BuildingElementPartyWall.party_wall_lining_type` — a PartyWall BASE field
- *    (`getBaseFieldsForElementType`, `lib/schemaCache.ts` ~1680-1691), filtered out of
- *    `advancedProperties` before this picker ever sees it.
  *  - `ControlChargeTarget.logic_type` — `ControlChargeTarget` is a nested `$def`, not
  *    an element type `getElementSubschema` ever resolves to directly; no
  *    element-subschema route reaches it.
@@ -211,10 +266,112 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  *    element-subschema route of its own.
  *  - `Zone.temp_setpnt_basis` — `Zone` is not an HEM element type this editor ever
  *    mounts Advanced Fields for.
+ * (`BuildingElementPartyWall.party_wall_lining_type`, listed here through R4.5, is
+ * reachable via `getElementSubschema('core','BuildingElementPartyWall')` but is a
+ * PartyWall BASE field — `getBaseFieldsForElementType`, `lib/schemaCache.ts` — so
+ * `advancedProperties` filters it out one layer ABOVE this picker rather than the
+ * schema never offering it. Same net effect, different reason; R4.6a's standing
+ * invariant asserts its dispatch anyway, since the base-field list is not this
+ * module's to depend on.)
  *
  * The `Group` accordion renderer (rank 100) is deliberately NOT ported: no Advanced
  * Fields uischema (generated OR manually-built System layout spec) ever emits one.
  */
+
+/** A BARE null-typed schema: exactly `{type: 'null'}`, nothing else. */
+function isBareNullSchema(value: unknown): boolean {
+  return isRecord(value) && value.type === 'null' && Object.keys(value).length === 1;
+}
+
+/**
+ * R4.6a: collapse a NULLABLE WRAPPER — `anyOf`/`oneOf` of exactly `[X, {type:'null'}]`
+ * — down to its non-null branch `X`. Idempotent and shape-preserving for everything
+ * else: any node that is not exactly that pattern is returned UNCHANGED, by identity.
+ *
+ * WHY THE RESOLVED NODE, NOT JUST DISPATCH (this is the load-bearing half): teaching
+ * `pickDirectControl` to peek inside the wrapper would fix WHICH control renders and
+ * nothing else. `numericInputAttributesFromSchema` (`components/numericDraftInput.ts`)
+ * reads `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` / `multipleOf`
+ * off the TOP LEVEL of whatever schema node NumberControl is handed, and on a wrapper
+ * those keywords sit one level down, on the inner branch. A dispatch-only fix would
+ * therefore have produced a NumberControl with no `min`, no `max`, no `step` — the
+ * numeric draft buffer and unit adornment back, the schema constraints still silently
+ * dropped. Unwrapping the node itself fixes dispatch and rendering in one move, and
+ * leaves every consumer downstream (controls, validators, placeholder generation) free
+ * to keep reading keywords off the top level the way they always have.
+ *
+ * PATTERN, DELIBERATELY STRICT — this is a targeted normalization of one HEM/pydantic
+ * emission habit (`Optional[float]` -> `anyOf:[{type:'number'},{type:'null'}]`), not a
+ * general combinator resolver. It matches ONLY when the keyword's value is an array of
+ * exactly 2 entries, exactly one of which is a BARE `{type:'null'}` (see
+ * `isBareNullSchema` — a null branch carrying anything else is not this pattern), and
+ * the other is a record. Three branches, no null branch, a null branch with siblings,
+ * nested combinators inside the surviving branch: all left alone. Collapsing those
+ * would mean CHOOSING a branch, which is a semantic decision no renderer should make
+ * silently; they keep falling through `pickDirectControl` rule (f) to TextControl's
+ * JSON blob exactly as before.
+ *
+ * ANNOTATIONS COME FROM THE OUTER NODE ONLY — this function moves TYPE and
+ * CONSTRAINTS, never presentation. `title` and `description` survive exactly as the
+ * wrapper declared them, and if the wrapper declared none, the result carries none
+ * either (so `labelForProperty` start-cases the key, as it does for any other
+ * titleless property). The inner branch's own `title`/`description` are DROPPED. That
+ * asymmetry is deliberate and is the difference between fixing a dispatch bug and
+ * quietly renaming fields:
+ *  - The wrapper IS the property; the inner branch is the TYPE the property was
+ *    declared as. HEM's schemas are pydantic-emitted, so an inner `title` is a model
+ *    or enum CLASS NAME ("MVHRLocation", "MechanicalVentilationPosition",
+ *    "WindShieldLocation", "PartyWallLiningType"), not a field label — and every
+ *    nullable-wrapped property that has any label at all today gets it from the
+ *    wrapper ("MVHR Efficiency", "U-Value", "Duct Perimeter").
+ *  - Letting the inner title through would rename Core `position_intake` AND
+ *    `position_exhaust` to the SAME string, "MechanicalVentilationPosition" — two
+ *    distinct rows in one grid, indistinguishable. Verified by running it that way
+ *    first; that is what sent this rule the other direction.
+ *  - It also keeps `description` byte-identical for `orientation360` and `pitch`, the
+ *    only two live properties where inner and outer BOTH carry one (the property-site
+ *    text is the specific one: "Orientation for non-MVHR systems…" vs. the generic
+ *    `$def` sentence). Node-level `description` is not rendered by any control today
+ *    — only per-OPTION descriptions inside enum alternatives are, by EnumControl — so
+ *    this costs nothing and pre-empts the question if that ever changes.
+ * Net effect on labels across every live wrapper: ZERO changes, with one intended
+ * exception noted at the `mvhr_location` deletion site in `AdvancedFieldsEditor.tsx`.
+ *
+ * TWO MORE KEYWORDS ARE DROPPED:
+ *  - the `anyOf`/`oneOf` itself, obviously — it is what is being collapsed. Leaving it
+ *    on would re-trigger `schemaEmitsControl`'s combinator short-circuit and, worse,
+ *    hand `isNonEmptyEnumLike` a non-const alternatives array to reason about.
+ *  - a `default` of exactly `null`. Every one of the 28 nullable wrappers in
+ *    `core-input.schema.json` carries `default: null` (verified by sweep, not
+ *    assumed), and that default describes the NULL branch that was just dropped — it
+ *    is the schema saying "this optional field is absent", not "this number defaults
+ *    to nothing". Carrying it onto a NumberControl would misrepresent the field. A
+ *    non-null `default` describes the surviving branch and IS carried (no live wrapper
+ *    has one today; the alternative — dropping every `default` unconditionally —
+ *    would lose real information the day one appears).
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- pure schema helper, not a React component; exported for the standing-invariant test.
+export function unwrapNullableSchema(node: Record<string, unknown>): Record<string, unknown> {
+  for (const keyword of ['anyOf', 'oneOf'] as const) {
+    const branches = node[keyword];
+    if (!Array.isArray(branches) || branches.length !== 2) continue;
+    if (branches.filter(isBareNullSchema).length !== 1) continue;
+    const inner = branches.find((branch) => !isBareNullSchema(branch));
+    if (!isRecord(inner)) continue;
+
+    // Inner first, wrapper laid over the top: the wrapper wins every keyword it
+    // actually declares, the inner branch supplies the rest (type, constraints, enum,
+    // properties, items, …).
+    const merged: Record<string, unknown> = { ...inner, ...node };
+    delete merged[keyword];
+    if (merged.default === null) delete merged.default;
+    for (const annotation of ['title', 'description'] as const) {
+      if (!(annotation in node)) delete merged[annotation];
+    }
+    return merged;
+  }
+  return node;
+}
 
 /**
  * NON-EMPTY enum-like, deliberately stricter than the shared `schemaHasEnum` /
@@ -466,12 +623,34 @@ function getAtPath(data: Record<string, unknown>, segments: string[]): unknown {
  * item 0. Fixed via `setAtPathNode`: when the EXISTING child at a hop is an array and
  * the next segment is a canonical index (`isCanonicalArrayIndexSegment`), clone the
  * array (`.slice()`) and recurse into that index instead of falling through to record
- * semantics; unsetting a leaf INSIDE an array mirrors `lodash/fp/unset` exactly —
- * `delete arr[i]`, leaving a hole (`undefined`, serializes as JSON `null`), not a
- * splice that would shift every later sibling's index. A data/plant key that happens
- * to be the literal string `'0'` over an OBJECT (not an array) is UNAFFECTED — this
- * only activates when the value ALREADY THERE is an array; a key still only means an
- * array index when the parent it hangs off actually is one.
+ * semantics. A data/plant key that happens to be the literal string `'0'` over an
+ * OBJECT (not an array) is UNAFFECTED — this only activates when the value ALREADY
+ * THERE is an array; a key still only means an array index when the parent it hangs
+ * off actually is one.
+ *
+ * R4.6a (R4.5 review note, closed): unsetting a leaf that IS an array index now
+ * SPLICES the element out. R4.5 landed it as `delete arr[i]` — a hole — on the stated
+ * grounds that this "mirrors `lodash/fp/unset` exactly". It did, and that was the
+ * right call while JsonForms' `UPDATE_DATA` reducer (built on `lodash/fp/unset`) was
+ * the reference implementation this whole module was being held against. R4.4/R4.5
+ * deleted that reducer along with the rest of JsonForms; parity with it is no longer a
+ * contract, and what is left is just the behaviour on its own merits — where a hole is
+ * indefensible. `JSON.stringify` serialises a hole as `null`, and `null` is never
+ * valid HEM input for any of the arrays this walker can reach: `window_part_list`,
+ * `edge_insulation` and `treatment` are all variable-length lists OF OBJECTS, so the
+ * export would carry a `null` entry straight into the engine. Splicing keeps the array
+ * a list of the things it is a list of; later items shifting down is the correct
+ * consequence of removing one, not a side effect to be avoided.
+ *
+ * UNREACHABLE FROM TODAY'S UI, deliberately fixed anyway (correctness by construction,
+ * not a live bug): reaching this branch needs a control bound DIRECTLY to an array
+ * index, and no live array has primitive items — every array-hop path in production
+ * ends at a leaf inside an item OBJECT (`sec.list.0.value`), which unsets through the
+ * record branch below and never touches the array. The reset affordance that produces
+ * `value === undefined` also only renders when a value already exists. So this is
+ * about what the next array shape inherits, not about anything a user can do today —
+ * which is exactly why it is worth getting right while the reasoning is still written
+ * down.
  */
 function setAtPathNode(node: unknown, segments: string[], value: unknown): unknown {
   const [head, ...rest] = segments;
@@ -480,7 +659,9 @@ function setAtPathNode(node: unknown, segments: string[], value: unknown): unkno
     const nextArray = node.slice();
     if (rest.length === 0) {
       if (value === undefined) {
-        delete nextArray[index];
+        // R4.6a: splice, not `delete` — see the docstring's own paragraph on why the
+        // lodash-parity hole died with the reducer it mirrored.
+        nextArray.splice(index, 1);
       } else {
         nextArray[index] = value;
       }
@@ -697,7 +878,14 @@ export function DirectAdvancedFields({
     // `scope`) through `schema` that buildSystemAdvancedUischema used to build the
     // scope in the first place, then $ref-resolve exactly like the flat walk does.
     const propertySchemaNode = resolveSchemaPointer(schema, node.scope);
-    const resolved = readRecord(dereferenceSchemaNodeInRoot(propertySchemaNode, resolutionRoot));
+    // R4.6a: unwrap AFTER dereferencing, never before. `dereferenceSchemaNodeInRoot`
+    // recurses through every key and array element (`derefSchema`, lib/subschemaCache.ts),
+    // so a `$ref` sitting INSIDE an `anyOf` branch — which is how HEM writes every
+    // nullable enum, e.g. `anyOf:[{$ref:'#/$defs/MVHRLocation'},{type:'null'}]` — is
+    // already inlined by this point and the surviving branch is a real schema, not a
+    // pointer. Unwrapping first would hand back a bare `{$ref}` node with nothing for
+    // `pickDirectControl` to dispatch on.
+    const resolved = unwrapNullableSchema(readRecord(dereferenceSchemaNodeInRoot(propertySchemaNode, resolutionRoot)));
     const label = node.label ?? labelForProperty(leafKey, resolved);
     const value = getAtPath(data, segments);
     // Required from the PARENT schema's `required` list, mirroring how the retired
@@ -743,7 +931,11 @@ export function DirectAdvancedFields({
   const flatEntries: { key: string; resolved: Record<string, unknown> }[] = [];
   if (!layout) {
     for (const key of Object.keys(properties)) {
-      const resolved = readRecord(dereferenceSchemaNodeInRoot(properties[key], resolutionRoot));
+      // R4.6a: unwrap AFTER dereferencing — see the same note in `renderLayoutNode`
+      // above for why the order matters. `schemaEmitsControl`'s verdict is unchanged
+      // by unwrapping every live wrapper: it short-circuited TRUE on the non-empty
+      // combinator before, and now finds a derivable `type` on the surviving branch.
+      const resolved = unwrapNullableSchema(readRecord(dereferenceSchemaNodeInRoot(properties[key], resolutionRoot)));
       if (schemaEmitsControl(resolved)) {
         flatEntries.push({ key, resolved });
       }
@@ -983,9 +1175,17 @@ export function DirectSpecFields({
     const tokens = segmentsFromLayoutScope(node.scope);
     const leafKey = tokens[tokens.length - 1] ?? node.scope;
     const schemaOverride = directSpecSchemaOverride(node.options);
-    const resolved =
+    // R4.6a: unwrap here too, and around BOTH arms — see `renderLayoutNode`'s note
+    // above for the deref-then-unwrap ordering. The `schemaOverride` arm is included
+    // deliberately even though it never passes through `dereferenceSchemaNodeInRoot`:
+    // web's builders lift each override straight off a resolved HEM property schema
+    // (`SimplifiedFabricEditor`'s `ui` memo, parent repo), so an override IS a live
+    // HEM node and can be a nullable wrapper just like a walked one. Unwrapping only
+    // the walked arm would have left the two hosts disagreeing about the same field.
+    const resolved = unwrapNullableSchema(
       schemaOverride ??
-      readRecord(dereferenceSchemaNodeInRoot(walkSchemaPropertiesByTokens(contextSchema, tokens), resolutionRoot));
+        readRecord(dereferenceSchemaNodeInRoot(walkSchemaPropertiesByTokens(contextSchema, tokens), resolutionRoot)),
+    );
     const fullSegments = [...contextSegments, ...tokens];
     const label = node.label ?? labelForProperty(leafKey, resolved);
     const value = getAtPath(data, fullSegments);

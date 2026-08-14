@@ -1223,13 +1223,34 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     // executed-table `pickDirectControl` routed 'string' type ahead of enum, so this
     // field reached TextControl's own `extractOptions` dropdown fallback -- validation
     // errors and helper text dropped, since only EnumControl forwards those. R4.3b's
-    // enum-first dispatch now routes it to EnumControl proper instead. The inline
-    // enum below is still required either way: a bare `anyOf` (HEM's
-    // shield_fact_location is `$ref`'d inside one) derives no `.enum`/type for
-    // `pickDirectControl` to see at all, so without inlining the field would still
-    // fall through to a plain TextControl with no dropdown or validation, regardless
-    // of dispatch order. Inline the same enum as HEM `$defs/WindShieldLocation`
-    // directly so it gets a real dropdown + validation.
+    // enum-first dispatch now routes it to EnumControl proper instead.
+    //
+    // R4.6a CORRECTION, and the reason this override SURVIVES the generic
+    // nullable-wrapper unwrap that retired its `mvhr_location` twin: the claim this
+    // comment used to make -- "a bare `anyOf` (HEM's shield_fact_location is `$ref`'d
+    // inside one) derives no `.enum`/type for `pickDirectControl` to see at all" -- is
+    // simply not true of this field on EITHER profile, checked directly against both
+    // published schemas. FHS emits `{enum:['Sheltered','Average','Exposed']}` inline
+    // (no wrapper, no `$ref`); Core emits `{$ref:'#/$defs/WindShieldLocation',
+    // description:'Wind shielding factor'}` -- a bare `$ref` with a sibling, which
+    // `dereferenceSchemaNodeInRoot` inlines into a flat `{enum, title, type}` before
+    // `pickDirectControl` ever runs. Both already route to EnumControl unaided, and
+    // `unwrapNullableSchema` (DirectAdvancedFields.tsx) never touches either shape.
+    //
+    // What this override actually still does is pin the LABEL. Core's
+    // `$defs/WindShieldLocation` carries `title: 'WindShieldLocation'`, and the
+    // property site carries no title of its own, so without the override
+    // `labelForProperty` would render the raw `$def` name "WindShieldLocation" on Core
+    // instead of the start-cased key "Shield Fact Location" users see today (FHS,
+    // titleless either way, is unaffected -- there this block is a no-op beyond adding
+    // an explicit `type:'string'`). Retiring it therefore means CHANGING a live label,
+    // which is a product decision, not the dead-special-case cleanup R4.6a is doing --
+    // deliberately left for whoever owns the "$def titles as field labels" question.
+    // Worth noting what that leaves: `mvhr_location`, whose override IS gone, now
+    // renders as the start-cased key "Mvhr Location", while this field keeps a
+    // hand-pinned "Shield Fact Location". Both are start-cased keys; the difference is
+    // that one is pinned in code and the other is derived. Deleting this block would
+    // land Core on "WindShieldLocation" instead, which is why it cannot simply follow.
     if (elementType === 'BuildingElementGround' && subtype === 'Suspended_floor' && advancedProperties.shield_fact_location) {
       const sh = advancedProperties.shield_fact_location as Record<string, unknown>;
       advancedProperties.shield_fact_location = {
@@ -1240,49 +1261,27 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       };
     }
 
-    // mvhr_location: same shield_fact_location-style problem, different profile.
-    // HEM's `$defs/MechanicalVentilation.properties.mvhr_location` is
-    // `{anyOf:[{$ref:'#/$defs/MVHRLocation'},{type:'null'}]}` on Core -- a bare anyOf
-    // derives no `.enum`/type for `pickDirectControl` to see at all, even after $ref
-    // dereferencing (the anyOf wrapper itself never collapses into a flat type/enum),
-    // so without inlining this field falls through to a plain TextControl with no
-    // dropdown or validation. MechanicalVentilation's base-field exclusion is only
-    // `['vent_type']` (`getBaseFieldsForElementType`), on BOTH profiles, so nothing
-    // upstream prunes this field away on Core. UNLIKE shield_fact_location this is NOT
-    // FHS-only: FHS's own mvhr_location is ALREADY a bare `{enum:['inside','outside']}`
-    // with no anyOf wrapper (HEM flattens it differently there), so it already reaches
-    // EnumControl unaided on that profile -- verified directly against both schema
-    // files, and the guard below is a no-op in that case (no anyOf/oneOf branch to
-    // read an enum out of). Dereference against the active root schema and read the
-    // enum out of whichever anyOf/oneOf branch carries one, rather than hardcoding
-    // HEM's `$defs/MVHRLocation` values, so a future HEM schema change (new location,
-    // renamed value) keeps tracking the schema instead of quietly drifting from it.
-    if (elementType === 'MechanicalVentilation' && advancedProperties.mvhr_location) {
-      const mv = advancedProperties.mvhr_location as Record<string, unknown>;
-      const rootFull = getActiveRootSchema();
-      const derefedMv = (rootFull ? dereferenceSchemaNodeInRoot(mv, rootFull) : mv) as Record<string, unknown>;
-      const alternatives = Array.isArray(derefedMv.anyOf)
-        ? (derefedMv.anyOf as Record<string, unknown>[])
-        : Array.isArray(derefedMv.oneOf)
-          ? (derefedMv.oneOf as Record<string, unknown>[])
-          : [];
-      const enumBranch = alternatives.find(
-        (branch) => branch && Array.isArray(branch.enum) && (branch.enum as unknown[]).length > 0,
-      );
-      if (enumBranch) {
-        advancedProperties.mvhr_location = {
-          type: 'string',
-          enum: [...(enumBranch.enum as unknown[])],
-          title:
-            typeof mv.title === 'string'
-              ? mv.title
-              : typeof enumBranch.title === 'string'
-                ? enumBranch.title
-                : 'Mvhr Location',
-          ...(typeof mv.description === 'string' ? { description: mv.description } : {}),
-        };
-      }
-    }
+    // R4.6a DELETION NOTE: `mvhr_location` used to get its own inline flat-enum
+    // override here, added in R4.5 review round 1 because HEM's
+    // `$defs/MechanicalVentilation.properties.mvhr_location` is
+    // `{anyOf:[{$ref:'#/$defs/MVHRLocation'},{type:'null'}]}` on Core and that wrapper
+    // reached `pickDirectControl` with no top-level type or enum to dispatch on, so
+    // the field rendered as a free-text box. `unwrapNullableSchema`
+    // (DirectAdvancedFields.tsx) now collapses that wrapper generically, at every
+    // resolution site, for all 19 misrouted Core properties at once -- so this
+    // one-field patch became dead weight and is gone. Verified by re-running the Core
+    // MechanicalVentilation characterization across the deletion, not assumed: same
+    // EnumControl, same inside/outside options, same forwarded description. ONE
+    // intended difference -- the LABEL goes from "MVHRLocation" to "Mvhr Location".
+    // The override reached into `$defs/MVHRLocation.title` and used the pydantic enum
+    // CLASS NAME as the field label; `unwrapNullableSchema` deliberately carries no
+    // inner annotations (see its docstring), so this titleless property now
+    // start-cases its own key like every other titleless row in the same grid. That
+    // is a correction, not a casualty. See
+    // `AdvancedFieldsEditor.directRender.test.tsx`'s Core MechanicalVentilation
+    // characterization, unchanged across this deletion apart from that label and the
+    // four NUMBER rows that gained their schema minima. Its `shield_fact_location`
+    // neighbour above is NOT redundant and stays; see the correction there for why.
 
     let result: SchemaNode = {
       ...fullSchema,
