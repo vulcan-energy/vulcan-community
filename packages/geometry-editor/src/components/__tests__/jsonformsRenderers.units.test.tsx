@@ -7,7 +7,9 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import coreSchema from '../../../../../data/schemas/core-input.schema.json';
 import fhsSchema from '../../../../../data/schemas/input_fhs.schema.json';
-import type { GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
+import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
+import type { GeometrySchemaParameterInfo, GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
+import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { type SchemaNode } from '../../lib/schemaTypes';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
 import { unwrapNullableSchema } from '../DirectAdvancedFields';
@@ -41,6 +43,7 @@ function renderControl(
     enabled = true,
     handleChange = vi.fn(),
     defaultsJson = null,
+    contextSchemaPort = null,
   }: {
     data?: unknown;
     path?: string;
@@ -57,6 +60,13 @@ function renderControl(
      * `null` by default: every pre-existing case here wants "no template default".
      */
     defaultsJson?: Record<string, unknown> | null;
+    /**
+     * Mounts the control inside a `GeometryEditorServicePortsProvider` carrying this
+     * port. `null` (the default) mounts with NO provider above the control, which is
+     * what every pre-existing case here wants and what makes `useGeometrySchemaPort()`
+     * hand back `unavailableGeometrySchemaPort`.
+     */
+    contextSchemaPort?: GeometrySchemaPort | null;
   } = {},
 ) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
@@ -82,12 +92,25 @@ function renderControl(
     rootSchema: schema,
   };
 
+  const tree = (
+    <GeometryStoreProvider store={store}>
+      <Control {...props as never} />
+    </GeometryStoreProvider>
+  );
+
   return {
     handleChange,
     ...render(
-      <GeometryStoreProvider store={store}>
-        <Control {...props as never} />
-      </GeometryStoreProvider>,
+      contextSchemaPort
+        ? (
+          <GeometryEditorServicePortsProvider
+            schemaPort={contextSchemaPort}
+            workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
+          >
+            {tree}
+          </GeometryEditorServicePortsProvider>
+        )
+        : tree,
     ),
   };
 }
@@ -631,5 +654,87 @@ describe('TextControl renders `{}` for a dictionary row (R4.6a regression)', () 
     // The exact string the bug put on the clipboard, named so the pin cannot be read
     // as merely "some placeholder exists".
     expect(writeText).not.toHaveBeenCalledWith('[]');
+  });
+});
+
+/**
+ * R4.6b-1 fix round: WHICH schema port a control row's label reads.
+ *
+ * R4.6b-1 moved Text/Boolean/WindowPartList off `ProviderFieldLabelWithTooltip` (which
+ * read the CONTEXT port via `useGeometrySchemaPort`) and onto the informed path (which
+ * read `config.schemaPort`). In the community Advanced Fields grid the two are the same
+ * object, so nothing moved; in a host that mounts a control with `config={{}}` inside a
+ * `GeometryEditorServicePortsProvider` — which is how the parent repo's snippet editors
+ * mount `DirectSpecFields` — the move silently swapped a real port for `unavailable` and
+ * dropped every tooltip on those rows.
+ *
+ * The fallback below is the fix: `cfg.schemaPort ?? useGeometrySchemaPort()`. TextControl
+ * is the subject because it is one of the three that regressed.
+ */
+describe('advanced control label resolution falls back to the provider schema port', () => {
+  const DESCRIBED: GeometrySchemaParameterInfo = {
+    name: 'field',
+    title: 'Field',
+    description: 'Only the port knows this.',
+    type: 'string',
+    jsonPath: '#/properties/field',
+    parentKeys: [],
+    param: { type: 'string' },
+    source: 'schema',
+  };
+
+  function describedPort(findParameter: GeometrySchemaPort['findParameter']): GeometrySchemaPort {
+    return { ...schemaPort, findParameter };
+  }
+
+  /** The label's own hover target, not a pill's or an input adornment's. */
+  function labelTooltip(container: HTMLElement): HTMLElement | null {
+    return container.querySelector<HTMLElement>('.tooltip-container');
+  }
+
+  it('reads the provider port when the config carries none, and asks it for the real property key', () => {
+    const findParameter = vi.fn(() => DESCRIBED);
+    const { container } = renderControl(TextControl, {
+      data: 'x',
+      schema: { type: 'string' },
+      // Exactly the parent repo's `DirectSpecFields … config={{}}` shape: no port here.
+      config: { schemaPort: undefined },
+      contextSchemaPort: describedPort(findParameter),
+    });
+
+    expect(findParameter).toHaveBeenCalled();
+    expect(findParameter.mock.calls[0][0]).toBe('field');
+    const tip = labelTooltip(container);
+    expect(tip).not.toBeNull();
+    expect(tip).toHaveTextContent('Field');
+  });
+
+  it('renders a bare label when neither the config nor a provider supplies a port', () => {
+    const { container } = renderControl(TextControl, {
+      data: 'x',
+      schema: { type: 'string' },
+      config: { schemaPort: undefined },
+      contextSchemaPort: null,
+    });
+
+    // `unavailableGeometrySchemaPort` THROWS on `findParameter`; the label resolving at
+    // all is the assertion that the availability gate held.
+    expect(screen.getByText('Field')).toBeVisible();
+    expect(labelTooltip(container)).toBeNull();
+  });
+
+  it('still prefers the config port when a host supplies one, provider or not', () => {
+    const fromConfig = vi.fn(() => DESCRIBED);
+    const fromContext = vi.fn(() => DESCRIBED);
+    const { container } = renderControl(TextControl, {
+      data: 'x',
+      schema: { type: 'string' },
+      config: { schemaPort: describedPort(fromConfig) },
+      contextSchemaPort: describedPort(fromContext),
+    });
+
+    expect(fromConfig).toHaveBeenCalled();
+    expect(fromContext).not.toHaveBeenCalled();
+    expect(labelTooltip(container)).not.toBeNull();
   });
 });
