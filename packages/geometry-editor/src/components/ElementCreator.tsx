@@ -16,8 +16,8 @@ import {
   validateZone,
   isGlobalObject,
   getAdjacentPartyWallUiToggleLabel,
-  ZONE_OVERRIDE_EPSILON,
 } from '../stores/geometryStore';
+import { ZONE_OVERRIDE_EPSILON } from '../lib/zoneDerivation';
 import {
   bindElementFormModule,
   type ElementFormInstance,

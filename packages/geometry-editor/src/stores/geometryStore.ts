@@ -57,8 +57,6 @@ import {
   withEffectiveStoreyHeights,
   ZONE_OVERRIDE_EPSILON,
 } from '../lib/zoneDerivation';
-// Re-exported for consumers that already import it from the store (ElementCreator).
-export { ZONE_OVERRIDE_EPSILON } from '../lib/zoneDerivation';
 import { validateElementCore } from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import { validateZone as validateZoneCore } from '../geometry/validation/validateZone';
