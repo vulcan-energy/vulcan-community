@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { memo, useState, useCallback, useMemo } from 'react';
+import React, { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Group, Line, Circle, Rect, Text } from 'react-konva';
 import { getPointElementIconNode } from '../../lib/pointElementIconSpec';
 import { lucideIconNodeToKonva } from '../../lib/lucideIconKonva';
@@ -13,10 +13,19 @@ import {
   generateDefaultCoordinates,
   shouldSnapToParent,
 } from '../../stores/geometryStore';
-import { calculateDirectionArrow, calculateArrowPoints } from '../../lib/directionArrows';
+import {
+  calculateDirectionArrow,
+  calculateArrowPoints,
+  type DirectionArrow,
+} from '../../lib/directionArrows';
 import type { DrawMode } from '../../hooks/useDrawingMode';
 import {
+  applyCompassOrientationToLineCoords,
+  applyCompassOrientationToSlopedPolygonCoords,
+  orientation360FromSegmentOutwardModelXY,
+  orientation360SlopedFromFirstEdge,
   polygonEdgePerpendicularBearings,
+  polygonPlanCentroid,
   segmentTangentAndOpeningOutwardModelXY,
   shortestSignedCompassDeltaDeg,
 } from '../../lib/openingSegmentOutward';
@@ -56,6 +65,8 @@ import {
   endCanvasInteraction,
   readCanvasInteractionSession,
   writeCanvasInteractionSession,
+  type CanvasInteractionKind,
+  type CanvasInteractionSession,
 } from './canvasInteractionSession';
 import {
   type CanvasElementRendererPalette,
@@ -72,6 +83,7 @@ import {
   findPerpendicularFootOnWallInfiniteFromCache as utilFindPerpFootOnWallInfiniteFromCache,
   findClosestSnapCorner as utilFindClosestSnapCorner,
   getNearbySnapWallSegments as utilGetNearbySnapWallSegments,
+  isLineWallElementForSnap as utilIsLineWallElementForSnap,
   type GeometrySnapCache,
   type ClosestSnapCorner,
 } from '../../lib/snapUtils';
@@ -81,7 +93,6 @@ import type { SnapFeedbackSignal } from './snapFeedbackSignal';
 import { geometryPerf } from '../../lib/geometryPerf';
 import { getMechanicalVentilationDuctworkRoleStyle } from '../../lib/mvhrDuctwork';
 import {
-  downslopeUnitModelXY,
   isOrientationPitchAxis,
   slopedPolygonPlaneBasis,
   slopeHingeContourSegment,
@@ -93,6 +104,87 @@ type LineVertexDragHint = { handle: 0 | 1; wallSnap: boolean; vertexSnap: boolea
 
 type ElementCoordinate = { x: number; y: number; z: number };
 type DragPreviewTarget = Parameters<typeof updateDraggedElementShapeFromCoords>[0];
+
+type ArrowRotateMode = 'orientation' | 'slope' | 'line';
+
+type ArrowBearingCandidate =
+  | { kind: 'neighbour'; bearing: number; sourceElementId: string }
+  | {
+      kind: 'own-edge';
+      bearing: number;
+      sourceEdgeIndex: number;
+      edgeRole: 'low' | 'top';
+    };
+
+type ArrowRotateSnapshot = {
+  mode: ArrowRotateMode;
+  coordinates: ElementCoordinate[];
+  orientation360: number;
+  pivot: { x: number; y: number };
+  startHandleCanvas: { x: number; y: number };
+  gripStartAngleOffset: number;
+  latestCoordinates: ElementCoordinate[];
+  latestOrientation360: number;
+};
+
+function isFinitePoint(value: unknown): value is { x: number; y: number } {
+  if (!value || typeof value !== 'object') return false;
+  return (
+    'x' in value &&
+    typeof value.x === 'number' &&
+    Number.isFinite(value.x) &&
+    'y' in value &&
+    typeof value.y === 'number' &&
+    Number.isFinite(value.y)
+  );
+}
+
+function isArrowRotateSnapshot(value: unknown): value is ArrowRotateSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  return (
+    'mode' in value &&
+    (value.mode === 'orientation' || value.mode === 'slope' || value.mode === 'line') &&
+    'coordinates' in value &&
+    Array.isArray(value.coordinates) &&
+    'latestCoordinates' in value &&
+    Array.isArray(value.latestCoordinates) &&
+    'orientation360' in value &&
+    typeof value.orientation360 === 'number' &&
+    'latestOrientation360' in value &&
+    typeof value.latestOrientation360 === 'number' &&
+    'pivot' in value &&
+    isFinitePoint(value.pivot) &&
+    'gripStartAngleOffset' in value &&
+    typeof value.gripStartAngleOffset === 'number' &&
+    Number.isFinite(value.gripStartAngleOffset)
+  );
+}
+
+function compassBearingFromPoints(
+  pivot: { x: number; y: number },
+  point: { x: number; y: number },
+): number | null {
+  const dx = point.x - pivot.x;
+  const dy = point.y - pivot.y;
+  if (Math.hypot(dx, dy) <= 1e-9) return null;
+  return normalizeOrientation360Deg(Math.atan2(dx, dy) * 180 / Math.PI);
+}
+
+function nearestArrowBearingCandidate(
+  rawBearing: number,
+  candidates: ArrowBearingCandidate[],
+): ArrowBearingCandidate | null {
+  let snappedCandidate: ArrowBearingCandidate | null = null;
+  let snappedDifference = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const difference = Math.abs(shortestSignedCompassDeltaDeg(rawBearing, candidate.bearing));
+    if (difference <= 3 && difference < snappedDifference) {
+      snappedCandidate = candidate;
+      snappedDifference = difference;
+    }
+  }
+  return snappedCandidate;
+}
 
 function canPreviewLineHostedDescendants(element: Element | undefined): boolean {
   return !!element &&
@@ -349,7 +441,7 @@ function resolveLineVertexDragWorld(
 }
 
 type SnapDragNodeLike = {
-  position: () => { x: number; y: number };
+  position: (next?: { x: number; y: number }) => { x: number; y: number };
   getParent?: () => { findOne?: (selector: string) => unknown } | null;
   getStage?: () => {
     getPointerPosition?: () => { x: number; y: number } | null;
@@ -360,6 +452,10 @@ type SnapDragNodeLike = {
 type SnapDragEventLike = {
   evt?: { shiftKey?: boolean };
   target: SnapDragNodeLike;
+};
+
+type ArrowRotateDragTarget = Exclude<DragPreviewTarget, null | undefined> & SnapDragNodeLike & {
+  stopDrag?: () => void;
 };
 
 function dragEventCanvasPosition(e: SnapDragEventLike): { x: number; y: number } {
@@ -659,6 +755,19 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   globalOrientationOffset,
 }) => {
   const geometryStore = useGeometryStoreApi();
+  const arrowRotateInteractionRef = useRef<{
+    target: ArrowRotateDragTarget;
+    session: CanvasInteractionSession<ArrowRotateSnapshot>;
+  } | null>(null);
+  useEffect(() => () => {
+    const interaction = arrowRotateInteractionRef.current;
+    if (!interaction) return;
+    if (interaction.session.isActive()) interaction.session.cancel();
+    writeCanvasInteractionSession(interaction.target, null);
+    if (arrowRotateInteractionRef.current === interaction) {
+      arrowRotateInteractionRef.current = null;
+    }
+  }, []);
   const resolvedGlobalOrientationOffset = globalOrientationOffset ?? geometryStore.getState().globalOrientationOffset;
   const coordinates = element.coordinates || [];
   const parentElementName = (element as { parent_element?: string | null }).parent_element;
@@ -960,6 +1069,353 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
     },
     [canvasCenter, elementsById, panOffset, resolvedGlobalOrientationOffset, scale],
   );
+
+  const getArrowRotateStartOrientation = (mode: ArrowRotateMode): number | null => {
+    if (mode === 'orientation') {
+      const orientation = (element as { orientation360?: number }).orientation360;
+      return typeof orientation === 'number' && Number.isFinite(orientation)
+        ? normalizeOrientation360Deg(orientation)
+        : null;
+    }
+    const [a, b] = coordinates;
+    if (!a || !b) return null;
+    if (mode === 'slope') {
+      return orientation360SlopedFromFirstEdge(
+        a.x,
+        a.y,
+        b.x,
+        b.y,
+        resolvedGlobalOrientationOffset,
+      );
+    }
+    const geometricBearing = orientation360FromSegmentOutwardModelXY(a.x, a.y, b.x, b.y, 0);
+    return geometricBearing === null
+      ? null
+      : normalizeOrientation360Deg(geometricBearing - resolvedGlobalOrientationOffset);
+  };
+
+  const getArrowBearingCandidates = (mode: ArrowRotateMode): ArrowBearingCandidate[] => {
+    const candidates: ArrowBearingCandidate[] = [];
+    if (mode === 'line') {
+      const sourceZ = coordinates[0]?.z;
+      for (const candidate of Object.values(elementsById)) {
+        const candidateCoordinates = candidate.coordinates;
+        if (
+          candidate.id === element.id ||
+          Boolean((candidate as { parent_element?: unknown }).parent_element) ||
+          !utilIsLineWallElementForSnap(candidate) ||
+          candidateCoordinates?.length !== 2 ||
+          !isSameSnapFloor(element, sourceZ, candidate, candidateCoordinates[0]?.z) ||
+          !isSameSnapFloor(element, sourceZ, candidate, candidateCoordinates[1]?.z)
+        ) {
+          continue;
+        }
+        const [a, b] = candidateCoordinates;
+        const geometricBearing = orientation360FromSegmentOutwardModelXY(a.x, a.y, b.x, b.y, 0);
+        if (geometricBearing === null) continue;
+        const bearing = normalizeOrientation360Deg(
+          geometricBearing - resolvedGlobalOrientationOffset,
+        );
+        candidates.push({
+          kind: 'neighbour',
+          bearing,
+          sourceElementId: candidate.id,
+        });
+        candidates.push({
+          kind: 'neighbour',
+          bearing: normalizeOrientation360Deg(bearing + 180),
+          sourceElementId: candidate.id,
+        });
+      }
+      return candidates;
+    }
+
+    for (const candidate of Object.values(elementsById)) {
+      if (
+        candidate.id === element.id ||
+        (candidate.type !== 'BuildingElementOpaque' && candidate.type !== 'BuildingElementTransparent') ||
+        getElementShape(candidate) !== 'sloped-polygon'
+      ) {
+        continue;
+      }
+      const candidateArrow = calculateDirectionArrow(candidate, resolvedGlobalOrientationOffset);
+      if (!candidateArrow) continue;
+      candidates.push({
+        kind: 'neighbour',
+        bearing: candidateArrow.orientation,
+        sourceElementId: candidate.id,
+      });
+    }
+
+    if (mode === 'orientation') {
+      for (const { edgeIndex, bearing, edgeRole } of polygonEdgePerpendicularBearings(
+        coordinates,
+        resolvedGlobalOrientationOffset,
+      )) {
+        candidates.push({
+          kind: 'own-edge',
+          bearing,
+          sourceEdgeIndex: edgeIndex,
+          edgeRole,
+        });
+      }
+    }
+    return candidates;
+  };
+
+  const restoreArrowRotatePreview = (
+    target: ArrowRotateDragTarget,
+    snapshot: ArrowRotateSnapshot,
+  ) => {
+    const previewElement = snapshot.mode === 'orientation'
+      ? { ...element, orientation360: snapshot.orientation360 } as Element
+      : element;
+    updateDraggedElementShapeFromCoords(
+      target,
+      element.id,
+      snapshot.coordinates,
+      scale,
+      panOffset,
+      canvasCenter,
+      previewElement,
+      resolvedGlobalOrientationOffset,
+    );
+    if (snapshot.mode === 'line') {
+      for (const descendantId of collectHostedDescendantElementIds(elementsById, element.id)) {
+        const descendant = elementsById[descendantId];
+        if (!descendant?.coordinates?.length) continue;
+        updateDraggedElementShapeFromCoords(
+          target,
+          descendantId,
+          descendant.coordinates,
+          scale,
+          panOffset,
+          canvasCenter,
+          descendant,
+          resolvedGlobalOrientationOffset,
+        );
+      }
+    }
+    target?.position?.(snapshot.startHandleCanvas);
+  };
+
+  const beginArrowRotateDrag = (
+    target: ArrowRotateDragTarget,
+    mode: ArrowRotateMode,
+    directionArrow: DirectionArrow,
+  ) => {
+    const orientation360 = getArrowRotateStartOrientation(mode);
+    // Geometry-moving drags pivot on the shape's centre: a slope's vertex centroid
+    // and a line's midpoint are the same construction, since polygonPlanCentroid
+    // averages the vertices and a line has two. That is also where
+    // calculateDirectionArrow roots the arrow, so the grip orbits its own base.
+    const pivot = mode === 'orientation'
+      ? { x: directionArrow.centerX, y: directionArrow.centerY }
+      : polygonPlanCentroid(coordinates);
+    const startHandleWorld = { x: directionArrow.arrowX, y: directionArrow.arrowY };
+    const startHandleBearing = pivot ? compassBearingFromPoints(pivot, startHandleWorld) : null;
+    if (orientation360 === null || !pivot || startHandleBearing === null) {
+      target?.stopDrag?.();
+      return;
+    }
+
+    const snapshotCoordinates = coordinates.map((coordinate) => ({ ...coordinate })) as ElementCoordinate[];
+    const snapshot: ArrowRotateSnapshot = {
+      mode,
+      coordinates: snapshotCoordinates,
+      orientation360,
+      pivot,
+      startHandleCanvas: worldToCanvas(startHandleWorld, scale, panOffset, canvasCenter),
+      gripStartAngleOffset: shortestSignedCompassDeltaDeg(
+        normalizeOrientation360Deg(startHandleBearing - resolvedGlobalOrientationOffset),
+        orientation360,
+      ),
+      latestCoordinates: snapshotCoordinates,
+      latestOrientation360: orientation360,
+    };
+    const kind: CanvasInteractionKind = mode === 'orientation'
+      ? 'orientation-arrow-drag'
+      : mode === 'slope'
+        ? 'slope-rotate-drag'
+        : 'line-rotate-drag';
+    const descendantElementIds = mode === 'line'
+      ? collectHostedDescendantElementIds(elementsById, element.id)
+      : [];
+    const baseConfig = {
+      kind,
+      targetId: element.id,
+      snapshot,
+      cleanup: () => {
+        snapFeedbackSignal.reset();
+        setOrientationArrowGripFill(
+          target,
+          element.id,
+          canvasInteractionPalette.handleFill,
+        );
+      },
+      onCancel: () => {
+        restoreArrowRotatePreview(target, snapshot);
+        target?.stopDrag?.();
+        writeCanvasInteractionSession(target, null);
+      },
+    };
+    const session = beginCanvasInteraction({
+      ...baseConfig,
+      preview: {
+        mode: 'elementNodes' as const,
+        target,
+        primaryElementId: element.id,
+        elements: [{
+          elementId: element.id,
+          coordinateCount: snapshotCoordinates.length,
+        }, ...descendantElementIds.map((elementId) => ({
+          elementId,
+          coordinateCount: elementsById[elementId]?.coordinates?.length ?? 0,
+        }))],
+      },
+    });
+    if (!session) {
+      writeCanvasInteractionSession(target, null);
+      target?.stopDrag?.();
+      return;
+    }
+    writeCanvasInteractionSession(target, session);
+    arrowRotateInteractionRef.current = { target, session };
+    snapFeedbackSignal.reset();
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || readCanvasInteractionSession(target) !== session) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      session.cancel();
+    };
+    document.addEventListener('keydown', handleEscape, true);
+    session.addCleanup(() => document.removeEventListener('keydown', handleEscape, true));
+    session.addCleanup(() => {
+      if (arrowRotateInteractionRef.current?.session === session) {
+        arrowRotateInteractionRef.current = null;
+      }
+    });
+  };
+
+  const moveArrowRotateDrag = (target: ArrowRotateDragTarget, shiftKey: boolean) => {
+    const session = readCanvasInteractionSession(target);
+    if (!session?.isActive() || !isArrowRotateSnapshot(session.snapshot)) return;
+    const snapshot = session.snapshot;
+    const pointerCanvas = target.position();
+    const pointerWorld = canvasToWorld(pointerCanvas, scale, panOffset, canvasCenter);
+    const pointerBearing = compassBearingFromPoints(snapshot.pivot, pointerWorld);
+    if (pointerBearing === null) return;
+    const rawBearing = normalizeOrientation360Deg(
+      pointerBearing - resolvedGlobalOrientationOffset + snapshot.gripStartAngleOffset,
+    );
+    const snappedCandidate = nearestArrowBearingCandidate(
+      rawBearing,
+      getArrowBearingCandidates(snapshot.mode),
+    );
+    const resolvedBearing = normalizeOrientation360Deg(
+      shiftKey
+        ? rawBearing
+        : snappedCandidate?.bearing ?? Math.round(rawBearing / 5) * 5,
+    );
+    const orientation360 = roundToTwoDecimals(resolvedBearing);
+    const snapEvent: SnapEvent | null = shiftKey
+      ? null
+      : snappedCandidate?.kind === 'neighbour'
+        ? {
+            kind: 'neighbour-bearing',
+            sourceElementId: snappedCandidate.sourceElementId,
+            value: orientation360,
+          }
+        : snappedCandidate?.kind === 'own-edge'
+          ? {
+              kind: 'edge-normal',
+              sourceElementId: element.id,
+              sourceEdgeIndex: snappedCandidate.sourceEdgeIndex,
+              edgeRole: snappedCandidate.edgeRole,
+              value: orientation360,
+            }
+          : { kind: 'angle-step', value: orientation360 };
+    let previewCoordinates: ElementCoordinate[] | null;
+    if (snapshot.mode === 'orientation') {
+      previewCoordinates = snapshot.coordinates;
+    } else if (snapshot.mode === 'slope') {
+      previewCoordinates = applyCompassOrientationToSlopedPolygonCoords(
+        snapshot.coordinates,
+        orientation360,
+        resolvedGlobalOrientationOffset,
+      );
+    } else {
+      previewCoordinates = applyCompassOrientationToLineCoords(
+        snapshot.coordinates,
+        orientation360,
+        resolvedGlobalOrientationOffset,
+      );
+    }
+    if (!previewCoordinates) return;
+    snapFeedbackSignal.set({ event: snapEvent });
+    setOrientationArrowGripFill(
+      target,
+      element.id,
+      snapEvent?.kind === 'neighbour-bearing' ||
+      (snapEvent?.kind === 'edge-normal' && snapEvent.edgeRole === 'top')
+        ? canvasInteractionPalette.snap
+        : canvasInteractionPalette.handleFill,
+    );
+    snapshot.latestCoordinates = previewCoordinates;
+    snapshot.latestOrientation360 = orientation360;
+    const previewElement = {
+      ...element,
+      coordinates: previewCoordinates,
+      ...(snapshot.mode === 'orientation' ? { orientation360 } : {}),
+    } as Element;
+    updateDraggedElementShapeFromCoords(
+      target,
+      element.id,
+      previewCoordinates,
+      scale,
+      panOffset,
+      canvasCenter,
+      previewElement,
+      resolvedGlobalOrientationOffset,
+    );
+    if (snapshot.mode === 'line') {
+      previewLineHostedDescendantsForCoords(target, element.id, previewCoordinates);
+    }
+    const previewArrow = calculateDirectionArrow(previewElement, resolvedGlobalOrientationOffset);
+    if (previewArrow) {
+      target?.position?.(worldToCanvas(
+        { x: previewArrow.arrowX, y: previewArrow.arrowY },
+        scale,
+        panOffset,
+        canvasCenter,
+      ));
+    }
+  };
+
+  const endArrowRotateDrag = (target: ArrowRotateDragTarget) => {
+    const session = readCanvasInteractionSession(target);
+    if (!session?.isActive()) return;
+    if (!isArrowRotateSnapshot(session.snapshot)) {
+      endCanvasInteraction(session, { committed: false });
+      writeCanvasInteractionSession(target, null);
+      return;
+    }
+    const snapshot = session.snapshot;
+    const orientationChanged = Math.abs(shortestSignedCompassDeltaDeg(
+      snapshot.orientation360,
+      snapshot.latestOrientation360,
+    )) > 1e-9;
+    if (orientationChanged) {
+      if (snapshot.mode === 'orientation') {
+        updateElement(element.id, { orientation360: snapshot.latestOrientation360 });
+      } else {
+        updateElement(element.id, { coordinates: snapshot.latestCoordinates });
+      }
+    }
+    endCanvasInteraction(session, { committed: true });
+    writeCanvasInteractionSession(target, null);
+  };
   // Floor-aware opacity: elements on current floor are fully visible, others are 20% opacity
   const isCurrentFloor = isElementOnActiveCanvasFloor(element, currentFloorZ, floors);
   // Only elements on the current floor should be interactive; others are visual-only context.
@@ -976,7 +1432,14 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
 
   const shape = getElementShape(element as any);
   const orientationPitchAxis = shape === 'sloped-polygon' && isOrientationPitchAxis(element);
-  const showDirectSelectionHandles = isSelected && getDormerBundleInfo(element) === null;
+  const isDormerBundleMember = getDormerBundleInfo(element) !== null;
+  const canRotateByArrow =
+    isSelected &&
+    drawMode === 'none' &&
+    !isReadOnlyDevelopmentContextShading &&
+    !parentElementName &&
+    element.type !== 'OnSiteGeneration';
+  const showDirectSelectionHandles = isSelected && !isDormerBundleMember;
   const isRegularWallOpaque =
     element.type === 'BuildingElementOpaque' && (element as any).is_external_door !== true;
   const useWallSupportedPolygonSnaps =
@@ -1360,6 +1823,84 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
       const selectedThermalBridgeHaloStroke = isSelected && isThermalBridgeLine
         ? canvasElementPalette.selected
         : null;
+      const canRotateLineByArrow = canRotateByArrow && !isDormerBundleMember;
+      const lineDirectionArrow = calculateDirectionArrow(element);
+      const lineDirectionArrowRender = (() => {
+        if (!lineDirectionArrow) return null;
+        const centerCanvas = worldToCanvas(
+          { x: lineDirectionArrow.centerX, y: lineDirectionArrow.centerY },
+          scale,
+          panOffset,
+          canvasCenter,
+        );
+        const arrowCanvas = worldToCanvas(
+          { x: lineDirectionArrow.arrowX, y: lineDirectionArrow.arrowY },
+          scale,
+          panOffset,
+          canvasCenter,
+        );
+        const arrowPoints = calculateArrowPoints({
+          centerX: centerCanvas.x,
+          centerY: centerCanvas.y,
+          arrowX: arrowCanvas.x,
+          arrowY: arrowCanvas.y,
+          orientation: lineDirectionArrow.orientation,
+        });
+        return (
+          <>
+            <Line
+              name={`arrow-line-${element.id}`}
+              points={[centerCanvas.x, centerCanvas.y, arrowCanvas.x, arrowCanvas.y]}
+              stroke={elementColor}
+              strokeWidth={isSelected ? 3 : 2}
+              lineCap="round"
+              listening={false}
+            />
+            <Line
+              name={`arrow-head-${element.id}`}
+              points={[
+                arrowPoints.tip.x, arrowPoints.tip.y,
+                arrowPoints.left.x, arrowPoints.left.y,
+                arrowPoints.tip.x, arrowPoints.tip.y,
+                arrowPoints.right.x, arrowPoints.right.y,
+              ]}
+              stroke={elementColor}
+              strokeWidth={isSelected ? 3 : 2}
+              lineCap="round"
+              lineJoin="round"
+              listening={false}
+            />
+            {canRotateLineByArrow ? (
+              <Circle
+                name={`orientation-arrow-grip-${element.id}`}
+                x={arrowCanvas.x}
+                y={arrowCanvas.y}
+                radius={5}
+                fill={canvasInteractionPalette.handleFill}
+                stroke={canvasInteractionPalette.handleStroke}
+                strokeWidth={2}
+                listening={false}
+              />
+            ) : null}
+            {canRotateLineByArrow ? (
+              <Circle
+                name={`orientation-arrow-handle-${element.id}`}
+                x={arrowCanvas.x}
+                y={arrowCanvas.y}
+                radius={16}
+                opacity={0}
+                draggable
+                onDragStart={(e) => beginArrowRotateDrag(e.target, 'line', lineDirectionArrow)}
+                onDragMove={(e) => {
+                  // Shift suppresses snaps only for vertex/arrow drags; draw mode keeps Shift ortho-lock.
+                  moveArrowRotateDrag(e.target, !!e.evt?.shiftKey);
+                }}
+                onDragEnd={(e) => endArrowRotateDrag(e.target)}
+              />
+            ) : null}
+          </>
+        );
+      })();
 
       return (
         <Group
@@ -1434,6 +1975,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               handleElementClick(element.id, e);
             }) : undefined}
           />
+          {/* Direction control stays below endpoint handles so vertex editing wins overlap hits. */}
+          {lineDirectionArrowRender}
           {isSelected
             && element.type === 'ThermalBridgeLinear'
             && resolveThermalBridgeLineMode(element as any) === 'slope'
@@ -1902,55 +2445,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   cleanupVertexInteractionAfterDragEnd(draggedNode);
                 }}
               />
-              </>
-            );
-          })()}
-
-          {/* Direction arrow for line elements with orientation360 */}
-          {(() => {
-            const directionArrow = calculateDirectionArrow(element);
-            if (!directionArrow) return null;
-
-            // Convert world coordinates to canvas coordinates
-            const centerCanvas = worldToCanvas({ x: directionArrow.centerX, y: directionArrow.centerY }, scale, panOffset, canvasCenter);
-            const arrowCanvas = worldToCanvas({ x: directionArrow.arrowX, y: directionArrow.arrowY }, scale, panOffset, canvasCenter);
-
-            // Calculate arrowhead points
-            const arrowPoints = calculateArrowPoints({
-              centerX: centerCanvas.x,
-              centerY: centerCanvas.y,
-              arrowX: arrowCanvas.x,
-              arrowY: arrowCanvas.y,
-              orientation: directionArrow.orientation
-            });
-
-            return (
-              <>
-                {/* Arrow line */}
-                <Line
-                  name={`arrow-line-${element.id}`}
-                  points={[centerCanvas.x, centerCanvas.y, arrowCanvas.x, arrowCanvas.y]}
-                  stroke={elementColor}
-                  strokeWidth={isSelected ? 3 : 2}
-                  lineCap="round"
-                  listening={false}
-                />
-
-                {/* Arrowhead */}
-                <Line
-                  name={`arrow-head-${element.id}`}
-                  points={[
-                    arrowPoints.tip.x, arrowPoints.tip.y,
-                    arrowPoints.left.x, arrowPoints.left.y,
-                    arrowPoints.tip.x, arrowPoints.tip.y,
-                    arrowPoints.right.x, arrowPoints.right.y
-                  ]}
-                  stroke={elementColor}
-                  strokeWidth={isSelected ? 3 : 2}
-                  lineCap="round"
-                  lineJoin="round"
-                  listening={false}
-                />
               </>
             );
           })()}
@@ -2460,6 +2954,9 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
       // First two coordinates define the bottom edge
       const bottomEdgeCoords = canvasCoords.slice(0, 2);
       const slopeEdgeCoords = canvasCoords.slice(2);
+      const canRotateSlopedByArrow =
+        canRotateByArrow &&
+        (orientationPitchAxis || !isDormerBundleMember);
       const orientationBasis = orientationPitchAxis
         ? slopedPolygonPlaneBasis(
             coordinates.map((point) => [point.x, point.y] as [number, number]),
@@ -2608,7 +3105,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   lineJoin="round"
                   listening={false}
                 />
-                {orientationPitchAxis && isSelected ? (
+                {canRotateSlopedByArrow ? (
                   <Circle
                     name={`orientation-arrow-grip-${element.id}`}
                     x={arrowCanvas.x}
@@ -2620,7 +3117,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     listening={false}
                   />
                 ) : null}
-                {orientationPitchAxis && isSelected ? (
+                {canRotateSlopedByArrow ? (
                   <Circle
                     name={`orientation-arrow-handle-${element.id}`}
                     x={arrowCanvas.x}
@@ -2629,139 +3126,18 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     opacity={0}
                     draggable
                     onDragStart={(e) => {
-                      snapFeedbackSignal.reset();
-                      const session = beginCanvasInteraction({
-                        kind: 'orientation-arrow-drag',
-                        targetId: element.id,
-                        snapshot: { orientation360: (element as { orientation360?: number }).orientation360 },
-                        cleanup: () => {
-                          snapFeedbackSignal.reset();
-                          setOrientationArrowGripFill(
-                            e.target,
-                            element.id,
-                            canvasInteractionPalette.handleFill,
-                          );
-                        },
-                      });
-                      writeCanvasInteractionSession(e.target, session);
+                      beginArrowRotateDrag(
+                        e.target,
+                        orientationPitchAxis ? 'orientation' : 'slope',
+                        directionArrow,
+                      );
                     }}
                     onDragMove={(e) => {
-                      const pointerWorld = canvasToWorld(e.target.position(), scale, panOffset, canvasCenter);
-                      const dx = pointerWorld.x - directionArrow.centerX;
-                      const dy = pointerWorld.y - directionArrow.centerY;
-                      if (Math.hypot(dx, dy) <= 1e-9) return;
-                      const rawBearing = normalizeOrientation360Deg(
-                        Math.atan2(dx, dy) * 180 / Math.PI - resolvedGlobalOrientationOffset,
-                      );
-                      type BearingCandidate =
-                        | { kind: 'neighbour'; bearing: number; sourceElementId: string }
-                        | {
-                            kind: 'own-edge';
-                            bearing: number;
-                            sourceEdgeIndex: number;
-                            edgeRole: 'low' | 'top';
-                          };
-                      const candidates: BearingCandidate[] = [];
-                      for (const candidate of Object.values(elementsById)) {
-                        if (
-                          candidate.id === element.id ||
-                          (candidate.type !== 'BuildingElementOpaque' && candidate.type !== 'BuildingElementTransparent') ||
-                          getElementShape(candidate) !== 'sloped-polygon'
-                        ) continue;
-                        const candidateArrow = calculateDirectionArrow(candidate, resolvedGlobalOrientationOffset);
-                        if (!candidateArrow) continue;
-                        candidates.push({
-                          kind: 'neighbour',
-                          bearing: candidateArrow.orientation,
-                          sourceElementId: candidate.id,
-                        });
-                      }
-                      // Both senses stay snappable — squaring off an edge is what makes it
-                      // classifiable as eaves or ridge, and the 5° grid cannot land those
-                      // bearings — but only the apex-down sense earns on-canvas guidance;
-                      // hinging along an edge is already plain from the contour.
-                      for (const { edgeIndex, bearing, edgeRole } of polygonEdgePerpendicularBearings(
-                        coordinates,
-                        resolvedGlobalOrientationOffset,
-                      )) {
-                        candidates.push({
-                          kind: 'own-edge',
-                          bearing,
-                          sourceEdgeIndex: edgeIndex,
-                          edgeRole,
-                        });
-                      }
-
-                      let snappedCandidate: BearingCandidate | null = null;
-                      let snappedDifference = Number.POSITIVE_INFINITY;
-                      for (const candidate of candidates) {
-                        const difference = Math.abs(shortestSignedCompassDeltaDeg(rawBearing, candidate.bearing));
-                        if (difference <= 3 && difference < snappedDifference) {
-                          snappedCandidate = candidate;
-                          snappedDifference = difference;
-                        }
-                      }
                       // Shift suppresses snaps only for vertex/arrow drags; draw mode keeps Shift ortho-lock.
-                      const suppressSnapping = !!e.evt?.shiftKey;
-                      const orientation360 = normalizeOrientation360Deg(
-                        suppressSnapping
-                          ? rawBearing
-                          : snappedCandidate?.bearing ?? Math.round(rawBearing / 5) * 5,
-                      );
-                      const snapEvent: SnapEvent | null = suppressSnapping
-                        ? null
-                        : snappedCandidate?.kind === 'neighbour'
-                          ? {
-                              kind: 'neighbour-bearing',
-                              sourceElementId: snappedCandidate.sourceElementId,
-                              value: orientation360,
-                            }
-                          : snappedCandidate?.kind === 'own-edge'
-                            ? {
-                                kind: 'edge-normal',
-                                sourceElementId: element.id,
-                                sourceEdgeIndex: snappedCandidate.sourceEdgeIndex,
-                                edgeRole: snappedCandidate.edgeRole,
-                                value: orientation360,
-                              }
-                            : { kind: 'angle-step', value: orientation360 };
-                      snapFeedbackSignal.set({ event: snapEvent });
-                      setOrientationArrowGripFill(
-                        e.target,
-                        element.id,
-                        snapEvent?.kind === 'neighbour-bearing' ||
-                        (snapEvent?.kind === 'edge-normal' && snapEvent.edgeRole === 'top')
-                          ? canvasInteractionPalette.snap
-                          : canvasInteractionPalette.handleFill,
-                      );
-                      const downslope = downslopeUnitModelXY(orientation360, resolvedGlobalOrientationOffset);
-                      const arrowLength = Math.hypot(
-                        directionArrow.arrowX - directionArrow.centerX,
-                        directionArrow.arrowY - directionArrow.centerY,
-                      );
-                      const snappedCanvas = worldToCanvas({
-                        x: directionArrow.centerX + downslope[0] * arrowLength,
-                        y: directionArrow.centerY + downslope[1] * arrowLength,
-                      }, scale, panOffset, canvasCenter);
-                      e.target.position(snappedCanvas);
-                      updateElement(element.id, { orientation360 }, true);
+                      moveArrowRotateDrag(e.target, !!e.evt?.shiftKey);
                     }}
                     onDragEnd={(e) => {
-                      const world = canvasToWorld(e.target.position(), scale, panOffset, canvasCenter);
-                      const orientation360 = roundToTwoDecimals(normalizeOrientation360Deg(
-                        Math.atan2(world.x - directionArrow.centerX, world.y - directionArrow.centerY) * 180 / Math.PI -
-                          resolvedGlobalOrientationOffset,
-                      ));
-                      updateElement(element.id, { orientation360 });
-                      const session = readCanvasInteractionSession(e.target);
-                      endCanvasInteraction(session, { committed: true });
-                      writeCanvasInteractionSession(e.target, null);
-                      snapFeedbackSignal.reset();
-                      setOrientationArrowGripFill(
-                        e.target,
-                        element.id,
-                        canvasInteractionPalette.handleFill,
-                      );
+                      endArrowRotateDrag(e.target);
                     }}
                   />
                 ) : null}

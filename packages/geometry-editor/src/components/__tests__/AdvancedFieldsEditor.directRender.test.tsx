@@ -278,6 +278,23 @@ function assertDirectCharacterization(args: MountArgs, expectedRows: ExpectedRow
  * supplies the minimal discriminator stubs in `SYSTEM_PLANT_FIXTURES` — nothing else,
  * so it stays obvious that they exist to open branches rather than to shape results.
  *
+ * WHAT THAT MAKES THE SYSTEM HALF: FIXTURE-BOUNDED, not exhaustive. Read the counts
+ * below as "every route these fixtures open", never as "every route the schemas hold".
+ * `SYSTEM_PLANT_FIXTURES` opens ONE discriminator branch per subcategory on Core —
+ * `HotWaterSource` -> `CombiBoiler` of 6, `SpaceHeatSystem` -> `WetDistribution` of 4,
+ * `SpaceCoolSystem` -> `AirConditioning` of 1 (complete, by luck of there being one) —
+ * and two of `HeatSourceWet`'s 4 (`Boiler`, `HeatPump`). `WWHRS` has no fixture and
+ * contributes zero routes on both profiles; `HotWaterDemand` has none either but needs
+ * none, being a plain object rather than a discriminated map, and does contribute (4
+ * routes, 3 wrappers, on Core). And on CORE the System walk is nearly empty regardless
+ * of fixtures: `flattenIfThenAllOfProperties` resolves FHS's `allOf`/`if`/`then` but
+ * never selects a branch of Core's discriminated `oneOf`, so a Core plant schema stays a
+ * bare combinator node with no `properties` for `buildSystemAdvancedUischema` to walk —
+ * measured, `System:HeatSourceWet` contributes 2 routes and `HotWaterSource`,
+ * `SpaceCoolSystem`, `SpaceHeatSystem` one each, none of them wrappers. The invariant is
+ * still worth what it costs, but expanding the fixtures (or fixing Core's flattening) is
+ * what would widen it, and the `moved` list below would grow when either happens.
+ *
  * TWO ORACLES, ONE OF WHICH IS GENUINELY INDEPENDENT — stated plainly because it bounds
  * what this test can catch:
  *  - `controlExpectedFromInnerBranchType` IS independent: it reads `inner.type` /
@@ -1822,6 +1839,44 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
  * resolved-subschema walk. Fixtures below are shaped to match those two builders
  * exactly (verified directly against both, parent repo, read-only), not invented.
  */
+
+/**
+ * `DirectSpecFields` is FULLY CONTROLLED: its `applyChange` closes over the `data`
+ * PROP (`onDataChange(setAtPath(data, segments, value))`), so whatever the host feeds
+ * back in is the base for the next edit. Both production hosts do feed it back — web's
+ * `SnippetEditorShell`/`useSnippetShellData` owns the payload and re-renders with it.
+ *
+ * A bare `onDataChange` spy over a STATIC `data` prop looks equivalent and is not: the
+ * component keeps rendering the original fixture, so a second consecutive interaction
+ * is applied to PRE-EDIT state and silently discards the first edit, and nothing the
+ * component itself wrote is ever read back. That is exactly the harness defect the
+ * paired parent commit fixed on web's `SnippetEditor` test (a controlled wrapper
+ * mirroring `JsonViewerModal`'s real mount); this is the same fix for the community
+ * side. The spy is still passed straight through, so call-count and payload
+ * assertions are unaffected.
+ */
+const ControlledDirectSpecFields: React.FC<{
+  schema: Record<string, unknown>;
+  initialData: Record<string, unknown>;
+  config: Record<string, unknown>;
+  spec: DirectSpecNode;
+  onDataChange: (next: Record<string, unknown>) => void;
+}> = ({ schema, initialData, config, spec, onDataChange }) => {
+  const [data, setData] = React.useState(initialData);
+  return (
+    <DirectSpecFields
+      schema={schema}
+      data={data}
+      config={config}
+      spec={spec}
+      onDataChange={(next) => {
+        onDataChange(next);
+        setData(next);
+      }}
+    />
+  );
+};
+
 function renderDirectSpecFields(props: {
   schema: Record<string, unknown>;
   data: Record<string, unknown>;
@@ -1837,9 +1892,9 @@ function renderDirectSpecFields(props: {
       workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
     >
       <GeometryStoreProvider store={store}>
-        <DirectSpecFields
+        <ControlledDirectSpecFields
           schema={props.schema}
-          data={props.data}
+          initialData={props.data}
           config={props.config ?? { advancedEditor: true, elementType: 'ThermalBridgeLinear' }}
           spec={props.spec}
           onDataChange={onDataChange}
@@ -2054,6 +2109,27 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
       sec: { list: [{ name: 'Alpha 2', value: 1 }, { name: 'Beta', value: 2 }] },
     });
 
+    // SECOND CONSECUTIVE EDIT, against data the component itself wrote. This is the
+    // half the old (uncontrolled) harness could not express at all, and it closes the
+    // loop `getAtPath`'s docstring states as a contract -- "both must agree, or a value
+    // written via one would read back as undefined via the other". Everything above
+    // only ever exercised the write side against the pristine fixture; the read side
+    // was only ever exercised at mount, against that same fixture. Here the array that
+    // `setAtPath`'s array branch produced (a `.slice()` clone, one index rewritten) is
+    // what `getAtPath` must now index back into.
+    expect(item0NameInput.value).toBe('Alpha 2');
+    expect(item1NameInput.value).toBe('Beta');
+    fireEvent.change(item1NameInput, { target: { value: 'Beta 2' } });
+    expect(onDataChange).toHaveBeenLastCalledWith({
+      sec: { list: [{ name: 'Alpha 2', value: 1 }, { name: 'Beta 2', value: 2 }] },
+    });
+    // Still a real array after two writes through the array hop, not an object with
+    // numeric keys -- the shape `JSON.stringify` has to emit for a HEM list.
+    const afterTwoEdits = onDataChange.mock.calls[onDataChange.mock.calls.length - 1][0] as {
+      sec: { list: unknown };
+    };
+    expect(Array.isArray(afterTwoEdits.sec.list)).toBe(true);
+
     // Unset (reset-to-undefined) on item 0's `value`. R4.6a COMMENT CORRECTION: this
     // exercises the RECORD branch of `setAtPathNode`, not the array branch -- the leaf
     // being unset is a key inside the item OBJECT at index 0 (`sec.list.0.value`), so
@@ -2062,7 +2138,8 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
     // item 1 down)") described the ARRAY-INDEX-leaf case, which this fixture never
     // reaches and which R4.6a changed to a splice anyway -- see the dedicated
     // array-index-leaf test below and `setAtPathNode`'s docstring. Everything asserted
-    // here is unchanged by that fix.
+    // here is unchanged by that fix. It now runs as the THIRD consecutive interaction,
+    // against the twice-rewritten array rather than the fixture (hence `'Beta 2'`).
     const resetButton = within(fieldRowByLabel(container, 'value', 'Item 0')).getByRole('button', {
       name: 'Reset to default',
     });
@@ -2071,7 +2148,8 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
       sec: { list: Array<Record<string, unknown> | undefined> };
     };
     expect(lastCall.sec.list.length).toBe(2);
-    expect(lastCall.sec.list[1]).toEqual({ name: 'Beta', value: 2 });
+    expect(lastCall.sec.list[1]).toEqual({ name: 'Beta 2', value: 2 });
+    expect(lastCall.sec.list[0]).toEqual({ name: 'Alpha 2' });
     expect(Object.prototype.hasOwnProperty.call(lastCall.sec.list[0] ?? {}, 'value')).toBe(false);
   });
 
@@ -2083,13 +2161,24 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
     // `null` is not valid HEM input for any list this walker can reach
     // (`window_part_list`, `edge_insulation`, `treatment` are all lists OF OBJECTS).
     //
-    // UNREACHABLE FROM TODAY'S UI, and the fixture says so honestly: no live array has
-    // PRIMITIVE items, so no production spec ever binds a Control straight to an array
-    // index -- every real array path ends at a leaf inside an item object, which the
-    // test immediately above covers. This is a self-rooted `Group` over a primitive
-    // list, the minimal shape that reaches the array branch's leaf-unset at all, and
-    // the reason to have it is that the next array-shaped builder inherits this
-    // behaviour whether or not anyone re-derives the argument.
+    // UNREACHABLE FROM TODAY'S UI, and the fixture now says so for the RIGHT reason (an
+    // earlier version of this comment claimed no production spec binds a Control
+    // straight to an array index, which is false). Web's `SimplifiedFabricEditor`
+    // (`buildControls`, parent repo) does exactly that -- a `Control` scoped
+    // `#/properties/<i>` inside a Group whose `pathOverride` ends at the array -- chosen
+    // per item for items that are not objects. What makes it dead is the DATA: every
+    // array those fabric sections can reach in today's schemas holds OBJECTS
+    // (`treatment` / `shading` / `window_part_list` / `edge_insulation`), so the
+    // per-item Group branch is taken instead and every live array path ends at a leaf
+    // inside an item object -- the test immediately above. Nor is it the reset
+    // affordance holding it back: that renders for any non-blank value even under the
+    // fabric editor's `config={{}}` mount, and clicking it commits `undefined`, which is
+    // precisely what this fixture drives. See `setAtPathNode`'s docstring for the full
+    // reasoning and for the two routes that genuinely do not apply. This is a
+    // self-rooted `Group` over a primitive list, the minimal shape that reaches the
+    // array branch's leaf-unset at all, and the reason to have it is that the next
+    // array-shaped builder inherits this behaviour whether or not anyone re-derives the
+    // argument.
     const itemSchema = { type: 'number' };
     const primitiveListSpec: DirectSpecNode = {
       type: 'VerticalLayout',

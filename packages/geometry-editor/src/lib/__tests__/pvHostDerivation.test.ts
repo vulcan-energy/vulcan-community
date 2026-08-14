@@ -11,7 +11,7 @@ import {
   pointInPolygon2D,
   polygonAreaM2,
 } from '../pvHostDerivation';
-import { orientation360SlopedFromFirstEdge } from '../openingSegmentOutward';
+import { orientation360SlopedFromFirstEdge, polygonPlanCentroid } from '../openingSegmentOutward';
 import type {
   BuildingElementOpaque,
   BuildingElementTransparent,
@@ -162,10 +162,13 @@ describe('pvHostDerivation – deriveFromHostRoof', () => {
       extra_json: { _slope_pitch_axis: 'orientation' },
     });
     const panel = makePanel({ id: 'panel', coordinates: square(2, 2, 1) });
+    const panelCentroid = polygonPlanCentroid(panel.coordinates);
 
     expect(deriveFromHostRoof(panel, roof, undefined, 0).orientation360).toBe(90);
     const aligned = alignHostedSlopedPanelToHostOrientation(panel, roof, 0);
     expect(aligned).not.toBeNull();
+    expect(polygonPlanCentroid(aligned!)?.x).toBeCloseTo(panelCentroid!.x, 12);
+    expect(polygonPlanCentroid(aligned!)?.y).toBeCloseTo(panelCentroid!.y, 12);
     expect(orientation360SlopedFromFirstEdge(
       aligned![0]!.x,
       aligned![0]!.y,
