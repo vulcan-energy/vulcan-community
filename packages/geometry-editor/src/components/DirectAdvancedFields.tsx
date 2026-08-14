@@ -286,11 +286,13 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  *    either, but only because `Control` is not one of the seven `SystemSubcategory`
  *    values this editor mounts; nothing about the shape prevents it.
  *  - `ShowerMixer.WWHRS_configuration` — `ShowerMixer` has no element-subschema route of
- *    its own, and the System walk stops one level short: `HotWaterDemand.Shower` is a
- *    DICTIONARY (`additionalProperties`, no `properties`), and
- *    `buildControlsForSchema` only recurses into a child with non-empty `properties`, so
- *    it emits ONE Control for `Shower` itself and never descends to the item schema this
- *    property lives on.
+ *    its own, and the System walk stops one level short: `buildControlsForSchema` only
+ *    recurses into a child with non-empty `properties`, so it emits ONE Control for
+ *    `Shower` itself and never descends to the item schema this property lives on. On
+ *    CORE — the profile this list is scoped to — the node that walk sees is the nullable
+ *    WRAPPER `anyOf:[dict,{type:'null'}]`, because the layout is built before
+ *    `unwrapNullableSchema` runs; it has no `properties` either, so the conclusion holds
+ *    on both profiles, but by way of the wrapper on Core and the bare dictionary on FHS.
  *  - `Zone.temp_setpnt_basis` — `Zone` is neither an HEM element type this editor mounts
  *    Advanced Fields for nor a `SystemSubcategory`. This one IS structural.
  * (`BuildingElementPartyWall.party_wall_lining_type`, listed here through R4.5, is

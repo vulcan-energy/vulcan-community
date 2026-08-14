@@ -577,9 +577,13 @@ describe('TextControl renders `{}` for a dictionary row (R4.6a regression)', () 
 
   // Core, WRAPPED: `anyOf:[dict,{type:'null'}]`. Before R4.6a the wrapper reached the
   // generator intact and produced `{}`; the unwrap strips it, and without the guard fix
-  // the same field then offered `[]` — which `validateAdvancedFieldPrimitive` rejects on
-  // paste, so the row errored and nothing committed. Asserting both columns makes the
-  // regression a single readable equality rather than a remembered "it used to be".
+  // the same field then offered `[]`, which the editor ACCEPTED and committed — see the
+  // measured note in `lib/schemaPlaceholders.ts`: per-property validation is a no-op on
+  // every System-walk row, so the bad example landed in `extra_json` silently rather
+  // than erroring. This test cannot observe that half (`renderControl` injects a stub
+  // schemaPort whose `validateProperty` always returns valid), and does not claim to —
+  // it pins the placeholder. Asserting both columns makes the regression a single
+  // readable equality rather than a remembered "it used to be".
   it.each([
     ['InfiltrationVentilation', 'MechanicalVentilation'],
     ['HotWaterDemand', 'Bath'],

@@ -331,9 +331,23 @@ export function generateCompletePlaceholder(schema: SchemaNode | null | undefine
   // R4.6a REGRESSION FIX: this guard used to require `schema.properties` as well, so a
   // DICTIONARY (`{type:'object', additionalProperties:{…}}` — no `properties`, which is
   // how HEM models every user-keyed map) fell past it to the `'[]'` fallback below and
-  // offered an ARRAY as the example for an OBJECT-shaped field. Pasting that via the
-  // "Copy example" button then failed `validateAdvancedFieldPrimitive`, so the row
-  // errored and nothing committed.
+  // offered an ARRAY as the example for an OBJECT-shaped field.
+  //
+  // What that COST the user, stated as measured rather than as assumed (an earlier
+  // draft of this comment claimed the paste was rejected by
+  // `validateAdvancedFieldPrimitive`; it is not, and the truth is worse). Per-property
+  // validation is a NO-OP on every System-walk row: `validatePropertyValueForMode`
+  // (`lib/schemaCache.ts:1980`) looks up `subschema.properties[key]`, but for
+  // `elementType:'System'` the subschema's top-level `properties` is the SUBTYPE
+  // wrapper (`{InfiltrationVentilation: …}`), so the leaf key is never found and it
+  // falls back to a lookup that finds nothing and returns `{valid:true}`. Probed with
+  // `[]`, `{}`, `"not an object"`, `42` and `true` — all accepted. So pasting the bad
+  // `[]` example COMMITTED it: `extra_json` took an array where HEM requires an
+  // object, silently, and the model carried invalid input rather than the edit being
+  // blocked. (Validation is not globally dead — the flat-walk route for these keys
+  // rejects `[]` correctly — but that route renders zero rows, because they are all
+  // base fields.) Tracked as a follow-up in the parent repo's refactor plan; it is a
+  // separate defect from this guard and is deliberately not fixed here.
   //
   // It only became visible in R4.6a because HEM writes an optional dictionary as
   // `anyOf:[dict,{type:'null'}]`: the wrapper took the union branch at the top of this
