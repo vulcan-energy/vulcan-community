@@ -75,6 +75,17 @@ type PlantControlCtx = {
    * Nested object keys from the plant root (not including the leaf property key),
    * already start-cased at append time in `buildControlsForSchema` — see the note on
    * `titleOrKeyFromSchema` above, and the `plantKey` exclusion on `leafControlLabel`.
+   *
+   * READ THAT NOTE FOR THE CASING RULE ONLY, NOT FOR THE SOURCE. Prefixes do not go
+   * through `titleOrKeyFromSchema` at all: `buildControlsForSchema` pushes
+   * `startCaseKey(key)` directly and never consults the nested object's own `title`, so a
+   * prefix is KEY-derived even when the node is titled. Core's
+   * `InfiltrationVentilation.Leaks` is the live case — it resolves to `$defs`
+   * `VentilationLeaks`, which carries `title: "VentilationLeaks"`, and the row still
+   * renders `Leaks · Env Area`. Leaves are title-first, prefixes are key-derived by
+   * design today; the asymmetry predates R4.6b-1 (which start-cased the FALLBACKS and
+   * nothing else) and any change to it belongs to the content slice, which owns what
+   * these labels should SAY.
    */
   pathLabels: string[];
 };

@@ -242,6 +242,42 @@ function resolveUnit(candidates: FieldUnitCandidate[]): FieldUnitResolution {
 }
 
 /**
+ * Does this tooltip say anything a reader did not already have?
+ *
+ * Mirrors `formatSchemaInfoForTooltip` (`../utils/schemaTooltipHelpers`) exactly, arm by
+ * arm. That formatter can emit five things: the DESCRIPTION, and a metadata block of
+ * `Source:`, `Type:`, `Units:`, `Constraints:` (min / max / enum values) and `variants`.
+ *
+ * `Source:` and `Type:` are not content. `Source:` is emitted unconditionally, and always
+ * reads "Schema" or "HEM Guidance" — provenance for text that, in the case this predicate
+ * screens out, is not there. `Type:` restates what the control already shows the user:
+ * a checkbox is a boolean, a dropdown of three options is an enum, a JSON blob row is an
+ * object. A hover target whose entire payload is `Source: Schema · Type: object` costs a
+ * pointer trip and a popup to say nothing, so it is not rendered at all — the house rule
+ * is to render nothing when there is nothing to say.
+ *
+ * The other four ARE content: a description explains the parameter, a unit disambiguates
+ * the number, min/max/enum bound it, and `variants` says where the property applies.
+ * Any one of them present makes the tooltip worth offering.
+ *
+ * The constraints arm restates the formatter's own emptiness test rather than `!!
+ * constraints`: a constraints object carrying neither min, max nor a non-empty enum
+ * renders no `Constraints:` line, so it is not content here either.
+ */
+function tooltipHasSubstantiveContent(info: GeometrySchemaParameterInfo): boolean {
+  if (info.description?.trim()) return true;
+  if (info.units) return true;
+  if (info.variants && info.variants.length > 0) return true;
+  const constraints = info.constraints;
+  if (constraints) {
+    if (constraints.min !== undefined) return true;
+    if (constraints.max !== undefined) return true;
+    if (constraints.enum && constraints.enum.length > 0) return true;
+  }
+  return false;
+}
+
+/**
  * Canonical field metadata resolver for labels, tooltips, unit adornments and
  * completeness diagnostics. Every lookup is scoped by the concrete context.
  */
@@ -303,7 +339,7 @@ export function resolveFieldPresentation(
   const displayUnit = unit.status === 'resolved' ? unit.display : undefined;
   const label = stripResolvedUnitFromLabel(context.label ?? schemaInfo?.title ?? paramId, displayUnit);
 
-  const tooltipInfo = schemaInfo || description || overrideMetadata
+  const tooltipCandidate = schemaInfo || description || overrideMetadata
     ? {
         name: paramId,
         title: schemaInfo?.title ?? label,
@@ -320,6 +356,14 @@ export function resolveFieldPresentation(
         variants: schemaInfo?.variants,
         source: descriptionSource,
       } satisfies GeometrySchemaParameterInfo
+    : null;
+  // Finding the parameter is not the same as having something to say about it. A node
+  // that resolves but carries no description, unit, bound or variant produces a
+  // Source/Type-only shell, so the tooltip is dropped and `ResolvedFieldLabel` (and every
+  // other `tooltipInfo` consumer) renders a plain label. Screened on the BUILT object,
+  // not on the inputs, so this cannot drift from what the formatter would have shown.
+  const tooltipInfo = tooltipCandidate && tooltipHasSubstantiveContent(tooltipCandidate)
+    ? tooltipCandidate
     : null;
 
   return {

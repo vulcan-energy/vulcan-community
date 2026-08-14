@@ -235,11 +235,19 @@ function renderFieldLabelWithTooltipForMode(
   return <ResolvedFieldLabel presentation={presentation} useFHSSchema={useFHSSchema} />;
 }
 
+/**
+ * The informed resolution every Advanced Fields control row uses: real property key,
+ * resolved schema node, subtype/fabric variant, and an EFFECTIVE schema port supplied by
+ * the caller (`useAdvancedControlPreamble`, the only call site — see the port contract
+ * documented there). The port is a parameter rather than something re-derived from
+ * `config` here so that "which port does a label read?" has exactly one decision point.
+ */
 function resolveAdvancedControlFieldPresentation(
   label: string,
   propertyKey: string | undefined,
   schema: JsonRecord,
   config: RendererConfig,
+  schemaPort: GeometrySchemaPort,
 ): ResolvedFieldPresentation {
   return resolveFieldPresentation({
     mode: config.useFHSSchemaForValidation ? 'fhs' : 'core',
@@ -249,7 +257,7 @@ function resolveAdvancedControlFieldPresentation(
     opaqueFabricVariant: config.opaqueFabricVariant,
     label,
     schemaNode: schema,
-  }, config.schemaPort ?? unavailableGeometrySchemaPort);
+  }, schemaPort);
 }
 
 const ProviderFieldLabelWithTooltip: React.FC<{
@@ -944,13 +952,32 @@ type AdvancedControlPreamble = {
  * pill was spelled two different ways (`presentation.statusPillType` in Boolean/Enum,
  * an explicit `getStatusPillType` call in Text/Number) that happened to agree.
  *
- * PLAIN FUNCTION, NOT A HOOK, deliberately: every line here is pure derivation from
- * props. The two store reads (`useDefaultValues`, `useDefaultsLookup`) stay at each
- * control's own top level and are passed in, so this stays outside the rules-of-hooks
- * contract and each control keeps its own `useState`/`useNumericDraftInput` calls where
- * a reader expects to find them.
+ * A HOOK, for exactly one reason: the SCHEMA PORT (see below). Everything else here is
+ * pure derivation from props, and the two store reads (`useDefaultValues`,
+ * `useDefaultsLookup`) still stay at each control's own top level and are passed in, so
+ * each control keeps its own `useState`/`useNumericDraftInput` calls where a reader
+ * expects to find them. All five call sites invoke this unconditionally as their first
+ * statement, so the rules-of-hooks contract holds.
  *
- * TWO PREVIOUSLY-DIVERGENT LINES ARE UNIFIED HERE, both verified inert by the rendered-
+ * SCHEMA PORT CONTRACT — `cfg.schemaPort ?? useGeometrySchemaPort()`, resolved ONCE here
+ * and passed down to `resolveAdvancedControlFieldPresentation`:
+ *  - a host that puts a port in `config` wins outright (the community Advanced Fields
+ *    grid does this in `AdvancedFieldsEditor.tsx`, with the same port the context
+ *    carries, so nothing changes there);
+ *  - otherwise the ambient `GeometryEditorServicePortsProvider` port applies (the parent
+ *    repo's snippet editors mount `DirectSpecFields` with `config={{}}` INSIDE such a
+ *    provider — before this fallback existed those rows silently resolved against
+ *    `unavailable`);
+ *  - `unavailableGeometrySchemaPort` only when neither exists, which is precisely what
+ *    `useGeometrySchemaPort()` returns with no provider above it, so a portless mount is
+ *    byte-identical to before.
+ * This is also a deliberate UPGRADE for Number/Enum rows in portless-config hosts: they
+ * were already on the informed path and therefore already read `unavailable` there, even
+ * before R4.6b-1 moved Text/Boolean/WindowPartList onto it. Text/Boolean/WindowPartList
+ * previously reached the context port via `ProviderFieldLabelWithTooltip`; without this
+ * fallback the R4.6b-1 move would have taken that away from them.
+ *
+ * THREE PREVIOUSLY-DIVERGENT LINES ARE UNIFIED HERE, all verified inert by the rendered-
  * row sweep in `AdvancedFieldsEditor.directRender.test.tsx`:
  *  - `statusPillType` now always goes through the ground-U-aware `getStatusPillType`
  *    branch (Boolean/Enum used `computeFieldPresentationState`'s own result). Identical
@@ -958,15 +985,28 @@ type AdvancedControlPreamble = {
  *    only ever reaches NumberControl, so the extra argument is `undefined` for
  *    Boolean/Enum and the two expressions collapse to the same call.
  *  - `isCustom` now always subtracts `matchesGroundCalc`, for the same reason.
+ *  - `isJsonLike` now always comes from `schemaIsJsonLike(s)`. Number, Boolean and Enum
+ *    each hard-coded `false` into `computeFieldPresentationState` (only Text and
+ *    WindowPartList computed it), which is a claim about the schema, not about the
+ *    control. Inert across both published schemas as swept: exactly one node routes to a
+ *    non-text control AND is json-like — FHS `Zone.additionalProperties.ThermalBridging`,
+ *    `type: ["object","number"]` — and no swept route mounts it. It is reachable in
+ *    principle through `SnippetEditor`/`DirectSpecFields`, and the unified semantics are
+ *    the INTENDED ones: `isJsonLike` is what makes `valuesEquivalent` compare a value to
+ *    its default by `JSON.stringify` rather than `String()`, and what makes
+ *    `isMeaningfulExplicitValue` read an empty `{}`/`[]` as unset. Both questions are
+ *    answered by the schema, not by which control the picker happened to choose.
  * Unifying beats a `groundAware: boolean` flag that only one caller could ever set.
  */
-function advancedControlPreamble(
+function useAdvancedControlPreamble(
   props: Pick<AdvancedControlProps, 'data' | 'path' | 'label' | 'schema' | 'uischema' | 'config'>,
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
 ): AdvancedControlPreamble {
+  const contextSchemaPort = useGeometrySchemaPort();
   const { data, path, label, schema, uischema, config } = props;
   const cfg = rendererConfig(config);
+  const schemaPort = cfg.schemaPort ?? contextSchemaPort;
   const s = schemaWithOverride(uischema, schema);
   const elementType = cfg.elementType;
   const subtype = cfg.subtype;
@@ -976,7 +1016,7 @@ function advancedControlPreamble(
   const groundUComputedWPerM2K = cfg.groundUComputedWPerM2K;
   const isGroundUField = isGroundUValueField(propKey, elementType);
 
-  const fieldPresentation = resolveAdvancedControlFieldPresentation(label, propKey, s, cfg);
+  const fieldPresentation = resolveAdvancedControlFieldPresentation(label, propKey, s, cfg, schemaPort);
   const defaultValue = getAdvancedDefaultValue(
     defaults,
     defaultsLookup,
@@ -1241,7 +1281,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     fieldPresentation,
     indicatorMessages,
     hasEvidence,
-  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
   const midpointPresentation = resolveFieldPresentation({
     mode: cfg.useFHSSchemaForValidation ? 'fhs' : 'core',
     propertyKey: 'mid_height_air_flow_path',
@@ -1710,7 +1750,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     isRuField,
     isGroundUField,
     groundUComputedWPerM2K,
-  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
   const openRuCalculator = cfg.openRuCalculator;
   const openGroundUCalculator = cfg.openGroundUCalculator;
   // One derivation feeding both the input placeholder and the copy button beside it.
@@ -1885,7 +1925,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     isRuField,
     isGroundUField,
     groundUComputedWPerM2K,
-  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
   const openRuCalculator = cfg.openRuCalculator;
   const openGroundUCalculator = cfg.openGroundUCalculator;
   const resyncSuspendedThermalTransmWalls = cfg.resyncSuspendedThermalTransmWalls;
@@ -2126,7 +2166,7 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
     statusPillLabelOverride,
     isCustom,
     showReset,
-  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
 
   return renderAdvancedFieldRow(
     propKey,
@@ -2180,7 +2220,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     statusPillLabelOverride,
     isCustom,
     showReset,
-  } = advancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
   const fromEnum = Array.isArray(s.enum) ? s.enum : null;
   const fromOneOf = schemaAlternatives(s, 'oneOf');
   const fromAnyOf = schemaAlternatives(s, 'anyOf');

@@ -689,11 +689,26 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
  * ~1800 hover interactions, and the affordance's presence is what this invariant is
  * about. (Content was measured out-of-band for R4.6b-1's before/after diff.)
  *
- * WHAT IS SWEPT: the SAME population as the R4.6a sweep above — every element type in
- * `ELEMENT_TYPE_ORDER` × every subtype in `SWEPT_SUBTYPES` × both profiles for the flat
- * walk, and every `SWEPT_SYSTEM_SUBTYPES` entry × both profiles for the System layout
- * walk, with the same `SYSTEM_PLANT_FIXTURES` discriminator stubs — but MOUNTED for
- * real through `AdvancedFieldsEditor` rather than resolved at the schema level.
+ * `no-tip` therefore means one of two things, and the inventory does not distinguish
+ * them: no parameter resolved at all, or one resolved with nothing worth saying. Since
+ * R4.6b-1's fix round, `resolveFieldPresentation` drops a tooltip whose whole payload
+ * would be the `Source:`/`Type:` metadata lines (see `tooltipHasSubstantiveContent`,
+ * `lib/fieldPresentation.ts`), so 21 rows below read `no-tip` where they used to offer a
+ * hover target that said nothing.
+ *
+ * WHAT IS SWEPT: the R4.6a population above MINUS its `System`-as-a-flat-element-type
+ * routes — every element type in `ELEMENT_TYPE_ORDER` EXCEPT `'System'` × every subtype
+ * in `SWEPT_SUBTYPES` × both profiles for the flat walk, and every
+ * `SWEPT_SYSTEM_SUBTYPES` entry × both profiles for the System layout walk, with the same
+ * `SYSTEM_PLANT_FIXTURES` discriminator stubs — but MOUNTED for real through
+ * `AdvancedFieldsEditor` rather than resolved at the schema level. The exclusion is the
+ * 30 routes (2 profiles × 15 subtypes) the R4.6a sweep reaches by treating `System` as an
+ * ordinary flat element type, and it costs this sweep nothing: `AdvancedFieldsEditor`
+ * mounts System through `buildSystemAdvancedUischema`, keyed on a SUBCATEGORY subtype, so
+ * every one of those 30 routes hands the builder a fabric subtype it has no plants for
+ * and renders zero rows. Measured, not assumed — dropping the `continue` moves
+ * `routesSwept` 674 -> 704 and leaves `routesWithRows` and the inventory below untouched.
+ * Every other route is shared with the sweep above.
  *
  * FIXTURE-BOUNDED, exactly as the sweep above is, and for the same reason: the System
  * half only sees the branches `SYSTEM_PLANT_FIXTURES` opens. Read every count below as
@@ -872,7 +887,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'g_value | G-Value | textbox | 0 | 1 | - | tip',
-    'window_part_list | Window Part List | other:DIV | - | - | - | tip',
+    'window_part_list | Window Part List | other:DIV | - | - | - | no-tip',
   ],
   'core/ElectricBattery [every subtype]': [
     'battery_age | Battery Age | textbox | 0 | - | - | tip',
@@ -913,7 +928,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'core/System:HotWaterDemand': [
     'Bath | Bath | textbox | - | - | {} | tip',
-    'Distribution | Distribution | textbox | - | - | {} | tip',
+    'Distribution | Distribution | textbox | - | - | {} | no-tip',
     'Other | Other | textbox | - | - | {} | tip',
     'Shower | Shower | textbox | - | - | {} | tip',
   ],
@@ -924,10 +939,10 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'ach_max_static_calcs | ACH Maximum Static Calcs | textbox | 0 | - | - | tip',
     'ach_min_static_calcs | ACH Minimum Static Calcs | textbox | 0 | - | - | tip',
     'altitude | Altitude | textbox | - | - | - | tip',
-    'Control_VentAdjustMax | Control Ventadjustmax | textbox | - | - | "example" | tip',
-    'Control_VentAdjustMin | Control Ventadjustmin | textbox | - | - | "example" | tip',
-    'Control_WindowAdjust | Control Windowadjust | textbox | - | - | "example" | tip',
-    'cross_vent_possible | Cross Vent Possible | checkbox | - | - | - | tip',
+    'Control_VentAdjustMax | Control Ventadjustmax | textbox | - | - | "example" | no-tip',
+    'Control_VentAdjustMin | Control Ventadjustmin | textbox | - | - | "example" | no-tip',
+    'Control_WindowAdjust | Control Windowadjust | textbox | - | - | "example" | no-tip',
+    'cross_vent_possible | Cross Vent Possible | checkbox | - | - | - | no-tip',
     'env_area | Leaks · Env Area | textbox | 0 | - | - | tip',
     'test_pressure | Leaks · Test Pressure | textbox | 0 | - | - | tip',
     'test_result | Leaks · Test Result | textbox | 0 | - | - | tip',
@@ -1080,7 +1095,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'electricity_part_load | boiler · Electricity Part Load | textbox | 0 | 1 | - | tip',
     'electricity_standby | boiler · Electricity Standby | textbox | 0 | 0.1 | - | tip',
     'EnergySupply | boiler · Energy Supply | textbox | - | - | "example" | tip',
-    'EnergySupply_aux | boiler · Energy Supply Aux | textbox | - | - | "example" | tip',
+    'EnergySupply_aux | boiler · Energy Supply Aux | textbox | - | - | "example" | no-tip',
     'is_heat_network | boiler · Is Heat Network | checkbox | - | - | - | tip',
     'modulation_load | boiler · Modulation Load | textbox | 0.1 | 1 | - | tip',
     'rated_power | boiler · Rated Power | textbox | 0 | - | - | tip',
@@ -1091,7 +1106,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'min_modulation_rate_35 | hp · Min Modulation Rate 35 | textbox | 0 | 1 | - | tip',
     'min_modulation_rate_55 | hp · Min Modulation Rate 55 | textbox | 0 | 1 | - | tip',
     'min_temp_diff_flow_return_for_hp_to_operate | hp · Min Temp Diff Flow Return For Hp To Operate | textbox | 0 | 50 | - | tip',
-    'modulating_control | hp · Modulating Control | checkbox | - | - | - | tip',
+    'modulating_control | hp · Modulating Control | checkbox | - | - | - | no-tip',
     'power_crankcase_heater | hp · Power Crankcase Heater | textbox | 0 | - | - | tip',
     'power_heating_circ_pump | hp · Power Heating Circ Pump | textbox | 0 | 1 | - | tip',
     'power_heating_warm_air_fan | hp · Power Heating Warm Air Fan | textbox | 0 | - | - | tip',
@@ -1103,17 +1118,17 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'source_type | hp · Source Type | select | - | - | - | tip',
     'temp_lower_operating_limit | hp · Temp Lower Operating Limit | textbox | -30 | 0 | - | tip',
     'temp_return_feed_max | hp · Temp Return Feed Max | textbox | 4 | 80 | - | tip',
-    'test_data_EN14825 | hp · Test Data EN 14825 | textbox | - | - | [{"test_letter":null,"capacity":1,"cop":1,"design_flow_temp":1,"temp_outlet":1,"temp_source":-273.15,"temp_test":-273.15,"air_flow_rate":1}] | tip',
-    'time_constant_onoff_operation | hp · Time Constant Onoff Operation | textbox | 0 | - | - | tip',
-    'var_flow_temp_ctrl_during_test | hp · Var Flow Temp Ctrl During Test | checkbox | - | - | - | tip',
+    'test_data_EN14825 | hp · Test Data EN 14825 | textbox | - | - | [{"test_letter":null,"capacity":1,"cop":1,"design_flow_temp":1,"temp_outlet":1,"temp_source":-273.15,"temp_test":-273.15,"air_flow_rate":1}] | no-tip',
+    'time_constant_onoff_operation | hp · Time Constant Onoff Operation | textbox | 0 | - | - | no-tip',
+    'var_flow_temp_ctrl_during_test | hp · Var Flow Temp Ctrl During Test | checkbox | - | - | - | no-tip',
   ],
   'fhs/System:HotWaterDemand': [
-    'Bath | Bath | textbox | - | - | {} | tip',
-    'Other | Other | textbox | - | - | {} | tip',
-    'Shower | Shower | textbox | - | - | {} | tip',
+    'Bath | Bath | textbox | - | - | {} | no-tip',
+    'Other | Other | textbox | - | - | {} | no-tip',
+    'Shower | Shower | textbox | - | - | {} | no-tip',
   ],
   'fhs/System:HotWaterSource': [
-    'ColdWaterSource | Cold Water Source | select | - | - | - | tip',
+    'ColdWaterSource | Cold Water Source | select | - | - | - | no-tip',
     'HeatSourceWet | Heatsourcewet | textbox | - | - | null | tip',
     'rejected_energy_1 | Rejected Energy 1 | textbox | 0 | - | - | tip',
     'rejected_factor_3 | Rejected Factor 3 | textbox | 0 | - | - | tip',
@@ -1127,14 +1142,14 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'altitude | Altitude | textbox | -150 | 7200 | - | tip',
     'env_area | Leaks · Env Area | textbox | 5 | 72000 | - | tip',
     'test_pressure | Leaks · Test Pressure | select | - | - | - | tip',
-    'test_result | Leaks · Test Result | textbox | 0 | - | - | tip',
+    'test_result | Leaks · Test Result | textbox | 0 | - | - | no-tip',
     'ventilation_zone_height | Leaks · Ventilation Zone Height | textbox | 1 | 120 | - | tip',
-    'MechanicalVentilation | Mechanical Ventilation | textbox | - | - | {} | tip',
-    'noise_nuisance | Noise Nuisance | checkbox | - | - | - | tip',
+    'MechanicalVentilation | Mechanical Ventilation | textbox | - | - | {} | no-tip',
+    'noise_nuisance | Noise Nuisance | checkbox | - | - | - | no-tip',
     'shield_class | Shield Class | select | - | - | - | tip',
     'terrain_class | Terrain Class | select | - | - | - | tip',
     'ventilation_zone_base_height | Ventilation Zone Base Height | textbox | -150 | 750 | - | tip',
-    'Vents | Vents | textbox | - | - | {} | tip',
+    'Vents | Vents | textbox | - | - | {} | no-tip',
   ],
   'fhs/System:SpaceCoolSystem': [
     'advanced_start | Advanced Start | textbox | - | - | - | tip',
@@ -1146,10 +1161,10 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'fhs/System:SpaceHeatSystem': [
     'bypass_fraction_recirculated | Bypass Fraction Recirculated | textbox | 0 | 1 | - | tip',
-    'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | tip',
+    'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | no-tip',
     'design_flow_temp | Design Flow Temp | textbox | 20 | 120 | - | tip',
     'temp_diff_emit_dsgn | Temp Diff Emit Dsgn | textbox | 0 | 70 | - | tip',
-    'variable_flow | Variable Flow | checkbox | - | - | - | tip',
+    'variable_flow | Variable Flow | checkbox | - | - | - | no-tip',
   ],
   'fhs/WaterPipework [every subtype]': [
     'internal_diameter_mm | Internal Diameter Mm | textbox | 5 | 50 | - | tip',
