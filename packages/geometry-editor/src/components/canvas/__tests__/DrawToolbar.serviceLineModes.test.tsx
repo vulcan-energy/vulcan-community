@@ -50,6 +50,29 @@ function renderToolbar(
   );
 }
 
+describe('DrawToolbar shape dropdown and internal draw modes', () => {
+  afterEach(cleanup);
+
+  it('shows the placeholder, not an internal token, while an unlisted mode like space-label-polygon is active', () => {
+    // `drawMode` carries modes this toolbar never offers (`space-label-polygon` is
+    // entered from the Space Labeller's "Draw a manual room footprint" with the
+    // toolbar still mounted). StandardDropdown now renders an unmatched value as a
+    // literal "<value> (not in list)" entry, so feeding the raw mode through would
+    // surface the internal token to the user -- the toolbar must map any mode it
+    // does not offer to the placeholder instead.
+    const { container } = renderToolbar('BuildingElementOpaque', true, {
+      drawMode: 'space-label-polygon' as DrawMode,
+    });
+
+    // `className` lands on StandardDropdown's container div; the select is inside it.
+    const select = container.querySelector('.shape-dropdown select') as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    expect(select.value).toBe('');
+    expect(select.selectedOptions[0]).toHaveTextContent('Select shape...');
+    expect(screen.queryByText(/\(not in list\)/)).not.toBeInTheDocument();
+  });
+});
+
 describe('DrawToolbar service-line modes', () => {
   afterEach(cleanup);
 
