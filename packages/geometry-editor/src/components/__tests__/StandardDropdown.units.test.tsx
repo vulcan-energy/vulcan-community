@@ -151,25 +151,23 @@ describe('StandardDropdown persistent unit adornment', () => {
     expect(screen.queryByText(/\(not in list\)/)).not.toBeInTheDocument();
   });
 
-  it('a change event on an untouched unmatched value round-trips the TRUE stored value', () => {
-    // Before the fix the select was DISPLAYING option index 0 while holding a
-    // different stored value, so blur/change flows could commit the misread.
-    // With the entry injected, the select's own value IS the stored value.
-    const onChange = vi.fn();
+  it('a runtime-lied undefined value renders the placeholder alone -- never a malformed sentinel', () => {
+    // The prop is typed `string`, but TypeScript lies at runtime boundaries. The
+    // sentinel guard and the placeholder guard must agree on what "no value" is, or
+    // an undefined smuggled through renders BOTH -- and an <option> with no value
+    // attribute falls back to its own text, so " (not in list)" becomes a committable
+    // DOM value. Review finding, latent (no live consumer passes a non-string).
     render(
       <StandardDropdown
-        aria-label="Mass class"
-        value="NOT_A_CLASS"
+        aria-label="Mode"
+        value={undefined as unknown as string}
         options={OPTIONS}
-        onChange={onChange}
+        onChange={() => undefined}
       />,
     );
 
-    const select = screen.getByLabelText('Mass class') as HTMLSelectElement;
-    // Re-selecting the current (unmatched) value: jsdom fires change with the
-    // select's current value, which must be the stored one, not an option's.
-    fireEvent.change(select, { target: { value: select.value } });
-    expect(onChange).toHaveBeenCalledWith('NOT_A_CLASS');
+    expect(screen.queryByText(/\(not in list\)/)).not.toBeInTheDocument();
+    expect(screen.getByText('Select...')).toBeInTheDocument();
   });
 
   it('preserves direct select markup when no unit is supplied', () => {

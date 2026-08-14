@@ -77,8 +77,15 @@ export const StandardDropdown: React.FC<StandardDropdownProps> = ({
    * disappears on the next render. (Whether an out-of-range value should also raise
    * a visible validation error is the host's job -- EnumControl's `errors` prop --
    * not this component's.)
+   *
+   * `Boolean(value)`, not `value !== ''`: the prop is typed `string`, but TypeScript
+   * lies at runtime boundaries, and an `undefined`/`null` smuggled through would
+   * disagree with the placeholder's own `!value` guard -- rendering BOTH the
+   * placeholder and a malformed sentinel whose DOM value falls back to its text.
+   * Truthiness keeps the two branches exclusive by construction for every runtime
+   * value, string or not.
    */
-  const valueUnmatched = value !== '' && !options.some((option) => option.value === value);
+  const valueUnmatched = Boolean(value) && !options.some((option) => option.value === value);
 
   const renderSelect = (controlDescribedBy: string | undefined) => (
     <select
