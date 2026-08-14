@@ -196,7 +196,9 @@ export function applyCompassOrientationToSlopedPolygonCoords(
 
 /**
  * Rotate a two-point line in plan to a stored outward-facing compass bearing.
- * Endpoint A stays fixed, endpoint B keeps its original plan length and Z.
+ * The segment MIDPOINT stays fixed — the same convention as the sloped-polygon
+ * path, which pivots on the vertex centroid — so both endpoints move and each
+ * keeps its original plan length share and Z.
  */
 export function applyCompassOrientationToLineCoords(
   coords: Array<{ x: number; y: number; z: number }>,
@@ -210,12 +212,12 @@ export function applyCompassOrientationToLineCoords(
   const geometricOutwardBearing = wrapOrientation360(desiredOrientation360 + globalOrientationOffset);
   const wallDirectionDeg = wrapOrientation360(180 - geometricOutwardBearing);
   const radians = wallDirectionDeg * Math.PI / 180;
+  const halfSpanX = (length / 2) * Math.cos(radians);
+  const halfSpanY = (length / 2) * Math.sin(radians);
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
   return [
-    a,
-    {
-      x: a.x + length * Math.cos(radians),
-      y: a.y + length * Math.sin(radians),
-      z: b.z,
-    },
+    { x: midX - halfSpanX, y: midY - halfSpanY, z: a.z },
+    { x: midX + halfSpanX, y: midY + halfSpanY, z: b.z },
   ];
 }

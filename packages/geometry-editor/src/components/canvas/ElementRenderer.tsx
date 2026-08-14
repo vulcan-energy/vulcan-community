@@ -1205,13 +1205,13 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
     directionArrow: DirectionArrow,
   ) => {
     const orientation360 = getArrowRotateStartOrientation(mode);
+    // Geometry-moving drags pivot on the shape's centre: a slope's vertex centroid
+    // and a line's midpoint are the same construction, since polygonPlanCentroid
+    // averages the vertices and a line has two. That is also where
+    // calculateDirectionArrow roots the arrow, so the grip orbits its own base.
     const pivot = mode === 'orientation'
       ? { x: directionArrow.centerX, y: directionArrow.centerY }
-      : mode === 'slope'
-        ? polygonPlanCentroid(coordinates)
-        : coordinates[0]
-          ? { x: coordinates[0].x, y: coordinates[0].y }
-          : null;
+      : polygonPlanCentroid(coordinates);
     const startHandleWorld = { x: directionArrow.arrowX, y: directionArrow.arrowY };
     const startHandleBearing = pivot ? compassBearingFromPoints(pivot, startHandleWorld) : null;
     if (orientation360 === null || !pivot || startHandleBearing === null) {

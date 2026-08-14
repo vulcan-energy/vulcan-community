@@ -252,7 +252,7 @@ describe('applyCompassOrientationToSlopedPolygonCoords', () => {
 });
 
 describe('applyCompassOrientationToLineCoords', () => {
-  it('keeps A fixed, moves B to the stored bearing, and preserves length', () => {
+  it('keeps the midpoint fixed, swings both ends to the stored bearing, and preserves length', () => {
     const coordinates: [{ x: number; y: number; z: number }, { x: number; y: number; z: number }] = [
       { x: 2, y: 3, z: 4 },
       { x: 5, y: 7, z: 9 },
@@ -260,8 +260,13 @@ describe('applyCompassOrientationToLineCoords', () => {
     const rotated = applyCompassOrientationToLineCoords(coordinates, 40, 25);
 
     expect(rotated).not.toBeNull();
-    expect(rotated?.[0]).toBe(coordinates[0]);
+    // Midpoint of (2,3)-(5,7) is (3.5,5): the pivot, so it survives the rotation.
+    expect((rotated![0].x + rotated![1].x) / 2).toBeCloseTo(3.5, 12);
+    expect((rotated![0].y + rotated![1].y) / 2).toBeCloseTo(5, 12);
+    // Both ends actually move — this bearing is not the segment's original one.
+    expect(rotated![0].x).not.toBeCloseTo(2, 6);
     expect(Math.hypot(rotated![1].x - rotated![0].x, rotated![1].y - rotated![0].y)).toBeCloseTo(5, 12);
+    expect(rotated?.[0].z).toBe(4);
     expect(rotated?.[1].z).toBe(9);
     const geometricBearing = orientation360FromSegmentOutwardModelXY(
       rotated![0].x,

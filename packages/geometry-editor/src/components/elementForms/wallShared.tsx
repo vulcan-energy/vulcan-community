@@ -353,7 +353,8 @@ export function useWallSharedFormState(args: {
   );
 
   // Apply edited orientation360: rotate sloped polygons around their plan centroid
-  // (first-edge compass), or 2-point lines around the first endpoint.
+  // (first-edge compass), or 2-point lines around their midpoint. Both pivot on the
+  // shape's centre so the inspector and the canvas rotate arrow agree exactly.
   const applyOrientationToGeometry = (desiredOrientationDeg: number) => {
     if (!selection || selection.type !== 'element') return;
     const el = getElementById(selection.id);
