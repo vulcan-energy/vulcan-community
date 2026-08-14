@@ -6,6 +6,7 @@ import {
   applyMechanicalVentilationCsvPositionColumns,
   canMechanicalVentilationInheritHostPlacement,
 } from './mechanicalVentilationBranches';
+import { segmentTangentAndOpeningOutwardModelXY } from './openingSegmentOutward';
 import { syncWindowSecurityRiskForStorey } from './windowSecurityRisk';
 
 type ElementCoordinate = { x: number; y: number; z: number };
@@ -173,7 +174,7 @@ function isHostedVentPointElement(element: Element | undefined): boolean {
   return !!element && (element.type === 'Vents' || isHostedMechanicalVentilationFan(element));
 }
 
-function isDerivedWindowShadingElement(element: Element | undefined): boolean {
+function isWindowShadingElement(element: Element | undefined): boolean {
   return !!element && element.type === 'WindowShading';
 }
 
@@ -198,12 +199,37 @@ function pointOnSegmentAtT(
 }
 
 function projectionTOnSegment(point: { x: number; y: number }, segment: [ElementCoordinate, ElementCoordinate]): number {
+  const raw = rawProjectionTOnSegment(point, segment);
+  return Math.max(0, Math.min(1, raw));
+}
+
+function rawProjectionTOnSegment(
+  point: { x: number; y: number },
+  segment: [ElementCoordinate, ElementCoordinate],
+): number {
   const [a, b] = segment;
   const vx = b.x - a.x;
   const vy = b.y - a.y;
   const v2 = vx * vx + vy * vy || 1;
-  const raw = ((point.x - a.x) * vx + (point.y - a.y) * vy) / v2;
-  return Math.max(0, Math.min(1, raw));
+  return ((point.x - a.x) * vx + (point.y - a.y) * vy) / v2;
+}
+
+/**
+ * Shading is re-anchored with an UNCLAMPED parameter along its parent, so that a
+ * point sitting beyond either end of the segment round-trips exactly. The cost is
+ * that a near-degenerate previous segment amplifies without bound: a 1e-6 m parent
+ * with shading 0.5 m along it yields t = 5e5, which throws the shading ~10^6 m once
+ * it is rebuilt on a normal-length segment. The clamped helpers (updateLineOpeningChild,
+ * projectPointToSegment) are immune to this, so for shading the guard below is the
+ * only thing holding the line — it therefore needs a real length floor rather than a
+ * float-noise epsilon. Matches the 0.01 m guards used by flipElementOrientation and
+ * restoreWindowShadingPointAcrossHostFlip.
+ */
+const MIN_SHADING_PARENT_SEGMENT_M = 0.01;
+
+function isUsableLineSegment(segment: [ElementCoordinate, ElementCoordinate]): boolean {
+  const [a, b] = segment;
+  return Math.hypot(b.x - a.x, b.y - a.y) > MIN_SHADING_PARENT_SEGMENT_M;
 }
 
 function childCenterAndLength(child: Element): { center: { x: number; y: number }; length: number } | null {
@@ -344,6 +370,55 @@ function updateHostedVentChild(
   return elementPatchChanged(child, nextChild) ? nextChild : null;
 }
 
+function updateHostedWindowShadingChild(
+  child: Element,
+  previousChild: Element,
+  previousParentCoords: [ElementCoordinate, ElementCoordinate],
+  nextParentCoords: [ElementCoordinate, ElementCoordinate],
+): Element | null {
+  const previousPoint = previousChild.coordinates?.[0] as ElementCoordinate | undefined;
+  if (
+    !previousPoint ||
+    !isUsableLineSegment(previousParentCoords) ||
+    !isUsableLineSegment(nextParentCoords)
+  ) {
+    return null;
+  }
+
+  const t = rawProjectionTOnSegment(previousPoint, previousParentCoords);
+  const previousPointOnParent = pointOnSegmentAtT(previousParentCoords, t, previousPoint.z);
+  const [previousA, previousB] = previousParentCoords;
+  const { openingOutward: previousOutward } = segmentTangentAndOpeningOutwardModelXY(
+    previousA.x,
+    previousA.y,
+    previousB.x,
+    previousB.y,
+  );
+  const perpendicularOffset =
+    (previousPoint.x - previousPointOnParent.x) * previousOutward[0] +
+    (previousPoint.y - previousPointOnParent.y) * previousOutward[1];
+
+  const nextPointOnParent = pointOnSegmentAtT(nextParentCoords, t, previousPoint.z);
+  const [nextA, nextB] = nextParentCoords;
+  const { openingOutward: nextOutward } = segmentTangentAndOpeningOutwardModelXY(
+    nextA.x,
+    nextA.y,
+    nextB.x,
+    nextB.y,
+  );
+  const nextChild = {
+    ...child,
+    coordinates: [{
+      x: nextPointOnParent.x + perpendicularOffset * nextOutward[0],
+      y: nextPointOnParent.y + perpendicularOffset * nextOutward[1],
+      z: previousPoint.z,
+    }],
+    _v: (child._v ?? 0) + 1,
+  } as Element;
+
+  return elementPatchChanged(child, nextChild) ? nextChild : null;
+}
+
 export function cascadeHostedDescendantGeometry({
   previousElementsById,
   nextElementsById,
@@ -357,6 +432,7 @@ export function cascadeHostedDescendantGeometry({
 }): HostedDescendantCascadeResult {
   let elementsById = nextElementsById;
   const changedIds = new Set(changedElementIds);
+  let childrenByParentName: Map<string, string[]> | null = null;
   const queue = Array.from(changedIds);
   const processedParents = new Set<string>();
 
@@ -373,21 +449,34 @@ export function cascadeHostedDescendantGeometry({
     const previousParentCoords = getLineHostCoordinates(previousParent) ?? nextParentCoords;
     const parentNames = parentLinkNames(previousParent, nextParent);
     if (parentNames.size === 0) continue;
+    childrenByParentName ??= buildChildrenByParentName(nextElementsById);
 
-    for (const child of Object.values(elementsById)) {
-      if (!child || child.id === parentId) continue;
-      const parentName = typeof child.parent_element === 'string' ? child.parent_element.trim() : '';
-      if (!parentNames.has(parentName)) continue;
+    for (const childId of childIdsForParentNames(childrenByParentName, parentNames)) {
+      if (childId === parentId) continue;
+      const child = elementsById[childId];
+      if (!child) continue;
 
       const previousChild = previousElementsById[child.id] ?? child;
       const nextChild = shouldSnapToLineParent(child)
         ? updateLineOpeningChild(child, previousChild, previousParentCoords, nextParentCoords, floors)
         : isHostedVentPointElement(child)
           ? updateHostedVentChild(child, previousChild, previousParentCoords, nextParent, nextParentCoords)
-          : null;
+          : isWindowShadingElement(child)
+            ? updateHostedWindowShadingChild(child, previousChild, previousParentCoords, nextParentCoords)
+            : null;
       if (!nextChild) {
-        if (isDerivedWindowShadingElement(child)) {
+        if (isWindowShadingElement(child)) {
           changedIds.add(child.id);
+        }
+        // A child whose OWN coordinates already landed correctly can still host
+        // descendants that have not moved yet, so it must still be traversed as a
+        // parent. This is the common case, not the corner one: the store re-anchors
+        // direct line children inline (updateElement / commitVertexPositionUpdates)
+        // with the same math this cascade uses, so a window normally arrives here
+        // already correct and produces no patch — while its hosted shading is still
+        // sitting at the old position. Skipping it here strands every grandchild.
+        if (getLineHostCoordinates(child)) {
+          queue.push(child.id);
         }
         continue;
       }
@@ -397,7 +486,9 @@ export function cascadeHostedDescendantGeometry({
       }
       elementsById[child.id] = nextChild;
       changedIds.add(child.id);
-      queue.push(child.id);
+      if (getLineHostCoordinates(nextChild)) {
+        queue.push(child.id);
+      }
     }
   }
 
