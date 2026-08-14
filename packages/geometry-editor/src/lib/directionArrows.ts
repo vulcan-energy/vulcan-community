@@ -5,6 +5,7 @@ import type { Element } from '../geometry/types';
 import { getElementShape } from './shapeUtils';
 import {
   orientation360FromSegmentOutwardModelXY,
+  polygonPlanCentroid,
   segmentTangentAndOpeningOutwardModelXY,
 } from './openingSegmentOutward';
 import { downslopeUnitModelXY, isOrientationPitchAxis } from './slopePitchAxis';
@@ -49,8 +50,9 @@ export function calculateDirectionArrow(element: Element, globalOrientationOffse
 
   if (isOrientationPitchAxis(element)) {
     if (element.coordinates.length < 3 || !Number.isFinite(globalOrientationOffset)) return null;
-    const centerX = element.coordinates.reduce((sum, point) => sum + point.x, 0) / element.coordinates.length;
-    const centerY = element.coordinates.reduce((sum, point) => sum + point.y, 0) / element.coordinates.length;
+    const centroid = polygonPlanCentroid(element.coordinates);
+    if (!centroid) return null;
+    const { x: centerX, y: centerY } = centroid;
     const downslope = downslopeUnitModelXY(element.orientation360, globalOrientationOffset!);
     // Same fixed-length convention as the bottom-edge and line arrows: the grip is
     // sized in screen space, so the shaft does not have to grow with the footprint.

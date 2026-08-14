@@ -7,8 +7,9 @@ import {
   applyCompassOrientationToSlopedPolygonCoords,
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
+  polygonPlanCentroid,
   polygonEdgePerpendicularBearings,
-  rotatePolygonPlanXYAroundFirstVertex,
+  rotatePolygonPlanXYAroundPoint,
   segmentTangentAndOpeningOutwardModelXY,
 } from '../openingSegmentOutward';
 
@@ -190,32 +191,64 @@ describe('applyCompassOrientationToSlopedPolygonCoords', () => {
     rotated!.forEach((p, i) => expect(p.z).toBe(i));
   });
 
-  it('rotatePolygonPlanXYAroundFirstVertex moves the second vertex CCW as expected', () => {
+  it('rotatePolygonPlanXYAroundPoint rotates around the supplied pivot', () => {
     const tri = [
       { x: 0, y: 0, z: 0 },
       { x: 1, y: 0, z: 0 },
       { x: 1, y: 1, z: 0 },
     ];
-    const r = rotatePolygonPlanXYAroundFirstVertex(tri, 90);
-    expect(r[1].x).toBeCloseTo(0, 5);
-    expect(r[1].y).toBeCloseTo(1, 5);
+    const r = rotatePolygonPlanXYAroundPoint(tri, 90, { x: 0.5, y: 0.5 });
+    expect(r[0].x).toBeCloseTo(1, 5);
+    expect(r[0].y).toBeCloseTo(0, 5);
   });
 
-  it('matches the inspector rotation about vertex 0 for the same target bearing', () => {
+  it('matches the inspector centroid rotation for the same target bearing', () => {
     const snapshot = [
       { x: 3, y: 4, z: 0 },
       { x: 5, y: 4, z: 1 },
       { x: 5, y: 6, z: 2 },
       { x: 3, y: 6, z: 3 },
     ];
-    const expectedInspectorCoordinates = rotatePolygonPlanXYAroundFirstVertex(snapshot, 90);
+    const centroid = polygonPlanCentroid(snapshot);
+    expect(centroid).not.toBeNull();
+    const expectedInspectorCoordinates = rotatePolygonPlanXYAroundPoint(snapshot, 90, centroid!);
 
     expect(applyCompassOrientationToSlopedPolygonCoords(snapshot, 75, 15)).toEqual(
       expectedInspectorCoordinates,
     );
-    expect(expectedInspectorCoordinates[0]).toEqual(snapshot[0]);
+    expect(polygonPlanCentroid(expectedInspectorCoordinates)?.x).toBeCloseTo(centroid!.x, 12);
+    expect(polygonPlanCentroid(expectedInspectorCoordinates)?.y).toBeCloseTo(centroid!.y, 12);
   });
 
+  it('keeps the centroid fixed and preserves every edge length', () => {
+    const snapshot = [
+      { x: 1, y: 2, z: 0 },
+      { x: 5, y: 1, z: 1 },
+      { x: 7, y: 4, z: 2 },
+      { x: 4, y: 7, z: 3 },
+      { x: 0, y: 5, z: 4 },
+    ];
+    const beforeCentroid = polygonPlanCentroid(snapshot);
+    const rotated = applyCompassOrientationToSlopedPolygonCoords(snapshot, 37.25, 12);
+    expect(beforeCentroid).not.toBeNull();
+    expect(rotated).not.toBeNull();
+    const afterCentroid = polygonPlanCentroid(rotated!);
+    expect(afterCentroid?.x).toBeCloseTo(beforeCentroid!.x, 12);
+    expect(afterCentroid?.y).toBeCloseTo(beforeCentroid!.y, 12);
+
+    for (let index = 0; index < snapshot.length; index += 1) {
+      const nextIndex = (index + 1) % snapshot.length;
+      const beforeLength = Math.hypot(
+        snapshot[nextIndex].x - snapshot[index].x,
+        snapshot[nextIndex].y - snapshot[index].y,
+      );
+      const afterLength = Math.hypot(
+        rotated![nextIndex].x - rotated![index].x,
+        rotated![nextIndex].y - rotated![index].y,
+      );
+      expect(afterLength).toBeCloseTo(beforeLength, 12);
+    }
+  });
 });
 
 describe('applyCompassOrientationToLineCoords', () => {

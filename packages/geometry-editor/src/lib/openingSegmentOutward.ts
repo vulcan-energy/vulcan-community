@@ -137,26 +137,36 @@ export function shortestSignedCompassDeltaDeg(fromDeg: number, toDeg: number): n
   return d;
 }
 
+/** Unweighted mean of the polygon vertices in the XY plane. */
+export function polygonPlanCentroid(
+  coords: ReadonlyArray<{ x: number; y: number }>,
+): { x: number; y: number } | null {
+  if (coords.length === 0) return null;
+  return {
+    x: coords.reduce((sum, point) => sum + point.x, 0) / coords.length,
+    y: coords.reduce((sum, point) => sum + point.y, 0) / coords.length,
+  };
+}
+
 /**
- * Rotate every vertex in the XY plane around coords[0] by `deltaDegCCW` (counter‑clockwise
+ * Rotate every vertex in the XY plane around `pivot` by `deltaDegCCW` (counter-clockwise
  * in model space: +X east, +Y north). Z is preserved.
  */
-export function rotatePolygonPlanXYAroundFirstVertex(
+export function rotatePolygonPlanXYAroundPoint(
   coords: Array<{ x: number; y: number; z: number }>,
   deltaDegCCW: number,
+  pivot: { x: number; y: number },
 ): Array<{ x: number; y: number; z: number }> {
   if (coords.length === 0) return coords;
-  const ax = coords[0].x;
-  const ay = coords[0].y;
   const rad = (deltaDegCCW * Math.PI) / 180;
   const c = Math.cos(rad);
   const s = Math.sin(rad);
   return coords.map((p) => {
-    const x = p.x - ax;
-    const y = p.y - ay;
+    const x = p.x - pivot.x;
+    const y = p.y - pivot.y;
     return {
-      x: ax + x * c - y * s,
-      y: ay + x * s + y * c,
+      x: pivot.x + x * c - y * s,
+      y: pivot.y + x * s + y * c,
       z: p.z,
     };
   });
@@ -180,7 +190,8 @@ export function applyCompassOrientationToSlopedPolygonCoords(
   // compass bearing by the same amount. Convert desired compass change to the
   // equivalent model-space rotation by reversing the signed delta.
   const delta = shortestSignedCompassDeltaDeg(desiredOrientation360, current);
-  return rotatePolygonPlanXYAroundFirstVertex(coords, delta);
+  const pivot = polygonPlanCentroid(coords);
+  return pivot ? rotatePolygonPlanXYAroundPoint(coords, delta, pivot) : null;
 }
 
 /**

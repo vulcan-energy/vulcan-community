@@ -352,7 +352,8 @@ export function useWallSharedFormState(args: {
     selectedDraftElement ? Math.round(getCurrentOrientation(selectedDraftElement)) : 0,
   );
 
-  // Apply edited orientation360: rotate sloped polygons in plan (first-edge compass), or 2-point lines around the first endpoint
+  // Apply edited orientation360: rotate sloped polygons around their plan centroid
+  // (first-edge compass), or 2-point lines around the first endpoint.
   const applyOrientationToGeometry = (desiredOrientationDeg: number) => {
     if (!selection || selection.type !== 'element') return;
     const el = getElementById(selection.id);

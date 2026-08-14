@@ -25,6 +25,7 @@ import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
   polygonEdgePerpendicularBearings,
+  polygonPlanCentroid,
   segmentTangentAndOpeningOutwardModelXY,
   shortestSignedCompassDeltaDeg,
 } from '../../lib/openingSegmentOutward';
@@ -1206,9 +1207,11 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
     const orientation360 = getArrowRotateStartOrientation(mode);
     const pivot = mode === 'orientation'
       ? { x: directionArrow.centerX, y: directionArrow.centerY }
-      : coordinates[0]
-        ? { x: coordinates[0].x, y: coordinates[0].y }
-        : null;
+      : mode === 'slope'
+        ? polygonPlanCentroid(coordinates)
+        : coordinates[0]
+          ? { x: coordinates[0].x, y: coordinates[0].y }
+          : null;
     const startHandleWorld = { x: directionArrow.arrowX, y: directionArrow.arrowY };
     const startHandleBearing = pivot ? compassBearingFromPoints(pivot, startHandleWorld) : null;
     if (orientation360 === null || !pivot || startHandleBearing === null) {
