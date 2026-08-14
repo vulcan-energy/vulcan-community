@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  applyCompassOrientationToLineCoords,
   applyCompassOrientationToSlopedPolygonCoords,
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -198,5 +199,45 @@ describe('applyCompassOrientationToSlopedPolygonCoords', () => {
     const r = rotatePolygonPlanXYAroundFirstVertex(tri, 90);
     expect(r[1].x).toBeCloseTo(0, 5);
     expect(r[1].y).toBeCloseTo(1, 5);
+  });
+
+  it('matches the inspector rotation about vertex 0 for the same target bearing', () => {
+    const snapshot = [
+      { x: 3, y: 4, z: 0 },
+      { x: 5, y: 4, z: 1 },
+      { x: 5, y: 6, z: 2 },
+      { x: 3, y: 6, z: 3 },
+    ];
+    const expectedInspectorCoordinates = rotatePolygonPlanXYAroundFirstVertex(snapshot, 90);
+
+    expect(applyCompassOrientationToSlopedPolygonCoords(snapshot, 75, 15)).toEqual(
+      expectedInspectorCoordinates,
+    );
+    expect(expectedInspectorCoordinates[0]).toEqual(snapshot[0]);
+  });
+
+});
+
+describe('applyCompassOrientationToLineCoords', () => {
+  it('keeps A fixed, moves B to the stored bearing, and preserves length', () => {
+    const coordinates: [{ x: number; y: number; z: number }, { x: number; y: number; z: number }] = [
+      { x: 2, y: 3, z: 4 },
+      { x: 5, y: 7, z: 9 },
+    ];
+    const rotated = applyCompassOrientationToLineCoords(coordinates, 40, 25);
+
+    expect(rotated).not.toBeNull();
+    expect(rotated?.[0]).toBe(coordinates[0]);
+    expect(Math.hypot(rotated![1].x - rotated![0].x, rotated![1].y - rotated![0].y)).toBeCloseTo(5, 12);
+    expect(rotated?.[1].z).toBe(9);
+    const geometricBearing = orientation360FromSegmentOutwardModelXY(
+      rotated![0].x,
+      rotated![0].y,
+      rotated![1].x,
+      rotated![1].y,
+      0,
+    );
+    expect(geometricBearing).not.toBeNull();
+    expect(((geometricBearing! - 25) + 360) % 360).toBeCloseTo(40, 12);
   });
 });

@@ -182,3 +182,29 @@ export function applyCompassOrientationToSlopedPolygonCoords(
   const delta = shortestSignedCompassDeltaDeg(desiredOrientation360, current);
   return rotatePolygonPlanXYAroundFirstVertex(coords, delta);
 }
+
+/**
+ * Rotate a two-point line in plan to a stored outward-facing compass bearing.
+ * Endpoint A stays fixed, endpoint B keeps its original plan length and Z.
+ */
+export function applyCompassOrientationToLineCoords(
+  coords: Array<{ x: number; y: number; z: number }>,
+  desiredOrientation360: number,
+  globalOrientationOffset = 0,
+): [{ x: number; y: number; z: number }, { x: number; y: number; z: number }] | null {
+  if (coords.length !== 2) return null;
+  const [a, b] = coords;
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!(length > 0)) return null;
+  const geometricOutwardBearing = wrapOrientation360(desiredOrientation360 + globalOrientationOffset);
+  const wallDirectionDeg = wrapOrientation360(180 - geometricOutwardBearing);
+  const radians = wallDirectionDeg * Math.PI / 180;
+  return [
+    a,
+    {
+      x: a.x + length * Math.cos(radians),
+      y: a.y + length * Math.sin(radians),
+      z: b.z,
+    },
+  ];
+}
