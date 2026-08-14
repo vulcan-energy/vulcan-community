@@ -202,6 +202,7 @@ import {
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
+  segmentTangentAndOpeningOutwardModelXY,
 } from '../lib/openingSegmentOutward';
 import {
   isOrientationPitchAxis,
@@ -1875,6 +1876,77 @@ const projectPointToSegment = (
     x: a.x + t * vx,
     y: a.y + t * vy,
     z: point.z ?? a.z,
+  };
+};
+
+/**
+ * Re-anchor a hosted WindowShading point when its host is flipped.
+ *
+ * Note this deliberately uses a DIFFERENT convention from the cascade's
+ * `updateHostedWindowShadingChild`, which transfers the parametric position `t`.
+ * Transferring `t` is exactly what must NOT happen here: a flip reverses the
+ * segment's endpoints while leaving the line itself in place, so the same `t`
+ * names the mirrored point and the shading visibly walks along its own window.
+ * Re-projecting the original point onto the new segment instead keeps the foot of
+ * the perpendicular where it was, and only the signed standoff is carried over —
+ * which flips sign with the host's outward normal, so shading follows the facade
+ * to whichever side is now the exterior.
+ *
+ * The two conventions agree only because a flip leaves the parent line unchanged.
+ * They diverge if the flip also moves the line (the direct line-child restore uses
+ * the CLAMPED projectPointToSegment, so a window whose centre sits past the wall
+ * end is pulled back), in which case the shading lands where the original point
+ * projects rather than at the same relative position.
+ */
+const restoreWindowShadingPointAcrossHostFlip = (
+  point: ElementCoordinate,
+  previousSegment: [ElementCoordinate, ElementCoordinate],
+  nextSegment: [ElementCoordinate, ElementCoordinate],
+): ElementCoordinate => {
+  const [previousA, previousB] = previousSegment;
+  const previousVx = previousB.x - previousA.x;
+  const previousVy = previousB.y - previousA.y;
+  const previousLengthSquared = previousVx * previousVx + previousVy * previousVy;
+  const [nextA, nextB] = nextSegment;
+  const nextVx = nextB.x - nextA.x;
+  const nextVy = nextB.y - nextA.y;
+  const nextLengthSquared = nextVx * nextVx + nextVy * nextVy;
+  if (previousLengthSquared <= 0.0001 || nextLengthSquared <= 0.0001) return point;
+
+  const previousT =
+    ((point.x - previousA.x) * previousVx + (point.y - previousA.y) * previousVy) /
+    previousLengthSquared;
+  const previousProjection = {
+    x: previousA.x + previousT * previousVx,
+    y: previousA.y + previousT * previousVy,
+  };
+  const { openingOutward: previousOutward } = segmentTangentAndOpeningOutwardModelXY(
+    previousA.x,
+    previousA.y,
+    previousB.x,
+    previousB.y,
+  );
+  const perpendicularOffset =
+    (point.x - previousProjection.x) * previousOutward[0] +
+    (point.y - previousProjection.y) * previousOutward[1];
+
+  const nextT =
+    ((point.x - nextA.x) * nextVx + (point.y - nextA.y) * nextVy) /
+    nextLengthSquared;
+  const nextProjection = {
+    x: nextA.x + nextT * nextVx,
+    y: nextA.y + nextT * nextVy,
+  };
+  const { openingOutward: nextOutward } = segmentTangentAndOpeningOutwardModelXY(
+    nextA.x,
+    nextA.y,
+    nextB.x,
+    nextB.y,
+  );
+  return {
+    x: nextProjection.x + perpendicularOffset * nextOutward[0],
+    y: nextProjection.y + perpendicularOffset * nextOutward[1],
+    z: point.z,
   };
 };
 
@@ -6316,40 +6388,54 @@ const createGeometryState = (
     }
 
     type HostedChildSnapshot =
-      | { id: string; kind: 'line'; center: ElementCoordinate; length: number }
-      | { id: string; kind: 'point'; center: ElementCoordinate };
+      | { id: string; kind: 'line'; parentId: string; center: ElementCoordinate; length: number }
+      | { id: string; kind: 'point'; parentId: string; center: ElementCoordinate; windowShading: boolean }
+      | { id: string; kind: 'terminal'; parentId: string; center: ElementCoordinate };
 
     const hostedChildSnapshots: HostedChildSnapshot[] = [];
     const parentName = element.name;
+    const elementIdByName = new Map(
+      Object.values(stateBefore.elementsById).map((candidate) => [candidate.name, candidate.id]),
+    );
+    for (const childId of collectHostedDescendantElementIds(stateBefore.elementsById, id)) {
+      const child = stateBefore.elementsById[childId];
+      if (!child) continue;
+      const coordinates = child.coordinates ?? [];
+      const linkedParentId = child.parent_element
+        ? elementIdByName.get(child.parent_element)
+        : undefined;
+      if (!linkedParentId) continue;
+      if (shouldSnapToParent(child) && coordinates.length >= 2) {
+        hostedChildSnapshots.push({
+          id: child.id,
+          kind: 'line',
+          parentId: linkedParentId,
+          center: {
+            x: (coordinates[0].x + coordinates[1].x) / 2,
+            y: (coordinates[0].y + coordinates[1].y) / 2,
+            z: (coordinates[0].z + coordinates[1].z) / 2,
+          },
+          length: Math.max(
+            0.01,
+            Math.hypot(
+              coordinates[1].x - coordinates[0].x,
+              coordinates[1].y - coordinates[0].y,
+            ),
+          ),
+        });
+      } else if ((isHostedVentPointElement(child) || isWindowShading(child)) && coordinates.length >= 1) {
+        hostedChildSnapshots.push({
+          id: child.id,
+          kind: 'point',
+          parentId: linkedParentId,
+          center: coordinates[0] as ElementCoordinate,
+          windowShading: isWindowShading(child),
+        });
+      }
+    }
+
     for (const child of Object.values(stateBefore.elementsById)) {
       const coordinates = child.coordinates ?? [];
-      if (child.parent_element === parentName) {
-        if (shouldSnapToParent(child) && coordinates.length >= 2) {
-          hostedChildSnapshots.push({
-            id: child.id,
-            kind: 'line',
-            center: {
-              x: (coordinates[0].x + coordinates[1].x) / 2,
-              y: (coordinates[0].y + coordinates[1].y) / 2,
-              z: (coordinates[0].z + coordinates[1].z) / 2,
-            },
-            length: Math.max(
-              0.01,
-              Math.hypot(
-                coordinates[1].x - coordinates[0].x,
-                coordinates[1].y - coordinates[0].y,
-              ),
-            ),
-          });
-        } else if (isHostedVentPointElement(child) && coordinates.length >= 1) {
-          hostedChildSnapshots.push({
-            id: child.id,
-            kind: 'point',
-            center: coordinates[0] as ElementCoordinate,
-          });
-        }
-      }
-
       if (
         isHostedMvhrTerminalPointElement(child) &&
         child.host_element === parentName &&
@@ -6357,7 +6443,8 @@ const createGeometryState = (
       ) {
         hostedChildSnapshots.push({
           id: child.id,
-          kind: 'point',
+          kind: 'terminal',
+          parentId: id,
           center: coordinates[0] as ElementCoordinate,
         });
       }
@@ -6367,46 +6454,53 @@ const createGeometryState = (
       coordinates: [{ ...end }, { ...start }],
     } as Partial<Element>, true);
 
-    const flippedElement = get().elementsById[id];
-    const flippedCoords = getVentParentLineCoordinates(flippedElement);
-    if (flippedCoords) {
-      const [flippedStart, flippedEnd] = flippedCoords;
-      const vx = flippedEnd.x - flippedStart.x;
-      const vy = flippedEnd.y - flippedStart.y;
+    for (const snapshot of hostedChildSnapshots) {
+      if (!get().elementsById[snapshot.id]) continue;
+      const currentParent = get().elementsById[snapshot.parentId];
+      const currentParentCoords = snapshot.kind === 'terminal'
+        ? getTerminalHostLineCoordinates(currentParent)
+        : getVentParentLineCoordinates(currentParent);
+      if (!currentParentCoords) continue;
+
+      const [currentParentStart, currentParentEnd] = currentParentCoords;
+      const vx = currentParentEnd.x - currentParentStart.x;
+      const vy = currentParentEnd.y - currentParentStart.y;
       const length = Math.hypot(vx, vy) || 1;
       const ux = vx / length;
       const uy = vy / length;
-
-      for (const snapshot of hostedChildSnapshots) {
-        if (!get().elementsById[snapshot.id]) {
-          continue;
-        }
-        const projectedCenter = projectPointToSegment(snapshot.center, flippedCoords);
-        if (snapshot.kind === 'line') {
-          const half = snapshot.length / 2;
-          get().updateElement(snapshot.id, {
-            coordinates: [
-              {
-                x: projectedCenter.x - half * ux,
-                y: projectedCenter.y - half * uy,
-                z: flippedStart.z,
-              },
-              {
-                x: projectedCenter.x + half * ux,
-                y: projectedCenter.y + half * uy,
-                z: flippedEnd.z,
-              },
-            ],
-          } as Partial<Element>, true);
-        } else {
-          get().updateElement(snapshot.id, {
-            coordinates: [{
-              ...projectedCenter,
-              z: snapshot.center.z,
-            }],
-          } as Partial<Element>, true);
-        }
+      const projectedCenter = projectPointToSegment(snapshot.center, currentParentCoords);
+      if (snapshot.kind === 'line') {
+        const half = snapshot.length / 2;
+        get().updateElement(snapshot.id, {
+          coordinates: [
+            {
+              x: projectedCenter.x - half * ux,
+              y: projectedCenter.y - half * uy,
+              z: currentParentStart.z,
+            },
+            {
+              x: projectedCenter.x + half * ux,
+              y: projectedCenter.y + half * uy,
+              z: currentParentEnd.z,
+            },
+          ],
+        } as Partial<Element>, true);
+        continue;
       }
+
+      const previousParentCoords = snapshot.kind === 'point' && snapshot.windowShading
+        ? getVentParentLineCoordinates(stateBefore.elementsById[snapshot.parentId])
+        : null;
+      const restoredCenter = previousParentCoords
+        ? restoreWindowShadingPointAcrossHostFlip(
+            snapshot.center,
+            previousParentCoords,
+            currentParentCoords,
+          )
+        : { ...projectedCenter, z: snapshot.center.z };
+      get().updateElement(snapshot.id, {
+        coordinates: [restoredCenter],
+      } as Partial<Element>, true);
     }
 
     if (!skipAutoSave) {
