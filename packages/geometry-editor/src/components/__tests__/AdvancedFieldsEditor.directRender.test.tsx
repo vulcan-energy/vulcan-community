@@ -59,7 +59,8 @@ import {
   buildSystemAdvancedUischema,
   type AdvancedFieldsLayoutNode,
 } from '../../lib/systemAdvancedUischema';
-import { GroupAccordion, WindowPartListControl } from '../jsonformsRenderers';
+import { GroupAccordion, validateAdvancedFieldPrimitive, WindowPartListControl } from '../jsonformsRenderers';
+import { getElementSubschemaForMode, validatePropertyValueForMode } from '../../lib/schemaCache';
 
 beforeAll(async () => {
   configureGeometrySchemaAssetSource({
@@ -2924,3 +2925,162 @@ describe('WindowPartListControl interactions (ported from the deleted web regist
   });
 });
 
+/**
+ * Per-property validation on a **System** Advanced Field was a NO-OP on every row, on both
+ * profiles. `resolveFhsElementSubschemaFromRoot` / `resolveCoreElementSubschemaFromRoot`
+ * deliberately return System rows as a wrapper — `{ properties: { [subtype]: inner } }`, because
+ * `extra_json` is shaped `{ HeatSourceWet: { … } }` — so `subschema.properties[key]` never found a
+ * leaf, and both arms' "key not found" branch answered `{ valid: true }`. Any shape at all
+ * committed silently, which is how a `'[]'` placeholder reached a user's saved model.
+ *
+ * Read against the REAL published schemas (`data/schemas/*`), like the rest of this file, so a
+ * schema change that moves these leaves shows up here instead of being re-mocked.
+ */
+describe('System Advanced Fields: per-property validation descends the subtype wrapper', () => {
+  /** The shapes probed on the no-op: all four were accepted on both profiles before the fix. */
+  const NON_NUMERIC_SHAPES: ReadonlyArray<readonly [string, unknown]> = [
+    ['an array', []],
+    ['an object', {}],
+    ['a string', 'not an object'],
+    ['a boolean', true],
+  ];
+
+  const check = (mode: 'core' | 'fhs', subtype: string, key: string, value: unknown) =>
+    validatePropertyValueForMode(mode === 'fhs', 'System', subtype, key, value);
+
+  it.each(['core', 'fhs'] as const)(
+    '%s: the resolver still hands back the subtype WRAPPER (the Advanced Fields walk depends on it)',
+    (mode) => {
+      const subschema = getElementSubschemaForMode(mode === 'fhs', 'System', 'InfiltrationVentilation');
+      expect(Object.keys(subschema?.properties ?? {})).toEqual(['InfiltrationVentilation']);
+      // The leaf is one level down -- which is exactly why the direct lookup missed it.
+      expect(subschema?.properties?.ach_max_static_calcs).toBeUndefined();
+    },
+  );
+
+  describe('numeric leaf: InfiltrationVentilation.ach_max_static_calcs', () => {
+    it.each(['core', 'fhs'] as const)('%s: rejects every non-numeric shape', (mode) => {
+      for (const [label, value] of NON_NUMERIC_SHAPES) {
+        const result = check(mode, 'InfiltrationVentilation', 'ach_max_static_calcs', value);
+        expect(result.valid, `${mode}: ${label} must be rejected`).toBe(false);
+        expect(result.errors?.join(' ')).toContain('must be number');
+      }
+    });
+
+    it.each(['core', 'fhs'] as const)('%s: accepts a plausible number, and the coerced string form', (mode) => {
+      expect(check(mode, 'InfiltrationVentilation', 'ach_max_static_calcs', 2)).toEqual({ valid: true });
+      // Pre-existing coercion path (`coerceValueToSchemaType`): a numeric string is coerced, not
+      // rejected. Asserted as measured -- the descent reuses that path rather than replacing it.
+      expect(check(mode, 'InfiltrationVentilation', 'ach_max_static_calcs', '2')).toEqual({ valid: true });
+    });
+
+    it.each(['core', 'fhs'] as const)('%s: still treats unset values as valid', (mode) => {
+      for (const unset of [undefined, null, '']) {
+        expect(check(mode, 'InfiltrationVentilation', 'ach_max_static_calcs', unset)).toEqual({ valid: true });
+      }
+    });
+  });
+
+  describe("the '[]'-commit incident class: object-typed leaves", () => {
+    it.each(['core', 'fhs'] as const)(
+      '%s: InfiltrationVentilation.MechanicalVentilation rejects [] and accepts an object',
+      (mode) => {
+        // Core publishes this leaf nullable-wrapped (`anyOf: [ object-map, null ]`), FHS bare;
+        // the descent sees through the wrapper, so both reject the array.
+        const rejected = check(mode, 'InfiltrationVentilation', 'MechanicalVentilation', []);
+        expect(rejected.valid).toBe(false);
+        expect(rejected.errors?.join(' ')).toContain('must be object');
+        // THIS map's entries are `additionalProperties` with no `minProperties`, so an empty map
+        // is a legitimate value here. Not a general rule about maps -- see the `Other` case below.
+        expect(check(mode, 'InfiltrationVentilation', 'MechanicalVentilation', {})).toEqual({ valid: true });
+      },
+    );
+
+    it.each(['core', 'fhs'] as const)('%s: HotWaterDemand.Bath rejects [] and accepts an object', (mode) => {
+      const rejected = check(mode, 'HotWaterDemand', 'Bath', []);
+      expect(rejected.valid).toBe(false);
+      expect(rejected.errors?.join(' ')).toContain('must be object');
+      // `Bath` carries no `minProperties` on either profile.
+      expect(check(mode, 'HotWaterDemand', 'Bath', {})).toEqual({ valid: true });
+    });
+
+    it('HotWaterDemand.Other: {} is valid on core but NOT on FHS, which sets minProperties: 1', () => {
+      // Enforced rather than described: "the entries are `additionalProperties`, so `{}` is fine"
+      // is false one property away, and the verdict has to come from the leaf's own node.
+      expect(check('core', 'HotWaterDemand', 'Other', {})).toEqual({ valid: true });
+      const rejected = check('fhs', 'HotWaterDemand', 'Other', {});
+      expect(rejected.valid).toBe(false);
+      expect(rejected.errors?.join(' ')).toContain('must NOT have fewer than 1 properties');
+      // `[]` is still rejected on both, for the ordinary reason.
+      expect(check('core', 'HotWaterDemand', 'Other', []).valid).toBe(false);
+      expect(check('fhs', 'HotWaterDemand', 'Other', []).valid).toBe(false);
+    });
+
+    it('core: HotWaterDemand.Distribution accepts [] because the schema declares an array there', () => {
+      // Not a blanket "arrays are wrong" rule -- the verdict comes from the leaf's own node.
+      expect(check('core', 'HotWaterDemand', 'Distribution', [])).toEqual({ valid: true });
+      expect(check('core', 'HotWaterDemand', 'Distribution', 'not an object').valid).toBe(false);
+      // FHS has no `Distribution` under HotWaterDemand, so there is nothing to validate against
+      // and the row keeps its "no verdict" pass.
+      expect(check('fhs', 'HotWaterDemand', 'Distribution', [])).toEqual({ valid: true });
+    });
+  });
+
+  /**
+   * Pins the DOCUMENTED non-goal in `validateSystemSubtypePropertyValue`, so a future change to it
+   * is deliberate. The gap is DEPTH, not dictionaries: a verdict is reached only one segment below
+   * the subtype. With only `(subtype, key)` we cannot tell a user plant NAME from a leaf inside
+   * some plant, and validating a leaf against the plant-object schema would false-error live FHS
+   * `HeatSourceWet` rows.
+   */
+  describe('depth >= 2 stays unvalidated (documented gap)', () => {
+    it.each(['core', 'fhs'] as const)('%s: every row under a dictionary subtype', (mode) => {
+      // `HeatSourceWet` (also `SpaceCoolSystem`, `SpaceHeatSystem`, `WWHRS`, Core `HotWaterSource`)
+      // is a plant map, so BOTH readings of the key are depth >= 2.
+      expect(check(mode, 'HeatSourceWet', 'my hp', [])).toEqual({ valid: true });
+      expect(check(mode, 'HeatSourceWet', 'rated_power', 'not a number')).toEqual({ valid: true });
+    });
+
+    it('fhs: and rows under a PROPERTIES-carrying subtype, one level down', () => {
+      // The gap is not confined to the plant maps. `Leaks` is a direct leaf of
+      // `InfiltrationVentilation` and does get a verdict...
+      expect(check('fhs', 'InfiltrationVentilation', 'Leaks', []).valid).toBe(false);
+      // ...but its own children do not: FHS declares `test_pressure` as
+      // `enum: ["Standard","Pulse test only"]`, and the Core-shaped value 50 still commits.
+      expect(check('fhs', 'InfiltrationVentilation', 'test_pressure', 50)).toEqual({ valid: true });
+      // Same one level down from FHS `HotWaterSource`, whose single property is a blob...
+      expect(check('fhs', 'HotWaterSource', 'hw cylinder', []).valid).toBe(false);
+      // ...whose children are again out of reach.
+      expect(check('fhs', 'HotWaterSource', 'type', 'not-a-declared-enum-member')).toEqual({ valid: true });
+    });
+  });
+
+  it('reaches the same verdict through the control-facing port path (validateAdvancedFieldPrimitive)', () => {
+    const config = {
+      schemaPort: canonicalGeometrySchemaPort,
+      subtype: 'InfiltrationVentilation',
+      useFHSSchemaForValidation: true,
+    } as Parameters<typeof validateAdvancedFieldPrimitive>[0];
+
+    expect(
+      validateAdvancedFieldPrimitive(config, 'System', 'ach_max_static_calcs', []).valid,
+    ).toBe(false);
+    expect(
+      validateAdvancedFieldPrimitive(config, 'System', 'ach_max_static_calcs', 2),
+    ).toEqual({ valid: true });
+  });
+
+  it('leaves the non-System direct lookup exactly as it was', () => {
+    for (const [, value] of NON_NUMERIC_SHAPES) {
+      expect(
+        validatePropertyValueForMode(false, 'BuildingElementOpaque', undefined, 'u_value', value).valid,
+      ).toBe(false);
+    }
+    expect(
+      validatePropertyValueForMode(false, 'BuildingElementOpaque', undefined, 'u_value', 0.3),
+    ).toEqual({ valid: true });
+    expect(
+      validatePropertyValueForMode(false, 'BuildingElementOpaque', undefined, 'u_value', '0.3'),
+    ).toEqual({ valid: true });
+  });
+});
