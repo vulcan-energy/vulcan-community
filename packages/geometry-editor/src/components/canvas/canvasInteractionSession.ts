@@ -17,6 +17,8 @@ export type CanvasInteractionKind =
   | 'drawing-preview'
   | 'guide-overlay-drag'
   | 'orientation-arrow-drag'
+  | 'slope-rotate-drag'
+  | 'line-rotate-drag'
   | 'stage-pan'
   | 'marquee';
 

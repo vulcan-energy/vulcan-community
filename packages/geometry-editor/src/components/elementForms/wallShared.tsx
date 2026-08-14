@@ -75,7 +75,10 @@
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { useKeyedState } from '../../hooks/useKeyedState';
 import { roundToTwoDecimals } from '../../geometry/constants';
-import { applyCompassOrientationToSlopedPolygonCoords } from '../../lib/openingSegmentOutward';
+import {
+  applyCompassOrientationToLineCoords,
+  applyCompassOrientationToSlopedPolygonCoords,
+} from '../../lib/openingSegmentOutward';
 import { convertShapeCoordinates, getElementShape } from '../../lib/shapeUtils';
 import { VULCAN_UI_PARTY_ELEMENT_KEY } from '../../lib/assemblyMaterialFabric';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
@@ -349,7 +352,9 @@ export function useWallSharedFormState(args: {
     selectedDraftElement ? Math.round(getCurrentOrientation(selectedDraftElement)) : 0,
   );
 
-  // Apply edited orientation360: rotate sloped polygons in plan (first-edge compass), or 2-point lines around the first endpoint
+  // Apply edited orientation360: rotate sloped polygons around their plan centroid
+  // (first-edge compass), or 2-point lines around their midpoint. Both pivot on the
+  // shape's centre so the inspector and the canvas rotate arrow agree exactly.
   const applyOrientationToGeometry = (desiredOrientationDeg: number) => {
     if (!selection || selection.type !== 'element') return;
     const el = getElementById(selection.id);
@@ -376,16 +381,13 @@ export function useWallSharedFormState(args: {
     }
 
     if (el.coordinates.length !== 2) return;
-    const [A, B] = el.coordinates as Array<{ x: number; y: number; z: number }>;
-    const len = Math.hypot(B.x - A.x, B.y - A.y);
-    if (len <= 0) return;
-    // `orientation360` for 2-point lines is the outward-facing compass bearing.
     const offset = getGlobalOrientationOffset();
-    const desiredOutwardDeg = (desiredOrientationDeg + offset + 360) % 360;
-    const desiredWallDirectionDeg = (180 - desiredOutwardDeg + 360) % 360; // mathematical tangent angle, 0=East
-    const rad = desiredWallDirectionDeg * Math.PI / 180;
-    const newB = { x: A.x + len * Math.cos(rad), y: A.y + len * Math.sin(rad), z: B.z };
-    updateElement(selection.id, { coordinates: [A, newB] });
+    const next = applyCompassOrientationToLineCoords(
+      el.coordinates as Array<{ x: number; y: number; z: number }>,
+      desiredOrientationDeg,
+      offset,
+    );
+    if (next) updateElement(selection.id, { coordinates: next });
   };
 
   // Vents' optimistic DISPLAY write when a parent wall/window is chosen — mirrors

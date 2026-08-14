@@ -137,26 +137,36 @@ export function shortestSignedCompassDeltaDeg(fromDeg: number, toDeg: number): n
   return d;
 }
 
+/** Unweighted mean of the polygon vertices in the XY plane. */
+export function polygonPlanCentroid(
+  coords: ReadonlyArray<{ x: number; y: number }>,
+): { x: number; y: number } | null {
+  if (coords.length === 0) return null;
+  return {
+    x: coords.reduce((sum, point) => sum + point.x, 0) / coords.length,
+    y: coords.reduce((sum, point) => sum + point.y, 0) / coords.length,
+  };
+}
+
 /**
- * Rotate every vertex in the XY plane around coords[0] by `deltaDegCCW` (counter‑clockwise
+ * Rotate every vertex in the XY plane around `pivot` by `deltaDegCCW` (counter-clockwise
  * in model space: +X east, +Y north). Z is preserved.
  */
-export function rotatePolygonPlanXYAroundFirstVertex(
+export function rotatePolygonPlanXYAroundPoint(
   coords: Array<{ x: number; y: number; z: number }>,
   deltaDegCCW: number,
+  pivot: { x: number; y: number },
 ): Array<{ x: number; y: number; z: number }> {
   if (coords.length === 0) return coords;
-  const ax = coords[0].x;
-  const ay = coords[0].y;
   const rad = (deltaDegCCW * Math.PI) / 180;
   const c = Math.cos(rad);
   const s = Math.sin(rad);
   return coords.map((p) => {
-    const x = p.x - ax;
-    const y = p.y - ay;
+    const x = p.x - pivot.x;
+    const y = p.y - pivot.y;
     return {
-      x: ax + x * c - y * s,
-      y: ay + x * s + y * c,
+      x: pivot.x + x * c - y * s,
+      y: pivot.y + x * s + y * c,
       z: p.z,
     };
   });
@@ -180,5 +190,34 @@ export function applyCompassOrientationToSlopedPolygonCoords(
   // compass bearing by the same amount. Convert desired compass change to the
   // equivalent model-space rotation by reversing the signed delta.
   const delta = shortestSignedCompassDeltaDeg(desiredOrientation360, current);
-  return rotatePolygonPlanXYAroundFirstVertex(coords, delta);
+  const pivot = polygonPlanCentroid(coords);
+  return pivot ? rotatePolygonPlanXYAroundPoint(coords, delta, pivot) : null;
+}
+
+/**
+ * Rotate a two-point line in plan to a stored outward-facing compass bearing.
+ * The segment MIDPOINT stays fixed — the same convention as the sloped-polygon
+ * path, which pivots on the vertex centroid — so both endpoints move and each
+ * keeps its original plan length share and Z.
+ */
+export function applyCompassOrientationToLineCoords(
+  coords: Array<{ x: number; y: number; z: number }>,
+  desiredOrientation360: number,
+  globalOrientationOffset = 0,
+): [{ x: number; y: number; z: number }, { x: number; y: number; z: number }] | null {
+  if (coords.length !== 2) return null;
+  const [a, b] = coords;
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!(length > 0)) return null;
+  const geometricOutwardBearing = wrapOrientation360(desiredOrientation360 + globalOrientationOffset);
+  const wallDirectionDeg = wrapOrientation360(180 - geometricOutwardBearing);
+  const radians = wallDirectionDeg * Math.PI / 180;
+  const halfSpanX = (length / 2) * Math.cos(radians);
+  const halfSpanY = (length / 2) * Math.sin(radians);
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
+  return [
+    { x: midX - halfSpanX, y: midY - halfSpanY, z: a.z },
+    { x: midX + halfSpanX, y: midY + halfSpanY, z: b.z },
+  ];
 }
