@@ -1268,7 +1268,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     // reached `pickDirectControl` with no top-level type or enum to dispatch on, so
     // the field rendered as a free-text box. `unwrapNullableSchema`
     // (DirectAdvancedFields.tsx) now collapses that wrapper generically, at every
-    // resolution site, for all 19 misrouted Core properties at once -- so this
+    // resolution site, for all 26 misrouted property routes at once -- so this
     // one-field patch became dead weight and is gone. Verified by re-running the Core
     // MechanicalVentilation characterization across the deletion, not assumed: same
     // EnumControl, same inside/outside options, same forwarded description. ONE

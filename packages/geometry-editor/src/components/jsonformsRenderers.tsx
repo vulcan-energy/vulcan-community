@@ -1591,19 +1591,40 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
           // `elementType`/`propKey`; only `validateAdvancedFieldPrimitive` does. So
           // the guard moved down to the one thing it guards:
           //  - empty input unsets, host-independent (unchanged for the element editor,
-          //    newly reachable for a config-less host);
+          //    newly reachable for a config-less host) — but only when there is
+          //    something to unset, see the next note;
           //  - the parse always runs, and invalid JSON always sets the local error;
           //  - WITH elementType+propKey: validate, commit only if valid — byte-identical
           //    to the previous behaviour on the Advanced Fields path;
           //  - WITHOUT them: commit the parsed value unvalidated, because there is no
           //    element context to validate against. Committing something correctly
           //    typed beats committing a string that is wrong in every host.
+          //
+          // R4.6a review round 1, SECOND behaviour change, called out rather than left
+          // to ride: moving the guard down also exposed the empty-input branch to a
+          // BARE FOCUS/BLUR. A JSON-blob row renders '' for absent data AND for an
+          // empty `{}`/`[]` (see `valueString` above), so merely TABBING THROUGH such a
+          // row reached `handleChange(path, undefined)` -> `setAtPath` -> a fresh
+          // object identity -> `onDataChange`, marking the host dirty on a pure focus
+          // event. `alreadyEmpty` below stops that. This was NOT introduced here: the
+          // element editor, which always supplies `elementType`, has had the same
+          // spurious dirty since the handler was written — tabbing through an unset
+          // Advanced Fields blob row emitted a delete of a key that was not there. So
+          // this fixes an existing bug on that path as well as the newly-exposed one,
+          // and is a deliberate behaviour change on both. A genuine CLEAR still
+          // unsets: `onChange` above has already written the empty STRING to the host
+          // by blur time, and a string is not `alreadyEmpty`.
           onBlur={(e) => {
             if (!isJsonLike) return;
             const raw = e.currentTarget.value.trim();
             if (raw === '') {
+              const alreadyEmpty =
+                data === undefined ||
+                data === null ||
+                (Array.isArray(data) && data.length === 0) ||
+                (isRecord(data) && Object.keys(data).length === 0);
               setLocalError(null);
-              handleChange(path, undefined);
+              if (!alreadyEmpty) handleChange(path, undefined);
               return;
             }
             try {

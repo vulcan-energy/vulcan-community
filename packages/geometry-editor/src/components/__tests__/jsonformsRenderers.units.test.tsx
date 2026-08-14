@@ -214,17 +214,32 @@ describe('advanced numeric field presentations', () => {
  * `config={{}}`: editing a nested object there wrote
  * `{"orientation":"{\"add_degrees\":42}"}` instead of `{"orientation":{"add_degrees":42}}`.
  * Its own characterization test currently PINS the broken string, with a KNOWN-ISSUE
- * comment; that pin is updated parent-side, not here. These three cases are the
+ * comment; that pin is updated parent-side, not here. These cases are the
  * community-side coverage for the same behaviour, per the test-move policy (coverage
  * for community code lives in community).
+ *
+ * The last two came out of R4.6a review round 1, and both cover the boundary rather
+ * than the happy path: that the guarded branch commits ONLY IF VALIDATION PASSES (the
+ * module's default stub port always says valid, so the original case could only ever
+ * prove that a commit happened), and that a bare tab-through of an already-empty row
+ * emits nothing at all.
  */
 describe('TextControl JSON-blob commit (R4.5 follow-up, R4.6a)', () => {
   const objectSchema = { type: 'object' };
 
-  function blurWith(raw: string, config: Record<string, unknown>) {
+  /**
+   * `data` is the value the HOST currently holds for the row; `raw` is what the user
+   * leaves in the input before blurring. `typed: false` blurs WITHOUT an intervening
+   * `onChange`, which is what a bare tab-through looks like.
+   */
+  function blurWith(
+    raw: string,
+    config: Record<string, unknown>,
+    { data = {} as unknown, typed = true }: { data?: unknown; typed?: boolean } = {},
+  ) {
     const handleChange = vi.fn();
     renderControl(TextControl, {
-      data: {},
+      data,
       path: 'orientation',
       label: 'Orientation',
       schema: objectSchema,
@@ -232,7 +247,7 @@ describe('TextControl JSON-blob commit (R4.5 follow-up, R4.6a)', () => {
       handleChange,
     });
     const input = screen.getByRole('textbox');
-    fireEvent.change(input, { target: { value: raw } });
+    if (typed) fireEvent.change(input, { target: { value: raw } });
     fireEvent.blur(input, { target: { value: raw } });
     return { handleChange, input };
   }
@@ -250,6 +265,24 @@ describe('TextControl JSON-blob commit (R4.5 follow-up, R4.6a)', () => {
     expect(handleChange).toHaveBeenLastCalledWith('orientation', { add_degrees: 42 });
   });
 
+  it('commits ONLY IF valid when an elementType is present -- an invalid parse sets the error and is not committed', () => {
+    // R4.6a review round 1: the case above proves a commit HAPPENS, but the module's
+    // stub `schemaPort.validateProperty` always returns `{valid:true}`, so it says
+    // nothing about the "only if valid" half of the guarded branch. Override the port
+    // for this one mount so validation actually rejects.
+    const rejectingPort: GeometrySchemaPort = {
+      ...schemaPort,
+      validateProperty: () => ({ valid: false, errors: ['must be an object of the right shape'] }),
+    };
+    const { handleChange } = blurWith('{"add_degrees":42}', { schemaPort: rejectingPort });
+
+    // The blur added no commit: the last call is still the per-keystroke raw string
+    // `onChange` wrote, not the parsed object.
+    expect(handleChange).toHaveBeenLastCalledWith('orientation', '{"add_degrees":42}');
+    expect(handleChange).not.toHaveBeenCalledWith('orientation', { add_degrees: 42 });
+    expect(screen.getByText('must be an object of the right shape')).toBeVisible();
+  });
+
   it('reports invalid JSON and commits nothing new, with or without an elementType', () => {
     for (const config of [{ elementType: undefined }, {}]) {
       const { handleChange } = blurWith('{not json', config);
@@ -260,11 +293,29 @@ describe('TextControl JSON-blob commit (R4.5 follow-up, R4.6a)', () => {
     }
   });
 
-  it('unsets on empty input regardless of host config', () => {
+  it('clearing a populated row still unsets, regardless of host config', () => {
     for (const config of [{ elementType: undefined }, {}]) {
-      const { handleChange } = blurWith('   ', config);
+      // `onChange` has already written the empty STRING to the host by blur time,
+      // which is what distinguishes a real clear from a tab-through.
+      const { handleChange } = blurWith('   ', config, { data: { add_degrees: 42 } });
       expect(handleChange).toHaveBeenLastCalledWith('orientation', undefined);
       cleanup();
+    }
+  });
+
+  it('R4.6a review round 1: tabbing through an already-empty row emits NOTHING -- no spurious dirty', () => {
+    // A JSON-blob row renders '' for absent data AND for an empty `{}`/`[]`, so a bare
+    // focus/blur used to reach the empty-input branch and emit
+    // `handleChange(path, undefined)` -- which `setAtPath` turns into a fresh object
+    // identity and the host turns into "this element changed". Both hosts are covered:
+    // the config-less one, where moving the R4.5 guard newly exposed this, and the
+    // element editor, where it has been latent since the handler was written.
+    for (const config of [{ elementType: undefined }, {}]) {
+      for (const data of [undefined, null, {}, []]) {
+        const { handleChange } = blurWith('', config, { data, typed: false });
+        expect(handleChange).not.toHaveBeenCalled();
+        cleanup();
+      }
     }
   });
 });

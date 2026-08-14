@@ -32,17 +32,17 @@
  * R4.6a: the first slice to CORRECT this renderer rather than port or extend it. With
  * JsonForms gone there is no longer a second implementation to hold parity with, so
  * "what the old path did" stopped being an argument and the behaviour had to stand on
- * its own. Two things did not: HEM Core's nullable-wrapped properties
- * (`anyOf:[X,{type:'null'}]`) were dispatching to TextControl as a whole class — 19
- * properties, sixteen of them numbers rendering without their schema minima — and the
- * two review-driven, one-field-at-a-time patches that had papered over the enum
- * corner of it were still accumulating. `unwrapNullableSchema` (below) replaces both
- * with one normalization applied at all three resolution sites; one of the two inline
- * overrides is deleted as redundant, the other kept with a corrected rationale. Two
- * smaller R4.5 review notes are closed in the same slice: `setAtPathNode`'s
- * array-index unset now splices instead of leaving a JSON `null` hole (below), and
- * TextControl's JSON-blob commit no longer skips PARSING when the host supplies no
- * `elementType` (`jsonformsRenderers.tsx`).
+ * its own. Two things did not: HEM's nullable-wrapped properties
+ * (`anyOf:[X,{type:'null'}]`) were dispatching to TextControl as a whole class — 26
+ * property routes across BOTH profiles, 23 of them numbers rendering without their
+ * schema minima — and the two review-driven, one-field-at-a-time patches that had
+ * papered over the enum corner of it were still accumulating. `unwrapNullableSchema`
+ * (below) replaces both with one normalization applied at all three resolution sites;
+ * one of the two inline overrides is deleted as redundant, the other kept with a
+ * corrected rationale. Two smaller R4.5 review notes are closed in the same slice:
+ * `setAtPathNode`'s array-index unset now splices instead of leaving a JSON `null`
+ * hole (below), and TextControl's JSON-blob commit no longer skips PARSING when the
+ * host supplies no `elementType` (`jsonformsRenderers.tsx`).
  */
 
 import React from 'react';
@@ -154,12 +154,12 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  *      no live HEM property has that exact shape", citing `area_per_perimeter_vent`
  *      (a plain `{type:'number'}` in both profiles, correctly) as evidence that the
  *      R4.2 spike's example had been a stale docstring claim. The example was stale;
- *      the generalization from it was wrong. Core declares SIXTEEN live
- *      `anyOf:[{type:'number',…},{type:'null'}]` properties across five element types
- *      — including every `u_value` — and each of them landed here, on a text box with
- *      no `min`/`max`. The single field checked happened to be one of the ones HEM
- *      does NOT wrap. Nullable wrappers no longer reach this rule at all; they are
- *      collapsed before dispatch.
+ *      the generalization from it was wrong. TWENTY-THREE live number routes carry
+ *      `anyOf:[{type:'number',…},{type:'null'}]` across both profiles — including
+ *      every `u_value` — and each of them landed here, on a text box with no
+ *      `min`/`max`. The single field checked happened to be one HEM does NOT wrap.
+ *      Nullable wrappers no longer reach this rule at all; they are collapsed before
+ *      dispatch.
  *
  * A nested object-typed property (e.g. MechanicalVentilation FHS's `position_exhaust`
  * in its non-flat mode) needs NO special case: the generator does not recurse past the
@@ -207,18 +207,37 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  * top-level `type`/`enum` of its own — `isNonEmptyEnumLike` only recognizes a bare
  * `.enum` or oneOf/anyOf where EVERY branch carries `const`, and rule (c)-(e) have no
  * type to read, so every such property fell to rule (f) -> TextControl. That framing
- * was too narrow twice over, as R4.6a's full dispatch sweep across both published
- * schemas showed (`AdvancedFieldsEditor.directRender.test.tsx`, "R4.6a standing
- * invariant"): the shape is not rare (28 properties in `core-input.schema.json`'s
- * element subschemas carry it; FHS carries none — HEM's FHS wrapper flattens
- * nullables away, which is exactly why FHS-only verification kept missing this), and
- * it is not an ENUM problem — 16 of the 19 misrouted properties are NUMBERS
- * (`u_value`, `thermal_resistance_construction`, `mvhr_eff`, `orientation360`,
- * `pitch`, the duct dimensions, …), where TextControl silently drops `min`/`max`/the
- * numeric draft buffer/the unit adornment that the identical FHS field (a plain
- * `{type:'number'}`) has always had. Chasing that one $ref-to-enum field at a time —
- * `shield_fact_location`, then `mvhr_location` a slice later — was never going to
- * converge.
+ * was too narrow twice over, as R4.6a's dispatch sweep showed
+ * (`AdvancedFieldsEditor.directRender.test.tsx`, "R4.6a standing invariant" — see
+ * there for exactly what is and is not swept).
+ *
+ * COUNTS, AND WHAT THEY ARE COUNTS OF (review round 1 asked for this precision, and
+ * getting it wrong is what produced the retracted claim below): the unit is a ROUTE —
+ * one (profile, element type or System subtype, property) triple — because the same
+ * property can be reached by more than one walk, and a property that is unreachable is
+ * not a bug. Sweeping the flat walk (every element type × every subtype, both
+ * profiles) and the System layout walk finds 43 routes carrying a nullable wrapper, of
+ * which 26 dispatched to the wrong control. It is not an ENUM problem: 23 of the 26
+ * are NUMBERS (`u_value`, `thermal_resistance_construction`, `mvhr_eff`,
+ * `orientation360`, `pitch`, the duct dimensions, the `ach_*` limits, the CombiBoiler
+ * loss factors, …), where TextControl silently drops `min`/`max`/the numeric draft
+ * buffer/the unit adornment. Two are enums and one is a boolean. Chasing that one
+ * $ref-to-enum field at a time — `shield_fact_location`, then `mvhr_location` a slice
+ * later — was never going to converge.
+ *
+ * RETRACTED (review round 1, REAL WRONG CLAIM — this docstring asserted it on R4.6a's
+ * first commit): "FHS carries none — HEM's FHS wrapper flattens nullables away". There
+ * is no such flattening mechanism. `input_fhs.schema.json` carries FIVE property-level
+ * nullable wrappers, byte-identical in shape to Core's; four of them are LIVE and are
+ * among the 26 moved (`HotWaterSource` / `hw cylinder` / `allOf[4].then`, the
+ * `{type:'CombiBoiler'}` branch: `rejected_energy_1`, `rejected_factor_3`,
+ * `storage_loss_factor_1`, `storage_loss_factor_2`; the fifth,
+ * `HeatSourceWet`/`boiler`/`cost_schedule_hybrid`, wraps an OBJECT and so is a JSON
+ * blob before and after). What is true is narrower and is the actual reason FHS-only
+ * verification kept missing this shape: FHS puts its wrappers inside `allOf`/`then`
+ * CONDITIONAL branches, which a scan of top-level `properties` — the natural way to
+ * "check the schema" — never reaches. The lesson is about how the schema was looked
+ * at, not about what the profile contains.
  *
  * `unwrapNullableSchema` (below) now collapses the wrapper to its non-null branch at
  * the three points where a property schema is RESOLVED, so `pickDirectControl` and
@@ -302,14 +321,43 @@ function isBareNullSchema(value: unknown): boolean {
  *
  * PATTERN, DELIBERATELY STRICT — this is a targeted normalization of one HEM/pydantic
  * emission habit (`Optional[float]` -> `anyOf:[{type:'number'},{type:'null'}]`), not a
- * general combinator resolver. It matches ONLY when the keyword's value is an array of
- * exactly 2 entries, exactly one of which is a BARE `{type:'null'}` (see
+ * general combinator resolver. A layer is collapsed ONLY when the keyword's value is an
+ * array of exactly 2 entries, exactly one of which is a BARE `{type:'null'}` (see
  * `isBareNullSchema` — a null branch carrying anything else is not this pattern), and
- * the other is a record. Three branches, no null branch, a null branch with siblings,
- * nested combinators inside the surviving branch: all left alone. Collapsing those
- * would mean CHOOSING a branch, which is a semantic decision no renderer should make
- * silently; they keep falling through `pickDirectControl` rule (f) to TextControl's
- * JSON blob exactly as before.
+ * the other is a record. Three branches, no null branch, a null branch with siblings:
+ * all left alone, returned by identity. Collapsing those would mean CHOOSING a branch,
+ * which is a semantic decision no renderer should make silently; they keep falling
+ * through `pickDirectControl` rule (f) to TextControl's JSON blob exactly as before.
+ *
+ * A COMBINATOR INSIDE THE SURVIVING BRANCH IS CARRIED THROUGH, NOT ERASED (review
+ * round 1, REAL BUG — this function shipped in R4.6a's first commit doing the
+ * opposite). `{...inner, ...node}` lets the WRAPPER win every keyword it declares,
+ * which is right for annotations and wrong for exactly one keyword: the combinator
+ * being collapsed. When the surviving branch carried the SAME keyword as the wrapper,
+ * the wrapper's array overwrote the inner's and the very next line deleted it, leaving
+ * a node with no type, no enum and no combinator at all — which is worse than a wrong
+ * control, because `schemaEmitsControl` then returns false and the flat walk drops the
+ * property, so THE ROW DISAPPEARS from the grid. Core has exactly one such node,
+ * `$defs/ControlChargeTarget.charge_level` (`anyOf:[{$ref ChargeLevel},{type:'null'}]`
+ * where `ChargeLevel` is itself `anyOf:[number, array-of-number, ScheduleForDouble]`),
+ * and no element subschema routes to it — but `DirectSpecFields` passes host-supplied
+ * `options.schemaOverride` nodes through this same function, and those are arbitrary
+ * web-builder output, so "not reachable from a published schema today" was never the
+ * whole reachability question. The inner's own combinator is now restored after the
+ * merge; that node collapses to `{anyOf:[number, array, ScheduleForDouble], …}` and
+ * renders the JSON blob this docstring always claimed it would.
+ *
+ * IDEMPOTENT BY CONSTRUCTION, via a fixpoint rather than a promise: each pass consumes
+ * exactly one wrapper layer, and passes repeat until nothing changes, so the result is
+ * always a node this function would leave alone. That also makes `Optional[Optional[X]]`
+ * (`{oneOf:[{anyOf:[X,{null}]},{null}]}`) collapse all the way to `X` instead of one
+ * layer short — a single pass would have left a second wrapper standing and dispatched
+ * it to TextControl, and calling the function twice would have returned something
+ * different from calling it once. Termination does not rest on the bound: every pass
+ * strictly removes one combinator array from a finite structure. The bound is there
+ * because a `$ref` cycle that `dereferenceSchemaNodeInRoot`'s own `seen` guard left
+ * partially inlined could in principle feed this a self-referential node, and a
+ * renderer must not hang on a malformed schema. No live schema needs a second pass.
  *
  * ANNOTATIONS COME FROM THE OUTER NODE ONLY — this function moves TYPE and
  * CONSTRAINTS, never presentation. `title` and `description` survive exactly as the
@@ -338,20 +386,35 @@ function isBareNullSchema(value: unknown): boolean {
  * exception noted at the `mvhr_location` deletion site in `AdvancedFieldsEditor.tsx`.
  *
  * TWO MORE KEYWORDS ARE DROPPED:
- *  - the `anyOf`/`oneOf` itself, obviously — it is what is being collapsed. Leaving it
- *    on would re-trigger `schemaEmitsControl`'s combinator short-circuit and, worse,
- *    hand `isNonEmptyEnumLike` a non-const alternatives array to reason about.
- *  - a `default` of exactly `null`. Every one of the 28 nullable wrappers in
- *    `core-input.schema.json` carries `default: null` (verified by sweep, not
- *    assumed), and that default describes the NULL branch that was just dropped — it
- *    is the schema saying "this optional field is absent", not "this number defaults
- *    to nothing". Carrying it onto a NumberControl would misrepresent the field. A
- *    non-null `default` describes the surviving branch and IS carried (no live wrapper
- *    has one today; the alternative — dropping every `default` unconditionally —
- *    would lose real information the day one appears).
+ *  - the WRAPPER's own `anyOf`/`oneOf`, obviously — it is what is being collapsed.
+ *    Leaving it on would re-trigger `schemaEmitsControl`'s combinator short-circuit
+ *    and, worse, hand `isNonEmptyEnumLike` a non-const alternatives array to reason
+ *    about. (The SURVIVING BRANCH's own combinator, if it has one, is a different
+ *    keyword instance and is kept — see above.)
+ *  - a `default` of exactly `null`. Every nullable wrapper in either published schema
+ *    carries `default: null` (verified by sweep, not assumed), and that default
+ *    describes the NULL branch that was just dropped — it is the schema saying "this
+ *    optional field is absent", not "this number defaults to nothing". Carrying it
+ *    onto a NumberControl would misrepresent the field. A non-null `default` describes
+ *    the surviving branch and IS carried (no live wrapper has one today; the
+ *    alternative — dropping every `default` unconditionally — would lose real
+ *    information the day one appears).
  */
 // eslint-disable-next-line react-refresh/only-export-components -- pure schema helper, not a React component; exported for the standing-invariant test.
 export function unwrapNullableSchema(node: Record<string, unknown>): Record<string, unknown> {
+  let current = node;
+  // Bounded only against a malformed self-referential node; see the docstring's
+  // idempotence paragraph. No published schema needs more than one pass.
+  for (let pass = 0; pass < 8; pass += 1) {
+    const next = unwrapNullableSchemaLayer(current);
+    if (next === current) return current;
+    current = next;
+  }
+  return current;
+}
+
+/** One layer of {@link unwrapNullableSchema}; returns `node` itself when nothing matches. */
+function unwrapNullableSchemaLayer(node: Record<string, unknown>): Record<string, unknown> {
   for (const keyword of ['anyOf', 'oneOf'] as const) {
     const branches = node[keyword];
     if (!Array.isArray(branches) || branches.length !== 2) continue;
@@ -363,7 +426,13 @@ export function unwrapNullableSchema(node: Record<string, unknown>): Record<stri
     // actually declares, the inner branch supplies the rest (type, constraints, enum,
     // properties, items, …).
     const merged: Record<string, unknown> = { ...inner, ...node };
-    delete merged[keyword];
+    // …except this one. `...node` just overwrote any same-named combinator the
+    // surviving branch declared, and the wrapper's copy is the one being consumed, so
+    // hand the inner's back rather than deleting both. See the docstring's
+    // COMBINATOR INSIDE THE SURVIVING BRANCH paragraph — deleting both is the review
+    // round 1 bug that made whole rows vanish.
+    if (keyword in inner) merged[keyword] = inner[keyword];
+    else delete merged[keyword];
     if (merged.default === null) delete merged.default;
     for (const annotation of ['title', 'description'] as const) {
       if (!(annotation in node)) delete merged[annotation];
