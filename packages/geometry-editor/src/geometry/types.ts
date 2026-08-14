@@ -29,7 +29,7 @@ export interface SpaceLabel {
   height_override?: number;
   /**
    * When true/undefined, name is derived from room type like element auto-naming; set false after manual edit.
-   * Not read from CSV; in-memory / session only.
+   * Authored state persists through the scoped override-provenance marker in `extra_json`.
    */
   _nameAutoSync?: boolean;
   /** Forward-compatible bag (mirrors other CSV rows). */

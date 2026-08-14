@@ -248,6 +248,12 @@ export function buildHostDerivedPatch(
   return patch;
 }
 
+/**
+ * Apply host-roof fields to a transparent opening without override gating. A rooflight sits in the
+ * roof plane, so its pitch, orientation and base height must continue to follow that plane; a PV
+ * panel sits on the roof and may be independently tilted, which is why `buildHostDerivedPatch`
+ * gates the same fields on authored override flags.
+ */
 export function buildTransparentHostDerivedPatch(
   opening: BuildingElementTransparent,
   derived: { base_height?: number; pitch?: number; orientation360?: number },

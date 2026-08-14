@@ -3,6 +3,120 @@
 
 import { describe, it, expect } from 'vitest';
 import { stripUiKeysFromCsv, parseCSVLine, upsertScenariosBaseModelEnabledLine } from '../csvPresetUtils';
+import {
+  CURRENT_PROVENANCE_MARKERS_VERSION,
+  ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR,
+  OVERRIDE_PROVENANCE_REGISTRY,
+  SPACE_LABEL_NAME_AUTO_SYNC_DESCRIPTOR,
+  SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR,
+  SLOPED_WIDTH_OVERRIDE_DESCRIPTOR,
+  projectOverrideMarkersForExport,
+  promoteOverrideMarkersOnImport,
+} from '../overrideProvenance';
+
+describe('override provenance helpers', () => {
+  it('projects active markers copy-on-write and deletes stale automatic markers', () => {
+    const original = {
+      roof: {
+        _widthUserOverride: true,
+        _heightUserOverride: false,
+        extra_json: {
+          keep: 'advanced',
+          [SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR.key]: true,
+        },
+      },
+    };
+
+    const projected = projectOverrideMarkersForExport(
+      original,
+      [SLOPED_WIDTH_OVERRIDE_DESCRIPTOR, SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR],
+    );
+
+    expect(projected).not.toBe(original);
+    expect(projected.roof.extra_json).toEqual({
+      keep: 'advanced',
+      [SLOPED_WIDTH_OVERRIDE_DESCRIPTOR.key]: true,
+    });
+    expect(original.roof.extra_json).toEqual({
+      keep: 'advanced',
+      [SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR.key]: true,
+    });
+    expect(projectOverrideMarkersForExport(
+      projected,
+      [SLOPED_WIDTH_OVERRIDE_DESCRIPTOR, SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR],
+    )).toBe(projected);
+  });
+
+  it('preserves the existing false-sense name marker wire value', () => {
+    const records: Record<string, {
+      _nameAutoSync: boolean;
+      extra_json?: Record<string, unknown>;
+    }> = { element: { _nameAutoSync: false } };
+    const projected = projectOverrideMarkersForExport(
+      records,
+      [ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR],
+    );
+    expect(projected.element.extra_json).toEqual({ _name_auto_sync: false });
+  });
+
+  it('treats authoritative absence as automatic except for heuristic-fallback descriptors', () => {
+    const legacy: Record<string, unknown> = {};
+    promoteOverrideMarkersOnImport(
+      legacy,
+      [SLOPED_WIDTH_OVERRIDE_DESCRIPTOR, ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR],
+      undefined,
+    );
+    expect(legacy).toEqual({});
+
+    const current: Record<string, unknown> = {};
+    promoteOverrideMarkersOnImport(
+      current,
+      [SLOPED_WIDTH_OVERRIDE_DESCRIPTOR, ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR],
+      1,
+    );
+    expect(current).toEqual({
+      _widthUserOverride: false,
+    });
+
+    const absentNames: Record<string, unknown> = {};
+    promoteOverrideMarkersOnImport(
+      absentNames,
+      [ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR, SPACE_LABEL_NAME_AUTO_SYNC_DESCRIPTOR],
+      1,
+    );
+    expect(absentNames).toEqual({});
+
+    const marked: Record<string, unknown> = {
+      extra_json: { [ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR.key]: false },
+    };
+    promoteOverrideMarkersOnImport(
+      marked,
+      OVERRIDE_PROVENANCE_REGISTRY.element,
+      1,
+    );
+    expect(marked._nameAutoSync).toBe(false);
+  });
+
+  it('pins the marker version to an exact registry key/version snapshot', () => {
+    // A future marker addition must bump its `since`, the current version, and this snapshot
+    // together so documents saved before that key existed never become authoritative for it.
+    expect(CURRENT_PROVENANCE_MARKERS_VERSION).toBe(1);
+    expect(Object.entries(OVERRIDE_PROVENANCE_REGISTRY).flatMap(([kind, descriptors]) =>
+      descriptors.map(({ key, since }) => ({ kind, key, since })),
+    )).toEqual([
+      { kind: 'element', key: '_width_user_override', since: 1 },
+      { kind: 'element', key: '_height_user_override', since: 1 },
+      { kind: 'element', key: '_pv_base_height_user_override', since: 1 },
+      { kind: 'element', key: '_pv_pitch_user_override', since: 1 },
+      { kind: 'element', key: '_pv_orientation_user_override', since: 1 },
+      { kind: 'element', key: '_name_auto_sync', since: 1 },
+      { kind: 'zone', key: '_floor_area_user_override', since: 1 },
+      { kind: 'zone', key: '_height_user_override', since: 1 },
+      { kind: 'floor', key: 'FloorHeightOverride', since: 0 },
+      { kind: 'spaceLabel', key: '_name_auto_sync', since: 1 },
+    ]);
+  });
+});
 
 describe('parseCSVLine', () => {
   it('should split simple comma-separated values', () => {
@@ -132,6 +246,26 @@ describe('stripUiKeysFromCsv', () => {
     expect(result).toContain('string_inverter');
     expect(result).not.toContain('_pv_footprint_flip');
     expect(result).not.toContain('_pv_bottom_is_long');
+  });
+
+  it('strips fixed element and space-label override markers before merge', () => {
+    const extraJson = jsonCsvCell({
+      u_value: 0.18,
+      _width_user_override: true,
+      _height_user_override: true,
+      _name_auto_sync: false,
+    });
+    const csv = [
+      'Exposed Elements,,,,,,,,,,,,,,',
+      'Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json',
+      `wall1,Living,BuildingElementOpaque,12,30,5,2.4,180,0,FALSE,FALSE,,,${extraJson}`,
+    ].join('\n');
+
+    const result = stripUiKeysFromCsv(csv);
+    expect(result).toContain('u_value');
+    expect(result).not.toContain('_width_user_override');
+    expect(result).not.toContain('_height_user_override');
+    expect(result).not.toContain('_name_auto_sync');
   });
 
   it('should strip psi_source from extra_json before merge', () => {

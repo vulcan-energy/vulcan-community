@@ -3,6 +3,7 @@
 
 import type { Element, Floor } from '../geometry/types';
 import type { FloorHeightOverrideRow } from '../geometry/io/parseCsvToGeometry';
+import { FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR } from './overrideProvenance';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -45,7 +46,11 @@ export function applyFloorHeightOverrides(
   const overrideHeightByZIndex = new Map(overrides.map((override) => [override.zIndex, override.height]));
   return floors.map((floor) => {
     const height = overrideHeightByZIndex.get(floor.zIndex);
-    if (height !== undefined) return { ...floor, height, heightUserOverride: true };
-    return floor.heightUserOverride ? { ...floor, heightUserOverride: false } : floor;
+    if (height !== undefined) {
+      return { ...floor, height, [FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR.flag]: true };
+    }
+    return floor[FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR.flag]
+      ? { ...floor, [FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR.flag]: false }
+      : floor;
   });
 }
