@@ -54,7 +54,7 @@ import {
   withEffectiveStoreyHeights,
 } from '../lib/zoneDerivation';
 import { resolveTargetZoneIdForNewCanvasElement } from '../lib/resolveTargetZoneForNewElement';
-import { selectionForDrawnElement } from '../lib/drawnElementSelection';
+import { selectionForDrawnElement, selectionForElement } from '../lib/drawnElementSelection';
 import { isPointInPolygon2D } from '../lib/pointInPolygon';
 import { compareElementPaintOrder } from '../lib/canvasPaintOrder';
 import { CompassRose } from './CompassRose';
@@ -743,8 +743,10 @@ const getSelectionForElementId = (
   elementId: string,
   elementsById: Record<string, Element>,
 ): GeometryCanvasSelection => {
-  const bundleInfo = getDormerBundleInfo(elementsById[elementId]);
-  if (!bundleInfo) return { type: 'element', id: elementId };
+  const element = elementsById[elementId];
+  if (!element) return null;
+  const bundleInfo = getDormerBundleInfo(element);
+  if (!bundleInfo) return selectionForElement(element);
   return { type: 'dormer', id: bundleInfo.bundle_id };
 };
 

@@ -10,6 +10,7 @@ import { validateSpaceLabels } from '../../geometry/validation/validateSpaceLabe
 import { getVolumeCalculationBreakdown } from '../../lib/zoneDerivation';
 import { getContextualElementDisplayName, getElementTypeDisplayName } from '../../lib/displayNames';
 import { getElementCanvasFloorZValue } from '../../lib/elementCanvasFloor';
+import { selectionForElement } from '../../lib/drawnElementSelection';
 import { fhsFloorLabelForCanvasFloor } from '../../lib/storeySemantics';
 import { worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
 import { ValidationIndicator } from '../ValidationIndicator';
@@ -248,15 +249,17 @@ const ElementEntryRow = memo(function ElementEntryRow({
 
 function getSelectionForEntry(entry: ElementsPanelEntry): Selection {
   const bundleInfo = getDormerBundleInfo(entry.representative);
-  return bundleInfo ? { type: 'dormer', id: bundleInfo.bundle_id } : { type: 'element', id: entry.representative.id };
+  return bundleInfo ? { type: 'dormer', id: bundleInfo.bundle_id } : selectionForElement(entry.representative);
 }
 
 function getSelectionForElementIdFromElements(
   elementsById: Record<string, Element>,
   elementId: string,
 ): Selection {
-  const bundleInfo = getDormerBundleInfo(elementsById[elementId]);
-  return bundleInfo ? { type: 'dormer', id: bundleInfo.bundle_id } : { type: 'element', id: elementId };
+  const element = elementsById[elementId];
+  if (!element) return null;
+  const bundleInfo = getDormerBundleInfo(element);
+  return bundleInfo ? { type: 'dormer', id: bundleInfo.bundle_id } : selectionForElement(element);
 }
 
 type ElementEntryRowActionState = {
@@ -1127,7 +1130,10 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                       true
                                     );
                                   } catch { /* swallow: best-effort */ }
-                                  setSelection({ type: 'element', id: elementId, isPlaceholder: true });
+                                  const createdElement = geometryStore.getState().elementsById[elementId];
+                                  if (!createdElement) throw new Error('Created element is missing from the geometry store');
+                                  setSelectedElementIds([elementId]);
+                                  setSelection({ ...selectionForElement(createdElement), isPlaceholder: true });
                                   await handleAssignSource(missing.id, elementId);
                                 } catch (error) {
                                   alert(error instanceof Error ? error.message : 'Failed to create element');
@@ -1220,7 +1226,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                       return (
                         <button
                           key={`missing-${missing.path}-${missing.type}-${index}`}
-                          className="element-pill element-pill--missing element-pill--missing-required"
+                          className="element-pill element-pill--missing element-pill--missing-required element-pill--missing-cta"
                           onClick={() => {
                             try {
                               const targetZoneId = missing.zoneId || zones[0]?.id || createPlaceholderZone();
@@ -1244,11 +1250,11 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                     true,
                                   );
                                 }
-                                setSelection({
-                                  type: 'element',
-                                  id: ids[0],
-                                  isPlaceholder: true,
-                                });
+                                const firstId = ids[0];
+                                const firstElement = geometryStore.getState().elementsById[firstId];
+                                if (!firstElement) throw new Error('Created element is missing from the geometry store');
+                                setSelectedElementIds([firstId]);
+                                setSelection({ ...selectionForElement(firstElement), isPlaceholder: true });
                                 return;
                               }
 
@@ -1313,11 +1319,9 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                 );
                               } catch { /* swallow: best-effort */ }
                               const createdElement = geometryStore.getState().elementsById[elementId];
-                              setSelection({
-                                type: createdElement?.zoneId ? 'element' : 'global',
-                                id: elementId,
-                                isPlaceholder: true,
-                              });
+                              if (!createdElement) throw new Error('Created element is missing from the geometry store');
+                              setSelectedElementIds([elementId]);
+                              setSelection({ ...selectionForElement(createdElement), isPlaceholder: true });
                             } catch (error) {
                               alert(error instanceof Error ? error.message : 'Failed to create element');
                             }
@@ -1327,27 +1331,25 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                             missing.pillQualifier ? ` — ${missing.pillQualifier}` : ''
                           }${missing.zoneId ? ` (${zoneName})` : ''}`}
                         >
-                          <div className="element-pill__missing-line element-pill__missing-row--wrap">
-                            <span>
-                              + {getElementTypeDisplayName(missing.type as ElementType)}
-                            </span>
-                            {missing.pillQualifier ? (
-                              <>
-                                <span className="element-pill__missing-separator" aria-hidden="true">
-                                  ·
-                                </span>
-                                <span className="element-pill__missing-meta">
-                                  {missing.pillQualifier}
-                                </span>
-                              </>
-                            ) : null}
-                            {missing.zoneId && (
-                              <>
-                                <span className="element-pill__missing-separator">•</span>
-                                <span className="element-pill__missing-meta">{zoneName}</span>
-                              </>
-                            )}
-                          </div>
+                          <span>
+                            + {getElementTypeDisplayName(missing.type as ElementType)}
+                          </span>
+                          {missing.pillQualifier ? (
+                            <>
+                              <span className="element-pill__missing-separator" aria-hidden="true">
+                                ·
+                              </span>
+                              <span className="element-pill__missing-meta">
+                                {missing.pillQualifier}
+                              </span>
+                            </>
+                          ) : null}
+                          {missing.zoneId && (
+                            <>
+                              <span className="element-pill__missing-separator">•</span>
+                              <span className="element-pill__missing-meta">{zoneName}</span>
+                            </>
+                          )}
                         </button>
                       );
                     })}
@@ -1361,7 +1363,10 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                   try {
                     const targetZoneId = zones.length > 0 ? zones[0].id : createPlaceholderZone();
                     const elementId = createPlaceholderElement(targetZoneId, 'BuildingElementOpaque');
-                    setSelection({ type: 'element', id: elementId, isPlaceholder: true });
+                    const createdElement = geometryStore.getState().elementsById[elementId];
+                    if (!createdElement) throw new Error('Created element is missing from the geometry store');
+                    setSelectedElementIds([elementId]);
+                    setSelection({ ...selectionForElement(createdElement), isPlaceholder: true });
                   } catch (error) {
                     alert(error instanceof Error ? error.message : 'Failed to create element');
                   }

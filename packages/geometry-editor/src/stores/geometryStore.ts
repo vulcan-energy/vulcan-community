@@ -3589,9 +3589,7 @@ const createGeometryState = (
     }) as Element;
     newElement = { ...newElement, _nameAutoSync: true };
 
-    // Determine if this is a global object
-    const isGlobalObject = ['WaterPipework', 'Appliance', 'HotWaterDemand', 'ContextShading', 'Vents', 'MechanicalVentilation', 'MechanicalVentilationDuctwork', 'MechanicalVentilationTerminal', 'CombustionAppliances', 'OnSiteGeneration', 'ElectricBattery', 'System'].includes(type);
-    const selectionType = isGlobalObject ? 'global' : 'element';
+    const selectionType = isGlobalObject(newElement) ? 'global' : 'element';
 
     set((state) => {
       // Normalized structures used by UI
@@ -4456,9 +4454,8 @@ const createGeometryState = (
           const nonPlaceholderElements = Object.values(remainingElementsById).filter(e => !e.isPlaceholder);
           if (nonPlaceholderElements.length > 0) {
             const mostRecentElement = nonPlaceholderElements[nonPlaceholderElements.length - 1];
-            const isGlobalElement = ['WaterPipework', 'Appliance', 'HotWaterDemand', 'ContextShading', 'MechanicalVentilation', 'CombustionAppliances', 'Vents'].includes(mostRecentElement.type);
             newSelection = {
-              type: isGlobalElement ? 'global' : 'element',
+              type: isGlobalObject(mostRecentElement) ? 'global' : 'element',
               id: mostRecentElement.id
             };
           } else {
