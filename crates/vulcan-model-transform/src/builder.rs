@@ -688,10 +688,16 @@ fn overlay_row_onto_seed(
     // extra_json arrives as a parsed object from the CSV parser, or as a raw
     // string in some sections — accept both.
     let extra_json_obj = match row.get("extra_json") {
+        // Already sanitized at the merge entry point by `sanitize_csv_extra_json`.
         Some(Value::Object(obj)) => Some(obj.clone()),
+        // A DOUBLE-ENCODED cell reaches the merge as a string, so the entry-point pass never
+        // saw it — it only rewrites object cells. Re-parsing here turns it back into mergeable
+        // data, so it has to be sanitized at this parse point or cleared fields inside it would
+        // clobber the seed. This is the only consumer that can resurrect a string cell.
         Some(Value::String(raw)) => serde_json::from_str::<Value>(raw)
             .ok()
-            .and_then(|v| v.as_object().cloned()),
+            .and_then(|v| v.as_object().cloned())
+            .map(|obj| sanitize_extra_json_object(&obj)),
         _ => None,
     };
     if let Some(extra_json) = extra_json_obj {
@@ -763,9 +769,20 @@ fn overlay_row_onto_seed(
 ///  - Nested whitespace-only strings such as `"  "` are KEPT, for parity with the web strip's
 ///    exact-`''` comparison. Only the top level trims.
 ///
-/// A cell whose `extra_json` is not an object is returned untouched. The string form only arises
-/// when the CSV codec failed to parse the cell as JSON (see `parse_extra_json_value` in
-/// `vulcan-csv-codec`), and the merge already discards it.
+/// THE ONE GAP, and where it is closed. A cell whose `extra_json` is not an object is returned
+/// untouched, and "not an object" is a wider set than it looks. `parse_extra_json_value` in
+/// `vulcan-csv-codec` returns ANY valid JSON — it calls `as_object_mut` only to strip `_`-prefixed
+/// keys, and simply skips that step for a non-object — so a *double-encoded* cell (a valid JSON
+/// string literal whose contents are object JSON) arrives here as a `Value::String` with no parse
+/// failure anywhere. It is not inert: `overlay_row_onto_seed`'s string branch re-parses exactly
+/// that shape back into mergeable data. That branch therefore sanitizes at its own parse point,
+/// and it is the only consumer that can resurrect a string cell. Do not assume elsewhere that a
+/// non-object cell has been discarded.
+///
+/// The app cannot author a double-encoded cell, but it can carry one: `parseExtraJson` in
+/// `packages/geometry-editor/src/geometry/io/parseCsvToGeometry.ts` does a bare
+/// `JSON.parse(...) as Record<string, unknown>` with no object check, so an externally authored
+/// one survives a round-trip intact.
 fn sanitize_csv_extra_json(
     csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
 ) -> HashMap<String, Vec<HashMap<String, Value>>> {
@@ -9160,7 +9177,10 @@ mod extra_json_merge_tests {
 
     #[test]
     fn sanitize_leaves_non_object_extra_json_cells_untouched() {
-        // A string `extra_json` only arises when the CSV codec failed to parse the cell.
+        // The pass rewrites object cells only; a non-object cell is passed through as-is. That
+        // is not the same as the cell being inert — `overlay_row_onto_seed`'s string branch can
+        // still re-parse a string cell into mergeable data, which is why it sanitizes at its own
+        // parse point. See `overlay_row_onto_seed_sanitizes_double_encoded_extra_json`.
         let mut row: HashMap<String, Value> = HashMap::new();
         row.insert("Name".to_string(), Value::String("wall 0".to_string()));
         row.insert("extra_json".to_string(), Value::String("{bad".to_string()));
@@ -9176,6 +9196,97 @@ mod extra_json_merge_tests {
         assert_eq!(
             sanitized["Exposed Elements"][0]["Name"],
             Value::String("wall 0".to_string())
+        );
+    }
+
+    /// A `Water Pipework` CSV whose one primary row carries `extra_json` verbatim. The section is
+    /// merged by `overlay_row_onto_seed`, seeded from the defaults template's
+    /// `HotWaterSource["hw cylinder"].primary_pipework[0]` (`internal_diameter_mm` 31, `length` 3).
+    fn water_pipework_csv(extra_json_cell: &str) -> String {
+        format!(
+            r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Water Pipework
+Name,Type,pipework_type,extra_json
+pipe1,WaterPipework,primary,{extra_json_cell}
+"#
+        )
+    }
+
+    fn merged_primary_pipe(csv: &str) -> serde_json::Map<String, Value> {
+        build_full_json(csv)["HotWaterSource"]["hw cylinder"]["primary_pipework"][0]
+            .as_object()
+            .expect("primary pipework should merge")
+            .clone()
+    }
+
+    #[test]
+    fn overlay_row_onto_seed_sanitizes_double_encoded_extra_json() {
+        // A DOUBLE-ENCODED cell — a valid JSON *string literal* whose contents are object JSON —
+        // parses to `Value::String`, so `sanitize_csv_extra_json` leaves it alone. But
+        // `overlay_row_onto_seed` re-parses the string form into an object and merges it, so the
+        // cleared fields inside it reach the seed unless that branch sanitizes too. The app
+        // cannot create such a cell, but `parseExtraJson` in
+        // `packages/geometry-editor/src/geometry/io/parseCsvToGeometry.ts` does a bare
+        // `JSON.parse(...) as Record<string, unknown>` with no object check, so an externally
+        // authored one survives round-trips.
+        let inner = r#"{"internal_diameter_mm":"","length":""}"#;
+        let double_encoded = serde_json::to_string(inner).expect("string encodes");
+        let cell = format!("\"{}\"", double_encoded.replace('"', "\"\""));
+        let csv = water_pipework_csv(&cell);
+
+        // Guard the fixture itself: the point of the test is lost if the cell reaches the merge
+        // as an object, because then the entry-point pass would be what cleaned it.
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(&csv).expect("CSV should parse");
+        assert!(
+            data["Water Pipework"][0]["extra_json"].is_string(),
+            "fixture must reach the merge as a string cell, got {:?}",
+            data["Water Pipework"][0]["extra_json"]
+        );
+
+        let pipe = merged_primary_pipe(&csv);
+
+        assert_eq!(
+            pipe.get("internal_diameter_mm").and_then(|v| v.as_f64()),
+            Some(31.0),
+            "cleared field must leave the template seed in place, got {pipe:?}"
+        );
+        assert_eq!(
+            pipe.get("length").and_then(|v| v.as_f64()),
+            Some(3.0),
+            "cleared field must leave the template seed in place, got {pipe:?}"
+        );
+    }
+
+    #[test]
+    fn overlay_row_onto_seed_sanitizes_ordinary_extra_json() {
+        // The single-encoded twin of the case above, end to end. The `build_partial_json` helpers
+        // skip `build_json`, so without this there was no test anywhere pinning the entry-point
+        // pass over an `overlay_row_onto_seed` section.
+        let csv = water_pipework_csv(r#""{""internal_diameter_mm"":"""",""length"":""""}""#);
+
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(&csv).expect("CSV should parse");
+        assert!(
+            data["Water Pipework"][0]["extra_json"].is_object(),
+            "fixture must reach the merge as an object cell, got {:?}",
+            data["Water Pipework"][0]["extra_json"]
+        );
+
+        let pipe = merged_primary_pipe(&csv);
+
+        assert_eq!(
+            pipe.get("internal_diameter_mm").and_then(|v| v.as_f64()),
+            Some(31.0),
+            "cleared field must leave the template seed in place, got {pipe:?}"
+        );
+        assert_eq!(
+            pipe.get("length").and_then(|v| v.as_f64()),
+            Some(3.0),
+            "cleared field must leave the template seed in place, got {pipe:?}"
         );
     }
 
