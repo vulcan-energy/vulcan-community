@@ -57,7 +57,7 @@ export function getElementEntrySelectionState(
   dormerBundleId: string | null,
 ): boolean {
   return (
-    (selection?.type === 'element' && entry.memberIds.includes(selection.id)) ||
+    ((selection?.type === 'element' || selection?.type === 'global') && entry.memberIds.includes(selection.id)) ||
     (selection?.type === 'dormer' && dormerBundleId === selection.id) ||
     hasSelectedEntryMember(entry, selectedElementIdSet)
   );
