@@ -4560,6 +4560,13 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
+        let seed_default_pv = self
+            .defaults
+            .get("OnSiteGeneration")
+            .and_then(Value::as_object)
+            .and_then(|systems| systems.get("Default PV"))
+            .cloned();
+
         if let Some(section_data) = csv_data.get("On-Site Generation") {
             if section_data.is_empty() {
                 // No PV systems in CSV - cleanup will remove empty section
@@ -4779,19 +4786,14 @@ impl JSONBuilder {
                     // Insert new entry with CSV name
                     on_site_gen.insert(element_name.to_string(), Value::Object(pv_system));
 
-                    // Remove empty "Default PV" placeholder if it exists (peak_power=0 means it's just a template)
-                    // We only keep it if we merged into it, otherwise remove it when creating a new named system
-                    if let Some(default_pv) = on_site_gen.get("Default PV") {
-                        if let Some(default_pv_obj) = default_pv.as_object() {
-                            let peak_power = default_pv_obj
-                                .get("peak_power")
-                                .and_then(|v| v.as_f64())
-                                .unwrap_or(0.0);
-                            if peak_power == 0.0 {
-                                // Empty placeholder - remove it since we're creating a real named system
-                                on_site_gen.remove("Default PV");
-                            }
-                        }
+                    // Provenance rule: only the exact defaults-template seed is a removable
+                    // placeholder. Any difference means the entry was authored and must survive.
+                    let default_pv_is_untouched_seed = on_site_gen
+                        .get("Default PV")
+                        .zip(seed_default_pv.as_ref())
+                        .is_some_and(|(current, seed)| current == seed);
+                    if default_pv_is_untouched_seed {
+                        on_site_gen.remove("Default PV");
                     }
                 }
             }
@@ -6991,18 +6993,56 @@ impl JSONBuilder {
                     })
                 });
 
-            // Step 2: Remove stale template WetDistribution systems. Legacy CSVs without the link
-            // column rebuild wet systems as before; current CSVs preserve only explicitly authored
-            // systems with linked emitters and remove defaults that are neither authored nor linked.
+            // Step 2: Remove stale template WetDistribution systems. CSV-authored systems are
+            // never silently deleted: unlinked authored names survive with E059, while unlinked
+            // template names keep today's silent cleanup. Legacy CSVs rebuild template wet systems
+            // but retain every system name authored by the Systems section.
             if let Some(space_heat_system) = result.get_mut("SpaceHeatSystem") {
                 if let Some(shs_obj) = space_heat_system.as_object_mut() {
                     if linked_system_emitters.is_empty() && !saw_space_heat_system_link_column {
-                        shs_obj.clear();
+                        let csv_authored_names: Vec<String> = shs_obj
+                            .keys()
+                            .filter(|name| authored_space_heat_system_names.contains(*name))
+                            .cloned()
+                            .collect();
+                        for name in csv_authored_names {
+                            self.push_non_fatal(
+                                "E059",
+                                &format!("SpaceHeatSystem/{name}"),
+                                &format!(
+                                    "SpaceHeatSystem '{name}' was authored in the Systems CSV, but the legacy Wet Emitters table has no space_heat_system column. Link it from a Wet Emitter row's space_heat_system column, or remove the Systems row."
+                                ),
+                            );
+                        }
+                        shs_obj.retain(|name, _| authored_space_heat_system_names.contains(name));
                     } else {
+                        let unlinked_csv_authored_wet_names: Vec<String> = shs_obj
+                            .iter()
+                            .filter_map(|(name, system)| {
+                                let is_wet_distribution =
+                                    system.get("type").and_then(|v| v.as_str())
+                                        == Some("WetDistribution");
+                                (is_wet_distribution
+                                    && authored_space_heat_system_names.contains(name)
+                                    && !linked_system_emitters.contains_key(name))
+                                .then(|| name.clone())
+                            })
+                            .collect();
+                        for name in unlinked_csv_authored_wet_names {
+                            self.push_non_fatal(
+                                "E059",
+                                &format!("SpaceHeatSystem/{name}"),
+                                &format!(
+                                    "SpaceHeatSystem '{name}' was authored in the Systems CSV but no Wet Emitter row links to it. Link it from a Wet Emitter row's space_heat_system column, or remove the Systems row."
+                                ),
+                            );
+                        }
                         shs_obj.retain(|name, system| {
                             let is_wet_distribution = system.get("type").and_then(|v| v.as_str())
                                 == Some("WetDistribution");
-                            !is_wet_distribution || linked_system_emitters.contains_key(name)
+                            !is_wet_distribution
+                                || linked_system_emitters.contains_key(name)
+                                || authored_space_heat_system_names.contains(name)
                         });
                     }
                 }
@@ -9995,7 +10035,10 @@ mod wet_emitter_tests {
     const SCHEMA_PATH: &str = crate::schema_paths::CORE_UPSTREAM_SCHEMA_REL_PATH;
     const DEFAULTS_PATH: &str = "../../data/defaults/defaults_template.json";
 
-    fn build_partial_json(csv: &str, defaults_path: &str) -> Value {
+    fn build_partial_json_with_errors(
+        csv: &str,
+        defaults_path: &str,
+    ) -> (Value, Vec<ValidationError>) {
         let mut parser = CSVParser::new();
         let data = parser.parse_csv(csv).expect("CSV should parse");
         let mut builder =
@@ -10007,7 +10050,17 @@ mod wet_emitter_tests {
         builder
             .process_root_level_sections(&mut result, &data)
             .expect("Root sections should process");
-        result
+        let errors = builder.take_non_fatal_errors();
+        (result, errors)
+    }
+
+    fn build_partial_json(csv: &str, defaults_path: &str) -> Value {
+        build_partial_json_with_errors(csv, defaults_path).0
+    }
+
+    fn parse_csv(csv: &str) -> HashMap<String, Vec<HashMap<String, Value>>> {
+        let mut parser = CSVParser::new();
+        parser.parse_csv(csv).expect("CSV should parse")
     }
 
     #[test]
@@ -10468,7 +10521,7 @@ Unlinked UFH,Living,WetEmitter,ufh,8,,,"{""emitter_floor_area"":8,""frac_convect
     }
 
     #[test]
-    fn blank_space_heat_system_column_does_not_generate_legacy_wet_systems() {
+    fn csv_authored_policy_drops_unlinked_template_wet_distribution_silently() {
         let csv = r#"Zone
 Name,Type,volume,floor_area
 Living,Zone,100,50
@@ -10479,7 +10532,7 @@ Unlinked Radiator,Living,WetEmitter,radiator,,1,,"{""length"":0.6,""frac_convect
 Unlinked UFH,Living,WetEmitter,ufh,8,,,"{""emitter_floor_area"":8,""frac_convective"":0.45}"
 "#;
 
-        let json = build_partial_json(csv, DEFAULTS_PATH);
+        let (json, errors) = build_partial_json_with_errors(csv, DEFAULTS_PATH);
         let space_heat_systems = json["SpaceHeatSystem"]
             .as_object()
             .expect("SpaceHeatSystem should be an object");
@@ -10496,6 +10549,150 @@ Unlinked UFH,Living,WetEmitter,ufh,8,,,"{""emitter_floor_area"":8,""frac_convect
             json["Zone"]["Living"].get("SpaceHeatSystem").is_none(),
             "zone should not reference generated systems when current CSV links are blank"
         );
+        assert!(
+            errors.iter().all(|error| error.code != "E059"),
+            "template-only cleanup should stay silent: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn csv_authored_policy_legacy_csv_clears_and_rebuilds_template_only_systems() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Wet Emitters
+Name,Zone,Type,subcategory,unit_number
+Radiator,Living,WetEmitter,radiator,1
+"#;
+        let csv_data = parse_csv(csv);
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+
+        builder
+            .merge_wet_emitters(&mut result, &csv_data)
+            .expect("untouched template system should be removed silently");
+
+        assert!(result["SpaceHeatSystem"].get("zone 1 radiators").is_none());
+        assert!(result["SpaceHeatSystem"].get("Living radiator").is_some());
+        assert!(
+            builder.take_non_fatal_errors().is_empty(),
+            "template-only legacy rebuild should stay silent"
+        );
+    }
+
+    #[test]
+    fn csv_authored_policy_keeps_linked_wet_distribution_without_warning() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Systems
+Name,Type
+Living circuit,WetDistribution
+
+Wet Emitters
+Name,Zone,Type,subcategory,unit_number,space_heat_system
+Radiator,Living,WetEmitter,radiator,1,Living circuit
+"#;
+        let csv_data = parse_csv(csv);
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        result["SpaceHeatSystem"]["Living circuit"] = json!({
+            "type": "WetDistribution",
+            "Zone": "Living",
+            "design_flow_temp": 45,
+            "thermal_mass": 0.2
+        });
+
+        builder
+            .merge_wet_emitters(&mut result, &csv_data)
+            .expect("linked authored system should be preserved");
+
+        let system = result["SpaceHeatSystem"]["Living circuit"]
+            .as_object()
+            .expect("linked authored system should remain");
+        assert_eq!(system["design_flow_temp"], 45);
+        assert_eq!(system["emitters"].as_array().unwrap().len(), 1);
+        assert!(
+            builder
+                .take_non_fatal_errors()
+                .iter()
+                .all(|error| error.code != "E059"),
+            "linked authored systems should not produce E059"
+        );
+    }
+
+    #[test]
+    fn csv_authored_policy_keeps_unlinked_wet_distribution_and_warns() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Systems
+Name,Type
+Living circuit,WetDistribution
+
+Wet Emitters
+Name,Zone,Type,subcategory,unit_number,space_heat_system
+Radiator,Living,WetEmitter,radiator,1,
+"#;
+        let csv_data = parse_csv(csv);
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        result["SpaceHeatSystem"]["Living circuit"] = json!({
+            "type": "WetDistribution",
+            "Zone": "Living",
+            "design_flow_temp": 45
+        });
+
+        builder
+            .merge_wet_emitters(&mut result, &csv_data)
+            .expect("unlinked authored system should produce a non-fatal error");
+
+        assert!(
+            result["SpaceHeatSystem"].get("Living circuit").is_some(),
+            "CSV-authored WetDistribution must not be silently deleted"
+        );
+        let errors = builder.take_non_fatal_errors();
+        let error = errors
+            .iter()
+            .find(|error| error.code == "E059")
+            .expect("unlinked authored WetDistribution should produce E059");
+        assert!(error.message.contains("Living circuit"));
+        assert!(error.message.contains("space_heat_system"));
+        assert!(error.message.contains("remove the Systems row"));
+    }
+
+    #[test]
+    fn csv_authored_policy_legacy_csv_keeps_dry_system_and_warns() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Systems
+Name,Zone,Type,subcategory,extra_json
+Direct heater,Living,System,SpaceHeatSystem,"{""SpaceHeatSystem"":{""Direct heater"":{""type"":""InstantElecHeater"",""rated_power"":2.5}}}"
+
+Wet Emitters
+Name,Zone,Type,subcategory,unit_number
+Radiator,Living,WetEmitter,radiator,1
+"#;
+
+        let (json, errors) = build_partial_json_with_errors(csv, DEFAULTS_PATH);
+
+        assert!(
+            json["SpaceHeatSystem"].get("Direct heater").is_some(),
+            "legacy wet rebuild must not delete a CSV-authored dry system"
+        );
+        assert!(json["SpaceHeatSystem"].get("Living radiator").is_some());
+        let error = errors
+            .iter()
+            .find(|error| error.code == "E059")
+            .expect("preserved authored dry system should produce E059");
+        assert!(error.message.contains("Direct heater"));
+        assert!(error.message.contains("space_heat_system"));
+        assert!(error.message.contains("remove the Systems row"));
     }
 
     #[test]
@@ -10780,6 +10977,7 @@ radiator 2,Bedroom,WetEmitter,radiator,1.5
 mod onsite_generation_tests {
     use super::*;
     use crate::parser::CSVParser;
+    use serde_json::json;
 
     const SCHEMA_PATH: &str = crate::schema_paths::CORE_UPSTREAM_SCHEMA_REL_PATH;
     const DEFAULTS_PATH: &str = "../../data/defaults/defaults_template.json";
@@ -10797,6 +10995,26 @@ mod onsite_generation_tests {
             .process_root_level_sections(&mut result, &data)
             .expect("Root sections should process");
         result
+    }
+
+    fn builder_with_default_pv(default_pv: Value) -> JSONBuilder {
+        let mut builder =
+            JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        builder.defaults["OnSiteGeneration"] = json!({ "Default PV": default_pv });
+        builder.index_templates();
+        builder
+    }
+
+    fn merge_named_pv(builder: &JSONBuilder, result: &mut Value) {
+        let csv = r#"On-Site Generation
+Name,Type,generation_type,pitch,orientation360,base_height,peak_power
+PV South,OnSiteGeneration,PhotovoltaicSystem,30,180,10,2.5
+"#;
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(csv).expect("CSV should parse");
+        builder
+            .merge_onsite_generation(result, &data)
+            .expect("PV merge should succeed");
     }
 
     #[test]
@@ -11063,6 +11281,62 @@ PV South,OnSiteGeneration,PhotovoltaicSystem,30,180,10,2.5,"-6.460,-4.940,0.000|
 
         let pv_south = json["OnSiteGeneration"]["PV South"].as_object().unwrap();
         assert_eq!(pv_south["peak_power"].as_f64().unwrap(), 2.5);
+    }
+
+    #[test]
+    fn untouched_seed_default_pv_is_removed_when_named_pv_arrives() {
+        let builder = builder_with_default_pv(json!({
+            "type": "PhotovoltaicSystem",
+            "peak_power": 0,
+            "EnergySupply": "mains elec"
+        }));
+        let mut result = builder.defaults.clone();
+
+        merge_named_pv(&builder, &mut result);
+
+        assert!(result["OnSiteGeneration"].get("Default PV").is_none());
+        assert!(result["OnSiteGeneration"].get("PV South").is_some());
+    }
+
+    #[test]
+    fn authored_zero_peak_default_pv_is_kept_when_named_pv_arrives() {
+        let builder = builder_with_default_pv(json!({
+            "type": "PhotovoltaicSystem",
+            "peak_power": 0,
+            "EnergySupply": "mains elec"
+        }));
+        let mut result = builder.defaults.clone();
+        result["OnSiteGeneration"]["Default PV"]["pitch"] = json!(15);
+
+        merge_named_pv(&builder, &mut result);
+
+        let default_pv = result["OnSiteGeneration"]["Default PV"]
+            .as_object()
+            .expect("authored Default PV should be kept");
+        assert_eq!(default_pv["peak_power"], 0);
+        assert_eq!(default_pv["pitch"], 15);
+    }
+
+    #[test]
+    fn missing_peak_power_uses_seed_equality_instead_of_value_fallback() {
+        let builder = builder_with_default_pv(json!({
+            "type": "PhotovoltaicSystem",
+            "EnergySupply": "mains elec"
+        }));
+
+        let mut untouched_result = builder.defaults.clone();
+        merge_named_pv(&builder, &mut untouched_result);
+        assert!(untouched_result["OnSiteGeneration"]
+            .get("Default PV")
+            .is_none());
+
+        let mut authored_result = builder.defaults.clone();
+        authored_result["OnSiteGeneration"]["Default PV"]["orientation360"] = json!(180);
+        merge_named_pv(&builder, &mut authored_result);
+        assert_eq!(
+            authored_result["OnSiteGeneration"]["Default PV"]["orientation360"],
+            180
+        );
     }
 }
 
