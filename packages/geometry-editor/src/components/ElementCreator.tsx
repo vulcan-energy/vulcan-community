@@ -17,7 +17,6 @@ import {
   isGlobalObject,
   getAdjacentPartyWallUiToggleLabel,
 } from '../stores/geometryStore';
-import { ZONE_OVERRIDE_EPSILON } from '../lib/zoneDerivation';
 import {
   bindElementFormModule,
   type ElementFormInstance,
@@ -1219,6 +1218,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const syncZoneHeightValue = zoneHeightInput.syncValue;
   const zoneFloorArea = zoneFloorAreaInput.value;
   const zoneHeight = zoneHeightInput.value;
+  // Per-field touch tracking for the zone form's authored-override flags
+  // (override-provenance parity with the SLOPE/PV forms): only a user
+  // keystroke in one of these two inputs — never a programmatic prefill or
+  // reset — should be able to pin _floorAreaUserOverride/_heightUserOverride
+  // true on submit. Keyed by selection id, same idiom as
+  // profileHeightsPopoverOpen above: switching zones (or away and back)
+  // resets both flags to untouched.
+  const [zoneFieldsTouched, setZoneFieldsTouched] = useKeyedState<{ floorArea: boolean; height: boolean }>(
+    selection?.id ?? 'none',
+    { floorArea: false, height: false },
+  );
   const [simplifiedThermalBridging, setSimplifiedThermalBridging] = useState<boolean>(false);
   const zoneVolume = useMemo(
     () => calculateZoneVolume(zoneFloorArea, zoneHeight),
@@ -3198,48 +3208,44 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 	      const submittedLivingroomArea: number | undefined = undefined;
 	      const submittedRestOfDwellingArea: number | undefined = undefined;
 
-      // Determine if the user has overridden derived values.
-      // Compare submitted values to live derived values — if they differ,
-      // the user wants a manual override; if they match, auto-track geometry.
-      let floorAreaUserOverride = false;
-      let heightUserOverride = false;
-      if (selection && selection.type === 'zone') {
-        const allElements = Object.values(elementsById) as import('../geometry/types').Element[];
-        const { floorArea: derivedArea } = calculateDerivedFloorArea(selection.id, allElements);
-        floorAreaUserOverride = derivedArea > 0 && submittedFloorArea !== undefined && submittedFloorArea > 0
-          && Math.abs(submittedFloorArea - derivedArea) > ZONE_OVERRIDE_EPSILON;
-
-        const derivedH = calculateDerivedHeight(selection.id, allElements);
-        heightUserOverride = derivedH > 0 && submittedHeight !== undefined && submittedHeight > 0
-          && Math.abs(submittedHeight - derivedH) > ZONE_OVERRIDE_EPSILON;
+      // Author the override flags from what the user actually EDITED this
+      // form session (zoneFieldsTouched), not from comparing the submitted
+      // value to the live geometry-derived value — typing the exact derived
+      // number must still pin it (override-provenance parity with the
+      // SLOPE/PV forms). A field the user never touched is omitted from the
+      // patch entirely, value and flag alike, so updateZone's own
+      // derived-vs-submitted inference (still in place for flag-less
+      // callers) is never even asked to run for it.
+      const zoneOverridePatch: Partial<Zone> = {};
+      if (zoneFieldsTouched.floorArea) {
+        zoneOverridePatch.floorArea = submittedFloorArea;
+        zoneOverridePatch._floorAreaUserOverride = true;
+      }
+      if (zoneFieldsTouched.height) {
+        zoneOverridePatch.height = submittedHeight;
+        zoneOverridePatch._heightUserOverride = true;
       }
 
       if (selection && selection.type === 'zone') {
         if (selection.isPlaceholder) {
 	          updateZone(selection.id, {
 	            name: zoneName,
-	            floorArea: submittedFloorArea,
-	            height: submittedHeight,
 	            volume: zoneVolume,
             livingroom_area: submittedLivingroomArea,
             restofdwelling_area: submittedRestOfDwellingArea,
             isPlaceholder: false,
             simplifiedThermalBridging: simplifiedThermalBridging,
-            _floorAreaUserOverride: floorAreaUserOverride,
-            _heightUserOverride: heightUserOverride
+            ...zoneOverridePatch,
           });
           setSelection({ type: 'zone', id: selection.id });
         } else {
 	          updateZone(selection.id, {
 	            name: zoneName,
-	            floorArea: submittedFloorArea,
-	            height: submittedHeight,
 	            volume: zoneVolume,
             livingroom_area: submittedLivingroomArea,
             restofdwelling_area: submittedRestOfDwellingArea,
             simplifiedThermalBridging: simplifiedThermalBridging,
-            _floorAreaUserOverride: floorAreaUserOverride,
-            _heightUserOverride: heightUserOverride
+            ...zoneOverridePatch,
           });
         }
       } else {
@@ -5362,6 +5368,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                               <StandardInput
                                 {...decimalInputProps(zoneFloorAreaInput)}
                                 unit={fieldUnit('floorArea', 'Zone')}
+                                onChange={(e) => {
+                                  zoneFloorAreaInput.handleInputChange(e);
+                                  setZoneFieldsTouched((prev) => (
+                                    prev.floorArea ? prev : { ...prev, floorArea: true }
+                                  ));
+                                }}
                                 onBlur={(e) => {
                                   const rawValue = e.currentTarget.value.trim();
                                   zoneFloorAreaInput.handleBlur(e);
@@ -5370,7 +5382,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                                     typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : '',
                                   );
                                   if (nextFloorArea != null) {
-                                    commitExistingZoneDraft({ floorArea: nextFloorArea });
+                                    // A touched field is authored: the explicit flag pins the value even
+                                    // when it equals the derived one. Untouched blurs (focus passing
+                                    // through the prefilled value) stay flag-less and leave the store's
+                                    // inference to no-op.
+                                    commitExistingZoneDraft(
+                                      zoneFieldsTouched.floorArea
+                                        ? { floorArea: nextFloorArea, _floorAreaUserOverride: true }
+                                        : { floorArea: nextFloorArea },
+                                    );
                                   }
                                 }}
                                 step="0.1"
@@ -5384,6 +5404,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                               <ResetFieldButton
                                 onClick={() => {
                                   zoneFloorAreaInput.setValue(derivedValue);
+                                  setZoneFieldsTouched((prev) => (
+                                    prev.floorArea ? { ...prev, floorArea: false } : prev
+                                  ));
                                   if (selection?.type === 'zone') {
                                     updateZone(selection.id, {
                                       floorArea: derivedValue,
@@ -5503,6 +5526,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                             <StandardInput
                               {...decimalInputProps(zoneHeightInput)}
                               unit={fieldUnit('height', 'Zone')}
+                              onChange={(e) => {
+                                zoneHeightInput.handleInputChange(e);
+                                setZoneFieldsTouched((prev) => (
+                                  prev.height ? prev : { ...prev, height: true }
+                                ));
+                              }}
                               onBlur={(e) => {
                                 const rawValue = e.currentTarget.value.trim();
                                 zoneHeightInput.handleBlur(e);
@@ -5511,7 +5540,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                                   typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : '',
                                 );
                                 if (nextHeight != null) {
-                                  commitExistingZoneDraft({ height: nextHeight });
+                                  // Touched = authored (see the floorArea twin above).
+                                  commitExistingZoneDraft(
+                                    zoneFieldsTouched.height
+                                      ? { height: nextHeight, _heightUserOverride: true }
+                                      : { height: nextHeight },
+                                  );
                                 }
                               }}
                               step="0.1"
@@ -5526,6 +5560,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                             <ResetFieldButton
                               onClick={() => {
                                 zoneHeightInput.setValue(derivedH);
+                                setZoneFieldsTouched((prev) => (
+                                  prev.height ? { ...prev, height: false } : prev
+                                ));
                                 if (selection?.type === 'zone') {
                                   updateZone(selection.id, { height: derivedH, _heightUserOverride: false });
                                 }
