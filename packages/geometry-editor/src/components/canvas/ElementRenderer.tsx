@@ -16,7 +16,7 @@ import {
 import { calculateDirectionArrow, calculateArrowPoints } from '../../lib/directionArrows';
 import type { DrawMode } from '../../hooks/useDrawingMode';
 import {
-  polygonEdgeOutwardBearings,
+  polygonEdgePerpendicularBearings,
   segmentTangentAndOpeningOutwardModelXY,
   shortestSignedCompassDeltaDeg,
 } from '../../lib/openingSegmentOutward';
@@ -2655,7 +2655,12 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       );
                       type BearingCandidate =
                         | { kind: 'neighbour'; bearing: number; sourceElementId: string }
-                        | { kind: 'own-edge'; bearing: number; sourceEdgeIndex: number };
+                        | {
+                            kind: 'own-edge';
+                            bearing: number;
+                            sourceEdgeIndex: number;
+                            edgeRole: 'low' | 'top';
+                          };
                       const candidates: BearingCandidate[] = [];
                       for (const candidate of Object.values(elementsById)) {
                         if (
@@ -2671,11 +2676,20 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                           sourceElementId: candidate.id,
                         });
                       }
-                      for (const { edgeIndex, bearing } of polygonEdgeOutwardBearings(
+                      // Both senses stay snappable — squaring off an edge is what makes it
+                      // classifiable as eaves or ridge, and the 5° grid cannot land those
+                      // bearings — but only the apex-down sense earns on-canvas guidance;
+                      // hinging along an edge is already plain from the contour.
+                      for (const { edgeIndex, bearing, edgeRole } of polygonEdgePerpendicularBearings(
                         coordinates,
                         resolvedGlobalOrientationOffset,
                       )) {
-                        candidates.push({ kind: 'own-edge', bearing, sourceEdgeIndex: edgeIndex });
+                        candidates.push({
+                          kind: 'own-edge',
+                          bearing,
+                          sourceEdgeIndex: edgeIndex,
+                          edgeRole,
+                        });
                       }
 
                       let snappedCandidate: BearingCandidate | null = null;
@@ -2707,6 +2721,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                                 kind: 'edge-normal',
                                 sourceElementId: element.id,
                                 sourceEdgeIndex: snappedCandidate.sourceEdgeIndex,
+                                edgeRole: snappedCandidate.edgeRole,
                                 value: orientation360,
                               }
                             : { kind: 'angle-step', value: orientation360 };
@@ -2714,7 +2729,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                       setOrientationArrowGripFill(
                         e.target,
                         element.id,
-                        snapEvent?.kind === 'neighbour-bearing' || snapEvent?.kind === 'edge-normal'
+                        snapEvent?.kind === 'neighbour-bearing' ||
+                        (snapEvent?.kind === 'edge-normal' && snapEvent.edgeRole === 'top')
                           ? canvasInteractionPalette.snap
                           : canvasInteractionPalette.handleFill,
                       );

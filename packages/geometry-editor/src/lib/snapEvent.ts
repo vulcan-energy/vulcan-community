@@ -18,6 +18,8 @@ export type SnapEvent = {
   sourceElementId?: string;
   sourceVertexOrder?: number;
   sourceEdgeIndex?: number;
+  /** edge-normal snaps: whether the squared-off edge is the plane's low or top edge. */
+  edgeRole?: 'low' | 'top';
   value?: number;
   position?: { x: number; y: number }; // snapped control point in model coordinates
 };
@@ -30,6 +32,7 @@ export function snapEventsEqual(a: SnapEvent | null, b: SnapEvent | null): boole
     a.sourceElementId === b.sourceElementId &&
     a.sourceVertexOrder === b.sourceVertexOrder &&
     a.sourceEdgeIndex === b.sourceEdgeIndex &&
+    a.edgeRole === b.edgeRole &&
     a.value === b.value &&
     a.position?.x === b.position?.x &&
     a.position?.y === b.position?.y

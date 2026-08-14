@@ -43,6 +43,12 @@ function angularPillText(event: SnapEvent, sourceElement: Element | undefined): 
   const value = event.kind === 'right-angle' ? 90 : event.value;
   if (value === undefined) return null;
   const rounded = Math.round(value * 10) / 10;
+  // An own-edge snap points at the dragged element itself, so its own name says
+  // nothing. Only the apex-down sense is called out: hinging along an edge is
+  // already plain from the contour, so it reads as a bare bearing.
+  if (event.kind === 'edge-normal') {
+    return event.edgeRole === 'top' ? `${rounded}° · top edge` : `${rounded}°`;
+  }
   const sourceLabel = event.sourceElementId
     ? sourceElement?.name || event.sourceElementId
     : null;
@@ -100,6 +106,7 @@ export const LiveSnapFeedback = memo<LiveSnapFeedbackProps>(function LiveSnapFee
   const sourceCoordinates = sourceElement?.coordinates;
   if (
     event.kind === 'edge-normal' &&
+    event.edgeRole === 'top' &&
     event.sourceEdgeIndex !== undefined &&
     sourceCoordinates &&
     sourceCoordinates.length > 1

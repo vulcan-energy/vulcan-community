@@ -21,8 +21,8 @@ describe('Direction Arrow Calculations', () => {
 
       const result = calculateDirectionArrow(element as any, 30);
 
-      // Drag-control arrow scales with the footprint: 0.35 * sqrt(area 6), floor 0.25.
-      const arrowLength = 0.35 * Math.sqrt(6);
+      // One fixed length for every direction arrow, footprint-independent.
+      const arrowLength = 0.25;
       expect(result?.centerX).toBeCloseTo(2, 12);
       expect(result?.centerY).toBeCloseTo(1, 12);
       expect(result?.arrowX).toBeCloseTo(2 + arrowLength, 12);
@@ -30,21 +30,28 @@ describe('Direction Arrow Calculations', () => {
       expect(result?.orientation).toBe(60);
     });
 
-    it('never shrinks the Orientation-axis arrow below the fixed-length convention', () => {
-      const element = {
-        type: 'BuildingElementOpaque' as const,
-        coordinates: [
-          { x: 0, y: 0, z: 0 },
-          { x: 0.4, y: 0, z: 0 },
-          { x: 0.2, y: 0.3, z: 0 },
-        ],
-        pitch: 30,
-        orientation360: 90,
-        extra_json: { _slope_pitch_axis: 'orientation' },
-      };
+    it('uses the same fixed length on a large footprint as on a small one', () => {
+      const arrowXFor = (coordinates: Array<{ x: number; y: number; z: number }>) =>
+        calculateDirectionArrow({
+          type: 'BuildingElementOpaque' as const,
+          coordinates,
+          pitch: 30,
+          orientation360: 90,
+          extra_json: { _slope_pitch_axis: 'orientation' },
+        } as any, 0)?.arrowX;
 
-      const result = calculateDirectionArrow(element as any, 0);
-      expect(result?.arrowX).toBeCloseTo(0.2 + 0.25, 12);
+      expect(arrowXFor([
+        { x: 0, y: 0, z: 0 },
+        { x: 0.4, y: 0, z: 0 },
+        { x: 0.2, y: 0.3, z: 0 },
+      ])).toBeCloseTo(0.2 + 0.25, 12);
+      // 200 m²: the footprint-scaled convention would have made this arrow ~5 m.
+      expect(arrowXFor([
+        { x: 0, y: 0, z: 0 },
+        { x: 20, y: 0, z: 0 },
+        { x: 20, y: 10, z: 0 },
+        { x: 0, y: 10, z: 0 },
+      ])).toBeCloseTo(10 + 0.25, 12);
     });
 
     it('keeps the bottom-edge sloped arrow on the first-edge midpoint', () => {

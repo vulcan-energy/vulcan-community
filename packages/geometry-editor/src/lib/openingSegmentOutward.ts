@@ -47,24 +47,67 @@ export function orientation360FromSegmentOutwardModelXY(
   return wrapOrientation360(bearing + globalOrientationOffset);
 }
 
-/** Outward-normal compass bearings for every non-degenerate edge in a closed polygon. */
-export function polygonEdgeOutwardBearings(
+/** Where an edge sits on a plane whose fall line runs perpendicular to it. */
+export type PolygonEdgeSlopeRole = 'low' | 'top';
+
+export type PolygonEdgePerpendicularBearing = {
+  edgeIndex: number;
+  bearing: number;
+  edgeRole: PolygonEdgeSlopeRole;
+};
+
+/**
+ * Both fall-line bearings perpendicular to each polygon edge, in stored
+ * `orientation360` space.
+ *
+ * An edge admits two square alignments and they are not interchangeable: falling
+ * towards the edge puts the hinge along it (`low`), falling away puts the hinge
+ * through the opposite corner and makes the edge the top of the plane (`top`) —
+ * the apex-down case that is hard to hit by eye.
+ *
+ * The role is decided by projecting every vertex on the edge normal, not by the
+ * normal's sign or a centroid test: winding cannot invert an extreme, and an edge
+ * that is neither extreme (a concave ring's mid-plane edge) is correctly offered
+ * as neither, instead of being mislabelled the top.
+ */
+export function polygonEdgePerpendicularBearings(
   coords: Array<{ x: number; y: number }>,
   globalOrientationOffset = 0,
-): Array<{ edgeIndex: number; bearing: number }> {
-  if (coords.length < 2) return [];
-  const bearings: Array<{ edgeIndex: number; bearing: number }> = [];
+): PolygonEdgePerpendicularBearing[] {
+  if (coords.length < 3) return [];
+  const bearings: PolygonEdgePerpendicularBearing[] = [];
   for (let edgeIndex = 0; edgeIndex < coords.length; edgeIndex++) {
     const a = coords[edgeIndex]!;
     const b = coords[(edgeIndex + 1) % coords.length]!;
-    const bearing = orientation360FromSegmentOutwardModelXY(
-      a.x,
-      a.y,
-      b.x,
-      b.y,
-      globalOrientationOffset,
-    );
-    if (bearing !== null) bearings.push({ edgeIndex, bearing });
+    // Bearings are derived geometrically and then moved into stored space by
+    // subtracting the site offset, matching the rest of the model.
+    const geometricBearing = orientation360FromSegmentOutwardModelXY(a.x, a.y, b.x, b.y, 0);
+    if (geometricBearing === null) continue;
+    const { openingOutward } = segmentTangentAndOpeningOutwardModelXY(a.x, a.y, b.x, b.y);
+    // The edge is perpendicular to its own normal, so both endpoints share this.
+    const edgeProjection = a.x * openingOutward[0] + a.y * openingOutward[1];
+    let maxProjection = -Infinity;
+    let minProjection = Infinity;
+    for (const point of coords) {
+      const projection = point.x * openingOutward[0] + point.y * openingOutward[1];
+      if (projection > maxProjection) maxProjection = projection;
+      if (projection < minProjection) minProjection = projection;
+    }
+    const span = maxProjection - minProjection;
+    if (!(span > 0)) continue;
+    const tolerance = Math.max(1e-9, span * 1e-6);
+    const towardsEdge = wrapOrientation360(geometricBearing - globalOrientationOffset);
+    // Falling along the normal makes the far side of the plane the low one.
+    let towardsEdgeRole: PolygonEdgeSlopeRole;
+    if (edgeProjection >= maxProjection - tolerance) towardsEdgeRole = 'low';
+    else if (edgeProjection <= minProjection + tolerance) towardsEdgeRole = 'top';
+    else continue;
+    bearings.push({ edgeIndex, bearing: towardsEdge, edgeRole: towardsEdgeRole });
+    bearings.push({
+      edgeIndex,
+      bearing: wrapOrientation360(towardsEdge + 180),
+      edgeRole: towardsEdgeRole === 'low' ? 'top' : 'low',
+    });
   }
   return bearings;
 }
