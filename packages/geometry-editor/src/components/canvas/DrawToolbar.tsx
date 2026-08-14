@@ -332,7 +332,16 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
           addDisabled={in3D}
         />
         <StandardDropdown
-          value={drawMode === 'none' ? '' : drawMode}
+          // Only a mode this toolbar OFFERS may appear as its value. `drawMode` also
+          // carries internal modes no element type's option list ever contains --
+          // `space-label-polygon` (entered from the Space Labeller's "Draw a manual
+          // room footprint", with this toolbar still mounted) and `none` -- and
+          // StandardDropdown now renders an unmatched value as a literal
+          // "<value> (not in list)" entry rather than silently showing the first
+          // option. Honest for stored data; wrong here, where the unmatched value is
+          // an internal token the user never chose. Showing the placeholder says the
+          // true thing instead: no shape tool is active.
+          value={drawModeOptions.some((option) => option.value === drawMode) ? drawMode : ''}
           onChange={handleDrawModeChange}
           options={drawModeOptions}
           placeholder="Select shape..."

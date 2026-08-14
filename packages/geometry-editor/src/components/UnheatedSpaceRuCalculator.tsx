@@ -424,7 +424,13 @@ export const UnheatedSpaceRuCalculator: React.FC<UnheatedSpaceRuCalculatorProps>
                   Exposed wall assembly (optional)
                 </div>
                 <StandardDropdown
-                  value={formula.exposedAssemblyId}
+                  // While the assembly library is still loading, `assemblyOptions` is
+                  // just the "Manual U only" entry, so a persisted assembly id would
+                  // flash as "<id> (not in list)" right beside the "Loading assembly
+                  // library…" text. Hold the select at '' until the library resolves;
+                  // once it has, an id that genuinely is not in the library shows the
+                  // sentinel, which is then the honest steady state.
+                  value={library ? formula.exposedAssemblyId : ''}
                   onChange={(v) => setFormula((f) => ({ ...f, exposedAssemblyId: v ?? '' }))}
                   options={assemblyOptions}
                   size="md"
