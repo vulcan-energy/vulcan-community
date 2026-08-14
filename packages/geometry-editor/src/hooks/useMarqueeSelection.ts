@@ -20,6 +20,7 @@ import {
 } from '../components/canvas/vertexDragSession';
 import type { OrthogonalRoomEditingState } from './useDrawingMode';
 import { isElementOnActiveCanvasFloor, type CanvasFloorListEntry } from '../lib/elementCanvasFloor';
+import { selectionForElement } from '../lib/drawnElementSelection';
 import {
   createMarqueeSelectionSignal,
   type MarqueeSelectionPreview,
@@ -326,18 +327,7 @@ export function useMarqueeSelection(deps: UseMarqueeSelectionDeps) {
 
       if (elementIds.length === 1) {
         const selectedElement = elementsInMarquee[0];
-        const isGlobalObject = [
-          'WaterPipework',
-          'Appliance',
-          'HotWaterDemand',
-          'ContextShading',
-          'Vents',
-          'MechanicalVentilation',
-          'CombustionAppliances',
-          'System',
-        ].includes(selectedElement.type);
-        const selectionType = isGlobalObject ? 'global' : 'element';
-        setSelection({ type: selectionType, id: selectedElement.id });
+        setSelection(selectionForElement(selectedElement));
       } else {
         setSelection(null);
       }

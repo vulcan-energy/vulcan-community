@@ -1,12 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { Element } from '../geometry/types';
 import { isGlobalObject, type GeometryStoreApi } from '../stores/geometryStore';
 
 export type DrawnElementSelection = {
   type: 'element' | 'global';
   id: string;
 };
+
+export function selectionForElement(element: Element): DrawnElementSelection {
+  return {
+    type: isGlobalObject(element) ? 'global' : 'element',
+    id: element.id,
+  };
+}
 
 /**
  * Selection for an element the canvas has just created.
@@ -21,8 +29,5 @@ export function selectionForDrawnElement(
   elementId: string,
 ): DrawnElementSelection {
   const created = store.getState().elementsById[elementId];
-  return {
-    type: created && isGlobalObject(created) ? 'global' : 'element',
-    id: elementId,
-  };
+  return created ? selectionForElement(created) : { type: 'element', id: elementId };
 }
