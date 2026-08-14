@@ -123,6 +123,20 @@ export interface WallSharedFormGroup {
   ) => void;
 }
 
+export const buildWallSharedWidthCommitOverrides = (
+  value: number,
+  isSlopedPolygon: boolean,
+): Partial<Element> => isSlopedPolygon
+  ? { width: value, _widthUserOverride: true }
+  : { width: value };
+
+export const buildWallSharedHeightCommitOverrides = (
+  value: number,
+  isSlopedPolygon: boolean,
+): Partial<Element> => isSlopedPolygon
+  ? { height: value, _heightUserOverride: true }
+  : { height: value };
+
 export function useWallSharedFormState(args: {
   elementType: ElementType;
   selection: ElementFormSelection | null;
@@ -169,9 +183,13 @@ export function useWallSharedFormState(args: {
   const commitElementWidthField = (value: number | '') => {
     if (value === '') return;
     const width = typeof value === 'number' ? value : undefined;
-    const overrides: Record<string, unknown> = { width: value };
+    const isSlopedPolygon = isSelectedSlopedFabricPolygon();
+    const overrides: Record<string, unknown> = buildWallSharedWidthCommitOverrides(
+      value,
+      isSlopedPolygon,
+    );
     if (
-      !isSelectedSlopedFabricPolygon() &&
+      !isSlopedPolygon &&
       (
         elementType === 'BuildingElementOpaque'
         || elementType === 'BuildingElementTransparent'
@@ -189,9 +207,13 @@ export function useWallSharedFormState(args: {
   const commitElementHeightField = (value: number | '') => {
     if (value === '') return;
     const height = typeof value === 'number' ? value : undefined;
-    const overrides: Record<string, unknown> = { height: value };
+    const isSlopedPolygon = isSelectedSlopedFabricPolygon();
+    const overrides: Record<string, unknown> = buildWallSharedHeightCommitOverrides(
+      value,
+      isSlopedPolygon,
+    );
     if (
-      !isSelectedSlopedFabricPolygon() &&
+      !isSlopedPolygon &&
       (
         elementType === 'BuildingElementOpaque'
         || elementType === 'BuildingElementTransparent'
