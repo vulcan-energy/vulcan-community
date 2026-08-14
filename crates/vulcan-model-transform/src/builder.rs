@@ -688,10 +688,16 @@ fn overlay_row_onto_seed(
     // extra_json arrives as a parsed object from the CSV parser, or as a raw
     // string in some sections — accept both.
     let extra_json_obj = match row.get("extra_json") {
+        // Already sanitized at the merge entry point by `sanitize_csv_extra_json`.
         Some(Value::Object(obj)) => Some(obj.clone()),
+        // A DOUBLE-ENCODED cell reaches the merge as a string, so the entry-point pass never
+        // saw it — it only rewrites object cells. Re-parsing here turns it back into mergeable
+        // data, so it has to be sanitized at this parse point or cleared fields inside it would
+        // clobber the seed. This is the only consumer that can resurrect a string cell.
         Some(Value::String(raw)) => serde_json::from_str::<Value>(raw)
             .ok()
-            .and_then(|v| v.as_object().cloned()),
+            .and_then(|v| v.as_object().cloned())
+            .map(|obj| sanitize_extra_json_object(&obj)),
         _ => None,
     };
     if let Some(extra_json) = extra_json_obj {
@@ -703,9 +709,8 @@ fn overlay_row_onto_seed(
             if !allowed.is_empty() && !allowed.contains(k) {
                 continue;
             }
-            if !csv_cell_is_set(v) {
-                continue;
-            }
+            // No blank check here: `sanitize_csv_extra_json` already removed cleared
+            // `extra_json` values, at every depth, before the merge started.
             seed.insert(k.clone(), v.clone());
         }
     }
@@ -714,6 +719,133 @@ fn overlay_row_onto_seed(
         seed.retain(|k, _| allowed.contains(k));
     }
     seed
+}
+
+/// The one place the merge decides that a *cleared* `extra_json` field is not an input.
+///
+/// Run once over the whole parsed CSV at the top of [`JSONBuilder::build_json`], which is the
+/// single merge entry point (`transform_geometry_csv` is its only production caller and the wasm
+/// crate wraps that). Every `extra_json` merge loop downstream — there are around thirty, and
+/// four of them never had a guard at all — therefore sees an `extra_json` object that no longer
+/// contains a cleared field, at any depth. Doing it here rather than per loop is what makes the
+/// NESTED case work: a per-loop guard can only inspect the top level of the cell, so a cleared
+/// field inside `edge_insulation[0]`, `treatment[0]` or `HeatSourceWet.<name>` used to travel
+/// straight into the merged HEM JSON on every route.
+///
+/// TWO RULES, and they are deliberately not the same rule.
+///
+/// 1. At the TOP LEVEL of the `extra_json` object: drop keys whose value is *blank* — `null`, or
+///    a string that is empty after trimming. This is the published merge-precedence contract
+///    ("Blank cells (null / empty string) leave the seed value in place", see the comment above
+///    [`csv_cell_is_set`], which this reuses so the two cannot drift). A top-level `extra_json`
+///    key is peer to a CSV column, so it gets the CSV column's blank handling.
+///
+/// 2. BELOW the top level: drop object keys whose value is EXACTLY `""`, with no trimming. This
+///    is a different rule because it is enforcing a different thing — the browser's save
+///    boundary. `NumberControl` writes `''` as its cleared sentinel the moment a user backspaces
+///    the last digit of a numeric Advanced Field, and the web app strips it in
+///    `web/src/lib/snippetSavePayload.ts` (`stripEmptyStringValues`). This function is that
+///    function's engine-side mirror, down to its limits, and the two must not drift: the web
+///    strip covers the snippet editors' save path only, and every other route into the merge
+///    (the geometry CSV round-trip, the MCP server, the batch CLI, a hand-edited CSV) arrives
+///    here instead.
+///
+/// WHY THE RULE IS SOUND, and the justification is SEMANTIC, not schema-derived. `""` is
+/// technically schema-VALID for any string property: `minLength` is declared nowhere in either
+/// published schema, so no "the schema forbids it" claim is available and none is made. The rule
+/// stands on two other things. First, an empty string is not a value a user *meant* — it is what
+/// a cleared input control leaves behind. Second, HEM core itself already converges `""` with
+/// absence: `corpus.rs` matches `"" => None` when resolving system references, so the engine
+/// reads a cleared reference exactly as it reads a missing one.
+///
+/// DELIBERATE LIMITS, inherited from the web mirror.
+///  - Array ELEMENTS that are `""` are left in place. Dropping one silently renumbers its
+///    siblings, which is not what clearing a field means.
+///  - Parent objects left empty by a strip are NOT pruned. `{a:{b:""}}` becomes `{a:{}}`.
+///    Removing `a` as well would be a second, unrequested rule.
+///  - Nested `null` is KEPT. Unlike the top level, `null` below it is a meaningful value: the
+///    `anyOf [X, null]` branches in these schemas are live, so a nested `null` is an authored
+///    choice rather than an empty cell.
+///  - Nested whitespace-only strings such as `"  "` are KEPT, for parity with the web strip's
+///    exact-`''` comparison. Only the top level trims.
+///
+/// THE ONE GAP, and where it is closed. A cell whose `extra_json` is not an object is returned
+/// untouched, and "not an object" is a wider set than it looks. `parse_extra_json_value` in
+/// `vulcan-csv-codec` returns ANY valid JSON — it calls `as_object_mut` only to strip `_`-prefixed
+/// keys, and simply skips that step for a non-object — so a *double-encoded* cell (a valid JSON
+/// string literal whose contents are object JSON) arrives here as a `Value::String` with no parse
+/// failure anywhere. It is not inert: `overlay_row_onto_seed`'s string branch re-parses exactly
+/// that shape back into mergeable data. That branch therefore sanitizes at its own parse point,
+/// and it is the only consumer that can resurrect a string cell. Do not assume elsewhere that a
+/// non-object cell has been discarded.
+///
+/// The app cannot author a double-encoded cell, but it can carry one: `parseExtraJson` in
+/// `packages/geometry-editor/src/geometry/io/parseCsvToGeometry.ts` does a bare
+/// `JSON.parse(...) as Record<string, unknown>` with no object check, so an externally authored
+/// one survives a round-trip intact.
+fn sanitize_csv_extra_json(
+    csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+) -> HashMap<String, Vec<HashMap<String, Value>>> {
+    csv_data
+        .iter()
+        .map(|(section, rows)| {
+            let rows = rows
+                .iter()
+                .map(|row| {
+                    let sanitized = match row.get("extra_json") {
+                        Some(Value::Object(obj)) => {
+                            Some(Value::Object(sanitize_extra_json_object(obj)))
+                        }
+                        _ => None,
+                    };
+                    let mut row = row.clone();
+                    if let Some(sanitized) = sanitized {
+                        row.insert("extra_json".to_string(), sanitized);
+                    }
+                    row
+                })
+                .collect();
+            (section.clone(), rows)
+        })
+        .collect()
+}
+
+/// Rule 1 (blank keys out) at the top level of one `extra_json` cell, then rule 2 below it.
+/// See [`sanitize_csv_extra_json`] for why the two levels differ.
+fn sanitize_extra_json_object(
+    extra_json: &serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    let mut sanitized = serde_json::Map::new();
+    for (key, value) in extra_json {
+        if !csv_cell_is_set(value) {
+            continue;
+        }
+        sanitized.insert(key.clone(), strip_nested_cleared_fields(value));
+    }
+    sanitized
+}
+
+/// Rule 2: recursively drop object keys whose value is exactly `""`. The mirror of
+/// `stripEmptyStringValues` in `web/src/lib/snippetSavePayload.ts`; keep the two in step,
+/// including the limits documented on [`sanitize_csv_extra_json`].
+fn strip_nested_cleared_fields(value: &Value) -> Value {
+    match value {
+        Value::Object(obj) => {
+            let mut stripped = serde_json::Map::new();
+            for (key, nested) in obj {
+                if nested.as_str() == Some("") {
+                    continue;
+                }
+                stripped.insert(key.clone(), strip_nested_cleared_fields(nested));
+            }
+            Value::Object(stripped)
+        }
+        // Array ELEMENTS are never dropped, only descended into.
+        Value::Array(items) => {
+            Value::Array(items.iter().map(strip_nested_cleared_fields).collect())
+        }
+        _ => value.clone(),
+    }
 }
 
 /// Metadata row names recognised by the merge pipeline. One list, shared by all
@@ -1293,6 +1425,12 @@ impl JSONBuilder {
         &mut self,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<Value, BuildError> {
+        // Cleared Advanced Fields must not reach the merged HEM JSON. One pass at the single
+        // merge entry point, so no downstream loop has to remember — and so the NESTED case is
+        // covered, which no per-loop guard can reach. See `sanitize_csv_extra_json`.
+        let sanitized_csv_data = sanitize_csv_extra_json(csv_data);
+        let csv_data = &sanitized_csv_data;
+
         // Parse DefaultThermalBridging from metadata early so it's available for zone processing
         self.parse_default_thermal_bridging_from_metadata(csv_data);
         self.parse_cold_water_source_from_metadata(csv_data);
@@ -1873,16 +2011,14 @@ impl JSONBuilder {
                                 // Only merge if:
                                 // 1. Property is valid for this element type
                                 // 2. Property is not already set by CSV columns (CSV takes precedence)
-                                // 3. Value is not null/empty
-                                // 4. Property is not position_xyz (CSV-only field)
+                                // 3. Property is not position_xyz (CSV-only field)
+                                // Cleared values need no check here: `sanitize_csv_extra_json`
+                                // removed them, at every depth, before the merge started.
                                 if allowed_building_element_props.contains(&storage_key)
                                     && !csv_set_keys.contains(&storage_key)
                                     && key != "position_xyz"
                                     && key != "pitch"
                                     && key != "is_external_door"
-                                    && !(value.is_null()
-                                        || (value.is_string()
-                                            && value.as_str().unwrap().is_empty()))
                                 {
                                     let processed_value = self.coerce_building_element_value(
                                         key,
@@ -3292,9 +3428,7 @@ impl JSONBuilder {
                                 if is_ui_only_extra_json_key(k) {
                                     continue;
                                 }
-                                if !csv_cell_is_set(v) {
-                                    continue;
-                                }
+                                // Cleared values are already gone: `sanitize_csv_extra_json`.
                                 if csv_set_keys.contains(k) {
                                     continue;
                                 }
@@ -3403,9 +3537,7 @@ impl JSONBuilder {
                                 if is_ui_only_extra_json_key(k) {
                                     continue;
                                 }
-                                if !csv_cell_is_set(v) {
-                                    continue;
-                                }
+                                // Cleared values are already gone: `sanitize_csv_extra_json`.
                                 // Skip only if this key was set by CSV columns (not defaults)
                                 if csv_set_keys.contains(k) {
                                     continue;
@@ -3565,9 +3697,8 @@ impl JSONBuilder {
                                         if is_ui_only_extra_json_key(k) {
                                             continue;
                                         }
-                                        if !csv_cell_is_set(v) {
-                                            continue;
-                                        }
+                                        // Cleared values are already gone:
+                                        // `sanitize_csv_extra_json`.
                                         if csv_set_keys.contains(k) {
                                             continue;
                                         }
@@ -8930,6 +9061,302 @@ mod extra_json_merge_tests {
             .process_root_level_sections(&mut result, &data)
             .expect("Root sections should process");
         result
+    }
+
+    /// The whole merge, including the `extra_json` sanitize pass. `build_partial_json` skips
+    /// `build_json` itself, so it cannot see the pass at all.
+    fn build_full_json(csv: &str) -> Value {
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        builder.build_json(&data).expect("CSV should merge")
+    }
+
+    fn sanitize(extra_json: Value) -> Value {
+        Value::Object(sanitize_extra_json_object(
+            extra_json.as_object().expect("test input is an object"),
+        ))
+    }
+
+    #[test]
+    fn sanitize_drops_blank_top_level_values() {
+        let sanitized = sanitize(serde_json::json!({
+            "cleared": "",
+            "nulled": null,
+            "whitespace": "   ",
+            "kept_number": 1.5,
+            "kept_string": "D",
+            "kept_false": false,
+            "kept_zero": 0,
+        }));
+
+        assert_eq!(
+            sanitized,
+            serde_json::json!({
+                "kept_number": 1.5,
+                "kept_string": "D",
+                "kept_false": false,
+                "kept_zero": 0,
+            })
+        );
+    }
+
+    #[test]
+    fn sanitize_drops_nested_cleared_field_in_object() {
+        // The headline bug: no per-loop guard can see below the top level.
+        let sanitized = sanitize(serde_json::json!({
+            "HeatSourceWet": { "hp": { "type": "HeatPumpSource", "power_max": "" } }
+        }));
+
+        assert_eq!(
+            sanitized,
+            serde_json::json!({
+                "HeatSourceWet": { "hp": { "type": "HeatPumpSource" } }
+            })
+        );
+    }
+
+    #[test]
+    fn sanitize_drops_nested_cleared_field_inside_array_element() {
+        let sanitized = sanitize(serde_json::json!({
+            "edge_insulation": [
+                { "type": "horizontal", "width": "", "edge_thermal_resistance": 1 }
+            ]
+        }));
+
+        assert_eq!(
+            sanitized,
+            serde_json::json!({
+                "edge_insulation": [
+                    { "type": "horizontal", "edge_thermal_resistance": 1 }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn sanitize_keeps_nested_null_and_whitespace() {
+        // Nested `null` is an authored `anyOf [X, null]` choice, not an empty cell; nested
+        // whitespace is kept for parity with the web strip's exact-`''` comparison.
+        let sanitized = sanitize(serde_json::json!({
+            "outer": { "nulled": null, "whitespace": "  " }
+        }));
+
+        assert_eq!(
+            sanitized,
+            serde_json::json!({
+                "outer": { "nulled": null, "whitespace": "  " }
+            })
+        );
+    }
+
+    #[test]
+    fn sanitize_keeps_empty_string_array_elements() {
+        // Dropping one would silently renumber its siblings.
+        let sanitized = sanitize(serde_json::json!({
+            "outer": { "items": ["a", "", "c"] }
+        }));
+
+        assert_eq!(
+            sanitized,
+            serde_json::json!({
+                "outer": { "items": ["a", "", "c"] }
+            })
+        );
+    }
+
+    #[test]
+    fn sanitize_keeps_parent_object_emptied_by_the_strip() {
+        let sanitized = sanitize(serde_json::json!({
+            "outer": { "only": "" }
+        }));
+
+        assert_eq!(sanitized, serde_json::json!({ "outer": {} }));
+    }
+
+    #[test]
+    fn sanitize_leaves_non_object_extra_json_cells_untouched() {
+        // The pass rewrites object cells only; a non-object cell is passed through as-is. That
+        // is not the same as the cell being inert — `overlay_row_onto_seed`'s string branch can
+        // still re-parse a string cell into mergeable data, which is why it sanitizes at its own
+        // parse point. See `overlay_row_onto_seed_sanitizes_double_encoded_extra_json`.
+        let mut row: HashMap<String, Value> = HashMap::new();
+        row.insert("Name".to_string(), Value::String("wall 0".to_string()));
+        row.insert("extra_json".to_string(), Value::String("{bad".to_string()));
+        let csv_data: HashMap<String, Vec<HashMap<String, Value>>> =
+            HashMap::from([("Exposed Elements".to_string(), vec![row])]);
+
+        let sanitized = sanitize_csv_extra_json(&csv_data);
+
+        assert_eq!(
+            sanitized["Exposed Elements"][0]["extra_json"],
+            Value::String("{bad".to_string())
+        );
+        assert_eq!(
+            sanitized["Exposed Elements"][0]["Name"],
+            Value::String("wall 0".to_string())
+        );
+    }
+
+    /// A `Water Pipework` CSV whose one primary row carries `extra_json` verbatim. The section is
+    /// merged by `overlay_row_onto_seed`, seeded from the defaults template's
+    /// `HotWaterSource["hw cylinder"].primary_pipework[0]` (`internal_diameter_mm` 31, `length` 3).
+    fn water_pipework_csv(extra_json_cell: &str) -> String {
+        format!(
+            r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Water Pipework
+Name,Type,pipework_type,extra_json
+pipe1,WaterPipework,primary,{extra_json_cell}
+"#
+        )
+    }
+
+    fn merged_primary_pipe(csv: &str) -> serde_json::Map<String, Value> {
+        build_full_json(csv)["HotWaterSource"]["hw cylinder"]["primary_pipework"][0]
+            .as_object()
+            .expect("primary pipework should merge")
+            .clone()
+    }
+
+    #[test]
+    fn overlay_row_onto_seed_sanitizes_double_encoded_extra_json() {
+        // A DOUBLE-ENCODED cell — a valid JSON *string literal* whose contents are object JSON —
+        // parses to `Value::String`, so `sanitize_csv_extra_json` leaves it alone. But
+        // `overlay_row_onto_seed` re-parses the string form into an object and merges it, so the
+        // cleared fields inside it reach the seed unless that branch sanitizes too. The app
+        // cannot create such a cell, but `parseExtraJson` in
+        // `packages/geometry-editor/src/geometry/io/parseCsvToGeometry.ts` does a bare
+        // `JSON.parse(...) as Record<string, unknown>` with no object check, so an externally
+        // authored one survives round-trips.
+        let inner = r#"{"internal_diameter_mm":"","length":""}"#;
+        let double_encoded = serde_json::to_string(inner).expect("string encodes");
+        let cell = format!("\"{}\"", double_encoded.replace('"', "\"\""));
+        let csv = water_pipework_csv(&cell);
+
+        // Guard the fixture itself: the point of the test is lost if the cell reaches the merge
+        // as an object, because then the entry-point pass would be what cleaned it.
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(&csv).expect("CSV should parse");
+        assert!(
+            data["Water Pipework"][0]["extra_json"].is_string(),
+            "fixture must reach the merge as a string cell, got {:?}",
+            data["Water Pipework"][0]["extra_json"]
+        );
+
+        let pipe = merged_primary_pipe(&csv);
+
+        assert_eq!(
+            pipe.get("internal_diameter_mm").and_then(|v| v.as_f64()),
+            Some(31.0),
+            "cleared field must leave the template seed in place, got {pipe:?}"
+        );
+        assert_eq!(
+            pipe.get("length").and_then(|v| v.as_f64()),
+            Some(3.0),
+            "cleared field must leave the template seed in place, got {pipe:?}"
+        );
+    }
+
+    #[test]
+    fn overlay_row_onto_seed_sanitizes_ordinary_extra_json() {
+        // The single-encoded twin of the case above, end to end. The `build_partial_json` helpers
+        // skip `build_json`, so without this there was no test anywhere pinning the entry-point
+        // pass over an `overlay_row_onto_seed` section.
+        let csv = water_pipework_csv(r#""{""internal_diameter_mm"":"""",""length"":""""}""#);
+
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(&csv).expect("CSV should parse");
+        assert!(
+            data["Water Pipework"][0]["extra_json"].is_object(),
+            "fixture must reach the merge as an object cell, got {:?}",
+            data["Water Pipework"][0]["extra_json"]
+        );
+
+        let pipe = merged_primary_pipe(&csv);
+
+        assert_eq!(
+            pipe.get("internal_diameter_mm").and_then(|v| v.as_f64()),
+            Some(31.0),
+            "cleared field must leave the template seed in place, got {pipe:?}"
+        );
+        assert_eq!(
+            pipe.get("length").and_then(|v| v.as_f64()),
+            Some(3.0),
+            "cleared field must leave the template seed in place, got {pipe:?}"
+        );
+    }
+
+    #[test]
+    fn cleared_battery_field_does_not_reach_merged_json() {
+        // ElectricBattery is one of the four `extra_json` loops that never had a guard.
+        // `battery_location` is seeded by the defaults template and `battery_age` is not, so one
+        // row exercises both halves of the contract: a cleared field leaves the seed in place
+        // where there is one, and reaches the merged JSON in neither case.
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Systems
+Name,Zone,Type,system_type,coords,extra_json
+Battery 1,Living,ElectricBattery,ElectricBattery,"-5.0,0.0,0.0","{""capacity"":5.0,""charge_discharge_efficiency_round_trip"":0.85,""battery_age"":"""",""minimum_charge_rate_one_way_trip"":0.001,""maximum_charge_rate_one_way_trip"":2.0,""maximum_discharge_rate_one_way_trip"":1.8,""battery_location"":"""",""EnergySupply"":""mains elec""}"
+"#;
+
+        let json = build_full_json(csv);
+
+        let battery = json["EnergySupply"]["mains elec"]["ElectricBattery"]
+            .as_object()
+            .expect("battery should merge");
+        assert_eq!(battery["capacity"].as_f64(), Some(5.0));
+        assert_eq!(
+            battery.get("battery_location").and_then(|v| v.as_str()),
+            Some("inside"),
+            "a cleared field must leave the template seed in place, got {battery:?}"
+        );
+        assert!(
+            !battery.contains_key("battery_age"),
+            "a cleared Advanced Field must not reach merged JSON, got {battery:?}"
+        );
+    }
+
+    #[test]
+    fn nested_cleared_field_does_not_reach_merged_json() {
+        // The bug the per-loop guards could never catch: `''` below the top level of the cell.
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Ground Elements
+Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,extra_json
+ground 0,Living,BuildingElementGround,8,2,4,20,Slab_edge_insulation,2,0.2,"{""edge_insulation"":[{""edge_thermal_resistance"":1,""type"":""horizontal"",""width"":""""}]}"
+"#;
+
+        let json = build_full_json(csv);
+
+        let edge_insulation = json["Zone"]["Living"]["BuildingElement"]["ground 0"]
+            ["edge_insulation"]
+            .as_array()
+            .expect("edge_insulation should merge as an array");
+        let first = edge_insulation[0]
+            .as_object()
+            .expect("edge_insulation entry should be an object");
+        assert_eq!(
+            first.get("type").and_then(|v| v.as_str()),
+            Some("horizontal")
+        );
+        assert_eq!(
+            first
+                .get("edge_thermal_resistance")
+                .and_then(|v| v.as_f64()),
+            Some(1.0)
+        );
+        assert!(
+            !first.contains_key("width"),
+            "a cleared nested field must not reach merged JSON, got {first:?}"
+        );
     }
 
     #[test]
