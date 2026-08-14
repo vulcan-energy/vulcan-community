@@ -64,6 +64,14 @@ const NAMED_UI_ONLY_EXTRA_JSON_KEYS: &[&str] = &[
     "ru_calculator_state_v1",
     // Adopted detailed-junction solve provenance: ψ anatomy, flanking-term U′ provenance and audit
     // envelope. HEM reads the adopted `linear_thermal_transmittance`, never this blob.
+    //
+    // Feature-gated (default ON) so the FREE wasm variant, built with default features off,
+    // does not carry the Pro solver's name in its string pool — the launch-artifact Pro-marker
+    // scan treats that literal as evidence of linked Pro code. Dropping the entry there is
+    // functionally safe: the browser-side `EXTRA_JSON_UI_KEYS` strip runs before the wasm merge
+    // on every product route, and the non-browser routes this list exists for (MCP server,
+    // batch CLI) are native builds that keep default features.
+    #[cfg(feature = "tb-solver-ui-key")]
     "thermal_bridge_solver",
 ];
 
