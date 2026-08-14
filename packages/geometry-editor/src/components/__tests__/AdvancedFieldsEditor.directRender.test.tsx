@@ -2990,7 +2990,8 @@ describe('System Advanced Fields: per-property validation descends the subtype w
         const rejected = check(mode, 'InfiltrationVentilation', 'MechanicalVentilation', []);
         expect(rejected.valid).toBe(false);
         expect(rejected.errors?.join(' ')).toContain('must be object');
-        // The map's entries are `additionalProperties`, so an empty map is a legitimate value.
+        // THIS map's entries are `additionalProperties` with no `minProperties`, so an empty map
+        // is a legitimate value here. Not a general rule about maps -- see the `Other` case below.
         expect(check(mode, 'InfiltrationVentilation', 'MechanicalVentilation', {})).toEqual({ valid: true });
       },
     );
@@ -2999,7 +3000,20 @@ describe('System Advanced Fields: per-property validation descends the subtype w
       const rejected = check(mode, 'HotWaterDemand', 'Bath', []);
       expect(rejected.valid).toBe(false);
       expect(rejected.errors?.join(' ')).toContain('must be object');
+      // `Bath` carries no `minProperties` on either profile.
       expect(check(mode, 'HotWaterDemand', 'Bath', {})).toEqual({ valid: true });
+    });
+
+    it('HotWaterDemand.Other: {} is valid on core but NOT on FHS, which sets minProperties: 1', () => {
+      // Enforced rather than described: "the entries are `additionalProperties`, so `{}` is fine"
+      // is false one property away, and the verdict has to come from the leaf's own node.
+      expect(check('core', 'HotWaterDemand', 'Other', {})).toEqual({ valid: true });
+      const rejected = check('fhs', 'HotWaterDemand', 'Other', {});
+      expect(rejected.valid).toBe(false);
+      expect(rejected.errors?.join(' ')).toContain('must NOT have fewer than 1 properties');
+      // `[]` is still rejected on both, for the ordinary reason.
+      expect(check('core', 'HotWaterDemand', 'Other', []).valid).toBe(false);
+      expect(check('fhs', 'HotWaterDemand', 'Other', []).valid).toBe(false);
     });
 
     it('core: HotWaterDemand.Distribution accepts [] because the schema declares an array there', () => {
@@ -3014,14 +3028,31 @@ describe('System Advanced Fields: per-property validation descends the subtype w
 
   /**
    * Pins the DOCUMENTED non-goal in `validateSystemSubtypePropertyValue`, so a future change to it
-   * is deliberate. `HeatSourceWet` (also `HotWaterSource`, `SpaceCoolSystem`, `SpaceHeatSystem`,
-   * `WWHRS`) is a plant DICTIONARY: with only `(subtype, key)` we cannot tell a user plant NAME
-   * from a leaf inside some plant, and validating a leaf against the plant-object schema would
-   * false-error live FHS `HeatSourceWet` rows.
+   * is deliberate. The gap is DEPTH, not dictionaries: a verdict is reached only one segment below
+   * the subtype. With only `(subtype, key)` we cannot tell a user plant NAME from a leaf inside
+   * some plant, and validating a leaf against the plant-object schema would false-error live FHS
+   * `HeatSourceWet` rows.
    */
-  it.each(['core', 'fhs'] as const)('%s: dictionary subtypes stay unvalidated (documented gap)', (mode) => {
-    expect(check(mode, 'HeatSourceWet', 'my hp', [])).toEqual({ valid: true });
-    expect(check(mode, 'HeatSourceWet', 'rated_power', 'not a number')).toEqual({ valid: true });
+  describe('depth >= 2 stays unvalidated (documented gap)', () => {
+    it.each(['core', 'fhs'] as const)('%s: every row under a dictionary subtype', (mode) => {
+      // `HeatSourceWet` (also `SpaceCoolSystem`, `SpaceHeatSystem`, `WWHRS`, Core `HotWaterSource`)
+      // is a plant map, so BOTH readings of the key are depth >= 2.
+      expect(check(mode, 'HeatSourceWet', 'my hp', [])).toEqual({ valid: true });
+      expect(check(mode, 'HeatSourceWet', 'rated_power', 'not a number')).toEqual({ valid: true });
+    });
+
+    it('fhs: and rows under a PROPERTIES-carrying subtype, one level down', () => {
+      // The gap is not confined to the plant maps. `Leaks` is a direct leaf of
+      // `InfiltrationVentilation` and does get a verdict...
+      expect(check('fhs', 'InfiltrationVentilation', 'Leaks', []).valid).toBe(false);
+      // ...but its own children do not: FHS declares `test_pressure` as
+      // `enum: ["Standard","Pulse test only"]`, and the Core-shaped value 50 still commits.
+      expect(check('fhs', 'InfiltrationVentilation', 'test_pressure', 50)).toEqual({ valid: true });
+      // Same one level down from FHS `HotWaterSource`, whose single property is a blob...
+      expect(check('fhs', 'HotWaterSource', 'hw cylinder', []).valid).toBe(false);
+      // ...whose children are again out of reach.
+      expect(check('fhs', 'HotWaterSource', 'type', 'not-a-declared-enum-member')).toEqual({ valid: true });
+    });
   });
 
   it('reaches the same verdict through the control-facing port path (validateAdvancedFieldPrimitive)', () => {

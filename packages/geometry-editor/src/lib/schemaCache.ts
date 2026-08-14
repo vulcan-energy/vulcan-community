@@ -4,7 +4,7 @@
 import { getAjvInstance, ensureRootSchema } from './ajvCache';
 import { errorMessageFromUnknown, isRecord } from './jsonTypes';
 import { asSchemaNode, isSchemaNode, type SchemaNode } from './schemaTypes';
-import { resolveRefNode } from './schemaRefResolver';
+import { resolveRefChain, resolveRefNode } from './schemaRefResolver';
 import { flattenIfThenAllOfProperties } from './systemSchemaFlatten';
 import type { GeometrySchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 
@@ -53,6 +53,13 @@ let preloadCoreSchemaPromise: Promise<void> | null = null;
 // Note: WeakMaps can't be cleared, so we reassign on schema (re)load/reset.
 let compiledPropValidatorCore: WeakMap<object, PropertyValidator> = new WeakMap();
 let compiledPropValidatorFhs: WeakMap<object, PropertyValidator> = new WeakMap();
+
+// Normalised System subtype nodes (see normalizeSystemSubtypeNode), keyed the same way and
+// reassigned at every site that reassigns the compiled-validator caches above (both preloads,
+// both `__set*ForTests`, both `__reset*ForTests`), so "every schema-derived cache is dropped on
+// (re)load" holds by construction rather than by an argument about node identity.
+let normalizedSystemSubtypeNodesCore: WeakMap<object, SchemaNode | null> = new WeakMap();
+let normalizedSystemSubtypeNodesFhs: WeakMap<object, SchemaNode | null> = new WeakMap();
 
 // Optional debug instrumentation (off by default).
 // Enable in DevTools:
@@ -103,8 +110,9 @@ export async function preloadSchema(): Promise<void> {
         }
         // Schema-driven coercion caches depend on schema contents; invalidate after (re)load.
         try { strictestIntegerKeysCache.clear(); } catch { /* swallow: best-effort */ }
-        // Reset compiled validator cache for core schema
+        // Reset schema-derived node caches for core schema
         compiledPropValidatorCore = new WeakMap();
+        normalizedSystemSubtypeNodesCore = new WeakMap();
       } catch (e) {
         schemaText = null;
         schemaObj = null;
@@ -233,8 +241,9 @@ export async function preloadFHSSchema(): Promise<void> {
     }
     // Schema-driven coercion caches depend on schema contents; invalidate after (re)load.
     try { strictestIntegerKeysCache.clear(); } catch { /* swallow: best-effort */ }
-    // Reset compiled validator cache for FHS schema
+    // Reset schema-derived node caches for FHS schema
     compiledPropValidatorFhs = new WeakMap();
+    normalizedSystemSubtypeNodesFhs = new WeakMap();
     if (!fhsSchemaObj.$defs && !fhsSchemaObj.properties) {
       throw new Error('FHS geometry schema is missing properties and $defs');
     }
@@ -284,6 +293,7 @@ export function __setFHSSchemaObjectForTests(obj: SchemaNode | null): void {
   fhsSchemaObj = obj;
   try { strictestIntegerKeysCache.clear(); } catch { /* swallow: best-effort */ }
   compiledPropValidatorFhs = new WeakMap();
+  normalizedSystemSubtypeNodesFhs = new WeakMap();
 }
 export function __resetFHSSchemaCacheForTests(): void {
   fhsSchemaText = null;
@@ -291,6 +301,7 @@ export function __resetFHSSchemaCacheForTests(): void {
   fhsPreloadStarted = false;
   try { strictestIntegerKeysCache.clear(); } catch { /* swallow: best-effort */ }
   compiledPropValidatorFhs = new WeakMap();
+  normalizedSystemSubtypeNodesFhs = new WeakMap();
 }
 
 /**
@@ -1131,6 +1142,7 @@ export function __setSchemaObjectForTests(obj: SchemaNode | null): void {
   schemaObj = obj;
   try { strictestIntegerKeysCache.clear(); } catch { /* swallow: best-effort */ }
   compiledPropValidatorCore = new WeakMap();
+  normalizedSystemSubtypeNodesCore = new WeakMap();
 }
 export function __resetSchemaCacheForTests(): void {
   schemaText = null;
@@ -1138,6 +1150,7 @@ export function __resetSchemaCacheForTests(): void {
   preloadCoreSchemaPromise = null;
   try { strictestIntegerKeysCache.clear(); } catch { /* swallow: best-effort */ }
   compiledPropValidatorCore = new WeakMap();
+  normalizedSystemSubtypeNodesCore = new WeakMap();
 }
 
 // Advanced fields utilities
@@ -1949,23 +1962,17 @@ function validatePropertyValueAgainstSchemaRoot(
 }
 
 /**
- * Normalised System subtype nodes, keyed on the raw node from the loaded root. Only the FHS
- * conditional flatten allocates a new node; every other shape returns a node that already
- * lives in the root, so the compiled-validator WeakMaps still key on stable identities.
- *
- * No explicit reset: entries are keyed on schema-node identity, and a schema (re)load parses a
- * fresh root whose nodes are new objects, so entries for a replaced root become unreachable.
- */
-const normalizedSystemSubtypeNodes: WeakMap<object, SchemaNode | null> = new WeakMap();
-
-/**
  * `resolveFhsElementSubschemaFromRoot` / `resolveCoreElementSubschemaFromRoot` deliberately hand
  * back System rows as a WRAPPER — `{ type:'object', properties: { [subtype]: inner } }` — because
  * System `extra_json` is shaped `{ HeatSourceWet: { … } }` and the Advanced Fields walk depends on
  * that shape. So `subschema.properties[key]` can never see a System leaf, and per-property
  * validation has to descend one level first. Normalise `inner` the way the walk does:
  *
- *  - follow `$ref` (Core routes several subtype nodes through `$defs`);
+ *  - follow the `$ref` CHAIN (Core routes several subtype nodes through `$defs`). No published
+ *    subtype node is a `$ref` today, so the hop is inert — but `resolveRefNode` stops after one
+ *    hop, and a chained ref would come back still carrying `$ref` with `properties` undefined,
+ *    which reads as "nothing to validate" and would drop coverage SILENTLY. `resolveRefChain`
+ *    is cycle-guarded and costs nothing on the non-ref shapes we actually have;
  *  - see THROUGH a nullable/combinator wrapper — Core publishes `HeatSourceWet` and
  *    `SpaceCoolSystem` as `anyOf: [ { type:'object', additionalProperties: … }, { type:'null' } ]`;
  *  - on FHS, flatten `allOf` / `if` / `then` so conditional leaves are reachable.
@@ -1984,17 +1991,18 @@ function normalizeSystemSubtypeNode(
   isFhsRoot: boolean,
 ): SchemaNode | null {
   if (!isSchemaNode(inner)) return null;
-  const cached = normalizedSystemSubtypeNodes.get(inner);
+  const cache = isFhsRoot ? normalizedSystemSubtypeNodesFhs : normalizedSystemSubtypeNodesCore;
+  const cached = cache.get(inner);
   if (cached !== undefined) return cached;
 
-  let node = resolveRefNode(rootSchema, inner);
+  let node = resolveRefChain(rootSchema, inner);
   if (node && !node.properties && !node.additionalProperties) {
     const branches = [
       ...(Array.isArray(node.anyOf) ? node.anyOf : []),
       ...(Array.isArray(node.oneOf) ? node.oneOf : []),
     ];
     for (const branch of branches) {
-      const resolved = resolveRefNode(rootSchema, branch);
+      const resolved = resolveRefChain(rootSchema, branch);
       if (resolved && (resolved.properties || resolved.additionalProperties)) {
         node = resolved;
         break;
@@ -2005,7 +2013,7 @@ function normalizeSystemSubtypeNode(
     node = asSchemaNode(flattenIfThenAllOfProperties(node, undefined, rootSchema)) ?? node;
   }
 
-  normalizedSystemSubtypeNodes.set(inner, node);
+  cache.set(inner, node);
   return node;
 }
 
@@ -2015,14 +2023,27 @@ function normalizeSystemSubtypeNode(
  * {@link normalizeSystemSubtypeNode}). Returns `null` for "no verdict — fall through to the
  * caller's existing path", so this only ever adds coverage.
  *
- * NON-GOAL (deliberate, not an oversight): when `key` is absent from the descended `properties`
- * and the subtype node is a DICTIONARY (`additionalProperties` — the `HeatSourceWet`,
- * `HotWaterSource` and `SpaceCoolSystem` plant maps), this returns no verdict and the row stays
- * `{ valid: true }`, exactly as before. With only `(subtype, key)` in hand we cannot tell whether
- * `key` is a user plant NAME whose value is the whole plant blob, or a LEAF inside some plant:
- * validating a leaf against the plant-object schema would raise a false error on live FHS
- * `HeatSourceWet` leaf rows. The follow-up is to pass the row's full path (or its already-resolved
- * schema node) down from the controls, which removes the ambiguity; until then this stays a gap.
+ * NON-GOAL (deliberate, not an oversight) — the gap is DEPTH, not dictionaries. A verdict is
+ * reached only for rows exactly ONE segment below the subtype; anything deeper is absent from the
+ * descended `properties` and stays `{ valid: true }`, exactly as before. The dictionary subtypes
+ * (`HeatSourceWet`, `SpaceCoolSystem`, `SpaceHeatSystem`, `WWHRS`, Core `HotWaterSource` — the
+ * `additionalProperties` plant maps) are the most prominent members of that set, because EVERY row
+ * under them is depth ≥ 2, but they are not the whole of it: properties-carrying subtypes leak the
+ * same way one level down. Measured on the published schemas: FHS
+ * `InfiltrationVentilation.Leaks.test_pressure` (declared `enum: ["Standard","Pulse test only"]`)
+ * still accepts the Core-shaped value `50`, and every FHS `HotWaterSource."hw cylinder".*` row is
+ * likewise unvalidated.
+ *
+ * The cause is the argument list: with only `(subtype, key)` we cannot tell whether `key` is a
+ * plant NAME (value = the whole plant blob) or a LEAF inside some plant, and validating a leaf
+ * against the plant-object schema would raise a false error on live FHS `HeatSourceWet` rows.
+ * The follow-up is to pass the row's full path (or its already-resolved schema node) down from the
+ * controls, which removes the ambiguity; until then this stays a gap.
+ *
+ * Live reach, therefore: the direct leaves of `InfiltrationVentilation` and `HotWaterDemand` —
+ * which is exactly where the recorded `'[]'` incident class lived (`MechanicalVentilation`,
+ * `Bath` / `Other` / `Shower`) — plus FHS `HotWaterSource."hw cylinder"` validated as a whole blob,
+ * though the Advanced Fields walk recurses past `hw cylinder` so that row is never emitted.
  */
 function validateSystemSubtypePropertyValue(
   rootSchema: SchemaNode | null,
@@ -2093,14 +2114,16 @@ export function validatePropertyValueForMode(
   if (!useFHSSchema) {
     const root = getSchemaObject();
     const subschema = getElementSubschemaForMode(false, elementType, subtype);
+    // A System row's leaves sit one level down, under the `{ [subtype]: inner }` wrapper the
+    // resolver returns; without this descent every System Advanced Field falls through to
+    // `validatePropertyValue`, which finds nothing either and accepts any JSON shape. The helper
+    // self-guards (non-System, direct hit, unset value => no verdict), so both arms call it the
+    // same way, unconditionally, ahead of their existing path.
+    const viaSubtype = validateSystemSubtypePropertyValue(
+      root, subschema, elementType, subtype, key, value, false,
+    );
+    if (viaSubtype) return viaSubtype;
     if (!root || !subschema || !subschema.properties || !subschema.properties[key]) {
-      // A System row's leaves sit one level down, under the `{ [subtype]: inner }` wrapper the
-      // resolver returns; without this descent every System Advanced Field falls through to
-      // `validatePropertyValue`, which finds nothing either and accepts any JSON shape.
-      const viaSubtype = validateSystemSubtypePropertyValue(
-        root, subschema, elementType, subtype, key, value, false,
-      );
-      if (viaSubtype) return viaSubtype;
       return validatePropertyValue(elementType, key, value);
     }
     try {
@@ -2113,8 +2136,8 @@ export function validatePropertyValueForMode(
 
   const root = getFHSSchemaObject();
   const subschema = getElementSubschemaForMode(true, elementType, subtype);
-  // Same descent on FHS: `validatePropertyValueAgainstSchemaRoot`'s `!subschema.properties[key]`
-  // early return is what silently accepted every System value here.
+  // Same descent, same shape, on FHS: `validatePropertyValueAgainstSchemaRoot`'s
+  // `!subschema.properties[key]` early return is what silently accepted every System value here.
   const viaSubtype = validateSystemSubtypePropertyValue(
     root, subschema, elementType, subtype, key, value, true,
   );
