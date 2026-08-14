@@ -4560,6 +4560,13 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
+        let seed_default_pv = self
+            .defaults
+            .get("OnSiteGeneration")
+            .and_then(Value::as_object)
+            .and_then(|systems| systems.get("Default PV"))
+            .cloned();
+
         if let Some(section_data) = csv_data.get("On-Site Generation") {
             if section_data.is_empty() {
                 // No PV systems in CSV - cleanup will remove empty section
@@ -4779,19 +4786,14 @@ impl JSONBuilder {
                     // Insert new entry with CSV name
                     on_site_gen.insert(element_name.to_string(), Value::Object(pv_system));
 
-                    // Remove empty "Default PV" placeholder if it exists (peak_power=0 means it's just a template)
-                    // We only keep it if we merged into it, otherwise remove it when creating a new named system
-                    if let Some(default_pv) = on_site_gen.get("Default PV") {
-                        if let Some(default_pv_obj) = default_pv.as_object() {
-                            let peak_power = default_pv_obj
-                                .get("peak_power")
-                                .and_then(|v| v.as_f64())
-                                .unwrap_or(0.0);
-                            if peak_power == 0.0 {
-                                // Empty placeholder - remove it since we're creating a real named system
-                                on_site_gen.remove("Default PV");
-                            }
-                        }
+                    // Provenance rule: only the exact defaults-template seed is a removable
+                    // placeholder. Any difference means the entry was authored and must survive.
+                    let default_pv_is_untouched_seed = on_site_gen
+                        .get("Default PV")
+                        .zip(seed_default_pv.as_ref())
+                        .is_some_and(|(current, seed)| current == seed);
+                    if default_pv_is_untouched_seed {
+                        on_site_gen.remove("Default PV");
                     }
                 }
             }
@@ -10010,6 +10012,11 @@ mod wet_emitter_tests {
         result
     }
 
+    fn parse_csv(csv: &str) -> HashMap<String, Vec<HashMap<String, Value>>> {
+        let mut parser = CSVParser::new();
+        parser.parse_csv(csv).expect("CSV should parse")
+    }
+
     #[test]
     fn multiple_radiators_aggregated_into_single_system() {
         // CSV has 2 radiator rows for the same zone
@@ -10499,6 +10506,63 @@ Unlinked UFH,Living,WetEmitter,ufh,8,,,"{""emitter_floor_area"":8,""frac_convect
     }
 
     #[test]
+    fn untouched_template_wet_distribution_is_dropped_when_emitters_have_no_link_column() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Wet Emitters
+Name,Zone,Type,subcategory,unit_number
+Radiator,Living,WetEmitter,radiator,1
+"#;
+        let csv_data = parse_csv(csv);
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+
+        builder
+            .merge_wet_emitters(&mut result, &csv_data)
+            .expect("untouched template system should be removed silently");
+
+        assert!(result["SpaceHeatSystem"].get("zone 1 radiators").is_none());
+        assert!(result["SpaceHeatSystem"].get("Living radiator").is_some());
+    }
+
+    #[test]
+    fn authored_wet_distribution_with_emitter_link_is_kept() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Systems
+Name,Type
+Living circuit,WetDistribution
+
+Wet Emitters
+Name,Zone,Type,subcategory,unit_number,space_heat_system
+Radiator,Living,WetEmitter,radiator,1,Living circuit
+"#;
+        let csv_data = parse_csv(csv);
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        result["SpaceHeatSystem"]["Living circuit"] = json!({
+            "type": "WetDistribution",
+            "Zone": "Living",
+            "design_flow_temp": 45,
+            "thermal_mass": 0.2
+        });
+
+        builder
+            .merge_wet_emitters(&mut result, &csv_data)
+            .expect("linked authored system should be preserved");
+
+        let system = result["SpaceHeatSystem"]["Living circuit"]
+            .as_object()
+            .expect("linked authored system should remain");
+        assert_eq!(system["design_flow_temp"], 45);
+        assert_eq!(system["emitters"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
     fn multiple_fancoils_aggregated_into_single_system() {
         // CSV has 2 fancoil rows (note: fancoil not yet implemented, so this will fail initially)
         let csv = r#"Zone
@@ -10780,6 +10844,7 @@ radiator 2,Bedroom,WetEmitter,radiator,1.5
 mod onsite_generation_tests {
     use super::*;
     use crate::parser::CSVParser;
+    use serde_json::json;
 
     const SCHEMA_PATH: &str = crate::schema_paths::CORE_UPSTREAM_SCHEMA_REL_PATH;
     const DEFAULTS_PATH: &str = "../../data/defaults/defaults_template.json";
@@ -10797,6 +10862,26 @@ mod onsite_generation_tests {
             .process_root_level_sections(&mut result, &data)
             .expect("Root sections should process");
         result
+    }
+
+    fn builder_with_default_pv(default_pv: Value) -> JSONBuilder {
+        let mut builder =
+            JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        builder.defaults["OnSiteGeneration"] = json!({ "Default PV": default_pv });
+        builder.index_templates();
+        builder
+    }
+
+    fn merge_named_pv(builder: &JSONBuilder, result: &mut Value) {
+        let csv = r#"On-Site Generation
+Name,Type,generation_type,pitch,orientation360,base_height,peak_power
+PV South,OnSiteGeneration,PhotovoltaicSystem,30,180,10,2.5
+"#;
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(csv).expect("CSV should parse");
+        builder
+            .merge_onsite_generation(result, &data)
+            .expect("PV merge should succeed");
     }
 
     #[test]
@@ -11063,6 +11148,62 @@ PV South,OnSiteGeneration,PhotovoltaicSystem,30,180,10,2.5,"-6.460,-4.940,0.000|
 
         let pv_south = json["OnSiteGeneration"]["PV South"].as_object().unwrap();
         assert_eq!(pv_south["peak_power"].as_f64().unwrap(), 2.5);
+    }
+
+    #[test]
+    fn untouched_seed_default_pv_is_removed_when_named_pv_arrives() {
+        let builder = builder_with_default_pv(json!({
+            "type": "PhotovoltaicSystem",
+            "peak_power": 0,
+            "EnergySupply": "mains elec"
+        }));
+        let mut result = builder.defaults.clone();
+
+        merge_named_pv(&builder, &mut result);
+
+        assert!(result["OnSiteGeneration"].get("Default PV").is_none());
+        assert!(result["OnSiteGeneration"].get("PV South").is_some());
+    }
+
+    #[test]
+    fn authored_zero_peak_default_pv_is_kept_when_named_pv_arrives() {
+        let builder = builder_with_default_pv(json!({
+            "type": "PhotovoltaicSystem",
+            "peak_power": 0,
+            "EnergySupply": "mains elec"
+        }));
+        let mut result = builder.defaults.clone();
+        result["OnSiteGeneration"]["Default PV"]["pitch"] = json!(15);
+
+        merge_named_pv(&builder, &mut result);
+
+        let default_pv = result["OnSiteGeneration"]["Default PV"]
+            .as_object()
+            .expect("authored Default PV should be kept");
+        assert_eq!(default_pv["peak_power"], 0);
+        assert_eq!(default_pv["pitch"], 15);
+    }
+
+    #[test]
+    fn missing_peak_power_uses_seed_equality_instead_of_value_fallback() {
+        let builder = builder_with_default_pv(json!({
+            "type": "PhotovoltaicSystem",
+            "EnergySupply": "mains elec"
+        }));
+
+        let mut untouched_result = builder.defaults.clone();
+        merge_named_pv(&builder, &mut untouched_result);
+        assert!(untouched_result["OnSiteGeneration"]
+            .get("Default PV")
+            .is_none());
+
+        let mut authored_result = builder.defaults.clone();
+        authored_result["OnSiteGeneration"]["Default PV"]["orientation360"] = json!(180);
+        merge_named_pv(&builder, &mut authored_result);
+        assert_eq!(
+            authored_result["OnSiteGeneration"]["Default PV"]["orientation360"],
+            180
+        );
     }
 }
 
