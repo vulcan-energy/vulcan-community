@@ -41,14 +41,24 @@ import {
 import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
-import type { Element } from '../../geometry/types';
+import type { Element, SystemSubcategory } from '../../geometry/types';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
 import {
   DirectAdvancedFields,
   DirectSpecFields,
   pickDirectControl,
+  unwrapNullableSchema,
   type DirectSpecNode,
 } from '../DirectAdvancedFields';
+import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
+import { dereferenceSchemaNodeInRoot } from '../../lib/subschemaCache';
+import { resolveSchemaPointer } from '../../lib/schemaRefResolver';
+import { expandSystemMergeMapSchemaForJsonForms } from '../../lib/systemAdvancedSchemaExpand';
+import { flattenSystemSubtypePlantSchemas } from '../../lib/systemSchemaFlatten';
+import {
+  buildSystemAdvancedUischema,
+  type AdvancedFieldsLayoutNode,
+} from '../../lib/systemAdvancedUischema';
 import { GroupAccordion, WindowPartListControl } from '../jsonformsRenderers';
 
 beforeAll(async () => {
@@ -226,6 +236,421 @@ function assertDirectCharacterization(args: MountArgs, expectedRows: ExpectedRow
   return { container };
 }
 
+/**
+ * R4.6a STANDING INVARIANT — the highest-value part of that slice, and the reason it
+ * lives here rather than beside a single fixture.
+ *
+ * The bug it guards was never about one field. HEM wraps optional scalars as
+ * `anyOf:[X, {type:'null'}]` (pydantic `Optional[T]`), and a wrapper carries no
+ * top-level `type`/`enum` of its own, so `pickDirectControl` had nothing to dispatch on
+ * and sent the whole class to TextControl — 26 property routes, 23 of them NUMBERS
+ * silently rendering as constraint-free text boxes. It was found and patched TWICE, one
+ * field at a time (`shield_fact_location`, then `mvhr_location` a slice later), because
+ * each patch was written against the field in front of the reviewer rather than against
+ * the shape. `unwrapNullableSchema` fixes the shape; this test is what stops the class
+ * from re-opening one property at a time when HEM publishes its next schema.
+ *
+ * WHAT IS SWEPT, AND WHAT A "ROUTE" IS (review round 1 corrected both — the first
+ * version of this sweep covered one of the three walks and concluded, wrongly, that FHS
+ * carried no wrappers at all). The unit is a ROUTE: one (profile, walk-and-container,
+ * property) triple, because the same `$def` property can be reached by more than one
+ * walk and an unreachable property is not a bug. Both walks that resolve schemas off
+ * the published roots are driven for real, through the real port:
+ *  - the FLAT walk (`DirectAdvancedFields`' `schema.properties` loop) — every element
+ *    type in `ELEMENT_TYPE_ORDER` × every subtype in `SWEPT_SUBTYPES`, both profiles.
+ *  - the SYSTEM LAYOUT walk (`renderLayoutNode`) — every `SystemSubcategory`, both
+ *    profiles, built through the SAME pipeline `AdvancedFieldsEditor`'s subschema memo
+ *    uses (`expandSystemMergeMapSchemaForJsonForms` -> deref ->
+ *    `flattenSystemSubtypePlantSchemas` -> `buildSystemAdvancedUischema`), then each
+ *    emitted `Control` scope resolved with `resolveSchemaPointer` + deref exactly as
+ *    that walk does. This is the half the first version missed entirely: for `System`
+ *    the flat sweep sees one object-typed property and contributes nothing, which hid
+ *    Core's three `InfiltrationVentilation` limits and all four live FHS wrappers.
+ * The third resolution site, `DirectSpecFields`' `Control` branch, takes host-supplied
+ * `options.schemaOverride` nodes rather than published-schema nodes, so there is no
+ * population to sweep — it is covered by the unit-level contract tests below and by the
+ * `DirectSpecFields` characterizations further down this file.
+ *
+ * WHY THE SYSTEM SWEEP NEEDS PLANT FIXTURES: FHS hides four of its five wrappers inside
+ * `allOf`/`then` conditional branches keyed on a plant's `type` discriminator
+ * (`hw cylinder` must be `{type:'CombiBoiler'}` to open `allOf[4]`). Those branches are
+ * flattened by `flattenSystemSubtypePlantSchemas` against LIVE plant JSON, so the sweep
+ * supplies the minimal discriminator stubs in `SYSTEM_PLANT_FIXTURES` — nothing else,
+ * so it stays obvious that they exist to open branches rather than to shape results.
+ *
+ * TWO ORACLES, ONE OF WHICH IS GENUINELY INDEPENDENT — stated plainly because it bounds
+ * what this test can catch:
+ *  - `controlExpectedFromInnerBranchType` IS independent: it reads `inner.type` /
+ *    `inner.enum` directly and never calls a production helper, so it cannot agree with
+ *    `pickDirectControl` by sharing its bug.
+ *  - `nullableInnerBranch` is NOT: it restates `unwrapNullableSchema`'s matching rule.
+ *    A test cannot both use the contract to classify and check the contract from
+ *    scratch. What guards the matcher instead is (a) the pinned `moved` list below — if
+ *    the matcher narrowed, routes drop out of it and the literal comparison fails — and
+ *    (b) the two-armed assertion in the first `it`, which sweeps EVERY combinator-
+ *    bearing node, not just matching ones, and requires non-matching ones to come back
+ *    by identity. Over-matching and under-matching therefore both fail something.
+ */
+const ADVANCED_FIELD_ELEMENT_TYPES = ELEMENT_TYPE_ORDER;
+
+/**
+ * Subtypes are swept because `getElementSubschema` resolves a DIFFERENT subschema per
+ * subtype (floor-type variants, emitter families, …). `undefined` is included: it is
+ * what most element types are mounted with.
+ */
+const SWEPT_SUBTYPES: (string | undefined)[] = [
+  undefined,
+  'wall', 'roof', 'floor', 'door', 'ceiling',
+  'Slab_no_edge_insulation', 'Slab_edge_insulation', 'Suspended_floor',
+  'Heated_basement', 'Unheated_basement', 'Exposed_floor',
+  'radiator', 'ufh', 'fancoil',
+];
+
+const SWEPT_SYSTEM_SUBTYPES = [
+  'HeatSourceWet',
+  'HotWaterSource',
+  'HotWaterDemand',
+  'InfiltrationVentilation',
+  'SpaceCoolSystem',
+  'SpaceHeatSystem',
+  'WWHRS',
+] as const satisfies readonly SystemSubcategory[];
+
+/**
+ * Minimal `extra_json[subtype]` slices: plant keys plus the `type` discriminator each
+ * conditional branch keys on, and nothing else. `hw cylinder: {type:'CombiBoiler'}` is
+ * the one that matters — it opens FHS `HotWaterSource`'s `allOf[4].then`, where the
+ * four live FHS nullable wrappers live.
+ */
+const SYSTEM_PLANT_FIXTURES: Record<string, Record<string, unknown>> = {
+  HeatSourceWet: { boiler: { type: 'Boiler' }, hp: { type: 'HeatPump' } },
+  HotWaterSource: { 'hw cylinder': { type: 'CombiBoiler' } },
+  SpaceHeatSystem: { 'Zone 1 circuit': { type: 'WetDistribution' } },
+  SpaceCoolSystem: { cooler: { type: 'AirConditioning' } },
+};
+
+type CombinatorRoute = {
+  mode: 'core' | 'fhs';
+  /** Where the node was reached: an element type, or `System:<subcategory>` for the layout walk. */
+  container: string;
+  property: string;
+  resolved: Record<string, unknown>;
+  /** The non-null branch when this is a nullable wrapper; `null` for any other combinator shape. */
+  inner: Record<string, unknown> | null;
+};
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Deliberately duplicated from `isBareNullSchema`: the sweep must not import the thing it audits. */
+function isNullBranch(value: unknown): boolean {
+  return isPlainRecord(value) && value.type === 'null' && Object.keys(value).length === 1;
+}
+
+/** See the two-oracles note above: this restates the contract, it does not independently verify it. */
+function nullableInnerBranch(node: Record<string, unknown>): Record<string, unknown> | null {
+  for (const keyword of ['anyOf', 'oneOf'] as const) {
+    const branches = node[keyword];
+    if (!Array.isArray(branches) || branches.length !== 2) continue;
+    if (branches.filter(isNullBranch).length !== 1) continue;
+    const inner = branches.find((branch) => !isNullBranch(branch));
+    if (isPlainRecord(inner)) return inner;
+  }
+  return null;
+}
+
+/** The weak, obviously-independent membership test the sweep collects on. */
+function hasCombinator(node: Record<string, unknown>): boolean {
+  return ['anyOf', 'oneOf', 'allOf'].some((keyword) => Array.isArray(node[keyword]));
+}
+
+/**
+ * Independent oracle: what control the INNER branch alone implies, read straight off
+ * its `type`/`enum` with no reference to `pickDirectControl`'s rule table. Anything
+ * that is not a scalar or an enum (object, array) is a JSON blob -> 'text', which is
+ * where TextControl legitimately belongs.
+ */
+function controlExpectedFromInnerBranchType(inner: Record<string, unknown>): string {
+  if (Array.isArray(inner.enum) && inner.enum.length > 0) return 'enum';
+  const type = inner.type;
+  if (type === 'boolean') return 'boolean';
+  if (type === 'number' || type === 'integer') return 'number';
+  if (type === 'string') return 'text';
+  return 'text';
+}
+
+function layoutControlScopes(node: AdvancedFieldsLayoutNode, out: string[] = []): string[] {
+  if (node.type === 'VerticalLayout') {
+    for (const child of node.elements ?? []) layoutControlScopes(child, out);
+    return out;
+  }
+  if (node.scope) out.push(node.scope);
+  return out;
+}
+
+/** Every combinator-bearing property node reachable through either published-schema walk. */
+function sweepCombinatorRoutes(): CombinatorRoute[] {
+  const found: CombinatorRoute[] = [];
+  const seen = new Set<string>();
+
+  const record = (mode: 'core' | 'fhs', container: string, property: string, resolved: unknown) => {
+    if (!isPlainRecord(resolved) || !hasCombinator(resolved)) return;
+    const key = `${mode}/${container}.${property}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    found.push({ mode, container, property, resolved, inner: nullableInnerBranch(resolved) });
+  };
+
+  for (const mode of ['core', 'fhs'] as const) {
+    const root = canonicalGeometrySchemaPort.getRootSchema(mode) as Record<string, unknown> | null;
+
+    // Walk 1: the flat walk.
+    for (const elementType of ADVANCED_FIELD_ELEMENT_TYPES) {
+      for (const subtype of SWEPT_SUBTYPES) {
+        const subschema = canonicalGeometrySchemaPort.getElementSubschema(mode, elementType, subtype) as
+          | Record<string, unknown>
+          | null;
+        if (!subschema || !isPlainRecord(subschema.properties)) continue;
+        const defs = (subschema as { $defs?: unknown }).$defs ?? (root as { $defs?: unknown } | null)?.$defs;
+        const properties = subschema.properties as Record<string, unknown>;
+        for (const property of Object.keys(properties)) {
+          record(mode, elementType, property, dereferenceSchemaNodeInRoot(properties[property], { $defs: defs }));
+        }
+      }
+    }
+
+    // Walk 2: the System layout walk, through the real builder pipeline.
+    for (const subtype of SWEPT_SYSTEM_SUBTYPES) {
+      const raw = canonicalGeometrySchemaPort.getElementSubschema(mode, 'System', subtype) as
+        | Record<string, unknown>
+        | null;
+      if (!raw || !root) continue;
+      const plants = SYSTEM_PLANT_FIXTURES[subtype] ?? {};
+      const expanded = expandSystemMergeMapSchemaForJsonForms(raw, subtype, plants) ?? raw;
+      const derefed = dereferenceSchemaNodeInRoot(expanded, root) as Record<string, unknown>;
+      const subschema = flattenSystemSubtypePlantSchemas(derefed, subtype, plants, root);
+      const defs = (subschema as { $defs?: unknown }).$defs ?? (root as { $defs?: unknown } | null)?.$defs;
+      for (const scope of layoutControlScopes(buildSystemAdvancedUischema(subtype, subschema))) {
+        const property = scope.split('/').pop() ?? scope;
+        record(
+          mode,
+          `System:${subtype}`,
+          property,
+          dereferenceSchemaNodeInRoot(resolveSchemaPointer(subschema, scope), { $defs: defs }),
+        );
+      }
+    }
+  }
+  return found;
+}
+
+describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their inner branch', () => {
+  it('every nullable wrapper reaches the control its inner branch implies, and every other combinator shape is left alone', () => {
+    const routes = sweepCombinatorRoutes();
+    const wrappers = routes.filter((route) => route.inner);
+
+    // Guard against the sweep silently finding nothing (a renamed port method, an empty
+    // subschema map, a builder signature change) and the invariant passing vacuously
+    // forever after. Floors, not equalities -- the pinned list below is where exact
+    // population drift is meant to surface.
+    expect(routes.length).toBeGreaterThanOrEqual(50);
+    expect(wrappers.length).toBeGreaterThanOrEqual(43);
+    // Arm 2 below needs a non-wrapper population to be worth anything; without this
+    // floor it could quietly become vacuous if the sweep stopped reaching them.
+    expect(routes.length - wrappers.length).toBeGreaterThanOrEqual(7);
+
+    // Arm 1: a matching wrapper dispatches on its inner branch.
+    const mismatches = wrappers
+      .map((route) => ({
+        field: `${route.mode}/${route.container}.${route.property}`,
+        actual: pickDirectControl(unwrapNullableSchema(route.resolved)),
+        expected: controlExpectedFromInnerBranchType(route.inner as Record<string, unknown>),
+      }))
+      .filter((result) => result.actual !== result.expected);
+    expect(mismatches).toEqual([]);
+
+    // Arm 2: a combinator that is NOT the nullable pattern comes back by identity --
+    // the unwrap must not start collapsing branches it has no business choosing
+    // between. Together with arm 1 this fails on both over- and under-matching.
+    const wronglyTouched = routes
+      .filter((route) => !route.inner && unwrapNullableSchema(route.resolved) !== route.resolved)
+      .map((route) => `${route.mode}/${route.container}.${route.property}`);
+    expect(wronglyTouched).toEqual([]);
+  });
+
+  it('pins the population: every wrapper was TextControl before, and these are the routes the unwrap moves', () => {
+    const wrappers = sweepCombinatorRoutes().filter((route) => route.inner);
+
+    // Every wrapper resolved WITHOUT unwrapping lands on TextControl -- that is the
+    // single failure mode this whole class had, stated once rather than per row.
+    for (const wrapper of wrappers) {
+      expect(pickDirectControl(wrapper.resolved)).toBe('text');
+    }
+
+    const moved = wrappers
+      .map((route) => ({ route, control: pickDirectControl(unwrapNullableSchema(route.resolved)) }))
+      .filter(({ control }) => control !== 'text')
+      .map(({ route, control }) => `${route.mode}/${route.container}.${route.property} -> ${control}`)
+      .sort();
+
+    // Pinned literally so a schema update that adds or drops a misrouted route shows up
+    // as a diff to read, not as a silently different pass.
+    //
+    // Two things worth reading off this list rather than re-deriving them:
+    //  - FHS IS IN IT. R4.6a's first commit asserted `fhs` contributed nothing, on an
+    //    invented "HEM flattens nullables in FHS" mechanism. It does not: FHS carries
+    //    five property-level wrappers and four are live here, gated behind
+    //    `hw cylinder: {type:'CombiBoiler'}` (the fifth,
+    //    HeatSourceWet/boiler/cost_schedule_hybrid, wraps an OBJECT, so it is a JSON
+    //    blob before and after and correctly absent).
+    //  - `is_unheated_pitched_roof` and the two PartyWall entries are BASE fields
+    //    (`getBaseFieldsForElementType`) that never reach the Advanced Fields grid.
+    //    Asserted anyway: that filter lives one layer above `pickDirectControl` and is
+    //    not this invariant's to assume.
+    expect(moved).toEqual([
+      'core/BuildingElementAdjacentConditionedSpace.thermal_resistance_construction -> number',
+      'core/BuildingElementAdjacentConditionedSpace.u_value -> number',
+      'core/BuildingElementOpaque.is_unheated_pitched_roof -> boolean',
+      'core/BuildingElementOpaque.thermal_resistance_construction -> number',
+      'core/BuildingElementOpaque.u_value -> number',
+      'core/BuildingElementPartyWall.party_wall_lining_type -> enum',
+      'core/BuildingElementPartyWall.thermal_resistance_cavity -> number',
+      'core/BuildingElementPartyWall.thermal_resistance_construction -> number',
+      'core/BuildingElementPartyWall.u_value -> number',
+      'core/BuildingElementTransparent.thermal_resistance_construction -> number',
+      'core/BuildingElementTransparent.u_value -> number',
+      'core/MechanicalVentilation.mid_height_air_flow_path -> number',
+      'core/MechanicalVentilation.mvhr_eff -> number',
+      'core/MechanicalVentilation.mvhr_location -> enum',
+      'core/MechanicalVentilation.orientation360 -> number',
+      'core/MechanicalVentilation.pitch -> number',
+      'core/MechanicalVentilationDuctwork.duct_perimeter_mm -> number',
+      'core/MechanicalVentilationDuctwork.external_diameter_mm -> number',
+      'core/MechanicalVentilationDuctwork.internal_diameter_mm -> number',
+      'core/System:InfiltrationVentilation.ach_max_static_calcs -> number',
+      'core/System:InfiltrationVentilation.ach_min_static_calcs -> number',
+      'core/System:InfiltrationVentilation.vent_opening_ratio_init -> number',
+      'fhs/System:HotWaterSource.rejected_energy_1 -> number',
+      'fhs/System:HotWaterSource.rejected_factor_3 -> number',
+      'fhs/System:HotWaterSource.storage_loss_factor_1 -> number',
+      'fhs/System:HotWaterSource.storage_loss_factor_2 -> number',
+    ]);
+  });
+
+  it('leaves every other combinator shape alone', () => {
+    // The unwrap is a targeted normalization of one pydantic emission habit, not a
+    // general combinator resolver -- collapsing any of these would mean CHOOSING a
+    // branch, a semantic decision no renderer should make silently.
+    const untouched: Record<string, unknown>[] = [
+      // Three branches, one of them null.
+      { anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }] },
+      // Two branches, neither null.
+      { anyOf: [{ type: 'number' }, { type: 'string' }] },
+      // Null branch carrying siblings -- not a bare `{type:'null'}`.
+      { anyOf: [{ type: 'number' }, { type: 'null', title: 'Nothing' }] },
+      // Single branch.
+      { anyOf: [{ type: 'number' }] },
+      // allOf is not a nullable-wrapper keyword at all.
+      { allOf: [{ type: 'number' }, { type: 'null' }] },
+    ];
+    for (const node of untouched) {
+      expect(unwrapNullableSchema(node)).toBe(node);
+    }
+
+    // Idempotent on an already-flat node, and on its own output.
+    const flat = { type: 'number', minimum: 0 };
+    expect(unwrapNullableSchema(flat)).toBe(flat);
+    const once = unwrapNullableSchema({ anyOf: [{ type: 'number', minimum: 0 }, { type: 'null' }], default: null });
+    expect(once).toEqual({ type: 'number', minimum: 0 });
+    expect(unwrapNullableSchema(once)).toBe(once);
+
+    // Annotations: the WRAPPER's win, and the inner branch's never leak in (that rule
+    // is what keeps `position_intake`/`position_exhaust` from both rendering as
+    // "MechanicalVentilationPosition"). A non-null `default` survives; a `null` one
+    // describes the branch that was just dropped and does not.
+    expect(
+      unwrapNullableSchema({
+        anyOf: [{ type: 'string', enum: ['a'], title: 'InnerTypeName', description: 'inner' }, { type: 'null' }],
+        title: 'Field Label',
+      }),
+    ).toEqual({ type: 'string', enum: ['a'], title: 'Field Label' });
+    expect(
+      unwrapNullableSchema({
+        anyOf: [{ type: 'string', title: 'InnerTypeName' }, { type: 'null' }],
+      }),
+    ).toEqual({ type: 'string' });
+    expect(
+      unwrapNullableSchema({ anyOf: [{ type: 'number' }, { type: 'null' }], default: 3 }),
+    ).toEqual({ type: 'number', default: 3 });
+  });
+
+  it('R4.6a review round 1: a combinator INSIDE the surviving branch survives the unwrap, and the row does not vanish', () => {
+    // REAL BUG in R4.6a's first commit. The merge was `{...inner, ...node}` followed by
+    // an unconditional `delete merged[keyword]` -- so when the surviving branch carried
+    // the SAME keyword as the wrapper, `...node` overwrote the inner's array and the
+    // delete removed the wrapper's, leaving a node with no type, no enum and no
+    // combinator. That is worse than a wrong control: `schemaEmitsControl` returns false
+    // for it, so `DirectAdvancedFields`' flat walk never pushes the property and the ROW
+    // DISAPPEARS.
+    //
+    // The real Core node with this shape (`$defs/ControlChargeTarget.charge_level`,
+    // read from the port rather than hand-copied so it cannot drift): a nullable wrapper
+    // around a `$ref` to `ChargeLevel`, which is itself a three-branch `anyOf`. No
+    // element subschema routes to `ControlChargeTarget` -- but `DirectSpecFields` passes
+    // host-supplied `options.schemaOverride` nodes through the same function, and those
+    // are arbitrary web-builder output, so unreachability in the published schemas was
+    // never the whole reachability question.
+    const coreRoot = canonicalGeometrySchemaPort.getRootSchema('core') as {
+      $defs?: Record<string, { properties?: Record<string, unknown> }>;
+    } | null;
+    const chargeLevel = coreRoot?.$defs?.ControlChargeTarget?.properties?.charge_level as Record<string, unknown>;
+    expect(chargeLevel).toMatchObject({ anyOf: [{ $ref: '#/$defs/ChargeLevel' }, { type: 'null' }] });
+
+    const resolved = dereferenceSchemaNodeInRoot(chargeLevel, coreRoot) as Record<string, unknown>;
+    const unwrapped = unwrapNullableSchema(resolved);
+    // The inner three-branch combinator is still there, so the node still describes
+    // something and still emits a control.
+    expect(Array.isArray(unwrapped.anyOf)).toBe(true);
+    expect((unwrapped.anyOf as unknown[]).length).toBe(3);
+    expect(pickDirectControl(unwrapped)).toBe('text');
+
+    // DOM-level: the row renders. Under the bug this mounted with `plain` only.
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const { container } = render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={canonicalGeometrySchemaPort}
+        workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
+      >
+        <GeometryStoreProvider store={store}>
+          <DirectAdvancedFields
+            schema={{ type: 'object', properties: { charge_level: chargeLevel, plain: { type: 'number' } }, $defs: coreRoot?.$defs }}
+            data={{ plain: 1 }}
+            config={{ advancedEditor: true, elementType: 'System' }}
+            onDataChange={vi.fn()}
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+    expect(fieldKeys(container)).toEqual(['charge_level', 'plain']);
+
+    // Synthetic siblings of the same class: same-keyword and cross-keyword nesting, and
+    // `Optional[Optional[X]]`, which the fixpoint collapses all the way rather than one
+    // layer short.
+    expect(
+      unwrapNullableSchema({ anyOf: [{ anyOf: [{ type: 'number' }, { type: 'string' }] }, { type: 'null' }] }),
+    ).toEqual({ anyOf: [{ type: 'number' }, { type: 'string' }] });
+    expect(
+      unwrapNullableSchema({ anyOf: [{ oneOf: [{ const: 'a' }, { const: 'b' }] }, { type: 'null' }] }),
+    ).toEqual({ oneOf: [{ const: 'a' }, { const: 'b' }] });
+    const doubled = unwrapNullableSchema({
+      oneOf: [{ anyOf: [{ type: 'number', minimum: 0 }, { type: 'null' }] }, { type: 'null' }],
+    });
+    expect(doubled).toEqual({ type: 'number', minimum: 0 });
+    expect(unwrapNullableSchema(doubled)).toBe(doubled);
+  });
+});
+
 describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
   it('config 1 -- ElectricBattery, Core and FHS (regression anchor)', () => {
     assertDirectCharacterization(
@@ -287,11 +712,41 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       [
         row('areal_heat_capacity', 'Areal Heat Capacity', TEXT('0', '0')),
         row('mass_distribution_class', 'MassDistributionClass', SELECT),
-        row('u_value', 'U-Value', TEXT(null)),
-        row('thermal_resistance_construction', 'Thermal Resistance Construction', TEXT(null)),
+        // R4.6a CHARACTERIZATION CHANGE (both rows): was TEXT(null) -- a bare
+        // TextControl with no numeric attributes at all. Core declares both of these
+        // as `anyOf:[{type:'number', exclusiveMinimum:0},{type:'null'}]`, a nullable
+        // wrapper that carried no top-level type for `pickDirectControl` to dispatch
+        // on, so both fell to rule (f) -> TextControl. That TEXT(null) literal is
+        // itself the evidence the misroute PRE-DATES the direct renderer: it was
+        // captured verbatim from the last GREEN A/B run, i.e. recorded off the
+        // JsonForms mount rendering the identical constraint-free text box (see
+        // `pickDirectControl`'s docstring in DirectAdvancedFields.tsx for the tester-
+        // level reason). `unwrapNullableSchema` collapses the wrapper, so both now
+        // route to NumberControl and surface the inner branch's `exclusiveMinimum: 0`
+        // as `min="0"` + `data-exclusive-minimum="0"` -- byte-identical to how FHS,
+        // which declares the same fields as plain `{type:'number'}`, has always
+        // rendered them (see this test's own FHS half below, TEXT('0.01')).
+        row('u_value', 'U-Value', TEXT('0', '0')),
+        row('thermal_resistance_construction', 'Thermal Resistance Construction', TEXT('0', '0')),
         row('solar_absorption_coeff', 'Solar Absorption Coeff', TEXT('0')),
       ],
     );
+
+    // R4.6a HEADLINE, asserted on the DOM rather than only through the row literal
+    // above: Core `u_value` is now a real number input carrying the schema's own
+    // constraint, not a bare text box. `min`/`data-exclusive-minimum` come from
+    // `numericInputAttributesFromSchema`, which reads those keywords off the TOP LEVEL
+    // of the node it is handed -- on the wrapper they sat one level down on the anyOf
+    // branch, which is why the fix had to unwrap the resolved NODE and not merely
+    // re-point dispatch (a dispatch-only fix would render this same NumberControl with
+    // no min, no max, no step). `inputmode` is the other half of what the user
+    // actually gets back: the numeric draft buffer and mobile keypad TextControl never
+    // provided.
+    const uValueInput = within(fieldRow(container, 'u_value')).getByRole('textbox');
+    expect(uValueInput).toHaveAttribute('min', '0');
+    expect(uValueInput).toHaveAttribute('data-exclusive-minimum', '0');
+    expect(uValueInput).toHaveAttribute('inputmode', 'decimal');
+    expect(fieldRow(container, 'u_value').querySelector('select')).toBeNull();
 
     // Interaction (brief: "one number-entry + one unset each on configs 2 and 5").
     // solar_absorption_coeff is a plain `{type:'number'}` field in Core -- a genuine
@@ -654,7 +1109,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     );
   });
 
-  it('R4.5 review round 1 fix: MechanicalVentilation, Core: mvhr_location renders EnumControl, not a free-text blob (adjacent to config 5)', () => {
+  it('R4.5 review round 1 fix / R4.6a: MechanicalVentilation, Core: every nullable-wrapped property routes to a real control (mvhr_location EnumControl, the four numeric fields NumberControl with their schema minima)', () => {
     // REGRESSION, caught in adversarial review round 1: HEM's
     // `$defs/MechanicalVentilation.properties.mvhr_location` is
     // `{anyOf:[{$ref:'#/$defs/MVHRLocation'},{type:'null'}]}` on the CORE profile --
@@ -665,11 +1120,19 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     // this on TextControl, and the shape's live-instance audit at the time only
     // checked FHS (where `mvhr_location` happens to already be a bare
     // `{enum:['inside','outside']}` with no anyOf wrapper) -- Core was never actually
-    // exercised for this field, so the regression shipped. Fixed by inlining a flat
-    // `{type:'string', enum:[...]}` override in AdvancedFieldsEditor.tsx's subschema
-    // memo, the same pattern `shield_fact_location` already used (see the inline
-    // comments at both sites, and `pickDirectControl`'s corrected docstring in
-    // DirectAdvancedFields.tsx).
+    // exercised for this field, so the regression shipped. R4.5 fixed it by inlining a
+    // flat `{type:'string', enum:[...]}` override in AdvancedFieldsEditor.tsx's
+    // subschema memo, one field at a time.
+    //
+    // R4.6a REPLACED that override with `unwrapNullableSchema` (DirectAdvancedFields.tsx),
+    // which collapses the wrapper generically at every resolution site -- and this
+    // fixture is where the one-field-at-a-time approach is shown to have been the
+    // wrong shape of fix. mvhr_location's row below is UNCHANGED across that swap
+    // (same SELECT, same "MVHRLocation" label, same options -- the deletion is a
+    // no-op for it, which is exactly why the override was safe to remove), while FOUR
+    // sibling rows in the same grid, all carrying the same nullable wrapper around a
+    // NUMBER, were quietly broken the whole time and are corrected below. Those four
+    // are annotated individually.
     //
     // No subtype passed, matching config 5's own mounting pattern immediately above
     // (and MechanicalVentilation's base-field exclusion, `['vent_type']`, is the same
@@ -689,21 +1152,51 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         row('SFP', 'SFP', TEXT('0', '0')),
         row('SFP_in_use_factor', 'SFP In Use Factor', TEXT('1')),
         row('design_outdoor_air_flow_rate', 'Design Outdoor Air Flow Rate', TEXT('0', '0')),
+        // `ductwork` is a nullable wrapper too -- around an ARRAY. It stays TEXT(null):
+        // unwrapping changes the resolved node but not the destination control (rule
+        // (f) -> TextControl's JSON blob either way), which is the point of asserting
+        // it here rather than only asserting the rows that moved.
         row('ductwork', 'Ductwork', TEXT(null)),
-        row('mvhr_eff', 'MVHR Efficiency', TEXT(null)),
-        row('mvhr_location', 'MVHRLocation', SELECT),
+        // R4.6a CHARACTERIZATION CHANGE: was TEXT(null).
+        // `anyOf:[{type:'number', minimum:0, maximum:1},{type:'null'}]` -> NumberControl,
+        // surfacing min="0" (max="1" is set too; `inputSignatureForRow` only samples
+        // min/data-exclusive-minimum).
+        row('mvhr_eff', 'MVHR Efficiency', TEXT('0')),
+        // R4.6a CHARACTERIZATION CHANGE, LABEL ONLY: was 'MVHRLocation'. The control
+        // is unchanged (SELECT, same options -- see the assertions below). That label
+        // was an artifact of the deleted R4.5 inline override, which hoisted the
+        // pydantic ENUM CLASS NAME out of `$defs/MVHRLocation.title` and used it as
+        // the field label. `unwrapNullableSchema` deliberately does not carry inner
+        // annotations (see its docstring), so this titleless property now start-cases
+        // its own key like every other titleless row in this grid -- the same rule
+        // that gives 'Position Intake' / 'Mid Height Air Flow Path' their labels
+        // instead of 'MechanicalVentilationPosition' / nothing. Losing 'MVHRLocation'
+        // is the point, not a casualty.
+        row('mvhr_location', 'Mvhr Location', SELECT),
         row('sup_air_flw_ctrl', 'SupplyAirFlowRateControlType', SELECT),
         row('sup_air_temp_ctrl', 'SupplyAirTemperatureControlType', SELECT),
+        // Nullable wrappers around OBJECTS (`$defs/MechanicalVentilationPosition`).
+        // Like `ductwork` above, unwrapping does not move them: an object-typed node
+        // still falls to TextControl's JSON blob.
         row('position_intake', 'Position Intake', TEXT(null)),
         row('position_exhaust', 'Position Exhaust', TEXT(null)),
-        row('mid_height_air_flow_path', 'Mid Height Air Flow Path', TEXT(null)),
-        row('orientation360', 'Orientation360', TEXT(null)),
-        row('pitch', 'Pitch', TEXT(null)),
+        // R4.6a CHARACTERIZATION CHANGE: was TEXT(null).
+        // `anyOf:[{type:'number', exclusiveMinimum:0},{type:'null'}]` -> NumberControl.
+        row('mid_height_air_flow_path', 'Mid Height Air Flow Path', TEXT('0', '0')),
+        // R4.6a CHARACTERIZATION CHANGE (both rows): was TEXT(null).
+        // `anyOf:[{type:'number', minimum:0, maximum:360|180},{type:'null'}]` ->
+        // NumberControl. These two are the compass/tilt fields the main element form
+        // renders as proper bounded numbers elsewhere in the editor; only the Core
+        // MechanicalVentilation Advanced Fields copies were free-text.
+        row('orientation360', 'Orientation360', TEXT('0')),
+        row('pitch', 'Pitch', TEXT('0')),
       ],
     );
 
     // The headline assertion: a real <select> with the schema's own enum values, not
-    // a JSON.stringify'd free-text blob.
+    // a JSON.stringify'd free-text blob. R4.6a: this now holds with NO field-specific
+    // code anywhere -- `unwrapNullableSchema` is generic, and AdvancedFieldsEditor's
+    // `mvhr_location` inline override is deleted.
     const mvhrRow = fieldRow(container, 'mvhr_location');
     const select = within(mvhrRow).getByRole('combobox') as HTMLSelectElement;
     const optionValues = Array.from(select.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
@@ -711,6 +1204,59 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
 
     fireEvent.change(select, { target: { value: 'outside' } });
     expect(select.value).toBe('outside');
+
+    // R4.6a: `mvhr_eff` is the numeric half of the same fix -- assert the constraint
+    // that `inputSignatureForRow` does not sample (`max`), so the row literal above is
+    // not the only thing standing between a regression and a green suite. A
+    // TextControl-rendered row carries none of these attributes at all.
+    const mvhrEffInput = within(fieldRow(container, 'mvhr_eff')).getByRole('textbox');
+    expect(mvhrEffInput).toHaveAttribute('min', '0');
+    expect(mvhrEffInput).toHaveAttribute('max', '1');
+    expect(mvhrEffInput).toHaveAttribute('inputmode', 'decimal');
+  });
+
+  it('R4.6a: the boolean arm of the nullable unwrap renders a real CHECKBOX (BuildingElementOpaque.is_unheated_pitched_roof, Core)', () => {
+    // The one BOOLEAN nullable wrapper in either published schema. It is asserted
+    // through a direct `DirectAdvancedFields` mount rather than through
+    // `AdvancedFieldsEditor`, because it is a BASE field for BuildingElementOpaque
+    // (`getBaseFieldsForElementType`, lib/schemaCache.ts) and so is filtered out of
+    // `advancedProperties` before the grid ever sees it -- config 2 above deliberately
+    // shows no row for it. That makes the boolean arm unreachable through the element
+    // editor today; it is exercised here anyway, on the REAL schema node pulled from
+    // the port (not a hand-copied literal, which would only prove the test author's
+    // idea of the shape), the same way the Stage 2.5 gate tests mount
+    // `DirectAdvancedFields` directly for shapes no element type routes to.
+    const coreOpaque = canonicalGeometrySchemaPort.getElementSubschema('core', 'BuildingElementOpaque') as
+      | { properties?: Record<string, unknown> }
+      | null;
+    const wrapped = coreOpaque?.properties?.is_unheated_pitched_roof as Record<string, unknown>;
+    // Guard the fixture itself: if HEM ever flattens this field, the assertion below
+    // would pass for the wrong reason.
+    expect(wrapped).toMatchObject({ anyOf: [{ type: 'boolean' }, { type: 'null' }] });
+
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const { container } = render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={canonicalGeometrySchemaPort}
+        workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
+      >
+        <GeometryStoreProvider store={store}>
+          <DirectAdvancedFields
+            schema={{ type: 'object', properties: { is_unheated_pitched_roof: wrapped } }}
+            data={{ is_unheated_pitched_roof: true }}
+            config={{ advancedEditor: true, elementType: 'BuildingElementOpaque' }}
+            onDataChange={vi.fn()}
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+
+    const roofRow = fieldRow(container, 'is_unheated_pitched_roof');
+    expect(inputSignatureForRow(roofRow)).toEqual(CHECKBOX);
+    expect((within(roofRow).getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+    // The label still comes from the WRAPPER's own title, not from anything the inner
+    // branch contributes -- see `unwrapNullableSchema`'s annotation rule.
+    expect(fieldLabelText(roofRow)).toBe('Is Unheated Pitched Roof');
   });
 
   it('config 6 -- WetEmitter, radiator, FHS: per_metre and lumped thermal-mode pruning direct-render characterization', () => {
@@ -1508,9 +2054,15 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
       sec: { list: [{ name: 'Alpha 2', value: 1 }, { name: 'Beta', value: 2 }] },
     });
 
-    // Unset (reset-to-undefined) on item 0's value: mirrors lodash/fp `unset` --
-    // deletes the leaf, leaving a hole at index 0 (not a splice that would shift item
-    // 1 down to index 0) -- item 1 stays intact at index 1.
+    // Unset (reset-to-undefined) on item 0's `value`. R4.6a COMMENT CORRECTION: this
+    // exercises the RECORD branch of `setAtPathNode`, not the array branch -- the leaf
+    // being unset is a key inside the item OBJECT at index 0 (`sec.list.0.value`), so
+    // index 0 keeps its object, minus that key, and the array itself is untouched.
+    // The old wording here ("leaving a hole at index 0 (not a splice that would shift
+    // item 1 down)") described the ARRAY-INDEX-leaf case, which this fixture never
+    // reaches and which R4.6a changed to a splice anyway -- see the dedicated
+    // array-index-leaf test below and `setAtPathNode`'s docstring. Everything asserted
+    // here is unchanged by that fix.
     const resetButton = within(fieldRowByLabel(container, 'value', 'Item 0')).getByRole('button', {
       name: 'Reset to default',
     });
@@ -1521,6 +2073,71 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
     expect(lastCall.sec.list.length).toBe(2);
     expect(lastCall.sec.list[1]).toEqual({ name: 'Beta', value: 2 });
     expect(Object.prototype.hasOwnProperty.call(lastCall.sec.list[0] ?? {}, 'value')).toBe(false);
+  });
+
+  it('R4.6a: unsetting a leaf that IS an array index splices the item out — no `null` hole in the serialised JSON', () => {
+    // R4.5 REVIEW NOTE, closed. `setAtPathNode` used to `delete arr[i]` here, on the
+    // stated grounds that it mirrored `lodash/fp/unset` -- the contract that mattered
+    // while JsonForms' `UPDATE_DATA` reducer was the reference implementation. R4.4/R4.5
+    // deleted that reducer; a hole serialises as `null` through `JSON.stringify`, and
+    // `null` is not valid HEM input for any list this walker can reach
+    // (`window_part_list`, `edge_insulation`, `treatment` are all lists OF OBJECTS).
+    //
+    // UNREACHABLE FROM TODAY'S UI, and the fixture says so honestly: no live array has
+    // PRIMITIVE items, so no production spec ever binds a Control straight to an array
+    // index -- every real array path ends at a leaf inside an item object, which the
+    // test immediately above covers. This is a self-rooted `Group` over a primitive
+    // list, the minimal shape that reaches the array branch's leaf-unset at all, and
+    // the reason to have it is that the next array-shaped builder inherits this
+    // behaviour whether or not anyone re-derives the argument.
+    const itemSchema = { type: 'number' };
+    const primitiveListSpec: DirectSpecNode = {
+      type: 'VerticalLayout',
+      elements: [
+        {
+          type: 'Group',
+          label: 'Readings',
+          elements: [0, 1, 2].map((index) => ({
+            type: 'Control' as const,
+            label: `Reading ${index}`,
+            scope: `#/properties/${index}`,
+            options: { schemaOverride: itemSchema },
+          })),
+          options: {
+            schemaOverride: { type: 'object', properties: { 0: itemSchema, 1: itemSchema, 2: itemSchema } },
+            pathOverride: 'sec.list',
+            openInitially: true,
+          },
+        },
+      ],
+    };
+    const onDataChange = vi.fn();
+    const { container } = renderDirectSpecFields({
+      schema: { type: 'object', properties: {} },
+      data: { sec: { list: [10, 20, 30] }, sibling: 'untouched' },
+      spec: primitiveListSpec,
+      onDataChange,
+    });
+
+    // Values bind per index (10/20/30), which is what makes the post-unset shift below
+    // meaningful rather than an artefact of everything reading index 0.
+    expect(
+      ['0', '1', '2'].map((key) => (within(fieldRow(container, key)).getByRole('textbox') as HTMLInputElement).value),
+    ).toEqual(['10', '20', '30']);
+
+    fireEvent.click(within(fieldRow(container, '0')).getByRole('button', { name: 'Reset to default' }));
+
+    const next = onDataChange.mock.calls[onDataChange.mock.calls.length - 1][0] as {
+      sec: { list: unknown };
+      sibling: string;
+    };
+    // Item removed, later items shifted down, still an array, siblings intact.
+    expect(Array.isArray(next.sec.list)).toBe(true);
+    expect(next.sec.list).toEqual([20, 30]);
+    expect(next.sibling).toBe('untouched');
+    // The assertion the old `delete` semantics failed: a hole stringifies as `null`,
+    // and `[null,20,30]` is what used to reach the exported HEM input.
+    expect(JSON.stringify(next.sec.list)).toBe('[20,30]');
   });
 });
 
