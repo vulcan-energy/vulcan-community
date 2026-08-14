@@ -5,8 +5,12 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import coreSchema from '../../../../../data/schemas/core-input.schema.json';
+import fhsSchema from '../../../../../data/schemas/input_fhs.schema.json';
 import type { GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
+import { type SchemaNode } from '../../lib/schemaTypes';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
+import { unwrapNullableSchema } from '../DirectAdvancedFields';
 import { EnumControl, NumberControl, TextControl } from '../jsonformsRenderers';
 
 afterEach(cleanup);
@@ -36,6 +40,7 @@ function renderControl(
     config = {},
     enabled = true,
     handleChange = vi.fn(),
+    defaultsJson = null,
   }: {
     data?: unknown;
     path?: string;
@@ -45,9 +50,17 @@ function renderControl(
     config?: Record<string, unknown>;
     enabled?: boolean;
     handleChange?: ReturnType<typeof vi.fn>;
+    /**
+     * Seeds the store's template defaults. The controls read their default value off
+     * the store (`useDefaultValues`/`useDefaultsLookup`), not off `config`, so this is
+     * the only way to reach the default-wins branch of the placeholder ladder. Left
+     * `null` by default: every pre-existing case here wants "no template default".
+     */
+    defaultsJson?: Record<string, unknown> | null;
   } = {},
 ) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
+  if (defaultsJson !== null) store.setState({ defaultsJson });
   const props = {
     data,
     path,
@@ -317,5 +330,302 @@ describe('TextControl JSON-blob commit (R4.5 follow-up, R4.6a)', () => {
         cleanup();
       }
     }
+  });
+});
+
+/**
+ * Ported from the deleted web `jsonformsRenderers.test.tsx` (parent repo, R4.5). Five
+ * of that file's seventeen cases never went through the `<JsonForms renderers={...}>`
+ * mount the deletion was justified by — they did `render(<TextControl {...props} />)`
+ * directly, so they were community behaviour tests sitting in the wrong repo and were
+ * dropped with no equivalent. Re-seated here on the current prop shape
+ * (`AdvancedControlProps` + this file's `renderControl`), not copied verbatim; the
+ * originals predate `schemaPort`, the store-injected defaults, and R4.5's local
+ * control-props type.
+ *
+ * What they are the only coverage OF, and therefore what they are written to fail on:
+ *
+ *  - Placeholder WIRING, not placeholder GENERATION. `generateRobustPlaceholder`'s own
+ *    unit tests (`lib/__tests__/schemaPlaceholders.test.ts`) survived R4.5 and pin the
+ *    strings; nothing pinned that `TextControl` calls it with the row's resolved schema
+ *    and `$defs`, suppresses it once the row has content, prefers a template default
+ *    over it, and renders the result as the input's `placeholder` ATTRIBUTE. Assertions
+ *    below therefore read `getAttribute('placeholder')` — a `textContent` assertion
+ *    cannot see a placeholder at all, which is how this stayed unpinned.
+ *  - The empty-value sentinel rule (`isMeaningfulExplicitValue` ->
+ *    `getStatusPillType` / `shouldShowResetToSource`, `jsonformsRenderers.tsx`): `''`,
+ *    `'{}'` and `'[]'` are blank-like, NOT user overrides. Nothing anywhere referenced
+ *    those symbols or the `custom-value` class. The last case pins it through its three
+ *    observable consequences, so a regression to a bare `data !== undefined` fails it.
+ */
+describe('TextControl placeholder wiring and blank-like sentinels (ported from the deleted web registry test, R4.5)', () => {
+  // `data: null` below stands in for the originals' `data: undefined`: `renderControl`'s
+  // destructuring default (`data = 0.25`) fires on an explicit `undefined`, so passing
+  // one would silently mount a numeric value instead of an empty row. `null` and
+  // `undefined` are indistinguishable to everything asserted here — both render '' and
+  // both are blank-like to `isMeaningfulExplicitValue`.
+
+  /** `type: ['array','null']` + `items.$ref` + sibling `$defs` — the live window shape. */
+  function arrayOfRefSchema(defName: string, def: Record<string, unknown>) {
+    return {
+      type: ['array', 'null'],
+      items: { $ref: `#/$defs/${defName}` },
+      $defs: { [defName]: def },
+    };
+  }
+
+  const treatmentSchema = arrayOfRefSchema('WindowTreatment', {
+    type: 'object',
+    properties: {
+      controls: {
+        type: 'string',
+        enum: ['auto_motorised', 'combined_light_blind_HVAC', 'manual', 'manual_motorised'],
+      },
+      delta_r: { type: 'number' },
+      trans_red: { type: 'number' },
+      type: { type: 'string', enum: ['blinds', 'curtains'] },
+    },
+  });
+
+  function placeholderOf(): string | null {
+    return (screen.getByRole('textbox') as HTMLInputElement).getAttribute('placeholder');
+  }
+
+  it('resolves a nested $ref through the row schema\'s own $defs, and drops the placeholder once the row is populated', () => {
+    renderControl(TextControl, {
+      data: null,
+      path: 'treatment',
+      label: 'Treatment',
+      schema: treatmentSchema,
+      config: { elementType: 'BuildingElementTransparent' },
+    });
+    // The item `$ref` is resolved against the schema's own `$defs`, and every property
+    // of the resolved object appears — not `[]`, which is what an unresolved `$ref`
+    // degrades to.
+    expect(placeholderOf()).toBe(
+      '[{"controls":"auto_motorised","delta_r":1,"trans_red":1,"type":"blinds"}]',
+    );
+    cleanup();
+
+    // Second half of the wiring: a populated row shows its value, never a hint on top
+    // of it.
+    renderControl(TextControl, {
+      data: [{ type: 'curtains' }],
+      path: 'treatment',
+      label: 'Treatment',
+      schema: treatmentSchema,
+      config: { elementType: 'BuildingElementTransparent' },
+    });
+    expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('[{"type":"curtains"}]');
+    expect(placeholderOf()).toBeNull();
+  });
+
+  it('picks the object-ish branch of a oneOf item schema (shading)', () => {
+    renderControl(TextControl, {
+      data: null,
+      path: 'shading',
+      label: 'Shading',
+      schema: arrayOfRefSchema('WindowShadingObject', {
+        oneOf: [
+          {
+            type: 'object',
+            properties: {
+              height: { type: 'number' },
+              distance: { type: 'number' },
+              transparency: { type: 'number' },
+              type: { type: 'string', enum: ['obstacle'] },
+            },
+          },
+        ],
+      }),
+      config: { elementType: 'BuildingElementTransparent' },
+    });
+
+    expect(placeholderOf()).toBe('[{"height":1,"distance":1,"transparency":1,"type":"obstacle"}]');
+  });
+
+  it('generates a single-property item example (window_part_list)', () => {
+    renderControl(TextControl, {
+      data: null,
+      path: 'window_part_list',
+      label: 'Window Part List',
+      schema: arrayOfRefSchema('WindowPart', {
+        type: 'object',
+        properties: { mid_height_air_flow_path: { type: 'number' } },
+      }),
+      config: { elementType: 'BuildingElementTransparent' },
+    });
+
+    expect(placeholderOf()).toBe('[{"mid_height_air_flow_path":1}]');
+  });
+
+  it('prefers a template default over the schema example, and JSON-stringifies it instead of rendering [object Object]', () => {
+    // The original case asserted only that `[object Object]` was absent, from a mount
+    // with no default at all — so it could not reach the branch that produces one. An
+    // object-valued template default is exactly that branch: the ladder's PRIORITY 1
+    // arm has to stringify it, and `String(someObject)` is `'[object Object]'`.
+    renderControl(TextControl, {
+      data: null,
+      path: 'treatment',
+      label: 'Treatment',
+      schema: treatmentSchema,
+      config: { elementType: 'BuildingElementTransparent' },
+      // Shaped for `getDefaultValue`'s typed depth-first search: it only returns a
+      // value from a node whose own `type` matches the control's `elementType`.
+      defaultsJson: {
+        BuildingElement: {
+          'window 1': {
+            type: 'BuildingElementTransparent',
+            treatment: [{ type: 'blinds', controls: 'manual' }],
+          },
+        },
+      },
+    });
+
+    const placeholder = placeholderOf();
+    expect(placeholder).not.toContain('[object Object]');
+    // The default, not the schema example the same mount would otherwise have shown
+    // (asserted verbatim in the first case above) — so this pins the ladder's order too.
+    expect(placeholder).toBe('[{"type":"blinds","controls":"manual"}]');
+  });
+
+  it('treats \'\', \'{}\', \'[]\' and empty containers as blank-like, not as a user override', () => {
+    // The ONLY coverage of `isMeaningfulExplicitValue`. Asserted through all three of
+    // its observable consequences, because each fails on a different mutation of the
+    // rule: the status pill (`getStatusPillType`), the reset-to-source affordance
+    // (`shouldShowResetToSource`), and the `custom-value` class on the input container.
+    // A regression to `data !== undefined` shows up in at least one of the three for
+    // every value below.
+    for (const [data, displayed] of [
+      ['', ''],
+      ['{}', '{}'],
+      ['[]', '[]'],
+      [[], ''],
+      [{}, ''],
+    ] as Array<[unknown, string]>) {
+      renderControl(TextControl, {
+        data,
+        path: 'treatment',
+        label: 'Treatment',
+        schema: treatmentSchema,
+        config: { elementType: 'BuildingElementTransparent' },
+      });
+
+      const input = screen.getByRole('textbox') as HTMLInputElement;
+      expect(input.value).toBe(displayed);
+      expect(screen.queryByText('Custom')).not.toBeInTheDocument();
+      expect(screen.getByText('Schema')).toBeVisible();
+      expect(screen.queryByRole('button', { name: 'Reset to default' })).not.toBeInTheDocument();
+      expect(input.closest('.standard-input-container')).not.toHaveClass('custom-value');
+      cleanup();
+    }
+
+    // Contrast, so the loop above cannot pass by asserting nothing ever renders: a
+    // genuinely non-empty value on the same field DOES read as a user override.
+    renderControl(TextControl, {
+      data: [{ type: 'blinds' }],
+      path: 'treatment',
+      label: 'Treatment',
+      schema: treatmentSchema,
+      config: { elementType: 'BuildingElementTransparent' },
+    });
+    expect(screen.getByText('Custom')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reset to default' })).toBeVisible();
+    expect(screen.getByRole('textbox').closest('.standard-input-container')).toHaveClass(
+      'custom-value',
+    );
+  });
+});
+
+/**
+ * R4.6a REGRESSION, the WIRING half. `lib/__tests__/schemaPlaceholders.test.ts` pins
+ * what `generateRobustPlaceholder` RETURNS for a dictionary schema; this pins that
+ * `TextControl` actually renders it, on the real published node, through the real
+ * `unwrapNullableSchema`. Generator coverage without wiring coverage is exactly what
+ * let the original placeholder bugs through — see the ported block above — so the
+ * assertions below read the `placeholder` ATTRIBUTE and the "Copy example" clipboard
+ * payload, which is the surface a user actually pastes from.
+ */
+describe('TextControl renders `{}` for a dictionary row (R4.6a regression)', () => {
+  /** Root property with its `$ref` followed once, as the walks deliver it. */
+  function publishedNode(root: SchemaNode, container: string, property: string): SchemaNode {
+    const node = root.properties?.[container] as SchemaNode;
+    const resolved =
+      typeof node.$ref === 'string' ? (root.$defs ?? {})[node.$ref.replace('#/$defs/', '')] : node;
+    return resolved.properties?.[property] as SchemaNode;
+  }
+
+  function mountAndReadPlaceholder(
+    root: SchemaNode,
+    container: string,
+    property: string,
+    { unwrap }: { unwrap: boolean },
+  ): { placeholder: string | null; copyExample: HTMLElement | null } {
+    const published = publishedNode(root, container, property);
+    renderControl(TextControl, {
+      data: null,
+      path: `${container}.${property}`,
+      label: property,
+      schema: unwrap ? unwrapNullableSchema(published) : published,
+      config: { elementType: 'System', subtype: container, $defs: root.$defs },
+    });
+    return {
+      placeholder: (screen.getByRole('textbox') as HTMLInputElement).getAttribute('placeholder'),
+      copyExample: screen.queryByRole('button', { name: 'Copy example' }),
+    };
+  }
+
+  // Core, WRAPPED: `anyOf:[dict,{type:'null'}]`. Before R4.6a the wrapper reached the
+  // generator intact and produced `{}`; the unwrap strips it, and without the guard fix
+  // the same field then offered `[]` — which `validateAdvancedFieldPrimitive` rejects on
+  // paste, so the row errored and nothing committed. Asserting both columns makes the
+  // regression a single readable equality rather than a remembered "it used to be".
+  it.each([
+    ['InfiltrationVentilation', 'MechanicalVentilation'],
+    ['HotWaterDemand', 'Bath'],
+    ['HotWaterDemand', 'Other'],
+    ['HotWaterDemand', 'Shower'],
+  ])('core System:%s.%s renders `{}` wrapped AND unwrapped', (container, property) => {
+    for (const unwrap of [false, true]) {
+      const { placeholder } = mountAndReadPlaceholder(coreSchema as never, container, property, { unwrap });
+      expect(placeholder).toBe('{}');
+      cleanup();
+    }
+  });
+
+  // DECLARED PRE-EXISTING CHANGE: never wrapped, so these rendered `[]` before R4.6a as
+  // well as after, on both profiles. The same guard fix corrects them.
+  it.each([
+    ['core', 'InfiltrationVentilation', 'Vents'],
+    ['fhs', 'InfiltrationVentilation', 'Vents'],
+    ['fhs', 'InfiltrationVentilation', 'MechanicalVentilation'],
+    ['fhs', 'HotWaterDemand', 'Shower'],
+  ] as Array<['core' | 'fhs', string, string]>)(
+    '%s System:%s.%s: a bare dictionary renders `{}`',
+    (profile, container, property) => {
+      const root = (profile === 'core' ? coreSchema : fhsSchema) as never as SchemaNode;
+      const { placeholder } = mountAndReadPlaceholder(root, container, property, { unwrap: true });
+      expect(placeholder).toBe('{}');
+    },
+  );
+
+  it('offers the same `{}` on the clipboard, which is the half that errored on paste', () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    const { placeholder, copyExample } = mountAndReadPlaceholder(
+      coreSchema as never,
+      'InfiltrationVentilation',
+      'MechanicalVentilation',
+      { unwrap: true },
+    );
+    expect(placeholder).toBe('{}');
+    expect(copyExample).not.toBeNull();
+
+    fireEvent.click(copyExample as HTMLElement);
+    expect(writeText).toHaveBeenCalledWith('{}');
+    // The exact string the bug put on the clipboard, named so the pin cannot be read
+    // as merely "some placeholder exists".
+    expect(writeText).not.toHaveBeenCalledWith('[]');
   });
 });

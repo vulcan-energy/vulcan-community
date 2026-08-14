@@ -8,6 +8,7 @@ import {
   generateDefaultValue,
   resolveSchemaRef 
 } from '../schemaPlaceholders';
+import { type SchemaNode } from '../schemaTypes';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -264,6 +265,117 @@ describe('Schema Placeholder Generation', () => {
       };
       const result = generateCompletePlaceholder(schema);
       expect(result).toBe('["example"]');
+    });
+  });
+
+  /**
+   * R4.6a REGRESSION. `generateCompletePlaceholder`'s object branch used to require
+   * `properties` as well as `type: 'object'`, so a DICTIONARY (`additionalProperties`,
+   * no `properties` — how HEM models every user-keyed map) fell through to the `'[]'`
+   * fallback and offered an ARRAY as the example for an OBJECT field. Pasting it via
+   * "Copy example" then failed validation and the row errored.
+   *
+   * It stayed invisible while HEM's optional dictionaries arrived here still wrapped as
+   * `anyOf:[dict,{type:'null'}]`, because the wrapper took the union branch and produced
+   * `'{}'`. R4.6a's `unwrapNullableSchema` strips the wrapper first, so the dictionary
+   * now arrives bare and the gap became reachable.
+   *
+   * Read against the REAL published schemas, not hand-built fixtures, so a schema update
+   * that changes these shapes shows up here rather than being quietly re-mocked. Both
+   * profiles, and both halves of the population: the WRAPPED dictionaries (the
+   * regression, Core only) and the BARE ones (broken since before R4.6a, on both
+   * profiles — fixing the guard fixes those too, which is a deliberate declared change,
+   * not a side effect).
+   */
+  describe('dictionary schemas (R4.6a regression: additionalProperties without properties)', () => {
+    const schemaDir = join(import.meta.dirname, '../../../../../data/schemas');
+    const profiles: Record<'core' | 'fhs', SchemaNode> = {
+      core: JSON.parse(readFileSync(join(schemaDir, 'core-input.schema.json'), 'utf-8')) as SchemaNode,
+      fhs: JSON.parse(readFileSync(join(schemaDir, 'input_fhs.schema.json'), 'utf-8')) as SchemaNode,
+    };
+
+    function defsOf(profile: 'core' | 'fhs'): Record<string, SchemaNode> {
+      return profiles[profile].$defs ?? {};
+    }
+
+    /** Root property, `$ref` followed once (Core routes its roots through `$defs`). */
+    function rootProperty(profile: 'core' | 'fhs', container: string, property: string): SchemaNode {
+      let node = profiles[profile].properties?.[container] as SchemaNode;
+      if (typeof node.$ref === 'string') node = defsOf(profile)[node.$ref.replace('#/$defs/', '')];
+      return node.properties?.[property] as SchemaNode;
+    }
+
+    /** The nullable-wrapper collapse `DirectAdvancedFields` applies before rendering. */
+    function unwrapNullable(node: SchemaNode): SchemaNode {
+      const isNull = (branch: SchemaNode): boolean =>
+        branch.type === 'null' && Object.keys(branch).length === 1;
+      for (const keyword of ['anyOf', 'oneOf'] as const) {
+        const branches = node[keyword];
+        if (!Array.isArray(branches) || branches.length !== 2) continue;
+        if (branches.filter(isNull).length !== 1) continue;
+        const merged: SchemaNode = { ...branches.find((branch) => !isNull(branch)), ...node };
+        delete merged[keyword];
+        return merged;
+      }
+      return node;
+    }
+
+    // The four Core routes the regression was reported on. Each is a nullable-WRAPPED
+    // dictionary, so each is asserted twice: wrapped (what shipped before R4.6a) and
+    // unwrapped (what ships now). Both must be `{}` — that equality IS the regression
+    // statement, and it fails in the unwrapped column without the guard fix.
+    it.each([
+      ['InfiltrationVentilation', 'MechanicalVentilation'],
+      ['HotWaterDemand', 'Bath'],
+      ['HotWaterDemand', 'Other'],
+      ['HotWaterDemand', 'Shower'],
+    ])('core %s.%s: the same `{}` before and after the nullable unwrap', (container, property) => {
+      const wrapped = rootProperty('core', container, property);
+      const unwrapped = unwrapNullable(wrapped);
+      // Guard the fixture: if HEM stops wrapping these, this test is measuring nothing.
+      expect(Array.isArray(wrapped.anyOf)).toBe(true);
+      expect(unwrapped.type).toBe('object');
+      expect(unwrapped.properties).toBeUndefined();
+      expect(unwrapped.additionalProperties).toBeDefined();
+
+      expect(generateRobustPlaceholder(property, wrapped, defsOf('core'))).toBe('{}');
+      expect(generateRobustPlaceholder(property, unwrapped, defsOf('core'))).toBe('{}');
+    });
+
+    // DECLARED PRE-EXISTING CHANGE, not a regression: these were never wrapped, so they
+    // rendered `[]` before R4.6a and after it. The guard fix corrects them too.
+    it.each([
+      ['core', 'InfiltrationVentilation', 'Vents'],
+      ['fhs', 'InfiltrationVentilation', 'Vents'],
+      ['fhs', 'InfiltrationVentilation', 'MechanicalVentilation'],
+      ['fhs', 'HotWaterDemand', 'Bath'],
+      ['fhs', 'HotWaterDemand', 'Other'],
+      ['fhs', 'HotWaterDemand', 'Shower'],
+    ] as Array<['core' | 'fhs', string, string]>)(
+      '%s %s.%s: a BARE dictionary is `{}` (was `[]` before and after R4.6a)',
+      (profile, container, property) => {
+        const node = rootProperty(profile, container, property);
+        expect(node.type).toBe('object');
+        expect(node.properties).toBeUndefined();
+        expect(node.additionalProperties).toBeDefined();
+
+        expect(generateRobustPlaceholder(property, node, defsOf(profile))).toBe('{}');
+      },
+    );
+
+    it('leaves an object WITH properties, and every non-object shape, exactly as they were', () => {
+      // The guard fix widened one condition; these are the neighbours it must not have
+      // moved. `Distribution` is the control the regression report used: a 3-branch
+      // `anyOf` the unwrap deliberately does not touch, which produced `{}` throughout
+      // and is why the four HotWaterDemand rows disagreed with each other.
+      expect(
+        generateRobustPlaceholder('Distribution', rootProperty('core', 'HotWaterDemand', 'Distribution'), defsOf('core')),
+      ).toBe('{}');
+      expect(generateCompletePlaceholder({ type: 'object', properties: { a: { type: 'number' } } })).toBe('{"a":1}');
+      expect(generateCompletePlaceholder({ type: 'array', items: { type: 'number' } })).toBe('[1]');
+      expect(generateCompletePlaceholder({ type: 'string' })).toBe('"example"');
+      // No `type` at all is still the unknown-shape fallback, unchanged.
+      expect(generateCompletePlaceholder({ additionalProperties: { type: 'number' } })).toBe('[]');
     });
   });
 

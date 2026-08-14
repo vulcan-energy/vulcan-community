@@ -326,8 +326,33 @@ export function generateCompletePlaceholder(schema: SchemaNode | null | undefine
     return JSON.stringify([example]);
   }
 
-  // Handle object types
-  if (schema.type === 'object' && schema.properties) {
+  // Handle object types.
+  //
+  // R4.6a REGRESSION FIX: this guard used to require `schema.properties` as well, so a
+  // DICTIONARY (`{type:'object', additionalProperties:{…}}` — no `properties`, which is
+  // how HEM models every user-keyed map) fell past it to the `'[]'` fallback below and
+  // offered an ARRAY as the example for an OBJECT-shaped field. Pasting that via the
+  // "Copy example" button then failed `validateAdvancedFieldPrimitive`, so the row
+  // errored and nothing committed.
+  //
+  // It only became visible in R4.6a because HEM writes an optional dictionary as
+  // `anyOf:[dict,{type:'null'}]`: the wrapper took the union branch at the top of this
+  // function and produced `'{}'`, masking the broken guard. `unwrapNullableSchema`
+  // (`components/DirectAdvancedFields.tsx`) now strips the wrapper before the node gets
+  // here, so the dictionary arrives bare and the guard's gap became reachable — Core
+  // `System:InfiltrationVentilation.MechanicalVentilation` and
+  // `System:HotWaterDemand.{Bath,Other,Shower}`. A dictionary that was NEVER wrapped
+  // (`InfiltrationVentilation.Vents`, and every one of these on FHS) hit it all along.
+  //
+  // `generateDefaultValue` already returns `{}` for an object with no `properties`, so
+  // dropping the extra condition is the whole fix. `{}` deliberately, not a sampled
+  // one-entry map: the KEY of a dictionary entry is a user-chosen plant/appliance name
+  // ("MVHR Default", "mixer shower 1"), so any sample would invent a HEM name and paste
+  // it into the user's model. `{}` is also exactly what the pre-R4.6a union branch
+  // produced, and what `HotWaterDemand.Distribution` — a 3-branch `anyOf` the unwrap
+  // deliberately leaves alone — still produces today, so the four sibling rows in that
+  // one grid agree again.
+  if (schema.type === 'object') {
     const example = generateDefaultValue(schema, defs);
     return JSON.stringify(example);
   }
