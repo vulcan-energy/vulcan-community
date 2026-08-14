@@ -64,6 +64,22 @@ export const StandardDropdown: React.FC<StandardDropdownProps> = ({
   const helperTextId = helperText && !error ? `${dropdownId}-helper` : undefined;
   const describedBy = [ariaDescribedBy, errorId, helperTextId].filter(Boolean).join(' ') || undefined;
 
+  /**
+   * A non-empty `value` that matches no option MUST still be what the select
+   * displays. A native `<select>` whose value has no matching `<option>` silently
+   * falls back to showing option index 0 -- so before this existed, a stored
+   * out-of-enum value (e.g. `mass_distribution_class: "NOT_A_CLASS"` in a snippet)
+   * rendered as the FIRST legitimate option, with nothing anywhere telling the user
+   * the value on screen was not the value in their data. Any change event then
+   * committed the misread. Rendering the stored value as its own entry makes the
+   * control display the truth; `disabled` because it exists to REPRESENT current
+   * state, not to be choosable -- picking any real option replaces it and the entry
+   * disappears on the next render. (Whether an out-of-range value should also raise
+   * a visible validation error is the host's job -- EnumControl's `errors` prop --
+   * not this component's.)
+   */
+  const valueUnmatched = value !== '' && !options.some((option) => option.value === value);
+
   const renderSelect = (controlDescribedBy: string | undefined) => (
     <select
       ref={selectRef}
@@ -80,6 +96,11 @@ export const StandardDropdown: React.FC<StandardDropdownProps> = ({
       {placeholder && !value && !options.some((option) => option.value === '') && (
         <option value="" disabled>
           {placeholder}
+        </option>
+      )}
+      {valueUnmatched && (
+        <option value={value} disabled>
+          {value} (not in list)
         </option>
       )}
       {options.map((option, index) => (
