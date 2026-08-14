@@ -9,6 +9,14 @@ publish = false
 description = "Canonical Vulcan Geometry CSV to HEM model transform"
 license = "AGPL-3.0-only"
 
+[features]
+default = ["tb-solver-ui-key"]
+# Includes the Pro thermal-bridge solver's persisted extra_json key name in the
+# UI-only strip list. Default ON (native, MCP, batch CLI). The FREE wasm variant
+# builds without it so the Pro crate's name never appears in the Free artifact's
+# string pool — see NAMED_UI_ONLY_EXTRA_JSON_KEYS in src/builder.rs.
+tb-solver-ui-key = []
+
 [dependencies]
 jsonschema = { version = "0.46.5", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
