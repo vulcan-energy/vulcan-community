@@ -11,6 +11,7 @@ import {
   calculateSuggestedVentilationBaseHeight,
   calculateSuggestedVentilationHeight,
   withEffectiveStoreyHeights,
+  ZONE_OVERRIDE_EPSILON,
 } from '../../../lib/zoneDerivation';
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
@@ -1980,7 +1981,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         )
       ) {
         const derivedH = calculateDerivedHeight(zone.id, allElements);
-        if (derivedH > 0 && Math.abs(csvHeight - derivedH) > FLOOR_AREA_MATCH_EPSILON_M2) {
+        if (derivedH > 0 && Math.abs(csvHeight - derivedH) > ZONE_OVERRIDE_EPSILON) {
           flags._heightUserOverride = true;
         }
       }
