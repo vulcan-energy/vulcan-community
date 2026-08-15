@@ -49,7 +49,7 @@ import {
   pickDirectControl,
   type DirectSpecNode,
 } from '../DirectAdvancedFields';
-import { unwrapNullableSchema } from '../../lib/schemaShape';
+import { isPrimitiveOrEnumSchemaNode, unwrapNullableSchema } from '../../lib/schemaShape';
 import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
 import { dereferenceSchemaNodeInRoot } from '../../lib/subschemaCache';
 import { resolveSchemaPointer } from '../../lib/schemaRefResolver';
@@ -666,6 +666,93 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
     });
     expect(doubled).toEqual({ type: 'number', minimum: 0 });
     expect(unwrapNullableSchema(doubled)).toBe(doubled);
+  });
+
+  /**
+   * R4.6b-2: `isPrimitiveOrEnumSchemaNode` landed in `lib/schemaShape.ts` as a PORT of the
+   * parent repo's third hand-written copy of this rule, with no consumer inside this repo
+   * yet — the offer-side callers (`SnippetEditor`'s `compliance_settings` union,
+   * `SimplifiedFabricEditor`'s fabric union) migrate to it in the paired parent PR. A
+   * predicate with no consumer and no test is a predicate nobody notices breaking, so the
+   * acceptance set is pinned here, next to the `unwrapNullableSchema` it composes with.
+   *
+   * The question it answers is the OFFER-side one: would a direct renderer give this node a
+   * single input or dropdown (worth offering as a row when the data has no value yet),
+   * rather than a JSON blob (which needs real data before a row means anything)?
+   */
+  it('R4.6b-2: isPrimitiveOrEnumSchemaNode accepts scalar rows, including through nullable wrappers', () => {
+    const accepted: unknown[] = [
+      { type: 'string' },
+      { type: 'number' },
+      { type: 'integer' },
+      { type: 'boolean' },
+      // Type UNIONS count if any member is primitive -- HEM writes `["string","null"]` too.
+      { type: ['string', 'null'] },
+      // Enum-like with no `type` of its own.
+      { enum: ['a', 'b'] },
+      { oneOf: [{ const: 1 }, { const: 2 }] },
+      { anyOf: [{ const: 'x', title: 'X' }] },
+      // The nullable wrapper this composes `unwrapNullableSchema` for: the whole reason the
+      // parent's copy existed, since reading `type` off the WRAPPER finds nothing.
+      { anyOf: [{ type: 'number', minimum: 0 }, { type: 'null' }], default: null },
+      { oneOf: [{ enum: ['a'] }, { type: 'null' }] },
+      // Optional[Optional[X]] -- the fixpoint unwraps both layers.
+      { oneOf: [{ anyOf: [{ type: 'number' }, { type: 'null' }] }, { type: 'null' }] },
+      // The live FHS zero-names shape: empty alternatives, but a real `type` beside them.
+      { type: 'string', oneOf: [] },
+    ];
+    for (const node of accepted) {
+      expect(isPrimitiveOrEnumSchemaNode(node), JSON.stringify(node)).toBe(true);
+    }
+
+    const rejected: unknown[] = [
+      { type: 'object', properties: { a: { type: 'string' } } },
+      { type: 'array', items: { type: 'number' } },
+      // A wrapper around an object is still an object row.
+      { anyOf: [{ type: 'object', properties: {} }, { type: 'null' }] },
+      // Combinators that are not const-alternatives say nothing about scalarness.
+      { anyOf: [{ type: 'object' }, { type: 'array' }] },
+      { oneOf: [{ const: 'a' }, { type: 'string' }] },
+      {},
+      // Not a record at all.
+      null,
+      undefined,
+      [],
+      'string',
+      42,
+    ];
+    for (const node of rejected) {
+      expect(isPrimitiveOrEnumSchemaNode(node), JSON.stringify(node)).toBe(false);
+    }
+  });
+
+  it('R4.6b-2: the two shapes where the composed predicate diverges from the parent copy it ported', () => {
+    // The port is composed from `isNonEmptyEnumLike` + `schemaTypeList` rather than from the
+    // original's hand-inlined tests, which differ on exactly two shapes. Both were swept
+    // against every node of both published schemas (2650 nodes, zero divergences), so these
+    // are pinned as SYNTHETIC statements of what the composed rule does -- not as live
+    // behaviour changes.
+
+    // (1) A bare empty enum with no `type`. The original returned TRUE on
+    // `Array.isArray(s.enum)` alone; the tightened `schemaHasEnum` requires a member, and
+    // there is no type to fall through to, so it is no longer OFFERED. A property whose
+    // schema advertises zero legal values is not an offer worth making -- and it would not
+    // have rendered as an enum anyway (`pickDirectControl` sends it to TextControl).
+    expect(isPrimitiveOrEnumSchemaNode({ enum: [] })).toBe(false);
+    // Unchanged where a type is present to answer the question instead.
+    expect(isPrimitiveOrEnumSchemaNode({ type: 'string', enum: [] })).toBe(true);
+
+    // (2) A node carrying BOTH a non-const `oneOf` and a const `anyOf`. The original read
+    // `oneOf` OR ELSE `anyOf` and never looked at the second once the first existed, so it
+    // answered FALSE; the shared predicates check each keyword independently, so this now
+    // answers TRUE. Asserting the composed verdict deliberately: the node IS enum-like by
+    // way of its `anyOf`, and no published schema writes this shape.
+    expect(
+      isPrimitiveOrEnumSchemaNode({
+        oneOf: [{ type: 'string' }],
+        anyOf: [{ const: 'a' }, { const: 'b' }],
+      }),
+    ).toBe(true);
   });
 });
 

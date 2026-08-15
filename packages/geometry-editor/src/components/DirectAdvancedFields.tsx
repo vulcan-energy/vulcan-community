@@ -544,7 +544,21 @@ function renderControlForProperty(args: {
   const path = segments.join('.');
   const leafKey = segments[segments.length - 1] ?? path;
 
-  const baseProps = {
+  // TYPED, not cast (R4.6b-2 review): `Omit<DirectControlProps, 'errors'>` is what makes
+  // the required-prop contract this slice introduced actually bite HERE, at the only two
+  // production mounts. Both render sites used to go through `as unknown as
+  // DirectControlProps`, which would have swallowed a dropped `propKey` silently — a
+  // required prop nothing checks is a comment, not a contract. The four fields beyond the
+  // control prop type (`visible`, `required`, `id`, `rootSchema`) are declared in the
+  // intersection rather than deleted: they are populated for parity with the original
+  // JsonForms `ControlProps` shape and read by none of the five controls, which is a
+  // separate decision from this one and is documented at `AdvancedControlProps`.
+  const baseProps: Omit<DirectControlProps, 'errors'> & {
+    visible: boolean;
+    required: boolean;
+    id: string;
+    rootSchema: Record<string, unknown>;
+  } = {
     data: value,
     path,
     // R4.6b-2: the decoded leaf segment travels as its own prop. This walk has held it
@@ -554,7 +568,12 @@ function renderControlForProperty(args: {
     label,
     schema: resolved,
     uischema: { type: 'Control', scope },
-    config,
+    // The one narrowing left: `config` arrives here as an open `Record<string, unknown>`
+    // (the host's `advancedFieldsConfig`) and the controls read it as their own
+    // `RendererConfig`, which is not exported from `jsonformsRenderers.tsx`. Cast the one
+    // field rather than the whole object, so every other prop — `propKey` included — is
+    // still checked.
+    config: config as DirectControlProps['config'],
     enabled: true,
     visible: true,
     required,
@@ -579,7 +598,13 @@ function renderControlForProperty(args: {
   // containing '.' corrupted that downstream split. No control derives a propKey any
   // more; `baseProps.propKey` above is the decoded segment itself. `path` survives as
   // the control's data address (`handleChange`'s echoed argument, the row `id`, and the
-  // System Sample baseline lookup) — none of which re-parses it into a key.
+  // System Sample baseline lookup), none of which SPLITS it into segments — with one
+  // honest exception: `EnumControl`'s junction-type check still asks
+  // `path.includes('junction_type')`, and that substring arm is the one that decides,
+  // since the key test beside it now reads `propKey`. A plant key containing
+  // 'junction_type' anywhere would still answer yes on a non-ThermalBridgeLinear
+  // element — pre-existing, unchanged by this slice, and gated behind
+  // `elementType === 'ThermalBridgeLinear'` in practice.
 
   // Stage 2.2: window_part_list routes to WindowPartListControl BEFORE the type-based
   // picker — it is an array-typed property that would otherwise never reach a sane
@@ -591,7 +616,7 @@ function renderControlForProperty(args: {
   // the check outright since R4.3, and GenericControl no longer exists to mirror.
   if (leafKey === 'window_part_list') {
     return (
-      <WindowPartListControl key={path} {...({ ...baseProps, errors: '' } as unknown as DirectControlProps)} />
+      <WindowPartListControl key={path} {...baseProps} errors="" />
     );
   }
 
@@ -631,7 +656,7 @@ function renderControlForProperty(args: {
     // retired JsonForms path and neither ever surfaced a required error.
     errors = 'is a required property';
   }
-  const controlProps = { ...baseProps, errors } as unknown as DirectControlProps;
+  const controlProps = { ...baseProps, errors };
 
   switch (control) {
     case 'enum':
