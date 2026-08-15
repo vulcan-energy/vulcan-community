@@ -215,8 +215,10 @@ function useDefaultsLookup() {
  * `resolveAdvancedControlFieldPresentation` and render it through `ResolvedFieldLabel`.
  * This function survives for the hand-rendered field groups that genuinely have only a
  * label — `AdvancedFieldsEditor`'s own group headers, `EdgeInsulationFields`,
- * `FancoilTestDataFields`, `DhwStorageHeatSourcePicker`, `WindowTreatmentFields` — plus
- * `renderFieldLabelWithIndicator`'s no-presentation fallback arm.
+ * `FancoilTestDataFields`, `DhwStorageHeatSourcePicker`, `WindowTreatmentFields`. Those
+ * five are now its ONLY callers: R4.6b-2 deleted `renderFieldLabelWithIndicator`'s
+ * no-presentation fallback arm, which was the last route from a control row into this
+ * lossy resolver.
  *
  * R4.6b-1 also deleted the copy of `ResolvedFieldLabel`'s JSX that used to live here.
  * The markup was byte-identical to that component; keeping two copies meant a label or
@@ -298,22 +300,30 @@ export function renderFieldLabelWithTooltip(
 }
 
 /**
- * R4.6b-1 residual, flagged rather than silently left: every one of the six
- * `renderAdvancedFieldLabelRow` call sites now supplies `presentation`, so the
- * label-only arm below is no longer reachable from any control. It is kept as the
- * documented fallback for a caller that has nothing but a display label — the same
- * situation `renderFieldLabelWithTooltip`'s hand-rendered consumers are in — and
- * making the parameter REQUIRED (deleting the arm, and with it the last lossy
- * resolution inside the Advanced Fields grid) is a clean follow-up, deliberately not
- * folded into this slice's measured surface.
+ * Label plus its small inline indicators (evidence chip, validation info).
+ *
+ * R4.6b-2 closes the R4.6b-1 residual this used to carry. `presentation` is REQUIRED and
+ * the label-only fallback arm is DELETED — it routed through
+ * `renderFieldLabelWithTooltip`, which reverse-engineers a property key from the DISPLAY
+ * LABEL (`getSchemaParamIdForField`) and so resolves the wrong parameter, or none, for any
+ * curated `title` that is not a start-case of its key. Evidence that it was dead rather
+ * than merely unused: this function has exactly ONE caller
+ * (`renderAdvancedFieldLabelRow`), that caller has exactly SIX (Text, Number, Boolean,
+ * Enum's two arms, WindowPartList), and every one of the six passes the preamble's
+ * `fieldPresentation`, which `useAdvancedControlPreamble` computes unconditionally for
+ * every control. There is no path through the Advanced Fields grid that arrives here
+ * without one.
+ *
+ * `label` and `elementType` went with the arm: they were its arguments and nothing else's.
+ * The label a row shows now comes from the resolved presentation, which is the point of
+ * having resolved one. `renderFieldLabelWithTooltip` itself stays, for the five
+ * hand-rendered field groups that genuinely have only a label — see its own docstring.
  */
 function renderFieldLabelWithIndicator(
-  label: string,
-  elementType: string | undefined,
-  indicatorMessages?: readonly string[],
-  hasEvidence?: boolean,
-  useFHSSchema?: boolean,
-  presentation?: ResolvedFieldPresentation,
+  indicatorMessages: readonly string[] | undefined,
+  hasEvidence: boolean | undefined,
+  useFHSSchema: boolean | undefined,
+  presentation: ResolvedFieldPresentation,
 ): React.ReactNode {
   return (
     <div
@@ -326,9 +336,7 @@ function renderFieldLabelWithIndicator(
         overflowWrap: 'anywhere',
       }}
     >
-      {presentation
-        ? <ResolvedFieldLabel presentation={presentation} useFHSSchema={useFHSSchema ?? false} />
-        : renderFieldLabelWithTooltip(label, elementType, useFHSSchema)}
+      <ResolvedFieldLabel presentation={presentation} useFHSSchema={useFHSSchema ?? false} />
       {hasEvidence && (
         <span
           style={{
@@ -1567,8 +1575,6 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     'flex-start',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       'default-used',
@@ -1592,26 +1598,17 @@ const ADVANCED_CTRL_LABEL_ROW: React.CSSProperties = {
 };
 
 function renderAdvancedFieldLabelRow(
-  label: string,
-  elementType: string | undefined,
   indicatorMessages: readonly string[] | undefined,
   hasEvidence: boolean | undefined,
   statusPillType: StatusPillType,
-  statusPillLabelOverride?: string,
-  useFHSSchema?: boolean,
-  presentation?: ResolvedFieldPresentation,
+  statusPillLabelOverride: string | undefined,
+  useFHSSchema: boolean | undefined,
+  presentation: ResolvedFieldPresentation,
 ): React.ReactNode {
   return (
     <div style={ADVANCED_CTRL_LABEL_ROW}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {renderFieldLabelWithIndicator(
-          label,
-          elementType,
-          indicatorMessages,
-          hasEvidence,
-          useFHSSchema,
-          presentation,
-        )}
+        {renderFieldLabelWithIndicator(indicatorMessages, hasEvidence, useFHSSchema, presentation)}
       </div>
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
         <StatusPill type={statusPillType} labelOverride={statusPillLabelOverride} />
@@ -1907,8 +1904,6 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     'flex-end',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       statusPillType,
@@ -2155,8 +2150,6 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     'flex-end',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       statusPillType,
@@ -2170,10 +2163,11 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
 export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, schema, uischema, config }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
+  // No `elementType`: R4.6b-2's label-row change took its last reader in this control
+  // (the deleted label-only fallback arm). A checkbox validates nothing per-element.
   const {
     cfg,
     isCompact,
-    elementType,
     fieldPresentation,
     indicatorMessages,
     hasEvidence,
@@ -2205,8 +2199,6 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
     'center',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       statusPillType,
@@ -2386,8 +2378,6 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       'flex-start',
       0,
       renderAdvancedFieldLabelRow(
-        label,
-        elementType,
         indicatorMessages,
         hasEvidence,
         statusPillType,
@@ -2418,8 +2408,6 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     'flex-end',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       statusPillType,
