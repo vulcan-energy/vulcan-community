@@ -11,6 +11,7 @@ import {
   normalizeFieldUnit,
   resolveFieldPresentation,
 } from '../fieldPresentation';
+import { resolveFieldLabelContent } from '../schemaDescriptionOverrides';
 
 function schemaInfo(
   name: string,
@@ -308,5 +309,54 @@ describe('resolveFieldPresentation', () => {
   ] as const)('explicitly classifies unitless %s %s/%s %s', (mode, elementType, subtype, propertyKey) => {
     const result = resolveFieldPresentation({ mode, elementType, subtype, propertyKey }, schemaPort(() => null));
     expect(result.unit).toEqual({ status: 'unitless', source: 'semantic_unitless' });
+  });
+});
+
+/**
+ * R4.6b-3: the arms of the label content rule that NO RENDERED ROW REACHES.
+ *
+ * The standing rendered-row invariant (`AdvancedFieldsEditor.directRender.test.tsx`)
+ * already pins every label a swept route produces, so this table deliberately does not
+ * restate it. What it pins is the set of claims the rule's own docstrings make about
+ * fields the sweep's fixtures never open — a solar collector's `first_order_hlc`, a heat
+ * battery's `heat_storage_kJ_*`, a heat-pump test datum's `cop`, FHS's evidence-free
+ * `inlet_diameter_mm` — because a rule that is only tested where it happens to fire
+ * today is a rule that will be widened by the next person without noticing what it eats.
+ */
+describe('resolveFieldLabelContent (R4.6b-3 label content rule)', () => {
+  it.each([
+    // Step 2, rejection arm 1: a pydantic class name is the TYPE's name, not the field's.
+    ['cross_section_shape', 'DuctShape', 'Cross Section Shape'],
+    // ...but the test is narrow enough to leave a short curated title alone. `CoP` is the
+    // live one: same letters as its key, two "words" by start-casing, and still copy.
+    ['cop', 'CoP', 'CoP'],
+    // Step 2, rejection arm 2: the title has run the key's own words together.
+    ['ColdWaterSource', 'Coldwatersource', 'Cold Water Source'],
+    // Same letters, same word boundaries — KEPT, and then spelled (amendment (a)).
+    ['SFP_in_use_factor', 'Sfp In Use Factor', 'SFP In Use Factor'],
+    // Same letters, and casing the key cannot express: kept, not degraded to "Hlc".
+    ['first_order_hlc', 'First Order HLC', 'First Order HLC'],
+    // One title word covering two key words, but "kJ" earns it.
+    [
+      'heat_storage_kJ_per_K_above_Phase_transition',
+      'Heat Storage kJ Per K Above Phase Transition',
+      'Heat Storage kJ Per K Above Phase Transition',
+    ],
+    // Different letters: curated copy, kept verbatim (Core's `ach_*` divergence).
+    ['ach_max_static_calcs', 'ACH Maximum Static Calcs', 'ACH Maximum Static Calcs'],
+    // Step 1: stripped where the row demonstrably still shows `mm`...
+    ['external_diameter_mm', undefined, 'External Diameter'],
+    // ...and NOT stripped where nothing else would show it.
+    ['inlet_diameter_mm', undefined, 'Inlet Diameter Mm'],
+    // Step 0: an override beats a title the rule would otherwise have to derive around.
+    ['sup_air_flw_ctrl', 'SupplyAirFlowRateControlType', 'Supply Air Flow Rate Control'],
+    ['test_data_EN14825', 'Test Data En14825', 'Test Data EN14825'],
+    // Step 3 on a key-derived label, both spellings and both profiles' `u_value`.
+    ['time_constant_onoff_operation', undefined, 'Time Constant On/Off Operation'],
+    ['min_temp_diff_flow_return_for_hp_to_operate', undefined, 'Min Temp Diff Flow Return For HP To Operate'],
+    ['u_value', undefined, 'U-Value'],
+    ['u_value', 'U-Value', 'U-Value'],
+  ] as const)('labels %s (title %s) as %s', (propertyKey, title, expected) => {
+    expect(resolveFieldLabelContent(propertyKey, title)).toBe(expected);
   });
 });
