@@ -7,6 +7,7 @@
 // global-selection chain), so this module's single hydrate covers it.
 
 import type { Element } from '../../geometry/types';
+import { THERMAL_BRIDGE_POINT_BULK_FIELD_DESCRIPTORS } from '../../lib/bulkFieldDescriptors';
 import { StandardInput } from '../StandardInput';
 import { decimalInputProps, useDecimalInput } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
@@ -36,7 +37,7 @@ export const thermalBridgePointFormModule: ElementFormModule<ThermalBridgePointF
   buildElementData(state, ctx) {
     return {
       ...ctx.baseData,
-      heat_transfer_coeff: state.heatTransferCoeffInput.value
+      [THERMAL_BRIDGE_POINT_BULK_FIELD_DESCRIPTORS.heatTransferCoeff.modelField]: state.heatTransferCoeffInput.value,
     } as Partial<Element>;
   },
 
@@ -45,11 +46,11 @@ export const thermalBridgePointFormModule: ElementFormModule<ThermalBridgePointF
     const { elementType, fieldUnit, renderFieldLabel } = ctx;
     return (
       <>
-        {renderFieldLabel('Heat Transfer Coefficient (W/K):', elementType)}
+        {renderFieldLabel(`${THERMAL_BRIDGE_POINT_BULK_FIELD_DESCRIPTORS.heatTransferCoeff.label} (W/K):`, elementType)}
         <div className="element-input">
           <StandardInput
             {...decimalInputProps(heatTransferCoeffInput)}
-            unit={fieldUnit('heat_transfer_coeff')}
+            unit={fieldUnit(THERMAL_BRIDGE_POINT_BULK_FIELD_DESCRIPTORS.heatTransferCoeff.modelField)}
             step="0.01"
             min="0"
             variant="ghost"
