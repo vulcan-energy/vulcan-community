@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import {
-  useGeometrySchemaPort,
-  useGeometryWorkspaceResourcePort,
-} from '../../../geometry-editor-host/src/editorServicePorts';
+import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import type { GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 import { useKeyedState } from '../hooks/useKeyedState';
 import {
@@ -27,7 +23,7 @@ import {
 } from '../lib/fabricDefaultsEditableProps';
 import { resolveFieldPresentation, type ResolvedFieldPresentation } from '../lib/fieldPresentation';
 import { formatSchemaInfoForTooltip } from '../utils/schemaTooltipHelpers';
-import { useGeometryStore, useGeometryStoreApi } from '../stores/geometryStore';
+import { useGeometryStore } from '../stores/geometryStore';
 import { StandardDropdown } from './StandardDropdown';
 import { StandardInput } from './StandardInput';
 import { Tooltip } from './Tooltip';
@@ -166,34 +162,27 @@ export type FabricDefaultsEditorPanelProps = {
   defaultsRoot: unknown | null;
   loading: boolean;
   loadError: string | null;
-  /** Opens full JSON editor (confirm unsaved in parent if needed). */
-  onOpenFullJsonEditor?: () => void;
-  /** After successful save (disk + optional store sync). */
-  onCommitted?: (merged: unknown) => void;
+  /** Resets a discarded or saved structured draft from the shared defaults session. */
+  sessionRevision?: number;
+  /** The shared defaults session owns persistence and store synchronisation. */
+  onSave(merged: unknown): Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 };
 
 /**
- * Fabric merge-template fields for one defaults JSON file. Intended for use inside {@link FabricDefaultsModal}.
+ * Structured fields for the shared defaults editing session.
  */
 export function FabricDefaultsEditorPanel({
   filePath,
   defaultsRoot,
   loading,
   loadError,
-  onOpenFullJsonEditor,
-  onCommitted,
+  sessionRevision = 0,
+  onSave,
   onDirtyChange,
 }: FabricDefaultsEditorPanelProps): React.ReactElement {
-  const geometryStore = useGeometryStoreApi();
   const schemaPort = useGeometrySchemaPort();
-  const workspaceResourcePort = useGeometryWorkspaceResourcePort();
-  const { useFHSSchema, setDefaultsJson } = useGeometryStore(
-    useShallow((s) => ({
-      useFHSSchema: !!s.complianceSettings?.complianceValidationEnabled,
-      setDefaultsJson: s.setDefaultsJson,
-    })),
-  );
+  const useFHSSchema = useGeometryStore((s) => !!s.complianceSettings?.complianceValidationEnabled);
 
   const initialSchemaReady = (
     schemaPort.availability === 'available' &&
@@ -207,6 +196,7 @@ export function FabricDefaultsEditorPanel({
   const draftResetKey = [
     filePath,
     defaultsSig,
+    `session:${sessionRevision}`,
     `fhs:${useFHSSchema ? '1' : '0'}`,
     `schema:${schemaReady ? '1' : '0'}`,
   ].join('\0');
@@ -294,13 +284,8 @@ export function FabricDefaultsEditorPanel({
   }, [setDraftByRole]);
 
   const handleSave = useCallback(async () => {
-    const path = (filePath || '').trim();
-    if (!path || !defaultsRoot) {
+    if (!defaultsRoot) {
       setSaveError('No defaults file loaded.');
-      return;
-    }
-    if (workspaceResourcePort.availability !== 'available') {
-      setSaveError('Workspace resource access is unavailable.');
       return;
     }
     setSaving(true);
@@ -313,18 +298,11 @@ export function FabricDefaultsEditorPanel({
         schemaPort,
       );
       const merged = applyFabricMergeTemplateUpdates(defaultsRoot, resolved, updates);
-      const text = JSON.stringify(merged, null, 2);
-      await workspaceResourcePort.writeText(path, text);
-
-      const storePath = (geometryStore.getState().defaultsPath || '').trim();
-      if (storePath === path) {
-        setDefaultsJson(merged);
-      }
+      await onSave(merged);
 
       const nextDraft = cloneDraft(merged, useFHSSchema, schemaPort);
       setBaselineDraft(JSON.parse(JSON.stringify(nextDraft)) as typeof nextDraft);
       setDraftByRole(nextDraft);
-      onCommitted?.(merged);
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e ? String((e as Error).message) : String(e);
       setSaveError(msg);
@@ -332,19 +310,15 @@ export function FabricDefaultsEditorPanel({
       setSaving(false);
     }
   }, [
-    filePath,
     defaultsRoot,
     draftByRole,
-    geometryStore,
     resolved,
     schemaPort,
     setBaselineDraft,
     setDraftByRole,
     setSaveError,
     useFHSSchema,
-    setDefaultsJson,
-    workspaceResourcePort,
-    onCommitted,
+    onSave,
   ]);
 
   const effPath = (filePath || '').trim();
@@ -497,14 +471,7 @@ export function FabricDefaultsEditorPanel({
           boxShadow: '0 -6px 16px rgba(0,0,0,0.06)',
         }}
       >
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          {onOpenFullJsonEditor ? (
-            <button type="button" className="btn btn-ghost btn-small" onClick={onOpenFullJsonEditor}>
-              Edit full JSON{' '}
-              <span style={{ opacity: 0.85 }}>(Advanced)</span>
-            </button>
-          ) : null}
-        </div>
+        <div />
         <button type="button" className="btn btn-primary" disabled={!canSave} onClick={() => void handleSave()}>
           {saving ? 'Saving…' : 'Save fabric defaults'}
         </button>

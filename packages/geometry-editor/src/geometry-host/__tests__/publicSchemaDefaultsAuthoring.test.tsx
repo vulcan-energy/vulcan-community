@@ -132,8 +132,7 @@ describe('public schema and defaults authoring', () => {
       </GeometryEditorServicePortsProvider>,
     );
 
-    await screen.findByText(/Fabric defaults/);
-    await user.click(screen.getByRole('button', { name: /Edit full JSON/i }));
+    await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
     const editor = await screen.findByRole('textbox', { name: /Defaults JSON/i });
     fireEvent.change(editor, {
       target: { value: '{"Zone":{"z":{"BuildingElement":{}}}}' },
@@ -154,5 +153,68 @@ describe('public schema and defaults authoring', () => {
     expect(store.getState().defaultsJson).toEqual({
       Zone: { z: { BuildingElement: {} } },
     });
+  });
+
+  it('keeps the raw JSON escape hatch available for malformed defaults without rereading the file', async () => {
+    const user = userEvent.setup();
+    const readText = vi.fn(async () => '{ definitely not JSON');
+    const resources = createResources({ readText });
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      schemaPort: canonicalGeometrySchemaPort,
+      workspaceResourcePort: resources,
+    });
+
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={canonicalGeometrySchemaPort}
+        workspaceResourcePort={resources}
+      >
+        <GeometryStoreProvider store={store}>
+          <DefaultsEditorModal
+            isOpen
+            filePath="input/defaults/broken.json"
+            onClose={vi.fn()}
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
+
+    expect(await screen.findByRole('textbox', { name: /Defaults JSON/i })).toHaveValue(
+      '{ definitely not JSON',
+    );
+    expect(await screen.findByText(/Invalid JSON:/i)).toBeInTheDocument();
+    expect(readText).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects raw defaults whose root is not an object', async () => {
+    const user = userEvent.setup();
+    const resources = createResources({ readText: vi.fn(async () => '[]') });
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      schemaPort: canonicalGeometrySchemaPort,
+      workspaceResourcePort: resources,
+    });
+
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={canonicalGeometrySchemaPort}
+        workspaceResourcePort={resources}
+      >
+        <GeometryStoreProvider store={store}>
+          <DefaultsEditorModal
+            isOpen
+            filePath="input/defaults/not-an-object.json"
+            onClose={vi.fn()}
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
+
+    expect(await screen.findByText('Defaults JSON must have an object at its root.')).toBeInTheDocument();
   });
 });
