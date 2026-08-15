@@ -13,16 +13,18 @@
  * etc.), matching the cast pattern in `__tests__/jsonformsRenderers.units.test.tsx`.
  *
  * R4.3b: the System layout-spec walk below is SEGMENT-safe, not dot-string-safe — see
- * `segmentsFromLayoutScope` and `../lib/systemAdvancedUischema`'s own docstring. Raw
- * user plant-key names (CSV-derived) may contain '/' or '.', either of which used to
+ * `segmentsFromLayoutScope` (`../lib/jsonTypes` since R4.6b-2) and
+ * `../lib/systemAdvancedUischema`'s own docstring. Raw user plant-key names
+ * (CSV-derived) may contain '/' or '.', either of which used to
  * corrupt the walk (a '/' broke `resolveSchemaPointer`'s pointer split; a '.' broke
  * this file's own dot-path round-trip).
  *
  * R4.5: this file also exports `DirectSpecFields`, a second direct renderer, sibling
  * to `DirectAdvancedFields` above and living here for the same reason — it shares
- * `renderControlForProperty`, `getAtPath`, `setAtPath`, `labelForProperty`, and
- * `segmentsFromLayoutScope` rather than duplicating them. Where `DirectAdvancedFields`
- * interprets a resolved SUBSCHEMA, `DirectSpecFields` interprets an EXPLICIT
+ * `renderControlForProperty` and `labelForProperty` with it, and reaches the same
+ * `getAtPath` / `setAtPath` / `segmentsFromLayoutScope` walk (`../lib/jsonTypes` since
+ * R4.6b-2) rather than duplicating either. Where `DirectAdvancedFields` interprets a
+ * resolved SUBSCHEMA, `DirectSpecFields` interprets an EXPLICIT
  * uischema-spec tree — the shape web's SnippetEditor and SimplifiedFabricEditor
  * (parent repo) build by hand and used to mount as a raw JsonForms `uischema` prop
  * through the now-deleted `standardRenderers` registry (see `jsonformsRenderers.tsx`'s
@@ -41,14 +43,21 @@
  * one of the two inline overrides is deleted as redundant, the other kept with a
  * corrected rationale. Two smaller R4.5 review notes are closed in the same slice:
  * `setAtPathNode`'s array-index unset now splices instead of leaving a JSON `null`
- * hole (below), and TextControl's JSON-blob commit no longer skips PARSING when the
- * host supplies no `elementType` (`jsonformsRenderers.tsx`).
+ * hole (`../lib/jsonTypes` since R4.6b-2), and TextControl's JSON-blob commit no longer
+ * skips PARSING when the host supplies no `elementType` (`jsonformsRenderers.tsx`).
  */
 
 import React from 'react';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
-import { decodePointerToken, resolveSchemaPointer } from '../lib/schemaRefResolver';
-import { isRecord, readRecord } from '../lib/jsonTypes';
+import { resolveSchemaPointer } from '../lib/schemaRefResolver';
+import {
+  getAtPath,
+  isRecord,
+  readRecord,
+  segmentsFromLayoutScope,
+  setAtPath,
+} from '../lib/jsonTypes';
+import { isNonEmptyEnumLike, schemaTypeList, unwrapNullableSchema } from '../lib/schemaShape';
 import type { AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
   BooleanControl,
@@ -57,11 +66,20 @@ import {
   NumberControl,
   TextControl,
   WindowPartListControl,
-  schemaHasConstAlternatives,
-  schemaHasEnum,
-  schemaTypeList,
   validateAdvancedFieldPrimitive,
 } from './jsonformsRenderers';
+
+/**
+ * R4.6b-2: `unwrapNullableSchema` MOVED to `../lib/schemaShape` (component-space to
+ * lib-space; see that module's docstring). Re-exported here for the PARENT repo's two
+ * consumers only — `web/src/components/SimplifiedFabricEditor.tsx` and
+ * `web/src/components/SnippetEditor.tsx` both import it from this path today, and
+ * retargeting them at the lib module is the paired parent PR's job, not this slice's.
+ * Community code must import it from `../lib/schemaShape` directly; this line goes when
+ * the parent's imports move.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- pure schema helper re-export, not a React component.
+export { unwrapNullableSchema };
 
 export type DirectAdvancedFieldsProps = {
   /** The built subschema (has .properties, maybe .$defs, maybe .required) — same object AdvancedFieldsEditor's retired <JsonForms> mount used to receive as its `schema` prop. */
@@ -138,8 +156,8 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  *      before this function runs — see `renderControlForProperty`).
  *  (b) NON-EMPTY enum-like (`.enum` with >=1 member, or a non-empty oneOf/anyOf where
  *      every branch is a bare `const`) -> EnumControl. R4.3b's new leading rule — see
- *      above and `isNonEmptyEnumLike`'s own docstring below for why "non-empty" is
- *      load-bearing here, not a stylistic nicety.
+ *      above and `isNonEmptyEnumLike`'s own docstring (`../lib/schemaShape`) for why
+ *      "non-empty" is load-bearing here, not a stylistic nicety.
  *  (c) type list includes 'boolean' -> BooleanControl.
  *  (d) type list includes 'string' -> TextControl.
  *  (e) type list includes 'number' OR 'integer' -> NumberControl. (On the retired
@@ -181,9 +199,10 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  * FIXED (R4.3b adversarial review round 2, REAL finding — this used to be documented
  * here as an unreachable divergence; it was neither): empty `.enum: []` / `oneOf: []`
  * / `anyOf: []` are NOT enum-like for this picker. The shared `schemaHasEnum` /
- * `schemaHasConstAlternatives` exports are vacuously true on an empty array
- * (`[].every(...)` is true) — harmless under the OLD type-first order (a type-bearing
- * schema matched rule (c)/(d) first regardless), but under R4.3b's enum-first
+ * `schemaHasConstAlternatives` predicates WERE vacuously true on an empty array
+ * (`[].every(...)` is true) until R4.6b-2 moved them to `../lib/schemaShape` and made
+ * non-emptiness part of what they mean — harmless under the OLD type-first order (a
+ * type-bearing schema matched rule (c)/(d) first regardless), but under R4.3b's enum-first
  * promotion that vacuous truth would fire FIRST, routing an empty-alternatives field
  * to EnumControl with ZERO options — permanently uneditable, not merely different.
  * This IS reachable: `lib/systemHotWaterAdvancedSchema.ts`'s
@@ -322,224 +341,25 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  * emits none.
  */
 
-/** A BARE null-typed schema: exactly `{type: 'null'}`, nothing else. */
-function isBareNullSchema(value: unknown): boolean {
-  return isRecord(value) && value.type === 'null' && Object.keys(value).length === 1;
-}
-
 /**
- * R4.6a: collapse a NULLABLE WRAPPER — `anyOf`/`oneOf` of exactly `[X, {type:'null'}]`
- * — down to its non-null branch `X`. Idempotent and shape-preserving for everything
- * else: any node that is not exactly that pattern is returned UNCHANGED, by identity.
- *
- * WHY THE RESOLVED NODE, NOT JUST DISPATCH (this is the load-bearing half): teaching
- * `pickDirectControl` to peek inside the wrapper would fix WHICH control renders and
- * nothing else. `numericInputAttributesFromSchema` (`components/numericDraftInput.ts`)
- * reads `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` / `multipleOf`
- * off the TOP LEVEL of whatever schema node NumberControl is handed, and on a wrapper
- * those keywords sit one level down, on the inner branch. A dispatch-only fix would
- * therefore have produced a NumberControl with no `min`, no `max`, no `step` — the
- * numeric draft buffer and unit adornment back, the schema constraints still silently
- * dropped. Unwrapping the node itself fixes dispatch and rendering in one move, and
- * leaves every consumer downstream (controls, validators, placeholder generation) free
- * to keep reading keywords off the top level the way they always have.
- *
- * PATTERN, DELIBERATELY STRICT — this is a targeted normalization of one HEM/pydantic
- * emission habit (`Optional[float]` -> `anyOf:[{type:'number'},{type:'null'}]`), not a
- * general combinator resolver. A layer is collapsed ONLY when the keyword's value is an
- * array of exactly 2 entries, exactly one of which is a BARE `{type:'null'}` (see
- * `isBareNullSchema` — a null branch carrying anything else is not this pattern), and
- * the other is a record. Three branches, no null branch, a null branch with siblings:
- * all left alone, returned by identity. Collapsing those would mean CHOOSING a branch,
- * which is a semantic decision no renderer should make silently; they keep falling
- * through `pickDirectControl` rule (f) to TextControl's JSON blob exactly as before.
- *
- * A COMBINATOR INSIDE THE SURVIVING BRANCH IS CARRIED THROUGH, NOT ERASED (review
- * round 1, REAL BUG — this function shipped in R4.6a's first commit doing the
- * opposite). `{...inner, ...node}` lets the WRAPPER win every keyword it declares,
- * which is right for annotations and wrong for exactly one keyword: the combinator
- * being collapsed. When the surviving branch carried the SAME keyword as the wrapper,
- * the wrapper's array overwrote the inner's and the very next line deleted it, leaving
- * a node with no type, no enum and no combinator at all — which is worse than a wrong
- * control, because `schemaEmitsControl` then returns false and the flat walk drops the
- * property, so THE ROW DISAPPEARS from the grid. Core has exactly one such node,
- * `$defs/ControlChargeTarget.charge_level` (`anyOf:[{$ref ChargeLevel},{type:'null'}]`
- * where `ChargeLevel` is itself `anyOf:[number, array-of-number, ScheduleForDouble]`),
- * and no element subschema routes to it — but `DirectSpecFields` passes host-supplied
- * `options.schemaOverride` nodes through this same function, and those are arbitrary
- * web-builder output, so "not reachable from a published schema today" was never the
- * whole reachability question. The inner's own combinator is now restored after the
- * merge; that node collapses to `{anyOf:[number, array, ScheduleForDouble], …}` and
- * renders the JSON blob this docstring always claimed it would.
- *
- * IDEMPOTENT BY CONSTRUCTION, via a fixpoint rather than a promise: each pass consumes
- * exactly one wrapper layer, and passes repeat until nothing changes, so the result is
- * always a node this function would leave alone. That also makes `Optional[Optional[X]]`
- * (`{oneOf:[{anyOf:[X,{null}]},{null}]}`) collapse all the way to `X` instead of one
- * layer short — a single pass would have left a second wrapper standing and dispatched
- * it to TextControl, and calling the function twice would have returned something
- * different from calling it once. Termination does not rest on the bound: every pass
- * strictly removes one combinator array from a finite structure. The bound is there
- * because a `$ref` cycle that `dereferenceSchemaNodeInRoot`'s own `seen` guard left
- * partially inlined could in principle feed this a self-referential node, and a
- * renderer must not hang on a malformed schema. No live schema needs a second pass.
- *
- * ANNOTATIONS COME FROM THE OUTER NODE ONLY — this function moves TYPE and
- * CONSTRAINTS, never presentation. `title` and `description` survive exactly as the
- * wrapper declared them, and if the wrapper declared none, the result carries none
- * either (so `labelForProperty` start-cases the key, as it does for any other
- * titleless property). The inner branch's own `title`/`description` are DROPPED. That
- * asymmetry is deliberate and is the difference between fixing a dispatch bug and
- * quietly renaming fields:
- *  - The wrapper IS the property; the inner branch is the TYPE the property was
- *    declared as. HEM's schemas are pydantic-emitted, so an inner `title` is a model
- *    or enum CLASS NAME ("MVHRLocation", "MechanicalVentilationPosition",
- *    "WindShieldLocation", "PartyWallLiningType"), not a field label — and every
- *    nullable-wrapped property that has any label at all today gets it from the
- *    wrapper ("MVHR Efficiency", "U-Value", "Duct Perimeter").
- *  - Letting the inner title through would rename Core `position_intake` AND
- *    `position_exhaust` to the SAME string, "MechanicalVentilationPosition" — two
- *    distinct rows in one grid, indistinguishable. Verified by running it that way
- *    first; that is what sent this rule the other direction.
- *  - It also keeps `description` byte-identical wherever inner and outer BOTH carry one,
- *    and the property-site text is always the specific one ("Orientation for non-MVHR
- *    systems…" against the generic `$def` sentence). FIVE live routes are in that
- *    position, not the two this line used to name: Core `MechanicalVentilation`'s
- *    `orientation360`, `pitch`, `position_intake` and `position_exhaust` — the last two
- *    being the very pair the bullet above uses as its example — plus
- *    `BuildingElementPartyWall.party_wall_lining_type`. (Across the published files as a
- *    whole, ignoring reachability, Core has 22 such wrappers and FHS none; the other 17
- *    sit inside dictionary ITEM schemas or behind unopened System branches, one level
- *    below anything a Control scope reaches.) Node-level `description` is not rendered
- *    by any control today — only per-OPTION descriptions inside enum alternatives are,
- *    by EnumControl — so this costs nothing and pre-empts the question if that ever
- *    changes.
- * Net effect on labels across every live wrapper: ZERO changes, with one intended
- * exception noted at the `mvhr_location` deletion site in `AdvancedFieldsEditor.tsx`.
- *
- * TWO MORE KEYWORDS ARE DROPPED:
- *  - the WRAPPER's own `anyOf`/`oneOf`, obviously — it is what is being collapsed.
- *    Leaving it on would re-trigger `schemaEmitsControl`'s combinator short-circuit
- *    and, worse, hand `isNonEmptyEnumLike` a non-const alternatives array to reason
- *    about. (The SURVIVING BRANCH's own combinator, if it has one, is a different
- *    keyword instance and is kept — see above.)
- *  - a `default` of exactly `null`. Every nullable wrapper on a LIVE ROUTE — the 43 the
- *    standing invariant sweeps — carries `default: null`, and that default describes the
- *    NULL branch that was just dropped: it is the schema saying "this optional field is
- *    absent", not "this number defaults to nothing". Carrying it onto a NumberControl
- *    would misrepresent the field. A non-null `default` describes the surviving branch
- *    and IS carried.
- *
- *    SCOPED TO ROUTES DELIBERATELY, because it is NOT true of the schemas as a whole and
- *    an earlier version of this line said it was. Sweeping every `anyOf`/`oneOf` node in
- *    both published files finds 160 nullable wrappers in Core and 6 in FHS, of which
- *    EIGHT lack a `default: null`: Core's `/properties/Control`,
- *    `$defs/HeatPumpHotWaterOnly.heat_exchanger_surface_area_declared`,
- *    `$defs/HotWaterSourcePointOfUse.efficiency` and the three
- *    `$defs/ScheduleRepeaterEntryFor{Boolean,DegreesCelsius,Double}` defs (no `default`
- *    at all), Core's `$defs/WetEmitterFanCoil.n_units` (`default: 1`), and FHS's own
- *    `$defs/ScheduleRepeaterEntryForDouble`. None is on a live route today — several sit
- *    behind Core System discriminator branches the flattener does not open (see the
- *    VERIFIED NOT LIVE note above) — but "not reachable today" is a fact about routes,
- *    not about the schema, and the day one becomes reachable the CODE is already right:
- *    it drops only an exactly-`null` default and carries `n_units`' `1` through. The
- *    alternative — dropping every `default` unconditionally — would lose that.
+ * R4.6b-2 MOVE NOTE: `unwrapNullableSchema` (with its `isBareNullSchema` /
+ * `unwrapNullableSchemaLayer` internals) and `isNonEmptyEnumLike` used to be written out
+ * here. Both are `../lib/schemaShape` now — see the imports at the top of this file and
+ * that module's docstring for why a schema-shape question stopped living in a component.
+ * `isNonEmptyEnumLike` also SHRANK in the move: it used to re-check non-emptiness on top
+ * of `jsonformsRenderers.tsx`'s vacuously-true `schemaHasEnum` /
+ * `schemaHasConstAlternatives`, and those two now own the rule, so it is a plain
+ * disjunction of them. The reachability argument the guard exists FOR (an FHS
+ * `hw cylinder` with no wet heat-source plants yet manufactures
+ * `{type:'string', oneOf: []}`, which must reach TextControl and not a zero-option
+ * dropdown) moved with it, to `isNonEmptyEnumLike`'s own docstring.
  */
-// EXPORTED, and not only for the standing-invariant test below it: web's
-// `SimplifiedFabricEditor` (parent repo) builds its own `DirectSpecFields` spec and has
-// to make the SAME dispatch decision this module makes, on the same published schemas.
-// Without it, `buildControls` reads a nullable wrapper as neither primitive nor
-// enum-like nor object nor array and emits no Control at all, so on the Core profile a
-// window snippet's `u_value` / `thermal_resistance_construction` / `Control_*` rows
-// silently vanish from the editor. Consuming this is what stops that rule being
-// re-implemented a fourth time and drifting a fourth way.
-// eslint-disable-next-line react-refresh/only-export-components -- pure schema helper, not a React component.
-export function unwrapNullableSchema(node: Record<string, unknown>): Record<string, unknown> {
-  let current = node;
-  // Bounded only against a malformed self-referential node; see the docstring's
-  // idempotence paragraph. No published schema needs more than one pass.
-  for (let pass = 0; pass < 8; pass += 1) {
-    const next = unwrapNullableSchemaLayer(current);
-    if (next === current) return current;
-    current = next;
-  }
-  return current;
-}
-
-/** One layer of {@link unwrapNullableSchema}; returns `node` itself when nothing matches. */
-function unwrapNullableSchemaLayer(node: Record<string, unknown>): Record<string, unknown> {
-  for (const keyword of ['anyOf', 'oneOf'] as const) {
-    const branches = node[keyword];
-    if (!Array.isArray(branches) || branches.length !== 2) continue;
-    if (branches.filter(isBareNullSchema).length !== 1) continue;
-    const inner = branches.find((branch) => !isBareNullSchema(branch));
-    if (!isRecord(inner)) continue;
-
-    // Inner first, wrapper laid over the top: the wrapper wins every keyword it
-    // actually declares, the inner branch supplies the rest (type, constraints, enum,
-    // properties, items, …).
-    const merged: Record<string, unknown> = { ...inner, ...node };
-    // …except this one. `...node` just overwrote any same-named combinator the
-    // surviving branch declared, and the wrapper's copy is the one being consumed, so
-    // hand the inner's back rather than deleting both. See the docstring's
-    // COMBINATOR INSIDE THE SURVIVING BRANCH paragraph — deleting both is the review
-    // round 1 bug that made whole rows vanish.
-    if (keyword in inner) merged[keyword] = inner[keyword];
-    else delete merged[keyword];
-    if (merged.default === null) delete merged.default;
-    for (const annotation of ['title', 'description'] as const) {
-      if (!(annotation in node)) delete merged[annotation];
-    }
-    return merged;
-  }
-  return node;
-}
-
-/**
- * NON-EMPTY enum-like, deliberately stricter than the shared `schemaHasEnum` /
- * `schemaHasConstAlternatives` exports from `./jsonformsRenderers`, which are
- * vacuously true on an empty array (`[].every(...)` is true) — exactly matching the
- * retired JsonForms registry's own GenericControl fallback's inline guards instead
- * (`s.enum.length > 0`, `oneOfAnyOfConsts.length > 0` — GenericControl itself is
- * deleted as of R4.5, see the deletion note above `schemaHasIntegerType` in
- * `jsonformsRenderers.tsx`), the control this picker's enum-first rule is standing in
- * for.
- *
- * R4.3b BUGFIX (adversarial review round 2, REAL finding): the shared predicates'
- * vacuous truth is harmless where they're actually used elsewhere (the rank-1000/1100
- * EnumControl registry testers web/ used to mount through `standardRenderers` before
- * R4.5 deleted that registry entirely — pre-existing registry behaviour, deliberately
- * NOT touched by this R4.3b fix, and moot now that the registry is gone) and was ALSO
- * harmless in this file through R4.3's type-first order (a type-bearing
- * schema matched boolean/string/number before enum-ness was ever consulted). R4.3b's
- * enum-first promotion changed that: without this non-emptiness guard, an
- * empty-alternatives schema would route to EnumControl with ZERO options —
- * permanently uneditable, not merely a cosmetic divergence. This shape is REACHABLE
- * in production, not synthetic: `lib/systemHotWaterAdvancedSchema.ts`'s
- * `inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema` manufactures
- * `HeatSourceWet: {type:'string', oneOf: []}` whenever an FHS project has a
- * CombiBoiler/HIU/HeatBattery `hw cylinder` and ZERO wet heat-source plants defined
- * yet — its own hint text asks the user to type a name ("No defined heat source (wet)
- * names yet. Add a Heat source (wet) system that defines a plant key, then link
- * here."), which a zero-option dropdown cannot accept. With this guard, that shape
- * falls through to ordinary type dispatch (string -> TextControl, a free-text input),
- * matching both the old type-first port and the retired JsonForms path (GenericControl
- * was never vacuous here, so it never diverged either).
- */
-function isNonEmptyEnumLike(resolved: Record<string, unknown>): boolean {
-  const enumValues = resolved.enum;
-  if (schemaHasEnum(resolved) && Array.isArray(enumValues) && enumValues.length > 0) return true;
-  const oneOf = resolved.oneOf;
-  if (schemaHasConstAlternatives(resolved, 'oneOf') && Array.isArray(oneOf) && oneOf.length > 0) return true;
-  const anyOf = resolved.anyOf;
-  if (schemaHasConstAlternatives(resolved, 'anyOf') && Array.isArray(anyOf) && anyOf.length > 0) return true;
-  return false;
-}
 
 // eslint-disable-next-line react-refresh/only-export-components -- pure picker helper, not a React component.
 export function pickDirectControl(resolved: Record<string, unknown>): 'enum' | 'number' | 'boolean' | 'text' {
   // R4.3b: NON-EMPTY enum-like wins outright, ahead of type — see the module
-  // docstring above and `isNonEmptyEnumLike`'s own docstring for the full
+  // docstring above and `isNonEmptyEnumLike`'s own docstring (`../lib/schemaShape`)
+  // for the full
   // before/after rationale (including why "non-empty" is load-bearing, not
   // stylistic). This is also where `ecodesign_control_class`
   // ({type:'integer', oneOf:[{const,title},…]} via applyEcodesignControlClassEnum)
@@ -667,192 +487,14 @@ function labelForProperty(key: string, resolved: Record<string, unknown>): strin
 }
 
 /**
- * Splits a System layout-spec scope (`#/properties/a/properties/b/properties/c`,
- * every token RFC-6901-escaped by `buildSystemAdvancedUischema`) into raw path
- * segments (`['a', 'b', 'c']`). Splitting on the literal '/properties/' delimiter is
- * safe here because escaping turned every raw '/' into '~1' first — no token can
- * contain an unescaped '/' by construction (see
- * `../lib/systemAdvancedUischema`'s docstring). Each segment is then RFC-6901-decoded
- * back to the raw key ('~1' -> '/', '~0' -> '~') the schema/data actually use. Keeps
- * the defensive shape of the function this replaces for a scope that does not start
- * with '#/properties/' (should not happen; every scope here is built by
- * `buildSystemAdvancedUischema` or the flat walk's own literal `#/properties/${key}`)
- * — such a scope is split as-is rather than having a leading segment dropped.
- *
- * R4.3b: replaces the old `pathFromLayoutScope`/`leafKeyFromPath` pair, which joined
- * segments into a single dot-separated string and split it back apart downstream —
- * exactly the scheme a '.' in a raw plant key (e.g. "Zone 1.5 circuit") would corrupt.
- * Everything downstream of this function now carries `segments: string[]` instead of
- * a joined path, until the point (`path = segments.join('.')`, in
- * `renderControlForProperty`) where a dot-joined string is still handed to the control
- * components themselves for their OWN id/propKey derivation — see the residual note
- * there.
+ * R4.6b-2 MOVE NOTE: `segmentsFromLayoutScope`, `isCanonicalArrayIndexSegment`,
+ * `getAtPath`, `setAtPathNode` and `setAtPath` used to be written out here, between
+ * `labelForProperty` above and `renderControlForProperty` below. They are `../lib/jsonTypes`
+ * now, docstrings and logic byte-for-byte — a walk over plain JSON data has no business
+ * living behind a React component module, and BOTH walks in this file (plus, once the
+ * paired parent PR lands, whatever else needs a data path) reach it from there. The
+ * `lodash/fp` array-hop contract and every divergence note travelled with the code.
  */
-function segmentsFromLayoutScope(scope: string): string[] {
-  const tokens = scope.split('/properties/');
-  const segments = scope.startsWith('#/properties/') ? tokens.slice(1) : tokens;
-  return segments.map(decodePointerToken);
-}
-
-/**
- * A path segment is a valid ARRAY index (not an object key) only when canonical:
- * '0', '1', '2', … — never '01' (leading zero), '-1', or a non-numeric string like a
- * plant key that just happens to read as a number in some other base. Shared by
- * `getAtPath` and `setAtPath`'s array-hop support (R4.5 review round 1 fix) so both
- * sides agree on exactly the same set of segments that mean "array index."
- */
-function isCanonicalArrayIndexSegment(segment: string): boolean {
-  return /^(0|[1-9]\d*)$/.test(segment);
-}
-
-/**
- * Walk `data` along path segments; undefined at any missing hop.
- *
- * R4.5 review round 1 fix: array hops are now supported, matching `setAtPath`'s own
- * contract below (both must agree, or a value written via one would read back as
- * undefined via the other). When the CURRENT node at a hop is an array, a canonical
- * non-negative-integer segment (see `isCanonicalArrayIndexSegment`) indexes into it;
- * a non-canonical segment against an array (should not happen — every array-hop
- * segment in this file comes from a decoded plant/instance-path token that is
- * genuinely a numeric array index, e.g. a per-item Group's `pathOverride`) returns
- * undefined rather than guessing. A non-array, non-null object hop still uses
- * ordinary record property lookup as before.
- */
-function getAtPath(data: Record<string, unknown>, segments: string[]): unknown {
-  let current: unknown = data;
-  for (const segment of segments) {
-    if (Array.isArray(current)) {
-      if (!isCanonicalArrayIndexSegment(segment)) return undefined;
-      current = current[Number(segment)];
-      continue;
-    }
-    if (current === null || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
-}
-
-/**
- * Immutable nested set/delete along path segments (Stage 2.1): clones each hop, and
- * either sets or deletes the leaf. `value === undefined` deletes the leaf key
- * outright (matches the top-level spike behaviour, extended to every hop).
- * Intermediate containers are left in place even if the delete empties them — this is
- * NOT a stylistic choice, it matches what the retired JsonForms path's own JsonForms
- * core reducer did: `UPDATE_DATA`'s unset branch is `lodash/fp/unset(path, data)`
- * (verified in node_modules/@jsonforms/core), which only removes the leaf and never
- * prunes now-empty ancestors. A missing intermediate hop is created as `{}` on set.
- * That matches `lodash/fp/set`'s auto-vivification for an ORDINARY key only: lodash
- * vivifies an ARRAY when the next segment is a canonical integer index — the same
- * integer-key rule the R4.5 note below cites as the reason an existing array must be
- * preserved — and `setAtPathNode` still vivifies `{}` there. Deliberate, not an
- * oversight; see the first divergence below.
- *
- * Two standing divergences from `lodash/fp`, both currently unreachable, both left
- * as-is:
- *  - SET through a MISSING hop whose next segment is an integer builds `{'0': …}`
- *    where lodash would build `[…]`. Nothing can reach it: the only builder that emits
- *    integer path segments (web's `SimplifiedFabricEditor`, per-item Groups) derives
- *    those indices by iterating an array that is already present in the data, so the
- *    array hop is never missing at the moment it is walked.
- *  - DELETE along a missing intermediate hop vivifies `{}` ancestors here where
- *    `lodash/fp/unset` is a no-op — reset buttons only render when a value exists, so
- *    the path is always present.
- *
- * R4.5 review round 1 fix (REAL finding, adversarial review round 1): array hops are
- * now preserved instead of destroyed. `lodash/fp`'s own `set`/`unset` — the contract
- * this function has always cited above — PRESERVES an array for an integer key (it
- * only auto-vivifies a plain object for a NON-numeric key), but this function used to
- * treat every array child as "not a valid container" and silently replace the WHOLE
- * array with `{}` on any nested write under it. A per-item Group's `pathOverride`
- * (e.g. `'window.window_part_list.0'`, from `DirectSpecFields`' self-rooted array
- * shape) would therefore have destroyed every sibling item on the very first edit to
- * item 0. Fixed via `setAtPathNode`: when the EXISTING child at a hop is an array and
- * the next segment is a canonical index (`isCanonicalArrayIndexSegment`), clone the
- * array (`.slice()`) and recurse into that index instead of falling through to record
- * semantics. A data/plant key that happens to be the literal string `'0'` over an
- * OBJECT (not an array) is UNAFFECTED — this only activates when the value ALREADY
- * THERE is an array; a key still only means an array index when the parent it hangs
- * off actually is one.
- *
- * R4.6a (R4.5 review note, closed): unsetting a leaf that IS an array index now
- * SPLICES the element out. R4.5 landed it as `delete arr[i]` — a hole — on the stated
- * grounds that this "mirrors `lodash/fp/unset` exactly". It did, and that was the
- * right call while JsonForms' `UPDATE_DATA` reducer (built on `lodash/fp/unset`) was
- * the reference implementation this whole module was being held against. R4.4/R4.5
- * deleted that reducer along with the rest of JsonForms; parity with it is no longer a
- * contract, and what is left is just the behaviour on its own merits — where a hole is
- * indefensible. `JSON.stringify` serialises a hole as `null`, and `null` is never
- * valid HEM input for any of the arrays this walker can reach: `window_part_list`,
- * `edge_insulation` and `treatment` are all variable-length lists OF OBJECTS, so the
- * export would carry a `null` entry straight into the engine. Splicing keeps the array
- * a list of the things it is a list of; later items shifting down is the correct
- * consequence of removing one, not a side effect to be avoided.
- *
- * UNREACHABLE FROM TODAY'S UI, deliberately fixed anyway (correctness by construction,
- * not a live bug) — though not for the reason this note originally gave. Reaching the
- * leaf-unset above needs a control bound DIRECTLY to an array index, and a production
- * builder does emit exactly that shape: web's `SimplifiedFabricEditor` (`buildControls`,
- * parent repo) puts a `Control` scoped `#/properties/<i>` inside a Group whose
- * `pathOverride` ends at the array, chosen PER ITEM for items that are not objects. So
- * the binding exists in the code; what makes it dead is the data it is chosen against.
- * Every array those fabric sections can reach in today's schemas holds OBJECTS
- * (`BuildingElementTransparent.treatment` / `.shading` / `.window_part_list`,
- * `edge_insulation` on the slab-with-edge-insulation ground variant), so the per-item
- * GROUP branch is taken instead and every live array-hop path ends at a leaf inside an
- * item OBJECT (`sec.list.0.value`), which unsets through the record branch below and
- * never touches the array. The other `DirectSpecFields` host, `SnippetEditor`, emits a
- * flat list of top-level Controls with no array hops at all, and `DirectAdvancedFields`'
- * own two walks never descend into an array — an array-typed property renders as a
- * single JSON-blob `TextControl`.
- *
- * So a primitive-item array is the ONE missing precondition, and the load-bearing thing
- * to watch: the affordance that produces `value === undefined` is already live. It is
- * NOT the reset button that holds this back — that renders for any non-blank value even
- * under the fabric editor's `config={{}}` mount, because with no `elementType` there is
- * no template default and `shouldShowResetToSource` reduces to
- * `isMeaningfulExplicitValue`; clicking it commits `undefined`. The two OTHER routes to
- * `undefined` are the ones that happen not to apply: `NumberControl` commits `''`, not
- * `undefined`, when its input is cleared, and `TextControl`'s unset-on-blur only fires
- * for JSON-like (object/array-typed) rows. So this is about what the next array shape
- * inherits, not about anything a user can do today — which is exactly why it is worth
- * getting right while the reasoning is still written down.
- */
-function setAtPathNode(node: unknown, segments: string[], value: unknown): unknown {
-  const [head, ...rest] = segments;
-  if (Array.isArray(node) && isCanonicalArrayIndexSegment(head)) {
-    const index = Number(head);
-    const nextArray = node.slice();
-    if (rest.length === 0) {
-      if (value === undefined) {
-        // R4.6a: splice, not `delete` — see the docstring's own paragraph on why the
-        // lodash-parity hole died with the reducer it mirrored.
-        nextArray.splice(index, 1);
-      } else {
-        nextArray[index] = value;
-      }
-      return nextArray;
-    }
-    nextArray[index] = setAtPathNode(nextArray[index], rest, value);
-    return nextArray;
-  }
-  const record =
-    node && typeof node === 'object' && !Array.isArray(node) ? (node as Record<string, unknown>) : {};
-  const nextRecord: Record<string, unknown> = { ...record };
-  if (rest.length === 0) {
-    if (value === undefined) {
-      delete nextRecord[head];
-    } else {
-      nextRecord[head] = value;
-    }
-    return nextRecord;
-  }
-  nextRecord[head] = setAtPathNode(nextRecord[head], rest, value);
-  return nextRecord;
-}
-
-function setAtPath(obj: Record<string, unknown>, segments: string[], value: unknown): Record<string, unknown> {
-  return setAtPathNode(obj, segments, value) as Record<string, unknown>;
-}
 
 /**
  * Renders one property's control, shared by the flat walk and the layout-spec walk.
@@ -902,13 +544,36 @@ function renderControlForProperty(args: {
   const path = segments.join('.');
   const leafKey = segments[segments.length - 1] ?? path;
 
-  const baseProps = {
+  // TYPED, not cast (R4.6b-2 review): `Omit<DirectControlProps, 'errors'>` is what makes
+  // the required-prop contract this slice introduced actually bite HERE, at the only two
+  // production mounts. Both render sites used to go through `as unknown as
+  // DirectControlProps`, which would have swallowed a dropped `propKey` silently — a
+  // required prop nothing checks is a comment, not a contract. The four fields beyond the
+  // control prop type (`visible`, `required`, `id`, `rootSchema`) are declared in the
+  // intersection rather than deleted: they are populated for parity with the original
+  // JsonForms `ControlProps` shape and read by none of the five controls, which is a
+  // separate decision from this one and is documented at `AdvancedControlProps`.
+  const baseProps: Omit<DirectControlProps, 'errors'> & {
+    visible: boolean;
+    required: boolean;
+    id: string;
+    rootSchema: Record<string, unknown>;
+  } = {
     data: value,
     path,
+    // R4.6b-2: the decoded leaf segment travels as its own prop. This walk has held it
+    // all along; the controls used to re-derive it from `path` and get it wrong for any
+    // leaf key containing a '.'. See `AdvancedControlProps.propKey`.
+    propKey: leafKey,
     label,
     schema: resolved,
     uischema: { type: 'Control', scope },
-    config,
+    // The one narrowing left: `config` arrives here as an open `Record<string, unknown>`
+    // (the host's `advancedFieldsConfig`) and the controls read it as their own
+    // `RendererConfig`, which is not exported from `jsonformsRenderers.tsx`. Cast the one
+    // field rather than the whole object, so every other prop — `propKey` included — is
+    // still checked.
+    config: config as DirectControlProps['config'],
     enabled: true,
     visible: true,
     required,
@@ -922,18 +587,24 @@ function renderControlForProperty(args: {
     handleChange: (_path: string, v: unknown) => applyChange(segments, v),
     rootSchema: schema,
   };
-  // R4.3b residual (accepted, out of scope): `path = segments.join('.')` above is
-  // still safe for the control components' OWN id/propKey derivation
-  // (`jsonformsRenderers.tsx`'s controls each do `path.split('.').pop()`) only
-  // because leaf keys are HEM schema property keys, never user names — with one
-  // pre-existing exception: the degenerate no-properties-plant Control
+  // R4.3b residual, CLOSED IN R4.6b-2. It read: `path = segments.join('.')` is still
+  // safe for the control components' OWN propKey derivation
+  // (`jsonformsRenderers.tsx`'s controls each did `path.split('.').pop()`) only because
+  // leaf keys are HEM schema property keys, never user names — with one pre-existing
+  // exception, the degenerate no-properties-plant Control
   // (`systemAdvancedUischema.ts`'s `buildControlsForSchema` returns
   // `[{ type: 'Control', scope: scopePrefix }]` when a plant schema itself has no
-  // `.properties`), where the scope's final segment IS the raw plant key. A plant
-  // key containing '.' would still corrupt that downstream split. This is
-  // pre-existing and out of scope until the controls stop parsing path strings of
-  // their own (R4.5+) — this slice's segment-safety work protects THIS module's own
-  // walk/apply, not every control's internal path parsing.
+  // `.properties`), where the scope's final segment IS the raw plant key, so a plant key
+  // containing '.' corrupted that downstream split. No control derives a propKey any
+  // more; `baseProps.propKey` above is the decoded segment itself. `path` survives as
+  // the control's data address (`handleChange`'s echoed argument, the row `id`, and the
+  // System Sample baseline lookup), none of which SPLITS it into segments — with one
+  // honest exception: `EnumControl`'s junction-type check still asks
+  // `path.includes('junction_type')`, and that substring arm is the one that decides,
+  // since the key test beside it now reads `propKey`. A plant key containing
+  // 'junction_type' anywhere would still answer yes on a non-ThermalBridgeLinear
+  // element — pre-existing, unchanged by this slice, and gated behind
+  // `elementType === 'ThermalBridgeLinear'` in practice.
 
   // Stage 2.2: window_part_list routes to WindowPartListControl BEFORE the type-based
   // picker — it is an array-typed property that would otherwise never reach a sane
@@ -945,7 +616,7 @@ function renderControlForProperty(args: {
   // the check outright since R4.3, and GenericControl no longer exists to mirror.
   if (leafKey === 'window_part_list') {
     return (
-      <WindowPartListControl key={path} {...({ ...baseProps, errors: '' } as unknown as DirectControlProps)} />
+      <WindowPartListControl key={path} {...baseProps} errors="" />
     );
   }
 
@@ -985,7 +656,7 @@ function renderControlForProperty(args: {
     // retired JsonForms path and neither ever surfaced a required error.
     errors = 'is a required property';
   }
-  const controlProps = { ...baseProps, errors } as unknown as DirectControlProps;
+  const controlProps = { ...baseProps, errors };
 
   switch (control) {
     case 'enum':

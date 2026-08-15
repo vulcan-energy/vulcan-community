@@ -27,13 +27,11 @@ import { classifyOpaqueFabricVariant } from '../lib/opaqueFabricVariant';
 import { windowSecurityRiskDefaultForElement } from '../lib/windowSecurityRisk';
 import { usesGroundThermalTransmWallsAutofill } from '../lib/groundFloorSubtype';
 import { errorMessageFromUnknown, isRecord, readRecord, type JsonRecord } from '../lib/jsonTypes';
+import { schemaAlternatives, schemaTypeList } from '../lib/schemaShape';
 import type { Element, Floor } from '../geometry/types';
 import type { SchemaNode } from '../lib/schemaTypes';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import {
-  unavailableGeometrySchemaPort,
-  type GeometrySchemaPort,
-} from '../../../geometry-editor-host/src/schemaPort';
+import type { GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 import {
   WindowDetailChip,
   WindowDetailCollectionShell,
@@ -94,6 +92,21 @@ type AdvancedControlProps = {
   data: unknown;
   handleChange: (path: string, value: unknown) => void;
   path: string;
+  /**
+   * The property's own leaf key — `u_value`, `mid_height_air_flow_path`, a raw System
+   * plant key — supplied by the walk that mounted this control.
+   *
+   * R4.6b-2: REQUIRED, and no longer derived here. Every control used to recover it as
+   * `path.split('.').pop()`, which is a guess that happens to be right only while no leaf
+   * key contains a '.'; a CSV-derived System plant key may (`"Zone 1.5 circuit"` would
+   * have arrived as `"5 circuit"`), which R4.3b recorded as an accepted residual because
+   * the walks were segment-safe but the controls still re-parsed a joined string. Both
+   * walks in `DirectAdvancedFields.tsx` already hold the decoded leaf segment, so they
+   * now pass it and the guess is gone. Required rather than optional-with-fallback
+   * because those two walks are the only mounts in either repo — verified by sweep, the
+   * parent repo mounts no control directly.
+   */
+  propKey: string;
   label: string;
   errors?: string;
   schema?: unknown;
@@ -112,18 +125,6 @@ function uiOptions(uischema: unknown): JsonRecord {
 
 function schemaWithOverride(uischema: unknown, schema: unknown): JsonRecord {
   return readRecord(uiOptions(uischema).schemaOverride ?? schema);
-}
-
-function schemaAlternatives(schema: JsonRecord, key: 'oneOf' | 'anyOf'): JsonRecord[] | null {
-  const value = schema[key];
-  return Array.isArray(value) ? value.filter(isRecord) : null;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
-export function schemaTypeList(schema: JsonRecord): string[] {
-  const typeValue = schema.type;
-  if (Array.isArray(typeValue)) return typeValue.filter((type): type is string => typeof type === 'string');
-  return typeof typeValue === 'string' ? [typeValue] : [];
 }
 
 function schemaDefs(value: unknown): Record<string, SchemaNode> | undefined {
@@ -211,8 +212,10 @@ function useDefaultsLookup() {
  * `resolveAdvancedControlFieldPresentation` and render it through `ResolvedFieldLabel`.
  * This function survives for the hand-rendered field groups that genuinely have only a
  * label — `AdvancedFieldsEditor`'s own group headers, `EdgeInsulationFields`,
- * `FancoilTestDataFields`, `DhwStorageHeatSourcePicker`, `WindowTreatmentFields` — plus
- * `renderFieldLabelWithIndicator`'s no-presentation fallback arm.
+ * `FancoilTestDataFields`, `DhwStorageHeatSourcePicker`, `WindowTreatmentFields`. Those
+ * five are now its ONLY callers: R4.6b-2 deleted `renderFieldLabelWithIndicator`'s
+ * no-presentation fallback arm, which was the last route from a control row into this
+ * lossy resolver.
  *
  * R4.6b-1 also deleted the copy of `ResolvedFieldLabel`'s JSX that used to live here.
  * The markup was byte-identical to that component; keeping two copies meant a label or
@@ -294,22 +297,30 @@ export function renderFieldLabelWithTooltip(
 }
 
 /**
- * R4.6b-1 residual, flagged rather than silently left: every one of the six
- * `renderAdvancedFieldLabelRow` call sites now supplies `presentation`, so the
- * label-only arm below is no longer reachable from any control. It is kept as the
- * documented fallback for a caller that has nothing but a display label — the same
- * situation `renderFieldLabelWithTooltip`'s hand-rendered consumers are in — and
- * making the parameter REQUIRED (deleting the arm, and with it the last lossy
- * resolution inside the Advanced Fields grid) is a clean follow-up, deliberately not
- * folded into this slice's measured surface.
+ * Label plus its small inline indicators (evidence chip, validation info).
+ *
+ * R4.6b-2 closes the R4.6b-1 residual this used to carry. `presentation` is REQUIRED and
+ * the label-only fallback arm is DELETED — it routed through
+ * `renderFieldLabelWithTooltip`, which reverse-engineers a property key from the DISPLAY
+ * LABEL (`getSchemaParamIdForField`) and so resolves the wrong parameter, or none, for any
+ * curated `title` that is not a start-case of its key. Evidence that it was dead rather
+ * than merely unused: this function has exactly ONE caller
+ * (`renderAdvancedFieldLabelRow`), that caller has exactly SIX (Text, Number, Boolean,
+ * Enum's two arms, WindowPartList), and every one of the six passes the preamble's
+ * `fieldPresentation`, which `useAdvancedControlPreamble` computes unconditionally for
+ * every control. There is no path through the Advanced Fields grid that arrives here
+ * without one.
+ *
+ * `label` and `elementType` went with the arm: they were its arguments and nothing else's.
+ * The label a row shows now comes from the resolved presentation, which is the point of
+ * having resolved one. `renderFieldLabelWithTooltip` itself stays, for the five
+ * hand-rendered field groups that genuinely have only a label — see its own docstring.
  */
 function renderFieldLabelWithIndicator(
-  label: string,
-  elementType: string | undefined,
-  indicatorMessages?: readonly string[],
-  hasEvidence?: boolean,
-  useFHSSchema?: boolean,
-  presentation?: ResolvedFieldPresentation,
+  indicatorMessages: readonly string[] | undefined,
+  hasEvidence: boolean | undefined,
+  useFHSSchema: boolean | undefined,
+  presentation: ResolvedFieldPresentation,
 ): React.ReactNode {
   return (
     <div
@@ -322,9 +333,7 @@ function renderFieldLabelWithIndicator(
         overflowWrap: 'anywhere',
       }}
     >
-      {presentation
-        ? <ResolvedFieldLabel presentation={presentation} useFHSSchema={useFHSSchema ?? false} />
-        : renderFieldLabelWithTooltip(label, elementType, useFHSSchema)}
+      <ResolvedFieldLabel presentation={presentation} useFHSSchema={useFHSSchema ?? false} />
       {hasEvidence && (
         <span
           style={{
@@ -358,21 +367,19 @@ function renderFieldLabelWithIndicator(
 function getDefaultValue(
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
-  path: string,
+  propertyName: string,
   elementType?: string,
   subtype?: string,
   opaqueFabricVariant?: OpaqueFabricVariant,
 ): unknown {
-  if (!defaults || !path) {
+  // R4.6b-2: takes the property name outright. It used to take the control's dot-joined
+  // `path` and recover the name as `path.split('.').pop()` — the same guess every control
+  // was making separately, and the same one a '.'-bearing leaf key breaks. The caller has
+  // the real key now (see `AdvancedControlProps.propKey`).
+  if (!defaults || !propertyName) {
     return undefined;
   }
   const defaultsRecord = readRecord(defaults);
-
-  const maybePropertyName = path.split('.').pop();
-  if (!maybePropertyName) {
-    return undefined;
-  }
-  const propertyName: string = maybePropertyName;
 
   // Special handling for MechanicalVentilation: filter by vent_type (subtype)
   if (elementType === 'MechanicalVentilation' && subtype) {
@@ -644,11 +651,10 @@ function getDefaultValue(
 function getAdvancedDefaultValue(
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
-  path: string,
   elementType: string | undefined,
   subtype: string | undefined,
   opaqueFabricVariant: OpaqueFabricVariant | undefined,
-  propKey: string | undefined,
+  propKey: string,
   config: RendererConfig | undefined,
 ): unknown {
   if (propKey === 'security_risk' && elementType === 'BuildingElementTransparent') {
@@ -657,7 +663,10 @@ function getAdvancedDefaultValue(
       floorStoreyInputs(config?.floors),
     );
   }
-  return getDefaultValue(defaults, defaultsLookup, path, elementType, subtype, opaqueFabricVariant);
+  // R4.6b-2: `path` is gone from this signature. It carried exactly one thing into
+  // `getDefaultValue` — the leaf key — which this function was already being handed
+  // separately as `propKey`, spelled two different ways off the same string.
+  return getDefaultValue(defaults, defaultsLookup, propKey, elementType, subtype, opaqueFabricVariant);
 }
 
 function readFiniteControlNumber(value: unknown): number | null {
@@ -798,6 +807,27 @@ type FieldPresentationState = {
   showReset: boolean;
 };
 
+/**
+ * Reads the value at a control's dot-joined `path` inside a baseline record, reporting
+ * PRESENCE separately from value — `exists` is what lets System Sample mode tell "the
+ * preset omits this key" from "the preset sets it to nothing" (see
+ * `computeFieldPresentationState`, the only caller).
+ *
+ * R4.6b-2: the per-segment `decodeURIComponent` this used to carry is GONE. It was a
+ * JsonForms-era artifact — that path's own scope handling percent-escaped tokens — and
+ * since R4.3b every producer of a control `path` in this codebase joins DECODED
+ * segments: `renderControlForProperty` builds it from `segmentsFromLayoutScope`
+ * (RFC-6901 tokens, `~1`/`~0`, decoded by `decodePointerToken`), from a literal
+ * `schema.properties` key, or from a web builder's dot-joined `pathOverride`. Swept both
+ * repos: the only `encodeURIComponent` producers are element-visibility keys, thermal-bridge
+ * detail contracts and parent-repo file ids/URLs, none of which reaches a control path.
+ * Leaving the decode in was not neutral: a raw data key containing a legal percent
+ * sequence (`"a%20b"`) would have been silently rewritten to a different key before the
+ * lookup, so this deletes a latent corruption rather than tidying a no-op. Deliberately
+ * NOT rebased onto `getAtPath` (`../lib/jsonTypes`): that walker answers "what value",
+ * this one answers "was the key there at all", and collapsing the two would lose the
+ * distinction System Sample mode is built on.
+ */
 function readValueAtDataPath(
   root: unknown,
   path: string,
@@ -805,16 +835,7 @@ function readValueAtDataPath(
   if (!root || typeof root !== 'object' || Array.isArray(root) || !path) {
     return { exists: false, value: undefined };
   }
-  const segments = path
-    .split('.')
-    .filter(Boolean)
-    .map((segment) => {
-      try {
-        return decodeURIComponent(segment);
-      } catch {
-        return segment;
-      }
-    });
+  const segments = path.split('.').filter(Boolean);
   let cur: unknown = root;
   for (const segment of segments) {
     if (cur == null) return { exists: false, value: undefined };
@@ -917,13 +938,19 @@ function schemaIsJsonLike(s: JsonRecord): boolean {
 /** Everything the Advanced Fields controls derive identically from their props. */
 type AdvancedControlPreamble = {
   cfg: RendererConfig;
+  /**
+   * The EFFECTIVE port this row's presentation was resolved against — `cfg.schemaPort`
+   * if the host supplied one, otherwise the ambient provider's, otherwise unavailable
+   * (see the SCHEMA PORT CONTRACT below). Returned so that a control needing a SECOND
+   * resolution reads the same port as its own label instead of re-deciding.
+   */
+  schemaPort: GeometrySchemaPort;
   /** Resolved schema node for this property (uischema `schemaOverride` wins). */
   s: JsonRecord;
   isCompact: boolean;
   elementType: string | undefined;
   subtype: string | undefined;
   opaqueFabricVariant: OpaqueFabricVariant | undefined;
-  propKey: string | undefined;
   isJsonLike: boolean;
   valueString: string;
   fieldPresentation: ResolvedFieldPresentation;
@@ -952,6 +979,14 @@ type AdvancedControlPreamble = {
  * pill was spelled two different ways (`presentation.statusPillType` in Boolean/Enum,
  * an explicit `getStatusPillType` call in Text/Number) that happened to agree.
  *
+ * R4.6b-2: `propKey` is now READ FROM PROPS, not derived. This hook opened with
+ * `path?.split('.')?.pop()`, which is the whole reason the key could ever be wrong: the
+ * walk that mounted the control already held the decoded leaf segment and then threw it
+ * away by joining, leaving each control to guess it back. The guess fails for a leaf key
+ * containing a '.', which a CSV-derived System plant key can be. The preamble no longer
+ * RETURNS `propKey` either — the caller passed it in, so handing it back was surface with
+ * two spellings of one value.
+ *
  * A HOOK, for exactly one reason: the SCHEMA PORT (see below). Everything else here is
  * pure derivation from props, and the two store reads (`useDefaultValues`,
  * `useDefaultsLookup`) still stay at each control's own top level and are passed in, so
@@ -971,6 +1006,12 @@ type AdvancedControlPreamble = {
  *  - `unavailableGeometrySchemaPort` only when neither exists, which is precisely what
  *    `useGeometrySchemaPort()` returns with no provider above it, so a portless mount is
  *    byte-identical to before.
+ * R4.6b-2 returns that resolved port (see `AdvancedControlPreamble.schemaPort`) so the one
+ * decision point actually covers every label in the row. `WindowPartListControl` resolves a
+ * SECOND presentation for its per-part unit and was still reading
+ * `cfg.schemaPort ?? unavailable` on its own — the one place where "which port does a
+ * label read?" still had two answers.
+ *
  * This is also a deliberate UPGRADE for Number/Enum rows in portless-config hosts: they
  * were already on the informed path and therefore already read `unavailable` there, even
  * before R4.6b-1 moved Text/Boolean/WindowPartList onto it. Text/Boolean/WindowPartList
@@ -999,19 +1040,18 @@ type AdvancedControlPreamble = {
  * Unifying beats a `groundAware: boolean` flag that only one caller could ever set.
  */
 function useAdvancedControlPreamble(
-  props: Pick<AdvancedControlProps, 'data' | 'path' | 'label' | 'schema' | 'uischema' | 'config'>,
+  props: Pick<AdvancedControlProps, 'data' | 'path' | 'propKey' | 'label' | 'schema' | 'uischema' | 'config'>,
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
 ): AdvancedControlPreamble {
   const contextSchemaPort = useGeometrySchemaPort();
-  const { data, path, label, schema, uischema, config } = props;
+  const { data, path, propKey, label, schema, uischema, config } = props;
   const cfg = rendererConfig(config);
   const schemaPort = cfg.schemaPort ?? contextSchemaPort;
   const s = schemaWithOverride(uischema, schema);
   const elementType = cfg.elementType;
   const subtype = cfg.subtype;
   const opaqueFabricVariant = cfg.opaqueFabricVariant;
-  const propKey = path?.split('.')?.pop();
   const isJsonLike = schemaIsJsonLike(s);
   const groundUComputedWPerM2K = cfg.groundUComputedWPerM2K;
   const isGroundUField = isGroundUValueField(propKey, elementType);
@@ -1020,7 +1060,6 @@ function useAdvancedControlPreamble(
   const defaultValue = getAdvancedDefaultValue(
     defaults,
     defaultsLookup,
-    path,
     elementType,
     subtype,
     opaqueFabricVariant,
@@ -1044,12 +1083,12 @@ function useAdvancedControlPreamble(
 
   return {
     cfg,
+    schemaPort,
     s,
     isCompact: Boolean(cfg.compact),
     elementType,
     subtype,
     opaqueFabricVariant,
-    propKey,
     isJsonLike,
     valueString: advancedControlValueString(data, isJsonLike),
     fieldPresentation,
@@ -1259,10 +1298,40 @@ function windowPartRowsEqual(a: WindowPartListItem[], b: WindowPartListItem[]): 
   return a.every((row, index) => Math.abs(row.mid_height_air_flow_path - b[index].mid_height_air_flow_path) <= 1e-6);
 }
 
+/**
+ * The repeating window-part editor: one row per air-flow-path midpoint, edited RELATIVE to
+ * the window base and stored absolute.
+ *
+ * Uses only the label/indicator half of the preamble — the row is a repeating editor with
+ * no single value, so it has no status pill of its own (`'default-used'` is hard-coded
+ * below) and no defaults/reset affordance.
+ *
+ * TWO PRESENTATIONS, ONE PORT (R4.6b-2). The per-part unit adornment comes from a SECOND
+ * `resolveFieldPresentation` call, because the rows edit `mid_height_air_flow_path` while
+ * this control is bound to `window_part_list`, an array whose own presentation says nothing
+ * about its items' unit. That second call used to read
+ * `cfg.schemaPort ?? unavailableGeometrySchemaPort` while the label above it followed
+ * R4.6b-1's contract (config port -> ambient provider port -> unavailable), so in a host
+ * that mounts with `config={{}}` inside a `GeometryEditorServicePortsProvider` — the parent
+ * repo's snippet-editor shape — the two halves of one row read DIFFERENT ports, and this
+ * half resolved against `unavailable`, which by its own availability gate asks the schema
+ * nothing. Both now use the effective port the preamble resolved once, which is the whole
+ * point of resolving it there.
+ *
+ * WHAT CHANGES ON SCREEN, MEASURED: nothing, on today's schemas. That presentation's only
+ * consumer is `fieldUnitForAdornment`, and `mid_height_air_flow_path` carries a hardcoded
+ * `units: 'm'` in `lib/schemaDescriptionOverrides.ts` that resolves with no port at all;
+ * against the canonical port the same 'm' arrives from the schema description instead, so
+ * the resolution SOURCE moves and the display does not. The change is still real and still
+ * pinned (`__tests__/jsonformsRenderers.units.test.tsx`, "R4.6b-2"): the provider is now
+ * ASKED about the item field, and a port whose schema-derived unit ever disagreed with the
+ * override would produce a conflict here, which the old code could not have seen.
+ */
 export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
   data,
   handleChange,
   path,
+  propKey,
   label,
   schema,
   uischema,
@@ -1270,24 +1339,22 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
 }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
-  // Uses only the label/indicator half of the preamble: the row is a repeating editor
-  // with no single value, so it has no status pill of its own (`'default-used'` is
-  // hard-coded below) and no defaults/reset affordance.
   const {
     cfg,
+    schemaPort,
     isCompact,
     elementType,
-    propKey,
     fieldPresentation,
     indicatorMessages,
     hasEvidence,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
+  // Second presentation, same port — see this component's docstring.
   const midpointPresentation = resolveFieldPresentation({
     mode: cfg.useFHSSchemaForValidation ? 'fhs' : 'core',
     propertyKey: 'mid_height_air_flow_path',
     elementType: elementType ?? 'BuildingElementTransparent',
     label: 'Window part midpoint (m)',
-  }, cfg.schemaPort ?? unavailableGeometrySchemaPort);
+  }, schemaPort);
 
   const selection = useGeometryStore((state) => state.selection);
   const getElementById = useGeometryStore((state) => state.getElementById);
@@ -1547,8 +1614,6 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     'flex-start',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       'default-used',
@@ -1572,26 +1637,17 @@ const ADVANCED_CTRL_LABEL_ROW: React.CSSProperties = {
 };
 
 function renderAdvancedFieldLabelRow(
-  label: string,
-  elementType: string | undefined,
   indicatorMessages: readonly string[] | undefined,
   hasEvidence: boolean | undefined,
   statusPillType: StatusPillType,
-  statusPillLabelOverride?: string,
-  useFHSSchema?: boolean,
-  presentation?: ResolvedFieldPresentation,
+  statusPillLabelOverride: string | undefined,
+  useFHSSchema: boolean | undefined,
+  presentation: ResolvedFieldPresentation,
 ): React.ReactNode {
   return (
     <div style={ADVANCED_CTRL_LABEL_ROW}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {renderFieldLabelWithIndicator(
-          label,
-          elementType,
-          indicatorMessages,
-          hasEvidence,
-          useFHSSchema,
-          presentation,
-        )}
+        {renderFieldLabelWithIndicator(indicatorMessages, hasEvidence, useFHSSchema, presentation)}
       </div>
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
         <StatusPill type={statusPillType} labelOverride={statusPillLabelOverride} />
@@ -1726,7 +1782,7 @@ function CopyPlaceholderButton({ kind, text }: { kind: 'default' | 'example'; te
   );
 }
 
-export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, schema, uischema, config }) => {
+export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, schema, uischema, config }) => {
   const [localError, setLocalError] = useState<string | null>(null);
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
@@ -1735,7 +1791,6 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     s,
     isCompact,
     elementType,
-    propKey,
     isJsonLike,
     valueString,
     fieldPresentation,
@@ -1750,7 +1805,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     isRuField,
     isGroundUField,
     groundUComputedWPerM2K,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const openRuCalculator = cfg.openRuCalculator;
   const openGroundUCalculator = cfg.openGroundUCalculator;
   // One derivation feeding both the input placeholder and the copy button beside it.
@@ -1888,8 +1943,6 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     'flex-end',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       statusPillType,
@@ -1900,7 +1953,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     );
 };
 
-export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, schema, uischema, config }) => {
+export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, schema, uischema, config }) => {
   const [localError, setLocalError] = useState<string | null>(null);
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
@@ -1910,7 +1963,6 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     isCompact,
     elementType,
     subtype,
-    propKey,
     valueString,
     fieldPresentation,
     fieldUnit,
@@ -1925,7 +1977,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     isRuField,
     isGroundUField,
     groundUComputedWPerM2K,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const openRuCalculator = cfg.openRuCalculator;
   const openGroundUCalculator = cfg.openGroundUCalculator;
   const resyncSuspendedThermalTransmWalls = cfg.resyncSuspendedThermalTransmWalls;
@@ -2137,8 +2189,6 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     'flex-end',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       statusPillType,
@@ -2149,14 +2199,14 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
   );
 };
 
-export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, schema, uischema, config }) => {
+export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, schema, uischema, config }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
+  // No `elementType`: R4.6b-2's label-row change took its last reader in this control
+  // (the deleted label-only fallback arm). A checkbox validates nothing per-element.
   const {
     cfg,
     isCompact,
-    elementType,
-    propKey,
     fieldPresentation,
     indicatorMessages,
     hasEvidence,
@@ -2166,7 +2216,7 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
     statusPillLabelOverride,
     isCustom,
     showReset,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
 
   return renderAdvancedFieldRow(
     propKey,
@@ -2188,8 +2238,6 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
     'center',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       statusPillType,
@@ -2200,7 +2248,7 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
   );
 };
 
-export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, errors, schema, uischema, config, enabled }) => {
+export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, errors, schema, uischema, config, enabled }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
   const {
@@ -2208,7 +2256,6 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     s,
     isCompact,
     elementType,
-    propKey,
     valueString,
     fieldPresentation,
     fieldUnit: resolvedFieldUnit,
@@ -2220,7 +2267,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     statusPillLabelOverride,
     isCustom,
     showReset,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const fromEnum = Array.isArray(s.enum) ? s.enum : null;
   const fromOneOf = schemaAlternatives(s, 'oneOf');
   const fromAnyOf = schemaAlternatives(s, 'anyOf');
@@ -2229,12 +2276,15 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
   const optionDescriptions = new Map<string, string>();
   let coerceType: 'string' | 'number' | 'boolean' | undefined;
 
-  // Check if this is junction_type for ThermalBridgeLinear - use descriptions in labels
-  // Path might be just 'junction_type' or a full path ending with 'junction_type'
-  // JsonForms paths can be in various formats, so check multiple patterns
-  const pathSegments = path.split(/[/#.]/);
-  const lastSegment = pathSegments[pathSegments.length - 1];
-  const isJunctionTypeField = lastSegment === 'junction_type' || path.includes('junction_type');
+  // Check if this is junction_type for ThermalBridgeLinear - use descriptions in labels.
+  //
+  // R4.6b-2: the leaf test reads `propKey` instead of re-splitting `path` on `/#.` and
+  // taking the last piece — the fourth and last of this file's path-parsing derivations.
+  // Provably identical here, not merely usually so: the only inputs where the split's last
+  // piece is 'junction_type' while `propKey` is not are keys that CONTAIN 'junction_type'
+  // after a '.', '/' or '#', and every one of those already satisfies the `includes` arm
+  // this line has always carried for a full-path scope.
+  const isJunctionTypeField = propKey === 'junction_type' || path.includes('junction_type');
   const isJunctionType = isJunctionTypeField && elementType === 'ThermalBridgeLinear';
 
   // (Debug logs removed; re-add targeted diagnostics when needed.)
@@ -2367,8 +2417,6 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       'flex-start',
       0,
       renderAdvancedFieldLabelRow(
-        label,
-        elementType,
         indicatorMessages,
         hasEvidence,
         statusPillType,
@@ -2399,8 +2447,6 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     'flex-end',
     0,
     renderAdvancedFieldLabelRow(
-      label,
-      elementType,
       indicatorMessages,
       hasEvidence,
       statusPillType,
@@ -2486,18 +2532,15 @@ export const GroupAccordion: React.FC<{
  * own `anyOf`-nullable-number check; `schemaIsPlainString`, the deleted rank-90
  * plain-string tester's own guard) had no other caller and were deleted alongside it,
  * not carried forward as unused surface.
+ *
+ * R4.6b-2 MOVE NOTE: `schemaTypeList`, `schemaHasEnum`, `schemaHasConstAlternatives` and
+ * their shared `schemaAlternatives` helper used to live in this file too, exported for a
+ * SIBLING COMPONENT (`DirectAdvancedFields.tsx`'s control picker) to import — the only
+ * reason they were exported at all. They are now `../lib/schemaShape`, which also owns the
+ * non-emptiness rule the picker used to re-apply on top of them; this file imports the two
+ * it still uses (`schemaAlternatives` for `schemaIsJsonLike` and `EnumControl`'s option
+ * list, `schemaTypeList` for the integer check below) and exports neither.
  */
 function schemaHasIntegerType(schema: unknown): boolean {
   return schemaTypeList(readRecord(schema)).includes('integer');
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
-export function schemaHasEnum(schema: unknown): boolean {
-  return Array.isArray(readRecord(schema).enum);
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
-export function schemaHasConstAlternatives(schema: unknown, key: 'oneOf' | 'anyOf'): boolean {
-  const alts = schemaAlternatives(readRecord(schema), key);
-  return !!alts && alts.every((a) => Object.prototype.hasOwnProperty.call(a, 'const'));
 }
