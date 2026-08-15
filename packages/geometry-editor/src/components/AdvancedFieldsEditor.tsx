@@ -1237,26 +1237,28 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     // `pickDirectControl` ever runs. Both already route to EnumControl unaided, and
     // `unwrapNullableSchema` (DirectAdvancedFields.tsx) never touches either shape.
     //
-    // What this override actually still does is pin the LABEL. Core's
-    // `$defs/WindShieldLocation` carries `title: 'WindShieldLocation'`, and the
-    // property site carries no title of its own, so without the override
-    // `labelForProperty` would render the raw `$def` name "WindShieldLocation" on Core
-    // instead of the start-cased key "Shield Fact Location" users see today (FHS,
-    // titleless either way, is unaffected -- there this block is a no-op beyond adding
-    // an explicit `type:'string'`). Retiring it therefore means CHANGING a live label,
-    // which is a product decision, not the dead-special-case cleanup R4.6a is doing --
-    // deliberately left for whoever owns the "$def titles as field labels" question.
-    // Worth noting what that leaves: `mvhr_location`, whose override IS gone, now
-    // renders as the start-cased key "Mvhr Location", while this field keeps a
-    // hand-pinned "Shield Fact Location". Both are start-cased keys; the difference is
-    // that one is pinned in code and the other is derived. Deleting this block would
-    // land Core on "WindShieldLocation" instead, which is why it cannot simply follow.
+    // R4.6a noted that what this override still did, beyond the flat enum, was PIN THE
+    // LABEL: Core's `$defs/WindShieldLocation` carries `title: 'WindShieldLocation'` and
+    // the property site carries none of its own, so `labelForProperty` would have
+    // rendered the raw `$def` name. That was left "for whoever owns the '$def titles as
+    // field labels' question", and R4.6b-3 is that owner: the label content rule rejects
+    // a pydantic type name outright, so Core derives "Shield Fact Location" from the key
+    // on its own and the hand-pinned `title` is GONE from the block below. The field is
+    // now labelled by the same rule as every other row rather than by a special case,
+    // and its neighbour `mvhr_location` -- the field this comment used to contrast it
+    // with -- is derived by that same rule too.
+    //
+    // The flat enum stays: it is a claim about the CONTROL, not the label. Both profiles
+    // route to EnumControl unaided today (FHS emits `{enum:[...]}` inline; Core's bare
+    // `$ref` with a sibling description is inlined by `dereferenceSchemaNodeInRoot`
+    // before `pickDirectControl` runs), so it is belt-and-braces, but it is also what
+    // fixes the enum VALUES to `WIND_SHIELD_LOCATION_ENUM` and that is not this slice's
+    // question to reopen.
     if (elementType === 'BuildingElementGround' && subtype === 'Suspended_floor' && advancedProperties.shield_fact_location) {
       const sh = advancedProperties.shield_fact_location as Record<string, unknown>;
       advancedProperties.shield_fact_location = {
         type: 'string',
         enum: [...WIND_SHIELD_LOCATION_ENUM],
-        title: typeof sh.title === 'string' ? sh.title : 'Shield Fact Location',
         ...(typeof sh.description === 'string' ? { description: sh.description } : {}),
       };
     }

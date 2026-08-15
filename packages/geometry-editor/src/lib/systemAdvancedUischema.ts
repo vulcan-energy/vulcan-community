@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { startCaseKey } from '../components/DirectAdvancedFields';
+import { resolveFieldLabelContent, startCaseKey } from './schemaDescriptionOverrides';
 import { encodePointerToken } from './schemaRefResolver';
+import { PLANT_KEYS_ARE_USER_NAMES } from './systemAdvancedSchemaExpand';
 
 /**
  * Structurally identical to the subset of `@jsonforms/core`'s `UISchemaElement` this
@@ -59,18 +60,35 @@ function sortPropertyKeys(keys: string[]): string[] {
  * through `labelForProperty` (because `leafControlLabel` returns `undefined` with no
  * prefix parts, leaving the Control without a `label`) and rendered "Design Flow Temp",
  * while the same schema shape one nesting level down rendered `min_outdoor_temp` raw.
+ *
+ * R4.6b-3 (steps 1-3): "a real title wins outright" is now "a real title wins if it is
+ * ADMISSIBLE" — the shared content rule (`resolveFieldLabelContent`,
+ * `./schemaDescriptionOverrides`) decides, and the same call sits behind the flat walk's
+ * `labelForProperty`, so the two walks cannot disagree about one field's name. This
+ * function still reads the RAW child schema, where the flat walk reads the dereferenced
+ * one; a `$ref`'d property therefore reaches the rule here with no title at all and is
+ * key-derived on both paths anyway.
  */
 function titleOrKeyFromSchema(key: string, childSchema: unknown): string {
-  if (childSchema && typeof childSchema === 'object' && !Array.isArray(childSchema)) {
-    const t = (childSchema as { title?: string }).title;
-    if (typeof t === 'string' && t.trim()) return t.trim();
-  }
-  return startCaseKey(key);
+  const title =
+    childSchema && typeof childSchema === 'object' && !Array.isArray(childSchema)
+      ? (childSchema as { title?: unknown }).title
+      : undefined;
+  return resolveFieldLabelContent(key, title);
 }
 
 type PlantControlCtx = {
   plantKey: string;
   multiPlant: boolean;
+  /**
+   * Is `plantKey` a name the USER typed (a merge-map key expanded from their `extra_json`)
+   * or a schema property of this subtype? Stamped on the subtype node by
+   * `expandSystemMergeMapSchemaForJsonForms` (`./systemAdvancedSchemaExpand`), which is
+   * the only place that still knows, and consumed by `plantBlobControl`. Do not try to
+   * re-derive it from the keys themselves: `System:InfiltrationVentilation`'s data keys
+   * are schema property names, so every data-shaped heuristic gets that subtype wrong.
+   */
+  plantKeysAreUserNames: boolean;
   /**
    * Nested object keys from the plant root (not including the leaf property key),
    * already start-cased at append time in `buildControlsForSchema` — see the note on
@@ -82,10 +100,13 @@ type PlantControlCtx = {
    * prefix is KEY-derived even when the node is titled. Core's
    * `InfiltrationVentilation.Leaks` is the live case — it resolves to `$defs`
    * `VentilationLeaks`, which carries `title: "VentilationLeaks"`, and the row still
-   * renders `Leaks · Env Area`. Leaves are title-first, prefixes are key-derived by
-   * design today; the asymmetry predates R4.6b-1 (which start-cased the FALLBACKS and
-   * nothing else) and any change to it belongs to the content slice, which owns what
-   * these labels should SAY.
+   * renders `Leaks · Env Area`.
+   *
+   * R4.6b-3 DECIDED that asymmetry rather than removing it: PREFIXES are structural
+   * breadcrumbs (key-derived; plant keys raw), LEAVES are field labels (title-first,
+   * subject to admissibility). See the rule-set docstring on `resolveFieldLabelContent`
+   * (`./schemaDescriptionOverrides`). Note that the two happen to agree here anyway —
+   * "VentilationLeaks" is exactly the pydantic type name the leaf rule would reject.
    */
   pathLabels: string[];
 };
@@ -106,6 +127,36 @@ function leafControlLabel(key: string, childSchema: unknown, ctx: PlantControlCt
 }
 
 /**
+ * The ONE control a plant with no expandable properties renders: the whole thing as a
+ * JSON blob.
+ *
+ * When the key is a USER PLANT NAME, R4.6b-3 states the label EXPLICITLY where it used to
+ * be left undefined for `DirectAdvancedFields` to fill in from
+ * `labelForProperty(plantKey, …)`. Byte-identical output — Core's five plant routes still
+ * read "Hp", "Boiler", "Cooler", "Hw Cylinder", "Zone 1 Circuit" — and that is the point:
+ * `labelForProperty` now runs the label CONTENT rule, which is a rule about SCHEMA TEXT.
+ * A plant key is not schema text; it is a name the user typed into a CSV, and putting it
+ * through the rule spells `hp` as "HP" off the acronym dictionary. Start-cased, not raw,
+ * because that is what these five rows have always rendered; the RAW plant key is used
+ * for the multi-plant PREFIX (`leafControlLabel`), a different decision documented there.
+ *
+ * When the key is a SCHEMA property — every key of `System:InfiltrationVentilation`, and
+ * FHS `HotWaterDemand`'s `Bath`/`Shower`/`Other` — the label is left undefined on purpose
+ * and the content rule runs, which is what turns "Mechanicalventilation" into "Mechanical
+ * Ventilation" and keeps Core's curated "ACH Maximum Static Calcs". Getting this arm
+ * wrong is not subtle: labelling those blindly with the key froze eight
+ * InfiltrationVentilation rows at their start-cased key, including the two `ach_*` rows
+ * that FHS needs the acronym dictionary for.
+ */
+function plantBlobControl(scopePrefix: string, ctx: PlantControlCtx): AdvancedFieldsLayoutNode {
+  return {
+    type: 'Control',
+    scope: scopePrefix,
+    ...(ctx.plantKeysAreUserNames ? { label: startCaseKey(ctx.plantKey) } : {}),
+  };
+}
+
+/**
  * VerticalLayout + Control only, deliberately no `Group`: a `Group` means collapsible
  * accordion chrome, which reads Scenario-style rather than like normal Advanced Fields,
  * where every plant's rows are visible at once. Groups are still rendered elsewhere —
@@ -117,7 +168,7 @@ function leafControlLabel(key: string, childSchema: unknown, ctx: PlantControlCt
  */
 function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: PlantControlCtx): AdvancedFieldsLayoutNode[] {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
-    return [{ type: 'Control', scope: scopePrefix }];
+    return [plantBlobControl(scopePrefix, ctx)];
   }
   const s = schema as Record<string, unknown>;
   const props = s.properties;
@@ -174,7 +225,7 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
     }
     return out;
   }
-  return [{ type: 'Control', scope: scopePrefix }];
+  return [plantBlobControl(scopePrefix, ctx)];
 }
 
 /**
@@ -210,6 +261,10 @@ export function buildSystemAdvancedUischema(
 
   const plantKeys = sortPropertyKeys(Object.keys(plantProps));
   const multiPlant = plantKeys.length > 1;
+  // R4.6b-3: see `PlantControlCtx.plantKeysAreUserNames`. Absent (every subtype whose
+  // plants were never expanded from a merge map) means these keys are schema properties,
+  // which is the safe default — it puts them through the label content rule.
+  const plantKeysAreUserNames = inner?.[PLANT_KEYS_ARE_USER_NAMES] === true;
   const elements: AdvancedFieldsLayoutNode[] = [];
 
   for (const plantKey of plantKeys) {
@@ -220,7 +275,12 @@ export function buildSystemAdvancedUischema(
     // keys, correct by construction for ones that are not.
     const baseScope = `#/properties/${encodePointerToken(subtype)}/properties/${encodePointerToken(plantKey)}`;
     elements.push(
-      ...buildControlsForSchema(plantSchema, baseScope, { plantKey, multiPlant, pathLabels: [] }),
+      ...buildControlsForSchema(plantSchema, baseScope, {
+        plantKey,
+        multiPlant,
+        plantKeysAreUserNames,
+        pathLabels: [],
+      }),
     );
   }
 
