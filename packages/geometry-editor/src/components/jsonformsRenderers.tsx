@@ -95,6 +95,21 @@ type AdvancedControlProps = {
   data: unknown;
   handleChange: (path: string, value: unknown) => void;
   path: string;
+  /**
+   * The property's own leaf key — `u_value`, `mid_height_air_flow_path`, a raw System
+   * plant key — supplied by the walk that mounted this control.
+   *
+   * R4.6b-2: REQUIRED, and no longer derived here. Every control used to recover it as
+   * `path.split('.').pop()`, which is a guess that happens to be right only while no leaf
+   * key contains a '.'; a CSV-derived System plant key may (`"Zone 1.5 circuit"` would
+   * have arrived as `"5 circuit"`), which R4.3b recorded as an accepted residual because
+   * the walks were segment-safe but the controls still re-parsed a joined string. Both
+   * walks in `DirectAdvancedFields.tsx` already hold the decoded leaf segment, so they
+   * now pass it and the guess is gone. Required rather than optional-with-fallback
+   * because those two walks are the only mounts in either repo — verified by sweep, the
+   * parent repo mounts no control directly.
+   */
+  propKey: string;
   label: string;
   errors?: string;
   schema?: unknown;
@@ -347,21 +362,19 @@ function renderFieldLabelWithIndicator(
 function getDefaultValue(
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
-  path: string,
+  propertyName: string,
   elementType?: string,
   subtype?: string,
   opaqueFabricVariant?: OpaqueFabricVariant,
 ): unknown {
-  if (!defaults || !path) {
+  // R4.6b-2: takes the property name outright. It used to take the control's dot-joined
+  // `path` and recover the name as `path.split('.').pop()` — the same guess every control
+  // was making separately, and the same one a '.'-bearing leaf key breaks. The caller has
+  // the real key now (see `AdvancedControlProps.propKey`).
+  if (!defaults || !propertyName) {
     return undefined;
   }
   const defaultsRecord = readRecord(defaults);
-
-  const maybePropertyName = path.split('.').pop();
-  if (!maybePropertyName) {
-    return undefined;
-  }
-  const propertyName: string = maybePropertyName;
 
   // Special handling for MechanicalVentilation: filter by vent_type (subtype)
   if (elementType === 'MechanicalVentilation' && subtype) {
@@ -633,11 +646,10 @@ function getDefaultValue(
 function getAdvancedDefaultValue(
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
-  path: string,
   elementType: string | undefined,
   subtype: string | undefined,
   opaqueFabricVariant: OpaqueFabricVariant | undefined,
-  propKey: string | undefined,
+  propKey: string,
   config: RendererConfig | undefined,
 ): unknown {
   if (propKey === 'security_risk' && elementType === 'BuildingElementTransparent') {
@@ -646,7 +658,10 @@ function getAdvancedDefaultValue(
       floorStoreyInputs(config?.floors),
     );
   }
-  return getDefaultValue(defaults, defaultsLookup, path, elementType, subtype, opaqueFabricVariant);
+  // R4.6b-2: `path` is gone from this signature. It carried exactly one thing into
+  // `getDefaultValue` — the leaf key — which this function was already being handed
+  // separately as `propKey`, spelled two different ways off the same string.
+  return getDefaultValue(defaults, defaultsLookup, propKey, elementType, subtype, opaqueFabricVariant);
 }
 
 function readFiniteControlNumber(value: unknown): number | null {
@@ -924,7 +939,6 @@ type AdvancedControlPreamble = {
   elementType: string | undefined;
   subtype: string | undefined;
   opaqueFabricVariant: OpaqueFabricVariant | undefined;
-  propKey: string | undefined;
   isJsonLike: boolean;
   valueString: string;
   fieldPresentation: ResolvedFieldPresentation;
@@ -952,6 +966,14 @@ type AdvancedControlPreamble = {
  * Text/Boolean reverse-engineered it from the display label instead; and the status
  * pill was spelled two different ways (`presentation.statusPillType` in Boolean/Enum,
  * an explicit `getStatusPillType` call in Text/Number) that happened to agree.
+ *
+ * R4.6b-2: `propKey` is now READ FROM PROPS, not derived. This hook opened with
+ * `path?.split('.')?.pop()`, which is the whole reason the key could ever be wrong: the
+ * walk that mounted the control already held the decoded leaf segment and then threw it
+ * away by joining, leaving each control to guess it back. The guess fails for a leaf key
+ * containing a '.', which a CSV-derived System plant key can be. The preamble no longer
+ * RETURNS `propKey` either — the caller passed it in, so handing it back was surface with
+ * two spellings of one value.
  *
  * A HOOK, for exactly one reason: the SCHEMA PORT (see below). Everything else here is
  * pure derivation from props, and the two store reads (`useDefaultValues`,
@@ -1000,19 +1022,18 @@ type AdvancedControlPreamble = {
  * Unifying beats a `groundAware: boolean` flag that only one caller could ever set.
  */
 function useAdvancedControlPreamble(
-  props: Pick<AdvancedControlProps, 'data' | 'path' | 'label' | 'schema' | 'uischema' | 'config'>,
+  props: Pick<AdvancedControlProps, 'data' | 'path' | 'propKey' | 'label' | 'schema' | 'uischema' | 'config'>,
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
 ): AdvancedControlPreamble {
   const contextSchemaPort = useGeometrySchemaPort();
-  const { data, path, label, schema, uischema, config } = props;
+  const { data, path, propKey, label, schema, uischema, config } = props;
   const cfg = rendererConfig(config);
   const schemaPort = cfg.schemaPort ?? contextSchemaPort;
   const s = schemaWithOverride(uischema, schema);
   const elementType = cfg.elementType;
   const subtype = cfg.subtype;
   const opaqueFabricVariant = cfg.opaqueFabricVariant;
-  const propKey = path?.split('.')?.pop();
   const isJsonLike = schemaIsJsonLike(s);
   const groundUComputedWPerM2K = cfg.groundUComputedWPerM2K;
   const isGroundUField = isGroundUValueField(propKey, elementType);
@@ -1021,7 +1042,6 @@ function useAdvancedControlPreamble(
   const defaultValue = getAdvancedDefaultValue(
     defaults,
     defaultsLookup,
-    path,
     elementType,
     subtype,
     opaqueFabricVariant,
@@ -1050,7 +1070,6 @@ function useAdvancedControlPreamble(
     elementType,
     subtype,
     opaqueFabricVariant,
-    propKey,
     isJsonLike,
     valueString: advancedControlValueString(data, isJsonLike),
     fieldPresentation,
@@ -1264,6 +1283,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
   data,
   handleChange,
   path,
+  propKey,
   label,
   schema,
   uischema,
@@ -1278,11 +1298,10 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     cfg,
     isCompact,
     elementType,
-    propKey,
     fieldPresentation,
     indicatorMessages,
     hasEvidence,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const midpointPresentation = resolveFieldPresentation({
     mode: cfg.useFHSSchemaForValidation ? 'fhs' : 'core',
     propertyKey: 'mid_height_air_flow_path',
@@ -1727,7 +1746,7 @@ function CopyPlaceholderButton({ kind, text }: { kind: 'default' | 'example'; te
   );
 }
 
-export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, schema, uischema, config }) => {
+export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, schema, uischema, config }) => {
   const [localError, setLocalError] = useState<string | null>(null);
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
@@ -1736,7 +1755,6 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     s,
     isCompact,
     elementType,
-    propKey,
     isJsonLike,
     valueString,
     fieldPresentation,
@@ -1751,7 +1769,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     isRuField,
     isGroundUField,
     groundUComputedWPerM2K,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const openRuCalculator = cfg.openRuCalculator;
   const openGroundUCalculator = cfg.openGroundUCalculator;
   // One derivation feeding both the input placeholder and the copy button beside it.
@@ -1901,7 +1919,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     );
 };
 
-export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, schema, uischema, config }) => {
+export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, schema, uischema, config }) => {
   const [localError, setLocalError] = useState<string | null>(null);
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
@@ -1911,7 +1929,6 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     isCompact,
     elementType,
     subtype,
-    propKey,
     valueString,
     fieldPresentation,
     fieldUnit,
@@ -1926,7 +1943,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     isRuField,
     isGroundUField,
     groundUComputedWPerM2K,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const openRuCalculator = cfg.openRuCalculator;
   const openGroundUCalculator = cfg.openGroundUCalculator;
   const resyncSuspendedThermalTransmWalls = cfg.resyncSuspendedThermalTransmWalls;
@@ -2150,14 +2167,13 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
   );
 };
 
-export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, schema, uischema, config }) => {
+export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, schema, uischema, config }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
   const {
     cfg,
     isCompact,
     elementType,
-    propKey,
     fieldPresentation,
     indicatorMessages,
     hasEvidence,
@@ -2167,7 +2183,7 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
     statusPillLabelOverride,
     isCustom,
     showReset,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
 
   return renderAdvancedFieldRow(
     propKey,
@@ -2201,7 +2217,7 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
   );
 };
 
-export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, label, errors, schema, uischema, config, enabled }) => {
+export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, errors, schema, uischema, config, enabled }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
   const {
@@ -2209,7 +2225,6 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     s,
     isCompact,
     elementType,
-    propKey,
     valueString,
     fieldPresentation,
     fieldUnit: resolvedFieldUnit,
@@ -2221,7 +2236,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     statusPillLabelOverride,
     isCustom,
     showReset,
-  } = useAdvancedControlPreamble({ data, path, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const fromEnum = Array.isArray(s.enum) ? s.enum : null;
   const fromOneOf = schemaAlternatives(s, 'oneOf');
   const fromAnyOf = schemaAlternatives(s, 'anyOf');
@@ -2230,12 +2245,15 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
   const optionDescriptions = new Map<string, string>();
   let coerceType: 'string' | 'number' | 'boolean' | undefined;
 
-  // Check if this is junction_type for ThermalBridgeLinear - use descriptions in labels
-  // Path might be just 'junction_type' or a full path ending with 'junction_type'
-  // JsonForms paths can be in various formats, so check multiple patterns
-  const pathSegments = path.split(/[/#.]/);
-  const lastSegment = pathSegments[pathSegments.length - 1];
-  const isJunctionTypeField = lastSegment === 'junction_type' || path.includes('junction_type');
+  // Check if this is junction_type for ThermalBridgeLinear - use descriptions in labels.
+  //
+  // R4.6b-2: the leaf test reads `propKey` instead of re-splitting `path` on `/#.` and
+  // taking the last piece — the fourth and last of this file's path-parsing derivations.
+  // Provably identical here, not merely usually so: the only inputs where the split's last
+  // piece is 'junction_type' while `propKey` is not are keys that CONTAIN 'junction_type'
+  // after a '.', '/' or '#', and every one of those already satisfies the `includes` arm
+  // this line has always carried for a full-path scope.
+  const isJunctionTypeField = propKey === 'junction_type' || path.includes('junction_type');
   const isJunctionType = isJunctionTypeField && elementType === 'ThermalBridgeLinear';
 
   // (Debug logs removed; re-add targeted diagnostics when needed.)

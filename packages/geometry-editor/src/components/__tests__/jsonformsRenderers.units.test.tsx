@@ -74,6 +74,11 @@ function renderControl(
   const props = {
     data,
     path,
+    // R4.6b-2: `propKey` is a required prop now, supplied by whichever walk mounts the
+    // control (`DirectAdvancedFields` / `DirectSpecFields`, both of which hold the decoded
+    // leaf segment). This harness stands in for that walk, so it derives the same key the
+    // walk would for these single-hop paths rather than making every case restate it.
+    propKey: path.split('.').pop() ?? path,
     label,
     schema,
     uischema,

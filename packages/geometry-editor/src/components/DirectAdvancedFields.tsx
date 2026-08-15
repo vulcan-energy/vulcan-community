@@ -547,6 +547,10 @@ function renderControlForProperty(args: {
   const baseProps = {
     data: value,
     path,
+    // R4.6b-2: the decoded leaf segment travels as its own prop. This walk has held it
+    // all along; the controls used to re-derive it from `path` and get it wrong for any
+    // leaf key containing a '.'. See `AdvancedControlProps.propKey`.
+    propKey: leafKey,
     label,
     schema: resolved,
     uischema: { type: 'Control', scope },
@@ -564,18 +568,18 @@ function renderControlForProperty(args: {
     handleChange: (_path: string, v: unknown) => applyChange(segments, v),
     rootSchema: schema,
   };
-  // R4.3b residual (accepted, out of scope): `path = segments.join('.')` above is
-  // still safe for the control components' OWN id/propKey derivation
-  // (`jsonformsRenderers.tsx`'s controls each do `path.split('.').pop()`) only
-  // because leaf keys are HEM schema property keys, never user names — with one
-  // pre-existing exception: the degenerate no-properties-plant Control
+  // R4.3b residual, CLOSED IN R4.6b-2. It read: `path = segments.join('.')` is still
+  // safe for the control components' OWN propKey derivation
+  // (`jsonformsRenderers.tsx`'s controls each did `path.split('.').pop()`) only because
+  // leaf keys are HEM schema property keys, never user names — with one pre-existing
+  // exception, the degenerate no-properties-plant Control
   // (`systemAdvancedUischema.ts`'s `buildControlsForSchema` returns
   // `[{ type: 'Control', scope: scopePrefix }]` when a plant schema itself has no
-  // `.properties`), where the scope's final segment IS the raw plant key. A plant
-  // key containing '.' would still corrupt that downstream split. This is
-  // pre-existing and out of scope until the controls stop parsing path strings of
-  // their own (R4.5+) — this slice's segment-safety work protects THIS module's own
-  // walk/apply, not every control's internal path parsing.
+  // `.properties`), where the scope's final segment IS the raw plant key, so a plant key
+  // containing '.' corrupted that downstream split. No control derives a propKey any
+  // more; `baseProps.propKey` above is the decoded segment itself. `path` survives as
+  // the control's data address (`handleChange`'s echoed argument, the row `id`, and the
+  // System Sample baseline lookup) — none of which re-parses it into a key.
 
   // Stage 2.2: window_part_list routes to WindowPartListControl BEFORE the type-based
   // picker — it is an array-typed property that would otherwise never reach a sane

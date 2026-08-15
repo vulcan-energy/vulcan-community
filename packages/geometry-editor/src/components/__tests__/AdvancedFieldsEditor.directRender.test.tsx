@@ -2861,6 +2861,7 @@ describe('WindowPartListControl interactions (ported from the deleted web regist
             data={data}
             handleChange={handleChange}
             path="window_part_list"
+            propKey="window_part_list"
             label="Window Part List"
             config={{ advancedEditor: true, elementType: 'BuildingElementTransparent' }}
           />
