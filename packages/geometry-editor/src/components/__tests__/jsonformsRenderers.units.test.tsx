@@ -12,7 +12,7 @@ import type { GeometrySchemaParameterInfo, GeometrySchemaPort } from '../../../.
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { type SchemaNode } from '../../lib/schemaTypes';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
-import { unwrapNullableSchema } from '../DirectAdvancedFields';
+import { unwrapNullableSchema } from '../../lib/schemaShape';
 import { EnumControl, NumberControl, TextControl } from '../jsonformsRenderers';
 
 afterEach(cleanup);

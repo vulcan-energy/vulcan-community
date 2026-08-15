@@ -27,6 +27,7 @@ import { classifyOpaqueFabricVariant } from '../lib/opaqueFabricVariant';
 import { windowSecurityRiskDefaultForElement } from '../lib/windowSecurityRisk';
 import { usesGroundThermalTransmWallsAutofill } from '../lib/groundFloorSubtype';
 import { errorMessageFromUnknown, isRecord, readRecord, type JsonRecord } from '../lib/jsonTypes';
+import { schemaAlternatives, schemaTypeList } from '../lib/schemaShape';
 import type { Element, Floor } from '../geometry/types';
 import type { SchemaNode } from '../lib/schemaTypes';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
@@ -112,18 +113,6 @@ function uiOptions(uischema: unknown): JsonRecord {
 
 function schemaWithOverride(uischema: unknown, schema: unknown): JsonRecord {
   return readRecord(uiOptions(uischema).schemaOverride ?? schema);
-}
-
-function schemaAlternatives(schema: JsonRecord, key: 'oneOf' | 'anyOf'): JsonRecord[] | null {
-  const value = schema[key];
-  return Array.isArray(value) ? value.filter(isRecord) : null;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
-export function schemaTypeList(schema: JsonRecord): string[] {
-  const typeValue = schema.type;
-  if (Array.isArray(typeValue)) return typeValue.filter((type): type is string => typeof type === 'string');
-  return typeof typeValue === 'string' ? [typeValue] : [];
 }
 
 function schemaDefs(value: unknown): Record<string, SchemaNode> | undefined {
@@ -2486,18 +2475,15 @@ export const GroupAccordion: React.FC<{
  * own `anyOf`-nullable-number check; `schemaIsPlainString`, the deleted rank-90
  * plain-string tester's own guard) had no other caller and were deleted alongside it,
  * not carried forward as unused surface.
+ *
+ * R4.6b-2 MOVE NOTE: `schemaTypeList`, `schemaHasEnum`, `schemaHasConstAlternatives` and
+ * their shared `schemaAlternatives` helper used to live in this file too, exported for a
+ * SIBLING COMPONENT (`DirectAdvancedFields.tsx`'s control picker) to import — the only
+ * reason they were exported at all. They are now `../lib/schemaShape`, which also owns the
+ * non-emptiness rule the picker used to re-apply on top of them; this file imports the two
+ * it still uses (`schemaAlternatives` for `schemaIsJsonLike` and `EnumControl`'s option
+ * list, `schemaTypeList` for the integer check below) and exports neither.
  */
 function schemaHasIntegerType(schema: unknown): boolean {
   return schemaTypeList(readRecord(schema)).includes('integer');
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
-export function schemaHasEnum(schema: unknown): boolean {
-  return Array.isArray(readRecord(schema).enum);
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields' control picker.
-export function schemaHasConstAlternatives(schema: unknown, key: 'oneOf' | 'anyOf'): boolean {
-  const alts = schemaAlternatives(readRecord(schema), key);
-  return !!alts && alts.every((a) => Object.prototype.hasOwnProperty.call(a, 'const'));
 }

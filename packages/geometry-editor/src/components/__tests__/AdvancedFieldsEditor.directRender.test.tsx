@@ -47,9 +47,9 @@ import {
   DirectAdvancedFields,
   DirectSpecFields,
   pickDirectControl,
-  unwrapNullableSchema,
   type DirectSpecNode,
 } from '../DirectAdvancedFields';
+import { unwrapNullableSchema } from '../../lib/schemaShape';
 import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
 import { dereferenceSchemaNodeInRoot } from '../../lib/subschemaCache';
 import { resolveSchemaPointer } from '../../lib/schemaRefResolver';
@@ -2324,12 +2324,15 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       // heat-source plants defined yet -- its own hint text asks the user to type a
       // name ("No defined heat source (wet) names yet. Add a Heat source (wet)
       // system that defines a plant key, then link here."). The shared
-      // `schemaHasEnum`/`schemaHasConstAlternatives` predicates are vacuously true on
+      // `schemaHasEnum`/`schemaHasConstAlternatives` predicates WERE vacuously true on
       // an empty array, which was harmless under R4.3's type-first `pickDirectControl`
       // order but would route this straight to a ZERO-OPTION EnumControl dropdown
       // under R4.3b's enum-first order without the `isNonEmptyEnumLike` guard --
       // permanently uneditable, right next to help text asking for exactly the input
-      // it no longer accepts. Exercises `pickDirectControl` directly (unit-level, the
+      // it no longer accepts. R4.6b-2 moved the guard INTO those two predicates
+      // (`lib/schemaShape.ts`), so there is no longer a loose form of them to guard
+      // against; what this test pins is the OUTCOME, which is why it is unchanged by
+      // that move. Exercises `pickDirectControl` directly (unit-level, the
       // fastest signal) AND through a full DirectAdvancedFields mount (DOM-level, the
       // signal that would have actually caught this in the field).
       expect(pickDirectControl({ type: 'string', oneOf: [] })).toBe('text');
