@@ -32,6 +32,20 @@ const fhsSchemaText = readFileSync(
   'utf8',
 );
 
+const editableDefaultsText = JSON.stringify({
+  Zone: {
+    Main: {
+      BuildingElement: {
+        wall: {
+          type: 'BuildingElementOpaque',
+          pitch: 90,
+          u_value: 0.18,
+        },
+      },
+    },
+  },
+});
+
 function createResources(
   overrides: Partial<GeometryWorkspaceResourcePort> = {},
 ): GeometryWorkspaceResourcePort {
@@ -132,6 +146,7 @@ describe('public schema and defaults authoring', () => {
       </GeometryEditorServicePortsProvider>,
     );
 
+    expect(await screen.findByRole('heading', { name: /Fabric defaults/ })).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
     const editor = await screen.findByRole('textbox', { name: /Defaults JSON/i });
     fireEvent.change(editor, {
@@ -180,12 +195,14 @@ describe('public schema and defaults authoring', () => {
       </GeometryEditorServicePortsProvider>,
     );
 
+    expect(await screen.findByText(/Invalid JSON:/i)).toBeInTheDocument();
+    expect(screen.getByText(/repair the defaults file/i)).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
 
     expect(await screen.findByRole('textbox', { name: /Defaults JSON/i })).toHaveValue(
       '{ definitely not JSON',
     );
-    expect(await screen.findByText(/Invalid JSON:/i)).toBeInTheDocument();
+    expect(screen.getByText('input/defaults/broken.json')).toBeInTheDocument();
     expect(readText).toHaveBeenCalledTimes(1);
   });
 
@@ -215,6 +232,131 @@ describe('public schema and defaults authoring', () => {
 
     await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
 
-    expect(await screen.findByText('Defaults JSON must have an object at its root.')).toBeInTheDocument();
+    expect((await screen.findAllByText('Defaults JSON must have an object at its root.')).length).toBeGreaterThan(0);
+  });
+
+  it('tracks structured drafts and confirms discarding them in both view directions', async () => {
+    const user = userEvent.setup();
+    const resources = createResources({ readText: vi.fn(async () => editableDefaultsText) });
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      schemaPort: canonicalGeometrySchemaPort,
+      workspaceResourcePort: resources,
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={resources}>
+        <GeometryStoreProvider store={store}>
+          <DefaultsEditorModal isOpen filePath="input/defaults/editable.json" onClose={vi.fn()} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+
+    const uValue = await screen.findByDisplayValue('0.18');
+    await user.clear(uValue);
+    await user.type(uValue, '0.25');
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save fabric defaults/i })).toBeEnabled());
+
+    await user.click(screen.getByRole('button', { name: /Edit full JSON/i }));
+    expect(confirm).toHaveBeenCalledWith('Discard unsaved defaults changes?');
+    expect(screen.queryByRole('textbox', { name: /Defaults JSON/i })).not.toBeInTheDocument();
+
+    confirm.mockReturnValue(true);
+    await user.click(screen.getByRole('button', { name: /Edit full JSON/i }));
+    const rawEditor = await screen.findByRole('textbox', { name: /Defaults JSON/i });
+    expect(rawEditor).toHaveValue(editableDefaultsText);
+
+    fireEvent.change(rawEditor, { target: { value: `${editableDefaultsText}\n` } });
+    await user.click(screen.getByRole('button', { name: /^Fabric defaults$/i }));
+    expect(confirm).toHaveBeenCalledTimes(3);
+  });
+
+  it('confirms unsaved raw drafts before closing from the header or backdrop', async () => {
+    const user = userEvent.setup();
+    const resources = createResources({ readText: vi.fn(async () => editableDefaultsText) });
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      schemaPort: canonicalGeometrySchemaPort,
+      workspaceResourcePort: resources,
+    });
+    const onClose = vi.fn();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={resources}>
+        <GeometryStoreProvider store={store}>
+          <DefaultsEditorModal isOpen filePath="input/defaults/editable.json" onClose={onClose} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
+    fireEvent.change(await screen.findByRole('textbox', { name: /Defaults JSON/i }), {
+      target: { value: `${editableDefaultsText}\n` },
+    });
+    await user.click(screen.getByRole('button', { name: /Close modal/i }));
+    fireEvent.click(document.querySelector('.modal-backdrop')!);
+
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('shows save failures in the shared raw session', async () => {
+    const user = userEvent.setup();
+    const resources = createResources({
+      readText: vi.fn(async () => editableDefaultsText),
+      writeText: vi.fn(async () => { throw new Error('disk full'); }),
+    });
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      schemaPort: canonicalGeometrySchemaPort,
+      workspaceResourcePort: resources,
+    });
+
+    render(
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={resources}>
+        <GeometryStoreProvider store={store}>
+          <DefaultsEditorModal isOpen filePath="input/defaults/editable.json" onClose={vi.fn()} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
+    fireEvent.change(await screen.findByRole('textbox', { name: /Defaults JSON/i }), {
+      target: { value: `${editableDefaultsText}\n` },
+    });
+    await user.click(screen.getByRole('button', { name: /Save full defaults/i }));
+
+    expect(await screen.findByText('disk full')).toBeInTheDocument();
+  });
+
+  it('resets the session and rereads defaults when reopened', async () => {
+    const user = userEvent.setup();
+    const first = editableDefaultsText;
+    const second = editableDefaultsText.replace('0.18', '0.19');
+    const readText = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const resources = createResources({ readText });
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      schemaPort: canonicalGeometrySchemaPort,
+      workspaceResourcePort: resources,
+    });
+    const renderModal = (isOpen: boolean) => (
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={resources}>
+        <GeometryStoreProvider store={store}>
+          <DefaultsEditorModal isOpen={isOpen} filePath="input/defaults/editable.json" onClose={vi.fn()} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    const { rerender } = render(renderModal(true));
+
+    await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
+    expect(await screen.findByRole('textbox', { name: /Defaults JSON/i })).toHaveValue(first);
+
+    rerender(renderModal(false));
+    rerender(renderModal(true));
+    await waitFor(() => expect(readText).toHaveBeenCalledTimes(2));
+    await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
+    expect(await screen.findByRole('textbox', { name: /Defaults JSON/i })).toHaveValue(second);
   });
 });

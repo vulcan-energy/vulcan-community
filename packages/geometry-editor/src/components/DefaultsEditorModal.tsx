@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import ReactDOM from 'react-dom';
 import { useGeometryWorkspaceResourcePort } from '../../../geometry-editor-host/src/editorServicePorts';
 import { isRecord } from '../lib/jsonTypes';
@@ -9,6 +9,7 @@ import { useGeometryStoreApi } from '../stores/geometryStore';
 import { FabricDefaultsEditorPanel } from './FabricDefaultsEditor';
 import type { GlobalSettingsDefaultsCompatibility } from './GlobalSettingsModal';
 import { ModalHeader } from './ModalHeader';
+import { useKeyedState } from '../hooks/useKeyedState';
 
 export type DefaultsEditorModalProps = Readonly<{
   isOpen: boolean;
@@ -69,54 +70,49 @@ export function DefaultsEditorModal({
 }: DefaultsEditorModalProps): React.ReactElement | null {
   const geometryStore = useGeometryStoreApi();
   const workspaceResourcePort = useGeometryWorkspaceResourcePort();
-  const [mode, setMode] = useState<EditorMode>('fabric');
-  const [text, setText] = useState('');
-  const [baselineText, setBaselineText] = useState('');
-  const [defaultsRoot, setDefaultsRoot] = useState<unknown | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [fabricDirty, setFabricDirty] = useState(false);
-  const [sessionRevision, setSessionRevision] = useState(0);
-  const [compatibility, setCompatibility] = useState(defaultsCompatibility);
   const hasFilePath = filePath.trim().length > 0;
+  const canLoad = isOpen && hasFilePath && workspaceResourcePort.availability === 'available';
   const loadKey = [isOpen ? 'open' : 'closed', filePath, workspaceResourcePort.availability].join('\0');
+  const compatibilityKey = [loadKey, JSON.stringify(defaultsCompatibility ?? null)].join('\0');
+  const [mode, setMode] = useKeyedState<EditorMode>(loadKey, 'fabric');
+  const [text, setText] = useKeyedState(loadKey, '');
+  const [baselineText, setBaselineText] = useKeyedState(loadKey, '');
+  const [defaultsRoot, setDefaultsRoot] = useKeyedState<unknown | null>(loadKey, null);
+  const [loading, setLoading] = useKeyedState(loadKey, canLoad);
+  const [saving, setSaving] = useKeyedState(loadKey, false);
+  const [loadError, setLoadError] = useKeyedState<string | null>(
+    loadKey,
+    !hasFilePath
+      ? 'No defaults file selected.'
+      : isOpen && workspaceResourcePort.availability !== 'available'
+        ? 'Workspace resource access is unavailable.'
+        : null,
+  );
+  const [saveError, setSaveError] = useKeyedState<string | null>(loadKey, null);
+  const [fabricDirty, setFabricDirty] = useKeyedState(loadKey, false);
+  const [sessionRevision, setSessionRevision] = useKeyedState(loadKey, 0);
+  const [compatibility, setCompatibility] = useKeyedState(
+    compatibilityKey,
+    defaultsCompatibility,
+  );
+  const workspaceResourcePortRef = useRef(workspaceResourcePort);
 
   useEffect(() => {
-    setCompatibility(defaultsCompatibility);
-  }, [defaultsCompatibility, filePath]);
+    workspaceResourcePortRef.current = workspaceResourcePort;
+  }, [workspaceResourcePort]);
 
   useEffect(() => {
-    setMode('fabric');
-    setText('');
-    setBaselineText('');
-    setDefaultsRoot(null);
-    setFabricDirty(false);
-    setSaveError(null);
-    setSessionRevision((current) => current + 1);
-
-    if (!isOpen || !hasFilePath) {
-      setLoading(false);
-      setLoadError(hasFilePath ? null : 'No defaults file selected.');
-      return undefined;
-    }
-    if (workspaceResourcePort.availability !== 'available') {
-      setLoading(false);
-      setLoadError('Workspace resource access is unavailable.');
-      return undefined;
-    }
+    if (!canLoad) return undefined;
 
     let cancelled = false;
-    setLoading(true);
-    setLoadError(null);
-    void workspaceResourcePort.readText(filePath).then((content) => {
+    void workspaceResourcePortRef.current.readText(filePath).then((content) => {
       if (cancelled) return;
       const parsed = parseDefaultsText(content);
       setText(content);
       setBaselineText(content);
       setDefaultsRoot(parsed.root);
-      setLoadError(null);
+      setLoadError(parsed.error);
+      setSessionRevision((current) => current + 1);
     }).catch((error: unknown) => {
       if (!cancelled) setLoadError(errorMessage(error));
     }).finally(() => {
@@ -125,7 +121,16 @@ export function DefaultsEditorModal({
     return () => {
       cancelled = true;
     };
-  }, [filePath, hasFilePath, isOpen, loadKey, workspaceResourcePort]);
+  }, [
+    canLoad,
+    filePath,
+    setBaselineText,
+    setDefaultsRoot,
+    setLoadError,
+    setLoading,
+    setSessionRevision,
+    setText,
+  ]);
 
   const rawParseResult = useMemo(() => parseDefaultsText(text), [text]);
   const rawCompatibility = useMemo(() => {
@@ -153,16 +158,26 @@ export function DefaultsEditorModal({
     setText(baselineText);
     setDefaultsRoot(parsed.root);
     setLoadError(null);
+    setSaveError(null);
     setFabricDirty(false);
     setSessionRevision((current) => current + 1);
-  }, [baselineText]);
+  }, [
+    baselineText,
+    setDefaultsRoot,
+    setFabricDirty,
+    setLoadError,
+    setSaveError,
+    setSessionRevision,
+    setText,
+  ]);
 
   const changeMode = useCallback((nextMode: EditorMode) => {
     if (nextMode === mode) return;
     if (!confirmDiscard()) return;
     if (dirty) resetToBaseline();
+    setSaveError(null);
     setMode(nextMode);
-  }, [confirmDiscard, dirty, mode, resetToBaseline]);
+  }, [confirmDiscard, dirty, mode, resetToBaseline, setMode, setSaveError]);
 
   const persist = useCallback(async (merged: unknown, format: SaveFormat) => {
     setSaving(true);
@@ -195,7 +210,22 @@ export function DefaultsEditorModal({
     } finally {
       setSaving(false);
     }
-  }, [compatibility, filePath, geometryStore, inspectCompatibility, onCommitted, workspaceResourcePort]);
+  }, [
+    compatibility,
+    filePath,
+    geometryStore,
+    inspectCompatibility,
+    onCommitted,
+    setBaselineText,
+    setCompatibility,
+    setDefaultsRoot,
+    setFabricDirty,
+    setSaveError,
+    setSaving,
+    setSessionRevision,
+    setText,
+    workspaceResourcePort,
+  ]);
 
   const handleRawSave = useCallback(async () => {
     if (!isRecord(rawParseResult.root) || rawParseResult.error) return;
@@ -271,17 +301,27 @@ export function DefaultsEditorModal({
           </div>
         ) : null}
         {mode === 'fabric' ? (
-          <FabricDefaultsEditorPanel
-            filePath={filePath}
-            defaultsRoot={defaultsRoot}
-            loading={loading}
-            loadError={loadError}
-            sessionRevision={sessionRevision}
-            onSave={(merged) => persist(merged, 'fabric')}
-            onDirtyChange={setFabricDirty}
-          />
+          <>
+            {loadError?.startsWith('Invalid JSON:') ? (
+              <p className="error-text">
+                Use <strong>Edit full JSON</strong> to repair the defaults file.
+              </p>
+            ) : null}
+            <FabricDefaultsEditorPanel
+              filePath={filePath}
+              defaultsRoot={defaultsRoot}
+              loading={loading}
+              loadError={loadError}
+              sessionRevision={sessionRevision}
+              onSave={(merged) => persist(merged, 'fabric')}
+              onDirtyChange={setFabricDirty}
+            />
+          </>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+              {filePath}
+            </div>
             {loadError ? <p className="error-text">{loadError}</p> : null}
             {saveError ? <p className="error-text">{saveError}</p> : null}
             {!loading && rawParseResult.error ? <p className="error-text">{rawParseResult.error}</p> : null}

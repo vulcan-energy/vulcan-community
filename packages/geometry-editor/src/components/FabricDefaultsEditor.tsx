@@ -466,12 +466,11 @@ export function FabricDefaultsEditorPanel({
           display: 'flex',
           flexWrap: 'wrap',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          justifyContent: 'flex-end',
           gap: 12,
           boxShadow: '0 -6px 16px rgba(0,0,0,0.06)',
         }}
       >
-        <div />
         <button type="button" className="btn btn-primary" disabled={!canSave} onClick={() => void handleSave()}>
           {saving ? 'Saving…' : 'Save fabric defaults'}
         </button>
