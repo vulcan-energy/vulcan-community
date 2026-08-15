@@ -13,7 +13,7 @@ import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-e
 import { type SchemaNode } from '../../lib/schemaTypes';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
 import { unwrapNullableSchema } from '../../lib/schemaShape';
-import { EnumControl, NumberControl, TextControl } from '../jsonformsRenderers';
+import { EnumControl, NumberControl, TextControl, WindowPartListControl } from '../jsonformsRenderers';
 
 afterEach(cleanup);
 
@@ -32,7 +32,11 @@ const schemaPort: GeometrySchemaPort = {
 };
 
 function renderControl(
-  Control: typeof NumberControl | typeof EnumControl | typeof TextControl,
+  Control:
+    | typeof NumberControl
+    | typeof EnumControl
+    | typeof TextControl
+    | typeof WindowPartListControl,
   {
     data = 0.25,
     path = 'field',
@@ -741,5 +745,109 @@ describe('advanced control label resolution falls back to the provider schema po
     expect(fromConfig).toHaveBeenCalled();
     expect(fromContext).not.toHaveBeenCalled();
     expect(labelTooltip(container)).not.toBeNull();
+  });
+});
+
+/**
+ * R4.6b-2: `WindowPartListControl`'s SECOND label follows the same port as its first.
+ *
+ * The control resolves TWO presentations — one for the row itself (`window_part_list`,
+ * through the preamble) and one for the per-part unit adornment
+ * (`mid_height_air_flow_path`, resolved inline, because an array property's own
+ * presentation says nothing about its items' unit). R4.6b-1 gave the FIRST the
+ * config-port-then-provider-port contract pinned by the describe block above; the second
+ * kept reading `cfg.schemaPort ?? unavailableGeometrySchemaPort`. In the community
+ * Advanced Fields grid both resolve to the same object, but in a host that mounts with
+ * `config={{}}` INSIDE a `GeometryEditorServicePortsProvider` — the parent repo's
+ * snippet-editor shape — one row read two different ports, and the second half resolved
+ * against `unavailable`, which by its own availability gate never asks a schema anything.
+ *
+ * WHAT THE USER SEES, MEASURED RATHER THAN CLAIMED: nothing, on today's schemas. The
+ * adornment's only input is `fieldUnitForAdornment`, and `mid_height_air_flow_path` carries
+ * a hardcoded `units: 'm'` override (`lib/schemaDescriptionOverrides.ts`) that resolves with
+ * no port at all; against the canonical port the same 'm' arrives from the schema
+ * description instead, so the resolution SOURCE changes and the display does not. This was
+ * briefed as the slice's one deliberate UI delta and it turns out to be a delta in which
+ * port answers, not in what renders — recorded here so the next reader does not have to
+ * re-derive it. It is still a real behaviour change and still worth pinning: a port whose
+ * schema-derived unit ever disagreed with the override would now produce a CONFLICT and
+ * drop the adornment, where the old code could not have seen the disagreement at all.
+ */
+describe('R4.6b-2: the window-part midpoint presentation follows the same port as the row label', () => {
+  const MIDPOINT_IN_METRES: GeometrySchemaParameterInfo = {
+    name: 'mid_height_air_flow_path',
+    title: 'Mid height air flow path',
+    description: 'Height of the mid point of the window part above ground.',
+    type: 'number',
+    jsonPath: '#/$defs/WindowPart/properties/mid_height_air_flow_path',
+    parentKeys: [],
+    param: { type: 'number', units: 'm' },
+    source: 'schema',
+  };
+
+  /** Answers only for the ITEM field, so a hit proves WHICH of the two resolutions asked. */
+  function midpointOnlyPort(spy: ReturnType<typeof vi.fn>): GeometrySchemaPort {
+    return {
+      ...schemaPort,
+      findParameter: (paramId, ...rest) => {
+        spy(paramId, ...rest);
+        return paramId === 'mid_height_air_flow_path' ? MIDPOINT_IN_METRES : null;
+      },
+    };
+  }
+
+  const onePart = [{ mid_height_air_flow_path: 1.5 }];
+
+  function renderWindowParts(overrides: Parameters<typeof renderControl>[1] = {}) {
+    return renderControl(WindowPartListControl, {
+      data: onePart,
+      path: 'window_part_list',
+      label: 'Window Part List',
+      schema: { type: 'array' },
+      ...overrides,
+    });
+  }
+
+  it('asks the PROVIDER port for the item key when the config carries no port', () => {
+    const asked = vi.fn();
+    renderWindowParts({
+      // Exactly the parent repo's `DirectSpecFields … config={{}}` shape: no port here.
+      config: { schemaPort: undefined, elementType: undefined },
+      contextSchemaPort: midpointOnlyPort(asked),
+    });
+
+    const keys = asked.mock.calls.map((call) => call[0]);
+    // The row label reaching the provider is R4.6b-1's contract, already pinned above.
+    expect(keys).toContain('window_part_list');
+    // THIS is R4.6b-2: before it, the midpoint resolution was handed
+    // `unavailableGeometrySchemaPort`, whose availability gate means `findParameter` is
+    // never called at all -- the provider was never asked about the item field.
+    expect(keys).toContain('mid_height_air_flow_path');
+    expect(expectUnit('m')).toBeVisible();
+  });
+
+  it('still prefers the config port when a host supplies one, provider or not', () => {
+    const fromConfig = vi.fn();
+    const fromContext = vi.fn();
+    renderWindowParts({
+      config: { schemaPort: midpointOnlyPort(fromConfig) },
+      contextSchemaPort: midpointOnlyPort(fromContext),
+    });
+
+    expect(fromConfig.mock.calls.map((call) => call[0])).toContain('mid_height_air_flow_path');
+    expect(fromContext).not.toHaveBeenCalled();
+    expect(expectUnit('m')).toBeVisible();
+  });
+
+  it('renders the same unit with no port at all -- the display is unchanged by the move', () => {
+    renderWindowParts({
+      config: { schemaPort: undefined, elementType: undefined },
+      contextSchemaPort: null,
+    });
+
+    // `lib/schemaDescriptionOverrides.ts` supplies `units: 'm'` for this key without any
+    // schema access, which is why the slice's "UI delta" is invisible on today's data.
+    expect(expectUnit('m')).toBeVisible();
+    expect(screen.getByLabelText('Window part 1 midpoint in metres above window base')).toBeVisible();
   });
 });

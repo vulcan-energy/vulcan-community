@@ -31,10 +31,7 @@ import { schemaAlternatives, schemaTypeList } from '../lib/schemaShape';
 import type { Element, Floor } from '../geometry/types';
 import type { SchemaNode } from '../lib/schemaTypes';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import {
-  unavailableGeometrySchemaPort,
-  type GeometrySchemaPort,
-} from '../../../geometry-editor-host/src/schemaPort';
+import type { GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 import {
   WindowDetailChip,
   WindowDetailCollectionShell,
@@ -941,6 +938,13 @@ function schemaIsJsonLike(s: JsonRecord): boolean {
 /** Everything the Advanced Fields controls derive identically from their props. */
 type AdvancedControlPreamble = {
   cfg: RendererConfig;
+  /**
+   * The EFFECTIVE port this row's presentation was resolved against — `cfg.schemaPort`
+   * if the host supplied one, otherwise the ambient provider's, otherwise unavailable
+   * (see the SCHEMA PORT CONTRACT below). Returned so that a control needing a SECOND
+   * resolution reads the same port as its own label instead of re-deciding.
+   */
+  schemaPort: GeometrySchemaPort;
   /** Resolved schema node for this property (uischema `schemaOverride` wins). */
   s: JsonRecord;
   isCompact: boolean;
@@ -1002,6 +1006,12 @@ type AdvancedControlPreamble = {
  *  - `unavailableGeometrySchemaPort` only when neither exists, which is precisely what
  *    `useGeometrySchemaPort()` returns with no provider above it, so a portless mount is
  *    byte-identical to before.
+ * R4.6b-2 returns that resolved port (see `AdvancedControlPreamble.schemaPort`) so the one
+ * decision point actually covers every label in the row. `WindowPartListControl` resolves a
+ * SECOND presentation for its per-part unit and was still reading
+ * `cfg.schemaPort ?? unavailable` on its own — the one place where "which port does a
+ * label read?" still had two answers.
+ *
  * This is also a deliberate UPGRADE for Number/Enum rows in portless-config hosts: they
  * were already on the informed path and therefore already read `unavailable` there, even
  * before R4.6b-1 moved Text/Boolean/WindowPartList onto it. Text/Boolean/WindowPartList
@@ -1073,6 +1083,7 @@ function useAdvancedControlPreamble(
 
   return {
     cfg,
+    schemaPort,
     s,
     isCompact: Boolean(cfg.compact),
     elementType,
@@ -1287,6 +1298,35 @@ function windowPartRowsEqual(a: WindowPartListItem[], b: WindowPartListItem[]): 
   return a.every((row, index) => Math.abs(row.mid_height_air_flow_path - b[index].mid_height_air_flow_path) <= 1e-6);
 }
 
+/**
+ * The repeating window-part editor: one row per air-flow-path midpoint, edited RELATIVE to
+ * the window base and stored absolute.
+ *
+ * Uses only the label/indicator half of the preamble — the row is a repeating editor with
+ * no single value, so it has no status pill of its own (`'default-used'` is hard-coded
+ * below) and no defaults/reset affordance.
+ *
+ * TWO PRESENTATIONS, ONE PORT (R4.6b-2). The per-part unit adornment comes from a SECOND
+ * `resolveFieldPresentation` call, because the rows edit `mid_height_air_flow_path` while
+ * this control is bound to `window_part_list`, an array whose own presentation says nothing
+ * about its items' unit. That second call used to read
+ * `cfg.schemaPort ?? unavailableGeometrySchemaPort` while the label above it followed
+ * R4.6b-1's contract (config port -> ambient provider port -> unavailable), so in a host
+ * that mounts with `config={{}}` inside a `GeometryEditorServicePortsProvider` — the parent
+ * repo's snippet-editor shape — the two halves of one row read DIFFERENT ports, and this
+ * half resolved against `unavailable`, which by its own availability gate asks the schema
+ * nothing. Both now use the effective port the preamble resolved once, which is the whole
+ * point of resolving it there.
+ *
+ * WHAT CHANGES ON SCREEN, MEASURED: nothing, on today's schemas. That presentation's only
+ * consumer is `fieldUnitForAdornment`, and `mid_height_air_flow_path` carries a hardcoded
+ * `units: 'm'` in `lib/schemaDescriptionOverrides.ts` that resolves with no port at all;
+ * against the canonical port the same 'm' arrives from the schema description instead, so
+ * the resolution SOURCE moves and the display does not. The change is still real and still
+ * pinned (`__tests__/jsonformsRenderers.units.test.tsx`, "R4.6b-2"): the provider is now
+ * ASKED about the item field, and a port whose schema-derived unit ever disagreed with the
+ * override would produce a conflict here, which the old code could not have seen.
+ */
 export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
   data,
   handleChange,
@@ -1299,23 +1339,22 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
 }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
-  // Uses only the label/indicator half of the preamble: the row is a repeating editor
-  // with no single value, so it has no status pill of its own (`'default-used'` is
-  // hard-coded below) and no defaults/reset affordance.
   const {
     cfg,
+    schemaPort,
     isCompact,
     elementType,
     fieldPresentation,
     indicatorMessages,
     hasEvidence,
   } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
+  // Second presentation, same port — see this component's docstring.
   const midpointPresentation = resolveFieldPresentation({
     mode: cfg.useFHSSchemaForValidation ? 'fhs' : 'core',
     propertyKey: 'mid_height_air_flow_path',
     elementType: elementType ?? 'BuildingElementTransparent',
     label: 'Window part midpoint (m)',
-  }, cfg.schemaPort ?? unavailableGeometrySchemaPort);
+  }, schemaPort);
 
   const selection = useGeometryStore((state) => state.selection);
   const getElementById = useGeometryStore((state) => state.getElementById);
