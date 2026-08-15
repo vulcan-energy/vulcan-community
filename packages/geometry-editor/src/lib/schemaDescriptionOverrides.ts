@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * HEM guidance tooltip overrides (Option A + UI-only fields)
+ * HEM guidance tooltip overrides (Option A + UI-only fields), and — since R4.6b-3 —
+ * the FIELD LABEL CONTENT RULE that decides what an Advanced Fields row is called.
  *
  * We treat the active browser schema (core or FHS) as the source of truth.
  * However:
@@ -1709,4 +1710,263 @@ export function getVulcanDescriptionOverride(elementType: string | undefined, pa
     if (desc) return desc;
   }
   return null;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────────
+ * R4.6b-3 — THE FIELD LABEL CONTENT RULE
+ * ─────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Local start-case helper for schema keys with no `title`, e.g. `battery_age` ->
+ * `Battery Age`, `EnergySupply` -> `Energy Supply`.
+ *
+ * R4.6b-3 MOVE NOTE: this lived in `../components/DirectAdvancedFields` (which still
+ * re-exports it for the parent repo's `SimplifiedFabricEditor`) until the label rule
+ * below acquired a second, third and fourth caller. Logic byte-for-byte; only its home
+ * changed, and it moved TO the rule rather than the rule moving to it, because deriving
+ * a label from a key is step 3 of the rule, not a component concern.
+ *
+ * R4.3 FINDING (generalizing past ElectricBattery surfaced this): the R4.2 spike's
+ * original version only split on `_`, since every ElectricBattery key was snake_case.
+ * OnSiteGeneration FHS's `EnergySupply` (a PascalCase key with no schema `title`)
+ * broke that: on the retired JsonForms path, JsonForms' own `addLabel`/label-derivation
+ * for a Control with no explicit uischema `label` fell back to `title` if present, else
+ * lodash `startCase(scopeSegment)` (see node_modules/@jsonforms/core), which DOES split
+ * camelCase/PascalCase boundaries -- rendered "Energy Supply"; the R4.2-era version
+ * here rendered "EnergySupply" verbatim. This is now fixed by splitting at
+ * lowercase->uppercase and acronym-run->titlecase boundaries too, matching lodash
+ * `startCase`'s `words()` closely enough for the ASCII identifier-style keys HEM
+ * schemas use (ordinary snake_case, PascalCase, camelCase, and digit runs) --
+ * `words()`'s full Unicode-script handling is out of scope, nothing in these schemas
+ * needs it.
+ *
+ * R4.5: also used by web's `SimplifiedFabricEditor` (parent repo), which dropped its
+ * local `labelize` for it. NOT a zero-delta swap, and saying otherwise is what let the
+ * claim stand unchallenged: `labelize` split only on `_` and lowercase->uppercase, never
+ * on digit runs, so `orientation360` went from "Orientation360" to "Orientation 360".
+ * The change is deliberate and better: it matches lodash `startCase`, which is what
+ * @jsonforms/core's own label derivation used on the retired path, so it REMOVES an
+ * inconsistency between the two editors. The merged parent commit says the same and
+ * pins `orientation360` in its own characterization test.
+ */
+export function startCaseKey(key: string): string {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-zA-Z])(\d)/g, '$1 $2')
+    .replace(/(\d)([a-zA-Z])/g, '$1 $2')
+    .split(/[_\-\s]+/)
+    .filter((word) => word.length > 0);
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+}
+
+/**
+ * Canonical spellings, applied WORD BY WORD (step 3).
+ *
+ * Audited against both published schemas rather than wished for. Entries that change a
+ * live row today: MVHR (`mvhr_location`), ACH (`ach_max/min_static_calcs`), HP
+ * (`min_temp_diff_flow_return_for_hp_to_operate`, `cost_schedule_hp`), DC/AC
+ * (`inverter_peak_power_dc/ac`), SFP (the KEPT title "Sfp In Use Factor"), and `onoff`
+ * (`time_constant_onoff_operation`). Entries that change nothing today and are kept so
+ * the spelling cannot drift when a new key arrives: DHW (`separate_DHW_tests` already
+ * start-cases correctly) and CoP. CoP earns its place from the other direction — Core's
+ * `HeatPumpTestDatum.cop` is titled "CoP", which step 2 KEEPS (measured, and pinned in
+ * `__tests__/fieldPresentation.test.ts`); this entry is what stops a titleless `cop`
+ * anywhere else from rendering "Cop" beside it.
+ *
+ * Candidates deliberately NOT here because they match nothing in either schema: WWHRS,
+ * HIU, PV, UFH, MEV, PIV, SAP, EPC, CO2. A dictionary entry that fires nowhere is a
+ * claim about a schema we do not have.
+ *
+ * `hp -> HP` IS SAFE ONLY BECAUSE PLANT KEYS NEVER REACH THIS RULE. `hp` is also a live
+ * user plant key (Core renders its whole plant as one blob row labelled "Hp"), and
+ * `buildSystemAdvancedUischema` labels those rows itself — off the merge-map annotation
+ * `PLANT_KEYS_ARE_USER_NAMES` (`./systemAdvancedSchemaExpand`) — precisely so that a
+ * user's own CSV name is never re-spelled by a schema-text rule. If plant keys are ever
+ * routed through here, this entry must go, and so must `ac`/`dc`, which are just as
+ * plausible as names for a cooling plant.
+ */
+const LABEL_WORD_SPELLINGS: ReadonlyMap<string, string> = new Map([
+  ['mvhr', 'MVHR'],
+  ['ach', 'ACH'],
+  ['hp', 'HP'],
+  ['dc', 'DC'],
+  ['ac', 'AC'],
+  ['sfp', 'SFP'],
+  ['dhw', 'DHW'],
+  ['cop', 'CoP'],
+  ['onoff', 'On/Off'],
+]);
+
+/**
+ * Whole-label hyphenations (step 3, after the word pass).
+ *
+ * Two entries, both the same case: a one-letter physics symbol bound to its noun, which
+ * word-level spelling cannot express. Core already titles `u_value` "U-Value"; FHS
+ * titles neither, so before this rule the same field read "U-Value" on one profile and
+ * "U Value" on the other.
+ */
+const LABEL_HYPHENATIONS: ReadonlyMap<string, string> = new Map([
+  ['u value', 'U-Value'],
+  ['g value', 'G-Value'],
+]);
+
+/**
+ * Trailing unit tokens dropped from a KEY-DERIVED label (step 1) — `External Diameter
+ * Mm` -> `External Diameter`.
+ *
+ * `mm` alone, because `mm` is the only suffix every affected row was checked against.
+ * The check is not a formality: dropping a unit from a label that has no other unit on
+ * screen is information loss, so `stripKeyDerivedUnitSuffix` REQUIRES the row to carry
+ * the same unit in its metadata before it strips anything, and FHS's
+ * `inlet_diameter_mm` (no override, no schema description) consequently keeps its
+ * suffix. Add a token here only alongside that evidence.
+ *
+ * Admissible titles never reach this step: a curated title carries its own spelling, and
+ * every `_mm` title in Core is already written without the suffix.
+ */
+const LABEL_UNIT_SUFFIX_TOKENS: ReadonlySet<string> = new Set(['mm']);
+
+/** Letters and digits only, case-folded — the comparison basis for step 2. */
+function labelLetters(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * Is this title a pydantic TYPE NAME rather than field copy?
+ *
+ * HEM's schemas title every `$def` with its generating class, and a `$ref`'d enum
+ * property inherits it: `cross_section_shape` renders "DuctShape",
+ * `shield_class` renders "VentilationShieldClass", `pipe_contents` renders
+ * "PipeworkContents". These name the TYPE, not the field — the qualifier in front is the
+ * type namespace (a `VentilationShieldClass` inside `System:InfiltrationVentilation`),
+ * which is why dropping it is a correction and not a loss of context.
+ *
+ * The test is deliberately narrow: ONE alphanumeric token that start-cases into two or
+ * more words of two or more letters each. "CoP" (words "Co"/"P") and "SFP" (one word)
+ * therefore stay, which is the point — a short curated title is not a class name.
+ */
+function isTypeNameTitle(title: string): boolean {
+  if (!/^[A-Za-z][A-Za-z0-9]*$/.test(title)) return false;
+  const words = startCaseKey(title).split(' ');
+  return words.length >= 2 && words.every((word) => word.length >= 2);
+}
+
+/**
+ * Does this title run together words the KEY keeps apart, gaining nothing by it?
+ *
+ * Only ever asked of a title whose letters are the key's letters, so the two word lists
+ * cover the same characters and can be walked in step. A title word that swallows two or
+ * more key words has lost a boundary; it is worth keeping ANYWAY if it carries an
+ * internal capital, because that is information start-casing cannot invent:
+ *
+ *   "Coldwatersource"  vs "Cold Water Source"  -> boundary lost, nothing gained -> reject
+ *   "Control Ventadjustmax" vs "Control Vent Adjust Max"                        -> reject
+ *   "Sfp In Use Factor" vs "SFP In Use Factor" -> same boundaries               -> keep
+ *   "First Order HLC"  vs "First Order Hlc"    -> same boundaries               -> keep
+ *   "Heat Storage kJ Per K ..." vs "... K J Per K ..." -> "kJ" is informative   -> keep
+ *
+ * The two keeps are not hypothetical: `first_order_hlc` and the heat-battery
+ * `heat_storage_kJ_per_K_*` keys render whenever a solar collector or heat battery is in
+ * the model, and a letters-only test would degrade both.
+ */
+function titleRunsKeyWordsTogether(title: string, keyDerived: string): boolean {
+  const titleWords = title.split(/\s+/).filter((word) => word.length > 0);
+  const derivedWords = keyDerived.split(' ').filter((word) => word.length > 0);
+  let next = 0;
+  for (const titleWord of titleWords) {
+    const target = labelLetters(titleWord);
+    let covered = '';
+    let consumed = 0;
+    while (next < derivedWords.length && covered.length < target.length) {
+      covered += labelLetters(derivedWords[next] ?? '');
+      next += 1;
+      consumed += 1;
+    }
+    // Misalignment means the two are not the same words differently spaced after all;
+    // leave such a title alone rather than guess at it.
+    if (covered !== target) return false;
+    if (consumed >= 2 && !/[A-Z]/.test(titleWord.slice(1))) return true;
+  }
+  return false;
+}
+
+/**
+ * Step 2 — is this schema `title` curated copy, or the schema talking to itself?
+ *
+ * A title with letters the key does not have is somebody's writing and is KEPT
+ * ("ACH Maximum Static Calcs", "MVHR Efficiency", "Blinds / curtains"). The two
+ * rejections are both cases where the title says LESS than the key: a pydantic class
+ * name, and a title that has run the key's own words together.
+ */
+function titleIsAdmissible(propertyKey: string, title: string): boolean {
+  if (isTypeNameTitle(title)) return false;
+  if (labelLetters(title) !== labelLetters(propertyKey)) return true;
+  return !titleRunsKeyWordsTogether(title, startCaseKey(propertyKey));
+}
+
+/** Step 1, and only for key-derived labels. See `LABEL_UNIT_SUFFIX_TOKENS`. */
+function stripKeyDerivedUnitSuffix(label: string, propertyKey: string): string {
+  const words = label.split(' ');
+  const last = words[words.length - 1]?.toLowerCase() ?? '';
+  if (words.length < 2 || !LABEL_UNIT_SUFFIX_TOKENS.has(last)) return label;
+  const info = TOOLTIP_OVERRIDES[propertyKey] ?? TOOLTIP_OVERRIDES[`*:${propertyKey}`];
+  if (info?.units?.trim().toLowerCase() !== last) return label;
+  return words.slice(0, -1).join(' ');
+}
+
+/** Step 3 — canonical spellings, then the whole-label hyphenations. */
+function applyLabelSpellings(label: string): string {
+  const spelled = label
+    .split(' ')
+    .map((word) => LABEL_WORD_SPELLINGS.get(word.toLowerCase()) ?? word)
+    .join(' ');
+  return LABEL_HYPHENATIONS.get(spelled.toLowerCase()) ?? spelled;
+}
+
+/** Step 0 of the override ladder: an explicit `label` on this key's own entry. */
+function labelOverrideFor(propertyKey: string): string | undefined {
+  const info = TOOLTIP_OVERRIDES[propertyKey] ?? TOOLTIP_OVERRIDES[`*:${propertyKey}`];
+  const label = info?.label?.trim();
+  return label && label.length > 0 ? label : undefined;
+}
+
+/**
+ * THE LABEL CONTENT RULE — what one Advanced Fields row is called (R4.6b-3).
+ *
+ * PREFIXES ARE NOT LABELS, AND DO NOT COME HERE. A System row's text is a structural
+ * breadcrumb followed by a field label, and only the second half is this rule's
+ * business:
+ *  - a PREFIX is a plant key the user typed into their CSV ("hw cylinder",
+ *    "Kitchen/Diner rads"), kept RAW, or a nested-object path part, START-CASED from its
+ *    key. A prefix NEVER takes the node's schema `title`, even when it has one: Core's
+ *    `InfiltrationVentilation.Leaks` resolves to a `$def` titled "VentilationLeaks" and
+ *    the row still reads `Leaks · Env Area`. That is deliberate — a breadcrumb names the
+ *    place in the user's document, and the user's document is keyed by keys.
+ *  - a LEAF is the field's own label, and it is title-first, subject to step 2 below.
+ * `leafControlLabel` (`./systemAdvancedUischema`) composes the two and calls this on the
+ * tail only; the flat walk's `labelForProperty` (`../components/DirectAdvancedFields`)
+ * calls it on the whole label, there being no prefix.
+ *
+ * THE STEPS, in order:
+ *  0. an explicit `label` override wins outright (three keys; see `HardcodedFieldInfo`).
+ *  1. a key-derived label drops a trailing unit token it can prove is shown elsewhere.
+ *  2. a schema `title` is used only if ADMISSIBLE (`titleIsAdmissible`); otherwise the
+ *     label is derived from the key, which is the more informative of the two.
+ *  3. canonical spellings apply to BOTH outcomes — the kept title as well as the derived
+ *     label, which is what makes "Sfp In Use Factor" read "SFP In Use Factor" without
+ *     having to reject a perfectly well-spaced title to get there.
+ *
+ * OUT OF SCOPE, deliberately: user plant keys (see `LABEL_WORD_SPELLINGS`), and every
+ * hand-authored label in the editor's own field groups — those are written by us, not
+ * derived from a schema, and there is nothing for a rule to resolve.
+ */
+export function resolveFieldLabelContent(propertyKey: string, title?: unknown): string {
+  const override = labelOverrideFor(propertyKey);
+  if (override) return override;
+  const trimmed = typeof title === 'string' ? title.trim() : '';
+  if (trimmed && titleIsAdmissible(propertyKey, trimmed)) {
+    return applyLabelSpellings(trimmed);
+  }
+  return applyLabelSpellings(stripKeyDerivedUnitSuffix(startCaseKey(propertyKey), propertyKey));
 }

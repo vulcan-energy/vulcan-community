@@ -57,6 +57,7 @@ import {
   segmentsFromLayoutScope,
   setAtPath,
 } from '../lib/jsonTypes';
+import { resolveFieldLabelContent, startCaseKey } from '../lib/schemaDescriptionOverrides';
 import { isNonEmptyEnumLike, schemaTypeList, unwrapNullableSchema } from '../lib/schemaShape';
 import type { AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
@@ -70,16 +71,16 @@ import {
 } from './jsonformsRenderers';
 
 /**
- * R4.6b-2: `unwrapNullableSchema` MOVED to `../lib/schemaShape` (component-space to
- * lib-space; see that module's docstring). Re-exported here for the PARENT repo's two
- * consumers only — `web/src/components/SimplifiedFabricEditor.tsx` and
- * `web/src/components/SnippetEditor.tsx` both import it from this path today, and
- * retargeting them at the lib module is the paired parent PR's job, not this slice's.
- * Community code must import it from `../lib/schemaShape` directly; this line goes when
- * the parent's imports move.
+ * R4.6b-3: `startCaseKey` MOVED to `../lib/schemaDescriptionOverrides`, which owns the
+ * label content rule it is now step 3 of. Re-exported here for the PARENT repo's
+ * `web/src/components/SimplifiedFabricEditor.tsx`, which imports it from this path
+ * today; retargeting it at the lib module is a paired parent PR's job. Community code
+ * must import it from `../lib/schemaDescriptionOverrides` directly; this line goes when
+ * the parent's import moves — exactly as R4.6b-2's `unwrapNullableSchema` re-export,
+ * deleted in this slice, did once the parent moved to `../lib/schemaShape`.
  */
-// eslint-disable-next-line react-refresh/only-export-components -- pure schema helper re-export, not a React component.
-export { unwrapNullableSchema };
+// eslint-disable-next-line react-refresh/only-export-components -- pure string helper re-export, not a React component.
+export { startCaseKey };
 
 export type DirectAdvancedFieldsProps = {
   /** The built subschema (has .properties, maybe .$defs, maybe .required) — same object AdvancedFieldsEditor's retired <JsonForms> mount used to receive as its `schema` prop. */
@@ -427,48 +428,17 @@ function schemaEmitsControl(resolved: Record<string, unknown>): boolean {
 }
 
 /**
- * Local start-case helper for schema keys with no `title`, e.g. `battery_age` ->
- * `Battery Age`, `EnergySupply` -> `Energy Supply`.
+ * Label for one property: the schema `title` when it is ADMISSIBLE, else the key,
+ * through the R4.6b-3 content rule (`resolveFieldLabelContent`,
+ * `../lib/schemaDescriptionOverrides`). Title-first is unchanged; what changed is that a
+ * title which only restates its own key — a pydantic class name, or the key's words run
+ * together — no longer beats the key it was derived from. The rule is shared with the
+ * System walk's `titleOrKeyFromSchema` (`../lib/systemAdvancedUischema`) so that the
+ * same field cannot be called two things depending on which walk reached it.
  *
- * R4.3 FINDING (generalizing past ElectricBattery surfaced this): the R4.2 spike's
- * original version only split on `_`, since every ElectricBattery key was snake_case.
- * OnSiteGeneration FHS's `EnergySupply` (a PascalCase key with no schema `title`)
- * broke that: on the retired JsonForms path, JsonForms' own `addLabel`/label-derivation
- * for a Control with no explicit uischema `label` fell back to `title` if present, else
- * lodash `startCase(scopeSegment)` (see node_modules/@jsonforms/core), which DOES split
- * camelCase/PascalCase boundaries -- rendered "Energy Supply"; the R4.2-era version
- * here rendered "EnergySupply" verbatim. This is now fixed by splitting at
- * lowercase->uppercase and acronym-run->titlecase boundaries too, matching lodash
- * `startCase`'s `words()` closely enough for the ASCII identifier-style keys HEM
- * schemas use (ordinary snake_case, PascalCase, camelCase, and digit runs) --
- * `words()`'s full Unicode-script handling is out of scope, nothing in these schemas
- * needs it.
- */
-// R4.5: exported so web's `SimplifiedFabricEditor` can drop its local `labelize` and
-// share this one. NOT a zero-delta swap, and saying otherwise here is what let the claim
-// stand unchallenged: `labelize` split only on `_` and lowercase->uppercase, never on
-// digit runs, so the one live schema key affected — `orientation360`, on
-// BuildingElementTransparent/Opaque and reachable through a simplified_fabric snippet —
-// went from "Orientation360" to "Orientation 360". User-authored snippet DATA keys are
-// labelled by the same function and can diverge further (`area_cm2` -> "Area Cm 2" where
-// `labelize` gave "Area Cm2"). The change is deliberate and better: it matches lodash
-// `startCase`, which is what @jsonforms/core's own label derivation used on the retired
-// path, so it REMOVES an inconsistency between the two editors. The merged parent commit
-// says the same and pins `orientation360` in its own characterization test.
-// eslint-disable-next-line react-refresh/only-export-components -- pure string helper, not a React component.
-export function startCaseKey(key: string): string {
-  const words = key
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-    .replace(/([a-zA-Z])(\d)/g, '$1 $2')
-    .replace(/(\d)([a-zA-Z])/g, '$1 $2')
-    .split(/[_\-\s]+/)
-    .filter((word) => word.length > 0);
-  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-}
-
-/**
- * Label for one property: `resolved.title` if present, else start-cased key.
+ * Note WHICH node's title this sees: the DEREFERENCED, nullable-unwrapped node, so a
+ * `$ref`'d enum's `$def` title is visible here and is exactly what the type-name arm of
+ * the rule exists for.
  *
  * SPIKE FINDING (still holds under R4.3/R4.4): no `*` is appended for required fields,
  * even though JsonForms core's own `computeLabel(label, required, hideRequiredAsterisk)`
@@ -482,8 +452,7 @@ export function startCaseKey(key: string): string {
  * what parity meant, and the direct path still renders no asterisk today.
  */
 function labelForProperty(key: string, resolved: Record<string, unknown>): string {
-  const title = resolved.title;
-  return typeof title === 'string' && title.trim() ? title : startCaseKey(key);
+  return resolveFieldLabelContent(key, resolved.title);
 }
 
 /**

@@ -16,6 +16,17 @@
  * hide controls until discriminators match — that is schema/JsonForms behaviour, not the merge maps.
  */
 
+/**
+ * Annotation this module stamps on an expanded subtype node whose `properties` keys are
+ * the USER'S OWN plant names ("hw cylinder", "Kitchen/Diner rads"), rather than schema
+ * property names. Read by `buildSystemAdvancedUischema` (`./systemAdvancedUischema`),
+ * which must keep those names away from the label content rule, and by nothing else.
+ *
+ * An `x-` extension key so it cannot collide with a JSON Schema keyword, and one shared
+ * constant so the producer and the consumer cannot drift apart on the spelling.
+ */
+export const PLANT_KEYS_ARE_USER_NAMES = 'x-vulcan-plant-keys-are-user-names' as const;
+
 function cloneSchemaFragment<T>(obj: T): T {
   try {
     if (typeof structuredClone === 'function') return structuredClone(obj);
@@ -49,9 +60,22 @@ export function expandSystemMergeMapSchemaForJsonForms(
   if (keys.length === 0) return fullSchema;
 
   const perKey: Record<string, unknown> = {};
+  /**
+   * R4.6b-3: did these keys come from a MAP (so they are names the user typed into their
+   * CSV), or from the subtype's own declared properties (so they are schema keys)? Both
+   * arrive here as `Object.keys(mapData)` and leave as `properties`, indistinguishable
+   * afterwards — and the label content rule needs to tell them apart, because it must
+   * never re-spell a user's plant name. `System:InfiltrationVentilation` is the case that
+   * makes this a real question and not a theoretical one: its data keys ARE schema
+   * property names (`ach_max_static_calcs`, `shield_class`), so a data-shaped guess gets
+   * it wrong; the SCHEMA shape is what actually decides. See
+   * `PLANT_KEYS_ARE_USER_NAMES` and `buildSystemAdvancedUischema`.
+   */
+  let plantKeysAreUserNames = false;
 
   if (innerObj.additionalProperties && typeof innerObj.additionalProperties === 'object') {
     const tmpl = innerObj.additionalProperties;
+    plantKeysAreUserNames = true;
     for (const k of keys) {
       perKey[k] = cloneSchemaFragment(tmpl);
     }
@@ -74,6 +98,7 @@ export function expandSystemMergeMapSchemaForJsonForms(
     ) as { additionalProperties?: Record<string, unknown> } | undefined;
     if (!branch?.additionalProperties) return fullSchema;
     const tmpl = branch.additionalProperties;
+    plantKeysAreUserNames = true;
     for (const k of keys) {
       perKey[k] = cloneSchemaFragment(tmpl);
     }
@@ -92,6 +117,7 @@ export function expandSystemMergeMapSchemaForJsonForms(
         title: innerObj.title,
         description: innerObj.description,
         properties: perKey,
+        ...(plantKeysAreUserNames ? { [PLANT_KEYS_ARE_USER_NAMES]: true } : {}),
       },
     },
     $defs: (fullSchema as { $defs?: unknown }).$defs ?? {},
