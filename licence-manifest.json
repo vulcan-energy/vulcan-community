@@ -1831,14 +1831,6 @@
       "classification": "public_candidate_defaults_editor_dispatch"
     },
     {
-      "path": "packages/geometry-editor/src/components/DefaultsJsonEditorModal.tsx",
-      "source_path": "packages/geometry-editor/src/components/DefaultsJsonEditorModal.tsx",
-      "license": "AGPL-3.0-only",
-      "additional_terms": "Vulcan-Origin-Terms-1.0",
-      "rights_status": "approved",
-      "classification": "public_candidate_raw_defaults_json_editor"
-    },
-    {
       "path": "packages/geometry-editor/src/components/DeleteConfirmModal.css",
       "source_path": "packages/geometry-editor/src/components/DeleteConfirmModal.css",
       "license": "AGPL-3.0-only",
@@ -2181,14 +2173,6 @@
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
       "classification": "public_candidate_structured_fabric_defaults_editor"
-    },
-    {
-      "path": "packages/geometry-editor/src/components/FabricDefaultsModal.tsx",
-      "source_path": "packages/geometry-editor/src/components/FabricDefaultsModal.tsx",
-      "license": "AGPL-3.0-only",
-      "additional_terms": "Vulcan-Origin-Terms-1.0",
-      "rights_status": "approved",
-      "classification": "public_candidate_fabric_defaults_modal"
     },
     {
       "path": "packages/geometry-editor/src/components/FancoilTestDataFields.tsx",
