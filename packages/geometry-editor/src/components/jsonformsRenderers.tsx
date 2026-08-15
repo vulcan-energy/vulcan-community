@@ -787,6 +787,27 @@ type FieldPresentationState = {
   showReset: boolean;
 };
 
+/**
+ * Reads the value at a control's dot-joined `path` inside a baseline record, reporting
+ * PRESENCE separately from value — `exists` is what lets System Sample mode tell "the
+ * preset omits this key" from "the preset sets it to nothing" (see
+ * `computeFieldPresentationState`, the only caller).
+ *
+ * R4.6b-2: the per-segment `decodeURIComponent` this used to carry is GONE. It was a
+ * JsonForms-era artifact — that path's own scope handling percent-escaped tokens — and
+ * since R4.3b every producer of a control `path` in this codebase joins DECODED
+ * segments: `renderControlForProperty` builds it from `segmentsFromLayoutScope`
+ * (RFC-6901 tokens, `~1`/`~0`, decoded by `decodePointerToken`), from a literal
+ * `schema.properties` key, or from a web builder's dot-joined `pathOverride`. Swept both
+ * repos: the only `encodeURIComponent` producers are element-visibility keys, thermal-bridge
+ * detail contracts and parent-repo file ids/URLs, none of which reaches a control path.
+ * Leaving the decode in was not neutral: a raw data key containing a legal percent
+ * sequence (`"a%20b"`) would have been silently rewritten to a different key before the
+ * lookup, so this deletes a latent corruption rather than tidying a no-op. Deliberately
+ * NOT rebased onto `getAtPath` (`../lib/jsonTypes`): that walker answers "what value",
+ * this one answers "was the key there at all", and collapsing the two would lose the
+ * distinction System Sample mode is built on.
+ */
 function readValueAtDataPath(
   root: unknown,
   path: string,
@@ -794,16 +815,7 @@ function readValueAtDataPath(
   if (!root || typeof root !== 'object' || Array.isArray(root) || !path) {
     return { exists: false, value: undefined };
   }
-  const segments = path
-    .split('.')
-    .filter(Boolean)
-    .map((segment) => {
-      try {
-        return decodeURIComponent(segment);
-      } catch {
-        return segment;
-      }
-    });
+  const segments = path.split('.').filter(Boolean);
   let cur: unknown = root;
   for (const segment of segments) {
     if (cur == null) return { exists: false, value: undefined };
