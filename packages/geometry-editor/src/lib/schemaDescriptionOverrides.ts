@@ -16,6 +16,12 @@
  * - If schema provides a non-empty description: **use schema**
  * - Else if an override exists here: **use HEM guidance override**
  * - Else fall back to showing schema metadata only (type/enum/constraints)
+ *
+ * The label rule lives at the BOTTOM of this file (`resolveFieldLabelContent`), for the
+ * same reason the descriptions live here: a field's display text is override-able data
+ * plus one resolution policy, and splitting the two across modules is what produced the
+ * per-field label patches R4.6b spent three slices retiring. `HardcodedFieldInfo` grew a
+ * `label` field rather than a second parallel map.
  */
 
 export type TooltipDescriptionSource = 'schema' | 'hem_guidance';
@@ -23,13 +29,31 @@ export type TooltipDescriptionSource = 'schema' | 'hem_guidance';
 export type FieldUnitSemantic = 'fraction' | 'unitless';
 
 export interface HardcodedFieldInfo {
-  description: string;
+  /**
+   * OPTIONAL since R4.6b-3 only so that a `label`-only entry can exist. Every
+   * description-bearing entry below is unchanged, and an entry with no description
+   * still reports no metadata match (`getFieldMetadata`), so it can never turn into
+   * an empty tooltip.
+   */
+  description?: string;
   type?: string;
   units?: string;
   /** Explicit meaning for numeric values whose schema has no useful physical unit. */
   unitSemantic?: FieldUnitSemantic;
   /** UI-only numeric model field included in completeness diagnostics. */
   modelAuthoring?: boolean;
+  /**
+   * R4.6b-3: the row's label, when neither the schema `title` nor the key can produce
+   * it. Read by `resolveFieldLabelContent` (bottom of this file) and by NOTHING else —
+   * in particular `getFieldMetadata` still requires a description/unit to report a
+   * match, so a label-only entry adds no tooltip.
+   *
+   * Reserve it for keys where the rule cannot win by construction, not for taste:
+   * abbreviated keys whose expansion is not in the key (`sup_air_flw_ctrl`), and keys
+   * embedding a standard number that start-casing splits (`test_data_EN14825` ->
+   * "Test Data EN 14825"). Anything else belongs in the rule.
+   */
+  label?: string;
 }
 
 export interface FieldMetadataContext {
@@ -446,6 +470,23 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     description: 'Dimensionless rejected-energy factor used by the combi-boiler calculation.',
     type: 'number',
     unitSemantic: 'unitless',
+  },
+  // R4.6b-3 (DECISION 2, as CORRECTED by measurement): these two rows used to show a
+  // tooltip belonging to a DIFFERENT parameter — `Distribution` showed
+  // HeatSourceWetHeatPump.temp_distribution_heat_network's heat-network temperature
+  // text, `Bath` showed NumberOfBathrooms' description down to its "Type: integer" line.
+  // R4.6b-1's informed lookup removed both, correctly. These are NEW descriptions
+  // written for the parameters that actually exist, from their own schema shapes; no
+  // sentence of the old text survives, deliberately. Neither is mode-scoped: schema
+  // descriptions win over overrides, so an entry only ever fills a silent node, and
+  // Core and FHS mean the same thing by these two keys.
+  'System:HotWaterDemand:Distribution': {
+    description: 'Hot-water distribution pipework carrying water from the hot water source to the outlets. Each pipe run is described by its internal diameter, length and location, either as one list for the dwelling or as a list per hot water source.',
+    type: 'object',
+  },
+  'System:HotWaterDemand:Bath': {
+    description: 'The baths in the dwelling, keyed by name. Each entry gives the volume the bath holds and the cold water source that fills it.',
+    type: 'object',
   },
   'System:HeatSourceWet:A': {
     description: 'Dimensionless heat-battery characteristic parameter A.',
@@ -920,13 +961,25 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     description: 'Location of the MVHR unit: "inside" (within the thermal envelope) or "outside" (outside the thermal envelope). Affects heat losses and energy consumption calculations. Only applicable for MVHR systems.',
     type: 'string',
   },
+  // R4.6b-3: both keys abbreviate words that are not in the key at all, so neither the
+  // schema title (the pydantic class names `SupplyAirFlowRateControlType` /
+  // `SupplyAirTemperatureControlType`) nor start-casing ("Sup Air Flw Ctrl") can produce
+  // a readable label. The expansion is taken from each field's own description below.
   'sup_air_flw_ctrl': {
+    label: 'Supply Air Flow Rate Control',
     description: 'Supply air flow rate control type: "ODA" (Outdoor Air - flow rate based on outdoor air requirements). Determines how the supply air flow rate is controlled and calculated.',
     type: 'string',
   },
   'sup_air_temp_ctrl': {
+    label: 'Supply Air Temperature Control',
     description: 'Supply air temperature control type: "CONST" (constant temperature), "NO_CTRL" (no temperature control), or "LOAD_COM" (load compensation - temperature varies based on heating/cooling demand). Determines how the supply air temperature is controlled.',
     type: 'string',
+  },
+  // R4.6b-3, the standard-number class: start-casing splits the digits off the standard
+  // it belongs to ("Test Data EN 14825"), and the schema title ("Test Data En14825") has
+  // lost the acronym. Any future key embedding a standard number needs the same entry.
+  'test_data_EN14825': {
+    label: 'Test Data EN14825',
   },
   'measured_air_flow_rate': {
     description: 'Measured air flow rate (unit: litres per second, optional). Actual measured airflow used with measured fan power to derive SFP.',
