@@ -230,9 +230,73 @@ describe('public schema and defaults authoring', () => {
       </GeometryEditorServicePortsProvider>,
     );
 
+    expect(await screen.findByText('Defaults JSON must have an object at its root.')).toBeInTheDocument();
+    expect(screen.getByText(/repair the defaults file/i)).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
 
-    expect((await screen.findAllByText('Defaults JSON must have an object at its root.')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('Defaults JSON must have an object at its root.')).toBeInTheDocument();
+  });
+
+  it('keeps the malformed-file diagnostic when discarding raw repairs', async () => {
+    const user = userEvent.setup();
+    const resources = createResources({ readText: vi.fn(async () => '{ definitely not JSON') });
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      schemaPort: canonicalGeometrySchemaPort,
+      workspaceResourcePort: resources,
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={resources}>
+        <GeometryStoreProvider store={store}>
+          <DefaultsEditorModal isOpen filePath="input/defaults/broken.json" onClose={vi.fn()} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
+    fireEvent.change(await screen.findByRole('textbox', { name: /Defaults JSON/i }), {
+      target: { value: '{"Zone":{}}' },
+    });
+    await user.click(screen.getByRole('button', { name: /^Back to fabric defaults$/i }));
+
+    expect(confirm).toHaveBeenCalledWith('Discard unsaved defaults changes?');
+    expect(await screen.findByText(/Invalid JSON:/i)).toBeInTheDocument();
+    expect(screen.getByText(/repair the defaults file/i)).toBeInTheDocument();
+  });
+
+  it('clears a malformed-file diagnostic after a successful raw repair', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => undefined);
+    const resources = createResources({
+      readText: vi.fn(async () => '{ definitely not JSON'),
+      writeText,
+    });
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      schemaPort: canonicalGeometrySchemaPort,
+      workspaceResourcePort: resources,
+    });
+
+    render(
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={resources}>
+        <GeometryStoreProvider store={store}>
+          <DefaultsEditorModal isOpen filePath="input/defaults/broken.json" onClose={vi.fn()} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /Edit full JSON/i }));
+    fireEvent.change(await screen.findByRole('textbox', { name: /Defaults JSON/i }), {
+      target: { value: '{"Zone":{}}' },
+    });
+    await user.click(screen.getByRole('button', { name: /Save full defaults/i }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+
+    expect(screen.queryByText(/Invalid JSON:/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Fabric defaults$/i }));
+    expect(screen.queryByText(/repair the defaults file/i)).not.toBeInTheDocument();
   });
 
   it('tracks structured drafts and confirms discarding them in both view directions', async () => {

@@ -157,7 +157,7 @@ export function DefaultsEditorModal({
     const parsed = parseDefaultsText(baselineText);
     setText(baselineText);
     setDefaultsRoot(parsed.root);
-    setLoadError(null);
+    setLoadError(parsed.error);
     setSaveError(null);
     setFabricDirty(false);
     setSessionRevision((current) => current + 1);
@@ -183,6 +183,7 @@ export function DefaultsEditorModal({
     setSaving(true);
     setSaveError(null);
     try {
+      // Saves target the host's current resource port; the initial read stays session-stable.
       if (workspaceResourcePort.availability !== 'available') {
         throw new Error('Workspace resource access is unavailable.');
       }
@@ -200,6 +201,7 @@ export function DefaultsEditorModal({
       setText(formatted);
       setBaselineText(formatted);
       setDefaultsRoot(merged);
+      setLoadError(null);
       setCompatibility(nextCompatibility);
       setFabricDirty(false);
       setSessionRevision((current) => current + 1);
@@ -220,6 +222,7 @@ export function DefaultsEditorModal({
     setCompatibility,
     setDefaultsRoot,
     setFabricDirty,
+    setLoadError,
     setSaveError,
     setSaving,
     setSessionRevision,
@@ -302,7 +305,7 @@ export function DefaultsEditorModal({
         ) : null}
         {mode === 'fabric' ? (
           <>
-            {loadError?.startsWith('Invalid JSON:') ? (
+            {loadError && !defaultsRoot && !loading ? (
               <p className="error-text">
                 Use <strong>Edit full JSON</strong> to repair the defaults file.
               </p>
@@ -324,7 +327,7 @@ export function DefaultsEditorModal({
             </div>
             {loadError ? <p className="error-text">{loadError}</p> : null}
             {saveError ? <p className="error-text">{saveError}</p> : null}
-            {!loading && rawParseResult.error ? <p className="error-text">{rawParseResult.error}</p> : null}
+            {!loading && !loadError && rawParseResult.error ? <p className="error-text">{rawParseResult.error}</p> : null}
             <textarea
               aria-label="Defaults JSON"
               value={text}
