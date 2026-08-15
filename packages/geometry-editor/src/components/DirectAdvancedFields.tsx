@@ -451,8 +451,12 @@ function schemaEmitsControl(resolved: Record<string, unknown>): boolean {
  * renderer stack; matching what the JsonForms path actually did (not the brief) was
  * what parity meant, and the direct path still renders no asterisk today.
  */
-function labelForProperty(key: string, resolved: Record<string, unknown>): string {
-  return resolveFieldLabelContent(key, resolved.title);
+function labelForProperty(
+  key: string,
+  resolved: Record<string, unknown>,
+  elementType: string | undefined,
+): string {
+  return resolveFieldLabelContent(key, resolved.title, elementType);
 }
 
 /**
@@ -691,7 +695,7 @@ export function DirectAdvancedFields({
     // pointer. Unwrapping first would hand back a bare `{$ref}` node with nothing for
     // `pickDirectControl` to dispatch on.
     const resolved = unwrapNullableSchema(readRecord(dereferenceSchemaNodeInRoot(propertySchemaNode, resolutionRoot)));
-    const label = node.label ?? labelForProperty(leafKey, resolved);
+    const label = node.label ?? labelForProperty(leafKey, resolved, elementType);
     const value = getAtPath(data, segments);
     // Required from the PARENT schema's `required` list, mirroring how the retired
     // JsonForms path's Ajv required-missing errors used to attach to this control
@@ -760,7 +764,7 @@ export function DirectAdvancedFields({
               segments: [key],
               resolved,
               value: data[key],
-              label: labelForProperty(key, resolved),
+              label: labelForProperty(key, resolved, elementType),
               scope: `#/properties/${key}`,
               schema,
               config,
@@ -992,7 +996,7 @@ export function DirectSpecFields({
         readRecord(dereferenceSchemaNodeInRoot(walkSchemaPropertiesByTokens(contextSchema, tokens), resolutionRoot)),
     );
     const fullSegments = [...contextSegments, ...tokens];
-    const label = node.label ?? labelForProperty(leafKey, resolved);
+    const label = node.label ?? labelForProperty(leafKey, resolved, elementType);
     const value = getAtPath(data, fullSegments);
     return renderControlForProperty({
       segments: fullSegments,

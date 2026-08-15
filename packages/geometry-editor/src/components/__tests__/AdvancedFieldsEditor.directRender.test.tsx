@@ -913,7 +913,16 @@ function sweepRenderedRows(): {
  * and `fhs/System:HotWaterDemand`'s `Bath`, which gained descriptions written for the
  * parameters they actually are. Every one was reconciled against the decided
  * before/after table before being pinned here; a label this file does not move is a
- * label that did not change.
+ * label that did not change ON A ROUTE THESE FIXTURES OPEN.
+ *
+ * That last clause is load-bearing, not throat-clearing: this sweep is fixture-bounded
+ * (see the note above), and the rule reaches rows it cannot render. FHS `mvhr_eff` reads
+ * "MVHR Eff" instead of "Mvhr Eff" for anyone whose ventilation system is an MVHR —
+ * that property sits behind an `if vent_type == "MVHR"` branch no swept route selects —
+ * and the FHS hybrid-boiler branch moves `cost_schedule_hp`/`_boiler`/`_hybrid` and
+ * `boiler_location` the same way. All improvements, all measured out-of-band, none
+ * visible here. Read a silent row as "this fixture did not exercise it", never as "no
+ * user sees a change".
  */
 const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   'core/BuildingElementAdjacentConditionedSpace [every subtype]': [

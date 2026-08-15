@@ -478,15 +478,19 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   // text, `Bath` showed NumberOfBathrooms' description down to its "Type: integer" line.
   // R4.6b-1's informed lookup removed both, correctly. These are NEW descriptions
   // written for the parameters that actually exist, from their own schema shapes; no
-  // sentence of the old text survives, deliberately. Neither is mode-scoped: schema
-  // descriptions win over overrides, so an entry only ever fills a silent node, and
-  // Core and FHS mean the same thing by these two keys.
+  // sentence of the old text survives, deliberately. Neither is mode-scoped, for two
+  // different reasons: `Distribution` is a CORE-ONLY key (FHS's HotWaterDemand declares
+  // Shower/Bath/Other and nothing else), so there is no second profile to disagree with;
+  // `Bath` exists on both and means the same thing, so the copy is written to be true of
+  // both — Core's `$defs/Bath` requires `flowrate` alongside `size` and `ColdWaterSource`
+  // where FHS requires only the latter two, and the sentence covers that superset even
+  // though Core reads its own schema description today and never shows this one.
   'System:HotWaterDemand:Distribution': {
     description: 'Hot-water distribution pipework carrying water from the hot water source to the outlets. Each pipe run is described by its internal diameter, length and location, either as one list for the dwelling or as a list per hot water source.',
     type: 'object',
   },
   'System:HotWaterDemand:Bath': {
-    description: 'The baths in the dwelling, keyed by name. Each entry gives the volume the bath holds and the cold water source that fills it.',
+    description: 'The baths in the dwelling, keyed by name. Each entry gives the volume the bath holds, its flow rate, and the cold water source that fills it.',
     type: 'object',
   },
   'System:HeatSourceWet:A': {
@@ -1778,6 +1782,14 @@ export function startCaseKey(key: string): string {
  * HIU, PV, UFH, MEV, PIV, SAP, EPC, CO2. A dictionary entry that fires nowhere is a
  * claim about a schema we do not have.
  *
+ * "Changes nothing today" has TWO causes and they decay differently. DHW's is stable —
+ * no key it would rewrite renders differently from how it already reads. CoP's is not:
+ * FHS carries titleless `cop` and `cop_dhw` keys that this entry WOULD move, and they
+ * are quiet only because they sit inside `test_data_EN14825` array items and `test_data`
+ * patternProperties, which neither walk enumerates. The day one of those becomes a row,
+ * this entry starts doing work — which is the argument for it being here now rather than
+ * being discovered missing later.
+ *
  * `hp -> HP` IS SAFE ONLY BECAUSE PLANT KEYS NEVER REACH THIS RULE. `hp` is also a live
  * user plant key (Core renders its whole plant as one blob row labelled "Hp"), and
  * `buildSystemAdvancedUischema` labels those rows itself — off the merge-map annotation
@@ -1905,13 +1917,24 @@ function titleIsAdmissible(propertyKey: string, title: string): boolean {
   return !titleRunsKeyWordsTogether(title, startCaseKey(propertyKey));
 }
 
-/** Step 1, and only for key-derived labels. See `LABEL_UNIT_SUFFIX_TOKENS`. */
-function stripKeyDerivedUnitSuffix(label: string, propertyKey: string): string {
+/**
+ * Step 1, and only for key-derived labels. See `LABEL_UNIT_SUFFIX_TOKENS`.
+ *
+ * The evidence check goes through `getFieldMetadata`, the SAME ladder the unit adornment
+ * resolves through (`resolveFieldPresentation` reads `overrideMetadata.info.units`), not
+ * through a direct index of the bare key. The two agree on every `_mm` key today, so this
+ * is inert — but they agree by coincidence: the ladder also carries element-scoped
+ * entries (`external_diameter_mm_MechanicalVentilationDuctwork`,
+ * `..._WaterPipework`), and an element-scoped entry that existed only there, or that
+ * named a different unit, would have had this gate strip a suffix the row then never
+ * showed. A gate must judge the same thing the render does, or it is not a gate.
+ */
+function stripKeyDerivedUnitSuffix(label: string, propertyKey: string, elementType?: string): string {
   const words = label.split(' ');
   const last = words[words.length - 1]?.toLowerCase() ?? '';
   if (words.length < 2 || !LABEL_UNIT_SUFFIX_TOKENS.has(last)) return label;
-  const info = TOOLTIP_OVERRIDES[propertyKey] ?? TOOLTIP_OVERRIDES[`*:${propertyKey}`];
-  if (info?.units?.trim().toLowerCase() !== last) return label;
+  const units = getFieldMetadata({ propertyKey, elementType })?.info.units;
+  if (units?.trim().toLowerCase() !== last) return label;
   return words.slice(0, -1).join(' ');
 }
 
@@ -1960,13 +1983,36 @@ function labelOverrideFor(propertyKey: string): string | undefined {
  * OUT OF SCOPE, deliberately: user plant keys (see `LABEL_WORD_SPELLINGS`), and every
  * hand-authored label in the editor's own field groups — those are written by us, not
  * derived from a schema, and there is nothing for a rule to resolve.
+ *
+ * ONE TRIPWIRE, recorded because it is invisible from anything that renders today. A
+ * census over every property node in both published schemas — not just the routes the
+ * editor reaches — finds exactly two labels this rule would make WORSE: Core's `sol_loc`
+ * (title "SolarCollectorLoopLocation" -> "Sol Loc") and `temp_setpnt_basis` (title
+ * "ZoneTemperatureControlBasis" -> "Temp Setpnt Basis"), both keys whose abbreviation
+ * carries less than the type name does. They are inert ONLY because both sit behind a
+ * Core discriminated `oneOf` that the System walk never branch-selects, so no row exists
+ * to be spoiled. Whoever teaches Core's flattening to select those branches inherits
+ * both the same day; `HardcodedFieldInfo.label` is the reserved remedy, exactly as for
+ * `sup_air_flw_ctrl`.
  */
-export function resolveFieldLabelContent(propertyKey: string, title?: unknown): string {
+export function resolveFieldLabelContent(
+  propertyKey: string,
+  title?: unknown,
+  /**
+   * Only step 1 reads it, and only to ask the unit-metadata ladder the same question the
+   * adornment asks. Optional because the System walk has no element type to give — its
+   * rows fall to the ladder's bare-key arm, which is where every `_mm` unit is recorded
+   * anyway.
+   */
+  elementType?: string,
+): string {
   const override = labelOverrideFor(propertyKey);
   if (override) return override;
   const trimmed = typeof title === 'string' ? title.trim() : '';
   if (trimmed && titleIsAdmissible(propertyKey, trimmed)) {
     return applyLabelSpellings(trimmed);
   }
-  return applyLabelSpellings(stripKeyDerivedUnitSuffix(startCaseKey(propertyKey), propertyKey));
+  return applyLabelSpellings(
+    stripKeyDerivedUnitSuffix(startCaseKey(propertyKey), propertyKey, elementType),
+  );
 }
