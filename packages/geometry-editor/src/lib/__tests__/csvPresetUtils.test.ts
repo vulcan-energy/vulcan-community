@@ -113,6 +113,7 @@ describe('override provenance helpers', () => {
       { kind: 'zone', key: '_floor_area_user_override', since: 1 },
       { kind: 'zone', key: '_height_user_override', since: 1 },
       { kind: 'floor', key: 'FloorHeightOverride', since: 0 },
+      { kind: 'floor', key: 'FloorBaseHeightOverride', since: 0 },
       { kind: 'spaceLabel', key: '_name_auto_sync', since: 1 },
     ]);
   });

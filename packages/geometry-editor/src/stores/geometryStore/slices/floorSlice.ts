@@ -7,6 +7,7 @@ import { getElementCanvasFloorZValue } from '../../../lib/elementCanvasFloor';
 import {
   cascadeFloorStackChange,
   deriveZoneProperties,
+  getCumulativeBaseHeightsByFloorId,
   withEffectiveStoreyHeights,
 } from '../../../lib/zoneDerivation';
 import {
@@ -86,7 +87,10 @@ export const createFloorSlice: GeometryStoreSlice = (set, get) => ({
       const oldEff = withEffectiveStoreyHeights(state.floors, elements);
       const newEff = withEffectiveStoreyHeights(nextFloors, elements);
       const effectiveChanged = oldEff.some((f, i) => f.height !== newEff[i]?.height);
-      if (!effectiveChanged) return { floors: nextFloors };
+      const oldBases = getCumulativeBaseHeightsByFloorId(state.floors, elements);
+      const newBases = getCumulativeBaseHeightsByFloorId(nextFloors, elements);
+      const baseChanged = state.floors.some((floor) => oldBases.get(floor.id) !== newBases.get(floor.id));
+      if (!effectiveChanged && !baseChanged) return { floors: nextFloors };
 
       const patches = cascadeFloorStackChange(oldEff, newEff, elements);
       if (patches.length === 0) return { floors: nextFloors };

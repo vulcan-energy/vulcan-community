@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
 import {
   calculateDerivedHeight,
+  calculateBaseHeightPatchForFloorStackChange,
   getCumulativeBaseHeightsByFloorId,
   getStrictStoreyHeight,
   getMaxLineWallHeightOnFloor,
@@ -172,5 +173,156 @@ describe('getStrictStoreyHeight source resolution', () => {
     expect(bases.get('floor-0')).toBe(0);
     expect(bases.get('floor-1')).toBe(2.4);
     expect(bases.get('floor-2')).toBeNull();
+  });
+
+  it('uses an explicit floor base without changing the storey height below it', () => {
+    const modelFloors = [
+      {
+        id: 'floor-0',
+        name: 'Ground',
+        zIndex: 0,
+        height: 2.4,
+        baseHeight: 0.3,
+        baseHeightUserOverride: true,
+        isRoofSpace: false,
+      },
+      { id: 'floor-1', name: 'First', zIndex: 1, height: 2.4, isRoofSpace: false },
+    ];
+    const lowerWall = {
+      id: 'lower-wall',
+      name: 'Lower wall',
+      type: 'BuildingElementOpaque',
+      height: 2.4,
+      width: 4,
+      pitch: 90,
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      parent_element: null,
+    } as unknown as Element;
+
+    const bases = getCumulativeBaseHeightsByFloorId(modelFloors, [lowerWall]);
+
+    expect(bases.get('floor-0')).toBe(0.3);
+    expect(bases.get('floor-1')).toBe(2.7);
+  });
+
+  it('prefills existing floor bases from consistent authored vertical wall bases', () => {
+    const modelFloors = [
+      { id: 'floor-0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false },
+      { id: 'floor-1', name: 'First', zIndex: 1, height: 2.4, isRoofSpace: false },
+    ];
+    const elements = [
+      {
+        id: 'lower-wall',
+        name: 'Lower wall',
+        type: 'BuildingElementOpaque',
+        height: 2.4,
+        width: 4,
+        pitch: 90,
+        base_height: 0.3,
+        coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+        parent_element: null,
+      },
+      {
+        id: 'upper-wall',
+        name: 'Upper wall',
+        type: 'BuildingElementOpaque',
+        height: 2.4,
+        width: 4,
+        pitch: 90,
+        base_height: 2.7,
+        coordinates: [{ x: 0, y: 0, z: 1 }, { x: 4, y: 0, z: 1 }],
+        parent_element: null,
+      },
+    ] as unknown as Element[];
+
+    const bases = getCumulativeBaseHeightsByFloorId(modelFloors, elements);
+
+    expect(bases.get('floor-0')).toBe(0.3);
+    expect(bases.get('floor-1')).toBe(2.7);
+  });
+
+  it('prefills from adjacent-wall viewer bases but excludes windows, slopes, and doors', () => {
+    const modelFloors = [
+      { id: 'floor-0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false },
+    ];
+    const elements = [
+      {
+        id: 'party-wall',
+        name: 'Party wall',
+        type: 'BuildingElementPartyWall',
+        height: 2.4,
+        width: 4,
+        pitch: 90,
+        _base_height: 0.4,
+        coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      },
+      {
+        id: 'window',
+        name: 'Window',
+        type: 'BuildingElementTransparent',
+        height: 2.4,
+        width: 2,
+        pitch: 90,
+        base_height: 0.8,
+        coordinates: [{ x: 1, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }],
+      },
+      {
+        id: 'sloped-wall',
+        name: 'Sloped wall',
+        type: 'BuildingElementOpaque',
+        height: 2.4,
+        width: 4,
+        pitch: 30,
+        base_height: 1.2,
+        coordinates: [{ x: 0, y: 1, z: 0 }, { x: 4, y: 1, z: 0 }],
+      },
+      {
+        id: 'external-door',
+        name: 'External door',
+        type: 'BuildingElementOpaque',
+        height: 2.4,
+        width: 1,
+        pitch: 90,
+        is_external_door: true,
+        base_height: 1.6,
+        coordinates: [{ x: 1, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }],
+      },
+    ] as unknown as Element[];
+
+    const bases = getCumulativeBaseHeightsByFloorId(modelFloors, elements);
+
+    expect(bases.get('floor-0')).toBe(0.4);
+  });
+
+  it('cascades an explicit base edit onto authored ground-floor elevations', () => {
+    const oldFloors = [
+      { id: 'floor-0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false },
+    ];
+    const newFloors = [
+      {
+        id: 'floor-0',
+        name: 'Ground',
+        zIndex: 0,
+        height: 2.4,
+        baseHeight: 0.3,
+        baseHeightUserOverride: true,
+        isRoofSpace: false,
+      },
+    ];
+    const wall = {
+      id: 'wall-0',
+      name: 'Ground wall',
+      type: 'BuildingElementOpaque',
+      height: 2.4,
+      width: 4,
+      pitch: 90,
+      base_height: 0,
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      parent_element: null,
+    } as unknown as Element;
+
+    expect(calculateBaseHeightPatchForFloorStackChange(wall, oldFloors, newFloors)).toEqual({
+      base_height: 0.3,
+    });
   });
 });

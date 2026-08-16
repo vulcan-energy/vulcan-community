@@ -332,6 +332,7 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
           }}
           onDeleteFloor={removeFloor}
           onUpdateFloor={(id, updates) => updateFloor(id, updates)}
+          onEnsureFloorForZ={ensureFloorForZ}
           getElementValidation={getElementValidation}
           addDisabled={in3D}
         />

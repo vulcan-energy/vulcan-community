@@ -83,9 +83,13 @@ import { syncSpaceHeatSystemZoneNameInExtraJson } from '../../../lib/spaceHeatSy
 import { collectDuplicateElementNameWarnings } from '../../../lib/elementNameDuplicates';
 import { buildHistoryDocumentSnapshotFromState } from '../../../lib/geometryHistorySnapshot';
 import { isMvhrTerminalHost } from '../../../lib/mvhrDuctwork';
-import { applyFloorHeightOverrides } from '../../../lib/floorDerivation';
+import {
+  applyFloorBaseHeightOverrides,
+  applyFloorHeightOverrides,
+} from '../../../lib/floorDerivation';
 import {
   CURRENT_PROVENANCE_MARKERS_VERSION,
+  FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
   FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR,
   OVERRIDE_PROVENANCE_REGISTRY,
   PROVENANCE_MARKERS_METADATA_KEY,
@@ -728,6 +732,19 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     for (const floor of heightOverrideFloors) {
       lines.push(
         `${FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR.key},${floor.zIndex},${floor.height},,,,,,,,,,,,,`,
+      );
+    }
+    const baseHeightOverrideFloors = [...state.floors]
+      .filter((floor) =>
+        isOverrideActive(
+          floor as unknown as Record<string, unknown>,
+          FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
+        ) && Number.isFinite(floor.baseHeight)
+      )
+      .sort((a, b) => a.zIndex - b.zIndex);
+    for (const floor of baseHeightOverrideFloors) {
+      lines.push(
+        `${FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR.key},${floor.zIndex},${floor.baseHeight},,,,,,,,,,,,,`,
       );
     }
     if (state.junctionPsiDefaultsPath && state.junctionPsiDefaultsPath.trim() !== '') {
@@ -1872,11 +1889,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       } catch { /* swallow: best-effort */ }
     });
 
-    // Apply persisted floor storey-height overrides (FloorHeightOverride metadata rows) now
-    // that every floor has been (re-)created above from element z-values. Without this, a
-    // user-typed storey height always reverted to wall-derived on reload — the CSV had nowhere
-    // to record the override, so `ensureFloorForZ` -> `addFloor(name, 0, false, z)` always
-    // recreated floors with `heightUserOverride` unset.
+    // Apply persisted floor storey-height and base-elevation overrides now that every floor has
+    // been (re-)created above from element z-values. Without this, a user-typed floor value
+    // always reverted to its derived value on reload — the CSV had nowhere to record the
+    // override, so `ensureFloorForZ` -> `addFloor(name, 0, false, z)` always recreated floors
+    // without the corresponding override flag.
     //
     // The parsed rows are the COMPLETE override set for this document: loadFromCSV does not
     // clear floors and the production load flows call it without clearAll, so a floor reused
@@ -1886,7 +1903,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // matching floor (e.g. a hand-edited or truncated CSV) is ignored: it cannot happen from a
     // save this store produced, but must not throw.
     set((state) => ({
-      floors: applyFloorHeightOverrides(state.floors, metadata.floorHeightOverrides),
+      floors: applyFloorBaseHeightOverrides(
+        applyFloorHeightOverrides(state.floors, metadata.floorHeightOverrides),
+        metadata.floorBaseHeightOverrides,
+      ),
     }));
 
     if (options.schemaPort.availability === 'available') {

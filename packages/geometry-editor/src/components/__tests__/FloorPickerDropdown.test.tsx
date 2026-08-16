@@ -112,7 +112,7 @@ describe('FloorPickerDropdown', () => {
     expect(onAddFloor).toHaveBeenCalledWith(-1);
   });
 
-  it('displays each floor\'s base height', () => {
+  it('displays each floor\'s base height as an editable field', () => {
     render(
       <FloorPickerDropdown
         currentFloorZ={0}
@@ -126,14 +126,42 @@ describe('FloorPickerDropdown', () => {
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
+    const groundInput = screen.getByLabelText('Base height for F1: Ground in metres');
     const upperInput = screen.getByLabelText('Base height for F2 in metres');
+    expect(groundInput).toHaveAttribute('type', 'text');
     expect(upperInput).toHaveAttribute('type', 'text');
+    expect(groundInput).toHaveValue('0');
     expect(upperInput).toHaveValue('2.4');
-    expect(screen.getByTitle('Base height of F1: Ground, in metres')).toHaveTextContent('0 m');
-    expect(screen.getByTitle('Base height of F2, in metres')).toBeInTheDocument();
   });
 
-  it('edits F2 base height by changing the storey below it', () => {
+  it('edits F1 base height directly', () => {
+    const onUpdateFloor = vi.fn();
+
+    render(
+      <FloorPickerDropdown
+        currentFloorZ={0}
+        floors={floors}
+        elementsById={elementsById}
+        onSelectFloor={vi.fn()}
+        onAddFloor={vi.fn()}
+        onDeleteFloor={vi.fn()}
+        onUpdateFloor={onUpdateFloor}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('Current floor'));
+    const input = screen.getByLabelText('Base height for F1: Ground in metres');
+    expect(input).not.toBeDisabled();
+    fireEvent.change(input, { target: { value: '0.3' } });
+    fireEvent.blur(input);
+
+    expect(onUpdateFloor).toHaveBeenCalledWith('floor-0', {
+      baseHeight: 0.3,
+      baseHeightUserOverride: true,
+    });
+  });
+
+  it('edits F2 base height directly', () => {
     const onUpdateFloor = vi.fn();
 
     render(
@@ -150,17 +178,19 @@ describe('FloorPickerDropdown', () => {
 
     fireEvent.click(screen.getByTitle('Current floor'));
     const input = screen.getByLabelText('Base height for F2 in metres');
-    expect(input).not.toBeDisabled();
     fireEvent.change(input, { target: { value: '2.7' } });
     fireEvent.blur(input);
 
-    expect(onUpdateFloor).toHaveBeenCalledWith('floor-0', {
-      height: 2.7,
-      heightUserOverride: true,
+    expect(onUpdateFloor).toHaveBeenCalledWith('floor-1', {
+      baseHeight: 2.7,
+      baseHeightUserOverride: true,
     });
   });
 
   it('shows F1 Ground before any floor record exists', () => {
+    const onEnsureFloorForZ = vi.fn(() => 'floor-0');
+    const onUpdateFloor = vi.fn();
+
     render(
       <FloorPickerDropdown
         currentFloorZ={0}
@@ -169,19 +199,26 @@ describe('FloorPickerDropdown', () => {
         onSelectFloor={vi.fn()}
         onAddFloor={vi.fn()}
         onDeleteFloor={vi.fn()}
-        onUpdateFloor={vi.fn()}
+        onUpdateFloor={onUpdateFloor}
+        onEnsureFloorForZ={onEnsureFloorForZ}
       />,
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
 
     expect(screen.getByRole('option', { name: /F1: Ground/i })).toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: /Base height for F1: Ground/i })).toBeNull();
-    expect(screen.getByTitle('Base height of F1: Ground, in metres')).toHaveTextContent('0 m');
+    const input = screen.getByRole('textbox', { name: /Base height for F1: Ground/i });
+    fireEvent.change(input, { target: { value: '0.2' } });
+    fireEvent.blur(input);
+    expect(onEnsureFloorForZ).toHaveBeenCalledWith(0);
+    expect(onUpdateFloor).toHaveBeenCalledWith('floor-0', {
+      baseHeight: 0.2,
+      baseHeightUserOverride: true,
+    });
     expect(screen.queryByText('No floors yet.')).toBeNull();
   });
 
-  it('displays and edits basement base height', () => {
+  it('displays and edits basement base height directly', () => {
     const onUpdateFloor = vi.fn();
     const floorsWithBasement = [
       { id: 'floor-b1', name: '-1', zIndex: -1, height: 2.4, isRoofSpace: false },
@@ -223,8 +260,8 @@ describe('FloorPickerDropdown', () => {
     fireEvent.blur(input);
 
     expect(onUpdateFloor).toHaveBeenCalledWith('floor-b1', {
-      height: 2.7,
-      heightUserOverride: true,
+      baseHeight: -2.7,
+      baseHeightUserOverride: true,
     });
   });
 
@@ -277,7 +314,7 @@ describe('FloorPickerDropdown', () => {
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    expect(screen.queryByLabelText('Base height for F2 in metres')).toBeNull();
+    expect(screen.queryByLabelText('Base height for F1: Ground in metres')).toBeNull();
   });
 
   it('confirms floor deletion before calling the delete handler', () => {

@@ -32,9 +32,11 @@ interface FloorPickerDropdownProps {
   onAddFloor: (z: number) => void;
   onDeleteFloor: (id: string) => void;
   /**
-   * Apply a floor patch (`height` + `heightUserOverride`) when the user edits a floor base height.
+   * Apply a floor patch (`baseHeight` + `baseHeightUserOverride`) when the user edits a floor base.
    */
   onUpdateFloor?: (floorId: string, updates: Partial<Floor>) => void;
+  /** Create the internal floor record when the picker is used before any element exists. */
+  onEnsureFloorForZ?: (z: number) => string;
   /** Reuse element validation to flag real floor-stack overlap/separation warnings. */
   getElementValidation?: (element: Element) => ValidationResult;
   addDisabled?: boolean;
@@ -73,6 +75,7 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   onAddFloor,
   onDeleteFloor,
   onUpdateFloor,
+  onEnsureFloorForZ,
   getElementValidation,
   addDisabled = false,
 }) => {
@@ -165,11 +168,7 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
     return warningFloorIds;
   }, [elementsById, floorRows, getElementValidation]);
 
-  /**
-   * Commit a typed base height by changing the adjacent storey's stored height. Floor 0 is the
-   * model datum (base 0) and is intentionally read-only; an upper floor's base is controlled by
-   * the storey immediately below it, while a basement floor's base is controlled by itself.
-   */
+  /** Commit a typed base elevation directly to the edited floor. */
   const commitBaseHeight = useCallback(
     (rowFloor: Floor) => {
       const rowKey = rowFloor.id;
@@ -180,47 +179,21 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
         return next;
       });
       if (draft === undefined) return;
-      if (rowFloor.zIndex === 0) return;
       const parsed = Number.parseFloat(draft);
       if (!Number.isFinite(parsed)) return;
       const roundedBase = Math.round(parsed * 100) / 100;
-      const floorAtZ = (zIndex: number): Floor | undefined =>
-        sortedFloors.find((floor) => floor.zIndex === zIndex);
-      const baseAtZ = (zIndex: number): number | null => {
-        if (zIndex === 0) return 0;
-        const floor = floorAtZ(zIndex);
-        return floor ? baseHeightsByFloorId.get(floor.id) ?? null : null;
-      };
-
-      const targetFloor = rowFloor.zIndex > 0
-        ? floorAtZ(rowFloor.zIndex - 1)
-        : rowFloor;
-      const referenceBase = rowFloor.zIndex > 0
-        ? baseAtZ(rowFloor.zIndex - 1)
-        : baseAtZ(rowFloor.zIndex + 1);
-      if (!targetFloor || referenceBase === null) {
-        setToastMessage('Base height is unresolved until the adjacent floor is set');
+      const targetFloorId = sortedFloors.find((floor) => floor.zIndex === rowFloor.zIndex)?.id
+        ?? onEnsureFloorForZ?.(rowFloor.zIndex);
+      if (!targetFloorId) {
+        setToastMessage('Base height cannot be saved until this floor exists');
         return;
       }
-
-      const targetStoreyHeight = rowFloor.zIndex > 0
-        ? roundedBase - referenceBase
-        : referenceBase - roundedBase;
-      if (!Number.isFinite(targetStoreyHeight) || targetStoreyHeight <= 0) {
-        setToastMessage(
-          rowFloor.zIndex > 0
-            ? 'Base height must be above the floor below'
-            : 'Base height must be below the floor above',
-        );
-        return;
-      }
-
-      onUpdateFloor?.(targetFloor.id, {
-        height: Math.round(targetStoreyHeight * 100) / 100,
-        heightUserOverride: true,
+      onUpdateFloor?.(targetFloorId, {
+        baseHeight: roundedBase,
+        baseHeightUserOverride: true,
       });
     },
-    [baseDrafts, sortedFloors, baseHeightsByFloorId, onUpdateFloor],
+    [baseDrafts, sortedFloors, onEnsureFloorForZ, onUpdateFloor],
   );
 
   const updatePosition = useCallback(() => {
@@ -343,47 +316,31 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                   </div>
                 </button>
                 {onUpdateFloor ? (
-                  row.floor.zIndex === 0 ? (
-                    <div
-                      className="floor-picker-height-shell floor-picker-height-shell-readonly"
-                    >
-                      <span className="floor-picker-metric-label">Base</span>
-                      <span
-                        className="floor-picker-metric-value"
-                        title={`Base height of ${floorLabel(row.floor.zIndex)}, in metres`}
-                        aria-label={`Base height of ${floorLabel(row.floor.zIndex)} in metres`}
-                      >
-                        {baseElevation === null ? '—' : formatMetres(baseElevation)}
-                        {' m'}
-                      </span>
-                    </div>
-                  ) : (
-                    <label
-                      className="floor-picker-height-shell"
-                      title={`Base height of ${floorLabel(row.floor.zIndex)}, in metres`}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <span className="floor-picker-metric-label">Base</span>
-                      <DraftSafeNumberInput
-                        step="0.05"
-                        className="floor-picker-height-input"
-                        aria-label={`Base height for ${floorLabel(row.floor.zIndex)} in metres`}
-                        value={baseValueDisplay}
-                        placeholder="—"
-                        onChange={(event) =>
-                          setBaseDrafts((prev) => ({ ...prev, [row.floor.id]: event.target.value }))
+                  <label
+                    className="floor-picker-height-shell"
+                    title={`Base height of ${floorLabel(row.floor.zIndex)}, in metres`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <span className="floor-picker-metric-label">Base</span>
+                    <DraftSafeNumberInput
+                      step="0.05"
+                      className="floor-picker-height-input"
+                      aria-label={`Base height for ${floorLabel(row.floor.zIndex)} in metres`}
+                      value={baseValueDisplay}
+                      placeholder="—"
+                      onChange={(event) =>
+                        setBaseDrafts((prev) => ({ ...prev, [row.floor.id]: event.target.value }))
+                      }
+                      onBlur={() => commitBaseHeight(row.floor)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          (event.currentTarget as HTMLInputElement).blur();
                         }
-                        onBlur={() => commitBaseHeight(row.floor)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            (event.currentTarget as HTMLInputElement).blur();
-                          }
-                        }}
-                      />
-                      <span className="floor-picker-height-unit">m</span>
-                    </label>
-                  )
+                      }}
+                    />
+                    <span className="floor-picker-height-unit">m</span>
+                  </label>
                 ) : null}
                 {!isPlaceholderFloor && <button
                   type="button"

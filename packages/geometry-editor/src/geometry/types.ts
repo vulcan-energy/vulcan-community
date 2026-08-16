@@ -108,6 +108,13 @@ export interface Floor {
    * override" warning surfaces in the picker if walls diverge.
    */
   heightUserOverride?: boolean;
+  /**
+   * Explicit slab/base elevation in metres above the model datum. When absent, the base is
+   * derived from the floor stack for backwards compatibility with existing models.
+   */
+  baseHeight?: number;
+  /** True when the user has explicitly set `baseHeight` in the floor picker. */
+  baseHeightUserOverride?: boolean;
   isRoofSpace: boolean;
 }
 
