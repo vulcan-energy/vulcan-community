@@ -141,6 +141,21 @@
   box-shadow: none;
 }
 
+.floor-picker-metric-label {
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+  white-space: nowrap;
+}
+
+.floor-picker-metric-value {
+  width: 44px;
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .floor-picker-height-shell:focus-within {
   border-color: var(--accent-primary);
   background: var(--surface-control);

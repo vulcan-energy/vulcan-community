@@ -9,8 +9,7 @@ import type { ValidationResult } from '../../geometry/validation/types';
 import { FloorPickerDropdown } from '../canvas/FloorPickerDropdown';
 
 describe('FloorPickerDropdown', () => {
-  // Two floors with stored heights of 2.4 m. No walls have a `height` field, so the
-  // wall-derivation chain falls through to stored Floor.height = 2.4.
+  // Two floors with 2.4 m vertical walls. Storey heights are derived from those walls.
   const floors = [
     { id: 'floor-0', name: '0', zIndex: 0, height: 2.4, isRoofSpace: false },
     { id: 'floor-1', name: '1', zIndex: 1, height: 2.4, isRoofSpace: true },
@@ -21,6 +20,10 @@ describe('FloorPickerDropdown', () => {
       id: 'wall0',
       name: 'Ground wall',
       type: 'BuildingElementOpaque',
+      width: 2,
+      height: 2.4,
+      area: 4.8,
+      pitch: 90,
       floorId: 'floor-0',
       coordinates: [{ x: 0, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }],
       zoneId: 'zone-1',
@@ -30,6 +33,10 @@ describe('FloorPickerDropdown', () => {
       id: 'wall1',
       name: 'First wall',
       type: 'BuildingElementOpaque',
+      width: 2,
+      height: 2.4,
+      area: 4.8,
+      pitch: 90,
       floorId: 'floor-1',
       coordinates: [{ x: 0, y: 0, z: 1 }, { x: 2, y: 0, z: 1 }],
       zoneId: 'zone-1',
@@ -125,6 +132,8 @@ describe('FloorPickerDropdown', () => {
     expect(upperInput).toHaveAttribute('type', 'text');
     expect(groundInput).toHaveValue('2.4');
     expect(upperInput).toHaveValue('2.4');
+    expect(screen.getByTitle('Base elevation of F1: Ground, in metres')).toHaveTextContent('0 m');
+    expect(screen.getByTitle('Base elevation of F2, in metres')).toHaveTextContent('2.4 m');
   });
 
   it('edits F1 storey height directly', () => {
@@ -170,7 +179,8 @@ describe('FloorPickerDropdown', () => {
     fireEvent.click(screen.getByTitle('Current floor'));
 
     expect(screen.getByRole('option', { name: /F1: Ground/i })).toBeInTheDocument();
-    expect(screen.getByLabelText('Storey height for F1: Ground in metres')).toHaveValue('0');
+    expect(screen.getByLabelText('Storey height for F1: Ground in metres')).toHaveValue('');
+    expect(screen.getByTitle('Base elevation of F1: Ground, in metres')).toHaveTextContent('0 m');
     expect(screen.queryByText('No floors yet.')).toBeNull();
   });
 

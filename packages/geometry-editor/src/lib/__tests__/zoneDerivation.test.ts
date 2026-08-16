@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { calculateDerivedHeight, getMaxLineWallHeightOnFloor } from '../zoneDerivation';
+import {
+  calculateDerivedHeight,
+  getCumulativeBaseHeightsByFloorId,
+  getStrictStoreyHeight,
+  getMaxLineWallHeightOnFloor,
+} from '../zoneDerivation';
 
 const LINE_WALL_TYPES = [
   'BuildingElementOpaque',
@@ -121,5 +126,51 @@ describe('getMaxLineWallHeightOnFloor wall filtering', () => {
     ] as unknown as Element[];
 
     expect(getMaxLineWallHeightOnFloor(0, elements)).toBe(2.85);
+  });
+});
+
+describe('getStrictStoreyHeight source resolution', () => {
+  it('does not inherit a height from another floor or a stored fallback', () => {
+    const lowerFloor = { id: 'floor-0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false };
+    const upperFloor = { id: 'floor-1', name: 'First', zIndex: 1, height: 2.4, isRoofSpace: false };
+    const lowerWall = {
+      id: 'lower-wall',
+      name: 'Lower wall',
+      type: 'BuildingElementOpaque',
+      height: 2.4,
+      width: 4,
+      pitch: 90,
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      parent_element: null,
+    } as unknown as Element;
+
+    expect(getStrictStoreyHeight(upperFloor, [lowerWall])).toBe(0);
+    expect(getStrictStoreyHeight({ ...upperFloor, height: 3.1 }, [])).toBe(0);
+    expect(getStrictStoreyHeight({ ...upperFloor, height: 3.1, heightUserOverride: true }, [])).toBe(3.1);
+    expect(getStrictStoreyHeight(lowerFloor, [lowerWall])).toBe(2.4);
+  });
+
+  it('keeps an upper base unresolved when an intervening floor has no strict height', () => {
+    const modelFloors = [
+      { id: 'floor-0', name: 'Ground', zIndex: 0, height: 2.4, isRoofSpace: false },
+      { id: 'floor-1', name: 'First', zIndex: 1, height: 3.1, isRoofSpace: false },
+      { id: 'floor-2', name: 'Second', zIndex: 2, height: 2.4, isRoofSpace: false },
+    ];
+    const lowerWall = {
+      id: 'lower-wall',
+      name: 'Lower wall',
+      type: 'BuildingElementOpaque',
+      height: 2.4,
+      width: 4,
+      pitch: 90,
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      parent_element: null,
+    } as unknown as Element;
+
+    const bases = getCumulativeBaseHeightsByFloorId(modelFloors, [lowerWall]);
+
+    expect(bases.get('floor-0')).toBe(0);
+    expect(bases.get('floor-1')).toBe(2.4);
+    expect(bases.get('floor-2')).toBeNull();
   });
 });

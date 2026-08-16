@@ -48,6 +48,7 @@ import { partFInputFromContext, type PartFFinding } from './partF/rules';
 import type { Floor } from '../types';
 import {
   calculateDerivedBaseHeight,
+  getCumulativeBaseHeightsByFloorId,
   getEffectiveStoreyHeight,
   isVerticalLineWall,
   withEffectiveStoreyHeights,
@@ -129,10 +130,12 @@ type FloorStackInterval = {
 };
 
 export function getFloorStackWarningElementIds(elements: Element[], floors: Floor[]): Set<string> {
-  if (floors.length < 2) return new Set();
+  if (floors.length === 0) return new Set();
 
-  const effectiveFloors = withEffectiveStoreyHeights(floors, elements) ?? [];
+  const baseHeightsByFloorId = getCumulativeBaseHeightsByFloorId(floors, elements);
+  const floorByZ = new Map(floors.map((floor) => [floor.zIndex, floor]));
   const byFloorZ = new Map<number, FloorStackInterval[]>();
+  const affectedElementIds = new Set<string>();
 
   for (const element of elements) {
     if (!isVerticalLineWall(element)) continue;
@@ -150,26 +153,39 @@ export function getFloorStackWarningElementIds(elements: Element[], floors: Floo
     }
 
     const floorZ = Math.floor(firstPoint.z);
-    if (!floors.some((floor) => floor.zIndex === floorZ)) continue;
-    const slabM = calculateDerivedBaseHeight(firstPoint.z, effectiveFloors);
+    const floor = floorByZ.get(floorZ);
+    if (!floor) continue;
+    const slabM = baseHeightsByFloorId.get(floor.id) ?? null;
     const authoredBase = (element as { base_height?: unknown; _base_height?: unknown });
-    const authoredBaseM =
-      typeof authoredBase.base_height === 'number' && Number.isFinite(authoredBase.base_height)
-        ? authoredBase.base_height
-        : typeof authoredBase._base_height === 'number' && Number.isFinite(authoredBase._base_height)
-          ? authoredBase._base_height
-          : slabM;
+    const authoredBaseM = typeof authoredBase.base_height === 'number' && Number.isFinite(authoredBase.base_height)
+      ? authoredBase.base_height
+      : typeof authoredBase._base_height === 'number' && Number.isFinite(authoredBase._base_height)
+        ? authoredBase._base_height
+        : null;
+
+    // A floor-height override is valid by itself. The warning belongs to the element only when
+    // its authored bottom is actually separated from or below the slab that the floor stack
+    // resolves to. An unresolved slab is deliberately not replaced with a guessed elevation.
+    if (
+      authoredBaseM !== null &&
+      slabM !== null &&
+      Math.abs(authoredBaseM - slabM) > FLOOR_STACK_TOLERANCE_M
+    ) {
+      affectedElementIds.add(element.id);
+    }
+
+    const bottomM = authoredBaseM ?? slabM;
+    if (bottomM === null) continue;
 
     const intervals = byFloorZ.get(floorZ) ?? [];
     intervals.push({
       elementId: element.id,
-      bottomM: authoredBaseM,
-      topM: authoredBaseM + height,
+      bottomM,
+      topM: bottomM + height,
     });
     byFloorZ.set(floorZ, intervals);
   }
 
-  const affectedElementIds = new Set<string>();
   for (const floor of floors) {
     const lower = byFloorZ.get(floor.zIndex);
     const upper = byFloorZ.get(floor.zIndex + 1);
