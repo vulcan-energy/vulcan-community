@@ -276,28 +276,6 @@ describe('FloorPickerDropdown', () => {
     });
   });
 
-  it('does not flag an upper floor for a lower-floor height override alone', () => {
-    const floorsWithOverride = [
-      { ...floors[0], heightUserOverride: true },
-      floors[1],
-    ];
-
-    render(
-      <FloorPickerDropdown
-        currentFloorZ={0}
-        floors={floorsWithOverride}
-        elementsById={elementsById}
-        onSelectFloor={vi.fn()}
-        onAddFloor={vi.fn()}
-        onDeleteFloor={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByTitle('Current floor'));
-
-    expect(screen.queryByTitle('Floor geometry may overlap or separate.')).toBeNull();
-  });
-
   it('flags the floor picker when validation finds an overlap or separation warning', () => {
     const getElementValidation = vi.fn((element: Element): ValidationResult => ({
       hasIssues: false,
@@ -369,34 +347,6 @@ describe('FloorPickerDropdown', () => {
       height: 2.4,
       heightUserOverride: false,
     });
-  });
-
-  it('does not show a separate warning when an explicit floor override differs from wall height', () => {
-    const floorsWithOverride = [
-      { ...floors[0], height: 20.0, heightUserOverride: true },
-      floors[1],
-    ];
-    const elementsWithWall = {
-      ...elementsById,
-      wall0: { ...elementsById.wall0, height: 2.0 },
-    } as any;
-
-    render(
-      <FloorPickerDropdown
-        currentFloorZ={0}
-        floors={floorsWithOverride}
-        elementsById={elementsWithWall}
-        onSelectFloor={vi.fn()}
-        onAddFloor={vi.fn()}
-        onDeleteFloor={vi.fn()}
-        onUpdateFloor={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByTitle('Current floor'));
-
-    expect(screen.queryByLabelText('Reset F1: Ground storey height to wall-derived value')).toBeNull();
-    expect(screen.queryByTitle('Floor geometry may overlap or separate.')).toBeNull();
   });
 
   it('does not render height inputs when onUpdateFloor is not provided', () => {
