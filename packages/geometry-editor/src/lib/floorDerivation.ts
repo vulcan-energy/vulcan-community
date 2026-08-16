@@ -2,8 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, Floor } from '../geometry/types';
-import type { FloorHeightOverrideRow } from '../geometry/io/parseCsvToGeometry';
-import { FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR } from './overrideProvenance';
+import type {
+  FloorBaseHeightOverrideRow,
+  FloorHeightOverrideRow,
+} from '../geometry/io/parseCsvToGeometry';
+import {
+  FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
+  FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR,
+} from './overrideProvenance';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -52,5 +58,30 @@ export function applyFloorHeightOverrides(
     return floor[FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR.flag]
       ? { ...floor, [FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR.flag]: false }
       : floor;
+  });
+}
+
+/** Apply persisted explicit floor base elevations; old models without these rows retain derived bases. */
+export function applyFloorBaseHeightOverrides(
+  floors: Floor[],
+  overrides: readonly FloorBaseHeightOverrideRow[],
+): Floor[] {
+  const overrideBaseByZIndex = new Map(overrides.map((override) => [override.zIndex, override.baseHeight]));
+  return floors.map((floor) => {
+    const baseHeight = overrideBaseByZIndex.get(floor.zIndex);
+    if (baseHeight !== undefined) {
+      return {
+        ...floor,
+        baseHeight,
+        [FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR.flag]: true,
+      };
+    }
+    if (floor[FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR.flag] || floor.baseHeight !== undefined) {
+      const withoutBase = { ...floor };
+      delete withoutBase.baseHeight;
+      delete withoutBase.baseHeightUserOverride;
+      return withoutBase;
+    }
+    return floor;
   });
 }

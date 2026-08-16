@@ -494,14 +494,15 @@ export function calculateSuggestedVentilationBaseHeight(
  * Calculate the derived base_height for an element based on its Z-level.
  *
  * base_height = the height above ground of the bottom of the element.
- * Computed as the cumulative sum of `floor.height` for every floor below the element's floor.
+ * Computed from an explicit floor base when present, otherwise as the cumulative sum of
+ * `floor.height` for every floor below the element's floor.
  *
  * `floor.height` here is expected to be the *effective* storey height — callers should pre-process
  * with {@link withEffectiveStoreyHeights} so wall-derived heights and user overrides are baked in.
  *
- * For Z=0: returns 0.
- * For Z=N (N>=1): sum of `floor.height` for floors 0..N-1.
- * For Z=-N: negative sum of `floor.height` for floors -N..-1.
+ * For Z=0: returns the explicit F1 base when present, otherwise 0.
+ * For Z=N (N>=1): uses the explicit base for FN when present, otherwise the stack below it.
+ * For Z=-N: uses the explicit base for F-N when present, otherwise the stack above it.
  * Missing floors contribute 0 — callers should `ensureFloorForZ` first. For user-facing base
  * elevation display and validation, use {@link getCumulativeBaseHeightsByFloorId}, which keeps
  * an unresolved base distinct from a real zero elevation.
@@ -511,19 +512,29 @@ export function calculateDerivedBaseHeight(
   floors: Floor[],
 ): number {
   const floorZIndex = Math.floor(elementZ);
-  if (floorZIndex === 0) return 0;
+  const floorByZ = new Map(floors.map((floor) => [floor.zIndex, floor]));
+  const explicitBase = (floor: Floor | undefined): number | undefined => {
+    if (!floor || floor.baseHeightUserOverride !== true) return undefined;
+    return Number.isFinite(floor.baseHeight) ? floor.baseHeight : undefined;
+  };
+  const heightOf = (floor: Floor | undefined): number =>
+    floor && Number.isFinite(floor.height) && floor.height > 0 ? floor.height : 0;
 
-  let baseHeight = 0;
+  let baseHeight = explicitBase(floorByZ.get(0)) ?? 0;
+  if (floorZIndex === 0) return roundToTwoDecimals(baseHeight);
+
   if (floorZIndex > 0) {
     for (let z = 0; z < floorZIndex; z++) {
-      const floor = floors.find((f) => f.zIndex === z);
-      if (floor && Number.isFinite(floor.height) && floor.height > 0) baseHeight += floor.height;
+      const floor = floorByZ.get(z);
+      baseHeight = explicitBase(floor) ?? baseHeight;
+      baseHeight += heightOf(floor);
     }
-  } else {
-    for (let z = -1; z >= floorZIndex; z--) {
-      const floor = floors.find((f) => f.zIndex === z);
-      if (floor && Number.isFinite(floor.height) && floor.height > 0) baseHeight -= floor.height;
-    }
+    return roundToTwoDecimals(explicitBase(floorByZ.get(floorZIndex)) ?? baseHeight);
+  }
+
+  for (let z = -1; z >= floorZIndex; z--) {
+    const floor = floorByZ.get(z);
+    baseHeight = explicitBase(floor) ?? baseHeight - heightOf(floor);
   }
   return roundToTwoDecimals(baseHeight);
 }
@@ -563,6 +574,34 @@ export function getStrictStoreyHeight(floor: Floor, elements: Element[]): number
   const ownWalls = getMaxLineWallHeightOnFloor(floor.zIndex, elements);
   if (ownWalls > 0) return roundToTwoDecimals(ownWalls);
   return 0;
+}
+
+/**
+ * Existing authored wall bases are the strongest source for a floor's initial Base value. Only
+ * qualifying vertical line walls participate, matching strict storey-height derivation; windows,
+ * doors, slopes and other element types must not seed a floor base. A disagreement is left
+ * unresolved rather than hiding the element-specific floor-stack warning behind an arbitrary pick.
+ */
+function getConsistentAuthoredBaseHeightOnFloor(
+  floorZIndex: number,
+  elements: Element[],
+): number | undefined {
+  const authoredBases: number[] = [];
+  for (const element of elements) {
+    if (!isVerticalLineWall(element)) continue;
+    const elementFloorZ = Math.floor(element.coordinates[0]?.z ?? 0);
+    if (elementFloorZ !== floorZIndex) continue;
+    const record = element as { base_height?: unknown; _base_height?: unknown };
+    const value = Number.isFinite(record.base_height)
+      ? record.base_height
+      : Number.isFinite(record._base_height)
+        ? record._base_height
+        : undefined;
+    if (typeof value === 'number') authoredBases.push(value);
+  }
+  if (authoredBases.length === 0) return undefined;
+  const first = authoredBases[0]!;
+  return authoredBases.every((value) => Math.abs(value - first) <= 0.05) ? roundToTwoDecimals(first) : undefined;
 }
 
 /**
@@ -610,50 +649,82 @@ export function withEffectiveStoreyHeights<T extends Floor[] | undefined>(
 }
 
 /**
- * Cumulative base height (slab elevation) per floor — Floor 0 = 0, Floor N = sum of effective
- * storey heights for floors 0..N-1, basement floors are negative cumulative heights below
- * ground. Keyed by floor id for stable lookup. A non-ground floor is `null` when any required
- * lower floor is missing or has no resolvable height; this prevents an unknown elevation being
- * presented as a real zero or being silently filled from another floor.
+ * Base elevation (slab elevation) per floor, keyed by floor id for stable lookup. Precedence is:
+ * an explicit floor base, a consistent authored base from qualifying vertical line elements on
+ * that floor (legacy-model prefill), then the resolvable floor stack. A non-ground floor is
+ * `null` when neither authored data nor every required adjacent floor height can resolve it;
+ * this prevents an unknown elevation being presented as a real zero or silently guessed.
  */
 export function getCumulativeBaseHeightsByFloorId(
   floors: Floor[],
   elements: Element[],
 ): Map<string, number | null> {
-  const effectiveFloors = floors.map((floor) => ({
-    ...floor,
-    height: getStrictStoreyHeight(floor, elements),
-  }));
   const byId = new Map<string, number | null>();
-  for (const floor of floors) {
-    if (floor.zIndex === 0) {
-      byId.set(floor.id, 0);
+  const effectiveHeightByZ = new Map(
+    floors.map((floor) => [floor.zIndex, getStrictStoreyHeight(floor, elements)]),
+  );
+  const floorByZ = new Map(floors.map((floor) => [floor.zIndex, floor]));
+  const authoredBaseByZ = new Map(
+    floors.map((floor) => [floor.zIndex, getConsistentAuthoredBaseHeightOnFloor(floor.zIndex, elements)]),
+  );
+  const explicitBase = (floor: Floor | undefined): number | undefined => {
+    if (!floor || floor.baseHeightUserOverride !== true) return undefined;
+    return Number.isFinite(floor.baseHeight) ? floor.baseHeight : undefined;
+  };
+
+  const setBase = (floor: Floor, baseHeight: number | null): void => {
+    byId.set(floor.id, baseHeight === null ? null : roundToTwoDecimals(baseHeight));
+  };
+
+  const ground = floorByZ.get(0);
+  if (ground) setBase(ground, explicitBase(ground) ?? authoredBaseByZ.get(0) ?? 0);
+
+  const positiveFloors = floors
+    .filter((floor) => floor.zIndex > 0)
+    .sort((a, b) => a.zIndex - b.zIndex);
+  for (const floor of positiveFloors) {
+    const authored = explicitBase(floor);
+    if (authored !== undefined) {
+      setBase(floor, authored);
       continue;
     }
-
-    let baseHeight = 0;
-    let resolvable = true;
-    if (floor.zIndex > 0) {
-      for (let z = 0; z < floor.zIndex; z++) {
-        const lowerFloor = effectiveFloors.find((candidate) => candidate.zIndex === z);
-        if (!lowerFloor || !Number.isFinite(lowerFloor.height) || lowerFloor.height <= 0) {
-          resolvable = false;
-          break;
-        }
-        baseHeight += lowerFloor.height;
-      }
-    } else {
-      for (let z = -1; z >= floor.zIndex; z--) {
-        const lowerFloor = effectiveFloors.find((candidate) => candidate.zIndex === z);
-        if (!lowerFloor || !Number.isFinite(lowerFloor.height) || lowerFloor.height <= 0) {
-          resolvable = false;
-          break;
-        }
-        baseHeight -= lowerFloor.height;
-      }
+    const elementBase = authoredBaseByZ.get(floor.zIndex);
+    if (elementBase !== undefined) {
+      setBase(floor, elementBase);
+      continue;
     }
-    byId.set(floor.id, resolvable ? roundToTwoDecimals(baseHeight) : null);
+    const lowerBase = byId.get(floorByZ.get(floor.zIndex - 1)?.id ?? '');
+    const lowerHeight = effectiveHeightByZ.get(floor.zIndex - 1);
+    if (lowerBase === undefined || lowerBase === null || lowerHeight === undefined || lowerHeight <= 0) {
+      setBase(floor, null);
+      continue;
+    }
+    setBase(floor, lowerBase + lowerHeight);
   }
+
+  const basementFloors = floors
+    .filter((floor) => floor.zIndex < 0)
+    .sort((a, b) => b.zIndex - a.zIndex);
+  for (const floor of basementFloors) {
+    const authored = explicitBase(floor);
+    if (authored !== undefined) {
+      setBase(floor, authored);
+      continue;
+    }
+    const elementBase = authoredBaseByZ.get(floor.zIndex);
+    if (elementBase !== undefined) {
+      setBase(floor, elementBase);
+      continue;
+    }
+    const upperBase = byId.get(floorByZ.get(floor.zIndex + 1)?.id ?? '');
+    const ownHeight = effectiveHeightByZ.get(floor.zIndex);
+    if (upperBase === undefined || upperBase === null || ownHeight === undefined || ownHeight <= 0) {
+      setBase(floor, null);
+      continue;
+    }
+    setBase(floor, upperBase - ownHeight);
+  }
+
   return byId;
 }
 
@@ -833,17 +904,6 @@ export function calculateBaseHeightPatchForFloorMove(
 }
 
 /**
- * Tolerance (m) for treating two storey/base values as equal. Used by the floor picker dropdown
- * to (a) auto-clear `heightUserOverride` when the typed value matches the current wall-derived
- * storey height, and (b) decide whether to show the "stale override" warning when walls and the
- * stored override disagree.
- *
- * The floor-stack cascade itself preserves the offset above the old slab for every authored
- * `base_height` — it doesn't use this tolerance as a gate.
- */
-export const BASE_HEIGHT_AUTOSYNC_TOLERANCE_M = 0.01;
-
-/**
  * Tolerance for treating a zone's floorArea (m²) or height (m) as equal to its geometry-derived
  * value when deciding whether a submitted/loaded number is a user override. Lives here — beside
  * the derivations it compares against — so both the store's in-session inference and ioSlice's
@@ -867,7 +927,6 @@ export const ZONE_OVERRIDE_EPSILON = 0.005;
  * Returns null when:
  *   - the element has no coordinates,
  *   - it's a roof-like opaque placeholder (`base_height: 0` keeps that special meaning),
- *   - it's on the ground reference floor (Z = 0),
  *   - the effective slab for its floor didn't change, or
  *   - no `base_height` (or `_base_height`) has been authored yet (nothing to patch).
  */
@@ -881,7 +940,6 @@ export function calculateBaseHeightPatchForFloorStackChange(
   if (isRoofLikeOpaqueBaseHeightPlaceholder(element)) return null;
 
   const floorZ = Math.floor(coordinates[0]?.z ?? 0);
-  if (floorZ === 0) return null;
 
   const oldDerived = calculateDerivedBaseHeight(floorZ, oldFloors);
   const newDerived = calculateDerivedBaseHeight(floorZ, newFloors);

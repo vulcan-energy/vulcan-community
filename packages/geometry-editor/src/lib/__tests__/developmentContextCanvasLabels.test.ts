@@ -17,6 +17,7 @@ const metadata: ParsedCsvMetadata = {
   guideOverlayByFloor: {},
   guideOverlaySourceByFloor: {},
   floorHeightOverrides: [],
+  floorBaseHeightOverrides: [],
   complianceSettings: {},
 };
 

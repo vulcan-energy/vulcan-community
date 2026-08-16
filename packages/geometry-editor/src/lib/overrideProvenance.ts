@@ -81,6 +81,14 @@ export const FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR = {
   since: 0,
 } as const satisfies OverrideDescriptor;
 
+/** Existing metadata transport for an explicitly edited floor slab/base elevation. */
+export const FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR = {
+  flag: 'baseHeightUserOverride',
+  key: 'FloorBaseHeightOverride',
+  positiveSense: true,
+  since: 0,
+} as const satisfies OverrideDescriptor;
+
 export const SPACE_LABEL_NAME_AUTO_SYNC_DESCRIPTOR = {
   flag: '_nameAutoSync',
   key: '_name_auto_sync',
@@ -121,7 +129,7 @@ export const OVERRIDE_PROVENANCE_REGISTRY = {
     ZONE_FLOOR_AREA_OVERRIDE_DESCRIPTOR,
     ZONE_HEIGHT_OVERRIDE_DESCRIPTOR,
   ],
-  floor: [FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR],
+  floor: [FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR, FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR],
   spaceLabel: [SPACE_LABEL_NAME_AUTO_SYNC_DESCRIPTOR],
 } as const satisfies Record<OverrideRecordKind, readonly OverrideDescriptor[]>;
 

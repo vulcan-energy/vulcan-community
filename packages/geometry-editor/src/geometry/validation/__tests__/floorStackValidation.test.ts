@@ -118,9 +118,33 @@ describe('canonical floor-stack validation', () => {
       { id: 'floor-0', name: 'Ground', zIndex: 0, height: 2, heightUserOverride: true, isRoofSpace: false },
       { id: 'floor-1', name: 'First', zIndex: 1, height: 1.5, heightUserOverride: true, isRoofSpace: false },
     ];
+    const lowerWall = wall('lower-wall', 'floor-0', 0, 2, 0);
     const upperWall = wall('upper-wall', 'floor-1', 1, 1.5, baseHeight);
 
-    const result = validateElementCore(upperWall, validationContext([upperWall], modelFloors));
+    const result = validateElementCore(upperWall, validationContext([lowerWall, upperWall], modelFloors));
+
+    expect(result.warnings).toContainEqual(expect.objectContaining({
+      fieldKey: 'floor_stack',
+      message: expect.stringContaining('Floor geometry may overlap or separate.'),
+    }));
+  });
+
+  it('uses an explicit F1 base when checking the wall against its slab', () => {
+    const modelFloors: Floor[] = [
+      {
+        id: 'floor-0',
+        name: 'Ground',
+        zIndex: 0,
+        height: 2,
+        heightUserOverride: true,
+        baseHeight: 0.3,
+        baseHeightUserOverride: true,
+        isRoofSpace: false,
+      },
+    ];
+    const groundWall = wall('ground-wall', 'floor-0', 0, 2, 0);
+
+    const result = validateElementCore(groundWall, validationContext([groundWall], modelFloors));
 
     expect(result.warnings).toContainEqual(expect.objectContaining({
       fieldKey: 'floor_stack',

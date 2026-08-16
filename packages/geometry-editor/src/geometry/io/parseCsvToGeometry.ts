@@ -11,6 +11,7 @@ import {
 import { ingestThermalBridgeLinearPostParse } from '../../lib/thermalBridgeFloorIngest';
 import {
   FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR,
+  FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
   OVERRIDE_PROVENANCE_REGISTRY,
   PARSE_PROMOTED_ELEMENT_OVERRIDE_DESCRIPTORS,
   PROVENANCE_MARKERS_METADATA_KEY,
@@ -98,6 +99,7 @@ function parseAirPermeabilityTestPressure(
  * `Floor.zIndex` — the same key `GuideOverlay`/`GuideOverlaySource` rows use per floor.
  */
 export type FloorHeightOverrideRow = Readonly<{ zIndex: number; height: number }>;
+export type FloorBaseHeightOverrideRow = Readonly<{ zIndex: number; baseHeight: number }>;
 
 export type ParsedCsvMetadata = {
   globalOrientationOffset: number;
@@ -112,6 +114,7 @@ export type ParsedCsvMetadata = {
   guideOverlayByFloor: GuideOverlayByFloor;
   guideOverlaySourceByFloor: GuideOverlaySourceByFloor;
   floorHeightOverrides: readonly FloorHeightOverrideRow[];
+  floorBaseHeightOverrides: readonly FloorBaseHeightOverrideRow[];
   defaultThermalBridging?: number;
   complianceSettings: ComplianceSettings;
   creationDefaultAssemblyIds?: Partial<Record<'wall' | 'roof' | 'ground_floor', string>>;
@@ -168,6 +171,7 @@ export const parseCsvToGeometry = (
   const detectedGuideOverlayByFloor: GuideOverlayByFloor = {};
   const detectedGuideOverlaySourceByFloor: GuideOverlaySourceByFloor = {};
   const detectedFloorHeightOverrides: FloorHeightOverrideRow[] = [];
+  const detectedFloorBaseHeightOverrides: FloorBaseHeightOverrideRow[] = [];
   const detectedZoneOverrideMarkers: Record<string, Record<string, unknown>> = {};
   const zoneOverrideDescriptorsByKey = new Map<string, OverrideDescriptor>(
     OVERRIDE_PROVENANCE_REGISTRY.zone.map((descriptor) => [descriptor.key, descriptor]),
@@ -310,6 +314,21 @@ export const parseCsvToGeometry = (
         const height = Number.parseFloat(heightStr);
         if (Number.isFinite(height)) {
           detectedFloorHeightOverrides.push({ zIndex: Number.parseInt(zIndexStr, 10), height });
+        }
+      }
+      continue;
+    }
+    if (hostMetadataKey === FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR.key) {
+      const parts = parseCsvLine(line);
+      const zIndexStr = (parts[1] ?? '').trim();
+      const baseHeightStr = (parts[2] ?? '').trim();
+      if (/^-?\d+$/.test(zIndexStr)) {
+        const baseHeight = Number.parseFloat(baseHeightStr);
+        if (Number.isFinite(baseHeight)) {
+          detectedFloorBaseHeightOverrides.push({
+            zIndex: Number.parseInt(zIndexStr, 10),
+            baseHeight,
+          });
         }
       }
       continue;
@@ -577,6 +596,7 @@ export const parseCsvToGeometry = (
       guideOverlayByFloor: detectedGuideOverlayByFloor,
       guideOverlaySourceByFloor: detectedGuideOverlaySourceByFloor,
       floorHeightOverrides: detectedFloorHeightOverrides,
+      floorBaseHeightOverrides: detectedFloorBaseHeightOverrides,
       defaultThermalBridging: detectedDefaultThermalBridging,
       complianceSettings,
       ...(Object.keys(creationDefaultAssemblyIds).length > 0 ? { creationDefaultAssemblyIds } : {}),

@@ -87,6 +87,22 @@ FloorHeightOverride,1,not-a-number,,,,,,,,,,,,,
     expect(parsed.metadata.floorHeightOverrides).toEqual([]);
   });
 
+  it('parses FloorBaseHeightOverride metadata rows', () => {
+    const csv = `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0.0,,,,,,,,,,,,,
+FloorBaseHeightOverride,0,0.3,,,,,,,,,,,,,
+FloorBaseHeightOverride,-1,-2.7,,,,,,,,,,,,,
+`.trim();
+
+    const parsed = parseCsvToGeometry(csv);
+
+    expect(parsed.metadata.floorBaseHeightOverrides).toEqual([
+      { zIndex: 0, baseHeight: 0.3 },
+      { zIndex: -1, baseHeight: -2.7 },
+    ]);
+  });
+
   it('parses zone rows whose names begin with "Zone "', () => {
     const csv = `
 Metadata,,,,,,,,,,,,,

@@ -7,7 +7,11 @@ import type {
 } from '../../../geometry-editor-host/src';
 import type { Element, Floor, SpaceLabel, Zone } from '../geometry/types';
 import { parseCsvToGeometry, type ParsedCsvMetadata } from '../geometry/io/parseCsvToGeometry';
-import { applyFloorHeightOverrides, deriveFloorsFromElements } from './floorDerivation';
+import {
+  applyFloorBaseHeightOverrides,
+  applyFloorHeightOverrides,
+  deriveFloorsFromElements,
+} from './floorDerivation';
 
 export type DevelopmentContextProject = GeometryProjectContextProject;
 type GeometryListFilter = Extract<
@@ -106,11 +110,15 @@ export function parseDevelopmentContextModel(stem: string, csvContent: string): 
     deriveFloorsFromElements(parsed.elements),
     parsed.metadata.floorHeightOverrides,
   );
+  const floorsWithBaseOverrides = applyFloorBaseHeightOverrides(
+    floors,
+    parsed.metadata.floorBaseHeightOverrides,
+  );
   return {
     stem: normalizeBaseModelStem(stem),
     elements: parsed.elements,
     zones: parsed.zones,
-    floors,
+    floors: floorsWithBaseOverrides,
     spaceLabels: parsed.spaceLabels,
     metadata: parsed.metadata,
   };
