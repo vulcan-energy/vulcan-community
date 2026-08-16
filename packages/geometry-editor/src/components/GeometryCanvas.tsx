@@ -258,7 +258,11 @@ import {
   resolveDevelopmentModelVerticalContext,
   type DevelopmentContextVerticalRelation,
 } from '../lib/developmentContextShading';
-import { validateElementCore, type ValidationContext } from '../geometry/validation/validateElement';
+import {
+  getFloorStackWarningElementIds,
+  validateElementCore,
+  type ValidationContext,
+} from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import { selectPartFData } from '../geometry/validation/partF/selector';
 import { getOverlapBadgeMenuLayerStyle, type OverlapBadgeMenuAnchor } from '../lib/overlapBadgeMenu';
@@ -2391,6 +2395,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           ? junctionPsiDefaultsMap
           : undefined,
       linearThermalBridgeIssues: findLinearThermalBridgeIssues(elementsForValidation),
+      floorStackWarningElementIds: getFloorStackWarningElementIds(elementsForValidation, floors),
       partFFindings: complianceOn
         ? selectPartFData({
             zones,

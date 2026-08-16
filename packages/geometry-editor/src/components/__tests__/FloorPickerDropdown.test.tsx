@@ -307,8 +307,8 @@ describe('FloorPickerDropdown', () => {
         element.id === 'wall1'
           ? [
               {
-                message: 'Base height 0 m < slab ~2.4 m — use height above ground',
-                fieldKey: 'base_height',
+                message: 'Floor geometry may overlap or separate.',
+                fieldKey: 'floor_stack',
                 source: 'geometry',
               },
             ]
@@ -371,15 +371,14 @@ describe('FloorPickerDropdown', () => {
     });
   });
 
-  it('shows a stale-override warning when walls disagree with an explicit override', () => {
-    const onUpdateFloor = vi.fn();
+  it('does not show a separate warning when an explicit floor override differs from wall height', () => {
     const floorsWithOverride = [
-      { ...floors[0], height: 3.0, heightUserOverride: true },
+      { ...floors[0], height: 20.0, heightUserOverride: true },
       floors[1],
     ];
     const elementsWithWall = {
       ...elementsById,
-      wall0: { ...elementsById.wall0, height: 2.4 },
+      wall0: { ...elementsById.wall0, height: 2.0 },
     } as any;
 
     render(
@@ -390,15 +389,14 @@ describe('FloorPickerDropdown', () => {
         onSelectFloor={vi.fn()}
         onAddFloor={vi.fn()}
         onDeleteFloor={vi.fn()}
-        onUpdateFloor={onUpdateFloor}
+        onUpdateFloor={vi.fn()}
       />,
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    const warningButton = screen.getByLabelText('Reset F1: Ground storey height to wall-derived value');
-    fireEvent.click(warningButton);
 
-    expect(onUpdateFloor).toHaveBeenCalledWith('floor-0', { heightUserOverride: false });
+    expect(screen.queryByLabelText('Reset F1: Ground storey height to wall-derived value')).toBeNull();
+    expect(screen.queryByTitle('Floor geometry may overlap or separate.')).toBeNull();
   });
 
   it('does not render height inputs when onUpdateFloor is not provided', () => {

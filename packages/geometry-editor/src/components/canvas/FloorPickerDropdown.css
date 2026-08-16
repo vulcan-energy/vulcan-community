@@ -141,26 +141,6 @@
   box-shadow: none;
 }
 
-.floor-picker-override-warning {
-  align-self: center;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--validation-warning);
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-.floor-picker-override-warning:hover {
-  background: var(--warning-bg);
-}
-
 .floor-picker-height-shell:focus-within {
   border-color: var(--accent-primary);
   background: var(--surface-control);

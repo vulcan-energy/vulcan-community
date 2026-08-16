@@ -49,6 +49,7 @@ import type { Floor } from '../types';
 import {
   calculateDerivedBaseHeight,
   getEffectiveStoreyHeight,
+  isVerticalLineWall,
   withEffectiveStoreyHeights,
 } from '../../lib/zoneDerivation';
 import { deriveFromHostRoof, isPanelFullyOnRoof } from '../../lib/pvHostDerivation';
@@ -114,6 +115,79 @@ export const schemaIssue = (message: string, fieldKey?: string): ValidationIssue
   ({ message, source: 'schema', fieldKey });
 export const fhsIssue = (message: string, fieldKey?: string): ValidationIssue =>
   ({ message, source: 'fhs', fieldKey });
+
+/** Stable validation metadata shared by canonical validation and the floor-picker projection. */
+export const FLOOR_STACK_WARNING_FIELD_KEY = 'floor_stack';
+export const FLOOR_STACK_WARNING_MESSAGE = 'Floor geometry may overlap or separate.';
+
+const FLOOR_STACK_TOLERANCE_M = 0.05;
+
+type FloorStackInterval = {
+  elementId: string;
+  bottomM: number;
+  topM: number;
+};
+
+export function getFloorStackWarningElementIds(elements: Element[], floors: Floor[]): Set<string> {
+  if (floors.length < 2) return new Set();
+
+  const effectiveFloors = withEffectiveStoreyHeights(floors, elements) ?? [];
+  const byFloorZ = new Map<number, FloorStackInterval[]>();
+
+  for (const element of elements) {
+    if (!isVerticalLineWall(element)) continue;
+    const firstPoint = element.coordinates[0];
+    const height = (element as { height?: unknown }).height;
+    if (
+      !firstPoint ||
+      typeof firstPoint.z !== 'number' ||
+      !Number.isFinite(firstPoint.z) ||
+      typeof height !== 'number' ||
+      !Number.isFinite(height) ||
+      height <= 0
+    ) {
+      continue;
+    }
+
+    const floorZ = Math.floor(firstPoint.z);
+    if (!floors.some((floor) => floor.zIndex === floorZ)) continue;
+    const slabM = calculateDerivedBaseHeight(firstPoint.z, effectiveFloors);
+    const authoredBase = (element as { base_height?: unknown; _base_height?: unknown });
+    const authoredBaseM =
+      typeof authoredBase.base_height === 'number' && Number.isFinite(authoredBase.base_height)
+        ? authoredBase.base_height
+        : typeof authoredBase._base_height === 'number' && Number.isFinite(authoredBase._base_height)
+          ? authoredBase._base_height
+          : slabM;
+
+    const intervals = byFloorZ.get(floorZ) ?? [];
+    intervals.push({
+      elementId: element.id,
+      bottomM: authoredBaseM,
+      topM: authoredBaseM + height,
+    });
+    byFloorZ.set(floorZ, intervals);
+  }
+
+  const affectedElementIds = new Set<string>();
+  for (const floor of floors) {
+    const lower = byFloorZ.get(floor.zIndex);
+    const upper = byFloorZ.get(floor.zIndex + 1);
+    if (!lower || !upper || lower.length === 0 || upper.length === 0) continue;
+
+    // Storey height is defined by the tallest qualifying vertical wall. Compare that lower
+    // envelope with the first upper wall envelope so a real gap or overlap is surfaced, while
+    // a height override with no adjacent geometry remains valid.
+    const lowerTopM = Math.max(...lower.map((interval) => interval.topM));
+    const upperBottomM = Math.min(...upper.map((interval) => interval.bottomM));
+    if (Math.abs(lowerTopM - upperBottomM) <= FLOOR_STACK_TOLERANCE_M) continue;
+
+    lower.forEach((interval) => affectedElementIds.add(interval.elementId));
+    upper.forEach((interval) => affectedElementIds.add(interval.elementId));
+  }
+
+  return affectedElementIds;
+}
 
 function formatNumberForIssue(value: number): string {
   const rounded = roundToTwoDecimals(value);
@@ -242,6 +316,8 @@ export interface ValidationContext {
    * attached when the element id appears in a finding's `affectedElementIds`.
    */
   partFFindings?: readonly PartFFinding[];
+  /** Precomputed floor-stack warnings for model-wide validation callers. */
+  floorStackWarningElementIds?: ReadonlySet<string>;
 }
 
 function jsonSchemaPropertyIsBoolean(
@@ -630,6 +706,11 @@ export const validateElementCore = (
   };
 
   const allElements = elementsById ? Object.values(elementsById) : [];
+  const floorStackWarnings = context.floorStackWarningElementIds
+    ?? (floors ? getFloorStackWarningElementIds(allElements, floors) : new Set<string>());
+  if (floorStackWarnings.has(element.id)) {
+    warnings.push(geo(FLOOR_STACK_WARNING_MESSAGE, FLOOR_STACK_WARNING_FIELD_KEY));
+  }
   const findElementByName = (name: string | null | undefined): Element | undefined => {
     const trimmed = name?.trim();
     return trimmed ? allElements.find((candidate) => candidate.name === trimmed) : undefined;
@@ -2158,6 +2239,9 @@ export const collectGeometryValidation = (
   });
 
   const linearThermalBridgeIssues = findLinearThermalBridgeIssues(elements);
+  const floorStackWarningElementIds = options.floors
+    ? getFloorStackWarningElementIds(elements, options.floors)
+    : new Set<string>();
 
   elements.forEach((element) => {
     if (element.isPlaceholder) return;
@@ -2174,6 +2258,7 @@ export const collectGeometryValidation = (
       defaultsLoading: options.defaultsLoading,
       junctionPsiWorkspaceByType: options.junctionPsiWorkspaceByType,
       linearThermalBridgeIssues,
+      floorStackWarningElementIds,
     });
     warnings.push(...validation.warnings.map(w => w.message));
     criticalIssues.push(...validation.issues.map(i => i.message));
