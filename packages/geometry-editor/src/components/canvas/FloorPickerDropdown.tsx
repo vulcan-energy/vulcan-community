@@ -14,10 +14,7 @@ import {
   FLOOR_STACK_WARNING_MESSAGE,
 } from '../../geometry/validation/validateElement';
 import {
-  BASE_HEIGHT_AUTOSYNC_TOLERANCE_M,
   getCumulativeBaseHeightsByFloorId,
-  getMaxLineWallHeightOnFloor,
-  getStrictStoreyHeight,
 } from '../../lib/zoneDerivation';
 import {
   canvasFloorToFhsStorey,
@@ -35,11 +32,9 @@ interface FloorPickerDropdownProps {
   onAddFloor: (z: number) => void;
   onDeleteFloor: (id: string) => void;
   /**
-   * Apply a floor patch (`height` + `heightUserOverride`) when the user edits a storey height.
+   * Apply a floor patch (`height` + `heightUserOverride`) when the user edits a floor base height.
    */
   onUpdateFloor?: (floorId: string, updates: Partial<Floor>) => void;
-  /** Create the internal floor record when the picker is used before any element exists. */
-  onEnsureFloorForZ?: (z: number) => string;
   /** Reuse element validation to flag real floor-stack overlap/separation warnings. */
   getElementValidation?: (element: Element) => ValidationResult;
   addDisabled?: boolean;
@@ -78,7 +73,6 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   onAddFloor,
   onDeleteFloor,
   onUpdateFloor,
-  onEnsureFloorForZ,
   getElementValidation,
   addDisabled = false,
 }) => {
@@ -87,8 +81,8 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [position, setPosition] = useState({ x: 0, bottom: 0, width: 0 });
   const [pendingDeleteFloor, setPendingDeleteFloor] = useState<FloorRow | null>(null);
-  // Per-row storey-height drafts so users can type freely; commit to store on blur/Enter.
-  const [heightDrafts, setHeightDrafts] = useState<Record<string, string>>({});
+  // Per-row base-height drafts so users can type freely; commit to store on blur/Enter.
+  const [baseDrafts, setBaseDrafts] = useState<Record<string, string>>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const addInputRef = useRef<HTMLInputElement>(null);
@@ -115,20 +109,8 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
     ];
   }, [sortedFloors]);
 
-  // All elements, used by the effective-storey helpers (max wall height, override resolution).
+  // All elements, used by strict floor-stack derivation.
   const allElements = useMemo(() => Object.values(elementsById), [elementsById]);
-
-  /**
-   * Per-floor effective storey heights, computed once per (floors, elements) change.
-   * Without this, every floor row would re-walk `allElements` for the effective storey height.
-   */
-  const heightsByFloorId = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const floor of pickerFloors) {
-      m.set(floor.id, getStrictStoreyHeight(floor, allElements));
-    }
-    return m;
-  }, [pickerFloors, allElements]);
 
   const baseHeightsByFloorId = useMemo(() => {
     const baseHeights = getCumulativeBaseHeightsByFloorId(sortedFloors, allElements);
@@ -184,38 +166,61 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   }, [elementsById, floorRows, getElementValidation]);
 
   /**
-   * Commit a typed storey-height value to the same floor row. Auto-clears the override flag when
-   * the resulting storey matches the wall-derived height.
+   * Commit a typed base height by changing the adjacent storey's stored height. Floor 0 is the
+   * model datum (base 0) and is intentionally read-only; an upper floor's base is controlled by
+   * the storey immediately below it, while a basement floor's base is controlled by itself.
    */
-  const commitStoreyHeight = useCallback(
+  const commitBaseHeight = useCallback(
     (rowFloor: Floor) => {
       const rowKey = rowFloor.id;
-      const draft = heightDrafts[rowKey];
-      setHeightDrafts((prev) => {
+      const draft = baseDrafts[rowKey];
+      setBaseDrafts((prev) => {
         const next = { ...prev };
         delete next[rowKey];
         return next;
       });
       if (draft === undefined) return;
+      if (rowFloor.zIndex === 0) return;
       const parsed = Number.parseFloat(draft);
       if (!Number.isFinite(parsed)) return;
-      const rounded = Math.round(parsed * 100) / 100;
+      const roundedBase = Math.round(parsed * 100) / 100;
+      const floorAtZ = (zIndex: number): Floor | undefined =>
+        sortedFloors.find((floor) => floor.zIndex === zIndex);
+      const baseAtZ = (zIndex: number): number | null => {
+        if (zIndex === 0) return 0;
+        const floor = floorAtZ(zIndex);
+        return floor ? baseHeightsByFloorId.get(floor.id) ?? null : null;
+      };
 
-      const targetFloor = sortedFloors.find((floor) => floor.zIndex === rowFloor.zIndex);
-      const targetFloorId = targetFloor?.id ?? onEnsureFloorForZ?.(rowFloor.zIndex);
-      if (!targetFloorId) return;
+      const targetFloor = rowFloor.zIndex > 0
+        ? floorAtZ(rowFloor.zIndex - 1)
+        : rowFloor;
+      const referenceBase = rowFloor.zIndex > 0
+        ? baseAtZ(rowFloor.zIndex - 1)
+        : baseAtZ(rowFloor.zIndex + 1);
+      if (!targetFloor || referenceBase === null) {
+        setToastMessage('Base height is unresolved until the adjacent floor is set');
+        return;
+      }
 
-      const targetStorey = Math.max(0, rounded);
-      const wallDerived = getMaxLineWallHeightOnFloor(rowFloor.zIndex, allElements);
-      const matchesWalls =
-        wallDerived > 0 && Math.abs(wallDerived - targetStorey) <= BASE_HEIGHT_AUTOSYNC_TOLERANCE_M;
+      const targetStoreyHeight = rowFloor.zIndex > 0
+        ? roundedBase - referenceBase
+        : referenceBase - roundedBase;
+      if (!Number.isFinite(targetStoreyHeight) || targetStoreyHeight <= 0) {
+        setToastMessage(
+          rowFloor.zIndex > 0
+            ? 'Base height must be above the floor below'
+            : 'Base height must be below the floor above',
+        );
+        return;
+      }
 
-      onUpdateFloor?.(targetFloorId, {
-        height: targetStorey,
-        heightUserOverride: !matchesWalls,
+      onUpdateFloor?.(targetFloor.id, {
+        height: Math.round(targetStoreyHeight * 100) / 100,
+        heightUserOverride: true,
       });
     },
-    [heightDrafts, sortedFloors, allElements, onEnsureFloorForZ, onUpdateFloor],
+    [baseDrafts, sortedFloors, baseHeightsByFloorId, onUpdateFloor],
   );
 
   const updatePosition = useCallback(() => {
@@ -304,10 +309,9 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
         {floorRows.map((row) => {
             const isActive = row.floor.zIndex === currentFloorZ;
             const isPlaceholderFloor = !sortedFloors.some((floor) => floor.id === row.floor.id);
-            const effectiveHeight = heightsByFloorId.get(row.floor.id) ?? 0;
-            const heightDraft = heightDrafts[row.floor.id];
-            const heightValueDisplay = heightDraft ?? (effectiveHeight > 0 ? formatMetres(effectiveHeight) : '');
             const baseElevation = baseHeightsByFloorId.get(row.floor.id) ?? null;
+            const baseDraft = baseDrafts[row.floor.id];
+            const baseValueDisplay = baseDraft ?? (baseElevation === null ? '' : formatMetres(baseElevation));
             const hasFloorStackWarning = floorStackWarningsByFloorId.has(row.floor.id);
 
             return (
@@ -339,37 +343,37 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                   </div>
                 </button>
                 {onUpdateFloor ? (
-                  <>
+                  row.floor.zIndex === 0 ? (
                     <div
                       className="floor-picker-height-shell floor-picker-height-shell-readonly"
                     >
                       <span className="floor-picker-metric-label">Base</span>
                       <span
                         className="floor-picker-metric-value"
-                        title={`Base elevation of ${floorLabel(row.floor.zIndex)}, in metres`}
-                        aria-label={`Base elevation of ${floorLabel(row.floor.zIndex)} in metres`}
+                        title={`Base height of ${floorLabel(row.floor.zIndex)}, in metres`}
+                        aria-label={`Base height of ${floorLabel(row.floor.zIndex)} in metres`}
                       >
                         {baseElevation === null ? '—' : formatMetres(baseElevation)}
                         {' m'}
                       </span>
                     </div>
+                  ) : (
                     <label
                       className="floor-picker-height-shell"
-                      title={`Storey height of ${floorLabel(row.floor.zIndex)}, in metres`}
+                      title={`Base height of ${floorLabel(row.floor.zIndex)}, in metres`}
                       onClick={(event) => event.stopPropagation()}
                     >
-                      <span className="floor-picker-metric-label">Height</span>
+                      <span className="floor-picker-metric-label">Base</span>
                       <DraftSafeNumberInput
                         step="0.05"
-                        min={0}
                         className="floor-picker-height-input"
-                        aria-label={`Storey height for ${floorLabel(row.floor.zIndex)} in metres`}
-                        value={heightValueDisplay}
+                        aria-label={`Base height for ${floorLabel(row.floor.zIndex)} in metres`}
+                        value={baseValueDisplay}
                         placeholder="—"
                         onChange={(event) =>
-                          setHeightDrafts((prev) => ({ ...prev, [row.floor.id]: event.target.value }))
+                          setBaseDrafts((prev) => ({ ...prev, [row.floor.id]: event.target.value }))
                         }
-                        onBlur={() => commitStoreyHeight(row.floor)}
+                        onBlur={() => commitBaseHeight(row.floor)}
                         onKeyDown={(event) => {
                           if (event.key === 'Enter') {
                             event.preventDefault();
@@ -379,7 +383,7 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                       />
                       <span className="floor-picker-height-unit">m</span>
                     </label>
-                  </>
+                  )
                 ) : null}
                 {!isPlaceholderFloor && <button
                   type="button"
