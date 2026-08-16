@@ -95,8 +95,8 @@ describe('canonical floor-stack validation', () => {
 
   it('does not warn for an override alone or for excluded non-vertical geometry', () => {
     const lowerWall = wall('lower-wall', 'floor-0', 0, 2);
-    const pitchedWall = { ...wall('pitched-wall', 'floor-1', 1, 8, 4), pitch: 30 };
-    const windowLike = { ...wall('window-like', 'floor-1', 1, 8, 4), type: 'BuildingElementOpaque' as const, is_external_door: true };
+    const pitchedWall = { ...wall('pitched-wall', 'floor-1', 1, 8, 0), pitch: 30 };
+    const windowLike = { ...wall('window-like', 'floor-1', 1, 8, 0), type: 'BuildingElementOpaque' as const, is_external_door: true };
 
     const result = validateElementCore(
       lowerWall,
@@ -104,5 +104,27 @@ describe('canonical floor-stack validation', () => {
     );
 
     expect(result.warnings.some((warning) => warning.fieldKey === 'floor_stack')).toBe(false);
+
+    const alignedUpperWall = wall('aligned-upper-wall', 'floor-1', 1, 2, 4);
+    const alignedResult = validateElementCore(
+      alignedUpperWall,
+      validationContext([alignedUpperWall]),
+    );
+    expect(alignedResult.warnings.some((warning) => warning.fieldKey === 'floor_stack')).toBe(false);
+  });
+
+  it.each([1.5, 2.5])('warns when a qualifying wall is %s m away from its floor slab', (baseHeight) => {
+    const modelFloors: Floor[] = [
+      { id: 'floor-0', name: 'Ground', zIndex: 0, height: 2, heightUserOverride: true, isRoofSpace: false },
+      { id: 'floor-1', name: 'First', zIndex: 1, height: 1.5, heightUserOverride: true, isRoofSpace: false },
+    ];
+    const upperWall = wall('upper-wall', 'floor-1', 1, 1.5, baseHeight);
+
+    const result = validateElementCore(upperWall, validationContext([upperWall], modelFloors));
+
+    expect(result.warnings).toContainEqual(expect.objectContaining({
+      fieldKey: 'floor_stack',
+      message: expect.stringContaining('Floor geometry may overlap or separate.'),
+    }));
   });
 });

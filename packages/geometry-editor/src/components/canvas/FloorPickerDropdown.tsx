@@ -15,8 +15,9 @@ import {
 } from '../../geometry/validation/validateElement';
 import {
   BASE_HEIGHT_AUTOSYNC_TOLERANCE_M,
-  getEffectiveStoreyHeight,
+  getCumulativeBaseHeightsByFloorId,
   getMaxLineWallHeightOnFloor,
+  getStrictStoreyHeight,
 } from '../../lib/zoneDerivation';
 import {
   canvasFloorToFhsStorey,
@@ -124,10 +125,20 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   const heightsByFloorId = useMemo(() => {
     const m = new Map<string, number>();
     for (const floor of pickerFloors) {
-      m.set(floor.id, getEffectiveStoreyHeight(floor, allElements));
+      m.set(floor.id, getStrictStoreyHeight(floor, allElements));
     }
     return m;
   }, [pickerFloors, allElements]);
+
+  const baseHeightsByFloorId = useMemo(() => {
+    const baseHeights = getCumulativeBaseHeightsByFloorId(sortedFloors, allElements);
+    // The synthetic ground row is a real zero elevation for display, but it must not make a
+    // missing real lower floor look resolvable when calculating the base of an upper floor.
+    if (!sortedFloors.some((floor) => floor.zIndex === 0)) {
+      baseHeights.set('__ground-floor-placeholder__', 0);
+    }
+    return baseHeights;
+  }, [sortedFloors, allElements]);
 
   const floorRows = useMemo<FloorRow[]>(() => {
     return pickerFloors.map((floor) => {
@@ -295,7 +306,8 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
             const isPlaceholderFloor = !sortedFloors.some((floor) => floor.id === row.floor.id);
             const effectiveHeight = heightsByFloorId.get(row.floor.id) ?? 0;
             const heightDraft = heightDrafts[row.floor.id];
-            const heightValueDisplay = heightDraft ?? formatMetres(effectiveHeight);
+            const heightValueDisplay = heightDraft ?? (effectiveHeight > 0 ? formatMetres(effectiveHeight) : '');
+            const baseElevation = baseHeightsByFloorId.get(row.floor.id) ?? null;
             const hasFloorStackWarning = floorStackWarningsByFloorId.has(row.floor.id);
 
             return (
@@ -327,30 +339,47 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                   </div>
                 </button>
                 {onUpdateFloor ? (
-                  <label
-                    className="floor-picker-height-shell"
-                    title={`Storey height of ${floorLabel(row.floor.zIndex)}, in metres`}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <DraftSafeNumberInput
-                      step="0.05"
-                      min={0}
-                      className="floor-picker-height-input"
-                      aria-label={`Storey height for ${floorLabel(row.floor.zIndex)} in metres`}
-                      value={heightValueDisplay}
-                      onChange={(event) =>
-                        setHeightDrafts((prev) => ({ ...prev, [row.floor.id]: event.target.value }))
-                      }
-                      onBlur={() => commitStoreyHeight(row.floor)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          (event.currentTarget as HTMLInputElement).blur();
+                  <>
+                    <div
+                      className="floor-picker-height-shell floor-picker-height-shell-readonly"
+                    >
+                      <span className="floor-picker-metric-label">Base</span>
+                      <span
+                        className="floor-picker-metric-value"
+                        title={`Base elevation of ${floorLabel(row.floor.zIndex)}, in metres`}
+                        aria-label={`Base elevation of ${floorLabel(row.floor.zIndex)} in metres`}
+                      >
+                        {baseElevation === null ? '—' : formatMetres(baseElevation)}
+                        {' m'}
+                      </span>
+                    </div>
+                    <label
+                      className="floor-picker-height-shell"
+                      title={`Storey height of ${floorLabel(row.floor.zIndex)}, in metres`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <span className="floor-picker-metric-label">Height</span>
+                      <DraftSafeNumberInput
+                        step="0.05"
+                        min={0}
+                        className="floor-picker-height-input"
+                        aria-label={`Storey height for ${floorLabel(row.floor.zIndex)} in metres`}
+                        value={heightValueDisplay}
+                        placeholder="—"
+                        onChange={(event) =>
+                          setHeightDrafts((prev) => ({ ...prev, [row.floor.id]: event.target.value }))
                         }
-                      }}
-                    />
-                    <span className="floor-picker-height-unit">m</span>
-                  </label>
+                        onBlur={() => commitStoreyHeight(row.floor)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            (event.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                      />
+                      <span className="floor-picker-height-unit">m</span>
+                    </label>
+                  </>
                 ) : null}
                 {!isPlaceholderFloor && <button
                   type="button"
