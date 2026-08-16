@@ -4,6 +4,7 @@
 import React, { memo, useCallback, useEffect, useMemo } from 'react';
 import type { DrawMode } from '../../hooks/useDrawingMode';
 import type { Element, ElementType, Floor } from '../../geometry/types';
+import type { ValidationResult } from '../../geometry/validation/types';
 import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { StandardDropdown } from '../StandardDropdown';
@@ -83,6 +84,7 @@ export interface DrawToolbarProps {
   ensureFloorForZ: (z: number) => string;
   removeFloor: (id: string) => void;
   updateFloor: (id: string, updates: Partial<Floor>) => void;
+  getElementValidation?: (element: Element) => ValidationResult;
   setDrawPoints: (points: Array<{ x: number; y: number }>) => void;
   setRoomWalls: (walls: Array<{ x: number; y: number }>) => void;
   setRoomWallElements: (ids: string[]) => void;
@@ -125,6 +127,7 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   ensureFloorForZ,
   removeFloor,
   updateFloor,
+  getElementValidation,
   setDrawPoints,
   setRoomWalls,
   setRoomWallElements,
@@ -329,6 +332,8 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
           }}
           onDeleteFloor={removeFloor}
           onUpdateFloor={(id, updates) => updateFloor(id, updates)}
+          onEnsureFloorForZ={ensureFloorForZ}
+          getElementValidation={getElementValidation}
           addDisabled={in3D}
         />
         <StandardDropdown

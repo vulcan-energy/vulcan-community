@@ -197,6 +197,15 @@ const LINE_WALL_TYPES: Array<Element['type']> = [
   'BuildingElementPartyWall',
 ];
 
+function isVerticalLineWall(element: Element): boolean {
+  if (!LINE_WALL_TYPES.includes(element.type)) return false;
+  if (!element.coordinates || element.coordinates.length !== 2) return false;
+  if (element.type === 'BuildingElementOpaque' && element.is_external_door === true) return false;
+
+  const pitch = (element as { pitch?: number }).pitch;
+  return typeof pitch !== 'number' || pitch === 90;
+}
+
 /**
  * Per-floor weighted-average line-wall height (m) for each Z-level that has contributing walls.
  * Same wall filtering as {@link calculateDerivedHeight}.
@@ -204,12 +213,7 @@ const LINE_WALL_TYPES: Array<Element['type']> = [
 export function getPerFloorLineWallAverageHeights(zoneId: string, elements: Element[]): Map<number, number> {
   const lineWalls = elements.filter((el) => {
     if ((el as any).zoneId !== zoneId) return false;
-    if (!LINE_WALL_TYPES.includes(el.type)) return false;
-    if (!el.coordinates || el.coordinates.length !== 2) return false;
-    if (el.type === 'BuildingElementOpaque' && el.is_external_door === true) return false;
-
-    const pitch = (el as { pitch?: number }).pitch;
-    return typeof pitch !== 'number' || pitch === 90;
+    return isVerticalLineWall(el);
   });
 
   const byFloor = new Map<number, typeof lineWalls>();
@@ -522,36 +526,21 @@ export function calculateDerivedBaseHeight(
   return roundToTwoDecimals(baseHeight);
 }
 
-/** Element types that contribute to wall-derived storey height (vertical fabric only). */
-const STOREY_HEIGHT_WALL_TYPES: ReadonlySet<Element['type']> = new Set([
-  'BuildingElementOpaque',
-  'BuildingElementAdjacentConditionedSpace',
-  'BuildingElementAdjacentUnconditionedSpace_Simple',
-  'BuildingElementPartyWall',
-]);
-
 /**
  * Max effective wall height for line walls on a given floor. Returns 0 when no qualifying walls
- * exist. Pitched walls contribute `height × sin(pitch)` (vertical projection); horizontal surfaces
- * (pitch 0 / 180) are excluded — those are roofs/ceilings, not walls. Polygon walls are excluded
- * because their `height` field is synthetic (sqrt(area)) and not physically meaningful.
+ * exist. This uses the same vertical line-wall filtering as zone-height derivation: pitched and
+ * horizontal surfaces, polygon walls, windows, and external doors are excluded. Polygon walls are
+ * excluded because their `height` field is synthetic (sqrt(area)) and not physically meaningful.
  */
 export function getMaxLineWallHeightOnFloor(floorZIndex: number, elements: Element[]): number {
   let max = 0;
   for (const el of elements) {
-    if (!STOREY_HEIGHT_WALL_TYPES.has(el.type)) continue;
-    if (!el.coordinates || el.coordinates.length !== 2) continue;
+    if (!isVerticalLineWall(el)) continue;
     const z = Math.floor(el.coordinates[0]?.z ?? 0);
     if (z !== floorZIndex) continue;
     const h = (el as { height?: unknown }).height;
     if (typeof h !== 'number' || !Number.isFinite(h) || h <= 0) continue;
-    const pitch = (el as { pitch?: unknown }).pitch;
-    let effective = h;
-    if (typeof pitch === 'number' && Number.isFinite(pitch)) {
-      if (pitch === 0 || pitch === 180) continue; // horizontal surface, not a wall
-      if (pitch !== 90) effective = h * Math.sin((pitch * Math.PI) / 180);
-    }
-    if (effective > max) max = effective;
+    if (h > max) max = h;
   }
   return max;
 }
@@ -561,7 +550,7 @@ export function getMaxLineWallHeightOnFloor(floorZIndex: number, elements: Eleme
  *
  * Resolution order:
  * 1. If `floor.heightUserOverride === true` → return the user-typed `floor.height` (sticky override).
- * 2. Else if line walls exist on this floor → return their max effective height (with pitch projection).
+ * 2. Else if vertical line walls exist on this floor → return their maximum height.
  * 3. Else if any floor between this floor and ground has line walls → return the closest one's
  *    max wall height. Typical storeys are uniform; this lets a new upper/basement floor inherit
  *    the building's normal storey height until walls are drawn on it.

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { calculateDerivedHeight } from '../zoneDerivation';
+import { calculateDerivedHeight, getMaxLineWallHeightOnFloor } from '../zoneDerivation';
 
 const LINE_WALL_TYPES = [
   'BuildingElementOpaque',
@@ -70,5 +70,56 @@ describe('calculateDerivedHeight wall filtering', () => {
     ] as unknown as Element[];
 
     expect(calculateDerivedHeight('zone-pitch-filter', elements)).toBe(2.85);
+  });
+});
+
+describe('getMaxLineWallHeightOnFloor wall filtering', () => {
+  it('uses only vertical fabric lines, excluding slopes, windows, and external doors', () => {
+    const elements = [
+      {
+        id: 'vertical-wall',
+        name: 'Vertical wall',
+        type: 'BuildingElementOpaque',
+        height: 2.85,
+        width: 4,
+        pitch: 90,
+        is_external_door: false,
+        coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+        parent_element: null,
+      },
+      {
+        id: 'pitched-wall',
+        name: 'Pitched wall',
+        type: 'BuildingElementOpaque',
+        height: 8,
+        width: 4,
+        pitch: 30,
+        coordinates: [{ x: 0, y: 1, z: 0 }, { x: 4, y: 1, z: 0 }],
+        parent_element: null,
+      },
+      {
+        id: 'external-door',
+        name: 'External door',
+        type: 'BuildingElementOpaque',
+        height: 4,
+        width: 1,
+        pitch: 90,
+        is_external_door: true,
+        coordinates: [{ x: 1, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }],
+        parent_element: 'Vertical wall',
+      },
+      {
+        id: 'window',
+        name: 'Window',
+        type: 'BuildingElementTransparent',
+        height: 6,
+        width: 2,
+        pitch: 90,
+        coordinates: [{ x: 1, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }],
+        parent_element: 'Vertical wall',
+      },
+    ] as unknown as Element[];
+
+    expect(getMaxLineWallHeightOnFloor(0, elements)).toBe(2.85);
   });
 });
