@@ -10,6 +10,10 @@ import { getElementCanvasFloorZValue } from '../../lib/elementCanvasFloor';
 import type { Element, Floor } from '../../geometry/types';
 import type { ValidationIssue, ValidationResult } from '../../geometry/validation/types';
 import {
+  FLOOR_STACK_WARNING_FIELD_KEY,
+  FLOOR_STACK_WARNING_MESSAGE,
+} from '../../geometry/validation/validateElement';
+import {
   BASE_HEIGHT_AUTOSYNC_TOLERANCE_M,
   getEffectiveStoreyHeight,
   getMaxLineWallHeightOnFloor,
@@ -30,9 +34,7 @@ interface FloorPickerDropdownProps {
   onAddFloor: (z: number) => void;
   onDeleteFloor: (id: string) => void;
   /**
-   * Apply a floor patch (`height` + `heightUserOverride`). The dropdown uses this for two
-   * actions: typing a storey height (sets override) and clicking the stale-override warning
-   * (clears override, snaps to walls).
+   * Apply a floor patch (`height` + `heightUserOverride`) when the user edits a storey height.
    */
   onUpdateFloor?: (floorId: string, updates: Partial<Floor>) => void;
   /** Create the internal floor record when the picker is used before any element exists. */
@@ -49,14 +51,10 @@ type FloorRow = {
 };
 
 const TOAST_DURATION_MS = 2400;
-const FLOOR_STACK_WARNING = 'Floor geometry may overlap or separate.';
+const FLOOR_STACK_WARNING = FLOOR_STACK_WARNING_MESSAGE;
 
 function isFloorStackWarning(warning: ValidationIssue): boolean {
-  if (warning.source !== 'geometry') return false;
-  if (warning.fieldKey === 'base_height') {
-    return warning.message.includes('< slab') || warning.message.includes('> storey ceiling');
-  }
-  return warning.fieldKey === 'height' && warning.message.startsWith('Top of element ');
+  return warning.source === 'geometry' && warning.fieldKey === FLOOR_STACK_WARNING_FIELD_KEY;
 }
 
 function floorLabel(zIndex: number): string {
@@ -120,18 +118,13 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   const allElements = useMemo(() => Object.values(elementsById), [elementsById]);
 
   /**
-   * Per-floor wall-derived + effective storey heights, computed once per (floors, elements) change.
-   * Without this, every floor row would re-walk `allElements` twice (max wall height + effective
-   * storey) when checking the stale-override warning — O(rows × elements) per render. With the map,
-   * it's O(floors × elements) once.
+   * Per-floor effective storey heights, computed once per (floors, elements) change.
+   * Without this, every floor row would re-walk `allElements` for the effective storey height.
    */
   const heightsByFloorId = useMemo(() => {
-    const m = new Map<string, { wallHeight: number; effective: number }>();
+    const m = new Map<string, number>();
     for (const floor of pickerFloors) {
-      m.set(floor.id, {
-        wallHeight: getMaxLineWallHeightOnFloor(floor.zIndex, allElements),
-        effective: getEffectiveStoreyHeight(floor, allElements),
-      });
+      m.set(floor.id, getEffectiveStoreyHeight(floor, allElements));
     }
     return m;
   }, [pickerFloors, allElements]);
@@ -212,14 +205,6 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
       });
     },
     [heightDrafts, sortedFloors, allElements, onEnsureFloorForZ, onUpdateFloor],
-  );
-
-  /** Clear a floor's override so it snaps back to wall-derived storey height. */
-  const snapFloorToWalls = useCallback(
-    (floor: Floor) => {
-      onUpdateFloor?.(floor.id, { heightUserOverride: false });
-    },
-    [onUpdateFloor],
   );
 
   const updatePosition = useCallback(() => {
@@ -308,21 +293,10 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
         {floorRows.map((row) => {
             const isActive = row.floor.zIndex === currentFloorZ;
             const isPlaceholderFloor = !sortedFloors.some((floor) => floor.id === row.floor.id);
-            const rowHeights = heightsByFloorId.get(row.floor.id);
-            const wallHeight = rowHeights?.wallHeight ?? 0;
-            const effectiveHeight = rowHeights?.effective ?? 0;
+            const effectiveHeight = heightsByFloorId.get(row.floor.id) ?? 0;
             const heightDraft = heightDrafts[row.floor.id];
             const heightValueDisplay = heightDraft ?? formatMetres(effectiveHeight);
             const hasFloorStackWarning = floorStackWarningsByFloorId.has(row.floor.id);
-            const ownerOverrideStale = !!(
-              !isPlaceholderFloor &&
-              row.floor.heightUserOverride === true &&
-              wallHeight > 0 &&
-              Math.abs(wallHeight - effectiveHeight) > BASE_HEIGHT_AUTOSYNC_TOLERANCE_M
-            );
-            const staleTitle = ownerOverrideStale
-              ? `Walls suggest ${formatMetres(wallHeight)} m for ${floorLabel(row.floor.zIndex)}; override is ${formatMetres(effectiveHeight)} m. Click to reset.`
-              : undefined;
 
             return (
               <div key={row.floor.id} className="floor-picker-row-shell">
@@ -352,25 +326,6 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                     </div>
                   </div>
                 </button>
-                {ownerOverrideStale ? (
-                  <button
-                    type="button"
-                    className="floor-picker-override-warning"
-                    title={staleTitle}
-                    aria-label={`Reset ${floorLabel(row.floor.zIndex)} storey height to wall-derived value`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      snapFloorToWalls(row.floor);
-                    }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path
-                        d="M12 3 1.5 21h21L12 3zm0 5 7.5 13h-15L12 8zm-1 4v4h2v-4h-2zm0 5v2h2v-2h-2z"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  </button>
-                ) : null}
                 {onUpdateFloor ? (
                   <label
                     className="floor-picker-height-shell"

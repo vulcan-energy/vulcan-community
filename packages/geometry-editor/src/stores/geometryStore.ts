@@ -57,7 +57,10 @@ import {
   withEffectiveStoreyHeights,
   ZONE_OVERRIDE_EPSILON,
 } from '../lib/zoneDerivation';
-import { validateElementCore } from '../geometry/validation/validateElement';
+import {
+  getFloorStackWarningElementIds,
+  validateElementCore,
+} from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import { validateZone as validateZoneCore } from '../geometry/validation/validateZone';
 import { validateSpaceLabels } from '../geometry/validation/validateSpaceLabels';
@@ -7515,6 +7518,10 @@ const createGeometryState = (
     const linearThermalBridgeIssues = findLinearThermalBridgeIssues(
       Object.values(state.elementsById),
     );
+    const floorStackWarningElementIds = getFloorStackWarningElementIds(
+      Object.values(state.elementsById),
+      state.floors,
+    );
     const sharedValidationContext = {
       schemaPort,
       elementsById: state.elementsById,
@@ -7532,6 +7539,7 @@ const createGeometryState = (
           ? state.junctionPsiDefaultsMap
           : undefined,
       linearThermalBridgeIssues,
+      floorStackWarningElementIds,
       partFFindings,
     };
 

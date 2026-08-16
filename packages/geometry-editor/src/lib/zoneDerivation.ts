@@ -197,7 +197,7 @@ const LINE_WALL_TYPES: Array<Element['type']> = [
   'BuildingElementPartyWall',
 ];
 
-function isVerticalLineWall(element: Element): boolean {
+export function isVerticalLineWall(element: Element): boolean {
   if (!LINE_WALL_TYPES.includes(element.type)) return false;
   if (!element.coordinates || element.coordinates.length !== 2) return false;
   if (element.type === 'BuildingElementOpaque' && element.is_external_door === true) return false;
