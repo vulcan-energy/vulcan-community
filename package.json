@@ -24,7 +24,8 @@
     "quality": "node scripts/quality-gate.mjs --enforce",
     "typecheck": "tsc -p tsconfig.phase1a.json",
     "typecheck:document": "tsc -p packages/geometry-document/tsconfig.json",
-    "test": "vitest run && npm run test:sbom",
+    "test": "vitest run && npm run test:sbom && npm run test:worktree",
+    "test:worktree": "node scripts/worktree-setup.test.mjs",
     "test:sbom": "node --test scripts/generate-cargo-sbom.test.mjs"
   },
   "devDependencies": {

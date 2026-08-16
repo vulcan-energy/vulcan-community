@@ -9,7 +9,10 @@ be reported through `SECURITY.md`, not a public issue.
 
 ## Preparing a change
 
-Use Node.js 22 and install the locked dependencies with `npm ci`. Keep pull
+Use Node.js 22 and install the locked dependencies with `npm ci`. For isolated
+work, use `./scripts/new-worktree.sh <slug>`; its default profile prepares the
+submodules and npm workspace, while raw `git worktree add` receives the same
+setup after the managed hooks have been installed. Keep pull
 requests focused and explain the behaviour changed. Before requesting review, run:
 
 ```text
