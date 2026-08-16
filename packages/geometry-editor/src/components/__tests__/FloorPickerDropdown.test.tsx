@@ -4,12 +4,13 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { Element } from '../../geometry/types';
+import type { ValidationResult } from '../../geometry/validation/types';
 import { FloorPickerDropdown } from '../canvas/FloorPickerDropdown';
 
 describe('FloorPickerDropdown', () => {
   // Two floors with stored heights of 2.4 m. No walls have a `height` field, so the
-  // wall-derivation chain falls through to stored Floor.height = 2.4. Cumulative base
-  // heights then read: F1 (ground) -> 0 m, F2 -> 2.4 m.
+  // wall-derivation chain falls through to stored Floor.height = 2.4.
   const floors = [
     { id: 'floor-0', name: '0', zIndex: 0, height: 2.4, isRoofSpace: false },
     { id: 'floor-1', name: '1', zIndex: 1, height: 2.4, isRoofSpace: true },
@@ -104,7 +105,7 @@ describe('FloorPickerDropdown', () => {
     expect(onAddFloor).toHaveBeenCalledWith(-1);
   });
 
-  it('displays cumulative base heights per FHS floor (F1 = 0 m, F2 = 2.4 m)', () => {
+  it('displays each floor\'s effective storey height', () => {
     render(
       <FloorPickerDropdown
         currentFloorZ={0}
@@ -118,15 +119,17 @@ describe('FloorPickerDropdown', () => {
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    const groundInput = screen.getByLabelText('Base height for F1: Ground in metres');
-    const upperInput = screen.getByLabelText('Base height for F2 in metres');
+    const groundInput = screen.getByLabelText('Storey height for F1: Ground in metres');
+    const upperInput = screen.getByLabelText('Storey height for F2 in metres');
     expect(groundInput).toHaveAttribute('type', 'text');
     expect(upperInput).toHaveAttribute('type', 'text');
-    expect(groundInput).toHaveValue('0');
+    expect(groundInput).toHaveValue('2.4');
     expect(upperInput).toHaveValue('2.4');
   });
 
-  it('F1 base-height input is read-only (ground reference is always 0)', () => {
+  it('edits F1 storey height directly', () => {
+    const onUpdateFloor = vi.fn();
+
     render(
       <FloorPickerDropdown
         currentFloorZ={0}
@@ -135,16 +138,72 @@ describe('FloorPickerDropdown', () => {
         onSelectFloor={vi.fn()}
         onAddFloor={vi.fn()}
         onDeleteFloor={vi.fn()}
+        onUpdateFloor={onUpdateFloor}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('Current floor'));
+    const input = screen.getByLabelText('Storey height for F1: Ground in metres');
+    expect(input).not.toBeDisabled();
+    fireEvent.change(input, { target: { value: '2.7' } });
+    fireEvent.blur(input);
+
+    expect(onUpdateFloor).toHaveBeenCalledWith('floor-0', {
+      height: 2.7,
+      heightUserOverride: true,
+    });
+  });
+
+  it('shows F1 Ground before any floor record exists', () => {
+    render(
+      <FloorPickerDropdown
+        currentFloorZ={0}
+        floors={[]}
+        elementsById={{}}
+        onSelectFloor={vi.fn()}
+        onAddFloor={vi.fn()}
+        onDeleteFloor={vi.fn()}
         onUpdateFloor={vi.fn()}
       />,
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    const input = screen.getByLabelText('Base height for F1: Ground in metres');
-    expect(input).toBeDisabled();
+
+    expect(screen.getByRole('option', { name: /F1: Ground/i })).toBeInTheDocument();
+    expect(screen.getByLabelText('Storey height for F1: Ground in metres')).toHaveValue('0');
+    expect(screen.queryByText('No floors yet.')).toBeNull();
   });
 
-  it('displays and edits basement base height as a negative slab elevation', () => {
+  it('creates the ground floor before committing an edited height from the placeholder row', () => {
+    const onEnsureFloorForZ = vi.fn(() => 'floor-0');
+    const onUpdateFloor = vi.fn();
+
+    render(
+      <FloorPickerDropdown
+        currentFloorZ={0}
+        floors={[]}
+        elementsById={{}}
+        onSelectFloor={vi.fn()}
+        onAddFloor={vi.fn()}
+        onDeleteFloor={vi.fn()}
+        onUpdateFloor={onUpdateFloor}
+        onEnsureFloorForZ={onEnsureFloorForZ}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('Current floor'));
+    const input = screen.getByLabelText('Storey height for F1: Ground in metres');
+    fireEvent.change(input, { target: { value: '2.7' } });
+    fireEvent.blur(input);
+
+    expect(onEnsureFloorForZ).toHaveBeenCalledWith(0);
+    expect(onUpdateFloor).toHaveBeenCalledWith('floor-0', {
+      height: 2.7,
+      heightUserOverride: true,
+    });
+  });
+
+  it('displays and edits basement storey height directly', () => {
     const onUpdateFloor = vi.fn();
     const floorsWithBasement = [
       { id: 'floor-b1', name: '-1', zIndex: -1, height: 2.4, isRoofSpace: false },
@@ -177,12 +236,12 @@ describe('FloorPickerDropdown', () => {
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    const input = screen.getByLabelText('Base height for F0: Basement 1 in metres');
+    const input = screen.getByLabelText('Storey height for F0: Basement 1 in metres');
     expect(input).toHaveAttribute('type', 'text');
-    expect(input).toHaveValue('-2.4');
+    expect(input).toHaveValue('2.4');
     expect(input).not.toBeDisabled();
 
-    fireEvent.change(input, { target: { value: '-2.7' } });
+    fireEvent.change(input, { target: { value: '2.7' } });
     fireEvent.blur(input);
 
     expect(onUpdateFloor).toHaveBeenCalledWith('floor-b1', {
@@ -191,7 +250,7 @@ describe('FloorPickerDropdown', () => {
     });
   });
 
-  it('editing F2 base height routes the new storey to internal floor 0 with override=true', () => {
+  it('editing F2 storey height updates internal floor 1 with override=true', () => {
     const onUpdateFloor = vi.fn();
 
     render(
@@ -207,15 +266,72 @@ describe('FloorPickerDropdown', () => {
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    const input = screen.getByLabelText('Base height for F2 in metres');
+    const input = screen.getByLabelText('Storey height for F2 in metres');
     fireEvent.change(input, { target: { value: '2.7' } });
     fireEvent.blur(input);
 
-    // F2's base = internal Floor 0's storey. Typed 2.7 -> set Floor 0 height to 2.7 with override.
-    expect(onUpdateFloor).toHaveBeenCalledWith('floor-0', {
+    expect(onUpdateFloor).toHaveBeenCalledWith('floor-1', {
       height: 2.7,
       heightUserOverride: true,
     });
+  });
+
+  it('does not flag an upper floor for a lower-floor height override alone', () => {
+    const floorsWithOverride = [
+      { ...floors[0], heightUserOverride: true },
+      floors[1],
+    ];
+
+    render(
+      <FloorPickerDropdown
+        currentFloorZ={0}
+        floors={floorsWithOverride}
+        elementsById={elementsById}
+        onSelectFloor={vi.fn()}
+        onAddFloor={vi.fn()}
+        onDeleteFloor={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('Current floor'));
+
+    expect(screen.queryByTitle('Floor geometry may overlap or separate.')).toBeNull();
+  });
+
+  it('flags the floor picker when validation finds an overlap or separation warning', () => {
+    const getElementValidation = vi.fn((element: Element): ValidationResult => ({
+      hasIssues: false,
+      issues: [],
+      hasWarnings: element.id === 'wall1',
+      warnings:
+        element.id === 'wall1'
+          ? [
+              {
+                message: 'Base height 0 m < slab ~2.4 m — use height above ground',
+                fieldKey: 'base_height',
+                source: 'geometry',
+              },
+            ]
+          : [],
+    }));
+
+    render(
+      <FloorPickerDropdown
+        currentFloorZ={0}
+        floors={floors}
+        elementsById={elementsById}
+        onSelectFloor={vi.fn()}
+        onAddFloor={vi.fn()}
+        onDeleteFloor={vi.fn()}
+        getElementValidation={getElementValidation}
+      />,
+    );
+
+    // The dot is available on the closed picker button and remains attached to the affected row
+    // when the picker is opened.
+    expect(screen.getByTitle('Floor geometry may overlap or separate.')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Current floor'));
+    expect(screen.getAllByTitle('Floor geometry may overlap or separate.')).toHaveLength(2);
   });
 
   it('auto-clears the override flag when typed value matches the wall-derived storey', () => {
@@ -244,7 +360,7 @@ describe('FloorPickerDropdown', () => {
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    const input = screen.getByLabelText('Base height for F2 in metres');
+    const input = screen.getByLabelText('Storey height for F1: Ground in metres');
     fireEvent.change(input, { target: { value: '2.4' } });
     fireEvent.blur(input);
 
@@ -279,8 +395,7 @@ describe('FloorPickerDropdown', () => {
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    // Warning targets F2's row because its base depends on internal Floor 0's overridden storey.
-    const warningButton = screen.getByLabelText('Reset F2 base height to wall-derived value');
+    const warningButton = screen.getByLabelText('Reset F1: Ground storey height to wall-derived value');
     fireEvent.click(warningButton);
 
     expect(onUpdateFloor).toHaveBeenCalledWith('floor-0', { heightUserOverride: false });
@@ -299,7 +414,7 @@ describe('FloorPickerDropdown', () => {
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    expect(screen.queryByLabelText('Base height for F1: Ground in metres')).toBeNull();
+    expect(screen.queryByLabelText('Storey height for F1: Ground in metres')).toBeNull();
   });
 
   it('confirms floor deletion before calling the delete handler', () => {

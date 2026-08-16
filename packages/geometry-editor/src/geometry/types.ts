@@ -96,9 +96,10 @@ export interface Floor {
   zIndex: number; // Maps to z-coordinate (0, 1, 2, etc.)
   /**
    * Stored storey height in metres. The *effective* storey height is derived live from line walls
-   * on the floor (max height × sin(pitch)); see `getEffectiveStoreyHeight`. This stored value is
-   * only used as the effective height when `heightUserOverride === true` — i.e. the user has
-   * explicitly typed a value into the floor picker. Otherwise walls drive.
+   * on the floor (maximum height of qualifying vertical fabric walls); see
+   * `getEffectiveStoreyHeight`. This stored value is only used as the effective height when
+   * `heightUserOverride === true` — i.e. the user has explicitly typed a value into the floor
+   * picker. Otherwise walls drive.
    */
   height: number;
   /**

@@ -5,11 +5,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom';
 import { DeleteConfirmModal } from '../DeleteConfirmModal';
 import { DraftSafeNumberInput } from '../DraftSafeNumberInput';
+import { ValidationIndicator } from '../ValidationIndicator';
 import { getElementCanvasFloorZValue } from '../../lib/elementCanvasFloor';
 import type { Element, Floor } from '../../geometry/types';
+import type { ValidationIssue, ValidationResult } from '../../geometry/validation/types';
 import {
   BASE_HEIGHT_AUTOSYNC_TOLERANCE_M,
-  getCumulativeBaseHeightsByFloorId,
   getEffectiveStoreyHeight,
   getMaxLineWallHeightOnFloor,
 } from '../../lib/zoneDerivation';
@@ -30,20 +31,33 @@ interface FloorPickerDropdownProps {
   onDeleteFloor: (id: string) => void;
   /**
    * Apply a floor patch (`height` + `heightUserOverride`). The dropdown uses this for two
-   * actions: typing a base height (sets override) and clicking the stale-override warning
+   * actions: typing a storey height (sets override) and clicking the stale-override warning
    * (clears override, snaps to walls).
    */
   onUpdateFloor?: (floorId: string, updates: Partial<Floor>) => void;
+  /** Create the internal floor record when the picker is used before any element exists. */
+  onEnsureFloorForZ?: (z: number) => string;
+  /** Reuse element validation to flag real floor-stack overlap/separation warnings. */
+  getElementValidation?: (element: Element) => ValidationResult;
   addDisabled?: boolean;
 }
 
 type FloorRow = {
   floor: Floor;
   elementCount: number;
-  childElements: Array<{ name: string; type: string }>;
+  childElements: Array<{ id: string; name: string; type: string }>;
 };
 
 const TOAST_DURATION_MS = 2400;
+const FLOOR_STACK_WARNING = 'Floor geometry may overlap or separate.';
+
+function isFloorStackWarning(warning: ValidationIssue): boolean {
+  if (warning.source !== 'geometry') return false;
+  if (warning.fieldKey === 'base_height') {
+    return warning.message.includes('< slab') || warning.message.includes('> storey ceiling');
+  }
+  return warning.fieldKey === 'height' && warning.message.startsWith('Top of element ');
+}
 
 function floorLabel(zIndex: number): string {
   return fhsFloorLabelForCanvasFloor(zIndex);
@@ -65,6 +79,8 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   onAddFloor,
   onDeleteFloor,
   onUpdateFloor,
+  onEnsureFloorForZ,
+  getElementValidation,
   addDisabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -72,8 +88,8 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [position, setPosition] = useState({ x: 0, bottom: 0, width: 0 });
   const [pendingDeleteFloor, setPendingDeleteFloor] = useState<FloorRow | null>(null);
-  // Per-row base-height drafts so users can type freely; commit to store on blur/Enter.
-  const [baseDrafts, setBaseDrafts] = useState<Record<string, string>>({});
+  // Per-row storey-height drafts so users can type freely; commit to store on blur/Enter.
+  const [heightDrafts, setHeightDrafts] = useState<Record<string, string>>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const addInputRef = useRef<HTMLInputElement>(null);
@@ -90,14 +106,18 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   const pendingAddPreview = pendingAddExists ? `${pendingAddLabel} exists` : `Adds ${pendingAddLabel}`;
   const currentFloor = sortedFloors.find((floor) => floor.zIndex === currentFloorZ) ?? null;
 
+  // Ground is the default drawing floor even before the first element has been created. Keep a
+  // synthetic row in the picker until the store creates the real record via selection or editing.
+  const pickerFloors = useMemo(() => {
+    if (sortedFloors.some((floor) => floor.zIndex === 0)) return sortedFloors;
+    return [
+      { id: '__ground-floor-placeholder__', name: '0', zIndex: 0, height: 0, isRoofSpace: false },
+      ...sortedFloors,
+    ];
+  }, [sortedFloors]);
+
   // All elements, used by the effective-storey helpers (max wall height, override resolution).
   const allElements = useMemo(() => Object.values(elementsById), [elementsById]);
-
-  /** Cumulative base height (slab elevation) per floor id — what the dropdown actually displays. */
-  const baseHeightsByFloorId = useMemo(
-    () => getCumulativeBaseHeightsByFloorId(floors, allElements),
-    [floors, allElements],
-  );
 
   /**
    * Per-floor wall-derived + effective storey heights, computed once per (floors, elements) change.
@@ -107,23 +127,24 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
    */
   const heightsByFloorId = useMemo(() => {
     const m = new Map<string, { wallHeight: number; effective: number }>();
-    for (const floor of floors) {
+    for (const floor of pickerFloors) {
       m.set(floor.id, {
         wallHeight: getMaxLineWallHeightOnFloor(floor.zIndex, allElements),
         effective: getEffectiveStoreyHeight(floor, allElements),
       });
     }
     return m;
-  }, [floors, allElements]);
+  }, [pickerFloors, allElements]);
 
   const floorRows = useMemo<FloorRow[]>(() => {
-    return sortedFloors.map((floor) => {
+    return pickerFloors.map((floor) => {
       const childElements = Object.values(elementsById)
         .filter((element) => {
           const floorZ = getElementCanvasFloorZValue(element, floors);
           return floorZ === floor.zIndex || element.floorId === floor.id;
         })
         .map((element) => ({
+          id: element.id,
           name: element.name || 'Unnamed',
           type: element.type || 'Element',
         }));
@@ -134,19 +155,39 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
         childElements,
       };
     });
-  }, [elementsById, floors, sortedFloors]);
+  }, [elementsById, floors, pickerFloors]);
+
+  const floorStackWarningsByFloorId = useMemo(() => {
+    const warningFloorIds = new Set<string>();
+    if (!getElementValidation) return warningFloorIds;
+
+    for (const row of floorRows) {
+      let hasWarning = false;
+      for (const childElement of row.childElements) {
+        const element = elementsById[childElement.id];
+        if (!element) continue;
+        for (const warning of getElementValidation(element).warnings) {
+          if (isFloorStackWarning(warning)) {
+            hasWarning = true;
+            break;
+          }
+        }
+        if (hasWarning) break;
+      }
+      if (hasWarning) warningFloorIds.add(row.floor.id);
+    }
+    return warningFloorIds;
+  }, [elementsById, floorRows, getElementValidation]);
 
   /**
-   * Commit a typed base-height value for a row. The dropdown shows *base* (slab elevation), but
-   * the storey height that determines it is stored on the adjacent floor: for upper floors that
-   * is the floor below, while basement rows own their own below-ground storey height. Auto-clears
-   * the override flag when the resulting storey matches the wall-derived height.
+   * Commit a typed storey-height value to the same floor row. Auto-clears the override flag when
+   * the resulting storey matches the wall-derived height.
    */
-  const commitBaseHeight = useCallback(
+  const commitStoreyHeight = useCallback(
     (rowFloor: Floor) => {
       const rowKey = rowFloor.id;
-      const draft = baseDrafts[rowKey];
-      setBaseDrafts((prev) => {
+      const draft = heightDrafts[rowKey];
+      setHeightDrafts((prev) => {
         const next = { ...prev };
         delete next[rowKey];
         return next;
@@ -156,33 +197,21 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
       if (!Number.isFinite(parsed)) return;
       const rounded = Math.round(parsed * 100) / 100;
 
-      const ownerFloor =
-        rowFloor.zIndex > 0
-          ? sortedFloors.find((f) => f.zIndex === rowFloor.zIndex - 1)
-          : rowFloor.zIndex < 0
-            ? rowFloor
-            : undefined;
-      if (!ownerFloor) return;
+      const targetFloor = sortedFloors.find((floor) => floor.zIndex === rowFloor.zIndex);
+      const targetFloorId = targetFloor?.id ?? onEnsureFloorForZ?.(rowFloor.zIndex);
+      if (!targetFloorId) return;
 
-      const adjacentBase =
-        rowFloor.zIndex > 0
-          ? baseHeightsByFloorId.get(ownerFloor.id) ?? 0
-          : baseHeightsByFloorId.get(sortedFloors.find((f) => f.zIndex === rowFloor.zIndex + 1)?.id ?? '') ?? 0;
-      const rawStorey =
-        rowFloor.zIndex > 0
-          ? rounded - adjacentBase
-          : adjacentBase - rounded;
-      const targetStorey = Math.max(0, Math.round(rawStorey * 100) / 100);
-      const wallDerived = getMaxLineWallHeightOnFloor(ownerFloor.zIndex, allElements);
+      const targetStorey = Math.max(0, rounded);
+      const wallDerived = getMaxLineWallHeightOnFloor(rowFloor.zIndex, allElements);
       const matchesWalls =
         wallDerived > 0 && Math.abs(wallDerived - targetStorey) <= BASE_HEIGHT_AUTOSYNC_TOLERANCE_M;
 
-      onUpdateFloor?.(ownerFloor.id, {
+      onUpdateFloor?.(targetFloorId, {
         height: targetStorey,
         heightUserOverride: !matchesWalls,
       });
     },
-    [baseDrafts, sortedFloors, baseHeightsByFloorId, allElements, onUpdateFloor],
+    [heightDrafts, sortedFloors, allElements, onEnsureFloorForZ, onUpdateFloor],
   );
 
   /** Clear a floor's override so it snaps back to wall-derived storey height. */
@@ -276,41 +305,23 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
       }}
     >
       <div className="floor-picker-list" role="listbox" aria-label="Floors">
-        {floorRows.length === 0 ? (
-          <div className="floor-picker-empty">No floors yet.</div>
-        ) : (
-          floorRows.map((row) => {
+        {floorRows.map((row) => {
             const isActive = row.floor.zIndex === currentFloorZ;
-            // Internal z=0 is FHS Floor 1 and anchors the ground/base reference.
-            const baseAtThisFloor = baseHeightsByFloorId.get(row.floor.id) ?? 0;
-            const isGroundReference = row.floor.zIndex === 0;
-            const baseDraft = baseDrafts[row.floor.id];
-            const baseValueDisplay = baseDraft ?? formatMetres(baseAtThisFloor);
-
-            // Stale-override detection — the row "owns" the storey height of the floor below,
-            // while a basement row owns its own storey height below the next floor up.
-            const ownerFloor =
-              row.floor.zIndex > 0
-                ? sortedFloors.find((f) => f.zIndex === row.floor.zIndex - 1)
-                : row.floor.zIndex < 0
-                  ? row.floor
-                  : undefined;
-            const ownerHeights = ownerFloor ? heightsByFloorId.get(ownerFloor.id) : undefined;
-            const ownerWallHeight = ownerHeights?.wallHeight ?? 0;
-            const ownerEffective = ownerHeights?.effective ?? 0;
+            const isPlaceholderFloor = !sortedFloors.some((floor) => floor.id === row.floor.id);
+            const rowHeights = heightsByFloorId.get(row.floor.id);
+            const wallHeight = rowHeights?.wallHeight ?? 0;
+            const effectiveHeight = rowHeights?.effective ?? 0;
+            const heightDraft = heightDrafts[row.floor.id];
+            const heightValueDisplay = heightDraft ?? formatMetres(effectiveHeight);
+            const hasFloorStackWarning = floorStackWarningsByFloorId.has(row.floor.id);
             const ownerOverrideStale = !!(
-              ownerFloor &&
-              ownerFloor.heightUserOverride === true &&
-              ownerWallHeight > 0 &&
-              Math.abs(ownerWallHeight - ownerEffective) > BASE_HEIGHT_AUTOSYNC_TOLERANCE_M
+              !isPlaceholderFloor &&
+              row.floor.heightUserOverride === true &&
+              wallHeight > 0 &&
+              Math.abs(wallHeight - effectiveHeight) > BASE_HEIGHT_AUTOSYNC_TOLERANCE_M
             );
-            const baseIfSnapped = ownerFloor && row.floor.zIndex > 0
-              ? (baseHeightsByFloorId.get(ownerFloor.id) ?? 0) + ownerWallHeight
-              : ownerFloor && row.floor.zIndex < 0
-                ? (baseHeightsByFloorId.get(sortedFloors.find((f) => f.zIndex === row.floor.zIndex + 1)?.id ?? '') ?? 0) - ownerWallHeight
-                : baseAtThisFloor;
             const staleTitle = ownerOverrideStale
-              ? `Walls suggest ${formatMetres(baseIfSnapped)} m for ${floorLabel(row.floor.zIndex)}; override is ${formatMetres(baseAtThisFloor)} m. Click to reset.`
+              ? `Walls suggest ${formatMetres(wallHeight)} m for ${floorLabel(row.floor.zIndex)}; override is ${formatMetres(effectiveHeight)} m. Click to reset.`
               : undefined;
 
             return (
@@ -330,18 +341,26 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                     <div className="floor-picker-row-summary">
                       <span className="floor-picker-row-title">{floorLabel(row.floor.zIndex)}</span>
                       <span className="floor-picker-row-meta">{floorCountLabel(row.elementCount)}</span>
+                      {hasFloorStackWarning ? (
+                        <ValidationIndicator
+                          hasIssues
+                          issues={[FLOOR_STACK_WARNING]}
+                          variant="warning"
+                          size="small"
+                        />
+                      ) : null}
                     </div>
                   </div>
                 </button>
-                {ownerOverrideStale && ownerFloor ? (
+                {ownerOverrideStale ? (
                   <button
                     type="button"
                     className="floor-picker-override-warning"
                     title={staleTitle}
-                    aria-label={`Reset ${floorLabel(row.floor.zIndex)} base height to wall-derived value`}
+                    aria-label={`Reset ${floorLabel(row.floor.zIndex)} storey height to wall-derived value`}
                     onClick={(event) => {
                       event.stopPropagation();
-                      snapFloorToWalls(ownerFloor);
+                      snapFloorToWalls(row.floor);
                     }}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -354,28 +373,20 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                 ) : null}
                 {onUpdateFloor ? (
                   <label
-                    className={`floor-picker-height-shell ${isGroundReference ? 'floor-picker-height-shell-readonly' : ''}`}
-                    title={
-                      isGroundReference
-                        ? `${floorLabel(row.floor.zIndex)} is the ground-floor reference (base = 0 m)`
-                        : `Base height (slab elevation) of ${floorLabel(row.floor.zIndex)}, in metres`
-                    }
+                    className="floor-picker-height-shell"
+                    title={`Storey height of ${floorLabel(row.floor.zIndex)}, in metres`}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <DraftSafeNumberInput
                       step="0.05"
-                      min={row.floor.zIndex < 0 ? undefined : 0}
+                      min={0}
                       className="floor-picker-height-input"
-                      aria-label={`Base height for ${floorLabel(row.floor.zIndex)} in metres`}
-                      value={baseValueDisplay}
-                      readOnly={isGroundReference}
-                      disabled={isGroundReference}
+                      aria-label={`Storey height for ${floorLabel(row.floor.zIndex)} in metres`}
+                      value={heightValueDisplay}
                       onChange={(event) =>
-                        setBaseDrafts((prev) => ({ ...prev, [row.floor.id]: event.target.value }))
+                        setHeightDrafts((prev) => ({ ...prev, [row.floor.id]: event.target.value }))
                       }
-                      onBlur={() => {
-                        if (!isGroundReference) commitBaseHeight(row.floor);
-                      }}
+                      onBlur={() => commitStoreyHeight(row.floor)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
                           event.preventDefault();
@@ -386,7 +397,7 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                     <span className="floor-picker-height-unit">m</span>
                   </label>
                 ) : null}
-                <button
+                {!isPlaceholderFloor && <button
                   type="button"
                   className="files-dropdown-action-btn floor-picker-delete-btn"
                   title={
@@ -405,11 +416,10 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                     <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" stroke="currentColor" strokeWidth="2" />
                     <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" stroke="currentColor" strokeWidth="2" />
                   </svg>
-                </button>
+                </button>}
               </div>
             );
-          })
-        )}
+          })}
       </div>
 
       <div className="floor-picker-divider" />
@@ -478,6 +488,14 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
           <span className="floor-picker-trigger-label" title={currentFloor ? floorLabel(currentFloor.zIndex) : floorLabel(currentFloorZ)}>
             {currentFloor ? floorLabel(currentFloor.zIndex) : floorLabel(currentFloorZ)}
           </span>
+          {floorStackWarningsByFloorId.size > 0 ? (
+            <ValidationIndicator
+              hasIssues
+              issues={[FLOOR_STACK_WARNING]}
+              variant="warning"
+              size="small"
+            />
+          ) : null}
         </button>
         {typeof window !== 'undefined' && dropdownElement ? ReactDOM.createPortal(dropdownElement, document.body) : null}
       </div>

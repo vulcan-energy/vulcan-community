@@ -8218,6 +8218,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             ensureFloorForZ={ensureFloorForZ}
             removeFloor={removeFloor}
             updateFloor={updateFloor}
+            getElementValidation={getValidation}
             setDrawPoints={setDrawPoints}
             setRoomWalls={setRoomWalls}
             setRoomWallElements={setRoomWallElements}
