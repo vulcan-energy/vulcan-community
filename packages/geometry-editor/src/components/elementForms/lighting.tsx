@@ -9,12 +9,12 @@
 // branches: only the element-selection chain had a Lighting case, so this
 // module's single hydrate covers it.
 //
-// getLightingFieldValue is exported: the orchestrator's
-// buildLightingCommitPatch (which backs commitExistingElementDraft for every
-// element type) reads lighting fields through the same lens.
+// Lighting read semantics live with the BulkFieldDescriptor pilot so the
+// single editor and MultiSelect use the same direct-or-bulb fallback.
 
 import { useState } from 'react';
 import type { Element } from '../../geometry/types';
+import { getLightingFieldValue } from '../../lib/bulkFieldDescriptors';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
 import {
@@ -55,25 +55,6 @@ function readNonEmptyString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-export function getLightingFieldValue(
-  element: Element,
-  field: 'efficacy' | 'count' | 'power',
-): number | undefined {
-  const directValue = (element as unknown as Record<string, unknown>)[field];
-  if (typeof directValue === 'number') {
-    return directValue;
-  }
-
-  const bulbs = (element as { bulbs?: Record<string, { efficacy?: number; count?: number; power?: number }> }).bulbs;
-  if (!bulbs || typeof bulbs !== 'object') {
-    return undefined;
-  }
-
-  const chosenBulb = bulbs.led ?? bulbs.incandescent;
-  const nestedValue = chosenBulb?.[field];
-  return typeof nestedValue === 'number' ? nestedValue : undefined;
 }
 
 function isLightingGrade(value: unknown): value is LightingGrade {

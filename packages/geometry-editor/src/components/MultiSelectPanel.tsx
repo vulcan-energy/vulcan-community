@@ -44,6 +44,12 @@ import { getElementCanvasFloorZValue } from '../lib/elementCanvasFloor';
 import { getSchemaParamIdForField } from '../lib/fieldTooltipMap';
 import { formatSchemaInfoForTooltip } from '../utils/schemaTooltipHelpers';
 import { resolveFieldPresentation, type ResolvedFieldPresentation } from '../lib/fieldPresentation';
+import {
+  buildBulkFieldPatches,
+  LIGHTING_BULK_FIELD_DESCRIPTORS,
+  THERMAL_BRIDGE_POINT_BULK_FIELD_DESCRIPTORS,
+  type NumericBulkFieldDescriptor,
+} from '../lib/bulkFieldDescriptors';
 import { classifyOpaqueFabricVariantFromElement } from '../lib/opaqueFabricVariant';
 import {
   groundFloorTypeSupportsViewerElevation,
@@ -277,7 +283,6 @@ const HORIZONTAL_POLYGON_PITCH_OPTIONS: { value: string; label: string }[] = [
   { value: '180', label: 'Facing down (180°)' },
 ];
 
-const LIGHTING_ENTRY_MODE_KEY = '_lighting_entry_mode';
 
 const isTransparent = (el: Element): el is BuildingElementTransparent => el.type === 'BuildingElementTransparent';
 const isGround = (el: Element): el is BuildingElementGround => el.type === 'BuildingElementGround';
@@ -287,8 +292,6 @@ const isAdjacentUnconditioned = (el: Element): el is BuildingElementAdjacentUnco
 const isPartyWall = (el: Element): el is BuildingElementPartyWall => el.type === 'BuildingElementPartyWall';
 const isThermalBridgeLinear = (el: Element): el is Element & { type: 'ThermalBridgeLinear'; length: number; linear_thermal_transmittance: number } =>
   el.type === 'ThermalBridgeLinear';
-const isThermalBridgePoint = (el: Element): el is Element & { type: 'ThermalBridgePoint'; heat_transfer_coeff: number } =>
-  el.type === 'ThermalBridgePoint';
 const isDuctwork = (el: Element): el is Element & { type: 'MechanicalVentilationDuctwork'; duct_type?: string; length?: number } =>
   el.type === 'MechanicalVentilationDuctwork';
 const isWaterPipework = (el: Element): el is Element & { type: 'WaterPipework'; location?: string; length?: number; pipework_type?: string } =>
@@ -297,8 +300,6 @@ const isWetEmitter = (el: Element): el is Element & { type: 'WetEmitter'; subcat
   el.type === 'WetEmitter';
 const isVent = (el: Element): el is Element & { type: 'Vents'; mid_height_air_flow_path?: number; area_cm2?: number } =>
   el.type === 'Vents';
-const isLighting = (el: Element): el is Element & { type: 'Lighting'; efficacy?: number; count?: number; power?: number; bulbs?: Record<string, { efficacy?: number; count?: number; power?: number }> } =>
-  el.type === 'Lighting';
 const isWindowShading = (el: Element): el is WindowShading => el.type === 'WindowShading';
 const isAnyElement = (el: Element): el is Element => !!el;
 
@@ -805,54 +806,6 @@ function selectionForElement(el: Element, focusFieldKey?: string): { type: 'elem
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function lightingFieldValue(
-  element: Element & { bulbs?: Record<string, { efficacy?: number; count?: number; power?: number }> },
-  field: 'efficacy' | 'count' | 'power',
-): number | undefined {
-  const direct = finiteNumber((element as unknown as Record<string, unknown>)[field]);
-  if (direct !== undefined) return direct;
-  const bulbs = element.bulbs;
-  if (!bulbs || typeof bulbs !== 'object') return undefined;
-  const chosen = bulbs.led ?? bulbs.incandescent;
-  return finiteNumber(chosen?.[field]);
-}
-
-function buildLightingBulkPatch(
-  element: Element & { bulbs?: Record<string, { efficacy?: number; count?: number; power?: number }> },
-  overrides: Partial<{ efficacy: number; count: number; power: number }>,
-): Partial<Element> {
-  const efficacy = Object.prototype.hasOwnProperty.call(overrides, 'efficacy')
-    ? overrides.efficacy
-    : lightingFieldValue(element, 'efficacy');
-  const count = Object.prototype.hasOwnProperty.call(overrides, 'count')
-    ? overrides.count
-    : lightingFieldValue(element, 'count');
-  const power = Object.prototype.hasOwnProperty.call(overrides, 'power')
-    ? overrides.power
-    : lightingFieldValue(element, 'power');
-  const patch: Partial<Element> = {
-    ...overrides,
-    efficacy,
-    count,
-    power,
-    bulbs: {
-      led: { count, power, efficacy },
-    },
-  } as Partial<Element>;
-  if (
-    Object.prototype.hasOwnProperty.call(overrides, 'efficacy') ||
-    Object.prototype.hasOwnProperty.call(overrides, 'power')
-  ) {
-    patch.extra_json = {
-      ...extraJsonRecord(element),
-      [LIGHTING_ENTRY_MODE_KEY]: 'detailed',
-    };
-  }
-  return {
-    ...patch,
-  };
 }
 
 const computeDistribution = <T extends Element>(
@@ -1963,6 +1916,23 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     });
   }, [activeElementIds, buildPerElementPatches, updateElementsBulk, withValidLiveNumber]);
 
+  const commitDescriptorNumber = useCallback((
+    descriptor: NumericBulkFieldDescriptor,
+    raw: string,
+    bounds: LiveNumberBounds | undefined,
+    transformValue: (value: number) => number = (value) => value,
+    targetIds: string[] = activeElementIds,
+  ) => {
+    withValidLiveNumber(descriptor.fieldKey, raw, bounds, (value) => {
+      const targetElements = targetIds
+        .map((id) => elementsById[id])
+        .filter((element): element is Element => !!element);
+      const perId = buildBulkFieldPatches(targetElements, descriptor, transformValue(value));
+      if (Object.keys(perId).length === 0) return;
+      updateElementsBulk(perId, { mode: 'replace' });
+    });
+  }, [activeElementIds, elementsById, updateElementsBulk, withValidLiveNumber]);
+
   const applyElementPatches = useCallback((
     buildPatch: (el: Element) => Partial<Element> | null,
     targetIds: string[] = activeElementIds,
@@ -2168,6 +2138,45 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       </div>
     </div>
   );
+
+  const renderDescriptorNumberRow = (
+    descriptor: NumericBulkFieldDescriptor,
+    summary: ReturnType<typeof describeDistribution>,
+    fallbackPlaceholder: string,
+    bounds: LiveNumberBounds | undefined,
+    transformValue: (value: number) => number = (value) => value,
+    targetIds: string[] = activeElementIds,
+  ) => {
+    const draft = liveDrafts[descriptor.fieldKey];
+    const error = draft !== undefined ? validateLiveNumberDraft(draft, bounds) : null;
+    return (
+      <div className="batch-row multi-select-row">
+        {renderTooltipRowLabel(descriptor.fieldKey, descriptor.label, true, undefined, targetIds)}
+        <div className="multi-select-row__control">
+          <StandardInput
+            type="text"
+            inputMode="decimal"
+            unit={rowFieldUnit(descriptor.fieldKey, descriptor.label, targetIds)}
+            step="0.01"
+            variant="ghost"
+            size="md"
+            value={liveNumberValue(descriptor.fieldKey, summary, true)}
+            onChange={(event) =>
+              commitDescriptorNumber(descriptor, event.target.value, bounds, transformValue, targetIds)
+            }
+            onBlur={() => clearLiveDraft(descriptor.fieldKey)}
+            placeholder={liveNumberPlaceholder(summary, true, fallbackPlaceholder)}
+            min={bounds?.min}
+            max={bounds?.max}
+            error={error ?? undefined}
+            aria-invalid={error ? true : undefined}
+            aria-label={descriptor.label}
+          />
+          <SummaryCaption summary={summary} />
+        </div>
+      </div>
+    );
+  };
 
   const renderExtraJsonNumberRow = (
     fieldKey: string,
@@ -2617,7 +2626,11 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     computeScalarDistribution(activeElements, isThermalBridgeLinear, (el) => extraJsonRecord(el).junction_type),
   );
   const thermalBridgePointHtcSummary = describeDistribution(
-    computeDistribution(activeElements, isThermalBridgePoint, (el) => el.heat_transfer_coeff),
+    computeDistribution(
+      activeElements,
+      (element): element is Element => THERMAL_BRIDGE_POINT_BULK_FIELD_DESCRIPTORS.heatTransferCoeff.isEligible(element),
+      THERMAL_BRIDGE_POINT_BULK_FIELD_DESCRIPTORS.heatTransferCoeff.readValue,
+    ),
   );
   const ductParentSummary = describeDistribution(
     computeScalarDistribution(activeElements, isDuctwork, (el) => el.parent_element),
@@ -2748,13 +2761,25 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     computeDistribution(activeWindowShadingGroupElements, isWindowShading, (el) => el.transparency),
   );
   const lightingEfficacySummary = describeDistribution(
-    computeDistribution(activeElements, isLighting, (el) => lightingFieldValue(el, 'efficacy')),
+    computeDistribution(
+      activeElements,
+      (element): element is Element => LIGHTING_BULK_FIELD_DESCRIPTORS.efficacy.isEligible(element),
+      LIGHTING_BULK_FIELD_DESCRIPTORS.efficacy.readValue,
+    ),
   );
   const lightingCountSummary = describeDistribution(
-    computeDistribution(activeElements, isLighting, (el) => lightingFieldValue(el, 'count')),
+    computeDistribution(
+      activeElements,
+      (element): element is Element => LIGHTING_BULK_FIELD_DESCRIPTORS.count.isEligible(element),
+      LIGHTING_BULK_FIELD_DESCRIPTORS.count.readValue,
+    ),
   );
   const lightingPowerSummary = describeDistribution(
-    computeDistribution(activeElements, isLighting, (el) => lightingFieldValue(el, 'power')),
+    computeDistribution(
+      activeElements,
+      (element): element is Element => LIGHTING_BULK_FIELD_DESCRIPTORS.power.isEligible(element),
+      LIGHTING_BULK_FIELD_DESCRIPTORS.power.readValue,
+    ),
   );
 
   const ductParentOptions = useMemo(() => [
@@ -3577,14 +3602,10 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
                 )}
               </>
             )}
-            {selectionKinds.has('ThermalBridgePoint') && renderNumberRow(
-              'heatTransferCoeff',
-              'Heat Transfer Coefficient',
+            {selectionKinds.has('ThermalBridgePoint') && renderDescriptorNumberRow(
+              THERMAL_BRIDGE_POINT_BULK_FIELD_DESCRIPTORS.heatTransferCoeff,
               thermalBridgePointHtcSummary,
-              true,
               'e.g. 5.00',
-              (el, value) => (isThermalBridgePoint(el) ? { heat_transfer_coeff: value } : null),
-              undefined,
               LIVE_NUMBER_BOUNDS.heatTransferCoeff,
             )}
           </div>
@@ -3859,9 +3880,9 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
 
         {selectionKinds.has('Lighting') && (
           <div className="multi-select-field-group">
-            {renderElementNumberRow('lightingEfficacy', 'Efficacy', lightingEfficacySummary, true, 'e.g. 80', (el, value) => isLighting(el) ? buildLightingBulkPatch(el, { efficacy: value }) : null, undefined, LIVE_NUMBER_BOUNDS.lightingEfficacy)}
-            {renderElementNumberRow('lightingCount', 'Count', lightingCountSummary, true, 'e.g. 4', (el, value) => isLighting(el) ? buildLightingBulkPatch(el, { count: Math.round(value) }) : null, undefined, LIVE_NUMBER_BOUNDS.lightingCount)}
-            {renderElementNumberRow('lightingPower', 'Power (W)', lightingPowerSummary, true, 'e.g. 8', (el, value) => isLighting(el) ? buildLightingBulkPatch(el, { power: value }) : null, undefined, LIVE_NUMBER_BOUNDS.lightingPower)}
+            {renderDescriptorNumberRow(LIGHTING_BULK_FIELD_DESCRIPTORS.efficacy, lightingEfficacySummary, 'e.g. 80', LIVE_NUMBER_BOUNDS.lightingEfficacy)}
+            {renderDescriptorNumberRow(LIGHTING_BULK_FIELD_DESCRIPTORS.count, lightingCountSummary, 'e.g. 4', LIVE_NUMBER_BOUNDS.lightingCount, Math.round)}
+            {renderDescriptorNumberRow(LIGHTING_BULK_FIELD_DESCRIPTORS.power, lightingPowerSummary, 'e.g. 8', LIVE_NUMBER_BOUNDS.lightingPower)}
           </div>
         )}
 
