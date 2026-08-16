@@ -1,0 +1,68 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+set -euo pipefail
+
+# Git runs post-checkout after `git worktree add` with a null previous HEAD and a
+# branch-checkout flag. Ordinary checkout/switch operations stay instant.
+null_head="0000000000000000000000000000000000000000"
+previous_head="${1:-}"
+branch_checkout="${3:-0}"
+
+if [ "$previous_head" != "$null_head" ] || [ "$branch_checkout" != "1" ]; then
+    exit 0
+fi
+
+git_dir="$(git rev-parse --absolute-git-dir)"
+common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+if [ "$git_dir" = "$common_dir" ]; then
+    exit 0
+fi
+
+profile="${VULCAN_WORKTREE_PROFILE:-test}"
+case "$profile" in
+    code|test) ;;
+    skip) exit 0 ;;
+    *)
+        echo "Unknown Community worktree profile: $profile (expected code, test, or skip)." >&2
+        exit 1
+        ;;
+esac
+
+root="$(git rev-parse --show-toplevel)"
+
+if [ "$profile" = "code" ]; then
+    echo "Community worktree is ready for source-only work"
+    exit 0
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+    echo "Community test-ready worktree setup requires Node.js 22.19 or newer." >&2
+    exit 1
+fi
+actual_node="$(node --version | sed 's/^v//')"
+IFS=. read -r node_major node_minor _ <<< "$actual_node"
+if [ "${node_major:-0}" -lt 22 ] || {
+    [ "${node_major:-0}" -eq 22 ] && [ "${node_minor:-0}" -lt 19 ];
+}; then
+    echo "Community test-ready worktree setup requires Node.js 22.19 or newer (found $actual_node)." >&2
+    echo "Activate the supported Node.js version, then recreate the worktree." >&2
+    exit 1
+fi
+
+report_setup_failure() {
+    local status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "The linked Community worktree was created, but its '$profile' setup failed." >&2
+        echo "Fix the reported prerequisite, then recreate it with scripts/new-worktree.sh." >&2
+    fi
+    return "$status"
+}
+trap report_setup_failure EXIT
+
+echo "Initialising Community submodules"
+(cd "$root" && git submodule update --init --recursive)
+echo "Installing the Community workspace dependencies"
+(cd "$root" && npm ci --no-audit --no-fund)
+echo "Community worktree is ready for tests and typechecks"

@@ -29,3 +29,10 @@ Agents working in this tree must also obey the following rules:
 
 These are operational safeguards. They do not replace the applicable licence or
 contributor agreement.
+
+Routine work belongs in a separate worktree. Run
+`./scripts/install-git-hooks.sh` once per clone, then use
+`./scripts/new-worktree.sh <slug>`; its default profile prepares recursive
+submodules and the locked npm workspace. The managed `post-checkout` hook also
+prepares raw `git worktree add` worktrees. Do not use `git worktree add
+--no-checkout` for developer worktrees because it suppresses the hook.

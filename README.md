@@ -32,6 +32,20 @@ If you already cloned without `--recurse-submodules`, recover with:
 git submodule update --init --recursive
 ```
 
+For an isolated task checkout, install the managed hooks once and use the
+repository creator:
+
+```bash
+./scripts/new-worktree.sh <slug>
+```
+
+The default `test` profile initialises recursive submodules and installs the
+locked npm workspace. After `./scripts/install-git-hooks.sh` has been run in a
+clone, raw `git worktree add` receives the same setup through the tracked
+`post-checkout` hook. Use `--profile code` for source-only work, and do not use
+`git worktree add --no-checkout` for developer worktrees because it suppresses
+the hook.
+
 The editor requires Node.js 22.19 or newer with npm (the lockfile is tested
 with npm 10.9.3), plus a POSIX shell with `grep`. Building its local model WASM
 also requires `cargo`, `rustc` and `rustup` using a nightly Rust toolchain, the

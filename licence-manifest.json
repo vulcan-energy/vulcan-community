@@ -484,6 +484,39 @@
       "provenance": "Relocated without relicensing from the owner-reviewed licensing validator, classified under CC-BY-4.0."
     },
     {
+      "path": ".githooks/post-checkout",
+      "source_path": ".githooks/post-checkout",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_worktree_harness"
+    },
+    {
+      "path": "scripts/install-git-hooks.sh",
+      "source_path": "scripts/install-git-hooks.sh",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_worktree_harness"
+    },
+    {
+      "path": "scripts/new-worktree.sh",
+      "source_path": "scripts/new-worktree.sh",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_worktree_harness"
+    },
+    {
+      "path": "scripts/worktree-setup.test.mjs",
+      "source_path": "scripts/worktree-setup.test.mjs",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite",
+      "shipped": false
+    },
+    {
       "path": "vitest.config.ts",
       "source_path": "vitest.config.ts",
       "license": "AGPL-3.0-only",
