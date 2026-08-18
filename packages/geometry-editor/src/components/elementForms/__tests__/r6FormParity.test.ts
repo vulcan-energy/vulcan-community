@@ -73,6 +73,11 @@ describe('R6 single-element field semantics', () => {
         expect(actual, label).toBe(expected);
       }
     }
+
+    const incandescentOnly = hydrateLightingField(lighting({
+      bulbs: { incandescent: { [field]: 60 } },
+    }), input);
+    expect(incandescentOnly).toBe(60);
   });
 
   it('normalises non-positive detailed values instead of persisting zero or negatives', () => {
