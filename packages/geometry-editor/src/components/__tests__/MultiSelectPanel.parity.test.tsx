@@ -32,6 +32,31 @@ const resources: GeometryWorkspaceResourcePort = Object.freeze({
   ensureDirectory: async () => { throw new Error('resource unavailable'); },
   exists: async () => false, list: async () => [],
 });
+const assemblyDocuments: Readonly<Record<string, string>> = Object.freeze({
+  'input/assembly_library/materials.json': JSON.stringify({
+    materialCategories: [],
+    materials: [{
+      id: 'test.board', name: 'Test board', shortName: 'test board',
+      lambda_W_mK: 0.2, density_kg_m3: 800, specific_heat_J_kg_K: 1000,
+    }],
+  }),
+  'input/assembly_library/cavity_resistances.json': JSON.stringify({ cavities: [] }),
+  'input/assembly_library/assemblies.json': JSON.stringify({
+    assemblies: [{
+      id: 'test.wall', name: '', elementType: 'wall',
+      layers: [{ kind: 'solid', materialId: 'test.board', thickness_m: 0.1 }],
+    }],
+  }),
+});
+const resolvedAssemblyResources: GeometryWorkspaceResourcePort = Object.freeze({
+  ...resources,
+  availability: 'available',
+  readText: async (path: string) => {
+    const document = assemblyDocuments[path];
+    if (document === undefined) throw new Error(`unexpected assembly resource: ${path}`);
+    return document;
+  },
+});
 const coords = [{ x: 0, y: 0, z: 0 }];
 
 function lighting(id: string, fields: Record<string, unknown> = {}): Element {
@@ -49,7 +74,11 @@ function fabric(id: string): Element {
     width: 2, height: 2, area: 4, pitch: 90,
   } as Element;
 }
-function mount(elements: Element[], selectedElementIds = elements.map((element) => element.id)) {
+function mount(
+  elements: Element[],
+  selectedElementIds = elements.map((element) => element.id),
+  workspaceResourcePort: GeometryWorkspaceResourcePort = resources,
+) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   store.setState({
     elementsById: Object.fromEntries(elements.map((element) => [element.id, element])),
@@ -57,12 +86,12 @@ function mount(elements: Element[], selectedElementIds = elements.map((element) 
     zones: [{ id: 'zone', name: 'Zone', floorArea: 1, height: 2 }], zoneIds: ['zone'],
   });
   const view = render(
-    <GeometryEditorServicePortsProvider schemaPort={schemaPort} workspaceResourcePort={resources}>
+    <GeometryEditorServicePortsProvider schemaPort={schemaPort} workspaceResourcePort={workspaceResourcePort}>
       <GeometryStoreProvider store={store}>
         <MultiSelectPanel
           selectedElementIds={selectedElementIds}
           onDelete={vi.fn()}
-          workspaceResourcePort={resources}
+          workspaceResourcePort={workspaceResourcePort}
         />
       </GeometryStoreProvider>
     </GeometryEditorServicePortsProvider>,
@@ -329,6 +358,41 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
 });
 
 describe('R6 MultiSelect parity fence — assembly seam', () => {
+  it('loads a host assembly and applies its exact envelope to every selected fabric element', async () => {
+    const user = userEvent.setup();
+    const { store } = mount(
+      [
+        { ...fabric('wall-a'), extra_json: { retained: 'a' } } as Element,
+        { ...fabric('wall-b'), extra_json: { retained: 'b' } } as Element,
+      ],
+      undefined,
+      resolvedAssemblyResources,
+    );
+
+    const trigger = await screen.findByRole('button', { name: 'Search assemblies…' });
+    expect(trigger).not.toBeDisabled();
+    await user.click(trigger);
+    const option = await screen.findByRole('option', { name: /100mm test board/ });
+    await user.click(option);
+
+    for (const [id, retained] of [['wall-a', 'a'], ['wall-b', 'b']] as const) {
+      expect(store.getState().elementsById[id]?.extra_json).toMatchObject({
+        retained,
+        u_value: expect.any(Number),
+        thermal_resistance_construction: expect.any(Number),
+        vulcan_assembly_v1: {
+          schemaVersion: 1,
+          assemblyId: 'test.wall',
+          assemblySnapshot: {
+            elementMode: 'BuildingElementOpaque',
+            pitchDegrees: 90,
+            layers: [{ kind: 'solid', materialId: 'test.board', thickness_m: 0.1 }],
+          },
+        },
+      });
+    }
+  });
+
   it('keeps assembly controls host-neutral and hidden for non-fabric selections', () => {
     mount([lighting('light', { efficacy: 90, count: 4, power: 8 })]);
     expect(screen.queryByText('Assembly')).not.toBeInTheDocument();
