@@ -25,6 +25,19 @@ import { decimalInputProps, useDecimalInput, type NumericDraftInputBinding } fro
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
 type WindowShadingType = '' | 'object' | 'overhang' | 'sidefinright' | 'sidefinleft' | 'reveal';
+type WindowShadingCoordinate = { x: number; y: number; z: number };
+
+export function projectWindowShadingPointToSegment(
+  point: WindowShadingCoordinate,
+  a: WindowShadingCoordinate,
+  b: WindowShadingCoordinate,
+): WindowShadingCoordinate {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const v2 = vx * vx + vy * vy || 1;
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * vx + (point.y - a.y) * vy) / v2));
+  return { x: a.x + t * vx, y: a.y + t * vy, z: point.z };
+}
 
 export interface WindowShadingFormState {
   linkedWindow: string;
@@ -146,10 +159,7 @@ export const windowShadingFormModule: ElementFormModule<WindowShadingFormState> 
                     if (parent && current.coordinates && current.coordinates.length >= 1 && parent.coordinates && parent.coordinates.length === 2) {
                       const p = current.coordinates[0];
                       const [A, B] = parent.coordinates as Array<{x:number,y:number,z:number}>;
-                      const vx = B.x - A.x; const vy = B.y - A.y; const v2 = vx*vx + vy*vy || 1;
-                      const tRaw = ((p.x - A.x) * vx + (p.y - A.y) * vy) / v2;
-                      const t = Math.max(0, Math.min(1, tRaw));
-                      const proj = { x: A.x + t * vx, y: A.y + t * vy, z: p.z };
+                      const proj = projectWindowShadingPointToSegment(p, A, B);
                       updateElement(selection.id, { coordinates: [proj] });
                     }
                   }
@@ -186,9 +196,7 @@ export const windowShadingFormModule: ElementFormModule<WindowShadingFormState> 
                     if (parent && parent.coordinates && parent.coordinates.length === 2 && el.coordinates && el.coordinates.length >= 1) {
                       const p = el.coordinates[0];
                       const [A,B] = parent.coordinates as Array<{x:number,y:number,z:number}>;
-                      const vx = B.x - A.x; const vy = B.y - A.y; const v2 = vx*vx + vy*vy || 1;
-                      const t = Math.max(0, Math.min(1, ((p.x - A.x) * vx + (p.y - A.y) * vy) / v2));
-                      const proj = { x: A.x + t * vx, y: A.y + t * vy, z: p.z };
+                      const proj = projectWindowShadingPointToSegment(p, A, B);
                       updateElement(selection.id, { coordinates: [proj], shading_type: nextShadingType as any });
                       return;
                     }

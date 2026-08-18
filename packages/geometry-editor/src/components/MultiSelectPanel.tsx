@@ -63,6 +63,7 @@ import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorS
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { buildLightingPatch, getLightingFieldValue } from './elementForms/lighting';
+import { projectWindowShadingPointToSegment } from './elementForms/windowShading';
 
 const loadAssemblyCalculatorModal = () => import('./AssemblyCalculatorModal');
 
@@ -470,21 +471,6 @@ function buildWindowDetailCopyExtraJson(
   return nextExtra;
 }
 
-function projectPointToWindowSegment(point: ElementCoordinate, windowElement: BuildingElementTransparent): ElementCoordinate[] | null {
-  if (!Array.isArray(windowElement.coordinates) || windowElement.coordinates.length < 2) return null;
-  const [a, b] = windowElement.coordinates as [ElementCoordinate, ElementCoordinate];
-  if (!a || !b) return null;
-  const vx = b.x - a.x;
-  const vy = b.y - a.y;
-  const v2 = vx * vx + vy * vy || 1;
-  const t = Math.max(0, Math.min(1, ((point.x - a.x) * vx + (point.y - a.y) * vy) / v2));
-  return [{
-    x: a.x + t * vx,
-    y: a.y + t * vy,
-    z: point.z,
-  }];
-}
-
 function windowShadingProjectionPatch(
   shading: WindowShading,
   parentName: string | null | undefined,
@@ -499,8 +485,11 @@ function windowShadingProjectionPatch(
       candidate.type === 'BuildingElementTransparent' && candidate.name === parentName,
   );
   if (!parent) return null;
-  const coordinates = projectPointToWindowSegment(point, parent);
-  return coordinates ? { coordinates } as Pick<WindowShading, 'coordinates'> : null;
+  if (!Array.isArray(parent.coordinates) || parent.coordinates.length < 2) return null;
+  const [a, b] = parent.coordinates as [ElementCoordinate, ElementCoordinate];
+  if (!a || !b) return null;
+  const coordinates = [projectWindowShadingPointToSegment(point, a, b)];
+  return { coordinates } as Pick<WindowShading, 'coordinates'>;
 }
 
 function countLabel(count: number, singular: string, plural = `${singular}s`): string {
