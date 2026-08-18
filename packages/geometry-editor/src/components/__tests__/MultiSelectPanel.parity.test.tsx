@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /** R6 parity fence: panel/store behavior, not a proposed descriptor helper. */
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
@@ -596,7 +596,9 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     expect(trigger).not.toBeDisabled();
     await user.click(trigger);
     expect(screen.getByRole('option', { name: /200mm test board/ })).toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText('Search assemblies…'), '100mm');
+    const searchInput = screen.getByPlaceholderText('Search assemblies…');
+    await waitFor(() => expect(screen.getByRole('listbox')).toHaveStyle({ pointerEvents: 'auto' }));
+    await user.type(searchInput, '100mm');
     expect(screen.queryByRole('option', { name: /200mm test board/ })).not.toBeInTheDocument();
     const option = await screen.findByRole('option', { name: /100mm test board/ });
     await user.click(option);
