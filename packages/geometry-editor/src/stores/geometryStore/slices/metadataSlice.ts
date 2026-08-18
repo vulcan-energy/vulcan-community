@@ -12,48 +12,60 @@ import {
 import type { GeometryState } from '../../geometryStore';
 import type { BundledAssemblyLibrary } from '../../../lib/assemblyLibrary';
 import type { CreationDefaultAssemblyIds } from '../../../lib/multiSelectAssemblyApply';
+import type { ExternalDetailProfileLink } from '../../../lib/assemblyTypes';
 import { parseJunctionPsiDefaultsCsv } from '../../../lib/junctionPsiDefaultsCsv';
 import type { GeometryWorkspaceResourcePort } from '../../../../../geometry-editor-host/src/workspaceResourcePort';
 
-type MetadataSlice = Pick<
-  GeometryState,
-  | 'defaultsPath'
-  | 'setDefaultsPath'
-  | 'defaultsJson'
-  | 'setDefaultsJson'
-  | 'defaultsLoading'
-  | 'setDefaultsLoading'
-  | 'hostDocumentMetadata'
-  | 'setHostDocumentMetadataValue'
-  | 'propertyPostcode'
-  | 'setPropertyPostcode'
-  | 'guideOverlay'
-  | 'guideOverlaySource'
-  | 'guideOverlayByFloor'
-  | 'guideOverlaySourceByFloor'
-  | 'setGuideOverlay'
-  | 'setGuideOverlaySource'
-  | 'updateGuideOverlay'
-  | 'clearGuideOverlay'
-  | 'resetGuideOverlayForActiveFloor'
-  | 'defaultThermalBridging'
-  | 'setDefaultThermalBridging'
-  | 'junctionPsiDefaultsPath'
-  | 'setJunctionPsiDefaultsPath'
-  | 'junctionPsiDefaultsMap'
-  | 'junctionPsiDefaultsLoading'
-  | 'junctionPsiDefaultsError'
-  | 'detailedBridgePsiProfile'
-  | 'setDetailedBridgePsiProfile'
-  | 'creationDefaultAssemblyIds'
-  | 'setCreationDefaultAssemblyIds'
-  | 'bundledAssemblyLibrary'
-  | 'setBundledAssemblyLibrary'
-  | 'bundledAssemblyLibraryLoading'
-  | 'setBundledAssemblyLibraryLoading'
-  | 'bundledAssemblyLibraryError'
-  | 'setBundledAssemblyLibraryError'
->;
+export interface MetadataSlice {
+  defaultsPath?: string;
+  setDefaultsPath: (path: string | undefined) => void;
+  /** Loaded defaults JSON from this editor's defaultsPath file. */
+  defaultsJson: any | null;
+  setDefaultsJson: (json: any | null) => void;
+  defaultsLoading: boolean;
+  setDefaultsLoading: (loading: boolean) => void;
+  /** Host-defined metadata rows preserved without giving the public editor feature semantics. */
+  hostDocumentMetadata: Readonly<Record<string, string>>;
+  setHostDocumentMetadataValue: (key: string, value: string | undefined) => void;
+  /** Property postcode written to SAP report metadata; it does not select native SAP climate data. */
+  propertyPostcode?: string;
+  setPropertyPostcode: (postcode: string | undefined) => void;
+  // Guide Overlay (floorplan tracing) — per-floor records with inherit-from-below semantics.
+  // `guideOverlay` / `guideOverlaySource` are denormalized views of the active floor (resolved
+  // via `currentFloorZ`); `*ByFloor` maps hold the source of truth.
+  guideOverlay: GuideOverlay | null;
+  guideOverlaySource: GuideOverlaySource | null;
+  guideOverlayByFloor: GuideOverlayByFloor;
+  guideOverlaySourceByFloor: GuideOverlaySourceByFloor;
+  setGuideOverlay: (overlay: GuideOverlay | null) => void;
+  setGuideOverlaySource: (source: GuideOverlaySource | null) => void;
+  updateGuideOverlay: (updates: Partial<GuideOverlay>) => void;
+  clearGuideOverlay: () => void;
+  /** Drop the active floor's own overlay record so it falls back to inheritance. */
+  resetGuideOverlayForActiveFloor: () => void;
+  /** Global thermal bridging default (W/K). */
+  defaultThermalBridging: number;
+  setDefaultThermalBridging: (value: number) => void;
+  /** Workspace CSV of junction_type to linear psi (W/m.K); geometry CSV metadata row JunctionPsiDefaultsPath. */
+  junctionPsiDefaultsPath?: string;
+  setJunctionPsiDefaultsPath: (path: string | undefined) => void;
+  junctionPsiDefaultsMap: Record<string, number>;
+  junctionPsiDefaultsLoading: boolean;
+  junctionPsiDefaultsError: string | null;
+  /** Optional external detail profile used as the preferred psi source for detailed linear thermal bridges. */
+  detailedBridgePsiProfile: ExternalDetailProfileLink | null;
+  setDetailedBridgePsiProfile: (profile: ExternalDetailProfileLink | null | undefined) => void;
+  creationDefaultAssemblyIds: CreationDefaultAssemblyIds;
+  setCreationDefaultAssemblyIds: (
+    patch: Partial<Record<'wall' | 'roof' | 'ground_floor', string | undefined>>,
+  ) => void;
+  bundledAssemblyLibrary: BundledAssemblyLibrary | null;
+  setBundledAssemblyLibrary: (lib: BundledAssemblyLibrary | null) => void;
+  bundledAssemblyLibraryLoading: boolean;
+  setBundledAssemblyLibraryLoading: (loading: boolean) => void;
+  bundledAssemblyLibraryError: string | null;
+  setBundledAssemblyLibraryError: (message: string | null) => void;
+}
 
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], MetadataSlice>;
 

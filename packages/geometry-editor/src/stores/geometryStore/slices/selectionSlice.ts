@@ -4,7 +4,17 @@
 import type { StateCreator } from 'zustand';
 import type { GeometryState } from '../../geometryStore';
 
-type SelectionSlice = Pick<GeometryState, 'setSelection' | 'clearSelection'>;
+export type Selection = {
+  type: 'zone' | 'element' | 'global' | 'dormer';
+  id: string;
+  isPlaceholder?: boolean;
+  focusFieldKey?: string;
+} | null;
+
+export interface SelectionSlice {
+  setSelection: (selection: Selection) => void;
+  clearSelection: () => void;
+}
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], SelectionSlice>;
 
 export const createSelectionSlice: GeometryStoreSlice = (set) => ({

@@ -106,14 +106,17 @@ import {
 
 export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
-type IoSlice = Pick<
-  GeometryState,
-  | 'generateCSV'
-  | 'loadFromCSV'
-  | 'lastSavedCsv'
-  | 'setLastSavedCsv'
-  | 'cancelPendingLoadedCsvWorkForDocumentBoundary'
->;
+export interface IoSlice {
+  generateCSV: () => string;
+  /** Returns non-fatal data-loss warnings from CSV parsing; load UIs must surface them. */
+  loadFromCSV: (csvContent: string) => { warnings: string[] };
+  /** CSV at the moment of the last successful save or load; null until either occurs. */
+  lastSavedCsv: string | null;
+  /** Set after a successful save or load. */
+  setLastSavedCsv: (csv: string | null) => void;
+  /** Internal cancellation hook used by document-boundary reset actions. */
+  cancelPendingLoadedCsvWorkForDocumentBoundary: () => void;
+}
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], IoSlice>;
 export type IoSliceOptions = Readonly<{
   defaultDefaultsPath: string | undefined;

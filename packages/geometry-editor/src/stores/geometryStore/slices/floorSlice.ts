@@ -18,20 +18,19 @@ import type { GeometryState } from '../../geometryStore';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
-type FloorSlice = Pick<
-  GeometryState,
-  | 'floors'
-  | 'floorIds'
-  | 'currentFloorId'
-  | 'currentFloorZ'
-  | 'addFloor'
-  | 'updateFloor'
-  | 'removeFloor'
-  | 'setCurrentFloor'
-  | 'setCurrentFloorZ'
-  | 'getCurrentFloor'
-  | 'ensureFloorForZ'
->;
+export interface FloorSlice {
+  floors: Floor[];
+  floorIds: string[];
+  currentFloorId: string | null;
+  currentFloorZ: number;
+  addFloor: (name: string, height: number, isRoofSpace?: boolean, zIndex?: number) => string;
+  updateFloor: (id: string, updates: Partial<Floor>) => void;
+  removeFloor: (id: string) => void;
+  setCurrentFloor: (id: string) => void;
+  setCurrentFloorZ: (z: number) => void;
+  getCurrentFloor: () => Floor | null;
+  ensureFloorForZ: (z: number) => string;
+}
 
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], FloorSlice>;
 

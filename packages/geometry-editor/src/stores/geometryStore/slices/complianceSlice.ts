@@ -3,11 +3,57 @@
 
 import type { StateCreator } from 'zustand';
 import type { GeometryState } from '../../geometryStore';
+import type { SapBuiltFormCode } from '../../../geometry/types';
 
-type ComplianceSlice = Pick<
-  GeometryState,
-  'complianceSettings' | 'setComplianceSettings' | 'replaceComplianceSettings'
->;
+export interface ComplianceSlice {
+  complianceSettings: {
+    PartO_active_cooling_required?: boolean;
+    NumberOfBedrooms?: number;
+    NumberOfWetRooms?: number;
+    GroundFloorArea?: number;
+    HeatingControlType?: 'SeparateTempControl' | 'SeparateTimeAndTempControl';
+    PartGcompliance?: boolean;
+    ColdWaterSource?: 'mains water' | 'header tank';
+    complianceValidationEnabled?: boolean;
+    /**
+     * Optional; from CSV `ScenariosBaseModelEnabled`. When `false`, the Scenarios tab hides the base model.
+     * (Worker sets on merge from strict FHS/ECaaS results.)
+     */
+    scenariosBaseModelEnabled?: boolean;
+    // Air permeability attributes
+    AirPermeability_test_pressure?: 'Standard' | 'Pulse test only';
+    AirPermeability_test_result?: number;
+    AirPermeability_env_area?: number;
+    AirPermeability_ventilation_zone_height?: number;
+    // Ventilation environment attributes (InfiltrationVentilation top-level)
+    Ventilation_shield_class?: 'Open' | 'Normal' | 'Shielded';
+    Ventilation_terrain_class?: 'OpenWater' | 'OpenField' | 'Suburban' | 'Urban';
+    Ventilation_altitude?: number;
+    Ventilation_ventilation_zone_base_height?: number;
+    Ventilation_noise_nuisance?: boolean;
+    /** FHS dwelling form — optional manual overrides of geometry-derived values. */
+    BuildingLength?: number;
+    BuildingWidth?: number;
+    NumberOfHabitableRooms?: number;
+    NumberOfHotTappedRooms?: number;
+    NumberOfUtilityRooms?: number;
+    NumberOfBathrooms?: number;
+    NumberOfSanitaryAccommodations?: number;
+    KitchenExtractorHoodExternal?: boolean;
+    /** FHS General.build_type. Undefined means use geometry-derived suggestion when available. */
+    build_type?: 'flat' | 'house';
+    /** Explicit SAP 10.2 Built-Form code. Never inferred or defaulted from geometry. */
+    built_form?: SapBuiltFormCode;
+    /** FHS General.storeys_in_dwelling. Undefined means use geometry-derived suggestion when available. */
+    storeys_in_dwelling?: number;
+    /** FHS General.storey_of_dwelling. Required by FHS when build_type is flat. */
+    storey_of_dwelling?: number;
+    /** FHS General.storeys_in_building. Required by FHS when build_type is flat. */
+    storeys_in_building?: number;
+  };
+  setComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
+  replaceComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
+}
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], ComplianceSlice>;
 
 /** Minimum FHS-compliant defaults for required compliance fields.

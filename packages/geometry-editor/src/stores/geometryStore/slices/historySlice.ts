@@ -9,20 +9,29 @@ import {
   type HistoryDocumentSnapshot,
 } from '../../../lib/geometryHistorySnapshot';
 import type { GeometryState } from '../../geometryStore';
+import type { Element, Floor, SpaceLabel, Zone } from '../../../geometry/types';
 
-type HistorySlice = Pick<
-  GeometryState,
-  | 'history'
-  | 'historyIndex'
-  | 'maxHistorySize'
-  | 'canUndo'
-  | 'canRedo'
-  | 'historyDebounceTimeout'
-  | 'saveToHistory'
-  | 'saveToHistoryDebounced'
-  | 'undo'
-  | 'redo'
->;
+export interface HistorySlice {
+  history: Array<{
+    elementsById: Record<string, Element>;
+    elementIds: string[];
+    zones: Zone[];
+    floors: Floor[];
+    floorIds: string[];
+    currentFloorId: string | null;
+    spaceLabelsById?: Record<string, SpaceLabel>;
+    spaceLabelIds?: string[];
+  }>;
+  historyIndex: number;
+  maxHistorySize: number;
+  canUndo: boolean;
+  canRedo: boolean;
+  historyDebounceTimeout: NodeJS.Timeout | null;
+  saveToHistory: (source?: string) => void;
+  saveToHistoryDebounced: () => void;
+  undo: () => void;
+  redo: () => void;
+}
 
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], HistorySlice>;
 
