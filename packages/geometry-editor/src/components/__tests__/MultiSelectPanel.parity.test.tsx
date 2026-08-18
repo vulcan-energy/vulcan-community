@@ -42,10 +42,16 @@ const assemblyDocuments: Readonly<Record<string, string>> = Object.freeze({
   }),
   'input/assembly_library/cavity_resistances.json': JSON.stringify({ cavities: [] }),
   'input/assembly_library/assemblies.json': JSON.stringify({
-    assemblies: [{
-      id: 'test.wall', name: '', elementType: 'wall',
-      layers: [{ kind: 'solid', materialId: 'test.board', thickness_m: 0.1 }],
-    }],
+    assemblies: [
+      {
+        id: 'test.wall', name: '', elementType: 'wall',
+        layers: [{ kind: 'solid', materialId: 'test.board', thickness_m: 0.1 }],
+      },
+      {
+        id: 'distractor.wall', name: 'Distractor assembly', elementType: 'wall',
+        layers: [{ kind: 'solid', materialId: 'test.board', thickness_m: 0.2 }],
+      },
+    ],
   }),
 });
 const resolvedAssemblyResources: GeometryWorkspaceResourcePort = Object.freeze({
@@ -198,8 +204,20 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
 
   it('keeps ThermalBridgePoint edits top-level and reloadable through CSV', () => {
     const { store } = mount([thermalBridgePoint('point', 4)]);
+    const originalUpdateElement = store.getState().updateElement;
+    const originalUpdateElementsBulk = store.getState().updateElementsBulk;
+    const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
+    const updateElementsBulk = vi.fn((...args: Parameters<typeof originalUpdateElementsBulk>) => originalUpdateElementsBulk(...args));
+    act(() => store.setState({ updateElement, updateElementsBulk }));
     fireEvent.change(input('Heat Transfer Coefficient'), { target: { value: '7.5' } });
+    expect(updateElementsBulk).toHaveBeenCalledExactlyOnceWith({
+      point: { heat_transfer_coeff: 7.5 },
+    }, { mode: 'replace' });
+    expect(updateElement).toHaveBeenCalledExactlyOnceWith(
+      'point', { heat_transfer_coeff: 7.5 }, false,
+    );
     expect(store.getState().elementsById.point?.heat_transfer_coeff).toBe(7.5);
+    expect(json(store, 'point')).toBe('{"id":"point","type":"ThermalBridgePoint","name":"point","coordinates":[{"x":0,"y":0,"z":0}],"zoneId":"zone","heat_transfer_coeff":7.5,"_v":1}');
     const csv = store.getState().generateCSV();
     expect(csv).toContain(',7.5,');
     const reloaded = createGeometryStore({ defaultDefaultsPath: null });
@@ -303,6 +321,65 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
       .toEqual({ retained: true, _lighting_entry_mode: 'detailed' });
   });
 
+  it('keeps exact Lighting count and power patches, nested siblings and bytes', () => {
+    const countMount = mount([
+      lighting('count', {
+        efficacy: null, count: 4, power: undefined,
+        bulbs: { led: { efficacy: 80, count: 2, power: 6 } },
+        extra_json: { retained: 'count' },
+      }),
+    ]);
+    const countOriginal = countMount.store.getState().updateElement;
+    const countUpdate = vi.fn((...args: Parameters<typeof countOriginal>) => countOriginal(...args));
+    act(() => countMount.store.setState({ updateElement: countUpdate }));
+    fireEvent.change(input('Count'), { target: { value: '5.4' } });
+    expect(countUpdate).toHaveBeenCalledExactlyOnceWith('count', {
+      count: 5,
+      efficacy: 80,
+      power: 6,
+      bulbs: { led: { count: 5, power: 6, efficacy: 80 } },
+    }, false);
+    expect(Object.keys(countUpdate.mock.calls[0]?.[1] ?? {})).toEqual([
+      'count', 'efficacy', 'power', 'bulbs',
+    ]);
+    expect(json(countMount.store, 'count')).toBe('{"id":"count","type":"Lighting","name":"count","coordinates":[{"x":0,"y":0,"z":0}],"efficacy":80,"count":5,"power":6,"bulbs":{"led":{"count":5,"power":6,"efficacy":80}},"extra_json":{"retained":"count"},"_v":1}');
+
+    cleanup();
+    const powerMount = mount([
+      lighting('power', {
+        efficacy: undefined, count: null, power: 8,
+        bulbs: { led: { efficacy: 80, count: 2, power: 6 } },
+        extra_json: { retained: 'power' }, zoneId: 'zone',
+      }),
+    ]);
+    const powerOriginal = powerMount.store.getState().updateElement;
+    const powerUpdate = vi.fn((...args: Parameters<typeof powerOriginal>) => powerOriginal(...args));
+    act(() => powerMount.store.setState({ updateElement: powerUpdate }));
+    fireEvent.change(input('Power (W)'), { target: { value: '9' } });
+    expect(powerUpdate).toHaveBeenCalledExactlyOnceWith('power', {
+      power: 9,
+      efficacy: 80,
+      count: 2,
+      bulbs: { led: { count: 2, power: 9, efficacy: 80 } },
+      extra_json: { retained: 'power', _lighting_entry_mode: 'detailed' },
+    }, false);
+    expect(Object.keys(powerUpdate.mock.calls[0]?.[1] ?? {})).toEqual([
+      'power', 'efficacy', 'count', 'bulbs', 'extra_json',
+    ]);
+    expect(json(powerMount.store, 'power')).toBe('{"id":"power","type":"Lighting","name":"power","coordinates":[{"x":0,"y":0,"z":0}],"efficacy":80,"count":2,"power":9,"bulbs":{"led":{"count":2,"power":9,"efficacy":80}},"extra_json":{"retained":"power","_lighting_entry_mode":"detailed"},"zoneId":"zone","_v":1}');
+
+    const csv = powerMount.store.getState().generateCSV();
+    const reloaded = createGeometryStore({ defaultDefaultsPath: null });
+    reloaded.getState().loadFromCSV(csv);
+    const roundTripped = Object.values(reloaded.getState().elementsById)
+      .find((element) => element.name === 'power');
+    expect(roundTripped).toMatchObject({ efficacy: 80, count: 2, power: 9 });
+    expect(roundTripped?.bulbs).toBeUndefined();
+    expect(roundTripped?.extra_json).toEqual({
+      retained: 'power', _lighting_entry_mode: 'detailed',
+    });
+  });
+
   it('keeps live drafts isolated by field key', () => {
     mount([
       lighting('a', { efficacy: 90, count: 4, power: 8 }),
@@ -347,6 +424,28 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     expect(JSON.stringify(roundTripped?.extra_json)).toBe(JSON.stringify(editedNull?.extra_json));
   });
 
+  it('falls back from nullish and non-finite direct Lighting fields to LED values', () => {
+    mount([
+      lighting('null', {
+        efficacy: null, count: null, power: null,
+        bulbs: { led: { efficacy: 80, count: 2, power: 6 } },
+      }),
+      lighting('undefined', {
+        efficacy: undefined, count: undefined, power: undefined,
+        bulbs: { led: { efficacy: 80, count: 2, power: 6 } },
+      }),
+      lighting('omitted', { bulbs: { led: { efficacy: 80, count: 2, power: 6 } } }),
+      lighting('nan', {
+        efficacy: Number.NaN, count: Number.NaN, power: Number.NaN,
+        bulbs: { led: { efficacy: 80, count: 2, power: 6 } },
+      }),
+    ]);
+
+    expect(input('Efficacy')).toHaveValue('80');
+    expect(input('Count')).toHaveValue('2');
+    expect(input('Power (W)')).toHaveValue('6');
+  });
+
   it('groups one multi-element edit into one undo step and restores both elements', () => {
     vi.useFakeTimers();
     const { store } = mount([
@@ -354,8 +453,15 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
       lighting('b', { efficacy: 80, count: 2, power: 6 }),
     ]);
     act(() => store.getState().saveToHistory('fixture baseline'));
+    const originalSaveToHistory = store.getState().saveToHistory;
+    const saveToHistory = vi.fn((...args: Parameters<typeof originalSaveToHistory>) => (
+      originalSaveToHistory(...args)
+    ));
+    act(() => store.setState({ saveToHistory }));
     fireEvent.change(input('Efficacy'), { target: { value: '110' } });
+    expect(saveToHistory).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(350));
+    expect(saveToHistory).toHaveBeenCalledExactlyOnceWith('debounced-flush');
     expect(store.getState().history).toHaveLength(2);
     expect(store.getState().canUndo).toBe(true);
     act(() => store.getState().undo());
@@ -379,6 +485,9 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     const trigger = await screen.findByRole('button', { name: 'Search assemblies…' });
     expect(trigger).not.toBeDisabled();
     await user.click(trigger);
+    expect(screen.getByRole('option', { name: /200mm test board/ })).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText('Search assemblies…'), '100mm');
+    expect(screen.queryByRole('option', { name: /200mm test board/ })).not.toBeInTheDocument();
     const option = await screen.findByRole('option', { name: /100mm test board/ });
     await user.click(option);
 
@@ -430,6 +539,14 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     expect(screen.getByText('Assembly')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Loading assemblies…' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Library' })).not.toBeDisabled();
+    for (const label of [
+      'U Value',
+      'Thermal Resistance Construction',
+      'Mass Distribution Class',
+      'Areal Heat Capacity',
+    ]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
   });
 
   it('keeps assembly controls host-neutral and hidden for non-fabric selections', () => {

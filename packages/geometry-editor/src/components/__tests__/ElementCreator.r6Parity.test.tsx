@@ -36,19 +36,41 @@ function renderLighting(element: Element) {
 afterEach(cleanup);
 
 describe('R6 ElementCreator Lighting commit fence', () => {
-  it.each([0, -1])('keeps %s detailed count edits omitted while preserving siblings', (value) => {
+  it.each([
+    ['Efficacy', 'efficacy', 0],
+    ['Efficacy', 'efficacy', -1],
+    ['Count', 'count', 0],
+    ['Count', 'count', -1],
+    ['Power', 'power', 0],
+    ['Power', 'power', -1],
+  ] as const)('keeps %s (%s) = %s omitted while preserving detailed siblings', (label, property, value) => {
     const store = renderLighting({
       id: 'light', type: 'Lighting', name: 'light', zoneId: 'zone',
       coordinates: [{ x: 0, y: 0, z: 0 }], efficacy: 90, count: 4, power: 8,
     } as Element);
-    const countLabel = screen.getByText('Count');
-    const countInput = countLabel.closest('.tooltip-container')?.nextElementSibling?.querySelector('input');
-    expect(countInput).toBeInstanceOf(HTMLInputElement);
-    fireEvent.change(countInput as HTMLInputElement, { target: { value: String(value) } });
+    const fieldLabel = screen.getByText(label);
+    const fieldInput = fieldLabel.closest('.tooltip-container')?.nextElementSibling?.querySelector('input');
+    expect(fieldInput).toBeInstanceOf(HTMLInputElement);
+    fireEvent.change(fieldInput as HTMLInputElement, { target: { value: String(value) } });
     const edited = store.getState().elementsById.light;
-    expect(edited?.count).toBeUndefined();
-    expect(Object.prototype.hasOwnProperty.call(edited, 'count')).toBe(true);
-    expect(edited?.efficacy).toBe(90);
-    expect(edited?.power).toBe(8);
+    expect(edited?.[property]).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(edited, property)).toBe(true);
+    expect(edited).toMatchObject({
+      efficacy: property === 'efficacy' ? undefined : 90,
+      count: property === 'count' ? undefined : 4,
+      power: property === 'power' ? undefined : 8,
+      bulbs: {
+        led: {
+          efficacy: property === 'efficacy' ? undefined : 90,
+          count: property === 'count' ? undefined : 4,
+          power: property === 'power' ? undefined : 8,
+        },
+      },
+    });
+    const led = edited?.bulbs?.led;
+    expect(Object.keys(led ?? {})).toEqual(['count', 'power', 'efficacy']);
+    for (const key of ['count', 'power', 'efficacy']) {
+      expect(Object.prototype.hasOwnProperty.call(led, key)).toBe(true);
+    }
   });
 });

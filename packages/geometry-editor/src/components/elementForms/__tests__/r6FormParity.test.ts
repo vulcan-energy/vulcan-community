@@ -40,6 +40,43 @@ describe('R6 single-element field semantics', () => {
     expect(nonFinite.efficacyInput.setValue.mock.calls[0]?.[0]).toBeNaN();
   });
 
+  it.each([
+    ['count', 'countInput', 4, 2, 1],
+    ['power', 'powerInput', 8, 6, 3],
+  ] as const)(
+    'reads direct %s first, then LED, then incandescent, while retaining direct NaN',
+    (field, inputKey, direct, led, incandescent) => {
+      const hydrate = (element: Element) => {
+        const state = {
+          setLightingEntryMode: vi.fn(),
+          setLightingGrade: vi.fn(),
+          setLightingLampType: vi.fn(),
+          efficacyInput: { setValue: vi.fn() },
+          countInput: { setValue: vi.fn() },
+          powerInput: { setValue: vi.fn() },
+        };
+        lightingFormModule.hydrate(state as never, element);
+        return state[inputKey].setValue;
+      };
+      expect(hydrate(lighting({
+        [field]: direct,
+        bulbs: { led: { [field]: led }, incandescent: { [field]: incandescent } },
+      }))).toHaveBeenCalledWith(direct);
+      expect(hydrate(lighting({
+        [field]: null,
+        bulbs: { led: { [field]: led }, incandescent: { [field]: incandescent } },
+      }))).toHaveBeenCalledWith(led);
+      expect(hydrate(lighting({
+        bulbs: { incandescent: { [field]: incandescent } },
+      }))).toHaveBeenCalledWith(incandescent);
+      const nonFinite = hydrate(lighting({
+        [field]: Number.NaN,
+        bulbs: { led: { [field]: led } },
+      }));
+      expect(nonFinite.mock.calls[0]?.[0]).toBeNaN();
+    },
+  );
+
   it('normalises non-positive detailed values instead of persisting zero or negatives', () => {
     const state = {
       lightingEntryMode: 'detailed', lightingGrade: 'unknown', lightingLampType: 'LED',
