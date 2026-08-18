@@ -387,6 +387,91 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     });
   });
 
+  it('keeps reversed multi-target Lighting efficacy, count and power routes, patch bytes and CSV reloads', () => {
+    const cases = [
+      {
+        field: 'Efficacy', raw: '110',
+        aPatch: {
+          efficacy: 110, count: 4, power: 8,
+          bulbs: { led: { count: 4, power: 8, efficacy: 110 } },
+          extra_json: { _lighting_entry_mode: 'detailed' },
+        },
+        bPatch: {
+          efficacy: 110, count: 2, power: 6,
+          bulbs: { led: { count: 2, power: 6, efficacy: 110 } },
+          extra_json: { _lighting_entry_mode: 'detailed' },
+        },
+        aValues: { efficacy: 110, count: 4, power: 8 },
+        bValues: { efficacy: 110, count: 2, power: 6 },
+        metadata: { _lighting_entry_mode: 'detailed' },
+      },
+      {
+        field: 'Count', raw: '5.4',
+        aPatch: {
+          count: 5, efficacy: 90, power: 8,
+          bulbs: { led: { count: 5, power: 8, efficacy: 90 } },
+        },
+        bPatch: {
+          count: 5, efficacy: 80, power: 6,
+          bulbs: { led: { count: 5, power: 6, efficacy: 80 } },
+        },
+        aValues: { efficacy: 90, count: 5, power: 8 },
+        bValues: { efficacy: 80, count: 5, power: 6 },
+        metadata: undefined,
+      },
+      {
+        field: 'Power (W)', raw: '9',
+        aPatch: {
+          power: 9, efficacy: 90, count: 4,
+          bulbs: { led: { count: 4, power: 9, efficacy: 90 } },
+          extra_json: { _lighting_entry_mode: 'detailed' },
+        },
+        bPatch: {
+          power: 9, efficacy: 80, count: 2,
+          bulbs: { led: { count: 2, power: 9, efficacy: 80 } },
+          extra_json: { _lighting_entry_mode: 'detailed' },
+        },
+        aValues: { efficacy: 90, count: 4, power: 9 },
+        bValues: { efficacy: 80, count: 2, power: 9 },
+        metadata: { _lighting_entry_mode: 'detailed' },
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      cleanup();
+      const { store } = mount([
+        lighting('b', { efficacy: 80, count: 2, power: 6, zoneId: 'zone' }),
+        lighting('a', { efficacy: 90, count: 4, power: 8, zoneId: 'zone' }),
+      ]);
+      const originalUpdateElement = store.getState().updateElement;
+      const originalUpdateElementsBulk = store.getState().updateElementsBulk;
+      const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
+      const updateElementsBulk = vi.fn((...args: Parameters<typeof originalUpdateElementsBulk>) => originalUpdateElementsBulk(...args));
+      act(() => store.setState({ updateElement, updateElementsBulk }));
+
+      fireEvent.change(input(testCase.field), { target: { value: testCase.raw } });
+      expect(updateElementsBulk, testCase.field).not.toHaveBeenCalled();
+      expect(updateElement, testCase.field).toHaveBeenCalledTimes(2);
+      expect(updateElement).toHaveBeenNthCalledWith(1, 'a', testCase.aPatch, true);
+      expect(updateElement).toHaveBeenNthCalledWith(2, 'b', testCase.bPatch, false);
+      expect(JSON.stringify(updateElement.mock.calls[0]?.[1])).toBe(JSON.stringify(testCase.aPatch));
+      expect(JSON.stringify(updateElement.mock.calls[1]?.[1])).toBe(JSON.stringify(testCase.bPatch));
+      expect(store.getState().elementsById.a).toMatchObject(testCase.aValues);
+      expect(store.getState().elementsById.b).toMatchObject(testCase.bValues);
+
+      const csv = store.getState().generateCSV();
+      const reloaded = createGeometryStore({ defaultDefaultsPath: null });
+      reloaded.getState().loadFromCSV(csv);
+      for (const [id, values] of [['a', testCase.aValues], ['b', testCase.bValues]] as const) {
+        const roundTripped = Object.values(reloaded.getState().elementsById)
+          .find((element) => element.name === id);
+        expect(roundTripped, `${testCase.field} ${id}`).toMatchObject(values);
+        expect(roundTripped?.bulbs).toBeUndefined();
+        expect(roundTripped?.extra_json).toEqual(testCase.metadata);
+      }
+    }
+  });
+
   it('keeps live drafts isolated by field key', () => {
     mount([
       lighting('a', { efficacy: 90, count: 4, power: 8 }),
@@ -431,50 +516,44 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     expect(JSON.stringify(roundTripped?.extra_json)).toBe(JSON.stringify(editedNull?.extra_json));
   });
 
-  it('falls back from nullish and non-finite direct Lighting fields to LED values', () => {
-    mount([
-      lighting('null', {
-        efficacy: null, count: null, power: null,
-        bulbs: { led: { efficacy: 80, count: 2, power: 6 } },
-      }),
-      lighting('undefined', {
-        efficacy: undefined, count: undefined, power: undefined,
-        bulbs: { led: { efficacy: 80, count: 2, power: 6 } },
-      }),
-      lighting('omitted', { bulbs: { led: { efficacy: 80, count: 2, power: 6 } } }),
-      lighting('nan', {
-        efficacy: Number.NaN, count: Number.NaN, power: Number.NaN,
-        bulbs: { led: { efficacy: 80, count: 2, power: 6 } },
-      }),
-    ]);
-
-    expect(input('Efficacy')).toHaveValue('80');
-    expect(input('Count')).toHaveValue('2');
-    expect(input('Power (W)')).toHaveValue('6');
-  });
-
-  it('uses incandescent only when no LED record exists in the panel path', () => {
-    mount([
-      lighting('incandescent-only', {
-        bulbs: { incandescent: { efficacy: 60, count: 1, power: 3 } },
-      }),
-    ]);
-    expect(input('Efficacy')).toHaveValue('60');
-    expect(input('Count')).toHaveValue('1');
-    expect(input('Power (W)')).toHaveValue('3');
+  it.each([
+    ['efficacy', 'Efficacy'],
+    ['count', 'Count'],
+    ['power', 'Power (W)'],
+  ] as const)('keeps exact %s direct/LED precedence without incandescent fall-through', (field, label) => {
+    const cases: Array<[
+      string,
+      number | null | undefined | 'omitted',
+      number | null | undefined | 'omitted',
+      string,
+    ]> = [
+      ['direct value', 120, 80, '120'],
+      ['direct null', null, 80, '80'],
+      ['direct own undefined', undefined, 80, '80'],
+      ['direct omitted', 'omitted', 80, '80'],
+      ['direct NaN', Number.NaN, 80, '80'],
+      ['LED null', 'omitted', null, ''],
+      ['LED own undefined', 'omitted', undefined, ''],
+      ['LED omitted', 'omitted', 'omitted', ''],
+      ['LED NaN', 'omitted', Number.NaN, ''],
+    ];
+    for (const [caseName, direct, led, expected] of cases) {
+      cleanup();
+      mount([lighting(`${field}-${caseName}`, {
+        ...(direct === 'omitted' ? {} : { [field]: direct }),
+        bulbs: {
+          led: led === 'omitted' ? {} : { [field]: led },
+          incandescent: { [field]: 60 },
+        },
+      })]);
+      expect(input(label), caseName).toHaveValue(expected);
+    }
 
     cleanup();
-    mount([
-      lighting('partial-led', {
-        bulbs: {
-          led: { count: 2 },
-          incandescent: { efficacy: 60, count: 1, power: 3 },
-        },
-      }),
-    ]);
-    expect(input('Efficacy')).toHaveValue('');
-    expect(input('Count')).toHaveValue('2');
-    expect(input('Power (W)')).toHaveValue('');
+    mount([lighting(`${field}-incandescent-only`, {
+      bulbs: { incandescent: { [field]: 60 } },
+    })]);
+    expect(input(label)).toHaveValue('60');
   });
 
   it('groups one multi-element edit into one undo step and restores both elements', () => {

@@ -11,88 +11,69 @@ const lighting = (fields: Record<string, unknown> = {}): Element => ({
   id: 'light', type: 'Lighting', name: 'light', coordinates: [{ x: 0, y: 0, z: 0 }], ...fields,
 } as Element);
 
-describe('R6 single-element field semantics', () => {
-  it('reads direct Lighting values first, then prefers the LED record over incandescent', () => {
-    const hydrate = (element: Element) => {
-      const state = {
-        setLightingEntryMode: vi.fn(),
-        setLightingGrade: vi.fn(),
-        setLightingLampType: vi.fn(),
-        efficacyInput: { setValue: vi.fn() },
-        countInput: { setValue: vi.fn() },
-        powerInput: { setValue: vi.fn() },
-      };
-      lightingFormModule.hydrate(state as never, element);
-      return state;
-    };
-    expect(hydrate(lighting({ efficacy: 120, bulbs: {
-      led: { efficacy: 80 }, incandescent: { efficacy: 60 },
-    } })).efficacyInput.setValue).toHaveBeenCalledWith(120);
-    expect(hydrate(lighting({ bulbs: {
-      led: { efficacy: 80 }, incandescent: { efficacy: 60 },
-    } })).efficacyInput.setValue).toHaveBeenCalledWith(80);
-    expect(hydrate(lighting({ efficacy: null, bulbs: {
-      led: { efficacy: 80 }, incandescent: { efficacy: 60 },
-    } })).efficacyInput.setValue).toHaveBeenCalledWith(80);
-    expect(hydrate(lighting({ efficacy: undefined, bulbs: {
-      led: { efficacy: 80 }, incandescent: { efficacy: 60 },
-    } })).efficacyInput.setValue).toHaveBeenCalledWith(80);
-    expect(hydrate(lighting({ bulbs: {
-      incandescent: { efficacy: 60 },
-    } })).efficacyInput.setValue).toHaveBeenCalledWith(60);
-    expect(hydrate(lighting({ bulbs: {
-      led: { count: 2 }, incandescent: { efficacy: 60 },
-    } })).efficacyInput.setValue).toHaveBeenCalledWith('');
-    const nonFinite = hydrate(lighting({ efficacy: Number.NaN, bulbs: {
-      led: { efficacy: 80 },
-    } }));
-    expect(nonFinite.efficacyInput.setValue.mock.calls[0]?.[0]).toBeNaN();
-  });
+type LightingField = 'efficacy' | 'count' | 'power';
+type LightingInput = 'efficacyInput' | 'countInput' | 'powerInput';
 
-  it.each([
-    ['count', 'countInput', 4, 2, 1],
-    ['power', 'powerInput', 8, 6, 3],
-  ] as const)(
-    'reads direct %s first, then prefers the LED record, while retaining direct NaN',
-    (field, inputKey, direct, led, incandescent) => {
-      const hydrate = (element: Element) => {
-        const state = {
-          setLightingEntryMode: vi.fn(),
-          setLightingGrade: vi.fn(),
-          setLightingLampType: vi.fn(),
-          efficacyInput: { setValue: vi.fn() },
-          countInput: { setValue: vi.fn() },
-          powerInput: { setValue: vi.fn() },
-        };
-        lightingFormModule.hydrate(state as never, element);
-        return state[inputKey].setValue;
-      };
-      expect(hydrate(lighting({
-        [field]: direct,
-        bulbs: { led: { [field]: led }, incandescent: { [field]: incandescent } },
-      }))).toHaveBeenCalledWith(direct);
-      expect(hydrate(lighting({
-        [field]: null,
-        bulbs: { led: { [field]: led }, incandescent: { [field]: incandescent } },
-      }))).toHaveBeenCalledWith(led);
-      expect(hydrate(lighting({
-        [field]: undefined,
-        bulbs: { led: { [field]: led }, incandescent: { [field]: incandescent } },
-      }))).toHaveBeenCalledWith(led);
-      expect(hydrate(lighting({
-        bulbs: { incandescent: { [field]: incandescent } },
-      }))).toHaveBeenCalledWith(incandescent);
-      const unrelatedLedField = field === 'count' ? { power: 6 } : { count: 2 };
-      expect(hydrate(lighting({
-        bulbs: { led: unrelatedLedField, incandescent: { [field]: incandescent } },
-      }))).toHaveBeenCalledWith('');
-      const nonFinite = hydrate(lighting({
-        [field]: Number.NaN,
-        bulbs: { led: { [field]: led } },
-      }));
-      expect(nonFinite.mock.calls[0]?.[0]).toBeNaN();
+function hydrateLightingField(element: Element, input: LightingInput) {
+  const state = {
+    setLightingEntryMode: vi.fn(),
+    setLightingGrade: vi.fn(),
+    setLightingLampType: vi.fn(),
+    efficacyInput: { setValue: vi.fn() },
+    countInput: { setValue: vi.fn() },
+    powerInput: { setValue: vi.fn() },
+  };
+  lightingFormModule.hydrate(state as never, element);
+  const setValue = state[input].setValue;
+  expect(setValue).toHaveBeenCalledTimes(1);
+  return setValue.mock.calls[0]?.[0];
+}
+
+function lightingPrecedenceElement(
+  field: LightingField,
+  direct: number | null | undefined | 'omitted',
+  led: number | null | undefined | 'omitted',
+): Element {
+  return lighting({
+    ...(direct === 'omitted' ? {} : { [field]: direct }),
+    bulbs: {
+      led: led === 'omitted' ? {} : { [field]: led },
+      incandescent: { [field]: 60 },
     },
-  );
+  });
+}
+
+describe('R6 single-element field semantics', () => {
+  it.each([
+    ['efficacy', 'efficacyInput'],
+    ['count', 'countInput'],
+    ['power', 'powerInput'],
+  ] as const)('hydrates %s once with exact direct/LED precedence and no incandescent fall-through', (field, input) => {
+    const cases: Array<[
+      string,
+      number | null | undefined | 'omitted',
+      number | null | undefined | 'omitted',
+      number | '' | typeof Number.NaN,
+    ]> = [
+      ['direct value', 120, 80, 120],
+      ['direct null', null, 80, 80],
+      ['direct own undefined', undefined, 80, 80],
+      ['direct omitted', 'omitted', 80, 80],
+      ['direct NaN', Number.NaN, 80, Number.NaN],
+      ['LED null', 'omitted', null, ''],
+      ['LED own undefined', 'omitted', undefined, ''],
+      ['LED omitted', 'omitted', 'omitted', ''],
+      ['LED NaN', 'omitted', Number.NaN, Number.NaN],
+    ];
+    for (const [label, direct, led, expected] of cases) {
+      const actual = hydrateLightingField(lightingPrecedenceElement(field, direct, led), input);
+      if (typeof expected === 'number' && Number.isNaN(expected)) {
+        expect(actual, label).toBeNaN();
+      } else {
+        expect(actual, label).toBe(expected);
+      }
+    }
+  });
 
   it('normalises non-positive detailed values instead of persisting zero or negatives', () => {
     const state = {
