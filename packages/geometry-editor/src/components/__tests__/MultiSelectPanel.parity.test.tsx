@@ -20,7 +20,7 @@ const schemaPort: GeometrySchemaPort = Object.freeze({
   getSchemaSubtypeForElementData: () => undefined, getConditionalRequiredFields: () => [],
   validateProperty: () => ({ valid: true }), findParameter: () => null,
 });
-// These tests do not exercise the assembly catalogue; leave that unrelated effect pending.
+// Non-assembly cases leave the unrelated catalogue effect pending; assembly cases inject their own port.
 const pendingResource = new Promise<never>(() => undefined);
 const resources: GeometryWorkspaceResourcePort = Object.freeze({
   availability: 'unavailable',
@@ -55,6 +55,13 @@ const resolvedAssemblyResources: GeometryWorkspaceResourcePort = Object.freeze({
     const document = assemblyDocuments[path];
     if (document === undefined) throw new Error(`unexpected assembly resource: ${path}`);
     return document;
+  },
+});
+const rejectedAssemblyResources: GeometryWorkspaceResourcePort = Object.freeze({
+  ...resources,
+  availability: 'available',
+  readText: async () => {
+    throw new Error('assembly fixture unavailable');
   },
 });
 const coords = [{ x: 0, y: 0, z: 0 }];
@@ -376,21 +383,53 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     await user.click(option);
 
     for (const [id, retained] of [['wall-a', 'a'], ['wall-b', 'b']] as const) {
-      expect(store.getState().elementsById[id]?.extra_json).toMatchObject({
+      const extraJson = store.getState().elementsById[id]?.extra_json;
+      const envelope = extraJson?.vulcan_assembly_v1 as { appliedAt?: unknown } | undefined;
+      expect(envelope?.appliedAt).toEqual(expect.any(String));
+      expect(new Date(envelope?.appliedAt as string).toISOString()).toBe(envelope?.appliedAt);
+      expect(extraJson).toEqual({
         retained,
-        u_value: expect.any(Number),
-        thermal_resistance_construction: expect.any(Number),
+        u_value: 1.5,
+        thermal_resistance_construction: 0.5,
+        mass_distribution_class: 'D: Mass equally distributed',
+        areal_heat_capacity: 'Light',
         vulcan_assembly_v1: {
           schemaVersion: 1,
           assemblyId: 'test.wall',
           assemblySnapshot: {
             elementMode: 'BuildingElementOpaque',
             pitchDegrees: 90,
-            layers: [{ kind: 'solid', materialId: 'test.board', thickness_m: 0.1 }],
+            layers: [{
+              kind: 'solid',
+              materialId: 'test.board',
+              thickness_m: 0.1,
+              repeatingBridges: undefined,
+            }],
           },
+          appliedAt: envelope?.appliedAt,
+          uncorrectedU_W_m2K: 1.5,
+          correctedU_W_m2K: 1.5,
+          combinedMethodU_W_m2K: 1.49,
+          thermalResistanceConstruction_m2K_W: 0.5,
+          rConstructionLowerLimit_m2K_W: 0.5,
+          rConstructionUpperLimit_m2K_W: 0.5,
+          massDistributionClass: 'D: Mass equally distributed',
+          calculationEngineVersion: 'vulcan-assembly-calc/0.6.0',
+          arealHeatCapacity_J_m2K: 80000,
+          arealHeatCapacityWrittenToElement_J_m2K: 75000,
+          uValueWrittenToElement_W_m2K: 1.5,
         },
       });
     }
+  });
+
+  it('surfaces a host assembly load failure without hiding the fabric controls', async () => {
+    mount([fabric('wall')], undefined, rejectedAssemblyResources);
+
+    expect(await screen.findByText('assembly fixture unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Assembly')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Loading assemblies…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Library' })).not.toBeDisabled();
   });
 
   it('keeps assembly controls host-neutral and hidden for non-fabric selections', () => {
