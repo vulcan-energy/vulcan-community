@@ -25,7 +25,7 @@ import {
 import { electricBatteryFormModule } from './elementForms/electricBattery';
 import { thermalBridgeLinearFormModule } from './elementForms/thermalBridgeLinear';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
-import { getLightingFieldValue, lightingFormModule } from './elementForms/lighting';
+import { buildLightingPatch, lightingFormModule } from './elementForms/lighting';
 import { applianceFormModule } from './elementForms/appliance';
 import { hotWaterDemandFormModule } from './elementForms/hotWaterDemand';
 import { combustionAppliancesFormModule } from './elementForms/combustionAppliances';
@@ -1260,40 +1260,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return !!target && (target.type === 'element' || target.type === 'global') && !target.isPlaceholder;
   }, [selection]);
 
-  const buildLightingCommitPatch = (
-    existingElement: Element,
-    overrides: Partial<Element>,
-  ): Partial<Element> => {
-    const next = { ...overrides } as Record<string, unknown>;
-
-    const rawEfficacy = Object.prototype.hasOwnProperty.call(overrides, 'efficacy')
-      ? (overrides as Record<string, unknown>).efficacy
-      : getLightingFieldValue(existingElement, 'efficacy');
-    const rawCount = Object.prototype.hasOwnProperty.call(overrides, 'count')
-      ? (overrides as Record<string, unknown>).count
-      : getLightingFieldValue(existingElement, 'count');
-    const rawPower = Object.prototype.hasOwnProperty.call(overrides, 'power')
-      ? (overrides as Record<string, unknown>).power
-      : getLightingFieldValue(existingElement, 'power');
-
-    const efficacy = typeof rawEfficacy === 'number' && rawEfficacy > 0 ? rawEfficacy : undefined;
-    const count = typeof rawCount === 'number' && rawCount > 0 ? rawCount : undefined;
-    const powerValue = typeof rawPower === 'number' && rawPower > 0 ? rawPower : undefined;
-
-    next.efficacy = efficacy;
-    next.count = count;
-    next.power = powerValue;
-    next.bulbs = {
-      led: {
-        count,
-        power: powerValue,
-        efficacy,
-      },
-    };
-
-    return next as Partial<Element>;
-  };
-
   const getZoneNameForElementZoneId = useCallback((zoneId: unknown): string | null => {
     if (typeof zoneId !== 'string' || !zoneId.trim()) return null;
     return getZoneById(zoneId)?.name?.trim() || null;
@@ -1362,7 +1328,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         Object.prototype.hasOwnProperty.call(next, field),
       );
     const patch = isLightingCommit
-      ? buildLightingCommitPatch(existingElement, next as Partial<Element>)
+      ? buildLightingPatch(existingElement, next as Partial<Element>, { positiveValues: true })
       : withSyncedSpaceHeatSystemZone(existingElement, next as Partial<Element>);
 
     try {
