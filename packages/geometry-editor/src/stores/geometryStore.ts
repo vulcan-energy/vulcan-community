@@ -234,6 +234,7 @@ import type {
   ElectricBattery,
   System,
   Element,
+  ElementDraft,
   SpaceLabel,
 } from '../geometry/types';
 // Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
@@ -278,6 +279,7 @@ export type {
   ElectricBattery,
   System,
   Element,
+  ElementDraft,
   SpaceLabel,
   SapBuiltFormCode,
 } from '../geometry/types';
@@ -1361,7 +1363,7 @@ export interface GeometryState extends
   updateZone: (id: string, updates: Partial<Zone>, skipAutoSave?: boolean) => void;
   removeZone: (id: string) => void;
 
-  addElement: (element: Omit<Element, 'id'>) => void;
+  addElement: (element: ElementDraft) => void;
   updateElement: (id: string, updates: Partial<Element>, skipAutoSave?: boolean) => void;
   setSlopePitchAxis: (id: string, axis: SlopePitchAxis) => void;
   flipElementOrientation: (id: string, skipAutoSave?: boolean) => void;
@@ -4867,27 +4869,32 @@ const createGeometryState = (
     const normalizedElement = {
       ...elementWithName,
       parent_element: (!elementWithName.parent_element || elementWithName.parent_element === '') ? null : elementWithName.parent_element
-    } as Element;
+    } as Element & {
+      coordinates: ElementCoordinate[] | string;
+      isPlaceholder?: boolean;
+      floorId?: string;
+      extra_json?: Record<string, unknown>;
+    };
     if (normalizedElement.type === 'MechanicalVentilationTerminal') {
       const host = (normalizedElement as MechanicalVentilationTerminal).host_element;
       (normalizedElement as MechanicalVentilationTerminal).host_element = (!host || host === '') ? null : host;
     }
     // Normalize coordinates coming from CSV string or missing/invalid arrays
     try {
-      const rawCoords = (normalizedElement as any).coordinates as any;
+      const rawCoords = normalizedElement.coordinates;
       if (typeof rawCoords === 'string') {
-        (normalizedElement as any).coordinates = parseCoords(rawCoords);
+        normalizedElement.coordinates = parseCoords(rawCoords);
       }
-      const coords = (normalizedElement as any).coordinates as Array<{x:number,y:number,z:number}> | undefined;
+      const coords = normalizedElement.coordinates as ElementCoordinate[] | undefined;
       const coordsMissing = !Array.isArray(coords) || coords.length === 0;
       if (coordsMissing) {
-        (normalizedElement as any).coordinates = generateDefaultCoordinates(normalizedElement);
+        normalizedElement.coordinates = generateDefaultCoordinates(normalizedElement);
       } else {
         // Respect shape if compatible with the chosen type; otherwise fall back to defaults
-        const shape = getElementShape(normalizedElement as any);
-        const compatible = isTypeShapeCompatible(normalizedElement.type as any, shape);
+        const shape = getElementShape(normalizedElement);
+        const compatible = isTypeShapeCompatible(normalizedElement.type, shape);
         if (!compatible) {
-          (normalizedElement as any).coordinates = generateDefaultCoordinates(normalizedElement);
+          normalizedElement.coordinates = generateDefaultCoordinates(normalizedElement);
         }
       }
       ensureExplicitFabricPitchForShape(normalizedElement);
@@ -4898,7 +4905,7 @@ const createGeometryState = (
         const parentCoords = getVentParentLineCoordinates(parentElement);
         if (parentCoords) {
           const currentZ = (normalizedElement.coordinates?.[0] as ElementCoordinate | undefined)?.z;
-          (normalizedElement as any).coordinates = [midpointOnSegment(parentCoords, currentZ)];
+          normalizedElement.coordinates = [midpointOnSegment(parentCoords, currentZ)];
         }
       }
       if (isHostedMechanicalVentilationFan(normalizedElement) && normalizedElement.parent_element) {
@@ -4941,15 +4948,15 @@ const createGeometryState = (
         normalizedElement._nameAutoSync = true;
       }
       // Finalize if it came in as placeholder - but preserve placeholder flag for CSV elements with empty names
-      if ((normalizedElement as any).isPlaceholder && normalizedElement.name.trim()) {
-        (normalizedElement as any).isPlaceholder = false;
+      if (normalizedElement.isPlaceholder && normalizedElement.name.trim()) {
+        normalizedElement.isPlaceholder = false;
       }
     } catch { /* swallow: best-effort */ }
 
     // Auto-assign floorId from z-coordinate (simplified integer floors). Physical-Z elements never
     // infer storey from coordinate z (z is metres); use explicit floor membership instead.
     try {
-      const coords = (normalizedElement as any).coordinates as Array<{ x: number; y: number; z: number }> | undefined;
+      const coords = normalizedElement.coordinates as ElementCoordinate[] | undefined;
       if (usesPhysicalZWithFloorMembership(normalizedElement as Element)) {
         if (normalizedElement.type === 'ThermalBridgeLinear') {
           ingestThermalBridgeLinearPostParse(
@@ -4962,8 +4969,8 @@ const createGeometryState = (
             state.floors,
           );
           const floorId = get().ensureFloorForZ(storey);
-          (normalizedElement as any).floorId = floorId;
-          (normalizedElement as any).extra_json = mergeServiceLineExtraJsonFloorId(
+          normalizedElement.floorId = floorId;
+          normalizedElement.extra_json = mergeServiceLineExtraJsonFloorId(
             normalizedElement as Element,
             storey,
           );
@@ -4978,13 +4985,13 @@ const createGeometryState = (
             const match = state.floors.find((f) => f.id === fid);
             floorId = match ? get().ensureFloorForZ(match.zIndex) : get().ensureFloorForZ(0);
           }
-          (normalizedElement as any).floorId = floorId;
+          normalizedElement.floorId = floorId;
           if (
             normalizedElement.type === 'WaterPipework' ||
             normalizedElement.type === 'MechanicalVentilationDuctwork'
           ) {
             const pipeStorey = state.floors.find((f) => f.id === floorId)?.zIndex ?? 0;
-            (normalizedElement as any).extra_json = mergeServiceLineExtraJsonFloorId(
+            normalizedElement.extra_json = mergeServiceLineExtraJsonFloorId(
               normalizedElement as Element,
               pipeStorey,
             );
@@ -4992,7 +4999,7 @@ const createGeometryState = (
         }
       } else {
         const firstZ = Array.isArray(coords) && coords.length > 0 ? Math.floor(coords[0].z ?? 0) : 0;
-        (normalizedElement as any).floorId = get().ensureFloorForZ(firstZ);
+        normalizedElement.floorId = get().ensureFloorForZ(firstZ);
       }
     } catch { /* swallow: best-effort */ }
 

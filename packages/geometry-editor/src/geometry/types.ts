@@ -453,3 +453,31 @@ export type Element =
   | OnSiteGeneration
   | ElectricBattery
   | System;
+
+/**
+ * Public input accepted by the geometry store when creating an element.
+ * Creation is deliberately less strict than a persisted `Element`: callers
+ * create placeholders and merge incomplete CSV rows, so variant fields are
+ * optional here. The `type` discriminant still controls which variant fields
+ * may be supplied, while common authoring metadata remains available on every
+ * draft.
+ */
+type ElementDraftMember<ElementMember extends Element> = {
+  name: string;
+  type: ElementMember['type'];
+  zoneId?: string;
+  parent_element: string | null;
+  coordinates: BaseElement['coordinates'] | string;
+} & Partial<Omit<BaseElement, 'id' | 'type' | 'name' | 'zoneId' | 'parent_element' | 'coordinates'>>
+  & Partial<Omit<ElementMember, keyof BaseElement | 'id' | 'type'>>;
+
+type ElementDraftUnion = {
+  [Type in Element['type']]: ElementDraftMember<Extract<Element, { type: Type }>>;
+}[Element['type']];
+
+type UnionKeys<Union> = Union extends Union ? keyof Union : never;
+type StrictUnionHelper<Member, All> = Member extends All
+  ? Member & Partial<Record<Exclude<UnionKeys<All>, keyof Member>, never>>
+  : never;
+
+export type ElementDraft = StrictUnionHelper<ElementDraftUnion, ElementDraftUnion>;
