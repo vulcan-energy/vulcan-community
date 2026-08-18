@@ -12,7 +12,7 @@ const lighting = (fields: Record<string, unknown> = {}): Element => ({
 } as Element);
 
 describe('R6 single-element field semantics', () => {
-  it('reads direct Lighting values first, then LED, then incandescent bulb values', () => {
+  it('reads direct Lighting values first, then prefers the LED record over incandescent', () => {
     const hydrate = (element: Element) => {
       const state = {
         setLightingEntryMode: vi.fn(),
@@ -31,9 +31,18 @@ describe('R6 single-element field semantics', () => {
     expect(hydrate(lighting({ bulbs: {
       led: { efficacy: 80 }, incandescent: { efficacy: 60 },
     } })).efficacyInput.setValue).toHaveBeenCalledWith(80);
+    expect(hydrate(lighting({ efficacy: null, bulbs: {
+      led: { efficacy: 80 }, incandescent: { efficacy: 60 },
+    } })).efficacyInput.setValue).toHaveBeenCalledWith(80);
+    expect(hydrate(lighting({ efficacy: undefined, bulbs: {
+      led: { efficacy: 80 }, incandescent: { efficacy: 60 },
+    } })).efficacyInput.setValue).toHaveBeenCalledWith(80);
     expect(hydrate(lighting({ bulbs: {
       incandescent: { efficacy: 60 },
     } })).efficacyInput.setValue).toHaveBeenCalledWith(60);
+    expect(hydrate(lighting({ bulbs: {
+      led: { count: 2 }, incandescent: { efficacy: 60 },
+    } })).efficacyInput.setValue).toHaveBeenCalledWith('');
     const nonFinite = hydrate(lighting({ efficacy: Number.NaN, bulbs: {
       led: { efficacy: 80 },
     } }));
@@ -44,7 +53,7 @@ describe('R6 single-element field semantics', () => {
     ['count', 'countInput', 4, 2, 1],
     ['power', 'powerInput', 8, 6, 3],
   ] as const)(
-    'reads direct %s first, then LED, then incandescent, while retaining direct NaN',
+    'reads direct %s first, then prefers the LED record, while retaining direct NaN',
     (field, inputKey, direct, led, incandescent) => {
       const hydrate = (element: Element) => {
         const state = {
@@ -67,8 +76,16 @@ describe('R6 single-element field semantics', () => {
         bulbs: { led: { [field]: led }, incandescent: { [field]: incandescent } },
       }))).toHaveBeenCalledWith(led);
       expect(hydrate(lighting({
+        [field]: undefined,
+        bulbs: { led: { [field]: led }, incandescent: { [field]: incandescent } },
+      }))).toHaveBeenCalledWith(led);
+      expect(hydrate(lighting({
         bulbs: { incandescent: { [field]: incandescent } },
       }))).toHaveBeenCalledWith(incandescent);
+      const unrelatedLedField = field === 'count' ? { power: 6 } : { count: 2 };
+      expect(hydrate(lighting({
+        bulbs: { led: unrelatedLedField, incandescent: { [field]: incandescent } },
+      }))).toHaveBeenCalledWith('');
       const nonFinite = hydrate(lighting({
         [field]: Number.NaN,
         bulbs: { led: { [field]: led } },

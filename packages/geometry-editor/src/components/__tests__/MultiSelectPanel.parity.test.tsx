@@ -148,7 +148,7 @@ describe('R6 MultiSelect parity fence — DOM, focus and keyboard', () => {
 
     cleanup();
     mount([thermalBridgePoint('point')]);
-    expect(fieldLabels()).toContain('Heat Transfer Coefficient');
+    expect(fieldLabels()).toEqual(['Heat Transfer Coefficient']);
     expect(input('Heat Transfer Coefficient')).toHaveValue('4');
     expect(screen.queryByRole('textbox', { name: 'Efficacy' })).not.toBeInTheDocument();
   });
@@ -184,8 +184,8 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
 
   it('routes a two-target panel edit through ordered per-element updates', () => {
     const { store } = mount([
-      lighting('a', { efficacy: 90, count: 4, power: 8 }),
       lighting('b', { efficacy: 80, count: 2, power: 6 }),
+      lighting('a', { efficacy: 90, count: 4, power: 8 }),
     ]);
     const originalUpdateElement = store.getState().updateElement;
     const original = store.getState().updateElementsBulk;
@@ -230,7 +230,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
   });
 
   it('routes a two-target ThermalBridgePoint edit through one bulk replace', () => {
-    const { store } = mount([thermalBridgePoint('a', 4), thermalBridgePoint('b', 5)]);
+    const { store } = mount([thermalBridgePoint('b', 5), thermalBridgePoint('a', 4)]);
     const originalUpdateElement = store.getState().updateElement;
     const originalUpdateElementsBulk = store.getState().updateElementsBulk;
     const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
@@ -496,7 +496,7 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
       const envelope = extraJson?.vulcan_assembly_v1 as { appliedAt?: unknown } | undefined;
       expect(envelope?.appliedAt).toEqual(expect.any(String));
       expect(new Date(envelope?.appliedAt as string).toISOString()).toBe(envelope?.appliedAt);
-      expect(extraJson).toEqual({
+      expect(extraJson).toStrictEqual({
         retained,
         u_value: 1.5,
         thermal_resistance_construction: 0.5,
@@ -529,6 +529,10 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
           uValueWrittenToElement_W_m2K: 1.5,
         },
       });
+      const layers = (envelope as {
+        assemblySnapshot?: { layers?: Array<Record<string, unknown>> };
+      } | undefined)?.assemblySnapshot?.layers;
+      expect(Object.prototype.hasOwnProperty.call(layers?.[0], 'repeatingBridges')).toBe(true);
     }
   });
 
@@ -539,18 +543,22 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     expect(screen.getByText('Assembly')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Loading assemblies…' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Library' })).not.toBeDisabled();
-    for (const label of [
-      'U Value',
-      'Thermal Resistance Construction',
-      'Mass Distribution Class',
-      'Areal Heat Capacity',
-    ]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    }
+    expect(input('U Value')).not.toBeDisabled();
+    expect(input('U Value')).toHaveValue('');
+    expect(input('Thermal Resistance Construction')).not.toBeDisabled();
+    expect(input('Thermal Resistance Construction')).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: 'Mass Distribution Class' }))
+      .not.toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Areal Heat Capacity' }))
+      .not.toBeDisabled();
   });
 
   it('keeps assembly controls host-neutral and hidden for non-fabric selections', () => {
     mount([lighting('light', { efficacy: 90, count: 4, power: 8 })]);
+    expect(screen.queryByText('Assembly')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Library' })).not.toBeInTheDocument();
+    cleanup();
+    mount([thermalBridgePoint('point')]);
     expect(screen.queryByText('Assembly')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Library' })).not.toBeInTheDocument();
     cleanup();
