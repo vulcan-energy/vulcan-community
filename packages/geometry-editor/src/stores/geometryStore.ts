@@ -114,22 +114,24 @@ import type { MissingElement, ValidationResult } from '../geometry/validation/ty
 export type { MissingElement, ValidationResult } from '../geometry/validation/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals, ZONE_NAME_SUGGESTIONS } from '../geometry/constants';
 import { parseCoords } from '../geometry/coords';
-import type { GuideOverlay, GuideOverlaySource } from '../geometry/guideOverlay';
 import {
   resolveGuideOverlayForFloor,
   resolveGuideOverlaySourceForFloor,
-  type GuideOverlayByFloor,
-  type GuideOverlaySourceByFloor,
 } from '../geometry/guideOverlayByFloor';
 import {
   createComplianceSlice,
+  type ComplianceSlice,
   createInitialComplianceSettings,
 } from './geometryStore/slices/complianceSlice';
-import { createMetadataSlice } from './geometryStore/slices/metadataSlice';
-import { createSelectionSlice } from './geometryStore/slices/selectionSlice';
-import { createHistorySlice } from './geometryStore/slices/historySlice';
-import { createFloorSlice } from './geometryStore/slices/floorSlice';
-import { createIoSlice, DEFAULT_DEFAULTS_PATH } from './geometryStore/slices/ioSlice';
+import { createMetadataSlice, type MetadataSlice } from './geometryStore/slices/metadataSlice';
+import {
+  createSelectionSlice,
+  type Selection,
+  type SelectionSlice,
+} from './geometryStore/slices/selectionSlice';
+import { createHistorySlice, type HistorySlice } from './geometryStore/slices/historySlice';
+import { createFloorSlice, type FloorSlice } from './geometryStore/slices/floorSlice';
+import { createIoSlice, DEFAULT_DEFAULTS_PATH, type IoSlice } from './geometryStore/slices/ioSlice';
 import {
   createDefaultNamingPreferences,
   formatAutoElementName,
@@ -141,13 +143,8 @@ import {
   type NamingPreferences,
   type NamingRuleId,
 } from './namingStore';
-import type { BundledAssemblyLibrary } from '../lib/assemblyLibrary';
-import type { ExternalDetailProfileLink } from '../lib/assemblyTypes';
 import { createDefaultsLookup, type DefaultsLookup } from '../lib/defaultsCache';
-import {
-  applyCreationDefaultAssemblyToElement,
-  type CreationDefaultAssemblyIds,
-} from '../lib/multiSelectAssemblyApply';
+import { applyCreationDefaultAssemblyToElement } from '../lib/multiSelectAssemblyApply';
 import {
   getElementCanvasFloorZValue,
   getThermalBridgeExtraJsonFloorStorey,
@@ -237,8 +234,8 @@ import type {
   ElectricBattery,
   System,
   Element,
+  ElementDraft,
   SpaceLabel,
-  SapBuiltFormCode,
 } from '../geometry/types';
 // Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
 // remove or relocate these re-exports without a paired web/ PR.
@@ -282,6 +279,7 @@ export type {
   ElectricBattery,
   System,
   Element,
+  ElementDraft,
   SpaceLabel,
   SapBuiltFormCode,
 } from '../geometry/types';
@@ -327,14 +325,6 @@ function measureGeometryStoreAction<T>(actionName: string, fn: () => T): T {
     }
   }
 }
-
-// Add selection and placeholder support
-type Selection = {
-  type: 'zone' | 'element' | 'global' | 'dormer';
-  id: string;
-  isPlaceholder?: boolean;
-  focusFieldKey?: string;
-} | null;
 
 /**
  * Apply the wall-change cascade in place. Called from `addElement`, `updateElement`, and
@@ -1276,7 +1266,13 @@ export const SUPPLY_SITUATIONS = ['room_air', 'outside'] as const;
 
 export type DuctType = typeof DUCT_TYPES[number];
 
-export interface GeometryState {
+export interface GeometryState extends
+  ComplianceSlice,
+  FloorSlice,
+  HistorySlice,
+  IoSlice,
+  MetadataSlice,
+  SelectionSlice {
   namingPreferences: NamingPreferences;
   setNamingPreferences: (preferences: NamingPreferences) => void;
   subscribePostCommandEffect: (effect: GeometryPostCommandEffect) => () => void;
@@ -1330,122 +1326,12 @@ export interface GeometryState {
     skippedKeptExisting?: boolean;
   };
 
-  // Floor management
-  floors: Floor[];
-  floorIds: string[];
-  currentFloorId: string | null;
-  currentFloorZ: number; // Simple z-coordinate for floor filtering
-
   selection: Selection;
-  setSelection: (selection: Selection) => void;
-  clearSelection: () => void;
   // Defaults association
-  defaultsPath?: string;
-  setDefaultsPath: (path: string | undefined) => void;
-  creationDefaultAssemblyIds: CreationDefaultAssemblyIds;
-  setCreationDefaultAssemblyIds: (
-    patch: Partial<Record<'wall' | 'roof' | 'ground_floor', string | undefined>>,
-  ) => void;
-  bundledAssemblyLibrary: BundledAssemblyLibrary | null;
-  setBundledAssemblyLibrary: (lib: BundledAssemblyLibrary | null) => void;
-  bundledAssemblyLibraryLoading: boolean;
-  setBundledAssemblyLibraryLoading: (loading: boolean) => void;
-  bundledAssemblyLibraryError: string | null;
-  setBundledAssemblyLibraryError: (message: string | null) => void;
-  // Loaded defaults JSON from this editor's defaultsPath file.
-  defaultsJson: any | null;
-  setDefaultsJson: (json: any | null) => void;
   /** Precomputed at defaults mutation boundaries; safe to select during render. */
   defaultsLookup: DefaultsLookup;
   /** Stable per-document defaults resolver; never reads another editor's defaults. */
   getDefaultsLookup: () => DefaultsLookup;
-  defaultsLoading: boolean;
-  setDefaultsLoading: (loading: boolean) => void;
-  /** Host-defined metadata rows preserved without giving the public editor feature semantics. */
-  hostDocumentMetadata: Readonly<Record<string, string>>;
-  setHostDocumentMetadataValue: (key: string, value: string | undefined) => void;
-  /** Property postcode written to SAP report metadata; it does not select native SAP climate data. */
-  propertyPostcode?: string;
-  setPropertyPostcode: (postcode: string | undefined) => void;
-
-  // Guide Overlay (floorplan tracing) — per-floor records with inherit-from-below semantics.
-  // `guideOverlay` / `guideOverlaySource` are denormalized views of the active floor (resolved
-  // via `currentFloorZ`); `*ByFloor` maps hold the source of truth.
-  guideOverlay: GuideOverlay | null;
-  guideOverlaySource: GuideOverlaySource | null;
-  guideOverlayByFloor: GuideOverlayByFloor;
-  guideOverlaySourceByFloor: GuideOverlaySourceByFloor;
-  setGuideOverlay: (overlay: GuideOverlay | null) => void;
-  setGuideOverlaySource: (source: GuideOverlaySource | null) => void;
-  updateGuideOverlay: (updates: Partial<GuideOverlay>) => void;
-  clearGuideOverlay: () => void;
-  /** Drop the active floor's own overlay record so it falls back to inheritance. */
-  resetGuideOverlayForActiveFloor: () => void;
-
-  // Global thermal bridging default (W/K) - applied per zone when simplified thermal bridging is disabled and no thermal bridge elements are defined
-  defaultThermalBridging: number;
-  setDefaultThermalBridging: (value: number) => void;
-
-  /** Workspace CSV of junction_type → linear ψ (W/m·K); geometry CSV metadata row JunctionPsiDefaultsPath. */
-  junctionPsiDefaultsPath?: string;
-  setJunctionPsiDefaultsPath: (path: string | undefined) => void;
-  junctionPsiDefaultsMap: Record<string, number>;
-  junctionPsiDefaultsLoading: boolean;
-  junctionPsiDefaultsError: string | null;
-
-  /** Optional external detail profile used as the preferred ψ source for detailed linear thermal bridges. */
-  detailedBridgePsiProfile: ExternalDetailProfileLink | null;
-  setDetailedBridgePsiProfile: (profile: ExternalDetailProfileLink | null | undefined) => void;
-
-  // Compliance settings
-  complianceSettings: {
-    PartO_active_cooling_required?: boolean;
-    NumberOfBedrooms?: number;
-    NumberOfWetRooms?: number;
-    GroundFloorArea?: number;
-    HeatingControlType?: 'SeparateTempControl' | 'SeparateTimeAndTempControl';
-    PartGcompliance?: boolean;
-    ColdWaterSource?: 'mains water' | 'header tank';
-    complianceValidationEnabled?: boolean;
-    /**
-     * Optional; from CSV `ScenariosBaseModelEnabled`. When `false`, the Scenarios tab hides the base model.
-     * (Worker sets on merge from strict FHS/ECaaS results.)
-     */
-    scenariosBaseModelEnabled?: boolean;
-    // Air permeability attributes
-    AirPermeability_test_pressure?: 'Standard' | 'Pulse test only';
-    AirPermeability_test_result?: number;
-    AirPermeability_env_area?: number;
-    AirPermeability_ventilation_zone_height?: number;
-    // Ventilation environment attributes (InfiltrationVentilation top-level)
-    Ventilation_shield_class?: 'Open' | 'Normal' | 'Shielded';
-    Ventilation_terrain_class?: 'OpenWater' | 'OpenField' | 'Suburban' | 'Urban';
-    Ventilation_altitude?: number;
-    Ventilation_ventilation_zone_base_height?: number;
-    Ventilation_noise_nuisance?: boolean;
-    /** FHS dwelling form — optional manual overrides of geometry-derived values */
-    BuildingLength?: number;
-    BuildingWidth?: number;
-    NumberOfHabitableRooms?: number;
-    NumberOfHotTappedRooms?: number;
-    NumberOfUtilityRooms?: number;
-    NumberOfBathrooms?: number;
-    NumberOfSanitaryAccommodations?: number;
-    KitchenExtractorHoodExternal?: boolean;
-    /** FHS General.build_type. Undefined means use geometry-derived suggestion when available. */
-    build_type?: 'flat' | 'house';
-    /** Explicit SAP 10.2 Built-Form code. Never inferred or defaulted from geometry. */
-    built_form?: SapBuiltFormCode;
-    /** FHS General.storeys_in_dwelling. Undefined means use geometry-derived suggestion when available. */
-    storeys_in_dwelling?: number;
-    /** FHS General.storey_of_dwelling. Required by FHS when build_type is flat. */
-    storey_of_dwelling?: number;
-    /** FHS General.storeys_in_building. Required by FHS when build_type is flat. */
-    storeys_in_building?: number;
-  };
-  setComplianceSettings: (settings: Partial<GeometryState['complianceSettings']>) => void;
-  replaceComplianceSettings: (settings: Partial<GeometryState['complianceSettings']>) => void;
-
   // Multi-select functionality
   selectedElementIds: string[];
   setSelectedElementIds: (ids: string[]) => void;
@@ -1477,7 +1363,7 @@ export interface GeometryState {
   updateZone: (id: string, updates: Partial<Zone>, skipAutoSave?: boolean) => void;
   removeZone: (id: string) => void;
 
-  addElement: (element: Omit<Element, 'id'>) => void;
+  addElement: (element: ElementDraft) => void;
   updateElement: (id: string, updates: Partial<Element>, skipAutoSave?: boolean) => void;
   setSlopePitchAxis: (id: string, axis: SlopePitchAxis) => void;
   flipElementOrientation: (id: string, skipAutoSave?: boolean) => void;
@@ -1502,14 +1388,6 @@ export interface GeometryState {
     options?: { recompute?: boolean },
   ) => void;
 
-  // Floor management functions
-  addFloor: (name: string, height: number, isRoofSpace?: boolean, zIndex?: number) => string;
-  updateFloor: (id: string, updates: Partial<Floor>) => void;
-  removeFloor: (id: string) => void;
-  setCurrentFloor: (id: string) => void;
-  getCurrentFloor: () => Floor | null;
-  ensureFloorForZ: (z: number) => string;
-  setCurrentFloorZ: (z: number) => void;
   calculateContextShadingAngles: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg?: number) => { start_angle: number; end_angle: number };
   calculateShadingAngularRange: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg?: number) => { start_angle: number; end_angle: number };
   calculateContextShadingDistance: (contextShading: ContextShading, parentElement: Element) => number;
@@ -1523,27 +1401,6 @@ export interface GeometryState {
     skippedSameFloorOverlapCount: number;
     skippedUnknownHeightCount: number;
   };
-
-  // Undo/Redo functionality
-  history: Array<{
-    elementsById: Record<string, Element>;
-    elementIds: string[];
-    zones: Zone[];
-    floors: Floor[];
-    floorIds: string[];
-    currentFloorId: string | null;
-    spaceLabelsById?: Record<string, SpaceLabel>;
-    spaceLabelIds?: string[];
-  }>;
-  historyIndex: number;
-  maxHistorySize: number;
-  canUndo: boolean;
-  canRedo: boolean;
-  historyDebounceTimeout: NodeJS.Timeout | null;
-  undo: () => void;
-  redo: () => void;
-  saveToHistory: (source?: string) => void;
-  saveToHistoryDebounced: () => void;
 
   // Canvas preferences
   snapToParent: boolean;
@@ -1570,9 +1427,6 @@ export interface GeometryState {
   getElementsByType: (type: ElementType) => Element[];
 
   // CSV generation and loading
-  generateCSV: () => string;
-  /** Returns non-fatal data-loss warnings from CSV parsing (e.g. dropped malformed extra_json); callers in the load UI must surface them. */
-  loadFromCSV: (csvContent: string) => { warnings: string[] };
   clearAll: () => void;
   /**
    * Clear only workspace-derived caches when the same account selects another
@@ -1588,11 +1442,6 @@ export interface GeometryState {
    * The CSV (as `generateCSV()` would produce it) at the moment of the last successful save or load.
    * `useGeometryDirty()` compares against this to detect unsaved changes. `null` until a save/load happens.
    */
-  lastSavedCsv: string | null;
-  /** Set after a successful save (with the saved content) or load (with the freshly-loaded current generateCSV). */
-  setLastSavedCsv: (csv: string | null) => void;
-  /** Internal cancellation hook used by document-boundary reset actions. */
-  cancelPendingLoadedCsvWorkForDocumentBoundary: () => void;
   /** Incremented when a full model replace happens (e.g. CSV import, clear) so 2D canvas can reset/fit the view. */
   canvasViewResetKey: number;
 
@@ -5020,27 +4869,32 @@ const createGeometryState = (
     const normalizedElement = {
       ...elementWithName,
       parent_element: (!elementWithName.parent_element || elementWithName.parent_element === '') ? null : elementWithName.parent_element
-    } as Element;
+    } as Element & {
+      coordinates: ElementCoordinate[] | string;
+      isPlaceholder?: boolean;
+      floorId?: string;
+      extra_json?: Record<string, unknown>;
+    };
     if (normalizedElement.type === 'MechanicalVentilationTerminal') {
       const host = (normalizedElement as MechanicalVentilationTerminal).host_element;
       (normalizedElement as MechanicalVentilationTerminal).host_element = (!host || host === '') ? null : host;
     }
     // Normalize coordinates coming from CSV string or missing/invalid arrays
     try {
-      const rawCoords = (normalizedElement as any).coordinates as any;
+      const rawCoords = normalizedElement.coordinates;
       if (typeof rawCoords === 'string') {
-        (normalizedElement as any).coordinates = parseCoords(rawCoords);
+        normalizedElement.coordinates = parseCoords(rawCoords);
       }
-      const coords = (normalizedElement as any).coordinates as Array<{x:number,y:number,z:number}> | undefined;
+      const coords = normalizedElement.coordinates as ElementCoordinate[] | undefined;
       const coordsMissing = !Array.isArray(coords) || coords.length === 0;
       if (coordsMissing) {
-        (normalizedElement as any).coordinates = generateDefaultCoordinates(normalizedElement);
+        normalizedElement.coordinates = generateDefaultCoordinates(normalizedElement);
       } else {
         // Respect shape if compatible with the chosen type; otherwise fall back to defaults
-        const shape = getElementShape(normalizedElement as any);
-        const compatible = isTypeShapeCompatible(normalizedElement.type as any, shape);
+        const shape = getElementShape(normalizedElement);
+        const compatible = isTypeShapeCompatible(normalizedElement.type, shape);
         if (!compatible) {
-          (normalizedElement as any).coordinates = generateDefaultCoordinates(normalizedElement);
+          normalizedElement.coordinates = generateDefaultCoordinates(normalizedElement);
         }
       }
       ensureExplicitFabricPitchForShape(normalizedElement);
@@ -5051,7 +4905,7 @@ const createGeometryState = (
         const parentCoords = getVentParentLineCoordinates(parentElement);
         if (parentCoords) {
           const currentZ = (normalizedElement.coordinates?.[0] as ElementCoordinate | undefined)?.z;
-          (normalizedElement as any).coordinates = [midpointOnSegment(parentCoords, currentZ)];
+          normalizedElement.coordinates = [midpointOnSegment(parentCoords, currentZ)];
         }
       }
       if (isHostedMechanicalVentilationFan(normalizedElement) && normalizedElement.parent_element) {
@@ -5094,15 +4948,15 @@ const createGeometryState = (
         normalizedElement._nameAutoSync = true;
       }
       // Finalize if it came in as placeholder - but preserve placeholder flag for CSV elements with empty names
-      if ((normalizedElement as any).isPlaceholder && normalizedElement.name.trim()) {
-        (normalizedElement as any).isPlaceholder = false;
+      if (normalizedElement.isPlaceholder && normalizedElement.name.trim()) {
+        normalizedElement.isPlaceholder = false;
       }
     } catch { /* swallow: best-effort */ }
 
     // Auto-assign floorId from z-coordinate (simplified integer floors). Physical-Z elements never
     // infer storey from coordinate z (z is metres); use explicit floor membership instead.
     try {
-      const coords = (normalizedElement as any).coordinates as Array<{ x: number; y: number; z: number }> | undefined;
+      const coords = normalizedElement.coordinates as ElementCoordinate[] | undefined;
       if (usesPhysicalZWithFloorMembership(normalizedElement as Element)) {
         if (normalizedElement.type === 'ThermalBridgeLinear') {
           ingestThermalBridgeLinearPostParse(
@@ -5115,8 +4969,8 @@ const createGeometryState = (
             state.floors,
           );
           const floorId = get().ensureFloorForZ(storey);
-          (normalizedElement as any).floorId = floorId;
-          (normalizedElement as any).extra_json = mergeServiceLineExtraJsonFloorId(
+          normalizedElement.floorId = floorId;
+          normalizedElement.extra_json = mergeServiceLineExtraJsonFloorId(
             normalizedElement as Element,
             storey,
           );
@@ -5131,13 +4985,13 @@ const createGeometryState = (
             const match = state.floors.find((f) => f.id === fid);
             floorId = match ? get().ensureFloorForZ(match.zIndex) : get().ensureFloorForZ(0);
           }
-          (normalizedElement as any).floorId = floorId;
+          normalizedElement.floorId = floorId;
           if (
             normalizedElement.type === 'WaterPipework' ||
             normalizedElement.type === 'MechanicalVentilationDuctwork'
           ) {
             const pipeStorey = state.floors.find((f) => f.id === floorId)?.zIndex ?? 0;
-            (normalizedElement as any).extra_json = mergeServiceLineExtraJsonFloorId(
+            normalizedElement.extra_json = mergeServiceLineExtraJsonFloorId(
               normalizedElement as Element,
               pipeStorey,
             );
@@ -5145,7 +4999,7 @@ const createGeometryState = (
         }
       } else {
         const firstZ = Array.isArray(coords) && coords.length > 0 ? Math.floor(coords[0].z ?? 0) : 0;
-        (normalizedElement as any).floorId = get().ensureFloorForZ(firstZ);
+        normalizedElement.floorId = get().ensureFloorForZ(firstZ);
       }
     } catch { /* swallow: best-effort */ }
 

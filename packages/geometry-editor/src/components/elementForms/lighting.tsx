@@ -9,9 +9,8 @@
 // branches: only the element-selection chain had a Lighting case, so this
 // module's single hydrate covers it.
 //
-// getLightingFieldValue is exported: the orchestrator's
-// buildLightingCommitPatch (which backs commitExistingElementDraft for every
-// element type) reads lighting fields through the same lens.
+// getLightingFieldValue and buildLightingPatch are exported so the element
+// and multi-select commit paths share the same Lighting model construction.
 
 import { useState } from 'react';
 import type { Element } from '../../geometry/types';
@@ -57,12 +56,15 @@ function readNonEmptyString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-export function getLightingFieldValue(
+type LightingField = 'efficacy' | 'count' | 'power';
+
+function readLightingFieldValue(
   element: Element,
-  field: 'efficacy' | 'count' | 'power',
+  field: LightingField,
+  finiteOnly = false,
 ): number | undefined {
   const directValue = (element as unknown as Record<string, unknown>)[field];
-  if (typeof directValue === 'number') {
+  if (typeof directValue === 'number' && (!finiteOnly || Number.isFinite(directValue))) {
     return directValue;
   }
 
@@ -73,7 +75,66 @@ export function getLightingFieldValue(
 
   const chosenBulb = bulbs.led ?? bulbs.incandescent;
   const nestedValue = chosenBulb?.[field];
-  return typeof nestedValue === 'number' ? nestedValue : undefined;
+  return typeof nestedValue === 'number' && (!finiteOnly || Number.isFinite(nestedValue))
+    ? nestedValue
+    : undefined;
+}
+
+export function getLightingFieldValue(
+  element: Element,
+  field: LightingField,
+  finiteOnly = false,
+): number | undefined {
+  return readLightingFieldValue(element, field, finiteOnly);
+}
+
+export interface LightingPatchOptions {
+  finiteFallback?: boolean;
+  positiveValues?: boolean;
+  markDetailed?: boolean;
+}
+
+export function buildLightingPatch(
+  element: Element,
+  overrides: Partial<Element>,
+  options: LightingPatchOptions = {},
+): Partial<Element> {
+  const value = (field: LightingField): number | undefined => {
+    const raw = Object.prototype.hasOwnProperty.call(overrides, field)
+      ? (overrides as Record<string, unknown>)[field]
+      : readLightingFieldValue(element, field, options.finiteFallback);
+    return typeof raw === 'number' && (!options.positiveValues || raw > 0) ? raw : undefined;
+  };
+
+  const efficacy = value('efficacy');
+  const count = value('count');
+  const power = value('power');
+  const patch = {
+    ...overrides,
+    efficacy,
+    count,
+    power,
+    bulbs: {
+      led: {
+        count,
+        power,
+        efficacy,
+      },
+    },
+  } as Partial<Element>;
+  if (
+    options.markDetailed
+    && (
+      Object.prototype.hasOwnProperty.call(overrides, 'efficacy')
+      || Object.prototype.hasOwnProperty.call(overrides, 'power')
+    )
+  ) {
+    patch.extra_json = {
+      ...readExtraJsonRecord(element.extra_json),
+      [LIGHTING_ENTRY_MODE_KEY]: 'detailed',
+    };
+  }
+  return patch;
 }
 
 function isLightingGrade(value: unknown): value is LightingGrade {

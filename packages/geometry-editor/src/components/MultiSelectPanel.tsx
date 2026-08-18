@@ -62,6 +62,8 @@ import {
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
 import { useKeyedState } from '../hooks/useKeyedState';
+import { buildLightingPatch, getLightingFieldValue } from './elementForms/lighting';
+import { projectWindowShadingPointToSegment } from './elementForms/windowShading';
 
 const loadAssemblyCalculatorModal = () => import('./AssemblyCalculatorModal');
 
@@ -277,8 +279,6 @@ const HORIZONTAL_POLYGON_PITCH_OPTIONS: { value: string; label: string }[] = [
   { value: '180', label: 'Facing down (180°)' },
 ];
 
-const LIGHTING_ENTRY_MODE_KEY = '_lighting_entry_mode';
-
 const isTransparent = (el: Element): el is BuildingElementTransparent => el.type === 'BuildingElementTransparent';
 const isGround = (el: Element): el is BuildingElementGround => el.type === 'BuildingElementGround';
 const isOpaque = (el: Element): el is BuildingElementOpaque => el.type === 'BuildingElementOpaque';
@@ -471,21 +471,6 @@ function buildWindowDetailCopyExtraJson(
   return nextExtra;
 }
 
-function projectPointToWindowSegment(point: ElementCoordinate, windowElement: BuildingElementTransparent): ElementCoordinate[] | null {
-  if (!Array.isArray(windowElement.coordinates) || windowElement.coordinates.length < 2) return null;
-  const [a, b] = windowElement.coordinates as [ElementCoordinate, ElementCoordinate];
-  if (!a || !b) return null;
-  const vx = b.x - a.x;
-  const vy = b.y - a.y;
-  const v2 = vx * vx + vy * vy || 1;
-  const t = Math.max(0, Math.min(1, ((point.x - a.x) * vx + (point.y - a.y) * vy) / v2));
-  return [{
-    x: a.x + t * vx,
-    y: a.y + t * vy,
-    z: point.z,
-  }];
-}
-
 function windowShadingProjectionPatch(
   shading: WindowShading,
   parentName: string | null | undefined,
@@ -500,8 +485,11 @@ function windowShadingProjectionPatch(
       candidate.type === 'BuildingElementTransparent' && candidate.name === parentName,
   );
   if (!parent) return null;
-  const coordinates = projectPointToWindowSegment(point, parent);
-  return coordinates ? { coordinates } as Pick<WindowShading, 'coordinates'> : null;
+  if (!Array.isArray(parent.coordinates) || parent.coordinates.length < 2) return null;
+  const [a, b] = parent.coordinates as [ElementCoordinate, ElementCoordinate];
+  if (!a || !b) return null;
+  const coordinates = [projectWindowShadingPointToSegment(point, a, b)];
+  return { coordinates } as Pick<WindowShading, 'coordinates'>;
 }
 
 function countLabel(count: number, singular: string, plural = `${singular}s`): string {
@@ -805,54 +793,6 @@ function selectionForElement(el: Element, focusFieldKey?: string): { type: 'elem
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function lightingFieldValue(
-  element: Element & { bulbs?: Record<string, { efficacy?: number; count?: number; power?: number }> },
-  field: 'efficacy' | 'count' | 'power',
-): number | undefined {
-  const direct = finiteNumber((element as unknown as Record<string, unknown>)[field]);
-  if (direct !== undefined) return direct;
-  const bulbs = element.bulbs;
-  if (!bulbs || typeof bulbs !== 'object') return undefined;
-  const chosen = bulbs.led ?? bulbs.incandescent;
-  return finiteNumber(chosen?.[field]);
-}
-
-function buildLightingBulkPatch(
-  element: Element & { bulbs?: Record<string, { efficacy?: number; count?: number; power?: number }> },
-  overrides: Partial<{ efficacy: number; count: number; power: number }>,
-): Partial<Element> {
-  const efficacy = Object.prototype.hasOwnProperty.call(overrides, 'efficacy')
-    ? overrides.efficacy
-    : lightingFieldValue(element, 'efficacy');
-  const count = Object.prototype.hasOwnProperty.call(overrides, 'count')
-    ? overrides.count
-    : lightingFieldValue(element, 'count');
-  const power = Object.prototype.hasOwnProperty.call(overrides, 'power')
-    ? overrides.power
-    : lightingFieldValue(element, 'power');
-  const patch: Partial<Element> = {
-    ...overrides,
-    efficacy,
-    count,
-    power,
-    bulbs: {
-      led: { count, power, efficacy },
-    },
-  } as Partial<Element>;
-  if (
-    Object.prototype.hasOwnProperty.call(overrides, 'efficacy') ||
-    Object.prototype.hasOwnProperty.call(overrides, 'power')
-  ) {
-    patch.extra_json = {
-      ...extraJsonRecord(element),
-      [LIGHTING_ENTRY_MODE_KEY]: 'detailed',
-    };
-  }
-  return {
-    ...patch,
-  };
 }
 
 const computeDistribution = <T extends Element>(
@@ -2748,13 +2688,13 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     computeDistribution(activeWindowShadingGroupElements, isWindowShading, (el) => el.transparency),
   );
   const lightingEfficacySummary = describeDistribution(
-    computeDistribution(activeElements, isLighting, (el) => lightingFieldValue(el, 'efficacy')),
+    computeDistribution(activeElements, isLighting, (el) => getLightingFieldValue(el, 'efficacy', true)),
   );
   const lightingCountSummary = describeDistribution(
-    computeDistribution(activeElements, isLighting, (el) => lightingFieldValue(el, 'count')),
+    computeDistribution(activeElements, isLighting, (el) => getLightingFieldValue(el, 'count', true)),
   );
   const lightingPowerSummary = describeDistribution(
-    computeDistribution(activeElements, isLighting, (el) => lightingFieldValue(el, 'power')),
+    computeDistribution(activeElements, isLighting, (el) => getLightingFieldValue(el, 'power', true)),
   );
 
   const ductParentOptions = useMemo(() => [
@@ -3859,9 +3799,9 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
 
         {selectionKinds.has('Lighting') && (
           <div className="multi-select-field-group">
-            {renderElementNumberRow('lightingEfficacy', 'Efficacy', lightingEfficacySummary, true, 'e.g. 80', (el, value) => isLighting(el) ? buildLightingBulkPatch(el, { efficacy: value }) : null, undefined, LIVE_NUMBER_BOUNDS.lightingEfficacy)}
-            {renderElementNumberRow('lightingCount', 'Count', lightingCountSummary, true, 'e.g. 4', (el, value) => isLighting(el) ? buildLightingBulkPatch(el, { count: Math.round(value) }) : null, undefined, LIVE_NUMBER_BOUNDS.lightingCount)}
-            {renderElementNumberRow('lightingPower', 'Power (W)', lightingPowerSummary, true, 'e.g. 8', (el, value) => isLighting(el) ? buildLightingBulkPatch(el, { power: value }) : null, undefined, LIVE_NUMBER_BOUNDS.lightingPower)}
+            {renderElementNumberRow('lightingEfficacy', 'Efficacy', lightingEfficacySummary, true, 'e.g. 80', (el, value) => isLighting(el) ? buildLightingPatch(el, { efficacy: value }, { finiteFallback: true, markDetailed: true }) : null, undefined, LIVE_NUMBER_BOUNDS.lightingEfficacy)}
+            {renderElementNumberRow('lightingCount', 'Count', lightingCountSummary, true, 'e.g. 4', (el, value) => isLighting(el) ? buildLightingPatch(el, { count: Math.round(value) }, { finiteFallback: true }) : null, undefined, LIVE_NUMBER_BOUNDS.lightingCount)}
+            {renderElementNumberRow('lightingPower', 'Power (W)', lightingPowerSummary, true, 'e.g. 8', (el, value) => isLighting(el) ? buildLightingPatch(el, { power: value }, { finiteFallback: true, markDetailed: true }) : null, undefined, LIVE_NUMBER_BOUNDS.lightingPower)}
           </div>
         )}
 
