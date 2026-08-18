@@ -177,9 +177,16 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     act(() => store.setState({ updateElement, updateElementsBulk }));
     fireEvent.change(input('Efficacy'), { target: { value: '110' } });
     expect(updateElementsBulk).not.toHaveBeenCalled();
-    expect(updateElement).toHaveBeenCalledOnce();
-    expect(updateElement.mock.calls[0]?.[0]).toBe('single');
-    expect(updateElement.mock.calls[0]?.[2]).toBe(false);
+    expect(updateElement).toHaveBeenCalledExactlyOnceWith('single', {
+      efficacy: 110,
+      count: 4,
+      power: 8,
+      bulbs: { led: { count: 4, power: 8, efficacy: 110 } },
+      extra_json: { _lighting_entry_mode: 'detailed' },
+    }, false);
+    expect(Object.keys(updateElement.mock.calls[0]?.[1] ?? {})).toEqual([
+      'efficacy', 'count', 'power', 'bulbs', 'extra_json',
+    ]);
   });
 
   it('routes a two-target panel edit through ordered per-element updates', () => {
@@ -444,6 +451,30 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     expect(input('Efficacy')).toHaveValue('80');
     expect(input('Count')).toHaveValue('2');
     expect(input('Power (W)')).toHaveValue('6');
+  });
+
+  it('uses incandescent only when no LED record exists in the panel path', () => {
+    mount([
+      lighting('incandescent-only', {
+        bulbs: { incandescent: { efficacy: 60, count: 1, power: 3 } },
+      }),
+    ]);
+    expect(input('Efficacy')).toHaveValue('60');
+    expect(input('Count')).toHaveValue('1');
+    expect(input('Power (W)')).toHaveValue('3');
+
+    cleanup();
+    mount([
+      lighting('partial-led', {
+        bulbs: {
+          led: { count: 2 },
+          incandescent: { efficacy: 60, count: 1, power: 3 },
+        },
+      }),
+    ]);
+    expect(input('Efficacy')).toHaveValue('');
+    expect(input('Count')).toHaveValue('2');
+    expect(input('Power (W)')).toHaveValue('');
   });
 
   it('groups one multi-element edit into one undo step and restores both elements', () => {
