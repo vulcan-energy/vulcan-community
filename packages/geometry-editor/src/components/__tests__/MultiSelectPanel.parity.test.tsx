@@ -80,6 +80,21 @@ function thermalBridgePoint(id: string, heat_transfer_coeff = 4): Element {
     id, type: 'ThermalBridgePoint', name: id, coordinates: coords, zoneId: 'zone', heat_transfer_coeff,
   } as Element;
 }
+function transparentWindow(
+  coordinates: Array<{ x: number; y: number; z: number }>,
+): Element {
+  return {
+    id: 'window', type: 'BuildingElementTransparent', name: 'Window', zoneId: 'zone',
+    coordinates, width: 10, height: 1, area: 10,
+  } as Element;
+}
+function windowShading(id: string, fields: Record<string, unknown> = {}): Element {
+  return {
+    id, type: 'WindowShading', name: id, zoneId: 'zone',
+    coordinates: [{ x: 5, y: 4, z: 7 }], shading_type: 'overhang',
+    ...fields,
+  } as Element;
+}
 function fabric(id: string): Element {
   return {
     id, type: 'BuildingElementOpaque', name: id,
@@ -165,9 +180,132 @@ describe('R6 MultiSelect parity fence — DOM, focus and keyboard', () => {
     expect(store.getState().elementsById.one?.efficacy).toBe(110);
     expect(efficacy).toHaveValue('110');
   });
+
+  it('keeps exact WindowShading labels, options, conditional fields and placeholders', () => {
+    mount([
+      transparentWindow([{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }]),
+      windowShading('shade', { parent_element: 'Window', shading_type: 'object' }),
+    ], ['shade']);
+
+    expect(fieldLabels()).toEqual([
+      'Linked Window', 'Shading Type', 'Distance', 'Height', 'Transparency',
+    ]);
+    expect(Array.from(screen.getByRole('combobox', { name: 'Linked Window' }).querySelectorAll('option'))
+      .map((option) => [option.value, option.textContent]))
+      .toEqual([
+        ['__placeholder__', 'Set value...'], ['', 'None'], ['Window', 'Window'],
+      ]);
+    expect(Array.from(screen.getByRole('combobox', { name: 'Shading Type' }).querySelectorAll('option'))
+      .map((option) => [option.value, option.textContent]))
+      .toEqual([
+        ['__placeholder__', 'Set value...'],
+        ['object', 'Obstacle'], ['overhang', 'Overhang'], ['sidefinleft', 'Left fin'],
+        ['sidefinright', 'Right fin'], ['reveal', 'Reveal'],
+      ]);
+    expect(input('Distance (m)')).toHaveAttribute('placeholder', 'No current value');
+    expect(input('Height (m)')).toHaveAttribute('placeholder', 'No current value');
+    expect(input('Transparency')).toHaveAttribute('placeholder', 'No current value');
+    expect(screen.queryByRole('textbox', { name: 'Depth (m)' })).not.toBeInTheDocument();
+
+    cleanup();
+    mount([windowShading('shade', { shading_type: 'overhang' })]);
+    expect(fieldLabels()).toEqual(['Linked Window', 'Shading Type', 'Distance', 'Depth']);
+    expect(input('Depth (m)')).toHaveAttribute('placeholder', 'No current value');
+    expect(screen.queryByRole('textbox', { name: 'Height (m)' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Transparency' })).not.toBeInTheDocument();
+  });
 });
 
 describe('R6 MultiSelect parity fence — model, bytes, persistence and history', () => {
+  it('keeps three-point WindowShading parent projection and ordered per-element updates', () => {
+    const parent = transparentWindow([
+      { x: 0, y: 0, z: 30 }, { x: 10, y: 0, z: 40 }, { x: 10, y: 5, z: 50 },
+    ]);
+    const { store } = mount([
+      parent,
+      windowShading('b', { coordinates: [{ x: -3, y: 4, z: 8 }] }),
+      windowShading('a', { coordinates: [{ x: 14, y: 4, z: 9 }] }),
+    ], ['b', 'a']);
+    const originalUpdateElement = store.getState().updateElement;
+    const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
+    act(() => store.setState({ updateElement }));
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Linked Window' }), {
+      target: { value: 'Window' },
+    });
+
+    const aPatch = { parent_element: 'Window', coordinates: [{ x: 10, y: 0, z: 9 }] };
+    const bPatch = { parent_element: 'Window', coordinates: [{ x: 0, y: 0, z: 8 }] };
+    expect(updateElement).toHaveBeenCalledTimes(2);
+    expect(updateElement).toHaveBeenNthCalledWith(1, 'a', aPatch, true);
+    expect(updateElement).toHaveBeenNthCalledWith(2, 'b', bPatch, false);
+    expect(Object.keys(updateElement.mock.calls[0]?.[1] ?? {})).toEqual(['parent_element', 'coordinates']);
+    expect(JSON.stringify(updateElement.mock.calls.map((call) => call[1])))
+      .toBe(JSON.stringify([aPatch, bPatch]));
+  });
+
+  it('keeps WindowShading subtype projection, undefined cleanup, key order and grouping', () => {
+    const parent = transparentWindow([
+      { x: 0, y: 0, z: 30 }, { x: 10, y: 0, z: 40 }, { x: 10, y: 5, z: 50 },
+    ]);
+    const { store } = mount([
+      parent,
+      windowShading('b', {
+        parent_element: 'Window', shading_type: 'object', height: 2, transparency: 0.4,
+        coordinates: [{ x: -3, y: 4, z: 8 }],
+      }),
+      windowShading('a', {
+        parent_element: 'Window', shading_type: 'object', height: 3, transparency: 0.5,
+        coordinates: [{ x: 14, y: 4, z: 9 }],
+      }),
+    ], ['b', 'a']);
+    const originalUpdateElement = store.getState().updateElement;
+    const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
+    act(() => store.setState({ updateElement }));
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Shading Type' }), {
+      target: { value: 'overhang' },
+    });
+
+    const aPatch = {
+      shading_type: 'overhang', height: undefined, transparency: undefined,
+      coordinates: [{ x: 10, y: 0, z: 9 }],
+    };
+    const bPatch = {
+      shading_type: 'overhang', height: undefined, transparency: undefined,
+      coordinates: [{ x: 0, y: 0, z: 8 }],
+    };
+    expect(updateElement).toHaveBeenNthCalledWith(1, 'a', aPatch, true);
+    expect(updateElement).toHaveBeenNthCalledWith(2, 'b', bPatch, false);
+    expect(Object.keys(updateElement.mock.calls[0]?.[1] ?? {})).toEqual([
+      'shading_type', 'height', 'transparency', 'coordinates',
+    ]);
+    expect(Object.prototype.hasOwnProperty.call(updateElement.mock.calls[0]?.[1], 'height')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(updateElement.mock.calls[0]?.[1], 'transparency')).toBe(true);
+    expect(JSON.stringify(updateElement.mock.calls.map((call) => call[1])))
+      .toBe(JSON.stringify([aPatch, bPatch]));
+  });
+
+  it.each([
+    ['object linked-window guard', windowShading('shade', { shading_type: 'object' }), 'Linked Window', 'Window', { parent_element: 'Window' }],
+    ['missing point linked-window guard', windowShading('shade', { coordinates: [] }), 'Linked Window', 'Window', { parent_element: 'Window' }],
+    ['missing parent subtype guard', windowShading('shade', { parent_element: 'Missing', shading_type: 'object' }), 'Shading Type', 'overhang', { shading_type: 'overhang', height: undefined, transparency: undefined }],
+    ['object subtype guard', windowShading('shade', { shading_type: 'overhang', depth: 2 }), 'Shading Type', 'object', { shading_type: 'object', depth: undefined }],
+  ] as const)('keeps the %s free of coordinate changes', (_case, shading, label, value, expectedPatch) => {
+    const { store } = mount([
+      transparentWindow([{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }]),
+      shading,
+    ], ['shade']);
+    const originalUpdateElement = store.getState().updateElement;
+    const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
+    act(() => store.setState({ updateElement }));
+
+    fireEvent.change(screen.getByRole('combobox', { name: label }), { target: { value } });
+
+    expect(updateElement).toHaveBeenCalledExactlyOnceWith('shade', expectedPatch, false);
+    expect(updateElement.mock.calls[0]?.[1]).not.toHaveProperty('coordinates');
+  });
+
   it('keeps the single-target edit on updateElement with no skip flag', () => {
     const { store } = mount([lighting('single', { efficacy: 90, count: 4, power: 8 })]);
     const originalUpdateElement = store.getState().updateElement;
