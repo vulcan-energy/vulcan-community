@@ -20,10 +20,12 @@ const schemaPort: GeometrySchemaPort = Object.freeze({
   getSchemaSubtypeForElementData: () => undefined, getConditionalRequiredFields: () => [],
   validateProperty: () => ({ valid: true }), findParameter: () => null,
 });
+// These tests do not exercise the assembly catalogue; leave that unrelated effect pending.
+const pendingResource = new Promise<never>(() => undefined);
 const resources: GeometryWorkspaceResourcePort = Object.freeze({
   availability: 'unavailable',
-  readText: async () => { throw new Error('resource unavailable'); },
-  readFile: async () => { throw new Error('resource unavailable'); },
+  readText: () => pendingResource,
+  readFile: () => pendingResource,
   writeText: async () => { throw new Error('resource unavailable'); },
   writeBytes: async () => { throw new Error('resource unavailable'); },
   removeFile: async () => { throw new Error('resource unavailable'); },
@@ -57,7 +59,11 @@ function mount(elements: Element[], selectedElementIds = elements.map((element) 
   const view = render(
     <GeometryEditorServicePortsProvider schemaPort={schemaPort} workspaceResourcePort={resources}>
       <GeometryStoreProvider store={store}>
-        <MultiSelectPanel selectedElementIds={selectedElementIds} onDelete={vi.fn()} />
+        <MultiSelectPanel
+          selectedElementIds={selectedElementIds}
+          onDelete={vi.fn()}
+          workspaceResourcePort={resources}
+        />
       </GeometryStoreProvider>
     </GeometryEditorServicePortsProvider>,
   );
@@ -76,7 +82,10 @@ function json(store: GeometryStoreApi, id: string): string {
   return JSON.stringify(element);
 }
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('R6 MultiSelect parity fence — DOM, focus and keyboard', () => {
   it('keeps exact Lighting field visibility, order, labels, placeholders and bounds', () => {
@@ -119,10 +128,13 @@ describe('R6 MultiSelect parity fence — DOM, focus and keyboard', () => {
 describe('R6 MultiSelect parity fence — model, bytes, persistence and history', () => {
   it('keeps the single-target edit on updateElement with no skip flag', () => {
     const { store } = mount([lighting('single', { efficacy: 90, count: 4, power: 8 })]);
-    const original = store.getState().updateElement;
-    const updateElement = vi.fn((...args: Parameters<typeof original>) => original(...args));
-    act(() => store.setState({ updateElement }));
-    act(() => fireEvent.change(input('Efficacy'), { target: { value: '110' } }));
+    const originalUpdateElement = store.getState().updateElement;
+    const originalUpdateElementsBulk = store.getState().updateElementsBulk;
+    const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
+    const updateElementsBulk = vi.fn((...args: Parameters<typeof originalUpdateElementsBulk>) => originalUpdateElementsBulk(...args));
+    act(() => store.setState({ updateElement, updateElementsBulk }));
+    fireEvent.change(input('Efficacy'), { target: { value: '110' } });
+    expect(updateElementsBulk).not.toHaveBeenCalled();
     expect(updateElement).toHaveBeenCalledOnce();
     expect(updateElement.mock.calls[0]?.[0]).toBe('single');
     expect(updateElement.mock.calls[0]?.[2]).toBe(false);
@@ -138,7 +150,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
     const updateElementsBulk = vi.fn((...args: Parameters<typeof original>) => original(...args));
     act(() => store.setState({ updateElement, updateElementsBulk }));
-    act(() => fireEvent.change(input('Efficacy'), { target: { value: '110' } }));
+    fireEvent.change(input('Efficacy'), { target: { value: '110' } });
     expect(updateElementsBulk).not.toHaveBeenCalled();
     expect(updateElement).toHaveBeenCalledTimes(2);
     expect(updateElement.mock.calls.map((call) => [call[0], call[2]])).toEqual([
@@ -150,7 +162,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
 
   it('keeps ThermalBridgePoint edits top-level and reloadable through CSV', () => {
     const { store } = mount([thermalBridgePoint('point', 4)]);
-    act(() => fireEvent.change(input('Heat Transfer Coefficient'), { target: { value: '7.5' } }));
+    fireEvent.change(input('Heat Transfer Coefficient'), { target: { value: '7.5' } });
     expect(store.getState().elementsById.point?.heat_transfer_coeff).toBe(7.5);
     const csv = store.getState().generateCSV();
     expect(csv).toContain(',7.5,');
@@ -170,7 +182,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
     const updateElementsBulk = vi.fn((...args: Parameters<typeof originalUpdateElementsBulk>) => originalUpdateElementsBulk(...args));
     act(() => store.setState({ updateElement, updateElementsBulk }));
-    act(() => fireEvent.change(input('Heat Transfer Coefficient'), { target: { value: '7.5' } }));
+    fireEvent.change(input('Heat Transfer Coefficient'), { target: { value: '7.5' } });
     expect(updateElementsBulk).toHaveBeenCalledOnce();
     expect(updateElement).toHaveBeenCalledTimes(2);
     expect(updateElement.mock.calls.map((call) => [call[0], call[1], call[2]])).toEqual([
@@ -200,7 +212,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     const updateElement = vi.fn((...args: Parameters<typeof originalUpdateElement>) => originalUpdateElement(...args));
     const updateElementsBulk = vi.fn((...args: Parameters<typeof originalUpdateElementsBulk>) => originalUpdateElementsBulk(...args));
     act(() => store.setState({ updateElement, updateElementsBulk }));
-    act(() => fireEvent.change(input('Efficacy'), { target: { value: '110' } }));
+    fireEvent.change(input('Efficacy'), { target: { value: '110' } });
 
     expect(updateElementsBulk).not.toHaveBeenCalled();
     expect(updateElement).toHaveBeenCalledTimes(2);
@@ -225,7 +237,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     });
     expect(json(store, 'direct')).toBe('{"id":"direct","type":"Lighting","name":"direct","coordinates":[{"x":0,"y":0,"z":0}],"efficacy":110,"count":4,"power":8,"extra_json":{"retained":"yes","_lighting_entry_mode":"detailed"},"bulbs":{"led":{"count":4,"power":8,"efficacy":110}},"_v":1}');
     expect(json(store, 'nested')).toBe('{"id":"nested","type":"Lighting","name":"nested","coordinates":[{"x":0,"y":0,"z":0}],"bulbs":{"led":{"count":2,"power":6,"efficacy":110}},"extra_json":{"retained":"nested","_lighting_entry_mode":"detailed"},"efficacy":110,"count":2,"power":6,"_v":1}');
-    act(() => fireEvent.change(input('Count'), { target: { value: '5' } }));
+    fireEvent.change(input('Count'), { target: { value: '5' } });
     expect(store.getState().elementsById.direct?.count).toBe(5);
     expect(store.getState().elementsById.direct?.extra_json?._lighting_entry_mode).toBe('detailed');
   });
@@ -234,7 +246,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     const countMount = mount([
       lighting('count-only', { efficacy: 90, count: 4, power: 8, extra_json: { retained: true } }),
     ]);
-    act(() => fireEvent.change(input('Count'), { target: { value: '5' } }));
+    fireEvent.change(input('Count'), { target: { value: '5' } });
     expect(countMount.store.getState().elementsById['count-only']?.extra_json)
       .toEqual({ retained: true });
 
@@ -242,7 +254,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     const powerMount = mount([
       lighting('power-only', { efficacy: 90, count: 4, power: 8, extra_json: { retained: true } }),
     ]);
-    act(() => fireEvent.change(input('Power (W)'), { target: { value: '9' } }));
+    fireEvent.change(input('Power (W)'), { target: { value: '9' } });
     expect(powerMount.store.getState().elementsById['power-only']?.extra_json)
       .toEqual({ retained: true, _lighting_entry_mode: 'detailed' });
 
@@ -250,7 +262,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     const efficacyMount = mount([
       lighting('efficacy-only', { efficacy: 90, count: 4, power: 8, extra_json: { retained: true } }),
     ]);
-    act(() => fireEvent.change(input('Efficacy'), { target: { value: '100' } }));
+    fireEvent.change(input('Efficacy'), { target: { value: '100' } });
     expect(efficacyMount.store.getState().elementsById['efficacy-only']?.extra_json)
       .toEqual({ retained: true, _lighting_entry_mode: 'detailed' });
   });
@@ -260,7 +272,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
       lighting('a', { efficacy: 90, count: 4, power: 8 }),
       lighting('b', { efficacy: 80, count: 2, power: 6 }),
     ]);
-    act(() => fireEvent.change(input('Efficacy'), { target: { value: 'draft' } }));
+    fireEvent.change(input('Efficacy'), { target: { value: 'draft' } });
     expect(input('Efficacy')).toHaveValue('draft');
     expect(input('Power (W)')).toHaveValue('');
   });
@@ -275,7 +287,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
       }),
       lighting('omitted-siblings', { efficacy: 90, bulbs: {}, extra_json: { retained: true }, zoneId: 'zone' }),
     ]);
-    act(() => fireEvent.change(input('Efficacy'), { target: { value: '110' } }));
+    fireEvent.change(input('Efficacy'), { target: { value: '110' } });
     for (const id of ['null-siblings', 'undefined-siblings', 'omitted-siblings']) {
       const edited = store.getState().elementsById[id];
       expect(edited).toBeDefined();
@@ -305,12 +317,12 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
       lighting('a', { efficacy: 90, count: 4, power: 8 }),
       lighting('b', { efficacy: 80, count: 2, power: 6 }),
     ]);
-    store.getState().saveToHistory('fixture baseline');
-    act(() => fireEvent.change(input('Efficacy'), { target: { value: '110' } }));
+    act(() => store.getState().saveToHistory('fixture baseline'));
+    fireEvent.change(input('Efficacy'), { target: { value: '110' } });
     act(() => vi.advanceTimersByTime(350));
     expect(store.getState().history).toHaveLength(2);
     expect(store.getState().canUndo).toBe(true);
-    store.getState().undo();
+    act(() => store.getState().undo());
     expect(store.getState().elementsById.a?.efficacy).toBe(90);
     expect(store.getState().elementsById.b?.efficacy).toBe(80);
   });

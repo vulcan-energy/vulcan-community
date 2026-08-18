@@ -41,9 +41,10 @@ describe('R6 ElementCreator Lighting commit fence', () => {
       id: 'light', type: 'Lighting', name: 'light', zoneId: 'zone',
       coordinates: [{ x: 0, y: 0, z: 0 }], efficacy: 90, count: 4, power: 8,
     } as Element);
-    const inputs = screen.getAllByRole('textbox');
-    expect(inputs.length).toBeGreaterThanOrEqual(3);
-    fireEvent.change(inputs[1], { target: { value: String(value) } });
+    const countLabel = screen.getByText('Count');
+    const countInput = countLabel.closest('.tooltip-container')?.nextElementSibling?.querySelector('input');
+    expect(countInput).toBeInstanceOf(HTMLInputElement);
+    fireEvent.change(countInput as HTMLInputElement, { target: { value: String(value) } });
     const edited = store.getState().elementsById.light;
     expect(edited?.count).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(edited, 'count')).toBe(true);
