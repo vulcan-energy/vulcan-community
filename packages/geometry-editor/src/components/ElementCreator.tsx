@@ -5913,7 +5913,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   const needsBasementDepth =
                     floorTypeForApply === 'Heated_basement' || floorTypeForApply === 'Unheated_basement';
                   const uComputed = computeGroundUValueFromElementModel(el, nextExtra, floorTypeForApply, {
-                    totalArea: buildingElementGroundFormState.derivedGroundArea,
+                    totalArea: buildingElementGroundFormState.derivedGroundTotalArea,
                     perimeter: buildingElementGroundFormState.derivedGroundPerimeter,
                     ...(thicknessWalls != null ? { thicknessWalls } : {}),
                     ...(needsBasementDepth && depthBasementFloor != null ? { depthBasementFloorM: depthBasementFloor } : {}),

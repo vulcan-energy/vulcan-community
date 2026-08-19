@@ -308,6 +308,34 @@ export function calculateGroundFloorArea(elements: Element[]): number {
 }
 
 /**
+ * Calculate the HEM `BuildingElementGround.total_area` shared by every
+ * ground-element row. Unlike `calculateGroundFloorArea`, this deliberately
+ * includes every Ground Elements row: the CSV-to-model transform has no floor
+ * grouping field, and represents each row as a split part of one physical
+ * ground floor.
+ */
+export function calculateSharedGroundElementArea(elements: Element[]): number {
+  const totalArea = elements
+    .filter((element): element is Extract<Element, { type: 'BuildingElementGround' }> =>
+      element.type === 'BuildingElementGround',
+    )
+    .reduce((sum, element) => {
+      if (typeof element.area === 'number' && Number.isFinite(element.area) && element.area > 0) {
+        return sum + element.area;
+      }
+
+      if (element.coordinates.length < 3) return sum;
+      try {
+        return sum + calculatePolygonArea(element.coordinates);
+      } catch {
+        return sum;
+      }
+    }, 0);
+
+  return roundToTwoDecimals(totalArea);
+}
+
+/**
  * Calculate the total building height for ventilation_zone_height.
  *
  * HEM uses this as the full height of the building envelope — leak paths

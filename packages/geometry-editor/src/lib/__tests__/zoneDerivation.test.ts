@@ -9,6 +9,7 @@ import {
   getCumulativeBaseHeightsByFloorId,
   getStrictStoreyHeight,
   getMaxLineWallHeightOnFloor,
+  calculateSharedGroundElementArea,
 } from '../zoneDerivation';
 
 const LINE_WALL_TYPES = [
@@ -76,6 +77,29 @@ describe('calculateDerivedHeight wall filtering', () => {
     ] as unknown as Element[];
 
     expect(calculateDerivedHeight('zone-pitch-filter', elements)).toBe(2.85);
+  });
+});
+
+describe('calculateSharedGroundElementArea', () => {
+  it('sums every split Ground Elements row for HEM total_area', () => {
+    const grounds = [
+      {
+        id: 'ground-north',
+        name: 'Ground north',
+        type: 'BuildingElementGround',
+        area: 59.41,
+        coordinates: [{ x: 0, y: 0, z: 0 }],
+      },
+      {
+        id: 'ground-south',
+        name: 'Ground south',
+        type: 'BuildingElementGround',
+        area: 21.24,
+        coordinates: [{ x: 0, y: 0, z: 2.5 }],
+      },
+    ] as unknown as Element[];
+
+    expect(calculateSharedGroundElementArea(grounds)).toBe(80.65);
   });
 });
 
