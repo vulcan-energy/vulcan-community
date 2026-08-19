@@ -548,6 +548,19 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     expect(updateElement).not.toHaveBeenCalled();
   });
 
+  it('preserves a manually owned zero perimeter', () => {
+    const manualGround = {
+      ...ground,
+      perimeter: 0,
+      extra_json: { [GROUND_EXPOSED_PERIMETER_MANUAL_KEY]: true },
+    } as Element;
+    const updateElement = vi.fn();
+
+    syncGroundExposedPerimetersFromWalls({ g1: manualGround, w1: southWall }, updateElement);
+
+    expect(updateElement).not.toHaveBeenCalled();
+  });
+
   it('includes adjacent-unheated boundaries in the auto-owned ground perimeter', () => {
     const adjacent: Element = {
       ...southWall,
@@ -594,5 +607,58 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     }, updateElement);
 
     expect(updateElement).toHaveBeenCalledWith('g1', { perimeter: 0 });
+  });
+
+  it('shares whole-floor area while retaining each unequal split fragment perimeter and U-value', () => {
+    const west = {
+      ...ground,
+      area: 20,
+      total_area: 20,
+      perimeter: 1,
+      thickness_walls: 0.3,
+      extra_json: { thermal_resistance_floor_construction: 4.2, u_value: 0.1 },
+    } as Element;
+    const east = {
+      ...west,
+      id: 'g2',
+      name: 'East ground floor',
+      area: 15.6,
+      total_area: 15.6,
+      coordinates: [
+        { x: 5, y: 0, z: 0 },
+        { x: 8.9, y: 0, z: 0 },
+        { x: 8.9, y: 4, z: 0 },
+        { x: 5, y: 4, z: 0 },
+      ],
+    } as Element;
+    const makeWall = (id: string, name: string, coordinates: Element['coordinates']): Element => ({
+      ...southWall,
+      id,
+      name,
+      coordinates,
+    });
+    const walls = [
+      makeWall('south-west', 'South west', [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }]),
+      makeWall('south-east', 'South east', [{ x: 5, y: 0, z: 0 }, { x: 8.9, y: 0, z: 0 }]),
+      makeWall('north-west', 'North west', [{ x: 5, y: 4, z: 0 }, { x: 0, y: 4, z: 0 }]),
+      makeWall('north-east', 'North east', [{ x: 8.9, y: 4, z: 0 }, { x: 5, y: 4, z: 0 }]),
+      makeWall('west', 'West', [{ x: 0, y: 4, z: 0 }, { x: 0, y: 0, z: 0 }]),
+      makeWall('east', 'East', [{ x: 8.9, y: 0, z: 0 }, { x: 8.9, y: 4, z: 0 }]),
+    ];
+    const elements = Object.fromEntries([west, east, ...walls].map((element) => [element.id, element]));
+    const updateElement = vi.fn();
+
+    syncGroundExposedPerimetersFromWalls(elements, updateElement);
+
+    const patches = new Map(updateElement.mock.calls.map(([id, patch]) => [id, patch as Record<string, unknown>]));
+    const westPatch = patches.get('g1')!;
+    const eastPatch = patches.get('g2')!;
+    expect(westPatch.total_area).toBe(35.6);
+    expect(eastPatch.total_area).toBe(35.6);
+    expect(westPatch.perimeter).toBe(14);
+    expect(eastPatch.perimeter).toBe(11.8);
+    expect((westPatch.extra_json as Record<string, unknown>).u_value).not.toBe(
+      (eastPatch.extra_json as Record<string, unknown>).u_value,
+    );
   });
 });

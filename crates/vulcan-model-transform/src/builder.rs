@@ -1782,6 +1782,40 @@ impl JSONBuilder {
 
         for section_name in &building_element_sections {
             if let Some(section_data) = csv_data.get(*section_name) {
+                // Ground Elements deliberately have no `total_area` CSV column: users draw
+                // ordinary floor sections, including split portions of one ground floor. HEM's
+                // total_area is instead the common physical footprint represented by all of
+                // those rows. Compute it once before the per-row merge so every generated
+                // BuildingElementGround receives the same authoritative value.
+                let shared_ground_total_area = if *section_name == "Ground Elements" {
+                    let mut total_area = 0.0_f64;
+                    for ground_row in section_data {
+                        let ground_name = ground_row
+                            .get("Name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("<unnamed>");
+                        let area = ground_row
+                            .get("area")
+                            .and_then(Value::as_f64)
+                            .filter(|value| value.is_finite() && *value > 0.0)
+                            .ok_or_else(|| {
+                                BuildError::new(
+                                    "E055",
+                                    &format!(
+                                        "Ground element '{ground_name}' requires a finite positive area"
+                                    ),
+                                )
+                            })?;
+                        total_area += area;
+                    }
+                    // Geometry CSV areas are persisted to two decimal places. Preserve that
+                    // contract when adding binary floating-point values so, for example,
+                    // 20 + 22.37 is emitted as exactly 42.37 rather than 42.370000000000005.
+                    Some((total_area * 100.0).round() / 100.0)
+                } else {
+                    None
+                };
+
                 tracing::debug!(
                     "Processing {} section with {} elements",
                     section_name,
@@ -2068,29 +2102,9 @@ impl JSONBuilder {
                             }
                         }
 
-                        // The geometry CSV contract has one ground-element `area` column and no
-                        // separate dwelling-wide `total_area` column. For the unambiguous
-                        // single-ground-element topology, upstream HEM requires those two facts
-                        // to be identical. Do not let a template's unrelated `total_area`
-                        // survive after the CSV has replaced `area` (the H283 route previously
-                        // produced area=35.6 with a stale template total_area=30).
-                        // Multi-element ground topology remains untouched because the CSV does
-                        // not carry an identity that can establish which zone portions belong to
-                        // the same whole-dwelling floor.
-                        if schema_element_type == "BuildingElementGround" && section_data.len() == 1
-                        {
-                            let area = element_obj_map
-                                .get("area")
-                                .and_then(Value::as_f64)
-                                .filter(|value| value.is_finite() && *value > 0.0)
-                                .ok_or_else(|| {
-                                    BuildError::new(
-                                        "E055",
-                                        &format!(
-                                            "Ground element '{element_name}' requires a finite positive area"
-                                        ),
-                                    )
-                                })?;
+                        if schema_element_type == "BuildingElementGround" {
+                            let shared_total_area = shared_ground_total_area
+                                .expect("Ground Elements rows have a precomputed shared total");
 
                             if let Some(explicit_total_area) = element_row
                                 .get("extra_json")
@@ -2108,11 +2122,11 @@ impl JSONBuilder {
                                             ),
                                         )
                                     })?;
-                                if (explicit_total_area - area).abs() > 0.01 {
+                                if (explicit_total_area - shared_total_area).abs() > 0.01 {
                                     return Err(BuildError::new(
                                         "E058",
                                         &format!(
-                                            "Ground element '{element_name}' is the sole represented ground floor, but extra_json.total_area {explicit_total_area} conflicts with CSV area {area}"
+                                            "Ground element '{element_name}' extra_json.total_area {explicit_total_area} conflicts with the shared CSV ground-floor area {shared_total_area}"
                                         ),
                                     ));
                                 }
@@ -2121,8 +2135,8 @@ impl JSONBuilder {
                             element_obj_map.insert(
                                 "total_area".to_string(),
                                 Value::Number(
-                                    serde_json::Number::from_f64(area)
-                                        .expect("validated finite ground area"),
+                                    serde_json::Number::from_f64(shared_total_area)
+                                        .expect("validated finite shared ground area"),
                                 ),
                             );
                         }

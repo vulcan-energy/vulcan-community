@@ -186,7 +186,8 @@ export interface BuildingElementGround extends BaseElement {
   width: number;
   height: number;
   area: number; // read-only
-  total_area: number; // mirrors area
+  /** Whole physical ground-floor area shared by every split ground element. */
+  total_area: number;
   perimeter: number;
   floor_type: 'Heated_basement' | 'Slab_no_edge_insulation' | 'Slab_edge_insulation' | 'Suspended_floor' | 'Unheated_basement';
   depth_basement_floor?: number;

@@ -107,6 +107,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M, roundToFourDecimals, roundToTwoDecimals } from '../../geometry/constants';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { getElementShape } from '../../lib/shapeUtils';
+import { calculateSharedGroundElementArea } from '../../lib/zoneDerivation';
 import {
   computeWeightedExternalWallAssemblyThicknessDetailsForGroundElement,
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
@@ -198,6 +199,7 @@ export interface BuildingElementGroundFormState {
   parentElement: string;
   setParentElement: (value: string) => void;
   derivedGroundArea: number;
+  derivedGroundTotalArea: number;
   derivedGroundEffectiveArea: number;
   derivedGroundPerimeter: number;
   groundPerimeterDetails: GroundExposedPerimeterDetails | null;
@@ -300,13 +302,6 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     totalAreaInputSetValueRef.current = totalAreaInput.syncValue;
   }, [totalAreaInput.syncValue]);
 
-  // Auto-calculate total_area for BuildingElementGround when area changes
-  useEffect(() => {
-    if (ctx.elementType === 'BuildingElementGround' && ctx.shared.areaInput.value && ctx.shared.areaInput.value > 0) {
-      totalAreaInputSetValueRef.current(ctx.shared.areaInput.value);
-    }
-  }, [ctx.elementType, ctx.shared.areaInput.value]);
-
   // Ground-narrowed re-derivation of ElementCreator's own generic
   // selectedElement/selectedShape — see module header note.
   const selectedGroundElement = useMemo((): BuildingElementGround | null => {
@@ -350,6 +345,31 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     }
     return derivedGroundArea;
   }, [selectedGroundElement, selectedGroundShape, derivedGroundArea]);
+
+  const derivedGroundTotalArea = useMemo((): number => {
+    if (!selectedGroundElement) return 0;
+    const elements = Object.values(ctx.elementsById);
+    const selectedIsPersisted = elements.some((element) => element.id === selectedGroundElement.id);
+    const elementsWithLiveSelection = elements.map((element) =>
+      element.id === selectedGroundElement.id
+        ? { ...element, area: derivedGroundArea }
+        : element,
+    );
+    // A just-created element is not yet in elementsById. Include it explicitly
+    // so the displayed total remains correct before the first store write.
+    if (!selectedIsPersisted) {
+      elementsWithLiveSelection.push({ ...selectedGroundElement, area: derivedGroundArea });
+    }
+    return calculateSharedGroundElementArea(elementsWithLiveSelection);
+  }, [selectedGroundElement, ctx.elementsById, derivedGroundArea]);
+
+  // total_area is the common physical footprint across all split ground
+  // elements, rather than the selected element's local area.
+  useEffect(() => {
+    if (ctx.elementType === 'BuildingElementGround' && derivedGroundTotalArea > 0) {
+      totalAreaInputSetValueRef.current(derivedGroundTotalArea);
+    }
+  }, [ctx.elementType, derivedGroundTotalArea]);
 
   const derivedGroundShapePerimeter = useMemo((): number => {
     if (!selectedGroundElement?.coordinates || selectedGroundElement.coordinates.length < 2) {
@@ -486,7 +506,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     const uComputed =
       derivedGroundArea > 0 && derivedGroundPerimeter > 0 && thicknessWalls > 0 && basementDepthOk
         ? computeGroundUValueFromElementModel(current, nextExtra, floorTypeForCalc, {
-            totalArea: derivedGroundArea,
+            totalArea: derivedGroundTotalArea,
             perimeter: derivedGroundPerimeter,
             thicknessWalls,
             ...(needsBasementDepth && depthBasementFloor != null ? { depthBasementFloorM: depthBasementFloor } : {}),
@@ -501,7 +521,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
 
     const syncAreaForLine = selectedGroundShape === 'line' ? derivedGroundArea : null;
     const needsGroundSync =
-      !numbersClose(readFiniteNumber(current.total_area), derivedGroundArea)
+      !numbersClose(readFiniteNumber(current.total_area), derivedGroundTotalArea)
       || !numbersClose(readFiniteNumber(current.perimeter), derivedGroundPerimeter)
       || (syncAreaForLine != null && !numbersClose(readFiniteNumber(current.area), syncAreaForLine));
 
@@ -509,7 +529,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
 
     ctx.updateElement(current.id, {
       ...(needsGroundSync ? {
-        total_area: derivedGroundArea,
+        total_area: derivedGroundTotalArea,
         perimeter: derivedGroundPerimeter,
         ...(syncAreaForLine != null ? { area: syncAreaForLine } : {}),
       } : {}),
@@ -524,6 +544,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     floorType,
     thicknessWallsInput.value,
     derivedGroundArea,
+    derivedGroundTotalArea,
     derivedGroundPerimeter,
     selectedGroundShape,
     numbersClose,
@@ -584,6 +605,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     parentElement: ctx.shared.parentElement,
     setParentElement: ctx.shared.setParentElement,
     derivedGroundArea,
+    derivedGroundTotalArea,
     derivedGroundEffectiveArea,
     derivedGroundPerimeter,
     groundPerimeterDetails,
@@ -678,7 +700,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
       // persists. Removing that defaults seed WOULD break core-input-mode
       // schema validation for every Ground element; only the editor-side
       // phantom emission was dead. Dropped here.
-      total_area: derivedArea,
+      total_area: state.derivedGroundTotalArea || derivedArea,
       perimeter: derivedPerimeter,
       floor_type: state.floorType || undefined,
       depth_basement_floor: state.depthBasementFloorInput.value === '' ? undefined : state.depthBasementFloorInput.value,
@@ -691,6 +713,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
     const {
       derivedGroundEffectiveArea,
       derivedGroundArea,
+      derivedGroundTotalArea,
       perimeterInput,
       groundPerimeterManual,
       groundPerimeterDetails,
@@ -740,7 +763,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
           <StandardInput
             type="text"
             inputMode="numeric"
-            value={formatConditionalDecimals(derivedGroundArea)}
+            value={formatConditionalDecimals(derivedGroundTotalArea)}
             unit={fieldUnit('total_area')}
             readOnly
             step="0.01"
@@ -749,7 +772,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
             size="md"
             className="flex-1"
           />
-          <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('totalArea', derivedGroundArea)} issue={getFieldValidationIssue('totalArea', derivedGroundArea) || undefined} />
+          <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('totalArea', derivedGroundTotalArea)} issue={getFieldValidationIssue('totalArea', derivedGroundTotalArea) || undefined} />
         </div>
         {renderFieldLabel('Perimeter (m):', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs('perimeter')}>
