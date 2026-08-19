@@ -13,6 +13,8 @@ import {
 } from './groundExposedPerimeter';
 import { usesGroundThermalTransmWallsAutofill } from './groundFloorSubtype';
 import type { DefaultsLookup } from './defaultsCache';
+import { calculateSharedGroundElementArea } from './zoneDerivation';
+import { computeGroundUValueFromElementModel } from './groundUValueCalculator';
 
 /** When true, auto-sync must not overwrite `extra_json.thermal_transm_walls` (user owns the value). */
 export const THERMAL_TRANSM_WALLS_MANUAL_KEY = '_thermal_transm_walls_manual';
@@ -347,32 +349,64 @@ export function syncSuspendedGroundFabricFromWalls(
 }
 
 /**
- * Auto-sync `BuildingElementGround.perimeter` to the exposed wall-linked perimeter.
+ * Auto-sync `BuildingElementGround.total_area` to the shared physical ground-floor area and
+ * each element's `perimeter` to its own exposed wall-linked run.
  *
  * The field remains user-editable: when `_ground_exposed_perimeter_manual` is set in `extra_json`,
- * this sync leaves the stored perimeter alone. The selected-element editor recomputes dependent
- * ground U-values through the existing auto-owned `u_value` path.
+ * this sync leaves the stored perimeter alone. Automatic ground U-values use the shared total
+ * area with each element's own perimeter, as in the HEM split-zone examples.
  */
 export function syncGroundExposedPerimetersFromWalls(
   elementsById: Record<string, Element>,
   updateElement: (id: string, patch: Partial<Element>) => void,
 ): void {
-  for (const el of Object.values(elementsById)) {
-    if (el.type !== 'BuildingElementGround') continue;
-    const extra = readExtraJsonRecord((el as { extra_json?: unknown }).extra_json);
-    if (groundExposedPerimeterManualFlag(extra)) continue;
+  const grounds = Object.values(elementsById).filter(
+    (element): element is Extract<Element, { type: 'BuildingElementGround' }> =>
+      element.type === 'BuildingElementGround' && !element.isPlaceholder,
+  );
+  if (grounds.length === 0) return;
 
-    const details = computeGroundExposedPerimeterDetails(elementsById, el);
-    const hasReliableZero =
-      details.shapePerimeterM > 0 &&
-      details.linkedBoundaryPerimeterM >= Math.max(0, details.shapePerimeterM - 0.05);
-    if (!(details.valueM > 0) && !hasReliableZero) continue;
+  const sharedTotalArea = calculateSharedGroundElementArea(grounds);
+  if (!(sharedTotalArea > 0)) return;
 
-    const currentPerimeter = readFinite((el as { perimeter?: unknown }).perimeter);
-    if (numbersClose(currentPerimeter, details.valueM)) continue;
+  for (const ground of grounds) {
+    const currentExtra = readExtraJsonRecord(ground.extra_json);
+    const manualPerimeter = groundExposedPerimeterManualFlag(currentExtra);
+    const details = manualPerimeter
+      ? null
+      : computeGroundExposedPerimeterDetails(elementsById, ground);
+    const hasReliableZero = details != null
+      && details.shapePerimeterM > 0
+      && details.linkedBoundaryPerimeterM >= Math.max(0, details.shapePerimeterM - 0.05);
+    const perimeter = manualPerimeter
+      ? readFinite(ground.perimeter)
+      : details && (details.valueM > 0 || hasReliableZero)
+        ? details.valueM
+        : readFinite(ground.perimeter);
+    let nextExtra = currentExtra;
+    if (perimeter != null && perimeter > 0) {
+      const uSync = applyComputedGroundUValueAutofill(
+        currentExtra,
+        computeGroundUValueFromElementModel(ground, nextExtra, ground.floor_type, {
+          totalArea: sharedTotalArea,
+          perimeter,
+        }),
+      );
+      nextExtra = uSync.extra;
+    }
 
-    updateElement(el.id, {
-      perimeter: details.valueM,
-    } as Partial<Element>);
+    const patch: Partial<Element> = {};
+    if (!numbersClose(readFinite(ground.total_area), sharedTotalArea)) {
+      (patch as { total_area?: number }).total_area = sharedTotalArea;
+    }
+    if (!manualPerimeter && perimeter != null && !numbersClose(readFinite(ground.perimeter), perimeter)) {
+      (patch as { perimeter?: number }).perimeter = perimeter;
+    }
+    if (JSON.stringify(currentExtra) !== JSON.stringify(nextExtra)) {
+      patch.extra_json = nextExtra;
+    }
+    if (Object.keys(patch).length > 0) {
+      updateElement(ground.id, patch);
+    }
   }
 }
