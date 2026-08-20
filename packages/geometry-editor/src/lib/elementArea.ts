@@ -422,7 +422,7 @@ export const getOpaqueElementExportGeometry = (
   globalOrientationOffset?: number,
 ) => getAreaBasedElementExportGeometry(element, globalOrientationOffset);
 
-/** Mid-height for CSV / engine: centre of the equivalent rectangle (base + height/2). */
+/** Mid-height in Vulcan's editor coordinates: centre of the equivalent rectangle above ground. */
 export const getTransparentExportMidHeight = (element: BuildingElementTransparent, globalOrientationOffset?: number): number => {
   const { baseHeight, height } = getAreaBasedElementExportGeometry(element, globalOrientationOffset);
   return roundToTwoDecimals(baseHeight + height / 2);

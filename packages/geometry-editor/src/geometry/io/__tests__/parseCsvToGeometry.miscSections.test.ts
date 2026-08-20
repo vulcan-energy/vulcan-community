@@ -3,8 +3,123 @@
 
 import { describe, expect, it } from 'vitest';
 import { parseCsvToGeometry } from '../parseCsvToGeometry';
+import { createGeometryStore } from '../../../stores/geometryStore';
+import type { Element, Zone } from '../../types';
 
 describe('parseCsvToGeometry — miscellaneous section handling', () => {
+  const windowCsv = (referenceRow: string, midHeight: number, partMidHeight: number) => `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+${referenceRow}
+Ventilation_ventilation_zone_base_height,2.4,,,,,,,,,,,,,
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Window Elements,,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,${midHeight},0.4,"0.000,0.000,1.000|1.000,0.000,1.000","{""window_part_list"":[{""mid_height_air_flow_path"":${partMidHeight}}]}"
+`.trim();
+
+  it('treats unversioned Vulcan CSVs as version 1 with legacy ground-relative window mid-heights', () => {
+    const parsed = parseCsvToGeometry(windowCsv('', 3.8, 3.8));
+    const window = parsed.elements.find((element) => element.type === 'BuildingElementTransparent');
+
+    expect(window?.mid_height).toBe(3.8);
+    expect((window?.extra_json as any).window_part_list).toEqual([{ mid_height_air_flow_path: 3.8 }]);
+    expect(parsed.metadata.vulcanCsvVersion).toBe(1);
+  });
+
+  it('hydrates version-2 ventilation-zone-relative window mid-heights into editor coordinates', () => {
+    const parsed = parseCsvToGeometry(windowCsv('VulcanCsvVersion,2,,,,,,,,,,,,,', 1.4, 1.4));
+    const window = parsed.elements.find((element) => element.type === 'BuildingElementTransparent');
+
+    expect(window?.mid_height).toBe(3.8);
+    expect((window?.extra_json as any).window_part_list).toEqual([{ mid_height_air_flow_path: 3.8 }]);
+    expect(parsed.metadata.vulcanCsvVersion).toBe(2);
+  });
+
+  it('rejects unsupported future Vulcan CSV versions instead of guessing', () => {
+    expect(() => parseCsvToGeometry(windowCsv('VulcanCsvVersion,3,,,,,,,,,,,,,', 1.4, 1.4)))
+      .toThrow('Unsupported VulcanCsvVersion: 3');
+  });
+
+  it.each(['', '2.5', 'not-a-version'])(
+    'rejects malformed Vulcan CSV version %j instead of treating it as legacy',
+    (version) => {
+      expect(() => parseCsvToGeometry(windowCsv(`VulcanCsvVersion,${version},,,,,,,,,,,,,`, 1.4, 1.4)))
+        .toThrow('Invalid VulcanCsvVersion');
+    },
+  );
+
+  it('exports HEM-relative window and window-part mid-heights as idempotent version-2 CSV', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const zone = { id: 'zone-1', name: 'Living', type: 'Zone' } as Zone;
+    const window = {
+      id: 'window-1',
+      name: 'Window 1',
+      type: 'BuildingElementTransparent',
+      zoneId: zone.id,
+      width: 1,
+      height: 1.2,
+      area: 1.2,
+      base_height: 3.2,
+      mid_height: 3.8,
+      coordinates: [{ x: 0, y: 0, z: 1 }, { x: 1, y: 0, z: 1 }],
+      extra_json: { window_part_list: [{ mid_height_air_flow_path: 3.8 }] },
+    } as Element;
+    store.setState({
+      zones: [zone],
+      elementsById: { [window.id]: window },
+      elementIds: [window.id],
+      complianceSettings: {
+        ...store.getState().complianceSettings,
+        Ventilation_ventilation_zone_base_height: 2.4,
+      },
+    });
+
+    const csv = store.getState().generateCSV();
+    expect(csv).toContain('VulcanCsvVersion,2');
+    expect(csv).toContain('"{""window_part_list"":[{""mid_height_air_flow_path"":1.4}]}"');
+
+    const parsed = parseCsvToGeometry(csv);
+    const roundTrippedWindow = parsed.elements.find((element) => element.type === 'BuildingElementTransparent');
+    expect(roundTrippedWindow?.mid_height).toBe(3.8);
+    expect((roundTrippedWindow?.extra_json as any).window_part_list).toEqual([
+      { mid_height_air_flow_path: 3.8 },
+    ]);
+
+    const reloaded = createGeometryStore({ defaultDefaultsPath: null });
+    reloaded.getState().loadFromCSV(csv);
+    const savedAgain = reloaded.getState().generateCSV();
+    expect(savedAgain).toContain('VulcanCsvVersion,2');
+    expect(savedAgain).toContain('"{""window_part_list"":[{""mid_height_air_flow_path"":1.4}]}"');
+  });
+
+  it('round-trips custom window and part mid-heights across a negative ventilation-zone base', () => {
+    const parsed = parseCsvToGeometry(`
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+VulcanCsvVersion,2,,,,,,,,,,,,,
+Ventilation_ventilation_zone_base_height,-1.2,,,,,,,,,,,,,
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Basement,Zone,60,25,2.4,FALSE
+
+Window Elements,,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Window 1,Basement,BuildingElementTransparent,1.2,90,1,1.2,0,-0.8,,0.1,0.4,0.9,0.4,"0.000,0.000,-1.000|1.000,0.000,-1.000","{""window_part_list"":[{""mid_height_air_flow_path"":1.1,""note"":""preserve""}]}"
+`.trim());
+    const window = parsed.elements.find((element) => element.type === 'BuildingElementTransparent');
+
+    expect(window?.mid_height).toBe(-0.3);
+    expect((window?.extra_json as any).window_part_list).toEqual([
+      { mid_height_air_flow_path: -0.1, note: 'preserve' },
+    ]);
+  });
+
   it('parses the canonical property postcode metadata row', () => {
     const parsed = parseCsvToGeometry(`Metadata,,,,,,,,,,,,,
 Postcode,MK40 1AA,,,,,,,,,,,,,`);

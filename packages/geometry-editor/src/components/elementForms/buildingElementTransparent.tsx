@@ -259,7 +259,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     maxWindowOpenAreaInputSetValueRef.current = maxWindowOpenAreaInput.syncValue;
   }, [maxWindowOpenAreaInput.syncValue, midHeightInput.syncValue]);
 
-  /** Opening mid-height: base + height/2 (matches HEM / engine convention). */
+  /** Opening mid-height: base + height/2 in Vulcan's ground-relative editor coordinates. */
   const derivedWindowMidHeight = useMemo(() => {
     const h = Number(ctx.shared.heightInput.value) || 0;
     const baseM =

@@ -19,6 +19,8 @@
 import {
   calculateDwellingDetailsSuggestion,
   calculateGroundFloorArea,
+  calculateSuggestedVentilationBaseHeight,
+  calculateSuggestedVentilationHeight,
 } from './zoneDerivation';
 import { calculateDwellingLengthWidthFromGroundElements } from './buildingFootprintDimensions';
 import {
@@ -27,7 +29,7 @@ import {
   dwellingCountZoneIds,
   type SpaceLabelAggregate,
 } from './spaceLabelDerivation';
-import type { Element, SpaceLabel, Zone } from '../geometry/types';
+import type { Element, Floor, SpaceLabel, Zone } from '../geometry/types';
 
 export interface EffectiveDwellingDetailsInputs {
   zones: Zone[];
@@ -51,6 +53,35 @@ export interface EffectiveDwellingDetailsInputs {
     BuildingWidth: number;
     KitchenExtractorHoodExternal: boolean;
   }>;
+}
+
+export interface EffectiveVentilationBaseHeightInputs extends EffectiveDwellingDetailsInputs {
+  floors?: Floor[];
+  complianceSettings: EffectiveDwellingDetailsInputs['complianceSettings'] & Partial<{
+    AirPermeability_ventilation_zone_height: number;
+    Ventilation_ventilation_zone_base_height: number;
+  }>;
+}
+
+/** Resolve the exact ventilation-zone base height written to CSV and used by window mid-heights. */
+export function resolveEffectiveVentilationBaseHeight(
+  inputs: EffectiveVentilationBaseHeightInputs,
+): number {
+  const explicit = inputs.complianceSettings.Ventilation_ventilation_zone_base_height;
+  if (typeof explicit === 'number' && Number.isFinite(explicit)) return explicit;
+
+  const elements = Object.values(inputs.elementsById);
+  const dwelling = resolveEffectiveDwellingDetails(inputs);
+  const derivedVentilationHeight = calculateSuggestedVentilationHeight(elements, inputs.floors);
+  const effectiveVentilationHeight =
+    inputs.complianceSettings.AirPermeability_ventilation_zone_height
+    ?? (derivedVentilationHeight > 0 ? derivedVentilationHeight : undefined);
+  return calculateSuggestedVentilationBaseHeight(elements, inputs.floors, {
+    buildType: dwelling.buildType,
+    storeysInDwelling: dwelling.storeysInDwelling,
+    storeyOfDwelling: dwelling.storeyOfDwelling,
+    ventilationZoneHeight: effectiveVentilationHeight,
+  });
 }
 
 export interface EffectiveDwellingDetails {

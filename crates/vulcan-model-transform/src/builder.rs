@@ -852,6 +852,7 @@ fn strip_nested_cleared_fields(value: &Value) -> Value {
 /// metadata mergers (it was previously triplicated and had already drifted).
 const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "GlobalOrientationOffset",
+    "VulcanCsvVersion",
     "DefaultsPath",
     "Postcode",
     "NumberOfBedrooms",
@@ -917,6 +918,130 @@ fn extract_metadata_field(row: &HashMap<String, Value>) -> (Option<String>, Opti
         }
     }
     (field_name, field_value)
+}
+
+const VULCAN_CSV_VERSION: &str = "VulcanCsvVersion";
+const LEGACY_VULCAN_CSV_VERSION: u64 = 1;
+const CURRENT_VULCAN_CSV_VERSION: u64 = 2;
+
+fn metadata_field_value(
+    csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+    target: &str,
+) -> Option<Value> {
+    csv_data.get("Metadata").and_then(|rows| {
+        rows.iter().find_map(|row| {
+            let (name, value) = extract_metadata_field(row);
+            (name.as_deref() == Some(target)).then_some(value).flatten()
+        })
+    })
+}
+
+fn metadata_f64(
+    csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+    target: &str,
+) -> Option<f64> {
+    metadata_field_value(csv_data, target).and_then(|value| {
+        value
+            .as_f64()
+            .or_else(|| {
+                value
+                    .as_str()
+                    .and_then(|raw| raw.trim().parse::<f64>().ok())
+            })
+            .filter(|number| number.is_finite())
+    })
+}
+
+fn window_mid_height_to_hem_reference(value: f64, ventilation_base_height: f64) -> Value {
+    let converted = ((value - ventilation_base_height) * 100.0).round() / 100.0;
+    Value::Number(
+        serde_json::Number::from_f64(converted)
+            .expect("finite window midpoint conversion must remain finite"),
+    )
+}
+
+fn vulcan_csv_version(
+    csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+) -> Result<u64, BuildError> {
+    let Some(raw_version) = metadata_field_value(csv_data, VULCAN_CSV_VERSION) else {
+        return Ok(LEGACY_VULCAN_CSV_VERSION);
+    };
+    let version = raw_version.as_u64().or_else(|| {
+        raw_version
+            .as_str()
+            .and_then(|raw| raw.trim().parse::<u64>().ok())
+    });
+    let Some(version) = version else {
+        return Err(BuildError::new(
+            "E055",
+            &format!("Invalid {VULCAN_CSV_VERSION}: '{raw_version}'"),
+        ));
+    };
+    if !(LEGACY_VULCAN_CSV_VERSION..=CURRENT_VULCAN_CSV_VERSION).contains(&version) {
+        return Err(BuildError::new(
+            "E055",
+            &format!(
+                "Unsupported {VULCAN_CSV_VERSION}: {version}; supported versions are {LEGACY_VULCAN_CSV_VERSION}-{CURRENT_VULCAN_CSV_VERSION}"
+            ),
+        ));
+    }
+    Ok(version)
+}
+
+fn migrate_v1_window_mid_height_reference(
+    csv_data: &mut HashMap<String, Vec<HashMap<String, Value>>>,
+) {
+    let ventilation_base_height =
+        metadata_f64(csv_data, "Ventilation_ventilation_zone_base_height").unwrap_or(0.0);
+    if ventilation_base_height.abs() <= f64::EPSILON {
+        return;
+    }
+
+    if let Some(windows) = csv_data.get_mut("Window Elements") {
+        for window in windows {
+            if let Some(mid_height) = window.get("mid_height").and_then(Value::as_f64) {
+                window.insert(
+                    "mid_height".to_string(),
+                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height),
+                );
+            }
+            let Some(part_list) = window
+                .get_mut("extra_json")
+                .and_then(Value::as_object_mut)
+                .and_then(|extra_json| extra_json.get_mut("window_part_list"))
+                .and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            for part in part_list {
+                let Some(part_object) = part.as_object_mut() else {
+                    continue;
+                };
+                let Some(mid_height) = part_object
+                    .get("mid_height_air_flow_path")
+                    .and_then(Value::as_f64)
+                else {
+                    continue;
+                };
+                part_object.insert(
+                    "mid_height_air_flow_path".to_string(),
+                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height),
+                );
+            }
+        }
+    }
+}
+
+/// Upgrade every supported Vulcan CSV version to the current persisted semantics before the
+/// schema merge. Add future migrations here in ascending version order.
+fn migrate_vulcan_csv_to_current(
+    csv_data: &mut HashMap<String, Vec<HashMap<String, Value>>>,
+) -> Result<(), BuildError> {
+    let version = vulcan_csv_version(csv_data)?;
+    if version < 2 {
+        migrate_v1_window_mid_height_reference(csv_data);
+    }
+    Ok(())
 }
 
 /// Slope-corrected PV panel dimensions from polygon coords + pitch (degrees).
@@ -1428,7 +1553,8 @@ impl JSONBuilder {
         // Cleared Advanced Fields must not reach the merged HEM JSON. One pass at the single
         // merge entry point, so no downstream loop has to remember — and so the NESTED case is
         // covered, which no per-loop guard can reach. See `sanitize_csv_extra_json`.
-        let sanitized_csv_data = sanitize_csv_extra_json(csv_data);
+        let mut sanitized_csv_data = sanitize_csv_extra_json(csv_data);
+        migrate_vulcan_csv_to_current(&mut sanitized_csv_data)?;
         let csv_data = &sanitized_csv_data;
 
         // Parse DefaultThermalBridging from metadata early so it's available for zone processing
@@ -4280,7 +4406,10 @@ impl JSONBuilder {
                     }
 
                     // Skip known metadata fields that aren't compliance settings
-                    if name == "GlobalOrientationOffset" || name == "DefaultsPath" {
+                    if name == "GlobalOrientationOffset"
+                        || name == "DefaultsPath"
+                        || name == VULCAN_CSV_VERSION
+                    {
                         continue;
                     }
 
@@ -9603,6 +9732,85 @@ window 0,Living,BuildingElementTransparent,1.6,90,1,1.6,90,1,"{""g_value"":0.55}
             .as_object()
             .unwrap();
         assert_eq!(window.get("g_value").unwrap(), 0.55);
+    }
+
+    #[test]
+    fn vulcan_csv_version_migrates_legacy_window_mid_heights_and_preserves_version_two() {
+        for (reference_row, stored_mid_height) in [
+            ("", 3.8),
+            ("VulcanCsvVersion,1", 3.8),
+            ("VulcanCsvVersion,2", 1.4),
+        ] {
+            let csv = format!(
+                r#"Metadata
+GlobalOrientationOffset,0
+Ventilation_ventilation_zone_base_height,2.4
+{reference_row}
+
+Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Window Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json
+window 0,Living,BuildingElementTransparent,1.2,90,1,1.2,90,3.2,{stored_mid_height},"{{""window_part_list"":[{{""mid_height_air_flow_path"":{stored_mid_height}}}]}}"
+"#,
+            );
+
+            let json = build_full_json(&csv);
+            let window = &json["Zone"]["Living"]["BuildingElement"]["window 0"];
+            assert_eq!(
+                window["mid_height"].as_f64(),
+                Some(1.4),
+                "reference row: {reference_row:?}",
+            );
+            assert_eq!(
+                window["window_part_list"][0]["mid_height_air_flow_path"].as_f64(),
+                Some(1.4),
+            );
+        }
+    }
+
+    #[test]
+    fn vulcan_csv_version_rejects_unsupported_future_versions() {
+        let csv = r#"Metadata
+GlobalOrientationOffset,0
+VulcanCsvVersion,3
+
+Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+"#;
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+
+        let error = builder
+            .build_json(&data)
+            .expect_err("future CSV version must fail");
+        assert!(error.message.contains("Unsupported VulcanCsvVersion: 3"));
+    }
+
+    #[test]
+    fn vulcan_csv_version_rejects_malformed_versions() {
+        let csv = r#"Metadata
+GlobalOrientationOffset,0
+VulcanCsvVersion,2.5
+
+Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+"#;
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+
+        let error = builder
+            .build_json(&data)
+            .expect_err("fractional CSV version must fail");
+        assert!(error.message.contains("Invalid VulcanCsvVersion"));
     }
 
     #[test]

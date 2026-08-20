@@ -2936,11 +2936,13 @@ describe('WindowPartListControl interactions (ported from the deleted web regist
     handleChange,
     baseHeightM,
     heightM,
+    ventilationZoneBaseHeightM = 0,
   }: {
     data: unknown;
     handleChange: ReturnType<typeof vi.fn>;
     baseHeightM: number;
     heightM: number;
+    ventilationZoneBaseHeightM?: number;
   }) {
     const store = createGeometryStore({ defaultDefaultsPath: null });
     const windowElement = {
@@ -2959,6 +2961,10 @@ describe('WindowPartListControl interactions (ported from the deleted web regist
         selection: { type: 'element', id: 'window-1' },
         elementsById: { 'window-1': windowElement },
         elementIds: ['window-1'],
+        complianceSettings: {
+          ...store.getState().complianceSettings,
+          Ventilation_ventilation_zone_base_height: ventilationZoneBaseHeightM,
+        },
       });
     });
     const utils = render(
@@ -3011,6 +3017,28 @@ describe('WindowPartListControl interactions (ported from the deleted web regist
     });
 
     expect(handleChange).toHaveBeenLastCalledWith('window_part_list', [{ mid_height_air_flow_path: 1.7 }]);
+  });
+
+  it('stores and displays window-part midpoints relative to the ventilation zone base', async () => {
+    const handleChange = vi.fn();
+    const { container } = renderWindowPartListControl({
+      data: [{ mid_height_air_flow_path: 3.8 }],
+      handleChange,
+      baseHeightM: 3.2,
+      heightM: 1.2,
+      ventilationZoneBaseHeightM: 2.4,
+    });
+
+    expect(container.textContent).toContain('Mid-height relative to ventilation zone base: 1.4 m');
+    const midpointInput = within(container).getByLabelText(
+      'Window part 1 midpoint in metres above window base',
+    ) as HTMLInputElement;
+    expect(midpointInput.value).toBe('0.6');
+
+    fireEvent.change(midpointInput, { target: { value: '0.8' } });
+    await waitFor(() => {
+      expect(handleChange).toHaveBeenLastCalledWith('window_part_list', [{ mid_height_air_flow_path: 4 }]);
+    });
   });
 
   it('preserves decimal-zero window part midpoint drafts above the window base', async () => {
