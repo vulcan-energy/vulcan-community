@@ -20,7 +20,12 @@ import {
   resolveEffectiveVentilationBaseHeight,
 } from '../../../lib/effectiveDwellingDetails';
 import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoercion';
-import { parseCsvToGeometry } from '../../../geometry/io/parseCsvToGeometry';
+import {
+  CURRENT_VULCAN_CSV_VERSION,
+  convertGroundRelativeWindowExtraJsonForCsv,
+  parseCsvToGeometry,
+  VULCAN_CSV_VERSION_METADATA_KEY,
+} from '../../../geometry/io/parseCsvToGeometry';
 import {
   encodeGuideOverlayMetadataValue,
   encodeGuideOverlaySourceMetadataValue,
@@ -106,12 +111,6 @@ import {
   projectOverrideMarkersForExport,
   promoteOverrideMarkersOnImport,
 } from '../../../lib/overrideProvenance';
-import {
-  CURRENT_VULCAN_CSV_VERSION,
-  convertGroundRelativeWindowExtraJsonForCsv,
-  VULCAN_CSV_VERSION_METADATA_KEY,
-} from '../../../geometry/io/vulcanCsvVersion';
-
 export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
 export interface IoSlice {
