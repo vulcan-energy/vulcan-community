@@ -2293,6 +2293,7 @@ const applyCoordinateDerivedElementFields = (
   element: Element,
   coordsChanged: boolean,
   globalOrientationOffset: number,
+  preserveExplicitGroundTotalArea = false,
 ): void => {
   if (coordsChanged && isWallLikeLineElement(element)) {
     const d = deriveWallProperties(element, globalOrientationOffset);
@@ -2312,7 +2313,9 @@ const applyCoordinateDerivedElementFields = (
   } else if (element.type === 'BuildingElementGround') {
     const d = deriveGroundProperties(element);
     (element as any).area = d.area;
-    (element as any).total_area = d.total_area;
+    if (!preserveExplicitGroundTotalArea) {
+      (element as any).total_area = d.total_area;
+    }
     const currentPerimeter = (element as { perimeter?: unknown }).perimeter;
     if (typeof currentPerimeter !== 'number' || !Number.isFinite(currentPerimeter)) {
       (element as any).perimeter = d.perimeter;
@@ -5584,8 +5587,22 @@ const createGeometryState = (
         }
       } catch { /* swallow: best-effort */ }
 
-      // Auto-calculate total_area for BuildingElementGround if area is provided
-      if (prevElement.type === 'BuildingElementGround' && 'area' in normalizedUpdates && normalizedUpdates.area !== undefined) {
+      // Preserve the legacy area -> total_area mirror for callers that only update area.
+      // Split ground-floor rows deliberately send both: local `area` and the shared
+      // physical-floor `total_area`. In that case the explicit shared value must win.
+      const explicitGroundTotalArea =
+        (normalizedUpdates as Partial<BuildingElementGround>).total_area;
+      const hasExplicitGroundTotalArea =
+        prevElement.type === 'BuildingElementGround'
+        && typeof explicitGroundTotalArea === 'number'
+        && Number.isFinite(explicitGroundTotalArea)
+        && explicitGroundTotalArea > 0;
+      if (
+        prevElement.type === 'BuildingElementGround'
+        && 'area' in normalizedUpdates
+        && normalizedUpdates.area !== undefined
+        && !hasExplicitGroundTotalArea
+      ) {
         (normalizedUpdates as any).total_area = normalizedUpdates.area;
       }
 
@@ -5767,6 +5784,7 @@ const createGeometryState = (
           nextElement,
           lineGeometryChanged,
           state.globalOrientationOffset,
+          hasExplicitGroundTotalArea,
         );
         applyTransparentOpeningAutomaticFields(
           prevElement,

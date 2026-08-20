@@ -14,7 +14,11 @@ function renderLighting(element: Element) {
   return renderElement(element);
 }
 
-function renderElement(element: Element, relatedElements: Element[] = []) {
+function renderElement(
+  element: Element,
+  relatedElements: Element[] = [],
+  beforeRender?: (store: ReturnType<typeof createGeometryStore>) => void,
+) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   const elements = [...relatedElements, element];
   store.setState({
@@ -22,6 +26,7 @@ function renderElement(element: Element, relatedElements: Element[] = []) {
     elementIds: elements.map((candidate) => candidate.id),
     zones: [{ id: 'zone', name: 'Zone', floorArea: 1, height: 2 }], zoneIds: ['zone'],
   });
+  beforeRender?.(store);
   render(
     <GeometryEditorServicePortsProvider
       schemaPort={unavailableGeometrySchemaPort}
@@ -228,5 +233,71 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
     fireEvent.change(dropdownAfterLabel('Shading Type'), { target: { value: 'overhang' } });
 
     expect(updateElement).toHaveBeenCalledExactlyOnceWith('shade', { shading_type: 'overhang' });
+  });
+});
+
+describe('BuildingElementGround selection stability', () => {
+  it('settles a selected line fragment with a shared total area', () => {
+    const west = {
+      id: 'ground-west',
+      type: 'BuildingElementGround',
+      name: 'West ground floor',
+      zoneId: 'zone',
+      floorId: '0',
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 5, y: 0, z: 0 },
+      ],
+      width: 5,
+      height: 2,
+      area: 10,
+      total_area: 10,
+      perimeter: 5,
+      thickness_walls: 0.3,
+      floor_type: 'Slab_no_edge_insulation',
+      extra_json: {
+        _ground_line_height_m: 2,
+        thermal_resistance_floor_construction: 4.2,
+      },
+    } as Element;
+    const east = {
+      ...west,
+      id: 'ground-east',
+      name: 'East ground floor',
+      coordinates: [
+        { x: 5, y: 0, z: 0 },
+        { x: 8, y: 0, z: 0 },
+      ],
+      width: 3,
+      area: 6,
+      total_area: 10,
+      perimeter: 3,
+    } as Element;
+
+    const updates: Array<[string, Partial<Element>, Partial<Element> | undefined]> = [];
+    const store = renderElement(west, [east], (groundStore) => {
+      const originalUpdate = groundStore.getState().updateElement;
+      groundStore.setState({
+        updateElement: (id, patch, skipAutoSave) => {
+          originalUpdate(id, patch, skipAutoSave);
+          const current = groundStore.getState().elementsById[id];
+          updates.push([id, patch, current && {
+            area: current.area,
+            total_area: current.total_area,
+            perimeter: current.perimeter,
+            _v: current._v,
+          } as Partial<Element>]);
+          if (updates.length > 30) {
+            throw new Error(`ground update loop: ${JSON.stringify(updates.slice(-6))}`);
+          }
+        },
+      });
+    });
+
+    expect(store.getState().elementsById['ground-west']).toMatchObject({
+      area: 10,
+      total_area: 16,
+    });
+    expect(updates.length).toBeLessThan(10);
   });
 });
