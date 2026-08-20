@@ -1600,7 +1600,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // the derived base_height/pitch/orientation360 from that host roof so the UI can show a "From
   // <roof name>" hint and a Reset button.
   const onSiteHostDerivation = useMemo(() => {
-    if (!selection || selection.type !== 'element') return null;
+    if (!selection || (selection.type !== 'element' && selection.type !== 'global')) return null;
     const el = elementsById[selection.id];
     if (!el || el.type !== 'OnSiteGeneration') return null;
     const panel = el as OnSiteGeneration;
@@ -4726,7 +4726,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   };
 
   const selectedElementFloorState = (() => {
-    if (selection.type !== 'element') return { value: '', parentControlled: false };
+    if (selection.type !== 'element' && selection.type !== 'global') return { value: '', parentControlled: false };
     const el = getElementById(selection.id);
     const parentControlled = isElementFloorControlledByParent(el, elementsById);
     const parentFloorZ = getParentControlledFloorZ(el, elementsById, floors);
@@ -4763,7 +4763,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     const parsed = parseInt(value || '0', 10);
     if (!Number.isFinite(parsed)) return;
     const zInt = Math.floor(parsed);
-    if (selection.type !== 'element') return;
+    if (selection.type !== 'element' && selection.type !== 'global') return;
     const el = getElementById(selection.id);
     if (!el) return;
     if (isElementFloorControlledByParent(el, elementsById)) return;
@@ -4906,17 +4906,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   value={elementType}
                   onChange={(value) => {
                     const nextType = value;
-                    const el = selection.type === 'element' ? getElementById(selection.id) : null;
+                    const el = getElementById(selection.id);
                     if (!el) { setElementType(nextType); return; }
+                    const nextSelectionType = isGlobalObject({ type: nextType }) ? 'global' : 'element';
                     const shape = getElementShape(el as any);
                     if (isTypeShapeCompatible(nextType, shape)) {
                       setElementType(nextType);
                       updateElement(el.id, { type: nextType } as Partial<Element>);
+                      setSelection({ ...selection, type: nextSelectionType });
                     } else {
                       const ok = window.confirm('Changing the element type may convert its shape. Continue?');
                       if (!ok) { return; }
                       setElementType(nextType);
                       updateElement(el.id, { type: nextType } as Partial<Element>);
+                      setSelection({ ...selection, type: nextSelectionType });
                     }
                   }}
                   options={ELEMENT_TYPES.filter((type) => {
@@ -4930,7 +4933,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   className="element-editor-type-picker"
                 />
               </div>
-              {selection.type === 'element' && (
+              {(selection.type === 'element' || selection.type === 'global') && (
                 <div className="element-editor-meta-control element-editor-meta-control--shape" ref={registerBaseFieldRefs('shape')}>
                   <StandardDropdown
                     value={(() => {
@@ -5015,7 +5018,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   />
                 </div>
               )}
-              {selection.type === 'element' && (
+              {(selection.type === 'element' || selection.type === 'global') && (
                 <div className="element-editor-meta-control element-editor-meta-control--floor" ref={registerBaseFieldRefs(['floorId', 'floor_id'])}>
                   <StandardDropdown
                     value={selectedElementFloorValue}

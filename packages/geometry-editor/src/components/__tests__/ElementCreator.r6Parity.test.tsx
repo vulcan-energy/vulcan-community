@@ -18,6 +18,8 @@ function renderElement(
   element: Element,
   relatedElements: Element[] = [],
   beforeRender?: (store: ReturnType<typeof createGeometryStore>) => void,
+  selectionType: 'element' | 'global' = 'element',
+  setSelection = vi.fn(),
 ) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   const elements = [...relatedElements, element];
@@ -34,8 +36,8 @@ function renderElement(
     >
       <GeometryStoreProvider store={store}>
         <ElementCreator
-          selection={{ type: 'element', id: element.id } as never}
-          setSelection={vi.fn()}
+          selection={{ type: selectionType, id: element.id } as never}
+          setSelection={setSelection}
           useCard={false}
         />
       </GeometryStoreProvider>
@@ -43,6 +45,59 @@ function renderElement(
   );
   return store;
 }
+
+describe('global element geometry controls', () => {
+  it('keeps shape and floor controls available for global geometry', () => {
+    const appliance = {
+      id: 'appliance',
+      type: 'Appliance',
+      name: 'Appliance',
+      coordinates: [{ x: 1, y: 2, z: 0 }],
+    } as Element;
+    const store = renderElement(
+      appliance,
+      [],
+      (geometryStore) => geometryStore.setState({
+        floors: [
+          { id: 'floor-0', name: 'Ground floor', zIndex: 0 },
+          { id: 'floor-1', name: 'First floor', zIndex: 1 },
+        ],
+      }),
+      'global',
+    );
+
+    expect(document.querySelector('.element-editor-meta-control--shape select')).toBeInstanceOf(HTMLSelectElement);
+    const floorSelect = document.querySelector('.element-editor-meta-control--floor select');
+    expect(floorSelect).toBeInstanceOf(HTMLSelectElement);
+
+    fireEvent.change(floorSelect as HTMLSelectElement, { target: { value: '1' } });
+
+    expect(store.getState().elementsById.appliance?.coordinates).toEqual([{ x: 1, y: 2, z: 1 }]);
+  });
+
+  it('persists global type changes and reclassifies the selection', () => {
+    const setSelection = vi.fn();
+    const store = renderElement(
+      {
+        id: 'appliance',
+        type: 'Appliance',
+        name: 'Appliance',
+        coordinates: [{ x: 1, y: 2, z: 0 }],
+      } as Element,
+      [],
+      undefined,
+      'global',
+      setSelection,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Element type' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Solar & Battery Generation and storage' }));
+    fireEvent.click(screen.getByRole('option', { name: /Electrical storage/i }));
+
+    expect(store.getState().elementsById.appliance?.type).toBe('ElectricBattery');
+    expect(setSelection).toHaveBeenCalledWith({ type: 'global', id: 'appliance' });
+  });
+});
 
 function windowElement(
   coordinates: Array<{ x: number; y: number; z: number }>,

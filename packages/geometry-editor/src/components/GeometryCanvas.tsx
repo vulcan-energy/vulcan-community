@@ -2277,7 +2277,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   /** 3D hit-testing updates both selection and `selectedElementIds` so multi-select works in 2D and 3D. */
   const handle3DSelectionChange = useCallback(
     (sel: GeometryCanvasSelection, additive = false) => {
-      if ((sel?.type === 'element' || sel?.type === 'dormer') && sel.id) {
+      if ((sel?.type === 'element' || sel?.type === 'global' || sel?.type === 'dormer') && sel.id) {
         const anchor =
           sel.type === 'dormer'
             ? getDormerBundleAnchorElement(elementsById, sel.id)
@@ -2930,7 +2930,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       return;
     }
 
-    if (selection.type !== 'element') return;
+    if (selection.type !== 'element' && selection.type !== 'global') return;
 
     const element = elementsById[selection.id];
     if (!element) return;
@@ -3768,7 +3768,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       setDrawingTooltip(prev => prev.visible ? { visible: false, text: '', position: { x: 0, y: 0 } } : prev);
     }
 
-    if (selection?.type === 'element') {
+    if (selection?.type === 'element' || selection?.type === 'global') {
       const element = elementsById[selection.id];
       if (element && getElementShape(element) === 'polygon' && element.coordinates && element.coordinates.length >= 3) {
         const closestPoint = utilFindClosestPointOnPolygon(mouseWorld, element.coordinates);
@@ -4813,7 +4813,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
     // In 'selected' mode (default), only calculate for highlighted/hovered elements
     return renderableElements.filter((element) => {
-      const isSelected = selection?.type === 'element' && selection.id === element.id;
+      const isSelected =
+        (selection?.type === 'element' || selection?.type === 'global') &&
+        selection.id === element.id;
       const isMultiSelected = selectedElementIdSet.has(element.id);
       const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
       return isSelected || isMultiSelected || isHovered;
@@ -6514,7 +6516,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         {!spaceLabellerOpen && (() => {
               return sortedForLabels
                 .map(({ element, canvasCoords }) => {
-                  const isSelected = selection?.type === 'element' && selection.id === element.id;
+                  const isSelected =
+                    (selection?.type === 'element' || selection?.type === 'global') &&
+                    selection.id === element.id;
                   const isMultiSelected = selectedElementIdSet.has(element.id);
                   const isHighlighted = isSelected || isMultiSelected;
                   const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
@@ -9024,7 +9028,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               const el = elementsById[id];
               if (!el) return null;
               const displayName = el.name || el.type || id;
-              const isSelected = selection?.type === 'element' && selection.id === id;
+              const isSelected =
+                (selection?.type === 'element' || selection?.type === 'global') &&
+                selection.id === id;
               const isHovered = elementHover === id;
 
               // Determine background color: hovered > selected > default
