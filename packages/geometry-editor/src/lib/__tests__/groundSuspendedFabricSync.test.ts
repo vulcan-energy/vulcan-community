@@ -23,6 +23,7 @@ import {
   usesGroundThermalTransmWallsAutofill,
 } from '../groundSuspendedFabricSync';
 import { computeWeightedThermalTransmWallsFromZoneExternalWalls } from '../suspendedFloorThermalTransmWallsAutofill';
+import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../overrideProvenance';
 import {
   __resetDefaultsCacheForTests,
   __setDefaultsObjectForTests,
@@ -548,6 +549,40 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     expect(updateElement).not.toHaveBeenCalled();
   });
 
+  it('keeps separate objects on one storey at their own areas and preserves a manual cross-zone total', () => {
+    const sameStoreyGround = {
+      ...ground,
+      id: 'g2',
+      name: 'Separate ground floor object',
+      area: 30,
+      total_area: 50,
+      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: true,
+    } as Element;
+    const updateElement = vi.fn();
+
+    syncGroundExposedPerimetersFromWalls({ g1: ground, g2: sameStoreyGround }, updateElement);
+
+    expect(updateElement).not.toHaveBeenCalledWith('g1', expect.objectContaining({ total_area: expect.anything() }));
+    expect(updateElement).not.toHaveBeenCalledWith('g2', expect.objectContaining({ total_area: expect.anything() }));
+  });
+
+  it('shares the storey total across ground fragments in different zones', () => {
+    const otherZoneGround = {
+      ...ground,
+      id: 'g2',
+      name: 'Other zone ground fragment',
+      zoneId: 'z2',
+      area: 30,
+      total_area: 30,
+    } as Element;
+    const updateElement = vi.fn();
+
+    syncGroundExposedPerimetersFromWalls({ g1: ground, g2: otherZoneGround }, updateElement);
+
+    expect(updateElement).toHaveBeenCalledWith('g1', expect.objectContaining({ total_area: 50 }));
+    expect(updateElement).toHaveBeenCalledWith('g2', expect.objectContaining({ total_area: 50 }));
+  });
+
   it('preserves a manually owned zero perimeter', () => {
     const manualGround = {
       ...ground,
@@ -609,7 +644,7 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     expect(updateElement).toHaveBeenCalledWith('g1', { perimeter: 0 });
   });
 
-  it('shares whole-floor area while retaining each unequal split fragment perimeter and U-value', () => {
+  it('keeps each object area while retaining each unequal perimeter and U-value', () => {
     const west = {
       ...ground,
       area: 20,
@@ -653,8 +688,8 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     const patches = new Map(updateElement.mock.calls.map(([id, patch]) => [id, patch as Record<string, unknown>]));
     const westPatch = patches.get('g1')!;
     const eastPatch = patches.get('g2')!;
-    expect(westPatch.total_area).toBe(35.6);
-    expect(eastPatch.total_area).toBe(35.6);
+    expect(westPatch).not.toHaveProperty('total_area');
+    expect(eastPatch).not.toHaveProperty('total_area');
     expect(westPatch.perimeter).toBe(14);
     expect(eastPatch.perimeter).toBe(11.8);
     expect((westPatch.extra_json as Record<string, unknown>).u_value).not.toBe(

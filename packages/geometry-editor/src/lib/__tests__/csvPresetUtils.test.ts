@@ -6,6 +6,7 @@ import { stripUiKeysFromCsv, parseCSVLine, upsertScenariosBaseModelEnabledLine }
 import {
   CURRENT_PROVENANCE_MARKERS_VERSION,
   ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR,
+  GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR,
   OVERRIDE_PROVENANCE_REGISTRY,
   SPACE_LABEL_NAME_AUTO_SYNC_DESCRIPTOR,
   SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR,
@@ -100,7 +101,7 @@ describe('override provenance helpers', () => {
   it('pins the marker version to an exact registry key/version snapshot', () => {
     // A future marker addition must bump its `since`, the current version, and this snapshot
     // together so documents saved before that key existed never become authoritative for it.
-    expect(CURRENT_PROVENANCE_MARKERS_VERSION).toBe(1);
+    expect(CURRENT_PROVENANCE_MARKERS_VERSION).toBe(2);
     expect(Object.entries(OVERRIDE_PROVENANCE_REGISTRY).flatMap(([kind, descriptors]) =>
       descriptors.map(({ key, since }) => ({ kind, key, since })),
     )).toEqual([
@@ -110,6 +111,11 @@ describe('override provenance helpers', () => {
       { kind: 'element', key: '_pv_pitch_user_override', since: 1 },
       { kind: 'element', key: '_pv_orientation_user_override', since: 1 },
       { kind: 'element', key: '_name_auto_sync', since: 1 },
+      {
+        kind: 'element',
+        key: GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.key,
+        since: GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.since,
+      },
       { kind: 'zone', key: '_floor_area_user_override', since: 1 },
       { kind: 'zone', key: '_height_user_override', since: 1 },
       { kind: 'floor', key: 'FloorHeightOverride', since: 0 },

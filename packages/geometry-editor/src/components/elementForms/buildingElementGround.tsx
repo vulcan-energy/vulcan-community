@@ -107,7 +107,11 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M, roundToFourDecimals, roundToTwoDecimals } from '../../geometry/constants';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { getElementShape } from '../../lib/shapeUtils';
-import { calculateSharedGroundElementArea } from '../../lib/zoneDerivation';
+import {
+  deriveAutomaticGroundTotalAreas,
+  groundTotalAreaMismatch,
+} from '../../lib/groundFloorArea';
+import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../lib/overrideProvenance';
 import {
   computeWeightedExternalWallAssemblyThicknessDetailsForGroundElement,
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
@@ -199,8 +203,10 @@ export interface BuildingElementGroundFormState {
   parentElement: string;
   setParentElement: (value: string) => void;
   derivedGroundArea: number;
-  derivedGroundTotalArea: number;
   derivedGroundEffectiveArea: number;
+  autoDerivedTotalArea: number;
+  groundTotalAreaManual: boolean;
+  groundTotalAreaWarning: boolean;
   derivedGroundPerimeter: number;
   groundPerimeterDetails: GroundExposedPerimeterDetails | null;
   groundPerimeterManual: boolean;
@@ -258,7 +264,33 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     } as Partial<Element>);
   };
 
-  const totalAreaInput = useDecimalInput('', ctx.commitElementNumericField('total_area'), { commitOnChange: true });
+  const commitGroundTotalArea = (value: number | '') => {
+    if (!isExistingElementSelection()) return;
+    const currentSelection = ctx.selection as ElementFormSelection;
+    const current = ctx.getElementById(currentSelection.id);
+    if (!current || current.type !== 'BuildingElementGround') return;
+
+    const grounds = Object.values(ctx.elementsById).filter((element): element is BuildingElementGround =>
+      element.type === 'BuildingElementGround' && !element.isPlaceholder,
+    );
+    const autoValue = deriveAutomaticGroundTotalAreas(grounds).get(current.id) ?? current.area;
+
+    if (value === '' || !Number.isFinite(value) || value <= 0) {
+      ctx.commitExistingElementDraft({
+        total_area: autoValue,
+        [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: false,
+      } as Partial<Element>);
+      return;
+    }
+
+    const rounded = roundToTwoDecimals(value);
+    ctx.commitExistingElementDraft({
+      total_area: rounded,
+      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: groundTotalAreaMismatch(rounded, autoValue),
+    } as Partial<Element>);
+  };
+
+  const totalAreaInput = useDecimalInput('', commitGroundTotalArea, { commitOnChange: true });
   const perimeterInput = useDecimalInput('', commitGroundPerimeter, { commitOnChange: true });
   const depthBasementFloorInput = useDecimalInput('', ctx.commitElementNumericField('depth_basement_floor'), { commitOnChange: true });
   const thicknessWallsInput = useDecimalInput('', ctx.commitElementNumericField('thickness_walls'), { commitOnChange: true });
@@ -346,30 +378,43 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     return derivedGroundArea;
   }, [selectedGroundElement, selectedGroundShape, derivedGroundArea]);
 
-  const derivedGroundTotalArea = useMemo((): number => {
-    if (!selectedGroundElement) return 0;
-    const elements = Object.values(ctx.elementsById);
-    const selectedIsPersisted = elements.some((element) => element.id === selectedGroundElement.id);
-    const elementsWithLiveSelection = elements.map((element) =>
-      element.id === selectedGroundElement.id
-        ? { ...element, area: derivedGroundArea }
-        : element,
+  const groundTotalsByElement = useMemo(() => {
+    const grounds = Object.values(ctx.elementsById).filter((element): element is BuildingElementGround =>
+      element.type === 'BuildingElementGround' && !element.isPlaceholder,
     );
-    // A just-created element is not yet in elementsById. Include it explicitly
-    // so the displayed total remains correct before the first store write.
-    if (!selectedIsPersisted) {
-      elementsWithLiveSelection.push({ ...selectedGroundElement, area: derivedGroundArea });
-    }
-    return calculateSharedGroundElementArea(elementsWithLiveSelection);
-  }, [selectedGroundElement, ctx.elementsById, derivedGroundArea]);
+    if (!selectedGroundElement) return deriveAutomaticGroundTotalAreas(grounds);
 
-  // total_area is the common physical footprint across all split ground
-  // elements, rather than the selected element's local area.
-  useEffect(() => {
-    if (ctx.elementType === 'BuildingElementGround' && derivedGroundTotalArea > 0) {
-      totalAreaInputSetValueRef.current(derivedGroundTotalArea);
+    const selectedIndex = grounds.findIndex((element) => element.id === selectedGroundElement.id);
+    if (selectedIndex >= 0) {
+      const liveGrounds = [...grounds];
+      liveGrounds[selectedIndex] = { ...liveGrounds[selectedIndex], area: derivedGroundEffectiveArea };
+      return deriveAutomaticGroundTotalAreas(liveGrounds);
     }
-  }, [ctx.elementType, derivedGroundTotalArea]);
+    return deriveAutomaticGroundTotalAreas([
+      ...grounds,
+      { ...selectedGroundElement, area: derivedGroundEffectiveArea },
+    ]);
+  }, [ctx.elementsById, selectedGroundElement, derivedGroundEffectiveArea]);
+
+  const autoDerivedTotalArea = selectedGroundElement
+    ? groundTotalsByElement.get(selectedGroundElement.id) ?? derivedGroundEffectiveArea
+    : 0;
+  const groundTotalAreaManual = selectedGroundElement
+    ? selectedGroundElement[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag] === true
+    : false;
+  const groundTotalAreaWarning = selectedGroundElement
+    ? groundTotalAreaManual && groundTotalAreaMismatch(selectedGroundElement.total_area, autoDerivedTotalArea)
+    : false;
+
+  useEffect(() => {
+    if (!selectedGroundElement) return;
+    const nextTotal = groundTotalAreaManual
+      ? selectedGroundElement.total_area
+      : autoDerivedTotalArea;
+    if (typeof nextTotal === 'number' && Number.isFinite(nextTotal)) {
+      totalAreaInputSetValueRef.current(roundToTwoDecimals(nextTotal));
+    }
+  }, [selectedGroundElement, groundTotalAreaManual, autoDerivedTotalArea]);
 
   const derivedGroundShapePerimeter = useMemo((): number => {
     if (!selectedGroundElement?.coordinates || selectedGroundElement.coordinates.length < 2) {
@@ -506,7 +551,9 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     const uComputed =
       derivedGroundArea > 0 && derivedGroundPerimeter > 0 && thicknessWalls > 0 && basementDepthOk
         ? computeGroundUValueFromElementModel(current, nextExtra, floorTypeForCalc, {
-            totalArea: derivedGroundTotalArea,
+            totalArea: groundTotalAreaManual
+              ? readFiniteNumber(current.total_area) ?? autoDerivedTotalArea
+              : autoDerivedTotalArea,
             perimeter: derivedGroundPerimeter,
             thicknessWalls,
             ...(needsBasementDepth && depthBasementFloor != null ? { depthBasementFloorM: depthBasementFloor } : {}),
@@ -520,18 +567,22 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     }
 
     const syncAreaForLine = selectedGroundShape === 'line' ? derivedGroundArea : null;
+    const needsTotalAreaSync =
+      !groundTotalAreaManual
+      && !numbersClose(readFiniteNumber(current.total_area), autoDerivedTotalArea);
+    const needsPerimeterSync = !numbersClose(readFiniteNumber(current.perimeter), derivedGroundPerimeter);
+    const needsLineAreaSync = syncAreaForLine != null
+      && !numbersClose(readFiniteNumber(current.area), syncAreaForLine);
     const needsGroundSync =
-      !numbersClose(readFiniteNumber(current.total_area), derivedGroundTotalArea)
-      || !numbersClose(readFiniteNumber(current.perimeter), derivedGroundPerimeter)
-      || (syncAreaForLine != null && !numbersClose(readFiniteNumber(current.area), syncAreaForLine));
+      needsTotalAreaSync || needsPerimeterSync || needsLineAreaSync;
 
     if (!changed && !needsGroundSync) return;
 
     ctx.updateElement(current.id, {
       ...(needsGroundSync ? {
-        total_area: derivedGroundTotalArea,
-        perimeter: derivedGroundPerimeter,
-        ...(syncAreaForLine != null ? { area: syncAreaForLine } : {}),
+        ...(needsTotalAreaSync ? { total_area: autoDerivedTotalArea } : {}),
+        ...(needsPerimeterSync ? { perimeter: derivedGroundPerimeter } : {}),
+        ...(needsLineAreaSync ? { area: syncAreaForLine! } : {}),
       } : {}),
       ...(changed ? { extra_json: nextExtra } : {}),
     } as Partial<Element>);
@@ -544,7 +595,8 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     floorType,
     thicknessWallsInput.value,
     derivedGroundArea,
-    derivedGroundTotalArea,
+    autoDerivedTotalArea,
+    groundTotalAreaManual,
     derivedGroundPerimeter,
     selectedGroundShape,
     numbersClose,
@@ -605,7 +657,9 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     parentElement: ctx.shared.parentElement,
     setParentElement: ctx.shared.setParentElement,
     derivedGroundArea,
-    derivedGroundTotalArea,
+    autoDerivedTotalArea,
+    groundTotalAreaManual,
+    groundTotalAreaWarning,
     derivedGroundEffectiveArea,
     derivedGroundPerimeter,
     groundPerimeterDetails,
@@ -663,6 +717,10 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
   buildElementData(state, ctx) {
     const derivedArea = state.derivedGroundArea;
     const derivedPerimeter = state.derivedGroundPerimeter;
+    const autoTotalArea = state.autoDerivedTotalArea || derivedArea;
+    const authoredTotalArea = typeof state.totalAreaInput.value === 'number'
+      ? state.totalAreaInput.value
+      : autoTotalArea;
     const extraJsonGround = typeof state.groundLineHeightInput.value === 'number'
       ? { [GROUND_LINE_HEIGHT_EXTRA_KEY]: state.groundLineHeightInput.value }
       : undefined;
@@ -700,7 +758,11 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
       // persists. Removing that defaults seed WOULD break core-input-mode
       // schema validation for every Ground element; only the editor-side
       // phantom emission was dead. Dropped here.
-      total_area: state.derivedGroundTotalArea || derivedArea,
+      total_area: authoredTotalArea,
+      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: groundTotalAreaMismatch(
+        authoredTotalArea,
+        autoTotalArea,
+      ),
       perimeter: derivedPerimeter,
       floor_type: state.floorType || undefined,
       depth_basement_floor: state.depthBasementFloorInput.value === '' ? undefined : state.depthBasementFloorInput.value,
@@ -712,8 +774,10 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
   renderPanel(state, ctx) {
     const {
       derivedGroundEffectiveArea,
-      derivedGroundArea,
-      derivedGroundTotalArea,
+      totalAreaInput,
+      autoDerivedTotalArea,
+      groundTotalAreaManual,
+      groundTotalAreaWarning,
       perimeterInput,
       groundPerimeterManual,
       groundPerimeterDetails,
@@ -761,18 +825,36 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
         {renderFieldLabel('Total Area (m²):', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs(['totalArea', 'total_area'])}>
           <StandardInput
-            type="text"
-            inputMode="numeric"
-            value={formatConditionalDecimals(derivedGroundTotalArea)}
+            {...decimalInputProps(totalAreaInput)}
             unit={fieldUnit('total_area')}
-            readOnly
             step="0.01"
             min="0"
             variant="ghost"
             size="md"
             className="flex-1"
           />
-          <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('totalArea', derivedGroundTotalArea)} issue={getFieldValidationIssue('totalArea', derivedGroundTotalArea) || undefined} />
+          {groundTotalAreaManual ? (
+            <ResetFieldButton
+              align="inline"
+              title={`Use the automatically derived floor total (${formatConditionalDecimals(autoDerivedTotalArea)} m²)`}
+              ariaLabel="Use automatically derived total area"
+              label="Use auto"
+              onClick={() => {
+                const current = ctx.selection?.type === 'element' ? ctx.getElementById(ctx.selection.id) : undefined;
+                if (!current || current.type !== 'BuildingElementGround') return;
+                ctx.updateElement(current.id, {
+                  total_area: autoDerivedTotalArea,
+                  [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: false,
+                } as Partial<Element>);
+              }}
+            />
+          ) : null}
+          <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('totalArea', totalAreaInput.value)} issue={getFieldValidationIssue('totalArea', totalAreaInput.value) || undefined} />
+        </div>
+        <div style={{ color: groundTotalAreaWarning ? 'var(--text-warning)' : 'var(--text-muted)', fontSize: 12 }}>
+          {groundTotalAreaWarning
+            ? `Warning: entered total differs from the automatic floor total of ${formatConditionalDecimals(autoDerivedTotalArea)} m².`
+            : `Automatic floor total: ${formatConditionalDecimals(autoDerivedTotalArea)} m².`}
         </div>
         {renderFieldLabel('Perimeter (m):', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs('perimeter')}>

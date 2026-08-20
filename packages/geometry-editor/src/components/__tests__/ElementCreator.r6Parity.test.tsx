@@ -9,6 +9,7 @@ import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-e
 import { ElementCreator } from '../ElementCreator';
 import type { Element } from '../../geometry/types';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
+import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../lib/overrideProvenance';
 
 function renderLighting(element: Element) {
   return renderElement(element);
@@ -292,7 +293,7 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
 });
 
 describe('BuildingElementGround selection stability', () => {
-  it('settles a selected line fragment with a shared total area', () => {
+  it('settles one-zone line objects with their own total areas', () => {
     const west = {
       id: 'ground-west',
       type: 'BuildingElementGround',
@@ -351,8 +352,58 @@ describe('BuildingElementGround selection stability', () => {
 
     expect(store.getState().elementsById['ground-west']).toMatchObject({
       area: 10,
-      total_area: 16,
+      total_area: 10,
     });
     expect(updates.length).toBeLessThan(10);
+  });
+
+  it('marks a differing total as manual, warns, and resets to the automatic value', () => {
+    const ground = {
+      id: 'ground',
+      type: 'BuildingElementGround',
+      name: 'Ground floor',
+      zoneId: 'zone',
+      floorId: '0',
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 5, y: 0, z: 0 },
+      ],
+      width: 5,
+      height: 2,
+      area: 10,
+      total_area: 10,
+      perimeter: 5,
+      thickness_walls: 0.3,
+      floor_type: 'Slab_no_edge_insulation',
+      extra_json: { _ground_line_height_m: 2 },
+    } as Element;
+    const store = renderElement(ground);
+    const fieldLabel = screen.getByText('Total Area');
+    const fieldInput = fieldLabel.closest('.tooltip-container')?.nextElementSibling?.querySelector('input');
+    expect(fieldInput).toBeInstanceOf(HTMLInputElement);
+
+    fireEvent.change(fieldInput as HTMLInputElement, { target: { value: '12' } });
+
+    expect(store.getState().elementsById.ground).toMatchObject({
+      total_area: 12,
+      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: true,
+    });
+    expect(screen.getByText(/Warning: entered total differs from the automatic floor total of 10 m²/)).toBeTruthy();
+
+    act(() => {
+      store.getState().updateElement('ground', { perimeter: 4 });
+    });
+
+    expect(store.getState().elementsById.ground).toMatchObject({
+      total_area: 12,
+      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: true,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use automatically derived total area' }));
+
+    expect(store.getState().elementsById.ground).toMatchObject({
+      total_area: 10,
+      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: false,
+    });
   });
 });

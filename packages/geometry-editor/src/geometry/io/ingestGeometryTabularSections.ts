@@ -318,10 +318,12 @@ export function ingestGeometryTabularSections(
                 'Suspended_floor',
                 'Unheated_basement',
               ]);
+              const totalArea = parseOptionalNumberColumn(V(d, 'total_area'));
               const groundElement: BuildingElementGround = {
                 ...baseElement,
                 type: 'BuildingElementGround',
                 area: parseRequiredNumberColumn(V(d, 'area')),
+                total_area: totalArea ?? parseRequiredNumberColumn(V(d, 'area')),
                 width: parseRequiredNumberColumn(V(d, 'width')),
                 height: parseRequiredNumberColumn(V(d, 'height')),
                 perimeter: parseRequiredNumberColumn(V(d, 'perimeter')),
@@ -330,7 +332,6 @@ export function ingestGeometryTabularSections(
                 thickness_walls: parseOptionalNumberColumn(V(d, 'thickness_walls')),
                 parent_element: V(d, 'parent_element') ? V(d, 'parent_element') : null,
                 coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
-                total_area: parseRequiredNumberColumn(V(d, 'area')),
                 ...groundViewerBaseHeightPatch(d),
                 extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
               };

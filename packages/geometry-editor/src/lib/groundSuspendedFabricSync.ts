@@ -13,7 +13,8 @@ import {
 } from './groundExposedPerimeter';
 import { usesGroundThermalTransmWallsAutofill } from './groundFloorSubtype';
 import type { DefaultsLookup } from './defaultsCache';
-import { calculateSharedGroundElementArea } from './zoneDerivation';
+import { deriveAutomaticGroundTotalAreas } from './groundFloorArea';
+import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from './overrideProvenance';
 import { computeGroundUValueFromElementModel } from './groundUValueCalculator';
 
 /** When true, auto-sync must not overwrite `extra_json.thermal_transm_walls` (user owns the value). */
@@ -349,7 +350,7 @@ export function syncSuspendedGroundFabricFromWalls(
 }
 
 /**
- * Auto-sync `BuildingElementGround.total_area` to the shared physical ground-floor area and
+ * Auto-sync `BuildingElementGround.total_area` to the shared physical area for its floor and
  * each element's `perimeter` to its own exposed wall-linked run.
  *
  * The field remains user-editable: when `_ground_exposed_perimeter_manual` is set in `extra_json`,
@@ -365,12 +366,15 @@ export function syncGroundExposedPerimetersFromWalls(
       element.type === 'BuildingElementGround' && !element.isPlaceholder,
   );
   if (grounds.length === 0) return;
-
-  const sharedTotalArea = calculateSharedGroundElementArea(grounds);
-  if (!(sharedTotalArea > 0)) return;
+  const automaticTotalAreas = deriveAutomaticGroundTotalAreas(grounds);
 
   for (const ground of grounds) {
     const currentExtra = readExtraJsonRecord(ground.extra_json);
+    const autoTotalArea = automaticTotalAreas.get(ground.id) ?? ground.area;
+    const manualTotalArea = ground[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag] === true;
+    const effectiveTotalArea = manualTotalArea && readFinite(ground.total_area) != null
+      ? readFinite(ground.total_area)!
+      : autoTotalArea;
     const manualPerimeter = groundExposedPerimeterManualFlag(currentExtra);
     const details = manualPerimeter
       ? null
@@ -388,7 +392,7 @@ export function syncGroundExposedPerimetersFromWalls(
       const uSync = applyComputedGroundUValueAutofill(
         currentExtra,
         computeGroundUValueFromElementModel(ground, nextExtra, ground.floor_type, {
-          totalArea: sharedTotalArea,
+          totalArea: effectiveTotalArea,
           perimeter,
         }),
       );
@@ -396,8 +400,8 @@ export function syncGroundExposedPerimetersFromWalls(
     }
 
     const patch: Partial<Element> = {};
-    if (!numbersClose(readFinite(ground.total_area), sharedTotalArea)) {
-      (patch as { total_area?: number }).total_area = sharedTotalArea;
+    if (!manualTotalArea && !numbersClose(readFinite(ground.total_area), autoTotalArea)) {
+      (patch as { total_area?: number }).total_area = autoTotalArea;
     }
     if (!manualPerimeter && perimeter != null && !numbersClose(readFinite(ground.perimeter), perimeter)) {
       (patch as { perimeter?: number }).perimeter = perimeter;

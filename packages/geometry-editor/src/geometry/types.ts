@@ -186,8 +186,10 @@ export interface BuildingElementGround extends BaseElement {
   width: number;
   height: number;
   area: number; // read-only
-  /** Whole physical ground-floor area shared by every split ground element. */
+  /** Whole area of this ground element across the dwelling; may exceed its zone-local area. */
   total_area: number;
+  /** Internal UX state: total_area is manually authored rather than mirrored from area. */
+  _totalAreaUserOverride?: boolean;
   perimeter: number;
   floor_type: 'Heated_basement' | 'Slab_no_edge_insulation' | 'Slab_edge_insulation' | 'Suspended_floor' | 'Unheated_basement';
   depth_basement_floor?: number;
