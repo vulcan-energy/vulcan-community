@@ -99,6 +99,7 @@ import {
   CURRENT_PROVENANCE_MARKERS_VERSION,
   FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
   FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR,
+  GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR,
   OVERRIDE_PROVENANCE_REGISTRY,
   PROVENANCE_MARKERS_METADATA_KEY,
   PV_HOST_OVERRIDE_DESCRIPTORS,
@@ -1218,7 +1219,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const groundHeader = [...EXPECTED_SECTION_HEADERS['Ground Elements']];
       const groundColumnCount = groundHeader.length;
 
-      lines.push('Ground Elements,,,,,,,,,,,,,');
+      lines.push('Ground Elements,,,,,,,,,,,,,,');
       lines.push(ensureColumnCount(groundHeader, groundColumnCount));
       groundElements.forEach(element => {
         const zone = resolveZoneForExport(element);
@@ -1228,6 +1229,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(zone.name),
             escapeCSV(element.type),
             escapeCSV(formatPositiveFiniteNumberForCsv(getElementGrossArea(element))),
+            escapeCSV(element[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag] === true
+              ? formatPositiveFiniteNumberForCsv(element.total_area)
+              : ''),
             escapeCSV(formatPositiveFiniteNumberForCsv(element.width)),
             escapeCSV(formatPositiveFiniteNumberForCsv(element.height)),
             escapeCSV(formatPositiveFiniteNumberForCsv(element.perimeter)),

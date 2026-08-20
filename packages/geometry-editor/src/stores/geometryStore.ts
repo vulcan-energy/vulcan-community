@@ -57,6 +57,8 @@ import {
   withEffectiveStoreyHeights,
   ZONE_OVERRIDE_EPSILON,
 } from '../lib/zoneDerivation';
+import { deriveAutomaticGroundTotalAreas } from '../lib/groundFloorArea';
+import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../lib/overrideProvenance';
 import {
   getFloorStackWarningElementIds,
   validateElementCore,
@@ -2313,7 +2315,8 @@ const applyCoordinateDerivedElementFields = (
   } else if (element.type === 'BuildingElementGround') {
     const d = deriveGroundProperties(element);
     (element as any).area = d.area;
-    if (!preserveExplicitGroundTotalArea) {
+    const manualTotalArea = element[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag] === true;
+    if (!preserveExplicitGroundTotalArea && !manualTotalArea) {
       (element as any).total_area = d.total_area;
     }
     const currentPerimeter = (element as { perimeter?: unknown }).perimeter;
@@ -5587,9 +5590,28 @@ const createGeometryState = (
         }
       } catch { /* swallow: best-effort */ }
 
-      // Preserve the legacy area -> total_area mirror for callers that only update area.
-      // Split ground-floor rows deliberately send both: local `area` and the shared
-      // physical-floor `total_area`. In that case the explicit shared value must win.
+      if (
+        prevElement.type === 'BuildingElementGround' &&
+        (('area' in normalizedUpdates && normalizedUpdates.area !== undefined) ||
+          Object.prototype.hasOwnProperty.call(normalizedUpdates, 'coordinates')) &&
+        !Object.prototype.hasOwnProperty.call(updates, 'total_area') &&
+        prevElement[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag] !== true
+      ) {
+        const draft = { ...prevElement, ...normalizedUpdates } as BuildingElementGround;
+        if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'coordinates')) {
+          draft.area = deriveGroundProperties(draft).area;
+        }
+        const grounds = Object.values(state.elementsById)
+          .filter((element): element is BuildingElementGround =>
+            element.type === 'BuildingElementGround' && element.id !== prevElement.id && !element.isPlaceholder,
+          );
+        grounds.push(draft);
+        const autoTotalArea = deriveAutomaticGroundTotalAreas(grounds).get(draft.id);
+        if (autoTotalArea != null) {
+          (normalizedUpdates as Partial<BuildingElementGround>).total_area = autoTotalArea;
+        }
+      }
+
       const explicitGroundTotalArea =
         (normalizedUpdates as Partial<BuildingElementGround>).total_area;
       const hasExplicitGroundTotalArea =
@@ -5602,6 +5624,7 @@ const createGeometryState = (
         && 'area' in normalizedUpdates
         && normalizedUpdates.area !== undefined
         && !hasExplicitGroundTotalArea
+        && prevElement[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag] !== true
       ) {
         (normalizedUpdates as any).total_area = normalizedUpdates.area;
       }

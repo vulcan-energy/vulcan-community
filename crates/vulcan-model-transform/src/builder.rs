@@ -264,6 +264,40 @@ fn pitch_csv_value_is_90(v: &Value) -> bool {
             .unwrap_or(false)
 }
 
+fn ground_floor_group_key(element_row: &HashMap<String, Value>) -> String {
+    if let Some(floor_id) = element_row.get("floor_id").and_then(Value::as_str) {
+        let floor_id = floor_id.trim();
+        if !floor_id.is_empty() {
+            return format!("floor:{floor_id}");
+        }
+    }
+    if let Some(z) = element_row
+        .get("coords")
+        .and_then(Value::as_str)
+        .and_then(|coords| coords.split('|').next())
+        .and_then(|point| point.split(',').nth(2))
+        .and_then(|raw| raw.trim().parse::<f64>().ok())
+        .filter(|z| z.is_finite())
+    {
+        return format!("z:{}", z.floor());
+    }
+    "z:0".to_string()
+}
+
+fn ground_row_key(element_row: &HashMap<String, Value>) -> String {
+    format!(
+        "{}\0{}",
+        element_row
+            .get("Zone")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        element_row
+            .get("Name")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    )
+}
+
 /// Wall-default pitch 90 is invalid for a coplanar horizontal 3+ vertex adjacent polygon; use 0°.
 fn should_coerce_horizontal_adjacent_pitch_90(
     schema_element_type: &str,
@@ -1908,36 +1942,49 @@ impl JSONBuilder {
 
         for section_name in &building_element_sections {
             if let Some(section_data) = csv_data.get(*section_name) {
-                // Ground Elements deliberately have no `total_area` CSV column: users draw
-                // ordinary floor sections, including split portions of one ground floor. HEM's
-                // total_area is instead the common physical footprint represented by all of
-                // those rows. Compute it once before the per-row merge so every generated
-                // BuildingElementGround receives the same authoritative value.
-                let shared_ground_total_area = if *section_name == "Ground Elements" {
-                    let mut total_area = 0.0_f64;
-                    for ground_row in section_data {
-                        let ground_name = ground_row
-                            .get("Name")
-                            .and_then(Value::as_str)
-                            .unwrap_or("<unnamed>");
-                        let area = ground_row
-                            .get("area")
-                            .and_then(Value::as_f64)
-                            .filter(|value| value.is_finite() && *value > 0.0)
-                            .ok_or_else(|| {
-                                BuildError::new(
-                                    "E055",
-                                    &format!(
-                                        "Ground element '{ground_name}' requires a finite positive area"
-                                    ),
-                                )
-                            })?;
-                        total_area += area;
+                let automatic_ground_totals = if *section_name == "Ground Elements" {
+                    let zone_count = section_data
+                        .iter()
+                        .filter_map(|row| row.get("Zone").and_then(Value::as_str))
+                        .filter(|zone| !zone.trim().is_empty())
+                        .collect::<HashSet<_>>()
+                        .len();
+                    let mut totals_by_floor = HashMap::<String, f64>::new();
+                    if zone_count > 1 {
+                        for row in section_data {
+                            let area = row
+                                .get("area")
+                                .and_then(Value::as_f64)
+                                .filter(|value| value.is_finite() && *value > 0.0)
+                                .ok_or_else(|| {
+                                    BuildError::new(
+                                        "E055",
+                                        "Ground elements require a finite positive area",
+                                    )
+                                })?;
+                            *totals_by_floor
+                                .entry(ground_floor_group_key(row))
+                                .or_default() += area;
+                        }
                     }
-                    // Geometry CSV areas are persisted to two decimal places. Preserve that
-                    // contract when adding binary floating-point values so, for example,
-                    // 20 + 22.37 is emitted as exactly 42.37 rather than 42.370000000000005.
-                    Some((total_area * 100.0).round() / 100.0)
+                    Some(
+                        section_data
+                            .iter()
+                            .map(|row| {
+                                let area =
+                                    row.get("area").and_then(Value::as_f64).unwrap_or_default();
+                                let total = if zone_count > 1 {
+                                    totals_by_floor
+                                        .get(&ground_floor_group_key(row))
+                                        .copied()
+                                        .unwrap_or(area)
+                                } else {
+                                    area
+                                };
+                                (ground_row_key(row), (total * 100.0).round() / 100.0)
+                            })
+                            .collect::<HashMap<_, _>>(),
+                    )
                 } else {
                     None
                 };
@@ -2229,40 +2276,45 @@ impl JSONBuilder {
                         }
 
                         if schema_element_type == "BuildingElementGround" {
-                            let shared_total_area = shared_ground_total_area
-                                .expect("Ground Elements rows have a precomputed shared total");
-
-                            if let Some(explicit_total_area) = element_row
+                            let auto_total_area = automatic_ground_totals
+                                .as_ref()
+                                .and_then(|totals| totals.get(&ground_row_key(element_row)))
+                                .copied()
+                                .filter(|value| value.is_finite() && *value > 0.0)
+                                .ok_or_else(|| BuildError::new(
+                                    "E055",
+                                    &format!("Ground element '{element_name}' requires a finite positive area"),
+                                ))?;
+                            let extra_total_area = element_row
                                 .get("extra_json")
                                 .and_then(Value::as_object)
-                                .and_then(|extra| extra.get("total_area"))
-                            {
-                                let explicit_total_area = explicit_total_area
-                                    .as_f64()
+                                .and_then(|extra| extra.get("total_area"));
+                            let manual_total_area =
+                                csv_set_keys.contains("total_area") || extra_total_area.is_some();
+                            let total_area = if manual_total_area {
+                                element_obj_map
+                                    .get("total_area")
+                                    .filter(|_| csv_set_keys.contains("total_area"))
+                                    .or(extra_total_area)
+                                    .and_then(Value::as_f64)
                                     .filter(|value| value.is_finite() && *value > 0.0)
                                     .ok_or_else(|| {
                                         BuildError::new(
                                             "E055",
                                             &format!(
-                                                "Ground element '{element_name}' extra_json.total_area must be a finite positive number"
+                                                "Ground element '{element_name}' manual total_area must be a finite positive number"
                                             ),
                                         )
-                                    })?;
-                                if (explicit_total_area - shared_total_area).abs() > 0.01 {
-                                    return Err(BuildError::new(
-                                        "E058",
-                                        &format!(
-                                            "Ground element '{element_name}' extra_json.total_area {explicit_total_area} conflicts with the shared CSV ground-floor area {shared_total_area}"
-                                        ),
-                                    ));
-                                }
-                            }
+                                    })?
+                            } else {
+                                auto_total_area
+                            };
 
                             element_obj_map.insert(
                                 "total_area".to_string(),
                                 Value::Number(
-                                    serde_json::Number::from_f64(shared_total_area)
-                                        .expect("validated finite shared ground area"),
+                                    serde_json::Number::from_f64(total_area)
+                                        .expect("validated finite ground total area"),
                                 ),
                             );
                         }
@@ -9555,6 +9607,74 @@ ground 0,Living,BuildingElementGround,8,2,4,20,Slab_no_edge_insulation,2,0.2,"{"
         assert!(!ground.contains_key("height"));
         // Must still pass schema-required fields via defaults merge
         assert!(ground.contains_key("u_value"));
+    }
+
+    #[test]
+    fn ground_total_area_defaults_to_each_object_area_on_the_same_floor() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Ground Elements
+Name,Zone,Type,area,total_area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,extra_json
+ground 0a,Living,BuildingElementGround,20,,5,4,18,Slab_no_edge_insulation,,,{}
+ground 0b,Living,BuildingElementGround,22.37,,5,4,18,Slab_no_edge_insulation,,,{}
+ground 1,Living,BuildingElementGround,31,,5,4,18,Slab_no_edge_insulation,,,{}
+"#;
+
+        let json = build_partial_json(csv, DEFAULTS_PATH);
+        let grounds = json["Zone"]["Living"]["BuildingElement"]
+            .as_object()
+            .expect("ground elements should merge");
+
+        assert_eq!(grounds["ground 0a"]["total_area"].as_f64(), Some(20.0));
+        assert_eq!(grounds["ground 0b"]["total_area"].as_f64(), Some(22.37));
+        assert_eq!(grounds["ground 1"]["total_area"].as_f64(), Some(31.0));
+    }
+
+    #[test]
+    fn ground_total_area_sums_same_storey_fragments_across_zones() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,20
+Kitchen,Zone,80,22.37
+
+Ground Elements
+Name,Zone,Type,area,total_area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,extra_json
+living ground,Living,BuildingElementGround,20,,5,4,18,Slab_no_edge_insulation,,,{}
+kitchen ground,Kitchen,BuildingElementGround,22.37,,5,4,18,Slab_no_edge_insulation,,,{}
+"#;
+
+        let json = build_partial_json(csv, DEFAULTS_PATH);
+        assert_eq!(
+            json["Zone"]["Living"]["BuildingElement"]["living ground"]["total_area"].as_f64(),
+            Some(42.37),
+        );
+        assert_eq!(
+            json["Zone"]["Kitchen"]["BuildingElement"]["kitchen ground"]["total_area"].as_f64(),
+            Some(42.37),
+        );
+    }
+
+    #[test]
+    fn explicit_ground_total_area_override_is_preserved() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Ground Elements
+Name,Zone,Type,area,total_area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,extra_json
+ground 0,Living,BuildingElementGround,20,45,5,4,18,Slab_no_edge_insulation,,,"{""_ground_total_area_manual"":true}"
+ground 1,Living,BuildingElementGround,31,,5,4,18,Slab_no_edge_insulation,,,{}
+"#;
+
+        let json = build_partial_json(csv, DEFAULTS_PATH);
+        let grounds = json["Zone"]["Living"]["BuildingElement"]
+            .as_object()
+            .expect("ground elements should merge");
+
+        assert_eq!(grounds["ground 0"]["total_area"].as_f64(), Some(45.0));
+        assert_eq!(grounds["ground 1"]["total_area"].as_f64(), Some(31.0));
     }
 
     #[test]

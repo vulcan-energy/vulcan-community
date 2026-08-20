@@ -304,7 +304,7 @@ function readFiniteGroundUModel(value: unknown): number | null {
 export type ComputeGroundUFromElementModelOptions = {
   /** Modal live wind field; when omitted, uses `extra_json.wind_speed_mps` (suspended floors). */
   windInput?: string | null;
-  /** Geometry-derived total ground area override (m²), used before `currentData.total_area`. */
+  /** Effective ground area override (m²), auto-derived or manually authored, used before `currentData.total_area`. */
   totalArea?: number | null;
   /** Geometry-derived exposed perimeter override (m), used before `currentData.perimeter`. */
   perimeter?: number | null;

@@ -59,6 +59,13 @@ export const ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR = {
   absentIsAuthoritative: false,
 } as const satisfies OverrideDescriptor;
 
+export const GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR = {
+  flag: '_totalAreaUserOverride',
+  key: '_ground_total_area_manual',
+  positiveSense: true,
+  since: 2,
+} as const satisfies OverrideDescriptor;
+
 export const ZONE_FLOOR_AREA_OVERRIDE_DESCRIPTOR = {
   flag: '_floorAreaUserOverride',
   key: '_floor_area_user_override',
@@ -109,6 +116,7 @@ export const PARSE_PROMOTED_ELEMENT_OVERRIDE_DESCRIPTORS = [
   SLOPED_WIDTH_OVERRIDE_DESCRIPTOR,
   SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR,
   ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR,
+  GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR,
 ] as const satisfies readonly OverrideDescriptor[];
 
 /**
@@ -124,6 +132,7 @@ export const OVERRIDE_PROVENANCE_REGISTRY = {
     PV_PITCH_OVERRIDE_DESCRIPTOR,
     PV_ORIENTATION_OVERRIDE_DESCRIPTOR,
     ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR,
+    GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR,
   ],
   zone: [
     ZONE_FLOOR_AREA_OVERRIDE_DESCRIPTOR,

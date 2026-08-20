@@ -113,7 +113,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
 
     const required = [
       { key: 'thermal_resistance_floor_construction', label: 'Floor construction R', ok: rFloor != null && rFloor > 0 },
-      { key: 'total_area', label: 'Total area (auto)', ok: totalArea != null && totalArea > 0 },
+      { key: 'total_area', label: 'Total area', ok: totalArea != null && totalArea > 0 },
       { key: 'perimeter', label: 'Perimeter (auto)', ok: perimeter != null && perimeter > 0 },
       { key: 'thickness_walls', label: 'Wall thickness', ok: thicknessWalls != null && thicknessWalls > 0 },
       ...(isBasementFloor
