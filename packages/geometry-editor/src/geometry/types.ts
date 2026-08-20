@@ -186,7 +186,7 @@ export interface BuildingElementGround extends BaseElement {
   width: number;
   height: number;
   area: number; // read-only
-  /** Whole physical ground-floor area shared by every split ground element. */
+  /** Whole area of this ground element across the dwelling; may exceed its zone-local area. */
   total_area: number;
   /** Internal UX state: total_area is manually authored rather than mirrored from area. */
   _totalAreaUserOverride?: boolean;

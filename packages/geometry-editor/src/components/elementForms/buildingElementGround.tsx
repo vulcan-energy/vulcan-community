@@ -567,18 +567,22 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     }
 
     const syncAreaForLine = selectedGroundShape === 'line' ? derivedGroundArea : null;
+    const needsTotalAreaSync =
+      !groundTotalAreaManual
+      && !numbersClose(readFiniteNumber(current.total_area), autoDerivedTotalArea);
+    const needsPerimeterSync = !numbersClose(readFiniteNumber(current.perimeter), derivedGroundPerimeter);
+    const needsLineAreaSync = syncAreaForLine != null
+      && !numbersClose(readFiniteNumber(current.area), syncAreaForLine);
     const needsGroundSync =
-      (!groundTotalAreaManual && !numbersClose(readFiniteNumber(current.total_area), autoDerivedTotalArea))
-      || !numbersClose(readFiniteNumber(current.perimeter), derivedGroundPerimeter)
-      || (syncAreaForLine != null && !numbersClose(readFiniteNumber(current.area), syncAreaForLine));
+      needsTotalAreaSync || needsPerimeterSync || needsLineAreaSync;
 
     if (!changed && !needsGroundSync) return;
 
     ctx.updateElement(current.id, {
       ...(needsGroundSync ? {
-        total_area: autoDerivedTotalArea,
-        perimeter: derivedGroundPerimeter,
-        ...(syncAreaForLine != null ? { area: syncAreaForLine } : {}),
+        ...(needsTotalAreaSync ? { total_area: autoDerivedTotalArea } : {}),
+        ...(needsPerimeterSync ? { perimeter: derivedGroundPerimeter } : {}),
+        ...(needsLineAreaSync ? { area: syncAreaForLine! } : {}),
       } : {}),
       ...(changed ? { extra_json: nextExtra } : {}),
     } as Partial<Element>);
@@ -713,6 +717,10 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
   buildElementData(state, ctx) {
     const derivedArea = state.derivedGroundArea;
     const derivedPerimeter = state.derivedGroundPerimeter;
+    const autoTotalArea = state.autoDerivedTotalArea || derivedArea;
+    const authoredTotalArea = typeof state.totalAreaInput.value === 'number'
+      ? state.totalAreaInput.value
+      : autoTotalArea;
     const extraJsonGround = typeof state.groundLineHeightInput.value === 'number'
       ? { [GROUND_LINE_HEIGHT_EXTRA_KEY]: state.groundLineHeightInput.value }
       : undefined;
@@ -750,9 +758,11 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
       // persists. Removing that defaults seed WOULD break core-input-mode
       // schema validation for every Ground element; only the editor-side
       // phantom emission was dead. Dropped here.
-      total_area: typeof state.totalAreaInput.value === 'number'
-        ? state.totalAreaInput.value
-        : state.autoDerivedTotalArea || derivedArea,
+      total_area: authoredTotalArea,
+      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: groundTotalAreaMismatch(
+        authoredTotalArea,
+        autoTotalArea,
+      ),
       perimeter: derivedPerimeter,
       floor_type: state.floorType || undefined,
       depth_basement_floor: state.depthBasementFloorInput.value === '' ? undefined : state.depthBasementFloorInput.value,

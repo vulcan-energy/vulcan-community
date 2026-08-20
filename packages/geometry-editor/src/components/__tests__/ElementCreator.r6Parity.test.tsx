@@ -390,6 +390,15 @@ describe('BuildingElementGround selection stability', () => {
     });
     expect(screen.getByText(/Warning: entered total differs from the automatic floor total of 10 m²/)).toBeTruthy();
 
+    act(() => {
+      store.getState().updateElement('ground', { perimeter: 4 });
+    });
+
+    expect(store.getState().elementsById.ground).toMatchObject({
+      total_area: 12,
+      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: true,
+    });
+
     fireEvent.click(screen.getByRole('button', { name: 'Use automatically derived total area' }));
 
     expect(store.getState().elementsById.ground).toMatchObject({

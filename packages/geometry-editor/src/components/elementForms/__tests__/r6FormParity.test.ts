@@ -4,6 +4,8 @@
 /** R6 fence for the single-element paths that share Lighting/TB field semantics. */
 import { describe, expect, it, vi } from 'vitest';
 import type { Element } from '../../../geometry/types';
+import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../../lib/overrideProvenance';
+import { buildingElementGroundFormModule } from '../buildingElementGround';
 import { lightingFormModule } from '../lighting';
 import { thermalBridgePointFormModule } from '../thermalBridgePoint';
 
@@ -103,5 +105,28 @@ describe('R6 single-element field semantics', () => {
     expect(data).toEqual({ id: 'point', type: 'ThermalBridgePoint', name: 'point', heat_transfer_coeff: 5.25 });
     expect(Object.keys(data)).toEqual(['id', 'type', 'name', 'heat_transfer_coeff']);
     expect(JSON.stringify(data)).toBe('{"id":"point","type":"ThermalBridgePoint","name":"point","heat_transfer_coeff":5.25}');
+  });
+
+  it('marks a differing total area as manually owned when creating a ground element', () => {
+    const data = buildingElementGroundFormModule.buildElementData({
+      derivedGroundArea: 20,
+      derivedGroundPerimeter: 18,
+      autoDerivedTotalArea: 20,
+      widthInput: { value: 5 },
+      totalAreaInput: { value: 45 },
+      groundLineHeightInput: { value: '' },
+      floorType: 'Slab_no_edge_insulation',
+      depthBasementFloorInput: { value: '' },
+      thicknessWallsInput: { value: 0.3 },
+    } as never, {
+      baseData: { id: 'ground', type: 'BuildingElementGround', name: 'ground' },
+      elementZoneId: 'zone',
+    });
+
+    expect(data).toMatchObject({
+      area: 20,
+      total_area: 45,
+      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: true,
+    });
   });
 });
