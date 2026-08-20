@@ -38,6 +38,7 @@ import {
   WindowDetailMiniButton,
 } from './WindowDetailControls';
 import { ResolvedFieldLabel } from './ResolvedFieldLabel';
+import { resolveEffectiveVentilationBaseHeight } from '../lib/effectiveDwellingDetails';
 
 type SuspendedThermalTransmWallSource = {
   elementId: string;
@@ -1300,7 +1301,8 @@ function windowPartRowsEqual(a: WindowPartListItem[], b: WindowPartListItem[]): 
 
 /**
  * The repeating window-part editor: one row per air-flow-path midpoint, edited RELATIVE to
- * the window base and stored absolute.
+ * the window base and stored in Vulcan's ground-relative editor coordinates. CSV export
+ * converts it to the ventilation-zone-relative value required by HEM.
  *
  * Uses only the label/indicator half of the preamble — the row is a repeating editor with
  * no single value, so it has no status pill of its own (`'default-used'` is hard-coded
@@ -1358,6 +1360,16 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
 
   const selection = useGeometryStore((state) => state.selection);
   const getElementById = useGeometryStore((state) => state.getElementById);
+  const ventilationZoneBaseHeightM = useGeometryStore((state) =>
+    resolveEffectiveVentilationBaseHeight({
+      zones: state.zones,
+      elementsById: state.elementsById,
+      spaceLabelsById: state.spaceLabelsById,
+      spaceLabelIds: state.spaceLabelIds,
+      complianceSettings: state.complianceSettings,
+      floors: state.floors,
+    }),
+  );
   const currentElement =
     selection?.type === 'element' ? getElementById(selection.id) : null;
 
@@ -1405,10 +1417,12 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
       return;
     }
 
-    const prevBaseHeightM = prevBaseHeightRef.current;
-    if (Math.abs(prevBaseHeightM - baseHeightM) <= 1e-6) return;
+    const previousBaseHeightM = prevBaseHeightRef.current;
+    if (Math.abs(previousBaseHeightM - baseHeightM) <= 1e-6) return;
 
-    const preservedRelRows = rows.map((row) => round2(row.mid_height_air_flow_path - prevBaseHeightM));
+    const preservedRelRows = rows.map((row) => round2(
+      row.mid_height_air_flow_path - previousBaseHeightM,
+    ));
     const nextRows = buildWindowPartRowsFromRel(baseHeightM, preservedRelRows);
     prevBaseHeightRef.current = baseHeightM;
 
@@ -1534,7 +1548,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
       </div>
       <WindowDetailCollectionShell empty="None" addLabel="Add window part" onAdd={addRow}>
         {relRows.map((relM, idx) => {
-          const absM = round2(baseHeightM + relM);
+          const zoneRelativeMidHeightM = round2(baseHeightM + relM - ventilationZoneBaseHeightM);
           return (
             <WindowDetailChip key={idx} minWidth={196} maxWidth={230}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -1598,7 +1612,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
                   whiteSpace: 'nowrap',
                 }}
               >
-                Mid-height from ground: {absM} m
+                Mid-height relative to ventilation zone base: {zoneRelativeMidHeightM} m
               </div>
             </WindowDetailChip>
           );

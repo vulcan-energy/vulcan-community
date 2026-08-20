@@ -45,6 +45,11 @@ import {
 } from './csvSectionRows';
 import { ingestGeometryTabularSections } from './ingestGeometryTabularSections';
 import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
+import {
+  migrateVulcanCsvElementsForEditor,
+  parseVulcanCsvVersion,
+  VULCAN_CSV_VERSION_METADATA_KEY,
+} from './vulcanCsvVersion';
 
 export type ComplianceSettings = {
   PartO_active_cooling_required?: boolean;
@@ -103,6 +108,7 @@ export type FloorBaseHeightOverrideRow = Readonly<{ zIndex: number; baseHeight: 
 
 export type ParsedCsvMetadata = {
   globalOrientationOffset: number;
+  vulcanCsvVersion: number;
   provenanceMarkersVersion?: number;
   schemaProfile?: ModelSchemaProfile;
   defaultsPath?: string;
@@ -162,6 +168,7 @@ export const parseCsvToGeometry = (
 
   let globalOffset = 0;
   let detectedProvenanceMarkersVersion: number | undefined;
+  let detectedVulcanCsvVersion: string | undefined;
   let detectedDefaultsPath: string | undefined;
   let detectedSchemaProfile: ModelSchemaProfile | undefined;
   const hostDocumentMetadataKeys = new Set(options.hostDocumentMetadataKeys ?? []);
@@ -204,6 +211,10 @@ export const parseCsvToGeometry = (
       if (/^\d+$/.test(rawVersion)) {
         detectedProvenanceMarkersVersion = Number.parseInt(rawVersion, 10);
       }
+      continue;
+    }
+    if (hostMetadataKey === VULCAN_CSV_VERSION_METADATA_KEY) {
+      detectedVulcanCsvVersion = metadataFields[1]?.trim() || '';
       continue;
     }
     const zoneOverrideDescriptor = hostMetadataKey
@@ -576,7 +587,13 @@ export const parseCsvToGeometry = (
       detectedProvenanceMarkersVersion,
     );
   }
-  const normalizedElements = normalizeThermalBridgeSourceLinks(newElements, globalOffset);
+  const csvVersion = parseVulcanCsvVersion(detectedVulcanCsvVersion);
+  const referenceNormalizedElements = migrateVulcanCsvElementsForEditor(
+    newElements,
+    csvVersion,
+    complianceSettings.Ventilation_ventilation_zone_base_height ?? 0,
+  );
+  const normalizedElements = normalizeThermalBridgeSourceLinks(referenceNormalizedElements, globalOffset);
 
   return {
     zones: newZones,
@@ -585,6 +602,7 @@ export const parseCsvToGeometry = (
     warnings,
     metadata: {
       globalOrientationOffset: globalOffset,
+      vulcanCsvVersion: csvVersion,
       provenanceMarkersVersion: detectedProvenanceMarkersVersion,
       schemaProfile: detectedSchemaProfile,
       defaultsPath: detectedDefaultsPath,

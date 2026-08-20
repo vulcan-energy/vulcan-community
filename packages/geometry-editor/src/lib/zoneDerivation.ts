@@ -1027,7 +1027,8 @@ export function cascadeFloorStackChange(
 
 /**
  * Suggested mid-height for a window opening (vertical centre of the ventilated opening).
- * Matches HEM usage: absolute elevation above ground, typically `base_height + height/2` for a vertical opening.
+ * Vulcan's editor model uses absolute elevation above ground; CSV export converts this to
+ * HEM's ventilation-zone-relative convention.
  */
 export function calculateDerivedWindowMidHeight(baseHeightM: number, openingHeightM: number): number {
   if (!Number.isFinite(baseHeightM) || !Number.isFinite(openingHeightM)) return 0;

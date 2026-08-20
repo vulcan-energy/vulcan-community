@@ -15,7 +15,10 @@ import {
 } from '../../../lib/zoneDerivation';
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
-import { resolveEffectiveDwellingDetails } from '../../../lib/effectiveDwellingDetails';
+import {
+  resolveEffectiveDwellingDetails,
+  resolveEffectiveVentilationBaseHeight,
+} from '../../../lib/effectiveDwellingDetails';
 import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoercion';
 import { parseCsvToGeometry } from '../../../geometry/io/parseCsvToGeometry';
 import {
@@ -103,6 +106,11 @@ import {
   projectOverrideMarkersForExport,
   promoteOverrideMarkersOnImport,
 } from '../../../lib/overrideProvenance';
+import {
+  CURRENT_VULCAN_CSV_VERSION,
+  convertGroundRelativeWindowExtraJsonForCsv,
+  VULCAN_CSV_VERSION_METADATA_KEY,
+} from '../../../geometry/io/vulcanCsvVersion';
 
 export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
@@ -658,6 +666,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     lines.push(
       `${PROVENANCE_MARKERS_METADATA_KEY},${CURRENT_PROVENANCE_MARKERS_VERSION},,,,,,,,,,,,,`,
     );
+    lines.push(
+      `${VULCAN_CSV_VERSION_METADATA_KEY},${CURRENT_VULCAN_CSV_VERSION},,,,,,,,,,,,,`,
+    );
     if (options.modelSchemaProfilePort.availability === 'available') {
       const modelSchemaProfile = options.modelSchemaProfilePort.metadataValueForElements(
         Object.values(state.elementsById),
@@ -795,6 +806,14 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const effectiveStoreysInDwelling = dd.storeysInDwelling;
     const effectiveStoreyOfDwelling = dd.storeyOfDwelling;
     const effectiveBuildType = dd.buildType;
+    const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
+      zones: state.zones,
+      elementsById: state.elementsById,
+      spaceLabelsById: state.spaceLabelsById,
+      spaceLabelIds: state.spaceLabelIds,
+      complianceSettings: compliance,
+      floors: state.floors,
+    });
 
     if (compliance.PartO_active_cooling_required !== undefined) {
       lines.push(`PartO_active_cooling_required,${compliance.PartO_active_cooling_required ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
@@ -849,16 +868,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     if (compliance.Ventilation_altitude !== undefined) {
       lines.push(`Ventilation_altitude,${compliance.Ventilation_altitude},,,,,,,,,,,,,`);
     }
-    {
-      const effectiveVentBaseHeight = compliance.Ventilation_ventilation_zone_base_height
-        ?? calculateSuggestedVentilationBaseHeight(allElementsForExport, state.floors, {
-          buildType: effectiveBuildType,
-          storeysInDwelling: effectiveStoreysInDwelling,
-          storeyOfDwelling: effectiveStoreyOfDwelling,
-          ventilationZoneHeight: effectiveVentHeight,
-        });
-      lines.push(`Ventilation_ventilation_zone_base_height,${effectiveVentBaseHeight},,,,,,,,,,,,,`);
-    }
+    lines.push(`Ventilation_ventilation_zone_base_height,${effectiveVentBaseHeight},,,,,,,,,,,,,`);
     if (compliance.Ventilation_noise_nuisance !== undefined) {
       lines.push(`Ventilation_noise_nuisance,${compliance.Ventilation_noise_nuisance ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
     }
@@ -1072,7 +1082,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
               ? exportedGeometry.baseHeight
               : undefined;
           // mid_height has no dedicated override flag (unlike sloped width/height): the editor
-          // (transparentOpeningDerivedFields.ts) keeps it auto-tracking base_height + height/2
+          // (transparentOpeningDerivedFields.ts) keeps it auto-tracking the ground-relative
+          // opening centre in the editor; export projects the selected value relative to the
+          // ventilation-zone base
           // in-session until the stored value diverges from that derived counterpart, so use the
           // same value-vs-derived check here rather than always overwriting it on export — that
           // silently discarded custom mid_height values on the very first save.
@@ -1093,13 +1105,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           // transparentOpeningDerivedFields.ts, while this export check uses
           // slopedDimensionDiffers' 0.01 default for the same auto-vs-manual decision.
           const exportedMidHeight = midHeightIsCustom
-            ? element.mid_height
+            ? roundToTwoDecimals((element.mid_height as number) - effectiveVentBaseHeight)
             : (
                 exportedHeight !== undefined
-                  ? roundToTwoDecimals((exportedBaseHeight ?? 0) + exportedHeight / 2)
+                  ? roundToTwoDecimals((exportedBaseHeight ?? 0) - effectiveVentBaseHeight + exportedHeight / 2)
                   : (
                       typeof element.mid_height === 'number' && Number.isFinite(element.mid_height)
-                        ? element.mid_height
+                        ? roundToTwoDecimals(element.mid_height - effectiveVentBaseHeight)
                         : undefined
                     )
               );
@@ -1119,7 +1131,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(formatOptionalFiniteNumberForCsv(exportedMidHeight)),
             escapeCSV(formatOptionalFiniteNumberForCsv(element.max_window_open_area)),
             formatElementCoordsForCsv(element),
-            escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
+            escapeCSVJson(element.extra_json ? JSON.stringify(
+              convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, effectiveVentBaseHeight),
+            ) : '')
           ];
           lines.push(ensureColumnCount(windowRow, windowColumnCount));
         }
