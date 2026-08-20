@@ -53,6 +53,7 @@ import { materialDimForCategoryGhost, CATEGORY_GHOST_OPACITY_FACTOR } from '../.
 import { ignoreObjectRaycast as ignoreRaycast, meshRaycastForInteractivity } from '../../lib/geometry3dRaycast';
 import { paintLucideIconOnCanvas } from '../../lib/lucideIconCanvas';
 import { isServiceLineElementType } from '../../lib/serviceLineDrawModes';
+import { selectionForElement } from '../../lib/drawnElementSelection';
 import { mergeUnheatedPitchedRoofCeilingElevationExtraJson } from '../../lib/unheatedPitchedRoofCeiling';
 import { useKeyedState } from '../../hooks/useKeyedState';
 import { createGeometryCanvasRenderer } from './geometryCanvasRenderer';
@@ -2826,7 +2827,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
     [elementsById, floors, selection, globalOrientationOffset],
   );
   const editHandleModel = useMemo(() => {
-    if (selection?.type !== 'element') return null;
+    if (selection?.type !== 'element' && selection?.type !== 'global') return null;
     const element = editPreviewSceneElementsById[selection.id];
     if (!element) return null;
     if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) return null;
@@ -2851,7 +2852,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
     const categoryGhost = isElementCategoryGhost(primitive.elementId);
     const directlySelected =
       primitive.isCurrentFloor &&
-      selection?.type === 'element' &&
+      (selection?.type === 'element' || selection?.type === 'global') &&
       selection.id === primitive.elementId;
     const selected =
       primitive.isCurrentFloor &&
@@ -2863,7 +2864,9 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
         setSelection({ type: 'dormer', id: info.bundle_id }, additive);
         return;
       }
-      setSelection({ type: 'element', id }, additive);
+      const selectedElement = editPreviewSceneElementsById[id] ?? elementsById[id];
+      if (!selectedElement) return;
+      setSelection(selectionForElement(selectedElement), additive);
     };
 
     switch (primitive.kind) {

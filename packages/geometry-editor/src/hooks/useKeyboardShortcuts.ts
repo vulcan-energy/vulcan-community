@@ -367,7 +367,7 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
             if (isServiceLineElementType(drawElementType)) {
               setDrawMode(drawMode === 'tb-slope-line' ? 'none' : 'tb-slope-line');
               setDrawPoints([]);
-            } else if (selection?.type === 'element' && hoverPoint) {
+            } else if ((selection?.type === 'element' || selection?.type === 'global') && hoverPoint) {
               const element = elementsById[selection.id];
               if (element && getElementShape(element) === 'polygon' && element.coordinates && element.coordinates.length >= 3) {
                 const newCoordinates = [...element.coordinates];
@@ -435,7 +435,7 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
                   elementName: null,
                   isMultiDelete: true,
                 });
-              } else if (selection?.type === 'element') {
+              } else if (selection?.type === 'element' || selection?.type === 'global') {
                 setElementDeleteModal({
                   isOpen: true,
                   elementId: selection.id,

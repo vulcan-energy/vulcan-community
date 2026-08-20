@@ -31,4 +31,21 @@ describe('GeometryCanvas architecture boundaries', () => {
     expect(geometryCanvasSource).toContain("floorElementType === 'BuildingElementAdjacentConditionedSpace'");
     expect(geometryCanvasSource).toContain('pitch: 180');
   });
+
+  it('keeps global geometry on the element delete and 3D selection paths', () => {
+    const geometryCanvasSource = readCanonicalEditorSource('components/GeometryCanvas.tsx');
+    const geometryCanvas3DSource = readCanonicalEditorSource('components/canvas/GeometryCanvas3D.tsx');
+    const deleteHandler = geometryCanvasSource.slice(
+      geometryCanvasSource.indexOf('const handleElementDelete = useCallback'),
+      geometryCanvasSource.indexOf('const handleConfirmElementDelete = useCallback'),
+    );
+
+    expect(deleteHandler).toContain(
+      "selection.type !== 'element' && selection.type !== 'global'",
+    );
+    expect(geometryCanvasSource).toContain(
+      "sel?.type === 'element' || sel?.type === 'global' || sel?.type === 'dormer'",
+    );
+    expect(geometryCanvas3DSource).toContain('setSelection(selectionForElement(selectedElement), additive)');
+  });
 });
