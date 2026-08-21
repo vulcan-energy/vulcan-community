@@ -14,9 +14,27 @@
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
-  margin-left: 8px;
   transition: all 0.2s ease;
   border: 1px solid transparent;
+}
+
+/* Opt-in: rendered immediately after a label. Every existing caller renders the pill
+ * this way, so `inline` defaults to `true` in StatusPill.tsx. */
+.status-pill-inline {
+  margin-left: 8px;
+}
+
+/* Fixed size/shape: a constant height and min-width so a tick, a count, or a dash all
+ * render identically (SAP Calculator status chips, decision "review 2"). 22px/30px are
+ * not drawn from a dedicated spacing scale — this file has none — but match the raw
+ * 22px control size already used elsewhere in this package (see GeometryCanvas.css).
+ * Two-class selector: at equal single-class specificity the 768px media query's later
+ * `.status-pill { padding: 1px 6px }` would otherwise win by source order and undo the
+ * fixed padding on narrow viewports. */
+.status-pill.status-pill-fixed {
+  height: 22px;
+  min-width: 30px;
+  padding: 0 8px;
 }
 
 /* Custom - Blue (same as box outline) */
@@ -67,11 +85,61 @@
   border-color: color-mix(in srgb, var(--text-secondary) 62%, transparent);
 }
 
+/* Tone overrides — used independently of `type`, for success/error/warning/neutral
+ * status chips (e.g. SAP Calculator validation summaries). Two-class selectors keep
+ * these winning over the `type`-driven colours above regardless of source order. */
+.status-pill.status-pill-tone-success {
+  background-color: var(--status-success-bg);
+  color: var(--status-success-text);
+  border-color: var(--status-success-border);
+}
+
+.status-pill.status-pill-tone-success:hover {
+  background-color: var(--status-success-text);
+  color: white;
+}
+
+.status-pill.status-pill-tone-error {
+  background-color: var(--status-error-bg);
+  color: var(--status-error-text);
+  border-color: var(--status-error-border);
+}
+
+.status-pill.status-pill-tone-error:hover {
+  background-color: var(--error-hover);
+  border-color: var(--status-error-text);
+}
+
+.status-pill.status-pill-tone-warning {
+  background-color: var(--status-warning-bg);
+  color: var(--status-warning-text);
+  border-color: var(--status-warning-border);
+}
+
+.status-pill.status-pill-tone-warning:hover {
+  background-color: color-mix(in srgb, var(--status-warning-text) 24%, transparent);
+  border-color: var(--status-warning-text);
+}
+
+.status-pill.status-pill-tone-neutral {
+  background-color: var(--status-neutral-bg);
+  color: var(--status-neutral-text);
+  border-color: var(--status-neutral-border);
+}
+
+.status-pill.status-pill-tone-neutral:hover {
+  background-color: color-mix(in srgb, var(--status-neutral-text) 22%, transparent);
+  border-color: var(--status-neutral-text);
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .status-pill {
     font-size: var(--font-size-micro);
     padding: 1px 6px;
+  }
+
+  .status-pill-inline {
     margin-left: 6px;
   }
 }

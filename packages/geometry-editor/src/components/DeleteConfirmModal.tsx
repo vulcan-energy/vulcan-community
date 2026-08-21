@@ -1,11 +1,31 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import './GlobalButtonSystem.css';
 import './DeleteConfirmModal.css';
 import { ModalHeader } from './ModalHeader';
+
+// Focus-trap primitives, adapted from the parent app's ModalFrame (web/src/components/
+// ModalFrame.tsx) — reimplemented here rather than imported, since this package does not
+// depend on the parent app. Kept local to this file; promote to a shared helper if a second
+// community component needs the same trap.
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((el) => {
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' && !el.hasAttribute('aria-hidden');
+  });
+}
 
 interface DeleteConfirmModalProps {
   isOpen: boolean;
@@ -24,6 +44,10 @@ interface DeleteConfirmModalProps {
   backdropZIndex?: number;
   /** Hide the default “cannot be undone” line (e.g. discard unsaved edits). */
   hideIrreversibleWarning?: boolean;
+  /** Which button receives focus when the dialog opens. Defaults to `'cancel'` — the
+   *  second element in tab order, after the header's close button — so Enter
+   *  immediately after opening is a no-op rather than a destructive confirm. */
+  initialFocus?: 'cancel' | 'confirm';
 }
 
 export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
@@ -40,7 +64,80 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   confirmVariant = 'danger',
   backdropZIndex,
   hideIrreversibleWarning = false,
+  initialFocus = 'cancel',
 }) => {
+  const titleId = useId();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // Move focus into the dialog on open, and restore it to whatever opened the dialog
+  // on close/unmount — the same contract as ModalFrame's initial-focus effect.
+  useEffect(() => {
+    if (!isOpen) return;
+    const container = containerRef.current;
+    if (!container || typeof document === 'undefined') return;
+
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const target = initialFocus === 'confirm' ? confirmButtonRef.current : cancelButtonRef.current;
+    (target ?? getFocusableElements(container)[0] ?? container).focus();
+
+    return () => {
+      previousFocusRef.current?.focus?.();
+    };
+  }, [isOpen, initialFocus]);
+
+  // Trap Tab within the dialog and route Escape to onClose, both at the document level
+  // (capture phase) so they win regardless of which descendant currently has focus —
+  // the same contract as ModalFrame's key-handling effect.
+  useEffect(() => {
+    if (!isOpen) return;
+    const container = containerRef.current;
+    if (!container || typeof document === 'undefined') return;
+
+    const handleGlobalKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+
+      const focusable = getFocusableElements(container);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        container.focus();
+        return;
+      }
+
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const active = document.activeElement;
+      const activeInside = active instanceof Node && container.contains(active);
+
+      if (!activeInside) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => document.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -49,10 +146,12 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      onClose();
-    } else if (e.key === 'Enter') {
+  // Enter confirms only as keyboard activation of the confirm button itself — never as
+  // a blanket handler on the backdrop/document, which previously fired onConfirm on
+  // Enter regardless of what had focus (one keystroke from an unintended delete).
+  const handleConfirmKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
       onConfirm();
     }
   };
@@ -94,13 +193,19 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
       className="modal-backdrop"
       style={backdropZIndex != null ? { zIndex: backdropZIndex } : undefined}
       onClick={handleBackdropClick}
-      onKeyDown={handleKeyDown}
-      tabIndex={-1}
     >
-      <div className="modal-container">
+      <div
+        ref={containerRef}
+        className="modal-container"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
         <ModalHeader
           icon={<div className="modal-icon destructive">{getItemTypeIcon()}</div>}
           title={title}
+          titleId={titleId}
           onClose={onClose}
         />
 
@@ -131,14 +236,17 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
         ) : null}
         <div className="modal-actions">
           <button
+            ref={cancelButtonRef}
             className="btn btn-ghost btn-standard"
             onClick={onClose}
           >
             Cancel
           </button>
           <button
+            ref={confirmButtonRef}
             className={confirmVariant === 'primary' ? 'btn btn-standard btn-yellow' : 'btn btn-danger btn-standard'}
             onClick={onConfirm}
+            onKeyDown={handleConfirmKeyDown}
           >
             {actionButtonText}
           </button>
