@@ -116,4 +116,25 @@ describe('SearchableDescribedSelect positioning', () => {
     expect(menu).toHaveStyle({ left: '20px', top: '148px', width: '360px' });
     expect(menu.style.bottom).toBe('');
   });
+
+  it('combines an external label with the selected value and responds to its label click', () => {
+    render(
+      <>
+        <label id="country-label" htmlFor="country-trigger">
+          Country
+        </label>
+        <SearchableDescribedSelect
+          id="country-trigger"
+          value="england"
+          onChange={vi.fn()}
+          aria-labelledby="country-label"
+          sections={[{ options: [{ value: 'england', label: 'England' }] }]}
+        />
+      </>,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Country England' });
+    fireEvent.click(screen.getByText('Country'));
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  });
 });

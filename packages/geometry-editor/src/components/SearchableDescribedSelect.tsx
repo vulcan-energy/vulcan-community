@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import './StandardDropdown.css';
 
@@ -19,6 +19,8 @@ type Section = {
 };
 
 interface SearchableDescribedSelectProps {
+  /** Id applied to the trigger button, for an external label's `htmlFor`. */
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -49,9 +51,12 @@ interface SearchableDescribedSelectProps {
   'aria-invalid'?: React.AriaAttributes['aria-invalid'];
   /** Ids describing the trigger button. */
   'aria-describedby'?: string;
+  /** Ids providing the trigger button's accessible name. */
+  'aria-labelledby'?: string;
 }
 
 export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps> = ({
+  id,
   value,
   onChange,
   placeholder = 'Select…',
@@ -70,7 +75,9 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   menuMinWidth = 560,
   'aria-invalid': ariaInvalid,
   'aria-describedby': ariaDescribedBy,
+  'aria-labelledby': ariaLabelledBy,
 }) => {
+  const selectedValueId = useId();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedSectionIndices, setExpandedSectionIndices] = useState<Set<number>>(() => new Set());
@@ -247,6 +254,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   return (
     <div style={{ position: 'relative', minWidth }}>
       <button
+        id={id}
         type="button"
         disabled={disabled}
         onClick={() => {
@@ -265,6 +273,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
          * supplies the error to assistive technology; this value drives the
          * shared visual invalid state only. */
         aria-describedby={ariaDescribedBy}
+        aria-labelledby={ariaLabelledBy ? `${ariaLabelledBy} ${selectedValueId}` : undefined}
         ref={triggerRef}
         className={
           usesStandardTrigger
@@ -316,6 +325,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
         }}
       >
         <span
+          id={ariaLabelledBy ? selectedValueId : undefined}
           style={{
             display: 'block',
             overflow: 'hidden',
