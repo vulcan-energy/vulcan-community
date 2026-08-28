@@ -182,6 +182,26 @@
   box-shadow: none;
 }
 
+/* Text action -- uses the same themed hover, press and focus language as the
+ * other button variants instead of falling back to the browser's text colour. */
+.btn.btn-link {
+  color: var(--text-secondary) !important;
+  background: transparent !important;
+  border: 0 !important;
+  text-decoration: none;
+}
+
+.btn.btn-link:hover:not(:disabled) {
+  color: var(--text-primary) !important;
+  background: var(--hover-bg) !important;
+}
+
+.btn.btn-link:active:not(:disabled) {
+  color: var(--text-primary) !important;
+  background: var(--surface-control-active) !important;
+  transform: translateY(1px);
+}
+
 /* Danger variant - For destructive actions */
 .btn-danger {
   background: var(--error-bg) !important;
@@ -429,12 +449,10 @@
   word-break: break-word;
 }
 
-
 .save-button-text {
   font-weight: 500;
   flex-shrink: 0;
 }
-
 
 /* Save button state styles - maintain consistent size */
 .save-button.saving {

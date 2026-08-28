@@ -37,6 +37,7 @@ export const StandardInput: React.FC<StandardInputProps> = ({
   onBlur,
   disabled,
   readOnly,
+  'aria-invalid': ariaInvalid,
   'aria-describedby': ariaDescribedBy,
   ...props
 }) => {
@@ -94,11 +95,14 @@ export const StandardInput: React.FC<StandardInputProps> = ({
   const errorId = error ? `${inputId}-error` : undefined;
   const helperTextId = helperText && !error ? `${inputId}-helper` : undefined;
   const describedBy = [ariaDescribedBy, errorId, helperTextId].filter(Boolean).join(' ') || undefined;
+  const isInvalid = Boolean(error) || ariaInvalid === true || ariaInvalid === 'true';
 
   const renderInput = (controlDescribedBy: string | undefined) => (
     <input
       id={inputId}
-      className={`standard-input standard-input-${size} ${variant === 'ghost' ? 'standard-input-ghost' : ''} ${error ? 'standard-input-error' : ''}`}
+      className={`standard-input standard-input-${size} ${variant === 'ghost' ? 'standard-input-ghost' : ''} ${
+        isInvalid ? 'standard-input-error' : ''
+      }`}
       type={renderedType}
       inputMode={renderedInputMode}
       value={renderedValue}
@@ -109,6 +113,7 @@ export const StandardInput: React.FC<StandardInputProps> = ({
       disabled={disabled}
       readOnly={readOnly}
       aria-describedby={controlDescribedBy}
+      aria-invalid={isInvalid || undefined}
       {...props}
     />
   );
@@ -126,7 +131,7 @@ export const StandardInput: React.FC<StandardInputProps> = ({
         variant={variant}
         disabled={disabled}
         readOnly={readOnly}
-        error={!!error}
+        error={isInvalid}
         describedBy={describedBy}
       >
         {renderInput}
