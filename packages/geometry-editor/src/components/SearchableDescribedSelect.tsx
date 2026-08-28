@@ -41,6 +41,14 @@ interface SearchableDescribedSelectProps {
   closeMenuSignal?: number;
   /** Use the shared native dropdown visual treatment while keeping the searchable portaled menu. */
   triggerVariant?: 'default' | 'standard';
+  /** Match the shared control sizes when the trigger sits in a dense table. */
+  triggerSize?: 'sm' | 'md' | 'lg';
+  /** Minimum menu width in CSS pixels; the menu never exceeds the viewport. */
+  menuMinWidth?: number;
+  /** Accessibility state applied to the trigger button. */
+  'aria-invalid'?: React.AriaAttributes['aria-invalid'];
+  /** Ids describing the trigger button. */
+  'aria-describedby'?: string;
 }
 
 export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps> = ({
@@ -58,6 +66,10 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   menuFooter,
   closeMenuSignal,
   triggerVariant = 'default',
+  triggerSize = 'md',
+  menuMinWidth = 560,
+  'aria-invalid': ariaInvalid,
+  'aria-describedby': ariaDescribedBy,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -65,9 +77,14 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const prevCloseMenuSignal = useRef<number | undefined>(undefined);
-  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number; width: number; maxHeight: number }>({
+  const [menuPosition, setMenuPosition] = useState<{
+    x: number;
+    top?: number;
+    bottom?: number;
+    width: number;
+    maxHeight: number;
+  }>({
     x: 0,
-    y: 0,
     width: 0,
     maxHeight: 360,
   });
@@ -181,12 +198,20 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
     const openAbove = spaceBelow < minComfortableHeight && spaceAbove > spaceBelow;
     const available = Math.max(openAbove ? spaceAbove : spaceBelow, 160);
     const maxHeight = Math.min(preferredHeight, available);
+    const width = Math.min(
+      Math.max(rect.width, menuMinWidth),
+      window.innerWidth - viewportMargin * 2,
+    );
+    const x = Math.min(
+      Math.max(rect.left, viewportMargin),
+      window.innerWidth - viewportMargin - width,
+    );
     setMenuPosition({
-      x: rect.left,
-      y: openAbove
-        ? Math.max(viewportMargin, rect.top - gap - maxHeight)
-        : Math.min(rect.bottom + gap, window.innerHeight - viewportMargin - maxHeight),
-      width: rect.width,
+      x,
+      ...(openAbove
+        ? { bottom: window.innerHeight - rect.top + gap }
+        : { top: rect.bottom + gap }),
+      width,
       maxHeight,
     });
     setIsPositioned(true);
@@ -236,10 +261,16 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
         }}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
+        /* A button does not support aria-invalid. The linked live description
+         * supplies the error to assistive technology; this value drives the
+         * shared visual invalid state only. */
+        aria-describedby={ariaDescribedBy}
         ref={triggerRef}
         className={
           usesStandardTrigger
-            ? `standard-dropdown standard-dropdown-md standard-dropdown-ghost ${selectedLabel ? '' : 'placeholder-shown'}`
+            ? `standard-dropdown standard-dropdown-${triggerSize} standard-dropdown-ghost ${
+                ariaInvalid ? 'standard-dropdown-error ' : ''
+              }${selectedLabel ? '' : 'placeholder-shown'}`
             : undefined
         }
         style={
@@ -309,9 +340,10 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
           style={{
             position: 'fixed',
             left: isPositioned ? menuPosition.x : -9999,
-            top: isPositioned ? menuPosition.y : -9999,
+            top: isPositioned ? menuPosition.top : -9999,
+            bottom: isPositioned ? menuPosition.bottom : undefined,
             zIndex: menuZIndex,
-            width: `min(calc(100vw - 24px), max(${menuPosition.width}px, 560px), 820px)`,
+            width: menuPosition.width,
             background: 'var(--bg-primary)',
             border: '1px solid var(--border)',
             borderRadius: 12,
