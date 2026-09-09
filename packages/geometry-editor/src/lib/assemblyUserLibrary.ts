@@ -15,6 +15,45 @@ import type {
   MaterialRow,
 } from './assemblyTypes';
 import { buildAssemblyDisplayName } from './assemblyNaming';
+import { migrateLegacyCavityLayer } from './assemblyCavityModel';
+
+/** Restore a saved or bundled library stack for either calculator or bulk apply. */
+export function layersFromLibraryAssembly(
+  row: AssemblyExample,
+  materialsById: Map<string, MaterialRow>,
+  cavityResistanceByType: Map<string, number>,
+): AssemblyLayer[] {
+  const out: AssemblyLayer[] = [];
+  for (const L of row.layers) {
+    if (L.kind === 'solid') {
+      const mid = L.materialId ?? '';
+      if (!mid || !materialsById.has(mid)) continue;
+      out.push({
+        kind: 'solid',
+        materialId: mid,
+        thickness_m: typeof L.thickness_m === 'number' && L.thickness_m > 0 ? L.thickness_m : 0.1,
+        repeatingBridges: L.repeatingBridges,
+      });
+    } else {
+      const ct = L.cavityType ?? '';
+      const r =
+        (ct ? cavityResistanceByType.get(ct) : undefined) ??
+        (typeof L.fixedResistance_m2K_W === 'number' ? L.fixedResistance_m2K_W : 0.18);
+      out.push(
+        migrateLegacyCavityLayer({
+          kind: 'cavity',
+          cavityType: ct || undefined,
+          ...(r > 0 ? { fixedResistance_m2K_W: r } : {}),
+          ventilation: L.ventilation,
+          gap_thickness_m: L.gap_thickness_m,
+          surface_emissivity: L.surface_emissivity,
+          annexFAirVoidLevelOverride: L.annexFAirVoidLevelOverride,
+        }),
+      );
+    }
+  }
+  return out;
+}
 
 export function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;

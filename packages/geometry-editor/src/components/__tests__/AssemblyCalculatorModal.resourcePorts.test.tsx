@@ -23,6 +23,7 @@ vi.mock('../../lib/assemblyLibrary', () => ({
 }));
 
 import { AssemblyCalculatorModal } from '../AssemblyCalculatorModal';
+import type { AssemblyExample, RepeatingBridgeDefinition } from '../../lib/assemblyTypes';
 
 const workspacePort = {
   availability: 'available',
@@ -102,6 +103,40 @@ describe('AssemblyCalculatorModal resource ports', () => {
     expect(screen.getByText('Assembly calculator')).toBeInTheDocument();
     await waitFor(() => expect(assemblyLibraryMocks.load).toHaveBeenCalledWith(workspacePort));
     expect(screen.queryByText('Detail profile')).not.toBeInTheDocument();
+  });
+
+  it.each<RepeatingBridgeDefinition>([
+    { mode: 'framing_fraction', framingFraction: 0.2 },
+    { mode: 'spacing_width', spacing_m: 0.5, width_m: 0.1 },
+  ])('retains saved repeating bridges when loading and applying $mode', async (definition) => {
+    const bridges = [{ id: 'studs', bridgeMaterialId: 'timber', definition }];
+    const assembly: AssemblyExample = {
+      id: 'user:asm:bridged-wall', name: 'Saved framed wall', elementType: 'wall', sourceType: 'user',
+      layers: [{ kind: 'solid', materialId: 'insulation', thickness_m: 0.2, repeatingBridges: bridges }],
+    };
+    assemblyLibraryMocks.load.mockResolvedValue({
+      materialsById: new Map([
+        ['insulation', { id: 'insulation', name: 'Insulation', shortName: 'Insulation', lambda_W_mK: 0.04, density_kg_m3: 30, specific_heat_J_kg_K: 1400 }],
+        ['timber', { id: 'timber', name: 'Timber', shortName: 'Timber', lambda_W_mK: 0.13, density_kg_m3: 500, specific_heat_J_kg_K: 1500 }],
+      ]),
+      cavityResistanceByType: new Map(), cavityRows: [], examples: [assembly], materialCategories: [],
+    });
+    const onApply = vi.fn();
+    renderModal({ onApply });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Search assemblies…' }));
+    fireEvent.click(screen.getByText('Saved framed wall'));
+    fireEvent.click(screen.getByRole('button', { name: 'Update element' }));
+
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
+      u_value: 0.28,
+      thermal_resistance_construction: 3.45,
+      areal_heat_capacity: 36720,
+      vulcan_assembly_v1: expect.objectContaining({
+        assemblySnapshot: expect.objectContaining({ layers: assembly.layers }),
+        arealHeatCapacity_J_m2K: 36720,
+      }),
+    }));
   });
 
   it('shows private detail suggestions only when a catalogue contribution is supplied', async () => {
