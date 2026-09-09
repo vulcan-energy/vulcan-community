@@ -56,12 +56,6 @@ jobs:
       - name: Typecheck geometry document
         run: npm run typecheck:document
 
-      - name: Lint
-        run: npm run lint
-        # The raw command exposes the existing debt and therefore exits non-zero. The
-        # following ratchet is the enforcing step: current debt passes, increases fail.
-        continue-on-error: true
-
       - name: Enforce static-analysis ratchet
         run: npm run quality
 
