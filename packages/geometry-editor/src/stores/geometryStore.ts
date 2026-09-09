@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { getDormerBundleElementIds } from '../lib/dormerGeometry';
 import {
   createContext,
   createElement,
@@ -4518,9 +4519,13 @@ const createGeometryState = (
       ) as Record<string, Element>;
       const remainingElementIds = state.elementIds.filter(elementId => remainingElementsById[elementId]);
       if (
-        (newSelection?.type === 'element' || newSelection?.type === 'global' || newSelection?.type === 'dormer') &&
+        (newSelection?.type === 'element' || newSelection?.type === 'global') &&
         state.elementsById[newSelection.id]?.zoneId === id
       ) {
+        newSelection = null;
+      }
+
+      if (newSelection?.type === 'dormer' && getDormerBundleElementIds(remainingElementsById, newSelection.id).length === 0) {
         newSelection = null;
       }
 
