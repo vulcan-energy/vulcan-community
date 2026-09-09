@@ -4517,6 +4517,12 @@ const createGeometryState = (
         Object.entries(state.elementsById).filter(([, element]) => element.zoneId !== id)
       ) as Record<string, Element>;
       const remainingElementIds = state.elementIds.filter(elementId => remainingElementsById[elementId]);
+      if (
+        (newSelection?.type === 'element' || newSelection?.type === 'global' || newSelection?.type === 'dormer') &&
+        state.elementsById[newSelection.id]?.zoneId === id
+      ) {
+        newSelection = null;
+      }
 
       const remainingSpaceLabelsById = Object.fromEntries(
         Object.entries(state.spaceLabelsById).filter(([, sl]) => sl.zoneId !== id),
@@ -4529,7 +4535,8 @@ const createGeometryState = (
         elementIds: remainingElementIds,
         spaceLabelsById: remainingSpaceLabelsById,
         spaceLabelIds: remainingSpaceLabelIds,
-        selection: newSelection
+        selection: newSelection,
+        selectedElementIds: state.selectedElementIds.filter(elementId => remainingElementsById[elementId]),
       };
     });
   },
@@ -7275,6 +7282,8 @@ const createGeometryState = (
   },
 
   clearAll: () => set((state) => ({
+    selection: null,
+    selectedElementIds: [],
     zones: [],
     elementsById: {},
     elementIds: [],
