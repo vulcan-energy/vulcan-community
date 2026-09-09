@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { parseGeometryCsvLine as parseCSVLine } from '../../../geometry-document/src/geometryCsvSections';
 import { SLOPE_PITCH_AXIS_EXTRA_JSON_KEY } from './slopePitchAxis';
 import {
   ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR,
@@ -126,38 +127,7 @@ export function upsertScenariosBaseModelEnabledLine(csv: string, enabled: boolea
   return lines.join('\n');
 }
 
-export function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++; // skip escaped quote
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ',') {
-        result.push(current);
-        current = '';
-      } else {
-        current += ch;
-      }
-    }
-  }
-  result.push(current);
-  return result;
-}
+export { parseCSVLine };
 
 /**
  * Strip UI-only keys from all extra_json cells in a geometry CSV string.
