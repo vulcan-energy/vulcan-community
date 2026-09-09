@@ -9,7 +9,7 @@ import { Rnd } from 'react-rnd';
 import { OrthogonalRoomEditModal } from './OrthogonalRoomEditModal';
 import { ElementCreator } from './ElementCreator';
 import { MultiSelectPanel } from './MultiSelectPanel';
-import { getElementShape, getElementColor, worldToCanvas, canvasToWorld, computePlanViewBoundsCenter, withCanvasAlpha, type ElementCanvasPalette } from '../lib/shapeUtils';
+import { getElementShape, getElementColor, worldToCanvas, canvasToWorld, computePlanViewBoundsCenter } from '../lib/shapeUtils';
 import { findOverlappingElements, getOverlapCenter } from '../lib/overlapDetection';
 import { readRootCssVar } from '../lib/cssVars';
 import { calculateMemoizedLabelPositions, transformCachedLabelPosition, getSmartLabelPillTexts, getSmartLabelLayoutSignature, SMART_LABEL_METRICS, type LabelPosition } from '../lib/labelUtils';
@@ -169,6 +169,7 @@ import {
 import { shouldStartStagePanGesture } from './canvas/stagePanGesture';
 import {
   readCanvasElementPalette,
+  readBaseCanvasElementPalette,
   readCanvasInteractionPalette,
 } from './canvas/elementRendererPalette';
 import { readDrawingCanvasPalette } from './canvas/drawingPreviewPalette';
@@ -843,50 +844,6 @@ function readCanvasLabelTheme(): CanvasLabelTheme {
   };
 }
 
-function readStaticPreviewElementPalette(): ElementCanvasPalette {
-  const externalWallStroke = readRootCssVar('--canvas-element-external-wall-stroke', readRootCssVar('--canvas-element-wall-stroke', '#cccccc'));
-  const internalWallStroke = readRootCssVar('--canvas-element-internal-wall-stroke', readRootCssVar('--canvas-element-adjacent-stroke', '#8BD3FF'));
-  const partyWallStroke = readRootCssVar('--canvas-element-party-wall-stroke', readRootCssVar('--canvas-element-adjacent-stroke', '#C084FC'));
-  const adjacentUnconditionedStroke = readRootCssVar('--canvas-element-adjacent-unconditioned-stroke', readRootCssVar('--canvas-element-adjacent-stroke', '#FBBF24'));
-  return {
-    externalWallStroke,
-    externalWallFill: withCanvasAlpha(externalWallStroke, '#cccccc', '29'),
-    internalWallStroke,
-    internalWallFill: withCanvasAlpha(internalWallStroke, '#8BD3FF', '29'),
-    partyWallStroke,
-    partyWallFill: withCanvasAlpha(partyWallStroke, '#C084FC', '29'),
-    adjacentUnconditionedStroke,
-    adjacentUnconditionedFill: withCanvasAlpha(adjacentUnconditionedStroke, '#FBBF24', '29'),
-    wallStroke: externalWallStroke,
-    wallFill: withCanvasAlpha(externalWallStroke, '#cccccc', '29'),
-    doorStroke: readRootCssVar('--canvas-element-door-stroke', '#ff8c00'),
-    doorFill: readRootCssVar('--canvas-element-door-fill', '#ff8c0022'),
-    windowStroke: readRootCssVar('--canvas-element-window-stroke', '#87ceeb'),
-    windowFill: readRootCssVar('--canvas-element-window-fill', '#87ceeb22'),
-    groundStroke: readRootCssVar('--canvas-element-ground-stroke', '#228b22'),
-    groundFill: readRootCssVar('--canvas-element-ground-fill', '#228b2255'),
-    adjacentStroke: internalWallStroke,
-    adjacentFill: withCanvasAlpha(internalWallStroke, '#8BD3FF', '29'),
-    contextStroke: readRootCssVar('--canvas-element-context-stroke', '#808080'),
-    contextFill: readRootCssVar('--canvas-element-context-fill', '#80808022'),
-    thermalBridgeStroke: readRootCssVar('--canvas-element-thermal-bridge-stroke', '#FF6B35'),
-    thermalBridgeSelectedStroke: readRootCssVar('--canvas-element-thermal-bridge-selected-stroke', '#FF7A3D'),
-    shadingStroke: readRootCssVar('--canvas-element-shading-stroke', '#F4C430'),
-    lightingStroke: readRootCssVar('--canvas-element-lighting-stroke', '#FFB347'),
-    ductworkStroke: readRootCssVar('--canvas-element-ductwork-stroke', '#4ADE80'),
-    pipeworkStroke: readRootCssVar('--canvas-element-pipework-stroke', '#38BDF8'),
-    emitterStroke: readRootCssVar('--canvas-element-emitter-stroke', '#60A5FA'),
-    applianceStroke: readRootCssVar('--canvas-element-appliance-stroke', '#CBD5E1'),
-    hotWaterStroke: readRootCssVar('--canvas-element-hot-water-stroke', '#FB7185'),
-    ventStroke: readRootCssVar('--canvas-element-vent-stroke', '#22D3EE'),
-    mechanicalVentilationStroke: readRootCssVar('--canvas-element-mechanical-ventilation-stroke', '#2DD4BF'),
-    combustionStroke: readRootCssVar('--canvas-element-combustion-stroke', '#FF7A3D'),
-    onsiteGenerationStroke: readRootCssVar('--canvas-element-onsite-generation-stroke', '#FACC15'),
-    batteryStroke: readRootCssVar('--canvas-element-battery-stroke', '#A78BFA'),
-    systemStroke: readRootCssVar('--canvas-element-system-stroke', '#FB923C'),
-  };
-}
-
 const renderSmartLabel = (
   element: Element,
   labelPos: LabelPosition,
@@ -1134,7 +1091,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const staticPreviewElementPalette = useMemo(() => {
     void themeId;
     void customTheme;
-    return readStaticPreviewElementPalette();
+    return readBaseCanvasElementPalette();
   }, [themeId, customTheme]);
   const canvasElementPalette = useMemo(() => {
     void themeId;

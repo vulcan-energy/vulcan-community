@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
+import { readBaseCanvasElementPalette, readCanvasElementPalette } from '../elementRendererPalette';
 import { createGeometryCanvasRenderer } from '../geometryCanvasRenderer';
 
 describe('createGeometryCanvasRenderer', () => {
@@ -45,4 +46,20 @@ describe('createGeometryCanvasRenderer', () => {
     restoreListener?.(laterRestoreEvent);
     expect(laterRestoreEvent.stopImmediatePropagation).not.toHaveBeenCalled();
   });
+});
+
+it('keeps normal preview colours when the renderer uses custom-light overrides', () => {
+  const normal = readBaseCanvasElementPalette();
+  expect(readCanvasElementPalette()).toMatchObject(normal);
+  document.documentElement.setAttribute('data-vulcan-custom-theme', 'true');
+  document.documentElement.style.setProperty('--bg-primary', '#ffffff');
+  document.documentElement.style.setProperty('--canvas-element-light-door-stroke', '#123456');
+  try {
+    expect(readCanvasElementPalette().doorStroke).toBe('#123456');
+    expect(readBaseCanvasElementPalette()).toEqual(normal);
+  } finally {
+    document.documentElement.removeAttribute('data-vulcan-custom-theme');
+    document.documentElement.style.removeProperty('--bg-primary');
+    document.documentElement.style.removeProperty('--canvas-element-light-door-stroke');
+  }
 });
