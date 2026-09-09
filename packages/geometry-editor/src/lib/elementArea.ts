@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { normalizeProfilePoints, interpolateProfileHeight } from './profileLineFace';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { calculatePolygonArea } from './polygonSync';
 import { isVulcanUiPartyFloorElement } from './assemblyMaterialFabric';
@@ -18,11 +19,6 @@ import type {
   BuildingElementAdjacentUnconditionedSpace_Simple,
   BuildingElementPartyWall,
 } from '../geometry/types';
-
-type ProfilePoint = {
-  t: number;
-  h: number;
-};
 
 type FaceExportGeometry = {
   width: number;
@@ -205,71 +201,6 @@ const internalAdjacentConditionedAreaMultiplier = (element: AreaBasedElement): 1
   return 1;
 };
 
-const interpolateProfileHeight = (profile: ProfilePoint[], t: number): number => {
-  if (profile.length === 0) return 0;
-  if (t <= profile[0].t) return profile[0].h;
-  if (t >= profile[profile.length - 1].t) return profile[profile.length - 1].h;
-
-  for (let index = 0; index < profile.length - 1; index += 1) {
-    const start = profile[index];
-    const end = profile[index + 1];
-    if (t < start.t || t > end.t) continue;
-    const span = end.t - start.t;
-    if (Math.abs(span) < 1e-9) return end.h;
-    const ratio = (t - start.t) / span;
-    return start.h + (end.h - start.h) * ratio;
-  }
-
-  return profile[profile.length - 1].h;
-};
-
-const normalizeProfilePoints = (raw: unknown): ProfilePoint[] | null => {
-  if (!Array.isArray(raw)) return null;
-
-  const sorted = raw
-    .filter(
-      (point): point is { t: number; h: number } =>
-        !!point &&
-        typeof point === 'object' &&
-        isFiniteNumber((point as Record<string, unknown>).t) &&
-        isFiniteNumber((point as Record<string, unknown>).h),
-    )
-    .map((point) => ({
-      t: Math.min(Math.max(point.t, 0), 1),
-      h: point.h,
-    }))
-    .sort((left, right) => left.t - right.t);
-
-  if (sorted.length < 2) return null;
-
-  const deduped: ProfilePoint[] = [];
-  for (const point of sorted) {
-    if (deduped.length > 0 && Math.abs(deduped[deduped.length - 1].t - point.t) < 1e-9) {
-      deduped[deduped.length - 1] = point;
-      continue;
-    }
-    deduped.push(point);
-  }
-
-  if (deduped.length < 2) return null;
-
-  const first = deduped[0];
-  const last = deduped[deduped.length - 1];
-
-  if (first.t > 0) {
-    deduped.unshift({ t: 0, h: first.h });
-  } else {
-    deduped[0] = { ...first, t: 0 };
-  }
-
-  if (last.t < 1) {
-    deduped.push({ t: 1, h: last.h });
-  } else {
-    deduped[deduped.length - 1] = { ...last, t: 1 };
-  }
-
-  return deduped;
-};
 
 const getProfiledLineFaceGeometry = (
   element: AreaBasedElement,
