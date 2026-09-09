@@ -58,7 +58,25 @@ describe("GlobalSettingsModal", () => {
     expect(screen.getByText("Ventilation Environment")).toBeInTheDocument();
     expect(screen.getByText("Thermal Bridging")).toBeInTheDocument();
 
-    await user.click(screen.getByText("Dwelling Details"));
+    const dwellingDetails = screen.getByText("Dwelling Details");
+    await user.click(dwellingDetails);
+    expect(screen.getByLabelText("Property postcode")).toBeInTheDocument();
+    await user.click(dwellingDetails);
+    expect(screen.queryByLabelText("Property postcode")).not.toBeInTheDocument();
+
+    const airTightness = screen.getByText("Air Tightness");
+    await user.click(airTightness);
+    expect(screen.getByLabelText("Test Pressure")).toBeInTheDocument();
+    await user.click(airTightness);
+    expect(screen.queryByLabelText("Test Pressure")).not.toBeInTheDocument();
+
+    const ventilation = screen.getByText("Ventilation Environment");
+    await user.click(ventilation);
+    expect(screen.getByLabelText("Shield Class")).toBeInTheDocument();
+    await user.click(ventilation);
+    expect(screen.queryByLabelText("Shield Class")).not.toBeInTheDocument();
+
+    await user.click(dwellingDetails);
     const postcode = screen.getByLabelText("Property postcode");
     await user.type(postcode, "mk40 1aa");
     expect(store.getState().propertyPostcode).toBe("MK40 1AA");

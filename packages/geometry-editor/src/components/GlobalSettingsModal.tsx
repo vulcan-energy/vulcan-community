@@ -302,6 +302,83 @@ function GlobalSettingsCollapsedIssueBadges({
   );
 }
 
+function GlobalSettingsAccordionHeader({
+  title,
+  expanded,
+  onToggle,
+  errorCount,
+  warningCount,
+  infoCount,
+}: {
+  title: string;
+  expanded: boolean;
+  onToggle: () => void;
+  errorCount: number;
+  warningCount?: number;
+  infoCount: number;
+}) {
+  return (
+    <div
+      onClick={onToggle}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 8,
+        cursor: "pointer",
+        padding: "var(--spacing-sm)",
+        borderRadius: "var(--radius-md)",
+        background: expanded ? "var(--bg-secondary)" : "transparent",
+        transition: "var(--transition-colors)",
+      }}
+    >
+      <span
+        style={{
+          fontWeight: "var(--font-weight-semibold)",
+          fontSize: "var(--font-size-md)",
+          flex: "1 1 auto",
+          minWidth: 0,
+        }}
+      >
+        {title}
+      </span>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexShrink: 0,
+        }}
+      >
+        <GlobalSettingsCollapsedIssueBadges
+          expanded={expanded}
+          errorCount={errorCount}
+          warningCount={warningCount}
+          infoCount={infoCount}
+        />
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          style={{
+            transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform var(--transition-normal) ease",
+          }}
+        >
+          <path
+            d="M6 9l6 6 6-6"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function GlobalSettingsSectionValidationStrip({
   expanded,
   errorIssues,
@@ -1606,70 +1683,16 @@ export function GlobalSettingsModal({
 
               {/* Dwelling Details Section */}
               <div style={{ marginTop: "var(--spacing-md)" }}>
-                <div
-                  onClick={() =>
+                <GlobalSettingsAccordionHeader
+                  title="Dwelling Details"
+                  expanded={complianceSettingsExpanded}
+                  onToggle={() =>
                     setComplianceSettingsExpanded(!complianceSettingsExpanded)
                   }
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    cursor: "pointer",
-                    padding: "var(--spacing-sm)",
-                    borderRadius: "var(--radius-md)",
-                    background: complianceSettingsExpanded
-                      ? "var(--bg-secondary)"
-                      : "transparent",
-                    transition: "var(--transition-colors)",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontWeight: "var(--font-weight-semibold)",
-                      fontSize: "var(--font-size-md)",
-                      flex: "1 1 auto",
-                      minWidth: 0,
-                    }}
-                  >
-                    Dwelling Details
-                  </span>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <GlobalSettingsCollapsedIssueBadges
-                      expanded={complianceSettingsExpanded}
-                      errorCount={fhsComplianceRequiredIssues.length}
-                      warningCount={globalSettingsWarningIssues.length}
-                      infoCount={complianceComparisonIssues.length}
-                    />
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      style={{
-                        transform: complianceSettingsExpanded
-                          ? "rotate(180deg)"
-                          : "rotate(0deg)",
-                        transition: "transform var(--transition-normal) ease",
-                      }}
-                    >
-                      <path
-                        d="M6 9l6 6 6-6"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                </div>
+                  errorCount={fhsComplianceRequiredIssues.length}
+                  warningCount={globalSettingsWarningIssues.length}
+                  infoCount={complianceComparisonIssues.length}
+                />
                 <GlobalSettingsSectionValidationStrip
                   expanded={complianceSettingsExpanded}
                   errorIssues={fhsComplianceRequiredIssues}
@@ -2656,67 +2679,13 @@ export function GlobalSettingsModal({
                   paddingTop: "var(--spacing-md)",
                 }}
               >
-                <div
-                  onClick={() => setAirTightnessExpanded(!airTightnessExpanded)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    cursor: "pointer",
-                    padding: "var(--spacing-sm)",
-                    borderRadius: "var(--radius-md)",
-                    background: airTightnessExpanded
-                      ? "var(--bg-secondary)"
-                      : "transparent",
-                    transition: "var(--transition-colors)",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontWeight: "var(--font-weight-semibold)",
-                      fontSize: "var(--font-size-md)",
-                      flex: "1 1 auto",
-                      minWidth: 0,
-                    }}
-                  >
-                    Air Tightness
-                  </span>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <GlobalSettingsCollapsedIssueBadges
-                      expanded={airTightnessExpanded}
-                      errorCount={0}
-                      infoCount={comparisonGlobalSections.airTightness.length}
-                    />
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      style={{
-                        transform: airTightnessExpanded
-                          ? "rotate(180deg)"
-                          : "rotate(0deg)",
-                        transition: "transform var(--transition-normal) ease",
-                      }}
-                    >
-                      <path
-                        d="M6 9l6 6 6-6"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                </div>
+                <GlobalSettingsAccordionHeader
+                  title="Air Tightness"
+                  expanded={airTightnessExpanded}
+                  onToggle={() => setAirTightnessExpanded(!airTightnessExpanded)}
+                  errorCount={0}
+                  infoCount={comparisonGlobalSections.airTightness.length}
+                />
                 <GlobalSettingsSectionValidationStrip
                   expanded={airTightnessExpanded}
                   errorIssues={[]}
@@ -2841,69 +2810,15 @@ export function GlobalSettingsModal({
                   paddingTop: "var(--spacing-md)",
                 }}
               >
-                <div
-                  onClick={() =>
+                <GlobalSettingsAccordionHeader
+                  title="Ventilation Environment"
+                  expanded={ventilationEnvExpanded}
+                  onToggle={() =>
                     setVentilationEnvExpanded(!ventilationEnvExpanded)
                   }
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    cursor: "pointer",
-                    padding: "var(--spacing-sm)",
-                    borderRadius: "var(--radius-md)",
-                    background: ventilationEnvExpanded
-                      ? "var(--bg-secondary)"
-                      : "transparent",
-                    transition: "var(--transition-colors)",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontWeight: "var(--font-weight-semibold)",
-                      fontSize: "var(--font-size-md)",
-                      flex: "1 1 auto",
-                      minWidth: 0,
-                    }}
-                  >
-                    Ventilation Environment
-                  </span>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <GlobalSettingsCollapsedIssueBadges
-                      expanded={ventilationEnvExpanded}
-                      errorCount={0}
-                      infoCount={comparisonGlobalSections.ventilation.length}
-                    />
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      style={{
-                        transform: ventilationEnvExpanded
-                          ? "rotate(180deg)"
-                          : "rotate(0deg)",
-                        transition: "transform var(--transition-normal) ease",
-                      }}
-                    >
-                      <path
-                        d="M6 9l6 6 6-6"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                </div>
+                  errorCount={0}
+                  infoCount={comparisonGlobalSections.ventilation.length}
+                />
                 <GlobalSettingsSectionValidationStrip
                   expanded={ventilationEnvExpanded}
                   errorIssues={[]}
