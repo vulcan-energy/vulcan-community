@@ -27,17 +27,62 @@ export function getHexRelativeLuminance(hex: string): number | null {
   return (0.2126 * channel(0)) + (0.7152 * channel(2)) + (0.0722 * channel(4));
 }
 
-export function readCanvasElementPalette(): CanvasElementRendererPalette {
-  const accent = readRootCssVar('--accent-primary', '#eafd5a');
+/** Normal colours shared with static previews; custom-light overrides are renderer-only. */
+export function readBaseCanvasElementPalette(): ElementCanvasPalette {
   const externalWallStroke = readRootCssVar('--canvas-element-external-wall-stroke', readRootCssVar('--canvas-element-wall-stroke', '#cccccc'));
   const internalWallStroke = readRootCssVar('--canvas-element-internal-wall-stroke', readRootCssVar('--canvas-element-adjacent-stroke', '#8BD3FF'));
   const partyWallStroke = readRootCssVar('--canvas-element-party-wall-stroke', readRootCssVar('--canvas-element-adjacent-stroke', '#C084FC'));
   const adjacentUnconditionedStroke = readRootCssVar('--canvas-element-adjacent-unconditioned-stroke', readRootCssVar('--canvas-element-adjacent-stroke', '#FBBF24'));
+  return {
+    externalWallStroke,
+    externalWallFill: withCanvasAlpha(externalWallStroke, '#cccccc', '29'),
+    internalWallStroke,
+    internalWallFill: withCanvasAlpha(internalWallStroke, '#8BD3FF', '29'),
+    partyWallStroke,
+    partyWallFill: withCanvasAlpha(partyWallStroke, '#C084FC', '29'),
+    adjacentUnconditionedStroke,
+    adjacentUnconditionedFill: withCanvasAlpha(adjacentUnconditionedStroke, '#FBBF24', '29'),
+    wallStroke: externalWallStroke,
+    wallFill: withCanvasAlpha(externalWallStroke, '#cccccc', '29'),
+    doorStroke: readRootCssVar('--canvas-element-door-stroke', '#ff8c00'),
+    doorFill: readRootCssVar('--canvas-element-door-fill', '#ff8c0022'),
+    windowStroke: readRootCssVar('--canvas-element-window-stroke', '#87ceeb'),
+    windowFill: readRootCssVar('--canvas-element-window-fill', '#87ceeb22'),
+    groundStroke: readRootCssVar('--canvas-element-ground-stroke', '#228b22'),
+    groundFill: readRootCssVar('--canvas-element-ground-fill', '#228b2255'),
+    adjacentStroke: internalWallStroke,
+    adjacentFill: withCanvasAlpha(internalWallStroke, '#8BD3FF', '29'),
+    contextStroke: readRootCssVar('--canvas-element-context-stroke', '#808080'),
+    contextFill: readRootCssVar('--canvas-element-context-fill', '#80808022'),
+    thermalBridgeStroke: readRootCssVar('--canvas-element-thermal-bridge-stroke', '#FF6B35'),
+    thermalBridgeSelectedStroke: readRootCssVar('--canvas-element-thermal-bridge-selected-stroke', '#FF7A3D'),
+    shadingStroke: readRootCssVar('--canvas-element-shading-stroke', '#F4C430'),
+    lightingStroke: readRootCssVar('--canvas-element-lighting-stroke', '#FFB347'),
+    ductworkStroke: readRootCssVar('--canvas-element-ductwork-stroke', '#4ADE80'),
+    pipeworkStroke: readRootCssVar('--canvas-element-pipework-stroke', '#38BDF8'),
+    emitterStroke: readRootCssVar('--canvas-element-emitter-stroke', '#60A5FA'),
+    applianceStroke: readRootCssVar('--canvas-element-appliance-stroke', '#CBD5E1'),
+    hotWaterStroke: readRootCssVar('--canvas-element-hot-water-stroke', '#FB7185'),
+    ventStroke: readRootCssVar('--canvas-element-vent-stroke', '#22D3EE'),
+    mechanicalVentilationStroke: readRootCssVar('--canvas-element-mechanical-ventilation-stroke', '#2DD4BF'),
+    combustionStroke: readRootCssVar('--canvas-element-combustion-stroke', '#FF7A3D'),
+    onsiteGenerationStroke: readRootCssVar('--canvas-element-onsite-generation-stroke', '#FACC15'),
+    batteryStroke: readRootCssVar('--canvas-element-battery-stroke', '#A78BFA'),
+    systemStroke: readRootCssVar('--canvas-element-system-stroke', '#FB923C'),
+  };
+}
+
+export function readCanvasElementPalette(): CanvasElementRendererPalette {
+  const accent = readRootCssVar('--accent-primary', '#eafd5a');
   const customLightTheme =
     typeof document !== 'undefined' &&
     document.documentElement.getAttribute('data-vulcan-custom-theme') === 'true' &&
     (getHexRelativeLuminance(readRootCssVar('--bg-primary', '#19383A')) ?? 0) > 0.55;
   if (customLightTheme) {
+    const externalWallStroke = readRootCssVar('--canvas-element-external-wall-stroke', readRootCssVar('--canvas-element-wall-stroke', '#cccccc'));
+    const internalWallStroke = readRootCssVar('--canvas-element-internal-wall-stroke', readRootCssVar('--canvas-element-adjacent-stroke', '#8BD3FF'));
+    const partyWallStroke = readRootCssVar('--canvas-element-party-wall-stroke', readRootCssVar('--canvas-element-adjacent-stroke', '#C084FC'));
+    const adjacentUnconditionedStroke = readRootCssVar('--canvas-element-adjacent-unconditioned-stroke', readRootCssVar('--canvas-element-adjacent-stroke', '#FBBF24'));
     const lightExternalWallStroke = readRootCssVar('--canvas-element-light-external-wall-stroke', externalWallStroke);
     const lightInternalWallStroke = readRootCssVar('--canvas-element-light-internal-wall-stroke', internalWallStroke);
     const lightPartyWallStroke = readRootCssVar('--canvas-element-light-party-wall-stroke', partyWallStroke);
@@ -85,41 +130,7 @@ export function readCanvasElementPalette(): CanvasElementRendererPalette {
   return {
     selected: readRootCssVar('--canvas-element-selected', '#00a2ff'),
     hover: readRootCssVar('--canvas-element-hover', accent),
-    externalWallStroke,
-    externalWallFill: withCanvasAlpha(externalWallStroke, '#cccccc', '29'),
-    internalWallStroke,
-    internalWallFill: withCanvasAlpha(internalWallStroke, '#8BD3FF', '29'),
-    partyWallStroke,
-    partyWallFill: withCanvasAlpha(partyWallStroke, '#C084FC', '29'),
-    adjacentUnconditionedStroke,
-    adjacentUnconditionedFill: withCanvasAlpha(adjacentUnconditionedStroke, '#FBBF24', '29'),
-    wallStroke: externalWallStroke,
-    wallFill: withCanvasAlpha(externalWallStroke, '#cccccc', '29'),
-    doorStroke: readRootCssVar('--canvas-element-door-stroke', '#ff8c00'),
-    doorFill: readRootCssVar('--canvas-element-door-fill', '#ff8c0022'),
-    windowStroke: readRootCssVar('--canvas-element-window-stroke', '#87ceeb'),
-    windowFill: readRootCssVar('--canvas-element-window-fill', '#87ceeb22'),
-    groundStroke: readRootCssVar('--canvas-element-ground-stroke', '#228b22'),
-    groundFill: readRootCssVar('--canvas-element-ground-fill', '#228b2255'),
-    adjacentStroke: internalWallStroke,
-    adjacentFill: withCanvasAlpha(internalWallStroke, '#8BD3FF', '29'),
-    contextStroke: readRootCssVar('--canvas-element-context-stroke', '#808080'),
-    contextFill: readRootCssVar('--canvas-element-context-fill', '#80808022'),
-    thermalBridgeStroke: readRootCssVar('--canvas-element-thermal-bridge-stroke', '#FF6B35'),
-    thermalBridgeSelectedStroke: readRootCssVar('--canvas-element-thermal-bridge-selected-stroke', '#FF7A3D'),
-    shadingStroke: readRootCssVar('--canvas-element-shading-stroke', '#F4C430'),
-    lightingStroke: readRootCssVar('--canvas-element-lighting-stroke', '#FFB347'),
-    ductworkStroke: readRootCssVar('--canvas-element-ductwork-stroke', '#4ADE80'),
-    pipeworkStroke: readRootCssVar('--canvas-element-pipework-stroke', '#38BDF8'),
-    emitterStroke: readRootCssVar('--canvas-element-emitter-stroke', '#60A5FA'),
-    applianceStroke: readRootCssVar('--canvas-element-appliance-stroke', '#CBD5E1'),
-    hotWaterStroke: readRootCssVar('--canvas-element-hot-water-stroke', '#FB7185'),
-    ventStroke: readRootCssVar('--canvas-element-vent-stroke', '#22D3EE'),
-    mechanicalVentilationStroke: readRootCssVar('--canvas-element-mechanical-ventilation-stroke', '#2DD4BF'),
-    combustionStroke: readRootCssVar('--canvas-element-combustion-stroke', '#FF7A3D'),
-    onsiteGenerationStroke: readRootCssVar('--canvas-element-onsite-generation-stroke', '#FACC15'),
-    batteryStroke: readRootCssVar('--canvas-element-battery-stroke', '#A78BFA'),
-    systemStroke: readRootCssVar('--canvas-element-system-stroke', '#FB923C'),
+    ...readBaseCanvasElementPalette(),
   };
 }
 

@@ -28,6 +28,7 @@ import {
 import { getExactSnappedVertices } from '../lib/snapUtils';
 import { isVulcanUiPartyFloorElement } from '../lib/assemblyMaterialFabric';
 import { coerceElementToStrictestNumericTyping } from '../lib/schemaCoercion';
+import { cloneJsonValue, jsonValuesEqual } from '../lib/jsonTypes';
 import {
   unavailableGeometrySchemaPort,
   type GeometrySchemaPort,
@@ -1867,33 +1868,6 @@ const copyWindowShadingCoordinates = (
   }
 
   return [pointAtSegmentFraction(targetSegment, segmentFractionForPoint(sourcePoint, sourceSegment))];
-};
-
-const cloneJsonValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(cloneJsonValue);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, cloneJsonValue(child)]),
-    );
-  }
-  return value;
-};
-
-const jsonValuesEqual = (a: unknown, b: unknown): boolean => {
-  if (Object.is(a, b)) return true;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, index) => jsonValuesEqual(item, b[index]));
-  }
-  if (a && b && typeof a === 'object' && typeof b === 'object') {
-    const aEntries = Object.entries(a as Record<string, unknown>);
-    const bRecord = b as Record<string, unknown>;
-    if (aEntries.length !== Object.keys(bRecord).length) return false;
-    return aEntries.every(([key, value]) =>
-      Object.prototype.hasOwnProperty.call(bRecord, key) && jsonValuesEqual(value, bRecord[key]),
-    );
-  }
-  return false;
 };
 
 const buildCopiedWindowShadingName = (

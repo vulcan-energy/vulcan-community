@@ -145,6 +145,20 @@ afterEach(() => {
 });
 
 describe('R6 MultiSelect parity fence — DOM, focus and keyboard', () => {
+  it('keeps window base-height bounds and commits only valid drafts', () => {
+    const window = transparentWindow([{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }]);
+    const { store } = mount([window]);
+    const before = json(store, window.id);
+    const field = input('Base Height (m)');
+    for (const value of ['-1', '501']) {
+      fireEvent.change(field, { target: { value } });
+      expect(json(store, window.id)).toBe(before);
+      expect(field).toHaveAttribute('aria-invalid', 'true');
+    }
+    fireEvent.change(field, { target: { value: '1.5' } });
+    expect(store.getState().elementsById[window.id]).toHaveProperty('base_height', 1.5);
+  });
+
   it('keeps exact Lighting field visibility, order, labels, placeholders and bounds', () => {
     mount([
       lighting('direct', { efficacy: 90, count: 4, power: 8 }),
