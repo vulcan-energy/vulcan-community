@@ -2045,6 +2045,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     hint?: string,
     bounds: LiveNumberBounds | undefined = LIVE_NUMBER_BOUNDS[fieldKey],
     targetIds: string[] = activeElementIds,
+    inputFieldKey: string = fieldKey,
   ) => (
     <div className="batch-row multi-select-row">
       {renderTooltipRowLabel(fieldKey, label, enabled, hint, targetIds)}
@@ -2057,7 +2058,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           variant="ghost"
           size="md"
           {...liveNumberInputProps(
-            fieldKey,
+            inputFieldKey,
             summary,
             enabled,
             fallbackPlaceholder,
@@ -3033,58 +3034,33 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
 
         {hasWallLikeElements && (
         <div className="multi-select-field-group">
-          <div className="batch-row multi-select-row">
-          {renderTooltipRowLabel('wallHeight', 'Height (m)', wallDimensionIds.length > 0, undefined, wallDimensionIds)}
-          <div className="multi-select-row__control">
-            <StandardInput
-              type="text"
-              inputMode="decimal"
-              unit={rowFieldUnit('wallHeight', 'Height (m)', wallDimensionIds)}
-              step="0.01"
-              variant="ghost"
-              size="md"
-              {...liveNumberInputProps(
-                'wallHeight',
-                wallHeightSummary,
-                wallDimensionIds.length > 0,
-                'e.g. 2.40',
-                (el, value) => (isWallLike(el) ? { height: value } : null),
-                undefined,
-                wallDimensionIds,
-              )}
-            />
-            <SummaryCaption summary={wallHeightSummary} />
-          </div>
-        </div>
-
-        <div className="batch-row multi-select-row">
-          {renderTooltipRowLabel('wallBaseHeight', 'Base Height (m)', wallDimensionIds.length > 0, undefined, wallDimensionIds)}
-          <div className="multi-select-row__control">
-            <StandardInput
-              type="text"
-              inputMode="decimal"
-              unit={rowFieldUnit('wallBaseHeight', 'Base Height (m)', wallDimensionIds)}
-              step="0.01"
-              variant="ghost"
-              size="md"
-              {...liveNumberInputProps(
-                'wallBaseHeight',
-                wallBaseHeightSummary,
-                wallDimensionIds.length > 0,
-                'e.g. 0 — bottom edge above ground',
-                (el, value) => {
-                  if (!isWallLike(el)) return null;
-                  const patch: Record<string, number> = {};
-                  patch[el.type === 'BuildingElementOpaque' ? 'base_height' : '_base_height'] = value;
-                  return patch;
-                },
-                undefined,
-                wallDimensionIds,
-              )}
-            />
-            <SummaryCaption summary={wallBaseHeightSummary} />
-          </div>
-        </div>
+          {renderNumberRow(
+            'wallHeight',
+            'Height (m)',
+            wallHeightSummary,
+            wallDimensionIds.length > 0,
+            'e.g. 2.40',
+            (el, value) => (isWallLike(el) ? { height: value } : null),
+            undefined,
+            undefined,
+            wallDimensionIds,
+          )}
+          {renderNumberRow(
+            'wallBaseHeight',
+            'Base Height (m)',
+            wallBaseHeightSummary,
+            wallDimensionIds.length > 0,
+            'e.g. 0 — bottom edge above ground',
+            (el, value) => {
+              if (!isWallLike(el)) return null;
+              const patch: Record<string, number> = {};
+              patch[el.type === 'BuildingElementOpaque' ? 'base_height' : '_base_height'] = value;
+              return patch;
+            },
+            undefined,
+            undefined,
+            wallDimensionIds,
+          )}
         </div>
         )}
 
@@ -3107,170 +3083,87 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           isHorizontalPolygonTransparent,
         )}
         {activeWindowSurfaceMode !== 'flat' && (
-          <div className="batch-row multi-select-row">
-            {renderTooltipRowLabel('winHeight', 'Height (m)', activeWindowSurfaceIds.length > 0, undefined, activeWindowSurfaceIds)}
-            <div className="multi-select-row__control">
-              <StandardInput
-                type="text"
-                inputMode="decimal"
-                unit={rowFieldUnit('winHeight', 'Height (m)', activeWindowSurfaceIds)}
-                step="0.01"
-                variant="ghost"
-                size="md"
-                {...liveNumberInputProps(
-                  'winHeight',
-                  windowHeightSummary,
-                  activeWindowSurfaceIds.length > 0,
-                  'e.g. 1.20',
-                  (el, value) => buildTransparentLivePatch(el, { height: value }),
-                  undefined,
-                  activeWindowSurfaceIds,
-                )}
-              />
-              <SummaryCaption summary={windowHeightSummary} />
-            </div>
-          </div>
+          renderNumberRow(
+            'winHeight',
+            'Height (m)',
+            windowHeightSummary,
+            activeWindowSurfaceIds.length > 0,
+            'e.g. 1.20',
+            (el, value) => buildTransparentLivePatch(el, { height: value }),
+            undefined,
+            undefined,
+            activeWindowSurfaceIds,
+          )
         )}
-        <div className="batch-row multi-select-row">
-          {renderTooltipRowLabel('winBaseHeight', 'Base Height (m)', activeWindowSurfaceIds.length > 0, undefined, activeWindowSurfaceIds)}
-          <div className="multi-select-row__control">
-            <StandardInput
-              type="text"
-              inputMode="decimal"
-              unit={rowFieldUnit('winBaseHeight', 'Base Height (m)', activeWindowSurfaceIds)}
-              step="0.01"
-              variant="ghost"
-              size="md"
-              {...liveNumberInputProps(
-                'windowBaseHeight',
-                windowBaseHeightSummary,
-                activeWindowSurfaceIds.length > 0,
-                'e.g. 0.90 — sill above ground',
-                (el, value) => buildTransparentLivePatch(el, { base_height: value }),
-                undefined,
-                activeWindowSurfaceIds,
-              )}
-            />
-            <SummaryCaption summary={windowBaseHeightSummary} />
-          </div>
-        </div>
+        {renderNumberRow(
+          'winBaseHeight',
+          'Base Height (m)',
+          windowBaseHeightSummary,
+          activeWindowSurfaceIds.length > 0,
+          'e.g. 0.90 — sill above ground',
+          (el, value) => buildTransparentLivePatch(el, { base_height: value }),
+          undefined,
+          undefined,
+          activeWindowSurfaceIds,
+          'windowBaseHeight',
+        )}
         {activeWindowSurfaceMode !== 'flat' && (
-          <div className="batch-row multi-select-row">
-            {renderTooltipRowLabel('winWidth', 'Width (m)', activeWindowSurfaceIds.length > 0, undefined, activeWindowSurfaceIds)}
-            <div className="multi-select-row__control">
-              <StandardInput
-                type="text"
-                inputMode="decimal"
-                unit={rowFieldUnit('winWidth', 'Width (m)', activeWindowSurfaceIds)}
-                step="0.01"
-                variant="ghost"
-                size="md"
-                {...liveNumberInputProps(
-                  'winWidth',
-                  windowWidthSummary,
-                  activeWindowSurfaceIds.length > 0,
-                  'e.g. 1.00',
-                  (el, value) => buildTransparentLivePatch(el, { width: value }),
-                  undefined,
-                  activeWindowSurfaceIds,
-                )}
-              />
-              <SummaryCaption summary={windowWidthSummary} />
-            </div>
-          </div>
+          renderNumberRow(
+            'winWidth',
+            'Width (m)',
+            windowWidthSummary,
+            activeWindowSurfaceIds.length > 0,
+            'e.g. 1.00',
+            (el, value) => buildTransparentLivePatch(el, { width: value }),
+            undefined,
+            undefined,
+            activeWindowSurfaceIds,
+          )
         )}
-        <div className="batch-row multi-select-row">
-          {renderTooltipRowLabel('freeAreaHeight', 'Free Area Height (m)', activeWindowSurfaceIds.length > 0, undefined, activeWindowSurfaceIds)}
-          <div className="multi-select-row__control">
-            <StandardInput
-              type="text"
-              inputMode="decimal"
-              unit={rowFieldUnit('freeAreaHeight', 'Free Area Height (m)', activeWindowSurfaceIds)}
-              step="0.01"
-              variant="ghost"
-              size="md"
-              {...liveNumberInputProps(
-                'freeAreaHeight',
-                freeAreaHeightSummary,
-                activeWindowSurfaceIds.length > 0,
-                'e.g. 0.40',
-                (el, value) => buildTransparentLivePatch(el, { free_area_height: value }),
-                undefined,
-                activeWindowSurfaceIds,
-              )}
-            />
-            <SummaryCaption summary={freeAreaHeightSummary} />
-          </div>
-        </div>
-        <div className="batch-row multi-select-row">
-          {renderTooltipRowLabel('midHeight', 'Mid Height (m)', activeWindowSurfaceIds.length > 0, undefined, activeWindowSurfaceIds)}
-          <div className="multi-select-row__control">
-            <StandardInput
-              type="text"
-              inputMode="decimal"
-              unit={rowFieldUnit('midHeight', 'Mid Height (m)', activeWindowSurfaceIds)}
-              step="0.01"
-              variant="ghost"
-              size="md"
-              {...liveNumberInputProps(
-                'midHeight',
-                midHeightSummary,
-                activeWindowSurfaceIds.length > 0,
-                'e.g. 1.20',
-                (el, value) => buildTransparentLivePatch(el, { mid_height: value }),
-                undefined,
-                activeWindowSurfaceIds,
-              )}
-            />
-            <SummaryCaption summary={midHeightSummary} />
-          </div>
-        </div>
-        <div className="batch-row multi-select-row">
-          {renderTooltipRowLabel('maxOpenArea', 'Max Window Open Area (m²)', activeWindowSurfaceIds.length > 0, undefined, activeWindowSurfaceIds)}
-          <div className="multi-select-row__control">
-            <StandardInput
-              type="text"
-              inputMode="decimal"
-              unit={rowFieldUnit('maxOpenArea', 'Max Window Open Area (m²)', activeWindowSurfaceIds)}
-              step="0.01"
-              variant="ghost"
-              size="md"
-              {...liveNumberInputProps(
-                'maxOpenArea',
-                maxOpenAreaSummary,
-                activeWindowSurfaceIds.length > 0,
-                'e.g. 0.50',
-                (el, value) => buildTransparentLivePatch(el, { max_window_open_area: value }),
-                undefined,
-                activeWindowSurfaceIds,
-              )}
-            />
-            <SummaryCaption summary={maxOpenAreaSummary} />
-          </div>
-        </div>
-        <div className="batch-row multi-select-row">
-          {renderTooltipRowLabel('frameAreaFraction', 'Frame Area Fraction', activeWindowSurfaceIds.length > 0, undefined, activeWindowSurfaceIds)}
-          <div className="multi-select-row__control">
-            <StandardInput
-              type="text"
-              inputMode="decimal"
-              unit={rowFieldUnit('frameAreaFraction', 'Frame Area Fraction', activeWindowSurfaceIds)}
-              step="0.01"
-              variant="ghost"
-              size="md"
-              {...liveNumberInputProps(
-                'frameAreaFraction',
-                frameAreaFractionSummary,
-                activeWindowSurfaceIds.length > 0,
-                'e.g. 0.25',
-                (el, value) => (el.type === 'BuildingElementTransparent' ? { frame_area_fraction: value } : null),
-                undefined,
-                activeWindowSurfaceIds,
-              )}
-            />
-            <SummaryCaption summary={frameAreaFractionSummary} />
-          </div>
-        </div>
+        {renderNumberRow(
+          'freeAreaHeight',
+          'Free Area Height (m)',
+          freeAreaHeightSummary,
+          activeWindowSurfaceIds.length > 0,
+          'e.g. 0.40',
+          (el, value) => buildTransparentLivePatch(el, { free_area_height: value }),
+          undefined,
+          undefined,
+          activeWindowSurfaceIds,
+        )}
+        {renderNumberRow(
+          'midHeight',
+          'Mid Height (m)',
+          midHeightSummary,
+          activeWindowSurfaceIds.length > 0,
+          'e.g. 1.20',
+          (el, value) => buildTransparentLivePatch(el, { mid_height: value }),
+          undefined,
+          undefined,
+          activeWindowSurfaceIds,
+        )}
+        {renderNumberRow(
+          'maxOpenArea',
+          'Max Window Open Area (m²)',
+          maxOpenAreaSummary,
+          activeWindowSurfaceIds.length > 0,
+          'e.g. 0.50',
+          (el, value) => buildTransparentLivePatch(el, { max_window_open_area: value }),
+          undefined,
+          undefined,
+          activeWindowSurfaceIds,
+        )}
+        {renderNumberRow(
+          'frameAreaFraction',
+          'Frame Area Fraction',
+          frameAreaFractionSummary,
+          activeWindowSurfaceIds.length > 0,
+          'e.g. 0.25',
+          (el, value) => (el.type === 'BuildingElementTransparent' ? { frame_area_fraction: value } : null),
+          undefined,
+          undefined,
+          activeWindowSurfaceIds,
+        )}
         {renderExtraJsonSelectRow(
           'securityRisk',
           'Security Risk',
