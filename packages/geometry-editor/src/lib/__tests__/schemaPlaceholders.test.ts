@@ -217,9 +217,9 @@ describe('Schema Placeholder Generation', () => {
   });
 
   describe('generateCompletePlaceholder', () => {
-    it('should handle array with object items', () => {
+    it.each([{ type: 'array' }, { type: ['null', 'array'] }])('should handle array with object items: %j', ({ type }) => {
       const schema = {
-        type: 'array',
+        type,
         items: {
           type: 'object',
           required: ['name'],
@@ -233,8 +233,8 @@ describe('Schema Placeholder Generation', () => {
       expect(result).toBe('[{"name":"example","value":1}]');
     });
 
-    it('should handle array with primitive items', () => {
-      const schema = { type: 'array', items: { type: 'number' } };
+    it.each([{ type: 'array' }, { type: ['null', 'array'] }])('should handle array with primitive items: %j', ({ type }) => {
+      const schema = { type, items: { type: 'number' } };
       const result = generateCompletePlaceholder(schema);
       expect(result).toBe('[1]');
     });
@@ -253,9 +253,9 @@ describe('Schema Placeholder Generation', () => {
       expect(result).toBe('{"id":"example","active":false,"optional":1}');
     });
 
-    it('should handle oneOf in array items', () => {
+    it.each([{ type: 'array' }, { type: ['null', 'array'] }])('should handle oneOf in array items: %j', ({ type }) => {
       const schema = {
-        type: 'array',
+        type,
         items: {
           oneOf: [
             { type: 'string' },
