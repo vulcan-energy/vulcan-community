@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { interpolateProfileHeight, normalizeProfilePoints } from '../profileLineFace';
 import { describe, expect, it } from 'vitest';
 import { getAreaBasedElementExportGeometry, getElementEffectiveArea, getElementGrossArea, getTransparentExportMidHeight } from '../elementArea';
 import type {
@@ -302,4 +303,19 @@ describe('getElementEffectiveArea external door netting', () => {
       [polygonDoor.id]: polygonDoor,
     })).toBe(6);
   });
+});
+
+it('normalizes shared profile sampling without losing tolerance or endpoint rules', () => {
+  const points = normalizeProfilePoints([
+    { t: 0.75, h: 4 }, { t: 0.25, h: -1 }, { t: 0.75 + 5e-10, h: 6 },
+    { t: NaN, h: 2 }, { t: 0.5, h: Infinity }, null,
+  ]);
+  expect(points).toEqual([
+    { t: 0, h: -1 }, { t: 0.25, h: -1 },
+    { t: 0.75 + 5e-10, h: 6 }, { t: 1, h: 6 },
+  ]);
+  expect(interpolateProfileHeight(points!, 0.5)).toBeCloseTo(2.5);
+  expect(normalizeProfilePoints([{ t: -1, h: 1 }, { t: -2, h: 2 }])).toBeNull();
+  expect(normalizeProfilePoints(null)).toBeNull();
+  expect(interpolateProfileHeight([], 0.5)).toBe(0);
 });
