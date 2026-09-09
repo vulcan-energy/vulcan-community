@@ -247,56 +247,15 @@ export function generateCompletePlaceholder(schema: SchemaNode | null | undefine
     }
   }
 
-  // Handle simple field types first (not just complex ones)
-  if (schema.type === 'string' || schema.type === 'number' || schema.type === 'integer' || schema.type === 'boolean') {
-    const defaultValue = generateDefaultValue(schema, defs);
-    return JSON.stringify(defaultValue);
+  const primaryType = Array.isArray(schema.type)
+    ? schema.type.find((type) => typeof type === 'string' && type !== 'null') ?? schema.type[0]
+    : schema.type;
+
+  if (primaryType === 'string' || primaryType === 'number' || primaryType === 'integer' || primaryType === 'boolean') {
+    return JSON.stringify(generateDefaultValue(schema, defs));
   }
 
-  // Handle union types like ["number", "null"]
-  if (Array.isArray(schema.type)) {
-    const nonNullTypes = schema.type.filter((t): t is string => typeof t === 'string' && t !== 'null');
-    const primaryType = nonNullTypes.length > 0 ? nonNullTypes[0] : schema.type[0];
-
-    if (primaryType === 'string' || primaryType === 'number' || primaryType === 'integer' || primaryType === 'boolean') {
-      const defaultValue = generateDefaultValue(schema, defs);
-      return JSON.stringify(defaultValue);
-    }
-
-    // Handle array union types like ["array", "null"]
-    if (primaryType === 'array' && schema.items) {
-      const itemSchema = schema.items;
-      const resolvedItemSchema = itemSchema.$ref ?
-        resolveSchemaRef(itemSchema.$ref, defs) : itemSchema;
-
-      if (!resolvedItemSchema) {
-        return '[]';
-      }
-
-      // Handle oneOf/anyOf for array items
-      if (resolvedItemSchema.oneOf || resolvedItemSchema.anyOf) {
-        const options = resolvedItemSchema.oneOf || resolvedItemSchema.anyOf;
-        if (options && options.length > 0) {
-          const best = pickBestUnionOption(options, defs);
-          const example = generateDefaultValue(best, defs);
-          return JSON.stringify([example]);
-        }
-      }
-
-      // Handle object array items
-      if (resolvedItemSchema.type === 'object' && resolvedItemSchema.properties) {
-        const example = generateDefaultValue(resolvedItemSchema, defs);
-        return JSON.stringify([example]);
-      }
-
-      // Handle primitive array items
-      const example = generateDefaultValue(resolvedItemSchema, defs);
-      return JSON.stringify([example]);
-    }
-  }
-
-  // Handle array types
-  if (schema.type === 'array' && schema.items) {
+  if (primaryType === 'array' && schema.items) {
     const itemSchema = schema.items;
     const resolvedItemSchema = itemSchema.$ref ?
       resolveSchemaRef(itemSchema.$ref, defs) : itemSchema;
@@ -315,13 +274,6 @@ export function generateCompletePlaceholder(schema: SchemaNode | null | undefine
       }
     }
 
-    // Handle object array items
-    if (resolvedItemSchema.type === 'object' && resolvedItemSchema.properties) {
-      const example = generateDefaultValue(resolvedItemSchema, defs);
-      return JSON.stringify([example]);
-    }
-
-    // Handle primitive array items
     const example = generateDefaultValue(resolvedItemSchema, defs);
     return JSON.stringify([example]);
   }
@@ -374,22 +326,12 @@ export function generateCompletePlaceholder(schema: SchemaNode | null | undefine
   return '[]';
 }
 
-/**
- * Generates specific placeholders for known complex fields
- * These are tailored to the exact schema requirements
- */
+/** Compatibility entry point; placeholders are determined by the schema. */
 export function generateSpecificPlaceholder(
-  fieldName: string,
+  _fieldName: string,
   schema: SchemaNode,
   defs?: Record<string, SchemaNode>,
 ): string {
-  const availableDefs = defs;
-
-  if (!availableDefs) {
-    return generateCompletePlaceholder(schema, defs);
-  }
-
-  // Use programmatic approach for all fields
   return generateCompletePlaceholder(schema, defs);
 }
 
@@ -428,21 +370,11 @@ function pickBestUnionOption(options: SchemaNode[], defs?: Record<string, Schema
   return best;
 }
 
-/**
- * Main function to generate robust placeholders for any field
- */
+/** Compatibility entry point; uses the same schema-driven generation. */
 export function generateRobustPlaceholder(
-  fieldName: string,
+  _fieldName: string,
   schema: SchemaNode,
   defs?: Record<string, SchemaNode>
 ): string {
-  // Try specific placeholder first
-  const specific = generateSpecificPlaceholder(fieldName, schema, defs);
-  if (specific && specific !== '[]') {
-    return specific;
-  }
-
-  // Fallback to generic generation
-  const generic = generateCompletePlaceholder(schema, defs);
-  return generic;
+  return generateCompletePlaceholder(schema, defs);
 }
