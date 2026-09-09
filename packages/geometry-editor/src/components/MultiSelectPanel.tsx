@@ -29,6 +29,7 @@ import {
   effectiveFabricDisplayValues,
 } from '../lib/multiSelectAssemblyApply';
 import { getElementShape } from '../lib/shapeUtils';
+import { cloneJsonValue as cloneExtraJsonValue, jsonValuesEqual as extraJsonValuesEqual } from '../lib/jsonTypes';
 import { ELEMENT_TYPE_ORDER } from '../lib/elementTypeMetadata';
 import type { WindowShading, Element, BuildingElementOpaque, BuildingElementTransparent, BuildingElementGround, BuildingElementAdjacentConditionedSpace, BuildingElementAdjacentUnconditionedSpace_Simple, BuildingElementPartyWall, WetEmitter, WaterPipework } from '../geometry/types';
 import {
@@ -412,33 +413,6 @@ const WINDOW_DETAIL_COPY_LABELS: Record<WindowDetailVisibleKey, string> = {
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function cloneExtraJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(cloneExtraJsonValue);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, cloneExtraJsonValue(child)]),
-    );
-  }
-  return value;
-}
-
-function extraJsonValuesEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, index) => extraJsonValuesEqual(item, b[index]));
-  }
-  if (a && b && typeof a === 'object' && typeof b === 'object') {
-    const aEntries = Object.entries(a as Record<string, unknown>);
-    const bRecord = b as Record<string, unknown>;
-    if (aEntries.length !== Object.keys(bRecord).length) return false;
-    return aEntries.every(([key, value]) =>
-      Object.prototype.hasOwnProperty.call(bRecord, key) && extraJsonValuesEqual(value, bRecord[key]),
-    );
-  }
-  return false;
 }
 
 function hasOwnExtraJsonKey(record: Record<string, unknown>, key: WindowDetailCopyKey): boolean {
