@@ -30,6 +30,8 @@ Agents working in this tree must also obey the following rules:
 These are operational safeguards. They do not replace the applicable licence or
 contributor agreement.
 
+- **Pull-request history:** Default to squash merges so each PR lands as one clear commit. Rebase the task branch onto current `main` when it needs updating; avoid merge-from-main commits. Require adversarial review and green required CI on the final branch commit before merging.
+
 Routine work belongs in a separate worktree. Run
 `./scripts/install-git-hooks.sh` once per clone, then use
 `./scripts/new-worktree.sh <slug>`; its default profile prepares recursive
