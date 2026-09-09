@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { parseGeometryCsvLine as parseCSVLine } from '../../../geometry-document/src/geometryCsvSections';
 import { JUNCTION_TYPE_ENUM, getPsiForJunctionType } from './simplifiedFabricMap';
 
 /** Workspace folder for junction ψ CSV files (relative to workspace root). */
@@ -13,29 +14,6 @@ export const DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH = `${JUNCTION_PSI_DEFAULTS_D
 
 const HEADER = 'junction_type,linear_thermal_transmittance';
 
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      result.push(current);
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  result.push(current);
-  return result;
-}
 
 /**
  * Parse sparse or full junction ψ CSV. Header: junction_type,linear_thermal_transmittance
