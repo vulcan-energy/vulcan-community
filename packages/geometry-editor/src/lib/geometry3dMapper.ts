@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { normalizeProfilePoints, interpolateProfileHeight } from './profileLineFace';
 import { isRoofLikeOpaqueElement } from './roofElement';
 import { getPointElementIconNode } from './pointElementIconSpec';
 import { getElementColor } from './shapeUtils';
@@ -80,66 +81,8 @@ const SERVICE_POLYGON_SLAB_M = 0.1;
 const POINT_MARKER_RADIUS_THERMAL_M = 0.14;
 const POINT_MARKER_RADIUS_SERVICE_M = 0.11;
 
-type ProfilePoint = {
-  t: number;
-  h: number;
-};
-
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
-}
-
-function normalizeProfilePoints(raw: unknown): ProfilePoint[] | null {
-  if (!Array.isArray(raw)) return null;
-
-  const sorted = raw
-    .filter(
-      (point): point is { t: number; h: number } =>
-        !!point &&
-        typeof point === 'object' &&
-        isFiniteNumber((point as Record<string, unknown>).t) &&
-        isFiniteNumber((point as Record<string, unknown>).h),
-    )
-    .map((point) => ({
-      t: Math.min(Math.max(point.t, 0), 1),
-      h: point.h,
-    }))
-    .sort((left, right) => left.t - right.t);
-
-  if (sorted.length < 2) return null;
-
-  const deduped: ProfilePoint[] = [];
-  for (const point of sorted) {
-    if (deduped.length > 0 && Math.abs(deduped[deduped.length - 1].t - point.t) < 1e-9) {
-      deduped[deduped.length - 1] = point;
-      continue;
-    }
-    deduped.push(point);
-  }
-
-  if (deduped.length < 2) return null;
-  if (deduped[0].t > 0) deduped.unshift({ t: 0, h: deduped[0].h });
-  if (deduped[deduped.length - 1].t < 1) deduped.push({ t: 1, h: deduped[deduped.length - 1].h });
-  deduped[0] = { ...deduped[0], t: 0 };
-  deduped[deduped.length - 1] = { ...deduped[deduped.length - 1], t: 1 };
-  return deduped;
-}
-
-function interpolateProfileHeight(profile: ProfilePoint[], t: number): number {
-  if (t <= profile[0].t) return profile[0].h;
-  if (t >= profile[profile.length - 1].t) return profile[profile.length - 1].h;
-
-  for (let index = 0; index < profile.length - 1; index += 1) {
-    const start = profile[index];
-    const end = profile[index + 1];
-    if (t < start.t || t > end.t) continue;
-    const span = end.t - start.t;
-    if (Math.abs(span) < 1e-9) return end.h;
-    const ratio = (t - start.t) / span;
-    return start.h + (end.h - start.h) * ratio;
-  }
-
-  return profile[profile.length - 1].h;
 }
 
 function pickWindowVentilation3D(element: Element): WindowVentilation3D | undefined {
