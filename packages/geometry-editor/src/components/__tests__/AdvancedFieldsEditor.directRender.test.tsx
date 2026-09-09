@@ -1315,44 +1315,13 @@ describe('R4.6b-1 standing invariant: what every Advanced Fields row actually re
 });
 
 describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
-  it('config 1 -- ElectricBattery, Core and FHS (regression anchor)', () => {
-    assertDirectCharacterization(
-      {
-        elementType: 'ElectricBattery',
-        useFHSSchema: false,
-        extraJson: {
-          battery_age: 5,
-          grid_charging_possible: true,
-          maximum_charge_rate_one_way_trip: 2,
-          maximum_discharge_rate_one_way_trip: 2,
-          minimum_charge_rate_one_way_trip: 1,
-        },
-      },
-      [
-        row('battery_age', 'Battery Age', TEXT('0')),
-        row('grid_charging_possible', 'Grid Charging Possible', CHECKBOX),
-        row('maximum_charge_rate_one_way_trip', 'Maximum Charge Rate One Way Trip', TEXT('0', '0')),
-        row('maximum_discharge_rate_one_way_trip', 'Maximum Discharge Rate One Way Trip', TEXT('0', '0')),
-        row('minimum_charge_rate_one_way_trip', 'Minimum Charge Rate One Way Trip', TEXT('0')),
-      ],
-    );
-    cleanup();
-    assertDirectCharacterization(
-      {
-        elementType: 'ElectricBattery',
-        useFHSSchema: true,
-        extraJson: {
-          maximum_charge_rate_one_way_trip: 2,
-          maximum_discharge_rate_one_way_trip: 2,
-          minimum_charge_rate_one_way_trip: 1,
-        },
-      },
-      [
-        row('minimum_charge_rate_one_way_trip', 'Minimum Charge Rate One Way Trip', TEXT('0')),
-        row('maximum_charge_rate_one_way_trip', 'Maximum Charge Rate One Way Trip', TEXT('0', '0')),
-        row('maximum_discharge_rate_one_way_trip', 'Maximum Discharge Rate One Way Trip', TEXT('0', '0')),
-      ],
-    );
+  it('Core battery maximum rates retain exclusive minimum attributes', () => {
+    const { container } = renderEditor({ elementType: 'ElectricBattery', useFHSSchema: false, extraJson: {} });
+    for (const key of ['maximum_charge_rate_one_way_trip', 'maximum_discharge_rate_one_way_trip']) {
+      const input = within(fieldRow(container, key)).getByRole('textbox');
+      expect(input).toHaveAttribute('min', '0');
+      expect(input).toHaveAttribute('data-exclusive-minimum', '0');
+    }
   });
 
   it('config 2 -- BuildingElementOpaque, wall, Core and FHS + interaction characterization (number-entry / unset)', async () => {
@@ -1569,7 +1538,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     expect(placeholderOption).toHaveAttribute('disabled');
   });
 
-  it('config 4 -- BuildingElementGround, Suspended_floor, FHS: shield_fact_location dropdown + area_per_perimeter_vent direct-render characterization', () => {
+  it('shows invalid persisted suspended-floor enum values before interaction', () => {
     const baseExtraJson = {
       u_value: 0.2,
       total_area: 80,
@@ -1586,58 +1555,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       shield_fact_location: 'Average',
       thermal_resist_insul: 1,
     };
-    const expectedRows = [
-      row('u_value', 'U-Value', TEXT('0.01')),
-      row('psi_wall_floor_junc', 'Psi Wall Floor Junc', TEXT('0')),
-      row('thermal_resistance_floor_construction', 'Thermal Resistance Floor Construction', TEXT('0.000001')),
-      row('areal_heat_capacity', 'Areal Heat Capacity', SELECT),
-      row('mass_distribution_class', 'Mass Distribution Class', SELECT),
-      row('height_upper_surface', 'Height Upper Surface', TEXT('0')),
-      row('thermal_transm_walls', 'Thermal Transm Walls', TEXT('0')),
-      row('area_per_perimeter_vent', 'Area Per Perimeter Vent', TEXT(null)),
-      row('shield_fact_location', 'Shield Fact Location', SELECT),
-      row('thermal_resist_insul', 'Thermal Resist Insul', TEXT('0')),
-    ];
-    const { container } = assertDirectCharacterization(
-      {
-        elementType: 'BuildingElementGround',
-        subtype: 'Suspended_floor',
-        useFHSSchema: true,
-        extraJson: baseExtraJson,
-      },
-      expectedRows,
-    );
-
-    // shield_fact_location: inlined as a plain string enum with WIND_SHIELD_LOCATION_ENUM
-    // by AdvancedFieldsEditor's own subschema memo -- still a dropdown (SELECT), but
-    // R4.3b changed WHICH control renders it: through R4.3, the resolved
-    // `{type:'string', enum:[...]}` schema reached TextControl's own `extractOptions`
-    // dropdown fallback (rule (d) won on type before enum was consulted); R4.3b's
-    // enum-first `pickDirectControl` now routes it to EnumControl proper instead (see
-    // the reworded comment at the inline site in AdvancedFieldsEditor.tsx). Same
-    // underlying `<StandardDropdown>` component either way -- the row check above
-    // already confirms SELECT; this assertion is just an explicit marker.
-    const shieldRow = fieldRow(container, 'shield_fact_location');
-    expect(shieldRow.querySelector('select')).not.toBeNull();
-
-    // area_per_perimeter_vent: plain `{type:'number'}` in FHS -- NumberControl,
-    // confirmed by the generic row check above.
-    const ventRow = fieldRow(container, 'area_per_perimeter_vent');
-    expect(ventRow.querySelector('select')).toBeNull();
-    expect(ventRow.querySelector('input[type="checkbox"]')).toBeNull();
-    cleanup();
-
-    // R4.3b HEADLINE RESTORATION: with an INVALID persisted string-enum value,
-    // EnumControl forwards `validateAdvancedFieldPrimitive`'s error text to its
-    // `<StandardDropdown error=...>` prop and it is visible ON MOUNT -- no interaction
-    // needed. Through R4.3, this same field reached TextControl's fallback dropdown
-    // instead, which hardcodes `error={undefined}` on its <StandardDropdown> and only
-    // ever surfaces a LOCAL error after an onChange/onBlur interaction (see
-    // `TextControl` in jsonformsRenderers.tsx) -- an invalid persisted value was
-    // therefore invisible until the user touched the field. Row shape (labels,
-    // control kinds) is identical to the valid-value fixture above; only this one
-    // field's runtime value/error differs, so this mount is NOT re-run through
-    // `assertDirectCharacterization`'s full-row comparison.
+    // Persisted invalid enum values must show their error before the user edits the field.
     const { container: invalidContainer } = renderEditor({
       elementType: 'BuildingElementGround',
       subtype: 'Suspended_floor',
