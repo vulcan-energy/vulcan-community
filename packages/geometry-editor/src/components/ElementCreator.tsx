@@ -1854,7 +1854,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     WaterPipework: bindElementFormModule(waterPipeworkFormModule, waterPipeworkFormState),
     WetEmitter: bindElementFormModule(wetEmitterFormModule, wetEmitterFormState),
     System: bindElementFormModule(systemFormModule, systemFormState),
-  } satisfies Partial<Record<ElementType, ElementFormInstance>>;
+  } satisfies Record<ElementType, ElementFormInstance>;
 
   // Floor-move base-height sync, shared across several families; OnSiteGeneration's
   // share now writes through its module state (see onSiteGeneration.tsx header).
@@ -2687,69 +2687,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           }
         } catch { /* swallow: best-effort */ }
 
-        // Set fields based on element type
+        elementFormInstances[element.type]?.hydrate(element);
         if (element.type === 'BuildingElementOpaque') {
-          // Moved to elementForms/buildingElementOpaque.tsx (slice-6 brief
-          // STAGE 4) — see that module's hydrate() (shared Opaque/Transparent
-          // prefix via wallShared.tsx's hydrateWallSharedFields, plus
-          // Opaque-exclusive isUnheatedPitchedRoof/isExternalDoor/
-          // unheatedPitchedRoofCeilingElevationInput, decision 7). The dormer
-          // metadata hydrate now lives in DormerBundleEditor.tsx (slice-6
-          // brief STAGE 5) — hydrateDormerMetadata runs unconditionally after
-          // the module's own hydrate, exactly as the inline block did before
-          // (it no-ops internally when the element isn't a dormer anchor).
-          elementFormInstances.BuildingElementOpaque.hydrate(element);
           dormerBundleEditor.hydrateDormerMetadata(element);
-        } else if (element.type === 'BuildingElementGround') {
-          elementFormInstances.BuildingElementGround.hydrate(element);
-        } else if (element.type === 'BuildingElementTransparent') {
-          // Moved to elementForms/buildingElementTransparent.tsx (slice-6
-          // brief STAGE 3) — see that module's hydrate().
-          elementFormInstances.BuildingElementTransparent.hydrate(element);
-        } else if (isAdjacentLikeElement(element)) {
-          // Moved to elementForms/adjacentLikeElement.tsx (slice-6 brief
-          // STAGE 2) — see that module's hydrate(). Any of the three keys
-          // below dispatches to the same bound instance; BuildingElementPartyWall
-          // is used here for consistency with the other dispatch sites.
-          elementFormInstances.BuildingElementPartyWall.hydrate(element);
-        } else if (element.type === 'ThermalBridgeLinear') {
-          elementFormInstances.ThermalBridgeLinear.hydrate(element);
-        } else if (element.type === 'ThermalBridgePoint') {
-          elementFormInstances.ThermalBridgePoint.hydrate(element);
-        }
-        // NEW: Load CSV v3 element types
-        else if (element.type === 'WindowShading') {
-          elementFormInstances.WindowShading.hydrate(element);
-        } else if (element.type === 'Lighting') {
-          elementFormInstances.Lighting.hydrate(element);
-        } else if (element.type === 'MechanicalVentilationDuctwork') {
-          elementFormInstances.MechanicalVentilationDuctwork.hydrate(element);
-        } else if (element.type === 'MechanicalVentilationTerminal') {
-          elementFormInstances.MechanicalVentilationTerminal.hydrate(element);
-        } else if (element.type === 'WetEmitter') {
-          elementFormInstances.WetEmitter.hydrate(element);
-        } else if (element.type === 'WaterPipework') {
-          elementFormInstances.WaterPipework.hydrate(element);
-        } else if (element.type === 'Appliance') {
-          elementFormInstances.Appliance.hydrate(element);
-        } else if (element.type === 'HotWaterDemand') {
-          elementFormInstances.HotWaterDemand.hydrate(element);
-        } else if (element.type === 'ContextShading') {
-          elementFormInstances.ContextShading.hydrate(element);
-        }
-        // NEW: Load InfiltrationVentilation element types
-        else if (element.type === 'Vents') {
-          elementFormInstances.Vents.hydrate(element);
-        } else if (element.type === 'MechanicalVentilation') {
-          elementFormInstances.MechanicalVentilation.hydrate(element);
-        } else if (element.type === 'CombustionAppliances') {
-          elementFormInstances.CombustionAppliances.hydrate(element);
-        } else if (element.type === 'OnSiteGeneration') {
-          elementFormInstances.OnSiteGeneration.hydrate(element);
-        } else if (element.type === 'ElectricBattery') {
-          elementFormInstances.ElectricBattery.hydrate(element);
-        } else if (element.type === 'System') {
-          elementFormInstances.System.hydrate(element);
         }
       }
     } else if (selection.type === 'global' && selection.id) {
@@ -2772,33 +2712,21 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         setElementFloorId(element.floorId || ''); // Set floor assignment
         elementElevationInput.setValue(readViewerElevationValue(element));
 
-        // Set fields based on global element type
-        if (element.type === 'WaterPipework') {
-          elementFormInstances.WaterPipework.hydrate(element);
-        } else if (element.type === 'Appliance') {
-          elementFormInstances.Appliance.hydrate(element);
-        } else if (element.type === 'HotWaterDemand') {
-          elementFormInstances.HotWaterDemand.hydrate(element);
-        } else if (element.type === 'ContextShading') {
-          elementFormInstances.ContextShading.hydrate(element);
-        }
-        // NEW: Load InfiltrationVentilation element types
-        else if (element.type === 'Vents') {
-          elementFormInstances.Vents.hydrate(element);
-        } else if (element.type === 'MechanicalVentilationDuctwork') {
-          elementFormInstances.MechanicalVentilationDuctwork.hydrate(element);
-        } else if (element.type === 'MechanicalVentilationTerminal') {
-          elementFormInstances.MechanicalVentilationTerminal.hydrate(element);
-        } else if (element.type === 'MechanicalVentilation') {
-          elementFormInstances.MechanicalVentilation.hydrate(element);
-        } else if (element.type === 'CombustionAppliances') {
-          elementFormInstances.CombustionAppliances.hydrate(element);
-        } else if (element.type === 'OnSiteGeneration') {
-          elementFormInstances.OnSiteGeneration.hydrate(element);
-        } else if (element.type === 'ElectricBattery') {
-          elementFormInstances.ElectricBattery.hydrate(element);
-        } else if (element.type === 'System') {
-          elementFormInstances.System.hydrate(element);
+        // Keep the global-selection hydration scope unchanged.
+        switch (element.type) {
+          case 'WaterPipework':
+          case 'Appliance':
+          case 'HotWaterDemand':
+          case 'ContextShading':
+          case 'Vents':
+          case 'MechanicalVentilationDuctwork':
+          case 'MechanicalVentilationTerminal':
+          case 'MechanicalVentilation':
+          case 'CombustionAppliances':
+          case 'OnSiteGeneration':
+          case 'ElectricBattery':
+          case 'System':
+            elementFormInstances[element.type].hydrate(element);
         }
       }
     } else if (selection.type === 'zone' && selection.id) {
@@ -3976,120 +3904,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       ...viewerElevationPatch,
     };
 
-	    switch (elementType) {
-		      case 'BuildingElementOpaque':
-		        // Moved to elementForms/buildingElementOpaque.tsx (slice-6 brief
-		        // STAGE 4) — see that module's buildElementData().
-		        return elementFormInstances.BuildingElementOpaque.buildElementData({ baseData, elementZoneId });
-
-      case 'BuildingElementTransparent':
-        // Moved to elementForms/buildingElementTransparent.tsx (slice-6
-        // brief STAGE 3) — see that module's buildElementData().
-        return elementFormInstances.BuildingElementTransparent.buildElementData({ baseData, elementZoneId });
-
-      case 'BuildingElementGround':
-        return elementFormInstances.BuildingElementGround.buildElementData({ baseData, elementZoneId });
-
-	      case 'BuildingElementAdjacentConditionedSpace':
-	      case 'BuildingElementAdjacentUnconditionedSpace_Simple':
-	      case 'BuildingElementPartyWall':
-	        // Moved to elementForms/adjacentLikeElement.tsx (slice-6 brief
-	        // STAGE 2) — see that module's buildElementData(). KEEPS the
-	        // legitimate pitch emission (brief decision 3's carve-out).
-	        return elementFormInstances.BuildingElementPartyWall.buildElementData({ baseData, elementZoneId });
-
-	      case 'ThermalBridgeLinear':
-	        return elementFormInstances.ThermalBridgeLinear.buildElementData({ baseData, elementZoneId });
-
-      case 'ThermalBridgePoint':
-        return elementFormInstances.ThermalBridgePoint.buildElementData({ baseData, elementZoneId });
-
-      // NEW: CSV v3 element types
-      case 'WindowShading':
-        return elementFormInstances.WindowShading.buildElementData({ baseData, elementZoneId });
-
-      case 'Lighting':
-        return elementFormInstances.Lighting.buildElementData({ baseData, elementZoneId });
-
-	      case 'MechanicalVentilationDuctwork':
-	        return elementFormInstances.MechanicalVentilationDuctwork.buildElementData({ baseData, elementZoneId });
-
-      case 'MechanicalVentilationTerminal':
-        return elementFormInstances.MechanicalVentilationTerminal.buildElementData({ baseData, elementZoneId });
-
-      case 'WetEmitter':
-        return elementFormInstances.WetEmitter.buildElementData({ baseData, elementZoneId });
-
-	      case 'WaterPipework':
-	        return elementFormInstances.WaterPipework.buildElementData({ baseData, elementZoneId });
-
-      case 'Appliance':
-        return elementFormInstances.Appliance.buildElementData({ baseData, elementZoneId });
-
-      case 'HotWaterDemand':
-        return elementFormInstances.HotWaterDemand.buildElementData({ baseData, elementZoneId });
-
-	      case 'ContextShading':
-	        return elementFormInstances.ContextShading.buildElementData({ baseData, elementZoneId });
-
-      // NEW: InfiltrationVentilation element types
-      case 'Vents':
-        return elementFormInstances.Vents.buildElementData({ baseData, elementZoneId });
-
-      case 'MechanicalVentilation':
-        return elementFormInstances.MechanicalVentilation.buildElementData({ baseData, elementZoneId });
-
-      case 'CombustionAppliances':
-        return elementFormInstances.CombustionAppliances.buildElementData({ baseData, elementZoneId });
-
-      case 'OnSiteGeneration': {
-        return elementFormInstances.OnSiteGeneration.buildElementData({ baseData, elementZoneId });
-      }
-
-      case 'ElectricBattery': {
-        return elementFormInstances.ElectricBattery.buildElementData({ baseData, elementZoneId });
-      }
-
-      case 'System':
-        return elementFormInstances.System.buildElementData({ baseData, elementZoneId, getZoneNameForElementZoneId });
-
-      default:
-        return <div>Select an element type to see attributes</div>;
-    }
+    const form = elementFormInstances[elementType];
+    return form
+      ? form.buildElementData({ baseData, elementZoneId, getZoneNameForElementZoneId })
+      : <div>Select an element type to see attributes</div>;
   };
   useEffect(() => {
     buildNewElementDataRef.current = buildNewElementData;
   });
 
   // Helper functions for AdvancedFieldsEditor
-  const getElementSubtype = (): string | undefined => {
-    switch (elementType) {
-      case 'BuildingElementGround':
-        return elementFormInstances.BuildingElementGround.subtype();
-      case 'MechanicalVentilation':
-        return elementFormInstances.MechanicalVentilation.subtype();
-      case 'WetEmitter':
-        return elementFormInstances.WetEmitter.subtype();
-      case 'Appliance':
-        return elementFormInstances.Appliance.subtype();
-      case 'HotWaterDemand':
-        return elementFormInstances.HotWaterDemand.subtype();
-      case 'WindowShading':
-        return elementFormInstances.WindowShading.subtype();
-      case 'ContextShading':
-        return elementFormInstances.ContextShading.subtype();
-      case 'CombustionAppliances':
-        return elementFormInstances.CombustionAppliances.subtype();
-      case 'OnSiteGeneration':
-        return elementFormInstances.OnSiteGeneration.subtype();
-      case 'ElectricBattery':
-        return elementFormInstances.ElectricBattery.subtype();
-      case 'System':
-        return elementFormInstances.System.subtype();
-      default:
-        return undefined;
-    }
-  };
+  const getElementSubtype = (): string | undefined => elementFormInstances[elementType]?.subtype();
 
   const getCurrentElementData = () => {
     if (selection.type === 'element' || selection.type === 'global') {
@@ -4642,87 +4467,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       flipElementOrientation,
       unheatedPitchedRoofCeilingElevationSuggestion,
     };
-    switch (elementType) {
-      case 'BuildingElementOpaque':
-        // Moved to elementForms/buildingElementOpaque.tsx (slice-6 brief
-        // STAGE 4) — see that module's renderPanel(). The dormer branch is
-        // now ctx.renderDormerBundleEditor() (decision 2); the dormer bundle
-        // machinery itself stays orchestrator-owned (stage 5 territory).
-        return elementFormInstances.BuildingElementOpaque.renderPanel(formRenderCtx);
-
-      case 'BuildingElementTransparent':
-        // Moved to elementForms/buildingElementTransparent.tsx (slice-6
-        // brief STAGE 3) — see that module's renderPanel().
-        return elementFormInstances.BuildingElementTransparent.renderPanel(formRenderCtx);
-
-      case 'BuildingElementGround':
-        return elementFormInstances.BuildingElementGround.renderPanel(formRenderCtx);
-
-      case 'BuildingElementAdjacentConditionedSpace':
-      case 'BuildingElementAdjacentUnconditionedSpace_Simple':
-      case 'BuildingElementPartyWall':
-        // Moved to elementForms/adjacentLikeElement.tsx (slice-6 brief
-        // STAGE 2) — see that module's renderPanel(). Any of the three keys
-        // below dispatches to the same bound instance; BuildingElementPartyWall
-        // is used here for consistency with the other dispatch sites.
-        return elementFormInstances.BuildingElementPartyWall.renderPanel(formRenderCtx);
-
-      case 'ThermalBridgeLinear':
-        return elementFormInstances.ThermalBridgeLinear.renderPanel(formRenderCtx);
-
-      case 'ThermalBridgePoint':
-        return elementFormInstances.ThermalBridgePoint.renderPanel(formRenderCtx);
-
-      // NEW: CSV v3 element types
-      case 'WindowShading':
-        return elementFormInstances.WindowShading.renderPanel(formRenderCtx);
-
-      case 'Lighting':
-        return elementFormInstances.Lighting.renderPanel(formRenderCtx);
-
-      case 'MechanicalVentilationDuctwork':
-        return elementFormInstances.MechanicalVentilationDuctwork.renderPanel(formRenderCtx);
-
-      case 'MechanicalVentilationTerminal':
-        return elementFormInstances.MechanicalVentilationTerminal.renderPanel(formRenderCtx);
-
-      case 'WetEmitter':
-        return elementFormInstances.WetEmitter.renderPanel(formRenderCtx);
-
-      case 'WaterPipework':
-        return elementFormInstances.WaterPipework.renderPanel(formRenderCtx);
-
-      case 'Appliance':
-        return elementFormInstances.Appliance.renderPanel(formRenderCtx);
-
-      case 'HotWaterDemand':
-        return elementFormInstances.HotWaterDemand.renderPanel(formRenderCtx);
-
-      case 'ContextShading':
-        return elementFormInstances.ContextShading.renderPanel(formRenderCtx);
-
-      // NEW: InfiltrationVentilation element types
-      case 'Vents':
-        return elementFormInstances.Vents.renderPanel(formRenderCtx);
-
-      case 'MechanicalVentilation':
-        return elementFormInstances.MechanicalVentilation.renderPanel(formRenderCtx);
-
-      case 'CombustionAppliances':
-        return elementFormInstances.CombustionAppliances.renderPanel(formRenderCtx);
-
-      case 'OnSiteGeneration':
-        return elementFormInstances.OnSiteGeneration.renderPanel(formRenderCtx);
-
-      case 'System':
-        return elementFormInstances.System.renderPanel(formRenderCtx);
-
-      case 'ElectricBattery':
-        return elementFormInstances.ElectricBattery.renderPanel(formRenderCtx);
-
-      default:
-        return <div>Select an element type to see attributes</div>;
-    }
+    const form = elementFormInstances[elementType];
+    return form ? form.renderPanel(formRenderCtx) : <div>Select an element type to see attributes</div>;
   };
 
   const selectedElementFloorState = (() => {
