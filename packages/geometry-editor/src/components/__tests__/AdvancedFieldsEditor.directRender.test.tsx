@@ -1315,12 +1315,12 @@ describe('R4.6b-1 standing invariant: what every Advanced Fields row actually re
 });
 
 describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
-  it('Core battery maximum rates retain exclusive minimum attributes', () => {
+  it('Core battery numeric bounds retain inclusive and exclusive minima', () => {
     const { container } = renderEditor({ elementType: 'ElectricBattery', useFHSSchema: false, extraJson: {} });
-    for (const key of ['maximum_charge_rate_one_way_trip', 'maximum_discharge_rate_one_way_trip']) {
+    for (const key of ['battery_age', 'minimum_charge_rate_one_way_trip', 'maximum_charge_rate_one_way_trip', 'maximum_discharge_rate_one_way_trip']) {
       const input = within(fieldRow(container, key)).getByRole('textbox');
       expect(input).toHaveAttribute('min', '0');
-      expect(input).toHaveAttribute('data-exclusive-minimum', '0');
+      expect(input.getAttribute('data-exclusive-minimum')).toBe(key.startsWith('maximum_') ? '0' : null);
     }
   });
 
@@ -1564,6 +1564,9 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     });
     const invalidRow = fieldRow(invalidContainer, 'areal_heat_capacity');
     expect(invalidRow.textContent).toContain('must be equal to one of the allowed values');
+    for (const input of invalidContainer.querySelectorAll('input')) {
+      expect(input).not.toHaveAttribute('data-exclusive-minimum');
+    }
   });
 
   it('config 5 -- MechanicalVentilation, MVHR, FHS: measured + sfp fan modes, + interaction characterization (number-entry / unset)', async () => {
