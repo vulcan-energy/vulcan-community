@@ -10,7 +10,6 @@ import type {
   AssemblyElementMode,
   AssemblyExample,
   AssemblyLayer,
-  MaterialRow,
   VulcanAssemblyV1Envelope,
 } from './assemblyTypes';
 import type { BundledAssemblyLibrary } from './assemblyLibrary';
@@ -33,7 +32,7 @@ import {
   toFhsMassDistributionClass,
   fhsMassDistributionFromSuggestion,
 } from './assemblyMassHeuristic';
-import { libraryElementTypeForMode } from './assemblyUserLibrary';
+import { layersFromLibraryAssembly, libraryElementTypeForMode } from './assemblyUserLibrary';
 import {
   adjustConstructionResistanceForHeatedAdjacentElement,
   applyHeatedAdjacentHalfToArealJPerM2K,
@@ -44,7 +43,7 @@ import type { Element } from '../geometry/types';
 import { getDefaultValueForElementField, type DefaultsLookup } from './defaultsCache';
 import { classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';
 import { getElementShape } from './shapeUtils';
-import { migrateLegacyCavityLayer, resolveAssemblyHeatTransferContext } from './assemblyCavityModel';
+import { resolveAssemblyHeatTransferContext } from './assemblyCavityModel';
 
 export function isFabricAssemblyElement(el: Element): boolean {
   const t = el.type;
@@ -92,42 +91,7 @@ export function libraryElementTypeForElement(el: Element): 'wall' | 'roof' | 'gr
   return libraryElementTypeForMode(mode, inferOpaqueSubtype(el));
 }
 
-export function layersFromLibraryAssembly(
-  row: AssemblyExample,
-  materialsById: Map<string, MaterialRow>,
-  cavityResistanceByType: Map<string, number>,
-): AssemblyLayer[] {
-  const out: AssemblyLayer[] = [];
-  for (const L of row.layers) {
-    if (L.kind === 'solid') {
-      const mid = L.materialId ?? '';
-      if (!mid || !materialsById.has(mid)) continue;
-      out.push({
-        kind: 'solid',
-        materialId: mid,
-        thickness_m: typeof L.thickness_m === 'number' && L.thickness_m > 0 ? L.thickness_m : 0.1,
-        repeatingBridges: L.repeatingBridges,
-      });
-    } else {
-      const ct = L.cavityType ?? '';
-      const r =
-        (ct ? cavityResistanceByType.get(ct) : undefined) ??
-        (typeof L.fixedResistance_m2K_W === 'number' ? L.fixedResistance_m2K_W : 0.18);
-      out.push(
-        migrateLegacyCavityLayer({
-          kind: 'cavity',
-          cavityType: ct || undefined,
-          ...(r > 0 ? { fixedResistance_m2K_W: r } : {}),
-          ventilation: L.ventilation,
-          gap_thickness_m: L.gap_thickness_m,
-          surface_emissivity: L.surface_emissivity,
-          annexFAirVoidLevelOverride: L.annexFAirVoidLevelOverride,
-        }),
-      );
-    }
-  }
-  return out;
-}
+export { layersFromLibraryAssembly } from './assemblyUserLibrary';
 
 export interface FabricDisplayValues {
   u: number | null;

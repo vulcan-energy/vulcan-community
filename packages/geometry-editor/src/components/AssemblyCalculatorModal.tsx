@@ -30,7 +30,6 @@ import {
   effectiveCavityResistanceM2KPerW,
   explicitWellVentilatedExternalSurfaceResistanceM2KPerW,
   isExplicitWellVentilatedCavity,
-  migrateLegacyCavityLayer,
   resolveAssemblyHeatTransferContext,
   resolveSuspendedGroundVentilatedVoidContext,
 } from '../lib/assemblyCavityModel';
@@ -53,7 +52,7 @@ import {
 import { computeFabricUWritesFromConstructionR } from '../lib/fabricUWrites';
 import { loadBundledAssemblyLibrary, upsertUserAssembly, type BundledAssemblyLibrary } from '../lib/assemblyLibrary';
 import { assemblySearchHaystack, assemblyPickerDescription } from '../lib/assemblyNaming';
-import { buildUserAssemblyExample, libraryElementTypeForMode } from '../lib/assemblyUserLibrary';
+import { buildUserAssemblyExample, layersFromLibraryAssembly, libraryElementTypeForMode } from '../lib/assemblyUserLibrary';
 import {
   type FhsMassDistributionClass,
   fhsMassDistributionFromSuggestion,
@@ -68,7 +67,6 @@ import {
 } from '../lib/assemblyMaterialFabric';
 import type {
   AssemblyElementMode,
-  AssemblyExample,
   AssemblyLayer,
   AssemblyLayerCavity,
   AssemblyLayerSolid,
@@ -119,42 +117,6 @@ export interface AssemblyCalculatorModalProps {
    * suspended floors — when this is not `Suspended_floor`, the calculator uses a single construction R only.
    */
   groundFloorType?: GroundFloorType | null;
-}
-
-function layersFromLibraryAssembly(
-  row: AssemblyExample,
-  materialsById: Map<string, MaterialRow>,
-  cavityResistanceByType: Map<string, number>,
-): AssemblyLayer[] {
-  const out: AssemblyLayer[] = [];
-  for (const L of row.layers) {
-    if (L.kind === 'solid') {
-      const mid = L.materialId ?? '';
-      if (!mid || !materialsById.has(mid)) continue;
-      out.push({
-        kind: 'solid',
-        materialId: mid,
-        thickness_m: typeof L.thickness_m === 'number' && L.thickness_m > 0 ? L.thickness_m : 0.1,
-      });
-    } else {
-      const ct = L.cavityType ?? '';
-      const r =
-        (ct ? cavityResistanceByType.get(ct) : undefined) ??
-        (typeof L.fixedResistance_m2K_W === 'number' ? L.fixedResistance_m2K_W : 0.18);
-      out.push(
-        migrateLegacyCavityLayer({
-          kind: 'cavity',
-          cavityType: ct || undefined,
-          ...(r > 0 ? { fixedResistance_m2K_W: r } : {}),
-          ventilation: L.ventilation,
-          gap_thickness_m: L.gap_thickness_m,
-          surface_emissivity: L.surface_emissivity,
-          annexFAirVoidLevelOverride: L.annexFAirVoidLevelOverride,
-        }),
-      );
-    }
-  }
-  return out;
 }
 
 function newBridgeId(): string {
