@@ -6,7 +6,7 @@
 // repository so every checkout enforces the same floor.
 // Existing debt is allowed; a regression in any recorded metric is not.
 //
-//   node scripts/quality-gate.mjs            # report movement, always exit 0
+//   node scripts/quality-gate.mjs            # report movement; invalid reports still fail
 //   node scripts/quality-gate.mjs --enforce  # fail if any metric worsened
 //   node scripts/quality-gate.mjs --update   # lower the baseline to current results
 
@@ -44,6 +44,9 @@ function runJson(cmd, args, cwd) {
 
 function measureEslint(root) {
   const results = runJson('npx', ['eslint', '.', '-f', 'json'], join(REPO_ROOT, root))
+  if (!Array.isArray(results)) {
+    throw new Error('quality-gate: eslint output must be a JSON array')
+  }
   let errors = 0
   let warnings = 0
   let filesWithProblems = 0
@@ -66,17 +69,23 @@ function measureReactDoctor(root) {
     ['react-doctor', '--json', '--no-dead-code', '-y', '.'],
     join(REPO_ROOT, root),
   )
-  const summary = report.summary ?? {}
+  if (!report || typeof report !== 'object' || !report.summary || typeof report.summary !== 'object') {
+    throw new Error('quality-gate: react-doctor output is missing summary')
+  }
+  if (!Array.isArray(report.diagnostics)) {
+    throw new Error('quality-gate: react-doctor output is missing diagnostics')
+  }
+  const summary = report.summary
   const byRule = {}
-  for (const diagnostic of report.diagnostics ?? []) {
+  for (const diagnostic of report.diagnostics) {
     const rule = diagnostic.rule ?? '(no rule)'
     byRule[rule] = (byRule[rule] ?? 0) + 1
   }
   return {
-    score: summary.score ?? null,
-    errors: summary.errorCount ?? 0,
-    warnings: summary.warningCount ?? 0,
-    affectedFiles: summary.affectedFileCount ?? 0,
+    score: summary.score,
+    errors: summary.errorCount,
+    warnings: summary.warningCount,
+    affectedFiles: summary.affectedFileCount,
     byRule,
   }
 }
@@ -91,17 +100,57 @@ const METRICS = [
   ['reactDoctor', 'score', 'higher'],
 ]
 
+const RULE_GROUPS = ['eslint', 'reactDoctor']
+
+function validateSnapshot(snapshot, label) {
+  for (const [group, key] of METRICS) {
+    const value = snapshot?.[group]?.[key]
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(
+        `quality-gate: ${label} metric ${group}.${key} must be a finite number; received ${String(value)}`,
+      )
+    }
+  }
+  for (const group of RULE_GROUPS) {
+    const byRule = snapshot?.[group]?.byRule
+    if (!byRule || typeof byRule !== 'object' || Array.isArray(byRule)) {
+      throw new Error(`quality-gate: ${label} metric ${group}.byRule must be an object`)
+    }
+    for (const [rule, count] of Object.entries(byRule)) {
+      if (typeof count !== 'number' || !Number.isFinite(count)) {
+        throw new Error(
+          `quality-gate: ${label} metric ${group}.byRule.${rule} must be a finite number; received ${String(count)}`,
+        )
+      }
+    }
+  }
+}
+
 function compare(baseline, current) {
   const regressions = []
   const improvements = []
   for (const [group, key, better] of METRICS) {
-    const was = baseline?.[group]?.[key]
+    const was = baseline[group][key]
     const now = current[group][key]
-    if (typeof was !== 'number' || typeof now !== 'number' || was === now) continue
+    if (was === now) continue
     const worse = better === 'lower' ? now > was : now < was
     const entry = { label: `${group}.${key}`, was, now }
     if (worse) regressions.push(entry)
     else improvements.push(entry)
+  }
+  for (const group of RULE_GROUPS) {
+    const rules = new Set([
+      ...Object.keys(baseline[group].byRule),
+      ...Object.keys(current[group].byRule),
+    ])
+    for (const rule of rules) {
+      const was = baseline[group].byRule[rule] ?? 0
+      const now = current[group].byRule[rule] ?? 0
+      if (was === now) continue
+      const entry = { label: `${group}.byRule.${rule}`, was, now }
+      if (now > was) regressions.push(entry)
+      else improvements.push(entry)
+    }
   }
   return { regressions, improvements }
 }
@@ -120,6 +169,7 @@ const current = {
   eslint: measureEslint(TARGET.eslintRoot),
   reactDoctor: measureReactDoctor(TARGET.doctorRoot),
 }
+validateSnapshot(current, 'current')
 
 console.log(
   `  eslint        ${current.eslint.errors} errors, ${current.eslint.warnings} warnings ` +
@@ -171,6 +221,7 @@ if (!existsSync(baselinePath)) {
 }
 
 const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'))
+validateSnapshot(baseline, 'baseline')
 const { regressions, improvements } = compare(baseline, current)
 
 for (const { label, was, now } of improvements) {
