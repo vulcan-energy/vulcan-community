@@ -370,4 +370,38 @@ describe('elementNameRemap', () => {
 
     expect(result.elementsById.window.parent_element).toBe('F2 Wall');
   });
+
+  it('remaps a hosted child when its parent is renamed and moved zones together', () => {
+    const result = applyElementRenamePlanToElementsById(
+      {
+        wall: makeElement({
+          id: 'wall',
+          name: 'Destination Wall',
+          zoneId: 'destination-zone',
+        }),
+        destinationWall: makeElement({
+          id: 'destination-wall',
+          name: 'Shared Wall',
+          zoneId: 'destination-zone',
+        }),
+        window: makeElement({
+          id: 'window',
+          name: 'Window',
+          type: 'BuildingElementTransparent',
+          zoneId: 'source-zone',
+          parent_element: 'Shared Wall',
+        }),
+      },
+      ['wall', 'destinationWall', 'window'],
+      [{
+        elementId: 'wall',
+        from: 'Shared Wall',
+        to: 'Destination Wall',
+        zoneId: 'source-zone',
+        type: 'BuildingElementOpaque',
+      }],
+    );
+
+    expect(result.elementsById.window.parent_element).toBe('Destination Wall');
+  });
 });

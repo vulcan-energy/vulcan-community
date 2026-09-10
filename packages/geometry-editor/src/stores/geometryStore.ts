@@ -5223,12 +5223,31 @@ const createGeometryState = (
       }
       const requestedName = typeof updates.name === 'string' ? updates.name.trim() : prevElement.name;
       const requestedElement = { ...prevElement, ...updates, name: requestedName } as Element;
-      if (
-        requestedName &&
-        (requestedName !== prevElement.name || requestedElement.zoneId !== prevElement.zoneId) &&
-        getScopedExistingElementNames(requestedElement, state.elementsById, id).includes(requestedName)
-      ) {
-        throw new Error(`Element name "${requestedName}" already exists${isGlobalObject(requestedElement) ? ' for this type' : ' in this zone'}. Please choose a different name.`);
+      const hostedZoneMoves = requestedElement.zoneId !== prevElement.zoneId
+        ? collectHostedDescendantElementIds(state.elementsById, id).flatMap((childId) => {
+            const child = state.elementsById[childId];
+            return isGlobalObject(child) ? [] : [{ ...child, zoneId: requestedElement.zoneId }];
+          })
+        : [];
+      const requestedElements = [requestedElement, ...hostedZoneMoves];
+      const requestedElementsById = hostedZoneMoves.length > 0
+        ? { ...state.elementsById, ...Object.fromEntries(requestedElements.map((element) => [element.id, element])) }
+        : state.elementsById;
+      const destinationNames = new Set(
+        requestedName !== prevElement.name || requestedElement.zoneId !== prevElement.zoneId
+          ? getScopedExistingElementNames(requestedElement, state.elementsById, id)
+          : [],
+      );
+      for (const element of requestedElements) {
+        const previous = state.elementsById[element.id];
+        if (
+          element.name &&
+          (element.name !== previous.name || element.zoneId !== previous.zoneId) &&
+          destinationNames.has(element.name)
+        ) {
+          throw new Error(`Element name "${element.name}" already exists${isGlobalObject(element) ? ' for this type' : ' in this zone'}. Please choose a different name.`);
+        }
+        destinationNames.add(element.name);
       }
 
       recordGeometryStoreWrite('updateElement');
@@ -5713,7 +5732,7 @@ const createGeometryState = (
           updates,
           'orientation360',
         );
-        applyAutoNameToElementDraft(prevElement, namingCandidate, state.elementsById, state.floors, id, Object.keys(updates), state.globalOrientationOffset, state.namingPreferences, {
+        applyAutoNameToElementDraft(prevElement, namingCandidate, requestedElementsById, state.floors, id, Object.keys(updates), state.globalOrientationOffset, state.namingPreferences, {
           coordsChanged: coordsUpdateChangedGeometry,
           userExplicitlySetOrientation360,
           target: normalizedUpdates,
@@ -5866,6 +5885,12 @@ const createGeometryState = (
           state.elementIds,
           elementRenamePlan,
         ).elementsById;
+      }
+
+      // Resolve and rename links in their old scope before carrying children into the new zone.
+      for (const moved of hostedZoneMoves) {
+        const child = newElementsById[moved.id];
+        newElementsById[moved.id] = { ...child, zoneId: moved.zoneId, _v: (child._v ?? 0) + 1 };
       }
 
       // If this was a parent wall update and we have child anchors, re-project child coords to stay on parent
@@ -6199,7 +6224,7 @@ const createGeometryState = (
               if (Object.keys(patch).length > 0) {
                 newElementsById[otherId] = { ...panel, ...patch } as Element;
               }
-            } else if (shouldDeriveTransparentFromOpaquePolygonHost(other, roof) && resolveParentElement(other)?.id === roof.id) {
+            } else if (shouldDeriveTransparentFromOpaquePolygonHost(other, roof) && resolveParentElement(state.elementsById[other.id])?.id === roof.id) {
               const opening = other as BuildingElementTransparent;
               const derived = deriveFromHostRoof(opening, roof, effFloorsForHostDerive, state.globalOrientationOffset);
               const patch = buildTransparentHostDerivedPatch(opening, derived);
