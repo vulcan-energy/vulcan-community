@@ -11,6 +11,7 @@ import {
   SPACE_LABEL_NAME_AUTO_SYNC_DESCRIPTOR,
   SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR,
   SLOPED_WIDTH_OVERRIDE_DESCRIPTOR,
+  WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR,
   projectOverrideMarkersForExport,
   promoteOverrideMarkersOnImport,
 } from '../overrideProvenance';
@@ -98,10 +99,35 @@ describe('override provenance helpers', () => {
     expect(marked._nameAutoSync).toBe(false);
   });
 
+  it('round-trips the window security override marker and removes it after reset', () => {
+    const authored = {
+      window: {
+        _windowSecurityRiskUserOverride: true,
+        extra_json: { security_risk: false },
+      },
+    };
+    const projected = projectOverrideMarkersForExport(authored, OVERRIDE_PROVENANCE_REGISTRY.element);
+    const imported = { extra_json: projected.window.extra_json } as Record<string, unknown>;
+    promoteOverrideMarkersOnImport(imported, [WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR], 3);
+
+    expect(imported._windowSecurityRiskUserOverride).toBe(true);
+
+    const reset = projectOverrideMarkersForExport(
+      {
+        window: {
+          _windowSecurityRiskUserOverride: false,
+          extra_json: imported.extra_json as Record<string, unknown>,
+        },
+      },
+      [WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR],
+    );
+    expect(reset.window.extra_json).toEqual({ security_risk: false });
+  });
+
   it('pins the marker version to an exact registry key/version snapshot', () => {
     // A future marker addition must bump its `since`, the current version, and this snapshot
     // together so documents saved before that key existed never become authoritative for it.
-    expect(CURRENT_PROVENANCE_MARKERS_VERSION).toBe(2);
+    expect(CURRENT_PROVENANCE_MARKERS_VERSION).toBe(3);
     expect(Object.entries(OVERRIDE_PROVENANCE_REGISTRY).flatMap(([kind, descriptors]) =>
       descriptors.map(({ key, since }) => ({ kind, key, since })),
     )).toEqual([
@@ -115,6 +141,11 @@ describe('override provenance helpers', () => {
         kind: 'element',
         key: GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.key,
         since: GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.since,
+      },
+      {
+        kind: 'element',
+        key: WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.key,
+        since: WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.since,
       },
       { kind: 'zone', key: '_floor_area_user_override', since: 1 },
       { kind: 'zone', key: '_height_user_override', since: 1 },

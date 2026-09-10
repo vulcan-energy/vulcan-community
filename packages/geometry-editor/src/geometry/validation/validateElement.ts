@@ -727,10 +727,18 @@ export const validateElementCore = (
   if (floorStackWarnings.has(element.id)) {
     warnings.push(geo(FLOOR_STACK_WARNING_MESSAGE, FLOOR_STACK_WARNING_FIELD_KEY));
   }
-  const findElementByName = (name: string | null | undefined): Element | undefined => {
+  const findNamedElements = (
+    name: string | null | undefined,
+    candidates: Element[] = allElements,
+  ): Element[] => {
     const trimmed = name?.trim();
-    return trimmed ? allElements.find((candidate) => candidate.name === trimmed) : undefined;
+    return trimmed ? candidates.filter((candidate) => candidate.name.trim() === trimmed) : [];
   };
+  const isVentParent = (candidate: Element): boolean =>
+    candidate.type === 'BuildingElementOpaque' || candidate.type === 'BuildingElementTransparent';
+  const mvhrUnits = allElements.filter((candidate) => candidate.type === 'MechanicalVentilation');
+  const terminalHosts = allElements.filter(isMvhrTerminalHost);
+  const ventParents = allElements.filter(isVentParent);
   const linkedMvhrDucts = (mvhrName: string): MechanicalVentilationDuctwork[] =>
     allElements.filter(
       (candidate): candidate is MechanicalVentilationDuctwork =>
@@ -1184,11 +1192,14 @@ export const validateElementCore = (
       if (!parentName) {
         warnings.push(geo('Duct is not assigned to an MVHR unit', 'parent_element'));
       } else if (elementsById) {
-        const parent = findElementByName(parentName);
-        if (!parent) {
-          issues.push(geo('MVHR unit not found', 'parent_element'));
-        } else if (parent.type !== 'MechanicalVentilation') {
-          issues.push(geo('Parent must be a MechanicalVentilation MVHR unit', 'parent_element'));
+        const parentMatches = findNamedElements(parentName, mvhrUnits);
+        const parent = parentMatches[0];
+        if (parentMatches.length === 0) {
+          issues.push(geo(findNamedElements(parentName).length > 0
+            ? 'Parent must be a MechanicalVentilation MVHR unit' : 'MVHR unit not found', 'parent_element'));
+        } else if (parentMatches.length > 1) {
+          issues.push(geo('MVHR unit reference is ambiguous', 'parent_element'));
+
         } else if ((parent as MechanicalVentilation).vent_type !== 'MVHR') {
           issues.push(geo('Parent ventilation system must use MVHR', 'parent_element'));
         } else if (isMvhrDuctRole(ductElement.duct_type)) {
@@ -1210,16 +1221,20 @@ export const validateElementCore = (
       }
       const parentName = terminalElement.parent_element?.trim();
       const hostName = terminalElement.host_element?.trim();
-      const parent = parentName ? findElementByName(parentName) : undefined;
-      const host = hostName ? findElementByName(hostName) : undefined;
+      const parentMatches = parentName ? findNamedElements(parentName, mvhrUnits) : [];
+      const hostMatches = hostName ? findNamedElements(hostName, terminalHosts) : [];
+      const parent = parentMatches[0];
+      const host = hostMatches[0];
 
       if (!parentName) {
         issues.push(geo('MVHR unit is required', 'parent_element'));
       } else if (elementsById) {
-        if (!parent) {
-          issues.push(geo('MVHR unit not found', 'parent_element'));
-        } else if (parent.type !== 'MechanicalVentilation') {
-          issues.push(geo('Parent must be a MechanicalVentilation MVHR unit', 'parent_element'));
+        if (parentMatches.length === 0) {
+          issues.push(geo(findNamedElements(parentName).length > 0
+            ? 'Parent must be a MechanicalVentilation MVHR unit' : 'MVHR unit not found', 'parent_element'));
+        } else if (parentMatches.length > 1) {
+          issues.push(geo('MVHR unit reference is ambiguous', 'parent_element'));
+
         } else if ((parent as MechanicalVentilation).vent_type !== 'MVHR') {
           issues.push(geo('Parent ventilation system must use MVHR', 'parent_element'));
         }
@@ -1239,10 +1254,12 @@ export const validateElementCore = (
           issues.push(geo('Manual external pitch must be between 0 and 180°', 'pitch'));
         }
       } else if (elementsById) {
-        if (!host) {
-          issues.push(geo('Mounted host not found', 'host_element'));
-        } else if (!isMvhrTerminalHost(host)) {
-          issues.push(geo('Mounted on must be an external wall or window', 'host_element'));
+        if (hostMatches.length === 0) {
+          issues.push(geo(findNamedElements(hostName).length > 0
+            ? 'Mounted on must be an external wall or window' : 'Mounted host not found', 'host_element'));
+        } else if (hostMatches.length > 1) {
+          issues.push(geo('Mounted host reference is ambiguous', 'host_element'));
+
         }
       }
 
@@ -1454,11 +1471,12 @@ export const validateElementCore = (
       if (!ventsElement.parent_element || ventsElement.parent_element.trim() === '') {
         warnings.push(geo('Link parent (recommended)', 'parent_element'));
       } else if (elementsById) {
-        const parent = Object.values(elementsById).find(e => e.name === ventsElement.parent_element);
-        if (!parent) {
-          issues.push(geo('Parent not found', 'parent_element'));
-        } else if (parent.type !== 'BuildingElementOpaque' && parent.type !== 'BuildingElementTransparent') {
-          issues.push(geo('Parent must be wall or window', 'parent_element'));
+        const parentMatches = findNamedElements(ventsElement.parent_element, ventParents);
+        if (parentMatches.length === 0) {
+          issues.push(geo(findNamedElements(ventsElement.parent_element).length > 0
+            ? 'Parent must be wall or window' : 'Parent not found', 'parent_element'));
+        } else if (parentMatches.length > 1) {
+          issues.push(geo('Parent reference is ambiguous', 'parent_element'));
         }
       }
       if (complianceValidationEnabled) appendPartFIssuesForElement(ventsElement.id);
@@ -1476,11 +1494,12 @@ export const validateElementCore = (
         if (!canMechanicalVentilationInheritHostPlacement(mechVentElement.vent_type)) {
           warnings.push(geo('Parent only applies to hosted MEV fan types', 'parent_element'));
         } else if (elementsById) {
-          const parent = Object.values(elementsById).find(e => e.name === parentName);
-          if (!parent) {
-            issues.push(geo('Parent not found', 'parent_element'));
-          } else if (parent.type !== 'BuildingElementOpaque' && parent.type !== 'BuildingElementTransparent') {
-            issues.push(geo('Parent must be wall or window', 'parent_element'));
+          const parentMatches = findNamedElements(parentName, ventParents);
+          if (parentMatches.length === 0) {
+            issues.push(geo(findNamedElements(parentName).length > 0
+              ? 'Parent must be wall or window' : 'Parent not found', 'parent_element'));
+          } else if (parentMatches.length > 1) {
+            issues.push(geo('Parent reference is ambiguous', 'parent_element'));
           }
         }
       }

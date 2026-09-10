@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, Floor } from '../geometry/types';
+import { WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR } from './overrideProvenance';
 
 export function windowSecurityRiskDefaultForStorey(storey: number | undefined): boolean {
   return storey === 0;
@@ -32,6 +33,28 @@ function readExtraJson(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function withAutomaticSecurityRisk(
+  element: Element,
+  extraJson: Record<string, unknown>,
+  value: boolean,
+): Element {
+  return {
+    ...element,
+    extra_json: { ...extraJson, security_risk: value },
+  };
+}
+
+function withManualSecurityRisk(
+  element: Element,
+  extraJson: Record<string, unknown>,
+): Element {
+  return {
+    ...element,
+    _windowSecurityRiskUserOverride: WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.positiveSense,
+    extra_json: extraJson,
+  };
+}
+
 export function windowSecurityRiskDefaultForElement(
   element: Pick<Element, 'coordinates' | 'floorId'> | undefined,
   floors: Pick<Floor, 'id' | 'zIndex'>[] = [],
@@ -50,13 +73,19 @@ export function syncWindowSecurityRiskForStorey(
   const nextDefault = windowSecurityRiskDefaultForStorey(nextStorey);
   const nextExtra = readExtraJson(nextElement.extra_json);
   const hasNextValue = Object.prototype.hasOwnProperty.call(nextExtra, 'security_risk');
+  const nextOverride = nextElement[WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.flag];
+  const nextMarker = nextExtra[WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.key] === WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.positiveSense;
+
+  // A typed false flag is an explicit reset-to-auto. A legacy/persisted positive marker remains
+  // authoritative only while the typed flag is absent; this lets a reset remove a stale marker
+  // on the next export without allowing it to re-enable the override in-session.
+  if (nextOverride === WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.positiveSense || (nextOverride === undefined && nextMarker)) {
+    return nextElement;
+  }
 
   if (!previousElement || previousElement.type !== 'BuildingElementTransparent') {
-    if (hasNextValue) return nextElement;
-    return {
-      ...nextElement,
-      extra_json: { ...nextExtra, security_risk: nextDefault },
-    };
+    if (hasNextValue && nextOverride !== false) return withManualSecurityRisk(nextElement, nextExtra);
+    return withAutomaticSecurityRisk(nextElement, nextExtra, nextDefault);
   }
 
   const prevStorey = resolveElementStorey(previousElement, floors);
@@ -64,18 +93,24 @@ export function syncWindowSecurityRiskForStorey(
   const prevExtra = readExtraJson(previousElement.extra_json);
   const prevValue = prevExtra.security_risk;
 
-  if (hasNextValue && nextExtra.security_risk !== prevValue) {
-    return nextElement;
+  if (nextOverride === false) {
+    return withAutomaticSecurityRisk(nextElement, nextExtra, nextDefault);
   }
+
+  if (hasNextValue && nextExtra.security_risk !== prevValue) {
+    return withManualSecurityRisk(nextElement, nextExtra);
+  }
+
+  const previousOverride =
+    previousElement[WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.flag];
+  if (previousOverride === WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.positiveSense) return nextElement;
+  if (previousOverride === false) return withAutomaticSecurityRisk(nextElement, nextExtra, nextDefault);
 
   const prevValueWasAuto =
     !Object.prototype.hasOwnProperty.call(prevExtra, 'security_risk') ||
     prevValue === prevDefault;
 
-  if (!prevValueWasAuto) return nextElement;
+  if (!prevValueWasAuto) return withManualSecurityRisk(nextElement, nextExtra);
 
-  return {
-    ...nextElement,
-    extra_json: { ...nextExtra, security_risk: nextDefault },
-  };
+  return withAutomaticSecurityRisk(nextElement, nextExtra, nextDefault);
 }

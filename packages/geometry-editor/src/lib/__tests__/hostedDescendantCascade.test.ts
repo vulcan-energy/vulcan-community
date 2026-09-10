@@ -540,7 +540,148 @@ describe('cascadeHostedDescendantGeometry', () => {
 });
 
 describe('hosted descendant translation cascade', () => {
-  it('collects hosted descendants recursively through generic parent links', () => {
+  it('keeps global MVHR parent links scoped to the ventilation unit type', () => {
+    const mvhr = {
+      id: 'mvhr',
+      name: 'Shared name',
+      type: 'MechanicalVentilation',
+      vent_type: 'MVHR',
+      coordinates: [{ x: 0, y: 0, z: 0 }],
+      parent_element: null,
+    } as Element;
+    const sameNamedWall = {
+      id: 'wall',
+      name: 'Shared name',
+      zoneId: 'zone-a',
+      type: 'BuildingElementOpaque',
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      parent_element: null,
+    } as Element;
+    const duct = {
+      id: 'duct',
+      name: 'Duct',
+      type: 'MechanicalVentilationDuctwork',
+      parent_element: 'Shared name',
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }],
+    } as Element;
+    const terminal = {
+      id: 'terminal',
+      name: 'Terminal',
+      type: 'MechanicalVentilationTerminal',
+      parent_element: 'Shared name',
+      host_element: null,
+      coordinates: [{ x: 0, y: 0, z: 0 }],
+    } as Element;
+    const all = elementsById([mvhr, sameNamedWall, duct, terminal]);
+
+    expect(collectHostedDescendantElementIds(all, mvhr.id)).toEqual(['duct', 'terminal']);
+    expect(collectHostedDescendantElementIds(all, sameNamedWall.id)).toEqual([]);
+  });
+
+  it('resolves a global Vents parent by eligible wall type despite an unrelated same-name object', () => {
+    const wall = {
+      id: 'wall',
+      name: 'Shared name',
+      zoneId: 'zone-a',
+      type: 'BuildingElementOpaque',
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      parent_element: null,
+    } as Element;
+    const unrelatedGlobal = {
+      id: 'system',
+      name: 'Shared name',
+      type: 'System',
+      coordinates: [{ x: 0, y: 0, z: 0 }],
+      parent_element: null,
+    } as Element;
+    const vent = {
+      id: 'vent',
+      name: 'Vent',
+      type: 'Vents',
+      parent_element: 'Shared name',
+      coordinates: [{ x: 1, y: 0, z: 0 }],
+    } as Element;
+
+    expect(collectHostedDescendantElementIds(elementsById([wall, unrelatedGlobal, vent]), wall.id)).toEqual(['vent']);
+  });
+
+  it('leaves a global child unmoved when duplicate wall names make its parent ambiguous', () => {
+    const wallA = {
+      id: 'wall-a',
+      name: 'Wall',
+      zoneId: 'zone-a',
+      type: 'BuildingElementOpaque',
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      parent_element: null,
+    } as Element;
+    const wallB = { ...wallA, id: 'wall-b', zoneId: 'zone-b' } as Element;
+    const vent = {
+      id: 'vent',
+      name: 'Vent',
+      type: 'Vents',
+      parent_element: 'Wall',
+      coordinates: [{ x: 1, y: 0, z: 0 }],
+    } as Element;
+    const previousElementsById = elementsById([wallA, wallB, vent]);
+    const nextElementsById = {
+      ...previousElementsById,
+      'wall-a': {
+        ...wallA,
+        coordinates: [{ x: 5, y: 0, z: 0 }, { x: 9, y: 0, z: 0 }],
+      },
+    } as Record<string, Element>;
+
+    const result = cascadeHostedDescendantTranslation({
+      previousElementsById,
+      nextElementsById,
+      changedElementIds: ['wall-a'],
+    });
+
+    expect(result.elementsById.vent.coordinates).toEqual(vent.coordinates);
+    expect(result.changedElementIds).toEqual(new Set(['wall-a']));
+  });
+
+  it('keeps a zoned window attached to the matching same-name wall', () => {
+    const wallA = {
+      id: 'wall-a',
+      name: 'Wall',
+      zoneId: 'zone-a',
+      type: 'BuildingElementOpaque',
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      parent_element: null,
+    } as Element;
+    const wallB = { ...wallA, id: 'wall-b', zoneId: 'zone-b' } as Element;
+    const window = {
+      id: 'window',
+      name: 'Window',
+      zoneId: 'zone-a',
+      type: 'BuildingElementTransparent',
+      parent_element: 'Wall',
+      coordinates: [{ x: 1, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }],
+    } as Element;
+    const previousElementsById = elementsById([wallA, wallB, window]);
+    const nextElementsById = {
+      ...previousElementsById,
+      'wall-a': {
+        ...wallA,
+        coordinates: [{ x: 5, y: 0, z: 0 }, { x: 9, y: 0, z: 0 }],
+      },
+    } as Record<string, Element>;
+
+    const result = cascadeHostedDescendantTranslation({
+      previousElementsById,
+      nextElementsById,
+      changedElementIds: ['wall-a'],
+    });
+
+    expect(result.elementsById.window.coordinates).toEqual([
+      { x: 6, y: 0, z: 0 },
+      { x: 7, y: 0, z: 0 },
+    ]);
+    expect(result.changedElementIds).toEqual(new Set(['wall-a', 'window']));
+  });
+
+  it('does not collect a duct whose parent link has an ineligible type', () => {
     const host = {
       id: 'roof',
       name: 'Roof',
@@ -586,7 +727,6 @@ describe('hosted descendant translation cascade', () => {
     expect(collectHostedDescendantElementIds(elementsById([host, opening, vent, duct]), 'roof')).toEqual([
       'opening',
       'vent',
-      'duct',
     ]);
   });
 

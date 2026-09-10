@@ -3,6 +3,54 @@
 
 import type { Element } from '../geometry/types';
 
+/** Resolve a unique name within the requested zone, or globally for unscoped links. */
+export function createElementNameLookup(elements: Iterable<Element>) {
+  const byName = new Map<string, Element[]>();
+  for (const element of elements) {
+    const name = element.name?.trim();
+    if (!name) continue;
+    const matches = byName.get(name) ?? [];
+    matches.push(element);
+    byName.set(name, matches);
+  }
+  return (
+    name: string | null | undefined,
+    zoneId?: string | null,
+    eligible?: (element: Element) => boolean,
+  ): Element | undefined => {
+    if (!name?.trim()) return undefined;
+    const matches = byName.get(name.trim()) ?? [];
+    const candidates = matches.filter((element) =>
+      (!zoneId || element.zoneId === zoneId) && (!eligible || eligible(element)),
+    );
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
+}
+
+/** Parent links on ventilation equipment are global; opening links belong to a zone. */
+export function createParentElementLookup(elements: Iterable<Element>) {
+  const resolveName = createElementNameLookup(elements);
+  return (child: Element): Element | undefined => {
+    switch (child.type) {
+      case 'BuildingElementOpaque':
+      case 'BuildingElementTransparent':
+        return resolveName(child.parent_element, child.zoneId, (parent) => parent.type === 'BuildingElementOpaque');
+      case 'WindowShading':
+        return resolveName(child.parent_element, child.zoneId, (parent) => parent.type === 'BuildingElementTransparent');
+      case 'MechanicalVentilationDuctwork':
+      case 'MechanicalVentilationTerminal':
+        return resolveName(child.parent_element, undefined, (parent) => parent.type === 'MechanicalVentilation');
+      case 'MechanicalVentilation':
+      case 'Vents':
+        return resolveName(child.parent_element, undefined, (parent) =>
+          parent.type === 'BuildingElementOpaque' || parent.type === 'BuildingElementTransparent',
+        );
+      default:
+        return resolveName(child.parent_element, child.zoneId);
+    }
+  };
+}
+
 type ElementWithNameRefs = Element & {
   _v?: number;
   space_heat_system?: string;
@@ -55,6 +103,7 @@ const normalizedRenameEntries = (renamePlan: ElementRenameEntry[]): ElementRenam
 
 const groupRenameEntriesByOldName = (
   renamePlan: ElementRenameEntry[],
+  elementsById?: Record<string, Element>,
 ): Map<string, ElementRenameEntry[]> => {
   const groups = new Map<string, ElementRenameEntry[]>();
   for (const entry of normalizedRenameEntries(renamePlan)) {
@@ -62,6 +111,28 @@ const groupRenameEntriesByOldName = (
     existing.push(entry);
     groups.set(entry.from, existing);
   }
+
+  // Keep an identity entry for an unrenamed element that still owns an old
+  // name. A unique rename target is global only when no same-name element
+  // remains; otherwise references must be resolved by the owner's scope.
+  if (elementsById) {
+    const renamedElementIds = new Set(
+      normalizedRenameEntries(renamePlan).map((entry) => entry.elementId),
+    );
+    for (const element of Object.values(elementsById)) {
+      const name = element.name.trim();
+      const entries = groups.get(name);
+      if (!entries || renamedElementIds.has(element.id)) continue;
+      entries.push({
+        elementId: element.id,
+        from: name,
+        to: name,
+        zoneId: element.zoneId,
+        type: element.type,
+      });
+    }
+  }
+
   return groups;
 };
 
@@ -130,6 +201,30 @@ const buildScopedNameMapForElement = (
   return scopedMap;
 };
 
+const buildPreRenameElementsById = (
+  elementsById: Record<string, Element>,
+  renamePlan: ElementRenameEntry[],
+): Record<string, Element> => {
+  const oldElementsById = { ...elementsById };
+  for (const entry of normalizedRenameEntries(renamePlan)) {
+    const current = oldElementsById[entry.elementId];
+    oldElementsById[entry.elementId] = current
+      ? { ...current, name: entry.from }
+      : ({
+          id: entry.elementId,
+          name: entry.from,
+          type: entry.type ?? 'BuildingElementOpaque',
+          zoneId: entry.zoneId,
+          coordinates: [],
+          parent_element: null,
+          width: 0,
+          height: 0,
+          area: 0,
+        } as Element);
+  }
+  return oldElementsById;
+};
+
 const remapDormerBundle = (
   bundle: unknown,
   renameMap: Map<string, string>,
@@ -164,18 +259,16 @@ const remapDormerBundle = (
 export const remapElementNameReferences = (
   element: Element,
   renameMap: Map<string, string>,
+  nextParent = resolveName(element.parent_element, renameMap),
+  nextHost = resolveName((element as ElementWithNameRefs).host_element, renameMap),
 ): Element => {
-  if (renameMap.size === 0) return element;
-
   const patch: Partial<ElementWithNameRefs> = {};
 
-  const nextParent = resolveName(element.parent_element, renameMap);
   if (nextParent !== element.parent_element) {
     patch.parent_element = nextParent as string | null;
   }
 
   const elementWithRefs = element as ElementWithNameRefs;
-  const nextHost = resolveName(elementWithRefs.host_element, renameMap);
   if (nextHost !== elementWithRefs.host_element) {
     patch.host_element = nextHost as string | null;
   }
@@ -237,17 +330,16 @@ export const applyElementNameMapToElementsById = (
 
 export const buildUnambiguousElementNameMap = (
   renamePlan: ElementRenameEntry[],
-  _elementsById: Record<string, Element>,
+  elementsById: Record<string, Element>,
   _elementIds: string[],
 ): UnambiguousNameMapResult => {
-  void _elementsById;
   void _elementIds;
   const nameMap = new Map<string, string>();
   let skippedAmbiguousNameCount = 0;
 
-  for (const [from, entries] of groupRenameEntriesByOldName(renamePlan)) {
+  for (const [from, entries] of groupRenameEntriesByOldName(renamePlan, elementsById)) {
     const uniqueTargets = [...new Set(entries.map((entry) => entry.to))];
-    if (uniqueTargets.length === 1) {
+    if (uniqueTargets.length === 1 && uniqueTargets[0] !== from) {
       nameMap.set(from, uniqueTargets[0]);
     } else {
       skippedAmbiguousNameCount += 1;
@@ -262,7 +354,7 @@ export const applyElementRenamePlanToElementsById = (
   elementIds: string[],
   renamePlan: ElementRenameEntry[],
 ): RenamePlanResult => {
-  const groups = groupRenameEntriesByOldName(renamePlan);
+  const groups = groupRenameEntriesByOldName(renamePlan, elementsById);
   if (groups.size === 0) {
     return { elementsById, changed: false, warnings: [] };
   }
@@ -270,13 +362,33 @@ export const applyElementRenamePlanToElementsById = (
   let nextElementsById = elementsById;
   let changed = false;
   const warnings: string[] = [];
+  const oldElementsById = buildPreRenameElementsById(elementsById, renamePlan);
+  const renameTargetById = new Map(
+    normalizedRenameEntries(renamePlan).map((entry) => [entry.elementId, entry.to]),
+  );
+  const resolveOldParent = createParentElementLookup(Object.values(oldElementsById));
+  const resolveOldHost = createElementNameLookup(
+    Object.values(oldElementsById).filter((candidate) =>
+      candidate.type === 'BuildingElementOpaque' || candidate.type === 'BuildingElementTransparent',
+    ),
+  );
 
   for (const elementId of elementIds) {
     const element = elementsById[elementId];
     if (!element) continue;
 
     const scopedNameMap = buildScopedNameMapForElement(element, groups, warnings);
-    const nextElement = remapElementNameReferences(element, scopedNameMap);
+    const oldElement = oldElementsById[elementId] ?? element;
+    const parent = resolveOldParent(oldElement);
+    const host = oldElement.type === 'MechanicalVentilationTerminal'
+      ? resolveOldHost(oldElement.host_element)
+      : undefined;
+    const nextElement = remapElementNameReferences(
+      element,
+      scopedNameMap,
+      parent ? renameTargetById.get(parent.id) ?? parent.name : element.parent_element,
+      host ? renameTargetById.get(host.id) ?? host.name : (element as ElementWithNameRefs).host_element,
+    );
     if (nextElement === element) continue;
 
     if (!changed) {

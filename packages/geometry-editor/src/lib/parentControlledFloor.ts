@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, Floor } from '../geometry/types';
+import { createElementNameLookup, createParentElementLookup } from './elementNameRemap';
 import { getElementCanvasFloorZValue } from './elementCanvasFloor';
 import { canMechanicalVentilationInheritHostPlacement } from './mechanicalVentilationBranches';
 import { isMvhrTerminalHost } from './mvhrDuctwork';
@@ -48,7 +49,10 @@ export function getFloorControlParentElement(
   if (!element) return null;
   const parentName = normalizedFloorControlParentName(element);
   if (!parentName) return null;
-  const parent = Object.values(elementsById).find((candidate) => candidate.name === parentName);
+  const elements = Object.values(elementsById);
+  const parent = element.type === 'MechanicalVentilationTerminal'
+    ? createElementNameLookup(elements)(parentName, undefined, isMvhrTerminalHost)
+    : createParentElementLookup(elements)(element);
   if (!parent || parent.id === element.id) return null;
   return isFloorControlledChildOf(element, parent) ? parent : null;
 }

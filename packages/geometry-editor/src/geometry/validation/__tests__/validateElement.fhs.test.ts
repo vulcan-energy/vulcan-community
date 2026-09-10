@@ -3,7 +3,15 @@
 
 import { describe, expect, it } from 'vitest';
 import { unavailableGeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
-import type { Appliance, BuildingElementTransparent, Element, Floor } from '../../types';
+import type {
+  Appliance,
+  BuildingElementOpaque,
+  BuildingElementTransparent,
+  Element,
+  Floor,
+  MechanicalVentilation,
+  MechanicalVentilationTerminal,
+} from '../../types';
 import {
   collectGeometryValidation,
   validateElementCore,
@@ -56,6 +64,52 @@ function refrigerationAppliance(): Appliance {
     parent_element: null,
     coordinates: [{ x: 0, y: 0, z: 0 }],
     isPlaceholder: false,
+  };
+}
+
+function mvhrUnit(id = 'mvhr-1', name = 'MVHR 1'): MechanicalVentilation {
+  return {
+    id,
+    name,
+    type: 'MechanicalVentilation',
+    vent_type: 'MVHR',
+    parent_element: null,
+    coordinates: [{ x: 0, y: 0, z: 0 }],
+    isPlaceholder: false,
+  } as MechanicalVentilation;
+}
+
+function terminalHost(id: string, name: string, zoneId: string): BuildingElementOpaque {
+  return {
+    id,
+    name,
+    zoneId,
+    type: 'BuildingElementOpaque',
+    is_external_door: false,
+    coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+    parent_element: null,
+    isPlaceholder: false,
+  } as BuildingElementOpaque;
+}
+
+function hostedTerminal(hostName: string, parentName = 'MVHR 1'): MechanicalVentilationTerminal {
+  return {
+    id: 'terminal-1',
+    name: 'Intake terminal',
+    type: 'MechanicalVentilationTerminal',
+    terminal_type: 'intake',
+    parent_element: parentName,
+    host_element: hostName,
+    coordinates: [{ x: 1, y: 0, z: 1 }],
+    isPlaceholder: false,
+  } as MechanicalVentilationTerminal;
+}
+
+function validationContext(elements: Element[]) {
+  return {
+    schemaPort: unavailableGeometrySchemaPort,
+    elementsById: Object.fromEntries(elements.map((element) => [element.id, element])),
+    complianceValidationEnabled: false,
   };
 }
 
@@ -130,6 +184,50 @@ describe('FHS window base-height validation', () => {
     expect(
       result.issues.some((issue) => issue.message.includes('ventilation zone base height')),
     ).toBe(false);
+  });
+});
+
+describe('name-scoped hosted validation', () => {
+  it('resolves a unique MVHR unit and wall when an unrelated global name collides', () => {
+    const terminal = hostedTerminal('Wall A', 'Shared name');
+    const wall = terminalHost('wall-a', 'Wall A', 'zone-a');
+    const sameNamedWall = terminalHost('shared-wall', 'Shared name', 'zone-a');
+    const unrelatedGlobal = {
+      id: 'global-wall-a',
+      name: 'Wall A',
+      type: 'System',
+      parent_element: null,
+      coordinates: [{ x: 0, y: 0, z: 0 }],
+    } as unknown as Element;
+    const result = validateElementCore(terminal, validationContext([
+      terminal,
+      mvhrUnit('mvhr-1', 'Shared name'),
+      wall,
+      sameNamedWall,
+      unrelatedGlobal,
+    ]));
+
+    expect(result.issues).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ message: 'MVHR unit reference is ambiguous' }),
+      expect.objectContaining({ message: 'Mounted host reference is ambiguous' }),
+      expect.objectContaining({ message: 'Mounted host not found' }),
+    ]));
+    expect(result.issues.some((issue) => issue.message.includes('must resolve from the mounted host'))).toBe(false);
+  });
+
+  it('reports an ambiguous host when two eligible walls share the referenced name', () => {
+    const terminal = hostedTerminal('Wall A');
+    const result = validateElementCore(terminal, validationContext([
+      terminal,
+      mvhrUnit(),
+      terminalHost('wall-a', 'Wall A', 'zone-a'),
+      terminalHost('wall-b', 'Wall A', 'zone-b'),
+    ]));
+
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      message: expect.stringContaining('Mounted host reference is ambiguous'),
+      fieldKey: 'host_element',
+    }));
   });
 });
 

@@ -7,6 +7,7 @@ import { elevationAtSlopedVertexM } from './geometry3dSloped';
 import { slopeHingeContourSegment } from './slopePitchAxis';
 import { getElementShape } from './shapeUtils';
 import { projectSegmentOntoParent } from './snapUtils';
+import { createParentElementLookup } from './elementNameRemap';
 
 export type Geometry3DElevationMode = 'coordinates-z' | 'base_height' | '_base_height' | 'unheated-pitched-roof-ceiling';
 
@@ -349,8 +350,7 @@ export function projectParentConstrainedLineCoordinates(
   elementsById: Record<string, Element>,
 ): Array<{ x: number; y: number; z: number }> {
   if (!isParentConstrainedLineElement(element) || coordinates.length !== 2) return coordinates;
-  const parentName = ((element as { parent_element?: unknown }).parent_element as string).trim();
-  const parent = Object.values(elementsById).find((candidate) => candidate?.name === parentName);
+  const parent = createParentElementLookup(Object.values(elementsById))(element);
   if (!parent?.coordinates || parent.coordinates.length !== 2) return coordinates;
   return projectSegmentOntoParent(coordinates, parent.coordinates);
 }

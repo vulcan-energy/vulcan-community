@@ -68,6 +68,44 @@ describe('floor mutation invariants', () => {
     expect(store.getState().elementsById[windowId].extra_json?.security_risk).toBe(false);
   });
 
+  it('migrates a legacy manual security-risk value before CSV save and floor round-trip', () => {
+    const { store } = seedWindow(false, false);
+    const legacyCsv = store.getState()
+      .generateCSV()
+      .replace('ProvenanceMarkers,3', 'ProvenanceMarkers,2')
+      .replace(',""_window_security_risk_user_override"":true', '');
+    expect(legacyCsv).not.toContain('_window_security_risk_user_override');
+
+    const reloaded = createGeometryStore({ defaultDefaultsPath: null });
+    reloaded.getState().loadFromCSV(legacyCsv);
+    const loadedWindowId = reloaded.getState().elementIds.find(
+      (id) => reloaded.getState().elementsById[id].name === 'Window',
+    )!;
+    const loadedWindow = reloaded.getState().elementsById[loadedWindowId];
+
+    expect(loadedWindow._windowSecurityRiskUserOverride).toBe(true);
+    const savedAgain = reloaded.getState().generateCSV();
+    expect(savedAgain).toContain('ProvenanceMarkers,3');
+    expect(savedAgain).toContain('_window_security_risk_user_override');
+
+    const savedReload = createGeometryStore({ defaultDefaultsPath: null });
+    savedReload.getState().loadFromCSV(savedAgain);
+    const savedReloadWindowId = savedReload.getState().elementIds.find(
+      (id) => savedReload.getState().elementsById[id].name === 'Window',
+    )!;
+    const savedReloadWindow = savedReload.getState().elementsById[savedReloadWindowId];
+    expect(savedReloadWindow._windowSecurityRiskUserOverride).toBe(true);
+
+    savedReload.getState().updateElement(savedReloadWindowId, {
+      coordinates: savedReloadWindow.coordinates.map((point) => ({ ...point, z: 1 })),
+    });
+    expect(savedReload.getState().elementsById[savedReloadWindowId].extra_json?.security_risk).toBe(false);
+    savedReload.getState().updateElement(savedReloadWindowId, {
+      coordinates: savedReloadWindow.coordinates.map((point) => ({ ...point, z: 0 })),
+    });
+    expect(savedReload.getState().elementsById[savedReloadWindowId].extra_json?.security_risk).toBe(false);
+  });
+
   it('cascades changes to wall-derived storey heights after a floor move', () => {
     const { store, wallId, windowId } = seedWindow(false);
     store.setState({ floors: store.getState().floors.map((floor) => ({ ...floor, height: 0 })) });

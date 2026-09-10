@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, Floor, MechanicalVentilation } from '../geometry/types';
+import { createParentElementLookup } from './elementNameRemap';
 import {
   applyMechanicalVentilationCsvPositionColumns,
   canMechanicalVentilationInheritHostPlacement,
@@ -19,49 +20,25 @@ export type HostedDescendantCascadeResult = {
 
 const COORDINATE_TRANSLATION_EPSILON = 1e-9;
 
-function normalizedElementName(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function normalizedParentElementName(element: Element | undefined): string {
-  return normalizedElementName((element as { parent_element?: unknown } | undefined)?.parent_element);
-}
-
-function parentLinkNames(previousParent: Element | undefined, nextParent: Element | undefined): Set<string> {
-  return new Set(
-    [previousParent?.name, nextParent?.name]
-      .map(normalizedElementName)
-      .filter(Boolean),
-  );
-}
-
-function buildChildrenByParentName(elementsById: Record<string, Element>): Map<string, string[]> {
-  const childrenByParentName = new Map<string, string[]>();
-  for (const element of Object.values(elementsById)) {
-    const parentName = normalizedParentElementName(element);
-    if (!parentName) continue;
-    const childIds = childrenByParentName.get(parentName) ?? [];
-    childIds.push(element.id);
-    childrenByParentName.set(parentName, childIds);
+function buildChildrenByParentId(
+  elementsById: Record<string, Element>,
+  previousElementsById: Record<string, Element> = elementsById,
+): Map<string, string[]> {
+  // A renamed host still owns children whose reference has not been rewritten yet.
+  const aliases = Object.values(previousElementsById).flatMap((previous) => {
+    const next = elementsById[previous.id];
+    return next && previous.name !== next.name ? [{ ...next, name: previous.name }] : [];
+  });
+  const resolveParent = createParentElementLookup([...Object.values(elementsById), ...aliases]);
+  const childrenByParentId = new Map<string, string[]>();
+  for (const child of Object.values(elementsById)) {
+    const parent = resolveParent(child);
+    if (!parent || parent.id === child.id) continue;
+    const children = childrenByParentId.get(parent.id) ?? [];
+    children.push(child.id);
+    childrenByParentId.set(parent.id, children);
   }
-  return childrenByParentName;
-}
-
-function childIdsForParentNames(
-  childrenByParentName: Map<string, string[]>,
-  parentNames: Iterable<string>,
-): string[] {
-  const childIds: string[] = [];
-  const seen = new Set<string>();
-  for (const parentName of parentNames) {
-    const ids = childrenByParentName.get(parentName) ?? [];
-    for (const id of ids) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      childIds.push(id);
-    }
-  }
-  return childIds;
+  return childrenByParentId;
 }
 
 function uniformCoordinateTranslation(
@@ -123,7 +100,7 @@ export function collectHostedDescendantElementIds(
   elementsById: Record<string, Element>,
   parentId: string,
 ): string[] {
-  const childrenByParentName = buildChildrenByParentName(elementsById);
+  const childrenByParentId = buildChildrenByParentId(elementsById);
   const descendantIds: string[] = [];
   const queuedParentIds = [parentId];
   const processedParentIds = new Set<string>();
@@ -136,10 +113,7 @@ export function collectHostedDescendantElementIds(
 
     const parent = elementsById[currentParentId];
     if (!parent) continue;
-    const parentNames = parentLinkNames(parent, parent);
-    if (parentNames.size === 0) continue;
-
-    for (const childId of childIdsForParentNames(childrenByParentName, parentNames)) {
+    for (const childId of childrenByParentId.get(currentParentId) ?? []) {
       if (childId === currentParentId || processedParentIds.has(childId) || seenDescendantIds.has(childId)) {
         continue;
       }
@@ -432,7 +406,7 @@ export function cascadeHostedDescendantGeometry({
 }): HostedDescendantCascadeResult {
   let elementsById = nextElementsById;
   const changedIds = new Set(changedElementIds);
-  let childrenByParentName: Map<string, string[]> | null = null;
+  let childrenByParentId: Map<string, string[]> | null = null;
   const queue = Array.from(changedIds);
   const processedParents = new Set<string>();
 
@@ -447,11 +421,9 @@ export function cascadeHostedDescendantGeometry({
     const nextParentCoords = getLineHostCoordinates(nextParent);
     if (!nextParentCoords) continue;
     const previousParentCoords = getLineHostCoordinates(previousParent) ?? nextParentCoords;
-    const parentNames = parentLinkNames(previousParent, nextParent);
-    if (parentNames.size === 0) continue;
-    childrenByParentName ??= buildChildrenByParentName(nextElementsById);
+    childrenByParentId ??= buildChildrenByParentId(nextElementsById, previousElementsById);
 
-    for (const childId of childIdsForParentNames(childrenByParentName, parentNames)) {
+    for (const childId of childrenByParentId.get(parentId) ?? []) {
       if (childId === parentId) continue;
       const child = elementsById[childId];
       if (!child) continue;
@@ -509,7 +481,7 @@ export function cascadeHostedDescendantTranslation({
 }): HostedDescendantCascadeResult {
   let elementsById = nextElementsById;
   const changedIds = new Set(changedElementIds);
-  const childrenByParentName = buildChildrenByParentName(nextElementsById);
+  const childrenByParentId = buildChildrenByParentId(nextElementsById, previousElementsById);
   const queue = Array.from(changedIds)
     .map((parentId) => ({
       parentId,
@@ -528,11 +500,7 @@ export function cascadeHostedDescendantTranslation({
 
     const nextParent = elementsById[parentId];
     if (!nextParent) continue;
-    const previousParent = previousElementsById[parentId] ?? nextParent;
-    const parentNames = parentLinkNames(previousParent, nextParent);
-    if (parentNames.size === 0) continue;
-
-    for (const childId of childIdsForParentNames(childrenByParentName, parentNames)) {
+    for (const childId of childrenByParentId.get(parentId) ?? []) {
       if (childId === parentId || processedParents.has(childId)) continue;
       const child = elementsById[childId];
       if (!child) continue;

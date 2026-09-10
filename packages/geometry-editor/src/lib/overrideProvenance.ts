@@ -66,6 +66,13 @@ export const GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR = {
   since: 2,
 } as const satisfies OverrideDescriptor;
 
+export const WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR = {
+  flag: '_windowSecurityRiskUserOverride',
+  key: '_window_security_risk_user_override',
+  positiveSense: true,
+  since: 3,
+} as const satisfies OverrideDescriptor;
+
 export const ZONE_FLOOR_AREA_OVERRIDE_DESCRIPTOR = {
   flag: '_floorAreaUserOverride',
   key: '_floor_area_user_override',
@@ -117,6 +124,7 @@ export const PARSE_PROMOTED_ELEMENT_OVERRIDE_DESCRIPTORS = [
   SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR,
   ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR,
   GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR,
+  WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR,
 ] as const satisfies readonly OverrideDescriptor[];
 
 /**
@@ -133,6 +141,7 @@ export const OVERRIDE_PROVENANCE_REGISTRY = {
     PV_ORIENTATION_OVERRIDE_DESCRIPTOR,
     ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR,
     GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR,
+    WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR,
   ],
   zone: [
     ZONE_FLOOR_AREA_OVERRIDE_DESCRIPTOR,

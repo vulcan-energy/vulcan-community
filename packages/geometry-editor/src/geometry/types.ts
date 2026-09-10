@@ -128,6 +128,8 @@ export interface BaseElement {
   _widthUserOverride?: boolean;
   /** Internal UX state: drawn sloped-polygon height is no longer auto-synced to the canvas. */
   _heightUserOverride?: boolean;
+  /** Internal UX state: window security risk was explicitly authored rather than storey-derived. */
+  _windowSecurityRiskUserOverride?: boolean;
   zoneId?: string; // Made optional for global objects
   type: ElementType;
   isPlaceholder?: boolean;

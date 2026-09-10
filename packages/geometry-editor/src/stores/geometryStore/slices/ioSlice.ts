@@ -72,6 +72,7 @@ import {
   ingestThermalBridgeLinearPostParse,
   resolveThermalBridgeLinearFloorIdAfterHostsReady,
 } from '../../../lib/thermalBridgeFloorIngest';
+import { createElementNameLookup } from '../../../lib/elementNameRemap';
 import {
   encodePromotedExtraJsonFields,
   EXPECTED_SECTION_HEADERS,
@@ -88,6 +89,7 @@ import {
   getMechanicalVentilationExtraJsonForCsv,
 } from '../../../lib/mechanicalVentilationBranches';
 import { syncSpaceHeatSystemZoneNameInExtraJson } from '../../../lib/spaceHeatSystemSync';
+import { windowSecurityRiskDefaultForElement } from '../../../lib/windowSecurityRisk';
 import { collectDuplicateElementNameWarnings } from '../../../lib/elementNameDuplicates';
 import { buildHistoryDocumentSnapshotFromState } from '../../../lib/geometryHistorySnapshot';
 import { isMvhrTerminalHost } from '../../../lib/mvhrDuctwork';
@@ -100,6 +102,7 @@ import {
   FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
   FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR,
   GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR,
+  WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR,
   OVERRIDE_PROVENANCE_REGISTRY,
   PROVENANCE_MARKERS_METADATA_KEY,
   PV_HOST_OVERRIDE_DESCRIPTORS,
@@ -216,11 +219,6 @@ function normalizedElementRefName(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function findImportedElementByName(elements: Element[], name: string): Element | undefined {
-  if (!name) return undefined;
-  return elements.find((candidate) => candidate.name === name);
-}
-
 function importedElementStorey(
   element: Element | undefined,
   floors: GeometryState['floors'],
@@ -230,15 +228,15 @@ function importedElementStorey(
 
 function resolveMechanicalVentilationDuctworkStoreyForCsvLoad(
   ductwork: ElementByType<'MechanicalVentilationDuctwork'>,
-  elements: Element[],
+  mechanicalVentilationByName: ReturnType<typeof createElementNameLookup>,
   floors: GeometryState['floors'],
 ): number {
   const explicitStorey = getThermalBridgeExtraJsonFloorStorey(ductwork, floors);
   if (explicitStorey !== undefined) return explicitStorey;
 
   const parentName = normalizedElementRefName(ductwork.parent_element);
-  const parent = findImportedElementByName(elements, parentName);
-  if (parent?.type === 'MechanicalVentilation') {
+  const parent = mechanicalVentilationByName(parentName);
+  if (parent) {
     const parentStorey = importedElementStorey(parent, floors);
     if (parentStorey !== undefined) return parentStorey;
   }
@@ -248,19 +246,20 @@ function resolveMechanicalVentilationDuctworkStoreyForCsvLoad(
 
 function resolveMechanicalVentilationTerminalStoreyForCsvLoad(
   terminal: ElementByType<'MechanicalVentilationTerminal'>,
-  elements: Element[],
+  terminalHostByName: ReturnType<typeof createElementNameLookup>,
+  mechanicalVentilationByName: ReturnType<typeof createElementNameLookup>,
   floors: GeometryState['floors'],
 ): number {
   const hostName = normalizedElementRefName(terminal.host_element);
-  const host = findImportedElementByName(elements, hostName);
-  if (host?.type === 'BuildingElementOpaque' || host?.type === 'BuildingElementTransparent') {
+  const host = terminalHostByName(hostName);
+  if (host) {
     const hostStorey = importedElementStorey(host, floors);
     if (hostStorey !== undefined) return hostStorey;
   }
 
   const parentName = normalizedElementRefName(terminal.parent_element);
-  const parent = findImportedElementByName(elements, parentName);
-  if (parent?.type === 'MechanicalVentilation') {
+  const parent = mechanicalVentilationByName(parentName);
+  if (parent) {
     const parentStorey = importedElementStorey(parent, floors);
     if (parentStorey !== undefined) return parentStorey;
   }
@@ -1870,6 +1869,16 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
     get().replaceComplianceSettings(importedSettings);
 
+    const importedMechanicalVentilationByName = createElementNameLookup(
+      newElements.filter((element) => element.type === 'MechanicalVentilation'),
+    );
+    const importedTerminalHostByName = createElementNameLookup(
+      newElements.filter((element) => isMvhrTerminalHost(element)),
+    );
+    const importedOpaqueByName = createElementNameLookup(
+      newElements.filter((element) => element.type === 'BuildingElementOpaque'),
+    );
+
     newElements.forEach((element) => {
       try {
         if (element.type === 'ThermalBridgeLinear') {
@@ -1892,14 +1901,23 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           return;
         }
         if (element.type === 'MechanicalVentilationDuctwork') {
-          const storey = resolveMechanicalVentilationDuctworkStoreyForCsvLoad(element, newElements, get().floors);
+          const storey = resolveMechanicalVentilationDuctworkStoreyForCsvLoad(
+            element,
+            importedMechanicalVentilationByName,
+            get().floors,
+          );
           const floorId = get().ensureFloorForZ(storey);
           element.floorId = floorId;
           element.extra_json = mergeServiceLineExtraJsonFloorId(element, storey);
           return;
         }
         if (element.type === 'MechanicalVentilationTerminal') {
-          const storey = resolveMechanicalVentilationTerminalStoreyForCsvLoad(element, newElements, get().floors);
+          const storey = resolveMechanicalVentilationTerminalStoreyForCsvLoad(
+            element,
+            importedTerminalHostByName,
+            importedMechanicalVentilationByName,
+            get().floors,
+          );
           element.floorId = get().ensureFloorForZ(storey);
           return;
         }
@@ -1935,15 +1953,20 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       });
     }
 
-    const importedParentByName = new Map<string, Element>();
-    for (const element of newElements) {
-      if (element.name) importedParentByName.set(element.name, element);
-    }
     for (const element of newElements) {
       if (element.type !== 'MechanicalVentilationTerminal') continue;
       const hostName = element.host_element?.trim();
       if (!hostName) continue;
-      const host = importedParentByName.get(hostName);
+      const matchingHosts = newElements.filter(
+        (candidate) => candidate.name.trim() === hostName && isMvhrTerminalHost(candidate),
+      );
+      if (matchingHosts.length > 1) {
+        parseWarnings.push(
+          `MechanicalVentilationTerminal '${element.name}' retained ambiguous host '${hostName}'`,
+        );
+        continue;
+      }
+      const host = importedTerminalHostByName(hostName);
       if (isMvhrTerminalHost(host)) continue;
       element.host_element = null;
       element.orientation360 = undefined;
@@ -1960,7 +1983,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (element.type !== 'BuildingElementTransparent') continue;
       const opening = element as BuildingElementTransparent;
       if (!opening.parent_element || !Array.isArray(opening.coordinates) || opening.coordinates.length < 3) continue;
-      const parent = importedParentByName.get(opening.parent_element);
+      const parent = importedOpaqueByName(opening.parent_element, opening.zoneId);
       if (
         !parent ||
         parent.type !== 'BuildingElementOpaque' ||
@@ -1987,6 +2010,21 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       metadata.globalOrientationOffset,
       metadata.provenanceMarkersVersion,
     );
+    // Legacy CSVs predate the security-risk provenance marker. Preserve values that diverge from
+    // the storey default before the first version-3 save makes the distinction authoritative.
+    if (!isOverrideDescriptorAuthoritative(WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR, metadata.provenanceMarkersVersion)) {
+      for (const element of allElements) {
+        if (element.type !== 'BuildingElementTransparent' || element._windowSecurityRiskUserOverride !== undefined) continue;
+        const extraJson = element.extra_json;
+        if (!extraJson || typeof extraJson !== 'object' || Array.isArray(extraJson)) continue;
+        if (
+          Object.prototype.hasOwnProperty.call(extraJson, 'security_risk') &&
+          (extraJson as Record<string, unknown>).security_risk !== windowSecurityRiskDefaultForElement(element, get().floors)
+        ) {
+          element._windowSecurityRiskUserOverride = WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR.positiveSense;
+        }
+      }
+    }
     reconstructPvHostLinkAndOverrideFlags(
       allElements,
       elementsById,
