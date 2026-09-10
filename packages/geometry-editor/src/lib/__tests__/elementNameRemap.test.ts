@@ -135,6 +135,52 @@ describe('elementNameRemap', () => {
     expect(result._v).toBe(1);
   });
 
+  it.each([
+    {
+      label: 'wall only',
+      plan: [{ elementId: 'wall', from: 'Shared', to: 'Wall A', zoneId: 'zone-1', type: 'BuildingElementOpaque' }],
+      parent: 'Shared',
+      host: 'Wall A',
+    },
+    {
+      label: 'MVHR only',
+      plan: [{ elementId: 'mvhr', from: 'Shared', to: 'MVHR A', type: 'MechanicalVentilation' }],
+      parent: 'MVHR A',
+      host: 'Shared',
+    },
+    {
+      label: 'both elements',
+      plan: [
+        { elementId: 'wall', from: 'Shared', to: 'Wall A', zoneId: 'zone-1', type: 'BuildingElementOpaque' },
+        { elementId: 'mvhr', from: 'Shared', to: 'MVHR A', type: 'MechanicalVentilation' },
+      ],
+      parent: 'MVHR A',
+      host: 'Wall A',
+    },
+  ])('keeps terminal parent and host remaps relation-specific when names collide ($label)', ({ plan, parent, host }) => {
+    const renamedWall = plan.some((entry) => entry.elementId === 'wall');
+    const renamedMvhr = plan.some((entry) => entry.elementId === 'mvhr');
+    const result = applyElementRenamePlanToElementsById(
+      {
+        wall: makeElement({ id: 'wall', name: renamedWall ? 'Wall A' : 'Shared', zoneId: 'zone-1' }),
+        mvhr: makeElement({ id: 'mvhr', name: renamedMvhr ? 'MVHR A' : 'Shared', type: 'MechanicalVentilation' }),
+        terminal: makeElement({
+          id: 'terminal',
+          name: 'Terminal',
+          type: 'MechanicalVentilationTerminal',
+          zoneId: 'zone-1',
+          parent_element: 'Shared',
+          host_element: 'Shared',
+        }),
+      },
+      ['wall', 'mvhr', 'terminal'],
+      plan,
+    );
+
+    expect(result.elementsById.terminal.parent_element).toBe(parent);
+    expect((result.elementsById.terminal as Element & { host_element?: string }).host_element).toBe(host);
+  });
+
   it('returns the same element when no references match', () => {
     const element = makeElement({
       id: 'wall',
@@ -253,5 +299,75 @@ describe('elementNameRemap', () => {
     expect(result.nameMap.get('Wall (S)')).toBeUndefined();
     expect(result.nameMap.get('Old Door')).toBe('Door');
     expect(result.skippedAmbiguousNameCount).toBe(1);
+  });
+
+  it('does not retarget an unrenamed same-name parent in another zone', () => {
+    const renamedHost = makeElement({ id: 'renamed-host', name: 'Zone A Wall', zoneId: 'zone-a' });
+    const unchangedHost = makeElement({ id: 'unchanged-host', name: 'Wall', zoneId: 'zone-b' });
+    const zoneAWindow = makeElement({
+      id: 'zone-a-window',
+      name: 'Zone A Window',
+      zoneId: 'zone-a',
+      type: 'BuildingElementTransparent',
+      parent_element: 'Wall',
+    });
+    const zoneBWindow = makeElement({
+      id: 'zone-b-window',
+      name: 'Zone B Window',
+      zoneId: 'zone-b',
+      type: 'BuildingElementTransparent',
+      parent_element: 'Wall',
+    });
+
+    const result = applyElementRenamePlanToElementsById(
+      {
+        'renamed-host': renamedHost,
+        'unchanged-host': unchangedHost,
+        'zone-a-window': zoneAWindow,
+        'zone-b-window': zoneBWindow,
+      },
+      ['renamed-host', 'unchanged-host', 'zone-a-window', 'zone-b-window'],
+      [{ elementId: 'renamed-host', from: 'Wall', to: 'Zone A Wall', zoneId: 'zone-a' }],
+    );
+
+    expect(result.elementsById['zone-a-window'].parent_element).toBe('Zone A Wall');
+    expect(result.elementsById['zone-b-window'].parent_element).toBe('Wall');
+  });
+
+  it('does not expose a global map while an old name remains in the document', () => {
+    const result = buildUnambiguousElementNameMap(
+      [{ elementId: 'a', from: 'Wall', to: 'Zone A Wall', zoneId: 'z0' }],
+      {
+        a: makeElement({ id: 'a', name: 'Zone A Wall', zoneId: 'z0' }),
+        b: makeElement({ id: 'b', name: 'Wall', zoneId: 'z1' }),
+      },
+      ['a', 'b'],
+    );
+
+    expect(result.nameMap.has('Wall')).toBe(false);
+    expect(result.skippedAmbiguousNameCount).toBe(1);
+  });
+
+  it('does not treat a renamed chained target as an identity owner', () => {
+    const result = applyElementRenamePlanToElementsById(
+      {
+        first: makeElement({ id: 'first', name: 'F1 Wall', zoneId: 'zone-1' }),
+        second: makeElement({ id: 'second', name: 'F2 Wall', zoneId: 'zone-1' }),
+        window: makeElement({
+          id: 'window',
+          name: 'Window',
+          zoneId: 'zone-1',
+          type: 'BuildingElementTransparent',
+          parent_element: 'F1 Wall',
+        }),
+      },
+      ['first', 'second', 'window'],
+      [
+        { elementId: 'first', from: 'F0 Wall', to: 'F1 Wall', zoneId: 'zone-1' },
+        { elementId: 'second', from: 'F1 Wall', to: 'F2 Wall', zoneId: 'zone-1' },
+      ],
+    );
+
+    expect(result.elementsById.window.parent_element).toBe('F2 Wall');
   });
 });

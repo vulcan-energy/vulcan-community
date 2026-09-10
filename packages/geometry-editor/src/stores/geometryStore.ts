@@ -200,6 +200,8 @@ import {
   applyElementRenamePlanToElementsById,
   buildUnambiguousElementNameMap,
   type ElementRenameEntry,
+  createElementNameLookup,
+  createParentElementLookup,
 } from '../lib/elementNameRemap';
 import { collectDuplicateElementNameWarnings } from '../lib/elementNameDuplicates';
 import {
@@ -379,17 +381,14 @@ function applyHostedFloorMovePatches(
   }
 
   const effectiveFloors = withEffectiveStoreyHeights(previousFloors, Object.values(previousElementsById));
-  const hostsByName = new Map<string, Element>();
-  for (const element of Object.values(nextElementsById)) {
-    if (isMvhrTerminalHost(element) && !hostsByName.has(element.name)) hostsByName.set(element.name, element);
-  }
+  const resolveHost = createElementNameLookup(Object.values(nextElementsById).filter(isMvhrTerminalHost));
   for (const nextChild of Object.values(nextElementsById)) {
     const previousChild = previousElementsById[nextChild.id];
     if (!previousChild) continue;
     let patch: Partial<Element>;
     if (nextChild.type === 'MechanicalVentilationTerminal') {
       // Terminal hosts use host_element; their coordinates retain physical elevation.
-      const host = hostsByName.get(nextChild.host_element?.trim() ?? '');
+      const host = resolveHost(nextChild.host_element);
       if (!host || floorZ(host) === undefined || floorZ(host) === floorZ(previousElementsById[host.id]) ||
           floorZ(host) === floorZ(nextChild)) continue;
       patch = buildMechanicalVentilationTerminalHostPlacementPatch(nextChild, host, floors, ensureFloorForZ);
@@ -2366,6 +2365,7 @@ function planTransformElementIds(
   selectedElementIds: string[],
 ): string[] {
   const ids = new Set(selectedElementIds.filter((id) => !!elementsById[id]));
+  const resolveElementName = createElementNameLookup(Object.values(elementsById));
   const queue = [...ids];
   const processed = new Set<string>();
 
@@ -2385,7 +2385,7 @@ function planTransformElementIds(
     for (const candidate of Object.values(elementsById)) {
       if (
         candidate.type !== 'MechanicalVentilationTerminal' ||
-        candidate.host_element !== parentName ||
+        resolveElementName(candidate.host_element, undefined, isMvhrTerminalHost)?.id !== parentId ||
         ids.has(candidate.id)
       ) {
         continue;
@@ -4913,9 +4913,7 @@ const createGeometryState = (
       }
       ensureExplicitFabricPitchForShape(normalizedElement);
       if (normalizedElement.type === 'Vents' && normalizedElement.parent_element) {
-        const parentElement = Object.values(state.elementsById).find(
-          (candidate) => isVentParentElement(candidate) && candidate.name === normalizedElement.parent_element,
-        );
+        const parentElement = createElementNameLookup(Object.values(state.elementsById).filter(isVentParentElement))(normalizedElement.parent_element);
         const parentCoords = getVentParentLineCoordinates(parentElement);
         if (parentCoords) {
           const currentZ = (normalizedElement.coordinates?.[0] as ElementCoordinate | undefined)?.z;
@@ -4923,9 +4921,7 @@ const createGeometryState = (
         }
       }
       if (isHostedMechanicalVentilationFan(normalizedElement) && normalizedElement.parent_element) {
-        const parentElement = Object.values(state.elementsById).find(
-          (candidate) => isVentParentElement(candidate) && candidate.name === normalizedElement.parent_element,
-        );
+        const parentElement = createElementNameLookup(Object.values(state.elementsById).filter(isVentParentElement))(normalizedElement.parent_element);
         Object.assign(
           normalizedElement,
           buildMechanicalVentilationHostPlacementPatch(
@@ -4936,9 +4932,7 @@ const createGeometryState = (
         );
       }
       if (isHostedMvhrTerminalPointElement(normalizedElement)) {
-        const hostElement = Object.values(state.elementsById).find(
-          (candidate) => isMvhrTerminalHost(candidate) && candidate.name === normalizedElement.host_element,
-        );
+        const hostElement = createElementNameLookup(Object.values(state.elementsById).filter(isMvhrTerminalHost))(normalizedElement.host_element);
         Object.assign(
           normalizedElement,
           buildMechanicalVentilationTerminalHostPlacementPatch(
@@ -5227,9 +5221,21 @@ const createGeometryState = (
         return state;
       }
       recordGeometryStoreWrite('updateElement');
+      const resolveElementName = createElementNameLookup(Object.values(state.elementsById));
+      const resolveParentElement = createParentElementLookup(Object.values(state.elementsById));
 
       // Normalize parent_element only if explicitly provided on updates
       const normalizedUpdates: Partial<Element> = { ...updates };
+      if (prevElement.type === 'BuildingElementTransparent' && Object.prototype.hasOwnProperty.call(updates, 'extra_json')) {
+        // Advanced-field edits replace extra_json, including unchanged automatic values.
+        // Only a changed value or removal records new security-risk intent.
+        const securityRisk = updates.extra_json?.security_risk;
+        if (securityRisk === undefined) {
+          normalizedUpdates._windowSecurityRiskUserOverride = false;
+        } else if (securityRisk !== prevElement.extra_json?.security_risk) {
+          normalizedUpdates._windowSecurityRiskUserOverride = true;
+        }
+      }
       // `AdvancedFieldsEditor` spreads full element data into `onChange`, which always includes
       // `name` even when the user did not edit it. That made `updateElement` treat every patch as
       // an explicit name update and skip junction/subtype auto-rename. Drop a redundant unchanged name.
@@ -5259,9 +5265,7 @@ const createGeometryState = (
       ) {
         const nextParentName = (normalizedUpdates as any).parent_element as string | null;
         if (nextParentName) {
-          const parentElement = Object.values(state.elementsById).find(
-            (candidate) => isVentParentElement(candidate) && candidate.name === nextParentName,
-          );
+          const parentElement = createElementNameLookup(Object.values(state.elementsById).filter(isVentParentElement))(nextParentName);
           if (parentElement) {
             const ventParentFields = parentElement as { orientation360?: number; pitch?: number };
             const parentOrientation = ventParentFields.orientation360;
@@ -5299,9 +5303,7 @@ const createGeometryState = (
             (normalizedUpdates as any).parent_element = null;
           }
         } else if (nextParentName) {
-          const parentElement = Object.values(state.elementsById).find(
-            (candidate) => isVentParentElement(candidate) && candidate.name === nextParentName,
-          );
+          const parentElement = createElementNameLookup(Object.values(state.elementsById).filter(isVentParentElement))(nextParentName);
           if (parentElement) {
             const draft = {
               ...(prevElement as MechanicalVentilation),
@@ -5331,9 +5333,7 @@ const createGeometryState = (
           ? ((normalizedUpdates as any).host_element as string | null)
           : (prevElement as MechanicalVentilationTerminal).host_element;
         if (nextHostName) {
-          const hostElement = Object.values(state.elementsById).find(
-            (candidate) => isMvhrTerminalHost(candidate) && candidate.name === nextHostName,
-          );
+          const hostElement = createElementNameLookup(Object.values(state.elementsById).filter(isMvhrTerminalHost))(nextHostName);
           if (hostElement) {
             const draft = {
               ...(prevElement as MechanicalVentilationTerminal),
@@ -5721,7 +5721,7 @@ const createGeometryState = (
           const vx = B.x - A.x; const vy = B.y - A.y;
           const vlen2 = vx*vx + vy*vy || 1;
           const children = Object.values(state.elementsById)
-            .filter(e => !!e.parent_element && e.parent_element === prevElement.name);
+            .filter(e => resolveParentElement(e)?.id === prevElement.id);
 
           childAnchors = children.map(child => {
               // Child center
@@ -5745,7 +5745,7 @@ const createGeometryState = (
         const vy = B.y - A.y;
         const v2 = vx * vx + vy * vy || 1;
         const ventChildren = Object.values(state.elementsById).filter(
-          (child) => isHostedVentPointElement(child) && child.parent_element === prevElement.name,
+          (child) => isHostedVentPointElement(child) && resolveParentElement(child)?.id === prevElement.id,
         );
         ventChildAnchors = ventChildren.map((child) => {
           const point = (child.coordinates?.[0] ?? A) as ElementCoordinate;
@@ -5762,7 +5762,7 @@ const createGeometryState = (
         const vy = B.y - A.y;
         const v2 = vx * vx + vy * vy || 1;
         const terminalChildren = Object.values(state.elementsById).filter(
-          (child) => isHostedMvhrTerminalPointElement(child) && child.host_element === prevElement.name,
+          (child) => isHostedMvhrTerminalPointElement(child) && resolveElementName(child.host_element, undefined, isMvhrTerminalHost)?.id === prevElement.id,
         );
         terminalChildAnchors = terminalChildren.map((child) => {
           const point = (child.coordinates?.[0] ?? A) as ElementCoordinate;
@@ -5991,7 +5991,7 @@ const createGeometryState = (
       // Only windows and external doors should snap to parent
       const parentElementChanged = (prevElement as any).parent_element !== (nextElement as any).parent_element;
       if ((nextElementWithSecurityRisk as any).parent_element && shouldSnapToParent(nextElementWithSecurityRisk) && (coordsChanged || parentElementChanged)) {
-        const parent = Object.values(newElementsById).find(e => e.name === (nextElementWithSecurityRisk as any).parent_element);
+        const parent = createParentElementLookup(Object.values(newElementsById))(nextElementWithSecurityRisk);
         if (parent && parent.type === 'BuildingElementOpaque' && (parent.coordinates||[]).length === 2) {
           const [PA, PB] = parent.coordinates as Array<{x:number,y:number,z:number}>;
           const vx = PB.x - PA.x; const vy = PB.y - PA.y;
@@ -6024,9 +6024,7 @@ const createGeometryState = (
         isHostedMvhrTerminalPointElement(nextElementWithSecurityRisk) &&
         (coordsChanged || terminalHostChanged)
       ) {
-        const host = Object.values(newElementsById).find(
-          (candidate) => isMvhrTerminalHost(candidate) && candidate.name === nextElementWithSecurityRisk.host_element,
-        );
+        const host = createElementNameLookup(Object.values(newElementsById).filter(isMvhrTerminalHost))(nextElementWithSecurityRisk.host_element);
         if (host) {
           const placementPatch = buildMechanicalVentilationTerminalHostPlacementPatch(
             nextElementWithSecurityRisk,
@@ -6049,7 +6047,7 @@ const createGeometryState = (
       ) {
         const parentName = (maybeRoofHostedOpening as BuildingElementTransparent).parent_element;
         const parent = parentName
-          ? Object.values(newElementsById).find((candidate) => candidate.name === parentName)
+          ? createParentElementLookup(Object.values(newElementsById))(maybeRoofHostedOpening)
           : undefined;
         if (shouldDeriveTransparentFromOpaquePolygonHost(maybeRoofHostedOpening, parent)) {
           let openingWithHost = maybeRoofHostedOpening;
@@ -6087,9 +6085,7 @@ const createGeometryState = (
         coordsChanged &&
         !parentElementChanged
       ) {
-        const parent = Object.values(newElementsById).find(
-          (candidate) => isVentParentElement(candidate) && candidate.name === nextElementWithSecurityRisk.parent_element,
-        );
+        const parent = createElementNameLookup(Object.values(newElementsById).filter(isVentParentElement))(nextElementWithSecurityRisk.parent_element);
         const parentCoords = getVentParentLineCoordinates(parent);
         const point = nextElementWithSecurityRisk.coordinates?.[0] as ElementCoordinate | undefined;
         if (parentCoords && point) {
@@ -6211,7 +6207,7 @@ const createGeometryState = (
               if (Object.keys(patch).length > 0) {
                 newElementsById[otherId] = { ...panel, ...patch } as Element;
               }
-            } else if (shouldDeriveTransparentFromOpaquePolygonHost(other, roof) && other.parent_element === roof.name) {
+            } else if (shouldDeriveTransparentFromOpaquePolygonHost(other, roof) && resolveParentElement(other)?.id === roof.id) {
               const opening = other as BuildingElementTransparent;
               const derived = deriveFromHostRoof(opening, roof, effFloorsForHostDerive, state.globalOrientationOffset);
               const patch = buildTransparentHostDerivedPatch(opening, derived);
@@ -6300,16 +6296,14 @@ const createGeometryState = (
       | { id: string; kind: 'terminal'; parentId: string; center: ElementCoordinate };
 
     const hostedChildSnapshots: HostedChildSnapshot[] = [];
-    const parentName = element.name;
-    const elementIdByName = new Map(
-      Object.values(stateBefore.elementsById).map((candidate) => [candidate.name, candidate.id]),
-    );
+    const resolveElementName = createElementNameLookup(Object.values(stateBefore.elementsById));
+    const resolveParentElement = createParentElementLookup(Object.values(stateBefore.elementsById));
     for (const childId of collectHostedDescendantElementIds(stateBefore.elementsById, id)) {
       const child = stateBefore.elementsById[childId];
       if (!child) continue;
       const coordinates = child.coordinates ?? [];
       const linkedParentId = child.parent_element
-        ? elementIdByName.get(child.parent_element)
+        ? resolveParentElement(child)?.id
         : undefined;
       if (!linkedParentId) continue;
       if (shouldSnapToParent(child) && coordinates.length >= 2) {
@@ -6345,7 +6339,7 @@ const createGeometryState = (
       const coordinates = child.coordinates ?? [];
       if (
         isHostedMvhrTerminalPointElement(child) &&
-        child.host_element === parentName &&
+        resolveElementName(child.host_element, undefined, isMvhrTerminalHost)?.id === id &&
         coordinates.length >= 1
       ) {
         hostedChildSnapshots.push({
@@ -6569,6 +6563,7 @@ const createGeometryState = (
       }
 
       // Re-project children of updated parent walls/windows
+      const resolveParentElement = createParentElementLookup(Object.values(newElementsById));
       for (const [parentId, { prevCoords, newCoords }] of updatedLineParents) {
         const parent = newElementsById[parentId];
         if (!isVentParentElement(parent) || newCoords.length !== 2) {
@@ -6577,7 +6572,7 @@ const createGeometryState = (
 
         // Find all children of this parent wall
         const children = Object.values(newElementsById).filter(
-          e => !!e.parent_element && e.parent_element === parent.name
+          e => resolveParentElement(e)?.id === parent.id
         );
 
         if (children.length === 0) continue;
@@ -6723,14 +6718,16 @@ const createGeometryState = (
       delete remainingElementsById[id];
       const newElementIds = state.elementIds.filter(elementId => elementId !== id);
 
-      // Clean up dangling parent_element references on children
+      // Clean up references that resolved to this element before its removal.
+      const resolveElementName = createElementNameLookup(Object.values(state.elementsById));
+      const resolveParentElement = createParentElementLookup(Object.values(state.elementsById));
       const removedName = removedElement.name;
       if (removedName) {
         for (const elId of newElementIds) {
           const el = remainingElementsById[elId];
-          if (el && (el as any).parent_element === removedName) {
+          if (el && resolveParentElement(el)?.id === id) {
             remainingElementsById[elId] = { ...el, parent_element: null } as typeof el;
-          } else if (el?.type === 'MechanicalVentilationTerminal' && el.host_element === removedName) {
+          } else if (el?.type === 'MechanicalVentilationTerminal' && resolveElementName(el.host_element, undefined, isMvhrTerminalHost)?.id === id) {
             remainingElementsById[elId] = {
               ...el,
               host_element: null,
@@ -6818,7 +6815,7 @@ const createGeometryState = (
             .map((elementId) => state.elementsById[elementId])
             .filter(
               (candidate): candidate is WindowShading =>
-                candidate?.type === 'WindowShading' && candidate.parent_element === src.name,
+                candidate?.type === 'WindowShading' && candidate.zoneId === src.zoneId && candidate.parent_element === src.name,
             )
         : [];
     const duplicatedShading = attachedWindowShading.map((shade) => {
@@ -6917,7 +6914,7 @@ const createGeometryState = (
       let parent = shouldSnapToParent(src) ? null : ((src as any).parent_element ?? null as any);
       if (parent && typeof parent === 'string') {
         // parent may be stored by name in older data; try remap by id first, else leave as-is
-        const parentEl = Object.values(state.elementsById).find(e => e.name === parent || e.id === parent);
+        const parentEl = state.elementsById[parent] ?? createParentElementLookup(Object.values(state.elementsById))(src);
         if (parentEl && oldToNewId.has(parentEl.id)) {
           parent = oldIdToNewName.get(parentEl.id) || parent; // keep by name if that’s what UI expects
         }
@@ -7074,9 +7071,7 @@ const createGeometryState = (
       // even if the child was iterated before the parent in elementsById.
       Object.values(state.elementsById).forEach((el) => {
         if (!isHostedVentPointElement(el) || !el.parent_element) return;
-        const parentElement = Object.values(updatedById).find(
-          (candidate) => isVentParentElement(candidate) && candidate.name === el.parent_element,
-        );
+        const parentElement = createElementNameLookup(Object.values(updatedById).filter(isVentParentElement))(el.parent_element);
         if (el.type === 'Vents') {
           const parentOrientation = (parentElement as { orientation360?: number } | undefined)?.orientation360;
           const parentPitch = (parentElement as { pitch?: number } | undefined)?.pitch;

@@ -4123,7 +4123,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const applyHostedParentElement = useCallback(
     (value: string, emptyParentValue: string | null) => {
       wallShared.setParentElement(value);
-      const parent = getParentByName(elementsById, elementIds, value);
+      const parent = getParentByName(elementsById, elementIds, value, elementZoneId);
       if (parent) {
         if ('pitch' in parent && typeof parent.pitch === 'number') {
           wallShared.setPitch(parent.pitch);
@@ -4160,6 +4160,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // (see the two `onChange={(value) => applyHostedParentElement(...)}`
     // sites), so nothing downstream relies on its own referential stability.
     [
+      elementZoneId,
       elementIds,
       elementsById,
       geometryStore,

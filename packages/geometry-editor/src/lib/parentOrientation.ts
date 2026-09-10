@@ -1,19 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Parent-lookup and pitch/orientation-inheritance helpers, moved verbatim from
-// ElementCreator.tsx per the slice-4 extraction brief's decision (f).1. Two
-// families read these: the wall family (BuildingElementOpaque/Transparent's
-// applyHostedParentElement, still inline in ElementCreator.tsx) and the
-// MechanicalVentilation form module (elementForms/mechanicalVentilation.tsx).
-// Neither owns these functions, so they live here instead of in either
-// caller.
-//
-// getParentByName's elementIds parameter is typed `readonly string[]` (the
-// legacy inline function took `string[]`) so both a module's
-// ElementFormStateCtx.elementIds (readonly) and the orchestrator's own
-// mutable elementIds array satisfy it without a cast.
-
+import { createElementNameLookup } from './elementNameRemap';
 import { deriveWallProperties } from './openingSegmentOutward';
 import { roundToFourDecimals } from '../geometry/constants';
 import { projectSegmentOntoParent } from './snapUtils';
@@ -27,11 +15,13 @@ export function getParentByName(
   elementsById: Record<string, Element>,
   elementIds: readonly string[],
   parentName: string,
+  zoneId?: string | null,
 ): Element | undefined {
-  if (!parentName) return undefined;
-  return elementIds
-    .map((id) => elementsById[id])
-    .find((element): element is Element => !!element && element.name === parentName);
+  return createElementNameLookup(
+    elementIds.map((id) => elementsById[id]).filter((element): element is Element => !!element),
+  )(parentName, zoneId, (parent) =>
+    parent.type === 'BuildingElementOpaque' || (!zoneId && parent.type === 'BuildingElementTransparent'),
+  );
 }
 
 export function getParentOrientation360(

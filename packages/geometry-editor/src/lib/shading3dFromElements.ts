@@ -13,6 +13,7 @@ import { modelXYToThreeXZ } from './geometryTransform';
 import { frameInsetFromFrameAreaFraction } from './geometryVentilationOverlay';
 import type { OrientedBoxPrimitive, PolygonPrismPrimitive } from './geometry3dPrimitivesTypes';
 import { segmentTangentAndOpeningOutwardModelXY } from './openingSegmentOutward';
+import { createParentElementLookup } from './elementNameRemap';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -101,7 +102,7 @@ export function getOutwardOrientationDegreesForWindow(
 ): number | null {
   const wallKey = windowEl.parent_element;
   if (wallKey) {
-    const wall = findElementByNameOrId(elementsById, wallKey);
+    const wall = elementsById[wallKey] ?? createParentElementLookup(Object.values(elementsById))(windowEl);
     if (wall?.type === 'BuildingElementOpaque') {
       const o = (wall as BuildingElementOpaque).orientation360;
       if (isFiniteNumber(o)) return o;

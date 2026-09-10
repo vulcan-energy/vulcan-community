@@ -438,6 +438,101 @@ Manual intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,4.2,,315,90,,"12.00
     });
   });
 
+  const terminalHostCsv = (duplicateHost: boolean) => `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Zone A,Zone,60,25,2.4,FALSE
+${duplicateHost ? 'Zone B,Zone,60,25,2.4,FALSE' : ''}
+
+Exposed Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Wall A,Zone A,BuildingElementOpaque,1,90,1,2,0,0,FALSE,FALSE,,"0.000,0.000,0.000|1.000,0.000,0.000","{}"
+${duplicateHost ? 'Wall A,Zone B,BuildingElementOpaque,1,90,1,2,0,0,FALSE,FALSE,,"0.000,0.000,0.000|1.000,0.000,0.000","{}"' : ''}
+
+Ventilation Systems,,,,,,,,,,,,,
+Name,Type,length,duct_type,terminal_type,parent_element,host_element,mid_height_air_flow_path,area_cm2,orientation360,pitch,vent_type,coords,extra_json
+MVHR 1,MechanicalVentilation,,,,,,,,,,,,"{}"
+Manual intake,MechanicalVentilationTerminal,,,intake,MVHR 1,Wall A,4.2,,315,90,,"0.000,0.000,1.000","{}"
+
+Systems,,,,,,,
+Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json
+Wall A,,System,HeatSourceWet,a2a_heat_pump,0,"0.000,0.000,9.000","{}"
+`.trim();
+
+  it('retains an ambiguous terminal host instead of guessing across zones', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+
+    const result = store.getState().loadFromCSV(terminalHostCsv(true));
+    const terminal = Object.values(store.getState().elementsById).find(
+      (element) => element.type === 'MechanicalVentilationTerminal',
+    );
+    const groundFloor = store.getState().floors.find((floor) => floor.zIndex === 0);
+
+    expect(terminal).toMatchObject({
+      host_element: 'Wall A',
+      orientation360: 315,
+      pitch: 90,
+      floorId: groundFloor?.id,
+    });
+    expect(result.warnings).toContain(
+      "MechanicalVentilationTerminal 'Manual intake' retained ambiguous host 'Wall A'",
+    );
+  });
+
+  it('keeps a unique global terminal host connected during import', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+
+    const result = store.getState().loadFromCSV(terminalHostCsv(false));
+    const terminal = Object.values(store.getState().elementsById).find(
+      (element) => element.type === 'MechanicalVentilationTerminal',
+    );
+
+    expect(terminal).toMatchObject({ host_element: 'Wall A' });
+    expect(result.warnings).not.toContain(
+      "MechanicalVentilationTerminal 'Manual intake' retained ambiguous host 'Wall A'",
+    );
+  });
+
+  const roofOpeningCsv = (duplicateHost: boolean) => `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Zone A,Zone,60,25,2.4,FALSE
+${duplicateHost ? 'Zone B,Zone,60,25,2.4,FALSE' : ''}
+
+Exposed Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Roof A,Zone A,BuildingElementOpaque,100,30,10,2,90,2,FALSE,FALSE,,"0.000,0.000,2.000|10.000,0.000,2.000|10.000,10.000,7.774|0.000,10.000,7.774","{}"
+${duplicateHost ? 'Roof A,Zone B,BuildingElementOpaque,100,45,10,2,180,8,FALSE,FALSE,,"0.000,0.000,8.000|10.000,0.000,8.000|10.000,10.000,18.000|0.000,10.000,18.000","{}"' : ''}
+
+Window Elements,,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Rooflight A,Zone A,BuildingElementTransparent,1,0,1,1,0,0,Roof A,0.1,0.4,0.5,0.4,"1.000,1.000,2.500|2.000,1.000,2.500|1.000,2.000,2.500","{}"
+`.trim();
+
+  it('resolves hosted roof openings in their zone when roof names repeat', () => {
+    const duplicateStore = createGeometryStore({ defaultDefaultsPath: null });
+    const uniqueStore = createGeometryStore({ defaultDefaultsPath: null });
+
+    duplicateStore.getState().loadFromCSV(roofOpeningCsv(true));
+    uniqueStore.getState().loadFromCSV(roofOpeningCsv(false));
+
+    const duplicateOpening = Object.values(duplicateStore.getState().elementsById).find(
+      (element) => element.name === 'Rooflight A',
+    );
+    const uniqueOpening = Object.values(uniqueStore.getState().elementsById).find(
+      (element) => element.name === 'Rooflight A',
+    );
+
+    expect(duplicateOpening).toMatchObject({ pitch: 30, orientation360: 90, base_height: uniqueOpening?.base_height });
+    expect(duplicateOpening?.coordinates).toEqual(uniqueOpening?.coordinates);
+  });
+
   it('strips deprecated Building Services blocks (no header row) so later sections still parse', () => {
     const csv = `
 Metadata,,,,,,,,,,,,,
