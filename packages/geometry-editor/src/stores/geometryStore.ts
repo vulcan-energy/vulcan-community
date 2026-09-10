@@ -212,7 +212,6 @@ import {
 } from '../lib/developmentContextShading';
 import {
   deriveWallProperties,
-  orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
   segmentTangentAndOpeningOutwardModelXY,
 } from '../lib/openingSegmentOutward';
