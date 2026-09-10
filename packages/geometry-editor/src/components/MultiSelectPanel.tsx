@@ -1873,7 +1873,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     withValidLiveNumber(fieldKey, raw, bounds, (value) => {
       const perId = buildPerElementPatches(targetIds, (el) => buildPatch(el, value));
       if (Object.keys(perId).length === 0) return;
-      updateElementsBulk(perId, { mode: 'replace' });
+      updateElementsBulk(perId);
     });
   }, [activeElementIds, buildPerElementPatches, updateElementsBulk, withValidLiveNumber]);
 

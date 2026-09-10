@@ -371,7 +371,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     fireEvent.change(input('Heat Transfer Coefficient'), { target: { value: '7.5' } });
     expect(updateElementsBulk).toHaveBeenCalledExactlyOnceWith({
       point: { heat_transfer_coeff: 7.5 },
-    }, { mode: 'replace' });
+    });
     expect(updateElement).toHaveBeenCalledExactlyOnceWith(
       'point', { heat_transfer_coeff: 7.5 }, false,
     );
@@ -388,7 +388,7 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     expect(roundTripped).not.toHaveProperty('heat_transfer_coefficient');
   });
 
-  it('routes a two-target ThermalBridgePoint edit through one bulk replace', () => {
+  it('routes a two-target ThermalBridgePoint edit through one bulk patch', () => {
     const { store } = mount([thermalBridgePoint('b', 5), thermalBridgePoint('a', 4)]);
     const originalUpdateElement = store.getState().updateElement;
     const originalUpdateElementsBulk = store.getState().updateElementsBulk;
@@ -402,7 +402,6 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
       ['a', { heat_transfer_coeff: 7.5 }, true],
       ['b', { heat_transfer_coeff: 7.5 }, false],
     ]);
-    expect(updateElementsBulk.mock.calls[0]?.[1]).toEqual({ mode: 'replace' });
     expect(updateElementsBulk.mock.calls[0]?.[0]).toEqual({
       a: { heat_transfer_coeff: 7.5 }, b: { heat_transfer_coeff: 7.5 },
     });

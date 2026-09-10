@@ -338,28 +338,83 @@ function measureGeometryStoreAction<T>(actionName: string, fn: () => T): T {
 }
 
 /**
- * Apply the wall-change cascade in place. Called from `addElement`, `updateElement`, and
- * `removeElement` after the main mutation, where the new element map differs from the old.
+ * Apply the wall-change cascade once after an element mutation or completed batch.
  * No-op when the change doesn't shift any floor's effective storey height.
  */
 function applyWallStackCascade(
   prevFloors: Floor[],
   prevElementsById: Record<string, Element>,
   nextElementsById: Record<string, Element>,
+  nextFloors: Floor[] = prevFloors,
 ): void {
   const patches = cascadeWallChangeIfAny(
     prevFloors,
     Object.values(prevElementsById),
     Object.values(nextElementsById),
+    nextFloors,
   );
   for (const { elementId, patch } of patches) {
     const el = nextElementsById[elementId];
     if (el) nextElementsById[elementId] = {
       ...el,
       ...patch,
-      _v: (el._v ?? 0) + 1,
+      _v: Math.max(el._v ?? 0, (prevElementsById[elementId]?._v ?? 0) + 1),
     } as Element;
   }
+}
+
+/** Refresh hosted floor-dependent fields after coordinates settle; roots keep their authored patches. */
+function applyHostedFloorMovePatches(
+  previousElementsById: Record<string, Element>,
+  nextElementsById: Record<string, Element>,
+  changedRootIds: Iterable<string>,
+  previousFloors: Floor[],
+  floors: Floor[],
+  ensureFloorForZ: (zIndex: number) => string,
+): Record<string, Element> {
+  const rootIds = new Set(changedRootIds);
+  const floorZ = (element: Element | undefined) => element && getElementCanvasFloorZValue(element, floors);
+  if (![...rootIds].some((id) => floorZ(previousElementsById[id]) !== floorZ(nextElementsById[id]))) {
+    return nextElementsById;
+  }
+
+  const effectiveFloors = withEffectiveStoreyHeights(previousFloors, Object.values(previousElementsById));
+  const hostsByName = new Map<string, Element>();
+  for (const element of Object.values(nextElementsById)) {
+    if (isMvhrTerminalHost(element) && !hostsByName.has(element.name)) hostsByName.set(element.name, element);
+  }
+  for (const nextChild of Object.values(nextElementsById)) {
+    const previousChild = previousElementsById[nextChild.id];
+    if (!previousChild) continue;
+    let patch: Partial<Element>;
+    if (nextChild.type === 'MechanicalVentilationTerminal') {
+      // Terminal hosts use host_element; their coordinates retain physical elevation.
+      const host = hostsByName.get(nextChild.host_element?.trim() ?? '');
+      if (!host || floorZ(host) === undefined || floorZ(host) === floorZ(previousElementsById[host.id]) ||
+          floorZ(host) === floorZ(nextChild)) continue;
+      patch = buildMechanicalVentilationTerminalHostPlacementPatch(nextChild, host, floors, ensureFloorForZ);
+    } else {
+      const previousFloor = floorZ(previousChild);
+      const nextFloor = floorZ(nextChild);
+      if (rootIds.has(nextChild.id) || previousFloor === undefined || nextFloor === undefined ||
+          previousFloor === nextFloor) continue;
+      const heightPatch = calculateBaseHeightPatchForFloorMove(previousChild, nextFloor, effectiveFloors);
+      patch = { ...heightPatch, floorId: ensureFloorForZ(nextFloor) };
+      if (heightPatch?.extra_json) {
+        // The old snapshot supplies only dependent heights, not metadata already updated by the cascade.
+        patch.extra_json = {
+          ...nextChild.extra_json,
+          window_part_list: heightPatch.extra_json.window_part_list,
+        };
+      }
+    }
+    nextElementsById[nextChild.id] = {
+      ...nextChild,
+      ...patch,
+      _v: Math.max(nextChild._v ?? 0, (previousChild._v ?? 0) + 1),
+    } as Element;
+  }
+  return nextElementsById;
 }
 
 // Project defaults (from PRD)
@@ -1284,9 +1339,20 @@ export interface GeometryState extends
   toggleElementSelection: (id: string) => void;
   clearElementSelection: () => void;
   selectAllElementsOnCurrentFloor: () => void;
-  /** Apply patches through updateElement invariants and coalesce them into one history step. */
-  updateElementsBulk: (perIdUpdates: Record<string, Partial<Element>>, options: { mode: 'replace' }) => void;
-  /** Merge flat keys into each element's extra_json (same as assembly calculator apply); one history entry. */
+  /**
+   * Apply partial patches through updateElement invariants and coalesce them into one history step.
+   * Undefined and NaN fields are ignored; updateElement handles explicit top-level clears.
+   * Use applyExtraJsonMergeBulk for explicit extra_json key clearing.
+   * The optional mode argument is retained for compatibility with older host callers and ignored.
+   */
+  updateElementsBulk: (
+    perIdUpdates: Record<string, Partial<Element>>,
+    options?: { mode: 'replace' },
+  ) => void;
+  /**
+   * Merge flat keys into each element's extra_json (same as assembly calculator apply); one history entry.
+   * Undefined patch values remain own keys so explicit extra_json clearing semantics are preserved.
+   */
   applyExtraJsonMergeBulk: (patchesById: Record<string, Record<string, unknown>>) => void;
   updateElementsFloor: (elementIds: string[], newFloorZ: number) => void;
   syncCurrentFloorWithSelection: () => void;
@@ -2729,9 +2795,7 @@ const createGeometryState = (
 
   // Route every bulk patch through the canonical single-element update path. This keeps
   // coordinate rewrites, derived geometry, ownership flags, cascades and history aligned.
-  updateElementsBulk: (perIdUpdates, options) => {
-    // options.mode currently only supports 'replace'
-    void options;
+  updateElementsBulk: (perIdUpdates) => {
     const snapshot = get().elementsById;
     const changedEntries: Array<[string, Partial<Element>]> = [];
     for (const [id, fields] of Object.entries(perIdUpdates)) {
@@ -2756,16 +2820,20 @@ const createGeometryState = (
 
   applyExtraJsonMergeBulk: (patchesById) => {
     const snapshot = get().elementsById;
-    const entries = Object.entries(patchesById).filter(
-      ([id, patch]) => !!snapshot[id] && !!patch && typeof patch === 'object' && Object.keys(patch).length > 0,
-    );
-    entries.forEach(([id, patch], index) => {
-      const el = snapshot[id]!;
+    const entries: Array<[string, Record<string, unknown>]> = [];
+    for (const [id, patch] of Object.entries(patchesById)) {
+      const el = snapshot[id];
+      if (!el || !patch || typeof patch !== 'object' || Object.keys(patch).length === 0) continue;
       const prev =
         el.extra_json && typeof el.extra_json === 'object' && !Array.isArray(el.extra_json)
           ? (el.extra_json as Record<string, unknown>)
           : {};
-      get().updateElement(id, { extra_json: { ...prev, ...patch } }, index < entries.length - 1);
+      const nextExtra = { ...prev, ...patch };
+      if (jsonValuesEqual(prev, nextExtra)) continue;
+      entries.push([id, nextExtra]);
+    }
+    entries.forEach(([id, nextExtra], index) => {
+      get().updateElement(id, { extra_json: nextExtra }, index < entries.length - 1);
     });
   },
 
@@ -2940,7 +3008,7 @@ const createGeometryState = (
       let updatedElementsById = { ...state.elementsById };
       const changedElementIds = new Set<string>();
 
-      const moveCandidateIds = elementIds.filter((elementId) => {
+      const moveCandidateIds = [...new Set(elementIds)].filter((elementId) => {
         const element = state.elementsById[elementId];
         return !!element?.coordinates?.length &&
           !isElementFloorControlledByParent(element, state.elementsById) &&
@@ -2995,16 +3063,18 @@ const createGeometryState = (
       changed = true;
 
       const effFloorsForMove = withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById));
-      elementIds.forEach((elementId) => {
+      for (const elementId of changedElementIds) {
         const el = updatedElementsById[elementId];
         const originalEl = state.elementsById[elementId];
-        if (!changedElementIds.has(elementId)) return;
-        if (!el || !el.coordinates?.length) return;
-        if (!originalEl) return;
-        if (usesPhysicalZWithFloorMembership(el)) return;
-        const patch = calculateBaseHeightPatchForFloorMove(originalEl, newFloorZ, effFloorsForMove);
-        if (patch) updatedElementsById[elementId] = { ...el, ...patch } as Element;
-      });
+        const patch = usesPhysicalZWithFloorMembership(el)
+          ? null
+          : calculateBaseHeightPatchForFloorMove(originalEl, newFloorZ, effFloorsForMove);
+        updatedElementsById[elementId] = syncWindowSecurityRiskForStorey(
+          patch ? { ...el, ...patch } as Element : el,
+          originalEl,
+          state.floors,
+        );
+      }
 
       updatedElementsById = cascadeHostedDescendantGeometry({
         previousElementsById: state.elementsById,
@@ -3018,6 +3088,16 @@ const createGeometryState = (
         changedElementIds,
       }).elementsById;
 
+      updatedElementsById = applyHostedFloorMovePatches(
+        state.elementsById,
+        updatedElementsById,
+        changedElementIds,
+        state.floors,
+        get().floors,
+        get().ensureFloorForZ,
+      );
+
+      applyWallStackCascade(state.floors, state.elementsById, updatedElementsById, get().floors);
       return { elementsById: updatedElementsById };
     });
 
@@ -4979,7 +5059,7 @@ const createGeometryState = (
 
     // Adding a wall can raise this floor's effective storey height. Cascade base_height on
     // every element above (preserving each one's offset above the old slab).
-    applyWallStackCascade(state.floors, state.elementsById, newElementsById);
+    applyWallStackCascade(state.floors, state.elementsById, newElementsById, get().floors);
 
     // Save to history immediately for significant operations like adding elements
       setTimeout(() => {
@@ -5745,11 +5825,7 @@ const createGeometryState = (
         );
       } catch { /* swallow: best-effort */ }
 
-      // Enforce strictest numeric typing (Core vs FHS) on the element before any state write.
-      // This prevents confusing cases where UI shows an integer but the stored value is fractional,
-      // causing FHS integer validation warnings.
       const nextElementWithSecurityRisk = syncWindowSecurityRiskForStorey(nextElement, prevElement, state.floors);
-      coerceElementForStore(nextElementWithSecurityRisk);
 
       // trimmed debug logging
 
@@ -5789,7 +5865,7 @@ const createGeometryState = (
         }
       }
 
-      // IMMUTABLE UPDATE: Create new elementsById with updated element
+      // Enforce Core/FHS numeric typing once, immediately before storing the updated element.
       let newElementsById = { ...state.elementsById, [id]: coerceElementForStore(nextElementWithSecurityRisk) };
 
       if (elementRenamePlan.length > 0) {
@@ -6149,6 +6225,15 @@ const createGeometryState = (
         /* host derivation is best-effort; never block the update */
       }
 
+      newElementsById = applyHostedFloorMovePatches(
+        state.elementsById,
+        newElementsById,
+        [id],
+        state.floors,
+        get().floors,
+        get().ensureFloorForZ,
+      );
+
       // Derive zone properties if this element belongs to a zone
       let updatedZones = state.zones;
       if (nextElementWithSecurityRisk.zoneId) {
@@ -6166,7 +6251,7 @@ const createGeometryState = (
       // Editing a wall's height (or moving it between floors) can change a floor's effective
       // storey height. Cascade base_height on every element above (preserving each one's offset
       // above the old slab). No-op when the change doesn't shift any storey.
-      applyWallStackCascade(state.floors, state.elementsById, newElementsById);
+      applyWallStackCascade(state.floors, state.elementsById, newElementsById, get().floors);
 
       const externalNameRemap = buildUnambiguousElementNameMap(
         elementRenamePlan,

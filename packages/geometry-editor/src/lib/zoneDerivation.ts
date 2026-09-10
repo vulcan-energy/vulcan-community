@@ -988,8 +988,8 @@ export function calculateBaseHeightPatchForFloorStackChange(
 
 /**
  * Same as {@link cascadeFloorStackChange} but driven by element changes (a wall added/updated/
- * removed). The floor *records* don't move — what changed is the wall heights elements derive
- * storey height from. Computes effective storey heights under both element sets and cascades
+ * removed). Also includes floors created by the mutation. Computes effective storey heights
+ * under the previous and next floor/element sets and cascades
  * based on the diff. Returns an empty array when nothing needs patching (e.g. a non-wall element
  * was added/updated, so no floor's effective storey shifted).
  */
@@ -997,10 +997,12 @@ export function cascadeWallChangeIfAny(
   floors: Floor[],
   oldElements: Element[],
   newElements: Element[],
+  nextFloors: Floor[] = floors,
 ): Array<{ elementId: string; patch: FloorMoveBaseHeightPatch }> {
   const oldEff = withEffectiveStoreyHeights(floors, oldElements);
-  const newEff = withEffectiveStoreyHeights(floors, newElements);
-  const changed = oldEff.some((f, i) => f.height !== newEff[i]?.height);
+  const newEff = withEffectiveStoreyHeights(nextFloors, newElements);
+  const changed = oldEff.length !== newEff.length ||
+    oldEff.some((f, i) => f.zIndex !== newEff[i]?.zIndex || f.height !== newEff[i]?.height);
   if (!changed) return [];
   return cascadeFloorStackChange(oldEff, newEff, newElements);
 }
