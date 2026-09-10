@@ -16,7 +16,8 @@
  *
  * - **2-point** sloped roof: **eaves only** (the drawn segment = eaves line; no gable from geometry).
  */
-import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
+import { isSlopedPitchedRoofElementForEavesGable } from '../../lib/roofElement';
+export { isSlopedPitchedRoofElementForEavesGable } from '../../lib/roofElement';
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { computeSlopedPolygonInwardNormal2D } from '../../lib/geometry3dSloped';
 import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
@@ -28,7 +29,7 @@ import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const MIN_LEN_M = 0.05;
 const GABLE_PERP_COS = 0.2;
@@ -37,24 +38,6 @@ const RIDGE_PARALLEL_COS = 0.85;
 
 function dist2XY(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-function isPitchSlopedNotFlat(o: BuildingElementOpaque): boolean {
-  const p = o.pitch;
-  return typeof p === 'number' && Number.isFinite(p) && p > 0 && p < 90;
-}
-
-/**
- * True when this is a sloped, roof-line opaque: roof-like (name/flag/pitch) and 0< pitch<90, not a placeholder.
- */
-export function isSlopedPitchedRoofElementForEavesGable(o: BuildingElementOpaque): boolean {
-  if (o.isPlaceholder) return false;
-  if (!isRoofLikeOpaqueElement(o)) return false;
-  if (!isPitchSlopedNotFlat(o)) return false;
-  if ((o as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof) return true;
-  const n = (o.name ?? '').trim().toLowerCase();
-  if (n === 'roof' || n.includes('roof')) return true;
-  return false;
 }
 
 function eavesGableJunctionCodes(o: BuildingElementOpaque): { eaves: 'E10' | 'E11'; gable: 'E12' | 'E13' } {

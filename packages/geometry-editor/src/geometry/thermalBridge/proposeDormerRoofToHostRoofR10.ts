@@ -12,7 +12,8 @@ import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLin
 import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { roundToTwoDecimals } from '../constants';
-import { type FacadeOpeningEdgeRole, type FacadeOpeningTbProposal, psiTable37ForCode } from './proposeFacadeOpenings';
+import { type FacadeOpeningEdgeRole, type FacadeOpeningTbProposal } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 import { isSlopedPitchedRoofElementForEavesGable } from './proposeSlopedRoofEavesGable';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { zonesCompatible } from './proposeAdjacentWallJunction';

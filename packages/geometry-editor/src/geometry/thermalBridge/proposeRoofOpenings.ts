@@ -26,9 +26,9 @@ import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import {
   jambReason,
   openingSillElevationMForFacadeTb,
-  psiTable37ForCode,
   type FacadeOpeningTbProposal,
 } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 function dist2XY(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y);

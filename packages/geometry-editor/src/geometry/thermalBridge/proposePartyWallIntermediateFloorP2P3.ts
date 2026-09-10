@@ -29,7 +29,7 @@ import {
 import { partyWallVerticalExtentM, isPartyWallVerticalEnvelopeLine } from './proposePartyWallToExternalE18';
 import { partyWallGroundFamilyClaimsElevation } from './proposeWallGroundContinuous';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const MIN_PLAN_OVERLAP_M = 0.05;
 const MIN_VERTICAL_OVERLAP_M = 0.05;

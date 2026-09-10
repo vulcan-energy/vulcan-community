@@ -5,7 +5,7 @@
  * Shared resolution and distance helpers for linear thermal bridges (proposers, dedupe, issues).
  */
 import type { BuildingElementOpaque, Element, ThermalBridgeLinear } from '../types';
-import { isSlopedPitchedRoofElementForEavesGable } from './proposeSlopedRoofEavesGable';
+import { isSlopedPitchedRoofElementForEavesGable } from '../../lib/roofElement';
 import {
   TB_ENDPOINT_EDGE_MARGIN_M,
   TB_MIN_PLAN_LENGTH_FOR_ALIGNMENT_M,

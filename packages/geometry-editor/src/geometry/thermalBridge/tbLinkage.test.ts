@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { BuildingElementOpaque, Element, ThermalBridgeLinear } from '../types';
 import {
   bestPlanEdgeMatchForLinearTb,
@@ -146,5 +146,24 @@ describe('tbLinkage', () => {
     expect(m).not.toBeNull();
     expect(m!.spanM).toBeCloseTo(8, 5);
     expect(m!.midpointDistToEdgeM).toBeLessThan(1e-5);
+  });
+
+  it('loads linkage helpers without importing proposal algorithms', async () => {
+    vi.resetModules();
+    vi.doMock('./proposeSlopedRoofEavesGable', () => {
+      throw new Error('tbLinkage must not import roof proposal algorithms');
+    });
+    vi.doMock('./proposeFacadeOpenings', () => {
+      throw new Error('tbLinkage must not import facade proposal algorithms');
+    });
+
+    try {
+      const linkage = await import('./tbLinkage');
+      expect(linkage.tbSegmentMidpoint).toBeTypeOf('function');
+    } finally {
+      vi.doUnmock('./proposeSlopedRoofEavesGable');
+      vi.doUnmock('./proposeFacadeOpenings');
+      vi.resetModules();
+    }
   });
 });

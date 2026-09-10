@@ -21,7 +21,7 @@ import {
   zonesCompatible,
 } from './proposeAdjacentWallJunction';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const MIN_PLAN = 0.05;
 const MIN_VERT = 0.05;

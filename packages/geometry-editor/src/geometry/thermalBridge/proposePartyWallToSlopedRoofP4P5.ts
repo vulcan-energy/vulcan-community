@@ -19,7 +19,7 @@ import { zonesCompatible } from './proposeAdjacentWallJunction';
 import { overlapEndpointsOnRoofPlanEdgeForPartyWall } from './partyWallRoofOverlap';
 import { isPartyWallVerticalEnvelopeLine } from './proposePartyWallToExternalE18';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 function isPitchSlopedNotFlat(o: BuildingElementOpaque): boolean {
   const p = o.pitch;

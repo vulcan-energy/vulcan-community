@@ -46,7 +46,7 @@ import {
 } from './proposeAdjacentWallJunction';
 import { isSlopedPitchedRoofElementForEavesGable } from './proposeSlopedRoofEavesGable';
 import type { FacadeOpeningEdgeRole, FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const MIN_VERT_OVERLAP_M = 0.05;
 const MIN_WALL_PLAN_LEN_XY_M = 0.05;

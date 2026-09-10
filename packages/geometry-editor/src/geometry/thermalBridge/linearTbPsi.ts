@@ -9,10 +9,10 @@ import { isVulcanUiPartyFloorElement } from '../../lib/assemblyMaterialFabric';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
 import type { Element } from '../types';
 import {
-  psiTable37ForCode,
   type FacadeOpeningEdgeRole,
   type FacadeOpeningTbProposal,
 } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const SHARED_PARTY_TB_ROLES: ReadonlySet<FacadeOpeningEdgeRole> = new Set([
   'e7_party_floor_external',

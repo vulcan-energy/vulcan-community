@@ -30,7 +30,7 @@ import { elementBaseElevationMForTb, elementFloorZIndexForTb } from '../../lib/g
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { isExternalLineWall } from './proposeExternalCorners';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 import { ADJACENT_WALL_COINCIDENT_PERP_TOL_M } from './thermalBridgeTolerances';
 
 /** Re-export for party-wall passes. */

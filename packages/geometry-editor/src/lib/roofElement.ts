@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../geometry/types';
+import type { BuildingElementOpaque, Element } from '../geometry/types';
 
 /**
  * Identifies opaque envelope pieces treated as **roof** in the app — same signals as
@@ -32,5 +32,23 @@ export function isRoofLikeOpaqueElement(element: Element): boolean {
     }
     return true;
   }
+  return false;
+}
+
+function isPitchSlopedNotFlat(o: BuildingElementOpaque): boolean {
+  const p = o.pitch;
+  return typeof p === 'number' && Number.isFinite(p) && p > 0 && p < 90;
+}
+
+/**
+ * True when this is a sloped, roof-line opaque: roof-like (name/flag/pitch) and 0< pitch<90, not a placeholder.
+ */
+export function isSlopedPitchedRoofElementForEavesGable(o: BuildingElementOpaque): boolean {
+  if (o.isPlaceholder) return false;
+  if (!isRoofLikeOpaqueElement(o)) return false;
+  if (!isPitchSlopedNotFlat(o)) return false;
+  if ((o as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof) return true;
+  const n = (o.name ?? '').trim().toLowerCase();
+  if (n === 'roof' || n.includes('roof')) return true;
   return false;
 }
