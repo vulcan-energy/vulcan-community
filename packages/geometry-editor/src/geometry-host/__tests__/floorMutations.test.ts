@@ -53,6 +53,31 @@ describe('floor mutation invariants', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it.each(['zone', 'element'])('refreshes upper-storey bases after removing the tallest wall by %s', (mode) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const { addFloor, addZone, addElement } = store.getState();
+    addFloor('Ground', 0);
+    addFloor('First', 0);
+    addZone({ name: 'Removed', floorArea: 20, height: 3, volume: 60 });
+    addZone({ name: 'Retained', floorArea: 20, height: 2.4, volume: 48 });
+    const [removed, retained] = store.getState().zones;
+    const wall = (name: string, zoneId: string, z: number, height: number, base_height: number) => ({
+      type: 'BuildingElementOpaque' as const, name, zoneId, height, base_height,
+      width: 4, area: 4 * height, pitch: 90, parent_element: null,
+      coordinates: [{ x: 0, y: z, z }, { x: 4, y: z, z }],
+    });
+    addElement(wall('Tall wall', removed.id, 0, 3, 0));
+    const tallId = store.getState().elementIds.at(-1)!;
+    addElement(wall('Lower wall', retained.id, 0, 2.4, 0));
+    addElement(wall('Upper wall', retained.id, 1, 2.4, 3));
+    const upperId = store.getState().elementIds.at(-1)!;
+    expect(store.getState().elementsById[upperId].base_height).toBe(3);
+    if (mode === 'zone') store.getState().removeZone(removed.id);
+    else store.getState().removeElement(tallId);
+    expect(store.getState().elementsById[upperId].base_height).toBe(2.4);
+    expect(store.getState().elementsById[upperId].coordinates[0].z).toBe(1);
+  });
+
   it.each([false, true])('refreshes automatic window security risk when moving floors (hosted: %s)', (hosted) => {
     const { store, wallId, windowId } = seedWindow(hosted);
     expect(store.getState().elementsById[windowId].extra_json?.security_risk).toBe(true);

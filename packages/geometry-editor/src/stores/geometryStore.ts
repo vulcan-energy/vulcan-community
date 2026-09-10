@@ -4514,6 +4514,7 @@ const createGeometryState = (
         Object.entries(state.elementsById).filter(([, element]) => element.zoneId !== id)
       ) as Record<string, Element>;
       const remainingElementIds = state.elementIds.filter(elementId => remainingElementsById[elementId]);
+      applyWallStackCascade(state.floors, state.elementsById, remainingElementsById);
       if (
         (newSelection?.type === 'element' || newSelection?.type === 'global') &&
         state.elementsById[newSelection.id]?.zoneId === id
@@ -5220,6 +5221,16 @@ const createGeometryState = (
       if (!prevElement) {
         return state;
       }
+      const requestedName = typeof updates.name === 'string' ? updates.name.trim() : prevElement.name;
+      const requestedElement = { ...prevElement, ...updates, name: requestedName } as Element;
+      if (
+        requestedName &&
+        (requestedName !== prevElement.name || requestedElement.zoneId !== prevElement.zoneId) &&
+        getScopedExistingElementNames(requestedElement, state.elementsById, id).includes(requestedName)
+      ) {
+        throw new Error(`Element name "${requestedName}" already exists${isGlobalObject(requestedElement) ? ' for this type' : ' in this zone'}. Please choose a different name.`);
+      }
+
       recordGeometryStoreWrite('updateElement');
       const resolveElementName = createElementNameLookup(Object.values(state.elementsById));
       const resolveParentElement = createParentElementLookup(Object.values(state.elementsById));
@@ -5831,27 +5842,8 @@ const createGeometryState = (
 
       const elementRenamePlan: ElementRenameEntry[] = [];
 
-      // If name is being updated, check for duplicates and update references
+      // Propagate an explicit name change through its references.
       if (normalizedUpdates.name && normalizedUpdates.name !== prevElement.name) {
-        const isGlobalElement = isGlobalObject(prevElement);
-        let existingElementNames: string[];
-
-        if (isGlobalElement) {
-          // For global objects, check for duplicates across all global objects of the same type
-          existingElementNames = Object.values(state.elementsById)
-            .filter(e => e.type === prevElement.type && e.id !== id && isGlobalObject(e))
-            .map(e => e.name);
-        } else {
-          // For zone-specific objects, check for duplicates within the same zone
-          existingElementNames = Object.values(state.elementsById)
-            .filter(e => e.zoneId === prevElement.zoneId && e.id !== id)
-            .map(e => e.name);
-        }
-
-        if (existingElementNames.includes(normalizedUpdates.name)) {
-          throw new Error(`Element name "${normalizedUpdates.name}" already exists${isGlobalElement ? ` for this type` : ` in this zone`}. Please choose a different name.`);
-        }
-
         const from = prevElement.name.trim();
         const to = normalizedUpdates.name.trim();
         if (from && to && from !== to) {
@@ -6230,18 +6222,14 @@ const createGeometryState = (
         get().ensureFloorForZ,
       );
 
-      // Derive zone properties if this element belongs to a zone
+      // A zone reassignment changes the geometry-derived values on both sides.
       let updatedZones = state.zones;
-      if (nextElementWithSecurityRisk.zoneId) {
-        const zone = state.zones.find(z => z.id === nextElementWithSecurityRisk.zoneId);
-        if (zone) {
-          const zoneUpdates = deriveZoneProperties(zone, Object.values(newElementsById));
-          if (Object.keys(zoneUpdates).length > 0) {
-            updatedZones = state.zones.map(z =>
-              z.id === nextElementWithSecurityRisk.zoneId ? { ...z, ...zoneUpdates } : z
-            );
-          }
-        }
+      for (const [index, zone] of state.zones.entries()) {
+        if (zone.id !== prevElement.zoneId && zone.id !== nextElementWithSecurityRisk.zoneId) continue;
+        const zoneUpdates = deriveZoneProperties(zone, Object.values(newElementsById));
+        if (Object.keys(zoneUpdates).length === 0) continue;
+        if (updatedZones === state.zones) updatedZones = [...state.zones];
+        updatedZones[index] = { ...zone, ...zoneUpdates };
       }
 
       // Editing a wall's height (or moving it between floors) can change a floor's effective
@@ -6860,23 +6848,16 @@ const createGeometryState = (
 
     const sourceIdSet = new Set(requestedSourceEls.map((el) => el.id));
     const sourceEls: Element[] = [...requestedSourceEls];
-    const selectedWindowNames = new Set(
-      requestedSourceEls
-        .filter((el) => el.type === 'BuildingElementTransparent' && !!el.name)
-        .map((el) => el.name),
-    );
-    if (selectedWindowNames.size > 0) {
-      for (const elementId of state.elementIds) {
-        const candidate = state.elementsById[elementId];
-        if (
-          candidate?.type === 'WindowShading' &&
-          candidate.parent_element &&
-          selectedWindowNames.has(candidate.parent_element) &&
-          !sourceIdSet.has(candidate.id)
-        ) {
-          sourceEls.push(candidate);
-          sourceIdSet.add(candidate.id);
-        }
+    const resolveParent = createParentElementLookup(Object.values(state.elementsById));
+    for (const elementId of state.elementIds) {
+      const candidate = state.elementsById[elementId];
+      if (
+        candidate?.type === 'WindowShading' &&
+        sourceIdSet.has(resolveParent(candidate)?.id ?? '') &&
+        !sourceIdSet.has(candidate.id)
+      ) {
+        sourceEls.push(candidate);
+        sourceIdSet.add(candidate.id);
       }
     }
 
