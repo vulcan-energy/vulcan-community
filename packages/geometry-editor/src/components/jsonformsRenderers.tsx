@@ -75,19 +75,8 @@ type RendererConfig = {
 };
 
 /**
- * R4.5: replaces `ControlProps & { config?: RendererConfig }` (`ControlProps` was
- * `@jsonforms/core`'s own control-prop type). This module no longer imports anything
- * from `@jsonforms/*` — the registry that used to feed these five controls props via
- * `withJsonFormsControlProps`/JsonForms' own reducer is gone (see the R4.5 deletion
- * note above `schemaHasIntegerType`), and `DirectAdvancedFields.tsx` /
- * `DirectSpecFields` have supplied every one of these fields by hand since R4.3.
- * A LOCAL structural type covering exactly what the five kept controls destructure
- * (checked against each control body below) — not a guess at `ControlProps`' full
- * shape. `visible`, `required`, `id`, and `rootSchema` are still populated by
- * `renderControlForProperty`'s `baseProps` in `DirectAdvancedFields.tsx` (kept there
- * for parity with the original JsonForms `ControlProps` shape / possible future use)
- * but are read by none of these five controls — deliberately omitted here rather than
- * carried forward as unused surface.
+ * Props consumed by the direct controls. `DirectAdvancedFields` and `DirectSpecFields`
+ * supply these values; metadata unused by controls is omitted from this local type.
  */
 type AdvancedControlProps = {
   data: unknown;
@@ -170,7 +159,7 @@ function coerceDropdownValue(
   return raw;
 }
 
-/** Per-field validation aligned with the schema mode used by this JsonForms instance (FHS vs Core). */
+/** Per-field validation through the effective Core or FHS geometry schema port. */
 // eslint-disable-next-line react-refresh/only-export-components -- data-layer validation helper shared with DirectAdvancedFields.
 export function validateAdvancedFieldPrimitive(
   config: RendererConfig | undefined,
@@ -279,9 +268,8 @@ const ProviderFieldLabelWithTooltip: React.FC<{
   );
 };
 
-// Helper to render a field label with tooltip for JsonForms controls. JsonForms
-// callers pass their schema mode explicitly; other field groups resolve it from
-// the nearest provider-backed store through the component above.
+// Label helper for hand-rendered field groups; the schema mode is explicit when supplied
+// and otherwise comes from the nearest provider-backed store.
 // eslint-disable-next-line react-refresh/only-export-components -- renderer helper reused by field groups.
 export function renderFieldLabelWithTooltip(
   label: string,

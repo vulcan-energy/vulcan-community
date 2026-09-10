@@ -1663,9 +1663,6 @@ export function resolveElementSubschemaForProfile(
     : resolveCoreElementSubschemaFromRoot(schemaRoot, elementType, subtype);
 }
 
-// Removed getRequiredFieldsForSubtype and getMissingRequiredFields functions
-// Advanced fields validation is now purely schema-driven via JsonForms
-
 // Base fields that should NOT appear in advanced fields (already handled in standard UI)
 export function getBaseFieldsForElementType(elementType: string): string[] {
   const baseFieldsMap: Record<string, string[]> = {
