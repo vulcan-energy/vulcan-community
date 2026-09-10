@@ -13,9 +13,9 @@ export const roundToFourDecimals = (value: number): number => {
 };
 
 /**
- * When `extra_json.height_upper_surface` is unset on a suspended ground floor, ElementCreator
- * seeds this void height (m) so ISO 13370 suspended-floor U paths have a positive height.
- * JsonForms treats the same value as the schema default for status pills when defaults JSON omits it.
+ * The ground-element form seeds this void height (m) when a suspended floor has no
+ * `extra_json.height_upper_surface`, giving ISO 13370 U-value calculations a positive height.
+ * Advanced-field status pills use the same default when defaults JSON omits it.
  */
 export const SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M = 0.15;
 

@@ -2,49 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * R4.3: render the existing custom JsonForms Advanced Fields controls directly off a
- * resolved subschema (or, for System, a layout spec from `../lib/systemAdvancedUischema`),
- * with no <JsonForms> dispatch and no generated uischema. Generalized from the R4.2
- * ElectricBattery-only spike to every element type. R4.4 retired the legacy JsonForms
- * mount and its fallback kill-switch (formerly `../lib/directRenderAdvancedFieldsFlag`),
- * so this is now the only Advanced Fields render path. This module must not import
- * anything from `@jsonforms/*` — every prop shape below is inferred structurally from
- * the control components themselves (`React.ComponentProps<typeof TextControl>`,
- * etc.), matching the cast pattern in `__tests__/jsonformsRenderers.units.test.tsx`.
+ * Direct renderers for advanced fields and explicit editor specs.
  *
- * R4.3b: the System layout-spec walk below is SEGMENT-safe, not dot-string-safe — see
- * `segmentsFromLayoutScope` (`../lib/jsonTypes` since R4.6b-2) and
- * `../lib/systemAdvancedUischema`'s own docstring. Raw user plant-key names
- * (CSV-derived) may contain '/' or '.', either of which used to
- * corrupt the walk (a '/' broke `resolveSchemaPointer`'s pointer split; a '.' broke
- * this file's own dot-path round-trip).
+ * `DirectAdvancedFields` walks resolved schema properties; `DirectSpecFields` walks
+ * caller-supplied layout/spec trees. Both share control selection, field presentation,
+ * and segment-safe JSON path helpers. Nullable schema nodes are unwrapped before control
+ * selection, so the picker only handles the resolved property shape.
  *
- * R4.5: this file also exports `DirectSpecFields`, a second direct renderer, sibling
- * to `DirectAdvancedFields` above and living here for the same reason — it shares
- * `renderControlForProperty` and `labelForProperty` with it, and reaches the same
- * `getAtPath` / `setAtPath` / `segmentsFromLayoutScope` walk (`../lib/jsonTypes` since
- * R4.6b-2) rather than duplicating either. Where `DirectAdvancedFields` interprets a
- * resolved SUBSCHEMA, `DirectSpecFields` interprets an EXPLICIT
- * uischema-spec tree — the shape web's SnippetEditor and SimplifiedFabricEditor
- * (parent repo) build by hand and used to mount as a raw JsonForms `uischema` prop
- * through the now-deleted `standardRenderers` registry (see `jsonformsRenderers.tsx`'s
- * own R4.5 deletion note). See `DirectSpecFields`'s own docstring below for the walk
- * semantics.
- *
- * R4.6a: the first slice to CORRECT this renderer rather than port or extend it. With
- * JsonForms gone there is no longer a second implementation to hold parity with, so
- * "what the old path did" stopped being an argument and the behaviour had to stand on
- * its own. Two things did not: HEM's nullable-wrapped properties
- * (`anyOf:[X,{type:'null'}]`) were dispatching to TextControl as a whole class — 26
- * property routes across BOTH profiles, 23 of them numbers rendering without their
- * schema minima — and the two review-driven, one-field-at-a-time patches that had
- * papered over the enum corner of it were still accumulating. `unwrapNullableSchema`
- * (below) replaces both with one normalization applied at all three resolution sites;
- * one of the two inline overrides is deleted as redundant, the other kept with a
- * corrected rationale. Two smaller R4.5 review notes are closed in the same slice:
- * `setAtPathNode`'s array-index unset now splices instead of leaving a JSON `null`
- * hole (`../lib/jsonTypes` since R4.6b-2), and TextControl's JSON-blob commit no longer
- * skips PARSING when the host supplies no `elementType` (`jsonformsRenderers.tsx`).
+ * The module intentionally has no `@jsonforms/*` imports. Controls receive local
+ * structural props and are rendered directly.
  */
 
 import React from 'react';
@@ -70,15 +36,7 @@ import {
   validateAdvancedFieldPrimitive,
 } from './jsonformsRenderers';
 
-/**
- * R4.6b-3: `startCaseKey` MOVED to `../lib/schemaDescriptionOverrides`, which owns the
- * label content rule it is now step 3 of. Re-exported here for the PARENT repo's
- * `web/src/components/SimplifiedFabricEditor.tsx`, which imports it from this path
- * today; retargeting it at the lib module is a paired parent PR's job. Community code
- * must import it from `../lib/schemaDescriptionOverrides` directly; this line goes when
- * the parent's import moves — exactly as R4.6b-2's `unwrapNullableSchema` re-export,
- * deleted in this slice, did once the parent moved to `../lib/schemaShape`.
- */
+/** Compatibility re-export; the implementation and new imports live in the schema-description module. */
 // eslint-disable-next-line react-refresh/only-export-components -- pure string helper re-export, not a React component.
 export { startCaseKey };
 
