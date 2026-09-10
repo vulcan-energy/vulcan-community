@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   applyCompassOrientationToLineCoords,
   applyCompassOrientationToSlopedPolygonCoords,
+  deriveWallProperties,
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
   polygonPlanCentroid,
@@ -12,6 +13,11 @@ import {
   rotatePolygonPlanXYAroundPoint,
   segmentTangentAndOpeningOutwardModelXY,
 } from '../openingSegmentOutward';
+import type { Element } from '../../geometry/types';
+
+vi.mock('../../stores/geometryStore', () => {
+  throw new Error('openingSegmentOutward must not load the geometry store');
+});
 
 /** Outward-facing wall/sloped orientation: outward normal azimuth minus global offset. */
 function orientation360WallLineSegmentLikeOutward(
@@ -69,6 +75,34 @@ describe('orientation360SlopedFromFirstEdge', () => {
     const { tangent, openingOutward } = segmentTangentAndOpeningOutwardModelXY(0, 0, 1, 0);
     const dot = tangent[0] * openingOutward[0] + tangent[1] * openingOutward[1];
     expect(dot).toBeCloseTo(0, 8);
+  });
+});
+
+describe('deriveWallProperties import boundary', () => {
+  it('derives a wall without evaluating the Zustand store module', () => {
+    const wall: Element = {
+      id: 'wall-1',
+      name: 'Wall 1',
+      type: 'BuildingElementOpaque',
+      parent_element: null,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 5, y: 0, z: 0 },
+      ],
+      width: 0,
+      height: 2.4,
+      area: 0,
+    };
+
+    expect(deriveWallProperties(wall, 30)).toEqual({
+      width: 5,
+      height: 2.4,
+      orientation360: 150,
+      area: 12,
+      perimeter: 14.8,
+      center_x: 2.5,
+      center_y: 0,
+    });
   });
 });
 

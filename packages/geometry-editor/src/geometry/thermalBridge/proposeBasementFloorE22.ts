@@ -13,7 +13,7 @@ import type { Floor } from '../../geometry/types';
 import type { BuildingElementGround, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const MIN_EDGE = 0.05;
 

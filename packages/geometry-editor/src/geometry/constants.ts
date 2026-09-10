@@ -19,6 +19,9 @@ export const roundToFourDecimals = (value: number): number => {
  */
 export const SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M = 0.15;
 
+export const DEFAULT_WALL_HEIGHT = 2.4;
+export const MIN_WALL_SEGMENT = 0.2;
+
 /**
  * Compass degrees in [0, 360). JavaScript `%` keeps the sign of the dividend, so
  * `(angle + 360) % 360` can still be negative when the true angle is below −360°.

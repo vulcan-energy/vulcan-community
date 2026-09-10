@@ -26,7 +26,7 @@ import {
   zonesCompatible,
 } from './proposeAdjacentWallJunction';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const Z_BAND_EPS = 0.04;
 

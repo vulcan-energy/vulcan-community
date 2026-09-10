@@ -1,7 +1,67 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { normalizeOrientation360Deg } from '../geometry/constants';
+import {
+  DEFAULT_WALL_HEIGHT,
+  MIN_WALL_SEGMENT,
+  normalizeOrientation360Deg,
+  roundToTwoDecimals,
+} from '../geometry/constants';
+import type { Element } from '../geometry/types';
+
+/**
+ * Derive the rounded dimensions and metrics for a two-point wall. Orientation is the segment's
+ * outward compass bearing minus the global offset; a degenerate segment keeps its prior bearing
+ * and emits GEO-007. The default wall height applies when the element has no usable height.
+ */
+export const deriveWallProperties = (
+  element: Element,
+  globalOrientationOffset: number,
+): {
+  width: number;
+  height: number;
+  orientation360: number;
+  area: number;
+  perimeter: number;
+  center_x: number;
+  center_y: number;
+} => {
+  const coordinates = element.coordinates;
+  const height = ('height' in element) ? element.height || DEFAULT_WALL_HEIGHT : DEFAULT_WALL_HEIGHT;
+
+  if (coordinates.length !== 2) {
+    throw new Error('Wall must have exactly 2 coordinates');
+  }
+
+  const [A, B] = coordinates;
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const width = Math.sqrt(dx * dx + dy * dy);
+
+  let orientation360 = ('orientation360' in element) ? element.orientation360 || 0 : 0;
+  if (width >= MIN_WALL_SEGMENT) {
+    const outwardOrientation360 = orientation360FromSegmentOutwardModelXY(A.x, A.y, B.x, B.y, 0);
+    orientation360 = normalizeOrientation360Deg((outwardOrientation360 ?? orientation360) - globalOrientationOffset);
+    orientation360 = roundToTwoDecimals(orientation360);
+  } else {
+    console.warn(`GEO-007: Near-zero segment ${width.toFixed(3)}m < ${MIN_WALL_SEGMENT}m`);
+  }
+
+  const area = roundToTwoDecimals(width * height);
+  const perimeter = roundToTwoDecimals(2 * (width + height));
+  const center_x = roundToTwoDecimals((A.x + B.x) / 2);
+  const center_y = roundToTwoDecimals((A.y + B.y) / 2);
+
+  return {
+    width: roundToTwoDecimals(width),
+    height: roundToTwoDecimals(height),
+    orientation360,
+    area,
+    perimeter,
+    center_x,
+    center_y,
+  };
+};
 
 /**
  * Opening “outward” in model plan (+X east, +Y north) from a window/wall segment A→B.

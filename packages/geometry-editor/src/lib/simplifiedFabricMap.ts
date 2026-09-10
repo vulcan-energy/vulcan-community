@@ -193,6 +193,12 @@ export const JUNCTION_TYPE_TO_PSI_TABLE_37: Record<string, number> = {
 
 export const JUNCTION_TYPE_TO_PSI: Record<string, number> = JUNCTION_TYPE_TO_PSI_TABLE_37;
 
+/** Default ψ (W/m·K) from built-in Table 3.7 for a junction type code. */
+export function psiTable37ForCode(code: string): number {
+  const v = JUNCTION_TYPE_TO_PSI[code];
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
+
 export function getPsiForJunctionType(junctionType: string | undefined): number | undefined {
   if (!junctionType) return undefined;
   return JUNCTION_TYPE_TO_PSI[junctionType];

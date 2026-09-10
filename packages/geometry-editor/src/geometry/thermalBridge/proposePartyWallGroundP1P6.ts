@@ -25,7 +25,8 @@ import {
 } from './proposeWallGroundContinuous';
 import { isPartyWallVerticalEnvelopeLine, partyWallVerticalExtentM } from './proposePartyWallToExternalE18';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode, SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M } from './proposeFacadeOpenings';
+import { SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const MIN_PLAN_OVERLAP_M = 0.05;
 const Z_BAND_EPS_M = 0.04;

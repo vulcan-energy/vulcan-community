@@ -116,7 +116,13 @@ import type { MissingElement, ValidationResult } from '../geometry/validation/ty
 // Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
 // remove or relocate these re-exports without a paired web/ PR.
 export type { MissingElement, ValidationResult } from '../geometry/validation/types';
-import { normalizeOrientation360Deg, roundToTwoDecimals, ZONE_NAME_SUGGESTIONS } from '../geometry/constants';
+import {
+  DEFAULT_WALL_HEIGHT,
+  MIN_WALL_SEGMENT,
+  normalizeOrientation360Deg,
+  roundToTwoDecimals,
+  ZONE_NAME_SUGGESTIONS,
+} from '../geometry/constants';
 import { parseCoords } from '../geometry/coords';
 import {
   resolveGuideOverlayForFloor,
@@ -205,6 +211,7 @@ import {
   type DevelopmentContextShadingModel,
 } from '../lib/developmentContextShading';
 import {
+  deriveWallProperties,
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
   segmentTangentAndOpeningOutwardModelXY,
@@ -243,6 +250,7 @@ import type {
 } from '../geometry/types';
 // Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
 // remove or relocate these re-exports without a paired web/ PR.
+export { deriveWallProperties };
 export { roundToTwoDecimals, roundToFourDecimals, ZONE_NAME_SUGGESTIONS } from '../geometry/constants';
 export { parseCoords, formatCoords, updateElementCoordinates } from '../geometry/coords';
 export {
@@ -358,7 +366,7 @@ function applyWallStackCascade(
 // Project defaults (from PRD)
 const PROJECT_DEFAULTS = {
   // Heights
-  wall_height: 2.400,    // meters - standard wall height
+  wall_height: DEFAULT_WALL_HEIGHT,    // meters - standard wall height
   window_height: 1.200,  // meters - standard window height
   base_z: 0.000,         // meters - ground level
 
@@ -369,7 +377,7 @@ const PROJECT_DEFAULTS = {
 
   // Validation
   attach_eps: 0.02,      // meters - window attachment tolerance
-  min_segment: 0.20,      // meters - minimum segment length
+  min_segment: MIN_WALL_SEGMENT,      // meters - minimum segment length
   pos_eps: 0.01          // meters - position tolerance
 };
 
@@ -644,71 +652,6 @@ export const generateDefaultCoordinates = (element: Element): Array<{x: number, 
       // Fallback to default wall coordinates
       return generateWallCoordinates(1.0, PROJECT_DEFAULTS.wall_height, 0, 0, 0);
   }
-};
-
-// Derivation Functions - Calculate properties from coordinates
-export const deriveWallProperties = (
-  element: Element,
-  globalOrientationOffset: number,
-): {
-  width: number;
-  height: number;
-  orientation360: number;
-  area: number;
-  perimeter: number;
-  center_x: number;
-  center_y: number;
-} => {
-  const coordinates = element.coordinates;
-  const height = ('height' in element) ? element.height || PROJECT_DEFAULTS.wall_height : PROJECT_DEFAULTS.wall_height;
-
-  if (coordinates.length !== 2) {
-    throw new Error('Wall must have exactly 2 coordinates');
-  }
-
-  const [A, B] = coordinates;
-  const dx = B.x - A.x;
-  const dy = B.y - A.y;
-
-  // Width = distance between points A and B
-  const width = Math.sqrt(dx * dx + dy * dy);
-
-  // Handle degenerate segments
-  let orientation360 = ('orientation360' in element) ? element.orientation360 || 0 : 0; // Keep prior orientation
-  if (width >= PROJECT_DEFAULTS.min_segment) {
-    // Calculate orientation360 from the outward-facing normal implied by
-    // the directed segment A→B, then apply the global north offset using
-    // the same subtractive convention as the rest of the model.
-    const outwardOrientation360 = orientation360FromSegmentOutwardModelXY(A.x, A.y, B.x, B.y, 0);
-    orientation360 = normalizeOrientation360Deg((outwardOrientation360 ?? orientation360) - globalOrientationOffset);
-    // Round to 2 decimal places for data quality and ECaaS compatibility
-    orientation360 = roundToTwoDecimals(orientation360);
-
-  } else {
-    // Emit GEO-007 warning for degenerate segment
-    console.warn(`GEO-007: Near-zero segment ${width.toFixed(3)}m < ${PROJECT_DEFAULTS.min_segment}m`);
-  }
-
-  // Area = width × height (height is scalar)
-  // Round to 2 decimal places for consistency (was 3dp, but 2dp is sufficient and matches ECaaS requirements)
-  const area = roundToTwoDecimals(width * height);
-
-  // Perimeter = 2 × (width + height)
-  const perimeter = roundToTwoDecimals(2 * (width + height));
-
-  // Center = midpoint of segment AB
-  const center_x = roundToTwoDecimals((A.x + B.x) / 2);
-  const center_y = roundToTwoDecimals((A.y + B.y) / 2);
-
-  return {
-    width: roundToTwoDecimals(width),
-    height: roundToTwoDecimals(height),
-    orientation360,
-    area,
-    perimeter,
-    center_x,
-    center_y
-  };
 };
 
 // NOTE: strictest numeric typing coercion lives in `lib/schemaCoercion.ts`

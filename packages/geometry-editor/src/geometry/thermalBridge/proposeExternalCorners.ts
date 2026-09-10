@@ -45,7 +45,7 @@ import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import type { BuildingElementOpaque, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import type { FacadeOpeningEdgeRole, FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 function wallBaseElevationM(w: BuildingElementOpaque): number {
   const coords = w.coordinates;

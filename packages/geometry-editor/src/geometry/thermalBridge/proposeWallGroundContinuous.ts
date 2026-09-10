@@ -36,9 +36,9 @@ import {
 import { isExternalLineWall } from './proposeExternalCorners';
 import {
   type FacadeOpeningTbProposal,
-  psiTable37ForCode,
   SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M,
 } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const MIN_SEGMENT_M = 0.05;
 /** Opening foot must lie within this perpendicular distance (m) of the wall’s infinite line to subtract. */

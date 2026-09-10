@@ -37,7 +37,7 @@ import type {
   ThermalBridgeLinear,
 } from '../types';
 import { isVulcanUiPartyFloorElement } from '../../lib/assemblyMaterialFabric';
-import { JUNCTION_TYPE_TO_PSI } from '../../lib/simplifiedFabricMap';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 import { dist3, midpoint3 } from './tbLinkage';
 import {
   findLinkedAdjacentConditionedFloorForLineElement,
@@ -49,6 +49,8 @@ import { findLinkedBasementGroundForLineElement, isBasementGroundElement } from 
 import { DEFAULT_TB_DEDUPE_TOLERANCE_M } from './thermalBridgeTolerances';
 /** Re-export for callers importing from facade openings. */
 export { DEFAULT_TB_DEDUPE_TOLERANCE_M };
+/** Re-export for callers importing from facade openings. */
+export { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 /**
  * Below this sill elevation (m above model zero), we omit **E3** (no separate sill detail) and instead
@@ -260,12 +262,6 @@ export function defaultJunctionCodeForEdge(
   if (role === 'sloped_roof_to_adjacent_wall_r8_r9') return 'R8';
   if (role === 'dormer_roof_to_host_roof_r10') return 'R10';
   return 'E4';
-}
-
-/** Default ψ (W/m·K) from built-in Table 3.7 for a junction type code. */
-export function psiTable37ForCode(code: string): number {
-  const v = JUNCTION_TYPE_TO_PSI[code];
-  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
 /** Junction codes allowed in the preview dropdown for this edge role. */

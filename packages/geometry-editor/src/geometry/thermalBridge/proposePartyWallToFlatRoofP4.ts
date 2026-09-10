@@ -27,7 +27,7 @@ import {
   overlapEndpointsOnRoofPlanEdgeForPartyWall,
 } from './partyWallRoofOverlap';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
-import { psiTable37ForCode } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const Z_BAND_M = 0.04;
 

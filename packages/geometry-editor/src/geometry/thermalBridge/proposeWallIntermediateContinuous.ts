@@ -27,9 +27,9 @@ import type { BuildingElementOpaque, Element } from '../types';
 import { isExternalLineWall } from './proposeExternalCorners';
 import {
   type FacadeOpeningTbProposal,
-  psiTable37ForCode,
   SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M,
 } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 import {
   footIntervalOnWallForRole,
   gapIntervalsAlongWall,

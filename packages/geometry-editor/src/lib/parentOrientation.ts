@@ -14,7 +14,7 @@
 // ElementFormStateCtx.elementIds (readonly) and the orchestrator's own
 // mutable elementIds array satisfy it without a cast.
 
-import { deriveWallProperties } from '../stores/geometryStore';
+import { deriveWallProperties } from './openingSegmentOutward';
 import { roundToFourDecimals } from '../geometry/constants';
 import { projectSegmentOntoParent } from './snapUtils';
 import {

@@ -17,7 +17,8 @@ import { roundToTwoDecimals } from '../constants';
 import { opaqueEnvelopeVerticalExtentM, zonesCompatible } from './proposeAdjacentWallJunction';
 import { isSlopedPitchedRoofElementForEavesGable } from './proposeSlopedRoofEavesGable';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
-import { type FacadeOpeningEdgeRole, type FacadeOpeningTbProposal, psiTable37ForCode } from './proposeFacadeOpenings';
+import { type FacadeOpeningEdgeRole, type FacadeOpeningTbProposal } from './proposeFacadeOpenings';
+import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
 const MIN_WALL_PLAN_LEN_M = 0.05;
 const ROOF_WALL_Z_OVERLAP_PAD_M = 0.45;
