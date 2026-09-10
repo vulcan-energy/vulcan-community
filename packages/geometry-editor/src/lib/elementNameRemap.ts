@@ -209,7 +209,7 @@ const buildPreRenameElementsById = (
   for (const entry of normalizedRenameEntries(renamePlan)) {
     const current = oldElementsById[entry.elementId];
     oldElementsById[entry.elementId] = current
-      ? { ...current, name: entry.from }
+      ? { ...current, name: entry.from, ...('zoneId' in entry ? { zoneId: entry.zoneId ?? undefined } : {}) }
       : ({
           id: entry.elementId,
           name: entry.from,
