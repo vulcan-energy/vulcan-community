@@ -53,6 +53,8 @@ interface SearchableDescribedSelectProps {
   'aria-describedby'?: string;
   /** Ids providing the trigger button's accessible name. */
   'aria-labelledby'?: string;
+  /** Accessible name for the trigger button, when no element exists for `aria-labelledby` to reference. */
+  'aria-label'?: string;
 }
 
 export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps> = ({
@@ -76,6 +78,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   'aria-invalid': ariaInvalid,
   'aria-describedby': ariaDescribedBy,
   'aria-labelledby': ariaLabelledBy,
+  'aria-label': ariaLabel,
 }) => {
   const selectedValueId = useId();
   const [isOpen, setIsOpen] = useState(false);
@@ -269,11 +272,14 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
         }}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
-        /* A button does not support aria-invalid. The linked live description
-         * supplies the error to assistive technology; this value drives the
-         * shared visual invalid state only. */
+        /* A button's role ignores aria-invalid (confirmed by react-doctor's
+         * role-supports-aria-props check: screen readers get no help from
+         * it here). The linked live description supplies the error to
+         * assistive technology; this value drives the shared visual
+         * invalid state only. */
         aria-describedby={ariaDescribedBy}
         aria-labelledby={ariaLabelledBy ? `${ariaLabelledBy} ${selectedValueId}` : undefined}
+        aria-label={ariaLabel}
         ref={triggerRef}
         className={
           usesStandardTrigger

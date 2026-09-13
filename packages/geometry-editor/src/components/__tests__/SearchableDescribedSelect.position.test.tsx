@@ -137,4 +137,33 @@ describe('SearchableDescribedSelect positioning', () => {
     fireEvent.click(screen.getByText('Country'));
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
   });
+
+  it('accepts an explicit aria-label for callers with no element to point aria-labelledby at', () => {
+    render(
+      <SearchableDescribedSelect
+        value=""
+        onChange={vi.fn()}
+        aria-label="Move to…"
+        sections={[{ options: [{ value: 'roof', label: 'Main roof' }] }]}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Move to…' })).toBeInTheDocument();
+  });
+
+  it('reflects aria-invalid in the shared error class only, since a button role ignores the DOM attribute', () => {
+    render(
+      <SearchableDescribedSelect
+        value=""
+        onChange={vi.fn()}
+        triggerVariant="standard"
+        aria-invalid="true"
+        sections={[{ options: [{ value: 'roof', label: 'Main roof' }] }]}
+      />,
+    );
+
+    const trigger = screen.getByRole('button');
+    expect(trigger).not.toHaveAttribute('aria-invalid');
+    expect(trigger).toHaveClass('standard-dropdown-error');
+  });
 });
