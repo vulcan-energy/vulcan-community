@@ -20,6 +20,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'third_party/jsonschema-0.46.5-offline/**'
+      - 'apps/cli/**'
 
 permissions:
   contents: read
@@ -48,3 +49,23 @@ jobs:
 
       - name: Build the Community model WASM
         run: ./scripts/build-model-wasm.sh
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      # The CLI copies the WASM next to its bundle; main CI builds it without one.
+      - name: Build the CLI with the WASM
+        run: npm run build -w apps/cli
+
+      - name: Smoke the CLI convert and preflight
+        run: |
+          fixture=crates/vulcan-model-wasm/tests/fixtures/min_working.csv
+          defaults=data/defaults/defaults_template.json
+          check='const r = JSON.parse(require("fs").readFileSync(0, "utf8")); process.exit(r[process.argv[1]].is_valid ? 0 : 1)'
+          node apps/cli/dist/cli.js convert "$fixture" --defaults "$defaults" --json | node -e "$check" validation
+          node apps/cli/dist/cli.js preflight "$fixture" --defaults "$defaults" --json | node -e "$check" preflight

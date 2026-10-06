@@ -3,6 +3,7 @@
 
 declare module '*vulcan_model_wasm.js' {
   export default function init(moduleOrPath?: unknown): Promise<unknown>;
+  export function initSync(options: { module: BufferSource }): unknown;
 
   export function convert_geometry_csv_request(requestJson: string): string;
   export function fhs_wrapper_version(): string;
