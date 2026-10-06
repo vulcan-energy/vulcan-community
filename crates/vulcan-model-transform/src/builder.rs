@@ -201,14 +201,16 @@ fn strip_ui_only_extra_json_section(
 
 /// Merges a Systems row's `entries` into `section`: CSV rows replace the defaults' entries but
 /// combine with each other by name (one dwelling can carry a DHW heat pump plus a warm-air one,
-/// or a cylinder plus a PointOfUse heater). `owned` records, per section, the names rows have
-/// authored so far. Two rows defining one name differently is E060 — letting row order pick the
-/// winner silently drops one of them; identical repeats are fine.
+/// or a cylinder plus a PointOfUse heater). `owned` records, per section, each name rows have
+/// authored so far and the Systems row (`row_name`) that authored it. Two rows defining one name
+/// differently is E060 — letting row order pick the winner silently drops one of them; identical
+/// repeats are fine.
 fn merge_csv_owned_entries(
     result_obj: &mut serde_json::Map<String, Value>,
     section: &str,
     entries: serde_json::Map<String, Value>,
-    owned: &mut HashMap<String, HashSet<String>>,
+    row_name: &str,
+    owned: &mut HashMap<String, HashMap<String, String>>,
 ) -> Result<(), BuildError> {
     let owned = owned.entry(section.to_string()).or_default();
     let target = result_obj.entry(section.to_string()).or_insert(Value::Null);
@@ -216,21 +218,47 @@ fn merge_csv_owned_entries(
         *target = Value::Object(serde_json::Map::new());
     }
     let target = target.as_object_mut().expect("just set");
-    target.retain(|name, _| owned.contains(name));
+    target.retain(|name, _| owned.contains_key(name));
     for (name, value) in entries {
-        if owned.contains(&name) && target.get(&name) != Some(&value) {
-            return Err(BuildError::new(
-                "E060",
-                &format!(
-                    "{section} '{name}' is defined differently by two Systems rows; \
-                     give them different names or make them identical"
-                ),
-            ));
+        if let Some(previous_row) = owned.get(&name) {
+            if target.get(&name) != Some(&value) {
+                return Err(BuildError::new(
+                    "E060",
+                    &format!(
+                        "Systems rows '{previous_row}' and '{row_name}' both define {section} \
+                         '{name}' differently — remove one of them, or make them identical."
+                    ),
+                ));
+            }
         }
-        owned.insert(name.clone());
+        owned
+            .entry(name.clone())
+            .or_insert_with(|| row_name.to_string());
         target.insert(name, value);
     }
     Ok(())
+}
+
+/// A Systems row's entries for `section`: the wrapped `{"<section>": {name: {...}}}` cell as is,
+/// or a flat cell's fields under the row's own name.
+fn csv_row_entries(
+    section: &str,
+    element_name: &str,
+    extra_json: &serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    match extra_json.get(section).and_then(|v| v.as_object()) {
+        // The wrapped top level is the user's own names, so the UI-only filter starts one
+        // level down.
+        Some(inner) => strip_ui_only_extra_json_section(section, inner),
+        None => serde_json::Map::from_iter([(
+            element_name.to_string(),
+            Value::Object(strip_ui_only_extra_json_system_fields(
+                section,
+                element_name,
+                extra_json,
+            )),
+        )]),
+    }
 }
 
 /// Twin of [`strip_ui_only_extra_json_section`] for the flat row shape, where `extra_json` holds
@@ -5961,7 +5989,9 @@ impl JSONBuilder {
     ) -> Result<(), BuildError> {
         let mut zone_to_space_cool_systems: HashMap<String, Vec<String>> = HashMap::new();
         // Entry names authored by Systems rows so far, keyed by section.
-        let mut csv_owned: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut csv_owned: HashMap<String, HashMap<String, String>> = HashMap::new();
+        // First heat-source name of each HeatSourceWet row, in row order.
+        let mut heat_source_wet_row_first_keys: Vec<String> = Vec::new();
         if let Some(section_data) = csv_data.get("Systems") {
             if section_data.is_empty() {
                 // No systems in CSV - cleanup will remove empty entries
@@ -6168,31 +6198,21 @@ impl JSONBuilder {
                                 if let Some(extra_json) =
                                     row.get("extra_json").and_then(|v| v.as_object())
                                 {
-                                    let wrapped =
-                                        extra_json.get("HeatSourceWet").and_then(|v| v.as_object());
-                                    // The wrapped top level is the user's own names for their
-                                    // heat sources, so the UI-only filter starts one level down.
-                                    let mut entries = match wrapped {
-                                        Some(inner) => {
-                                            strip_ui_only_extra_json_section("HeatSourceWet", inner)
-                                        }
-                                        None => serde_json::Map::from_iter([(
-                                            element_name.to_string(),
-                                            Value::Object(strip_ui_only_extra_json_system_fields(
-                                                "HeatSourceWet",
-                                                element_name,
-                                                extra_json,
-                                            )),
-                                        )]),
-                                    };
+                                    let mut entries =
+                                        csv_row_entries("HeatSourceWet", element_name, extra_json);
                                     self.ensure_fhs_heat_source_wet_defaults(&mut entries);
+                                    if let Some(first) = entries.keys().next() {
+                                        heat_source_wet_row_first_keys.push(first.clone());
+                                    }
                                     merge_csv_owned_entries(
                                         result_obj,
                                         "HeatSourceWet",
                                         entries,
+                                        element_name,
                                         &mut csv_owned,
                                     )?;
-                                    if let Some(hot_water_source) = wrapped
+                                    if let Some(hot_water_source) = extra_json
+                                        .get("HeatSourceWet")
                                         .and(extra_json.get("HotWaterSource"))
                                         .and_then(|v| v.as_object())
                                     {
@@ -6203,6 +6223,7 @@ impl JSONBuilder {
                                                 "HotWaterSource",
                                                 hot_water_source,
                                             ),
+                                            element_name,
                                             &mut csv_owned,
                                         )?;
                                     }
@@ -6212,27 +6233,13 @@ impl JSONBuilder {
                                 if let Some(extra_json) =
                                     row.get("extra_json").and_then(|v| v.as_object())
                                 {
-                                    let entries = match extra_json
-                                        .get("HotWaterSource")
-                                        .and_then(|v| v.as_object())
-                                    {
-                                        Some(inner) => strip_ui_only_extra_json_section(
-                                            "HotWaterSource",
-                                            inner,
-                                        ),
-                                        None => serde_json::Map::from_iter([(
-                                            element_name.to_string(),
-                                            Value::Object(strip_ui_only_extra_json_system_fields(
-                                                "HotWaterSource",
-                                                element_name,
-                                                extra_json,
-                                            )),
-                                        )]),
-                                    };
+                                    let entries =
+                                        csv_row_entries("HotWaterSource", element_name, extra_json);
                                     merge_csv_owned_entries(
                                         result_obj,
                                         "HotWaterSource",
                                         entries,
+                                        element_name,
                                         &mut csv_owned,
                                     )?;
                                 }
@@ -6245,23 +6252,11 @@ impl JSONBuilder {
                                         .get("zone_reference")
                                         .and_then(|v| v.as_str())
                                         .or_else(|| row.get("Zone").and_then(|v| v.as_str()));
-                                    let entries = match extra_json
-                                        .get("SpaceCoolSystem")
-                                        .and_then(|v| v.as_object())
-                                    {
-                                        Some(inner) => strip_ui_only_extra_json_section(
-                                            "SpaceCoolSystem",
-                                            inner,
-                                        ),
-                                        None => serde_json::Map::from_iter([(
-                                            element_name.to_string(),
-                                            Value::Object(strip_ui_only_extra_json_system_fields(
-                                                "SpaceCoolSystem",
-                                                element_name,
-                                                extra_json,
-                                            )),
-                                        )]),
-                                    };
+                                    let entries = csv_row_entries(
+                                        "SpaceCoolSystem",
+                                        element_name,
+                                        extra_json,
+                                    );
                                     if let Some(zone_name) = zone_name {
                                         let refs = zone_to_space_cool_systems
                                             .entry(zone_name.to_string())
@@ -6276,6 +6271,7 @@ impl JSONBuilder {
                                         result_obj,
                                         "SpaceCoolSystem",
                                         entries,
+                                        element_name,
                                         &mut csv_owned,
                                     )?;
                                 }
@@ -6362,10 +6358,11 @@ impl JSONBuilder {
                 }
                 // After every row, so a service row that precedes its heat source's
                 // row is not repointed before that heat source exists.
-                if csv_owned.contains_key("HeatSourceWet") {
+                if !heat_source_wet_row_first_keys.is_empty() {
                     self.repoint_heat_source_wet_references(
                         result_obj,
-                        csv_owned.get("HotWaterSource").unwrap_or(&HashSet::new()),
+                        &heat_source_wet_row_first_keys,
+                        csv_owned.get("HotWaterSource").unwrap_or(&HashMap::new()),
                     );
                 }
             }
@@ -6535,25 +6532,39 @@ impl JSONBuilder {
 
     /// After HeatSourceWet Systems rows change the wet plant, SpaceHeatSystem and
     /// HotWaterSource references to a name missing from the merged HeatSourceWet
-    /// map are repointed to its entry — only when there is exactly one. With several,
-    /// guessing a target is how a WarmAir system once landed on a water-sink heat
-    /// pump, so dangling references stay and fail validation loudly. Valid
+    /// map are repointed — to its only entry, or, when a single HeatSourceWet row
+    /// contributed (a legacy preset carried both `boiler` and `gas_boiler`), to that
+    /// row's first key. Otherwise there is no safe target: guessing is how a WarmAir
+    /// system once landed on a water-sink heat pump, so the dangling reference is
+    /// left for HEM to report (schema validation does not catch it). Valid
     /// user-authored references — and all their sibling fields — are preserved.
     fn repoint_heat_source_wet_references(
         &self,
         result_obj: &mut serde_json::Map<String, Value>,
-        csv_hot_water_sources: &HashSet<String>,
+        row_first_keys: &[String],
+        csv_hot_water_sources: &HashMap<String, String>,
     ) {
-        let first_hs_name = match result_obj.get("HeatSourceWet").and_then(|v| v.as_object()) {
-            Some(map) if map.len() == 1 => map.keys().next().expect("len 1").clone(),
+        let heat_source_wet: Vec<String> = result_obj
+            .get("HeatSourceWet")
+            .and_then(|v| v.as_object())
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default();
+        let first_hs_name = match (heat_source_wet.as_slice(), row_first_keys) {
+            ([only], _) | (_, [only]) => only.clone(),
             _ => return,
         };
-        let is_valid = |name: Option<&str>| name == Some(first_hs_name.as_str());
+        let is_valid =
+            |name: Option<&str>| name.is_some_and(|n| heat_source_wet.iter().any(|k| k == n));
         if let Some(systems_obj) = result_obj
             .get_mut("SpaceHeatSystem")
             .and_then(|v| v.as_object_mut())
         {
             for system in systems_obj.values_mut() {
+                // A WarmAir system needs an air-sink heat pump; repointing it to whatever
+                // wet heat source exists is the original panic, so it stays dangling.
+                if system.get("type").and_then(|v| v.as_str()) == Some("WarmAir") {
+                    continue;
+                }
                 if let Some(heat_source_obj) =
                     system.get_mut("HeatSource").and_then(|h| h.as_object_mut())
                 {
@@ -6628,7 +6639,7 @@ impl JSONBuilder {
                                 // No existing wet link on a defaults cylinder: add one
                                 // alongside its other heat sources. A CSV-authored
                                 // cylinder (e.g. immersion-only) is the user's choice.
-                                if !has_wet_entry && !csv_hot_water_sources.contains(hw_name) {
+                                if !has_wet_entry && !csv_hot_water_sources.contains_key(hw_name) {
                                     hs_obj.insert(
                                         first_hs_name.clone(),
                                         serde_json::json!({
