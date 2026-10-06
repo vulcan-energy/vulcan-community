@@ -56,6 +56,9 @@ jobs:
       - name: Typecheck geometry document
         run: npm run typecheck:document
 
+      - name: Build CLI
+        run: npm run build -w apps/cli
+
       - name: Enforce static-analysis ratchet
         run: npm run quality
 
