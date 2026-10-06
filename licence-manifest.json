@@ -75,6 +75,12 @@
       ]
     },
     {
+      "path": "apps/cli/**",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved"
+    },
+    {
       "path": "crates/vulcan-csv-codec/**",
       "license": "Apache-2.0",
       "rights_status": "approved"

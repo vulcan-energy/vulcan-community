@@ -1,0 +1,19 @@
+{
+  "name": "@vulcan-energy/community-cli",
+  "version": "0.1.0",
+  "description": "Vulcan Community command line: geometry CSV checks and automatic thermal bridges",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "vulcan-community": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "7.0.6"
+  }
+}
