@@ -5926,6 +5926,11 @@ impl JSONBuilder {
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         let mut zone_to_space_cool_systems: HashMap<String, Vec<String>> = HashMap::new();
+        // HeatSourceWet names authored by Systems rows so far (wrapped or flat).
+        let mut csv_heat_source_wet_names: HashSet<String> = HashSet::new();
+        // First heat source of the last wrapped HeatSourceWet row: where dangling
+        // references are repointed once every row has merged.
+        let mut heat_source_wet_fallback: Option<String> = None;
         if let Some(section_data) = csv_data.get("Systems") {
             if section_data.is_empty() {
                 // No systems in CSV - cleanup will remove empty entries
@@ -6125,9 +6130,10 @@ impl JSONBuilder {
 
                         match subcategory {
                             "HeatSourceWet" => {
-                                // Replace entire HeatSourceWet section (mirrors batch_runner.rs approach).
-                                // This removes stale defaults (e.g. old "hp") when switching to a different
-                                // heat source (e.g. "gas_boiler"), preventing orphaned entries.
+                                // CSV rows replace the defaults' heat sources (dropping a stale
+                                // default "hp" when the user picks e.g. "gas_boiler") but add to
+                                // each other by name, so one dwelling can carry several (a DHW
+                                // heat pump plus a warm-air one).
                                 if let Some(extra_json) =
                                     row.get("extra_json").and_then(|v| v.as_object())
                                 {
@@ -6144,11 +6150,21 @@ impl JSONBuilder {
                                         );
                                         self.ensure_fhs_heat_source_wet_defaults(&mut inner);
                                         // Wrapped format: { "HeatSourceWet": { "hp": { ... } } }
-                                        // Replace the entire HeatSourceWet object with the preset contents
-                                        result_obj.insert(
-                                            "HeatSourceWet".to_string(),
-                                            Value::Object(inner.clone()),
-                                        );
+                                        let section = result_obj
+                                            .entry("HeatSourceWet".to_string())
+                                            .or_insert(Value::Null);
+                                        if !section.is_object() {
+                                            *section = Value::Object(serde_json::Map::new());
+                                        }
+                                        let section = section.as_object_mut().expect("just set");
+                                        section.retain(|name, _| {
+                                            csv_heat_source_wet_names.contains(name)
+                                        });
+                                        csv_heat_source_wet_names.extend(inner.keys().cloned());
+                                        section.extend(inner.clone());
+                                        if let Some(first) = inner.keys().next() {
+                                            heat_source_wet_fallback = Some(first.clone());
+                                        }
 
                                         if let Some(hot_water_source) = extra_json
                                             .get("HotWaterSource")
@@ -6160,42 +6176,6 @@ impl JSONBuilder {
                                                     "HotWaterSource",
                                                     hot_water_source,
                                                 )),
-                                            );
-                                        }
-
-                                        // Repoint SpaceHeatSystem and HotWaterSource references
-                                        // whose name no longer exists in the new HeatSourceWet
-                                        // map. References the user authored to a still-valid
-                                        // heat source are left alone (a blanket repoint to the
-                                        // first key used to clobber them, row-order dependent).
-                                        if let Some(first_hs_name) = inner.keys().next() {
-                                            if let Some(systems_obj) = result_obj
-                                                .get_mut("SpaceHeatSystem")
-                                                .and_then(|v| v.as_object_mut())
-                                            {
-                                                for system in systems_obj.values_mut() {
-                                                    let Some(heat_source_obj) = system
-                                                        .as_object_mut()
-                                                        .and_then(|s| s.get_mut("HeatSource"))
-                                                        .and_then(|h| h.as_object_mut())
-                                                    else {
-                                                        continue;
-                                                    };
-                                                    let current_is_valid = heat_source_obj
-                                                        .get("name")
-                                                        .and_then(|v| v.as_str())
-                                                        .is_some_and(|n| inner.contains_key(n));
-                                                    if !current_is_valid {
-                                                        heat_source_obj.insert(
-                                                            "name".to_string(),
-                                                            Value::String(first_hs_name.clone()),
-                                                        );
-                                                    }
-                                                }
-                                            }
-
-                                            self.repoint_hot_water_source_for_heat_source_wet(
-                                                result_obj, &inner,
                                             );
                                         }
                                     } else {
@@ -6230,6 +6210,7 @@ impl JSONBuilder {
                                             element_name.to_string(),
                                             Value::Object(system_data),
                                         );
+                                        csv_heat_source_wet_names.insert(element_name.to_string());
                                     }
                                 }
                             }
@@ -6422,6 +6403,11 @@ impl JSONBuilder {
                         }
                     }
                 }
+                // After every row, so a service row that precedes its heat source's
+                // row is not repointed before that heat source exists.
+                if let Some(fallback) = heat_source_wet_fallback {
+                    self.repoint_heat_source_wet_references(result_obj, &fallback);
+                }
             }
         }
         self.reconcile_zone_space_cool_system_references(
@@ -6587,19 +6573,37 @@ impl JSONBuilder {
         }
     }
 
-    /// After a HeatSourceWet Systems row replaces the wet plant, hot-water
-    /// sources whose heat-source reference no longer exists in the new map are
-    /// repointed to its first entry. User-authored references that are still
-    /// valid — and all their sibling fields — are preserved.
-    fn repoint_hot_water_source_for_heat_source_wet(
+    /// After HeatSourceWet Systems rows change the wet plant, SpaceHeatSystem and
+    /// HotWaterSource references to a name missing from the merged HeatSourceWet
+    /// map are repointed to `fallback_name`. Valid user-authored references — and
+    /// all their sibling fields — are preserved.
+    fn repoint_heat_source_wet_references(
         &self,
         result_obj: &mut serde_json::Map<String, Value>,
-        heat_source_wet: &serde_json::Map<String, Value>,
+        fallback_name: &str,
     ) {
-        let Some(first_hs_name) = heat_source_wet.keys().next().cloned() else {
-            return;
-        };
-        let is_valid = |name: Option<&str>| name.is_some_and(|n| heat_source_wet.contains_key(n));
+        let first_hs_name = fallback_name.to_string();
+        let heat_source_wet: HashSet<String> = result_obj
+            .get("HeatSourceWet")
+            .and_then(|v| v.as_object())
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default();
+        let is_valid = |name: Option<&str>| name.is_some_and(|n| heat_source_wet.contains(n));
+        if let Some(systems_obj) = result_obj
+            .get_mut("SpaceHeatSystem")
+            .and_then(|v| v.as_object_mut())
+        {
+            for system in systems_obj.values_mut() {
+                if let Some(heat_source_obj) =
+                    system.get_mut("HeatSource").and_then(|h| h.as_object_mut())
+                {
+                    if !is_valid(heat_source_obj.get("name").and_then(|v| v.as_str())) {
+                        heat_source_obj
+                            .insert("name".to_string(), Value::String(first_hs_name.clone()));
+                    }
+                }
+            }
+        }
         if let Some(hot_water_source) = result_obj.get_mut("HotWaterSource") {
             if let Some(hw_source_obj) = hot_water_source.as_object_mut() {
                 for hw_source in hw_source_obj.values_mut() {
