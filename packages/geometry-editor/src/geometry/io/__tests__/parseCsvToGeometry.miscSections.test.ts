@@ -41,7 +41,7 @@ Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,${midHeig
   });
 
   it('preserves v1 window coordinates on ordinary save and during an unresolved upgrade', () => {
-    const csv = windowCsv('', 3.8, 3.8) + `
+    const csv = windowCsv('TargetBundleId,unknown-source', 3.8, 3.8) + `
 
 Non-Exposed Elements
 Name,Zone,Type,area,pitch,width,height,parent_element,extra_json
