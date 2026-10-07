@@ -128,7 +128,7 @@ function PartyWallSaveReview({ issues, anchorRef, onClose, onApply }: {
         <span>{issue.elementName}</span><span>{issue.value} W/m²K</span>
       </label>)}
     </div>
-    <StandardDropdown aria-label="U-value meaning" value={meaning} onChange={value => setMeaning(value as UValueInterpretation)}
+    <StandardDropdown variant="ghost" aria-label="U-value meaning" value={meaning} onChange={value => setMeaning(value as UValueInterpretation)}
       placeholder="Choose a meaning" options={[
         { value: 'whole_wall', label: 'Whole wall' },
         { value: 'half_construction', label: 'Dwelling side to midpoint' },
