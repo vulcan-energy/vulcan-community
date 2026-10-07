@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { render, screen } from '@testing-library/react';
+import { useMemo, useState } from 'react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import {
   GeometryEditorServicePortsProvider,
   useGeometrySchemaPort,
@@ -74,5 +75,34 @@ describe('Geometry editor service ports', () => {
       </GeometryEditorServicePortsProvider>,
     );
     expect(screen.getByText('available:available:available')).toBeInTheDocument();
+  });
+});
+
+
+describe('schema revision subscriptions', () => {
+  it('refreshes schema-derived fields without remounting or clearing a draft', () => {
+    let revision = 0;
+    let fields = ['u_value'];
+    const listeners = new Set<() => void>();
+    const reactivePort: GeometrySchemaPort = {
+      ...schemaPort,
+      subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+      getRevision: () => revision,
+      getBaseFieldsForElementType: () => fields,
+    };
+    function MountedEditor() {
+      const port = useGeometrySchemaPort();
+      const names = useMemo(() => port.getBaseFieldsForElementType('BuildingElementPartyWall'), [port]);
+      const [draft, setDraft] = useState('');
+      return <><span>{names.join(',')}</span><input aria-label="Draft" value={draft} onChange={e => setDraft(e.target.value)} /></>;
+    }
+    const { unmount } = render(<GeometryEditorServicePortsProvider schemaPort={reactivePort} workspaceResourcePort={workspaceResourcePort}><MountedEditor /></GeometryEditorServicePortsProvider>);
+    fireEvent.change(screen.getByLabelText('Draft'), { target: { value: '0.25' } });
+    expect(screen.getByText('u_value')).toBeInTheDocument();
+    act(() => { fields = ['u_value_whole_wall']; revision++; listeners.forEach(listener => listener()); });
+    expect(screen.getByText('u_value_whole_wall')).toBeInTheDocument();
+    expect(screen.getByLabelText('Draft')).toHaveValue('0.25');
+    unmount();
+    expect(listeners.size).toBe(0);
   });
 });

@@ -224,6 +224,11 @@ export interface BuildingElementGroundFormState {
 }
 
 function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState {
+  const { schemaPort } = ctx;
+  const schemaMode = ctx.schemaMode;
+  const suspendedProperties = schemaPort.availability === 'available'
+    ? schemaPort.getElementSubschema(schemaMode, 'BuildingElementGround', 'Suspended_floor')?.properties as Record<string, unknown> | undefined : undefined;
+  const supportsShieldLocation = suspendedProperties?.shield_fact_location != null && suspendedProperties.shield_fact_location !== false;
   const [floorType, setFloorType] = useState<GroundFloorType>('');
 
   const isExistingElementSelection = (): boolean =>
@@ -518,7 +523,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
         changed = true;
       }
       const parsedShield = parseWindShieldLocation(nextExtra.shield_fact_location);
-      if (nextExtra.shield_fact_location !== parsedShield) {
+      if (supportsShieldLocation && nextExtra.shield_fact_location !== parsedShield) {
         nextExtra.shield_fact_location = parsedShield;
         changed = true;
       }
@@ -593,6 +598,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     ctx.getElementById,
     ctx.updateElement,
     floorType,
+    supportsShieldLocation,
     thicknessWallsInput.value,
     derivedGroundArea,
     autoDerivedTotalArea,

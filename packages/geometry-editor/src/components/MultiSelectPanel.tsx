@@ -19,7 +19,7 @@ import type { AssemblyExample, VulcanAssemblyV1Envelope } from '../lib/assemblyT
 import { parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
 import type { GroundFloorType } from '../lib/groundUValueCalculator';
 import { getElementTypeDisplayName } from '../lib/displayNames';
-import { isVulcanUiPartyFloorElement } from '../lib/assemblyMaterialFabric';
+import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch } from '../lib/assemblyMaterialFabric';
 import {
   assemblyElementMode,
   assemblyPitchDegForElement,
@@ -138,6 +138,9 @@ const MULTISELECT_FIELD_MAP: Record<string, string> = {
   'maxOpenArea': 'max_window_open_area',
   'frameAreaFraction': 'frame_area_fraction',
   'manualUValue': 'u_value',
+  'u_value': 'u_value',
+  'u_value_whole_wall': 'u_value_whole_wall',
+  'thermal_resistance_construction': 'thermal_resistance_construction',
   'manualThermalResistanceConstruction': 'thermal_resistance_construction',
   'manualArealHeatCapacity': 'areal_heat_capacity',
   'manualMassDistributionClass': 'mass_distribution_class',
@@ -904,14 +907,6 @@ const FLOOR_TYPE_OPTIONS = [
   { value: 'Suspended_floor', label: 'Suspended Floor' },
   { value: 'Unheated_basement', label: 'Unheated Basement' },
 ] as const;
-const PARTY_WALL_CAVITY_OPTIONS = [
-  { value: 'solid', label: 'Solid' },
-  { value: 'unfilled_unsealed', label: 'Unfilled, unsealed' },
-  { value: 'unfilled_sealed', label: 'Unfilled, sealed' },
-  { value: 'filled_sealed', label: 'Filled, sealed' },
-  { value: 'filled_unsealed', label: 'Filled, unsealed' },
-  { value: 'defined_resistance', label: 'Defined resistance' },
-] as const;
 const PARTY_WALL_LINING_OPTIONS = [
   { value: 'wet_plaster', label: 'Wet plaster' },
   { value: 'dry_lined', label: 'Dry lined' },
@@ -1018,6 +1013,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   const geometryStore = useGeometryStoreApi();
   const schemaPort = useGeometrySchemaPort();
 
+
   useEffect(() => {
     const timer = globalThis.setTimeout(() => {
       prefetchAssemblyCalculatorModal();
@@ -1048,7 +1044,12 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   const complianceValidationEnabled = useGeometryStore(
     (s) => !!s.complianceSettings?.complianceValidationEnabled,
   );
+  const windowSchemaMode = complianceValidationEnabled ? 'fhs' : 'core';
+  const windowSchemaProperties = schemaPort.availability === 'available'
+    ? schemaPort.getElementSubschema(windowSchemaMode, 'BuildingElementTransparent')?.properties as Record<string, unknown> | undefined : undefined;
+  const supportsWindowField = (key: string) => windowSchemaProperties?.[key] != null && windowSchemaProperties[key] !== false;
   const defaultsLookup = useGeometryStore((s) => s.getDefaultsLookup());
+  const partyWallCavityFields = getPartyWallCavityFields(schemaPort, complianceValidationEnabled ? 'fhs' : 'core');
 
   const selectedElements = useMemo(
     () => selectedElementIds.map(id => elementsById[id]).filter(Boolean) as Element[],
@@ -2243,6 +2244,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     fallbackPlaceholder: string,
     buildPatch: (el: Element, value: number) => Record<string, unknown> | null,
     bounds: LiveNumberBounds | undefined,
+    unit?: string,
   ) => (
     <div className="batch-row multi-select-row">
       {renderTooltipRowLabel(
@@ -2256,7 +2258,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         <StandardInput
           type="text"
           inputMode="decimal"
-          unit={rowFieldUnit(
+          unit={unit ?? rowFieldUnit(
             MANUAL_METRIC_TOOLTIP_FIELD_KEY[metricKey] ?? metricKey,
             label,
             targetIds,
@@ -2964,8 +2966,8 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             {renderSelectRow(
               'Party Wall Cavity Type',
               partyWallCavityTypeSummary,
-              wallDimensionIds.length > 0,
-              PARTY_WALL_CAVITY_OPTIONS,
+              wallDimensionIds.length > 0 && partyWallCavityFields.options.length > 0,
+              partyWallCavityFields.options,
               (value) => applyElementPatches((el) => {
                 if (!isPartyWall(el)) return null;
                 const nextExtra: Record<string, unknown> = {
@@ -2992,7 +2994,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               undefined,
               wallDimensionIds,
             )}
-            {renderExtraJsonNumberRow(
+            {partyWallCavityFields.supportsResistance && renderExtraJsonNumberRow(
               'partyWallCavityResistance',
               'Cavity Resistance (m²K/W)',
               partyWallCavityResistanceSummary,
@@ -3094,7 +3096,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             activeWindowSurfaceIds,
           )
         )}
-        {renderNumberRow(
+        {supportsWindowField('free_area_height') && renderNumberRow(
           'freeAreaHeight',
           'Free Area Height (m)',
           freeAreaHeightSummary,
@@ -3105,7 +3107,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           undefined,
           activeWindowSurfaceIds,
         )}
-        {renderNumberRow(
+        {supportsWindowField('mid_height') && renderNumberRow(
           'midHeight',
           'Mid Height (m)',
           midHeightSummary,
@@ -3116,7 +3118,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           undefined,
           activeWindowSurfaceIds,
         )}
-        {renderNumberRow(
+        {supportsWindowField('max_window_open_area') && renderNumberRow(
           'maxOpenArea',
           'Max Window Open Area (m²)',
           maxOpenAreaSummary,
@@ -3707,6 +3709,21 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
                 )}
               </div>
             </div>
+            {activeType === 'BuildingElementPartyWall' ? getPartyWallFabricFields(schemaPort, complianceValidationEnabled ? 'fhs' : 'core').map((field) => (
+              <React.Fragment key={field.key}>
+                {renderManualNumberRow(
+                  constructionFieldScopeKey,
+                  constructionTargetIds,
+                  field.key,
+                  field.label,
+                  describeDistribution(computeDistribution(constructionTargetElements, isAnyElement, (el) => readPartyWallFabricValue(extraJsonRecord(el), field.key))),
+                  'Set value',
+                  (_el, value) => partyWallFabricPatch(field.key, value),
+                  { min: field.min },
+                  field.unit,
+                )}
+              </React.Fragment>
+            )) : <>
             {renderManualNumberRow(
               constructionFieldScopeKey,
               constructionTargetIds,
@@ -3731,6 +3748,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               }),
               LIVE_NUMBER_BOUNDS.manualThermalResistanceConstruction,
             )}
+            </>}
             {renderManualSelectRow(
               constructionFieldScopeKey,
               constructionTargetIds,

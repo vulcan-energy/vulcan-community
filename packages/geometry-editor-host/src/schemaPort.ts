@@ -36,6 +36,9 @@ export interface GeometrySchemaPropertyValidation {
  */
 export interface GeometrySchemaPort {
   readonly availability: 'available' | 'unavailable';
+  /** Notify mounted editors when the selected schema is cleared or becomes ready. */
+  subscribe?(listener: () => void): () => void;
+  getRevision?(): number;
   preload(mode: GeometrySchemaMode): Promise<void>;
   getRootSchema(mode: GeometrySchemaMode): GeometrySchemaNode | null;
   getElementSubschema(

@@ -14,6 +14,17 @@ export type GeometrySchemaAssetSource = Readonly<{
 
 let schemaAssetSource: GeometrySchemaAssetSource | null = null;
 let schemaAssetGeneration = 0;
+let schemaRevision = 0;
+const schemaListeners = new Set<() => void>();
+export const getGeometrySchemaRevision = (): number => schemaRevision;
+export function subscribeGeometrySchema(listener: () => void): () => void {
+  schemaListeners.add(listener);
+  return () => { schemaListeners.delete(listener); };
+}
+function publishSchemaChange(): void {
+  schemaRevision += 1;
+  for (const listener of schemaListeners) listener();
+}
 
 /**
  * Registers the host-owned schema assets used by the canonical resolver.
@@ -28,6 +39,7 @@ export function configureGeometrySchemaAssetSource(
   __resetSchemaCacheForTests();
   __resetFHSSchemaCacheForTests();
   resetGeometrySchemaValidators();
+  publishSchemaChange();
 }
 
 /** Clears configured assets and both caches. Intended only for isolated tests. */
@@ -119,6 +131,7 @@ export async function preloadSchema(): Promise<void> {
         // Reset schema-derived node caches for core schema
         compiledPropValidatorCore = new WeakMap();
         normalizedSystemSubtypeNodesCore = new WeakMap();
+        publishSchemaChange();
       }).catch((e) => {
         if (generation !== schemaAssetGeneration) throw e;
         schemaText = null;
@@ -151,7 +164,9 @@ export function getApplianceKeysForMode(useFHSSchema: boolean): string[] {
 
   const keys = new Set<string>();
   for (const patternKey of Object.keys(patternProps)) {
-    for (const token of patternKey.split('|')) {
+    // FHS a9 anchors the same literal alternatives as ^(key|key)$.
+    const alternatives = patternKey.replace(/^\^\((.*)\)\$$/, '$1');
+    for (const token of alternatives.split('|')) {
       const trimmed = token.trim();
       if (trimmed.length > 0) keys.add(trimmed);
     }
@@ -247,6 +262,7 @@ export async function preloadFHSSchema(): Promise<void> {
         strictestIntegerKeysCache.clear();
         compiledPropValidatorFhs = new WeakMap();
         normalizedSystemSubtypeNodesFhs = new WeakMap();
+        publishSchemaChange();
       }).catch((e: unknown) => {
         if (generation !== schemaAssetGeneration) throw e;
         fhsSchemaText = null;
@@ -1687,6 +1703,7 @@ export function getBaseFieldsForElementType(elementType: string): string[] {
       'width', 'height', 'area', 'pitch', 'parent_element', 'Type', 'type'
     ],
     'BuildingElementPartyWall': [
+      'u_value', 'u_value_whole_wall', 'thermal_resistance_construction',
       'width',
       'height',
       'area',

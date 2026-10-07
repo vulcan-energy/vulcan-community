@@ -193,6 +193,7 @@ import type {
 // see that file's own comment.
 
 export interface BuildingElementTransparentFormState {
+  supportedOpeningFields: readonly string[];
   /** Shared with the wall family — see module header comment. */
   widthInput: NumericDraftInputBinding;
   heightInput: NumericDraftInputBinding;
@@ -233,6 +234,14 @@ export interface BuildingElementTransparentFormState {
 }
 
 function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormState {
+  const { schemaPort } = ctx;
+  const mode = ctx.schemaMode;
+  const properties = schemaPort.availability === 'available'
+    ? schemaPort.getElementSubschema(mode, 'BuildingElementTransparent')?.properties as Record<string, unknown> | undefined : undefined;
+  const supportedOpeningFields = ['free_area_height', 'mid_height', 'max_window_open_area']
+    .filter(key => properties?.[key] != null && properties[key] !== false);
+  const supportsMidHeight = supportedOpeningFields.includes('mid_height');
+  const supportsMaxOpenArea = supportedOpeningFields.includes('max_window_open_area');
   const isExistingElementSelection = (): boolean =>
     !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
 
@@ -301,7 +310,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     const shouldSyncMid =
       !midHeightInput.isEditing &&
       (currentMid == null || currentMid <= 0 || prevMid == null || Math.abs(currentMid - prevMid) <= 0.005);
-    if (nextMid > 0 && shouldSyncMid && (currentMid == null || Math.abs(currentMid - nextMid) > 0.005)) {
+    if (supportsMidHeight && nextMid > 0 && shouldSyncMid && (currentMid == null || Math.abs(currentMid - nextMid) > 0.005)) {
       midHeightInputSetValueRef.current(nextMid);
       // Repair legacy/stale saved values when the editor first opens. Normal edits are already
       // canonicalized in the store, so this branch is otherwise a no-op for existing elements.
@@ -324,7 +333,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
         Math.abs(currentOpenArea - prevOpenArea) <= 0.005
       );
     if (
-      shouldSyncOpenArea &&
+      supportsMaxOpenArea && shouldSyncOpenArea &&
       (currentOpenArea == null || Math.abs(currentOpenArea - nextOpenArea) > 0.005)
     ) {
       maxWindowOpenAreaInputSetValueRef.current(nextOpenArea);
@@ -336,6 +345,8 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ctx is a fresh object literal every render (see ElementCreator.tsx's elementFormStateCtx); depending on the whole object would defeat memoization for no benefit (same idiom as system.tsx/thermalBridgeLinear.tsx's ctx.* dep arrays). The legacy dep array also listed isExistingElementSelection (a useCallback); dropping it is inert because hydrate() writes the two listed input deps on every selection change, so the effect already re-runs whenever selection observably changes — the only skipped case is a redundant repair-write when consecutive selections share identical derived values.
   }, [
     ctx.elementType,
+    supportsMidHeight,
+    supportsMaxOpenArea,
     derivedWindowMidHeight,
     derivedWindowMaxOpenArea,
     midHeightInput.value,
@@ -345,6 +356,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
   ]);
 
   return {
+    supportedOpeningFields,
     widthInput: ctx.shared.widthInput,
     heightInput: ctx.shared.heightInput,
     areaInput: ctx.shared.areaInput,
@@ -421,9 +433,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       base_height: state.baseHeightInput.value === '' ? undefined : state.baseHeightInput.value,
       parent_element: state.parentElement,
       frame_area_fraction: state.freeAreaFractionInput.value === '' ? undefined : state.freeAreaFractionInput.value,
-      free_area_height: state.freeAreaHeightInput.value,
-      mid_height: state.midHeightInput.value,
-      max_window_open_area: state.maxWindowOpenAreaInput.value,
+      ...(state.supportedOpeningFields.includes('free_area_height') ? { free_area_height: state.freeAreaHeightInput.value } : {}),
+      ...(state.supportedOpeningFields.includes('mid_height') ? { mid_height: state.midHeightInput.value } : {}),
+      ...(state.supportedOpeningFields.includes('max_window_open_area') ? { max_window_open_area: state.maxWindowOpenAreaInput.value } : {}),
     } as Partial<Element>;
   },
 
@@ -545,6 +557,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             size="md"
           />
         </div>
+        {state.supportedOpeningFields.includes('free_area_height') && <>
         {renderFieldLabel('Free Area Height (m):', elementType)}
         <div
           className="element-input"
@@ -562,6 +575,8 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value)} issue={getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value) || undefined} />
         </div>
+        </>}
+        {state.supportedOpeningFields.includes('mid_height') && <>
         {renderFieldLabel('Mid Height (m):', elementType)}
         <div
           className="element-input"
@@ -615,6 +630,8 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             </div>
           ) : null}
         </div>
+        </>}
+        {state.supportedOpeningFields.includes('max_window_open_area') && <>
         {renderFieldLabel('Max Window Open Area (m²):', elementType)}
         <div
           className="element-input"
@@ -650,6 +667,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
         <div style={INLINE_FIELD_NOTE_STYLE}>
           Suggested from width x free area height (capped by total window area).
         </div>
+        </>}
         {renderFieldLabel('Frame Area Fraction:', elementType)}
         <div className="element-input" ref={registerBaseFieldRef('frame_area_fraction')}>
           <StandardInput

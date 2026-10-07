@@ -1724,6 +1724,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // elementForms/wallShared.tsx (wallShared.applyParentPitchOrientationForDisplay).
 
   const elementFormStateCtx = {
+    schemaPort,
+    schemaMode: useFHSSchema ? ('fhs' as const) : ('core' as const),
     elementType,
     commitElementNumericField,
     commitExistingElementDraft,
