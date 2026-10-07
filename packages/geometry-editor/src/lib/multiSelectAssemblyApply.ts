@@ -14,8 +14,19 @@ import type {
 } from './assemblyTypes';
 import type { BundledAssemblyLibrary } from './assemblyLibrary';
 import { roundToTwoDecimals } from '../geometry/constants';
-import { computeFabricUWritesFromConstructionR } from './fabricUWrites';
-import { roundUValueToTwoSignificantFigures } from './iso6946AnnexF';
+import { computeAssemblyAnnexF, computeFabricUWritesFromConstructionR } from './fabricUWrites';
+import {
+  buildAnnexF_v1EnvelopeSnapshot,
+  ISO6946_DEFAULT_INVERTED_ROOF_F_TIMES_X,
+  ISO6946_DEFAULT_UK_PRECIPITATION_HEATING_SEASON_MM_PER_DAY,
+  roundUValueToTwoSignificantFigures,
+  shouldPersistAnnexF_v1,
+} from './iso6946AnnexF';
+import {
+  effectiveAnnexFAirVoidLevelForStack,
+  resolveAnnexFPrimaryCavityLayerIndex,
+  resolveAnnexFR1LayerIndex,
+} from './annexFCavity';
 import {
   arealHeatCapacityJPerM2KFromBand,
   CALCULATION_ENGINE_VERSION,
@@ -306,7 +317,11 @@ export function computePatchFromSavedAssembly(
     library.cavityResistanceByType,
     pitchDeg,
   );
-  const { rLayers: rLayersSeries, errors: seriesErrors } = sumConstructionResistanceSeriesOnly(
+  const {
+    rLayers: rLayersSeries,
+    layerResistances: seriesLayerResistances,
+    errors: seriesErrors,
+  } = sumConstructionResistanceSeriesOnly(
     calcLayers,
     library.materialsById,
     library.cavityResistanceByType,
@@ -343,12 +358,41 @@ export function computePatchFromSavedAssembly(
     };
   }
 
+  // Annex F air-void correction as the calculator applies it (saved rows carry no primary-cavity pick,
+  // fasteners or inverted-roof inputs, so those stay at the calculator defaults).
+  const annexPrimaryCavity = resolveAnnexFPrimaryCavityLayerIndex(layers, null);
+  const annexAirVoidLevel = effectiveAnnexFAirVoidLevelForStack(layers, library.cavityRows, annexPrimaryCavity);
+  const annexR1 = resolveAnnexFR1LayerIndex(layers, seriesLayerResistances, annexPrimaryCavity);
+  const annexF = useSuspendedVoidSplit
+    ? null
+    : computeAssemblyAnnexF({
+        rFullMean_m2K_W: iso.rConstructionMean_m2K_W,
+        rFullSeries_m2K_W: rLayersSeries,
+        pitchDeg,
+        externalSurfaceResistance_m2K_W: heatTransfer.externalSurfaceResistance_m2K_W,
+        halfConstruction,
+        layerSeriesR_m2K_W: seriesLayerResistances,
+        layers: heatTransfer.effectiveLayers,
+        r1LayerIndex: annexR1,
+        airVoidLevel: annexAirVoidLevel,
+        fastenerNf_per_m2: 0,
+        fastenerChi_W_per_m2K: 0,
+        invertedRoofEnabled: false,
+        opaqueSubtype: 'wall',
+        pMmPerDay: ISO6946_DEFAULT_UK_PRECIPITATION_HEATING_SEASON_MM_PER_DAY,
+        fTimesX: ISO6946_DEFAULT_INVERTED_ROOF_F_TIMES_X,
+      });
+
   const uW = computeFabricUWritesFromConstructionR(
     rLayers,
     rLayersSeriesAdjusted,
     pitchDeg,
     heatTransfer.externalSurfaceResistance_m2K_W,
+    annexF?.deltaUForElement_W_m2K ?? 0,
   );
+  if (uW.error) {
+    return { patch: {}, preview: { u: 0, r: 0, mass: '—', arealHeat_kJ_m2K: null }, errors: [uW.error] };
+  }
   const uWrite = uW.uForHem_W_m2K;
   const rWrite = uW.thermalResistanceConstruction_m2K_W;
   const massSuggestion = suggestMassDistributionClass(heatTransfer.effectiveLayers, library.materialsById);
@@ -383,6 +427,29 @@ export function computePatchFromSavedAssembly(
     massDistributionClass,
     calculationEngineVersion: CALCULATION_ENGINE_VERSION,
   };
+  const annexFSettings = {
+    airVoidLevel: annexAirVoidLevel,
+    hasAnnexFAirVoidLevelOverrideOnAnyCavity: layers.some(
+      (L) => L.kind === 'cavity' && L.annexFAirVoidLevelOverride !== undefined,
+    ),
+    annexFastenerEnabled: false,
+    annexNf: 0,
+    annexChi: 0,
+    annexInvertedRoof: false,
+    annexPMm: ISO6946_DEFAULT_UK_PRECIPITATION_HEATING_SEASON_MM_PER_DAY,
+    annexFTimesX: ISO6946_DEFAULT_INVERTED_ROOF_F_TIMES_X,
+  };
+  if (annexF && shouldPersistAnnexF_v1({ annex: annexF.annex, ...annexFSettings })) {
+    envelope.annexF_v1 = buildAnnexF_v1EnvelopeSnapshot(annexF.annex, {
+      airVoidLevel: annexAirVoidLevel,
+      airVoidLayerIndex: annexR1,
+      fastenerNf_per_m2: 0,
+      fastenerChi_W_per_m2K: 0,
+      invertedRoof: false,
+      p_mm_per_day: ISO6946_DEFAULT_UK_PRECIPITATION_HEATING_SEASON_MM_PER_DAY,
+      f_times_x: ISO6946_DEFAULT_INVERTED_ROOF_F_TIMES_X,
+    });
+  }
   if (arealRawJ != null) {
     envelope.arealHeatCapacity_J_m2K = arealRawJ;
   }
