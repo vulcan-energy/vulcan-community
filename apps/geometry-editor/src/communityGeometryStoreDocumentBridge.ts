@@ -274,24 +274,18 @@ export function createCommunityGeometryStoreDocumentBridge(
   };
 
   const saveCurrent = async () => {
-    const savedText = store.getState().generateCSV(); // Requested upgrades require resolved meaning.
+    store.getState().requestCsvUpgrade();
+    const savedText = store.getState().generateCSV(); // Save requires resolved legacy meaning.
     const upgrading = store.getState().csvUpgradeRequested && store.getState().sourceCsvVersion < 3;
     const document = flush();
-    const original = documentHost.getSnapshot().activeDocument;
-    if (upgrading && original) {
-      // Renaming an active document updates the same provider ID. Detach the captured
-      // contents into a new document so persistence creates a copy of the original.
-      const fileName = document.fileName === original.fileName
-        ? document.fileName.replace(/(\.csv)?$/i, '-upgraded.csv') : document.fileName;
-      const detached = await documentHost.newDocument({
-        contents: { fileName, text: savedText, derivedResources: document.derivedResources, sourceFiles: document.sourceFiles },
-        dirtyDecision: 'discard',
-      });
-      if (detached.status !== 'completed') return detached;
-    } else if (document.text !== savedText) {
-      // Draft synchronization retains the source format. Persist the explicitly
-      // finalized contents for this save without reloading or discarding edits.
-      observedDocument = replaceSessionText(document, savedText);
+    if (document.text !== savedText) {
+      // Draft synchronization retains the source format until Save commits.
+      writingSession = true;
+      try {
+        observedDocument = session.updateDocument({ text: savedText });
+      } finally {
+        writingSession = false;
+      }
     }
     const savedRevision = session.getSnapshot().revision;
     const savedDraftText = upgrading ? store.getState().generateCSV({ allowUnresolvedMigration: true }) : undefined;

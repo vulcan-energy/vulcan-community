@@ -295,6 +295,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const sourceCsvVersion = useGeometryStore((s) => s.sourceCsvVersion);
   const csvUpgradeRequested = useGeometryStore((s) => s.csvUpgradeRequested);
   const requestCsvUpgrade = useGeometryStore((s) => s.requestCsvUpgrade);
+  const getCsvMigrationIssues = useGeometryStore((s) => s.getCsvMigrationIssues);
   const resolveCsvMeaning = useGeometryStore((s) => s.resolveCsvUValueInterpretation);
   const migrationIssues = useMemo(() => csvUpgradeRequested || sourceCsvVersion >= 3
     ? csvMigrationIssues(Object.values(elementsById), sourceCsvVersion) : [], [elementsById, sourceCsvVersion, csvUpgradeRequested]);
@@ -781,7 +782,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     <>
     {migrationIssues.length > 0 && <details open className="csv-migration-review">
       <summary>Review legacy party-wall U-value meaning ({migrationIssues.length} elements)</summary>
-      <p>Select the elements that share a meaning. Numbers are preserved; validation or Save does not confirm a meaning. The original file is retained.</p>
+      <p>Choose what these U-values represent, then Save. Your file stays unchanged until this is resolved.</p>
       {migrationIssues.map(issue => <label key={issue.elementId} style={{ display: 'block' }}>
         <input type="checkbox" checked={migrationReview.selectedIds.includes(issue.elementId)} onChange={event => dispatchMigrationReview({ type: 'toggle', elementId: issue.elementId, checked: event.target.checked })} />
         {issue.elementName}: {issue.value} W/m²K
@@ -837,17 +838,12 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
       </div>
 
       <div className="filename-bar-right">
-        {sourceCsvVersion < 3 && !csvUpgradeRequested && <button
-          type="button"
-          className="btn btn-standard"
-          disabled={saveStatus === 'saving'}
-          title="Review format changes, then save an upgraded copy. Ordinary Save keeps the current format."
-          onClick={() => { dispatchMigrationReview({ type: 'reset' }); requestCsvUpgrade(); }}
-        >Upgrade format</button>}
         <div className="filename-bar-save-stack">
         <button
           ref={saveButtonRef}
           onClick={() => {
+            requestCsvUpgrade();
+            if (getCsvMigrationIssues().length > 0) return;
             void documentHost.save().catch((error) => {
               console.error('[FilenameBar] Save command failed:', error);
             });
@@ -858,7 +854,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
         >
           <span className="save-button-content">
             {getSaveButtonIcon()}
-            <span className="save-button-text">{csvUpgradeRequested ? 'Save upgraded copy' : 'Save'}</span>
+            <span className="save-button-text">Save</span>
             {showSaveErrorIndicator && (
               <span
                 role="button"

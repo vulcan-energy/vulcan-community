@@ -28,7 +28,7 @@ export function resolveCsvUValueMeaning(element: Element, meaning: UValueInterpr
 
 export function assertCsvMigrationResolved(elements: readonly Element[], sourceCsvVersion = 3): void {
   const issues = csvMigrationIssues(elements, sourceCsvVersion);
-  if (issues.length) throw new Error(`CSV_U_VALUE_MEANING_REQUIRED: choose whole-wall or previous half-construction U-value for ${issues.map(issue => issue.elementName).join(', ')} before saving an upgraded copy.`);
+  if (issues.length) throw new Error(`CSV_U_VALUE_MEANING_REQUIRED: choose whole-wall or previous half-construction U-value for ${issues.map(issue => issue.elementName).join(', ')} before saving.`);
 }
 
 /** Only an unchanged calculator result proves its half-construction provenance. */
