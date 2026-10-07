@@ -1712,6 +1712,30 @@ export const validateElementCore = (
           ),
         );
       }
+      if (elementsById && !sysElement.isPlaceholder) {
+        const hasExhaustAirHeatPump = [...heatSourceWetReferenceMap([sysElement]).values()].some(
+          (source) => source.type === 'HeatPump' &&
+            ['ExhaustAirMEV', 'ExhaustAirMVHR', 'ExhaustAirMixed'].includes(String(source.source_type)),
+        );
+        if (hasExhaustAirHeatPump) {
+          const ventTypes = Object.values(elementsById).flatMap((candidate) => {
+            if (candidate.isPlaceholder) return [];
+            const extra = readRecord(candidate.extra_json);
+            if (candidate.type === 'MechanicalVentilation') {
+              return [candidate.vent_type ?? extra.vent_type];
+            }
+            if (candidate.type !== 'System' || candidate.subcategory !== 'InfiltrationVentilation') return [];
+            const ventilation = readRecord(extra.InfiltrationVentilation);
+            return Object.values(readRecord(ventilation.MechanicalVentilation)).map((unit) => readRecord(unit).vent_type);
+          });
+          // HEM rejects any incompatible unit, even alongside compatible ventilation.
+          if (ventTypes.some((type) => type === 'Intermittent MEV' || type === 'Decentralised continuous MEV')) {
+            issues.push(geo('Exhaust-air heat pumps cannot be combined with Intermittent MEV or Decentralised continuous MEV', 'extra_json'));
+          } else if (!ventTypes.some((type) => type === 'Centralised continuous MEV' || type === 'MVHR')) {
+            issues.push(geo('Exhaust-air heat pumps require Centralised continuous MEV or MVHR ventilation', 'extra_json'));
+          }
+        }
+      }
       if (complianceValidationEnabled && elementsById) {
         for (const msg of hotWaterSourceHeatSourceWetLinkMessagesForElement(
           element,
