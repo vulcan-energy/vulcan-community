@@ -662,8 +662,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     if ((upgrading || rawState.sourceCsvVersion >= CURRENT_VULCAN_CSV_VERSION) && !exportOptions?.allowUnresolvedMigration) {
       assertCsvMigrationResolved(Object.values(rawState.elementsById), rawState.sourceCsvVersion);
     }
-    // Draft snapshots keep the original format; only an explicit, resolved save
-    // finalizes the upgrade and its separate document identity.
+    // Draft snapshots keep the original format; a resolved Save finalizes
+    // the format update without changing the selected calculation target.
     const exportVersion = upgrading && !exportOptions?.allowUnresolvedMigration && migrationIssues.length === 0
       ? CURRENT_VULCAN_CSV_VERSION : rawState.sourceCsvVersion;
     // Project authored override flags onto `extra_json` once, up front, so every section sees a

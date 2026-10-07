@@ -103,11 +103,10 @@ describe('FilenameBar migration review', () => {
     render(<GeometryStoreProvider store={store}><FilenameBar documentHost={documentHost} saveStatus="idle" saveError={null} /></GeometryStoreProvider>);
     expect(screen.queryByRole('combobox', { name: 'Legacy U-value meaning' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(documentHost.save).toHaveBeenCalledOnce();
+    expect(documentHost.save).not.toHaveBeenCalled();
     expect(store.getState().elementsById.a.extra_json?.u_value_interpretation).toBeUndefined();
-    await user.click(screen.getByRole('button', { name: 'Upgrade format' }));
-    expect(screen.getByRole('button', { name: 'Save upgraded copy' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Upgrade format' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save', exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upgrade CSV' })).not.toBeInTheDocument();
     const apply = screen.getByRole('button', { name: 'Apply meaning to selected elements' });
     expect(apply).toBeDisabled();
     await user.click(screen.getByRole('checkbox', { name: /Party a/ }));
