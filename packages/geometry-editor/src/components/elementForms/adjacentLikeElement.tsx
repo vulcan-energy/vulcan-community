@@ -191,6 +191,8 @@ const PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES = new Set([
 
 export interface AdjacentLikeElementFormState {
   partyWallCavityResistanceInput: NumericDraftInputBinding;
+  partyWallWholeUInput: NumericDraftInputBinding;
+  partyWallConstructionRInput: NumericDraftInputBinding;
   adjacentViewerBaseHeightInput: NumericDraftInputBinding;
   /** Shared with the wall family — see module header comment. */
   widthInput: NumericDraftInputBinding;
@@ -257,8 +259,25 @@ function useFormState(ctx: ElementFormStateCtx): AdjacentLikeElementFormState {
     { commitOnChange: true, formatOnBlur: 'preserve' },
   );
 
+  const commitPartyWallFabric = (field: 'u_value_whole_wall' | 'thermal_resistance_construction') => (value: number | '') => {
+    if (!isExistingElementSelection() || !ctx.selection) return;
+    const element = ctx.getElementById(ctx.selection.id);
+    if (!element || element.type !== 'BuildingElementPartyWall') return;
+    const extra = { ...readExtraJsonRecord(element.extra_json) };
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      extra[field] = value;
+      if (field === 'thermal_resistance_construction') extra.construction_basis = 'half';
+    } else delete extra[field];
+    // These independently authored facts do not acknowledge an ambiguous legacy U-value.
+    ctx.commitExistingElementDraft({ extra_json: extra } as Partial<Element>);
+  };
+  const partyWallWholeUInput = useDecimalInput('', commitPartyWallFabric('u_value_whole_wall'), { commitOnChange: true, formatOnBlur: 'preserve' });
+  const partyWallConstructionRInput = useDecimalInput('', commitPartyWallFabric('thermal_resistance_construction'), { commitOnChange: true, formatOnBlur: 'preserve' });
+
   return {
     partyWallCavityResistanceInput,
+    partyWallWholeUInput,
+    partyWallConstructionRInput,
     adjacentViewerBaseHeightInput,
     widthInput: ctx.shared.widthInput,
     heightInput: ctx.shared.heightInput,
@@ -305,6 +324,8 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
     state.setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
     state.areaInput.setValue(area);
     state.setPitch(pitch);
+    state.partyWallWholeUInput.setValue(readFiniteNumber(adjacentExtra.u_value_whole_wall) ?? '');
+    state.partyWallConstructionRInput.setValue(readFiniteNumber(adjacentExtra.thermal_resistance_construction) ?? '');
     const cavityResistance = readFiniteNumber(adjacentExtra.thermal_resistance_cavity);
     state.partyWallCavityResistanceInput.setValue(
       cavityResistance == null ? '' : formatConditionalDecimals(cavityResistance),
@@ -324,6 +345,8 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
   // speculatively; see header's THE RESET-GAP INVESTIGATION verdict.
   reset(state) {
     state.adjacentViewerBaseHeightInput.setValue('');
+    state.partyWallWholeUInput.setValue('');
+    state.partyWallConstructionRInput.setValue('');
   },
 
   buildElementData(state, ctx) {
@@ -331,6 +354,11 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
     const height = state.heightInput.value;
     return {
       ...ctx.baseData,
+      ...(ctx.baseData.type === 'BuildingElementPartyWall' ? { extra_json: {
+        ...readExtraJsonRecord(ctx.baseData.extra_json),
+        ...(typeof state.partyWallWholeUInput.value === 'number' ? { u_value_whole_wall: state.partyWallWholeUInput.value } : {}),
+        ...(typeof state.partyWallConstructionRInput.value === 'number' ? { thermal_resistance_construction: state.partyWallConstructionRInput.value, construction_basis: 'half' } : {}),
+      } } : {}),
       width,
       height,
       area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
@@ -497,6 +525,15 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
         )}
         {elementType === 'BuildingElementPartyWall' && (
           <>
+            {renderFieldLabel('Whole-wall U-value (W/m²K):', elementType, 'u_value_whole_wall')}
+            <div className="element-input" ref={registerBaseFieldRef('u_value_whole_wall')}>
+              <StandardInput {...decimalInputProps(state.partyWallWholeUInput)} aria-label="Whole-wall U-value" unit="W/m²K" step="0.01" min="0" variant="ghost" size="md" />
+            </div>
+            {renderFieldLabel('Construction resistance to midpoint (m²K/W):', elementType, 'thermal_resistance_construction')}
+            <div className="element-input" ref={registerBaseFieldRef('thermal_resistance_construction')}>
+              <StandardInput {...decimalInputProps(state.partyWallConstructionRInput)} aria-label="Construction resistance to midpoint" unit="m²K/W" step="0.01" min="0" variant="ghost" size="md" />
+              <span style={INLINE_FIELD_NOTE_STYLE}>Manual values are supported. Whole-wall U and construction resistance are independent; an assembly is optional.</span>
+            </div>
             {renderFieldLabel('Party Wall Cavity Type:', elementType, 'party_wall_cavity_type')}
             <div className="element-input">
               <StandardDropdown

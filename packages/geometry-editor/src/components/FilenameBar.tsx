@@ -14,6 +14,7 @@ import type { BuildErrorItem } from '../types/buildErrors';
 import type { GeometryDocumentHostPort } from '../../../geometry-document/src';
 import './GlobalButtonSystem.css';
 import './FilenameBar.css';
+import { csvMigrationIssues, type UValueInterpretation } from '../geometry/io/csvSemanticMigration';
 
 export type FilenameBarActionContext = Readonly<{
   documentHost: GeometryDocumentHostPort;
@@ -276,6 +277,14 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const zones = useGeometryStore((s) => s.zones);
   const elementsById = useGeometryStore((s) => s.elementsById);
   const elementIds = useGeometryStore((s) => s.elementIds);
+  const sourceCsvVersion = useGeometryStore((s) => s.sourceCsvVersion);
+  const csvUpgradeRequested = useGeometryStore((s) => s.csvUpgradeRequested);
+  const requestCsvUpgrade = useGeometryStore((s) => s.requestCsvUpgrade);
+  const resolveCsvMeaning = useGeometryStore((s) => s.resolveCsvUValueInterpretation);
+  const migrationIssues = useMemo(() => csvUpgradeRequested || sourceCsvVersion >= 3
+    ? csvMigrationIssues(Object.values(elementsById), sourceCsvVersion) : [], [elementsById, sourceCsvVersion, csvUpgradeRequested]);
+  const [migrationSelection, setMigrationSelection] = useState<string[]>([]);
+  const [migrationMeaning, setMigrationMeaning] = useState<UValueInterpretation | ''>('');
   const setSelection = useGeometryStore((s) => s.setSelection);
   const setSelectedElementIds = useGeometryStore((s) => s.setSelectedElementIds);
   const setCurrentFloorZ = useGeometryStore((s) => s.setCurrentFloorZ);
@@ -756,6 +765,24 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
 
   return (
     <>
+    {migrationIssues.length > 0 && <details open className="csv-migration-review">
+      <summary>Review legacy party-wall U-value meaning ({migrationIssues.length} elements)</summary>
+      <p>Select the elements that share a meaning. Numbers are preserved; validation or Save does not confirm a meaning. The original file is retained.</p>
+      {migrationIssues.map(issue => <label key={issue.elementId} style={{ display: 'block' }}>
+        <input type="checkbox" checked={migrationSelection.includes(issue.elementId)} onChange={event => setMigrationSelection(ids => event.target.checked ? [...ids, issue.elementId] : ids.filter(id => id !== issue.elementId))} />
+        {issue.elementName}: {issue.value} W/m²K
+      </label>)}
+      <select aria-label="Legacy U-value meaning" value={migrationMeaning} onChange={event => setMigrationMeaning(event.target.value as UValueInterpretation | '')}>
+        <option value="">Unknown — choose a meaning or correct the data</option>
+        <option value="whole_wall">Whole-wall U-value</option>
+        <option value="half_construction">Previous HEM half-construction U-value</option>
+      </select>
+      <button type="button" disabled={!migrationMeaning || !migrationSelection.some(id => migrationIssues.some(issue => issue.elementId === id))} onClick={() => {
+        if (!migrationMeaning) return;
+        resolveCsvMeaning(migrationSelection.filter(id => migrationIssues.some(issue => issue.elementId === id)), migrationMeaning);
+        setMigrationSelection([]); setMigrationMeaning('');
+      }}>Apply meaning to selected elements</button>
+    </details>}
     <div className="filename-bar">
       <div className="filename-bar-left">
         {availableFilenameActions.map((action) => (
@@ -796,6 +823,13 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
       </div>
 
       <div className="filename-bar-right">
+        {sourceCsvVersion < 3 && !csvUpgradeRequested && <button
+          type="button"
+          className="btn btn-standard"
+          disabled={saveStatus === 'saving'}
+          title="Review format changes, then save an upgraded copy. Ordinary Save keeps the current format."
+          onClick={() => { setMigrationSelection([]); setMigrationMeaning(''); requestCsvUpgrade(); }}
+        >Upgrade format</button>}
         <div className="filename-bar-save-stack">
         <button
           ref={saveButtonRef}
@@ -810,7 +844,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
         >
           <span className="save-button-content">
             {getSaveButtonIcon()}
-            <span className="save-button-text">Save</span>
+            <span className="save-button-text">{csvUpgradeRequested ? 'Save upgraded copy' : 'Save'}</span>
             {showSaveErrorIndicator && (
               <span
                 role="button"

@@ -175,7 +175,7 @@ export function createCommunityGeometryStoreDocumentBridge(
         ? document
         : replaceSessionContents(document, preparedContents);
       store.getState().loadFromCSV(preparedDocument.text);
-      const canonicalText = store.getState().generateCSV();
+      const canonicalText = store.getState().generateCSV({ allowUnresolvedMigration: true });
       observedDocument = canonicalText === preparedDocument.text
         ? preparedDocument
         : replaceSessionText(preparedDocument, canonicalText);
@@ -200,7 +200,7 @@ export function createCommunityGeometryStoreDocumentBridge(
 
     let text: string;
     try {
-      text = store.getState().generateCSV();
+      text = store.getState().generateCSV({ allowUnresolvedMigration: true });
     } catch (cause) {
       throw setError('serialize', cause);
     }
@@ -273,6 +273,45 @@ export function createCommunityGeometryStoreDocumentBridge(
     }
   };
 
+  const saveCurrent = async () => {
+    const savedText = store.getState().generateCSV(); // Requested upgrades require resolved meaning.
+    const upgrading = store.getState().csvUpgradeRequested && store.getState().sourceCsvVersion < 3;
+    const document = flush();
+    const original = documentHost.getSnapshot().activeDocument;
+    if (upgrading && original) {
+      // Renaming an active document updates the same provider ID. Detach the captured
+      // contents into a new document so persistence creates a copy of the original.
+      const fileName = document.fileName === original.fileName
+        ? document.fileName.replace(/(\.csv)?$/i, '-upgraded.csv') : document.fileName;
+      const detached = await documentHost.newDocument({
+        contents: { fileName, text: savedText, derivedResources: document.derivedResources, sourceFiles: document.sourceFiles },
+        dirtyDecision: 'discard',
+      });
+      if (detached.status !== 'completed') return detached;
+    } else if (document.text !== savedText) {
+      // Draft synchronization retains the source format. Persist the explicitly
+      // finalized contents for this save without reloading or discarding edits.
+      observedDocument = replaceSessionText(document, savedText);
+    }
+    const savedRevision = session.getSnapshot().revision;
+    const savedDraftText = upgrading ? store.getState().generateCSV({ allowUnresolvedMigration: true }) : undefined;
+    const result = await documentHost.save();
+    // Store edits reach the document session on a debounce. Compare the live
+    // draft too, so a late save cannot acknowledge an edited U-value meaning.
+    if (upgrading && result.status === 'completed' && session.getSnapshot().revision === savedRevision
+      && store.getState().generateCSV({ allowUnresolvedMigration: true }) === savedDraftText) {
+      store.setState({ sourceCsvVersion: 3, sourceProvenanceMarkersVersion: undefined, csvUpgradeRequested: false });
+    }
+    return result;
+  };
+
+  const saveBeforeReplacement = async (run: () => Promise<import('../../../packages/geometry-document/src').GeometryDocumentHostResult>) => {
+    const result = await saveCurrent();
+    if (result.status !== 'completed') return result;
+    // The replacement uses Cancel if another edit became dirty while Save awaited.
+    return runAfterFlush(run);
+  };
+
   const bridgeHolder: { current: CommunityGeometryStoreDocumentBridge | null } = {
     current: null,
   };
@@ -281,15 +320,19 @@ export function createCommunityGeometryStoreDocumentBridge(
     subscribe: (listener: () => void) => documentHost.subscribe(listener),
     updateFileName: (fileName: string) => documentHost.updateFileName(fileName),
     isDirty: () => documentHost.isDirty(),
-    save: () => runAfterFlush(() => documentHost.save()),
-    newDocument: (request?: GeometryDocumentHostNewRequest) =>
-      runAfterFlush(() => documentHost.newDocument(request)),
-    open: (request: GeometryDocumentHostOpenRequest) =>
-      runAfterFlush(() => documentHost.open(request)),
-    delete: (request: GeometryDocumentHostDestructiveRequest) =>
-      runAfterFlush(() => documentHost.delete(request)),
-    duplicate: (request: GeometryDocumentHostDestructiveRequest) =>
-      runAfterFlush(() => documentHost.duplicate(request)),
+    save: saveCurrent,
+    newDocument: (request?: GeometryDocumentHostNewRequest) => request?.dirtyDecision === 'save'
+      ? saveBeforeReplacement(() => documentHost.newDocument({ ...request, dirtyDecision: 'cancel' }))
+      : runAfterFlush(() => documentHost.newDocument(request)),
+    open: (request: GeometryDocumentHostOpenRequest) => request.dirtyDecision === 'save'
+      ? saveBeforeReplacement(() => documentHost.open({ ...request, dirtyDecision: 'cancel' }))
+      : runAfterFlush(() => documentHost.open(request)),
+    delete: (request: GeometryDocumentHostDestructiveRequest) => request.dirtyDecision === 'save'
+      ? saveBeforeReplacement(() => documentHost.delete({ ...request, dirtyDecision: 'cancel' }))
+      : runAfterFlush(() => documentHost.delete(request)),
+    duplicate: (request: GeometryDocumentHostDestructiveRequest) => request.dirtyDecision === 'save'
+      ? saveBeforeReplacement(() => documentHost.duplicate({ ...request, dirtyDecision: 'cancel' }))
+      : runAfterFlush(() => documentHost.duplicate(request)),
     dispose: () => bridgeHolder.current?.dispose(),
   });
 

@@ -2578,6 +2578,8 @@ const validateElementForState = (
   }
   return validateElementCore(element, {
     schemaPort,
+    sourceCsvVersion: state.sourceCsvVersion,
+    csvUpgradeRequested: state.csvUpgradeRequested,
     elementsById: eb,
     zones: state.zones,
     floors: state.floors,
@@ -7240,6 +7242,10 @@ const createGeometryState = (
     // Invalidate any in-flight junction defaults read before removing its path.
     stateBeforeReset.setJunctionPsiDefaultsPath(undefined);
     set((state) => ({
+      sourceCsvVersion: 3,
+      sourceProvenanceMarkersVersion: undefined,
+      csvUpgradeRequested: false,
+      targetBundleId: undefined,
       zones: [],
       elementsById: {},
       elementIds: [],
@@ -7289,6 +7295,10 @@ const createGeometryState = (
   },
 
   clearAll: () => set((state) => ({
+    sourceCsvVersion: 3,
+    sourceProvenanceMarkersVersion: undefined,
+    csvUpgradeRequested: false,
+    targetBundleId: undefined,
     selection: null,
     selectedElementIds: [],
     zones: [],
@@ -7435,6 +7445,8 @@ const createGeometryState = (
     );
     const sharedValidationContext = {
       schemaPort,
+      sourceCsvVersion: state.sourceCsvVersion,
+      csvUpgradeRequested: state.csvUpgradeRequested,
       elementsById: state.elementsById,
       zones: state.zones,
       floors: state.floors,

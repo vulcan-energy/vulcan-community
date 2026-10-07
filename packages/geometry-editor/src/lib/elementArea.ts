@@ -192,7 +192,7 @@ const getLineWidth = (element: { coordinates: Array<{ x: number; y: number; z: n
   return Math.hypot(end.x - start.x, end.y - start.y);
 };
 
-const internalAdjacentConditionedAreaMultiplier = (element: AreaBasedElement): 1 | 2 => {
+export const internalAdjacentConditionedAreaMultiplier = (element: AreaBasedElement): 1 | 2 => {
   if (element.type !== 'BuildingElementAdjacentConditionedSpace') return 1;
   if (isVulcanUiPartyFloorElement(element)) return 1;
 

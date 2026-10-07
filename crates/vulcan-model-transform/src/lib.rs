@@ -16,6 +16,9 @@ pub mod parser {
 }
 pub mod preflight_diagnostics;
 mod schema_validation;
+pub mod finalization;
+mod target_mappings;
+pub use target_mappings::map_target_unobstructed_shading;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -26,6 +29,16 @@ use std::collections::BTreeSet;
 pub enum ModelProfile {
     Core,
     Fhs,
+}
+
+/// Explicit converter contract; release labels never select translation rules implicitly.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversionProfile {
+    #[default]
+    CurrentRustFhs,
+    PythonFhsA9,
+    PythonFhsA8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +54,8 @@ pub struct TransformRequest {
     pub schema_json: String,
     pub defaults_json: String,
     pub profile: ModelProfile,
+    #[serde(default)]
+    pub conversion_profile: ConversionProfile,
     pub version_metadata: VersionMetadata,
 }
 
@@ -48,6 +63,7 @@ pub struct TransformRequest {
 pub struct TransformOutput {
     pub model: Value,
     pub validation: ValidationResult,
+    pub schema_omissions: Vec<finalization::SchemaOmission>,
     pub version_metadata: VersionMetadata,
 }
 
@@ -111,25 +127,21 @@ pub fn transform_geometry_csv(
         &request.version_metadata,
     )
     .map_err(|error| TransformError::Schema(error.to_string()))?;
+    builder.set_conversion_profile(request.conversion_profile);
     let model = builder
         .build_json(&csv_data)
         .map_err(TransformError::Build)?;
 
+    let mut schema_omissions = builder.take_schema_omissions();
+    let schema: Value = serde_json::from_str(&request.schema_json)
+        .map_err(|error| TransformError::Schema(error.to_string()))?;
+    let finalized = finalization::finalize_model(&model, &schema).map_err(TransformError::Schema)?;
+    schema_omissions.extend(finalized.omissions);
+    let model = finalized.model;
     let mut errors = builder.take_non_fatal_errors();
     let validation_model = clone_for_hem_validation(&model);
-    if let Err(error) = builder.validate_against_schema(&validation_model) {
-        if error.validation_errors.is_empty() {
-            errors.push(ValidationError {
-                code: error.code,
-                path: "schema".into(),
-                message: error.message,
-                schema_path: None,
-                keyword: None,
-            });
-        } else {
-            errors.extend(error.validation_errors);
-        }
-    }
+    errors.extend(finalized.validation.errors);
+    errors.extend(validate_target_input(&model, request.conversion_profile));
     let validation = ValidationResult {
         is_valid: errors.is_empty(),
         errors,
@@ -140,11 +152,61 @@ pub fn transform_geometry_csv(
     Ok(TransformOutput {
         model,
         validation,
+        schema_omissions,
         version_metadata: request.version_metadata,
     })
 }
 
+/// Source-verified wrapper readiness beyond a release's JSON schema. Diagnose
+/// missing main hot-water sources and a8 scalar bridges without inventing facts
+/// or silently renaming authored systems.
+pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<ValidationError> {
+    let mut errors = Vec::new();
+    if matches!(profile, ConversionProfile::PythonFhsA8 | ConversionProfile::PythonFhsA9)
+        && model.get("HotWaterSource").and_then(Value::as_object)
+            .is_some_and(|sources| !sources.contains_key("hw cylinder"))
+    {
+        // Both FHS schemas declare only this main-source key (including
+        // PointOfUse). Notional edit_storagetank indexes it unconditionally;
+        // an empty schema-valid object is not a usable hot-water source.
+        errors.push(ValidationError {
+            code: "E_PYTHON_FHS_HOT_WATER_SOURCE".into(),
+            path: "/HotWaterSource/hw cylinder".into(),
+            message: "Python FHS requires the main hot-water source under 'hw cylinder', including point-of-use systems. Supply a target-compatible main source; unsupported names are preserved in the authored CSV and are not renamed automatically.".into(),
+            schema_path: None, keyword: None,
+        });
+    }
+    if profile == ConversionProfile::PythonFhsA8 {
+        if let Some(zones) = model.get("Zone").and_then(Value::as_object) {
+            for (name, zone) in zones {
+                if zone.get("ThermalBridging").is_some_and(Value::is_number) {
+                    errors.push(ValidationError {
+                        code: "E_A8_THERMAL_BRIDGING".into(),
+                        path: format!("/Zone/{}/ThermalBridging", name.replace('~',"~0").replace('/',"~1")),
+                        message: "Python FHS a8 requires detailed thermal-bridge records during wrapper preprocessing, even though its schema accepts a scalar. Supply the actual bridge records; an aggregate cannot be expanded without evidence.".into(),
+                        schema_path: None, keyword: None,
+                    });
+                }
+            }
+        }
+    }
+    errors
+}
+
 fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
+    if matches!(request.conversion_profile, ConversionProfile::PythonFhsA8 | ConversionProfile::PythonFhsA9) && request.profile != ModelProfile::Fhs {
+        return Err(TransformError::InvalidRequest("Python conversion requires the FHS profile".into()));
+    }
+    let required_python_version = match request.conversion_profile {
+        ConversionProfile::PythonFhsA8 => Some("1.0.0a8"),
+        ConversionProfile::PythonFhsA9 => Some("1.0.0a9"),
+        ConversionProfile::CurrentRustFhs => None,
+    };
+    if let Some(version) = required_python_version {
+        if request.version_metadata.hem_core_version != version || request.version_metadata.fhs_wrapper_version.as_deref() != Some(version) {
+            return Err(TransformError::InvalidRequest(format!("The selected Python conversion profile requires matching core and FHS wrapper {version} metadata")));
+        }
+    }
     let mut missing = Vec::new();
     if request.csv.trim().is_empty() {
         missing.push("CSV");

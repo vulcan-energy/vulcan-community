@@ -8,7 +8,7 @@ export type OverrideDescriptor = {
   key: string;
   /** The flag/marker value that means the field is overridden rather than automatic. */
   positiveSense: boolean;
-  /** Provenance document version that first made this marker authoritative. */
+  /** Authority level: frozen legacy marker version 0–3; new markers use their introducing CSV format version (4+). */
   since: number;
   /** Whether an authoritative document version makes a missing marker mean automatic. */
   absentIsAuthoritative?: boolean;
@@ -153,14 +153,22 @@ export const OVERRIDE_PROVENANCE_REGISTRY = {
 
 export const PROVENANCE_MARKERS_METADATA_KEY = 'ProvenanceMarkers';
 
+/** Frozen capability ceiling for the retired independent ProvenanceMarkers row. */
+export const LEGACY_SUPPORTED_PROVENANCE_MARKERS_VERSION = 3;
+
 /**
- * Highest authoritative document version. A NEW marker key must declare
- * `since: CURRENT_PROVENANCE_MARKERS_VERSION + 1`; update the registry snapshot test and this
- * version deliberately together so already-saved documents never become authoritative by accident.
+ * CSV v3 includes every existing override capability. New markers advance the CSV
+ * format and their descriptor's `since` together; the legacy counter never grows.
+ * Legacy format 1/2 remains governed by its own marker row, not its format number.
  */
-export const CURRENT_PROVENANCE_MARKERS_VERSION = Math.max(
-  ...Object.values(OVERRIDE_PROVENANCE_REGISTRY).flat().map((descriptor) => descriptor.since),
-);
+export function overrideAuthorityVersion(
+  csvFormatVersion: number,
+  legacyMarkerVersion: number | undefined,
+): number | undefined {
+  if (csvFormatVersion >= 3) return csvFormatVersion;
+  if (legacyMarkerVersion === undefined) return undefined;
+  return Math.min(legacyMarkerVersion, LEGACY_SUPPORTED_PROVENANCE_MARKERS_VERSION);
+}
 
 export const EXTRA_JSON_OVERRIDE_MARKER_KEYS = [
   ...new Set([

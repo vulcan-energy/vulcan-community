@@ -717,7 +717,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  z-index: 1000;
+  /* Keep file controls above same-level draggable editor panels so an open
+     panel cannot intercept clicks on Save, Global Settings, or Files. */
+  z-index: 2200;
 }
 
 .overlay-filebar .filename-bar {

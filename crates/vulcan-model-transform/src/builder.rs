@@ -750,9 +750,8 @@ fn parse_csv_bool_cell(value: Option<&Value>, field: &str) -> Result<Option<bool
 }
 
 /// Contract precedence for a sectioned CSV row: defaults-template seed ←
-/// extra_json ← CSV columns (highest), with schema allowlisting. Blank cells
-/// (null / empty string) leave the seed value in place. An empty `allowed`
-/// set allows all keys and skips the final prune. `skip_keys` are identity /
+/// extra_json ← CSV columns (highest), before shared schema finalization. Blank cells
+/// (null / empty string) leave the seed value in place. `skip_keys` are identity /
 /// geometry / UI columns that must never enter the merged object.
 /// Use this for any new sectioned merge so the precedence cannot be
 /// reimplemented inverted (see `contracts/geometry-csv` `merge_precedence`).
@@ -764,14 +763,10 @@ fn overlay_row_onto_seed(
     mut seed: serde_json::Map<String, Value>,
     row: &HashMap<String, Value>,
     skip_keys: &[&str],
-    allowed: &HashSet<String>,
 ) -> serde_json::Map<String, Value> {
     let mut csv_set_keys: HashSet<String> = HashSet::new();
     for (k, v) in row {
         if k == "extra_json" || skip_keys.contains(&k.as_str()) {
-            continue;
-        }
-        if !allowed.is_empty() && !allowed.contains(k) {
             continue;
         }
         if !csv_cell_is_set(v) {
@@ -802,18 +797,12 @@ fn overlay_row_onto_seed(
             if is_ui_only_extra_json_key(k) || csv_set_keys.contains(k) {
                 continue;
             }
-            if !allowed.is_empty() && !allowed.contains(k) {
-                continue;
-            }
             // No blank check here: `sanitize_csv_extra_json` already removed cleared
             // `extra_json` values, at every depth, before the merge started.
             seed.insert(k.clone(), v.clone());
         }
     }
 
-    if !allowed.is_empty() {
-        seed.retain(|k, _| allowed.contains(k));
-    }
     seed
 }
 
@@ -1018,7 +1007,7 @@ fn extract_metadata_field(row: &HashMap<String, Value>) -> (Option<String>, Opti
 
 const VULCAN_CSV_VERSION: &str = "VulcanCsvVersion";
 const LEGACY_VULCAN_CSV_VERSION: u64 = 1;
-const CURRENT_VULCAN_CSV_VERSION: u64 = 2;
+const CURRENT_VULCAN_CSV_VERSION: u64 = 3;
 
 fn metadata_field_value(
     csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
@@ -1137,6 +1126,24 @@ fn migrate_vulcan_csv_to_current(
     if version < 2 {
         migrate_v1_window_mid_height_reference(csv_data);
     }
+    {
+        for row in csv_data.get("Non-Exposed Elements").into_iter().flatten() {
+            if row.get("Type").and_then(Value::as_str) != Some("BuildingElementPartyWall") { continue; }
+            let extra = row.get("extra_json");
+            let u = row.get("u_value").filter(|v| !v.is_null() && v.as_str() != Some(""))
+                .or_else(|| extra.and_then(|e| e.get("u_value")));
+            let interpretation = extra.and_then(|e| e.get("u_value_interpretation")).and_then(Value::as_str);
+            let interpreted_value = extra.and_then(|e| e.get("u_value_interpreted_value")).and_then(Value::as_f64);
+            let changed_after_legacy_review = version < 3 && interpreted_value.is_some()
+                && interpreted_value != u.and_then(Value::as_f64);
+            if u.is_some() && ((version >= 3 && !matches!(interpretation, Some("whole_wall" | "half_construction"))) || changed_after_legacy_review) {
+                return Err(BuildError::new("E_CSV_MIGRATION", &format!(
+                    "Party wall '{}' has unresolved legacy U-value meaning. Explicitly select whole_wall or half_construction before finalizing CSV version 3.",
+                    row.get("Name").and_then(Value::as_str).unwrap_or("unnamed")
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1223,6 +1230,8 @@ pub struct JSONBuilder {
     /// In that case we keep richer FHS-only fields; for Core schemas we rely strictly
     /// on the Core schema's allowed properties when pruning.
     is_fhs_schema: bool,
+    conversion_profile: crate::ConversionProfile,
+    schema_omissions: RefCell<Vec<crate::finalization::SchemaOmission>>,
     /// Parsed from CSV Metadata `ComplianceValidationEnabled` (workflow flag). When `Some(false)`,
     /// we skip injecting implicit `false` defaults for FHS-only root booleans used by validation.
     /// When `None` or `Some(true)`, FHS merges apply those defaults when keys are absent.
@@ -1242,6 +1251,10 @@ pub struct JSONBuilder {
 }
 
 impl JSONBuilder {
+    pub fn set_conversion_profile(&mut self, profile: crate::ConversionProfile) {
+        self.conversion_profile = profile;
+    }
+
     /// True when this builder validates against an FHS-family schema (FHS / ECaaS).
     pub fn targets_fhs_schema(&self) -> bool {
         self.is_fhs_schema
@@ -1271,6 +1284,8 @@ impl JSONBuilder {
 
         let mut builder = Self {
             is_fhs_schema: is_fhs,
+            conversion_profile: crate::ConversionProfile::default(),
+            schema_omissions: RefCell::new(Vec::new()),
             schema,
             defaults,
             seen_names: HashSet::new(),
@@ -1306,6 +1321,8 @@ impl JSONBuilder {
 
         let mut builder = Self {
             is_fhs_schema: is_fhs,
+            conversion_profile: crate::ConversionProfile::default(),
+            schema_omissions: RefCell::new(Vec::new()),
             schema,
             defaults,
             seen_names: HashSet::new(),
@@ -1686,6 +1703,8 @@ impl JSONBuilder {
             self.apply_fhs_cold_water_source(&mut result);
             self.sanitize_fhs_output(&mut result);
         }
+
+        crate::map_target_unobstructed_shading(&mut result, self.conversion_profile);
 
         // Schema-based cleanup: removes properties not allowed by the schema
         // This replaces hardcoded cleanup functions with a programmatic approach
@@ -2283,7 +2302,7 @@ impl JSONBuilder {
                                 // 3. Property is not position_xyz (CSV-only field)
                                 // Cleared values need no check here: `sanitize_csv_extra_json`
                                 // removed them, at every depth, before the merge started.
-                                if allowed_building_element_props.contains(&storage_key)
+                                if !matches!(key.as_str(), "u_value_interpretation" | "u_value_interpreted_value" | "construction_basis" | "internal_partition_area_basis")
                                     && !csv_set_keys.contains(&storage_key)
                                     && key != "position_xyz"
                                     && key != "pitch"
@@ -2390,6 +2409,14 @@ impl JSONBuilder {
                             );
                         }
                     }
+
+                    let target_path = format!("Zone/{zone_name}/BuildingElement/{element_name}");
+                    let diagnostics = match self.conversion_profile {
+                        crate::ConversionProfile::PythonFhsA8 => crate::target_mappings::map_python_a8_element(element_row, &mut element_obj, &target_path),
+                        crate::ConversionProfile::PythonFhsA9 => crate::target_mappings::map_python_a9_element(element_row, &mut element_obj, &target_path),
+                        crate::ConversionProfile::CurrentRustFhs => crate::target_mappings::map_rust_element(element_row, &mut element_obj, &target_path),
+                    };
+                    self.non_fatal_errors.borrow_mut().extend(diagnostics);
 
                     // Add to zone's BuildingElement section
                     let zone = result["Zone"][zone_name].as_object_mut().unwrap();
@@ -2581,17 +2608,6 @@ impl JSONBuilder {
                 // Contract precedence: CSV columns > extra_json > defaults template.
                 // Blank cells leave the template value in place, as in other sections;
                 // schema-invalid keys (UI-only metadata like floor_id) are dropped.
-                let allowed_names: &[&str] = match bridge_type {
-                    "ThermalBridgeLinear" => &[
-                        "type",
-                        "length",
-                        "linear_thermal_transmittance",
-                        "junction_type",
-                    ],
-                    _ => &["type", "heat_transfer_coeff"],
-                };
-                let allowed: HashSet<String> =
-                    allowed_names.iter().map(|s| s.to_string()).collect();
                 let seed = bridge_obj
                     .as_object()
                     .cloned()
@@ -2600,7 +2616,6 @@ impl JSONBuilder {
                     seed,
                     bridge_row,
                     &["Name", "Zone", "Type", "coords", "parent_element"],
-                    &allowed,
                 ));
                 // Add to zone's ThermalBridging section
                 let zone = result["Zone"][zone_name].as_object_mut().unwrap();
@@ -3567,55 +3582,6 @@ impl JSONBuilder {
             }
             let inf_vent = result.get_mut("InfiltrationVentilation").unwrap();
 
-            // Derive allowed properties from the active schema (Core or FHS), instead of hardcoded allowlists.
-            // This keeps the pipeline resilient as the schema evolves.
-            let schema_infiltration = self
-                .schema
-                .get("properties")
-                .and_then(|p| p.get("InfiltrationVentilation"));
-            let schema_infiltration_props = schema_infiltration
-                .and_then(|iv| iv.get("properties"))
-                .and_then(|p| p.as_object());
-
-            let vents_schema = schema_infiltration_props
-                .and_then(|p| p.get("Vents"))
-                .and_then(|v| v.get("additionalProperties"))
-                .or_else(|| {
-                    // Fallback: some schemas may define Vents at root level
-                    self.schema.get("$defs").and_then(|d| d.get("Vents"))
-                });
-            let allowed_vent_props = vents_schema
-                .map(|s| self.get_allowed_properties_from_schema(s))
-                .unwrap_or_default();
-
-            let mechvent_schema = schema_infiltration_props
-                .and_then(|p| p.get("MechanicalVentilation"))
-                .and_then(|v| v.get("additionalProperties"))
-                .or_else(|| {
-                    self.schema.get("$defs").and_then(|d| {
-                        d.get("MechanicalVentilationFHS")
-                            .or_else(|| d.get("MechanicalVentilation"))
-                    })
-                });
-            let allowed_mechvent_props = mechvent_schema
-                .map(|s| self.get_allowed_properties_from_schema(s))
-                .unwrap_or_default();
-
-            // Ductwork schema is typically defined as the items schema under
-            // MechanicalVentilation.ductwork. In FHS it sits inside the MVHR
-            // allOf/then branch rather than directly under base properties.
-            let ductwork_schema = mechvent_schema
-                .and_then(|mv| Self::find_property_schema(mv, "ductwork"))
-                .and_then(|dw| dw.get("items").or_else(|| dw.get("additionalProperties")))
-                .or_else(|| {
-                    self.schema
-                        .get("$defs")
-                        .and_then(|d| d.get("MechanicalVentilationDuctwork"))
-                });
-            let allowed_duct_props = ductwork_schema
-                .map(|s| self.get_allowed_properties_from_schema(s))
-                .unwrap_or_default();
-
             // Defaults templates for Vents / MechanicalVentilation (used for seeding missing required fields)
             let defaults_inf_vent = self.defaults.get("InfiltrationVentilation");
             let default_vents_map = defaults_inf_vent
@@ -3663,9 +3629,6 @@ impl JSONBuilder {
                             {
                                 continue;
                             }
-                            if !allowed_vent_props.is_empty() && !allowed_vent_props.contains(k) {
-                                continue;
-                            }
                             if v.is_null() || (v.is_string() && v.as_str().unwrap_or("").is_empty())
                             {
                                 continue;
@@ -3686,18 +3649,11 @@ impl JSONBuilder {
                                 if csv_set_keys.contains(k) {
                                     continue;
                                 }
-                                if !allowed_vent_props.is_empty() && !allowed_vent_props.contains(k)
-                                {
-                                    continue;
-                                }
                                 vent_obj.insert(k.clone(), strip_ui_only_extra_json_value(v));
                             }
                         }
 
-                        // Prune to schema-allowed keys (defence-in-depth; cleanup_against_schema will also run).
-                        if !allowed_vent_props.is_empty() {
-                            vent_obj.retain(|k, _| allowed_vent_props.contains(k));
-                        }
+                        // Shared finalization projects and reports unsupported fields.
                         vents.insert(vent_name.to_string(), Value::Object(vent_obj));
                     }
                     "MechanicalVentilation" => {
@@ -3748,14 +3704,6 @@ impl JSONBuilder {
                                 ),
                             )
                         })?;
-                        // Keys seeded from the defaults template for this vent_type. The JSON Schema
-                        // `additionalProperties` tree used for `allowed_mechvent_props` is not guaranteed
-                        // to list every engine field (e.g. some controls exist in templates before the
-                        // schema lists them). Retain must not strip template keys or merged inputs lose
-                        // required fields and fail validation.
-                        let template_keys: std::collections::HashSet<String> =
-                            mv_obj.keys().cloned().collect();
-
                         // Overlay: CSV columns (highest precedence), schema-allowed only, ignoring empties.
                         let mut csv_set_keys = std::collections::HashSet::new();
                         for (k, v) in vent_row {
@@ -3766,12 +3714,6 @@ impl JSONBuilder {
                                 || k == "parent_element"
                                 || k == "terminal_type"
                                 || k == "host_element"
-                            {
-                                continue;
-                            }
-                            if !allowed_mechvent_props.is_empty()
-                                && !allowed_mechvent_props.contains(k)
-                                && !template_keys.contains(k)
                             {
                                 continue;
                             }
@@ -3794,12 +3736,6 @@ impl JSONBuilder {
                                 // Cleared values are already gone: `sanitize_csv_extra_json`.
                                 // Skip only if this key was set by CSV columns (not defaults)
                                 if csv_set_keys.contains(k) {
-                                    continue;
-                                }
-                                if !allowed_mechvent_props.is_empty()
-                                    && !allowed_mechvent_props.contains(k)
-                                    && !template_keys.contains(k)
-                                {
                                     continue;
                                 }
                                 mv_obj.insert(k.clone(), strip_ui_only_extra_json_value(v));
@@ -3929,11 +3865,6 @@ impl JSONBuilder {
                                     {
                                         continue;
                                     }
-                                    if !allowed_duct_props.is_empty()
-                                        && !allowed_duct_props.contains(k)
-                                    {
-                                        continue;
-                                    }
                                     if v.is_null()
                                         || (v.is_string() && v.as_str().unwrap_or("").is_empty())
                                     {
@@ -3956,19 +3887,11 @@ impl JSONBuilder {
                                         if csv_set_keys.contains(k) {
                                             continue;
                                         }
-                                        if !allowed_duct_props.is_empty()
-                                            && !allowed_duct_props.contains(k)
-                                        {
-                                            continue;
-                                        }
                                         duct_obj
                                             .insert(k.clone(), strip_ui_only_extra_json_value(v));
                                     }
                                 }
 
-                                if !allowed_duct_props.is_empty() {
-                                    duct_obj.retain(|k, _| allowed_duct_props.contains(k));
-                                }
                                 ductwork.push(Value::Object(duct_obj));
                             }
                         }
@@ -4097,12 +4020,7 @@ impl JSONBuilder {
                             mv_obj.remove("position_intake");
                         }
 
-                        // Prune to schema-allowed keys (defence-in-depth; cleanup_against_schema will also run).
-                        if !allowed_mechvent_props.is_empty() {
-                            mv_obj.retain(|k, _| {
-                                allowed_mechvent_props.contains(k) || template_keys.contains(k)
-                            });
-                        }
+                        // Shared finalization projects and reports unsupported fields.
                         mechanical_ventilation.insert(vent_name.to_string(), Value::Object(mv_obj));
                     }
                     _ => {
@@ -4163,25 +4081,6 @@ impl JSONBuilder {
             let mut combustion_appliances = serde_json::Map::new();
 
             // Derive allowed keys from schema (Core/FHS) to avoid brittle allowlists.
-            let schema_infiltration = self
-                .schema
-                .get("properties")
-                .and_then(|p| p.get("InfiltrationVentilation"));
-            let schema_infiltration_props = schema_infiltration
-                .and_then(|iv| iv.get("properties"))
-                .and_then(|p| p.as_object());
-            let combustion_schema = schema_infiltration_props
-                .and_then(|p| p.get("CombustionAppliances"))
-                .and_then(|v| v.get("additionalProperties"))
-                .or_else(|| {
-                    self.schema
-                        .get("$defs")
-                        .and_then(|d| d.get("CombustionAppliances"))
-                });
-            let allowed_keys = combustion_schema
-                .map(|s| self.get_allowed_properties_from_schema(s))
-                .unwrap_or_default();
-
             // Defaults template seed (first available appliance)
             let defaults_inf_vent = self.defaults.get("InfiltrationVentilation");
             let default_appliance_obj = defaults_inf_vent
@@ -4209,7 +4108,6 @@ impl JSONBuilder {
                         .unwrap_or_else(serde_json::Map::new),
                     appliance_row,
                     &["Name", "Type", "coords"],
-                    &allowed_keys,
                 );
 
                 combustion_appliances
@@ -4239,24 +4137,6 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
-        // Derive allowed keys from schema (Core/FHS) to avoid brittle allowlists.
-        // The schema typically defines WaterPipework in $defs.
-        let pipework_schema = self
-            .schema
-            .get("$defs")
-            .and_then(|d| d.get("WaterPipework"))
-            .or_else(|| {
-                self.schema
-                    .get("$defs")
-                    .and_then(|d| d.get("Tank"))
-                    .and_then(|tank| tank.get("properties"))
-                    .and_then(|props| props.get("primary_pipework"))
-                    .and_then(|primary| primary.get("items"))
-            });
-        let allowed_pipework_props = pipework_schema
-            .map(|s| self.get_allowed_properties_from_schema(s))
-            .unwrap_or_default();
-
         // Defaults seeds: take the first distribution / primary pipework entries if present.
         let default_distribution_pipe = self
             .defaults
@@ -4306,7 +4186,6 @@ impl JSONBuilder {
                         "simplified pipework",
                         "simplified_pipework",
                     ],
-                    &allowed_pipework_props,
                 );
                 if pipework_type == "primary" {
                     primary_pipework.push(Value::Object(pipe_obj));
@@ -6841,7 +6720,6 @@ impl JSONBuilder {
     fn build_wet_emitter_object(
         subcategory: &str,
         emitter_row: &HashMap<String, Value>,
-        allowed_emitter_props: &HashSet<String>,
     ) -> Result<serde_json::Map<String, Value>, BuildError> {
         let mut emitter_data = emitter_row.clone();
         if let Some(extra_json_obj) = emitter_row.get("extra_json").and_then(|v| v.as_object()) {
@@ -7057,9 +6935,6 @@ impl JSONBuilder {
             }
         }
 
-        if !allowed_emitter_props.is_empty() {
-            emitter_obj.retain(|k, _| allowed_emitter_props.contains(k));
-        }
         Ok(emitter_obj)
     }
 
@@ -7121,37 +6996,6 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
-        let wet_distribution_schema = self.get_space_heat_system_variant_schema("WetDistribution");
-        let mut allowed_system_props: HashSet<String> = self
-            .get_space_heat_system_base_schema()
-            .map(Self::collect_schema_properties)
-            .unwrap_or_default();
-        if let Some(variant_schema) = wet_distribution_schema {
-            allowed_system_props.extend(Self::collect_schema_properties(variant_schema));
-        }
-        let mut allowed_emitter_props: HashSet<String> = self
-            .get_wet_distribution_emitter_schema()
-            .map(Self::collect_schema_properties)
-            .unwrap_or_default();
-        if allowed_emitter_props.is_empty() {
-            for k in [
-                "wet_emitter_type",
-                "c",
-                "c_per_m",
-                "n",
-                "frac_convective",
-                "length",
-                "thermal_mass",
-                "thermal_mass_per_m",
-                "emitter_floor_area",
-                "equivalent_specific_thermal_mass",
-                "system_performance_factor",
-                "n_units",
-                "fancoil_test_data",
-            ] {
-                allowed_emitter_props.insert(k.to_string());
-            }
-        }
         if let Some(section_data) = csv_data.get("Wet Emitters") {
             if section_data.is_empty() {
                 // FHS: no emitter rows means CSV does not author wet distribution — drop
@@ -7384,7 +7228,6 @@ impl JSONBuilder {
                     let emitter_obj = Self::build_wet_emitter_object(
                         &subcategory,
                         &emitter_row,
-                        &allowed_emitter_props,
                     )?;
                     emitters_array.push(Value::Object(emitter_obj));
                 }
@@ -7392,9 +7235,6 @@ impl JSONBuilder {
                 new_system.insert("emitters".to_string(), Value::Array(emitters_array));
                 if subcategory != "radiator" {
                     new_system.remove("thermal_mass");
-                }
-                if !allowed_system_props.is_empty() {
-                    new_system.retain(|k, _| allowed_system_props.contains(k));
                 }
                 new_space_heat_systems.insert(system_name, Value::Object(new_system));
             }
@@ -7502,8 +7342,7 @@ impl JSONBuilder {
                         let emitter_obj = Self::build_wet_emitter_object(
                             subcategory,
                             &emitter_row,
-                            &allowed_emitter_props,
-                        )?;
+                            )?;
                         if emitter_obj.get("wet_emitter_type").and_then(|v| v.as_str())
                             == Some("radiator")
                         {
@@ -7621,47 +7460,6 @@ impl JSONBuilder {
             }
         }
         Ok(())
-    }
-
-    fn collect_schema_properties(schema_def: &Value) -> HashSet<String> {
-        fn collect_from_schema(schema: &Value, out: &mut HashSet<String>) {
-            if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
-                for key in properties.keys() {
-                    out.insert(key.clone());
-                }
-            }
-            if let Some(then_block) = schema.get("then") {
-                collect_from_schema(then_block, out);
-            }
-            if let Some(else_block) = schema.get("else") {
-                collect_from_schema(else_block, out);
-            }
-            if let Some(all_of) = schema.get("allOf").and_then(|v| v.as_array()) {
-                for block in all_of {
-                    if let Some(then_block) = block.get("then") {
-                        collect_from_schema(then_block, out);
-                    }
-                    if let Some(else_block) = block.get("else") {
-                        collect_from_schema(else_block, out);
-                    }
-                    collect_from_schema(block, out);
-                }
-            }
-            if let Some(any_of) = schema.get("anyOf").and_then(|v| v.as_array()) {
-                for branch in any_of {
-                    collect_from_schema(branch, out);
-                }
-            }
-            if let Some(one_of) = schema.get("oneOf").and_then(|v| v.as_array()) {
-                for branch in one_of {
-                    collect_from_schema(branch, out);
-                }
-            }
-        }
-
-        let mut allowed = HashSet::new();
-        collect_from_schema(schema_def, &mut allowed);
-        allowed
     }
 
     fn schema_condition_matches_context(
@@ -7844,56 +7642,6 @@ impl JSONBuilder {
 
         let mut allowed = HashSet::new();
         collect_from_schema(schema_def, context, &mut allowed);
-        allowed
-    }
-
-    fn find_property_schema<'a>(schema_def: &'a Value, property: &str) -> Option<&'a Value> {
-        if let Some(prop_schema) = schema_def
-            .get("properties")
-            .and_then(|v| v.as_object())
-            .and_then(|props| props.get(property))
-        {
-            return Some(prop_schema);
-        }
-
-        for branch_key in ["then", "else"] {
-            if let Some(found) = schema_def
-                .get(branch_key)
-                .and_then(|branch| Self::find_property_schema(branch, property))
-            {
-                return Some(found);
-            }
-        }
-
-        for branches_key in ["allOf", "anyOf", "oneOf"] {
-            if let Some(branches) = schema_def.get(branches_key).and_then(|v| v.as_array()) {
-                for branch in branches {
-                    if let Some(found) = Self::find_property_schema(branch, property) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    /// Get allowed properties for a schema definition
-    /// For BuildingElement variants, this should merge base properties with conditional properties
-    fn get_allowed_properties_from_schema(&self, schema_def: &Value) -> HashSet<String> {
-        let mut allowed = Self::collect_schema_properties(schema_def);
-
-        // For BuildingElement variants, we also need to include base properties
-        // (type, pitch, thermal_resistance_construction, u_value).
-        if let Some(base_schema) = self.get_building_element_base_schema() {
-            if let Some(base_properties) = base_schema.get("properties").and_then(|v| v.as_object())
-            {
-                for key in base_properties.keys() {
-                    allowed.insert(key.clone());
-                }
-            }
-        }
-
         allowed
     }
 
@@ -8352,45 +8100,6 @@ impl JSONBuilder {
             .get("additionalProperties")
     }
 
-    fn get_space_heat_system_base_schema(&self) -> Option<&Value> {
-        self.schema
-            .get("properties")?
-            .get("SpaceHeatSystem")?
-            .get("additionalProperties")
-    }
-
-    fn get_space_heat_system_variant_schema(&self, system_type: &str) -> Option<&Value> {
-        let system_schema = self.get_space_heat_system_base_schema()?;
-
-        if let Some(all_of) = system_schema.get("allOf").and_then(|v| v.as_array()) {
-            for item in all_of {
-                let matches = item
-                    .get("if")
-                    .and_then(|if_cond| if_cond.get("properties"))
-                    .and_then(|props| props.get("type"))
-                    .and_then(|type_prop| type_prop.get("const"))
-                    .and_then(|v| v.as_str())
-                    .map(|const_val| const_val == system_type)
-                    .unwrap_or(false);
-
-                if matches {
-                    if let Some(then_schema) = item.get("then") {
-                        return Some(then_schema);
-                    }
-                }
-            }
-        }
-
-        Some(system_schema)
-    }
-
-    fn get_wet_distribution_emitter_schema(&self) -> Option<&Value> {
-        self.get_space_heat_system_variant_schema("WetDistribution")?
-            .get("properties")?
-            .get("emitters")?
-            .get("items")
-    }
-
     fn get_allowed_building_element_properties(
         &self,
         element_type: &str,
@@ -8466,289 +8175,22 @@ impl JSONBuilder {
             Some(element_obj),
             discriminator_value,
         );
-        if !allowed_props.is_empty() {
-            element_obj.retain(|key, _| allowed_props.contains(key));
-        }
+        let _ = allowed_props; // Shared finalization owns projection and omission diagnostics.
     }
 
     /// Schema-based cleanup: removes properties not allowed by the schema
     /// This recursively walks the JSON and removes any properties that aren't in the schema's properties list
     /// when additionalProperties is false
     pub fn cleanup_against_schema(&self, json_data: &mut Value) -> Result<(), BuildError> {
-        // Start from root schema - use the schema itself as the definition
-        // The root schema has properties, and we need to check additionalProperties at root level
-
-        self.cleanup_object_against_schema(json_data, &self.schema)?;
+        let (projected, omissions) = crate::finalization::project_model(json_data, &self.schema)
+            .map_err(|message| BuildError::new("E025", &message))?;
+        *json_data = projected;
+        self.schema_omissions.borrow_mut().extend(omissions);
         Ok(())
     }
 
-    /// Recursively clean an object against its schema definition
-    fn cleanup_object_against_schema(
-        &self,
-        json_value: &mut Value,
-        schema_def: &Value,
-    ) -> Result<(), BuildError> {
-        if let Some(obj) = json_value.as_object_mut() {
-            let additional_props = schema_def.get("additionalProperties");
-
-            // Handle additionalProperties as a value schema (name-keyed maps): each value in
-            // the object must conform to it. Covers both `$ref` form and the inline form the
-            // FHS schema uses for `Zone.additionalProperties` / `BuildingElement.additionalProperties`.
-            if let Some(additional_props) = additional_props {
-                if let Some(ref_path) = additional_props.get("$ref").and_then(|v| v.as_str()) {
-                    if let Some(ref_schema) = self.resolve_schema_ref(ref_path) {
-                        // Each value in this object should conform to the referenced schema
-                        // Iterate over values and clean each one
-                        for (_key, value) in obj.iter_mut() {
-                            self.cleanup_value_against_schema(value, ref_schema)?;
-                        }
-                        return Ok(());
-                    }
-                } else if additional_props.is_object() {
-                    for (_key, value) in obj.iter_mut() {
-                        self.cleanup_value_against_schema(value, additional_props)?;
-                    }
-                    return Ok(());
-                }
-            }
-
-            // Check if additionalProperties is false (strict mode)
-            let is_strict = additional_props
-                .and_then(|v| v.as_bool())
-                .map(|b| !b)
-                .unwrap_or(false);
-
-            if is_strict {
-                // Get allowed properties from schema
-                let allowed_props = self.get_allowed_properties_from_schema(schema_def);
-
-                // Remove properties not in allowed list
-                let keys_to_remove: Vec<String> = obj
-                    .keys()
-                    .filter(|k| !allowed_props.contains(*k))
-                    .cloned()
-                    .collect();
-
-                for key in keys_to_remove {
-                    obj.remove(&key);
-                }
-            }
-
-            // Recursively process each property
-            if let Some(properties) = schema_def.get("properties") {
-                for (key, value) in obj.iter_mut() {
-                    if let Some(prop_schema) = properties.get(key) {
-                        // Handle oneOf/discriminator for BuildingElement
-                        if key == "BuildingElement" {
-                            // For BuildingElement, resolve $ref if present
-                            let prop_schema_resolved = if let Some(ref_path) =
-                                prop_schema.get("$ref").and_then(|v| v.as_str())
-                            {
-                                self.resolve_schema_ref(ref_path).unwrap_or(prop_schema)
-                            } else {
-                                prop_schema
-                            };
-                            self.cleanup_building_element_object(value, prop_schema_resolved)?;
-                        } else {
-                            // For other properties, let cleanup_value_against_schema handle $ref resolution
-                            self.cleanup_value_against_schema(value, prop_schema)?;
-                        }
-                    }
-                }
-            }
-        } else if let Some(arr) = json_value.as_array_mut() {
-            // Handle arrays - get items schema
-            if let Some(items_schema) = schema_def.get("items") {
-                for item in arr.iter_mut() {
-                    self.cleanup_value_against_schema(item, items_schema)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Clean a value against its schema (handles objects, arrays, primitives)
-    fn cleanup_value_against_schema(
-        &self,
-        value: &mut Value,
-        schema_def: &Value,
-    ) -> Result<(), BuildError> {
-        // First, handle anyOf/oneOf wrappers by selecting the most appropriate branch
-        // for the current JSON value type. This is important for cases like
-        // ExternalConditions.shading_segments, which uses:
-        //   "anyOf": [
-        //     { "type": "array", "items": { "$ref": "#/$defs/ShadingSegment" } },
-        //     { "type": "null" }
-        //   ]
-        // Without unwrapping anyOf, array items (ShadingSegment) never see their
-        // own schema, so additionalProperties:false can't prune fields like `number`.
-        if let Some(any_of) = schema_def.get("anyOf").and_then(|v| v.as_array()) {
-            // Resolve $ref-only branches first so type matching and property
-            // scoring see the real variant schemas (e.g. OnSiteGeneration's
-            // anyOf of $ref PhotovoltaicSystemWithPanels / PhotovoltaicSystem).
-            let resolved: Vec<&Value> = any_of
-                .iter()
-                .map(|candidate| {
-                    candidate
-                        .get("$ref")
-                        .and_then(|r| r.as_str())
-                        .and_then(|r| self.resolve_schema_ref(r))
-                        .unwrap_or(candidate)
-                })
-                .collect();
-
-            // Nothing to clean for nulls when a null branch exists.
-            if value.is_null()
-                && resolved
-                    .iter()
-                    .any(|c| c.get("type").and_then(|v| v.as_str()) == Some("null"))
-            {
-                return Ok(());
-            }
-
-            let mut chosen_schema: Option<&Value> = None;
-            match &*value {
-                Value::Array(_) => {
-                    chosen_schema = resolved
-                        .iter()
-                        .find(|c| c.get("type").and_then(|v| v.as_str()) == Some("array"))
-                        .copied();
-                }
-                Value::Object(obj) => {
-                    let object_branches: Vec<&Value> = resolved
-                        .iter()
-                        .filter(|c| {
-                            c.get("type").and_then(|v| v.as_str()) == Some("object")
-                                || c.get("properties").is_some()
-                        })
-                        .copied()
-                        .collect();
-                    // With several object variants, pruning against the wrong one
-                    // silently deletes valid user fields — pick the branch whose
-                    // property set overlaps the value's keys the most.
-                    chosen_schema = match object_branches.len() {
-                        0 => None,
-                        1 => Some(object_branches[0]),
-                        _ => object_branches
-                            .iter()
-                            .max_by_key(|c| {
-                                let props = Self::collect_schema_properties(c);
-                                obj.keys().filter(|k| props.contains(*k)).count()
-                            })
-                            .copied(),
-                    };
-                }
-                _ => {}
-            }
-
-            // Fallback: if we didn't find a matching type, just use the first branch.
-            if chosen_schema.is_none() {
-                chosen_schema = resolved.first().copied();
-            }
-
-            if let Some(schema) = chosen_schema {
-                // Delegate to the same function with the unwrapped schema.
-                return self.cleanup_value_against_schema(value, schema);
-            }
-        }
-
-        match value {
-            Value::Object(obj) => {
-                // First, resolve $ref if schema_def itself is a $ref
-                let effective_schema =
-                    if let Some(ref_path) = schema_def.get("$ref").and_then(|v| v.as_str()) {
-                        self.resolve_schema_ref(ref_path).unwrap_or(schema_def)
-                    } else {
-                        schema_def
-                    };
-
-                // If the schema has additionalProperties with $ref, that means each value in the object
-                // should conform to the referenced schema. This is the case for properties like Zone
-                // where Zone is an object with zone names as keys and Zone objects as values.
-                if let Some(additional_props) = effective_schema.get("additionalProperties") {
-                    if let Some(ref_path) = additional_props.get("$ref").and_then(|v| v.as_str()) {
-                        if let Some(ref_schema) = self.resolve_schema_ref(ref_path) {
-                            // Each value in this object should conform to the referenced schema
-                            // Iterate over values and clean each one
-                            for (_key, val) in obj.iter_mut() {
-                                self.cleanup_value_against_schema(val, ref_schema)?;
-                            }
-                            return Ok(());
-                        }
-                    }
-                }
-
-                // Otherwise, clean the object against the schema normally
-                self.cleanup_object_against_schema(value, effective_schema)?;
-            }
-            Value::Array(_) => {
-                // Resolve $ref in items schema if present
-                let items_schema = if let Some(items) = schema_def.get("items") {
-                    if let Some(ref_path) = items.get("$ref").and_then(|v| v.as_str()) {
-                        self.resolve_schema_ref(ref_path).unwrap_or(items)
-                    } else {
-                        items
-                    }
-                } else {
-                    return Ok(());
-                };
-
-                if let Some(arr) = value.as_array_mut() {
-                    for item in arr.iter_mut() {
-                        self.cleanup_value_against_schema(item, items_schema)?;
-                    }
-                }
-            }
-            _ => {
-                // Primitives don't need cleanup
-            }
-        }
-        Ok(())
-    }
-
-    /// Special handling for BuildingElement which uses oneOf and discriminators
-    fn cleanup_building_element_object(
-        &self,
-        value: &mut Value,
-        _schema_def: &Value,
-    ) -> Result<(), BuildError> {
-        if let Some(obj) = value.as_object_mut() {
-            // BuildingElement is an object with additionalProperties containing oneOf
-            // Each key in BuildingElement is an element name, each value is an element object
-            for (_element_name, element_value) in obj.iter_mut() {
-                if let Some(element_obj) = element_value.as_object_mut() {
-                    // Get the element type
-                    if let Some(element_type) = element_obj.get("type").and_then(|v| v.as_str()) {
-                        let discriminator_value = if element_type == "BuildingElementGround" {
-                            element_obj.get("floor_type").and_then(|v| v.as_str())
-                        } else {
-                            None
-                        };
-                        let allowed_props = self.get_allowed_building_element_properties(
-                            element_type,
-                            Some(element_obj),
-                            discriminator_value,
-                        );
-
-                        if !allowed_props.is_empty() {
-                            let keys_to_remove: Vec<String> = element_obj
-                                .keys()
-                                .filter(|k| !allowed_props.contains(*k))
-                                .cloned()
-                                .collect();
-
-                            for key in keys_to_remove {
-                                element_obj.remove(&key);
-                            }
-                        }
-                        if self.is_fhs_schema {
-                            self.normalize_building_element_for_fhs(element_obj, None);
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
+    pub fn take_schema_omissions(&self) -> Vec<crate::finalization::SchemaOmission> {
+        std::mem::take(&mut *self.schema_omissions.borrow_mut())
     }
 
     pub fn validate_against_schema(&self, json_data: &Value) -> Result<(), BuildError> {
@@ -9573,7 +9015,7 @@ Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thick
 ground 0,Living,BuildingElementGround,8,2,4,20,Slab_no_edge_insulation,2,0.2,"{""height"":4}"
 "#;
 
-        let json = build_partial_json(csv, DEFAULTS_PATH);
+        let json = build_full_json(csv);
 
         let ground = json["Zone"]["Living"]["BuildingElement"]["ground 0"]
             .as_object()
@@ -9870,7 +9312,7 @@ window 0,Living,BuildingElementTransparent,1.2,90,1,1.2,90,3.2,{stored_mid_heigh
     fn vulcan_csv_version_rejects_unsupported_future_versions() {
         let csv = r#"Metadata
 GlobalOrientationOffset,0
-VulcanCsvVersion,3
+VulcanCsvVersion,4
 
 Zone
 Name,Type,volume,floor_area
@@ -9884,7 +9326,7 @@ Living,Zone,100,50
         let error = builder
             .build_json(&data)
             .expect_err("future CSV version must fail");
-        assert!(error.message.contains("Unsupported VulcanCsvVersion: 3"));
+        assert!(error.message.contains("Unsupported VulcanCsvVersion: 4"));
     }
 
     #[test]
@@ -9996,7 +9438,7 @@ mod schema_cleanup_tests {
     }
 
     #[test]
-    fn keeps_combustion_appliances_for_fhs_schema() {
+    fn reports_disallowed_combustion_appliances_for_fhs_schema() {
         // JSON with CombustionAppliances (required in FHS)
         let mut json = json!({
             "InfiltrationVentilation": {
@@ -10024,11 +9466,11 @@ mod schema_cleanup_tests {
             .cleanup_against_schema(&mut json)
             .expect("Cleanup should succeed");
 
-        // CombustionAppliances should be kept
+        // The pinned FHS schema does not declare CombustionAppliances.
         let inf_vent = json["InfiltrationVentilation"].as_object().unwrap();
         assert!(
-            inf_vent.contains_key("CombustionAppliances"),
-            "CombustionAppliances should be kept for FHS schema"
+            !inf_vent.contains_key("CombustionAppliances"),
+            "Disallowed FHS fields are projected with omission diagnostics"
         );
     }
 
@@ -10237,7 +9679,7 @@ mod schema_cleanup_tests {
     }
 
     #[test]
-    fn test_preserves_external_conditions_fhs_properties() {
+    fn test_reports_external_weather_fields_omitted_by_fhs_schema() {
         // Test that cleanup preserves all FHS ExternalConditions properties
         let mut json = json!({
             "ExternalConditions": {
@@ -10279,35 +9721,10 @@ mod schema_cleanup_tests {
 
         let ext_cond = json.get("ExternalConditions").unwrap().as_object().unwrap();
 
-        // Verify all FHS properties are preserved
-        assert!(
-            ext_cond.contains_key("timezone"),
-            "timezone should be preserved"
-        );
-        assert!(
-            ext_cond.contains_key("start_day"),
-            "start_day should be preserved"
-        );
-        assert!(
-            ext_cond.contains_key("end_day"),
-            "end_day should be preserved"
-        );
-        assert!(
-            ext_cond.contains_key("time_series_step"),
-            "time_series_step should be preserved"
-        );
-        assert!(
-            ext_cond.contains_key("daylight_savings"),
-            "daylight_savings should be preserved"
-        );
-        assert!(
-            ext_cond.contains_key("january_first"),
-            "january_first should be preserved"
-        );
-        assert!(
-            ext_cond.contains_key("leap_day_included"),
-            "leap_day_included should be preserved"
-        );
+        // FHS declares shading only; weather is a separately resolved runtime asset.
+        assert!(ext_cond.contains_key("shading_segments"));
+        assert!(!ext_cond.contains_key("timezone"));
+        assert!(builder.take_schema_omissions().iter().any(|o| o.path == "/ExternalConditions/timezone"));
     }
 
     #[test]
@@ -12272,6 +11689,24 @@ mod ventilation_systems_fhs_defaults_tests {
     const DEFAULTS_PATH: &str = "../../data/defaults/defaults_template.json";
 
     #[test]
+    fn authored_ventilation_extra_field_reaches_finalization_and_is_reported() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,40
+
+Ventilation Systems
+Name,Type,vent_type,extra_json
+fan,MechanicalVentilation,Intermittent MEV,"{""unsupported_authored_field"":42}"
+"#;
+        let data = CSVParser::new().parse_csv(csv).unwrap();
+        let mut builder = JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).unwrap();
+        let output = builder.build_json(&data).unwrap();
+        assert!(output.pointer("/InfiltrationVentilation/MechanicalVentilation/fan/unsupported_authored_field").is_none());
+        assert!(builder.take_schema_omissions().iter().any(|omission| omission.path == "/InfiltrationVentilation/MechanicalVentilation/fan/unsupported_authored_field"));
+        assert_eq!(data["Ventilation Systems"][0]["extra_json"]["unsupported_authored_field"],42);
+    }
+
+    #[test]
     fn intermittent_mev_gets_sfp_default_when_missing() {
         // Use a minimal-but-valid geometry CSV (zones + a few elements) and add an
         // Intermittent MEV system that omits SFP. This previously failed schema
@@ -13204,4 +12639,44 @@ Name,Type
             "MechanicalVentilation defaults should be removed for empty section"
         );
     }
+    #[test]
+    fn a9_window_mapping_composes_v1_coordinate_migration_once() {
+        for (version,midpoint) in [(1,3.4),(2,1.4),(3,1.4)] {
+            let mut source = HashMap::from([
+                ("Metadata".into(),vec![HashMap::from([("Field".into(),serde_json::json!("VulcanCsvVersion")),("Value".into(),serde_json::json!(version))]),HashMap::from([("Field".into(),serde_json::json!("Ventilation_ventilation_zone_base_height")),("Value".into(),serde_json::json!(2.0))])]),
+                ("Window Elements".into(),vec![HashMap::from([
+                    ("mid_height".into(),serde_json::json!(midpoint)),("free_area_height".into(),serde_json::json!(1.0)),("max_window_open_area".into(),serde_json::json!(0.6)),
+                    ("extra_json".into(),serde_json::json!({"window_part_list":[{"mid_height_air_flow_path":midpoint},{"mid_height_air_flow_path":midpoint}]}))
+                ])])
+            ]);
+            migrate_vulcan_csv_to_current(&mut source).unwrap();
+            let mut output=serde_json::json!({"type":"BuildingElementTransparent"});
+            let errors=crate::target_mappings::map_python_a9_element(&source["Window Elements"][0],&mut output,"test");
+            assert!(errors.is_empty(),"{errors:?}");
+            assert_eq!(output["window_part_list"][0]["mid_height"],1.4);
+            assert_eq!(output["window_part_list"][0]["max_window_open_area"],0.6);
+        }
+    }
+
+    #[test]
+    fn v3_party_u_requires_explicit_meaning_even_if_numeric_value_unchanged() {
+        let mut source=HashMap::from([
+            ("Metadata".into(),vec![HashMap::from([("Field".into(),serde_json::json!("VulcanCsvVersion")),("Value".into(),serde_json::json!(3))])]),
+            ("Non-Exposed Elements".into(),vec![HashMap::from([("Type".into(),serde_json::json!("BuildingElementPartyWall")),("Name".into(),serde_json::json!("Party wall")),("extra_json".into(),serde_json::json!({"u_value":0.25}))])])
+        ]);
+        assert!(migrate_vulcan_csv_to_current(&mut source).is_err());
+        source.get_mut("Non-Exposed Elements").unwrap()[0].get_mut("extra_json").unwrap()["u_value_interpretation"]=serde_json::json!("whole_wall");
+        assert!(migrate_vulcan_csv_to_current(&mut source).is_ok());
+    }
+
+    #[test]
+    fn changed_legacy_party_u_cannot_reuse_an_old_review_decision() {
+        let mut parser = CSVParser::new();
+        let csv = "Metadata\nVulcanCsvVersion,2\n\nZone\nName,Type,volume,floor_area\nZ,Zone,100,40\n\nNon-Exposed Elements\nName,Zone,Type,area,pitch,extra_json\nParty,Z,BuildingElementPartyWall,10,90,\"{\"\"u_value\"\":0.3,\"\"u_value_interpretation\"\":\"\"whole_wall\"\",\"\"u_value_interpreted_value\"\":0.2}\"\n";
+        let mut data=parser.parse_csv(csv).unwrap();
+        assert!(migrate_vulcan_csv_to_current(&mut data).is_err());
+        data.get_mut("Non-Exposed Elements").unwrap()[0].get_mut("extra_json").unwrap()["u_value"] = serde_json::json!(0.2);
+        assert!(migrate_vulcan_csv_to_current(&mut data).is_ok());
+    }
+
 }

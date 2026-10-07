@@ -97,7 +97,7 @@ describe('floor mutation invariants', () => {
     const { store } = seedWindow(false, false);
     const legacyCsv = store.getState()
       .generateCSV()
-      .replace('ProvenanceMarkers,3', 'ProvenanceMarkers,2')
+      .replace('VulcanCsvVersion,3', 'VulcanCsvVersion,2\nProvenanceMarkers,2')
       .replace(',""_window_security_risk_user_override"":true', '');
     expect(legacyCsv).not.toContain('_window_security_risk_user_override');
 
@@ -110,7 +110,8 @@ describe('floor mutation invariants', () => {
 
     expect(loadedWindow._windowSecurityRiskUserOverride).toBe(true);
     const savedAgain = reloaded.getState().generateCSV();
-    expect(savedAgain).toContain('ProvenanceMarkers,3');
+    expect(savedAgain).toContain('ProvenanceMarkers,2');
+    expect(savedAgain).toContain('VulcanCsvVersion,2');
     expect(savedAgain).toContain('_window_security_risk_user_override');
 
     const savedReload = createGeometryStore({ defaultDefaultsPath: null });

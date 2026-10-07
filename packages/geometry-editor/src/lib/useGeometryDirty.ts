@@ -67,7 +67,7 @@ export function useGeometryDirty(): boolean {
         return;
       }
       try {
-        setIsDirty(state.generateCSV() !== state.lastSavedCsv);
+        setIsDirty(state.generateCSV({ allowUnresolvedMigration: true }) !== state.lastSavedCsv);
       } catch (error) {
         // generateCSV fails loudly when elements reference missing zones; the
         // save flow surfaces that error to the user. For the dirty indicator,

@@ -824,6 +824,8 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
       onApply({
         u_value: uWrite,
         thermal_resistance_construction: rWrite,
+        construction_basis: shouldUseHeatedAdjacentHalfConstructionFabric(elementMode) ? 'half' : 'full',
+        ...(elementMode === 'BuildingElementPartyWall' ? { u_value_interpretation: 'half_construction' } : {}),
         mass_distribution_class: massDistributionClass,
         ...(arealElementValue != null ? { areal_heat_capacity: arealElementValue } : {}),
         vulcan_assembly_v1: envelope,

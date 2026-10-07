@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { getAjvInstance, ensureRootSchema } from './ajvCache';
+import { getAjvInstance, ensureRootSchema, resetGeometrySchemaValidators } from './ajvCache';
 import { errorMessageFromUnknown, isRecord } from './jsonTypes';
 import { asSchemaNode, isSchemaNode, type SchemaNode } from './schemaTypes';
 import { resolveRefChain, resolveRefNode } from './schemaRefResolver';
@@ -13,6 +13,7 @@ export type GeometrySchemaAssetSource = Readonly<{
 }>;
 
 let schemaAssetSource: GeometrySchemaAssetSource | null = null;
+let schemaAssetGeneration = 0;
 
 /**
  * Registers the host-owned schema assets used by the canonical resolver.
@@ -23,10 +24,15 @@ export function configureGeometrySchemaAssetSource(
   source: GeometrySchemaAssetSource,
 ): void {
   schemaAssetSource = source;
+  schemaAssetGeneration += 1;
+  __resetSchemaCacheForTests();
+  __resetFHSSchemaCacheForTests();
+  resetGeometrySchemaValidators();
 }
 
 /** Clears configured assets and both caches. Intended only for isolated tests. */
 export function resetGeometrySchemaAssetsForTests(): void {
+  schemaAssetGeneration += 1;
   schemaAssetSource = null;
   __resetSchemaCacheForTests();
   __resetFHSSchemaCacheForTests();
@@ -95,14 +101,16 @@ function schemaStringArray(value: unknown): string[] {
 // FHS schema cache (separate from Core schema)
 let fhsSchemaText: string | null = null;
 let fhsSchemaObj: SchemaNode | null = null;
-let fhsPreloadStarted = false;
+let preloadFhsSchemaPromise: Promise<void> | null = null;
 
 export async function preloadSchema(): Promise<void> {
   if (schemaObj) return;
   if (!preloadCoreSchemaPromise) {
+    const generation = schemaAssetGeneration;
     preloadCoreSchemaPromise = (async () => {
       try {
         const txt = await loadSchemaText('core');
+        if (generation !== schemaAssetGeneration) throw new Error('Geometry schema load superseded by a target change');
         schemaText = txt;
         schemaObj = asSchemaNode(JSON.parse(txt));
         if (!schemaObj) {
@@ -114,13 +122,14 @@ export async function preloadSchema(): Promise<void> {
         compiledPropValidatorCore = new WeakMap();
         normalizedSystemSubtypeNodesCore = new WeakMap();
       } catch (e) {
+        if (generation !== schemaAssetGeneration) throw e;
         schemaText = null;
         schemaObj = null;
         console.error('[SchemaCache] Core schema load failed', e);
         throw e;
       }
     })().finally(() => {
-      preloadCoreSchemaPromise = null;
+      if (generation === schemaAssetGeneration) preloadCoreSchemaPromise = null;
     });
   }
   await preloadCoreSchemaPromise;
@@ -230,30 +239,29 @@ export function schemaRootForFabricEditor(root: unknown): unknown {
 // FHS schema loading and caching
 export async function preloadFHSSchema(): Promise<void> {
   if (fhsSchemaObj) return;
-  if (fhsPreloadStarted) return;
-  fhsPreloadStarted = true;
-  try {
-    const txt = await loadSchemaText('fhs');
-    fhsSchemaText = txt;
-    fhsSchemaObj = asSchemaNode(JSON.parse(txt));
-    if (!fhsSchemaObj) {
-      throw new Error('FHS geometry schema root must be an object');
-    }
-    // Schema-driven coercion caches depend on schema contents; invalidate after (re)load.
-    try { strictestIntegerKeysCache.clear(); } catch { /* swallow: best-effort */ }
-    // Reset schema-derived node caches for FHS schema
-    compiledPropValidatorFhs = new WeakMap();
-    normalizedSystemSubtypeNodesFhs = new WeakMap();
-    if (!fhsSchemaObj.$defs && !fhsSchemaObj.properties) {
-      throw new Error('FHS geometry schema is missing properties and $defs');
-    }
-  } catch (e: unknown) {
-    fhsSchemaText = null;
-    fhsSchemaObj = null;
-    fhsPreloadStarted = false;
-    console.error('[SchemaCache] FHS schema load failed:', errorMessageFromUnknown(e));
-    throw e;
+  if (!preloadFhsSchemaPromise) {
+    const generation = schemaAssetGeneration;
+    preloadFhsSchemaPromise = (async () => {
+      try {
+        const txt = await loadSchemaText('fhs');
+        if (generation !== schemaAssetGeneration) throw new Error('Geometry schema load superseded by a target change');
+        const obj = asSchemaNode(JSON.parse(txt));
+        if (!obj || (!obj.$defs && !obj.properties)) throw new Error('FHS geometry schema is missing properties and $defs');
+        fhsSchemaText = txt;
+        fhsSchemaObj = obj;
+        strictestIntegerKeysCache.clear();
+        compiledPropValidatorFhs = new WeakMap();
+        normalizedSystemSubtypeNodesFhs = new WeakMap();
+      } catch (e: unknown) {
+        if (generation !== schemaAssetGeneration) throw e;
+        fhsSchemaText = null;
+        fhsSchemaObj = null;
+        console.error('[SchemaCache] FHS schema load failed:', errorMessageFromUnknown(e));
+        throw e;
+      }
+    })().finally(() => { if (generation === schemaAssetGeneration) preloadFhsSchemaPromise = null; });
   }
+  await preloadFhsSchemaPromise;
 }
 
 export function getFHSSchemaText(): string | null { return fhsSchemaText; }
@@ -298,7 +306,7 @@ export function __setFHSSchemaObjectForTests(obj: SchemaNode | null): void {
 export function __resetFHSSchemaCacheForTests(): void {
   fhsSchemaText = null;
   fhsSchemaObj = null;
-  fhsPreloadStarted = false;
+  preloadFhsSchemaPromise = null;
   try { strictestIntegerKeysCache.clear(); } catch { /* swallow: best-effort */ }
   compiledPropValidatorFhs = new WeakMap();
   normalizedSystemSubtypeNodesFhs = new WeakMap();
