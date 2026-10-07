@@ -11,7 +11,10 @@ declare const __VULCAN_COMMUNITY_REVISION__: string | undefined;
 
 const SOURCE_REPOSITORY = 'https://github.com/vulcan-energy/vulcan-community';
 
-export function versionInfo() {
+// Read from the model WASM by the caller; null when the WASM is not built.
+export type EngineVersions = Readonly<{ hemCoreVersion: string; fhsWrapperVersion: string }> | null;
+
+export function versionInfo(engines: EngineVersions = null) {
   const revision =
     typeof __VULCAN_COMMUNITY_REVISION__ === 'string' && __VULCAN_COMMUNITY_REVISION__ !== ''
       ? __VULCAN_COMMUNITY_REVISION__
@@ -20,6 +23,8 @@ export function versionInfo() {
     name: 'Vulcan Community',
     command: 'vulcan-community',
     version: packageJson.version,
+    hemCoreVersion: engines?.hemCoreVersion ?? null,
+    fhsWrapperVersion: engines?.fhsWrapperVersion ?? null,
     originalDeveloper: 'Home Energy Foundry Limited',
     origin: 'https://usevulcan.app/open-source',
     copyright: 'Copyright © 2026 Home Energy Foundry Limited and contributors.',
@@ -33,10 +38,13 @@ export function versionInfo() {
   };
 }
 
-export function versionText(): string {
-  const info = versionInfo();
+export function versionText(engines: EngineVersions = null): string {
+  const info = versionInfo(engines);
   return [
     `${info.command} ${info.version}`,
+    ...(engines === null
+      ? []
+      : [`HEM core ${engines.hemCoreVersion}, FHS wrapper ${engines.fhsWrapperVersion}`]),
     '',
     `This product contains ${info.name} software, originally developed by ${info.originalDeveloper}.`,
     `Vulcan: ${info.origin}`,
