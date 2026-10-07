@@ -309,3 +309,33 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,,"{""u_value"":0.25}"
   });
 
 });
+
+describe('ECaaS product reference load upgrade', () => {
+  const loadSystem = (productReference: string, productID: unknown) => {
+    const extra = { HeatSourceWet: { hp: { type: 'HeatPump', product_reference: productReference } }, _pcdb: { productType: 'AirSourceHeatPump', productID } };
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().loadFromCSV(`Metadata
+VulcanCsvVersion,3
+
+Zone
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,100,40,2.5,FALSE
+
+Systems
+Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json
+Heat Pump,Living,System,HeatSourceWet,,0,"0.000,0.000,0.000","${JSON.stringify(extra).replaceAll('"', '""')}"
+`);
+    const state = store.getState();
+    const system = Object.values(state.elementsById).find(element => element.type === 'System');
+    return {
+      reference: (system?.extra_json?.HeatSourceWet as Record<string, { product_reference: string }>).hp.product_reference,
+      dirty: state.generateCSV({ allowUnresolvedMigration: true }) !== state.lastSavedCsv,
+    };
+  };
+  it('rewrites a prefixed reference vouched for by _pcdb.productID and leaves the model dirty', () => {
+    expect(loadSystem('AirSourceHeatPump:2721', 2721)).toEqual({ reference: '2721', dirty: true });
+  });
+  it.each([['AirSourceHeatPump:2721', 9999], ['2721', 2721]])('leaves %s with productID %s untouched and clean', (reference, id) => {
+    expect(loadSystem(reference, id)).toEqual({ reference, dirty: false });
+  });
+});

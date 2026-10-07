@@ -71,3 +71,27 @@ export function normalizeCsvConstructionProvenance(
     } };
   });
 }
+
+/** Saves before the ECaaS bare-id fix wrote heat pump `product_reference` as `ProductType:id`.
+ * Rewrite only when `_pcdb.productID` vouches for the digits; anything else is left for the
+ * submit guard. Returns the same array when nothing changed. */
+export function upgradePcdbProductReferences(elements: readonly Element[]): Element[] {
+  let changed = false;
+  const result = elements.map(element => {
+    const extra = element.extra_json;
+    const pcdb = extra?._pcdb as { productID?: unknown } | undefined;
+    if (element.type !== 'System' || !pcdb || pcdb.productID === undefined) return element;
+    const productID = String(pcdb.productID);
+    let upgraded = false;
+    const next = JSON.parse(JSON.stringify(extra), (key, value) => {
+      const digits = key === 'product_reference' && typeof value === 'string' ? /^[A-Za-z]+:(\d+)$/.exec(value)?.[1] : undefined;
+      if (digits === undefined || digits !== productID) return value;
+      upgraded = true;
+      return digits;
+    });
+    if (!upgraded) return element;
+    changed = true;
+    return { ...element, extra_json: next };
+  });
+  return changed ? result : (elements as Element[]);
+}
