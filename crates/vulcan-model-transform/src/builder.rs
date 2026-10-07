@@ -12486,7 +12486,11 @@ Living,Zone,100,50
         let (with_value, errors) = build("5");
         assert!(errors.is_empty(), "{errors:?}");
         assert!(!with_value.to_string().contains("DefaultThermalBridging"));
-        assert_eq!(with_value, build("0.2").0, "value must never reach merged JSON");
+        assert_eq!(
+            with_value,
+            build("0.2").0,
+            "value must never reach merged JSON"
+        );
         // The row is inert, so even a malformed legacy value must not block the merge.
         assert!(build("-1").1.is_empty());
     }
