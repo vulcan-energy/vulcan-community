@@ -131,6 +131,19 @@ describe('computeAssemblyAnnexF', () => {
     expect(out.uForHem_W_m2K).toBe(0.74);
   });
 
+  it('returns exactly zero ΔU for a half-construction element with no corrections', () => {
+    for (const rFull of [0.3925, 0.8, 1.37, 2.5, 4.11, 7.9]) {
+      const { deltaUForElement_W_m2K } = computeAssemblyAnnexF({
+        ...partyWall,
+        airVoidLevel: 0,
+        rFullMean_m2K_W: rFull,
+        rFullSeries_m2K_W: rFull,
+        halfConstruction: true,
+      });
+      expect(deltaUForElement_W_m2K).toBe(0);
+    }
+  });
+
   it('passes the ΔU straight through for a full-construction element', () => {
     const { annex, deltaUForElement_W_m2K } = computeAssemblyAnnexF({ ...partyWall, halfConstruction: false });
     expect(deltaUForElement_W_m2K).toBe(annex.deltaU_total_W_m2K);

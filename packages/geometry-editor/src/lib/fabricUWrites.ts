@@ -73,7 +73,7 @@ export function computeFabricUWritesFromConstructionR(
   const error =
     Number.isFinite(thermalResistanceConstruction_m2K_W) && thermalResistanceConstruction_m2K_W > 0
       ? null
-      : 'The Annex F / surface-resistance corrections leave a non-positive construction resistance for HEM — reduce the corrections.';
+      : 'This assembly gives a non-positive construction resistance for HEM — check the layers and any Annex F / surface-resistance corrections.';
 
   const thermalResistanceSeries_m2K_W = roundToTwoDecimals(rConstructionSeries_m2K_W);
   const uSeriesRaw = computeOpaqueUAndTotals(
@@ -121,6 +121,8 @@ export function computeAssemblyAnnexF(
       .rTot,
   });
   if (!halfConstruction) return { annex, deltaUForElement_W_m2K: annex.deltaU_total_W_m2K };
+  // No corrections: return exactly 0 so float noise from the R round trip never flips the HEM-convention branch.
+  if (annex.deltaU_total_W_m2K === 0) return { annex, deltaUForElement_W_m2K: 0 };
   const films = full.rSi + full.rSe;
   const rCorrectedFull = 1 / annex.uAfterAnnexF_W_m2K - films;
   const uHalf = (r: number) => computeOpaqueUAndTotals(r / 2, pitchDeg, externalSurfaceResistance_m2K_W).u;
