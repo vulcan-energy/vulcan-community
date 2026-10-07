@@ -4373,7 +4373,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   value: '',
                   label: heatSourceWetReferenceOptions.length > 0
                     ? 'Select heat source'
-                    : 'Create HeatSourceWet first',
+                    : 'Create a heat source first',
                   disabled: heatSourceWetReferenceOptions.length === 0,
                 },
                 ...heatSourceWetReferenceOptions,

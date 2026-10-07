@@ -209,12 +209,12 @@ export function hotWaterSourceHeatSourceWetLinkMessagesForElement(
       if (typeof ref === 'string' && ref.trim()) {
         if (!defined.has(ref.trim())) {
           messages.push(
-            `Hot water (“${entryKey}”) points to heat source (wet) “${ref.trim()}”, which is not defined. Add a heat source (wet) with that name or change the link.`,
+            `Hot water (“${entryKey}”) points to heat source “${ref.trim()}”, which is not defined. Add a heat source with that name or change the link.`,
           );
         }
       } else if (!hasAnyHsw) {
         messages.push(
-          'Hot water requires a heat source (wet) when no link name is set (add a heat source (wet) system).',
+          'Hot water requires a heat source when no link name is set (add a heat source).',
         );
       }
     } else if (t === 'StorageTank' || t === 'SmartHotWaterTank') {
@@ -228,7 +228,7 @@ export function hotWaterSourceHeatSourceWetLinkMessagesForElement(
             const key = (typeof name === 'string' && name.trim() ? name.trim() : subKey) || subKey;
             if (key && !defined.has(key)) {
               messages.push(
-                `Hot water tank heat source “${key}” is not defined under heat source (wet). Add a matching plant or rename the link.`,
+                `Hot water tank heat source “${key}” is not defined. Add a heat source with that name or rename the link.`,
               );
             }
           }
@@ -281,8 +281,8 @@ export const detectMissingElements = (
         type: 'System',
         requiredBy: 'fhs',
         path: '/HeatSourceWet',
-        message: 'FHS: Heat source (wet) required when Wet Emitters are present',
-        pillQualifier: 'Heat source (wet)',
+        message: 'FHS: Heat source required when Wet Emitters are present',
+        pillQualifier: 'Heat source',
       });
     }
 
@@ -341,8 +341,8 @@ export const detectMissingElements = (
         type: 'System',
         requiredBy: 'fhs',
         path: '/HeatSourceWet',
-        message: 'FHS: Heat source (wet) required by hot water source',
-        pillQualifier: 'Heat source (wet)',
+        message: 'FHS: Heat source required by hot water source',
+        pillQualifier: 'Heat source',
       });
     }
 

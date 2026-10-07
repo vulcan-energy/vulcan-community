@@ -31,6 +31,36 @@ function defaultImmersionHeater(powerKw: number): Record<string, unknown> {
   };
 }
 
+// Generic example data, not a product: upstream FHS example DESN-H-End-02-HP-cMEV-HWOHP.json,
+// `HotWaterSource."hw cylinder".HeatSource.hwo_hps` (renamed `hwo_hp`), epb-hem-wrapper-fhs rev
+// c5ba2673fbd886cfe4fb528f61b376bdf406ebbd (pinned at hem_fhs_upstream/). Copyright (c) 2026 Crown
+// Copyright (Ministry of Housing, Communities and Local Government), MIT licence. Same values as
+// the shipped `hot_water_source/hwo_heat_pump_cylinder` preset.
+const HWOHP_KEY = 'hwo_hp';
+// The FHS schema requires the cylinder's own coil area once its only heater is a HeatPump_HWOnly;
+// the same example's cylinder value.
+const DEFAULT_HWOHP_CYLINDER_HEAT_EXCHANGER_AREA = 1.0;
+const DEFAULT_HWOHP = {
+  type: 'HeatPump_HWOnly',
+  EnergySupply: 'mains elec',
+  power_max: 5.0,
+  tank_volume_declared: 100.0,
+  daily_losses_declared: 1.05,
+  heat_exchanger_surface_area_declared: 1.5,
+  in_use_factor_mismatch: 0.6,
+  heater_position: 0.1,
+  thermostat_position: 0.33,
+  test_data: {
+    M: {
+      cop_dhw: 2.5,
+      energy_input_measured: 2.338,
+      hw_tapping_prof_daily_total: 5.845,
+      hw_vessel_loss_daily: 2.0,
+      power_standby: 0.02,
+    },
+  },
+};
+
 function defaultWetHeaterSource(name: string): Record<string, unknown> {
   return {
     type: 'HeatSourceWet',
@@ -135,15 +165,13 @@ export const DhwStorageHeatSourcePicker: React.FC<{
     const o: { value: string; label: string }[] = [
       { value: '', label: 'Manual (Advanced below)' },
       { value: IMMERSION_VALUE, label: 'Immersion' },
+      { value: HWOHP_VALUE, label: 'Hot-water-only heat pump (built-in)' },
     ];
-    if (selection === HWOHP_VALUE) {
-      o.push({ value: HWOHP_VALUE, label: 'Hot-water-only heat pump' });
-    }
     for (const w of wetNames) {
       o.push({ value: `wet:${w}`, label: `Wet: ${wetNameLabels[w] ?? w}` });
     }
     return o;
-  }, [selection, wetNameLabels, wetNames]);
+  }, [wetNameLabels, wetNames]);
 
   const applySelection = useCallback(
     (value: string, powerKw?: number) => {
@@ -157,7 +185,7 @@ export const DhwStorageHeatSourcePicker: React.FC<{
             ? { ...(cyl0 as Record<string, unknown>) }
             : { type: 'StorageTank' };
         if (cyl.type !== 'StorageTank') return prev;
-        if (!value || value === HWOHP_VALUE) {
+        if (!value) {
           return prev;
         }
         const p = typeof powerKw === 'number' && Number.isFinite(powerKw) ? powerKw : 3;
@@ -165,6 +193,15 @@ export const DhwStorageHeatSourcePicker: React.FC<{
           (hws as Record<string, unknown>)[HW_CYL] = {
             ...cyl,
             HeatSource: { immersion: defaultImmersionHeater(p) },
+          };
+        } else if (value === HWOHP_VALUE) {
+          // Re-picking keeps an existing (possibly edited) heat pump.
+          if (detectSelectionFromHeatSource((cyl as Record<string, unknown>).HeatSource, []) === HWOHP_VALUE) return prev;
+          // A heater inside the cylinder: no HeatSourceWet plant to link.
+          (hws as Record<string, unknown>)[HW_CYL] = {
+            heat_exchanger_surface_area: DEFAULT_HWOHP_CYLINDER_HEAT_EXCHANGER_AREA,
+            ...cyl,
+            HeatSource: { [HWOHP_KEY]: structuredClone(DEFAULT_HWOHP) },
           };
         } else if (value.startsWith('wet:')) {
           const n = value.slice(4);
@@ -224,7 +261,7 @@ export const DhwStorageHeatSourcePicker: React.FC<{
     <div style={{ marginBottom: flat ? '10px' : 'var(--spacing-md)' }}>
       <div style={{ marginBottom: '4px' }}>{renderFieldLabelWithTooltip('Heat Source', 'System')}</div>
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.4 }}>
-        Add an immersion heater, or link to an existing heat source.
+        Add an immersion heater or a built-in hot-water-only heat pump, or link to an existing heat source.
       </div>
       <StandardDropdown
         value={selection}

@@ -339,3 +339,38 @@ describe('ECaaS-only products', () => {
     }));
   });
 });
+
+describe('duplicate Systems definitions (merge E060)', () => {
+  const plant = (id: string, name: string, extra: Record<string, unknown>, subcategory = 'HeatSourceWet'): Element => ({
+    id, name, type: 'System', subcategory, parent_element: null, coordinates: [{ x: 0, y: 0, z: 0 }],
+    isPlaceholder: false, extra_json: extra,
+  } as Element);
+  const e060 = (element: Element, elements: Element[]) => validateElementCore(element, validationContext(elements))
+    .issues.filter((issue) => issue.message.includes('both define')).map((issue) => issue.message);
+
+  it('flags differing definitions of one name, on both rows, wrapped or flat', () => {
+    const a = plant('a', 'Heat pump', { HeatSourceWet: { hp: { type: 'HeatPump', power_max: 5 } } });
+    const b = plant('b', 'Heat pump 2', { HeatSourceWet: { hp: { type: 'HeatPump', power_max: 9 } } });
+    const message = "Systems rows 'Heat pump' and 'Heat pump 2' both define heat source 'hp' differently — remove one of them, or make them identical.";
+    expect(e060(a, [a, b])).toEqual([`Heat pump (System): ${message}`]);
+    expect(e060(b, [a, b])).toEqual([`Heat pump 2 (System): ${message}`]);
+    const flat = plant('c', 'hw cylinder', { type: 'StorageTank', volume: 150 }, 'HotWaterSource');
+    const wrapped = plant('d', 'Cylinder', { HotWaterSource: { 'hw cylinder': { type: 'StorageTank', volume: 200 } } }, 'HotWaterSource');
+    expect(e060(flat, [flat, wrapped])).toEqual([
+      "hw cylinder (System): Systems rows 'hw cylinder' and 'Cylinder' both define hot water source 'hw cylinder' differently — remove one of them, or make them identical.",
+    ]);
+  });
+
+  it('accepts identical repeats, including ones differing only in UI-only keys or key order', () => {
+    const a = plant('a', 'A', { HeatSourceWet: { hp: { type: 'HeatPump', power_max: 5 } }, _system_source: 'presets' });
+    const b = plant('b', 'B', { HeatSourceWet: { hp: { power_max: 5, type: 'HeatPump', _note: 'x' } } });
+    expect(e060(a, [a, b])).toEqual([]);
+  });
+
+  it('names heat sources in plain words for linking messages', () => {
+    const circuit = plant('s', 'Warm air', { SpaceHeatSystem: { wa: { type: 'WarmAir', HeatSource: { name: 'hp' } } } }, 'SpaceHeatSystem');
+    const hp = plant('h', 'HP', { HeatSourceWet: { hp: { type: 'HeatPump', sink_type: 'Water' } } });
+    expect(validateElementCore(circuit, { ...validationContext([circuit, hp]), complianceValidationEnabled: true }).issues)
+      .toContainEqual(expect.objectContaining({ message: 'Warm air (System): WarmAir SpaceHeatSystem "wa" must link a heat pump heat source with sink_type "Air"' }));
+  });
+});
