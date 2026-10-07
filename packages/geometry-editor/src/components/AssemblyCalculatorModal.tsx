@@ -620,12 +620,18 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
       calc.rLayersSeries,
       elementPitchDeg,
       heatTransferContext.externalSurfaceResistance_m2K_W,
+      annexComputation?.deltaU_total_W_m2K ?? 0,
     );
-  }, [calc.rLayers, calc.rLayersSeries, elementPitchDeg, heatTransferContext.externalSurfaceResistance_m2K_W]);
+  }, [
+    calc.rLayers,
+    calc.rLayersSeries,
+    elementPitchDeg,
+    heatTransferContext.externalSurfaceResistance_m2K_W,
+    annexComputation,
+  ]);
 
   const previewUForHem =
-    annexComputation?.uForHem_W_m2K ??
-    (fabricUWrites?.uCombinedTwoSf_W_m2K ?? roundUValueToTwoSignificantFigures(calc.u));
+    fabricUWrites?.uForHem_W_m2K ?? roundUValueToTwoSignificantFigures(calc.u);
   const previewWrittenConstructionR =
     fabricUWrites?.thermalResistanceConstruction_m2K_W ?? null;
   const fullAssemblyRPreview =
@@ -709,14 +715,15 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
           )
         : null;
 
+    const annex = annexComputation;
     const uW = computeFabricUWritesFromConstructionR(
       rfMean,
       rfSeries,
       elementPitchDeg,
       heatTransferContext.externalSurfaceResistance_m2K_W,
+      annex?.deltaU_total_W_m2K ?? 0,
     );
-    const annex = annexComputation;
-    const uWrite = annex != null ? annex.uForHem_W_m2K : uW.uCombinedTwoSf_W_m2K;
+    const uWrite = uW.uForHem_W_m2K;
     const rWrite = uW.thermalResistanceConstruction_m2K_W;
     const massDistributionClass: FhsMassDistributionClass | undefined =
       massSuggestion != null ? fhsMassDistributionFromSuggestion(massSuggestion) : undefined;
@@ -817,7 +824,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
           ? { height_upper_surface: roundToTwoDecimals(suspendedGroundVoidSplit.heightUpperSurfaceM) }
           : {}),
         mass_distribution_class: massDistributionClass,
-        ...(arealElementValue != null ? { areal_heat_capacity: arealElementValue } : {}),
+        areal_heat_capacity: arealElementValue, // undefined clears a stale value (no ρ/c)
         vulcan_assembly_v1: envelope,
       });
     } else {
@@ -827,7 +834,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
         construction_basis: shouldUseHeatedAdjacentHalfConstructionFabric(elementMode) ? 'half' : 'full',
         ...(elementMode === 'BuildingElementPartyWall' ? { u_value_interpretation: 'half_construction' } : {}),
         mass_distribution_class: massDistributionClass,
-        ...(arealElementValue != null ? { areal_heat_capacity: arealElementValue } : {}),
+        areal_heat_capacity: arealElementValue, // undefined clears a stale value (no ρ/c)
         vulcan_assembly_v1: envelope,
       });
     }

@@ -74,7 +74,7 @@ export function assemblyElementMode(el: Element): AssemblyElementMode | null {
 export function assemblyPitchDegForElement(el: Element): number {
   if (el.type === 'BuildingElementGround') return 180;
   const p = (el as { pitch?: number }).pitch;
-  return typeof p === 'number' && Number.isFinite(p) && p > 0 ? p : 90;
+  return typeof p === 'number' && Number.isFinite(p) ? p : 90;
 }
 
 export function inferOpaqueSubtype(el: Element): 'wall' | 'roof' {
@@ -82,6 +82,8 @@ export function inferOpaqueSubtype(el: Element): 'wall' | 'roof' {
   if (shape === 'sloped-polygon') return 'roof';
   const p = (el as { pitch?: number }).pitch;
   if (typeof p === 'number' && p > 0 && p < 90) return 'roof';
+  // Flat roof: getElementShape reports a pitch-0 polygon as a plain 'polygon'.
+  if (el.type === 'BuildingElementOpaque' && p === 0 && shape === 'polygon') return 'roof';
   return 'wall';
 }
 
@@ -347,7 +349,7 @@ export function computePatchFromSavedAssembly(
     pitchDeg,
     heatTransfer.externalSurfaceResistance_m2K_W,
   );
-  const uWrite = uW.uCombinedTwoSf_W_m2K;
+  const uWrite = uW.uForHem_W_m2K;
   const rWrite = uW.thermalResistanceConstruction_m2K_W;
   const massSuggestion = suggestMassDistributionClass(heatTransfer.effectiveLayers, library.materialsById);
   const areal = sumAssemblyArealHeatCapacity(heatTransfer.effectiveLayers, library.materialsById);
@@ -417,7 +419,7 @@ export function computePatchFromSavedAssembly(
       patch: {
         ...groundPatch,
         mass_distribution_class: massDistributionClass,
-        ...(arealElementValue != null ? { areal_heat_capacity: arealElementValue } : {}),
+        areal_heat_capacity: arealElementValue, // undefined clears a stale value (no ρ/c)
         vulcan_assembly_v1: envelope,
       },
       preview: { u: uWrite, r: rWrite, mass: massDistributionClass ?? '—', arealHeat_kJ_m2K: arealPreviewKj },
@@ -430,7 +432,7 @@ export function computePatchFromSavedAssembly(
       u_value: uWrite,
       thermal_resistance_construction: rWrite,
       mass_distribution_class: massDistributionClass,
-      ...(arealElementValue != null ? { areal_heat_capacity: arealElementValue } : {}),
+      areal_heat_capacity: arealElementValue, // undefined clears a stale value (no ρ/c)
       vulcan_assembly_v1: envelope,
     },
     preview: { u: uWrite, r: rWrite, mass: massDistributionClass ?? '—', arealHeat_kJ_m2K: arealPreviewKj },
