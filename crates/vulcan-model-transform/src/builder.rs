@@ -1128,15 +1128,28 @@ fn migrate_vulcan_csv_to_current(
     }
     {
         for row in csv_data.get("Non-Exposed Elements").into_iter().flatten() {
-            if row.get("Type").and_then(Value::as_str) != Some("BuildingElementPartyWall") { continue; }
+            if row.get("Type").and_then(Value::as_str) != Some("BuildingElementPartyWall") {
+                continue;
+            }
             let extra = row.get("extra_json");
-            let u = row.get("u_value").filter(|v| !v.is_null() && v.as_str() != Some(""))
+            let u = row
+                .get("u_value")
+                .filter(|v| !v.is_null() && v.as_str() != Some(""))
                 .or_else(|| extra.and_then(|e| e.get("u_value")));
-            let interpretation = extra.and_then(|e| e.get("u_value_interpretation")).and_then(Value::as_str);
-            let interpreted_value = extra.and_then(|e| e.get("u_value_interpreted_value")).and_then(Value::as_f64);
-            let changed_after_legacy_review = version < 3 && interpreted_value.is_some()
+            let interpretation = extra
+                .and_then(|e| e.get("u_value_interpretation"))
+                .and_then(Value::as_str);
+            let interpreted_value = extra
+                .and_then(|e| e.get("u_value_interpreted_value"))
+                .and_then(Value::as_f64);
+            let changed_after_legacy_review = version < 3
+                && interpreted_value.is_some()
                 && interpreted_value != u.and_then(Value::as_f64);
-            if u.is_some() && ((version >= 3 && !matches!(interpretation, Some("whole_wall" | "half_construction"))) || changed_after_legacy_review) {
+            if u.is_some()
+                && ((version >= 3
+                    && !matches!(interpretation, Some("whole_wall" | "half_construction")))
+                    || changed_after_legacy_review)
+            {
                 return Err(BuildError::new("E_CSV_MIGRATION", &format!(
                     "Party wall '{}' has unresolved legacy U-value meaning. Explicitly select whole_wall or half_construction before finalizing CSV version 3.",
                     row.get("Name").and_then(Value::as_str).unwrap_or("unnamed")
@@ -2302,8 +2315,13 @@ impl JSONBuilder {
                                 // 3. Property is not position_xyz (CSV-only field)
                                 // Cleared values need no check here: `sanitize_csv_extra_json`
                                 // removed them, at every depth, before the merge started.
-                                if !matches!(key.as_str(), "u_value_interpretation" | "u_value_interpreted_value" | "construction_basis" | "internal_partition_area_basis")
-                                    && !csv_set_keys.contains(&storage_key)
+                                if !matches!(
+                                    key.as_str(),
+                                    "u_value_interpretation"
+                                        | "u_value_interpreted_value"
+                                        | "construction_basis"
+                                        | "internal_partition_area_basis"
+                                ) && !csv_set_keys.contains(&storage_key)
                                     && key != "position_xyz"
                                     && key != "pitch"
                                     && key != "is_external_door"
@@ -2412,9 +2430,27 @@ impl JSONBuilder {
 
                     let target_path = format!("Zone/{zone_name}/BuildingElement/{element_name}");
                     let diagnostics = match self.conversion_profile {
-                        crate::ConversionProfile::PythonFhsA8 => crate::target_mappings::map_python_a8_element(element_row, &mut element_obj, &target_path),
-                        crate::ConversionProfile::PythonFhsA9 => crate::target_mappings::map_python_a9_element(element_row, &mut element_obj, &target_path),
-                        crate::ConversionProfile::CurrentRustFhs => crate::target_mappings::map_rust_element(element_row, &mut element_obj, &target_path),
+                        crate::ConversionProfile::PythonFhsA8 => {
+                            crate::target_mappings::map_python_a8_element(
+                                element_row,
+                                &mut element_obj,
+                                &target_path,
+                            )
+                        }
+                        crate::ConversionProfile::PythonFhsA9 => {
+                            crate::target_mappings::map_python_a9_element(
+                                element_row,
+                                &mut element_obj,
+                                &target_path,
+                            )
+                        }
+                        crate::ConversionProfile::CurrentRustFhs => {
+                            crate::target_mappings::map_rust_element(
+                                element_row,
+                                &mut element_obj,
+                                &target_path,
+                            )
+                        }
                     };
                     self.non_fatal_errors.borrow_mut().extend(diagnostics);
 
@@ -7225,10 +7261,7 @@ impl JSONBuilder {
                 let mut emitters_array = Vec::new();
 
                 for emitter_row in emitters_data {
-                    let emitter_obj = Self::build_wet_emitter_object(
-                        &subcategory,
-                        &emitter_row,
-                    )?;
+                    let emitter_obj = Self::build_wet_emitter_object(&subcategory, &emitter_row)?;
                     emitters_array.push(Value::Object(emitter_obj));
                 }
 
@@ -7339,10 +7372,8 @@ impl JSONBuilder {
                                 "Wet Emitters missing required 'subcategory' field",
                             ));
                         };
-                        let emitter_obj = Self::build_wet_emitter_object(
-                            subcategory,
-                            &emitter_row,
-                            )?;
+                        let emitter_obj =
+                            Self::build_wet_emitter_object(subcategory, &emitter_row)?;
                         if emitter_obj.get("wet_emitter_type").and_then(|v| v.as_str())
                             == Some("radiator")
                         {
@@ -9724,7 +9755,10 @@ mod schema_cleanup_tests {
         // FHS declares shading only; weather is a separately resolved runtime asset.
         assert!(ext_cond.contains_key("shading_segments"));
         assert!(!ext_cond.contains_key("timezone"));
-        assert!(builder.take_schema_omissions().iter().any(|o| o.path == "/ExternalConditions/timezone"));
+        assert!(builder
+            .take_schema_omissions()
+            .iter()
+            .any(|o| o.path == "/ExternalConditions/timezone"));
     }
 
     #[test]
@@ -11701,9 +11735,16 @@ fan,MechanicalVentilation,Intermittent MEV,"{""unsupported_authored_field"":42}"
         let data = CSVParser::new().parse_csv(csv).unwrap();
         let mut builder = JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).unwrap();
         let output = builder.build_json(&data).unwrap();
-        assert!(output.pointer("/InfiltrationVentilation/MechanicalVentilation/fan/unsupported_authored_field").is_none());
+        assert!(output
+            .pointer(
+                "/InfiltrationVentilation/MechanicalVentilation/fan/unsupported_authored_field"
+            )
+            .is_none());
         assert!(builder.take_schema_omissions().iter().any(|omission| omission.path == "/InfiltrationVentilation/MechanicalVentilation/fan/unsupported_authored_field"));
-        assert_eq!(data["Ventilation Systems"][0]["extra_json"]["unsupported_authored_field"],42);
+        assert_eq!(
+            data["Ventilation Systems"][0]["extra_json"]["unsupported_authored_field"],
+            42
+        );
     }
 
     #[test]
@@ -12641,31 +12682,73 @@ Name,Type
     }
     #[test]
     fn a9_window_mapping_composes_v1_coordinate_migration_once() {
-        for (version,midpoint) in [(1,3.4),(2,1.4),(3,1.4)] {
+        for (version, midpoint) in [(1, 3.4), (2, 1.4), (3, 1.4)] {
             let mut source = HashMap::from([
-                ("Metadata".into(),vec![HashMap::from([("Field".into(),serde_json::json!("VulcanCsvVersion")),("Value".into(),serde_json::json!(version))]),HashMap::from([("Field".into(),serde_json::json!("Ventilation_ventilation_zone_base_height")),("Value".into(),serde_json::json!(2.0))])]),
-                ("Window Elements".into(),vec![HashMap::from([
-                    ("mid_height".into(),serde_json::json!(midpoint)),("free_area_height".into(),serde_json::json!(1.0)),("max_window_open_area".into(),serde_json::json!(0.6)),
-                    ("extra_json".into(),serde_json::json!({"window_part_list":[{"mid_height_air_flow_path":midpoint},{"mid_height_air_flow_path":midpoint}]}))
-                ])])
+                (
+                    "Metadata".into(),
+                    vec![
+                        HashMap::from([
+                            ("Field".into(), serde_json::json!("VulcanCsvVersion")),
+                            ("Value".into(), serde_json::json!(version)),
+                        ]),
+                        HashMap::from([
+                            (
+                                "Field".into(),
+                                serde_json::json!("Ventilation_ventilation_zone_base_height"),
+                            ),
+                            ("Value".into(), serde_json::json!(2.0)),
+                        ]),
+                    ],
+                ),
+                (
+                    "Window Elements".into(),
+                    vec![HashMap::from([
+                        ("mid_height".into(), serde_json::json!(midpoint)),
+                        ("free_area_height".into(), serde_json::json!(1.0)),
+                        ("max_window_open_area".into(), serde_json::json!(0.6)),
+                        (
+                            "extra_json".into(),
+                            serde_json::json!({"window_part_list":[{"mid_height_air_flow_path":midpoint},{"mid_height_air_flow_path":midpoint}]}),
+                        ),
+                    ])],
+                ),
             ]);
             migrate_vulcan_csv_to_current(&mut source).unwrap();
-            let mut output=serde_json::json!({"type":"BuildingElementTransparent"});
-            let errors=crate::target_mappings::map_python_a9_element(&source["Window Elements"][0],&mut output,"test");
-            assert!(errors.is_empty(),"{errors:?}");
-            assert_eq!(output["window_part_list"][0]["mid_height"],1.4);
-            assert_eq!(output["window_part_list"][0]["max_window_open_area"],0.6);
+            let mut output = serde_json::json!({"type":"BuildingElementTransparent"});
+            let errors = crate::target_mappings::map_python_a9_element(
+                &source["Window Elements"][0],
+                &mut output,
+                "test",
+            );
+            assert!(errors.is_empty(), "{errors:?}");
+            assert_eq!(output["window_part_list"][0]["mid_height"], 1.4);
+            assert_eq!(output["window_part_list"][0]["max_window_open_area"], 0.6);
         }
     }
 
     #[test]
     fn v3_party_u_requires_explicit_meaning_even_if_numeric_value_unchanged() {
-        let mut source=HashMap::from([
-            ("Metadata".into(),vec![HashMap::from([("Field".into(),serde_json::json!("VulcanCsvVersion")),("Value".into(),serde_json::json!(3))])]),
-            ("Non-Exposed Elements".into(),vec![HashMap::from([("Type".into(),serde_json::json!("BuildingElementPartyWall")),("Name".into(),serde_json::json!("Party wall")),("extra_json".into(),serde_json::json!({"u_value":0.25}))])])
+        let mut source = HashMap::from([
+            (
+                "Metadata".into(),
+                vec![HashMap::from([
+                    ("Field".into(), serde_json::json!("VulcanCsvVersion")),
+                    ("Value".into(), serde_json::json!(3)),
+                ])],
+            ),
+            (
+                "Non-Exposed Elements".into(),
+                vec![HashMap::from([
+                    ("Type".into(), serde_json::json!("BuildingElementPartyWall")),
+                    ("Name".into(), serde_json::json!("Party wall")),
+                    ("extra_json".into(), serde_json::json!({"u_value":0.25})),
+                ])],
+            ),
         ]);
         assert!(migrate_vulcan_csv_to_current(&mut source).is_err());
-        source.get_mut("Non-Exposed Elements").unwrap()[0].get_mut("extra_json").unwrap()["u_value_interpretation"]=serde_json::json!("whole_wall");
+        source.get_mut("Non-Exposed Elements").unwrap()[0]
+            .get_mut("extra_json")
+            .unwrap()["u_value_interpretation"] = serde_json::json!("whole_wall");
         assert!(migrate_vulcan_csv_to_current(&mut source).is_ok());
     }
 
@@ -12673,10 +12756,11 @@ Name,Type
     fn changed_legacy_party_u_cannot_reuse_an_old_review_decision() {
         let mut parser = CSVParser::new();
         let csv = "Metadata\nVulcanCsvVersion,2\n\nZone\nName,Type,volume,floor_area\nZ,Zone,100,40\n\nNon-Exposed Elements\nName,Zone,Type,area,pitch,extra_json\nParty,Z,BuildingElementPartyWall,10,90,\"{\"\"u_value\"\":0.3,\"\"u_value_interpretation\"\":\"\"whole_wall\"\",\"\"u_value_interpreted_value\"\":0.2}\"\n";
-        let mut data=parser.parse_csv(csv).unwrap();
+        let mut data = parser.parse_csv(csv).unwrap();
         assert!(migrate_vulcan_csv_to_current(&mut data).is_err());
-        data.get_mut("Non-Exposed Elements").unwrap()[0].get_mut("extra_json").unwrap()["u_value"] = serde_json::json!(0.2);
+        data.get_mut("Non-Exposed Elements").unwrap()[0]
+            .get_mut("extra_json")
+            .unwrap()["u_value"] = serde_json::json!(0.2);
         assert!(migrate_vulcan_csv_to_current(&mut data).is_ok());
     }
-
 }

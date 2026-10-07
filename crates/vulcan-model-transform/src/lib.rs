@@ -14,9 +14,9 @@ pub mod error {
 pub mod parser {
     pub use vulcan_csv_codec::parser::*;
 }
+pub mod finalization;
 pub mod preflight_diagnostics;
 mod schema_validation;
-pub mod finalization;
 mod target_mappings;
 pub use target_mappings::map_target_unobstructed_shading;
 
@@ -135,7 +135,8 @@ pub fn transform_geometry_csv(
     let mut schema_omissions = builder.take_schema_omissions();
     let schema: Value = serde_json::from_str(&request.schema_json)
         .map_err(|error| TransformError::Schema(error.to_string()))?;
-    let finalized = finalization::finalize_model(&model, &schema).map_err(TransformError::Schema)?;
+    let finalized =
+        finalization::finalize_model(&model, &schema).map_err(TransformError::Schema)?;
     schema_omissions.extend(finalized.omissions);
     let model = finalized.model;
     let mut errors = builder.take_non_fatal_errors();
@@ -162,9 +163,13 @@ pub fn transform_geometry_csv(
 /// or silently renaming authored systems.
 pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<ValidationError> {
     let mut errors = Vec::new();
-    if matches!(profile, ConversionProfile::PythonFhsA8 | ConversionProfile::PythonFhsA9)
-        && model.get("HotWaterSource").and_then(Value::as_object)
-            .is_some_and(|sources| !sources.contains_key("hw cylinder"))
+    if matches!(
+        profile,
+        ConversionProfile::PythonFhsA8 | ConversionProfile::PythonFhsA9
+    ) && model
+        .get("HotWaterSource")
+        .and_then(Value::as_object)
+        .is_some_and(|sources| !sources.contains_key("hw cylinder"))
     {
         // Both FHS schemas declare only this main-source key (including
         // PointOfUse). Notional edit_storagetank indexes it unconditionally;
@@ -194,8 +199,14 @@ pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<V
 }
 
 fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
-    if matches!(request.conversion_profile, ConversionProfile::PythonFhsA8 | ConversionProfile::PythonFhsA9) && request.profile != ModelProfile::Fhs {
-        return Err(TransformError::InvalidRequest("Python conversion requires the FHS profile".into()));
+    if matches!(
+        request.conversion_profile,
+        ConversionProfile::PythonFhsA8 | ConversionProfile::PythonFhsA9
+    ) && request.profile != ModelProfile::Fhs
+    {
+        return Err(TransformError::InvalidRequest(
+            "Python conversion requires the FHS profile".into(),
+        ));
     }
     let required_python_version = match request.conversion_profile {
         ConversionProfile::PythonFhsA8 => Some("1.0.0a8"),
@@ -203,7 +214,9 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
         ConversionProfile::CurrentRustFhs => None,
     };
     if let Some(version) = required_python_version {
-        if request.version_metadata.hem_core_version != version || request.version_metadata.fhs_wrapper_version.as_deref() != Some(version) {
+        if request.version_metadata.hem_core_version != version
+            || request.version_metadata.fhs_wrapper_version.as_deref() != Some(version)
+        {
             return Err(TransformError::InvalidRequest(format!("The selected Python conversion profile requires matching core and FHS wrapper {version} metadata")));
         }
     }

@@ -12,18 +12,28 @@ use std::collections::HashMap;
 /// sectors qualify: never discard objects, extra authored keys or invalid arcs.
 /// Eight 45-degree sectors cover the same sky with exactly representable eighths.
 pub fn map_target_unobstructed_shading(model: &mut Value, profile: crate::ConversionProfile) {
-    if !matches!(profile, crate::ConversionProfile::PythonFhsA8 | crate::ConversionProfile::PythonFhsA9) {
+    if !matches!(
+        profile,
+        crate::ConversionProfile::PythonFhsA8 | crate::ConversionProfile::PythonFhsA9
+    ) {
         return;
     }
-    let Some(sectors) = model.pointer_mut("/ExternalConditions/shading_segments").and_then(Value::as_array_mut) else {
+    let Some(sectors) = model
+        .pointer_mut("/ExternalConditions/shading_segments")
+        .and_then(Value::as_array_mut)
+    else {
         return;
     };
-    if sectors.len() == 36 && sectors.iter().enumerate().all(|(i, sector)| {
-        sector.as_object().is_some_and(|fields| fields.len() == 2)
-            && sector.get("start360").and_then(Value::as_u64) == Some((i * 10) as u64)
-            && sector.get("end360").and_then(Value::as_u64) == Some(((i + 1) * 10) as u64)
-    }) {
-        *sectors = (0..8).map(|i| json!({"start360":i*45,"end360":(i+1)*45})).collect();
+    if sectors.len() == 36
+        && sectors.iter().enumerate().all(|(i, sector)| {
+            sector.as_object().is_some_and(|fields| fields.len() == 2)
+                && sector.get("start360").and_then(Value::as_u64) == Some((i * 10) as u64)
+                && sector.get("end360").and_then(Value::as_u64) == Some(((i + 1) * 10) as u64)
+        })
+    {
+        *sectors = (0..8)
+            .map(|i| json!({"start360":i*45,"end360":(i+1)*45}))
+            .collect();
     }
 }
 
@@ -431,10 +441,15 @@ mod tests {
     fn python_empty_sky_mapping_is_exact_bounded_and_idempotent() {
         use crate::ConversionProfile;
         let source = json!({"ExternalConditions":{"shading_segments":(0..36).map(|i| json!({"start360":i*10,"end360":(i+1)*10})).collect::<Vec<_>>()}});
-        for profile in [ConversionProfile::PythonFhsA8, ConversionProfile::PythonFhsA9] {
+        for profile in [
+            ConversionProfile::PythonFhsA8,
+            ConversionProfile::PythonFhsA9,
+        ] {
             let mut model = source.clone();
             map_target_unobstructed_shading(&mut model, profile);
-            let sectors = model["ExternalConditions"]["shading_segments"].as_array().unwrap();
+            let sectors = model["ExternalConditions"]["shading_segments"]
+                .as_array()
+                .unwrap();
             assert_eq!(sectors.len(), 8);
             for (i, sector) in sectors.iter().enumerate() {
                 assert_eq!(sector, &json!({"start360":i*45,"end360":(i+1)*45}));
@@ -442,16 +457,31 @@ mod tests {
             let once = model.clone();
             map_target_unobstructed_shading(&mut model, profile);
             assert_eq!(model, once);
-            for mutation in ["obstacle", "unknown", "empty_authored_shading", "gap", "reverse", "count", "string"] {
+            for mutation in [
+                "obstacle",
+                "unknown",
+                "empty_authored_shading",
+                "gap",
+                "reverse",
+                "count",
+                "string",
+            ] {
                 let mut authored = source.clone();
-                let sectors = authored["ExternalConditions"]["shading_segments"].as_array_mut().unwrap();
+                let sectors = authored["ExternalConditions"]["shading_segments"]
+                    .as_array_mut()
+                    .unwrap();
                 match mutation {
-                    "obstacle" => sectors[0]["shading"] = json!([{"type":"obstacle","height":5,"distance":10}]),
+                    "obstacle" => {
+                        sectors[0]["shading"] =
+                            json!([{"type":"obstacle","height":5,"distance":10}])
+                    }
                     "unknown" => sectors[0]["note"] = json!("authored"),
                     "empty_authored_shading" => sectors[0]["shading"] = json!([]),
                     "gap" => sectors[0]["end360"] = json!(9),
                     "reverse" => sectors.reverse(),
-                    "count" => { sectors.pop(); },
+                    "count" => {
+                        sectors.pop();
+                    }
                     "string" => sectors[0]["start360"] = json!("0"),
                     _ => unreachable!(),
                 }
@@ -639,13 +669,20 @@ mod tests {
     }
     #[test]
     fn python_fhs_requires_main_hot_water_name_without_rejecting_point_of_use() {
-        for profile in [crate::ConversionProfile::PythonFhsA8, crate::ConversionProfile::PythonFhsA9] {
+        for profile in [
+            crate::ConversionProfile::PythonFhsA8,
+            crate::ConversionProfile::PythonFhsA9,
+        ] {
             let model = json!({"HotWaterSource":{}});
             let errors = crate::validate_target_input(&model, profile);
             assert_eq!(errors.len(), 1);
             assert_eq!(errors[0].code, "E_PYTHON_FHS_HOT_WATER_SOURCE");
             assert_eq!(errors[0].path, "/HotWaterSource/hw cylinder");
-            assert!(crate::validate_target_input(&json!({"HotWaterSource":{"hw cylinder":{"type":"PointOfUse"}}}), profile).is_empty());
+            assert!(crate::validate_target_input(
+                &json!({"HotWaterSource":{"hw cylinder":{"type":"PointOfUse"}}}),
+                profile
+            )
+            .is_empty());
             assert_eq!(model, json!({"HotWaterSource":{}}));
         }
     }
