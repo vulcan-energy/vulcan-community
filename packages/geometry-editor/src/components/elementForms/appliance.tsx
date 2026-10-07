@@ -26,13 +26,7 @@ export interface ApplianceFormState {
 
 function useFormState(ctx: ElementFormStateCtx): ApplianceFormState {
   const [applianceKey, setApplianceKey] = useState<string>('');
-  if (
-    applianceKey !== ''
-    && ctx.applianceKeyOptions.length > 0
-    && !ctx.applianceKeyOptions.includes(applianceKey)
-  ) {
-    setApplianceKey('');
-  }
+
 
   return { applianceKey, setApplianceKey, applianceKeyOptions: ctx.applianceKeyOptions };
 }
@@ -43,9 +37,7 @@ export const applianceFormModule: ElementFormModule<ApplianceFormState> = {
 
   hydrate(state, element) {
     if (element.type !== 'Appliance') return;
-    const validKeys = state.applianceKeyOptions;
-    const incoming = 'appliancekey' in element ? element.appliancekey ?? '' : '';
-    state.setApplianceKey(validKeys.includes(incoming) ? incoming : '');
+    state.setApplianceKey(element.appliancekey ?? '');
   },
 
   reset(state) {
@@ -76,6 +68,8 @@ export const applianceFormModule: ElementFormModule<ApplianceFormState> = {
             }}
             options={[
               { value: '', label: 'Select appliance' },
+              ...(applianceKey && !applianceKeyOptions.includes(applianceKey)
+                ? [{ value: applianceKey, label: `${applianceKey} (unavailable in this version)`, disabled: true }] : []),
               ...applianceKeyOptions.map(key => ({ value: key, label: key })),
             ]}
             variant="ghost"

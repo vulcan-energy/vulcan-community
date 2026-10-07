@@ -1792,7 +1792,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     const preload = async () => {
       await Promise.all([schemaPort.preload('core'), schemaPort.preload('fhs')]);
     };
+    let current = true;
     preload().then(() => {
+      if (!current) return;
       // Best-effort: ensure root schema is loaded in AJV for reference resolution.
       // Note: AJVCache currently only supports a single "root" schema; in practice most
       // advanced-field subschemas include $defs inline, so this is mainly for Core mode.
@@ -1800,8 +1802,11 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       if (schema) {
         ensureRootSchema(schema);
       }
+    }).catch((error: unknown) => {
+      if (current) console.error('[Advanced fields] Schema load failed', error);
     });
     // Defaults are loaded from the user's defaultsPath via the store/ioSlice.
+    return () => { current = false; };
   }, [schemaMode, schemaPort]);
 
   useEffect(() => {

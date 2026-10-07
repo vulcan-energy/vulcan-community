@@ -10,6 +10,7 @@
 // dispatches the other operations through its registry by element type.
 
 import type { ReactNode } from 'react';
+import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import type {
   GeometryDetailedJunctionSolverContribution,
   GeometryProductCatalogueContribution,
@@ -116,6 +117,8 @@ export interface ElementFormSharedCtx {
 }
 
 export interface ElementFormStateCtx {
+  schemaPort: GeometrySchemaPort;
+  schemaMode: GeometrySchemaMode;
   /** The orchestrator's current "active family" UI state (the still-inline
    * ElementTypePicker/hydrate-effect-driven `elementType` local state) — added
    * for System's module (slice-5 stage 3): several of System's moved pieces

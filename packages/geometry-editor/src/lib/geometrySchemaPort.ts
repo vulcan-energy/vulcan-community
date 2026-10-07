@@ -18,6 +18,8 @@ const usesFhsSchema = (mode: GeometrySchemaMode): boolean => mode === 'fhs';
  */
 export const canonicalGeometrySchemaPort = Object.freeze<GeometrySchemaPort>({
   availability: 'available',
+  subscribe: schemaCache.subscribeGeometrySchema,
+  getRevision: schemaCache.getGeometrySchemaRevision,
   preload: (mode) => usesFhsSchema(mode)
     ? schemaCache.preloadFHSSchema()
     : schemaCache.preloadSchema(),

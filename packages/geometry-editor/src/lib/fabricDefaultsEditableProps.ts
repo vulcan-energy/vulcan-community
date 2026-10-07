@@ -118,7 +118,7 @@ function primitiveKind(propertySchema: unknown): 'number' | 'integer' | 'boolean
 function extraFabricTemplateKeys(elementType: string): string[] {
   switch (elementType) {
     case 'BuildingElementPartyWall':
-      return ['party_wall_cavity_type', 'party_wall_lining_type', 'thermal_resistance_cavity'];
+      return ['u_value', 'u_value_whole_wall', 'party_wall_cavity_type', 'party_wall_lining_type', 'thermal_resistance_cavity'];
     default:
       return [];
   }
