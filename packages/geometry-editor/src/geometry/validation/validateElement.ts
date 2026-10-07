@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { csvMigrationIssues } from '../io/csvSemanticMigration';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
@@ -305,6 +306,8 @@ export function partFFieldKeyForRule(rule: PartFFinding['rule']): string | undef
 }
 
 export interface ValidationContext {
+  sourceCsvVersion?: number;
+  csvUpgradeRequested?: boolean;
   /** Host-owned schema capability. Validation never reaches a concrete schema implementation. */
   schemaPort: GeometrySchemaPort;
   elementsById?: Record<string, Element>;
@@ -659,7 +662,7 @@ export const validateElementCore = (
   })();
   const t0 = dbg ? performance.now() : 0;
 
-  const issues: ValidationIssue[] = [];
+  const issues: ValidationIssue[] = ((context.sourceCsvVersion ?? 3) >= 3 || context.csvUpgradeRequested ? csvMigrationIssues([element], context.sourceCsvVersion) : []).map(issue => ({ source: 'geometry', fieldKey: 'u_value', message: `CSV_U_VALUE_MEANING_REQUIRED: ${issue.elementName} has legacy U-value ${issue.value}; choose its meaning in the migration review before saving.` }));
   const warnings: ValidationIssue[] = [];
   // Local aliases for the module-level helpers (geoIssue/schemaIssue/fhsIssue) so the long
   // switch below stays readable. Per-type validators in subsequent refactors call the
@@ -1708,6 +1711,30 @@ export const validateElementCore = (
             'system_preset',
           ),
         );
+      }
+      if (elementsById && !sysElement.isPlaceholder) {
+        const hasExhaustAirHeatPump = [...heatSourceWetReferenceMap([sysElement]).values()].some(
+          (source) => source.type === 'HeatPump' &&
+            ['ExhaustAirMEV', 'ExhaustAirMVHR', 'ExhaustAirMixed'].includes(String(source.source_type)),
+        );
+        if (hasExhaustAirHeatPump) {
+          const ventTypes = Object.values(elementsById).flatMap((candidate) => {
+            if (candidate.isPlaceholder) return [];
+            const extra = readRecord(candidate.extra_json);
+            if (candidate.type === 'MechanicalVentilation') {
+              return [candidate.vent_type ?? extra.vent_type];
+            }
+            if (candidate.type !== 'System' || candidate.subcategory !== 'InfiltrationVentilation') return [];
+            const ventilation = readRecord(extra.InfiltrationVentilation);
+            return Object.values(readRecord(ventilation.MechanicalVentilation)).map((unit) => readRecord(unit).vent_type);
+          });
+          // HEM rejects any incompatible unit, even alongside compatible ventilation.
+          if (ventTypes.some((type) => type === 'Intermittent MEV' || type === 'Decentralised continuous MEV')) {
+            issues.push(geo('Exhaust-air heat pumps cannot be combined with Intermittent MEV or Decentralised continuous MEV', 'extra_json'));
+          } else if (!ventTypes.some((type) => type === 'Centralised continuous MEV' || type === 'MVHR')) {
+            issues.push(geo('Exhaust-air heat pumps require Centralised continuous MEV or MVHR ventilation', 'extra_json'));
+          }
+        }
       }
       if (complianceValidationEnabled && elementsById) {
         for (const msg of hotWaterSourceHeatSourceWetLinkMessagesForElement(

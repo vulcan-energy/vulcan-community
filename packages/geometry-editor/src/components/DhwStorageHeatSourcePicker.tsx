@@ -19,6 +19,7 @@ import type { Element, System } from '../geometry/types';
 const HW_CYL = 'hw cylinder';
 
 const IMMERSION_VALUE = '__dhw_immersion__';
+const HWOHP_VALUE = '__dhw_hwonly_heat_pump__';
 
 function defaultImmersionHeater(powerKw: number): Record<string, unknown> {
   return {
@@ -59,6 +60,7 @@ function detectSelectionFromHeatSource(heatSource: unknown, wetNames: string[]):
   const [k, v] = entries[0];
   if (!v || typeof v !== 'object' || Array.isArray(v)) return '';
   const t = (v as Record<string, unknown>).type;
+  if (t === 'HeatPump_HWOnly') return HWOHP_VALUE;
   if (t === 'ImmersionHeater' && k === 'immersion') {
     return IMMERSION_VALUE;
   }
@@ -134,11 +136,14 @@ export const DhwStorageHeatSourcePicker: React.FC<{
       { value: '', label: 'Manual (Advanced below)' },
       { value: IMMERSION_VALUE, label: 'Immersion' },
     ];
+    if (selection === HWOHP_VALUE) {
+      o.push({ value: HWOHP_VALUE, label: 'Hot-water-only heat pump' });
+    }
     for (const w of wetNames) {
       o.push({ value: `wet:${w}`, label: `Wet: ${wetNameLabels[w] ?? w}` });
     }
     return o;
-  }, [wetNameLabels, wetNames]);
+  }, [selection, wetNameLabels, wetNames]);
 
   const applySelection = useCallback(
     (value: string, powerKw?: number) => {
@@ -152,7 +157,7 @@ export const DhwStorageHeatSourcePicker: React.FC<{
             ? { ...(cyl0 as Record<string, unknown>) }
             : { type: 'StorageTank' };
         if (cyl.type !== 'StorageTank') return prev;
-        if (value === '' || !value) {
+        if (!value || value === HWOHP_VALUE) {
           return prev;
         }
         const p = typeof powerKw === 'number' && Number.isFinite(powerKw) ? powerKw : 3;

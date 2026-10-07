@@ -91,3 +91,30 @@ describe('FilenameBar validation readiness', () => {
     expect(screen.queryByRole('button', { name: 'Validation failed at last save' })).not.toBeInTheDocument();
   });
 });
+
+
+describe('FilenameBar migration review', () => {
+  it('requires an explicit choice for selected affected elements and keeps others unresolved', async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    const wall = (id: string) => ({ id, name: `Party ${id}`, type: 'BuildingElementPartyWall' as const, zoneId: 'z', width: 2, height: 3, area: 6, parent_element: null, coordinates: [], extra_json: { u_value: .25 } });
+    store.setState({ sourceCsvVersion: 2, elementsById: { a: wall('a'), b: wall('b') }, elementIds: ['a', 'b'] });
+    const documentHost = documentHostHarness();
+    render(<GeometryStoreProvider store={store}><FilenameBar documentHost={documentHost} saveStatus="idle" saveError={null} /></GeometryStoreProvider>);
+    expect(screen.queryByRole('combobox', { name: 'Legacy U-value meaning' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(documentHost.save).not.toHaveBeenCalled();
+    expect(store.getState().elementsById.a.extra_json?.u_value_interpretation).toBeUndefined();
+    expect(screen.getByRole('button', { name: 'Save', exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upgrade CSV' })).not.toBeInTheDocument();
+    const apply = screen.getByRole('button', { name: 'Apply meaning to selected elements' });
+    expect(apply).toBeDisabled();
+    await user.click(screen.getByRole('checkbox', { name: /Party a/ }));
+    expect(apply).toBeDisabled();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Legacy U-value meaning' }), 'whole_wall');
+    await user.click(apply);
+    expect(store.getState().getCsvMigrationIssues().map(issue => issue.elementName)).toEqual(['Party b']);
+    expect(store.getState().elementsById.a.extra_json?.u_value_whole_wall).toBe(.25);
+    expect(screen.getByRole('combobox', { name: 'Legacy U-value meaning' })).toHaveValue('');
+  });
+});

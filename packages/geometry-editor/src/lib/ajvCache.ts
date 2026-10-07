@@ -8,7 +8,7 @@ type AjvInstance = InstanceType<typeof Ajv2020>;
 
 let singletonAjv: AjvInstance | null = null;
 let rootSchemaAdded = false;
-let currentSchemaId: string | null = null;
+let currentSchemaRoot: unknown = null;
 const compiledRefs = new Set<string>();
 
 export function getAjvInstance(): AjvInstance {
@@ -27,50 +27,12 @@ export function getAjvInstance(): AjvInstance {
   return singletonAjv;
 }
 
-/**
- * Compute a stable identifier for a schema to detect when it changes.
- * Uses a lightweight hash based on key distinguishing features.
- */
-function computeSchemaId(schema: unknown): string {
-  if (!isRecord(schema)) return 'null';
-
-  // Create a stable identifier based on schema structure
-  // Key features that distinguish Core, FHS, and Core Allowing FHS:
-  // - Root properties (Location distinguishes FHS)
-  // - ExternalConditions structure (timezone/start_day/etc distinguish FHS)
-  // - Number of root properties
-  const props = isRecord(schema.properties) ? schema.properties : {};
-  const propKeys = Object.keys(props).sort();
-  const hasLocation = 'Location' in props;
-  const hasExternalConditions = 'ExternalConditions' in props;
-
-  // Check ExternalConditions structure (FHS has timezone, start_day, etc.)
-  let externalConditionsType = 'none';
-  if (hasExternalConditions) {
-    const extCond = props.ExternalConditions;
-    if (isRecord(extCond)) {
-      if (typeof extCond.$ref === 'string') {
-        externalConditionsType = `ref:${extCond.$ref}`;
-      } else if (isRecord(extCond.properties)) {
-        const extProps = Object.keys(extCond.properties).sort();
-        const hasTimeFields = extProps.some((p: string) =>
-          ['timezone', 'start_day', 'end_day', 'daylight_savings'].includes(p)
-        );
-        externalConditionsType = hasTimeFields ? 'fhs' : 'core';
-      }
-    }
-  }
-
-  // Create identifier from distinguishing features
-  const idParts = [
-    `props:${propKeys.length}`,
-    `hasLocation:${hasLocation}`,
-    `extCond:${externalConditionsType}`,
-    // Include first few property names for additional uniqueness
-    `keys:${propKeys.slice(0, 5).join(',')}`,
-  ];
-
-  return idParts.join('|');
+/** Target changes must discard compiled validators even if root keys happen to match. */
+export function resetGeometrySchemaValidators(): void {
+  singletonAjv = null;
+  rootSchemaAdded = false;
+  currentSchemaRoot = null;
+  compiledRefs.clear();
 }
 
 export function ensureRootSchema(schema: unknown): void {
@@ -83,15 +45,15 @@ export function ensureRootSchema(schema: unknown): void {
   if (!ready) return;
 
   // Compute schema identity
-  const schemaId = computeSchemaId(schema);
+  const schemaRoot = schema;
 
   // If same schema already registered, no-op
-  if (rootSchemaAdded && currentSchemaId === schemaId) {
+  if (rootSchemaAdded && currentSchemaRoot === schemaRoot) {
     return;
   }
 
   // If different schema registered, reset first
-  if (rootSchemaAdded && currentSchemaId !== schemaId) {
+  if (rootSchemaAdded && currentSchemaRoot !== schemaRoot) {
     try {
       ajv.removeSchema('root');
     } catch { /* swallow: best-effort */ }
@@ -104,7 +66,7 @@ export function ensureRootSchema(schema: unknown): void {
     if (clone && clone.$schema) delete clone.$schema;
     if (!clone.$id) clone.$id = 'root';
     ajv.addSchema(clone, 'root');
-    currentSchemaId = schemaId;
+    currentSchemaRoot = schemaRoot;
     rootSchemaAdded = true;
   } catch {
     // If schema cannot be cloned/added, leave as is

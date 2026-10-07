@@ -299,7 +299,7 @@ export function DefaultsEditorModal({
         </div>
         {warnings.length > 0 ? (
           <div role="status" style={{ color: 'var(--warning-text)', fontSize: 12 }}>
-            <strong>Compatibility warnings</strong>
+            <strong>Template coverage (advisory)</strong>
             <ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
           </div>
         ) : null}

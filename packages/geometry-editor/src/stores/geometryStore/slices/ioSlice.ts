@@ -98,7 +98,6 @@ import {
   applyFloorHeightOverrides,
 } from '../../../lib/floorDerivation';
 import {
-  CURRENT_PROVENANCE_MARKERS_VERSION,
   FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
   FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR,
   GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR,
@@ -117,8 +116,19 @@ import {
 } from '../../../lib/overrideProvenance';
 export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
+import { internalAdjacentConditionedAreaMultiplier } from '../../../lib/elementArea';
+import { assertCsvMigrationResolved, csvMigrationIssues, resolveCsvUValueMeaning, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
+
 export interface IoSlice {
-  generateCSV: () => string;
+  sourceCsvVersion: number;
+  sourceProvenanceMarkersVersion?: number;
+  csvUpgradeRequested: boolean;
+  requestCsvUpgrade: () => void;
+  targetBundleId?: string;
+  setTargetBundleId: (id: string) => void;
+  getCsvMigrationIssues: () => CsvMigrationIssue[];
+  resolveCsvUValueInterpretation: (ids: readonly string[], meaning: UValueInterpretation) => void;
+  generateCSV: (options?: { allowUnresolvedMigration?: boolean }) => string;
   /** Returns non-fatal data-loss warnings from CSV parsing; load UIs must surface them. */
   loadFromCSV: (csvContent: string) => { warnings: string[] };
   /** CSV at the moment of the last successful save or load; null until either occurs. */
@@ -618,6 +628,24 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   };
 
   return (set, get) => ({
+  sourceCsvVersion: CURRENT_VULCAN_CSV_VERSION,
+  sourceProvenanceMarkersVersion: undefined,
+  csvUpgradeRequested: false,
+  requestCsvUpgrade: () => {
+    if (get().sourceCsvVersion < CURRENT_VULCAN_CSV_VERSION) set({ csvUpgradeRequested: true });
+  },
+  targetBundleId: undefined,
+  setTargetBundleId: (targetBundleId) => {
+    const state = get();
+    if (state.targetBundleId === targetBundleId) return;
+    set({
+      targetBundleId,
+      csvValidationCache: {},
+      complianceSettings: { ...state.complianceSettings, scenariosBaseModelEnabled: false },
+    });
+  },
+  getCsvMigrationIssues: () => csvMigrationIssues(Object.values(get().elementsById), get().sourceCsvVersion),
+  resolveCsvUValueInterpretation: (ids, meaning) => set(state => ({ elementsById: Object.fromEntries(Object.entries(state.elementsById).map(([id, element]) => [id, ids.includes(id) ? resolveCsvUValueMeaning(element, meaning) : element])) })),
   lastSavedCsv: null,
   setLastSavedCsv: (csv) => set({ lastSavedCsv: csv }),
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => {
@@ -627,8 +655,17 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     invalidatePendingDefaultsWork(loadedCsvWorkScheduler);
   },
 
-  generateCSV: () => {
+  generateCSV: (exportOptions) => {
     const rawState = get();
+    const migrationIssues = csvMigrationIssues(Object.values(rawState.elementsById), rawState.sourceCsvVersion);
+    const upgrading = rawState.csvUpgradeRequested && rawState.sourceCsvVersion < CURRENT_VULCAN_CSV_VERSION;
+    if ((upgrading || rawState.sourceCsvVersion >= CURRENT_VULCAN_CSV_VERSION) && !exportOptions?.allowUnresolvedMigration) {
+      assertCsvMigrationResolved(Object.values(rawState.elementsById), rawState.sourceCsvVersion);
+    }
+    // Draft snapshots keep the original format; a resolved Save finalizes
+    // the format update without changing the selected calculation target.
+    const exportVersion = upgrading && !exportOptions?.allowUnresolvedMigration && migrationIssues.length === 0
+      ? CURRENT_VULCAN_CSV_VERSION : rawState.sourceCsvVersion;
     // Project authored override flags onto `extra_json` once, up front, so every section sees a
     // current marker set and re-enabled automatic fields cannot leak stale markers.
     const state: GeometryState = {
@@ -662,12 +699,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       : 0;
     lines.push('Metadata,,,,,,,,,,,,,');
     lines.push(`GlobalOrientationOffset,${orientationOffset},,,,,,,,,,,,,`);
+    if (exportVersion < 3 && state.sourceProvenanceMarkersVersion !== undefined) {
+      lines.push(`${PROVENANCE_MARKERS_METADATA_KEY},${state.sourceProvenanceMarkersVersion},,,,,,,,,,,,,`);
+    }
     lines.push(
-      `${PROVENANCE_MARKERS_METADATA_KEY},${CURRENT_PROVENANCE_MARKERS_VERSION},,,,,,,,,,,,,`,
+      `${VULCAN_CSV_VERSION_METADATA_KEY},${exportVersion},,,,,,,,,,,,,`,
     );
-    lines.push(
-      `${VULCAN_CSV_VERSION_METADATA_KEY},${CURRENT_VULCAN_CSV_VERSION},,,,,,,,,,,,,`,
-    );
+    if (state.targetBundleId) lines.push(`TargetBundleId,${escapeCSV(state.targetBundleId)},,,,,,,,,,,,,`);
     if (options.modelSchemaProfilePort.availability === 'available') {
       const modelSchemaProfile = options.modelSchemaProfilePort.metadataValueForElements(
         Object.values(state.elementsById),
@@ -1103,14 +1141,15 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           // Follow-up: the in-session path uses DERIVED_VALUE_EPSILON = 0.005 in
           // transparentOpeningDerivedFields.ts, while this export check uses
           // slopedDimensionDiffers' 0.01 default for the same auto-vs-manual decision.
+          const windowHeightOffset = exportVersion >= 2 ? effectiveVentBaseHeight : 0;
           const exportedMidHeight = midHeightIsCustom
-            ? roundToTwoDecimals((element.mid_height as number) - effectiveVentBaseHeight)
+            ? roundToTwoDecimals((element.mid_height as number) - windowHeightOffset)
             : (
                 exportedHeight !== undefined
-                  ? roundToTwoDecimals((exportedBaseHeight ?? 0) - effectiveVentBaseHeight + exportedHeight / 2)
+                  ? roundToTwoDecimals((exportedBaseHeight ?? 0) - windowHeightOffset + exportedHeight / 2)
                   : (
                       typeof element.mid_height === 'number' && Number.isFinite(element.mid_height)
-                        ? roundToTwoDecimals(element.mid_height - effectiveVentBaseHeight)
+                        ? roundToTwoDecimals(element.mid_height - windowHeightOffset)
                         : undefined
                     )
               );
@@ -1131,7 +1170,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(formatOptionalFiniteNumberForCsv(element.max_window_open_area)),
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(
-              convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, effectiveVentBaseHeight),
+              convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, windowHeightOffset),
             ) : '')
           ];
           lines.push(ensureColumnCount(windowRow, windowColumnCount));
@@ -1276,7 +1315,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(formatViewerBaseHeightForCsv(element)),
             escapeCSV(element.parent_element || ''),
             formatElementCoordsForCsv(element),
-            escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
+            escapeCSVJson(JSON.stringify({ ...element.extra_json,
+              ...(element.type === 'BuildingElementAdjacentConditionedSpace' ? {
+                internal_partition_area_basis: internalAdjacentConditionedAreaMultiplier(element) === 2 ? 'both_faces' : 'single_face',
+              } : {}),
+            }))
           ];
           lines.push(ensureColumnCount(nonExposedRow, nonExposedColumnCount));
         }
@@ -1727,6 +1770,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
     set({
       hostDocumentMetadata: metadata.hostDocumentMetadata,
+      sourceCsvVersion: metadata.vulcanCsvVersion,
+      sourceProvenanceMarkersVersion: metadata.legacyProvenanceMarkersVersion,
+      csvUpgradeRequested: false,
+      targetBundleId: metadata.targetBundleId,
       propertyPostcode: metadata.propertyPostcode,
     });
     {
@@ -2130,7 +2177,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       get,
       set,
       loadedCsvWorkScheduler,
-      get().generateCSV(),
+      get().generateCSV({ allowUnresolvedMigration: true }),
     );
 
     return { warnings: [...parseWarnings, ...duplicateNameWarnings] };

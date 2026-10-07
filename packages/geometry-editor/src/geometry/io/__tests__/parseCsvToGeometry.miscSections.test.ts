@@ -40,9 +40,40 @@ Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,${midHeig
     expect(parsed.metadata.vulcanCsvVersion).toBe(2);
   });
 
+  it('preserves v1 window coordinates on ordinary save and during an unresolved upgrade', () => {
+    const csv = windowCsv('', 3.8, 3.8) + `
+
+Non-Exposed Elements
+Name,Zone,Type,area,pitch,width,height,parent_element,extra_json
+Party,Living,BuildingElementPartyWall,6,90,2,3,,"{""u_value"":0.25}"
+`;
+    const store = createGeometryStore();
+    store.getState().loadFromCSV(csv);
+    const ordinarySave = store.getState().generateCSV();
+    expect(ordinarySave).toContain('VulcanCsvVersion,1');
+    expect(ordinarySave).toContain('mid_height_air_flow_path"":3.8');
+    store.getState().requestCsvUpgrade();
+    expect(() => store.getState().generateCSV()).toThrow('CSV_U_VALUE_MEANING_REQUIRED');
+    const draft = store.getState().generateCSV({ allowUnresolvedMigration: true });
+    expect(draft).toContain('VulcanCsvVersion,1');
+    const reopened = createGeometryStore();
+    reopened.getState().loadFromCSV(draft);
+    const window = Object.values(reopened.getState().elementsById).find(element => element.type === 'BuildingElementTransparent');
+    expect(window?.mid_height).toBe(3.8);
+    expect(reopened.getState().getCsvMigrationIssues()).toHaveLength(1);
+    const party = Object.values(store.getState().elementsById).find(element => element.type === 'BuildingElementPartyWall')!;
+    store.getState().resolveCsvUValueInterpretation([party.id], 'whole_wall');
+    expect(store.getState().generateCSV({ allowUnresolvedMigration: true })).toContain('VulcanCsvVersion,1');
+    const upgraded = store.getState().generateCSV();
+    expect(upgraded).toContain('VulcanCsvVersion,3');
+    const upgradedWindow = parseCsvToGeometry(upgraded).elements.find(element => element.type === 'BuildingElementTransparent')!;
+    expect(upgradedWindow.mid_height).toBe(3.8);
+    expect(upgradedWindow.extra_json?.window_part_list).toEqual([{ mid_height_air_flow_path: 3.8 }]);
+  });
+
   it('rejects unsupported future Vulcan CSV versions instead of guessing', () => {
-    expect(() => parseCsvToGeometry(windowCsv('VulcanCsvVersion,3,,,,,,,,,,,,,', 1.4, 1.4)))
-      .toThrow('Unsupported VulcanCsvVersion: 3');
+    expect(() => parseCsvToGeometry(windowCsv('VulcanCsvVersion,4,,,,,,,,,,,,,', 1.4, 1.4)))
+      .toThrow('Unsupported VulcanCsvVersion: 4');
   });
 
   it.each(['', '2.5', 'not-a-version'])(
@@ -53,7 +84,7 @@ Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,${midHeig
     },
   );
 
-  it('exports HEM-relative window and window-part mid-heights as idempotent version-2 CSV', () => {
+  it('exports HEM-relative window and window-part mid-heights as idempotent version-3 CSV', () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
     const zone = { id: 'zone-1', name: 'Living', type: 'Zone' } as Zone;
     const window = {
@@ -80,7 +111,7 @@ Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,${midHeig
     });
 
     const csv = store.getState().generateCSV();
-    expect(csv).toContain('VulcanCsvVersion,2');
+    expect(csv).toContain('VulcanCsvVersion,3');
     expect(csv).toContain('"{""window_part_list"":[{""mid_height_air_flow_path"":1.4}]}"');
 
     const parsed = parseCsvToGeometry(csv);
@@ -93,7 +124,7 @@ Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,${midHeig
     const reloaded = createGeometryStore({ defaultDefaultsPath: null });
     reloaded.getState().loadFromCSV(csv);
     const savedAgain = reloaded.getState().generateCSV();
-    expect(savedAgain).toContain('VulcanCsvVersion,2');
+    expect(savedAgain).toContain('VulcanCsvVersion,3');
     expect(savedAgain).toContain('"{""window_part_list"":[{""mid_height_air_flow_path"":1.4}]}"');
   });
 

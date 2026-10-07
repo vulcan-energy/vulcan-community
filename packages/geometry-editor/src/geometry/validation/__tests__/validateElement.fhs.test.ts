@@ -266,3 +266,57 @@ describe('collectGeometryValidation Part F coverage', () => {
     );
   });
 });
+
+describe('exhaust-air heat pump ventilation compatibility', () => {
+  const heatPump = (sourceType = 'ExhaustAirMEV'): Element => ({
+    id: 'eahp', name: 'Exhaust-air heat pump', type: 'System', subcategory: 'HeatSourceWet',
+    parent_element: null, coordinates: [{ x: 0, y: 0, z: 0 }], isPlaceholder: false,
+    extra_json: { HeatSourceWet: { eahp: { type: 'HeatPump', source_type: sourceType } } },
+  });
+  const ventilation = (ventType: string, wrapped: boolean): Element => wrapped ? {
+    id: `vent-${ventType}`, name: 'Ventilation', type: 'System', subcategory: 'InfiltrationVentilation',
+    parent_element: null, coordinates: [{ x: 0, y: 0, z: 0 }], isPlaceholder: false,
+    extra_json: { InfiltrationVentilation: { MechanicalVentilation: { mev: { vent_type: ventType } } } },
+  } : { ...mvhrUnit(`vent-${ventType}`), vent_type: ventType } as MechanicalVentilation;
+  const exhaustIssues = (plant: Element, vents: Element[], fhs = false) => validateElementCore(plant, {
+    ...validationContext([plant, ...vents]), complianceValidationEnabled: fhs,
+  }).issues.filter((issue) => issue.message.includes('Exhaust-air heat pumps'));
+
+  it.each(['ExhaustAirMEV', 'ExhaustAirMVHR', 'ExhaustAirMixed'])('%s requires ventilation in core and FHS', (sourceType) => {
+    for (const fhs of [false, true]) {
+      expect(exhaustIssues(heatPump(sourceType), [], fhs)).toEqual([expect.objectContaining({
+        message: expect.stringContaining('Exhaust-air heat pumps require Centralised continuous MEV or MVHR ventilation'), fieldKey: 'extra_json',
+      })]);
+    }
+  });
+
+  it.each([false, true])('accepts compatible ventilation (wrapped=%s)', (wrapped) => {
+    for (const ventType of ['Centralised continuous MEV', 'MVHR']) {
+      expect(exhaustIssues(heatPump(), [ventilation(ventType, wrapped)])).toEqual([]);
+    }
+  });
+
+  it.each([false, true])('rejects incompatible units even alongside compatible ventilation (wrapped=%s)', (wrapped) => {
+    for (const ventType of ['Intermittent MEV', 'Decentralised continuous MEV']) {
+      expect(exhaustIssues(heatPump(), [ventilation('Centralised continuous MEV', !wrapped), ventilation(ventType, wrapped)]))
+        .toEqual([expect.objectContaining({
+          message: expect.stringContaining('Exhaust-air heat pumps cannot be combined with Intermittent MEV or Decentralised continuous MEV'),
+        })]);
+    }
+  });
+
+  it('ignores placeholder ventilation and reads standalone extra_json vent_type', () => {
+    const vent = ventilation('Centralised continuous MEV', false) as MechanicalVentilation;
+    expect(exhaustIssues(heatPump(), [{ ...vent, isPlaceholder: true }])).toHaveLength(1);
+    expect(exhaustIssues(heatPump(), [{ ...vent, vent_type: undefined, extra_json: { vent_type: 'Centralised continuous MEV' } } as unknown as MechanicalVentilation])).toEqual([]);
+  });
+
+  it('does not require exhaust ventilation for outdoor-air heat pumps or wet plant for HWOHP cylinders', () => {
+    expect(exhaustIssues(heatPump('OutsideAir'), [])).toEqual([]);
+    const cylinder: Element = {
+      ...heatPump(), subcategory: 'HotWaterSource',
+      extra_json: { HotWaterSource: { 'hw cylinder': { type: 'StorageTank', HeatSource: { hwo_hp: { type: 'HeatPump_HWOnly' } } } } },
+    } as Element;
+    expect(validateElementCore(cylinder, { ...validationContext([cylinder]), complianceValidationEnabled: true }).issues).toEqual([]);
+  });
+});
