@@ -81,7 +81,7 @@ export function upgradePcdbProductReferences(elements: readonly Element[]): Elem
     const extra = element.extra_json;
     const pcdb = extra?._pcdb as { productID?: unknown } | undefined;
     if (element.type !== 'System' || !pcdb || pcdb.productID === undefined) return element;
-    const productID = String(pcdb.productID);
+    const productID = String(pcdb.productID).trim();
     let upgraded = false;
     const next = JSON.parse(JSON.stringify(extra), (key, value) => {
       const digits = key === 'product_reference' && typeof value === 'string' ? /^[A-Za-z]+:(\d+)$/.exec(value)?.[1] : undefined;

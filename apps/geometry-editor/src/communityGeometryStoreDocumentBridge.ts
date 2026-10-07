@@ -148,6 +148,15 @@ export function createCommunityGeometryStoreDocumentBridge(
     }
   };
 
+  const updateSessionText = (text: string): GeometryDocumentSnapshot => {
+    writingSession = true;
+    try {
+      return session.updateDocument({ text });
+    } finally {
+      writingSession = false;
+    }
+  };
+
   const replaceSessionContents = (
     document: GeometryDocumentSnapshot,
     contents: GeometryDocumentContents,
@@ -174,11 +183,14 @@ export function createCommunityGeometryStoreDocumentBridge(
       )
         ? document
         : replaceSessionContents(document, preparedContents);
-      store.getState().loadFromCSV(preparedDocument.text);
+      const { upgraded } = store.getState().loadFromCSV(preparedDocument.text);
       const canonicalText = store.getState().generateCSV({ allowUnresolvedMigration: true });
+      // A load-time data upgrade is a change the user still has to save, not canonical formatting.
       observedDocument = canonicalText === preparedDocument.text
         ? preparedDocument
-        : replaceSessionText(preparedDocument, canonicalText);
+        : upgraded
+          ? updateSessionText(canonicalText)
+          : replaceSessionText(preparedDocument, canonicalText);
       storeMatchesDocument = true;
       clearError();
     } catch (cause) {
