@@ -320,3 +320,22 @@ describe('exhaust-air heat pump ventilation compatibility', () => {
     expect(validateElementCore(cylinder, { ...validationContext([cylinder]), complianceValidationEnabled: true }).issues).toEqual([]);
   });
 });
+
+describe('ECaaS-only products', () => {
+  it('warns, without a strict issue, when a System carries a product_reference', () => {
+    const plant: Element = {
+      id: 'ecaas-hp', name: 'Heat pump', type: 'System', subcategory: 'HeatSourceWet',
+      parent_element: null, coordinates: [{ x: 0, y: 0, z: 0 }], isPlaceholder: false,
+      extra_json: {
+        HeatSourceWet: { hp: { type: 'HeatPump', EnergySupply: 'mains elec', product_reference: 'HeatPump:123' } },
+        _pcdb: { brandName: 'Acme', modelName: 'HP-5' },
+      },
+    } as Element;
+    const result = validateElementCore(plant, validationContext([plant]));
+    expect(result.issues).toEqual([]);
+    expect(result.warnings).toContainEqual(expect.objectContaining({
+      fieldKey: 'extra_json',
+      message: "Heat pump (System): ECaaS-only product (Acme HP-5): this model can be submitted to ECaaS but can't run locally in Vulcan.",
+    }));
+  });
+});
