@@ -286,7 +286,6 @@ describe('resolveFieldPresentation', () => {
     ['core', 'Global', undefined, 'BuildingWidth', 'm'],
     ['core', 'Global', undefined, 'GroundFloorArea', 'm²'],
     ['core', 'Global', undefined, 'AirPermeability_test_result', 'm³/(h·m²)'],
-    ['fhs', 'Global', undefined, 'defaultThermalBridging', 'W/K'],
     ['core', 'Zone', undefined, 'floorArea', 'm²'],
     ['fhs', 'Zone', undefined, 'volume', 'm³'],
     ['core', 'ThermalBridgeLinear', undefined, 'tb_z0', 'm'],

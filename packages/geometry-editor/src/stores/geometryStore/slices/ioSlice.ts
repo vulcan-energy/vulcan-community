@@ -729,10 +729,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const value = state.hostDocumentMetadata[key]?.trim();
       if (value) lines.push(`${escapeCSV(key)},${escapeCSV(value)},,,,,,,,,,,,,`);
     }
-    const defaultTB = (typeof state.defaultThermalBridging === 'number' && !isNaN(state.defaultThermalBridging))
-      ? state.defaultThermalBridging
-      : 0.2;
-    lines.push(`DefaultThermalBridging,${defaultTB},,,,,,,,,,,,,`);
     // Per-floor overlay records are emitted in floor-index order so diffs stay stable.
     const overlayFloorKeys = Object.keys(state.guideOverlayByFloor)
       .map((k) => Number(k))
@@ -1787,9 +1783,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         guideOverlay: resolveGuideOverlayForFloor(overlayByFloor, activeZ).value,
         guideOverlaySource: resolveGuideOverlaySourceForFloor(sourceByFloor, activeZ).value,
       });
-    }
-    if (metadata.defaultThermalBridging !== undefined) {
-      get().setDefaultThermalBridging(metadata.defaultThermalBridging);
     }
     get().setJunctionPsiDefaultsPath(metadata.junctionPsiDefaultsPath);
     get().setDetailedBridgePsiProfile(metadata.detailedBridgePsiProfile);

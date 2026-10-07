@@ -43,9 +43,6 @@ export interface MetadataSlice {
   clearGuideOverlay: () => void;
   /** Drop the active floor's own overlay record so it falls back to inheritance. */
   resetGuideOverlayForActiveFloor: () => void;
-  /** Global thermal bridging default (W/K). */
-  defaultThermalBridging: number;
-  setDefaultThermalBridging: (value: number) => void;
   /** Workspace CSV of junction_type to linear psi (W/m.K); geometry CSV metadata row JunctionPsiDefaultsPath. */
   junctionPsiDefaultsPath?: string;
   setJunctionPsiDefaultsPath: (path: string | undefined) => void;
@@ -126,11 +123,6 @@ export const createMetadataSlice = (
   guideOverlaySource: null,
   guideOverlayByFloor: {} as GuideOverlayByFloor,
   guideOverlaySourceByFloor: {} as GuideOverlaySourceByFloor,
-  // Global thermal bridging default (W/K)
-  defaultThermalBridging: 0.2,
-  setDefaultThermalBridging: (value: number) => {
-    set({ defaultThermalBridging: value });
-  },
   setDefaultsPath: (path) => set({ defaultsPath: path }),
   setDefaultsJson: (json) => set({ defaultsJson: json }),
   setHostDocumentMetadataValue: (key, value) => set((state) => {

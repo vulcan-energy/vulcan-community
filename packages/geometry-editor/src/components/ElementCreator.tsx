@@ -959,14 +959,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   }, []);
 
   // Geometry store: data via shallow selector, stable function refs individually
-  const { zones, elementsById, elementIds, floors, complianceSettings, defaultThermalBridging, bundledAssemblyLibrary } = useGeometryStore(
+  const { zones, elementsById, elementIds, floors, complianceSettings, bundledAssemblyLibrary } = useGeometryStore(
     useShallow((s) => ({
       zones: s.zones,
       elementsById: s.elementsById,
       elementIds: s.elementIds,
       floors: s.floors,
       complianceSettings: s.complianceSettings,
-      defaultThermalBridging: s.defaultThermalBridging,
       bundledAssemblyLibrary: s.bundledAssemblyLibrary,
     }))
   );
@@ -1040,7 +1039,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return validateZone(zone, {
       elementsById,
       complianceValidationEnabled: complianceSettings.complianceValidationEnabled || false,
-      defaultThermalBridging,
       primaryFhsZoneId,
     });
   }, [
@@ -1048,7 +1046,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     getZoneById,
     elementsById,
     complianceSettings.complianceValidationEnabled,
-    defaultThermalBridging,
     primaryFhsZoneId,
   ]);
 

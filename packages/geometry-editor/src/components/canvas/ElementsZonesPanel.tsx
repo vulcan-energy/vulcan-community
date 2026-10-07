@@ -435,7 +435,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   } = useDrawingMode();
 
   const missingCategory = complianceSettings.complianceValidationEnabled ? 'critical' : 'warning';
-  const defaultThermalBridging = useGeometryStore((s) => s.defaultThermalBridging);
   const floors = useGeometryStore((s) => s.floors);
   const spaceLabelsById = useGeometryStore((s) => s.spaceLabelsById);
   const spaceLabelIds = useGeometryStore((s) => s.spaceLabelIds);
@@ -448,7 +447,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
       void elementsById;
       void elementIds;
       void complianceSettings;
-      void defaultThermalBridging;
       void spaceLabelsById;
       void spaceLabelIds;
       void storeZones;
@@ -458,7 +456,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
       elementsById,
       elementIds,
       complianceSettings,
-      defaultThermalBridging,
       spaceLabelsById,
       spaceLabelIds,
       storeZones,
@@ -620,7 +617,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
       const zoneValidation = validateZone(zone, {
         elementsById,
         complianceValidationEnabled: complianceSettings.complianceValidationEnabled || false,
-        defaultThermalBridging,
         primaryFhsZoneId,
       });
       const zoneSpaceLabelIds = spaceLabelIdsByZone.get(zone.id) ?? [];
@@ -645,7 +641,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     return validations;
   }, [
     complianceSettings.complianceValidationEnabled,
-    defaultThermalBridging,
     elementsById,
     floors,
     primaryFhsZoneId,

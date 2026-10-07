@@ -1249,8 +1249,6 @@ pub struct JSONBuilder {
     /// we skip injecting implicit `false` defaults for FHS-only root booleans used by validation.
     /// When `None` or `Some(true)`, FHS merges apply those defaults when keys are absent.
     compliance_validation_enabled: Option<bool>,
-    /// Default thermal bridging value (W/K) to use when simplified thermal bridging is disabled and no thermal bridge elements are defined
-    default_thermal_bridging: f64,
     /// FHS cold-water source selected from CSV Metadata `ColdWaterSource`.
     /// Core inputs keep their existing defaults shape; this only canonicalizes FHS-family output.
     cold_water_source: String,
@@ -1306,7 +1304,6 @@ impl JSONBuilder {
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
-            default_thermal_bridging: 0.2, // Default fallback value
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
@@ -1343,7 +1340,6 @@ impl JSONBuilder {
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
-            default_thermal_bridging: 0.2, // Default fallback value
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
@@ -1683,8 +1679,6 @@ impl JSONBuilder {
         migrate_vulcan_csv_to_current(&mut sanitized_csv_data)?;
         let csv_data = &sanitized_csv_data;
 
-        // Parse DefaultThermalBridging from metadata early so it's available for zone processing
-        self.parse_default_thermal_bridging_from_metadata(csv_data);
         self.parse_cold_water_source_from_metadata(csv_data);
 
         let mut result = self.defaults.clone();
@@ -4276,36 +4270,6 @@ impl JSONBuilder {
         Ok(())
     }
 
-    fn parse_default_thermal_bridging_from_metadata(
-        &mut self,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
-    ) {
-        // Parse DefaultThermalBridging from metadata early so it's available for zone processing
-        if let Some(metadata_rows) = csv_data.get("Metadata") {
-            for row in metadata_rows {
-                let (field_name, field_value) = extract_metadata_field(row);
-                if field_name.as_deref() == Some("DefaultThermalBridging") {
-                    if let Some(num) = self.csv_number_non_fatal(
-                        field_value.as_ref(),
-                        "DefaultThermalBridging",
-                        "Metadata",
-                    ) {
-                        if num < 0.0 {
-                            self.push_non_fatal(
-                                "E055",
-                                "Metadata",
-                                &format!("'DefaultThermalBridging' must be >= 0, got {num}"),
-                            );
-                        } else {
-                            self.default_thermal_bridging = num;
-                        }
-                    }
-                    break; // Found it, no need to continue
-                }
-            }
-        }
-    }
-
     fn normalize_cold_water_source(raw: &str) -> Option<&'static str> {
         match raw.trim() {
             COLD_WATER_SOURCE_MAINS => Some(COLD_WATER_SOURCE_MAINS),
@@ -4424,7 +4388,8 @@ impl JSONBuilder {
                 let (field_name, field_value) = extract_metadata_field(row);
 
                 if let Some(name) = field_name {
-                    // Skip fields already parsed before root-level merge.
+                    // ColdWaterSource is parsed before root-level merge; DefaultThermalBridging is a
+                    // legacy row no target applies, kept recognised so old CSVs still load.
                     if name == "DefaultThermalBridging" || name == "ColdWaterSource" {
                         continue;
                     }
@@ -12504,6 +12469,26 @@ Living,Zone,100,50
             tb.is_empty(),
             "ThermalBridging should stay empty without CSV rows"
         );
+    }
+
+    #[test]
+    fn legacy_default_thermal_bridging_row_loads_and_leaves_no_trace() {
+        let build = |value: &str| {
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\nVulcanCsvVersion,3\nDefaultThermalBridging,{value}\n\nZone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n"
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let json = builder.build_json(&data).expect("legacy CSV should build");
+            (json, builder.take_non_fatal_errors())
+        };
+        let (with_value, errors) = build("5");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(!with_value.to_string().contains("DefaultThermalBridging"));
+        assert_eq!(with_value, build("0.2").0, "value must never reach merged JSON");
+        // The row is inert, so even a malformed legacy value must not block the merge.
+        assert!(build("-1").1.is_empty());
     }
 
     #[test]

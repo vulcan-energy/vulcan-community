@@ -479,7 +479,6 @@ export function GlobalSettingsModal({
     elementsById,
     defaultsPath,
     propertyPostcode,
-    defaultThermalBridging,
     complianceSettings,
     floors,
     globalOrientationOffset,
@@ -498,7 +497,6 @@ export function GlobalSettingsModal({
       elementsById: state.elementsById,
       defaultsPath: state.defaultsPath,
       propertyPostcode: state.propertyPostcode,
-      defaultThermalBridging: state.defaultThermalBridging,
       complianceSettings: state.complianceSettings,
       floors: state.floors,
       globalOrientationOffset: state.globalOrientationOffset,
@@ -516,9 +514,6 @@ export function GlobalSettingsModal({
   const setDefaultsPath = useGeometryStore((state) => state.setDefaultsPath);
   const setPropertyPostcode = useGeometryStore(
     (state) => state.setPropertyPostcode
-  );
-  const setDefaultThermalBridging = useGeometryStore(
-    (state) => state.setDefaultThermalBridging
   );
   const setJunctionPsiDefaultsPath = useGeometryStore(
     (state) => state.setJunctionPsiDefaultsPath
@@ -3271,66 +3266,6 @@ export function GlobalSettingsModal({
                       gap: "var(--spacing-md)",
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-secondary)",
-                        marginBottom: "var(--spacing-sm)",
-                      }}
-                    >
-                      Heat loss through junctions (W/K per zone) when you are
-                      not using individual thermal bridge elements. If zones are
-                      merged, these values add together.
-                    </div>
-                    <StandardInput
-                      type="number"
-                      unit={complianceFieldUnit("defaultThermalBridging", "Fallback heat loss (W/K)")}
-                      label={
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                          }}
-                        >
-                          {complianceFieldLabel(
-                            "Fallback heat loss (W/K)",
-                            "defaultThermalBridging"
-                          )}
-                          {renderEvidencePill(
-                            "defaultThermalBridging",
-                            "Default Thermal Bridging"
-                          )}
-                        </div>
-                      }
-                      value={defaultThermalBridging.toString()}
-                      onChange={(e) => {
-                        const inputValue = e.target.value;
-                        if (inputValue === "" || inputValue === ".") {
-                          // Allow empty or partial decimal input
-                          return;
-                        }
-                        const parsed = parseFloat(inputValue);
-                        if (!isNaN(parsed) && parsed >= 0) {
-                          setDefaultThermalBridging(parsed);
-                        }
-                      }}
-                      onBlur={(e) => {
-                        // On blur, ensure we have a valid value or default to 0.20
-                        const inputValue = e.target.value;
-                        if (
-                          inputValue === "" ||
-                          isNaN(parseFloat(inputValue))
-                        ) {
-                          setDefaultThermalBridging(0.2);
-                        }
-                      }}
-                      min="0"
-                      step="0.01"
-                      variant="ghost"
-                      size="md"
-                    />
-
                     {externalDetailProfileSection}
 
                     <details

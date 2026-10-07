@@ -25,12 +25,6 @@ const THERMAL_BRIDGE_TYPES: ElementType[] = [
   'ThermalBridgePoint',
 ];
 
-export const hasPositiveDefaultThermalBridging = (
-  defaultThermalBridging?: number
-): boolean => typeof defaultThermalBridging === 'number'
-  && Number.isFinite(defaultThermalBridging)
-  && defaultThermalBridging > 0;
-
 export const zoneHasDetailedThermalBridging = (
   zoneId: string,
   elementsById: Record<string, Element>
@@ -42,12 +36,8 @@ export const zoneHasDetailedThermalBridging = (
 
 export const zoneHasThermalBridging = (
   zone: Zone,
-  elementsById: Record<string, Element>,
-  _defaultThermalBridging?: number
-): boolean => {
-  void _defaultThermalBridging;
-  return zone.simplifiedThermalBridging || zoneHasDetailedThermalBridging(zone.id, elementsById);
-};
+  elementsById: Record<string, Element>
+): boolean => zone.simplifiedThermalBridging || zoneHasDetailedThermalBridging(zone.id, elementsById);
 
 /** HotWaterDemand rows that count as shower or bath for FHS (avoids synthetic HW drawoff naming issues). */
 const SHOWER_OR_BATH_SUBCATEGORIES = new Set(['MixerShower', 'InstantElecShower', 'Bath']);
@@ -263,7 +253,6 @@ export const detectMissingElements = (
   zones: Zone[],
   elementsById: Record<string, Element>,
   complianceValidationEnabled: boolean,
-  defaultThermalBridging?: number,
   partOActiveCoolingRequired?: boolean,
   partFContext?: PartFDetectionContext,
 ): MissingElement[] => {
@@ -441,7 +430,7 @@ export const detectMissingElements = (
       });
     }
 
-    const hasThermalBridging = zoneHasThermalBridging(zone, elementsById, defaultThermalBridging);
+    const hasThermalBridging = zoneHasThermalBridging(zone, elementsById);
     if (!hasThermalBridging) {
       perZone.push({
         type: 'ThermalBridgeLinear',

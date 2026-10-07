@@ -160,7 +160,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([radiator]),
       true,
-      0,
       false,
       partFCtx(),
     );
@@ -180,7 +179,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([system]),
       true,
-      0,
       false,
       partFCtx(),
     );
@@ -196,7 +194,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([system]),
       true,
-      0,
       false,
       partFCtx(),
     );
@@ -213,7 +210,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, bath]),
       true,
-      0,
       false,
       partFCtx({ storeys: 2 }),
     );
@@ -233,7 +229,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, bath]),
       true,
-      0,
       false,
       partFCtx({ storeys: 1 }),
     );
@@ -251,7 +246,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, shower]),
       true,
-      0,
       false,
       partFCtx({ storeys: 2 }),
     );
@@ -269,7 +263,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, shower]),
       true,
-      0,
       false,
       partFCtx({ storeys: 2 }),
     );
@@ -291,7 +284,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById(els),
       true,
-      0,
       false,
       partFCtx({ spaceLabels: [bedroomLabel(0, 0)] }),
     );
@@ -314,7 +306,7 @@ describe('detectMissingElements + Part F', () => {
     const cmev = mv('Centralised continuous MEV', 200);
     const els = [wall, cmev];
 
-    const missing = detectMissingElements([z1], elementsById(els), true, 0, false);
+    const missing = detectMissingElements([z1], elementsById(els), true, false);
     const partFRows = missing.filter((m) => m.path.startsWith('/InfiltrationVentilation/'));
     expect(partFRows).toHaveLength(0);
   });
@@ -328,8 +320,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById(els),
-      false, // compliance off
-      0,
+      false,
       false,
       partFCtx({ spaceLabels: [bedroomLabel(0, 0)] }),
     );
@@ -345,7 +336,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([placeholder, cmev]),
       true,
-      0,
       false,
       partFCtx(),
     );
@@ -362,7 +352,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, cmev]),
       true,
-      0,
       false,
       partFCtx({ habitableRooms: undefined }),
     );
@@ -380,7 +369,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, wnd, cmev]),
       true,
-      0,
       false,
       partFCtx({ spaceLabels: [bedroomLabel(0, 0)] }),
     );
@@ -410,7 +398,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, cmev, ...enoughVents]),
       true,
-      0,
       false,
       partFCtx(),
     );
@@ -438,7 +425,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, imev1, imev2, ...padVents]),
       true,
-      0,
       false,
       partFCtx({
         bedrooms: 1,
@@ -469,7 +455,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, mvhr, offendingVent]),
       true,
-      0,
       false,
       partFCtx(),
     );
@@ -488,7 +473,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, imev, cmev]),
       true,
-      0,
       false,
       partFCtx({
         bedrooms: 4,
@@ -530,7 +514,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, cmev, oneHugeVent]),
       true,
-      0,
       false,
       partFCtx({ bedrooms: 4, habitableRooms: 5 }),
     );
@@ -552,7 +535,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, imev1, imev2, imev3]),
       true,
-      0,
       false,
       partFCtx({
         bedrooms: 2,
@@ -590,7 +572,6 @@ describe('detectMissingElements + Part F', () => {
       [z1],
       elementsById([wall, imev, ...padVents]),
       true,
-      0,
       false,
       partFCtx({
         bedrooms: 1,

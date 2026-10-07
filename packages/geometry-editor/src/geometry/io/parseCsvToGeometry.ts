@@ -218,7 +218,6 @@ export type ParsedCsvMetadata = {
   guideOverlaySourceByFloor: GuideOverlaySourceByFloor;
   floorHeightOverrides: readonly FloorHeightOverrideRow[];
   floorBaseHeightOverrides: readonly FloorBaseHeightOverrideRow[];
-  defaultThermalBridging?: number;
   complianceSettings: ComplianceSettings;
   creationDefaultAssemblyIds?: Partial<Record<'wall' | 'roof' | 'ground_floor', string>>;
   detailedBridgePsiProfile?: ExternalDetailProfileLink | null;
@@ -281,7 +280,6 @@ export const parseCsvToGeometry = (
   const zoneOverrideDescriptorsByKey = new Map<string, OverrideDescriptor>(
     OVERRIDE_PROVENANCE_REGISTRY.zone.map((descriptor) => [descriptor.key, descriptor]),
   );
-  let detectedDefaultThermalBridging: number | undefined;
   let detectedDefaultAssemblyWall: string | undefined;
   let detectedDefaultAssemblyRoof: string | undefined;
   let detectedDefaultAssemblyGroundFloor: string | undefined;
@@ -443,11 +441,8 @@ export const parseCsvToGeometry = (
       }
       continue;
     }
-    if (line.startsWith('DefaultThermalBridging,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value) && value >= 0) detectedDefaultThermalBridging = value;
-      continue;
-    }
+    // Legacy row: never applied by any target; older CSVs still carry it.
+    if (line.startsWith('DefaultThermalBridging,')) continue;
     if (line.startsWith('PartO_active_cooling_required,')) {
       const value = line.split(',')[1]?.trim().toUpperCase();
       complianceSettings.PartO_active_cooling_required = value === 'TRUE';
@@ -733,7 +728,6 @@ export const parseCsvToGeometry = (
       guideOverlaySourceByFloor: detectedGuideOverlaySourceByFloor,
       floorHeightOverrides: detectedFloorHeightOverrides,
       floorBaseHeightOverrides: detectedFloorBaseHeightOverrides,
-      defaultThermalBridging: detectedDefaultThermalBridging,
       complianceSettings,
       ...(Object.keys(creationDefaultAssemblyIds).length > 0 ? { creationDefaultAssemblyIds } : {}),
       ...(detailedBridgePsiProfile ? { detailedBridgePsiProfile } : {}),
