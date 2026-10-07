@@ -160,3 +160,30 @@
 .overlay-filebar:has(.csv-migration-review) {
   z-index: 2200;
 }
+
+/* A save decision stays anchored to the action without resizing the file bar. */
+.save-review-popover {
+  margin: 0;
+  padding: 0;
+  position: fixed;
+  z-index: 10000;
+  width: min(440px, calc(100vw - 24px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  overflow: auto;
+}
+.save-review-popover h3 { flex-shrink: 0; margin: 0; padding: 16px; font-size: 1rem; }
+.save-review-content { padding: 0 16px; overflow-y: auto; }
+.save-review-content p { margin: 0 0 12px; }
+.save-review-items { display: grid; gap: 8px; margin-bottom: 16px; }
+.save-review-item { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.save-review-item span:last-child { margin-left: auto; white-space: nowrap; color: var(--text-secondary); }
+.save-review-item input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent-primary); }
+.save-review-content .save-review-hint { margin: 12px 0; color: var(--text-secondary); font-size: 0.85rem; }
+.save-review-actions { flex-shrink: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border-subtle); }
