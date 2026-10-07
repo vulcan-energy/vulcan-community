@@ -107,9 +107,7 @@ export async function preloadSchema(): Promise<void> {
   if (schemaObj) return;
   if (!preloadCoreSchemaPromise) {
     const generation = schemaAssetGeneration;
-    preloadCoreSchemaPromise = (async () => {
-      try {
-        const txt = await loadSchemaText('core');
+    preloadCoreSchemaPromise = loadSchemaText('core').then((txt) => {
         if (generation !== schemaAssetGeneration) throw new Error('Geometry schema load superseded by a target change');
         schemaText = txt;
         schemaObj = asSchemaNode(JSON.parse(txt));
@@ -121,14 +119,13 @@ export async function preloadSchema(): Promise<void> {
         // Reset schema-derived node caches for core schema
         compiledPropValidatorCore = new WeakMap();
         normalizedSystemSubtypeNodesCore = new WeakMap();
-      } catch (e) {
+      }).catch((e) => {
         if (generation !== schemaAssetGeneration) throw e;
         schemaText = null;
         schemaObj = null;
         console.error('[SchemaCache] Core schema load failed', e);
         throw e;
-      }
-    })().finally(() => {
+      }).finally(() => {
       if (generation === schemaAssetGeneration) preloadCoreSchemaPromise = null;
     });
   }
@@ -241,9 +238,7 @@ export async function preloadFHSSchema(): Promise<void> {
   if (fhsSchemaObj) return;
   if (!preloadFhsSchemaPromise) {
     const generation = schemaAssetGeneration;
-    preloadFhsSchemaPromise = (async () => {
-      try {
-        const txt = await loadSchemaText('fhs');
+    preloadFhsSchemaPromise = loadSchemaText('fhs').then((txt) => {
         if (generation !== schemaAssetGeneration) throw new Error('Geometry schema load superseded by a target change');
         const obj = asSchemaNode(JSON.parse(txt));
         if (!obj || (!obj.$defs && !obj.properties)) throw new Error('FHS geometry schema is missing properties and $defs');
@@ -252,14 +247,13 @@ export async function preloadFHSSchema(): Promise<void> {
         strictestIntegerKeysCache.clear();
         compiledPropValidatorFhs = new WeakMap();
         normalizedSystemSubtypeNodesFhs = new WeakMap();
-      } catch (e: unknown) {
+      }).catch((e: unknown) => {
         if (generation !== schemaAssetGeneration) throw e;
         fhsSchemaText = null;
         fhsSchemaObj = null;
         console.error('[SchemaCache] FHS schema load failed:', errorMessageFromUnknown(e));
         throw e;
-      }
-    })().finally(() => { if (generation === schemaAssetGeneration) preloadFhsSchemaPromise = null; });
+      }).finally(() => { if (generation === schemaAssetGeneration) preloadFhsSchemaPromise = null; });
   }
   await preloadFhsSchemaPromise;
 }

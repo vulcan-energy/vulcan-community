@@ -525,11 +525,11 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
         )}
         {elementType === 'BuildingElementPartyWall' && (
           <>
-            {renderFieldLabel('Whole-wall U-value (W/m²K):', elementType, 'u_value_whole_wall')}
+            <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Whole-wall U-value (W/m²K):</div>
             <div className="element-input" ref={registerBaseFieldRef('u_value_whole_wall')}>
               <StandardInput {...decimalInputProps(state.partyWallWholeUInput)} aria-label="Whole-wall U-value" unit="W/m²K" step="0.01" min="0" variant="ghost" size="md" />
             </div>
-            {renderFieldLabel('Construction resistance to midpoint (m²K/W):', elementType, 'thermal_resistance_construction')}
+            <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Construction resistance to midpoint (m²K/W):</div>
             <div className="element-input" ref={registerBaseFieldRef('thermal_resistance_construction')}>
               <StandardInput {...decimalInputProps(state.partyWallConstructionRInput)} aria-label="Construction resistance to midpoint" unit="m²K/W" step="0.01" min="0" variant="ghost" size="md" />
               <span style={INLINE_FIELD_NOTE_STYLE}>Manual values are supported. Whole-wall U and construction resistance are independent; an assembly is optional.</span>

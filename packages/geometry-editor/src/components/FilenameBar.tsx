@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import ReactDOM from 'react-dom';
 import {
   defineFilenameActionContributions,
@@ -44,6 +44,21 @@ export type FilenameBarProps = Omit<FilenameBarActionContext, 'filename'> & Read
     React.ReactNode
   >;
 }>;
+
+type MigrationReviewState = { selectedIds: string[]; meaning: UValueInterpretation | '' };
+type MigrationReviewAction =
+  | { type: 'toggle'; elementId: string; checked: boolean }
+  | { type: 'meaning'; meaning: UValueInterpretation | '' }
+  | { type: 'reset' };
+
+const initialMigrationReview: MigrationReviewState = { selectedIds: [], meaning: '' };
+function migrationReviewReducer(state: MigrationReviewState, action: MigrationReviewAction): MigrationReviewState {
+  if (action.type === 'reset') return initialMigrationReview;
+  if (action.type === 'meaning') return { ...state, meaning: action.meaning };
+  return { ...state, selectedIds: action.checked
+    ? [...state.selectedIds, action.elementId]
+    : state.selectedIds.filter((id) => id !== action.elementId) };
+}
 
 const EMPTY_FILENAME_ACTION_CONTRIBUTIONS =
   defineFilenameActionContributions<FilenameBarActionContext, React.ReactNode>({
@@ -283,8 +298,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const resolveCsvMeaning = useGeometryStore((s) => s.resolveCsvUValueInterpretation);
   const migrationIssues = useMemo(() => csvUpgradeRequested || sourceCsvVersion >= 3
     ? csvMigrationIssues(Object.values(elementsById), sourceCsvVersion) : [], [elementsById, sourceCsvVersion, csvUpgradeRequested]);
-  const [migrationSelection, setMigrationSelection] = useState<string[]>([]);
-  const [migrationMeaning, setMigrationMeaning] = useState<UValueInterpretation | ''>('');
+  const [migrationReview, dispatchMigrationReview] = useReducer(migrationReviewReducer, initialMigrationReview);
   const setSelection = useGeometryStore((s) => s.setSelection);
   const setSelectedElementIds = useGeometryStore((s) => s.setSelectedElementIds);
   const setCurrentFloorZ = useGeometryStore((s) => s.setCurrentFloorZ);
@@ -769,18 +783,18 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
       <summary>Review legacy party-wall U-value meaning ({migrationIssues.length} elements)</summary>
       <p>Select the elements that share a meaning. Numbers are preserved; validation or Save does not confirm a meaning. The original file is retained.</p>
       {migrationIssues.map(issue => <label key={issue.elementId} style={{ display: 'block' }}>
-        <input type="checkbox" checked={migrationSelection.includes(issue.elementId)} onChange={event => setMigrationSelection(ids => event.target.checked ? [...ids, issue.elementId] : ids.filter(id => id !== issue.elementId))} />
+        <input type="checkbox" checked={migrationReview.selectedIds.includes(issue.elementId)} onChange={event => dispatchMigrationReview({ type: 'toggle', elementId: issue.elementId, checked: event.target.checked })} />
         {issue.elementName}: {issue.value} W/m²K
       </label>)}
-      <select aria-label="Legacy U-value meaning" value={migrationMeaning} onChange={event => setMigrationMeaning(event.target.value as UValueInterpretation | '')}>
+      <select aria-label="Legacy U-value meaning" value={migrationReview.meaning} onChange={event => dispatchMigrationReview({ type: 'meaning', meaning: event.target.value as UValueInterpretation | '' })}>
         <option value="">Unknown — choose a meaning or correct the data</option>
         <option value="whole_wall">Whole-wall U-value</option>
         <option value="half_construction">Previous HEM half-construction U-value</option>
       </select>
-      <button type="button" disabled={!migrationMeaning || !migrationSelection.some(id => migrationIssues.some(issue => issue.elementId === id))} onClick={() => {
-        if (!migrationMeaning) return;
-        resolveCsvMeaning(migrationSelection.filter(id => migrationIssues.some(issue => issue.elementId === id)), migrationMeaning);
-        setMigrationSelection([]); setMigrationMeaning('');
+      <button type="button" disabled={!migrationReview.meaning || !migrationReview.selectedIds.some(id => migrationIssues.some(issue => issue.elementId === id))} onClick={() => {
+        if (!migrationReview.meaning) return;
+        resolveCsvMeaning(migrationReview.selectedIds.filter(id => migrationIssues.some(issue => issue.elementId === id)), migrationReview.meaning);
+        dispatchMigrationReview({ type: 'reset' });
       }}>Apply meaning to selected elements</button>
     </details>}
     <div className="filename-bar">
@@ -828,7 +842,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           className="btn btn-standard"
           disabled={saveStatus === 'saving'}
           title="Review format changes, then save an upgraded copy. Ordinary Save keeps the current format."
-          onClick={() => { setMigrationSelection([]); setMigrationMeaning(''); requestCsvUpgrade(); }}
+          onClick={() => { dispatchMigrationReview({ type: 'reset' }); requestCsvUpgrade(); }}
         >Upgrade format</button>}
         <div className="filename-bar-save-stack">
         <button
