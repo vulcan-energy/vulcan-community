@@ -987,8 +987,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   'core/BuildingElementPartyWall [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
-    'u_value | U-Value | textbox | 0 | - | - | tip',
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
   ],
   'core/BuildingElementTransparent [every subtype]': [
     'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
@@ -1142,8 +1140,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
   ],
   'fhs/BuildingElementPartyWall [every subtype]': [
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
-    'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
   ],
