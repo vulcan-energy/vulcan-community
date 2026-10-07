@@ -1243,7 +1243,7 @@ pub struct JSONBuilder {
     /// In that case we keep richer FHS-only fields; for Core schemas we rely strictly
     /// on the Core schema's allowed properties when pruning.
     is_fhs_schema: bool,
-    conversion_profile: crate::ConversionProfile,
+    input_contract: crate::InputContract,
     schema_omissions: RefCell<Vec<crate::finalization::SchemaOmission>>,
     /// Parsed from CSV Metadata `ComplianceValidationEnabled` (workflow flag). When `Some(false)`,
     /// we skip injecting implicit `false` defaults for FHS-only root booleans used by validation.
@@ -1265,7 +1265,7 @@ pub struct JSONBuilder {
 
 impl JSONBuilder {
     pub fn set_conversion_profile(&mut self, profile: crate::ConversionProfile) {
-        self.conversion_profile = profile;
+        self.input_contract = profile.input_contract();
     }
 
     /// True when this builder validates against an FHS-family schema (FHS / ECaaS).
@@ -1297,7 +1297,7 @@ impl JSONBuilder {
 
         let mut builder = Self {
             is_fhs_schema: is_fhs,
-            conversion_profile: crate::ConversionProfile::default(),
+            input_contract: crate::ConversionProfile::default().input_contract(),
             schema_omissions: RefCell::new(Vec::new()),
             schema,
             defaults,
@@ -1334,7 +1334,7 @@ impl JSONBuilder {
 
         let mut builder = Self {
             is_fhs_schema: is_fhs,
-            conversion_profile: crate::ConversionProfile::default(),
+            input_contract: crate::ConversionProfile::default().input_contract(),
             schema_omissions: RefCell::new(Vec::new()),
             schema,
             defaults,
@@ -1717,7 +1717,7 @@ impl JSONBuilder {
             self.sanitize_fhs_output(&mut result);
         }
 
-        crate::map_target_unobstructed_shading(&mut result, self.conversion_profile);
+        crate::target_mappings::map_contract_unobstructed_shading(&mut result, self.input_contract);
 
         // Schema-based cleanup: removes properties not allowed by the schema
         // This replaces hardcoded cleanup functions with a programmatic approach
@@ -2429,23 +2429,18 @@ impl JSONBuilder {
                     }
 
                     let target_path = format!("Zone/{zone_name}/BuildingElement/{element_name}");
-                    let diagnostics = match self.conversion_profile {
-                        crate::ConversionProfile::PythonFhsA8 => {
-                            crate::target_mappings::map_python_a8_element(
+                    let contract = self.input_contract;
+                    let diagnostics = match contract.elements {
+                        crate::ElementInputConvention::PhysicalOpeningFullPartition => {
+                            crate::target_mappings::map_physical_opening_full_partition_element(
                                 element_row,
                                 &mut element_obj,
                                 &target_path,
+                                contract.party_wall_requires_whole_u,
                             )
                         }
-                        crate::ConversionProfile::PythonFhsA9 => {
-                            crate::target_mappings::map_python_a9_element(
-                                element_row,
-                                &mut element_obj,
-                                &target_path,
-                            )
-                        }
-                        crate::ConversionProfile::CurrentRustFhs => {
-                            crate::target_mappings::map_rust_element(
+                        crate::ElementInputConvention::DividedOpeningHalfPartition => {
+                            crate::target_mappings::map_divided_opening_half_partition_element(
                                 element_row,
                                 &mut element_obj,
                                 &target_path,
@@ -12715,10 +12710,11 @@ Name,Type
             ]);
             migrate_vulcan_csv_to_current(&mut source).unwrap();
             let mut output = serde_json::json!({"type":"BuildingElementTransparent"});
-            let errors = crate::target_mappings::map_python_a9_element(
+            let errors = crate::target_mappings::map_physical_opening_full_partition_element(
                 &source["Window Elements"][0],
                 &mut output,
                 "test",
+                true,
             );
             assert!(errors.is_empty(), "{errors:?}");
             assert_eq!(output["window_part_list"][0]["mid_height"], 1.4);
