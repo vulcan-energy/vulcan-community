@@ -117,7 +117,7 @@ import {
 export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
 import { internalAdjacentConditionedAreaMultiplier } from '../../../lib/elementArea';
-import { assertCsvMigrationResolved, csvMigrationIssues, resolveCsvUValueMeaning, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
+import { assertCsvMigrationResolved, csvMigrationIssues, resolveCsvUValueMeaning, upgradePcdbProductReferences, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
 
 export interface IoSlice {
   sourceCsvVersion: number;
@@ -129,8 +129,9 @@ export interface IoSlice {
   getCsvMigrationIssues: () => CsvMigrationIssue[];
   resolveCsvUValueInterpretation: (ids: readonly string[], meaning: UValueInterpretation) => void;
   generateCSV: (options?: { allowUnresolvedMigration?: boolean }) => string;
-  /** Returns non-fatal data-loss warnings from CSV parsing; load UIs must surface them. */
-  loadFromCSV: (csvContent: string) => { warnings: string[] };
+  /** Returns non-fatal data-loss warnings from CSV parsing; load UIs must surface them.
+   * `upgraded` means a load-time data upgrade left the model dirty against its baseline. */
+  loadFromCSV: (csvContent: string) => { warnings: string[]; upgraded: boolean };
   /** CSV at the moment of the last successful save or load; null until either occurs. */
   lastSavedCsv: string | null;
   /** Set after a successful save or load. */
@@ -2173,14 +2174,17 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     // Round-trip through the canonical serializer after all synchronous load
     // normalization, before control returns to callers that may edit immediately.
-    scheduleLoadedCsvBaseline(
-      get,
-      set,
-      loadedCsvWorkScheduler,
-      get().generateCSV({ allowUnresolvedMigration: true }),
-    );
+    const loadedCsvBaseline = get().generateCSV({ allowUnresolvedMigration: true });
+    // Applied after the baseline so the upgrade leaves the model dirty and the next save writes it.
+    const loadedElements = get().elementIds.map(id => get().elementsById[id]);
+    const upgradedElements = upgradePcdbProductReferences(loadedElements);
+    const upgraded = upgradedElements !== loadedElements;
+    if (upgraded) {
+      set({ elementsById: { ...get().elementsById, ...Object.fromEntries(upgradedElements.map(el => [el.id, el])) } });
+    }
+    scheduleLoadedCsvBaseline(get, set, loadedCsvWorkScheduler, loadedCsvBaseline);
 
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings] };
+    return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded };
   },
   });
 };
