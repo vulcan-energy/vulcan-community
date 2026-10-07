@@ -190,9 +190,9 @@ fn map_window(
             return;
         }
         make_single_opening(row, element, midpoint, path, errors);
-    } else if parts.is_some() {
+    } else if let Some(parts) = parts {
         // Invalid declared values must survive to validation, never become fixed glazing.
-        element.insert("window_part_list".into(), parts.unwrap().clone());
+        element.insert("window_part_list".into(), parts.clone());
     } else {
         make_single_opening(
             row,
