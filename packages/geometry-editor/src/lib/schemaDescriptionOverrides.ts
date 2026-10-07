@@ -1567,12 +1567,6 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'm',
     modelAuthoring: true,
   },
-  'Global:defaultThermalBridging': {
-    description: 'Fallback heat loss through junctions per zone (unit: W/K).',
-    type: 'number',
-    units: 'W/K',
-    modelAuthoring: true,
-  },
   'Zone:floorArea': {
     description: 'Zone floor area used for model authoring (unit: m²).',
     type: 'number',

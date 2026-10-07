@@ -778,17 +778,32 @@ describe('annotateProposalsWithDedupe', () => {
     expect(lintelAnn.status).toBe('new');
   });
 
-  it('does not match when junction_type differs', () => {
+  it('does not match when junction_type is outside the edge role options', () => {
     const w = makeWindow({ id: 'win-a', name: 'W1' });
     const proposals = proposeFacadeOpeningThermalBridges([w]);
     const sill = proposals.find((p) => p.edgeRole === 'sill')!;
     const tb = makeTb({
       id: 'tb-wrong-code',
       coordinates: [sill.coordinates[0], sill.coordinates[1]],
-      extra_json: { junction_type: 'E1' },
+      extra_json: { junction_type: 'P1' },
     });
     const sillAnn = annotateProposalsWithDedupe(proposals, [w, tb]).find((p) => p.edgeRole === 'sill')!;
     expect(sillAnn.status).toBe('new');
+  });
+
+  it('marks a lintel saved under another option for its role (E2) as duplicate', () => {
+    const w = makeWindow({ id: 'win-a', name: 'W1' });
+    const proposals = proposeFacadeOpeningThermalBridges([w]);
+    const lintel = proposals.find((p) => p.edgeRole === 'lintel')!;
+    expect(lintel.junctionCode).toBe('E1');
+    const tb = makeTb({
+      id: 'tb-lintel-e2',
+      coordinates: [lintel.coordinates[0], lintel.coordinates[1]],
+      extra_json: { junction_type: 'E2' },
+    });
+    const lintelAnn = annotateProposalsWithDedupe(proposals, [w, tb]).find((p) => p.edgeRole === 'lintel')!;
+    expect(lintelAnn.status).toBe('duplicate');
+    expect(lintelAnn.matchedExistingId).toBe('tb-lintel-e2');
   });
 
   it('does not match when midpoint is beyond tolerance', () => {

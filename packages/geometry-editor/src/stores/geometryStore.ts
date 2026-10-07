@@ -7276,7 +7276,6 @@ const createGeometryState = (
       guideOverlaySource: null,
       guideOverlayByFloor: {},
       guideOverlaySourceByFloor: {},
-      defaultThermalBridging: 0.2,
       junctionPsiDefaultsPath: undefined,
       junctionPsiDefaultsMap: {},
       junctionPsiDefaultsLoading: false,
@@ -7483,7 +7482,6 @@ const createGeometryState = (
       const validation = validateZone(zone, {
         elementsById: state.elementsById,
         complianceValidationEnabled: state.complianceSettings.complianceValidationEnabled || false,
-        defaultThermalBridging: state.defaultThermalBridging,
         primaryFhsZoneId,
       });
       allWarnings.push(...validation.warnings.map(w => w.message));
@@ -7531,7 +7529,6 @@ const createGeometryState = (
       state.zones,
       state.elementsById,
       complianceValidationEnabled,
-      state.defaultThermalBridging,
       state.complianceSettings.PartO_active_cooling_required || false,
       complianceValidationEnabled
         ? selectPartFData({

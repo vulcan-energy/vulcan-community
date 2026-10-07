@@ -108,18 +108,6 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
     isMetadata: true,
   },
   {
-    id: 'default_thermal_bridging',
-    label: 'Default Thermal Bridging',
-    field: 'DefaultThermalBridging',
-    sections: ['Metadata'],
-    category: 'Airtightness & bridging',
-    units: 'W/m\u00b2K',
-    description: 'Default y-value used when simplified thermal bridging is enabled',
-    valueType: 'number',
-    constraints: { min: 0 },
-    isMetadata: true,
-  },
-  {
     id: 'air_permeability_test_pressure',
     label: 'Air Permeability Test Pressure',
     field: 'AirPermeability_test_pressure',

@@ -72,8 +72,9 @@ describe('FIELD_TARGETS', () => {
   it('contains metadata field targets', () => {
     const ids = FIELD_TARGETS.map((t) => t.id);
     expect(ids).toContain('air_permeability_test_result');
-    expect(ids).toContain('default_thermal_bridging');
     expect(ids).toContain('ventilation_zone_base_height');
+    // DefaultThermalBridging is never applied by any target, so batch must not offer it.
+    expect(ids).not.toContain('default_thermal_bridging');
   });
 
   it('metadata targets have isMetadata flag set', () => {
@@ -81,7 +82,6 @@ describe('FIELD_TARGETS', () => {
     expect(metaTargets.map((t) => t.id).sort()).toEqual([
       'air_permeability_test_pressure',
       'air_permeability_test_result',
-      'default_thermal_bridging',
       'heating_control_type',
       'ventilation_shield_class',
       'ventilation_terrain_class',
@@ -118,7 +118,6 @@ describe('FIELD_TARGETS', () => {
         "areal_heat_capacity_ground",
         "areal_heat_capacity_opaque",
         "areal_heat_party_wall",
-        "default_thermal_bridging",
         "frame_area_fraction",
         "free_area_height",
         "g_value",
@@ -362,14 +361,6 @@ describe('validateFieldValue', () => {
     expect(validateFieldValue(target, '0')).toBeNull();
     expect(validateFieldValue(target, '-1')).toBe('Must be at least 0');
     expect(validateFieldValue(target, 'abc')).toBe('Must be a valid number');
-  });
-
-  it('validates default_thermal_bridging target', () => {
-    const target = getFieldTargetById('default_thermal_bridging')!;
-    expect(validateFieldValue(target, '0.15')).toBeNull();
-    expect(validateFieldValue(target, '0.08')).toBeNull();
-    expect(validateFieldValue(target, '0')).toBeNull();
-    expect(validateFieldValue(target, '-0.1')).toBe('Must be at least 0');
   });
 
   it('validates FHS areal_heat_capacity string enums', () => {

@@ -82,6 +82,19 @@ describe("GlobalSettingsModal", () => {
     expect(store.getState().propertyPostcode).toBe("MK40 1AA");
   });
 
+  it("offers no fallback thermal-bridging heat loss, which no target applies", async () => {
+    const user = userEvent.setup();
+    render(
+      <GeometryStoreProvider store={createGeometryStore()}>
+        <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} />
+      </GeometryStoreProvider>
+    );
+
+    await user.click(screen.getByRole("tab", { name: /Global values/i }));
+    await user.click(screen.getByText("Thermal Bridging"));
+    expect(screen.queryByText(/Fallback heat loss/)).not.toBeInTheDocument();
+  });
+
   it("duplicates defaults through the injected workspace without a private editor", async () => {
     const user = userEvent.setup();
     const store = createGeometryStore();

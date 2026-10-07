@@ -2382,7 +2382,6 @@ export const collectGeometryValidation = (
     schemaPort: GeometrySchemaPort;
     floors?: Floor[];
     complianceValidationEnabled?: boolean;
-    defaultThermalBridging?: number;
     partOActiveCoolingRequired?: boolean;
     partFContext?: PartFDetectionContext;
     calculateContextShadingDistance?: (contextElement: ContextShading, parent: Element) => number;
@@ -2433,7 +2432,6 @@ export const collectGeometryValidation = (
     const validation = validateZone(zone, {
       elementsById,
       complianceValidationEnabled: options.complianceValidationEnabled || false,
-      defaultThermalBridging: options.defaultThermalBridging,
       primaryFhsZoneId,
     });
     warnings.push(...validation.warnings.map(w => w.message));
@@ -2444,7 +2442,6 @@ export const collectGeometryValidation = (
     zones,
     elementsById,
     options.complianceValidationEnabled || false,
-    options.defaultThermalBridging,
     options.partOActiveCoolingRequired,
     options.partFContext,
   );

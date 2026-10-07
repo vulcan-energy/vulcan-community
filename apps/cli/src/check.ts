@@ -154,7 +154,6 @@ export function checkGeometryCsv(csvArg: string) {
     const result = validateZone(zone, {
       elementsById: byId,
       complianceValidationEnabled,
-      defaultThermalBridging: parsed.metadata.defaultThermalBridging,
       primaryFhsZoneId,
     });
     const base = {
@@ -184,7 +183,6 @@ export function checkGeometryCsv(csvArg: string) {
     parsed.zones,
     byId,
     complianceValidationEnabled,
-    parsed.metadata.defaultThermalBridging,
     parsed.metadata.complianceSettings.PartO_active_cooling_required,
     partFData?.context,
   );

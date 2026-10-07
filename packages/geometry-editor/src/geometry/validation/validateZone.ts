@@ -3,16 +3,12 @@
 
 import type { Element, Zone } from '../types';
 import type { ValidationIssue, ValidationResult } from './types';
-import {
-  hasPositiveDefaultThermalBridging,
-  zoneHasDetailedThermalBridging,
-} from './detectMissingElements';
+import { zoneHasDetailedThermalBridging } from './detectMissingElements';
 import { getZoneFloorLevelsMissingTfa } from '../../lib/zoneDerivation';
 
 export type ZoneValidationContext = {
   elementsById?: Record<string, Element>;
   complianceValidationEnabled?: boolean;
-  defaultThermalBridging?: number;
   primaryFhsZoneId?: string;
 };
 
@@ -119,7 +115,6 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
   const hasDetailedThermalBridging = context.elementsById
     ? zoneHasDetailedThermalBridging(zone.id, context.elementsById)
     : false;
-  const hasDefaultThermalBridging = hasPositiveDefaultThermalBridging(context.defaultThermalBridging);
 
   if (zone.simplifiedThermalBridging && hasDetailedThermalBridging) {
     warnings.push(warn(
@@ -132,10 +127,9 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
     !context.complianceValidationEnabled
     && !zone.simplifiedThermalBridging
     && !hasDetailedThermalBridging
-    && hasDefaultThermalBridging
   ) {
     warnings.push(warn(
-      'Default ψ only — set zone ψ or add TB',
+      'No thermal bridging — junction heat loss is 0; tick Simplified ψ or add thermal bridges',
       'simplifiedThermalBridging'
     ));
   }
