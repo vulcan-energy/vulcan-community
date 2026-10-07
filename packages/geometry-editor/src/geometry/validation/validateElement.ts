@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { csvMigrationIssues } from '../io/csvSemanticMigration';
+import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
@@ -1711,6 +1712,10 @@ export const validateElementCore = (
             'system_preset',
           ),
         );
+      }
+      const ecaasOnlyProducts = ecaasOnlyProductLabels(extraJson);
+      if (ecaasOnlyProducts.length > 0) {
+        warnings.push(geo(ecaasOnlyProductMessage(ecaasOnlyProducts), 'extra_json'));
       }
       if (elementsById && !sysElement.isPlaceholder) {
         const hasExhaustAirHeatPump = [...heatSourceWetReferenceMap([sysElement]).values()].some(
