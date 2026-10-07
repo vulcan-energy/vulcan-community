@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { stripUiKeysFromCsv, parseCSVLine, upsertScenariosBaseModelEnabledLine } from '../csvPresetUtils';
 import {
-  CURRENT_PROVENANCE_MARKERS_VERSION,
+  LEGACY_SUPPORTED_PROVENANCE_MARKERS_VERSION,
   ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR,
   GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR,
   OVERRIDE_PROVENANCE_REGISTRY,
@@ -12,11 +12,28 @@ import {
   SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR,
   SLOPED_WIDTH_OVERRIDE_DESCRIPTOR,
   WINDOW_SECURITY_RISK_OVERRIDE_DESCRIPTOR,
+  overrideAuthorityVersion,
+  isOverrideDescriptorAuthoritative,
   projectOverrideMarkersForExport,
   promoteOverrideMarkersOnImport,
 } from '../overrideProvenance';
 
 describe('override provenance helpers', () => {
+  it('uses format authority from v3 while preserving independently versioned legacy semantics', () => {
+    expect(overrideAuthorityVersion(1, undefined)).toBeUndefined();
+    expect(overrideAuthorityVersion(2, undefined)).toBeUndefined();
+    expect(overrideAuthorityVersion(1, 3)).toBe(3);
+    expect(overrideAuthorityVersion(2, 1)).toBe(1);
+    expect(overrideAuthorityVersion(3, undefined)).toBe(3);
+    expect(overrideAuthorityVersion(3, 1)).toBe(3);
+    expect(overrideAuthorityVersion(3, 99)).toBe(3);
+    expect(overrideAuthorityVersion(1, 99)).toBe(3);
+    const future = { flag: '_future', key: '_future', positiveSense: true, since: 4 };
+    expect(isOverrideDescriptorAuthoritative(future, overrideAuthorityVersion(1, 99))).toBe(false);
+    expect(isOverrideDescriptorAuthoritative(future, overrideAuthorityVersion(3, 99))).toBe(false);
+    expect(isOverrideDescriptorAuthoritative(future, overrideAuthorityVersion(4, undefined))).toBe(true);
+  });
+
   it('projects active markers copy-on-write and deletes stale automatic markers', () => {
     const original = {
       roof: {
@@ -124,10 +141,9 @@ describe('override provenance helpers', () => {
     expect(reset.window.extra_json).toEqual({ security_risk: false });
   });
 
-  it('pins the marker version to an exact registry key/version snapshot', () => {
-    // A future marker addition must bump its `since`, the current version, and this snapshot
-    // together so documents saved before that key existed never become authoritative for it.
-    expect(CURRENT_PROVENANCE_MARKERS_VERSION).toBe(3);
+  it('pins the frozen legacy capabilities to an exact registry key/version snapshot', () => {
+    // New markers use their introducing CSV format version; the old counter remains frozen.
+    expect(LEGACY_SUPPORTED_PROVENANCE_MARKERS_VERSION).toBe(3);
     expect(Object.entries(OVERRIDE_PROVENANCE_REGISTRY).flatMap(([kind, descriptors]) =>
       descriptors.map(({ key, since }) => ({ kind, key, since })),
     )).toEqual([

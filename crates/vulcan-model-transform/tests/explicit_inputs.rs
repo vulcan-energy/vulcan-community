@@ -30,6 +30,7 @@ Living,Zone,100,40
 #[test]
 fn transform_uses_caller_selected_profile_and_version_metadata() {
     let output = transform_geometry_csv(TransformRequest {
+        conversion_profile: Default::default(),
         csv: MINIMAL_CSV.to_string(),
         schema_json: MINIMAL_SCHEMA.to_string(),
         defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.to_string(),
@@ -50,6 +51,7 @@ fn transform_uses_caller_selected_profile_and_version_metadata() {
 #[test]
 fn transform_rejects_missing_caller_supplied_content() {
     let error = transform_geometry_csv(TransformRequest {
+        conversion_profile: Default::default(),
         csv: String::new(),
         schema_json: MINIMAL_SCHEMA.to_string(),
         defaults_json: "{}".to_string(),
@@ -62,4 +64,23 @@ fn transform_rejects_missing_caller_supplied_content() {
     .expect_err("empty CSV must fail loudly");
 
     assert!(error.to_string().contains("CSV"));
+}
+
+#[test]
+fn python_conversion_profiles_reject_mismatched_engine_wrapper_metadata() {
+    let error = transform_geometry_csv(TransformRequest {
+        csv: MINIMAL_CSV.into(),
+        schema_json: MINIMAL_SCHEMA.into(),
+        defaults_json: "{}".into(),
+        profile: ModelProfile::Fhs,
+        conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
+        version_metadata: VersionMetadata {
+            hem_core_version: "1.0.0a9".into(),
+            fhs_wrapper_version: Some("1.0.0a8".into()),
+        },
+    })
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("matching core and FHS wrapper 1.0.0a8"));
 }

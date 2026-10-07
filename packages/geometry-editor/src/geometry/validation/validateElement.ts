@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { csvMigrationIssues } from '../io/csvSemanticMigration';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
@@ -305,6 +306,8 @@ export function partFFieldKeyForRule(rule: PartFFinding['rule']): string | undef
 }
 
 export interface ValidationContext {
+  sourceCsvVersion?: number;
+  csvUpgradeRequested?: boolean;
   /** Host-owned schema capability. Validation never reaches a concrete schema implementation. */
   schemaPort: GeometrySchemaPort;
   elementsById?: Record<string, Element>;
@@ -659,7 +662,7 @@ export const validateElementCore = (
   })();
   const t0 = dbg ? performance.now() : 0;
 
-  const issues: ValidationIssue[] = [];
+  const issues: ValidationIssue[] = ((context.sourceCsvVersion ?? 3) >= 3 || context.csvUpgradeRequested ? csvMigrationIssues([element], context.sourceCsvVersion) : []).map(issue => ({ source: 'geometry', fieldKey: 'u_value', message: `CSV_U_VALUE_MEANING_REQUIRED: ${issue.elementName} has legacy U-value ${issue.value}; choose its meaning in the migration review before saving an upgraded copy.` }));
   const warnings: ValidationIssue[] = [];
   // Local aliases for the module-level helpers (geoIssue/schemaIssue/fhsIssue) so the long
   // switch below stays readable. Per-type validators in subsequent refactors call the

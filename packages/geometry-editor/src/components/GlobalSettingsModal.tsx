@@ -79,6 +79,7 @@ export type GlobalSettingsModalProps = Readonly<{
     compatibility: GlobalSettingsDefaultsCompatibility | undefined
   ) => void;
   evidenceSection?: ReactNode;
+  calculationTargetSection?: ReactNode;
   renderEvidencePill?: (fieldKey: string, label: string) => ReactNode;
   externalDetailProfileSection?: ReactNode;
   onIndicatorChange?: (indicator: GlobalSettingsIndicator | null) => void;
@@ -461,6 +462,7 @@ export function GlobalSettingsModal({
   inspectDefaultsCompatibility,
   onEditDefaults,
   evidenceSection,
+  calculationTargetSection,
   renderEvidencePill = () => null,
   externalDetailProfileSection,
   onIndicatorChange,
@@ -1497,7 +1499,7 @@ export function GlobalSettingsModal({
                                 fontWeight: 500,
                                 flexShrink: 0,
                               }}
-                              title={`Warning, may not contain sufficient inputs to be a default: ${(
+                              title={`Template coverage only; the merged model determines compatibility: ${(
                                 compat?.warnings ?? []
                               ).join("; ")}`}
                             >
@@ -1677,6 +1679,8 @@ export function GlobalSettingsModal({
                 Configure global settings that apply to your model, including
                 compliance settings and thermal bridging defaults.
               </div>
+
+              {calculationTargetSection}
 
               {/* Evidence linking for global settings */}
               {evidenceSection}

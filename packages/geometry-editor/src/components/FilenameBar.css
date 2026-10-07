@@ -142,3 +142,21 @@
     display: none;
   }
 }
+
+/* Review belongs below the file controls, above the draggable canvas panels. */
+.csv-migration-review {
+  order: 1;
+  padding: 12px;
+  max-width: min(620px, calc(100vw - 64px));
+  max-height: min(320px, 50vh);
+  overflow: auto;
+}
+
+.overlay-filebar-body:has(.csv-migration-review) {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.overlay-filebar:has(.csv-migration-review) {
+  z-index: 2200;
+}
