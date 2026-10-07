@@ -6,7 +6,7 @@ import type { Element } from '../types';
 export type UValueInterpretation = 'whole_wall' | 'half_construction';
 export type CsvMigrationIssue = { elementId: string; elementName: string; value: number; code: 'CSV_U_VALUE_MEANING_REQUIRED' };
 
-/** Version alone cannot prove the meaning of a manually authored party-wall U-value. */
+/** Import records established source meaning; only unresolved or changed evidence needs review. */
 export function csvMigrationIssues(elements: readonly Element[], sourceCsvVersion = 3): CsvMigrationIssue[] {
   return elements.flatMap(element => {
     const extra = element.extra_json;
@@ -28,12 +28,32 @@ export function resolveCsvUValueMeaning(element: Element, meaning: UValueInterpr
 
 export function assertCsvMigrationResolved(elements: readonly Element[], sourceCsvVersion = 3): void {
   const issues = csvMigrationIssues(elements, sourceCsvVersion);
-  if (issues.length) throw new Error(`CSV_U_VALUE_MEANING_REQUIRED: choose whole-wall or previous half-construction U-value for ${issues.map(issue => issue.elementName).join(', ')} before saving.`);
+  if (issues.length) throw new Error(`CSV_U_VALUE_MEANING_REQUIRED: choose whole-wall or dwelling-side-to-midpoint U-value for ${issues.map(issue => issue.elementName).join(', ')} before saving.`);
 }
 
-/** Only an unchanged calculator result proves its half-construction provenance. */
-export function normalizeCsvConstructionProvenance(elements: readonly Element[]): Element[] {
-  return elements.map(element => {
+/** Resolve source provenance at import, never from the currently selected calculation target.
+ * Historical unpinned v1/v2 files used the Rust contract: corpus.rs converts their U
+ * into construction resistance passed to PartyWall::new (wall layers before cavity).
+ */
+export function normalizeCsvConstructionProvenance(
+  elements: readonly Element[],
+  source?: { csvVersion: number; targetBundleId?: string },
+): Element[] {
+  const establishedRustMeaning = source?.targetBundleId === 'rust-fhs-a7-62d3df70-c5ba2673-v1'
+    || (source?.targetBundleId === undefined && source !== undefined && source.csvVersion < 3);
+  return elements.map(original => {
+    let element = original;
+    const originalExtra = element.extra_json;
+    if (establishedRustMeaning && element.type === 'BuildingElementPartyWall'
+      && typeof originalExtra?.u_value === 'number' && Number.isFinite(originalExtra.u_value)
+      && originalExtra.u_value_interpretation === undefined
+      && originalExtra.u_value_interpreted_value === undefined
+      && originalExtra.u_value_whole_wall === undefined
+      && originalExtra.construction_basis !== 'full') {
+      element = { ...element, extra_json: { ...originalExtra,
+        u_value_interpretation: 'half_construction', u_value_interpreted_value: originalExtra.u_value,
+      } };
+    }
     if (element.type !== 'BuildingElementPartyWall' && element.type !== 'BuildingElementAdjacentConditionedSpace') return element;
     const extra = element.extra_json;
     const raw = extra?.vulcan_assembly_v1;
@@ -41,7 +61,9 @@ export function normalizeCsvConstructionProvenance(elements: readonly Element[])
     const assembly = raw as Record<string, unknown>;
     const snapshot = assembly.assemblySnapshot as { elementMode?: unknown } | undefined;
     if (assembly.schemaVersion !== 1 || snapshot?.elementMode !== element.type) return element;
-    const unchangedU = typeof assembly.correctedU_W_m2K === 'number' && extra?.u_value === assembly.correctedU_W_m2K;
+    const unchangedU = typeof assembly.correctedU_W_m2K === 'number' && extra?.u_value === assembly.correctedU_W_m2K
+      && (extra.u_value_interpreted_value === undefined || extra.u_value_interpreted_value === extra.u_value)
+      && extra.construction_basis !== 'full';
     const unchangedR = typeof assembly.thermalResistanceConstruction_m2K_W === 'number' && extra?.thermal_resistance_construction === assembly.thermalResistanceConstruction_m2K_W;
     return { ...element, extra_json: { ...extra,
       ...(unchangedU && element.type === 'BuildingElementPartyWall' && extra?.u_value_interpretation === undefined ? { u_value_interpretation: 'half_construction', u_value_interpreted_value: extra.u_value } : {}),

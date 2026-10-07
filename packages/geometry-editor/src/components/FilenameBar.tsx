@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useLayoutEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import ReactDOM from 'react-dom';
 import {
   defineFilenameActionContributions,
@@ -9,12 +9,14 @@ import {
   type FilenameActionContributions,
 } from '../../../geometry-editor-host/src/filenameActionRegistry';
 import { StandardInput } from './StandardInput';
+import { StandardDropdown } from './StandardDropdown';
+import { useKeyedState } from '../hooks/useKeyedState';
 import { useGeometryStore } from '../stores/geometryStore';
 import type { BuildErrorItem } from '../types/buildErrors';
 import type { GeometryDocumentHostPort } from '../../../geometry-document/src';
 import './GlobalButtonSystem.css';
 import './FilenameBar.css';
-import { csvMigrationIssues, type UValueInterpretation } from '../geometry/io/csvSemanticMigration';
+import { csvMigrationIssues, type UValueInterpretation, type CsvMigrationIssue } from '../geometry/io/csvSemanticMigration';
 
 export type FilenameBarActionContext = Readonly<{
   documentHost: GeometryDocumentHostPort;
@@ -45,19 +47,94 @@ export type FilenameBarProps = Omit<FilenameBarActionContext, 'filename'> & Read
   >;
 }>;
 
-type MigrationReviewState = { selectedIds: string[]; meaning: UValueInterpretation | '' };
-type MigrationReviewAction =
-  | { type: 'toggle'; elementId: string; checked: boolean }
-  | { type: 'meaning'; meaning: UValueInterpretation | '' }
-  | { type: 'reset' };
+/** Shared save-decision surface. Content and decisions belong to the caller. */
+export function SaveReviewPopover({ anchorRef, title, children, actions, onClose }: {
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  title: string;
+  children: React.ReactNode;
+  actions: React.ReactNode;
+  onClose: () => void;
+}) {
+  const panelRef = useRef<HTMLDialogElement>(null);
+  const closeRef = useRef(onClose);
+  useLayoutEffect(() => { closeRef.current = onClose; }, [onClose]);
+  const titleId = useId();
+  const [position, setPosition] = useState({ left: 0, top: 0, maxHeight: 0 });
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const positionPanel = () => {
+      const panel = panelRef.current;
+      if (!anchor || !panel) return;
+      const rect = anchor.getBoundingClientRect();
+      const top = rect.bottom + 8;
+      setPosition({
+        left: Math.max(12, Math.min(rect.right - panel.offsetWidth, window.innerWidth - panel.offsetWidth - 12)),
+        top,
+        maxHeight: Math.max(0, window.innerHeight - top - 12),
+      });
+    };
+    positionPanel();
+    window.addEventListener('resize', positionPanel);
+    window.addEventListener('scroll', positionPanel, true);
+    panelRef.current?.focus();
+    return () => {
+      window.removeEventListener('resize', positionPanel);
+      window.removeEventListener('scroll', positionPanel, true);
+      anchor?.focus();
+    };
+  }, [anchorRef]);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !panelRef.current?.contains(event.target) && !anchorRef.current?.contains(event.target)) closeRef.current();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.stopPropagation(); closeRef.current(); }
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [anchorRef]);
+  return ReactDOM.createPortal(
+    <dialog open ref={panelRef} className="save-review-popover" aria-labelledby={titleId} tabIndex={-1} style={position}>
+      <h3 id={titleId}>{title}</h3>
+      <div className="save-review-content">{children}</div>
+      <div className="save-review-actions">{actions}</div>
+    </dialog>, document.body,
+  );
+}
 
-const initialMigrationReview: MigrationReviewState = { selectedIds: [], meaning: '' };
-function migrationReviewReducer(state: MigrationReviewState, action: MigrationReviewAction): MigrationReviewState {
-  if (action.type === 'reset') return initialMigrationReview;
-  if (action.type === 'meaning') return { ...state, meaning: action.meaning };
-  return { ...state, selectedIds: action.checked
-    ? [...state.selectedIds, action.elementId]
-    : state.selectedIds.filter((id) => id !== action.elementId) };
+function PartyWallSaveReview({ issues, anchorRef, onClose, onApply }: {
+  issues: CsvMigrationIssue[];
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  onApply: (ids: string[], meaning: UValueInterpretation) => void;
+}) {
+  const [selectedIds, setSelectedIds] = useState(() => issues.map(issue => issue.elementId));
+  const [meaning, setMeaning] = useState<UValueInterpretation | ''>('');
+  return <SaveReviewPopover anchorRef={anchorRef} title="Check party-wall U-values" onClose={onClose} actions={<>
+    <button type="button" className="btn btn-small btn-secondary" onClick={onClose}>Cancel</button>
+    <button type="button" className="btn btn-small btn-yellow" disabled={!meaning || selectedIds.length === 0}
+      onClick={() => { if (meaning) onApply(selectedIds, meaning); }}>
+      {selectedIds.length === issues.length ? 'Apply and save' : 'Apply'}
+    </button>
+  </>}>
+    <p>Do these values describe the whole wall or the construction from this dwelling to the wall’s midpoint?</p>
+    <div className="save-review-items">
+      {issues.map(issue => <label className="save-review-item" key={issue.elementId}>
+        <input type="checkbox" checked={selectedIds.includes(issue.elementId)} onChange={event => setSelectedIds(ids => event.target.checked ? [...ids, issue.elementId] : ids.filter(id => id !== issue.elementId))} />
+        <span>{issue.elementName}</span><span>{issue.value} W/m²K</span>
+      </label>)}
+    </div>
+    <StandardDropdown aria-label="U-value meaning" value={meaning} onChange={value => setMeaning(value as UValueInterpretation)}
+      placeholder="Choose a meaning" options={[
+        { value: 'whole_wall', label: 'Whole wall' },
+        { value: 'half_construction', label: 'Dwelling side to midpoint' },
+      ]} />
+    <p className="save-review-hint">Your file is unchanged until you save.</p>
+  </SaveReviewPopover>;
 }
 
 const EMPTY_FILENAME_ACTION_CONTRIBUTIONS =
@@ -278,7 +355,14 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const lastSaveValidationFailed = useGeometryStore(
     (state) => state.complianceSettings.scenariosBaseModelEnabled === false,
   );
+  const elementsById = useGeometryStore((s) => s.elementsById);
+  const sourceCsvVersion = useGeometryStore((s) => s.sourceCsvVersion);
+  const migrationIssues = useMemo(() => csvMigrationIssues(Object.values(elementsById), sourceCsvVersion), [elementsById, sourceCsvVersion]);
+  const reviewDocumentKey = documentSnapshot.activeDocument?.id ?? filename;
+  const [isReviewOpen, setIsReviewOpen] = useKeyedState(reviewDocumentKey, false);
+  const closeReview = useCallback(() => setIsReviewOpen(false), [setIsReviewOpen]);
   const showLastSaveValidationFailure =
+    migrationIssues.length === 0 &&
     lastSaveValidationFailed
     && buildErrorItems.length === 0
     && !buildError
@@ -290,16 +374,10 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const [saveErrorCopied, setSaveErrorCopied] = useState(false);
   const [prevHasSaveErrorDropdownContent, setPrevHasSaveErrorDropdownContent] = useState(hasSaveErrorDropdownContent);
   const zones = useGeometryStore((s) => s.zones);
-  const elementsById = useGeometryStore((s) => s.elementsById);
   const elementIds = useGeometryStore((s) => s.elementIds);
-  const sourceCsvVersion = useGeometryStore((s) => s.sourceCsvVersion);
-  const csvUpgradeRequested = useGeometryStore((s) => s.csvUpgradeRequested);
   const requestCsvUpgrade = useGeometryStore((s) => s.requestCsvUpgrade);
   const getCsvMigrationIssues = useGeometryStore((s) => s.getCsvMigrationIssues);
   const resolveCsvMeaning = useGeometryStore((s) => s.resolveCsvUValueInterpretation);
-  const migrationIssues = useMemo(() => csvUpgradeRequested || sourceCsvVersion >= 3
-    ? csvMigrationIssues(Object.values(elementsById), sourceCsvVersion) : [], [elementsById, sourceCsvVersion, csvUpgradeRequested]);
-  const [migrationReview, dispatchMigrationReview] = useReducer(migrationReviewReducer, initialMigrationReview);
   const setSelection = useGeometryStore((s) => s.setSelection);
   const setSelectedElementIds = useGeometryStore((s) => s.setSelectedElementIds);
   const setCurrentFloorZ = useGeometryStore((s) => s.setCurrentFloorZ);
@@ -780,24 +858,17 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
 
   return (
     <>
-    {migrationIssues.length > 0 && <details open className="csv-migration-review">
-      <summary>Review legacy party-wall U-value meaning ({migrationIssues.length} elements)</summary>
-      <p>Choose what these U-values represent, then Save. Your file stays unchanged until this is resolved.</p>
-      {migrationIssues.map(issue => <label key={issue.elementId} style={{ display: 'block' }}>
-        <input type="checkbox" checked={migrationReview.selectedIds.includes(issue.elementId)} onChange={event => dispatchMigrationReview({ type: 'toggle', elementId: issue.elementId, checked: event.target.checked })} />
-        {issue.elementName}: {issue.value} W/m²K
-      </label>)}
-      <select aria-label="Legacy U-value meaning" value={migrationReview.meaning} onChange={event => dispatchMigrationReview({ type: 'meaning', meaning: event.target.value as UValueInterpretation | '' })}>
-        <option value="">Unknown — choose a meaning or correct the data</option>
-        <option value="whole_wall">Whole-wall U-value</option>
-        <option value="half_construction">Previous HEM half-construction U-value</option>
-      </select>
-      <button type="button" disabled={!migrationReview.meaning || !migrationReview.selectedIds.some(id => migrationIssues.some(issue => issue.elementId === id))} onClick={() => {
-        if (!migrationReview.meaning) return;
-        resolveCsvMeaning(migrationReview.selectedIds.filter(id => migrationIssues.some(issue => issue.elementId === id)), migrationReview.meaning);
-        dispatchMigrationReview({ type: 'reset' });
-      }}>Apply meaning to selected elements</button>
-    </details>}
+    {isReviewOpen && migrationIssues.length > 0 && <PartyWallSaveReview
+      key={migrationIssues.map(issue => `${issue.elementId}:${issue.value}`).join('|')}
+      issues={migrationIssues} anchorRef={saveButtonRef} onClose={closeReview}
+      onApply={(ids, meaning) => {
+        resolveCsvMeaning(ids, meaning);
+        if (getCsvMigrationIssues().length === 0) {
+          closeReview();
+          void documentHost.save().catch(error => console.error('[FilenameBar] Save command failed:', error));
+        }
+      }}
+    />}
     <div className="filename-bar">
       <div className="filename-bar-left">
         {availableFilenameActions.map((action) => (
@@ -841,9 +912,16 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
         <div className="filename-bar-save-stack">
         <button
           ref={saveButtonRef}
+          data-geometry-save-action
+          type="button"
           onClick={() => {
             requestCsvUpgrade();
-            if (getCsvMigrationIssues().length > 0) return;
+            if (getCsvMigrationIssues().length > 0) {
+              closeSaveErrorDropdown();
+              setIsReviewOpen(true);
+              return;
+            }
+            closeReview();
             void documentHost.save().catch((error) => {
               console.error('[FilenameBar] Save command failed:', error);
             });

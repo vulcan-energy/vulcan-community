@@ -55,6 +55,13 @@ export function useDocumentSaveShortcut({
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
+      const saveActions = root.querySelectorAll<HTMLButtonElement>('button[data-geometry-save-action]');
+      if (saveActions.length > 0) {
+        // The visible action owns format review and disabled/saving behavior.
+        // Do not bypass it, or choose arbitrarily between nested editor actions.
+        if (saveActions.length === 1) saveActions[0].click();
+        return;
+      }
       const activeDocumentHost = documentHostRef.current;
       if (activeDocumentHost === null) return;
       void activeDocumentHost.save().catch((error) => {

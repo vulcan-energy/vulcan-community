@@ -713,7 +713,7 @@ export const parseCsvToGeometry = (
 
   return {
     zones: newZones,
-    elements: normalizeCsvConstructionProvenance(normalizedElements),
+    elements: normalizeCsvConstructionProvenance(normalizedElements, { csvVersion, targetBundleId }),
     spaceLabels: newSpaceLabels,
     warnings,
     metadata: {
