@@ -12,10 +12,11 @@ use std::collections::HashMap;
 /// sectors qualify: never discard objects, extra authored keys or invalid arcs.
 /// Eight 45-degree sectors cover the same sky with exactly representable eighths.
 pub fn map_target_unobstructed_shading(model: &mut Value, profile: crate::ConversionProfile) {
-    if !matches!(
-        profile,
-        crate::ConversionProfile::PythonFhsA8 | crate::ConversionProfile::PythonFhsA9
-    ) {
+    map_contract_unobstructed_shading(model, profile.input_contract());
+}
+
+pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: crate::InputContract) {
+    if !contract.uses_exact_empty_shading_sectors {
         return;
     }
     let Some(sectors) = model
@@ -55,25 +56,7 @@ fn error(errors: &mut Vec<ValidationError>, path: &str, field: &str, message: &s
     });
 }
 
-pub(crate) fn map_python_a9_element(
-    row: &Row,
-    model: &mut Value,
-    path: &str,
-) -> Vec<ValidationError> {
-    map_python_element(row, model, path, true)
-}
-
-pub(crate) fn map_python_a8_element(
-    row: &Row,
-    model: &mut Value,
-    path: &str,
-) -> Vec<ValidationError> {
-    map_python_element(row, model, path, false)
-}
-
-// The pinned a8/a9 Window classes, thermal class mapping, internal splitting and
-// U-to-R conversion are AST-identical. Party-wall reporting differs explicitly.
-fn map_python_element(
+pub(crate) fn map_physical_opening_full_partition_element(
     row: &Row,
     model: &mut Value,
     path: &str,
@@ -98,7 +81,11 @@ fn map_python_element(
 
 /// The original Rust contract remains the default. Only explicit new source
 /// meanings need projection; unversioned legacy rows retain their old behavior.
-pub(crate) fn map_rust_element(row: &Row, model: &mut Value, path: &str) -> Vec<ValidationError> {
+pub(crate) fn map_divided_opening_half_partition_element(
+    row: &Row,
+    model: &mut Value,
+    path: &str,
+) -> Vec<ValidationError> {
     let mut errors = Vec::new();
     let Some(element) = model.as_object_mut() else {
         return errors;
@@ -115,7 +102,7 @@ pub(crate) fn map_rust_element(row: &Row, model: &mut Value, path: &str) -> Vec<
             element.insert("thermal_resistance_construction".into(), r.clone());
         } else {
             element.remove("thermal_resistance_construction");
-            error(&mut errors,path,"thermal_resistance_construction","Whole-wall U-value cannot stand in for construction-to-midpoint resistance. Supply that independent value for the Rust target.");
+            error(&mut errors,path,"thermal_resistance_construction","Whole-wall U-value cannot stand in for construction-to-midpoint resistance. Supply that independent value for the selected input contract.");
         }
     }
     if field(row, "construction_basis").and_then(Value::as_str) == Some("full") {
@@ -280,10 +267,10 @@ fn map_partition(
                 } else if within && (area - physical * 2.0).abs() < 0.03 {
                     element.insert("area".into(), json!(area / 2.0));
                 } else {
-                    error(errors,path,"area","Partition area disagrees with its physical width and height; correct geometry before preparing Python input.");
+                    error(errors,path,"area","Partition area disagrees with its physical width and height; correct geometry before preparing target input.");
                 }
             } else if within {
-                error(errors,path,"area","Partition needs physical width/height or an explicit source area basis before Python preparation.");
+                error(errors,path,"area","Partition needs physical width/height or an explicit source area basis before target preparation.");
             }
         }
     }
@@ -438,6 +425,59 @@ fn construction_resistance(u: f64, pitch: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn canonical_contracts_match_legacy_element_projection() {
+        use crate::{ConversionProfile::*, ElementInputConvention};
+        let row = Row::from([
+            ("Type".into(), json!("Party")),
+            ("u_value_interpretation".into(), json!("half_construction")),
+            ("u_value".into(), json!(0.5)),
+            ("u_value_whole_wall".into(), json!(0.2)),
+            ("thermal_resistance_construction".into(), json!(2.0)),
+            ("construction_basis".into(), json!("half")),
+            ("internal_partition_area_basis".into(), json!("single_face")),
+            ("mid_height".into(), json!(1.2)),
+            ("free_area_height".into(), json!(0.8)),
+            ("max_window_open_area".into(), json!(0.6)),
+        ]);
+        for (legacy, canonical) in [
+            (CurrentRustFhs, DividedOpeningHalfPartitionV1),
+            (PythonFhsA8, PhysicalOpeningFullPartitionV1),
+            (PythonFhsA9, PhysicalOpeningFullPartitionPartyWallUV1),
+        ] {
+            for element_type in [
+                "BuildingElementTransparent",
+                "BuildingElementPartyWall",
+                "BuildingElementAdjacentConditionedSpace",
+            ] {
+                let project = |profile: crate::ConversionProfile| {
+                    let contract = profile.input_contract();
+                    let mut model = json!({"type":element_type,"pitch":90,"area":10,"u_value":0.5});
+                    let errors = match contract.elements {
+                        ElementInputConvention::DividedOpeningHalfPartition => {
+                            map_divided_opening_half_partition_element(&row, &mut model, "test")
+                        }
+                        ElementInputConvention::PhysicalOpeningFullPartition => {
+                            map_physical_opening_full_partition_element(
+                                &row,
+                                &mut model,
+                                "test",
+                                contract.party_wall_requires_whole_u,
+                            )
+                        }
+                    };
+                    (model, errors)
+                };
+                assert_eq!(project(legacy), project(canonical));
+            }
+            let readiness = json!({"HotWaterSource":{},"Zone":{"Z":{"ThermalBridging":0.1}}});
+            assert_eq!(
+                crate::validate_target_input(&readiness, legacy),
+                crate::validate_target_input(&readiness, canonical)
+            );
+        }
+    }
+
+    #[test]
     fn python_empty_sky_mapping_is_exact_bounded_and_idempotent() {
         use crate::ConversionProfile;
         let source = json!({"ExternalConditions":{"shading_segments":(0..36).map(|i| json!({"start360":i*10,"end360":(i+1)*10})).collect::<Vec<_>>()}});
@@ -498,7 +538,12 @@ mod tests {
     fn map(source: Value, output: Value) -> (Value, Vec<ValidationError>) {
         let row = serde_json::from_value(source).unwrap();
         let mut output = output;
-        let errors = map_python_a9_element(&row, &mut output, "Zone/Z/BuildingElement/test");
+        let errors = map_physical_opening_full_partition_element(
+            &row,
+            &mut output,
+            "Zone/Z/BuildingElement/test",
+            true,
+        );
         (output, errors)
     }
     #[test]
@@ -598,7 +643,7 @@ mod tests {
     fn rust_target_does_not_use_retained_whole_wall_u_as_half_construction_u() {
         let row=serde_json::from_value(json!({"extra_json":{"u_value":0.2,"u_value_interpretation":"whole_wall","u_value_whole_wall":0.2,"thermal_resistance_construction":1.3}})).unwrap();
         let mut output = json!({"type":"BuildingElementPartyWall","u_value":0.2});
-        assert!(map_rust_element(&row, &mut output, "wall").is_empty());
+        assert!(map_divided_opening_half_partition_element(&row, &mut output, "wall").is_empty());
         assert!(output.get("u_value").is_none());
         assert_eq!(output["thermal_resistance_construction"], 1.3);
     }
@@ -644,15 +689,20 @@ mod tests {
         let row=serde_json::from_value(json!({"Type":"BuildingElementPartyWall","extra_json":{"thermal_resistance_construction":1.3,"u_value_whole_wall":0.2}})).unwrap();
         let mut output =
             json!({"type":"BuildingElementPartyWall","pitch":90,"u_value_whole_wall":0.2});
-        assert!(map_python_a8_element(&row, &mut output, "wall").is_empty());
+        assert!(
+            map_physical_opening_full_partition_element(&row, &mut output, "wall", false)
+                .is_empty()
+        );
         assert_eq!(output["thermal_resistance_construction"], 1.3);
         assert!(output.get("u_value_whole_wall").is_none());
         let no_whole =
             serde_json::from_value(json!({"extra_json":{"thermal_resistance_construction":1.3}}))
                 .unwrap();
-        assert!(map_python_a9_element(&no_whole, &mut output, "wall")
-            .iter()
-            .any(|e| e.path.ends_with("u_value_whole_wall")));
+        assert!(
+            map_physical_opening_full_partition_element(&no_whole, &mut output, "wall", true)
+                .iter()
+                .any(|e| e.path.ends_with("u_value_whole_wall"))
+        );
     }
     #[test]
     fn a8_scalar_bridge_schema_gap_is_a_readiness_error_not_an_invented_mapping() {
@@ -702,8 +752,8 @@ mod tests {
             let mut a8 = model.clone();
             let mut a9 = model;
             assert_eq!(
-                map_python_a8_element(&row, &mut a8, "test"),
-                map_python_a9_element(&row, &mut a9, "test")
+                map_physical_opening_full_partition_element(&row, &mut a8, "test", false),
+                map_physical_opening_full_partition_element(&row, &mut a9, "test", true)
             );
             assert_eq!(a8, a9);
         }

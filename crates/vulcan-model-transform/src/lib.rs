@@ -39,6 +39,51 @@ pub enum ConversionProfile {
     CurrentRustFhs,
     PythonFhsA9,
     PythonFhsA8,
+    DividedOpeningHalfPartitionV1,
+    PhysicalOpeningFullPartitionV1,
+    #[serde(rename = "physical_opening_full_partition_party_wall_u_v1")]
+    PhysicalOpeningFullPartitionPartyWallUV1,
+}
+
+/// Input meaning, independent of the implementation language and release label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ElementInputConvention {
+    DividedOpeningHalfPartition,
+    PhysicalOpeningFullPartition,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct InputContract {
+    pub elements: ElementInputConvention,
+    pub party_wall_requires_whole_u: bool,
+    pub requires_main_hot_water_source: bool,
+    pub requires_detailed_thermal_bridges: bool,
+    pub uses_exact_empty_shading_sectors: bool,
+}
+
+impl ConversionProfile {
+    /// Compatibility boundary for published preparation artifacts. New profiles
+    /// describe the same contracts without tying them to a language or release.
+    pub(crate) fn input_contract(self) -> InputContract {
+        let (physical_openings, whole_u, detailed_bridges) = match self {
+            Self::CurrentRustFhs | Self::DividedOpeningHalfPartitionV1 => (false, false, false),
+            Self::PythonFhsA8 | Self::PhysicalOpeningFullPartitionV1 => (true, false, true),
+            Self::PythonFhsA9 | Self::PhysicalOpeningFullPartitionPartyWallUV1 => {
+                (true, true, false)
+            }
+        };
+        InputContract {
+            elements: if physical_openings {
+                ElementInputConvention::PhysicalOpeningFullPartition
+            } else {
+                ElementInputConvention::DividedOpeningHalfPartition
+            },
+            party_wall_requires_whole_u: whole_u,
+            requires_main_hot_water_source: physical_openings,
+            requires_detailed_thermal_bridges: detailed_bridges,
+            uses_exact_empty_shading_sectors: physical_openings,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,13 +208,12 @@ pub fn transform_geometry_csv(
 /// or silently renaming authored systems.
 pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<ValidationError> {
     let mut errors = Vec::new();
-    if matches!(
-        profile,
-        ConversionProfile::PythonFhsA8 | ConversionProfile::PythonFhsA9
-    ) && model
-        .get("HotWaterSource")
-        .and_then(Value::as_object)
-        .is_some_and(|sources| !sources.contains_key("hw cylinder"))
+    let contract = profile.input_contract();
+    if contract.requires_main_hot_water_source
+        && model
+            .get("HotWaterSource")
+            .and_then(Value::as_object)
+            .is_some_and(|sources| !sources.contains_key("hw cylinder"))
     {
         // Both FHS schemas declare only this main-source key (including
         // PointOfUse). Notional edit_storagetank indexes it unconditionally;
@@ -177,18 +221,18 @@ pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<V
         errors.push(ValidationError {
             code: "E_PYTHON_FHS_HOT_WATER_SOURCE".into(),
             path: "/HotWaterSource/hw cylinder".into(),
-            message: "Python FHS requires the main hot-water source under 'hw cylinder', including point-of-use systems. Supply a target-compatible main source; unsupported names are preserved in the authored CSV and are not renamed automatically.".into(),
+            message: "The selected input contract requires the main hot-water source under 'hw cylinder', including point-of-use systems. Supply a target-compatible main source; unsupported names are preserved in the authored CSV and are not renamed automatically.".into(),
             schema_path: None, keyword: None,
         });
     }
-    if profile == ConversionProfile::PythonFhsA8 {
+    if contract.requires_detailed_thermal_bridges {
         if let Some(zones) = model.get("Zone").and_then(Value::as_object) {
             for (name, zone) in zones {
                 if zone.get("ThermalBridging").is_some_and(Value::is_number) {
                     errors.push(ValidationError {
                         code: "E_A8_THERMAL_BRIDGING".into(),
                         path: format!("/Zone/{}/ThermalBridging", name.replace('~',"~0").replace('/',"~1")),
-                        message: "Python FHS a8 requires detailed thermal-bridge records during wrapper preprocessing, even though its schema accepts a scalar. Supply the actual bridge records; an aggregate cannot be expanded without evidence.".into(),
+                        message: "The selected input contract requires detailed thermal-bridge records during wrapper preprocessing, even though its schema accepts a scalar. Supply the actual bridge records; an aggregate cannot be expanded without evidence.".into(),
                         schema_path: None, keyword: None,
                     });
                 }
@@ -199,19 +243,21 @@ pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<V
 }
 
 fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
-    if matches!(
-        request.conversion_profile,
-        ConversionProfile::PythonFhsA8 | ConversionProfile::PythonFhsA9
-    ) && request.profile != ModelProfile::Fhs
+    if request.conversion_profile.input_contract().elements
+        == ElementInputConvention::PhysicalOpeningFullPartition
+        && request.profile != ModelProfile::Fhs
     {
         return Err(TransformError::InvalidRequest(
-            "Python conversion requires the FHS profile".into(),
+            "Physical-opening/full-partition conversion requires the FHS profile".into(),
         ));
     }
     let required_python_version = match request.conversion_profile {
         ConversionProfile::PythonFhsA8 => Some("1.0.0a8"),
         ConversionProfile::PythonFhsA9 => Some("1.0.0a9"),
-        ConversionProfile::CurrentRustFhs => None,
+        ConversionProfile::CurrentRustFhs
+        | ConversionProfile::DividedOpeningHalfPartitionV1
+        | ConversionProfile::PhysicalOpeningFullPartitionV1
+        | ConversionProfile::PhysicalOpeningFullPartitionPartyWallUV1 => None,
     };
     if let Some(version) = required_python_version {
         if request.version_metadata.hem_core_version != version
