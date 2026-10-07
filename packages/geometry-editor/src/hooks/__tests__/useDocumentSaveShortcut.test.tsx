@@ -42,16 +42,21 @@ function ShortcutOwner({
   documentHost,
   label,
   portalled = false,
+  saveAction,
+  saveDisabled = false,
 }: Readonly<{
   documentHost: GeometryDocumentHostPort;
   label: string;
   portalled?: boolean;
+  saveAction?: () => void;
+  saveDisabled?: boolean;
 }>) {
   const ownerRootRef = useRef<HTMLDivElement>(null);
   useDocumentSaveShortcut({ documentHost, ownerRootRef });
   const owner = (
     <div ref={ownerRootRef} data-testid={`${label}-root`}>
       <input aria-label={`${label} input`} />
+      {saveAction && <button data-geometry-save-action disabled={saveDisabled} onClick={saveAction}>Save {label}</button>}
     </div>
   );
   return portalled ? ReactDOM.createPortal(owner, document.body) : owner;
@@ -78,6 +83,29 @@ function dispatchSaveShortcut(modifier: 'meta' | 'control'): KeyboardEvent {
 }
 
 describe('useDocumentSaveShortcut', () => {
+  it('routes keyboard Save through the focused editor action so review is shared', () => {
+    const firstHost = documentHostHarness();
+    const secondHost = documentHostHarness();
+    const firstAction = vi.fn();
+    const secondAction = vi.fn();
+    render(<><ShortcutOwner documentHost={firstHost} label="First" saveAction={firstAction} />
+      <ShortcutOwner documentHost={secondHost} label="Second" saveAction={secondAction} /></>);
+    screen.getByRole('textbox', { name: 'Second input' }).focus();
+    expect(dispatchSaveShortcut('meta').defaultPrevented).toBe(true);
+    expect(secondAction).toHaveBeenCalledOnce();
+    expect(firstAction).not.toHaveBeenCalled();
+    expect(firstHost.save).not.toHaveBeenCalled();
+    expect(secondHost.save).not.toHaveBeenCalled();
+  });
+  it('does not bypass a disabled Save action', () => {
+    const host = documentHostHarness();
+    const action = vi.fn();
+    render(<ShortcutOwner documentHost={host} label="Only" saveAction={action} saveDisabled />);
+    expect(dispatchSaveShortcut('control').defaultPrevented).toBe(true);
+    expect(action).not.toHaveBeenCalled();
+    expect(host.save).not.toHaveBeenCalled();
+  });
+
   it.each(['meta', 'control'] as const)(
     'owns %s+S for the only mounted editor and prevents browser Save Page',
     (modifier) => {

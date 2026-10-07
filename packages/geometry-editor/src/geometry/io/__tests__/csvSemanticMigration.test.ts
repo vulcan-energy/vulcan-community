@@ -11,6 +11,66 @@ import type { Element } from '../../types';
 const wall = (id = 'p'): Element => ({ id, name: `Party ${id}`, type: 'BuildingElementPartyWall', zoneId: 'z', width: 2, height: 3, area: 6, parent_element: null, coordinates: [], extra_json: { u_value: .25, advanced: 'keep' } });
 
 describe('CSV v3 explicit U-value migration', () => {
+  const rustA7 = 'rust-fhs-a7-62d3df70-c5ba2673-v1';
+  const importWall = (metadata: string, extra: Record<string, unknown> = { u_value: .25 }) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().loadFromCSV(`Metadata
+${metadata}
+
+Zone
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,100,40,2.5,FALSE
+
+Non-Exposed Elements
+Name,Zone,Type,area,pitch,width,height,parent_element,coords,extra_json
+Party,Living,BuildingElementPartyWall,6,90,2,3,,,"${JSON.stringify(extra).replaceAll('"', '""')}"
+`);
+    return store;
+  };
+  it.each(['', 'VulcanCsvVersion,1', 'VulcanCsvVersion,2', `VulcanCsvVersion,3
+TargetBundleId,${rustA7}`])(
+    'preserves established Rust meaning from source metadata %s before target switches', metadata => {
+      const store = importWall(metadata);
+      const imported = Object.values(store.getState().elementsById)[0];
+      expect(imported.extra_json).toMatchObject({ u_value: .25, u_value_interpretation: 'half_construction', u_value_interpreted_value: .25 });
+      expect(imported.extra_json).not.toHaveProperty('u_value_whole_wall');
+      store.getState().setTargetBundleId('python-fhs-a9-918addad-b9b90138-v1');
+      store.getState().requestCsvUpgrade();
+      expect(store.getState().getCsvMigrationIssues()).toEqual([]);
+      const saved = store.getState().generateCSV();
+      expect(saved).toContain('VulcanCsvVersion,3');
+      const reopened = createGeometryStore({ defaultDefaultsPath: null });
+      reopened.getState().loadFromCSV(saved);
+      expect(reopened.getState().getCsvMigrationIssues()).toEqual([]);
+      expect(Object.values(reopened.getState().elementsById)[0].extra_json?.u_value_interpretation).toBe('half_construction');
+    },
+  );
+  it.each(['unknown-target', 'python-fhs-a8-f2ab6cf7-8ca182b0-v1', 'python-fhs-a9-918addad-b9b90138-v1'])(
+    'does not infer meaning from an unestablished source target %s, including after selecting Rust', pin => {
+      const store = importWall(`VulcanCsvVersion,2
+TargetBundleId,${pin}`);
+      store.getState().setTargetBundleId(rustA7);
+      expect(store.getState().getCsvMigrationIssues()).toHaveLength(1);
+    },
+  );
+  it.each([
+    { u_value: .25, u_value_interpretation: 'unknown' },
+    { u_value: .25, u_value_interpreted_value: .2 },
+    { u_value: .25, u_value_whole_wall: .25 },
+    { u_value: .25, construction_basis: 'full' },
+  ])('keeps conflicting source evidence unresolved: %j', extra => {
+    expect(importWall(`VulcanCsvVersion,2
+TargetBundleId,${rustA7}`, extra).getState().getCsvMigrationIssues()).toHaveLength(1);
+  });
+  it.each(['whole_wall', 'half_construction'] as const)('preserves explicit %s meaning', meaning => {
+    const store = importWall(`VulcanCsvVersion,2
+TargetBundleId,${rustA7}`, { u_value: .25, u_value_interpretation: meaning, u_value_interpreted_value: .25 });
+    expect(store.getState().getCsvMigrationIssues()).toEqual([]);
+    expect(Object.values(store.getState().elementsById)[0].extra_json?.u_value_interpretation).toBe(meaning);
+  });
+  it('keeps an unpinned modern file without source meaning unresolved', () => {
+    expect(importWall('VulcanCsvVersion,3').getState().getCsvMigrationIssues()).toHaveLength(1);
+  });
   it('does not acknowledge an unchanged or edited legacy number, validation, or a version stamp', () => {
     const element = wall();
     expect(csvMigrationIssues([element])).toHaveLength(1);
@@ -56,6 +116,10 @@ describe('CSV v3 explicit U-value migration', () => {
     expect(csvMigrationIssues([editedAfterImport], 2)).toHaveLength(1);
     const [edited] = normalizeCsvConstructionProvenance([{ ...element, extra_json: { ...element.extra_json, u_value: .3 } }]);
     expect(csvMigrationIssues([edited])).toHaveLength(1);
+    for (const conflict of [{ u_value_interpreted_value: .2 }, { construction_basis: 'full' }, { u_value_interpretation: 'unknown' }]) {
+      const [conflicting] = normalizeCsvConstructionProvenance([{ ...element, extra_json: { ...element.extra_json, ...conflict } }]);
+      expect(csvMigrationIssues([conflicting])).toHaveLength(1);
+    }
   });
   it('exports computed internal area basis and preserves it on reopen', () => {
     const store = createGeometryStore();
@@ -122,14 +186,11 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,,"{""u_value"":0.25}"
     const state = store.getState();
     expect(state.sourceCsvVersion).toBe(1);
     const ground = Object.values(state.elementsById).find(element => element.name === 'Manual ground')!;
-    const party = Object.values(state.elementsById).find(element => element.name === 'Party')!;
     expect(ground.total_area).toBe(45);
     expect(ground[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]).toBe(true);
-    expect(state.getCsvMigrationIssues()).toHaveLength(1);
+    expect(state.getCsvMigrationIssues()).toEqual([]);
     expect(state.generateCSV()).toContain('VulcanCsvVersion,1');
     state.requestCsvUpgrade();
-    expect(() => state.generateCSV()).toThrow('CSV_U_VALUE_MEANING_REQUIRED');
-    state.resolveCsvUValueInterpretation([party.id], 'half_construction');
     const upgraded = store.getState().generateCSV();
     expect(upgraded).toContain('VulcanCsvVersion,3');
     expect(upgraded).not.toContain('ProvenanceMarkers,');
@@ -208,7 +269,7 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,,"{""u_value"":0.25}"
 `;
     const store = createGeometryStore({ defaultDefaultsPath: null });
     store.getState().loadFromCSV(original);
-    expect(store.getState().getCsvMigrationIssues()).toHaveLength(1);
+    expect(store.getState().getCsvMigrationIssues()).toEqual([]);
     const ordinarySave = store.getState().generateCSV();
     expect(ordinarySave).toContain(`VulcanCsvVersion,${format ?? 1}`);
     const provenanceRow = ordinarySave.split('\n').find(line => line.startsWith('ProvenanceMarkers,'));
@@ -216,14 +277,14 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,,"{""u_value"":0.25}"
     const reopened = createGeometryStore({ defaultDefaultsPath: null });
     reopened.getState().loadFromCSV(ordinarySave);
     expect(reopened.getState().sourceCsvVersion).toBe(format ?? 1);
-    expect(reopened.getState().getCsvMigrationIssues()).toHaveLength(1);
+    expect(reopened.getState().getCsvMigrationIssues()).toEqual([]);
     for (const name of ['Automatic', 'Manual']) {
       const before = Object.values(store.getState().elementsById).find(element => element.name === name)!;
       const after = Object.values(reopened.getState().elementsById).find(element => element.name === name)!;
       expect(after[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]).toBe(name === 'Manual');
       expect(after.total_area).toBe(before.total_area);
     }
-    expect(reopened.getState().generateCSV()).not.toContain('u_value_interpretation');
+    expect(reopened.getState().generateCSV()).toContain('half_construction');
   });
 
   it('invalidates target readiness on A/B/A changes without rewriting authored state', () => {
