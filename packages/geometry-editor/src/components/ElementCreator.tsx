@@ -3533,7 +3533,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       if (dormerAssemblyRepresentative.type === 'BuildingElementGround') return 180;
       const rep = dormerAssemblyRepresentative as Element & { pitch?: number };
       const p = rep.pitch;
-      return typeof p === 'number' && Number.isFinite(p) && p > 0 ? p : 90;
+      return typeof p === 'number' && Number.isFinite(p) ? p : 90;
     }
     return elementType === 'BuildingElementGround' ? 180 : wallShared.pitch;
   })();

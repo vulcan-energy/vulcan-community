@@ -35,7 +35,6 @@ import {
 } from '../lib/assemblyCavityModel';
 import {
   buildAnnexF_v1EnvelopeSnapshot,
-  computeAnnexFCorrections,
   ISO6946_DEFAULT_INVERTED_ROOF_F_TIMES_X,
   ISO6946_DEFAULT_UK_PRECIPITATION_HEATING_SEASON_MM_PER_DAY,
   roundUValueToTwoSignificantFigures,
@@ -49,7 +48,7 @@ import {
   resolveAnnexFPrimaryCavityLayerIndex,
   resolveAnnexFR1LayerIndex,
 } from '../lib/annexFCavity';
-import { computeFabricUWritesFromConstructionR } from '../lib/fabricUWrites';
+import { computeAssemblyAnnexF, computeFabricUWritesFromConstructionR } from '../lib/fabricUWrites';
 import { loadBundledAssemblyLibrary, upsertUserAssembly, type BundledAssemblyLibrary } from '../lib/assemblyLibrary';
 import { assemblySearchHaystack, assemblyPickerDescription } from '../lib/assemblyNaming';
 import { buildUserAssemblyExample, layersFromLibraryAssembly, libraryElementTypeForMode } from '../lib/assemblyUserLibrary';
@@ -480,8 +479,8 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
         rConstructionLower: 0,
         rConstructionUpper: 0,
         rLayersSeries: 0,
+        rLayersSeriesFullAssembly: 0,
         seriesLayerResistances: [] as number[],
-        rTotSeriesWithFilms: 0,
         u: 0,
         uSeries: 0,
         hasRepeatingBridges: false,
@@ -516,7 +515,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
       elementPitchDeg,
       heatTransferContext.externalSurfaceResistance_m2K_W,
     );
-    const { u: uSeries, rTot: rTotSeriesWithFilms } = computeOpaqueUAndTotals(
+    const { u: uSeries } = computeOpaqueUAndTotals(
       rLayersSeriesAdjusted,
       elementPitchDeg,
       heatTransferContext.externalSurfaceResistance_m2K_W,
@@ -532,8 +531,8 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
       rConstructionLower: iso.rConstructionLower_m2K_W,
       rConstructionUpper: iso.rConstructionUpper_m2K_W,
       rLayersSeries: rLayersSeriesAdjusted,
+      rLayersSeriesFullAssembly: rLayersSeries,
       seriesLayerResistances: seriesOnly.layerResistances,
-      rTotSeriesWithFilms,
       u,
       uSeries,
       hasRepeatingBridges,
@@ -573,15 +572,18 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
     return resolveAnnexFR1LayerIndex(layers, calc.seriesLayerResistances, annexFPrimaryCavityResolved);
   }, [library, calc.errors.length, calc.seriesLayerResistances, layers, annexFPrimaryCavityResolved]);
 
-  const annexComputation = useMemo(() => {
+  const annexF = useMemo(() => {
     if (!library || calc.errors.length > 0 || !(calc.u > 0)) return null;
     // Annex F is defined for a single construction path; skip when R_f/R_g stack split is used.
     if (elementMode === 'BuildingElementGround' && useSuspendedGroundVoidSplit) {
       return null;
     }
-    return computeAnnexFCorrections({
-      uCombined_W_m2K: calc.u,
-      rTotSeriesWithFilms_m2K_W: calc.rTotSeriesWithFilms,
+    return computeAssemblyAnnexF({
+      rFullMean_m2K_W: calc.rLayersFullAssembly,
+      rFullSeries_m2K_W: calc.rLayersSeriesFullAssembly,
+      pitchDeg: elementPitchDeg,
+      externalSurfaceResistance_m2K_W: heatTransferContext.externalSurfaceResistance_m2K_W,
+      halfConstruction: heatedAdjacentHalfConstruction,
       layerSeriesR_m2K_W: calc.seriesLayerResistances,
       layers: heatTransferContext.effectiveLayers,
       r1LayerIndex: annexR1Resolved,
@@ -597,8 +599,12 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
     library,
     calc.errors.length,
     calc.u,
-    calc.rTotSeriesWithFilms,
+    calc.rLayersFullAssembly,
+    calc.rLayersSeriesFullAssembly,
     calc.seriesLayerResistances,
+    elementPitchDeg,
+    heatTransferContext.externalSurfaceResistance_m2K_W,
+    heatedAdjacentHalfConstruction,
     heatTransferContext.effectiveLayers,
     annexR1Resolved,
     effectiveAnnexFAirVoidLevel,
@@ -612,6 +618,8 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
     elementMode,
     useSuspendedGroundVoidSplit,
   ]);
+  const annexComputation = annexF?.annex ?? null;
+  const annexDeltaUForElement = annexF?.deltaUForElement_W_m2K ?? 0;
 
   const fabricUWrites = useMemo(() => {
     if (!(calc.rLayers > 0)) return null;
@@ -620,12 +628,18 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
       calc.rLayersSeries,
       elementPitchDeg,
       heatTransferContext.externalSurfaceResistance_m2K_W,
+      annexDeltaUForElement,
     );
-  }, [calc.rLayers, calc.rLayersSeries, elementPitchDeg, heatTransferContext.externalSurfaceResistance_m2K_W]);
+  }, [
+    calc.rLayers,
+    calc.rLayersSeries,
+    elementPitchDeg,
+    heatTransferContext.externalSurfaceResistance_m2K_W,
+    annexDeltaUForElement,
+  ]);
 
   const previewUForHem =
-    annexComputation?.uForHem_W_m2K ??
-    (fabricUWrites?.uCombinedTwoSf_W_m2K ?? roundUValueToTwoSignificantFigures(calc.u));
+    fabricUWrites?.uForHem_W_m2K ?? roundUValueToTwoSignificantFigures(calc.u);
   const previewWrittenConstructionR =
     fabricUWrites?.thermalResistanceConstruction_m2K_W ?? null;
   const fullAssemblyRPreview =
@@ -659,8 +673,12 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
   );
 
   const assemblyApplyErrors = useMemo(
-    () => [...calc.errors, ...(elementMode === 'BuildingElementGround' && groundSplit ? groundSplit.errors : [])],
-    [calc.errors, elementMode, groundSplit],
+    () => [
+      ...calc.errors,
+      ...(elementMode === 'BuildingElementGround' && groundSplit ? groundSplit.errors : []),
+      ...(fabricUWrites?.error ? [fabricUWrites.error] : []),
+    ],
+    [calc.errors, elementMode, groundSplit, fabricUWrites],
   );
 
   const stackValidForApply = useMemo(() => {
@@ -709,14 +727,16 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
           )
         : null;
 
+    const annex = annexComputation;
     const uW = computeFabricUWritesFromConstructionR(
       rfMean,
       rfSeries,
       elementPitchDeg,
       heatTransferContext.externalSurfaceResistance_m2K_W,
+      annexDeltaUForElement,
     );
-    const annex = annexComputation;
-    const uWrite = annex != null ? annex.uForHem_W_m2K : uW.uCombinedTwoSf_W_m2K;
+    if (uW.error) return;
+    const uWrite = uW.uForHem_W_m2K;
     const rWrite = uW.thermalResistanceConstruction_m2K_W;
     const massDistributionClass: FhsMassDistributionClass | undefined =
       massSuggestion != null ? fhsMassDistributionFromSuggestion(massSuggestion) : undefined;
@@ -738,7 +758,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
       /** Final U for HEM (Annex F corrections included). */
       correctedU_W_m2K: uWrite,
       combinedMethodU_W_m2K: roundToTwoDecimals(
-        annex?.uBeforeAnnexF_W_m2K ?? uW.uCombinedFromRoundedConstruction_W_m2K,
+        annex ? calc.u : uW.uCombinedFromRoundedConstruction_W_m2K,
       ),
       thermalResistanceConstruction_m2K_W: rWrite,
       rConstructionLowerLimit_m2K_W: roundToTwoDecimals(
@@ -817,7 +837,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
           ? { height_upper_surface: roundToTwoDecimals(suspendedGroundVoidSplit.heightUpperSurfaceM) }
           : {}),
         mass_distribution_class: massDistributionClass,
-        ...(arealElementValue != null ? { areal_heat_capacity: arealElementValue } : {}),
+        areal_heat_capacity: arealElementValue, // undefined clears a stale value (no ρ/c)
         vulcan_assembly_v1: envelope,
       });
     } else {
@@ -827,7 +847,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
         construction_basis: shouldUseHeatedAdjacentHalfConstructionFabric(elementMode) ? 'half' : 'full',
         ...(elementMode === 'BuildingElementPartyWall' ? { u_value_interpretation: 'half_construction' } : {}),
         mass_distribution_class: massDistributionClass,
-        ...(arealElementValue != null ? { areal_heat_capacity: arealElementValue } : {}),
+        areal_heat_capacity: arealElementValue, // undefined clears a stale value (no ρ/c)
         vulcan_assembly_v1: envelope,
       });
     }
@@ -835,6 +855,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
   }, [
     annexChi,
     annexComputation,
+    annexDeltaUForElement,
     annexFastenerEnabled,
     annexFTimesX,
     annexInvertedRoof,
