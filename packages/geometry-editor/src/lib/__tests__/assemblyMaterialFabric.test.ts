@@ -2,9 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
+import { unavailableGeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import type { BundledAssemblyLibrary } from '../assemblyLibrary';
 import type { MaterialRow } from '../assemblyTypes';
 import {
+  getPartyWallFabricFields,
+  getPartyWallCavityFields,
+  readPartyWallFabricValue,
+  partyWallFabricPatch,
   adjustConstructionResistanceForHeatedAdjacentElement,
   applyHeatedAdjacentHalfToArealJPerM2K,
   buildAssemblyMaterialPickerSections,
@@ -207,4 +212,45 @@ describe('buildAssemblyMaterialPickerSections', () => {
     expect(sections[0]?.title).toContain('not in typical list');
     expect(sections[0]?.options.some((o) => o.value === 'mat.iso.soil')).toBe(true);
   });
+});
+
+
+describe('target-aware party-wall fabric fields', () => {
+  it.each([
+    ['a7', { u_value: {}, thermal_resistance_construction: {} }, ['u_value', 'thermal_resistance_construction']],
+    ['a8', { u_value: false, thermal_resistance_construction: {} }, ['thermal_resistance_construction']],
+    ['a9', { u_value: false, u_value_whole_wall: {}, thermal_resistance_construction: {} }, ['u_value_whole_wall', 'thermal_resistance_construction']],
+  ])('uses schema permissions for %s, including false properties', (_target, properties, keys) => {
+    const port = { ...unavailableGeometrySchemaPort, availability: 'available' as const, getElementSubschema: () => ({ properties }) };
+    expect(getPartyWallFabricFields(port, 'fhs').map((field) => field.key)).toEqual(keys);
+  });
+
+  it('does not expose fields until the selected schema is ready', () => {
+    const port = { ...unavailableGeometrySchemaPort, availability: 'available' as const, getElementSubschema: () => null };
+    expect(getPartyWallFabricFields(port, 'fhs')).toEqual([]);
+  });
+
+  it('does not reinterpret a legacy U as half-construction U', () => {
+    expect(readPartyWallFabricValue({ u_value: 0.25 }, 'u_value')).toBeNull();
+    expect(readPartyWallFabricValue({ u_value: 0.25, u_value_interpretation: 'whole_wall' }, 'u_value')).toBeNull();
+    expect(readPartyWallFabricValue({ u_value: 0.25, u_value_interpretation: 'half_construction' }, 'u_value')).toBe(0.25);
+  });
+
+  it('records explicitly authored meaning without replacing other facts', () => {
+    const extra = { u_value: 0.3, u_value_whole_wall: 0.2, thermal_resistance_construction: 2 };
+    expect({ ...extra, ...partyWallFabricPatch('u_value_whole_wall', 0.24) }).toEqual({ ...extra, u_value_whole_wall: 0.24 });
+    expect(partyWallFabricPatch('u_value', 0.4)).toEqual({ u_value: 0.4, u_value_interpretation: 'half_construction', u_value_interpreted_value: 0.4 });
+    expect(partyWallFabricPatch('thermal_resistance_construction', 3)).toEqual({ thermal_resistance_construction: 3, construction_basis: 'half' });
+  });
+});
+
+
+it('filters party-wall cavity choices and resistance using the selected schema', () => {
+  const root = { $defs: { Cavity: { enum: ['solid', 'defined_resistance'] } } };
+  const port = { ...unavailableGeometrySchemaPort, availability: 'available' as const,
+    getRootSchema: () => root,
+    getElementSubschema: () => ({ properties: { party_wall_cavity_type: { $ref: '#/$defs/Cavity' }, thermal_resistance_cavity: {} } }),
+  };
+  expect(getPartyWallCavityFields(port, 'fhs')).toEqual({ options: [{ value: 'solid', label: 'Solid' }, { value: 'defined_resistance', label: 'Defined resistance' }], supportsResistance: true });
+  expect(getPartyWallCavityFields({ ...port, getElementSubschema: () => ({ properties: { party_wall_cavity_type: { enum: ['solid'] }, thermal_resistance_cavity: false } }) }, 'fhs')).toEqual({ options: [{ value: 'solid', label: 'Solid' }], supportsResistance: false });
 });

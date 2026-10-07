@@ -6,6 +6,8 @@
  * User-defined materials (`user:mat:…`) are always selectable.
  */
 
+import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
+import { dereferenceSchemaNodeInRoot } from './subschemaCache';
 import type { BundledAssemblyLibrary } from './assemblyLibrary';
 import type { AssemblyElementMode, MaterialRow } from './assemblyTypes';
 
@@ -170,4 +172,56 @@ export function buildAssemblyMaterialPickerSections(
     });
   }
   return sections;
+}
+
+/** Authored party-wall facts stay in the document when another target hides a field. */
+const PARTY_WALL_FABRIC_FIELDS = [
+  { key: 'u_value', label: 'Half-construction U-value', unit: 'W/m²K', min: 0.01 },
+  { key: 'u_value_whole_wall', label: 'Whole-wall U-value', unit: 'W/m²K', min: 0 },
+  { key: 'thermal_resistance_construction', label: 'Construction resistance to midpoint', unit: 'm²K/W', min: 0.01 },
+] as const;
+export type PartyWallFabricField = typeof PARTY_WALL_FABRIC_FIELDS[number];
+
+export function getPartyWallFabricFields(port: GeometrySchemaPort, mode: GeometrySchemaMode): readonly PartyWallFabricField[] {
+  if (port.availability !== 'available') return [];
+  const properties = port.getElementSubschema(mode, 'BuildingElementPartyWall')?.properties as Record<string, unknown> | undefined;
+  return PARTY_WALL_FABRIC_FIELDS.filter(({ key }) => properties?.[key] != null && properties[key] !== false);
+}
+
+export function readPartyWallFabricValue(extra: Record<string, unknown>, key: PartyWallFabricField['key']): number | null {
+  // An unresolved or whole-wall legacy U must never appear as a half-construction U.
+  if (key === 'u_value' && extra.u_value_interpretation !== 'half_construction') return null;
+  const value = extra[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function partyWallFabricPatch(key: PartyWallFabricField['key'], value: number): Record<string, unknown> {
+  return {
+    [key]: value,
+    ...(key === 'u_value' ? { u_value_interpretation: 'half_construction', u_value_interpreted_value: value } : {}),
+    ...(key === 'thermal_resistance_construction' ? { construction_basis: 'half' } : {}),
+  };
+}
+
+
+const PARTY_WALL_CAVITY_OPTIONS = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'unfilled_unsealed', label: 'Unfilled, unsealed' },
+  { value: 'unfilled_sealed', label: 'Unfilled, sealed' },
+  { value: 'filled_sealed', label: 'Filled, sealed' },
+  { value: 'filled_unsealed', label: 'Filled, unsealed' },
+  { value: 'defined_resistance', label: 'Defined resistance' },
+];
+
+export function getPartyWallCavityFields(port: GeometrySchemaPort, mode: GeometrySchemaMode) {
+  const properties = port.availability === 'available'
+    ? port.getElementSubschema(mode, 'BuildingElementPartyWall')?.properties as Record<string, unknown> | undefined : undefined;
+  const root = port.availability === 'available' ? port.getRootSchema(mode) : null;
+  const cavity = properties?.party_wall_cavity_type && root
+    ? dereferenceSchemaNodeInRoot(properties.party_wall_cavity_type, root) as Record<string, unknown> : undefined;
+  const values = Array.isArray(cavity?.enum) ? cavity.enum : [];
+  return {
+    options: PARTY_WALL_CAVITY_OPTIONS.filter(option => values.includes(option.value)),
+    supportsResistance: properties?.thermal_resistance_cavity != null && properties.thermal_resistance_cavity !== false,
+  };
 }

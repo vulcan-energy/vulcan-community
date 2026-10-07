@@ -5,6 +5,8 @@ import {
   createContext,
   createElement,
   useContext,
+  useMemo,
+  useSyncExternalStore,
   type ReactElement,
   type ReactNode,
 } from 'react';
@@ -64,8 +66,19 @@ export function GeometryEditorServicePortsProvider({
   );
 }
 
+const subscribeStaticSchema = (): (() => void) => () => {};
+const staticSchemaRevision = (): number => 0;
+
 export function useGeometrySchemaPort(): GeometrySchemaPort {
-  return useContext(GeometrySchemaPortContext);
+  const port = useContext(GeometrySchemaPortContext);
+  const revision = useSyncExternalStore(
+    port.subscribe ?? subscribeStaticSchema,
+    port.getRevision ?? staticSchemaRevision,
+    port.getRevision ?? staticSchemaRevision,
+  );
+  // Existing field memos depend on the port; a new snapshot refreshes them without
+  // remounting the editor or discarding an in-progress input draft.
+  return useMemo(() => ({ ...port, getRevision: () => revision }), [port, revision]);
 }
 
 export function useGeometryWorkspaceResourcePort(): GeometryWorkspaceResourcePort {

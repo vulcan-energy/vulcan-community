@@ -184,22 +184,15 @@ export function FabricDefaultsEditorPanel({
   const schemaPort = useGeometrySchemaPort();
   const useFHSSchema = useGeometryStore((s) => !!s.complianceSettings?.complianceValidationEnabled);
 
-  const initialSchemaReady = (
-    schemaPort.availability === 'available' &&
-    !!schemaPort.getRootSchema(useFHSSchema ? 'fhs' : 'core')
-  );
-  const [schemaReady, setSchemaReady] = useKeyedState(
-    schemaPort.availability,
-    initialSchemaReady,
-  );
+  const schemaReady = schemaPort.availability === 'available' &&
+    !!schemaPort.getRootSchema(useFHSSchema ? 'fhs' : 'core');
   const defaultsSig = useMemo(() => defaultsContentSig(defaultsRoot), [defaultsRoot]);
-  const draftResetKey = [
-    filePath,
-    defaultsSig,
-    `session:${sessionRevision}`,
-    `fhs:${useFHSSchema ? '1' : '0'}`,
-    `schema:${schemaReady ? '1' : '0'}`,
-  ].join('\0');
+  const documentKey = [filePath, defaultsSig, `session:${sessionRevision}`,
+    `fhs:${useFHSSchema ? '1' : '0'}`].join('\0');
+  // Only the first successful schema load initializes a document's draft.
+  // A later target load/failure must not replace unsaved edits with persisted defaults.
+  const [schemaInitialized, setSchemaInitialized] = useKeyedState(documentKey, schemaReady);
+  const draftResetKey = `${documentKey}\0schema:${schemaInitialized ? '1' : '0'}`;
   const resolved = useMemo(() => resolveFabricMergeTemplates(defaultsRoot), [defaultsRoot]);
   const initialDraft = useMemo(
     () => defaultsRoot && schemaReady
@@ -222,16 +215,18 @@ export function FabricDefaultsEditorPanel({
 
   useEffect(() => {
     if (schemaPort.availability !== 'available') return;
+    let current = true;
     void Promise.all([
       schemaPort.preload('core'),
       schemaPort.preload('fhs'),
     ]).then(() => {
-      setSchemaReady(true);
+      if (current) { setSchemaInitialized(true); setSaveError(null); }
     }).catch((error: unknown) => {
-      setSchemaReady(false);
+      if (!current) return;
       setSaveError(error instanceof Error ? error.message : String(error));
     });
-  }, [schemaPort, setSaveError, setSchemaReady]);
+    return () => { current = false; };
+  }, [schemaPort, setSaveError, setSchemaInitialized]);
 
   const dirty = useMemo(() => {
     const normDraft = normalizeFabricDraftForPersist(
@@ -284,8 +279,8 @@ export function FabricDefaultsEditorPanel({
   }, [setDraftByRole]);
 
   const handleSave = useCallback(async () => {
-    if (!defaultsRoot) {
-      setSaveError('No defaults file loaded.');
+    if (!defaultsRoot || !schemaReady) {
+      setSaveError(!defaultsRoot ? 'No defaults file loaded.' : 'Wait for the selected model schema to load.');
       return;
     }
     setSaving(true);
@@ -314,6 +309,7 @@ export function FabricDefaultsEditorPanel({
     draftByRole,
     resolved,
     schemaPort,
+    schemaReady,
     setBaselineDraft,
     setDraftByRole,
     setSaveError,
@@ -322,7 +318,7 @@ export function FabricDefaultsEditorPanel({
   ]);
 
   const effPath = (filePath || '').trim();
-  const canSave = !!effPath && !!defaultsRoot && dirty && !loading && !saving;
+  const canSave = !!effPath && !!defaultsRoot && schemaReady && dirty && !loading && !saving;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
