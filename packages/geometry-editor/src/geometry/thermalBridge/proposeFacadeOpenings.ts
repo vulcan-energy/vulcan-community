@@ -642,7 +642,9 @@ export interface AnnotatedFacadeProposal extends FacadeOpeningTbProposal {
 }
 
 /**
- * Tag proposals as duplicate when an existing ThermalBridgeLinear matches junction_type + midpoint proximity.
+ * Tag proposals as duplicate when an existing ThermalBridgeLinear sits at the same midpoint (within tolerance)
+ * with any junction_type offered for the proposal's edge role — a lintel saved as E2 is the same junction as
+ * the E1 proposal, and suggesting it again would double-count ψ·L.
  */
 export function annotateProposalsWithDedupe(
   proposals: FacadeOpeningTbProposal[],
@@ -653,12 +655,13 @@ export function annotateProposalsWithDedupe(
 
   return proposals.map((p) => {
     const jt = p.junctionCode;
+    const roleOptions = new Set(junctionOptionsForFacadeEdgeRole(p.edgeRole));
     const mid = midpoint3(p.coordinates[0], p.coordinates[1]);
 
     let matched: ThermalBridgeLinear | undefined;
     for (const tb of existing) {
       const exJt = tb.extra_json?.junction_type as string | undefined;
-      if (!exJt || exJt !== jt) continue;
+      if (!exJt || (exJt !== jt && !roleOptions.has(exJt))) continue;
       const c = tb.coordinates;
       if (!c || c.length < 2) continue;
       const exMid = midpoint3(c[0], c[1]);
