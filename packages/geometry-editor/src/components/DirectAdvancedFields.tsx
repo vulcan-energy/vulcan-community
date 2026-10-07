@@ -168,9 +168,8 @@ type DirectControlProps = React.ComponentProps<typeof TextControl>;
  * `inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema` manufactures
  * `HeatSourceWet: {type:'string', oneOf: []}` whenever an FHS project has a
  * CombiBoiler/HIU/HeatBattery `hw cylinder` and ZERO wet heat-source plants defined
- * yet (its own hint text literally asks the user to type a name: "No defined heat
- * source (wet) names yet. Add a Heat source (wet) system that defines a plant key,
- * then link here." — EnumControl with no options cannot accept that input). `pickDirectControl`
+ * yet (its own hint text literally asks the user to type a name: "No heat sources
+ * defined yet. Add a heat source, then link it here." — EnumControl with no options cannot accept that input). `pickDirectControl`
  * therefore requires NON-EMPTY alternatives (`isNonEmptyEnumLike`, mirroring the
  * retired JsonForms registry's own GenericControl fallback's inline guards — see the
  * R4.5 deletion note above `schemaHasIntegerType` in `jsonformsRenderers.tsx`), so

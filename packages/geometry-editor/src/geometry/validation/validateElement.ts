@@ -471,6 +471,93 @@ const heatSourceWetReferenceMap = (elements: Element[]): Map<string, Record<stri
   return map;
 };
 
+// Mirrors the merge's `NAMED_UI_ONLY_EXTRA_JSON_KEYS` / `NAME_KEYED_LEVELS` in
+// `crates/vulcan-model-transform/src/builder.rs`: UI-only keys are stripped from an entry before
+// rows are compared, except at levels whose keys are user-chosen names. Paths are relative to one
+// named entry. Keep in step with the merge, or the E060 warning below lies.
+const MERGE_UI_ONLY_KEYS = new Set(['psi_source', 'vulcan_assembly_v1', 'ru_calculator_state_v1', 'thermal_bridge_solver']);
+const MERGE_SECTION_LABELS: Record<string, string> = {
+  HeatSourceWet: 'heat source',
+  HotWaterSource: 'hot water source',
+  SpaceCoolSystem: 'cooling system',
+};
+const MERGE_NAME_KEYED_ENTRY_LEVELS: Record<string, string[]> = {
+  HeatSourceWet: ['boiler/cost_schedule_hybrid', 'boiler/cost_schedule_hp'],
+  HotWaterSource: ['HeatSource'],
+  SpaceCoolSystem: [],
+};
+
+/** Canonical (key-sorted, UI-stripped) JSON of one entry, as the merge compares it. */
+const mergeComparableEntry = (section: string, value: unknown, path = ''): string => {
+  if (Array.isArray(value)) return `[${value.map((item) => mergeComparableEntry(section, item, '\0')).join(',')}]`;
+  if (!value || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  const nameKeyed = MERGE_NAME_KEYED_ENTRY_LEVELS[section].includes(path);
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record)
+    .filter((key) => record[key] !== undefined && (nameKeyed || !(key.startsWith('_') || MERGE_UI_ONLY_KEYS.has(key))))
+    .sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${mergeComparableEntry(
+    section, record[key], path === '\0' ? path : path ? `${path}/${key}` : key,
+  )}`).join(',')}}`;
+};
+
+/** A Systems row's entries for `section`, as `csv_row_entries` reads them: wrapped names, or the flat row under its own name. */
+const mergeRowEntries = (section: string, element: Element, extra: Record<string, unknown>): Array<[string, unknown]> => {
+  const wrapped = extra[section];
+  if (wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)) return Object.entries(wrapped);
+  return [[element.name, extra]];
+};
+
+/**
+ * Editor twin of the merge's E060 (`merge_csv_owned_entries`): two Systems rows defining one
+ * HeatSourceWet / HotWaterSource / SpaceCoolSystem name with different content fail the merge.
+ * Identical repeats are fine. Returns the messages that involve `element`.
+ */
+const duplicateSystemDefinitionMessagesForElement = (
+  element: Element,
+  elements: Element[],
+  complianceValidationEnabled: boolean,
+): string[] => {
+  const owners = new Map<string, { row: Element; payload: string }>();
+  const messages: string[] = [];
+  const own = (section: string, row: Element, entries: Array<[string, unknown]>) => {
+    for (const [name, value] of entries) {
+      let entry = value;
+      // `ensure_fhs_heat_source_wet_defaults` runs before the comparison.
+      if (section === 'HeatSourceWet' && complianceValidationEnabled && entry && typeof entry === 'object'
+        && !Array.isArray(entry) && !('is_heat_network' in entry)) {
+        entry = { ...entry, is_heat_network: false };
+      }
+      const payload = mergeComparableEntry(section, entry);
+      const key = `${section}\0${name}`;
+      const previous = owners.get(key);
+      if (!previous) {
+        owners.set(key, { row, payload });
+      } else if (previous.payload !== payload) {
+        if (previous.row.id === element.id || row.id === element.id) {
+          messages.push(`Systems rows '${previous.row.name}' and '${row.name}' both define ${MERGE_SECTION_LABELS[section]} '${name}' differently — remove one of them, or make them identical.`);
+        }
+        previous.payload = payload;
+      }
+    }
+  };
+  for (const row of elements) {
+    if (row.type !== 'System') continue;
+    const subcategory = (row as System).subcategory;
+    const extra = row.extra_json;
+    if (!extra || typeof extra !== 'object' || Array.isArray(extra)) continue;
+    if (subcategory === 'HeatSourceWet') {
+      own('HeatSourceWet', row, mergeRowEntries('HeatSourceWet', row, extra));
+      if ('HeatSourceWet' in extra && extra.HotWaterSource && typeof extra.HotWaterSource === 'object' && !Array.isArray(extra.HotWaterSource)) {
+        own('HotWaterSource', row, Object.entries(extra.HotWaterSource));
+      }
+    } else if (subcategory === 'HotWaterSource' || subcategory === 'SpaceCoolSystem') {
+      own(subcategory, row, mergeRowEntries(subcategory, row, extra));
+    }
+  }
+  return messages;
+};
+
 const spaceHeatSystemHeatSourceWetLinkMessagesForElement = (
   element: Element,
   elements: Element[],
@@ -486,19 +573,19 @@ const spaceHeatSystemHeatSourceWetLinkMessagesForElement = (
     const linkedName = readRecord(system.HeatSource).name;
     const linked = typeof linkedName === 'string' ? linkedName.trim() : '';
     if (!linked) {
-      messages.push(`SpaceHeatSystem "${name}" must link a HeatSourceWet system`);
+      messages.push(`SpaceHeatSystem "${name}" must link a heat source`);
       continue;
     }
     const heatSource = heatSources.get(linked);
     if (!heatSource) {
-      messages.push(`SpaceHeatSystem "${name}" links HeatSourceWet "${linked}" but no matching HeatSourceWet system exists`);
+      messages.push(`SpaceHeatSystem "${name}" links heat source "${linked}" but no matching heat source exists`);
       continue;
     }
     if (systemType === 'WarmAir') {
       if (heatSource.type !== 'HeatPump') {
-        messages.push(`WarmAir SpaceHeatSystem "${name}" must link a HeatPump HeatSourceWet system`);
+        messages.push(`WarmAir SpaceHeatSystem "${name}" must link a heat pump heat source`);
       } else if (heatSource.sink_type !== 'Air') {
-        messages.push(`WarmAir SpaceHeatSystem "${name}" must link a HeatSourceWet heat pump with sink_type "Air"`);
+        messages.push(`WarmAir SpaceHeatSystem "${name}" must link a heat pump heat source with sink_type "Air"`);
       }
     }
   }
@@ -1739,6 +1826,15 @@ export const validateElementCore = (
           } else if (!ventTypes.some((type) => type === 'Centralised continuous MEV' || type === 'MVHR')) {
             issues.push(geo('Exhaust-air heat pumps require Centralised continuous MEV or MVHR ventilation', 'extra_json'));
           }
+        }
+      }
+      if (elementsById) {
+        for (const msg of duplicateSystemDefinitionMessagesForElement(
+          element,
+          Object.values(elementsById),
+          !!complianceValidationEnabled,
+        )) {
+          issues.push(geo(msg, 'extra_json'));
         }
       }
       if (complianceValidationEnabled && elementsById) {

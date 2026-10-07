@@ -2349,8 +2349,8 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       // exactly `HeatSourceWet: {type:'string', oneOf: []}` on an FHS
       // CombiBoiler/HIU/HeatBattery `hw cylinder` whenever the project has ZERO wet
       // heat-source plants defined yet -- its own hint text asks the user to type a
-      // name ("No defined heat source (wet) names yet. Add a Heat source (wet)
-      // system that defines a plant key, then link here."). The shared
+      // name ("No heat sources defined yet. Add a heat source, then link it
+      // here."). The shared
       // `schemaHasEnum`/`schemaHasConstAlternatives` predicates WERE vacuously true on
       // an empty array, which was harmless under R4.3's type-first `pickDirectControl`
       // order but would route this straight to a ZERO-OPTION EnumControl dropdown

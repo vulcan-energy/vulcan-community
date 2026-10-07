@@ -150,8 +150,8 @@ export function inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema(
   const baseDesc = typeof hswField.description === 'string' ? hswField.description.trim() : '';
   const hint
     = enumList.length === 0
-      ? 'No defined heat source (wet) names yet. Add a Heat source (wet) system that defines a plant key, then link here.'
-      : 'Only names that already exist on a heat source (wet) system in this project are allowed (plus the current value, if any). This link does not copy combi DHW test values; use the PCDB DHW action when linking to a PCDB combi boiler.';
+      ? 'No heat sources defined yet. Add a heat source, then link it here.'
+      : 'Only names that already exist on a heat source in this project are allowed (plus the current value, if any). This link does not copy combi DHW test values; use the PCDB DHW action when linking to a PCDB combi boiler.';
   const description = [baseDesc, hint].filter(Boolean).join(' ');
 
   cyl.properties.HeatSourceWet = {
