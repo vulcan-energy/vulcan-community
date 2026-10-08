@@ -226,7 +226,7 @@ export const targetValidationIssues = (
       ? { map: elements, id: elementId }
       : zoneId && row.pathSegments[2] !== 'BuildingElement' ? { map: zones, id: zoneId } : undefined;
     if (!owner) continue;
-    const message = row.userMessage.includes(hem) ? row.userMessage : `${hem}: ${row.userMessage}`;
+    const message = row.userMessage.startsWith(hem) ? row.userMessage : `${hem}: ${row.userMessage}`;
     owner.map.set(owner.id, [...(owner.map.get(owner.id) ?? []), { message, fieldKey, source: 'schema' }]);
   }
   return { elements, zones };
