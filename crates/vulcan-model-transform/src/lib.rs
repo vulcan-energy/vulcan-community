@@ -187,7 +187,11 @@ pub fn transform_geometry_csv(
     let mut errors = builder.take_non_fatal_errors();
     let validation_model = clone_for_hem_validation(&model);
     errors.extend(finalized.validation.errors);
-    errors.extend(validate_target_input(&model, request.conversion_profile));
+    errors.extend(validate_target_input(
+        &model,
+        request.conversion_profile,
+        &request.version_metadata,
+    ));
     let validation = ValidationResult {
         is_valid: errors.is_empty(),
         errors,
@@ -206,9 +210,14 @@ pub fn transform_geometry_csv(
 /// Source-verified wrapper readiness beyond a release's JSON schema. Diagnose
 /// missing main hot-water sources and a8 scalar bridges without inventing facts
 /// or silently renaming authored systems.
-pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<ValidationError> {
+pub fn validate_target_input(
+    model: &Value,
+    profile: ConversionProfile,
+    version: &VersionMetadata,
+) -> Vec<ValidationError> {
     let mut errors = Vec::new();
     let contract = profile.input_contract();
+    let hem = format!("HEM {}", version.hem_core_version);
     if contract.requires_main_hot_water_source
         && model
             .get("HotWaterSource")
@@ -221,7 +230,7 @@ pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<V
         errors.push(ValidationError {
             code: "E_PYTHON_FHS_HOT_WATER_SOURCE".into(),
             path: "/HotWaterSource/hw cylinder".into(),
-            message: "The selected input contract requires the main hot-water source under 'hw cylinder', including point-of-use systems. Supply a target-compatible main source; unsupported names are preserved in the authored CSV and are not renamed automatically.".into(),
+            message: format!("{hem} requires the main hot-water source under 'hw cylinder', including point-of-use systems. Supply a compatible main source; unsupported names are preserved in the authored CSV and are not renamed automatically."),
             schema_path: None, keyword: None,
         });
     }
@@ -231,8 +240,8 @@ pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<V
                 if zone.get("ThermalBridging").is_some_and(Value::is_number) {
                     errors.push(ValidationError {
                         code: "E_A8_THERMAL_BRIDGING".into(),
-                        path: format!("/Zone/{}/ThermalBridging", name.replace('~',"~0").replace('/',"~1")),
-                        message: "The selected input contract requires detailed thermal-bridge records during wrapper preprocessing, even though its schema accepts a scalar. Supply the actual bridge records; an aggregate cannot be expanded without evidence.".into(),
+                        path: json_pointer(&["Zone", name, "ThermalBridging"]),
+                        message: format!("{hem} requires detailed thermal-bridge records during wrapper preprocessing, even though its schema accepts a single total. Supply the actual bridge records; a total cannot be expanded without evidence."),
                         schema_path: None, keyword: None,
                     });
                 }
@@ -240,6 +249,14 @@ pub fn validate_target_input(model: &Value, profile: ConversionProfile) -> Vec<V
         }
     }
     errors
+}
+
+/// RFC 6901 pointer from raw segments (names may contain '/' or '~').
+pub(crate) fn json_pointer(segments: &[&str]) -> String {
+    segments
+        .iter()
+        .map(|segment| format!("/{}", segment.replace('~', "~0").replace('/', "~1")))
+        .collect()
 }
 
 fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
@@ -315,12 +332,16 @@ fn enforce_pure_hem_input(
             )
         })
         .filter(|error| {
+            // Only a concrete schema error explains an unknown property; converter
+            // errors (no keyword) must not soften the pure-HEM-input gate.
             !validation.errors.iter().any(|other| {
-                !matches!(
-                    other.keyword.as_deref(),
-                    Some("unevaluatedProperties") | Some("additionalProperties")
-                ) && (other.path == error.path
-                    || other.path.starts_with(&format!("{}/", error.path)))
+                other.keyword.is_some()
+                    && !matches!(
+                        other.keyword.as_deref(),
+                        Some("unevaluatedProperties") | Some("additionalProperties")
+                    )
+                    && (other.path == error.path
+                        || other.path.starts_with(&format!("{}/", error.path)))
             })
         })
         .cloned()

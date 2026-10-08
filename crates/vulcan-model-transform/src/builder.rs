@@ -2131,7 +2131,12 @@ impl JSONBuilder {
                     if !valid_types.is_empty() && !valid_types.contains(&schema_element_type) {
                         self.push_non_fatal(
                             "E056",
-                            &format!("Zone/{zone_name}/BuildingElement/{element_name}"),
+                            &crate::json_pointer(&[
+                                "Zone",
+                                zone_name,
+                                "BuildingElement",
+                                element_name,
+                            ]),
                             &format!(
                                 "Unknown building element type '{schema_element_type}' \
                                  (element '{element_name}' in {section_name}) — check the \
@@ -2234,7 +2239,12 @@ impl JSONBuilder {
                     if allowed_building_element_props.is_empty() {
                         self.push_non_fatal(
                             "E056",
-                            &format!("Zone/{zone_name}/BuildingElement/{element_name}"),
+                            &crate::json_pointer(&[
+                                "Zone",
+                                zone_name,
+                                "BuildingElement",
+                                element_name,
+                            ]),
                             &format!(
                                 "No schema properties found for building element type \
                                  '{schema_element_type}' (element '{element_name}') — \
@@ -2422,7 +2432,8 @@ impl JSONBuilder {
                         }
                     }
 
-                    let target_path = format!("Zone/{zone_name}/BuildingElement/{element_name}");
+                    let target_path =
+                        crate::json_pointer(&["Zone", zone_name, "BuildingElement", element_name]);
                     let contract = self.input_contract;
                     let diagnostics = match contract.elements {
                         crate::ElementInputConvention::PhysicalOpeningFullPartition => {
@@ -3379,7 +3390,7 @@ impl JSONBuilder {
                     other => {
                         self.push_non_fatal(
                             "E055",
-                            &format!("HotWaterDemand/{outlet_name}"),
+                            &crate::json_pointer(&["HotWaterDemand", outlet_name]),
                             &format!(
                                 "Hot Water Outlets row '{outlet_name}' has unknown subcategory \
                                  '{other}' and was skipped. Valid: MixerShower, \
@@ -4702,7 +4713,7 @@ impl JSONBuilder {
                                                     _ => self.csv_number_non_fatal(
                                                         Some(&val),
                                                         &name,
-                                                        "InfiltrationVentilation/Leaks",
+                                                        "/InfiltrationVentilation/Leaks",
                                                     ),
                                                 }
                                             }
@@ -4732,7 +4743,7 @@ impl JSONBuilder {
                                 if let Some(num) = self.csv_number_non_fatal(
                                     Some(&val),
                                     &name,
-                                    "InfiltrationVentilation/Leaks",
+                                    "/InfiltrationVentilation/Leaks",
                                 ) {
                                     leaks_obj.insert(
                                         leaks_field_name.to_string(),
@@ -4798,7 +4809,7 @@ impl JSONBuilder {
                                     if let Some(num) = self.csv_number_non_fatal(
                                         Some(&val),
                                         name,
-                                        "InfiltrationVentilation",
+                                        "/InfiltrationVentilation",
                                     ) {
                                         if let Some(n) = serde_json::Number::from_f64(num) {
                                             inf_vent_obj
@@ -4810,7 +4821,7 @@ impl JSONBuilder {
                                     if let Some(bool_val) = self.csv_bool_non_fatal(
                                         Some(&val),
                                         name,
-                                        "InfiltrationVentilation",
+                                        "/InfiltrationVentilation",
                                     ) {
                                         inf_vent_obj
                                             .insert(inf_field.to_string(), Value::Bool(bool_val));
@@ -4904,7 +4915,7 @@ impl JSONBuilder {
                 // > defaults profile). Pitch/orientation are rounded to integers for
                 // FHS only (an FHS schema requirement); core keeps fractional values.
                 let mut csv_set_keys: HashSet<String> = HashSet::new();
-                let pv_path = format!("OnSiteGeneration/{element_name}");
+                let pv_path = crate::json_pointer(&["OnSiteGeneration", element_name]);
                 for key in ["peak_power", "base_height", "width", "height"] {
                     if let Some(num) = self.csv_number_non_fatal(row.get(key), key, &pv_path) {
                         pv_system.insert(
@@ -5385,7 +5396,7 @@ impl JSONBuilder {
             if csv_authored.contains(&key) {
                 self.push_non_fatal(
                     "E057",
-                    &format!("SpaceHeatSystem/{key}"),
+                    &crate::json_pointer(&["SpaceHeatSystem", key.as_str()]),
                     &format!(
                         "SpaceHeatSystem '{key}' was authored in the Systems CSV but is not \
                          referenced by any zone. Set the row's Zone so the system heats a zone."
@@ -7157,7 +7168,7 @@ impl JSONBuilder {
                         for name in csv_authored_names {
                             self.push_non_fatal(
                                 "E059",
-                                &format!("SpaceHeatSystem/{name}"),
+                                &crate::json_pointer(&["SpaceHeatSystem", name.as_str()]),
                                 &format!(
                                     "SpaceHeatSystem '{name}' was authored in the Systems CSV, but the legacy Wet Emitters table has no space_heat_system column. Link it from a Wet Emitter row's space_heat_system column, or remove the Systems row."
                                 ),
@@ -7180,7 +7191,7 @@ impl JSONBuilder {
                         for name in unlinked_csv_authored_wet_names {
                             self.push_non_fatal(
                                 "E059",
-                                &format!("SpaceHeatSystem/{name}"),
+                                &crate::json_pointer(&["SpaceHeatSystem", name.as_str()]),
                                 &format!(
                                     "SpaceHeatSystem '{name}' was authored in the Systems CSV but no Wet Emitter row links to it. Link it from a Wet Emitter row's space_heat_system column, or remove the Systems row."
                                 ),

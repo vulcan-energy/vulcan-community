@@ -1819,6 +1819,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       if (target && typeof (target as HTMLElement).scrollIntoView === 'function') {
         (target as HTMLElement).scrollIntoView({ block: 'center', behavior: 'smooth' });
       }
+      target?.querySelector<HTMLElement>('input, select, textarea')?.focus({ preventScroll: true });
     }, 0);
     return () => window.clearTimeout(timer);
   }, [focusFieldKey, focusFieldVersion]);
