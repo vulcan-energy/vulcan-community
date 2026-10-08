@@ -29,7 +29,7 @@ export function getPvFootprintDimensionsFromPreset(
  * (older saves). The polygon is the plan-projection of the panel array; `width` is
  * the first drawn edge (lowest/eaves edge), and `height` is the upslope dimension
  * corrected from projected plan depth by pitch. Mirrored in the Rust merger
- * (`hem-batch-core/src/csv_pipeline/builder.rs::derive_pv_dimensions_from_coords`)
+ * (the CSV pipeline's `derive_pv_dimensions_from_coords`)
  * — keep both in sync.
  *
  * Returns null for degenerate polygons (<3 vertices, zero lowest edge or zero area).

@@ -18,7 +18,7 @@ export type FabricSection = {
   structuralRequired?: string[];
 };
 
-// Mapping mirrors merge logic in hem-batch-core/src/batch_runner.rs
+// Mapping mirrors the batch runner's simplified-fabric merge logic
 // schemaPointer values are legacy anchors; resolveFabricSchemaPointer() maps them to
 // `#/$defs/Zone/...` or other current root-schema locations.
 export const SIMPLIFIED_FABRIC_SECTIONS: FabricSection[] = [

@@ -3,7 +3,7 @@
 
 /**
  * Section-based CSV parsing for geometry / batch base-model CSVs.
- * Mirrors `hem-batch-core/src/csv_pipeline/parser.rs`: section title row,
+ * Mirrors the CSV pipeline parser: section title row,
  * then a header row, then rectangular data rows.
  */
 import {
