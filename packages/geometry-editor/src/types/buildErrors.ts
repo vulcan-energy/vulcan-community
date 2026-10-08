@@ -11,6 +11,8 @@ export type BuildErrorItem = {
   technicalMessage?: string;
   schemaPath?: string;
   keyword?: string;
+  /** Non-blocking: shown as a warning, never counted against Save or run. */
+  severity?: 'warning';
 };
 
 /** Validation by the selected HEM target, e.g. `{ hemVersion: '1.0.0a8', items }`. */

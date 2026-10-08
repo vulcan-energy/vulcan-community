@@ -40,6 +40,9 @@ pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: cra
 
 type Row = HashMap<String, Value>;
 
+/// Non-blocking mapping diagnostic: the builder reports it beside schema omissions.
+pub(crate) const TARGET_INPUT_WARNING: &str = "W_TARGET_INPUT";
+
 fn field<'a>(row: &'a Row, key: &str) -> Option<&'a Value> {
     row.get(key)
         .filter(|v| !v.is_null() && v.as_str() != Some(""))
@@ -61,13 +64,16 @@ pub(crate) fn map_physical_opening_full_partition_element(
     model: &mut Value,
     path: &str,
     whole_wall_u_required: bool,
+    ventilation_base_height: f64,
 ) -> Vec<ValidationError> {
     let mut errors = Vec::new();
     let Some(element) = model.as_object_mut() else {
         return errors;
     };
     match element.get("type").and_then(Value::as_str) {
-        Some("BuildingElementTransparent") => map_window(row, element, path, &mut errors),
+        Some("BuildingElementTransparent") => {
+            map_window(row, element, path, ventilation_base_height, &mut errors)
+        }
         Some("BuildingElementAdjacentConditionedSpace") => {
             map_partition(row, element, path, &mut errors)
         }
@@ -132,6 +138,7 @@ fn map_window(
     row: &Row,
     element: &mut Map<String, Value>,
     path: &str,
+    ventilation_base_height: f64,
     errors: &mut Vec<ValidationError>,
 ) {
     // Rust parts are numerical airflow divisions of the SAME whole opening.
@@ -169,12 +176,32 @@ fn map_window(
             element.insert("window_part_list".into(), Value::Array(parts.clone()));
             return;
         }
-        if field(row, "mid_height")
-            .and_then(Value::as_f64)
-            .is_some_and(|height| (height - midpoint.unwrap()).abs() > 1e-9)
-        {
-            error(errors,path,"mid_height","Whole-window and airflow-division mid-heights disagree; correct the authored opening heights.");
-            return;
+        // The legacy engine's stack flow used the division height; the whole-window
+        // mid_height only picked a wind-pressure band. Keep the height that was used
+        // and ask the user to check it when it is not the window's mid-height.
+        // Part heights are relative to the ventilation-zone base; base_height is
+        // above ground. The editor and v1 migration round heights to 0.01 m, so
+        // the window midpoint is compared at that resolution.
+        let used = midpoint.unwrap();
+        let geometric = match (
+            field(row, "base_height").and_then(Value::as_f64),
+            field(row, "height").and_then(Value::as_f64),
+        ) {
+            (Some(base), Some(height)) => {
+                Some(((base + height / 2.0 - ventilation_base_height) * 100.0).round() / 100.0)
+            }
+            _ => field(row, "mid_height").and_then(Value::as_f64),
+        };
+        let opens = field(row, "max_window_open_area").and_then(Value::as_f64) != Some(0.0);
+        if let Some(window_mid) = geometric.filter(|mid| opens && (mid - used).abs() > 0.005) {
+            let (used, window_mid) = (metres(used), metres(window_mid));
+            errors.push(ValidationError {
+                code: TARGET_INPUT_WARNING.into(),
+                path: format!("{path}/window_part_list"),
+                message: format!("The opening height used for ventilation ({used} m) differs from the window's mid-height ({window_mid} m), both above the ventilation-zone base. Check the opening height."),
+                schema_path: None,
+                keyword: None,
+            });
         }
         make_single_opening(row, element, midpoint, path, errors);
     } else if let Some(parts) = parts {
@@ -189,6 +216,11 @@ fn map_window(
             errors,
         );
     }
+}
+
+/// Millimetre display, so 1.0 + 1.3 / 2 reads as 1.65 rather than its float tail.
+fn metres(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
 }
 
 fn make_single_opening(
@@ -462,6 +494,7 @@ mod tests {
                                 &mut model,
                                 "test",
                                 contract.party_wall_requires_whole_u,
+                                0.0,
                             )
                         }
                     };
@@ -543,6 +576,7 @@ mod tests {
             &mut output,
             "Zone/Z/BuildingElement/test",
             true,
+            0.0,
         );
         (output, errors)
     }
@@ -557,6 +591,55 @@ mod tests {
             v["window_part_list"],
             json!([{"free_area_height":1.0,"mid_height":2.2,"max_window_open_area":0.8}])
         );
+    }
+    #[test]
+    fn legacy_division_height_is_used_and_warns_only_when_off_the_window_midpoint() {
+        let window = |base_height: f64| {
+            json!({"Type":"Transparent","base_height":base_height,"height":1.3,"free_area_height":0.95,"mid_height":1.65,"max_window_open_area":0.8,
+                "extra_json":{"window_part_list":[{"mid_height_air_flow_path":1.5},{"mid_height_air_flow_path":1.5}]}})
+        };
+        let (v, e) = map(window(1.0), json!({"type":"BuildingElementTransparent"}));
+        assert_eq!(
+            v["window_part_list"],
+            json!([{"free_area_height":0.95,"mid_height":1.5,"max_window_open_area":0.8}])
+        );
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].code, TARGET_INPUT_WARNING);
+        assert_eq!(e[0].path, "Zone/Z/BuildingElement/test/window_part_list");
+        assert!(e[0].message.contains("(1.5 m)") && e[0].message.contains("(1.65 m)"));
+        // Geometry wins over a stale whole-window mid_height: 0.85 + 1.3 / 2 = 1.5.
+        let (v, e) = map(window(0.85), json!({"type":"BuildingElementTransparent"}));
+        assert!(e.is_empty());
+        assert_eq!(v["window_part_list"][0]["mid_height"], 1.5);
+        // Upper-floor window, zone base 2.4 m: 3.2 + 1.2 / 2 - 2.4 = 1.4 above it.
+        let row = serde_json::from_value(
+            json!({"base_height":3.2,"height":1.2,"free_area_height":1,"max_window_open_area":0.5,
+            "extra_json":{"window_part_list":[{"mid_height_air_flow_path":1.4}]}}),
+        )
+        .unwrap();
+        let mut v = json!({"type":"BuildingElementTransparent"});
+        assert!(
+            map_physical_opening_full_partition_element(&row, &mut v, "w", true, 2.4).is_empty()
+        );
+        assert_eq!(v["window_part_list"][0]["mid_height"], 1.4);
+        // Odd-centimetre height: 1.0 + 1.01 / 2 is a float hair over 5 mm from the
+        // stored 1.51 m; it must not warn.
+        let row = serde_json::from_value(
+            json!({"base_height":1.0,"height":1.01,"free_area_height":1,"max_window_open_area":0.5,
+            "extra_json":{"window_part_list":[{"mid_height_air_flow_path":1.51}]}}),
+        )
+        .unwrap();
+        let mut v = json!({"type":"BuildingElementTransparent"});
+        assert!(
+            map_physical_opening_full_partition_element(&row, &mut v, "w", true, 0.0).is_empty()
+        );
+        // A window that does not open has no ventilation height to check.
+        let (_, e) = map(
+            json!({"base_height":1.0,"height":1.3,"max_window_open_area":0,
+            "extra_json":{"window_part_list":[{"mid_height_air_flow_path":1.5}]}}),
+            json!({"type":"BuildingElementTransparent"}),
+        );
+        assert!(e.is_empty());
     }
     #[test]
     fn invalid_or_conflicting_window_parts_never_become_fixed_glazing() {
@@ -690,7 +773,7 @@ mod tests {
         let mut output =
             json!({"type":"BuildingElementPartyWall","pitch":90,"u_value_whole_wall":0.2});
         assert!(
-            map_physical_opening_full_partition_element(&row, &mut output, "wall", false)
+            map_physical_opening_full_partition_element(&row, &mut output, "wall", false, 0.0)
                 .is_empty()
         );
         assert_eq!(output["thermal_resistance_construction"], 1.3);
@@ -698,11 +781,15 @@ mod tests {
         let no_whole =
             serde_json::from_value(json!({"extra_json":{"thermal_resistance_construction":1.3}}))
                 .unwrap();
-        assert!(
-            map_physical_opening_full_partition_element(&no_whole, &mut output, "wall", true)
-                .iter()
-                .any(|e| e.path.ends_with("u_value_whole_wall"))
-        );
+        assert!(map_physical_opening_full_partition_element(
+            &no_whole,
+            &mut output,
+            "wall",
+            true,
+            0.0
+        )
+        .iter()
+        .any(|e| e.path.ends_with("u_value_whole_wall")));
     }
     fn a8_version() -> crate::VersionMetadata {
         crate::VersionMetadata {
@@ -765,8 +852,8 @@ mod tests {
             let mut a8 = model.clone();
             let mut a9 = model;
             assert_eq!(
-                map_physical_opening_full_partition_element(&row, &mut a8, "test", false),
-                map_physical_opening_full_partition_element(&row, &mut a9, "test", true)
+                map_physical_opening_full_partition_element(&row, &mut a8, "test", false, 0.0),
+                map_physical_opening_full_partition_element(&row, &mut a9, "test", true, 0.0)
             );
             assert_eq!(a8, a9);
         }
