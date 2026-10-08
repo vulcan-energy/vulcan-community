@@ -6,6 +6,7 @@ import {
   buildSpaceHeatSystemSampleBaselineExtraJson,
   buildSpaceHeatSystemPresetExtraJson,
   firstSpaceHeatSystemType,
+  remapSpaceHeatSystemHeatSourceInExtraJson,
   isWetDistributionSpaceHeatSystem,
   spaceHeatSystemUsesHeatSourceWet,
   updateSpaceHeatSystemHeatSourceNameInExtraJson,
@@ -284,4 +285,23 @@ describe('systemEditorUtils SpaceHeatSystem preset shaping', () => {
       },
     })).toBe(false);
   });
+});
+
+
+it('remaps only matching circuits without mutating source data or controls', () => {
+  const first = Object.freeze({ type: 'WetDistribution', HeatSource: Object.freeze({ name: 'old', temp_flow_limit_upper: 65 }) });
+  const second = { type: 'WarmAir', HeatSource: { name: 'old' } };
+  const unrelated = { type: 'WetDistribution', HeatSource: { name: 'other' } };
+  const extra = { SpaceHeatSystem: { first, second, unrelated }, _system_source: 'custom' };
+  expect(remapSpaceHeatSystemHeatSourceInExtraJson(extra, 'old', 'new')).toEqual({
+    ...extra, SpaceHeatSystem: {
+      first: { ...first, HeatSource: { name: 'new', temp_flow_limit_upper: 65 } },
+      second: { ...second, HeatSource: { name: 'new' } }, unrelated,
+    },
+  });
+  expect(first.HeatSource.name).toBe('old');
+  expect(second.HeatSource.name).toBe('old');
+  expect(remapSpaceHeatSystemHeatSourceInExtraJson(extra, 'missing', 'new')).toBeNull();
+  expect(updateSpaceHeatSystemHeatSourceNameInExtraJson(extra, 'first', 'new').SpaceHeatSystem).toMatchObject({ first: { HeatSource: { name: 'new', temp_flow_limit_upper: 65 } } });
+  expect(first.HeatSource.name).toBe('old');
 });

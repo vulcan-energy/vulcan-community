@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
 import { unavailableGeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
+import { emptyGeometryInspectorContributions } from '../../../../geometry-editor-host/src/inspectorContributions';
+import { useStore } from 'zustand';
 import { ElementCreator } from '../ElementCreator';
 import type { Element } from '../../geometry/types';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
@@ -405,5 +407,90 @@ describe('BuildingElementGround selection stability', () => {
       total_area: 10,
       [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: false,
     });
+  });
+});
+
+
+describe('SpaceHeatSystem heat source creation', () => {
+  it.each(['WetDistribution', 'WarmAir'])('creates and links a source for %s through preset changes', async (type) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const system = {
+      id: 'heating', type: 'System', name: 'Heating', subcategory: 'SpaceHeatSystem',
+      zoneId: 'zone', floorId: 'floor-1', coordinates: [{ x: 2, y: 3, z: 1 }],
+      extra_json: { SpaceHeatSystem: { circuit: { type, HeatSource: { temp_flow_limit_upper: 65 } } } },
+    } as Element;
+    store.setState({
+      elementsById: { heating: system, ...(type === 'WarmAir' ? { existing: {
+        id: 'existing', type: 'System', subcategory: 'HeatSourceWet', name: 'Existing plant',
+        coordinates: [{ x: 0, y: 0, z: 1 }], extra_json: { HeatSourceWet: { first: {}, 'Heat source': {} } },
+      } as Element } : {}) }, elementIds: type === 'WarmAir' ? ['heating', 'existing'] : ['heating'],
+      zones: [{ id: 'zone', name: 'Zone', floorArea: 1, height: 2 }], zoneIds: ['zone'],
+      floors: [{ id: 'floor-1', name: 'First floor', zIndex: 1 }],
+      selection: { type: 'element', id: 'heating' },
+    });
+    const resources = {
+      ...unavailableGeometryWorkspaceResourcePort,
+      availability: 'available' as const,
+      list: async () => ['boiler.json', 'hp.json'],
+      readText: async (path: string) => JSON.stringify(path.endsWith('manifest.json') ? {} : {
+        HeatSourceWet: path.endsWith('boiler.json') ? { boiler: { type: 'Boiler', rated_power: 24 } } : { hp: { type: 'HeatPump', source_type: 'OutsideAir' } },
+      }),
+    };
+    function Harness() {
+      const selection = useStore(store, (state) => state.selection);
+      return <ElementCreator selection={selection} setSelection={store.getState().setSelection} workspaceResourcePort={resources} inspectorContributions={{
+        ...emptyGeometryInspectorContributions,
+        productCatalogue: {
+          hasAppliedSystemData: () => false,
+          renderAdvancedHotWaterAction: () => null,
+          renderSystemSource: ({ onApply }) => <><button onClick={() => onApply({
+            subcategory: 'HeatSourceWet', extraJson: { HeatSourceWet: { product: { type: 'Boiler' } }, _pcdb: { id: 'test' } },
+          })}>Apply product</button><button onClick={() => onApply({
+            subcategory: 'HeatSourceWet', extraJson: { HeatSourceWet: { replacement: { type: 'Boiler' } } },
+          })}>Replace product</button></>,
+        },
+      }} useCard={false} />;
+    }
+    render(<GeometryEditorServicePortsProvider schemaPort={unavailableGeometrySchemaPort} workspaceResourcePort={resources}>
+      <GeometryStoreProvider store={store}><Harness /></GeometryStoreProvider>
+    </GeometryEditorServicePortsProvider>);
+    const option = screen.getByRole('option', { name: 'Create heat source…' });
+    fireEvent.change(option.closest('select')!, { target: { value: (option as HTMLOptionElement).value } });
+    await waitFor(() => expect(store.getState().selection?.id).not.toBe('heating'));
+    const sourceId = store.getState().selection!.id;
+    const source = store.getState().elementsById[sourceId];
+    if (type === 'WarmAir') expect(source.name).not.toBe('Heat source');
+    expect(source).toMatchObject({ type: 'System', subcategory: 'HeatSourceWet', zoneId: 'zone', floorId: 'floor-1' });
+    const heatSource = () => store.getState().elementsById.heating.extra_json!.SpaceHeatSystem as Record<string, { HeatSource: { name: string; temp_flow_limit_upper: number } }>;
+    expect(heatSource().circuit.HeatSource).toEqual({ name: source.name, temp_flow_limit_upper: 65 });
+    expect(system.extra_json).toEqual({ SpaceHeatSystem: { circuit: { type, HeatSource: { temp_flow_limit_upper: 65 } } } });
+    await screen.findByRole('option', { name: 'boiler' });
+    fireEvent.change(dropdownAfterLabel('Preset'), { target: { value: 'boiler' } });
+    await waitFor(() => expect(heatSource().circuit.HeatSource.name).toBe('boiler'));
+    fireEvent.change(dropdownAfterLabel('Preset'), { target: { value: 'hp' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(heatSource().circuit.HeatSource.name).toBe('hp'));
+    fireEvent.change(dropdownAfterLabel('Preset'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(heatSource().circuit.HeatSource.name).toBe(store.getState().elementsById[sourceId].name));
+    fireEvent.change(dropdownAfterLabel('Preset'), { target: { value: 'boiler' } });
+    await waitFor(() => expect(heatSource().circuit.HeatSource.name).toBe('boiler'));
+    fireEvent.click(screen.getByRole('button', { name: 'PCDB' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(heatSource().circuit.HeatSource.name).toBe(store.getState().elementsById[sourceId].name);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply product' }));
+    expect(heatSource().circuit.HeatSource.name).toBe('product');
+    expect(heatSource().circuit.HeatSource.temp_flow_limit_upper).toBe(65);
+    act(() => store.getState().setSelection({ type: 'element', id: 'heating' }));
+    expect(screen.getByRole('option', { name: 'Create heat source…' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(store.getState().selection?.id).toBe(sourceId);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply product' })).toBeTruthy());
+    if (type === 'WarmAir') {
+      act(() => store.getState().updateElement('existing', { extra_json: { HeatSourceWet: { first: {}, product: {} } } } as Partial<Element>));
+      fireEvent.click(screen.getByRole('button', { name: 'Replace product' }));
+      expect(store.getState().elementsById[sourceId].extra_json?.HeatSourceWet).toHaveProperty('replacement');
+      expect(heatSource().circuit.HeatSource.name).toBe('product');
+    }
   });
 });

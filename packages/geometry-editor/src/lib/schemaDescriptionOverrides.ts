@@ -457,6 +457,72 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'number',
     units: 'kW',
   },
+  // Performance units follow the Core HEM schema where FHS omits the annotations.
+  'System:HotWaterSource:power_max': {
+    description: "(unit: kW)",
+    type: 'number',
+    units: 'kW',
+  },
+  'System:HotWaterSource:tank_volume_declared': {
+    description: "Tank volume stored in the database (unit: litres)",
+    type: 'number',
+    units: 'litres',
+  },
+  'System:HotWaterSource:daily_losses_declared': {
+    description: "Standing heat loss (unit: kWh/day)",
+    type: 'number',
+    units: 'kWh/day',
+  },
+  'System:HotWaterSource:heat_exchanger_surface_area_declared': {
+    description: "Surface area of heat exchanger stored in the database (unit: m2)",
+    type: 'number',
+    units: 'm2',
+  },
+  'System:HotWaterSource:energy_input_measured': {
+    description: "Electrical input energy measured in EN 16147 test over 24 hrs (unit: kWh)",
+    type: 'number',
+    units: 'kWh',
+  },
+  'System:HotWaterSource:hw_tapping_prof_daily_total': {
+    description: "Daily energy requirement for tapping profile used for test (unit: kWh/day)",
+    type: 'number',
+    units: 'kWh/day',
+  },
+  'System:HotWaterSource:hw_vessel_loss_daily': {
+    description: "Daily hot water vessel heat loss for a 45 K temperature difference between vessel and surroundings, tested in accordance with BS 1566 or EN 12897 or any equivalent standard. Vessel must be same as that used during EN 16147 test (unit: kWh/day)",
+    type: 'number',
+    units: 'kWh/day',
+  },
+  'System:HotWaterSource:power_standby': {
+    description: "Standby power measured in EN 16147 test (unit: kW)",
+    type: 'number',
+    units: 'kW',
+  },
+  'System:HeatSourceWet:air_flow_rate': {
+    description: "Air flow rate through the heat pump for the test condition (unit: m³/h)",
+    type: 'number',
+    units: 'm³/h',
+  },
+  'System:HeatSourceWet:design_flow_temp': {
+    description: "Design flow temperature for the heating system (unit: Celsius)",
+    type: 'number',
+    units: 'Celsius',
+  },
+  'System:HeatSourceWet:temp_outlet': {
+    description: "Heat pump outlet temperature for the test condition (unit: Celsius)",
+    type: 'number',
+    units: 'Celsius',
+  },
+  'System:HeatSourceWet:temp_source': {
+    description: "Heat pump source temperature for the test condition (unit: Celsius)",
+    type: 'number',
+    units: 'Celsius',
+  },
+  'System:HeatSourceWet:temp_test': {
+    description: "Ambient air temperature for the test condition (unit: Celsius)",
+    type: 'number',
+    units: 'Celsius',
+  },
   'System:HotWaterSource:cop_dhw': {
     description: 'Domestic-hot-water coefficient of performance measured during the test.',
     type: 'number',

@@ -53,6 +53,8 @@ type RendererConfig = {
   advancedEditor?: boolean;
   assemblySourceValues?: Record<string, unknown>;
   compact?: boolean;
+  tableCell?: boolean;
+  validateValue?: (value: unknown) => { valid: boolean; errors?: readonly string[] };
   currentElementData?: unknown;
   elementType?: string;
   evidenceFieldKeys?: Set<string>;
@@ -71,6 +73,7 @@ type RendererConfig = {
   suspendedThermalTransmWallsAutofillSources?: SuspendedThermalTransmWallSource[];
   systemSampleBaselineExtraJson?: unknown;
   systemSampleMode?: boolean;
+  systemSamplePathSegments?: string[];
   useFHSSchemaForValidation?: boolean;
 };
 
@@ -167,6 +170,7 @@ export function validateAdvancedFieldPrimitive(
   propKey: string | undefined,
   value: unknown,
 ): { valid: boolean; errors?: readonly string[] } {
+  if (config?.validateValue) return config.validateValue(value);
   if (!elementType || !propKey) return { valid: true };
   const schemaPort = config?.schemaPort;
   if (!schemaPort || schemaPort.availability !== 'available') return { valid: true };
@@ -820,11 +824,12 @@ type FieldPresentationState = {
 function readValueAtDataPath(
   root: unknown,
   path: string,
+  pathSegments?: string[],
 ): { exists: boolean; value: unknown } {
   if (!root || typeof root !== 'object' || Array.isArray(root) || !path) {
     return { exists: false, value: undefined };
   }
-  const segments = path.split('.').filter(Boolean);
+  const segments = pathSegments ?? path.split('.').filter(Boolean);
   let cur: unknown = root;
   for (const segment of segments) {
     if (cur == null) return { exists: false, value: undefined };
@@ -856,7 +861,7 @@ function computeFieldPresentationState(args: {
   const { data, isJsonLike, fieldSource, config, path } = args;
 
   if (config?.systemSampleMode) {
-    const baseline = readValueAtDataPath(config.systemSampleBaselineExtraJson, path);
+    const baseline = readValueAtDataPath(config.systemSampleBaselineExtraJson, path, config.systemSamplePathSegments);
     if (baseline.exists) {
       const matchesBaseline = valuesEquivalent(data, baseline.value, isJsonLike);
       return {
@@ -1913,13 +1918,13 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
               setLocalError(`Invalid JSON: ${errorMessageFromUnknown(err)}`);
             }
           }}
-          error={undefined}
+          error={cfg.validateValue ? (localError ?? cfg.validateValue(data).errors?.[0]) : undefined}
           size="md"
           helperText={undefined}
           placeholder={isBlank ? (defaultPlaceholder ?? examplePlaceholder) : undefined}
           className={isCustom ? 'custom-value' : ''}
         />
-        {localError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{localError}</div>)}
+        {!cfg.validateValue && localError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{localError}</div>)}
       </>,
       [
         !isRuField && !isGroundUField && isBlank && (
@@ -2112,6 +2117,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
   // this branch was reachable ONLY through the registry's rank-80 TextControl-wins /
   // rank-90 NumberControl dispatch quirks (deleted with `standardRenderers` itself) —
   // dead on the only render path left.
+  const fieldError = cfg.validateValue ? cfg.validateValue(numberDraftInput.inputValue.trim() === '' ? '' : Number(numberDraftInput.inputValue)).errors?.[0] : localError;
   return renderAdvancedFieldRow(
     propKey,
     isCompact,
@@ -2131,21 +2137,22 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
             <div style={{ flex: 1, minWidth: 0 }}>
               <StandardInput
                 label={undefined}
+                aria-label={cfg.tableCell ? label : undefined}
                 type="text"
                 {...numberInputAttributes}
                 value={numberDraftInput.inputValue}
                 onChange={numberDraftInput.handleInputChange}
                 onBlur={numberDraftInput.handleBlur}
-                error={undefined}
-                size="md"
+                error={cfg.validateValue ? fieldError ?? undefined : undefined}
+                size={cfg.tableCell ? "sm" : "md"}
                 variant="ghost"
                 unit={fieldUnit}
                 helperText={undefined}
                 placeholder={defaultValue !== undefined ? String(defaultValue) : undefined}
                 className={isCustom ? 'custom-value' : ''}
               />
-              {localError && (
-                <div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{localError}</div>
+              {!cfg.validateValue && fieldError && (
+                <div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{fieldError}</div>
               )}
             </div>
             {thermalTransmWallSyncButton}
@@ -2156,20 +2163,21 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
         <>
           <StandardInput
             label={undefined}
+                aria-label={cfg.tableCell ? label : undefined}
             type="text"
             {...numberInputAttributes}
             value={numberDraftInput.inputValue}
             onChange={numberDraftInput.handleInputChange}
             onBlur={numberDraftInput.handleBlur}
-            error={undefined}
-            size="md"
+            error={cfg.validateValue ? fieldError ?? undefined : undefined}
+            size={cfg.tableCell ? "sm" : "md"}
             variant="ghost"
             unit={fieldUnit}
             helperText={undefined}
             placeholder={defaultValue !== undefined ? String(defaultValue) : undefined}
             className={isCustom ? 'custom-value' : ''}
           />
-          {localError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{localError}</div>)}
+          {!cfg.validateValue && fieldError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{fieldError}</div>)}
           {suspendedThermalTransmSourcesInfo}
         </>
       )}
@@ -2182,7 +2190,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
         <GroundUCalculatorButton key="ground-u-calculator" onClick={openGroundUCalculator} hasValue={valueString !== ''} />
       ) : null,
       renderAdvancedFieldResetToSourceButton(handleChange, path, fieldSource, {
-        show: !isSuspendedGroundThermalTransmWallsFieldActive && showFieldSourceReset,
+        show: !cfg.tableCell && !isSuspendedGroundThermalTransmWallsFieldActive && showFieldSourceReset,
         isGroundUField,
         groundUComputedWPerM2K,
         groundUControlData: data,
@@ -2190,7 +2198,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     ],
     'flex-end',
     0,
-    renderAdvancedFieldLabelRow(
+    cfg.tableCell ? null : renderAdvancedFieldLabelRow(
       indicatorMessages,
       hasEvidence,
       statusPillType,
@@ -2389,7 +2397,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       isCompact,
       <StandardControlShell
         unit={fieldUnit}
-        size="md"
+        size={cfg.tableCell ? "sm" : "md"}
         variant="ghost"
         readOnly
       >
@@ -2418,7 +2426,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       [],
       'flex-start',
       0,
-      renderAdvancedFieldLabelRow(
+      cfg.tableCell ? null : renderAdvancedFieldLabelRow(
         indicatorMessages,
         hasEvidence,
         statusPillType,
@@ -2434,21 +2442,22 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     isCompact,
     <StandardDropdown
       label={undefined}
+      aria-label={cfg.tableCell ? label : undefined}
       value={valueString}
       onChange={(v) => handleChange(path, coerceDropdownValue(v, coerceType))}
       options={options}
       error={errors || undefined}
-      size="md"
+      size={cfg.tableCell ? "sm" : "md"}
       variant="ghost"
       unit={fieldUnit}
       helperText={helperText}
       placeholder={placeholder}
       className={isCustom ? 'custom-value' : ''}
     />,
-    showReset ? [renderResetToSourceButton(handleChange, path, fieldSource)] : [],
+    showReset && !cfg.tableCell ? [renderResetToSourceButton(handleChange, path, fieldSource)] : [],
     'flex-end',
     0,
-    renderAdvancedFieldLabelRow(
+    cfg.tableCell ? null : renderAdvancedFieldLabelRow(
       indicatorMessages,
       hasEvidence,
       statusPillType,

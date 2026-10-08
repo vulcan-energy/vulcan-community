@@ -1898,7 +1898,7 @@ function coerceValueToSchemaType(value: unknown, expectedTypes: string[]): unkno
  *
  * Callers own the "only validate when value is set" early return.
  */
-function validateValueAgainstPropertyNode(
+export function validateValueAgainstPropertyNode(
   rootSchema: SchemaNode,
   propertySchema: SchemaNode,
   elementType: string,

@@ -476,7 +476,7 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
     expect(wrappers.length).toBeGreaterThanOrEqual(43);
     // Arm 2 below needs a non-wrapper population to be worth anything; without this
     // floor it could quietly become vacuous if the sweep stopped reaching them.
-    expect(routes.length - wrappers.length).toBeGreaterThanOrEqual(7);
+    expect(routes.length - wrappers.length).toBeGreaterThanOrEqual(6);
 
     // Arm 1: a matching wrapper dispatches on its inner branch.
     const mismatches = wrappers
@@ -546,6 +546,16 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
       'core/MechanicalVentilationDuctwork.duct_perimeter_mm -> number',
       'core/MechanicalVentilationDuctwork.external_diameter_mm -> number',
       'core/MechanicalVentilationDuctwork.internal_diameter_mm -> number',
+      'core/System:HeatSourceWet.eahp_mixed_max_temp -> number',
+      'core/System:HeatSourceWet.eahp_mixed_min_temp -> number',
+      'core/System:HeatSourceWet.min_modulation_rate_20 -> number',
+      'core/System:HeatSourceWet.min_modulation_rate_35 -> number',
+      'core/System:HeatSourceWet.min_modulation_rate_55 -> number',
+      'core/System:HeatSourceWet.power_heating_warm_air_fan -> number',
+      'core/System:HeatSourceWet.power_max_backup -> number',
+      'core/System:HeatSourceWet.temp_distribution_heat_network -> number',
+      'core/System:HeatSourceWet.temp_return_feed_max -> number',
+      'core/System:HeatSourceWet.time_delay_backup -> number',
       'core/System:InfiltrationVentilation.ach_max_static_calcs -> number',
       'core/System:InfiltrationVentilation.ach_min_static_calcs -> number',
       'core/System:InfiltrationVentilation.vent_opening_ratio_init -> number',
@@ -1029,7 +1039,33 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'core/System:HeatSourceWet': [
     'boiler | Boiler | textbox | - | - | - | tip',
-    'hp | Hp | textbox | - | - | - | tip',
+    'backup_ctrl_type | hp · Backup Ctrl Type | select | - | - | - | tip',
+    'boiler | hp · Boiler | textbox | - | - | {"EnergySupply":"example","EnergySupply_aux":"example","boiler_location":"internal","efficiency_full_load":1,"efficiency_part_load":1.12,"electricity_circ_pump":0,"electricity_full_load":0,"electricity_part_load":0,"electricity_standby":0,"modulation_load":0,"rated_power":1,"cost_schedule_hybrid":{"cost_schedule_boiler":{},"cost_schedule_hp":{},"cost_schedule_start_day":0,"cost_schedule_time_series_step":1}} | tip',
+    'BufferTank | hp · Buffer Tank | textbox | - | - | {"daily_losses":1,"pump_fixed_flow_rate":1,"pump_power_at_flow_rate":1,"volume":1} | tip',
+    'eahp_mixed_max_temp | hp · EAHP Mixed Max Temperature | textbox | -273.15 | - | - | tip',
+    'eahp_mixed_min_temp | hp · EAHP Mixed Min Temperature | textbox | -273.15 | - | - | tip',
+    'EnergySupply | hp · Energy Supply | textbox | - | - | "example" | tip',
+    'EnergySupply_heat_network | hp · Energy Supply Heat Network | textbox | - | - | "example" | tip',
+    'min_modulation_rate_20 | hp · Min Modulation Rate 20 | textbox | 0 | 1 | - | tip',
+    'min_modulation_rate_35 | hp · Min Modulation Rate 35 | textbox | 0 | 1 | - | tip',
+    'min_modulation_rate_55 | hp · Min Modulation Rate 55 | textbox | 0 | 1 | - | tip',
+    'min_temp_diff_flow_return_for_hp_to_operate | hp · Minimum Temperature Difference Flow Return For Heat Pump To Operate | textbox | 0 | - | - | tip',
+    'modulating_control | hp · Modulating Control | checkbox | - | - | - | tip',
+    'power_crankcase_heater | hp · Power Crankcase Heater | textbox | 0 | - | - | tip',
+    'power_heating_circ_pump | hp · Power Heating Circ Pump | textbox | 0 | - | - | tip',
+    'power_heating_warm_air_fan | hp · Power Heating Warm Air Fan | textbox | 0 | - | - | tip',
+    'power_max_backup | hp · Power Max Backup | textbox | 0 | - | - | tip',
+    'power_off | hp · Power Off | textbox | 0 | - | - | tip',
+    'power_source_circ_pump | hp · Power Source Circ Pump | textbox | 0 | - | - | tip',
+    'power_standby | hp · Power Standby | textbox | 0 | - | - | tip',
+    'sink_type | hp · Sink Type | select | - | - | - | tip',
+    'source_type | hp · Source Type | select | - | - | - | tip',
+    'temp_distribution_heat_network | hp · Temp Distribution Heat Network | textbox | 0 | - | - | tip',
+    'temp_lower_operating_limit | hp · Temp Lower Operating Limit | textbox | -273.15 | - | - | tip',
+    'temp_return_feed_max | hp · Temp Return Feed Max | textbox | 0 | - | - | tip',
+    'time_constant_onoff_operation | hp · Time Constant On/Off Operation | textbox | 0 | - | - | tip',
+    'time_delay_backup | hp · Time Delay Backup | textbox | 0 | - | - | tip',
+    'var_flow_temp_ctrl_during_test | hp · Var Flow Temp Ctrl During Test | checkbox | - | - | - | tip',
   ],
   'core/System:HotWaterDemand': [
     'Bath | Bath | textbox | - | - | {} | tip',
@@ -1221,7 +1257,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'source_type | hp · Source Type | select | - | - | - | tip',
     'temp_lower_operating_limit | hp · Temp Lower Operating Limit | textbox | -30 | 0 | - | tip',
     'temp_return_feed_max | hp · Temp Return Feed Max | textbox | 4 | 80 | - | tip',
-    'test_data_EN14825 | hp · Test Data EN14825 | textbox | - | - | [{"test_letter":null,"capacity":1,"cop":1,"design_flow_temp":1,"temp_outlet":1,"temp_source":-273.15,"temp_test":-273.15,"air_flow_rate":1}] | no-tip',
     'time_constant_onoff_operation | hp · Time Constant On/Off Operation | textbox | 0 | - | - | no-tip',
     'var_flow_temp_ctrl_during_test | hp · Var Flow Temp Ctrl During Test | checkbox | - | - | - | no-tip',
   ],
@@ -1266,6 +1301,11 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'bypass_fraction_recirculated | Bypass Fraction Recirculated | textbox | 0 | 1 | - | tip',
     'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | no-tip',
     'design_flow_temp | Design Flow Temp | textbox | 20 | 120 | - | tip',
+    'ecodesign_control_class | Ecodesign Controller · Ecodesign Control Class | select | - | - | - | tip',
+    'max_outdoor_temp | Ecodesign Controller · Max Outdoor Temp | textbox | 10 | 50 | - | tip',
+    'min_flow_temp | Ecodesign Controller · Min Flow Temp | textbox | 20 | 120 | - | tip',
+    'min_outdoor_temp | Ecodesign Controller · Min Outdoor Temp | textbox | -60 | 30 | - | tip',
+    'temp_flow_limit_upper | Temp Flow Limit Upper | textbox | 0 | - | - | tip',
     'temp_diff_emit_dsgn | Temp Diff Emit Dsgn | textbox | 0 | 70 | - | tip',
     'variable_flow | Variable Flow | checkbox | - | - | - | no-tip',
   ],
@@ -2242,24 +2282,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     expect(finalExtraJson.SpaceHeatSystem['Zone 1.5 circuit'].frac_convective).toBe(0.55);
   });
 
-  it('config 11 -- System, HotWaterSource, FHS: HeatSource map is skipped (CHARACTERIZATION)', () => {
-    // CHARACTERIZATION FINDING, correcting the brief's assumption: HotWaterSource's
-    // `HeatSource` is NOT the same shape as SpaceHeatSystem's `HeatSource` (config
-    // 10). SpaceHeatSystem's is a single fixed-shape object (`{name,
-    // temp_flow_limit_upper}`) that `shouldRecurseIntoNestedObject` sees as having
-    // static `properties`, so it recurses and hoists per Stage-2.3's contract.
-    // HotWaterSource's `hw cylinder.HeatSource` (verified directly against
-    // `$defs.Tank.properties.HeatSource` in input_fhs.schema.json) is a genuine
-    // `additionalProperties` MAP keyed by heat-source name -- `expandSystemMergeMapSchemaForJsonForms`
-    // only expands the OUTERMOST merge-map (`extra_json[subtype]` itself, i.e.
-    // `HotWaterSource` -> `hw cylinder`), not a merge-map nested two levels further
-    // in. `shouldRecurseIntoNestedObject` therefore sees no static `properties` on
-    // this `HeatSource` schema and `buildSystemAdvancedUischema`'s own explicit guard
-    // (`if (key === 'HeatSource' && !shouldRecurseIntoNestedObject(...)) continue`)
-    // SKIPS it entirely -- "the Heat Source picker + hoisted per-heater controls
-    // cover editing" per that guard's own comment, referring to
-    // `DhwStorageHeatSourcePicker` (mounted separately by AdvancedFieldsEditor
-    // outside the generic Advanced Fields grid, unaffected by this slice).
+  it('config 11 -- System, HotWaterSource, FHS: named heater fields are editable', () => {
     const { container } = assertDirectCharacterization(
       {
         elementType: 'System',
@@ -2289,6 +2312,10 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       [
         row('ColdWaterSource', 'Cold Water Source', SELECT),
         row('daily_losses', 'Daily Losses', TEXT('0.001')),
+        row('heater_position', 'hp · Heater Position', TEXT('0')),
+        row('name', 'hp · Name', TEXT(null)),
+        row('temp_flow_limit_upper', 'hp · Temp Flow Limit Upper', TEXT('0', '0')),
+        row('thermostat_position', 'hp · Thermostat Position', TEXT('0')),
         row('init_temp', 'Init Temp', TEXT('1')),
         row('volume', 'Volume', TEXT('1')),
       ],

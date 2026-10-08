@@ -71,6 +71,7 @@ import {
   VULCAN_UI_PARTY_ELEMENT_KEY,
 } from '../lib/assemblyMaterialFabric';
 import { ELEMENT_TYPE_ORDER } from '../lib/elementTypeMetadata';
+import { collectHeatSourceWetNamesFromProject } from '../lib/heatSourceWetNamesFromProject';
 import { generateUniqueElementName } from '../lib/elementAutoNaming';
 import {
   getAreaBasedElementExportGeometry,
@@ -185,6 +186,7 @@ import {
 } from '../geometry/thermalBridge/externalDetailContracts';
 
 const ELEMENT_NAME_INPUT_ID = 'geometry-element-name-input';
+const CREATE_HEAT_SOURCE_OPTION = '__create_heat_source__';
 const CREATE_SPACE_HEAT_SYSTEM_OPTION = '__create_space_heat_system__';
 const DEFAULT_WET_DISTRIBUTION_PRESET_ID = 'wet_distribution';
 
@@ -2257,6 +2259,36 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // eslint-disable-next-line react-hooks/exhaustive-deps -- systemFormState itself is a fresh object every render (elementForms/system.tsx's useFormState returns a plain object literal, not memoized); systemFormState.setSystemExtraJson is the stable useState setter within it, already listed.
     [selectedSpaceHeatSystemUsesHeatSourceWet, selectedSystemElementFull, updateElement, systemFormState.setSystemExtraJson],
   );
+
+  const handleCreateHeatSourceForSelectedSpaceHeatSystem = useCallback(() => {
+    if (!selectedSpaceHeatSystemUsesHeatSourceWet || !selectedSystemElementFull) return;
+    const sourceName = generateUniqueElementName('Heat source', [
+      ...allElements.map((element) => element.name),
+      ...collectHeatSourceWetNamesFromProject(elementsById),
+    ]);
+    const anchor = selectedSystemElementFull.coordinates?.[0] ?? { x: 0, y: 0, z: 0 };
+    addElement({
+      name: sourceName,
+      type: 'System',
+      subcategory: 'HeatSourceWet',
+      zoneId: selectedSystemElementFull.zoneId || elementZoneId || undefined,
+      floorId: selectedSystemElementFull.floorId || elementFloorId || undefined,
+      parent_element: null,
+      coordinates: [{ x: anchor.x + 0.75, y: anchor.y, z: anchor.z ?? 0 }],
+    } as Omit<Element, 'id'>);
+    handleSpaceHeatSystemHeatSourceChange(sourceName);
+    setTimeout(() => {
+      const state = geometryStore.getState();
+      const created = state.elementIds
+        .map((id) => state.elementsById[id])
+        .find((element) => element?.type === 'System' && element.name === sourceName);
+      if (!created) return;
+      state.setSelection({ type: 'element', id: created.id });
+      state.setSelectedElementIds([created.id]);
+    }, 0);
+  }, [addElement, allElements, elementFloorId, elementZoneId, geometryStore,
+    handleSpaceHeatSystemHeatSourceChange, elementsById,
+    selectedSpaceHeatSystemUsesHeatSourceWet, selectedSystemElementFull]);
 
   const handleEditSelectedSpaceHeatSystemHeatSource = useCallback(() => {
     if (!selectedSpaceHeatSystemHeatSourceElement) return;
@@ -4377,7 +4409,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           <div style={EDITOR_FIELD_ACTION_FIELD_STYLE}>
             <StandardDropdown
               value={selectedSpaceHeatSystemHeatSourceName}
-              onChange={handleSpaceHeatSystemHeatSourceChange}
+              onChange={(value) => {
+                if (value === CREATE_HEAT_SOURCE_OPTION) handleCreateHeatSourceForSelectedSpaceHeatSystem();
+                else handleSpaceHeatSystemHeatSourceChange(value);
+              }}
               options={[
                 {
                   value: '',
@@ -4387,6 +4422,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   disabled: heatSourceWetReferenceOptions.length === 0,
                 },
                 ...heatSourceWetReferenceOptions,
+                { value: CREATE_HEAT_SOURCE_OPTION, label: 'Create heat source…' },
               ]}
               variant="ghost"
               size="md"

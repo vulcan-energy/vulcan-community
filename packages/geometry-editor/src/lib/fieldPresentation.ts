@@ -323,7 +323,7 @@ export function resolveFieldPresentation(
     ?? (context.schemaNode ? 'schemaNode' : undefined);
   const parsedDescriptionUnit = extractDescriptionUnit(schemaDescription);
   let structuredUnit = structuredUnitFromNode(exactNode);
-  if (!structuredUnit && schemaInfo?.units && !parsedDescriptionUnit) {
+  if (!structuredUnit && schemaInfo?.source !== 'hem_guidance' && schemaInfo?.units && !parsedDescriptionUnit) {
     structuredUnit = schemaInfo.units;
   }
   pushCandidate(candidates, 'schema_structured', structuredUnit, schemaMetadataSource);
