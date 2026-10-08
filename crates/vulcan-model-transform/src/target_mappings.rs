@@ -471,8 +471,8 @@ mod tests {
             }
             let readiness = json!({"HotWaterSource":{},"Zone":{"Z":{"ThermalBridging":0.1}}});
             assert_eq!(
-                crate::validate_target_input(&readiness, legacy),
-                crate::validate_target_input(&readiness, canonical)
+                crate::validate_target_input(&readiness, legacy, &a8_version()),
+                crate::validate_target_input(&readiness, canonical, &a8_version())
             );
         }
     }
@@ -704,16 +704,28 @@ mod tests {
                 .any(|e| e.path.ends_with("u_value_whole_wall"))
         );
     }
+    fn a8_version() -> crate::VersionMetadata {
+        crate::VersionMetadata {
+            hem_core_version: "1.0.0a8".into(),
+            fhs_wrapper_version: Some("1.0.0a8".into()),
+        }
+    }
     #[test]
     fn a8_scalar_bridge_schema_gap_is_a_readiness_error_not_an_invented_mapping() {
         let model = json!({"Zone":{"Z":{"ThermalBridging":12.3}}});
-        let errors = crate::validate_target_input(&model, crate::ConversionProfile::PythonFhsA8);
+        let errors = crate::validate_target_input(
+            &model,
+            crate::ConversionProfile::PythonFhsA8,
+            &a8_version(),
+        );
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path, "/Zone/Z/ThermalBridging");
+        assert!(errors[0].message.starts_with("HEM 1.0.0a8 requires"));
         assert_eq!(model["Zone"]["Z"]["ThermalBridging"], 12.3);
         assert!(crate::validate_target_input(
             &json!({"Zone":{"Z":{"ThermalBridging":{}}}}),
-            crate::ConversionProfile::PythonFhsA8
+            crate::ConversionProfile::PythonFhsA8,
+            &a8_version(),
         )
         .is_empty());
     }
@@ -724,13 +736,14 @@ mod tests {
             crate::ConversionProfile::PythonFhsA9,
         ] {
             let model = json!({"HotWaterSource":{}});
-            let errors = crate::validate_target_input(&model, profile);
+            let errors = crate::validate_target_input(&model, profile, &a8_version());
             assert_eq!(errors.len(), 1);
             assert_eq!(errors[0].code, "E_PYTHON_FHS_HOT_WATER_SOURCE");
             assert_eq!(errors[0].path, "/HotWaterSource/hw cylinder");
             assert!(crate::validate_target_input(
                 &json!({"HotWaterSource":{"hw cylinder":{"type":"PointOfUse"}}}),
-                profile
+                profile,
+                &a8_version(),
             )
             .is_empty());
             assert_eq!(model, json!({"HotWaterSource":{}}));

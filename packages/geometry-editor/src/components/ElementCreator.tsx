@@ -64,6 +64,7 @@ import {
 import type { GeometrySourceComparisonPort } from '../../../geometry-editor-host/src/sourceComparisonPort';
 import { getElementShape, isTypeShapeCompatible, convertShapeCoordinates } from '../lib/shapeUtils';
 import { isOrientationPitchAxis } from '../lib/slopePitchAxis';
+import { resolveIssueTarget } from '../lib/issueTarget';
 import {
   isVulcanUiPartyFloorElement,
   VULCAN_UI_PARTY_ELEMENT_KEY,
@@ -816,10 +817,11 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
     sourceComparisonPort.getSnapshot,
     sourceComparisonPort.getSnapshot,
   );
-  const { selectedElement, elementsById, activeCsvValidationInfo, validateElement } = useGeometryStore(
+  const { selectedElement, elementsById, zones, activeCsvValidationInfo, validateElement } = useGeometryStore(
     useShallow((s) => ({
       selectedElement: s.elementsById[selectionId] ?? null,
       elementsById: s.elementsById,
+      zones: s.zones,
       activeCsvValidationInfo: activeFilename ? s.csvValidationCache[activeFilename] : undefined,
       validateElement: s.validateElement,
     })),
@@ -831,19 +833,23 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
 
     const validation = validateElement(selectedElement, elementsById);
     const schemaIssues = (() => {
-      if (!activeFilename || !selectedElement.name) return [] as string[];
+      if (!activeFilename || !selectedElement.name) return [] as Array<{ text: string; fieldKey?: string }>;
       const errors = activeCsvValidationInfo?.wasmValidation?.errors || [];
-      const name = selectedElement.name;
-      const issues = errors
-        .filter((err) => (err.path || '').includes(name) || err.message.includes(name))
-        .map((err) => `Schema: ${err.path ? `${err.path}: ` : ''}${err.message}`);
-      return Array.from(new Set(issues));
+      const model = { zones, elements: [selectedElement] };
+      const issues = new Map<string, string | undefined>();
+      for (const err of errors) {
+        const target = resolveIssueTarget(err.path, model);
+        if (target.elementId !== selectedElement.id) continue;
+        const text = `Schema: ${err.path ? `${err.path}: ` : ''}${err.message}`;
+        if (!issues.has(text)) issues.set(text, target.fieldKey);
+      }
+      return [...issues].map(([text, fieldKey]) => ({ text, fieldKey }));
     })();
 
     const comparisonInfoPillItems = sourceComparisonPort.elementInfo(selectedElement.id)?.items ?? [];
 
     return { validation, schemaIssues, comparisonInfoPillItems };
-  }, [activeCsvValidationInfo, activeFilename, elementsById, selectedElement, sourceComparisonPort, sourceComparisonSnapshot.revision, validateElement]);
+  }, [activeCsvValidationInfo, activeFilename, elementsById, selectedElement, sourceComparisonPort, sourceComparisonSnapshot.revision, validateElement, zones]);
 
   if (!selectedElement || !validationRows) return null;
   const { validation, schemaIssues, comparisonInfoPillItems } = validationRows;
@@ -889,9 +895,10 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
           {schemaIssues.map((issue, i) => (
             <ValidationPill
               key={`schema-issue-${i}`}
-              message={`Saved: ${compactSelectedValidationMessage(issue, selectedElement)}`}
-              title={`Saved CSV validation: ${issue}`}
+              message={`Saved: ${compactSelectedValidationMessage(issue.text, selectedElement)}`}
+              title={`Saved CSV validation: ${issue.text}`}
               variant="warning"
+              onClick={issue.fieldKey ? () => onFocusField(issue.fieldKey!) : undefined}
             />
           ))}
         </div>

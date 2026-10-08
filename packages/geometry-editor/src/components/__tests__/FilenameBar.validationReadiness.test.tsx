@@ -128,3 +128,38 @@ describe('FilenameBar migration review', () => {
     expect(screen.queryByRole('dialog', { name: 'Check party-wall U-values' })).not.toBeInTheDocument();
   });
 });
+
+describe('FilenameBar build error rows', () => {
+  it('collapses schema errors under the converter error on the same element and navigates to its input', async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    const element = (id: string, name: string) => ({ id, name, type: 'BuildingElementTransparent' as const, zoneId: 'z1', coordinates: [{ x: 0, y: 0, z: 3 }] });
+    store.setState({
+      zones: [{ id: 'z1', name: 'Zone 1' }] as never,
+      elementsById: { w1: element('w1', 'Window 1'), w10: element('w10', 'Window 10') } as never,
+      elementIds: ['w1', 'w10'],
+    });
+    render(
+      <GeometryStoreProvider store={store}>
+        <FilenameBar
+          documentHost={documentHostHarness()}
+          saveStatus="idle"
+          saveError={null}
+          buildError="Schema validation failed"
+          buildErrorItems={[
+            { source: 'schema', code: 'E_TARGET_INPUT', path: '/Zone/Zone 1/BuildingElement/Window 1/mid_height', message: 'Whole-window and airflow-division mid-heights disagree.' },
+            { source: 'schema', code: 'E026', keyword: 'required', path: '/Zone/Zone 1/BuildingElement/Window 1/window_part_list/0', message: '"mid_height" is a required property' },
+            { source: 'schema', code: 'E026', keyword: 'required', path: '/Zone/Zone 1/BuildingElement/Window 10/window_part_list/0', message: '"free_area_height" is a required property' },
+          ]}
+        />
+      </GeometryStoreProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Build Error (2)' }));
+    expect(screen.getByText('2 errors')).toBeInTheDocument();
+    expect(screen.getByText('Details (+1 related)')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Whole-window and airflow-division mid-heights disagree.' }));
+    expect(store.getState().selection).toEqual({ type: 'element', id: 'w1', focusFieldKey: 'mid_height' });
+    expect(store.getState().currentFloorZ).toBe(3);
+  });
+});

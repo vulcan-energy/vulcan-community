@@ -13,6 +13,7 @@ import { StandardDropdown } from './StandardDropdown';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { useGeometryStore } from '../stores/geometryStore';
 import type { BuildErrorItem } from '../types/buildErrors';
+import { issuePathSegments, resolveIssueTarget, type IssueTarget } from '../lib/issueTarget';
 import type { GeometryDocumentHostPort } from '../../../geometry-document/src';
 import './GlobalButtonSystem.css';
 import './FilenameBar.css';
@@ -161,14 +162,7 @@ const titleCaseToken = (token: string) =>
     .trim()
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
-const decodeJsonPointerSegment = (segment: string) =>
-  segment.replace(/~1/g, '/').replace(/~0/g, '~');
-
-const pointerSegments = (path?: string) =>
-  (path || '')
-    .split('/')
-    .filter(Boolean)
-    .map(decodeJsonPointerSegment);
+const pointerSegments = issuePathSegments;
 
 const buildErrorLocation = (path?: string) => {
   const segments = pointerSegments(path);
@@ -232,6 +226,9 @@ const unexpectedFieldsFromMessage = (message: string) => {
   return fields.length > 5 ? `${shown}, and ${fields.length - 5} more` : shown;
 };
 
+/** JSON-schema errors carry the failing keyword; converter/source errors do not. */
+const isSchemaKeywordError = (item: BuildErrorItem) => Boolean(item.keyword || item.schemaPath);
+
 const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => {
   const pathSegments = pointerSegments(item.path);
   const { location, field } = buildErrorLocation(item.path);
@@ -284,6 +281,9 @@ const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => 
     userMessage = location === 'Appliances'
       ? 'Check the appliance entries against the selected schema.'
       : 'These settings conflict with the selected schema.';
+  } else if (!isSchemaKeywordError(item)) {
+    // Converter/source diagnostics are written for users; a generic "Check X" would hide them.
+    userMessage = item.message;
   } else {
     userMessage = fieldLabel
       ? `Check ${fieldLabel}.`
@@ -312,6 +312,34 @@ const filterDisplayBuildErrors = (errors: DisplayBuildError[]) => {
   return errors.filter((error) => {
     if (!isNoisyUnexpectedPropertiesError(error)) return true;
     return !concreteErrorParents.has(error.pathSegments.join('/'));
+  });
+};
+
+type DisplayBuildErrorRow = DisplayBuildError & { target: IssueTarget; derived: DisplayBuildError[] };
+
+/**
+ * Schema errors on an object that also has a converter/source error are usually its
+ * consequence (the converter could not produce valid input), so they move under that
+ * row's Details. Ownership comes from the path alone: no per-attribute rules.
+ */
+const collapseDerivedBuildErrors = (
+  errors: DisplayBuildError[],
+  resolve: (path?: string) => IssueTarget,
+): DisplayBuildErrorRow[] => {
+  const rows = errors.map((error) => ({ ...error, target: resolve(error.item.path), derived: [] as DisplayBuildError[] }));
+  const sourceRowByOwner = new Map<string, DisplayBuildErrorRow>();
+  for (const row of rows) {
+    // Only zone elements and zone-level keys: a top-level section error (e.g. an unlinked
+    // system or a defaulted cell) does not explain other errors in that section.
+    if (!isSchemaKeywordError(row.item) && row.target.section === 'Zone' && !sourceRowByOwner.has(row.target.ownerKey)) {
+      sourceRowByOwner.set(row.target.ownerKey, row);
+    }
+  }
+  return rows.filter((row) => {
+    const sourceRow = isSchemaKeywordError(row.item) ? sourceRowByOwner.get(row.target.ownerKey) : undefined;
+    if (!sourceRow) return true;
+    sourceRow.derived.push(row);
+    return false;
   });
 };
 
@@ -509,108 +537,48 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     }
     return currentSaveError || buildError || '';
   }, [buildErrorItems, buildError, currentSaveError]);
-  const groupedBuildErrors = useMemo(() => {
-    const displayErrors = filterDisplayBuildErrors(buildErrorItems.map(formatBuildErrorForDisplay));
-    const groups: Array<{ location: string; errors: DisplayBuildError[] }> = [];
-    const byLocation = new Map<string, DisplayBuildError[]>();
-
-    for (const error of displayErrors) {
-      const existing = byLocation.get(error.location);
-      if (existing) {
-        existing.push(error);
-      } else {
-        const next = [error];
-        byLocation.set(error.location, next);
-        groups.push({ location: error.location, errors: next });
-      }
+  const resolveTarget = useCallback(
+    (path?: string) => resolveIssueTarget(path, { zones, elements: elementIds.map((id) => elementsById[id]) }),
+    [zones, elementIds, elementsById],
+  );
+  const displayBuildErrorRows = useMemo(() => {
+    const rows = collapseDerivedBuildErrors(
+      filterDisplayBuildErrors(buildErrorItems.map(formatBuildErrorForDisplay)),
+      resolveTarget,
+    );
+    // Keep each location's rows together, in first-seen order.
+    const locationOrder = new Map<string, number>();
+    for (const row of rows) if (!locationOrder.has(row.location)) locationOrder.set(row.location, locationOrder.size);
+    return rows.sort((a, b) => locationOrder.get(a.location)! - locationOrder.get(b.location)!);
+  }, [buildErrorItems, resolveTarget]);
+  const displayedBuildErrorCount = displayBuildErrorRows.length;
+  const goToIssueTarget = useCallback((target: IssueTarget) => {
+    if (target.elementId) {
+      const z = elementsById[target.elementId]?.coordinates?.[0]?.z;
+      if (typeof z === 'number' && Number.isFinite(z)) setCurrentFloorZ(z);
+      setSelectedElementIds([target.elementId]);
+      setSelection({ type: 'element', id: target.elementId, focusFieldKey: target.fieldKey });
+    } else if (target.zoneId) {
+      setSelection({ type: 'zone', id: target.zoneId, focusFieldKey: target.fieldKey });
+    } else {
+      return;
     }
-
-    return groups;
-  }, [buildErrorItems]);
-  const displayBuildErrorRows = useMemo(
-    () => groupedBuildErrors.flatMap((group) => group.errors),
-    [groupedBuildErrors],
-  );
-  const displayedBuildErrorCount = useMemo(
-    () => displayBuildErrorRows.length,
-    [displayBuildErrorRows],
-  );
-  const saveErrorPathMatch = useMemo(() => {
-    const raw = (currentSaveError || '').trim();
-    const pathMatch = raw.match(/\bat\s+(.+)$/i);
-    if (!pathMatch) return null;
-    const tokens = pathMatch[1]
-      .split('/')
-      .flatMap((t) => {
-        const trimmed = t.trim();
-        return trimmed ? [trimmed] : [];
-      });
-    if (tokens.length < 4) return null;
-    const zoneIdx = tokens.findIndex((t) => /^zone$/i.test(t));
-    const elementIdx = tokens.findIndex((t) => /^buildingelement$/i.test(t));
-    if (zoneIdx < 0 || elementIdx < 0 || zoneIdx + 1 >= tokens.length || elementIdx + 1 >= tokens.length) return null;
-    return {
-      zoneName: tokens[zoneIdx + 1],
-      elementName: tokens[elementIdx + 1],
-      field: tokens[tokens.length - 1],
-    };
-  }, [currentSaveError]);
-
+    closeSaveErrorDropdown();
+  }, [closeSaveErrorDropdown, elementsById, setCurrentFloorZ, setSelectedElementIds, setSelection]);
+  // Free-text save errors ("... at /Zone/…/field") resolve through the same path resolver.
   const saveErrorFocusTarget = useMemo(() => {
-    const toLower = (s: string) => s.trim().toLowerCase();
-    const allElements = elementIds.flatMap((id) => {
-      const element = elementsById[id];
-      return element ? [element] : [];
-    });
-
-    let candidates = allElements;
-    if (saveErrorPathMatch?.zoneName) {
-      const matchingZoneIds = zones.flatMap((z) =>
-        toLower(String(z.name || '')) === toLower(saveErrorPathMatch.zoneName) ? [z.id] : [],
-      );
-      if (matchingZoneIds.length > 0) {
-        candidates = candidates.filter((el) => !!el.zoneId && matchingZoneIds.includes(el.zoneId));
-      }
-    }
-    if (saveErrorPathMatch?.elementName) {
-      candidates = candidates.filter((el) => toLower(String(el.name || '')) === toLower(saveErrorPathMatch.elementName));
-    }
-
-    if (candidates.length === 0) return null;
-
-    const minMatch = (currentSaveError || '').match(/is less than the minimum of ([0-9.]+)/i);
-    const maxMatch = (currentSaveError || '').match(/is greater than the maximum of ([0-9.]+)/i);
-    const fallbackField = ((currentSaveError || '').match(/\b(height|width|area|perimeter|base_height)\b/i)?.[1] || '') as string;
-    const resolvedField = (saveErrorPathMatch?.field || fallbackField || '').trim();
-    // Only infer an element target when we can confidently identify an element-scoped field.
-    // This prevents unrelated schema errors (e.g. HeatSourceWet) from being pinned to a random element.
-    if (!resolvedField) return null;
-    const field = resolvedField as keyof typeof candidates[number];
-    let narrowed = candidates;
-
-    if (minMatch) {
-      const threshold = Number(minMatch[1]);
-      narrowed = candidates.filter((el) => {
-        const v = Number(el?.[field]);
-        return Number.isFinite(v) && v < threshold;
-      });
-    } else if (maxMatch) {
-      const threshold = Number(maxMatch[1]);
-      narrowed = candidates.filter((el) => {
-        const v = Number(el?.[field]);
-        return Number.isFinite(v) && v > threshold;
-      });
-    }
-
-    const chosen = narrowed.length === 1 ? narrowed[0] : (candidates.length === 1 ? candidates[0] : candidates[0]);
-    const zoneName = chosen.zoneId ? (zones.find((z) => z.id === chosen.zoneId)?.name || '') : '';
+    // Joined errors ("…at /a; …at /b") resolve to the first part that names an element.
+    const target = (currentSaveError || '').split(/;\s+/)
+      .map((part) => resolveTarget(part.trim().match(/\bat\s+(\S.*)$/i)?.[1]))
+      .find((candidate) => candidate.elementId);
+    if (!target?.elementId) return null;
+    const element = elementsById[target.elementId];
     return {
-      elementId: chosen.id,
-      ambiguous: narrowed.length > 1 && candidates.length > 1,
-      elementName: chosen.name || 'Element',
-      zoneName: String(zoneName || ''),
+      target,
+      elementName: element?.name || 'Element',
+      zoneName: String(zones.find((zone) => zone.id === target.zoneId)?.name || ''),
     };
-  }, [saveErrorPathMatch, zones, elementIds, elementsById, currentSaveError]);
+  }, [currentSaveError, elementsById, resolveTarget, zones]);
   const saveErrorSummary = useMemo(() => {
     const raw = (currentSaveError || '').trim();
     if (!raw) return 'Build failed.';
@@ -808,43 +776,52 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           ) : buildErrorItems.length > 0 ? (
             <div className="save-error-details">
               <div className="save-error-rows">
-                {displayBuildErrorRows.map((error) => (
+                {displayBuildErrorRows.map((error) => {
+                  const canNavigate = !!(error.target.elementId || error.target.zoneId);
+                  return (
                   <div
                     className="save-error-row"
                     key={buildErrorRowKey(error)}
                   >
                     <div className="save-error-location">{error.location}</div>
                     <div className="save-error-row-content">
-                      <div className="save-error-user-message">{error.userMessage}</div>
+                      {canNavigate ? (
+                        <button
+                          type="button"
+                          className="save-error-details save-error-details-button"
+                          onClick={() => goToIssueTarget(error.target)}
+                          title="Go to this input"
+                        >
+                          {error.userMessage}
+                        </button>
+                      ) : (
+                        <div className="save-error-user-message">{error.userMessage}</div>
+                      )}
                       <details className="save-error-technical">
-                        <summary>Details</summary>
-                        <div className="save-error-technical-body">{error.item.technicalMessage || error.item.message}</div>
-                        {(error.item.path || error.item.code || error.item.keyword) && (
-                          <div className="save-error-technical-meta">
-                            {[error.item.path, error.item.keyword, error.item.code].filter(Boolean).join(' • ')}
-                          </div>
-                        )}
+                        <summary>Details{error.derived.length > 0 ? ` (+${error.derived.length} related)` : ''}</summary>
+                        {[error, ...error.derived].map((detail) => (
+                          <React.Fragment key={buildErrorRowKey(detail)}>
+                            <div className="save-error-technical-body">{detail.item.technicalMessage || detail.item.message}</div>
+                            {(detail.item.path || detail.item.code || detail.item.keyword) && (
+                              <div className="save-error-technical-meta">
+                                {[detail.item.path, detail.item.keyword, detail.item.code].filter(Boolean).join(' • ')}
+                              </div>
+                            )}
+                          </React.Fragment>
+                        ))}
                       </details>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : saveErrorFocusTarget ? (
             <button
               type="button"
               className="save-error-details save-error-details-button"
-              onClick={() => {
-                const target = elementsById[saveErrorFocusTarget.elementId];
-                const z = target?.coordinates?.[0]?.z;
-                if (typeof z === 'number' && Number.isFinite(z)) {
-                  setCurrentFloorZ(z);
-                }
-                setSelectedElementIds([saveErrorFocusTarget.elementId]);
-                setSelection({ type: 'element', id: saveErrorFocusTarget.elementId });
-                closeSaveErrorDropdown();
-              }}
-              title={saveErrorFocusTarget.ambiguous ? 'Click to select one matching element' : 'Click to select this element'}
+              onClick={() => goToIssueTarget(saveErrorFocusTarget.target)}
+              title="Go to this input"
             >
               {saveErrorSummary}
             </button>
