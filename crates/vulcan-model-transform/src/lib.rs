@@ -337,10 +337,11 @@ fn enforce_pure_hem_input(
             !validation.errors.iter().any(|other| {
                 other.keyword.is_some()
                     && !matches!(
-                    other.keyword.as_deref(),
-                    Some("unevaluatedProperties") | Some("additionalProperties")
-                ) && (other.path == error.path
-                    || other.path.starts_with(&format!("{}/", error.path)))
+                        other.keyword.as_deref(),
+                        Some("unevaluatedProperties") | Some("additionalProperties")
+                    )
+                    && (other.path == error.path
+                        || other.path.starts_with(&format!("{}/", error.path)))
             })
         })
         .cloned()
