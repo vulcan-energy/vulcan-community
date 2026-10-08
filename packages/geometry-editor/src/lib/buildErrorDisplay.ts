@@ -190,7 +190,7 @@ const collapseDerivedBuildErrors = (
   for (const row of rows) {
     // Only zone elements and zone-level keys: a top-level section error (e.g. an unlinked
     // system or a defaulted cell) does not explain other errors in that section.
-    if (!isSchemaKeywordError(row.item) && row.target.section === 'Zone' && !sourceRowByOwner.has(row.target.ownerKey)) {
+    if (!isSchemaKeywordError(row.item) && !row.item.severity && row.target.section === 'Zone' && !sourceRowByOwner.has(row.target.ownerKey)) {
       sourceRowByOwner.set(row.target.ownerKey, row);
     }
   }
@@ -216,8 +216,8 @@ export const targetValidationIssues = (
   validation: TargetValidation | null,
   model: Parameters<typeof resolveIssueTarget>[1],
 ) => {
-  const elements = new Map<string, ValidationIssue[]>();
-  const zones = new Map<string, ValidationIssue[]>();
+  const elements = new Map<string, TargetIssue[]>();
+  const zones = new Map<string, TargetIssue[]>();
   if (!validation?.items) return { elements, zones };
   const hem = `HEM ${validation.hemVersion}`;
   for (const row of displayBuildErrorRows(validation.items, (path) => resolveIssueTarget(path, model))) {
@@ -227,11 +227,24 @@ export const targetValidationIssues = (
       : zoneId && row.pathSegments[2] !== 'BuildingElement' ? { map: zones, id: zoneId } : undefined;
     if (!owner) continue;
     const message = row.userMessage.startsWith(hem) ? row.userMessage : `${hem}: ${row.userMessage}`;
-    owner.map.set(owner.id, [...(owner.map.get(owner.id) ?? []), { message, fieldKey, source: 'schema' }]);
+    owner.map.set(owner.id, [...(owner.map.get(owner.id) ?? []), { message, fieldKey, source: 'schema', ...(row.item.severity === 'warning' && { warning: true }) }]);
   }
   return { elements, zones };
 };
 
+/** A target issue; `warning` ones are shown as warnings and never block. */
+export type TargetIssue = ValidationIssue & { warning?: boolean };
+
 /** Adds target issues to a live validation result without copying when there are none. */
-export const withTargetIssues = (validation: ValidationResult, issues: readonly ValidationIssue[] | undefined): ValidationResult =>
-  issues?.length ? { ...validation, hasIssues: true, issues: [...validation.issues, ...issues] } : validation;
+export const withTargetIssues = (validation: ValidationResult, issues: readonly TargetIssue[] | undefined): ValidationResult => {
+  if (!issues?.length) return validation;
+  const errors = issues.filter((issue) => !issue.warning);
+  const warnings = issues.filter((issue) => issue.warning);
+  return {
+    ...validation,
+    hasIssues: validation.hasIssues || errors.length > 0,
+    issues: [...validation.issues, ...errors],
+    hasWarnings: validation.hasWarnings || warnings.length > 0,
+    warnings: [...validation.warnings, ...warnings],
+  };
+};

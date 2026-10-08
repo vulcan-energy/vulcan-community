@@ -2442,6 +2442,8 @@ impl JSONBuilder {
                                 &mut element_obj,
                                 &target_path,
                                 contract.party_wall_requires_whole_u,
+                                metadata_f64(csv_data, "Ventilation_ventilation_zone_base_height")
+                                    .unwrap_or(0.0),
                             )
                         }
                         crate::ElementInputConvention::DividedOpeningHalfPartition => {
@@ -2452,7 +2454,19 @@ impl JSONBuilder {
                             )
                         }
                     };
-                    self.non_fatal_errors.borrow_mut().extend(diagnostics);
+                    let (warnings, errors): (Vec<_>, Vec<_>) = diagnostics
+                        .into_iter()
+                        .partition(|d| d.code == crate::target_mappings::TARGET_INPUT_WARNING);
+                    self.non_fatal_errors.borrow_mut().extend(errors);
+                    self.schema_omissions
+                        .borrow_mut()
+                        .extend(warnings.into_iter().map(|w| {
+                            crate::finalization::SchemaOmission {
+                                code: w.code,
+                                path: w.path,
+                                message: format!("HEM {}: {}", self.hem_core_version, w.message),
+                            }
+                        }));
 
                     // Add to zone's BuildingElement section
                     let zone = result["Zone"][zone_name].as_object_mut().unwrap();
@@ -12715,6 +12729,7 @@ Name,Type
                 &mut output,
                 "test",
                 true,
+                2.0,
             );
             assert!(errors.is_empty(), "{errors:?}");
             assert_eq!(output["window_part_list"][0]["mid_height"], 1.4);

@@ -185,3 +185,49 @@ fn physical_opening_contracts_require_fhs_but_divided_contracts_keep_core_suppor
         }
     }
 }
+
+#[test]
+fn legacy_window_division_height_reaches_a8_with_a_non_blocking_warning() {
+    let csv = format!(
+        "{MINIMAL_CSV}
+Window Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,frame_area_fraction,free_area_height,mid_height,max_window_open_area,extra_json
+Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0.8,\"{{\"\"window_part_list\"\":[{{\"\"mid_height_air_flow_path\"\":1.5}}]}}\"
+"
+    );
+    let output = transform_geometry_csv(TransformRequest {
+        csv,
+        schema_json: MINIMAL_SCHEMA.into(),
+        defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
+        profile: ModelProfile::Fhs,
+        conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
+        version_metadata: VersionMetadata {
+            hem_core_version: "1.0.0a8".into(),
+            fhs_wrapper_version: Some("1.0.0a8".into()),
+        },
+    })
+    .unwrap();
+    let path = "/Zone/Living/BuildingElement/Window/window_part_list";
+    assert_eq!(
+        output.model.pointer(path),
+        Some(
+            &serde_json::json!([{"mid_height":1.5,"free_area_height":0.95,"max_window_open_area":0.8}])
+        )
+    );
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .all(|e| !e.path.contains("/Window/")),
+        "{:?}",
+        output.validation.errors
+    );
+    let warning = output
+        .schema_omissions
+        .iter()
+        .find(|w| w.path == path)
+        .expect("warning");
+    assert_eq!(warning.code, "W_TARGET_INPUT");
+    assert!(warning.message.starts_with("HEM 1.0.0a8: The opening height used for ventilation (1.5 m) differs from the window's mid-height (1.65 m), both above the ventilation-zone base."), "{}", warning.message);
+}

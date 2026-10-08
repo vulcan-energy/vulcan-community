@@ -31,4 +31,19 @@ describe('targetValidationIssues', () => {
     expect(withTargetIssues(clean, undefined)).toBe(clean);
     expect(withTargetIssues(clean, [{ message: 'x', source: 'schema' }])).toMatchObject({ hasIssues: true, issues: [{ message: 'x' }] });
   });
+
+  it('keeps a target warning a warning: it neither blocks nor absorbs the element errors', () => {
+    const { elements } = targetValidationIssues({
+      hemVersion: '1.0.0a8',
+      items: [
+        { source: 'schema', severity: 'warning', code: 'W_TARGET_INPUT', path: '/Zone/Zone 1/BuildingElement/Party Wall/window_part_list', message: 'HEM 1.0.0a8: Check the opening height.' },
+        { source: 'schema', code: 'E026', keyword: 'required', path: '/Zone/Zone 1/BuildingElement/Party Wall', message: '"u_value" is a required property' },
+      ],
+    }, model);
+    const clean = { hasIssues: false, issues: [], hasWarnings: false, warnings: [] };
+    const result = withTargetIssues(clean, elements.get('pw'));
+    expect(result.warnings).toMatchObject([{ message: 'HEM 1.0.0a8: Check the opening height.', fieldKey: 'window_part_list' }]);
+    expect(result.issues).toHaveLength(1);
+    expect(withTargetIssues(clean, elements.get('pw')?.filter((issue) => issue.warning))).toMatchObject({ hasIssues: false, hasWarnings: true });
+  });
 });
