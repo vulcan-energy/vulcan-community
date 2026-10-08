@@ -642,6 +642,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({
       targetBundleId,
       csvValidationCache: {},
+      targetValidation: null,
       complianceSettings: { ...state.complianceSettings, scenariosBaseModelEnabled: false },
     });
   },
@@ -1771,6 +1772,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       sourceProvenanceMarkersVersion: metadata.legacyProvenanceMarkersVersion,
       csvUpgradeRequested: false,
       targetBundleId: metadata.targetBundleId,
+      targetValidation: null,
       propertyPostcode: metadata.propertyPostcode,
     });
     {

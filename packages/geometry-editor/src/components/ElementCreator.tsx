@@ -65,6 +65,7 @@ import type { GeometrySourceComparisonPort } from '../../../geometry-editor-host
 import { getElementShape, isTypeShapeCompatible, convertShapeCoordinates } from '../lib/shapeUtils';
 import { isOrientationPitchAxis } from '../lib/slopePitchAxis';
 import { resolveIssueTarget } from '../lib/issueTarget';
+import { targetValidationIssues, withTargetIssues } from '../lib/buildErrorDisplay';
 import {
   isVulcanUiPartyFloorElement,
   VULCAN_UI_PARTY_ELEMENT_KEY,
@@ -817,12 +818,13 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
     sourceComparisonPort.getSnapshot,
     sourceComparisonPort.getSnapshot,
   );
-  const { selectedElement, elementsById, zones, activeCsvValidationInfo, validateElement } = useGeometryStore(
+  const { selectedElement, elementsById, zones, activeCsvValidationInfo, targetValidation, validateElement } = useGeometryStore(
     useShallow((s) => ({
       selectedElement: s.elementsById[selectionId] ?? null,
       elementsById: s.elementsById,
       zones: s.zones,
       activeCsvValidationInfo: activeFilename ? s.csvValidationCache[activeFilename] : undefined,
+      targetValidation: s.targetValidation,
       validateElement: s.validateElement,
     })),
   );
@@ -831,9 +833,13 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
     void sourceComparisonSnapshot.revision;
     if (!selectedElement) return null;
 
-    const validation = validateElement(selectedElement, elementsById);
+    const validation = withTargetIssues(
+      validateElement(selectedElement, elementsById),
+      targetValidationIssues(targetValidation, { zones, elements: Object.values(elementsById) }).elements.get(selectedElement.id),
+    );
     const schemaIssues = (() => {
-      if (!activeFilename || !selectedElement.name) return [] as Array<{ text: string; fieldKey?: string }>;
+      // Target validation (live or from Save) supersedes the saved-file schema pills.
+      if (targetValidation || !activeFilename || !selectedElement.name) return [] as Array<{ text: string; fieldKey?: string }>;
       const errors = activeCsvValidationInfo?.wasmValidation?.errors || [];
       const model = { zones, elements: [selectedElement] };
       const issues = new Map<string, string | undefined>();
@@ -849,7 +855,7 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
     const comparisonInfoPillItems = sourceComparisonPort.elementInfo(selectedElement.id)?.items ?? [];
 
     return { validation, schemaIssues, comparisonInfoPillItems };
-  }, [activeCsvValidationInfo, activeFilename, elementsById, selectedElement, sourceComparisonPort, sourceComparisonSnapshot.revision, validateElement, zones]);
+  }, [activeCsvValidationInfo, activeFilename, elementsById, selectedElement, sourceComparisonPort, sourceComparisonSnapshot.revision, targetValidation, validateElement, zones]);
 
   if (!selectedElement || !validationRows) return null;
   const { validation, schemaIssues, comparisonInfoPillItems } = validationRows;

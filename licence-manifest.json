@@ -4367,6 +4367,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/lib/buildErrorDisplay.ts",
+      "source_path": "packages/geometry-editor/src/lib/buildErrorDisplay.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/buildingFootprintDimensions.ts",
       "source_path": "packages/geometry-editor/src/lib/buildingFootprintDimensions.ts",
       "license": "AGPL-3.0-only",
