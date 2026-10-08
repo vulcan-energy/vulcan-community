@@ -116,6 +116,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import type { Element } from '../../geometry/types';
 import { listCategoryJsonOptions, type WorkspaceSnippetOption } from '../../geometry/parameterLibraryCatalog';
 import { syncSpaceHeatSystemZoneNameInExtraJson } from '../../lib/spaceHeatSystemSync';
+import { collectHeatSourceWetNamesFromProject } from '../../lib/heatSourceWetNamesFromProject';
 import { useKeyedState } from '../../hooks/useKeyedState';
 import { StandardDropdown } from '../StandardDropdown';
 import {
@@ -123,6 +124,7 @@ import {
   getSystemElementSourceFromState,
   readSelectedSystemElement,
   resolveHeatSourceWetReferenceName,
+  remapSpaceHeatSystemHeatSourceInExtraJson,
   SYSTEM_SOURCE_META_KEY,
   SYSTEM_SUBCATEGORY_LABELS,
   SYSTEM_SUBCATEGORY_TO_DIR,
@@ -361,14 +363,35 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
           !Array.isArray(nextExtraJson._pcdb),
         keys: nextExtraJson ? Object.keys(nextExtraJson) : [],
       });
+      const previous = ctx.getElementById(id);
+      const previousSourceName = previous ? resolveHeatSourceWetReferenceName(previous) : null;
       ctx.updateElement(id, {
         subcategory: params.subcategory,
         system_preset: nextSystemPreset,
         extra_json: nextExtraJson,
       } as Partial<Element>);
+      const current = ctx.getElementById(id);
+      const nextSourceName = current ? resolveHeatSourceWetReferenceName(current) : null;
+      if (previousSourceName && nextSourceName && previousSourceName !== nextSourceName) {
+        // A shared old key cannot identify which source a circuit meant.
+        const ambiguous = Object.values(ctx.elementsById).some((element) => (
+          element.id !== id && !element.isPlaceholder && (
+            resolveHeatSourceWetReferenceName(element) === previousSourceName
+            || collectHeatSourceWetNamesFromProject({ [element.id]: element }).includes(previousSourceName)
+          )
+        ));
+        if (!ambiguous) {
+          for (const elementId of ctx.elementIds) {
+            const element = ctx.getElementById(elementId);
+            if (element?.type !== 'System') continue;
+            const extra = remapSpaceHeatSystemHeatSourceInExtraJson(element.extra_json, previousSourceName, nextSourceName);
+            if (extra) ctx.updateElement(element.id, { extra_json: extra } as Partial<Element>);
+          }
+        }
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- isExistingElementSelection closes over `selection` (already listed) and is redefined every render, not a stable identity.
-    [selection, ctx.updateElement, traceSystemFlow],
+    [selection, ctx.updateElement, ctx.getElementById, ctx.elementsById, ctx.elementIds, traceSystemFlow],
   );
 
   // System UI mode follows persisted source-of-truth in the selected element
@@ -470,10 +493,10 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
           && !selection.isPlaceholder
           && (selection.type === 'element' || selection.type === 'global')
         ) {
-          ctx.updateElement(selection.id, {
-            system_preset: undefined,
-            extra_json: undefined,
-          } as Partial<Element>);
+          commitSystemSelectionUpdate({
+            source: 'presets', subcategory: systemSubcategory,
+            reason: 'preset-cleared',
+          });
         }
         return;
       }
@@ -529,7 +552,6 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     [
       selection,
       systemSubcategory,
-      ctx.updateElement,
       ctx.workspaceResourcePort,
       ctx.getElementById,
       ctx.getZoneNameForElementZoneId,

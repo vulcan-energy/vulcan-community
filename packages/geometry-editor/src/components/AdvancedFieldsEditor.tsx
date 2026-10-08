@@ -66,6 +66,7 @@ import { roundToTwoDecimals } from '../geometry/constants';
 import type { BuildingElementTransparent, Element, System, WindowShading } from '../geometry/types';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { classifyOpaqueFabricVariantFromElement } from '../lib/opaqueFabricVariant';
+import { SystemModelContext } from './SystemModelContext';
 import { DhwStorageHeatSourcePicker } from './DhwStorageHeatSourcePicker';
 import {
   WindowDetailChip,
@@ -1348,6 +1349,16 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       }
     }
 
+    if (elementType === 'System' && subtype === 'HotWaterSource' && result) {
+      const tanks = readExtraJsonRecord(readExtraJsonRecord(readExtraJsonRecord(result.properties).HotWaterSource).properties);
+      for (const tank of Object.values(tanks)) {
+        const heaters = readExtraJsonRecord(readExtraJsonRecord(readExtraJsonRecord(tank).properties).HeatSource);
+        for (const heater of Object.values(readExtraJsonRecord(heaters.properties))) {
+          const fields = readExtraJsonRecord(readExtraJsonRecord(heater).properties);
+          if (fields.name) fields.name = { ...readExtraJsonRecord(fields.name), oneOf: projectHeatSourceWetNames.map((name) => ({ const: name, title: projectHeatSourceWetLabels[name] ?? name })) };
+        }
+      }
+    }
     return result as AdvancedFieldsSchema;
   }, [
     elementType,
@@ -2392,6 +2403,11 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           ))}
         </div>
       )}
+
+      {elementType === 'System' && !isSystemPcdbMode && <SystemModelContext
+        extraJson={advancedFieldsData} subtype={subtype} useFHSSchema={useFHSSchema}
+        elementsById={elementsById}
+      />}
 
       {elementType === 'System' &&
         subtype === 'HotWaterSource' &&

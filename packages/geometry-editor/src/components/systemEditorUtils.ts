@@ -244,7 +244,7 @@ export function updateSpaceHeatSystemHeatSourceNameInExtraJson(
   const entry = firstRecordEntry(spaceHeatSystems);
   const entryName = entry?.[0] || systemName;
   const system = { ...(entry?.[1] ?? { type: 'WetDistribution' }) };
-  const heatSource = readRecord(system.HeatSource);
+  const heatSource = { ...readRecord(system.HeatSource) };
   if (heatSourceName) {
     heatSource.name = heatSourceName;
   } else {
@@ -262,4 +262,24 @@ export function updateSpaceHeatSystemHeatSourceNameInExtraJson(
       [entryName]: system,
     },
   };
+}
+
+/** Preserve circuit settings when a selected source changes its HEM map key. */
+export function remapSpaceHeatSystemHeatSourceInExtraJson(
+  extraJson: unknown,
+  from: string,
+  to: string,
+): Record<string, unknown> | null {
+  const extra = readRecord(extraJson);
+  const systems = readRecord(extra.SpaceHeatSystem);
+  const nextSystems = { ...systems };
+  let changed = false;
+  for (const [name, value] of Object.entries(systems)) {
+    const system = readRecord(value);
+    const heatSource = readRecord(system.HeatSource);
+    if (heatSource.name !== from) continue;
+    nextSystems[name] = { ...system, HeatSource: { ...heatSource, name: to } };
+    changed = true;
+  }
+  return changed ? { ...extra, SpaceHeatSystem: nextSystems } : null;
 }

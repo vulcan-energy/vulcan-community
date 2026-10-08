@@ -8,6 +8,8 @@
  */
 
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
+import { isRecord, readRecord } from './jsonTypes';
+import { unwrapNullableSchema } from './schemaShape';
 
 function cloneForFlatten<T>(obj: T): T {
   try {
@@ -108,6 +110,7 @@ function mergeAllOfListIntoMerged(
   allOf: unknown[],
   instanceData: unknown,
   fullRoot?: unknown,
+  required: Set<string> = new Set(),
 ): void {
   for (const branch of allOf) {
     if (!branch || typeof branch !== 'object' || Array.isArray(branch)) continue;
@@ -116,12 +119,12 @@ function mergeAllOfListIntoMerged(
       if (instanceData === undefined) continue;
       const match = jsonSchemaIfMatches(b.if, instanceData);
       if (match && b.then && typeof b.then === 'object' && !Array.isArray(b.then)) {
-        mergeThenSchemaInto(merged, b.then as Record<string, unknown>, instanceData, fullRoot);
+        mergeThenSchemaInto(merged, b.then as Record<string, unknown>, instanceData, fullRoot, required);
       } else if (!match && b.else && typeof b.else === 'object' && !Array.isArray(b.else)) {
-        mergeThenSchemaInto(merged, b.else as Record<string, unknown>, instanceData, fullRoot);
+        mergeThenSchemaInto(merged, b.else as Record<string, unknown>, instanceData, fullRoot, required);
       }
     } else if (!b.if && b.properties && typeof b.properties === 'object' && !Array.isArray(b.properties)) {
-      mergeThenSchemaInto(merged, { properties: b.properties } as Record<string, unknown>, instanceData, fullRoot);
+      mergeThenSchemaInto(merged, b, instanceData, fullRoot, required);
     }
   }
 }
@@ -131,6 +134,7 @@ function mergeThenSchemaInto(
   thenBranch: Record<string, unknown>,
   instanceData: unknown,
   fullRoot?: unknown,
+  required: Set<string> = new Set(),
 ): void {
   let th = thenBranch;
   if (fullRoot && th && typeof th === 'object') {
@@ -152,22 +156,30 @@ function mergeThenSchemaInto(
     const tank = defs?.Tank as { properties?: Record<string, unknown> } | undefined;
     const thProps = th.properties as Record<string, unknown> | undefined;
     if (tank?.properties && thProps && typeof thProps === 'object') {
+      const tankProperties = cloneForFlatten(tank.properties);
+      const baseHeaters = readRecord(tankProperties.HeatSource);
+      const overrideHeaters = readRecord(thProps.HeatSource);
       th = {
         ...th,
         properties: {
-          ...cloneForFlatten(tank.properties),
+          ...tankProperties,
           ...thProps,
+          HeatSource: {
+            ...baseHeaters, ...overrideHeaters,
+            additionalProperties: { ...readRecord(baseHeaters.additionalProperties), ...readRecord(overrideHeaters.additionalProperties) },
+          },
         },
       };
     }
   }
+  if (Array.isArray(th.required)) th.required.forEach((key) => { if (typeof key === 'string') required.add(key); });
   if (th.properties && typeof th.properties === 'object' && !Array.isArray(th.properties)) {
     const props = th.properties as Record<string, unknown>;
     for (const [k, subSchema] of Object.entries(props)) {
       merged[k] = cloneForFlatten(subSchema);
     }
     if (Array.isArray(th.allOf)) {
-      mergeAllOfListIntoMerged(merged, th.allOf as unknown[], instanceData, fullRoot);
+      mergeAllOfListIntoMerged(merged, th.allOf as unknown[], instanceData, fullRoot, required);
     }
     return;
   }
@@ -203,6 +215,7 @@ export function flattenIfThenAllOfProperties(
       : ({} as Record<string, unknown>);
 
   const merged: Record<string, unknown> = {};
+  const required = new Set(Array.isArray(n.required) ? n.required.filter((key): key is string => typeof key === 'string') : []);
 
   const topIf = out.if as Record<string, unknown> | undefined;
   const topThen = out.then as Record<string, unknown> | undefined;
@@ -211,7 +224,7 @@ export function flattenIfThenAllOfProperties(
     const useThen =
       instanceData !== undefined && jsonSchemaIfMatches(topIf, instanceData) ? true : false;
     const branch = useThen ? topThen : topElse;
-    mergeThenSchemaInto(merged, branch as Record<string, unknown>, instanceData, fullRoot);
+    if (branch) mergeThenSchemaInto(merged, branch as Record<string, unknown>, instanceData, fullRoot, required);
     delete out.if;
     delete out.then;
     delete out.else;
@@ -219,12 +232,13 @@ export function flattenIfThenAllOfProperties(
 
   const allOf = Array.isArray(out.allOf) ? (out.allOf as unknown[]) : null;
   if (allOf) {
-    mergeAllOfListIntoMerged(merged, allOf, instanceData, fullRoot);
+    mergeAllOfListIntoMerged(merged, allOf, instanceData, fullRoot, required);
     delete out.allOf;
   }
 
   // Conditional `allOf` / `then` keys must win over any overlapping base `properties` from expansion.
   out.properties = { ...baseProps, ...merged };
+  if (required.size) out.required = [...required];
   delete out.unevaluatedProperties;
 
   if (out.properties && typeof out.properties === 'object' && !Array.isArray(out.properties)) {
@@ -235,7 +249,21 @@ export function flattenIfThenAllOfProperties(
         instanceData && typeof instanceData === 'object' && !Array.isArray(instanceData)
           ? (instanceData as Record<string, unknown>)[k]
           : undefined;
-      next[k] = flattenIfThenAllOfProperties(v, childInstance, fullRoot) as unknown;
+      if (k === 'test_data' && isRecord(v)) {
+        const profile = readRecord(v.patternProperties)['M|L'];
+        const profiles = isRecord(profile) ? { M: profile, L: profile } : readRecord(v.properties);
+        next[k] = flattenIfThenAllOfProperties({ ...v, required: ['M'], properties: Object.fromEntries(Object.entries(profiles).map(([name, schema]) => [name, unwrapNullableSchema(readRecord(schema))])) }, childInstance, fullRoot);
+      } else if (k === 'HeatSource' && isRecord(v) && isRecord(v.additionalProperties) && isRecord(childInstance)) {
+        next[k] = {
+          ...v,
+          'x-vulcan-heater-map': true,
+          properties: Object.fromEntries(Object.entries(childInstance).map(([name, heater]) => [
+            name, { ...readRecord(flattenIfThenAllOfProperties(selectPlantVariant(v.additionalProperties, heater), heater, fullRoot)), 'x-vulcan-cylinder-heater': true },
+          ])),
+        };
+      } else {
+        next[k] = flattenIfThenAllOfProperties(v, childInstance, fullRoot);
+      }
     }
     out.properties = next;
   }
@@ -258,6 +286,21 @@ function normalizeHeatSourceWetPlantInstanceForFlatten(plant: unknown): unknown 
   return { ...p, is_heat_network: false };
 }
 
+function selectPlantVariant(node: unknown, instanceData: unknown): unknown {
+  if (!isRecord(node)) return node;
+  let n = node as Record<string, unknown>;
+  // Core schemas use discriminated unions where FHS uses if/then branches.
+  const variants = n.oneOf ?? n.anyOf;
+  if (Array.isArray(variants) && isRecord(instanceData)) {
+    const match = variants.find((variant) => {
+      const type = readRecord(readRecord(readRecord(variant).properties).type);
+      return type.const === instanceData.type && type.const !== undefined;
+    });
+    if (isRecord(match)) n = { ...n, ...match, oneOf: undefined, anyOf: undefined };
+  }
+  return n;
+}
+
 /** Deep-flatten each plant schema under `properties[subtype].properties` using live plant JSON. */
 export function flattenSystemSubtypePlantSchemas(
   subschema: Record<string, unknown>,
@@ -278,9 +321,15 @@ export function flattenSystemSubtypePlantSchemas(
         : undefined;
     const plantInstance =
       subtype === 'HeatSourceWet' ? normalizeHeatSourceWetPlantInstanceForFlatten(raw) : raw;
-    let flat = flattenIfThenAllOfProperties(cloneForFlatten(v), plantInstance, fullRoot) as Record<string, unknown>;
+    const plantType = readRecord(raw).type;
+    const selected = plantType === 'StorageTank' || plantType === 'HeatPump' ? selectPlantVariant(v, plantInstance) : v;
+    let flat = flattenIfThenAllOfProperties(cloneForFlatten(selected), plantInstance, fullRoot) as Record<string, unknown>;
     if (plantInstance && typeof plantInstance === 'object' && !Array.isArray(plantInstance)) {
       flat = omitAbsentOptionalObjectPropertiesFromSchema(flat, plantInstance) as Record<string, unknown>;
+    }
+    if (readRecord(raw).type === 'HeatPump' && isRecord(flat.properties)) {
+      // Engines derive exhaust airflow from ventilation; this optional Core reference is unused.
+      delete flat.properties.MechanicalVentilation;
     }
     nextPlants[k] = flat;
   }

@@ -187,7 +187,7 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
       if (shouldRecurseIntoNestedObject(childSchema)) {
         const nextPathLabels = key === 'HeatSource'
           ? ctx.pathLabels
-          : [...ctx.pathLabels, startCaseKey(key)];
+          : [...ctx.pathLabels, s['x-vulcan-heater-map'] ? key : startCaseKey(key)];
         const childElements = buildControlsForSchema(childSchema, childScope, {
           ...ctx,
           pathLabels: nextPathLabels,
@@ -204,7 +204,7 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
           });
         }
       } else {
-        const isPlantRootType = ctx.pathLabels.length === 0 && key === 'type';
+        const isPlantRootType = key === 'type' && (ctx.pathLabels.length === 0 || s['x-vulcan-cylinder-heater'] === true);
         if (isPlantRootType) {
           continue;
         }
