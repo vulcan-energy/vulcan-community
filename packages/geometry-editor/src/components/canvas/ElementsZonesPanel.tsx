@@ -5,7 +5,8 @@ import React, { useCallback, useState, useRef, useEffect, useLayoutEffect, useMe
 import { Rnd } from 'react-rnd';
 import type { Element, ElementType, Zone } from '../../geometry/types';
 import { useGeometryStore, useGeometryStoreApi, validateZone } from '../../stores/geometryStore';
-import type { ValidationResult, MissingElement } from '../../geometry/validation/types';
+import type { ValidationIssue, ValidationResult, MissingElement } from '../../geometry/validation/types';
+import { withTargetIssues } from '../../lib/buildErrorDisplay';
 import { validateSpaceLabels } from '../../geometry/validation/validateSpaceLabels';
 import { getVolumeCalculationBreakdown } from '../../lib/zoneDerivation';
 import { getContextualElementDisplayName, getElementTypeDisplayName } from '../../lib/displayNames';
@@ -101,6 +102,8 @@ export interface ElementsZonesPanelProps {
   modelSchemaProfilePort?: GeometryModelSchemaProfilePort;
   currentFloorZ: number;
   getValidation: (el: Element) => ValidationResult;
+  /** Selected-target issues on zone-level fields, by zone id. */
+  zoneTargetIssues?: ReadonlyMap<string, ValidationIssue[]>;
   elementsRect: PanelRect;
   setElementsRect: (rect: PanelRect | ((prev: PanelRect) => PanelRect)) => void;
   activePanel: 'elements' | 'details' | null;
@@ -291,6 +294,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   modelSchemaProfilePort = unavailableGeometryModelSchemaProfilePort,
   currentFloorZ,
   getValidation,
+  zoneTargetIssues,
   elementsRect,
   setElementsRect,
   activePanel,
@@ -621,7 +625,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
       });
       const zoneSpaceLabelIds = spaceLabelIdsByZone.get(zone.id) ?? [];
       if (zoneSpaceLabelIds.length === 0) {
-        validations.set(zone.id, zoneValidation);
+        validations.set(zone.id, withTargetIssues(zoneValidation, zoneTargetIssues?.get(zone.id)));
         continue;
       }
       const spaceValidation = validateSpaceLabels(spaceLabelsById, zoneSpaceLabelIds, {
@@ -630,12 +634,12 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
         floors,
         spaceInferenceWallPrintByZone,
       });
-      validations.set(zone.id, {
+      validations.set(zone.id, withTargetIssues({
         hasIssues: zoneValidation.hasIssues || spaceValidation.hasIssues,
         hasWarnings: zoneValidation.hasWarnings || spaceValidation.hasWarnings,
         issues: [...zoneValidation.issues, ...spaceValidation.issues],
         warnings: [...zoneValidation.warnings, ...spaceValidation.warnings],
-      });
+      }, zoneTargetIssues?.get(zone.id)));
     }
 
     return validations;
@@ -647,6 +651,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     spaceInferenceWallPrintByZone,
     spaceLabelIds,
     spaceLabelsById,
+    zoneTargetIssues,
     zones,
   ]);
   const filteredZones = useMemo(() => {

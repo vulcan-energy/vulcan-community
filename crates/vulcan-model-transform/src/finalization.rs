@@ -10,7 +10,18 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
+use std::hash::{Hash, Hasher};
+
+thread_local! {
+    /// Compiled `if` conditions for the schema projected most recently on this
+    /// thread, keyed by that schema's content hash. Every condition embeds the
+    /// schema's definitions, so compiling one per visited instance dominated
+    /// preparation; a different schema content starts a fresh cache.
+    static CONDITIONS: RefCell<(u64, HashMap<String, jsonschema::Validator>)> =
+        RefCell::new((0, HashMap::new()));
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SchemaOmission {
@@ -61,6 +72,15 @@ pub fn project_model(
     schema: &Value,
 ) -> Result<(Value, Vec<SchemaOmission>), String> {
     let schema = normalized_schema_document(schema.clone());
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    schema.to_string().hash(&mut hasher);
+    let schema_key = hasher.finish();
+    CONDITIONS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.0 != schema_key {
+            *cache = (schema_key, HashMap::new());
+        }
+    });
     let mut model = candidate.clone();
     let mut omissions = Vec::new();
     loop {
@@ -91,16 +111,23 @@ fn resolve<'a>(schema: &'a Value, root: &'a Value) -> Result<&'a Value, String> 
         .ok_or_else(|| format!("Unresolved schema reference {reference}"))
 }
 
+/// `root` must be the schema `project_model` keyed the condition cache with.
 fn matches_condition(condition: &Value, instance: &Value, root: &Value) -> Result<bool, String> {
-    let mut document = json!({"allOf": [condition]});
-    for key in ["$schema", "$defs", "definitions"] {
-        if let Some(value) = root.get(key) {
-            document[key] = value.clone();
+    CONDITIONS.with(|cache| {
+        let conditions = &mut cache.borrow_mut().1;
+        let key = condition.to_string();
+        if !conditions.contains_key(&key) {
+            let mut document = json!({"allOf": [condition]});
+            for key in ["$schema", "$defs", "definitions"] {
+                if let Some(value) = root.get(key) {
+                    document[key] = value.clone();
+                }
+            }
+            let validator = jsonschema::validator_for(&document).map_err(|e| e.to_string())?;
+            conditions.insert(key.clone(), validator);
         }
-    }
-    jsonschema::validator_for(&document)
-        .map(|v| v.is_valid(instance))
-        .map_err(|e| e.to_string())
+        Ok(conditions[&key].is_valid(instance))
+    })
 }
 
 // Select variants by value kind and explicit discriminators, not by full validity.
@@ -414,6 +441,18 @@ mod tests {
 #[cfg(test)]
 mod conditional_regressions {
     use super::*;
+    #[test]
+    fn cached_conditions_follow_schema_content_not_condition_text() {
+        // Same `if` text, different referenced definition: a new schema must recompile.
+        let schema = |mode: &str| json!({"$defs":{"c":{"properties":{"mode":{"const":mode}},"required":["mode"]}},"properties":{"mode":{}},"if":{"$ref":"#/$defs/c"},"then":{"properties":{"x":{}}},"unevaluatedProperties":false});
+        let source = json!({"mode":"a","x":1});
+        assert_eq!(project_model(&source, &schema("a")).unwrap().0, source);
+        assert_eq!(
+            project_model(&source, &schema("b")).unwrap().0,
+            json!({"mode":"a"})
+        );
+        assert_eq!(project_model(&source, &schema("a")).unwrap().0, source);
+    }
     #[test]
     fn named_pattern_and_else_fields_follow_context_without_erasing_invalid_data() {
         let schema = json!({"patternProperties":{"^system_":{"properties":{"mode":{}},"if":{"properties":{"mode":{"const":"MVHR"}}},"then":{"properties":{"ductwork":{"type":"array"}}},"else":{"properties":{"airflow":{"type":"number"}}},"unevaluatedProperties":false}},"additionalProperties":false});

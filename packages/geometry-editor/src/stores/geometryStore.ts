@@ -113,6 +113,7 @@ import {
 } from '../lib/spaceInference/remapInferredSpaceLabels';
 import { detectMissingElements as detectMissingElementsCore } from '../geometry/validation/detectMissingElements';
 import type { MissingElement, ValidationResult } from '../geometry/validation/types';
+import type { TargetValidation } from '../types/buildErrors';
 // Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
 // remove or relocate these re-exports without a paired web/ PR.
 export type { MissingElement, ValidationResult } from '../geometry/validation/types';
@@ -1476,6 +1477,12 @@ export interface GeometryState extends
     comparisonWarnings?: string[],
     csvLastModified?: number
   ) => void;
+  /**
+   * Selected-target (HEM version) validation for the current model, from the latest live
+   * preflight or Save; null when neither has run for it. Supersedes `wasmValidation`.
+   */
+  targetValidation: TargetValidation | null;
+  setTargetValidation: (validation: TargetValidation | null) => void;
   getCSVValidation: (filename: string) => {
     warnings: string[];
     criticalIssues: string[];
@@ -7222,6 +7229,7 @@ const createGeometryState = (
       bundledAssemblyLibraryLoading: false,
       bundledAssemblyLibraryError: null,
       csvValidationCache: {},
+      targetValidation: null,
       junctionPsiDefaultsMap: {},
       junctionPsiDefaultsLoading: false,
       junctionPsiDefaultsError: null,
@@ -7289,6 +7297,7 @@ const createGeometryState = (
       historyDebounceTimeout: null,
       lastSavedCsv: null,
       csvValidationCache: {},
+      targetValidation: null,
       globalOrientationOffset: 0,
     }));
   },
@@ -7406,6 +7415,9 @@ const createGeometryState = (
       }
     }));
   },
+
+  targetValidation: null,
+  setTargetValidation: (targetValidation) => set({ targetValidation }),
 
   getCSVValidation: (filename: string) => {
     const state = get();

@@ -12,3 +12,6 @@ export type BuildErrorItem = {
   schemaPath?: string;
   keyword?: string;
 };
+
+/** Validation by the selected HEM target, e.g. `{ hemVersion: '1.0.0a8', items }`. */
+export type TargetValidation = { hemVersion: string; items: readonly BuildErrorItem[] };

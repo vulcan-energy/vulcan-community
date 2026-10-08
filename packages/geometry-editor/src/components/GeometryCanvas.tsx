@@ -12,6 +12,7 @@ import { MultiSelectPanel } from './MultiSelectPanel';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld, computePlanViewBoundsCenter } from '../lib/shapeUtils';
 import { findOverlappingElements, getOverlapCenter } from '../lib/overlapDetection';
 import { readRootCssVar } from '../lib/cssVars';
+import { targetValidationIssues, withTargetIssues } from '../lib/buildErrorDisplay';
 import { calculateMemoizedLabelPositions, transformCachedLabelPosition, getSmartLabelPillTexts, getSmartLabelLayoutSignature, SMART_LABEL_METRICS, type LabelPosition } from '../lib/labelUtils';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { FilenameBar, type FilenameBarActionContext } from './FilenameBar';
@@ -1706,7 +1707,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     canUndo, canRedo, complianceSettings,
     defaultsPath, defaultsJson, defaultsLoading, defaultsLookup, junctionPsiDefaultsPath, junctionPsiDefaultsMap,
     calculateContextShadingDistance,
-    canvasViewResetKey, csvValidationCache,
+    canvasViewResetKey, csvValidationCache, targetValidation,
   } = useGeometryStore(
     useShallow((s) => ({
       zones: s.zones,
@@ -1741,6 +1742,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       junctionPsiDefaultsMap: s.junctionPsiDefaultsMap,
       calculateContextShadingDistance: s.calculateContextShadingDistance,
       csvValidationCache: s.csvValidationCache,
+      targetValidation: s.targetValidation,
     }))
   );
 
@@ -2386,14 +2388,18 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   // Deduplicate element validation calls within a geometry state snapshot while reusing
   // model-wide validation inputs that are identical for every element row.
+  const targetIssues = useMemo(
+    () => targetValidationIssues(targetValidation, { zones, elements: elementIds.map((id) => elementsById[id]) }),
+    [elementIds, elementsById, targetValidation, zones],
+  );
   const validationById = useMemo(
     () => new Map(
       elementIds.map((id) => {
         const element = elementsById[id];
-        return [id, validateElementCore(element, sharedElementValidationContext)] as const;
+        return [id, withTargetIssues(validateElementCore(element, sharedElementValidationContext), targetIssues.elements.get(id))] as const;
       }),
     ),
-    [elementIds, elementsById, sharedElementValidationContext],
+    [elementIds, elementsById, sharedElementValidationContext, targetIssues],
   );
   const getValidation = useCallback(
     (el: Element) => validationById.get(el.id) ?? validateElementCore(el, sharedElementValidationContext),
@@ -8128,6 +8134,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             modelSchemaProfilePort={modelSchemaProfilePort}
             currentFloorZ={currentFloorZ}
             getValidation={getValidation}
+            zoneTargetIssues={targetIssues.zones}
             elementsRect={elementsRect}
             setElementsRect={setElementsRect}
             activePanel={activePanel}
