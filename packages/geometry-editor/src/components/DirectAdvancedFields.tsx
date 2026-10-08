@@ -438,6 +438,44 @@ function labelForProperty(
  * as a function and returning the real control elements (EnumControl, NumberControl,
  * …) keeps their identity stable across renders instead.
  */
+function SystemPerformanceTable({ args }: { args: Parameters<typeof renderControlForProperty>[0] }) {
+  const { resolved, schema, value, config, segments, label, scope, applyChange } = args;
+  const item = readRecord(dereferenceSchemaNodeInRoot(resolved.items, schema));
+  const columns = Object.entries(readRecord(item.properties));
+  const rows = Array.isArray(value) ? value : [];
+  const rowCount = rows.length;
+  // HEM points have no IDs; remount on add/remove so shifted rows cannot inherit input drafts.
+  const rowKeys = React.useMemo(() => Array.from({ length: rowCount }, () => crypto.randomUUID()), [rowCount]);
+  const baseline = getAtPath(readRecord(config.systemSampleBaselineExtraJson), segments);
+  const changed = JSON.stringify(value) !== JSON.stringify(baseline);
+  return <GroupAccordion label={label} count={rows.length} openInitially={rows.length <= 3}>
+    <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 0 }}>Scroll horizontally to see all test fields.</p>
+    {config.systemSampleMode === true && <div style={{ marginBottom: 8 }}>
+      <StatusPill type={changed ? 'custom' : 'default-used'} labelOverride={changed ? 'Custom' : 'Preset'} />
+      {changed && Array.isArray(baseline) && <ResetFieldButton align="inline" label="Reset test data" onClick={() => applyChange(segments, structuredClone(baseline))} />}
+    </div>}
+    {((!Array.isArray(value) && value != null) || rows.some((row) => !isRecord(row))) ? <p role="alert">Test data must be an array of test-point objects. Correct the saved data before editing test points.</p> : <>
+      <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%' }} aria-label={`${label} test points`}>
+          <thead><tr><th scope="col">Point</th>{columns.map(([key, field]) => <th key={key} scope="col" style={{ textAlign: 'left', padding: 4 }}>{labelForProperty(key, readRecord(field), undefined)}</th>)}<th scope="col">Actions</th></tr></thead>
+          <tbody>{rows.map((row, index) => <tr key={rowKeys[index]}>
+            <th scope="row">{index + 1}</th>
+            {columns.map(([key, field]) => <td key={key} style={{ minWidth: 112, padding: 4, verticalAlign: 'top' }}>
+              {renderControlForProperty({ ...args, config: { ...config, tableCell: true, compact: true }, segments: [...segments, String(index), key], resolved: unwrapNullableSchema(readRecord(field)), value: readRecord(row)[key], label: `Point ${index + 1} · ${labelForProperty(key, readRecord(field), undefined)}`, scope: `${scope}/items/properties/${key}`, required: Array.isArray(item.required) && item.required.includes(key), applyChange: (_cellSegments, nextValue) => {
+                const next = rows.map((entry, i) => i === index ? setAtPath(readRecord(entry), [key], nextValue) : entry);
+                applyChange(segments, next);
+              } })}
+            </td>)}
+            <td style={{ verticalAlign: 'top', padding: 4 }}><button type="button" className="btn btn-nav btn-small" aria-label={`Remove test point ${index + 1}`} onClick={() => applyChange(segments, rows.filter((_, i) => i !== index))}>Remove</button></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      {!rows.length && <p role="alert">Add the product’s test points before calculating.</p>}
+      <button type="button" className="btn btn-nav btn-small" onClick={() => applyChange(segments, [...rows, {}])}>Add test point</button>
+    </>}
+  </GroupAccordion>;
+}
+
 function renderControlForProperty(args: {
   segments: string[];
   resolved: Record<string, unknown>;
@@ -560,37 +598,7 @@ function renderControlForProperty(args: {
   }
 
   if (elementType === 'System' && leafKey === 'test_data_EN14825' && isRecord(resolved.items)) {
-    const item = readRecord(dereferenceSchemaNodeInRoot(resolved.items, schema));
-    const columns = Object.entries(readRecord(item.properties));
-    const rows = Array.isArray(value) ? value : [];
-    const baseline = getAtPath(readRecord(config.systemSampleBaselineExtraJson), segments);
-    const changed = JSON.stringify(value) !== JSON.stringify(baseline);
-    return <GroupAccordion key={path} label={label} count={rows.length} openInitially={rows.length <= 3}>
-      <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 0 }}>Scroll horizontally to see all test fields.</p>
-      {config.systemSampleMode === true && <div style={{ marginBottom: 8 }}>
-        <StatusPill type={changed ? 'custom' : 'default-used'} labelOverride={changed ? 'Custom' : 'Preset'} />
-        {changed && Array.isArray(baseline) && <ResetFieldButton align="inline" label="Reset test data" onClick={() => applyChange(segments, structuredClone(baseline))} />}
-      </div>}
-      {((!Array.isArray(value) && value != null) || rows.some((row) => !isRecord(row))) ? <p role="alert">Test data must be an array of test-point objects. Correct the saved data before editing test points.</p> : <>
-        <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
-          <table style={{ borderCollapse: 'collapse', width: '100%' }} aria-label={`${label} test points`}>
-            <thead><tr><th scope="col">Point</th>{columns.map(([key, field]) => <th key={key} scope="col" style={{ textAlign: 'left', padding: 4 }}>{labelForProperty(key, readRecord(field), undefined)}</th>)}<th scope="col">Actions</th></tr></thead>
-            <tbody>{rows.map((row, index) => <tr key={index}>
-              <th scope="row">{index + 1}</th>
-              {columns.map(([key, field]) => <td key={key} style={{ minWidth: 112, padding: 4, verticalAlign: 'top' }}>
-                {renderControlForProperty({ ...args, config: { ...config, tableCell: true, compact: true }, segments: [...segments, String(index), key], resolved: unwrapNullableSchema(readRecord(field)), value: readRecord(row)[key], label: `Point ${index + 1} · ${labelForProperty(key, readRecord(field), undefined)}`, scope: `${scope}/items/properties/${key}`, required: Array.isArray(item.required) && item.required.includes(key), applyChange: (_cellSegments, nextValue) => {
-                  const next = rows.map((entry, i) => i === index ? setAtPath(readRecord(entry), [key], nextValue) : entry);
-                  applyChange(segments, next);
-                } })}
-              </td>)}
-              <td style={{ verticalAlign: 'top', padding: 4 }}><button type="button" className="btn btn-nav btn-small" aria-label={`Remove test point ${index + 1}`} onClick={() => applyChange(segments, rows.filter((_, i) => i !== index))}>Remove</button></td>
-            </tr>)}</tbody>
-          </table>
-        </div>
-        {!rows.length && <p role="alert">Add the product’s test points before calculating.</p>}
-        <button type="button" className="btn btn-nav btn-small" onClick={() => applyChange(segments, [...rows, {}])}>Add test point</button>
-      </>}
-    </GroupAccordion>;
+    return <SystemPerformanceTable key={path} args={args} />;
   }
 
   const control = pickDirectControl(resolved);

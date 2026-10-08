@@ -552,7 +552,6 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     [
       selection,
       systemSubcategory,
-      ctx.updateElement,
       ctx.workspaceResourcePort,
       ctx.getElementById,
       ctx.getZoneNameForElementZoneId,

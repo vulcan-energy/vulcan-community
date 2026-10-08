@@ -105,7 +105,8 @@ it('collapses large test tables and edits, removes and resets only test data', (
   expect(copInput).toHaveAttribute('aria-invalid', 'true');
   fireEvent.change(copInput, { target: { value: '.5' } });
   expect(copInput).not.toHaveAttribute('aria-invalid', 'true');
-  fireEvent.click(screen.getByRole('button', { name: 'Remove test point 2' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove test point 1' }));
+  expect(screen.getByRole('textbox', { name: 'Point 1 · CoP' })).toHaveValue('3');
   expect(onChange.mock.lastCall![0].HeatSourceWet['HP.with/dots'].test_data_EN14825).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: 'Reset to default' }));
   expect(onChange.mock.lastCall![0]).toEqual(original);

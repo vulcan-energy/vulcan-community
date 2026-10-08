@@ -321,7 +321,9 @@ export function flattenSystemSubtypePlantSchemas(
         : undefined;
     const plantInstance =
       subtype === 'HeatSourceWet' ? normalizeHeatSourceWetPlantInstanceForFlatten(raw) : raw;
-    let flat = flattenIfThenAllOfProperties(cloneForFlatten(['StorageTank', 'HeatPump'].includes(String(readRecord(raw).type)) ? selectPlantVariant(v, plantInstance) : v), plantInstance, fullRoot) as Record<string, unknown>;
+    const plantType = readRecord(raw).type;
+    const selected = plantType === 'StorageTank' || plantType === 'HeatPump' ? selectPlantVariant(v, plantInstance) : v;
+    let flat = flattenIfThenAllOfProperties(cloneForFlatten(selected), plantInstance, fullRoot) as Record<string, unknown>;
     if (plantInstance && typeof plantInstance === 'object' && !Array.isArray(plantInstance)) {
       flat = omitAbsentOptionalObjectPropertiesFromSchema(flat, plantInstance) as Record<string, unknown>;
     }
