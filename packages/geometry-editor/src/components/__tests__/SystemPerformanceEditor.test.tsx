@@ -11,8 +11,7 @@ import { canonicalGeometrySchemaPort, configureGeometrySchemaAssetSource, resetG
 import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
-import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
-import { SystemModelContext } from '../SystemModelContext';
+import { AdvancedFieldsEditor, SystemModelContext } from '../AdvancedFieldsEditor';
 import type { Element } from '../../geometry/types';
 import { DirectAdvancedFields } from '../DirectAdvancedFields';
 import { readRecord } from '../../lib/jsonTypes';
