@@ -681,6 +681,7 @@
 .geometry-canvas .btn-yellow:hover:not(:disabled),
 .geometry-canvas .save-button:hover:not(:disabled),
 .geometry-canvas .add-button:hover:not(:disabled),
+.geometry-canvas .draw-button.overlay-primary-button:hover:not(:disabled),
 .geometry-canvas .overlay-primary-button:hover:not(:disabled) {
   background: var(--canvas-control-primary-bg-hover) !important;
   border-color: var(--canvas-control-primary-bg-hover) !important;

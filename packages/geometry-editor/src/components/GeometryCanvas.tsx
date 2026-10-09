@@ -336,7 +336,7 @@ const DrawToolbarAutoTbSuggest = React.memo(function DrawToolbarAutoTbSuggest({
   return (
     <button
       type="button"
-      className="draw-button auto-tb-suggest editor-action-btn--primary"
+      className="draw-button auto-tb-suggest overlay-primary-button"
       onPointerEnter={onPrefetch}
       onFocus={onPrefetch}
       onMouseDown={onPrefetch}
