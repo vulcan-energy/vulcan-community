@@ -3,7 +3,8 @@
 
 import type Konva from 'konva';
 import type { DrawMode } from '../hooks/useDrawingMode';
-import type { ElementType } from '../geometry/types';
+import type { Element, ElementType } from '../geometry/types';
+import { LINE_WALL_SNAP_TYPES } from './snapUtils';
 
 /** Horizontal padding inside the blue draw-mode tooltip pill (matches GeometryCanvas). */
 export const DRAW_MODE_TOOLTIP_PILL_PADDING = 6;
@@ -46,6 +47,46 @@ export function getDrawModeTooltipPillWidth(text: string): number {
   const width = inner + DRAW_MODE_TOOLTIP_PILL_PADDING * 2;
   pillWidthCache.set(text, width);
   return width;
+}
+
+export const UNSNAPPED_VERTEX_CHIP_TEXT = 'Unsnapped vertex';
+export const UNSNAPPED_VERTEX_CHIP_FONT_SIZE = 11;
+export const UNSNAPPED_VERTEX_CHIP_HEIGHT = 20;
+export const UNSNAPPED_VERTEX_CHIP_PADDING_X = 8;
+const UNSNAPPED_VERTEX_CHIP_CHAR_WIDTH = 6.2;
+const UNSNAPPED_VERTEX_CHIP_OFFSET_Y = 10;
+
+export const POLYGON_VERTEX_GUIDANCE_TYPES = new Set<string>([
+  ...LINE_WALL_SNAP_TYPES,
+  'BuildingElementGround',
+]);
+
+export function shouldShowUnsnappedVertexGuidance(element: Element, shape: string): boolean {
+  if (shape === 'line' && element.coordinates?.length === 2) {
+    if (element.type === 'BuildingElementOpaque' && (element as { is_external_door?: unknown }).is_external_door) return false;
+    return LINE_WALL_SNAP_TYPES.has(element.type);
+  }
+
+  if (shape === 'polygon' && !!element.coordinates && element.coordinates.length >= 3) {
+    return POLYGON_VERTEX_GUIDANCE_TYPES.has(element.type);
+  }
+
+  return false;
+}
+
+/** Canvas rect of the warning chip drawn above a vertex handle (shared by renderer and label layout). */
+export function getUnsnappedVertexChipRect(
+  position: { x: number; y: number },
+  handleRadius: number,
+  text = UNSNAPPED_VERTEX_CHIP_TEXT,
+): { x: number; y: number; width: number; height: number } {
+  const width = (text.length * UNSNAPPED_VERTEX_CHIP_CHAR_WIDTH) + (UNSNAPPED_VERTEX_CHIP_PADDING_X * 2);
+  return {
+    x: position.x - (width / 2),
+    y: position.y - handleRadius - UNSNAPPED_VERTEX_CHIP_HEIGHT - UNSNAPPED_VERTEX_CHIP_OFFSET_Y,
+    width,
+    height: UNSNAPPED_VERTEX_CHIP_HEIGHT,
+  };
 }
 
 // Helper: Check if cursor is near first point (for completion detection)

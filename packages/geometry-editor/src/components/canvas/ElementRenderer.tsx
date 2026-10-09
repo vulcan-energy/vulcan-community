@@ -85,11 +85,19 @@ import {
   findClosestSnapCorner as utilFindClosestSnapCorner,
   getNearbySnapWallSegments as utilGetNearbySnapWallSegments,
   isLineWallElementForSnap as utilIsLineWallElementForSnap,
-  LINE_WALL_SNAP_TYPES,
   type GeometrySnapCache,
   type ClosestSnapCorner,
 } from '../../lib/snapUtils';
 import { tryAxisAlignedRightAngleSnapForVertex } from '../../lib/vertexEditSnap';
+import {
+  getUnsnappedVertexChipRect,
+  POLYGON_VERTEX_GUIDANCE_TYPES,
+  shouldShowUnsnappedVertexGuidance,
+  UNSNAPPED_VERTEX_CHIP_FONT_SIZE,
+  UNSNAPPED_VERTEX_CHIP_HEIGHT,
+  UNSNAPPED_VERTEX_CHIP_PADDING_X,
+  UNSNAPPED_VERTEX_CHIP_TEXT,
+} from '../../lib/drawModeTooltipPill';
 import type { SnapEvent } from '../../lib/snapEvent';
 import type { SnapFeedbackSignal } from './snapFeedbackSignal';
 import { geometryPerf } from '../../lib/geometryPerf';
@@ -536,31 +544,7 @@ function getWindowShadingObjectScreenGeometry(
   return { parent, midpoint, center, start, end, tangent, openingOutward, width, distance };
 }
 
-const UNSNAPPED_VERTEX_CHIP_TEXT = 'Unsnapped vertex';
 const DISCONNECTED_DUCT_CHIP_TEXT = 'Disconnected';
-const UNSNAPPED_VERTEX_CHIP_FONT_SIZE = 11;
-const UNSNAPPED_VERTEX_CHIP_HEIGHT = 20;
-const UNSNAPPED_VERTEX_CHIP_PADDING_X = 8;
-const UNSNAPPED_VERTEX_CHIP_CHAR_WIDTH = 6.2;
-const UNSNAPPED_VERTEX_CHIP_OFFSET_Y = 10;
-
-const POLYGON_VERTEX_GUIDANCE_TYPES = new Set<string>([
-  ...LINE_WALL_SNAP_TYPES,
-  'BuildingElementGround',
-]);
-
-function shouldShowUnsnappedVertexGuidance(element: Element, shape: string): boolean {
-  if (shape === 'line' && element.coordinates?.length === 2) {
-    if (element.type === 'BuildingElementOpaque' && (element as any).is_external_door) return false;
-    return LINE_WALL_SNAP_TYPES.has(element.type);
-  }
-
-  if (shape === 'polygon' && !!element.coordinates && element.coordinates.length >= 3) {
-    return POLYGON_VERTEX_GUIDANCE_TYPES.has(element.type);
-  }
-
-  return false;
-}
 
 function renderUnsnappedVertexChip(
   position: { x: number; y: number },
@@ -569,9 +553,7 @@ function renderUnsnappedVertexChip(
   palette: CanvasInteractionPalette,
   text = UNSNAPPED_VERTEX_CHIP_TEXT,
 ): React.ReactNode {
-  const width = (text.length * UNSNAPPED_VERTEX_CHIP_CHAR_WIDTH) + (UNSNAPPED_VERTEX_CHIP_PADDING_X * 2);
-  const x = position.x - (width / 2);
-  const y = position.y - handleRadius - UNSNAPPED_VERTEX_CHIP_HEIGHT - UNSNAPPED_VERTEX_CHIP_OFFSET_Y;
+  const { x, y, width } = getUnsnappedVertexChipRect(position, handleRadius, text);
 
   return (
     <Group key={key} listening={false}>
