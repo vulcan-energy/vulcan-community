@@ -1214,6 +1214,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const [isCanvasPanning, setIsCanvasPanning] = useState(false);
   const orthogonalModifierHeldRef = useRef(false);
   const multiDrawModifierHeldRef = useRef(false);
+  // Set when a pointer press happens with Alt held (Alt-drag, Alt-click multi-draw). A ref, so
+  // the key effect re-registering mid-hold (drawPoints changes on each Alt-click) keeps it.
+  const altUsedByCanvasRef = useRef(false);
   /** F flips the elbow of a Shift L-route preview; reset per segment. */
   const elbowFlippedRef = useRef(false);
   const panModifierHeldRef = useRef(false);
@@ -1507,6 +1510,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         orthogonalModifierHeldRef.current = true;
       } else if (event.key === 'Alt') {
         multiDrawModifierHeldRef.current = true;
+        // Auto-repeat keydowns while Alt is held must not clear an Alt-drag's mark.
+        if (!event.repeat) altUsedByCanvasRef.current = false;
         setMultiDrawModifierHeld(true);
       } else if (event.code === 'Space' && drawMode !== 'none') {
         panModifierHeldRef.current = true;
@@ -1519,6 +1524,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       } else if (event.key === 'Alt') {
         multiDrawModifierHeldRef.current = false;
         setMultiDrawModifierHeld(false);
+        // Alt-drag / Alt-click used it: stop Firefox (Windows) toggling its menu bar on release.
+        if (altUsedByCanvasRef.current) event.preventDefault();
+        altUsedByCanvasRef.current = false;
       } else if (event.code === 'Space') {
         panModifierHeldRef.current = false;
         setPanModifierHeld(false);
@@ -1527,16 +1535,22 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     const clearHeldModifiers = () => {
       orthogonalModifierHeldRef.current = false;
       multiDrawModifierHeldRef.current = false;
+      altUsedByCanvasRef.current = false;
       panModifierHeldRef.current = false;
       setMultiDrawModifierHeld(false);
       setPanModifierHeld(false);
     };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.altKey) altUsedByCanvasRef.current = true;
+    };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('blur', clearHeldModifiers);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('blur', clearHeldModifiers);
     };
   }, [canvasCenter, drawElementType, drawMode, drawPoints, drawingPreviewSignal, panOffset, scale]);
