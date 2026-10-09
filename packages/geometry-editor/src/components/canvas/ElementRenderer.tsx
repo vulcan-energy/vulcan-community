@@ -91,7 +91,6 @@ import {
 import { tryAxisAlignedRightAngleSnapForVertex } from '../../lib/vertexEditSnap';
 import {
   getUnsnappedVertexChipRect,
-  POLYGON_VERTEX_GUIDANCE_TYPES,
   shouldShowUnsnappedVertexGuidance,
   UNSNAPPED_VERTEX_CHIP_FONT_SIZE,
   UNSNAPPED_VERTEX_CHIP_HEIGHT,
