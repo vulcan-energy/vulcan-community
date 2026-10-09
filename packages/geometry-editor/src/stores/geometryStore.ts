@@ -4006,7 +4006,9 @@ const createGeometryState = (
         if (len <= 0) continue;
 
         // Check which vertices are snapped to other elements
-        const snappedVertices = getWallSupportedSnappedVertices(wall, state.elementsById);
+        // Exact corners decide first; only a wall with no corner partner keeps its T-ends.
+        const exactVertices = getExactSnappedVertices(wall, state.elementsById);
+        const snappedVertices = exactVertices.size ? exactVertices : getWallSupportedSnappedVertices(wall, state.elementsById);
         const p1Snapped = snappedVertices.has(0);
         const p2Snapped = snappedVertices.has(1);
 

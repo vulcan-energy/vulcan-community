@@ -742,6 +742,9 @@ describe('getWallSupportedSnappedVertices', () => {
       glided: lineWall('glided', 'BuildingElementAdjacentUnconditionedSpace_Simple', [0 + 3 * t, 5 + 4 * t], [-2, 9]),
       onWindow: lineWall('onWindow', 'BuildingElementAdjacentConditionedSpace', [20.5, 0], [20.5, 3]),
       window: { id: 'window', type: 'BuildingElementTransparent', coordinates: [{ x: 20, y: 0, z: 0 }, { x: 21, y: 0, z: 0 }] } as unknown as Element,
+      door: { ...lineWall('door', 'BuildingElementOpaque', [30, 0], [31, 0]), is_external_door: true } as unknown as Element,
+      onDoor: lineWall('onDoor', 'BuildingElementAdjacentConditionedSpace', [30.5, 0], [30.5, 3]),
+      noise: lineWall('noise', 'BuildingElementAdjacentConditionedSpace', [3 + 0.6e-9, 9 + 0.8e-9], [5, 12]),
     };
     const supported = (id: string) => [...getWallSupportedSnappedVertices(byId[id]!, byId)];
     expect(getExactSnappedVertices(byId.stem!, byId)).toEqual(new Set());
@@ -750,6 +753,8 @@ describe('getWallSupportedSnappedVertices', () => {
     expect(supported('upper')).toEqual([]); // the host is on another storey
     expect(supported('glided')).toEqual([0]);
     expect(supported('onWindow')).toEqual([]); // a window is never a wall host
+    expect(supported('onDoor')).toEqual([]); // nor is an external door
+    expect(supported('noise')).toEqual([0]); // 1e-9 m past a diagonal's end: float noise, still on it
   });
 });
 
@@ -1073,7 +1078,6 @@ describe('connected drag (Alt)', () => {
         { elementId: 'party', vertexIndex: 0 },
         { elementId: 'corner', vertexIndex: 0 },
       ]);
-      expect(getHoverHintText({ kind: 'body', dragging: false, connected: neighboursOf(byId, 's1').length > 0 })).toBe('Drag to move');
       const moved = planConnectedDrag(byId.host!, neighbours, byId, { x: -1, y: 0.5 });
       const xy = (id: string) => moved[id]!.map(({ x, y }) => [x, y]);
       expect(xy('host')).toEqual([[-1, 0], [-1, 10]]);
@@ -1094,13 +1098,52 @@ describe('connected drag (Alt)', () => {
         .toBe('Drag to move · Alt: move connected');
     });
 
-    it('Alt-dragging a stem slides its T-end along the host, which stays put', () => {
+    it('a lone stem offers move connected; Alt-dragging it slides its T-end along the host, which stays put', () => {
       const byId = tee();
-      expect(neighboursOf(byId, 's1')).toEqual([]);
-      const moved = planConnectedDrag(byId.s1!, [], byId, { x: 0.3, y: 1.2 });
+      const neighbours = neighboursOf(byId, 's1');
+      expect(neighbours).toEqual([{ elementId: 's1', vertexIndex: 0 }]);
+      expect(getHoverHintText({ kind: 'body', dragging: false, connected: neighbours.length > 0 })).toBe('Drag to move · Alt: move connected');
+      const moved = planConnectedDrag(byId.s1!, neighbours, byId, { x: 0.3, y: 1.2 });
+      expect(Object.keys(moved)).toEqual(['s1']);
       expect(moved.s1!.map(({ x, y }) => [x, y])).toEqual([[0, 4.2], [4, 4.2]]);
-      const after = { ...byId, s1: { ...byId.s1!, coordinates: moved.s1! } };
-      expect([...getWallSupportedSnappedVertices(after.s1!, after)]).toEqual([0]);
+    });
+
+    it('a skewed stem dragged 1 m keeps its T-end exactly on the host and its angle', () => {
+      const rad = (5 * Math.PI) / 180;
+      const byId = {
+        host: lineWall('host', 'BuildingElementOpaque', [0, 0], [0, 10]),
+        stem: lineWall('stem', 'BuildingElementAdjacentConditionedSpace', [0, 3], [4 * Math.cos(rad), 3 + 4 * Math.sin(rad)]),
+      } as unknown as Record<string, Element>;
+      const neighbours = neighboursOf(byId, 'stem');
+      expect(neighbours).toEqual([{ elementId: 'stem', vertexIndex: 0 }]);
+      // 1 m along the stem's normal.
+      const [p0, p1] = planConnectedDrag(byId.stem!, neighbours, byId, { x: -Math.sin(rad), y: Math.cos(rad) }).stem!;
+      expect(Math.abs(p0!.x)).toBeLessThan(1e-9);
+      expect(Math.atan2(p1!.y - p0!.y, p1!.x - p0!.x)).toBeCloseTo(rad, 12);
+      expect(p1!.x).toBeCloseTo(4 * Math.cos(rad) - Math.sin(rad), 12); // the far end only translates
+    });
+
+    it('squaring a stem keeps its exact corner and moves its T-end', () => {
+      vi.useFakeTimers();
+      try {
+        const store = createGeometryStore({ defaultDefaultsPath: null });
+        const wall = (name: string, a: [number, number], b: [number, number]) => ({
+          type: 'BuildingElementOpaque', name, height: 2.4, pitch: 90, base_height: 0, parent_element: null,
+          coordinates: [{ x: a[0], y: a[1], z: 0 }, { x: b[0], y: b[1], z: 0 }],
+        });
+        const [, stemId] = store.getState().addElements([
+          wall('Host', [0, 0], [0, 10]),
+          wall('Stem', [0, 3], [4, 3.1]), // T on Host at p1, corner with Return at p2
+          wall('Return', [4, 3.1], [4, 8]),
+        ] as never);
+        vi.runAllTimers();
+        store.getState().rightAlignSelectedElements([stemId!], 5);
+        const [p1, p2] = store.getState().elementsById[stemId!]!.coordinates;
+        expect([p2!.x, p2!.y]).toEqual([4, 3.1]);
+        expect(p1!.y).toBeCloseTo(3.1, 12);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });
