@@ -3,7 +3,7 @@
 
 import { memo, useMemo } from 'react';
 import { Circle, Layer, Line, Rect } from 'react-konva';
-import type { KonvaEventObject } from 'konva/lib/Node';
+import type Konva from 'konva';
 import { worldToCanvas } from '../../lib/shapeUtils';
 import { readRootCssVar } from '../../lib/cssVars';
 import type { AutoThermalBridgePreview, ThermalBridgePreviewAnchor } from '../../hooks/useAutoThermalBridgePreview';
@@ -20,7 +20,7 @@ function distanceToPreviewSegment(point: Point, a: Point, b: Point): number {
   return Math.hypot(point.x - a.x - t * dx, point.y - a.y - t * dy);
 }
 
-function previewPointer(event: KonvaEventObject<MouseEvent>): ThermalBridgePreviewAnchor | null {
+function previewPointer(event: Konva.KonvaEventObject<MouseEvent>): ThermalBridgePreviewAnchor | null {
   return event.target.getStage()?.getPointerPosition() ?? null;
 }
 
