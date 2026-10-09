@@ -1622,6 +1622,30 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/components/canvas/__tests__/ThermalBridgePreview2D.test.tsx",
+      "source_path": "packages/geometry-editor/src/components/canvas/__tests__/ThermalBridgePreview2D.test.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/__tests__/ThermalBridgePreview3D.test.ts",
+      "source_path": "packages/geometry-editor/src/components/canvas/__tests__/ThermalBridgePreview3D.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/__tests__/ThermalBridgePreviewControls.test.tsx",
+      "source_path": "packages/geometry-editor/src/components/canvas/__tests__/ThermalBridgePreviewControls.test.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/canvas/__tests__/vertexDragSession.test.ts",
       "source_path": "packages/geometry-editor/src/components/canvas/__tests__/vertexDragSession.test.ts",
       "license": "AGPL-3.0-only",
@@ -1856,6 +1880,54 @@
     {
       "path": "packages/geometry-editor/src/components/canvas/stagePanGesture.ts",
       "source_path": "packages/geometry-editor/src/components/canvas/stagePanGesture.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/ThermalBridgePreview.css",
+      "source_path": "packages/geometry-editor/src/components/canvas/ThermalBridgePreview.css",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/ThermalBridgePreview2D.tsx",
+      "source_path": "packages/geometry-editor/src/components/canvas/ThermalBridgePreview2D.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/ThermalBridgePreview3D.tsx",
+      "source_path": "packages/geometry-editor/src/components/canvas/ThermalBridgePreview3D.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/thermalBridgePreview3dGeometry.ts",
+      "source_path": "packages/geometry-editor/src/components/canvas/thermalBridgePreview3dGeometry.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/ThermalBridgePreviewControls.tsx",
+      "source_path": "packages/geometry-editor/src/components/canvas/ThermalBridgePreviewControls.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/thermalBridgePreviewRenderRows.ts",
+      "source_path": "packages/geometry-editor/src/components/canvas/thermalBridgePreviewRenderRows.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -2919,6 +2991,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/geometry/thermalBridge/autoThermalBridgeCandidates.test.ts",
+      "source_path": "packages/geometry-editor/src/geometry/thermalBridge/autoThermalBridgeCandidates.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/geometry/thermalBridge/autoThermalBridgeCandidates.ts",
       "source_path": "packages/geometry-editor/src/geometry/thermalBridge/autoThermalBridgeCandidates.ts",
       "license": "AGPL-3.0-only",
@@ -3495,6 +3575,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/hooks/__tests__/useAutoThermalBridgePreview.test.tsx",
+      "source_path": "packages/geometry-editor/src/hooks/__tests__/useAutoThermalBridgePreview.test.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/hooks/__tests__/useDocumentSaveShortcut.test.tsx",
       "source_path": "packages/geometry-editor/src/hooks/__tests__/useDocumentSaveShortcut.test.tsx",
       "license": "AGPL-3.0-only",
@@ -3525,6 +3613,22 @@
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
       "classification": "public_community_test_suite"
+    },
+    {
+      "path": "packages/geometry-editor/src/hooks/__tests__/useThermalBridgePreviewMode.test.tsx",
+      "source_path": "packages/geometry-editor/src/hooks/__tests__/useThermalBridgePreviewMode.test.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/hooks/useAutoThermalBridgePreview.ts",
+      "source_path": "packages/geometry-editor/src/hooks/useAutoThermalBridgePreview.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
     },
     {
       "path": "packages/geometry-editor/src/hooks/useDocumentSaveShortcut.ts",
@@ -3593,6 +3697,14 @@
     {
       "path": "packages/geometry-editor/src/hooks/usePanelLayout.ts",
       "source_path": "packages/geometry-editor/src/hooks/usePanelLayout.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/hooks/useThermalBridgePreviewMode.ts",
+      "source_path": "packages/geometry-editor/src/hooks/useThermalBridgePreviewMode.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

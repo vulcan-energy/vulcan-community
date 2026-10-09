@@ -82,7 +82,12 @@ export function incidentThermalBridgePreviewSurfaces(
   for (const surface of incident) {
     const length = Math.hypot(...surface.normal);
     const normal = surface.normal.map((component) => component / length);
-    const firstSignificant = normal.find((component) => Math.abs(component) > 1e-6) ?? 1;
+    let firstSignificant = 1;
+    for (const component of normal) {
+      if (Math.abs(component) <= 1e-6) continue;
+      firstSignificant = component;
+      break;
+    }
     const sign = firstSignificant < 0 ? -1 : 1;
     const canonicalNormal = normal.map((component) => component * sign);
     const planeOffset = surface.point.reduce(
