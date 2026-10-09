@@ -829,7 +829,10 @@ export const HoverHintOverlay = memo<{
     const onDragEnd = () => {
       dragging = false;
       if (stage.getIntersection(pointer()) === node) { sync(kindOf()); return; }
-      leave();
+      // Defer: unbinding the node's listeners mid-dragend dispatch makes Konva skip the
+      // handle's own dragend, so the drag never commits.
+      const ended = node;
+      setTimeout(() => { if (node === ended && !dragging) leave(); }, 0);
     };
     // Konva fires no mouseout when the hovered handle is unmounted, so a stage
     // mousemove (registered only while hovered) drops a detached node.
