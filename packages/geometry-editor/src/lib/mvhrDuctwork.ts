@@ -731,18 +731,18 @@ function splitAtFootprint(a: Point3, b: Point3, rings: PlanPoint[][]): Array<{ a
  * as `planAutoDucts` routes. Runs start and end exactly on the two plant points. Each leg is split
  * where it crosses the dwelling footprint, so every pipe draft has one `location`; the HEM pipe
  * fields (diameters, insulation, contents) come from the defaults' primary pipework at merge, as
- * for drawn pipes. A pair already joined by a run of primary pipes is skipped. Without a footprint
- * the location can't be derived, so the plan is empty. Output order is stable (pairs by id).
+ * for drawn pipes. Primary rows have no parent and the model transform attaches every one to every
+ * StorageTank, so once any primary pipe exists the user owns that network and the plan is empty
+ * (a loose one is fixed with Snap). Without a footprint the location can't be derived, so the plan
+ * is empty too. Output order is stable (pairs by id).
  * `effectiveFloors` carry effective storey heights (`withEffectiveStoreyHeights`).
  */
 export function planPrimaryPipework(elements: Element[], effectiveFloors: Floor[]): ElementDraft[] {
   const rings = dwellingFootprintRings(elements);
-  if (rings.length === 0) return [];
-  const runs = ductEndpointRuns(primaryPipes(elements));
+  if (rings.length === 0 || primaryPipes(elements).length > 0) return [];
   const floorIdOf = (el: Element) => effectiveFloors.find((floor) => floor.zIndex === getElementCanvasFloorZValue(el, effectiveFloors))?.id;
   const drafts: ElementDraft[] = [];
   for (const { heatSource, cylinder, heatSourcePoint: start, cylinderPoint: end } of primaryPipeworkPairs(elements, effectiveFloors)) {
-    if (runs.some((run) => ductRunTouchesPoint(run, start) && ductRunTouchesPoint(run, end))) continue;
     const [startFloorId, endFloorId] = [floorIdOf(heatSource), floorIdOf(cylinder)];
     if (!startFloorId || !endFloorId) continue;
     const points = orthogonalRun(start, end);

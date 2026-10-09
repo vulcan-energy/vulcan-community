@@ -420,10 +420,8 @@ export const detectMissingElements = (
     }
 
     // A heat source and cylinder with no primary pipework at all: the CTA routes it
-    // (planPrimaryPipework). A combi has no cylinder, so no row.
-    const hasPrimaryPipework = elements.some((el) =>
-      !el.isPlaceholder && el.type === 'WaterPipework' && (el.pipework_type ?? 'primary') === 'primary');
-    const pipeDrafts = hasPrimaryPipework ? [] : planPrimaryPipework(elements, effectiveFloors);
+    // (planPrimaryPipework, which is empty once any primary pipe exists). A combi has no cylinder, so no row.
+    const pipeDrafts = planPrimaryPipework(elements, effectiveFloors);
     if (pipeDrafts.length > 0) {
       const cylinder = primaryPipeworkPairs(elements, effectiveFloors)[0]!.cylinder;
       dwellingWide.push({

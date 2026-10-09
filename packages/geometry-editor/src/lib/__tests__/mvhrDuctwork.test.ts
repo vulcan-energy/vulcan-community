@@ -377,11 +377,12 @@ describe('planPrimaryPipework', () => {
     expect(primaryPipeRunGap(pipes(drafts)[0]!, [ground, heatPump, cylinder(1), ...pipes(drafts)], floors)).toBeNull();
   });
 
-  it('plans nothing for a combi, a served pair or a model without a footprint, and is deterministic', () => {
+  it('plans nothing for a combi, existing primary pipework (even disconnected) or a model without a footprint, and is deterministic', () => {
     expect(planPrimaryPipework([ground, heatPump, cylinder(0, 'CombiBoiler')], floors)).toEqual([]);
     expect(planPrimaryPipework([heatPump, cylinder()], floors)).toEqual([]);
     const drafts = planPrimaryPipework([ground, heatPump, cylinder()], floors);
     expect(planPrimaryPipework([ground, heatPump, cylinder(), ...pipes(drafts)], floors)).toEqual([]);
+    expect(planPrimaryPipework([ground, heatPump, cylinder(), ...pipes(drafts).slice(1, 2)], floors)).toEqual([]);
     expect(planPrimaryPipework([cylinder(), heatPump, ground], floors)).toEqual(drafts);
   });
 
