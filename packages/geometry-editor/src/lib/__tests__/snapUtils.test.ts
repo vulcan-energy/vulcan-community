@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
+import type { Element } from '../../geometry/types';
 import {
   applyAngleSnapIfClose,
   buildGeometrySnapCache,
@@ -12,6 +13,8 @@ import {
   resolveDrawSnapPoint,
   getExactSnappedVertices,
   getWallSupportedSnappedVertices,
+  planServiceLineEndpointWelds,
+  pointsConnected,
   snapCornerToOtherCornersFromCache,
 } from '../snapUtils';
 
@@ -627,5 +630,38 @@ describe('findClosestSnapCorner', () => {
       [],
     );
     expect(findClosestSnapCorner({ x: 0, y: 0 }, boundaryCache, 1)?.elementId).toBe('target');
+  });
+});
+
+const wall = { type: 'BuildingElementOpaque' };
+const duct = { type: 'MechanicalVentilationDuctwork' };
+
+describe('pointsConnected', () => {
+  it('uses the storey for building-element pairs and strict z for everything else', () => {
+    expect(pointsConnected(wall, { x: 1, y: 2, z: 0 }, wall, { x: 1, y: 2, z: 0.4 })).toBe(true);
+    expect(pointsConnected(wall, { x: 1, y: 2, z: 0 }, wall, { x: 1, y: 2, z: 1 })).toBe(false);
+    expect(pointsConnected(duct, { x: 1, y: 2, z: 0 }, duct, { x: 1, y: 2, z: 0.4 })).toBe(false);
+    expect(pointsConnected(duct, { x: 1, y: 2, z: 0 }, wall, { x: 1, y: 2, z: 0.4 })).toBe(false);
+    expect(pointsConnected(duct, { x: 1, y: 2, z: 0 }, duct, { x: 1, y: 2.001, z: 0 })).toBe(false);
+  });
+});
+
+describe('planServiceLineEndpointWelds', () => {
+  it('welds duct ends onto the unit point and onto each other, and pipe ends onto plant', () => {
+    const elementsById = {
+      unit: { id: 'unit', name: 'MVHR', type: 'MechanicalVentilation', coordinates: [{ x: 0, y: 0, z: 0 }] },
+      a: { id: 'a', name: 'A', type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MVHR',
+        coordinates: [{ x: 0.01, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }] },
+      b: { id: 'b', name: 'B', type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MVHR',
+        coordinates: [{ x: 2.01, y: 0.01, z: 0 }, { x: 2, y: 3, z: 0 }] },
+      boiler: { id: 'boiler', name: 'Boiler', type: 'System', coordinates: [{ x: 5, y: 5, z: 0 }] },
+      pipe: { id: 'pipe', name: 'P', type: 'WaterPipework', coordinates: [{ x: 5.02, y: 5, z: 0 }, { x: 8, y: 5, z: 0 }] },
+    } as unknown as Record<string, Element>;
+
+    expect(planServiceLineEndpointWelds(elementsById, ['a', 'b', 'pipe'], 0.05)).toEqual([
+      { elementId: 'a', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 0 } },
+      { elementId: 'b', vertexIndex: 0, newPosition: { x: 2, y: 0, z: 0 } },
+      { elementId: 'pipe', vertexIndex: 0, newPosition: { x: 5, y: 5, z: 0 } },
+    ]);
   });
 });

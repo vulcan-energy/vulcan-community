@@ -4680,7 +4680,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return geometryPerf.measure('GeometryCanvas.snapIndicators', () => {
       const indicators: React.ReactElement[] = [];
       // Extract store access outside loop to avoid calling getState() for every element
-      const angleTol = (geometryStore.getState() as any).PROJECT_DEFAULTS?.angle_deg || 5;
+      const angleTol = getProjectDefaults(geometryStore).angleTol;
       // `readRootCssVar` runs `getComputedStyle(document.documentElement)`, so resolve the
       // indicator paint once per pass rather than once per snapped vertex.
       const snapFill = readRootCssVar('--semantic-snap', '#1E90FF');

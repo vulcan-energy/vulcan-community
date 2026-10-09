@@ -118,4 +118,16 @@ describe('mvhrDuctwork helpers', () => {
       expect.objectContaining({ kind: 'cross-role-endpoint-overlap' }),
     ]));
   });
+
+  it('treats a near-miss duct end as disconnected', () => {
+    const warnings = collectMvhrDuctTopologyWarnings(
+      [
+        { name: 'Supply A', duct_type: 'supply', coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }] },
+        { name: 'Supply B', duct_type: 'supply', coordinates: [{ x: 1.01, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }] },
+      ],
+      { unitPoint: { x: 0, y: 0.01, z: 0 } },
+    );
+
+    expect(warnings.map((warning) => warning.kind)).toEqual(['disconnected-role', 'role-not-connected-to-unit']);
+  });
 });

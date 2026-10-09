@@ -25,7 +25,7 @@ import {
   deriveSlopedElementDimensions,
   slopedDimensionDiffers,
 } from '../lib/slopedElementDimensions';
-import { getExactSnappedVertices } from '../lib/snapUtils';
+import { getExactSnappedVertices, planServiceLineEndpointWelds } from '../lib/snapUtils';
 import { isVulcanUiPartyFloorElement } from '../lib/assemblyMaterialFabric';
 import { coerceElementToStrictestNumericTyping } from '../lib/schemaCoercion';
 import { cloneJsonValue, jsonValuesEqual } from '../lib/jsonTypes';
@@ -3949,6 +3949,8 @@ const createGeometryState = (
 
       return { elementsById: updatedElementsById };
     });
+    const serviceLineWelds = planServiceLineEndpointWelds(get().elementsById, elementIds, snapTol);
+    if (serviceLineWelds.length > 0) get().commitVertexPositionUpdates(serviceLineWelds);
   },
 
   rightAlignSelectedElements: (elementIds, angleTolDeg) => {

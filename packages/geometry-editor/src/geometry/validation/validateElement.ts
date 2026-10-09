@@ -75,7 +75,7 @@ import { computeGroundExposedPerimeterDetails } from '../../lib/groundExposedPer
 import { isExternalLineWall } from '../thermalBridge/proposeExternalCorners';
 import type { LinearThermalBridgeIssue } from '../thermalBridge/findLinearThermalBridgeIssues';
 import { findLinearThermalBridgeIssues } from '../thermalBridge/findLinearThermalBridgeIssues';
-import { getWallSupportedSnappedVertices } from '../../lib/snapUtils';
+import { getWallSupportedSnappedVertices, pointsConnected } from '../../lib/snapUtils';
 import {
   collectGlobalSettingsWarnings,
   resolveEffectiveVentilationZoneBaseHeight,
@@ -2134,7 +2134,7 @@ export const validateElementCore = (
           const other = elementsById[otherId];
           if (!other.coordinates) continue;
           for (const otherCoord of other.coordinates) {
-            if (coord.x === otherCoord.x && coord.y === otherCoord.y && coord.z === otherCoord.z) {
+            if (pointsConnected(el, coord, other, otherCoord)) {
               count++;
               return;
             }
