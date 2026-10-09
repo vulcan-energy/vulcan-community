@@ -14,7 +14,8 @@ import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/cons
 import { getElementCanvasFloorZValue } from './elementCanvasFloor';
 import { orientation360FromSegmentOutwardModelXY } from './openingSegmentOutward';
 import { planOrthogonalElbow, pointsConnected } from './snapUtils';
-import { pointInPolygon, polygonCentroid2d } from './spaceInference';
+import { isPointInPolygon2D as pointInPolygon } from './pointInPolygon';
+import { polygonCentroid2d } from './spaceInference/remapInferredSpaceLabels';
 import { resolveRoomTypeRule } from './spaceLabelDerivation';
 import { calculateDerivedBaseHeight, withEffectiveStoreyHeights } from './zoneDerivation';
 
@@ -458,7 +459,8 @@ export function planAutoDucts(
   const roles = AUTO_DUCT_ROLES[unit.vent_type];
   const unitPoint = getFirstPoint3(unit);
   const unitStorey = getElementCanvasFloorZValue(unit, floors);
-  const unitFloorId = floors.find((floor) => floor.zIndex === unitStorey)?.id;
+  const floorIdByStorey = new Map(floors.map((floor) => [floor.zIndex, floor.id]));
+  const unitFloorId = unitStorey === undefined ? undefined : floorIdByStorey.get(unitStorey);
   if (!roles || !unitPoint || unitStorey === undefined || !unitFloorId) return [];
 
   const unitDucts = elements.filter(
@@ -497,7 +499,7 @@ export function planAutoDucts(
         (ductEndpoints(duct) ?? []).some((end) => pointInPolygon(end, ring)));
       if (served) continue;
       const target = pointInsideRoom(ring);
-      const roomFloorId = floors.find((floor) => floor.zIndex === label.storey)?.id;
+      const roomFloorId = floorIdByStorey.get(label.storey);
       if (!target || !roomFloorId) continue;
       const run = orthogonalRun(unitPoint, target, unitPoint.z);
       const floorIds = run.slice(1).map(() => unitFloorId);
@@ -514,20 +516,22 @@ export function planAutoDucts(
       el.type === 'MechanicalVentilationTerminal' && !el.isPlaceholder && el.parent_element?.trim() === unit.name,
   );
   const takenHosts = new Set(unitTerminals.map((terminal) => terminal.host_element));
-  const hosts = elements
-    .filter((el) =>
-      !el.isPlaceholder && isMvhrTerminalHost(el) && el.coordinates?.length >= 2 &&
-      getElementCanvasFloorZValue(el, floors) === unitStorey)
-    .map((host) => ({ host, point: projectOntoSegment(unitPoint, host.coordinates[0]!, host.coordinates[1]!) }))
-    .map((entry) => ({ ...entry, distance: Math.hypot(entry.point.x - unitPoint.x, entry.point.y - unitPoint.y) }))
+  const freeHosts = elements
+    .flatMap((host) => {
+      if (
+        host.isPlaceholder || !isMvhrTerminalHost(host) || !(host.coordinates?.length >= 2) ||
+        takenHosts.has(host.name) || getElementCanvasFloorZValue(host, floors) !== unitStorey
+      ) return [];
+      const point = projectOntoSegment(unitPoint, host.coordinates[0]!, host.coordinates[1]!);
+      return [{ host, point, distance: Math.hypot(point.x - unitPoint.x, point.y - unitPoint.y) }];
+    })
     .sort((a, b) => a.distance - b.distance || (a.host.name < b.host.name ? -1 : a.host.name > b.host.name ? 1 : 0));
   for (const role of roles.terminals) {
     const done =
       unitTerminals.some((terminal) => terminal.terminal_type === role) ||
       unitDucts.some((duct) => duct.duct_type === role);
-    const nearest = done ? undefined : hosts.find((entry) => !takenHosts.has(entry.host.name));
+    const nearest = done ? undefined : freeHosts.shift();
     if (!nearest) continue;
-    takenHosts.add(nearest.host.name);
     const run = orthogonalRun(unitPoint, nearest.point, unitPoint.z);
     addRun(role, run, run.slice(1).map(() => unitFloorId));
     drafts.push({
