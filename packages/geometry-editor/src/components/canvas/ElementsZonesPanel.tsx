@@ -15,7 +15,7 @@ import { selectionForElement } from '../../lib/drawnElementSelection';
 import { fhsFloorLabelForCanvasFloor } from '../../lib/storeySemantics';
 import { worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
 import { ValidationIndicator } from '../ValidationIndicator';
-import { useDrawingMode } from '../../hooks/useDrawingMode';
+import type { PendingHostElementCreation } from '../../hooks/useDrawingMode';
 import {
   ELEMENTS_PANEL_MIN_W,
   ELEMENTS_PANEL_MIN_H,
@@ -117,6 +117,8 @@ export interface ElementsZonesPanelProps {
   setPanOffset: (p: { x: number; y: number }) => void;
   createPlaceholderZone: () => string;
   createPlaceholderElement: (zoneId: string, type: ElementType) => string;
+  /** Starts drawing a missing element on the canvas (the canvas owns the draw state). */
+  onDrawMissingElement: (type: ElementType, drawMode: 'line' | 'polygon', pending: PendingHostElementCreation) => void;
   updateElement: (id: string, patch: Partial<Element>, optional?: boolean) => void;
   setCurrentFloorZ: (z: number) => void;
   complianceSettings: { complianceValidationEnabled?: boolean };
@@ -308,6 +310,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   setPanOffset,
   createPlaceholderZone,
   createPlaceholderElement,
+  onDrawMissingElement,
   updateElement,
   setCurrentFloorZ,
   complianceSettings,
@@ -426,17 +429,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
       );
     }
   }, [sourceComparisonPort]);
-
-  const {
-    setDrawMode,
-    setDrawElementType,
-    setDrawPoints,
-    setRoomWalls,
-    setRoomWallElements,
-    setOrthogonalRoomStart,
-    setOrthogonalRoomEnd,
-    pendingHostElementCreationRef,
-  } = useDrawingMode();
 
   const missingCategory = complianceSettings.complianceValidationEnabled ? 'critical' : 'warning';
   const floors = useGeometryStore((s) => s.floors);
@@ -1146,17 +1138,10 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                             <button
                               className="files-dropdown-action-pill"
                               onClick={() => {
-                                pendingHostElementCreationRef.current = {
+                                onDrawMissingElement(missing.elementType as ElementType, missing.drawMode, {
                                   prefill: sourceComparisonPort.prefillMissingItem(missing.id) ?? undefined,
                                   onCreated: (elementId) => handleAssignSource(missing.id, elementId),
-                                };
-                                setDrawElementType(missing.elementType as ElementType);
-                                setDrawPoints([]);
-                                setRoomWalls([]);
-                                setRoomWallElements([]);
-                                setOrthogonalRoomStart(null);
-                                setOrthogonalRoomEnd(null);
-                                setDrawMode(missing.drawMode);
+                                });
                               }}
                               title="Draw this element on the canvas"
                             >

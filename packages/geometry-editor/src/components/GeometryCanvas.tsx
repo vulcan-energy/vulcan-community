@@ -60,7 +60,7 @@ import { selectionForDrawnElement, selectionForElement } from '../lib/drawnEleme
 import { isPointInPolygon2D } from '../lib/pointInPolygon';
 import { compareElementPaintOrder } from '../lib/canvasPaintOrder';
 import { CompassRose } from './CompassRose';
-import { useDrawingMode, type DrawMode } from '../hooks/useDrawingMode';
+import { useDrawingMode, type DrawMode, type PendingHostElementCreation } from '../hooks/useDrawingMode';
 import { roomFloorElementTypeForCanvasFloor, useMarqueeSelection } from '../hooks/useMarqueeSelection';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useAutoDuctPreview, useAutoThermalBridgePreview, type CanvasPreview } from '../hooks/useAutoThermalBridgePreview';
@@ -1688,6 +1688,18 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setActiveServiceLineElementId(null);
     setDrawElementType(type);
   }, [setActiveServiceLineElementId, setDrawElementType]);
+
+  // The elements panel's "Draw" for a missing item: the toolbar's type pick, then its draw mode.
+  const drawMissingElement = useCallback((type: ElementType, mode: DrawMode, pending: PendingHostElementCreation) => {
+    pendingHostElementCreationRef.current = pending;
+    handleDrawElementTypeFromToolbar(type);
+    setDrawPoints([]);
+    setRoomWalls([]);
+    setRoomWallElements([]);
+    setOrthogonalRoomStart(null);
+    setOrthogonalRoomEnd(null);
+    setDrawMode(mode);
+  }, [pendingHostElementCreationRef, handleDrawElementTypeFromToolbar, setDrawPoints, setRoomWalls, setRoomWallElements, setOrthogonalRoomStart, setOrthogonalRoomEnd, setDrawMode]);
 
   const handleStartMvhrDuctDraw = useCallback(({ role, parentName }: { role: MvhrDuctRole; parentName: string }) => {
     resetMvhrDrawDraft();
@@ -8508,6 +8520,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             setPanOffset={setPanOffset}
             createPlaceholderZone={createPlaceholderZone}
             createPlaceholderElement={createPlaceholderElement}
+            onDrawMissingElement={drawMissingElement}
             updateElement={updateElement}
             setCurrentFloorZ={setCurrentFloorZ}
             complianceSettings={complianceSettings}
