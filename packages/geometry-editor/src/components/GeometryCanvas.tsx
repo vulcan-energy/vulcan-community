@@ -60,7 +60,7 @@ import { selectionForDrawnElement, selectionForElement } from '../lib/drawnEleme
 import { isPointInPolygon2D } from '../lib/pointInPolygon';
 import { compareElementPaintOrder } from '../lib/canvasPaintOrder';
 import { CompassRose } from './CompassRose';
-import { useDrawingMode, type DrawMode } from '../hooks/useDrawingMode';
+import { useDrawingMode, type DrawMode, type PendingHostElementCreation } from '../hooks/useDrawingMode';
 import { roomFloorElementTypeForCanvasFloor, useMarqueeSelection } from '../hooks/useMarqueeSelection';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useAutoDuctPreview, useAutoThermalBridgePreview, type CanvasPreview } from '../hooks/useAutoThermalBridgePreview';
@@ -1107,6 +1107,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setDrawMvhrParentName(null);
     setDrawElementTypeState(type);
   }, [setDrawElementTypeState, setDrawMvhrParentName]);
+  const drawMissingElement = useCallback((type: ElementType, mode: DrawMode, pending: PendingHostElementCreation) => {
+    pendingHostElementCreationRef.current = pending;
+    setDrawElementType(type);
+    setDrawPoints([]);
+    setRoomWalls([]);
+    setRoomWallElements([]);
+    setOrthogonalRoomStart(null);
+    setOrthogonalRoomEnd(null);
+    setDrawMode(mode);
+  }, [pendingHostElementCreationRef, setDrawElementType, setDrawPoints, setRoomWalls, setRoomWallElements, setOrthogonalRoomStart, setOrthogonalRoomEnd, setDrawMode]);
   const drawMvhrRolePropsRef = useRef<Record<string, unknown>>({});
   const themeId = useThemeStore((s) => s.themeId);
   const customTheme = useThemeStore((s) => s.customTheme);
@@ -8508,6 +8518,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             setPanOffset={setPanOffset}
             createPlaceholderZone={createPlaceholderZone}
             createPlaceholderElement={createPlaceholderElement}
+            onDrawMissingElement={drawMissingElement}
             updateElement={updateElement}
             setCurrentFloorZ={setCurrentFloorZ}
             complianceSettings={complianceSettings}
