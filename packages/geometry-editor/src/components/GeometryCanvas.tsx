@@ -63,7 +63,7 @@ import { CompassRose } from './CompassRose';
 import { useDrawingMode, type DrawMode } from '../hooks/useDrawingMode';
 import { roomFloorElementTypeForCanvasFloor, useMarqueeSelection } from '../hooks/useMarqueeSelection';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import { useAutoThermalBridgePreview } from '../hooks/useAutoThermalBridgePreview';
+import { useAutoDuctPreview, useAutoThermalBridgePreview, type CanvasPreview } from '../hooks/useAutoThermalBridgePreview';
 import { ThermalBridgePreview2D } from './canvas/ThermalBridgePreview2D';
 import { ThermalBridgePreviewControls, ThermalBridgePreviewStatus } from './canvas/ThermalBridgePreviewControls';
 import { useDocumentSaveShortcut } from '../hooks/useDocumentSaveShortcut';
@@ -3088,16 +3088,25 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     uploadOverlayEvidence,
     onBeforeEnterCalibrateMode: resetDrawing,
   });
-  const thermalBridgePreview = useAutoThermalBridgePreview({
+  const canvasPreviewBlocked = showAutoTbPreview || showShortcuts || zoneDeleteModal.isOpen || elementDeleteModal.isOpen ||
+    overlayPdfImportState.isOpen || !!orthogonalRoomEditing?.isOpen || overlayMoveMode || overlayCalibrateMode;
+  const tbPreview = useAutoThermalBridgePreview({
     enabled: drawElementType === 'ThermalBridgeLinear',
-    blocked: showAutoTbPreview || showShortcuts || zoneDeleteModal.isOpen || elementDeleteModal.isOpen ||
-      overlayPdfImportState.isOpen || !!orthogonalRoomEditing?.isOpen || overlayMoveMode || overlayCalibrateMode,
+    blocked: canvasPreviewBlocked,
     currentFloorZ,
     viewMode,
     isElementHidden: isElementHiddenOnView,
     externalDetailCatalogue,
   });
-  const dismissThermalBridgePreview = thermalBridgePreview.dismiss;
+  const ductPreview = useAutoDuctPreview({
+    enabled: drawElementType === 'MechanicalVentilationDuctwork' && viewMode === '2d',
+    blocked: canvasPreviewBlocked,
+    currentFloorZ,
+    unitName: activeMvhrDrawParentElement?.name ?? null,
+  });
+  // One hold-A preview at a time: the ductwork tool's, else the thermal-bridge tool's (3D shows only the latter).
+  const thermalBridgePreview: CanvasPreview = drawElementType === 'MechanicalVentilationDuctwork' ? ductPreview : tbPreview;
+  const dismissThermalBridgePreview = tbPreview.dismiss;
   const inspectPreviewBridge = useCallback((id: string) => {
     dismissThermalBridgePreview();
     setSelection({ type: 'element', id });
@@ -3108,12 +3117,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     <div className="tb-preview-toolbar-accessory">
       <DrawToolbarAutoTbSuggest show={showDrawToolbarAutoTbSuggest}
         onPrefetch={prefetchAutoThermalBridgePreviewModal} onShow={handleShowAutoTbPreview} />
+      {ductPreview.active && ductPreview.runs.length > 0 && drawElementType === 'MechanicalVentilationDuctwork' && (
+        <button type="button" className="draw-button auto-tb-suggest" onClick={ductPreview.addAll}>Add all</button>
+      )}
       <ThermalBridgePreviewStatus preview={thermalBridgePreview} viewMode={viewMode} inline />
       {viewMode === '3d' && drawElementType === 'ThermalBridgeLinear' && !thermalBridgePreview.active && (
         <span className="draw-button">Hold A for suggestions</span>
       )}
     </div>
-  ), [handleShowAutoTbPreview, showDrawToolbarAutoTbSuggest, thermalBridgePreview, viewMode, drawElementType]);
+  ), [handleShowAutoTbPreview, showDrawToolbarAutoTbSuggest, thermalBridgePreview, ductPreview.active, ductPreview.runs.length, ductPreview.addAll, viewMode, drawElementType]);
 
   const guideOverlayCalibrationSessionRef = useRef<CanvasInteractionSession | null>(null);
   const resetGuideOverlayCalibrationPointerState = useCallback(() => {
@@ -6231,7 +6243,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           vertexSnapMode={vertexSnapMode}
           commitVertexPositionUpdates={commitVertexPositionUpdates}
           selection={selection}
-          previewOpacity={!thermalBridgePreview.active || element.type === 'ThermalBridgeLinear' || element.type === 'ThermalBridgePoint'
+          previewOpacity={!thermalBridgePreview.active || (thermalBridgePreview.kind === 'duct'
+            ? element.type === 'MechanicalVentilationDuctwork' || element.type === 'MechanicalVentilationTerminal'
+            : element.type === 'ThermalBridgeLinear' || element.type === 'ThermalBridgePoint')
             ? 1 : thermalBridgePreview.highlightedHostIds.has(element.id) ? 0.85 : 0.35}
           spaceLabellerSuppressFabricInteraction={spaceLabellerOpen}
         />
@@ -6270,6 +6284,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     commitVertexPositionUpdates,
     spaceLabellerOpen,
     thermalBridgePreview.active,
+    thermalBridgePreview.kind,
     thermalBridgePreview.highlightedHostIds,
   ]);
 
@@ -6306,7 +6321,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     onFrameRequestConsumed: clearFrame3dRequest,
     snapCache: geometrySnapCache,
     isElementCategoryGhost: isElementCategoryGhostFor3D,
-    thermalBridgePreview,
+    thermalBridgePreview: tbPreview,
     onInspectThermalBridge: inspectPreviewBridge,
   }), [
     elementsById,
@@ -6321,7 +6336,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     clearFrame3dRequest,
     geometrySnapCache,
     isElementCategoryGhostFor3D,
-    thermalBridgePreview,
+    tbPreview,
     inspectPreviewBridge,
   ]);
   const [hiddenGeometryCanvas3DProps, setHiddenGeometryCanvas3DProps] = useState(liveGeometryCanvas3DProps);

@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useEffect, useRef } from 'react';
-import type { AutoThermalBridgePreview } from '../../hooks/useAutoThermalBridgePreview';
+import type { CanvasPreview } from '../../hooks/useAutoThermalBridgePreview';
 import { JUNCTION_TYPE_DESCRIPTIONS } from '../../lib/simplifiedFabricMap';
 import './ThermalBridgePreview.css';
 import { externalDetailCandidateKey } from '../../geometry/thermalBridge/externalDetailContracts';
 
 export function ThermalBridgePreviewControls({ preview, width, height, viewMode, showStatus = true }: {
-  preview: AutoThermalBridgePreview;
+  preview: CanvasPreview;
   width: number;
   height: number;
   viewMode: string;
@@ -36,6 +36,18 @@ export function ThermalBridgePreviewControls({ preview, width, height, viewMode,
   }, [menuOpen, closeMenu]);
   if (!preview.active) return null;
   const shown = preview.menu ?? preview.hover;
+  if (preview.kind === 'duct') {
+    const run = preview.runs.find((candidate) => shown?.ids.includes(candidate.proposalId));
+    return <>
+      {shown && run && <div className="tb-preview-label" style={{
+        left: Math.max(8, Math.min(shown.anchor.x + 12, width - 290)),
+        top: Math.max(8, Math.min(shown.anchor.y + 12, height - 70)),
+      }}>
+        <span>{run.role[0]!.toUpperCase()}{run.role.slice(1)} · {run.lengthM.toFixed(2)} m · Click to add</span>
+      </div>}
+      {showStatus && <ThermalBridgePreviewStatus preview={preview} viewMode={viewMode} />}
+    </>;
+  }
   const rows = shown?.ids.flatMap((id) => {
     const row = preview.candidates.find((candidate) => candidate.proposalId === id);
     return row ? [row] : [];
@@ -104,15 +116,19 @@ export function ThermalBridgePreviewControls({ preview, width, height, viewMode,
 
 /** Fits in the existing draw toolbar accessory so the floor pill follows its placement. */
 export function ThermalBridgePreviewStatus({ preview, viewMode, inline = false }: {
-  preview: AutoThermalBridgePreview;
+  preview: CanvasPreview;
   viewMode: string;
   inline?: boolean;
 }) {
   if (!preview.active) return null;
   return (
     <div className={`tb-preview-status${inline ? ' tb-preview-status-inline' : ''}`} aria-live="polite">
-      {preview.error ? <span role="alert">{preview.error}</span> : (preview.menu || (preview.hover?.ids.length ?? 0) > 0) ? null :
-        <span>{preview.candidates.some((candidate) => !candidate.addabilityError)
+      {preview.error ? <span role="alert">{preview.error}</span> : (preview.menu || (preview.kind !== 'duct' && (preview.hover?.ids.length ?? 0) > 0)) ? null :
+        <span>{preview.kind === 'duct'
+          ? preview.chooseUnit ? 'Choose an MVHR unit'
+            : preview.runs.length ? `${preview.runs.length} run${preview.runs.length === 1 ? '' : 's'} · Click to add · Release A to draw`
+            : 'No suggestions on this floor'
+          : preview.candidates.some((candidate) => !candidate.addabilityError)
           ? `Click to add · Release A to ${viewMode === '3d' ? 'exit' : 'draw'}`
           : preview.candidates.length ? 'No addable suggestions on this floor' : 'No suggestions on this floor'}</span>}
       {preview.unplacedCount > 0 && <span>{preview.unplacedCount} suggestions need a floor · Review all…</span>}

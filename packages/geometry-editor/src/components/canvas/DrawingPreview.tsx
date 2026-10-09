@@ -281,7 +281,7 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
           multiDrawModifierHeld,
           !!drawElbow,
         );
-        const tooltipText = baseTooltipText && drawElementType === 'ThermalBridgeLinear'
+        const tooltipText = baseTooltipText && (drawElementType === 'ThermalBridgeLinear' || drawElementType === 'MechanicalVentilationDuctwork')
           ? `${baseTooltipText} · Hold A for suggestions`
           : baseTooltipText;
         const canvasPos = w2c(placementPoint);
