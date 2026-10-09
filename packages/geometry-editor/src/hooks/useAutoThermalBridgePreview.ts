@@ -18,8 +18,9 @@ import { isElementOnActiveCanvasFloor } from '../lib/elementCanvasFloor';
 import { geometryPerf } from '../lib/geometryPerf';
 import { findHostElementForAutoTbProposal } from '../geometry/thermalBridge/resolveTbHostFloorId';
 import { useThermalBridgePreviewMode } from './useThermalBridgePreviewMode';
-import { getElementCanvasFloorZValue } from '../lib/elementCanvasFloor';
-import { getFirstPoint3, planAutoDucts, type MvhrDuctRole, type Point3 } from '../lib/mvhrDuctwork';
+import { getElementCanvasFloorZValue, networkPoint3 } from '../lib/elementCanvasFloor';
+import { withEffectiveStoreyHeights } from '../lib/zoneDerivation';
+import { planAutoDucts, planPrimaryPipework, primaryPipeworkPairs, type MvhrDuctRole, type Point3 } from '../lib/mvhrDuctwork';
 import type { GeometryState } from '../stores/geometryStore';
 
 export interface ThermalBridgePreviewAnchor { x: number; y: number }
@@ -182,109 +183,133 @@ export function useAutoThermalBridgePreview(options: {
 
 export type AutoThermalBridgePreview = ReturnType<typeof useAutoThermalBridgePreview>;
 
-/** One auto-duct run: a room's L, or an intake/exhaust duct with its terminal. Added as one step. */
+/** One auto-routed run: a room's L, an intake/exhaust duct with its terminal, or a heat source's primary pipework to a cylinder. Added as one step. */
 export interface AutoDuctRun {
   proposalId: string;
-  role: MvhrDuctRole;
+  role: MvhrDuctRole | 'primary';
+  /** The storey the run starts on (its unit's or heat source's); the preview shows it there. */
+  storey: number | undefined;
   drafts: ElementDraft[];
   segments: Array<[Point3, Point3]>;
   lengthM: number;
 }
 
 /**
- * planAutoDucts' flat drafts as runs: every run's first duct starts at the unit; a terminal ends the
- * run of its own role just before it. A terminal with no such run (its duct was zero-length) is dropped.
+ * A planner's flat drafts as runs: a run starts with a segment leaving one of `starts` (the unit, or
+ * each heat source) and takes that start's storey; a terminal ends the run of its own role just
+ * before it. A terminal with no such run (its duct was zero-length) is dropped.
  */
-export function groupAutoDuctRuns(drafts: readonly ElementDraft[], unitPoint: Point3): AutoDuctRun[] {
+export function groupAutoDuctRuns(
+  drafts: readonly ElementDraft[],
+  starts: ReadonlyArray<{ point: Point3; storey: number | undefined }>,
+): AutoDuctRun[] {
+  const pointKey = (p: Point3) => `${p.x},${p.y},${p.z}`;
+  const startStorey = new Map(starts.map(({ point, storey }) => [pointKey(point), storey]));
   const runs: AutoDuctRun[] = [];
   for (const draft of drafts) {
     const run = runs[runs.length - 1];
-    if (draft.type !== 'MechanicalVentilationDuctwork') {
-      if (run && run.role === draft.terminal_type) run.drafts.push(draft);
+    if (draft.type !== 'MechanicalVentilationDuctwork' && draft.type !== 'WaterPipework') {
+      if (draft.type === 'MechanicalVentilationTerminal' && run && run.role === draft.terminal_type) run.drafts.push(draft);
       continue;
     }
     const [a, b] = draft.coordinates as [Point3, Point3];
-    if (run && !(a.x === unitPoint.x && a.y === unitPoint.y && a.z === unitPoint.z)) {
+    const startsRun = startStorey.has(pointKey(a));
+    if (run && !startsRun) {
       run.drafts.push(draft);
       run.segments.push([a, b]);
       run.lengthM += draft.length!;
     } else {
-      runs.push({ proposalId: '', role: draft.duct_type!, drafts: [draft], segments: [[a, b]], lengthM: draft.length! });
+      const role = draft.type === 'WaterPipework' ? 'primary' : draft.duct_type!;
+      runs.push({ proposalId: '', role, storey: startStorey.get(pointKey(a)), drafts: [draft], segments: [[a, b]], lengthM: draft.length! });
     }
   }
   // Role and far end survive re-planning after an add; the index among equal keys keeps duplicates apart.
   const seen = new Map<string, number>();
   return runs.map((run) => {
     const end = run.segments[run.segments.length - 1]![1];
-    const key = `${run.role}:${end.x},${end.y},${end.z}`;
+    const key = `${run.role}:${pointKey(end)}`;
     const index = seen.get(key) ?? 0;
     seen.set(key, index + 1);
     return { ...run, proposalId: `${key}:${index}` };
   });
 }
 
-type DuctPlanState = Pick<GeometryState, 'elementsById' | 'floors' | 'spaceLabelIds' | 'spaceLabelsById'>;
+type RunPlanState = Pick<GeometryState, 'elementsById' | 'floors' | 'spaceLabelIds' | 'spaceLabelsById'>;
+type RunPlan = { runs: AutoDuctRun[]; highlightIds: string[] };
 
 /** The named unit (the MVHR draw parent), else the only MVHR unit; null when there is no unambiguous unit. */
-function planAutoDuctRuns(state: DuctPlanState, unitName: string | null) {
+function planAutoDuctRuns(state: RunPlanState, unitName: string | null): RunPlan | null {
   const elements = Object.values(state.elementsById);
   const units = elements.filter((element): element is MechanicalVentilation =>
     element.type === 'MechanicalVentilation' && !element.isPlaceholder);
   const mvhrUnits = units.filter((unit) => unit.vent_type === 'MVHR');
   const unit = unitName ? units.find((candidate) => candidate.name === unitName)
     : mvhrUnits.length === 1 ? mvhrUnits[0] : undefined;
-  const unitPoint = unit && getFirstPoint3(unit);
+  const effectiveFloors = withEffectiveStoreyHeights(state.floors, elements);
+  const unitPoint = unit && networkPoint3(unit, effectiveFloors);
   if (!unit || !unitPoint) return null;
   const labels = state.spaceLabelIds.flatMap((id) => state.spaceLabelsById[id] ?? []);
+  const storey = getElementCanvasFloorZValue(unit, effectiveFloors);
   return {
-    unit,
-    storey: getElementCanvasFloorZValue(unit, state.floors),
-    runs: groupAutoDuctRuns(planAutoDucts(unit, elements, labels, state.floors), unitPoint),
+    highlightIds: [unit.id],
+    runs: groupAutoDuctRuns(planAutoDucts(unit, elements, labels, effectiveFloors), [{ point: unitPoint, storey }]),
   };
 }
 
-/** The hold-A preview for the ductwork tool: the same gesture and controls as the thermal-bridge preview. */
-export function useAutoDuctPreview(options: {
+/** Primary pipework from every heat source to its cylinder; each run shows on its heat source's storey. */
+function planPrimaryPipeworkRuns(state: RunPlanState): RunPlan {
+  const elements = Object.values(state.elementsById);
+  const effectiveFloors = withEffectiveStoreyHeights(state.floors, elements);
+  const pairs = primaryPipeworkPairs(elements, effectiveFloors);
+  return {
+    highlightIds: [...new Set(pairs.flatMap((pair) => [pair.heatSource.id, pair.cylinder.id]))],
+    runs: groupAutoDuctRuns(planPrimaryPipework(elements, effectiveFloors), pairs.map((pair) => ({
+      point: pair.heatSourcePoint, storey: getElementCanvasFloorZValue(pair.heatSource, effectiveFloors),
+    }))),
+  };
+}
+
+/**
+ * The hold-A preview for an auto-routing tool: the same gesture and controls as the thermal-bridge
+ * preview. `plan` must be stable per scope; it runs only while the preview shows, and again on commit.
+ */
+function useAutoRunPreview<Kind extends 'duct' | 'pipe'>(kind: Kind, options: {
   enabled: boolean;
   blocked: boolean;
   currentFloorZ: number;
-  unitName: string | null;
+  scopeKey: string;
+  plan: (state: RunPlanState) => RunPlan | null;
 }) {
-  const { enabled, blocked, currentFloorZ, unitName } = options;
+  const { enabled, blocked, currentFloorZ, scopeKey, plan: planRuns } = options;
   const store = useGeometryStoreApi();
   const elementsById = useGeometryStore((s) => s.elementsById);
   const floors = useGeometryStore(useShallow((s) => s.floors));
   const spaceLabelIds = useGeometryStore((s) => s.spaceLabelIds);
   const spaceLabelsById = useGeometryStore((s) => s.spaceLabelsById);
-  // A new unit is a new scope: hover, errors and any pin reset, and the plan rebuilds for that unit.
-  const mode = useThermalBridgePreviewMode({ enabled, blocked, scopeKey: `${currentFloorZ}:${unitName}` });
+  // A new scope (floor, unit): hover, errors and any pin reset, and the plan rebuilds.
+  const mode = useThermalBridgePreviewMode({ enabled, blocked, scopeKey });
   const { active, dismiss: dismissMode } = mode;
-  const interactionKey = `${currentFloorZ}:${unitName}:${active}`;
+  const interactionKey = `${scopeKey}:${active}`;
   const [hover, setHover] = useKeyedState<{ ids: string[]; anchor: ThermalBridgePreviewAnchor } | null>(interactionKey, null);
   const [error, setError] = useKeyedState<string | null>(interactionKey, null);
   // Planned only while the preview shows, so edits with A released never re-plan.
   const plan = useMemo(() => active
-    ? planAutoDuctRuns({ elementsById, floors, spaceLabelIds, spaceLabelsById }, unitName)
-    : null, [active, elementsById, floors, spaceLabelIds, spaceLabelsById, unitName]);
-  const chooseUnit = useMemo(() => active && !unitName && Object.values(elementsById).filter((element) =>
-    element.type === 'MechanicalVentilation' && !element.isPlaceholder && element.vent_type === 'MVHR').length > 1,
-  [active, unitName, elementsById]);
-  const onFloor = plan?.storey === currentFloorZ;
-  const runs = useMemo(() => (plan && onFloor ? plan.runs : []), [plan, onFloor]);
-  const otherFloorCount = plan && !onFloor ? plan.runs.length : 0;
-  const unitId = plan?.unit.id;
-  const highlightedHostIds = useMemo(() => new Set(active && unitId ? [unitId] : []), [active, unitId]);
+    ? planRuns({ elementsById, floors, spaceLabelIds, spaceLabelsById })
+    : null, [active, planRuns, elementsById, floors, spaceLabelIds, spaceLabelsById]);
+  const runs = useMemo(() => plan?.runs.filter((run) => run.storey === currentFloorZ) ?? [], [plan, currentFloorZ]);
+  const otherFloorCount = (plan?.runs.length ?? 0) - runs.length;
+  const highlightIdsKey = plan?.highlightIds.join('\0') ?? '';
+  const highlightedHostIds = useMemo(() => new Set(active && highlightIdsKey ? highlightIdsKey.split('\0') : []), [active, highlightIdsKey]);
 
   const onHover = useCallback((ids: string[], anchor: ThermalBridgePreviewAnchor) => {
     setHover((previous) => previous?.ids.join('\0') === ids.join('\0') ? previous : { ids, anchor });
   }, [setHover]);
-  /** Re-plans against live geometry and commits the chosen runs as one history step. */
+  /** Re-plans against live geometry and commits the chosen runs on this floor as one history step. */
   const commit = useCallback((ids: string[] | null) => {
     try {
       const current = store.getState();
-      const fresh = planAutoDuctRuns(current, unitName);
-      if (!fresh || fresh.storey !== currentFloorZ) throw new Error('This suggestion is no longer on the current floor.');
-      const chosen = ids ? fresh.runs.filter((run) => ids.includes(run.proposalId)) : fresh.runs;
+      const onFloor = planRuns(current)?.runs.filter((run) => run.storey === currentFloorZ) ?? [];
+      const chosen = ids ? onFloor.filter((run) => ids.includes(run.proposalId)) : onFloor;
       if (chosen.length === 0) throw new Error('This suggestion is no longer available.');
       current.addElements(chosen.flatMap((run) => run.drafts));
       setError(null);
@@ -292,7 +317,7 @@ export function useAutoDuctPreview(options: {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [store, unitName, currentFloorZ, setError, setHover]);
+  }, [store, planRuns, currentFloorZ, setError, setHover]);
   const add = useCallback((id: string) => commit([id]), [commit]);
   const addAll = useCallback(() => commit(null), [commit]);
   const onActivate = useCallback((ids: string[]) => {
@@ -305,14 +330,37 @@ export function useAutoDuctPreview(options: {
   }, [dismissMode, setHover]);
 
   return {
-    kind: 'duct' as const,
-    ...mode, dismiss, runs, chooseUnit, otherFloorCount, unplacedCount: 0, error, highlightedHostIds,
+    kind,
+    ...mode, dismiss, runs, chooseUnit: false, otherFloorCount, unplacedCount: 0, error, highlightedHostIds,
     hover: active ? hover : null,
     menu: null,
     onHover, onActivate, add, addAll, closeMenu,
   };
 }
 
+/** The hold-A preview for the ductwork tool. */
+export function useAutoDuctPreview(options: {
+  enabled: boolean;
+  blocked: boolean;
+  currentFloorZ: number;
+  unitName: string | null;
+}) {
+  const { enabled, blocked, currentFloorZ, unitName } = options;
+  const plan = useCallback((state: RunPlanState) => planAutoDuctRuns(state, unitName), [unitName]);
+  const preview = useAutoRunPreview('duct', { enabled, blocked, currentFloorZ, scopeKey: `${currentFloorZ}:${unitName}`, plan });
+  const elementsById = useGeometryStore((s) => s.elementsById);
+  const chooseUnit = useMemo(() => preview.active && !unitName && Object.values(elementsById).filter((element) =>
+    element.type === 'MechanicalVentilation' && !element.isPlaceholder && element.vent_type === 'MVHR').length > 1,
+  [preview.active, unitName, elementsById]);
+  return { ...preview, chooseUnit };
+}
+
+/** The hold-A preview for the pipework tool: primary pipework from each heat source to its cylinder. */
+export function useAutoPipePreview(options: { enabled: boolean; blocked: boolean; currentFloorZ: number }) {
+  return useAutoRunPreview('pipe', { ...options, scopeKey: String(options.currentFloorZ), plan: planPrimaryPipeworkRuns });
+}
+
 export type AutoDuctPreview = ReturnType<typeof useAutoDuctPreview>;
-/** Either hold-A canvas preview; the 2D layer, label and toolbar report take both. */
-export type CanvasPreview = AutoThermalBridgePreview | AutoDuctPreview;
+export type AutoPipePreview = ReturnType<typeof useAutoPipePreview>;
+/** Any hold-A canvas preview; the 2D layer, label and toolbar report take each. */
+export type CanvasPreview = AutoThermalBridgePreview | AutoDuctPreview | AutoPipePreview;

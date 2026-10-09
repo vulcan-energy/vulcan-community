@@ -4,7 +4,7 @@ import { act, fireEvent, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
-import { groupAutoDuctRuns, useAutoDuctPreview, useAutoThermalBridgePreview } from '../useAutoThermalBridgePreview';
+import { groupAutoDuctRuns, useAutoDuctPreview, useAutoPipePreview, useAutoThermalBridgePreview } from '../useAutoThermalBridgePreview';
 import { planAutoDucts } from '../../lib/mvhrDuctwork';
 import * as pipeline from '../../geometry/thermalBridge/autoThermalBridgePipeline';
 import type { Element, MechanicalVentilation, SpaceLabel } from '../../geometry/types';
@@ -148,10 +148,25 @@ describe('auto duct canvas preview', () => {
   }) as SpaceLabel);
 
   it('groups the plan into one run per room and per terminal role, terminals with their duct', () => {
-    const runs = groupAutoDuctRuns(planAutoDucts(unit, [unit, ...hosts], labels, [floor]), { x: 0, y: 0, z: 0 });
+    const runs = groupAutoDuctRuns(planAutoDucts(unit, [unit, ...hosts], labels, [floor]), [{ point: { x: 0, y: 0, z: 0 }, storey: 0 }]);
     expect(runs.map((run) => [run.role, run.drafts.map((d) => d.type === 'MechanicalVentilationTerminal' ? 'T' : 'D').join('')]))
       .toEqual([['extract', 'DD'], ['extract', 'DD'], ['supply', 'DD'], ['intake', 'DDT'], ['exhaust', 'DDT']]);
     expect(new Set(runs.map((run) => run.proposalId)).size).toBe(5);
+  });
+
+  it('groups an upper-storey unit\'s runs from its point in metres, not its storey index', () => {
+    const floors = [0, 1].map((zIndex) => ({ id: `f${zIndex}`, zIndex, name: String(zIndex), height: 2.5, heightUserOverride: true, isRoofSpace: false }));
+    const up = <T extends { floorId?: string; coordinates?: Array<{ z: number }> }>(el: T) =>
+      ({ ...el, floorId: 'f1', coordinates: el.coordinates?.map((c) => ({ ...c, z: 1 })) }) as T;
+    const elements = [up(unit), ...hosts.map(up)] as Element[];
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.setState({ floors, floorIds: ['f0', 'f1'], zones: [{ id: 'zone', name: 'Zone', floorArea: 20, height: 2.5, volume: 50 }],
+      elementsById: Object.fromEntries(elements.map((e) => [e.id, e])), elementIds: elements.map((e) => e.id),
+      spaceLabelsById: Object.fromEntries(labels.map((l) => [l.id, { ...l, storey: 1 }])), spaceLabelIds: labels.map((l) => l.id) });
+    const wrapper = ({ children }: { children: ReactNode }) => <GeometryStoreProvider store={store}>{children}</GeometryStoreProvider>;
+    const { result } = renderHook(() => useAutoDuctPreview({ enabled: true, blocked: false, currentFloorZ: 1, unitName: null }), { wrapper });
+    fireEvent.keyDown(document.body, { key: 'a' });
+    expect(result.current.runs.map((run) => run.role)).toEqual(['extract', 'extract', 'supply', 'intake', 'exhaust']);
   });
 
   it('adds a clicked run as one history step and the rest with Add all', () => {
@@ -181,5 +196,40 @@ describe('auto duct canvas preview', () => {
     act(() => result.current.add('stale'));
     expect(result.current.error).toBe('This suggestion is no longer available.');
     expect(count()).toBe(elements.length);
+  });
+});
+
+describe('auto pipe canvas preview', () => {
+  const p = (x: number, y: number, z = 0) => ({ x, y, z });
+  const floor = { id: 'f0', zIndex: 0, name: '0', height: 2.5, heightUserOverride: true, isRoofSpace: false };
+  const plant = [
+    { id: 'hp', name: 'Heat Pump', type: 'System', subcategory: 'HeatSourceWet', coordinates: [p(12, 2)],
+      extra_json: { HeatSourceWet: { hp: { type: 'HeatPump' } } } },
+    { id: 'cyl', name: 'Cylinder', type: 'System', subcategory: 'HotWaterSource', coordinates: [p(3, 6)],
+      extra_json: { HotWaterSource: { 'hw cylinder': { type: 'StorageTank', HeatSource: { hp: { type: 'HeatSourceWet', name: 'hp' } } } } } },
+    { id: 'g', name: 'Ground', type: 'BuildingElementGround', zoneId: 'zone', coordinates: [p(0, 0), p(10, 0), p(10, 8), p(0, 8)] },
+  ].map((e) => ({ parent_element: null, floorId: 'f0', ...e }) as unknown as Element);
+
+  it('previews one primary run per heat source and cylinder, adds it as one step and exports its pipes', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.setState({ floors: [floor], floorIds: ['f0'], zones: [{ id: 'zone', name: 'Zone', floorArea: 20, height: 2.5, volume: 50 }],
+      elementsById: Object.fromEntries(plant.map((e) => [e.id, e])), elementIds: plant.map((e) => e.id) });
+    store.getState().saveToHistory('seed');
+    const wrapper = ({ children }: { children: ReactNode }) => <GeometryStoreProvider store={store}>{children}</GeometryStoreProvider>;
+    const { result } = renderHook(() => useAutoPipePreview({ enabled: true, blocked: false, currentFloorZ: 0 }), { wrapper });
+    fireEvent.keyDown(document.body, { key: 'a' });
+    expect(result.current.runs.map((run) => [run.role, run.drafts.length, run.lengthM])).toEqual([['primary', 3, 13]]);
+    expect([...result.current.highlightedHostIds]).toEqual(['hp', 'cyl']);
+    act(() => result.current.onActivate([result.current.runs[0]!.proposalId]));
+    expect(store.getState().elementIds).toHaveLength(plant.length + 3);
+    expect(result.current.runs).toEqual([]);
+    const csv = store.getState().generateCSV();
+    const section = csv.slice(csv.indexOf('Water Pipework')).split('\n\n')[0]!.split('\n');
+    expect(section[1]).toBe('Name,Type,length,location,pipework_type,coords,extra_json');
+    expect(section.slice(2).map((row) => row.split(',').slice(1, 5))).toEqual([
+      ['WaterPipework', '2', 'external', 'primary'], ['WaterPipework', '7', 'internal', 'primary'], ['WaterPipework', '4', 'internal', 'primary'],
+    ]);
+    act(() => store.getState().undo());
+    expect(store.getState().elementIds).toHaveLength(plant.length);
   });
 });

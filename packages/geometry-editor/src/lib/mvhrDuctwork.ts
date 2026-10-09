@@ -9,11 +9,13 @@ import type {
   MechanicalVentilationDuctwork,
   MechanicalVentilationTerminal,
   SpaceLabel,
+  WaterPipework,
 } from '../geometry/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
 import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, networkPoint3 } from './elementCanvasFloor';
+import { extractAdjacentConditionedFootprintOuterRings, extractGroundFootprintOuterRings } from './buildingFootprintDimensions';
 import { orientation360FromSegmentOutwardModelXY, polygonPlanCentroid } from './openingSegmentOutward';
-import { planOrthogonalElbow, pointsConnected } from './snapUtils';
+import { planOrthogonalElbow, pointsConnected, primaryPipeworkPlantPairs } from './snapUtils';
 import { isPointInPolygon2D as pointInPolygon } from './pointInPolygon';
 import { resolveRoomTypeRule } from './spaceLabelDerivation';
 
@@ -379,13 +381,16 @@ export function looseDuctRunEndNearestUnit(
     roles: [duct.duct_type],
   });
   if (!warnings.some((w) => w.kind === 'disconnected-role' || w.kind === 'role-not-connected-to-unit')) return null;
-  // Free ends only: a joint shared with another duct of the run is not where the run stops.
-  const freeEnds = context.run.flatMap((runDuct) =>
-    ductEndpoints(runDuct)!.filter((end) =>
-      !context.run.some((other) => other !== runDuct && ductEndpoints(other)!.some((p) => sameDuctPoint(p, end)))));
-  if (freeEnds.length === 0) return null;
-  return freeEnds.reduce((best, end) =>
-    distance3d(end, context.unitPoint) < distance3d(best, context.unitPoint) ? end : best);
+  return runEndNearest(context.run, [context.unitPoint]);
+}
+
+/** The run's free end (not a joint shared with another segment of the run) nearest any of `targets`. */
+function runEndNearest(run: ReadonlyArray<Pick<Element, 'coordinates'>>, targets: Point3[]): Point3 | null {
+  const freeEnds = run.flatMap((segment) =>
+    ductEndpoints(segment)!.filter((end) =>
+      !run.some((other) => other !== segment && ductEndpoints(other)!.some((p) => sameDuctPoint(p, end)))));
+  const reach = (end: Point3) => Math.min(...targets.map((target) => distance3d(end, target)));
+  return freeEnds.length === 0 ? null : freeEnds.reduce((best, end) => (reach(end) < reach(best) ? end : best));
 }
 
 type PlanPoint = { x: number; y: number };
@@ -629,4 +634,182 @@ export function planAutoDucts(
     drafts.push(terminal);
   }
   return drafts;
+}
+
+export type PrimaryPipeworkPair = { heatSource: Element; cylinder: Element; heatSourcePoint: Point3; cylinderPoint: Point3 };
+
+/** `primaryPipeworkPlantPairs` with both plant points in metres; pairs missing a point are dropped. */
+export function primaryPipeworkPairs(elements: ReadonlyArray<Element>, effectiveFloors: Floor[]): PrimaryPipeworkPair[] {
+  return primaryPipeworkPlantPairs(elements).flatMap(({ heatSource, cylinder }) => {
+    const heatSourcePoint = networkPoint3(heatSource, effectiveFloors);
+    const cylinderPoint = networkPoint3(cylinder, effectiveFloors);
+    return heatSourcePoint && cylinderPoint ? [{ heatSource, cylinder, heatSourcePoint, cylinderPoint }] : [];
+  });
+}
+
+/** Primary pipes as the CSV exports them: placeholders included. */
+function primaryPipes(elements: ReadonlyArray<Element>): WaterPipework[] {
+  return elements.filter((el): el is WaterPipework => el.type === 'WaterPipework' && (el.pipework_type ?? 'primary') === 'primary');
+}
+
+/** HEM's minimum primary pipe length (`Tank.primary_pipework.items.length` in input_fhs.schema.json). */
+const MIN_PRIMARY_PIPE_M = 0.05;
+/** A point this close to the footprint boundary counts as inside: the pipe runs in the wall line. */
+const FOOTPRINT_BOUNDARY_TOLERANCE_M = 0.01;
+
+/**
+ * The dwelling footprint in plan: the lowest ground floor polygons, else (a flat) the lowest
+ * horizontal adjacent-conditioned polygons, as for the FHS length and width.
+ */
+function dwellingFootprintRings(elements: Element[]): PlanPoint[][] {
+  const ground = extractGroundFootprintOuterRings(elements);
+  return ground.length > 0 ? ground : extractAdjacentConditionedFootprintOuterRings(elements);
+}
+
+function insideFootprint(p: PlanPoint, rings: PlanPoint[][]): boolean {
+  return rings.some((ring) => pointInPolygon(p, ring) ||
+    ring.some((a, i) => distanceToSegment(p, a, ring[(i + 1) % ring.length]!) <= FOOTPRINT_BOUNDARY_TOLERANCE_M));
+}
+
+/**
+ * `points` with interior points dropped until every leg is at least `min` long (a short leg joins
+ * its neighbour). The ends stay exact. Null when the whole run is shorter than `min`.
+ */
+function withoutShortLegs(points: Point3[], min: number): Point3[] | null {
+  const pts = points.filter((p, i) => i === 0 || distance3d(p, points[i - 1]!) > 0);
+  for (let i = 0; i + 1 < pts.length;) {
+    if (distance3d(pts[i]!, pts[i + 1]!) >= min) { i += 1; continue; }
+    if (pts.length === 2) return null;
+    pts.splice(i + 1 === pts.length - 1 ? i : i + 1, 1);
+    i = Math.max(0, i - 1);
+  }
+  return pts;
+}
+
+type PipePiece = { a: Point3; b: Point3; location: 'internal' | 'external' };
+
+/**
+ * `a`→`b` split where its plan projection crosses a footprint edge, each piece `internal` when its
+ * plan midpoint is inside the footprint (or on its boundary). Adjacent pieces of one location join,
+ * and a piece shorter than MIN_PRIMARY_PIPE_M joins its neighbour, taking the neighbour's location.
+ */
+function splitAtFootprint(a: Point3, b: Point3, rings: PlanPoint[][]): PipePiece[] {
+  const ts = [0, 1];
+  const [dx, dy] = [b.x - a.x, b.y - a.y];
+  for (const ring of rings) {
+    ring.forEach((p, i) => {
+      const q = ring[(i + 1) % ring.length]!;
+      const [ex, ey] = [q.x - p.x, q.y - p.y];
+      const denom = dx * ey - dy * ex;
+      if (denom === 0) return; // Parallel (or a vertical leg): no crossing point.
+      const t = ((p.x - a.x) * ey - (p.y - a.y) * ex) / denom;
+      const u = ((p.x - a.x) * dy - (p.y - a.y) * dx) / denom;
+      if (t > 1e-9 && t < 1 - 1e-9 && u >= 0 && u <= 1) ts.push(t);
+    });
+  }
+  const at = (t: number): Point3 => (t === 0 ? a : t === 1 ? b : { x: a.x + t * dx, y: a.y + t * dy, z: a.z + t * (b.z - a.z) });
+  const sorted = [...new Set(ts)].sort((m, n) => m - n);
+  const pieces: PipePiece[] = sorted.slice(1).map((t, i) => {
+    const [p, q] = [at(sorted[i]!), at(t)];
+    return { a: p, b: q, location: insideFootprint({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, rings) ? 'internal' : 'external' };
+  });
+  // Each join restarts the scan, so the result settles whatever order pieces join in.
+  for (let i = 0; i < pieces.length;) {
+    const [prev, piece] = [pieces[i - 1], pieces[i]!];
+    if (prev?.location === piece.location) {
+      pieces.splice(i - 1, 2, { ...prev, b: piece.b });
+      i = 0;
+    } else if (pieces.length > 1 && distance3d(piece.a, piece.b) < MIN_PRIMARY_PIPE_M) {
+      const neighbour = prev ? i - 1 : 1;
+      const [first, second] = [Math.min(i, neighbour), Math.max(i, neighbour)];
+      pieces.splice(first, 2, { a: pieces[first]!.a, b: pieces[second]!.b, location: pieces[neighbour]!.location });
+      i = 0;
+    } else {
+      i += 1;
+    }
+  }
+  return pieces;
+}
+
+/**
+ * Auto-pipe plan per pair: primary pipework from each heat source to each cylinder it heats (see
+ * `primaryPipeworkPlantPairs`; a combi has no cylinder, so nothing). One orthogonal L at the heat
+ * source's height, longer axis first, then a riser at the cylinder when it is on another storey,
+ * as `planAutoDucts` routes. Runs start and end exactly on the two plant points. A leg shorter than
+ * HEM's 0.05 m minimum joins its neighbour, and each leg is split where it crosses the dwelling
+ * footprint, so every pipe draft has one `location` and is at least 0.05 m; a pair closer than that
+ * gets nothing. The HEM pipe fields (diameters, insulation, contents) come from the defaults'
+ * primary pipework at merge, as for drawn pipes.
+ *
+ * Primary rows have no parent and the model transform attaches every one to every StorageTank (so
+ * several cylinders each get every pair's pipes, an existing transform limit); once any primary
+ * pipe exists, placeholders included, the user owns that network and the plan is empty (a loose
+ * one is fixed with Snap). Without a footprint the location can't be derived, so the plan is empty
+ * too. Output order is stable (pairs by id). `effectiveFloors` carry effective storey heights.
+ */
+export function planPrimaryPipeworkByPair(
+  elements: Element[],
+  effectiveFloors: Floor[],
+): Array<{ pair: PrimaryPipeworkPair; drafts: ElementDraft[] }> {
+  const rings = dwellingFootprintRings(elements);
+  if (rings.length === 0 || primaryPipes(elements).length > 0) return [];
+  const floorIdOf = (el: Element) => effectiveFloors.find((floor) => floor.zIndex === getElementCanvasFloorZValue(el, effectiveFloors))?.id;
+  const runs: Array<{ pair: PrimaryPipeworkPair; drafts: ElementDraft[] }> = [];
+  for (const pair of primaryPipeworkPairs(elements, effectiveFloors)) {
+    const { heatSourcePoint: start, cylinderPoint: end } = pair;
+    const [startFloorId, endFloorId] = [floorIdOf(pair.heatSource), floorIdOf(pair.cylinder)];
+    const points = withoutShortLegs(orthogonalRun(start, end), MIN_PRIMARY_PIPE_M);
+    if (!startFloorId || !endFloorId || !points) continue;
+    const drafts: ElementDraft[] = [];
+    for (let i = 0; i + 1 < points.length; i += 1) {
+      const [a, b] = [points[i]!, points[i + 1]!];
+      for (const piece of splitAtFootprint(a, b, rings)) {
+        drafts.push({
+          name: '',
+          type: 'WaterPipework',
+          pipework_type: 'primary',
+          location: piece.location,
+          simplified_pipework: false,
+          parent_element: null,
+          // Legs at the heat source's height belong to its storey; a riser to the cylinder's.
+          floorId: a.z === start.z && b.z === start.z ? startFloorId : endFloorId,
+          coordinates: [piece.a, piece.b],
+          length: roundToTwoDecimals(distance3d(piece.a, piece.b)),
+          isPlaceholder: false,
+        });
+      }
+    }
+    runs.push({ pair, drafts });
+  }
+  return runs;
+}
+
+/** `planPrimaryPipeworkByPair`'s drafts, flat. */
+export function planPrimaryPipework(elements: Element[], effectiveFloors: Floor[]): ElementDraft[] {
+  return planPrimaryPipeworkByPair(elements, effectiveFloors).flatMap((run) => run.drafts);
+}
+
+/**
+ * Why a primary pipe's run is loose: it does not reach both the heat source and the cylinder of any
+ * pair. `looseEnd` is the run's free end nearest the plant it misses (the chip goes there). Null for
+ * a connected run, a non-primary pipe, or a model with no heat source and cylinder pair.
+ */
+export function primaryPipeRunGap(
+  pipe: Element,
+  elements: ReadonlyArray<Element>,
+  effectiveFloors: Floor[],
+): { message: string; looseEnd: Point3 | null } | null {
+  if (pipe.type !== 'WaterPipework' || pipe.isPlaceholder || (pipe.pipework_type ?? 'primary') !== 'primary') return null;
+  const pairs = primaryPipeworkPairs(elements, effectiveFloors);
+  const run = pairs.length > 0 ? ductEndpointRuns(primaryPipes(elements)).find((r) => r.some((p) => p.id === pipe.id)) : undefined;
+  if (!run) return null;
+  const reaches = (point: Point3) => ductRunTouchesPoint(run, point);
+  if (pairs.some((pair) => reaches(pair.heatSourcePoint) && reaches(pair.cylinderPoint))) return null;
+  const pair = pairs.find((p) => reaches(p.heatSourcePoint) || reaches(p.cylinderPoint)) ?? pairs[0]!;
+  const missed = ([[pair.heatSource, pair.heatSourcePoint], [pair.cylinder, pair.cylinderPoint]] as const)
+    .filter(([, point]) => !reaches(point));
+  return {
+    message: `Primary pipework run is not connected to ${missed.map(([el]) => el.name).join(' and ')}`,
+    looseEnd: runEndNearest(run, missed.map(([, point]) => point)),
+  };
 }

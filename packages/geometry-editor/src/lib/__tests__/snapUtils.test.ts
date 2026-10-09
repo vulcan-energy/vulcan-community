@@ -630,6 +630,30 @@ describe('getExactSnappedVertices', () => {
     expect(planServiceLineEndpointWelds({ unit, near }, ['near'], 0.05, effectiveFloors))
       .toEqual([{ elementId: 'near', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 2.5 } }]);
   });
+
+  it('welds, snap-dots and Alt-carries a primary pipe end on paired upper-storey plant in metres, never a combi', () => {
+    const effectiveFloors = [0, 1].map((zIndex) => ({ id: `f${zIndex}`, name: String(zIndex), zIndex, height: 2.5, isRoofSpace: false })) as Floor[];
+    const tank = (id: string, type: string, x: number) => ({ id, name: id, type: 'System', subcategory: 'HotWaterSource', floorId: 'f1',
+      coordinates: [{ x, y: 0, z: 1 }], extra_json: { HotWaterSource: { hw: { type, HeatSource: { hp: { type: 'HeatSourceWet', name: 'hp' } } } } } }) as unknown as Element;
+    const heatPump = { id: 'hp', name: 'hp', type: 'System', subcategory: 'HeatSourceWet', floorId: 'f0', coordinates: [{ x: 9, y: 9, z: 0 }],
+      extra_json: { HeatSourceWet: { hp: { type: 'HeatPump' } } } } as unknown as Element;
+    const [cylinder, combi] = [tank('cylinder', 'StorageTank', 0), tank('combi', 'CombiBoiler', 5)];
+    const pipe = (id: string, x: number, z: number, pipework_type = 'primary') => ({ id, name: id, type: 'WaterPipework', pipework_type,
+      coordinates: [{ x, y: 0, z }, { x: x + 2, y: 0, z }] }) as unknown as Element;
+    const plant = { heatPump, cylinder, combi };
+    const near = pipe('near', 0, 2.52);
+    expect(planServiceLineEndpointWelds({ ...plant, near }, ['near'], 0.05, effectiveFloors))
+      .toEqual([{ elementId: 'near', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 2.5 } }]);
+    const distribution = pipe('distribution', 0, 2.52, 'distribution');
+    expect(planServiceLineEndpointWelds({ ...plant, distribution }, ['distribution'], 0.05, effectiveFloors)).toEqual([]);
+    const [welded, onCombi] = [pipe('welded', 0, 2.5), pipe('onCombi', 5, 2.5)];
+    const byId = { ...plant, welded, onCombi };
+    expect(getExactSnappedVertices(welded, byId, { effectiveFloors })).toEqual(new Set([0]));
+    expect(getExactSnappedVertices(onCombi, byId, { effectiveFloors })).toEqual(new Set());
+    expect(planServiceLineEndpointWelds({ ...plant, onCombi: pipe('onCombi', 5, 2.52) }, ['onCombi'], 0.05, effectiveFloors)).toEqual([]);
+    expect(findConnectedDragNeighbours(cylinder, byId, 2, effectiveFloors)).toEqual([{ elementId: 'welded', vertexIndex: 0 }]);
+    expect(findConnectedDragNeighbours(combi, byId, 2, effectiveFloors)).toEqual([]);
+  });
 });
 
 describe('getWallSupportedSnappedVertices', () => {

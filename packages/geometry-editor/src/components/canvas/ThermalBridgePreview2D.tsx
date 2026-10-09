@@ -14,6 +14,7 @@ import { thermalBridgeCandidatesForRender, thermalBridgeIssuesForRender } from '
 
 type Point = { x: number; y: number };
 const NO_CANDIDATES: readonly AutoThermalBridgeCandidate[] = [];
+const PIPE_RUN_STYLE = { dash: [] as readonly number[] };
 function distanceToPreviewSegment(point: Point, a: Point, b: Point): number {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -40,13 +41,14 @@ export const ThermalBridgePreview2D = memo(function ThermalBridgePreview2D({
   onInspect: (id: string) => void;
   canActivate: () => boolean;
 }) {
-  const candidatesToRender = preview.kind === 'duct' ? NO_CANDIDATES : thermalBridgeCandidatesForRender(preview.candidates, preview);
-  const issuesToRender = preview.kind === 'duct' ? [] : thermalBridgeIssuesForRender(preview.issues, preview);
-  const runs = preview.kind === 'duct' ? preview.runs : null;
-  // A thermal-bridge candidate is one segment; a duct run is several, drawn in its role's style.
+  const isRunPreview = preview.kind === 'duct' || preview.kind === 'pipe';
+  const candidatesToRender = isRunPreview ? NO_CANDIDATES : thermalBridgeCandidatesForRender(preview.candidates, preview);
+  const issuesToRender = isRunPreview ? [] : thermalBridgeIssuesForRender(preview.issues, preview);
+  const runs = isRunPreview ? preview.runs : null;
+  // A thermal-bridge candidate is one segment; a duct or pipe run is several, a duct's drawn in its role's style.
   const projected = useMemo(() => runs
     ? runs.flatMap((run) => run.segments.map(([a, b], segment) => ({
-        id: run.proposalId, key: `${run.proposalId}:${segment}`, style: MVHR_DUCT_ROLE_STYLES[run.role],
+        id: run.proposalId, key: `${run.proposalId}:${segment}`, style: run.role === 'primary' ? PIPE_RUN_STYLE : MVHR_DUCT_ROLE_STYLES[run.role],
         end: worldToCanvas(run.segments[run.segments.length - 1]![1], scale, panOffset, canvasCenter),
         a: worldToCanvas(a, scale, panOffset, canvasCenter), b: worldToCanvas(b, scale, panOffset, canvasCenter),
       })))
@@ -55,7 +57,7 @@ export const ThermalBridgePreview2D = memo(function ThermalBridgePreview2D({
         a: worldToCanvas(candidate.coordinates[0], scale, panOffset, canvasCenter),
         b: worldToCanvas(candidate.coordinates[1], scale, panOffset, canvasCenter),
       })), [runs, candidatesToRender, scale, panOffset, canvasCenter]);
-  // Every run meets at the unit, so hover and click take one run: the nearest, and on a stretch runs
+  // Every duct run meets at the unit, so hover and click take one run: the nearest, and on a stretch runs
   // share (within half a pixel), the one whose room end is nearest. Overlapping bridges all go to the chooser.
   const hitIds = (point: Point) => {
     const hits = projected.flatMap((row) => {
