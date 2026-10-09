@@ -11,6 +11,8 @@
   background: var(--canvas-drawing-tooltip-bg, rgba(18, 31, 34, 0.96));
   font-size: 12px;
 }
+.tb-preview-label > span { display: inline-block; max-width: 100%; line-height: 1.35; }
+.tb-preview-label > .btn-small { min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; }
 .tb-preview-menu { box-sizing: border-box; max-height: min(300px, 50vh); overflow-y: auto; }
 .tb-preview-menu-heading { display: flex; justify-content: space-between; align-items: center; }
 .tb-preview-row { display: grid; gap: 4px; padding: 6px 0; border-top: 1px solid var(--border-overlay); }

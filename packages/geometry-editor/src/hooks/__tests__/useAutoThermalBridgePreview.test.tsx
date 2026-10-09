@@ -27,7 +27,10 @@ function setup() {
   }), { wrapper, initialProps: { floor: 0, hidden: visible } });
   return { store, ...hook };
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 describe('auto thermal bridge canvas preview', () => {
   it('adds a multi-option default once, prevents duplicates and supports undo', () => {
     const { result, store } = setup();
@@ -77,6 +80,58 @@ describe('auto thermal bridge canvas preview', () => {
     expect(propose).toHaveBeenCalledTimes(initial);
     act(() => result.current.add(row.proposalId));
     expect(propose).toHaveBeenCalledTimes(initial + 1); // The live commit recheck only.
+  });
+  it('keeps the hover chooser reachable across the pointer gap and does not postpone repeated empty hover events', () => {
+    const { result } = setup();
+    vi.useFakeTimers();
+    fireEvent.keyDown(document.body, { key: 'a' });
+    const [first, second] = result.current.candidates;
+    act(() => result.current.onHover([first!.proposalId], { x: 10, y: 20 }));
+    act(() => result.current.onHover([], { x: 10, y: 20 }));
+    act(() => vi.advanceTimersByTime(200));
+    act(() => result.current.onHover([], { x: 11, y: 20 }));
+    act(() => vi.advanceTimersByTime(49));
+    expect(result.current.hover?.ids).toEqual([first!.proposalId]);
+
+    act(() => result.current.onHover([second!.proposalId], { x: 12, y: 20 }));
+    act(() => vi.advanceTimersByTime(300));
+    expect(result.current.hover?.ids).toEqual([second!.proposalId]);
+
+    act(() => result.current.onHover([], { x: 12, y: 20 }));
+    act(() => vi.advanceTimersByTime(250));
+    expect(result.current.hover).toBeNull();
+  });
+  it('clears the pending hover timer on interaction-scope changes and unmount', () => {
+    const { result, rerender, unmount } = setup();
+    vi.useFakeTimers();
+    fireEvent.keyDown(document.body, { key: 'a' });
+    act(() => result.current.onHover([result.current.candidates[0]!.proposalId], { x: 10, y: 20 }));
+    act(() => result.current.onHover([], { x: 10, y: 20 }));
+    expect(vi.getTimerCount()).toBe(1);
+
+    rerender({ floor: 1, hidden: visible });
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => result.current.onHover([result.current.candidates[0]!.proposalId], { x: 20, y: 30 }));
+    act(() => result.current.onHover([], { x: 20, y: 30 }));
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('commits a selected junction code in one undoable step and rejects codes absent from the live options', () => {
+    const { result, store } = setup();
+    fireEvent.keyDown(document.body, { key: 'a' });
+    const row = result.current.candidates.find((candidate) => candidate.junctionOptions.length > 1)!;
+    const selectedCode = row.junctionOptions.find((code) => code !== row.junctionCode)!;
+    act(() => result.current.add(row.proposalId, selectedCode));
+    const bridges = () => Object.values(store.getState().elementsById).filter((element) => element.type === 'ThermalBridgeLinear');
+    expect(bridges()).toHaveLength(1);
+    expect(bridges()[0]!.extra_json?.junction_type).toBe(selectedCode);
+    act(() => store.getState().undo());
+    expect(bridges()).toHaveLength(0);
+
+    act(() => result.current.add(row.proposalId, 'not-an-option'));
+    expect(bridges()).toHaveLength(0);
+    expect(result.current.error).toMatch(/junction/i);
   });
   it('respects hidden hosts and bridge-category filters', () => {
     const { result, rerender } = setup();

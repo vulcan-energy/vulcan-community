@@ -336,14 +336,17 @@ const DrawToolbarAutoTbSuggest = React.memo(function DrawToolbarAutoTbSuggest({
   return (
     <button
       type="button"
-      className="draw-button auto-tb-suggest"
+      className="draw-button auto-tb-suggest editor-action-btn--primary"
       onPointerEnter={onPrefetch}
       onFocus={onPrefetch}
       onMouseDown={onPrefetch}
       onClick={onShow}
       title="Suggest linear thermal bridges (openings, corners, roof windows, party lines, …)"
     >
-      Review all…
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+      Add thermal bridges…
     </button>
   );
 });

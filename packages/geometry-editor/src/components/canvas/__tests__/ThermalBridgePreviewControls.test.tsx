@@ -33,6 +33,7 @@ function candidate(
 
 function preview(overrides: Partial<AutoThermalBridgePreview> = {}): AutoThermalBridgePreview {
   return {
+    kind: 'thermalBridge',
     active: true,
     held: true,
     pinned: false,
@@ -90,7 +91,7 @@ describe('ThermalBridgePreviewControls', () => {
     expect(screen.queryByText(/Click to add/)).not.toBeInTheDocument();
   });
 
-  it('shows one candidate as a direct add with an optional junction control', () => {
+  it('shows the junction description and code with an optional chooser', () => {
     const row = candidate('roof-window-lower', 'R2', ['R2', 'R11']);
     const configure = vi.fn();
     const add = vi.fn();
@@ -101,28 +102,47 @@ describe('ThermalBridgePreviewControls', () => {
       add,
     }));
 
-    expect(screen.getByText('R2 · 1.25 m · Click to add')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Change suggested junction type' }));
+    expect(screen.getByText('Sill of roof window · R2 · 1.25 m')).toBeInTheDocument();
+    expect(screen.queryByText(/Click to add/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Choose junction or detail' }));
     expect(configure).toHaveBeenCalledWith(row.proposalId, { x: 100, y: 100 });
     expect(add).not.toHaveBeenCalled();
   });
 
-  it('changes a junction from the pinned optional menu without adding it', () => {
+  it('adds immediately when a junction type is selected in the pinned chooser', () => {
     const row = candidate('roof-window-lower', 'R2', ['R2', 'R11']);
-    const override = vi.fn();
+    const add = vi.fn();
     renderControls(preview({
       pinned: true,
       menu: { ids: [row.proposalId], anchor: { x: 100, y: 100 } },
       candidates: [row],
-      override,
+      add,
     }));
 
     expect(screen.getByRole('dialog', { name: 'Choose thermal bridge' })).toHaveAttribute('data-suppress-canvas-keyboard');
     fireEvent.change(screen.getByRole('combobox', { name: 'Junction type for Opening roof-window-lower' }), {
       target: { value: 'R11' },
     });
-    expect(override).toHaveBeenCalledWith(row.proposalId, 'R11');
-    expect(screen.getByRole('button', { name: /Add R2/ })).toBeInTheDocument();
+    expect(add).toHaveBeenCalledWith(row.proposalId, 'R11');
+  });
+
+  it('keeps the hover label active while the pointer or keyboard enters it', () => {
+    const row = candidate('roof-window-lower', 'R2');
+    const onHover = vi.fn();
+    renderControls(preview({
+      candidates: [row],
+      hover: { ids: [row.proposalId], anchor: { x: 100, y: 100 } },
+      onHover,
+    }));
+
+    const label = document.querySelector('.tb-preview-label');
+    expect(label).not.toBeNull();
+    fireEvent.mouseEnter(label!);
+    expect(onHover).toHaveBeenLastCalledWith([row.proposalId], { x: 100, y: 100 });
+    fireEvent.focus(label!);
+    expect(onHover).toHaveBeenLastCalledWith([row.proposalId], { x: 100, y: 100 });
+    fireEvent.mouseLeave(label!);
+    expect(onHover).toHaveBeenLastCalledWith([], { x: 100, y: 100 });
   });
 
   it('adds one selected physical row immediately from an overlap chooser and isolates the canvas click', () => {
@@ -140,7 +160,7 @@ describe('ThermalBridgePreviewControls', () => {
       <ThermalBridgePreviewControls preview={value} width={800} height={600} viewMode="2d" />
     </div>);
 
-    fireEvent.click(screen.getByRole('button', { name: /Add R2 · 1.25 m Opening opening-bottom/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Add Sill of roof window \(R2\) · 1.25 m Opening opening-bottom/ }));
     expect(add).toHaveBeenCalledTimes(1);
     expect(add).toHaveBeenCalledWith(second.proposalId);
     expect(canvasClick).not.toHaveBeenCalled();
@@ -226,7 +246,8 @@ describe('ThermalBridgePreviewControls', () => {
     const detailOption = screen.getByRole('option', { name: /A2 · ψ 0.06 · Detail B/ });
     fireEvent.change(chooser, { target: { value: (detailOption as HTMLOptionElement).value } });
     expect(chooseDetail).toHaveBeenCalledWith(suggestion.groupKey, (detailOption as HTMLOptionElement).value);
-    expect(add).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /Add Steel lintel with perforated steel base plate \(E1\) · 1.25 m Opening wall-detail/ }));
+    expect(add).toHaveBeenCalledWith(row.proposalId);
   });
 
   it('shows a safe empty state when pinned candidate IDs have become stale', () => {
@@ -251,9 +272,12 @@ describe('ThermalBridgePreviewControls', () => {
       hover: { ids: ['issue:tb-warning'], anchor },
       issues: [warning] as never,
       otherFloorCount: 3,
+      unplacedCount: 2,
     }));
 
     expect(screen.getByText('3 suggestions on other floors')).toBeInTheDocument();
+    expect(screen.getByText('2 suggestions need a floor · Add thermal bridges…')).toBeInTheDocument();
+    expect(screen.queryByText(/Review all/)).not.toBeInTheDocument();
     expect(screen.getByText('Junction host could not be verified · Click to inspect')).toBeInTheDocument();
   });
 
@@ -272,6 +296,7 @@ describe('ThermalBridgePreviewControls', () => {
   it('says release A exits preview mode in 3D', () => {
     const row = candidate('opening-bottom', 'R2');
     renderControls(preview({ held: true, candidates: [row] }), '3d');
-    expect(screen.getByText('Click to add · Release A to exit')).toBeInTheDocument();
+    expect(screen.getByText('Release A to exit')).toBeInTheDocument();
+    expect(screen.queryByText(/Click to add/)).not.toBeInTheDocument();
   });
 });
