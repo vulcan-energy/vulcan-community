@@ -252,6 +252,22 @@ describe('planAutoDucts', () => {
     expect(planAutoDucts(unit(), [], [room('n', 'kitchen', 0, 4, 2, 0.15)], floors)).toEqual([]); // no point 0.1 m inside
   });
 
+  it('serves and routes only on the unit storey', () => {
+    // A free supply end on storey 1 above the living room does not serve it.
+    const upstairs = { id: 'u', name: 'U', type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MV', floorId: 'f1', coordinates: [p(0, 0), p(-3, 0)] } as Element;
+    expect(segs(planAutoDucts(unit(), [unit(), upstairs], [rooms[2]!], floors), 'supply')).toEqual([[p(0, 0), p(-3, 0)]]);
+    // An exhaust terminal on storey 1: no duct to it and no second terminal.
+    const wallUp = { ...hosts[0]!, id: 'wu', name: 'Wall Up', floorId: 'f1', coordinates: [p(-5, -3, 1), p(5, -3, 1)] } as Element;
+    const terminalUp = { id: 't', name: 'T', type: 'MechanicalVentilationTerminal', terminal_type: 'exhaust', parent_element: 'MV', host_element: 'Wall Up', floorId: 'f1', coordinates: [p(2, -3, 2.4)] } as Element;
+    expect(planAutoDucts(unit(), [unit(), wallUp, terminalUp], [], floors)).toEqual([]);
+  });
+
+  it('plans every room of a large dwelling, however small', () => {
+    const many = Array.from({ length: 18 }, (_, i) => room(`r${String(i).padStart(2, '0')}`, 'bedroom', 0, i * 5, 0, i === 17 ? 1.6 : 3));
+    const ends = segs(planAutoDucts({ ...unit(), coordinates: [p(-50, -50)] }, [], many, floors), 'supply').map((c) => c[1]!);
+    expect(many.every((r) => ends.some((e) => e.x > r.coordinates[0]!.x && e.x < r.coordinates[1]!.x && e.y > 0 && e.y < 2))).toBe(true);
+  });
+
   it('is deterministic whatever the label order', () => {
     expect(planAutoDucts(unit(), hosts, [...rooms].reverse(), floors)).toEqual(planAutoDucts(unit(), hosts, rooms, floors));
   });

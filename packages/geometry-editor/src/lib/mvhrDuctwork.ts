@@ -12,10 +12,9 @@ import type {
 } from '../geometry/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
 import { getElementCanvasFloorZValue } from './elementCanvasFloor';
-import { orientation360FromSegmentOutwardModelXY } from './openingSegmentOutward';
+import { orientation360FromSegmentOutwardModelXY, polygonPlanCentroid } from './openingSegmentOutward';
 import { planOrthogonalElbow, pointsConnected } from './snapUtils';
 import { isPointInPolygon2D as pointInPolygon } from './pointInPolygon';
-import { polygonCentroid2d } from './spaceInference/remapInferredSpaceLabels';
 import { resolveRoomTypeRule } from './spaceLabelDerivation';
 
 export const MVHR_DUCT_ROLES = ['supply', 'extract', 'intake', 'exhaust'] as const;
@@ -443,8 +442,12 @@ const MVHR_AUTO_DUCT_ROLES = {
 
 /** Run ends sit at least this far inside a room's boundary. */
 const ROOM_END_CLEARANCE_M = 0.1;
-/** Each run's room end is shifted by this times its index, so no two runs ever share an elbow or end. */
+/**
+ * Each run's room end is shifted by this times (its index mod RUN_END_STAGGER_STEPS), so neighbouring
+ * runs never share an elbow or end, and a large plan never pushes a point out of a small room.
+ */
 const RUN_END_STAGGER_M = 0.05;
+const RUN_END_STAGGER_STEPS = 4;
 
 function roomServedByRole(label: SpaceLabel, wet: boolean): boolean {
   const { increments } = resolveRoomTypeRule(label.room_type ?? '').rule;
@@ -462,8 +465,8 @@ function distanceToSegment(p: PlanPoint, a: PlanPoint, b: PlanPoint): number {
  * ROOM_END_CLEARANCE_M to every edge. Null when none does.
  */
 function pointInsideRoom(ring: PlanPoint[], stagger: number): PlanPoint | null {
-  const candidates = [polygonCentroid2d(ring)];
-  for (let i = 1; i + 1 < ring.length; i += 1) candidates.push(polygonCentroid2d([ring[0]!, ring[i]!, ring[i + 1]!]));
+  const candidates = [polygonPlanCentroid(ring)!];
+  for (let i = 1; i + 1 < ring.length; i += 1) candidates.push(polygonPlanCentroid([ring[0]!, ring[i]!, ring[i + 1]!])!);
   for (const c of candidates) {
     const p = { x: roundToTwoDecimals(c.x + stagger), y: roundToTwoDecimals(c.y + stagger) };
     if (!pointInPolygon(p, ring)) continue;
@@ -537,7 +540,8 @@ export function planAutoDucts(
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   let runIndex = 0;
   for (const { role, wet } of roles.rooms) {
-    const roleDucts = unitDucts.filter((duct) => duct.duct_type === role);
+    // Only runs on the unit's storey (the only storey planned) can serve its rooms.
+    const roleDucts = unitDucts.filter((duct) => duct.duct_type === role && getElementCanvasFloorZValue(duct, floors) === unitStorey);
     const ends = roleDucts.map((duct) => ductEndpoints(duct)).filter((e): e is [Point3, Point3] => e !== null);
     // Free run ends: not the unit point, and not a joint or elbow shared with another duct of the role.
     const freeEnds = ends.flatMap((pair, i) => pair.filter((end) =>
@@ -545,7 +549,7 @@ export function planAutoDucts(
     for (const label of labels) {
       if (!roomServedByRole(label, wet)) continue;
       // Every candidate room takes an index, served or not, so a re-run staggers exactly as the first plan did.
-      const stagger = RUN_END_STAGGER_M * runIndex++;
+      const stagger = RUN_END_STAGGER_M * (runIndex++ % RUN_END_STAGGER_STEPS);
       const ring = (label.coordinates ?? []).map((p) => ({ x: p.x, y: p.y }));
       if (ring.length < 3 || freeEnds.some((end) => pointInPolygon(end, ring))) continue;
       const target = pointInsideRoom(ring, stagger);
@@ -576,6 +580,8 @@ export function planAutoDucts(
   for (const role of roles.terminals) {
     if (unitDucts.some((duct) => duct.duct_type === role)) continue;
     const existing = ownTerminalByRole.get(role);
+    // A terminal on another storey is out of reach for now: no duct to it, and no second terminal.
+    if (existing && getElementCanvasFloorZValue(existing, floors) !== unitStorey) continue;
     const existingPoint = existing && getTerminalPoint(existing);
     if (existingPoint) {
       addRun(role, orthogonalRun(unitPoint, existingPoint));
