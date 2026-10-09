@@ -23,6 +23,9 @@ import {
   minimumBackgroundCountIntermittent,
 } from './rules';
 
+/** A vent draft with the sizing this plan always sets. */
+type PlannedVentDraft = Extract<ElementDraft, { type: 'Vents' }> & Pick<Vents, 'area_cm2' | 'mid_height_air_flow_path'>;
+
 interface PlacementContext {
   elements: Element[];
   spaceLabels: SpaceLabel[];
@@ -172,7 +175,7 @@ export function planBackgroundVents(
     storeys: number;
   },
   context: PlacementContext,
-): BatchPlan | null {
+): (BatchPlan & { drafts: PlannedVentDraft[] }) | null {
   const target = backgroundTargetFor(finding, input);
   if (!target) return null;
 
@@ -215,7 +218,7 @@ export function planBackgroundVents(
   const baseSum = baseRoundedArea * countToAdd;
   const residual = totalNeeded > baseSum ? roundUpOneDp(totalNeeded - baseSum) : 0;
 
-  const planned: Array<Extract<ElementDraft, { type: 'Vents' }>> = [];
+  const planned: PlannedVentDraft[] = [];
   for (let i = 0; i < countToAdd; i++) {
     const area = i === 0 ? roundOneDp(baseRoundedArea + residual) : baseRoundedArea;
     if (ranked.length > 0) {
@@ -244,7 +247,7 @@ export function planBackgroundVents(
     }
   }
 
-  const summary = `${planned.length} background vent${planned.length === 1 ? '' : 's'} (${roundOneDp(planned.reduce((s, p) => s + (p.area_cm2 ?? 0), 0))} cm² total)`;
+  const summary = `${planned.length} background vent${planned.length === 1 ? '' : 's'} (${roundOneDp(planned.reduce((s, p) => s + p.area_cm2, 0))} cm² total)`;
 
   return { drafts: planned, summary };
 }
