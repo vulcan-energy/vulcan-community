@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element, MechanicalVentilationDuctwork, MechanicalVentilationTerminal } from '../geometry/types';
+import type {
+  Element,
+  MechanicalVentilation,
+  MechanicalVentilationDuctwork,
+  MechanicalVentilationTerminal,
+} from '../geometry/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
 import { orientation360FromSegmentOutwardModelXY } from './openingSegmentOutward';
 import { pointsConnected } from './snapUtils';
@@ -187,20 +192,33 @@ export function countDuctEndpointComponents(
   return new Set(components.roots).size;
 }
 
+/** Ducts grouped into runs: each run is one endpoint component (ducts joined end to end). */
+export function ductEndpointRuns<T extends Pick<MechanicalVentilationDuctwork, 'coordinates'>>(
+  ducts: ReadonlyArray<T>,
+): T[][] {
+  const valid = ducts.filter((duct) => ductEndpoints(duct) !== null);
+  const { roots } = buildDuctEndpointComponents(valid);
+  const runs = new Map<number, T[]>();
+  valid.forEach((duct, index) => {
+    const root = roots[index]!;
+    runs.set(root, [...(runs.get(root) ?? []), duct]);
+  });
+  return [...runs.values()];
+}
+
+function ductRunTouchesPoint(
+  run: ReadonlyArray<Pick<MechanicalVentilationDuctwork, 'coordinates'>>,
+  point: Point3,
+): boolean {
+  return run.some((duct) => ductEndpoints(duct)!.some((end) => sameDuctPoint(end, point)));
+}
+
 export function allDuctEndpointComponentsConnectToPoint(
   ducts: ReadonlyArray<Pick<MechanicalVentilationDuctwork, 'coordinates'>>,
   point: Point3,
 ): boolean {
-  const components = buildDuctEndpointComponents(ducts);
-  if (components.endpoints.length === 0) return false;
-  const roots = new Set(components.roots);
-  const connectedRoots = new Set<number>();
-  components.endpoints.forEach((endpoints, index) => {
-    if (sameDuctPoint(endpoints[0], point) || sameDuctPoint(endpoints[1], point)) {
-      connectedRoots.add(components.roots[index]!);
-    }
-  });
-  return [...roots].every((root) => connectedRoots.has(root));
+  const runs = ductEndpointRuns(ducts);
+  return runs.length > 0 && runs.every((run) => ductRunTouchesPoint(run, point));
 }
 
 export type MvhrCrossRoleEndpointOverlap = {
@@ -307,4 +325,60 @@ export function terminalIsNearDuctEndpoint(
     }
   }
   return false;
+}
+
+type DuctRunContext = {
+  unitPoint: Point3;
+  roleDucts: MechanicalVentilationDuctwork[];
+  run: MechanicalVentilationDuctwork[];
+};
+
+/**
+ * The duct's run (its endpoint component among same-unit, same-role ducts) and its MVHR unit point,
+ * resolved the way validation resolves them. Null when the unit or the duct's geometry is missing.
+ */
+function ductRunContext(duct: MechanicalVentilationDuctwork, elements: ReadonlyArray<Element>): DuctRunContext | null {
+  const parentName = duct.parent_element?.trim();
+  if (!parentName || !isMvhrDuctRole(duct.duct_type)) return null;
+  const units = elements.filter(
+    (el): el is MechanicalVentilation => el.type === 'MechanicalVentilation' && el.name.trim() === parentName,
+  );
+  const unit = units.length === 1 ? units[0]! : undefined;
+  const unitPoint = unit && unit.vent_type === 'MVHR' ? getFirstPoint3(unit) : undefined;
+  if (!unit || !unitPoint) return null;
+  const roleDucts = elements.filter(
+    (el): el is MechanicalVentilationDuctwork =>
+      el.type === 'MechanicalVentilationDuctwork' &&
+      !el.isPlaceholder &&
+      el.parent_element === unit.name &&
+      el.duct_type === duct.duct_type,
+  );
+  const run = ductEndpointRuns(roleDucts).find((candidate) => candidate.includes(duct));
+  return run ? { unitPoint, roleDucts, run } : null;
+}
+
+/** True when the duct's run reaches its MVHR unit. */
+export function ductRunConnectsToUnit(duct: MechanicalVentilationDuctwork, elements: ReadonlyArray<Element>): boolean {
+  const context = ductRunContext(duct, elements);
+  return !!context && ductRunTouchesPoint(context.run, context.unitPoint);
+}
+
+/**
+ * Where the "Unsnapped vertex" chip goes for a duct whose run the topology check reports as loose:
+ * the run's end nearest the unit, which is where the fix is. A run's far end in a room is never marked.
+ */
+export function looseDuctRunEndNearestUnit(
+  duct: MechanicalVentilationDuctwork,
+  elements: ReadonlyArray<Element>,
+): Point3 | null {
+  const context = ductRunContext(duct, elements);
+  if (!context || ductRunTouchesPoint(context.run, context.unitPoint)) return null;
+  const warnings = collectMvhrDuctTopologyWarnings(context.roleDucts, {
+    unitPoint: context.unitPoint,
+    roles: [duct.duct_type],
+  });
+  if (!warnings.some((w) => w.kind === 'disconnected-role' || w.kind === 'role-not-connected-to-unit')) return null;
+  const ends = context.run.flatMap((runDuct) => ductEndpoints(runDuct)!);
+  return ends.reduce((best, end) =>
+    distance3d(end, context.unitPoint) < distance3d(best, context.unitPoint) ? end : best);
 }

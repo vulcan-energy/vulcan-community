@@ -5,14 +5,20 @@
  * Orphan and mismatch flags for existing {@link ThermalBridgeLinear} elements (suggest-TB modal / health).
  * Pure functions — safe to test without React.
  *
- * Pairwise **overlap** uses {@link overlapLengthBetweenSegmentElements} — **3D** parallel segments within
+ * Pairwise **overlap** uses {@link overlapStretchBetweenSegmentElements} — **3D** parallel segments within
  * perpendicular tolerance ({@link TB_SEGMENT_OVERLAP_LINE_SEP_TOL_M}), not plan-only 2D projection.
  *
  * Each issue has a **category** ({@link LinearThermalBridgeIssueCategory}) for cross-junction grouping
  * and a **kind** ({@link LinearThermalBridgeIssueKind}) for the specific rule. New junction rules should
  * reuse an existing category where possible; add a new `kind` when the message or predicate is new.
  */
-import type { BuildingElementGround, Element, ThermalBridgeLinear } from '../types';
+import type {
+  BuildingElementGround,
+  Element,
+  MechanicalVentilationDuctwork,
+  ThermalBridgeLinear,
+  WaterPipework,
+} from '../types';
 import { JUNCTION_TYPE_ENUM } from '../../lib/simplifiedFabricMap';
 import { e16e17CornerPlanMessage } from './linearTbCornerValidation';
 import {
@@ -30,7 +36,10 @@ import {
   tbPlanAlignmentMessageForMatchedEdge,
 } from './tbLinkage';
 import { validateHostForProposerPattern } from './junctionHostPredicates';
-import { overlapLengthBetweenSegmentElements } from './linearTbSegmentOverlap';
+import { overlapStretchBetweenSegmentElements, type Vec3 } from './linearTbSegmentOverlap';
+import { SERVICE_LINE_ELEMENT_TYPES } from '../../lib/serviceLineDrawModes';
+import { ductEndpoints, ductRunConnectsToUnit } from '../../lib/mvhrDuctwork';
+import { pointsConnected } from '../../lib/snapUtils';
 import { basementFloorSurfaceElevationM, isBasementGroundElement } from '../../lib/basementGeometry';
 
 const JUNCTION_SET = new Set(JUNCTION_TYPE_ENUM);
@@ -75,6 +84,8 @@ export interface LinearThermalBridgeIssue {
   kind: LinearThermalBridgeIssueKind;
   message: string;
   severity: LinearThermalBridgeIssueSeverity;
+  /** Overlap issues only: the shared stretch's two ends (world coords), the same on both issues of a pair. */
+  overlapStretch?: [Vec3, Vec3];
 }
 
 /** Stable mapping from fine-grained kind → general category (one category per kind today). */
@@ -347,20 +358,56 @@ export function findLinearThermalBridgeIssues(elements: Element[] | ReadonlyArra
 }
 
 type ColinearOverlapGroup = {
-  elementType: 'ThermalBridgeLinear' | 'MechanicalVentilationDuctwork' | 'WaterPipework';
   singular: string;
   riskNote: string;
+  /** Pairs of this type that may legitimately share a stretch. */
+  isExempt: (a: Element, b: Element, list: readonly Element[]) => boolean;
 };
 
-const COLINEAR_OVERLAP_GROUPS: readonly ColinearOverlapGroup[] = [
-  { elementType: 'ThermalBridgeLinear', singular: 'thermal bridge', riskNote: 'risk of double-counting ψ·L' },
-  {
-    elementType: 'MechanicalVentilationDuctwork',
+/** Identical end to end: both ends coincide (either direction). */
+function sameSegment(a: Element, b: Element): boolean {
+  const ea = ductEndpoints(a);
+  const eb = ductEndpoints(b);
+  if (!ea || !eb) return false;
+  const same = (p: Vec3, q: Vec3) => pointsConnected(a, p, b, q);
+  return (same(ea[0], eb[0]) && same(ea[1], eb[1])) || (same(ea[0], eb[1]) && same(ea[1], eb[0]));
+}
+
+/**
+ * Different roles or units never clash. Same-role runs that both reach their unit are radial runs
+ * bundled side by side, so they may share a stretch, unless they are the same segment twice.
+ */
+function isExemptDuctOverlap(a: Element, b: Element, list: readonly Element[]): boolean {
+  const da = a as MechanicalVentilationDuctwork;
+  const db = b as MechanicalVentilationDuctwork;
+  if (da.duct_type !== db.duct_type || da.parent_element !== db.parent_element) return true;
+  if (sameSegment(a, b)) return false;
+  return ductRunConnectsToUnit(da, list) && ductRunConnectsToUnit(db, list);
+}
+
+const COLINEAR_OVERLAP_GROUP_BY_TYPE: Record<(typeof SERVICE_LINE_ELEMENT_TYPES)[number], ColinearOverlapGroup> = {
+  ThermalBridgeLinear: {
+    singular: 'thermal bridge',
+    riskNote: 'risk of double-counting ψ·L',
+    isExempt: (a, b) =>
+      shouldSuppressThermalBridgeColinearOverlapPair(
+        junctionTypeFromExtra(extraRecord(a as ThermalBridgeLinear)),
+        junctionTypeFromExtra(extraRecord(b as ThermalBridgeLinear)),
+        a as ThermalBridgeLinear,
+        b as ThermalBridgeLinear,
+      ),
+  },
+  MechanicalVentilationDuctwork: {
     singular: 'duct run',
     riskNote: 'risk of double-counting duct length',
+    isExempt: isExemptDuctOverlap,
   },
-  { elementType: 'WaterPipework', singular: 'pipe run', riskNote: 'risk of double-counting pipe length' },
-];
+  WaterPipework: {
+    singular: 'pipe run',
+    riskNote: 'risk of double-counting pipe length',
+    isExempt: (a, b) => (a as WaterPipework).pipework_type !== (b as WaterPipework).pipework_type,
+  },
+};
 
 function setsEqual(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) return false;
@@ -401,28 +448,24 @@ function shouldSuppressThermalBridgeColinearOverlapPair(
 
 /** TB × TB, duct × duct, pipe × pipe — not cross-type. */
 function appendColinearSegmentOverlapIssues(out: LinearThermalBridgeIssue[], list: readonly Element[]): void {
-  for (const g of COLINEAR_OVERLAP_GROUPS) {
-    const els = list.filter((e) => e.type === g.elementType && !e.isPlaceholder) as Element[];
+  for (const elementType of SERVICE_LINE_ELEMENT_TYPES) {
+    const g = COLINEAR_OVERLAP_GROUP_BY_TYPE[elementType];
+    const els = list.filter((e) => e.type === elementType && !e.isPlaceholder) as Element[];
     for (let i = 0; i < els.length; i++) {
       for (let j = i + 1; j < els.length; j++) {
         const a = els[i]!;
         const b = els[j]!;
-        const overlapLen = overlapLengthBetweenSegmentElements(a, b);
-        if (overlapLen <= 0) continue;
+        const stretch = overlapStretchBetweenSegmentElements(a, b);
+        if (!stretch || g.isExempt(a, b, list)) continue;
+        const overlapLen = stretch.length;
+        const overlapStretch: [Vec3, Vec3] = [stretch.start, stretch.end];
 
-        const jta = g.elementType === 'ThermalBridgeLinear' ? junctionTypeFromExtra(extraRecord(a as ThermalBridgeLinear)) : undefined;
-        const jtb = g.elementType === 'ThermalBridgeLinear' ? junctionTypeFromExtra(extraRecord(b as ThermalBridgeLinear)) : undefined;
-
-        if (
-          g.elementType === 'ThermalBridgeLinear' &&
-          shouldSuppressThermalBridgeColinearOverlapPair(jta, jtb, a as ThermalBridgeLinear, b as ThermalBridgeLinear)
-        ) {
-          continue;
-        }
+        const jta = elementType === 'ThermalBridgeLinear' ? junctionTypeFromExtra(extraRecord(a as ThermalBridgeLinear)) : undefined;
+        const jtb = elementType === 'ThermalBridgeLinear' ? junctionTypeFromExtra(extraRecord(b as ThermalBridgeLinear)) : undefined;
 
         const msg = (other: Element): string => {
           const jtOther =
-            g.elementType === 'ThermalBridgeLinear'
+            elementType === 'ThermalBridgeLinear'
               ? junctionTypeFromExtra(extraRecord(other as ThermalBridgeLinear))
               : undefined;
           const suffix = jtOther ? ` (${jtOther})` : '';
@@ -437,6 +480,7 @@ function appendColinearSegmentOverlapIssues(out: LinearThermalBridgeIssue[], lis
             kind: 'overlap_duplicate_colinear_segment',
             message: msg(b),
             severity: 'error',
+            overlapStretch,
           }),
         );
         out.push(
@@ -447,6 +491,7 @@ function appendColinearSegmentOverlapIssues(out: LinearThermalBridgeIssue[], lis
             kind: 'overlap_duplicate_colinear_segment',
             message: msg(a),
             severity: 'error',
+            overlapStretch,
           }),
         );
       }
