@@ -161,75 +161,95 @@ describe('planAutoDucts', () => {
     { id: 'f0', name: '0', zIndex: 0, height: 2.5, isRoofSpace: false },
     { id: 'f1', name: '1', zIndex: 1, height: 2.5, isRoofSpace: false },
   ] as Floor[];
-  const unit = (vent_type: MechanicalVentilation['vent_type'] = 'MVHR') => ({
+  const unit = (vent_type: MechanicalVentilation['vent_type'] = 'MVHR', x = 0, y = 0) => ({
     id: 'mv', name: 'MV', type: 'MechanicalVentilation', vent_type, parent_element: null, floorId: 'f0',
-    coordinates: [{ x: 0, y: 0, z: 0 }],
+    coordinates: [{ x, y, z: 0 }],
   }) as MechanicalVentilation;
   const host = (id: string, type: string, a: [number, number], b: [number, number]) => ({
     id, name: id, type, parent_element: null, floorId: 'f0',
     coordinates: [{ x: a[0], y: a[1], z: 0 }, { x: b[0], y: b[1], z: 0 }],
   }) as Element;
   const hosts = [host('Wall N', 'BuildingElementOpaque', [-5, -2], [5, -2]), host('Win E', 'BuildingElementTransparent', [7, -5], [7, 5])];
-  const room = (id: string, room_type: string, storey: number, x: number, y: number) => ({
+  const room = (id: string, room_type: string, storey: number, x: number, y: number, w = 2) => ({
     id, name: id, zoneId: 'z', storey, room_type,
-    coordinates: [{ x, y, z: 0 }, { x: x + 2, y, z: 0 }, { x: x + 2, y: y + 2, z: 0 }, { x, y: y + 2, z: 0 }],
+    coordinates: [{ x, y, z: 0 }, { x: x + w, y, z: 0 }, { x: x + w, y: y + 2, z: 0 }, { x, y: y + 2, z: 0 }],
   }) as SpaceLabel;
   const rooms = [
-    room('b-kitchen', 'kitchen', 0, 4, 2), // centre (5, 3): L, x first
-    room('e-bath', 'bathroom', 0, 8, 2), // centre (9, 3): first leg overlaps the kitchen's
-    room('a-living', 'living_room', 0, -4, -1), // centre (-3, 0): on-axis, one leg
-    room('c-bed', 'bedroom', 1, 0, 4), // centre (1, 5), upstairs: L then a riser
+    room('b-kitchen', 'kitchen', 0, 4, 2), // extract run 0: centre (5, 3), L with x first
+    room('e-bath', 'bathroom', 0, 8, 2), // extract run 1: staggered to (9.05, 3.05)
+    room('a-living', 'living_room', 0, -4, -1), // run 2 (indices span roles): (-3, 0) staggered to (-2.9, 0.1)
+    room('c-bed', 'bedroom', 1, 0, 4), // another storey: not planned yet
     room('d-hall', 'hall', 0, 0, 8), // no role
   ];
+  const p = (x: number, y: number, z = 0) => ({ x, y, z });
   const segs = (drafts: ElementDraft[], role: string) =>
     drafts.filter((d) => d.duct_type === role).map((d) => d.coordinates);
   const asElements = (drafts: ElementDraft[]) =>
     drafts.map((d, i) => ({ ...d, id: `p${i}`, name: `P${i}` }) as Element);
+  const overlaps = (els: Element[]) =>
+    findLinearThermalBridgeIssues(els).filter((i) => i.kind === 'overlap_duplicate_colinear_segment');
+  const ducts = (drafts: ElementDraft[]) =>
+    drafts.filter((d) => d.type === 'MechanicalVentilationDuctwork') as unknown as MechanicalVentilationDuctwork[];
 
-  it('routes MVHR extract to wet rooms, supply to habitable rooms, and intake/exhaust to the nearest free hosts', () => {
+  it('routes extract to wet rooms and supply to habitable rooms on the unit storey, with staggered room ends', () => {
     const drafts = planAutoDucts(unit(), [unit(), ...hosts], rooms, floors);
     expect(segs(drafts, 'extract')).toEqual([
-      [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }], [{ x: 5, y: 0, z: 0 }, { x: 5, y: 3, z: 0 }],
-      [{ x: 0, y: 0, z: 0 }, { x: 9, y: 0, z: 0 }], [{ x: 9, y: 0, z: 0 }, { x: 9, y: 3, z: 0 }],
+      [p(0, 0), p(5, 0)], [p(5, 0), p(5, 3)],
+      [p(0, 0), p(9.05, 0)], [p(9.05, 0), p(9.05, 3.05)],
     ]);
-    expect(segs(drafts, 'supply')).toEqual([
-      [{ x: 0, y: 0, z: 0 }, { x: -3, y: 0, z: 0 }],
-      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 5, z: 0 }], [{ x: 0, y: 5, z: 0 }, { x: 1, y: 5, z: 0 }],
-      [{ x: 1, y: 5, z: 0 }, { x: 1, y: 5, z: 2.5 }],
-    ]);
-    expect(drafts.filter((d) => d.duct_type === 'supply').map((d) => d.floorId)).toEqual(['f0', 'f0', 'f0', 'f1']);
-    expect(segs(drafts, 'intake')).toEqual([[{ x: 0, y: 0, z: 0 }, { x: 0, y: -2, z: 0 }]]);
-    expect(segs(drafts, 'exhaust')).toEqual([[{ x: 0, y: 0, z: 0 }, { x: 7, y: 0, z: 0 }]]);
+    expect(segs(drafts, 'supply')).toEqual([[p(0, 0), p(-2.9, 0)], [p(-2.9, 0), p(-2.9, 0.1)]]);
+    expect(drafts.every((d) => d.floorId === 'f0' && d.parent_element === 'MV')).toBe(true);
+  });
+
+  it('builds terminals like the unit panel and ends each terminal duct on the terminal point', () => {
+    const drafts = planAutoDucts(unit(), [unit(), ...hosts], rooms, floors);
+    expect(segs(drafts, 'intake')).toEqual([[p(0, 0), p(0, -2)], [p(0, -2), p(0, -2, 2.4)]]);
+    expect(segs(drafts, 'exhaust')).toEqual([[p(0, 0), p(7, 0)], [p(7, 0), p(7, 0, 2.4)]]);
     expect(drafts.filter((d) => d.type === 'MechanicalVentilationTerminal')).toEqual([
-      expect.objectContaining({ terminal_type: 'intake', host_element: 'Wall N', parent_element: 'MV', coordinates: [{ x: 0, y: -2, z: 0 }] }),
-      expect.objectContaining({ terminal_type: 'exhaust', host_element: 'Win E', parent_element: 'MV', coordinates: [{ x: 7, y: 0, z: 0 }] }),
+      expect.objectContaining({ terminal_type: 'intake', host_element: 'Wall N', coordinates: [p(0, -2, 2.4)] }),
+      expect.objectContaining({ terminal_type: 'exhaust', host_element: 'Win E', coordinates: [p(7, 0, 2.4)] }),
     ]);
-    expect(drafts.filter((d) => d.type === 'MechanicalVentilationDuctwork').every((d) => d.parent_element === 'MV' && d.length! > 0)).toBe(true);
+    // A host taken by any unit's terminal is skipped; an existing terminal without a duct gets one.
+    const other = { id: 't', name: 'T', type: 'MechanicalVentilationTerminal', terminal_type: 'intake', parent_element: 'Other', host_element: 'Wall N', coordinates: [p(1, -2, 2.4)] } as Element;
+    const own = { ...other, id: 'o', name: 'O', terminal_type: 'exhaust', parent_element: 'MV', host_element: null, coordinates: [p(-3, 4, 1.5)] } as Element;
+    const filled = planAutoDucts(unit(), [unit(), ...hosts, other, own], [], floors);
+    expect(filled.find((d) => d.type === 'MechanicalVentilationTerminal')).toMatchObject({ terminal_type: 'intake', host_element: 'Win E' });
+    expect(segs(filled, 'exhaust')).toEqual([[p(0, 0), p(0, 4)], [p(0, 4), p(-3, 4)], [p(-3, 4), p(-3, 4, 1.5)]]);
   });
 
   it('plans a connected network with no topology warnings or overlap errors, and fills only gaps on re-run', () => {
     const drafts = planAutoDucts(unit(), [unit(), ...hosts], rooms, floors);
-    const ducts = drafts.filter((d) => d.type === 'MechanicalVentilationDuctwork') as unknown as MechanicalVentilationDuctwork[];
-    expect(collectMvhrDuctTopologyWarnings(ducts, { unitPoint: { x: 0, y: 0, z: 0 } })).toEqual([]);
+    expect(collectMvhrDuctTopologyWarnings(ducts(drafts), { unitPoint: p(0, 0) })).toEqual([]);
     const all = [unit(), ...hosts, ...asElements(drafts)];
-    const overlaps = (els: Element[]) => findLinearThermalBridgeIssues(els).filter((i) => i.kind === 'overlap_duplicate_colinear_segment');
     expect(overlaps(all)).toEqual([]);
     expect(overlaps(all.slice(1))).not.toEqual([]); // the kitchen and bath legs overlap; only the unit exempts them
-
     expect(planAutoDucts(unit(), all, rooms, floors)).toEqual([]);
-    const withoutBath = all.filter((el) => !(el.type === 'MechanicalVentilationDuctwork' && el.coordinates.some((p) => p.x === 9)));
+    const withoutBath = all.filter((el) => !(el.type === 'MechanicalVentilationDuctwork' && el.coordinates.some((q) => q.x === 9.05)));
     expect(segs(planAutoDucts(unit(), withoutBath, rooms, floors), 'extract')).toEqual(segs(drafts, 'extract').slice(2));
+
+    // Colinear rooms: the kitchen run ends where the bath's elbow would be without the stagger.
+    const colinear = [room('k', 'kitchen', 0, 8, -1), room('m', 'bathroom', 0, 8, 2)];
+    const plan = planAutoDucts(unit(), [unit()], colinear, floors);
+    expect(collectMvhrDuctTopologyWarnings(ducts(plan), { unitPoint: p(0, 0) })).toEqual([]);
+    expect(overlaps([unit(), ...asElements(plan)])).toEqual([]);
   });
 
-  it('plans nothing for non-MVHR units', () => {
+  it('counts only free run ends as serving a room', () => {
+    const joint = [
+      { id: 'j1', name: 'J1', type: 'MechanicalVentilationDuctwork', duct_type: 'extract', parent_element: 'MV', coordinates: [p(0, 0), p(5, 3)] },
+      { id: 'j2', name: 'J2', type: 'MechanicalVentilationDuctwork', duct_type: 'extract', parent_element: 'MV', coordinates: [p(5, 3), p(12, 3)] },
+    ] as Element[];
+    expect(segs(planAutoDucts(unit(), [unit(), ...joint], [rooms[0]!], floors), 'extract')).toEqual([[p(0, 0), p(5, 0)], [p(5, 0), p(5, 3)]]);
+  });
+
+  it('plans nothing for non-MVHR units, without a unit point, or for unreachable rooms', () => {
     expect(planAutoDucts(unit('Centralised continuous MEV'), hosts, rooms, floors)).toEqual([]);
-  });
-
-  it('returns nothing without a unit point, and only intake/exhaust without space labels', () => {
     expect(planAutoDucts({ ...unit(), coordinates: [] }, hosts, rooms, floors)).toEqual([]);
     expect(planAutoDucts(unit(), [], [], floors)).toEqual([]);
-    const drafts = planAutoDucts(unit(), hosts, [], floors);
-    expect(drafts.map((d) => d.duct_type ?? d.terminal_type)).toEqual(['intake', 'intake', 'exhaust', 'exhaust']);
+    expect(planAutoDucts(unit(), hosts, [], floors).map((d) => d.duct_type ?? d.terminal_type))
+      .toEqual(['intake', 'intake', 'intake', 'exhaust', 'exhaust', 'exhaust']);
+    expect(planAutoDucts(unit('MVHR', 5, 3), [], [rooms[0]!], floors)).toEqual([]); // unit on the room point
+    expect(planAutoDucts(unit(), [], [room('n', 'kitchen', 0, 4, 2, 0.15)], floors)).toEqual([]); // no point 0.1 m inside
   });
 
   it('is deterministic whatever the label order', () => {

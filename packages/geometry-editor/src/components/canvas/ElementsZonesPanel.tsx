@@ -4,7 +4,7 @@
 import React, { useCallback, useState, useRef, useEffect, useLayoutEffect, useMemo, memo, useSyncExternalStore } from 'react';
 import { Rnd } from 'react-rnd';
 import type { Element, ElementDraft, ElementType, Zone } from '../../geometry/types';
-import { useGeometryStore, useGeometryStoreApi, validateZone } from '../../stores/geometryStore';
+import { isGlobalObject, useGeometryStore, useGeometryStoreApi, validateZone } from '../../stores/geometryStore';
 import type { ValidationIssue, ValidationResult, MissingElement } from '../../geometry/validation/types';
 import { withTargetIssues } from '../../lib/buildErrorDisplay';
 import { validateSpaceLabels } from '../../geometry/validation/validateSpaceLabels';
@@ -1235,7 +1235,8 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                               // first created element is the user's entry point.
                               if (missing.batchPlan && missing.batchPlan.drafts.length > 0) {
                                 const ids = geometryStore.getState().addElements(
-                                  missing.batchPlan.drafts.map((draft) => ({ ...draft, zoneId: draft.zoneId ?? targetZoneId }) as ElementDraft),
+                                  missing.batchPlan.drafts.map((draft) =>
+                                    isGlobalObject(draft as Element) ? draft : ({ ...draft, zoneId: draft.zoneId ?? targetZoneId }) as ElementDraft),
                                 );
                                 const firstId = ids[0]!;
                                 const firstElement = geometryStore.getState().elementsById[firstId];

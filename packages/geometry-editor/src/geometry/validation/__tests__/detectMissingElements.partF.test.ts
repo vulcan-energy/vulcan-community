@@ -612,16 +612,20 @@ describe('detectMissingElements — MVHR ductwork row', () => {
 
     const row = store.getState().detectMissingElements().find((m) => m.type === 'MechanicalVentilationDuctwork');
     expect(row).toMatchObject({ requiredBy: 'fhs', pillQualifier: 'MVHR 1' });
-    // Kitchen extract L (2) + intake and exhaust: the wall is the only host, so exhaust has none.
+    // Kitchen extract L (2) + intake run and riser to its terminal: the wall is the only host, so exhaust has none.
     expect(row!.batchPlan!.drafts.map((d) => d.type)).toEqual([
-      'MechanicalVentilationDuctwork', 'MechanicalVentilationDuctwork', 'MechanicalVentilationDuctwork', 'MechanicalVentilationTerminal',
+      'MechanicalVentilationDuctwork', 'MechanicalVentilationDuctwork', 'MechanicalVentilationDuctwork',
+      'MechanicalVentilationDuctwork', 'MechanicalVentilationTerminal',
     ]);
 
     const historyBefore = store.getState().history.length;
     const ids = store.getState().addElements(row!.batchPlan!.drafts);
-    expect(ids).toHaveLength(4);
+    expect(ids).toHaveLength(5);
     expect(store.getState().history).toHaveLength(historyBefore + 1);
-    expect(store.getState().elementsById[ids[3]!]).toMatchObject({ host_element: 'Wall', coordinates: [{ x: 0, y: -2, z: 0 }] });
+    const terminal = store.getState().elementsById[ids[4]!]!;
+    expect(terminal).toMatchObject({ host_element: 'Wall', coordinates: [{ x: 0, y: -2, z: 2.4 }] });
+    expect(store.getState().elementsById[ids[3]!]!.coordinates[1]).toEqual(terminal.coordinates[0]);
+    expect(store.getState().validateElement(terminal).issues).toEqual([]);
     expect(store.getState().detectMissingElements().some((m) => m.type === 'MechanicalVentilationDuctwork')).toBe(false);
   });
 });

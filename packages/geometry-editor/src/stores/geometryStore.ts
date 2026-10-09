@@ -297,7 +297,7 @@ export type {
   SpaceLabel,
   SapBuiltFormCode,
 } from '../geometry/types';
-import { isMvhrTerminalHost } from '../lib/mvhrDuctwork';
+import { isMvhrTerminalHost, projectPointToSegment } from '../lib/mvhrDuctwork';
 
 type GeometryStoreDropProbe = {
   active?: boolean;
@@ -1925,22 +1925,6 @@ const getTerminalHostLineCoordinates = (
     return null;
   }
   return host.coordinates as [ElementCoordinate, ElementCoordinate];
-};
-
-const projectPointToSegment = (
-  point: ElementCoordinate,
-  segment: [ElementCoordinate, ElementCoordinate],
-): ElementCoordinate => {
-  const [a, b] = segment;
-  const vx = b.x - a.x;
-  const vy = b.y - a.y;
-  const v2 = vx * vx + vy * vy || 1;
-  const t = Math.max(0, Math.min(1, ((point.x - a.x) * vx + (point.y - a.y) * vy) / v2));
-  return {
-    x: a.x + t * vx,
-    y: a.y + t * vy,
-    z: point.z ?? a.z,
-  };
 };
 
 /**

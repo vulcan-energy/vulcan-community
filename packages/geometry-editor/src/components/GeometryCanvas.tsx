@@ -125,6 +125,7 @@ import {
 } from '../lib/serviceLineDrawModes';
 import { roundToTwoDecimals } from '../geometry/constants';
 import {
+  DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M,
   getMechanicalVentilationDuctworkRoleStyle,
   getFirstPoint3,
   isMvhrTerminalHost,
@@ -1016,8 +1017,6 @@ const renderCanvasMeasurementPill = (
     </Group>
   );
 };
-
-const DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M = 2.4;
 
 function projectPlanPointToSegment(
   point: { x: number; y: number },

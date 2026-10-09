@@ -185,6 +185,7 @@ export function checkGeometryCsv(csvArg: string) {
     complianceValidationEnabled,
     parsed.metadata.complianceSettings.PartO_active_cooling_required,
     partFData?.context,
+    floors,
   );
 
   const criticalRows = rows.filter((row) => row.severity === 'critical');
