@@ -149,6 +149,8 @@ export interface UseKeyboardShortcutsDeps {
   setOrthogonalRoomStart: (v: { x: number; y: number } | null) => void;
   setOrthogonalRoomEnd: (v: { x: number; y: number } | null) => void;
   resetDrawing: () => void;
+  /** A draft is in progress (points, room walls or an orthogonal-room start). */
+  drawDraftInProgress?: boolean;
 
   // Undo/redo
   undo: () => void;
@@ -212,6 +214,7 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
     selectAllElementsOnCurrentFloor,
     setMarqueeSelection,
     drawMode,
+    drawDraftInProgress = false,
     setDrawMode,
     setDrawPoints,
     setRoomWalls,
@@ -371,6 +374,8 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
               break;
             }
             if (isServiceLineElementType(drawElementType)) {
+              // Re-selecting the current mode mid-draft is a no-op, so the draft survives.
+              if (drawMode === 'tb-slope-line' && drawDraftInProgress) break;
               setDrawMode(drawMode === 'tb-slope-line' ? 'none' : 'tb-slope-line');
               setDrawPoints([]);
             } else if ((selection?.type === 'element' || selection?.type === 'global') && hoverPoint) {
@@ -461,6 +466,9 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
             const shortcut = resolveDrawModeShortcut(e.key, drawElementType);
             if (!shortcut) break;
             e.preventDefault();
+            // Re-selecting the current mode mid-draft (e.g. Shift+L mid-duct) is a no-op, so the
+            // draft survives; when idle it toggles drawing off.
+            if (drawMode === shortcut.mode && drawDraftInProgress) break;
             setDrawMode(drawMode === shortcut.mode ? 'none' : shortcut.mode);
             setDrawPoints([]);
             if (shortcut.reset === 'room' || shortcut.reset === 'orthogonal-room') {
@@ -495,6 +503,7 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
     spaceLabelHoverPoint,
     spaceLabelsById,
     drawMode,
+    drawDraftInProgress,
     drawElementType,
     setDrawMode,
     setDrawPoints,

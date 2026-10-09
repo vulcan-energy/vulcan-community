@@ -281,7 +281,7 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
           multiDrawModifierHeld,
           !!drawElbow,
         );
-        const tooltipText = baseTooltipText && (drawElementType === 'ThermalBridgeLinear' || drawElementType === 'MechanicalVentilationDuctwork')
+        const tooltipText = baseTooltipText && drawPoints.length === 0 && (drawElementType === 'ThermalBridgeLinear' || drawElementType === 'MechanicalVentilationDuctwork')
           ? `${baseTooltipText} · Hold A for suggestions`
           : baseTooltipText;
         const canvasPos = w2c(placementPoint);
@@ -298,8 +298,9 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
             />
             {tooltipText &&
               renderDrawModeTooltipPill(tooltipText, {
-                x: canvasPos.x - tooltipWidth / 2,
-                y: canvasPos.y - 15 - DRAW_MODE_TOOLTIP_PILL_HEIGHT,
+                // Keep the pill inside the canvas (canvasCenter is half the stage size).
+                x: Math.max(4, Math.min(canvasPos.x - tooltipWidth / 2, canvasCenter.x * 2 - tooltipWidth - 4)),
+                y: Math.max(4, Math.min(canvasPos.y - 15 - DRAW_MODE_TOOLTIP_PILL_HEIGHT, canvasCenter.y * 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT - 4)),
               }, palette)}
           </Group>
         );

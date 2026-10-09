@@ -147,3 +147,25 @@ describe('temporary suggestion preview keyboard ownership', () => {
     expect(deps.undo).toHaveBeenCalledOnce();
   });
 });
+
+describe('shape shortcut for the current draw mode mid-draft', () => {
+  it.each([
+    ['L', 'tb-plan-line', 'MechanicalVentilationDuctwork'], // Shift+L mid-duct
+    ['l', 'tb-plan-line', 'WaterPipework'],
+    ['s', 'tb-slope-line', 'ThermalBridgeLinear'],
+    ['p', 'polygon', 'BuildingElementOpaque'],
+  ] as const)('%s in %s mid-draft keeps the mode and the draft', (key, drawMode, drawElementType) => {
+    const deps = buildDeps({ drawMode, drawElementType, drawDraftInProgress: true });
+    renderHook(() => useKeyboardShortcuts(deps));
+    press(key);
+    expect(deps.setDrawMode).not.toHaveBeenCalled();
+    expect(deps.setDrawPoints).not.toHaveBeenCalled();
+  });
+
+  it('toggles drawing off when idle', () => {
+    const deps = buildDeps({ drawMode: 'tb-plan-line', drawElementType: 'MechanicalVentilationDuctwork' });
+    renderHook(() => useKeyboardShortcuts(deps));
+    press('l');
+    expect(deps.setDrawMode).toHaveBeenCalledWith('none');
+  });
+});

@@ -537,6 +537,7 @@ function getWindowShadingObjectScreenGeometry(
 }
 
 const UNSNAPPED_VERTEX_CHIP_TEXT = 'Unsnapped vertex';
+const DISCONNECTED_DUCT_CHIP_TEXT = 'Disconnected';
 const UNSNAPPED_VERTEX_CHIP_FONT_SIZE = 11;
 const UNSNAPPED_VERTEX_CHIP_HEIGHT = 20;
 const UNSNAPPED_VERTEX_CHIP_PADDING_X = 8;
@@ -566,8 +567,9 @@ function renderUnsnappedVertexChip(
   handleRadius: number,
   key: string,
   palette: CanvasInteractionPalette,
+  text = UNSNAPPED_VERTEX_CHIP_TEXT,
 ): React.ReactNode {
-  const width = (UNSNAPPED_VERTEX_CHIP_TEXT.length * UNSNAPPED_VERTEX_CHIP_CHAR_WIDTH) + (UNSNAPPED_VERTEX_CHIP_PADDING_X * 2);
+  const width = (text.length * UNSNAPPED_VERTEX_CHIP_CHAR_WIDTH) + (UNSNAPPED_VERTEX_CHIP_PADDING_X * 2);
   const x = position.x - (width / 2);
   const y = position.y - handleRadius - UNSNAPPED_VERTEX_CHIP_HEIGHT - UNSNAPPED_VERTEX_CHIP_OFFSET_Y;
 
@@ -588,7 +590,7 @@ function renderUnsnappedVertexChip(
         x={x + UNSNAPPED_VERTEX_CHIP_PADDING_X}
         y={y + 4}
         width={width - (UNSNAPPED_VERTEX_CHIP_PADDING_X * 2)}
-        text={UNSNAPPED_VERTEX_CHIP_TEXT}
+        text={text}
         fontSize={UNSNAPPED_VERTEX_CHIP_FONT_SIZE}
         fill={palette.warningOnFill}
         align="center"
@@ -1535,6 +1537,16 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   const elementFill = typeColor.fill || elementColor;
   const hoverStroke = isHoveredFromMenu ? canvasElementPalette.hover : elementColor;
   const showUnsnappedVertexGuidance = drawMode === 'none' && shouldShowUnsnappedVertexGuidance(element, shape);
+  // Polygon vertex chips render in their own pass after every handle, so they paint above them.
+  const renderPolygonVertexChips = () => isSelected && showUnsnappedVertexGuidance && canvasCoords.map((coord, index) => {
+    const isHostedPolygonOpening =
+      element.type === 'BuildingElementTransparent' &&
+      !!(element as { parent_element?: string | null }).parent_element &&
+      coordinates.length >= 3;
+    if ((snappedVertices?.has(index) ?? false) || isHostedPolygonOpening) return null;
+    const isVertexSelected = selectedVertex?.elementId === element.id && selectedVertex?.vertexIndex === index;
+    return renderUnsnappedVertexChip(coord, isVertexSelected ? 6 : 4, `unsnapped-chip-${element.id}-${index}`, canvasInteractionPalette);
+  });
 
   // Render point elements (single coordinate)
   if (shape === 'point') {
@@ -2027,13 +2039,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
 
             return (
               <>
-                {showUnsnappedVertexGuidance && !startSnapped && renderUnsnappedVertexChip(start, 6, `unsnapped-chip-${element.id}-0`, canvasInteractionPalette)}
-                {drawMode === 'none' && looseDuctRunEnd && renderUnsnappedVertexChip(
-                  worldToCanvas(looseDuctRunEnd, scale, panOffset, canvasCenter),
-                  6,
-                  `unsnapped-chip-${element.id}-run`,
-                  canvasInteractionPalette,
-                )}
                 <Circle
                   name={`vertex-${element.id}-0`}
                   x={start.x}
@@ -2254,7 +2259,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   cleanupVertexInteractionAfterDragEnd(draggedNode);
                 }}
               />
-                {showUnsnappedVertexGuidance && !endSnapped && renderUnsnappedVertexChip(end, 6, `unsnapped-chip-${element.id}-1`, canvasInteractionPalette)}
                 <Circle
                   name={`vertex-${element.id}-1`}
                   x={end.x}
@@ -2460,6 +2464,16 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   cleanupVertexInteractionAfterDragEnd(draggedNode);
                 }}
               />
+                {/* Chips paint after the handles so they sit above them. */}
+                {showUnsnappedVertexGuidance && !startSnapped && renderUnsnappedVertexChip(start, 6, `unsnapped-chip-${element.id}-0`, canvasInteractionPalette)}
+                {showUnsnappedVertexGuidance && !endSnapped && renderUnsnappedVertexChip(end, 6, `unsnapped-chip-${element.id}-1`, canvasInteractionPalette)}
+                {drawMode === 'none' && looseDuctRunEnd && renderUnsnappedVertexChip(
+                  worldToCanvas(looseDuctRunEnd, scale, panOffset, canvasCenter),
+                  6,
+                  `unsnapped-chip-${element.id}-run`,
+                  canvasInteractionPalette,
+                  DISCONNECTED_DUCT_CHIP_TEXT,
+                )}
               </>
             );
           })()}
@@ -2565,7 +2579,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
 
             return (
               <React.Fragment key={index}>
-                {showUnsnappedVertexGuidance && !isHandleHostSnapped && renderUnsnappedVertexChip(coord, handleRadius, `unsnapped-chip-${element.id}-${index}`, canvasInteractionPalette)}
                 <Circle
                   name={`vertex-${element.id}-${index}`}
                   x={coord.x}
@@ -2829,6 +2842,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               </React.Fragment>
             );
           })}
+          {renderPolygonVertexChips()}
 
           {/* ContextShading Visual Arc */}
           {isSelected && element.type === 'ContextShading' && (element as any).parent_element && (
@@ -3173,7 +3187,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
 
             return (
               <React.Fragment key={index}>
-                {showUnsnappedVertexGuidance && !isHandleHostSnapped && renderUnsnappedVertexChip(coord, handleRadius, `unsnapped-chip-${element.id}-${index}`, canvasInteractionPalette)}
                 <Circle
                   name={`vertex-${element.id}-${index}`}
                   x={coord.x}
@@ -3323,6 +3336,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               </React.Fragment>
             );
           })}
+          {renderPolygonVertexChips()}
 
         </Group>
       );

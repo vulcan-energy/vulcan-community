@@ -15,7 +15,7 @@ vi.mock('react-konva', () => {
     <div data-testid="konva-line" data-points={JSON.stringify(points ?? [])} data-stroke={stroke ?? ''} />
   );
   const Circle = ({ fill }: { fill?: string }) => <div data-testid="konva-circle" data-fill={fill ?? ''} />;
-  const Rect = ({ fill }: { fill?: string }) => <div data-testid="konva-rect" data-fill={fill ?? ''} />;
+  const Rect = ({ fill, y }: { fill?: string; y?: number }) => <div data-testid="konva-rect" data-fill={fill ?? ''} data-y={y} />;
   const Text = ({ text, fill }: { text?: string; fill?: string }) => (
     <div data-testid="konva-text" data-text={text ?? ''} data-fill={fill ?? ''} />
   );
@@ -80,6 +80,29 @@ describe('DrawingPreview', () => {
   });
 });
 
+describe('draw-mode pill', () => {
+  const pill = (drawPoints: Array<{ x: number; y: number }>) => {
+    const view = render(<DrawingPreview {...previewProps({
+      drawMode: 'tb-plan-line', drawElementType: 'MechanicalVentilationDuctwork', drawPoints,
+      drawCursor: { x: 0, y: 9.5 }, canvasCenter: { x: 400, y: 100 },
+    })} />);
+    const text = view.getAllByTestId('konva-text').map((node) => node.getAttribute('data-text')).find((t) => t?.startsWith('Place'));
+    const y = Number(view.getAllByTestId('konva-rect').find((node) => node.getAttribute('data-fill') === sharedDrawingPalette.snap)?.getAttribute('data-y'));
+    view.unmount();
+    return { text, y };
+  };
+
+  it('offers Hold A only before the first point', () => {
+    expect(pill([]).text).toBe('Place first point · Hold A for suggestions');
+    expect(pill([{ x: 0, y: 0 }]).text).not.toContain('Hold A');
+  });
+
+  it('stays inside the canvas vertically', () => {
+    // The cursor sits 5 px below the canvas top; unclamped, the pill would start above it.
+    expect(pill([]).y).toBe(4);
+  });
+});
+
 describe('tooltip copy', () => {
   const text = (mode: DrawMode, n: number, held: boolean, type: ElementType = 'BuildingElementOpaque') =>
     getDrawModeTooltipText(mode, Array(n).fill({ x: 0, y: 0 }), [], null, null, null, { current: null }, type, held);
@@ -89,24 +112,25 @@ describe('tooltip copy', () => {
     expect(text('point', 0, true)).toBe('Place object + continue');
     expect(text('line', 1, false)).toBe('Place final point (Alt/Option+Click for multi-draw)');
     expect(text('line', 1, true)).toBe('Place end point + continue');
-    expect(text('tb-plan-line', 1, false)).toBe('Place final point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
-    expect(text('tb-plan-line', 1, true)).toBe('Place end point + continue (P/V/S switches shape)');
-    expect(text('tb-vertical-line', 0, false)).toBe('Place vertical run (Alt/Option+Click to keep drawing; P/V/S switches shape)');
-    expect(text('tb-vertical-line', 0, true)).toBe('Place vertical run + continue (P/V/S switches shape)');
-    expect(text('tb-vertical-line', 1, false)).toBe('Create vertical run from current point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
-    expect(text('tb-vertical-line', 1, true)).toBe('Create vertical run + continue (P/V/S switches shape)');
-    expect(text('tb-slope-line', 1, false)).toBe('Place second point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
-    expect(text('tb-slope-line', 1, true)).toBe('Place end point + continue (P/V/S switches shape)');
+    expect(text('tb-plan-line', 1, false)).toBe('Place final point (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-plan-line', 1, true)).toBe('Place end point + continue (L/V/S switches shape)');
+    expect(text('tb-vertical-line', 0, false)).toBe('Place vertical run (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-vertical-line', 0, true)).toBe('Place vertical run + continue (L/V/S switches shape)');
+    expect(text('tb-vertical-line', 1, false)).toBe('Create vertical run from current point (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-vertical-line', 1, true)).toBe('Create vertical run + continue (L/V/S switches shape)');
+    expect(text('tb-slope-line', 1, false)).toBe('Place second point (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-slope-line', 1, true)).toBe('Place end point + continue (L/V/S switches shape)');
   });
 
-  it('adds the L-route hint on the duct and pipe plan tool only', () => {
-    const base = 'Place final point (Alt/Option+Click to keep drawing; P/V/S switches shape)';
-    expect(text('tb-plan-line', 1, false, 'MechanicalVentilationDuctwork')).toBe(`${base} · Shift L`);
+  it('adds the L-bend hint on the duct and pipe plan tool, which drop the shape-switch clause', () => {
+    expect(text('tb-plan-line', 1, false, 'MechanicalVentilationDuctwork'))
+      .toBe('Place final point (Alt/Option+Click to keep drawing) · Shift: L-bend');
     expect(
       getDrawModeTooltipText('tb-plan-line', [{ x: 0, y: 0 }], [], null, null, null, { current: null }, 'WaterPipework', true, true),
-    ).toBe('Place end point + continue (P/V/S switches shape) · F flip');
-    expect(text('tb-plan-line', 1, false, 'ThermalBridgeLinear')).toBe(base);
-    expect(text('tb-slope-line', 1, false, 'WaterPipework')).toBe('Place second point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
+    ).toBe('Place end point + continue · F: flip bend');
+    expect(text('tb-plan-line', 1, false, 'ThermalBridgeLinear'))
+      .toBe('Place final point (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-slope-line', 1, false, 'WaterPipework')).toBe('Place second point (Alt/Option+Click to keep drawing)');
   });
 
   it('hover hints', () => {
@@ -114,8 +138,8 @@ describe('tooltip copy', () => {
     expect(getHoverHintText({ kind: 'rotate-grip', dragging: true })).toBeNull();
     expect(getHoverHintText({ kind: 'vertex', dragging: true })).toBe('Shift: no snap');
     expect(getHoverHintText({ kind: 'body', dragging: false })).toBeNull();
-    expect(getHoverHintText({ kind: 'body', dragging: false, connected: true })).toBe('Alt moves connected');
-    expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: true })).toBe('Alt moves connected');
+    expect(getHoverHintText({ kind: 'body', dragging: false, connected: true })).toBe('Alt: move connected');
+    expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: true })).toBe('Alt: move connected');
     expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: false })).toBeNull();
     expect(getHoverHintText({ kind: 'label-vertex', dragging: false })).toBeNull();
   });

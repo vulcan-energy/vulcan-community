@@ -364,7 +364,7 @@ export function ductRunUnitPoint(
 }
 
 /**
- * Where the "Unsnapped vertex" chip goes for a duct whose run the topology check reports as loose:
+ * Where the "Disconnected" chip goes for a duct whose run the topology check reports as loose:
  * the run's end nearest the unit, which is where the fix is. A run's far end in a room is never marked.
  */
 export function looseDuctRunEndNearestUnit(
