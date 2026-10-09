@@ -527,7 +527,10 @@ export function planAutoDucts(
   );
   // Every duct vertex of this unit, existing or planned, bar the unit point: a new run may not
   // share one (a shared joint away from the unit is a topology warning or an overlap error).
-  const takenPoints = unitDucts.flatMap((duct) => ductEndpoints(duct) ?? []).filter((q) => !sameDuctPoint(q, unitPoint));
+  const takenPoints: Point3[] = [];
+  for (const duct of unitDucts) {
+    for (const q of ductEndpoints(duct) ?? []) if (!sameDuctPoint(q, unitPoint)) takenPoints.push(q);
+  }
   const drafts: ElementDraft[] = [];
   const addRun = (role: MvhrDuctRole, points: Point3[], endFloorId = unitFloorId) => {
     for (let i = 0; i + 1 < points.length; i += 1) {
@@ -560,9 +563,13 @@ export function planAutoDucts(
     const roleDucts = unitDucts.filter((duct) => duct.duct_type === role);
     const ends = roleDucts.map((duct) => ductEndpoints(duct));
     // Free run ends with their duct's storey: not the unit point, and not a joint or elbow shared with another duct of the role.
-    const freeEnds = roleDucts.flatMap((duct, i) => (ends[i] ?? []).filter((end) =>
-      !sameDuctPoint(end, unitPoint) && !ends.some((other, j) => j !== i && other?.some((q) => sameDuctPoint(q, end))))
-      .map((end) => ({ end, storey: getElementCanvasFloorZValue(duct, effectiveFloors) })));
+    const freeEnds: Array<{ end: Point3; storey: number | undefined }> = [];
+    roleDucts.forEach((duct, i) => {
+      for (const end of ends[i] ?? []) {
+        if (sameDuctPoint(end, unitPoint) || ends.some((other, j) => j !== i && other?.some((q) => sameDuctPoint(q, end)))) continue;
+        freeEnds.push({ end, storey: getElementCanvasFloorZValue(duct, effectiveFloors) });
+      }
+    });
     for (const { label, floor, z } of labels) {
       if (!roomServedByRole(label, wet)) continue;
       // Every candidate room takes an index, served or not, so a re-run staggers exactly as the first plan did.
