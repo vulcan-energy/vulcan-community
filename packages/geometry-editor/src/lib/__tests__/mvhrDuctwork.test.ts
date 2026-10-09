@@ -221,12 +221,8 @@ describe('planAutoDucts', () => {
     expect(segs(planAutoDucts(unit(), withoutBath, rooms, floors), 'extract')).toEqual(segs(drafts, 'extract').slice(2));
   });
 
-  it('gives centralised MEV extract and exhaust only, and other unit types nothing', () => {
-    const drafts = planAutoDucts(unit('Centralised continuous MEV'), hosts, rooms, floors);
-    expect([...new Set(drafts.map((d) => d.duct_type ?? d.terminal_type))]).toEqual(['extract', 'exhaust']);
-    expect(drafts.find((d) => d.type === 'MechanicalVentilationTerminal')?.host_element).toBe('Wall N');
-    expect(planAutoDucts(unit('Decentralised continuous MEV'), hosts, rooms, floors)).toEqual([]);
-    expect(planAutoDucts(unit('Intermittent MEV'), hosts, rooms, floors)).toEqual([]);
+  it('plans nothing for non-MVHR units', () => {
+    expect(planAutoDucts(unit('Centralised continuous MEV'), hosts, rooms, floors)).toEqual([]);
   });
 
   it('returns nothing without a unit point, and only intake/exhaust without space labels', () => {

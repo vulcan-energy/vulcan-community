@@ -397,13 +397,10 @@ export function looseDuctRunEndNearestUnit(
 
 type PlanPoint = { x: number; y: number };
 
-/** Room roles and terminal roles each unit type gets ductwork for. Unlisted types get none. */
-const AUTO_DUCT_ROLES: Partial<Record<MechanicalVentilation['vent_type'], {
-  rooms: Array<{ role: MvhrDuctRole; wet: boolean }>;
-  terminals: MvhrTerminalRole[];
-}>> = {
-  MVHR: { rooms: [{ role: 'extract', wet: true }, { role: 'supply', wet: false }], terminals: ['intake', 'exhaust'] },
-  'Centralised continuous MEV': { rooms: [{ role: 'extract', wet: true }], terminals: ['exhaust'] },
+/** HEM takes ductwork only for MVHR: extract to wet rooms, supply to habitable rooms, intake and exhaust. */
+const MVHR_AUTO_DUCT_ROLES = {
+  rooms: [{ role: 'extract', wet: true }, { role: 'supply', wet: false }] as Array<{ role: MvhrDuctRole; wet: boolean }>,
+  terminals: ['intake', 'exhaust'] as MvhrTerminalRole[],
 };
 
 function roomServedByRole(label: SpaceLabel, wet: boolean): boolean {
@@ -436,8 +433,8 @@ function projectOntoSegment(p: PlanPoint, a: PlanPoint, b: PlanPoint): PlanPoint
 }
 
 /**
- * Auto-duct plan for one ventilation unit: one radial run per wet room (extract) and, for MVHR,
- * per habitable room (supply), from the unit point to a point inside the room's space label, plus
+ * Auto-duct plan for one MVHR unit (other unit types get none): one radial run per wet room
+ * (extract) and per habitable room (supply), from the unit point to a point inside the room's space label, plus
  * a run to the nearest free external host and an intake or exhaust terminal on it. Each segment is
  * its own duct draft; consecutive segments share exact endpoints so each run is one connected
  * component touching the unit.
@@ -456,7 +453,7 @@ export function planAutoDucts(
   spaceLabels: readonly SpaceLabel[],
   floors: Floor[],
 ): ElementDraft[] {
-  const roles = AUTO_DUCT_ROLES[unit.vent_type];
+  const roles = unit.vent_type === 'MVHR' ? MVHR_AUTO_DUCT_ROLES : null;
   const unitPoint = getFirstPoint3(unit);
   const unitStorey = getElementCanvasFloorZValue(unit, floors);
   const floorIdByStorey = new Map(floors.map((floor) => [floor.zIndex, floor.id]));

@@ -398,8 +398,8 @@ export const detectMissingElements = (
       });
     }
 
-    // An MVHR with no ductwork at all: the CTA routes it (planAutoDucts). Centralised MEV is
-    // planned too, but duct and terminal parents must be MVHR today, so it gets no row yet.
+    // An MVHR with no ductwork at all: the CTA routes it (planAutoDucts). HEM takes ductwork only
+    // for MVHR, so other unit types get no row.
     for (const unit of elements) {
       if (unit.isPlaceholder || unit.type !== 'MechanicalVentilation' || unit.vent_type !== 'MVHR') continue;
       const hasDuctwork = elements.some((el) =>
