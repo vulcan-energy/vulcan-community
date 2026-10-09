@@ -93,13 +93,13 @@ export type HoverHintTarget = {
 
 /** Hint for a selected element's drag handle; null means native cursor only. */
 export function getHoverHintText(target: HoverHintTarget): string | null {
+  // Before a drag: the handle's base action, then its modifier. During one: only the modifier.
   if (target.kind === 'rotate-grip') return target.dragging ? null : 'Drag to rotate';
-  if (target.kind === 'vertex') return 'Shift: no snap';
-  if (target.kind === 'body' && target.connected && (!target.dragging || target.altHeld)) {
-    return 'Alt: move connected';
-  }
-  // label-vertex: Shift is orthogonal lock there, so cursor only.
-  return null;
+  if (target.kind === 'vertex') return target.dragging ? 'Shift: no snap' : 'Drag to reshape · Shift: no snap';
+  // label-vertex: Shift is orthogonal lock there, so no modifier hint.
+  if (target.kind === 'label-vertex') return target.dragging ? null : 'Drag to reshape';
+  if (target.dragging) return target.connected && target.altHeld ? 'Alt: move connected' : null;
+  return target.connected ? 'Drag to move · Alt: move connected' : 'Drag to move';
 }
 
 // Helper: Get tooltip text based on draw mode and state
