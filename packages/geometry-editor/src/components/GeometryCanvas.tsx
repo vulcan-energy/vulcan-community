@@ -4457,11 +4457,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     const neighbours = selectedElementIds.length > 1
       ? []
       : findConnectedDragNeighbours(element, elementsById as Record<string, Element>);
-    target.setAttrs({
-      connectedNeighbours: neighbours,
-      connectedStartPos: { x: target.x(), y: target.y() },
-      connectedAlt: false,
-    });
+    target.setAttr('connectedNeighbours', neighbours);
+    target.setAttr('connectedStartPos', { x: target.x(), y: target.y() });
+    target.setAttr('connectedAlt', false);
     return neighbours.map(({ elementId }) => ({ elementId, coordinateCount: 2 }));
   };
   // Per dragmove: the neighbours to carry while Alt is held, else null. Releasing Alt mid-drag
@@ -4488,7 +4486,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     const connected = target.getAttr('connectedAlt') === true && neighbours?.length
       ? { neighbours, moved: planConnectedDragFromHandle(target, element, neighbours) }
       : null;
-    target.setAttrs({ connectedNeighbours: null, connectedStartPos: null, connectedAlt: null });
+    target.setAttr('connectedNeighbours', null);
+    target.setAttr('connectedStartPos', null);
+    target.setAttr('connectedAlt', null);
     return connected;
   };
   const planConnectedDragFromHandle = (
