@@ -152,4 +152,37 @@ describe('getSmartLabelPillTexts', () => {
 
     expect(rectsOverlap(rectA, rectB)).toBe(false);
   });
+
+  it('places priority labels first and marks unplaceable ones as colliding instead of stacking them', () => {
+    const projectIdentity = (coord: { x: number; y: number }) => ({ x: coord.x, y: coord.y });
+    const stacked = Array.from({ length: 30 }, (_, index) => ({
+      id: `stack-${String(index).padStart(2, '0')}`,
+      name: 'Light',
+      type: 'Lighting',
+      parent_element: null,
+      coordinates: [{ x: 200, y: 200, z: 0 }],
+    })) as any[];
+    const priorityId = 'stack-29';
+
+    const positions = calculateMemoizedLabelPositions(
+      stacked,
+      { width: 800, height: 600 },
+      false,
+      projectIdentity,
+      1,
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+      [],
+      new Set([priorityId]),
+    );
+
+    expect(positions.get(priorityId)?.rect.collides).toBeUndefined();
+    const placed = stacked.map((e) => positions.get(e.id)!.rect).filter((rect) => !rect.collides);
+    expect(placed.length).toBeLessThan(stacked.length);
+    for (let i = 0; i < placed.length; i += 1) {
+      for (let j = i + 1; j < placed.length; j += 1) {
+        expect(rectsOverlap(placed[i], placed[j])).toBe(false);
+      }
+    }
+  });
 });

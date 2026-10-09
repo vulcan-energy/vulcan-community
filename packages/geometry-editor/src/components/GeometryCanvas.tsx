@@ -226,6 +226,8 @@ import { getElementCanvasFloorZValue, isElementOnActiveCanvasFloor, mergeService
 import { partitionElementCanvasDataByFloor } from '../lib/geometryCanvasLayerPartition';
 import {
   getDrawModeTooltipPillWidth,
+  getUnsnappedVertexChipRect,
+  shouldShowUnsnappedVertexGuidance,
   DRAW_MODE_TOOLTIP_PILL_FONT_FAMILY,
   DRAW_MODE_TOOLTIP_PILL_HEIGHT,
   DRAW_MODE_TOOLTIP_PILL_PADDING,
@@ -985,6 +987,31 @@ const renderSmartLabel = (
     </Group>
   );
 };
+
+/** An opening's side-distance pill in canvas space: drawn by the guidance, avoided by labels. */
+function getLineOpeningClearancePill(
+  clearance: LineHostedOpeningClearance,
+  side: LineOpeningClearanceSide,
+  scale: number,
+  panOffset: { x: number; y: number },
+  canvasCenter: { x: number; y: number },
+) {
+  const segment = side === 'start' ? clearance.startGuideSegment : clearance.endGuideSegment;
+  const distanceM = side === 'start' ? clearance.startDistanceM : clearance.endDistanceM;
+  const a = worldToCanvas(segment[0], scale, panOffset, canvasCenter);
+  const b = worldToCanvas(segment[1], scale, panOffset, canvasCenter);
+  const text = `${distanceM.toFixed(2)}m`;
+  const width = getDrawModeTooltipPillWidth(text);
+  return {
+    a,
+    b,
+    text,
+    x: (a.x + b.x) / 2 - width / 2,
+    y: (a.y + b.y) / 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2,
+    width,
+    height: DRAW_MODE_TOOLTIP_PILL_HEIGHT,
+  };
+}
 
 const renderCanvasMeasurementPill = (
   text: string,
@@ -4862,15 +4889,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       : canvasInteractionPalette.warningGuide;
 
     const renderSide = (side: LineOpeningClearanceSide) => {
-      const segment = side === 'start' ? clearance.startGuideSegment : clearance.endGuideSegment;
-      const distanceM = side === 'start' ? clearance.startDistanceM : clearance.endDistanceM;
-      const a = worldToCanvas(segment[0], scale, panOffset, canvasCenter);
-      const b = worldToCanvas(segment[1], scale, panOffset, canvasCenter);
+      const {
+        a,
+        b,
+        text: labelText,
+        x: labelX,
+        y: labelY,
+        width: pillWidth,
+      } = getLineOpeningClearancePill(clearance, side, scale, panOffset, canvasCenter);
       const measureLen = Math.hypot(b.x - a.x, b.y - a.y);
-      const labelText = `${distanceM.toFixed(2)}m`;
-      const pillWidth = getDrawModeTooltipPillWidth(labelText);
-      const labelX = (a.x + b.x) / 2 - pillWidth / 2;
-      const labelY = (a.y + b.y) / 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2;
       const isEditing =
         editable &&
         lineOpeningDistanceEditor?.elementId === selectedLineOpeningClearance?.elementId &&
@@ -5082,6 +5109,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       selectedPointDragTarget?.element.id ?? '',
       overlapHash,
       currentFloorZ,
+      selectedLineOpeningClearance
+        ? `${selectedLineOpeningClearance.elementId}:${selectedLineOpeningClearance.clearance.startDistanceM}:${selectedLineOpeningClearance.clearance.endDistanceM}`
+        : '',
     ].join('|');
   }, [
     selectedElementIds,
@@ -5090,6 +5120,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     selectedPointDragTarget,
     overlapGroups,
     currentFloorZ,
+    selectedLineOpeningClearance,
   ]);
 
   const memoizedLabelPositions = useMemo(() => {
@@ -5117,8 +5148,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       const element = elementsById[id];
       if (!element || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
       const coords = element.coordinates ?? [];
+      // ponytail: reserves the chip slot above every vertex, snapped or not; precise needs the
+      // renderer's snapped-vertex set (one registry pass, see the label-layout refactor note).
+      const reserveChipSlots = shouldShowUnsnappedVertexGuidance(element, getElementShape(element));
       for (const coord of coords) {
-        addAvoidRect(worldToCanvas(coord, scale, panOffset, canvasCenter), 14);
+        const point = worldToCanvas(coord, scale, panOffset, canvasCenter);
+        addAvoidRect(point, 14);
+        if (reserveChipSlots) avoidRects.push(getUnsnappedVertexChipRect(point, 6));
       }
       if (coords.length > 1) {
         const centroid = {
@@ -5157,6 +5193,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       }
     }
 
+    if (selectedLineOpeningClearance) {
+      for (const side of ['start', 'end'] as const) {
+        avoidRects.push(getLineOpeningClearancePill(selectedLineOpeningClearance.clearance, side, scale, panOffset, canvasCenter));
+      }
+    }
+
     return calculateMemoizedLabelPositions(
       elementsForLabelCalculation,
       canvasBounds,
@@ -5165,11 +5207,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       scale,
       panOffset,
       canvasCenter,
-      avoidRects
+      avoidRects,
+      selectedIds,
     );
     });
   // Use stable hashes instead of recalculating on every render.
-  // Note: not including scale, panOffset, or canvasCenter avoids recalculation on pan/zoom.
+  // Offsets are cached in pixels: a zoom must re-place them, a pan (panOffset, canvasCenter) need not.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     elementsForLabelHash,
@@ -5177,6 +5220,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     stageSize.width,
     stageSize.height,
     showLineDimensions,
+    scale,
   ]);
 
   // Handle element click - optimized with batched state updates
@@ -6863,6 +6907,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                   // Get cached label position and transform it to current canvas space
                   const cachedData = memoizedLabelPositions.get(element.id);
                   if (!cachedData) return null;
+                  // A label with no free slot stays hidden until its element is hovered or selected.
+                  if (cachedData.rect.collides && !isHighlighted && !isHovered) return null;
 
                   const labelRect = transformCachedLabelPosition(
                     cachedData,

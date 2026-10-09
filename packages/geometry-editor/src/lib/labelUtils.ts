@@ -30,7 +30,10 @@ export interface RectBounds {
   height: number;
 }
 
-export interface LabelRect extends LabelPosition, RectBounds {}
+export interface LabelRect extends LabelPosition, RectBounds {
+  /** No candidate slot was free: the rect is the on-element fallback and overlaps something. */
+  collides?: boolean;
+}
 
 export interface ElementBounds {
   minX: number;
@@ -236,7 +239,9 @@ export function calculateSmartLabelPosition(
 ): LabelRect {
   const bounds = calculateElementBounds(canvasCoords);
   const labelHeight = SMART_LABEL_METRICS.labelHeight;
-  const margin = 8; // Smaller margin for tighter clustering
+  // Clears the 14px half-size reserve GeometryCanvas puts on selected vertices; at 8 every
+  // edge slot of a selected line hit its own end vertices and the label fell back onto the line.
+  const margin = 16;
 
   // Estimate label width using same logic as renderer
   const padding = SMART_LABEL_METRICS.padding;
@@ -301,8 +306,9 @@ export function calculateSmartLabelPosition(
     const inBoundsCached = cachedRect.x >= 0 && cachedRect.x + cachedRect.width <= canvasBounds.width &&
       cachedRect.y >= 0 && cachedRect.y + cachedRect.height <= canvasBounds.height;
     if (inBoundsCached) {
-      let cachedOverlaps = false;
-      for (const ex of existingLabels) { if (rectsOverlap(cachedRect, ex)) { cachedOverlaps = true; break; } }
+      const cachedOverlaps =
+        existingLabels.some((ex) => rectsOverlap(cachedRect, ex)) ||
+        (avoidRects ?? []).some((av) => rectsOverlap(cachedRect, av));
       if (!cachedOverlaps) {
         return cachedRect;
       }
@@ -331,8 +337,8 @@ export function calculateSmartLabelPosition(
     }
   }
 
-  // Fallback: use center position (may overlap, but at least visible)
-  return { anchor: 'center', x: bounds.centerX - labelWidth / 2, y: centerY, width: labelWidth, height: labelHeight };
+  // Fallback: centre on the element. The caller hides it unless the label is a priority one.
+  return { anchor: 'center', x: bounds.centerX - labelWidth / 2, y: centerY, width: labelWidth, height: labelHeight, collides: true };
 }
 
 // Memoized label position calculation for performance optimization
@@ -344,7 +350,9 @@ export function calculateMemoizedLabelPositions(
   scale: number,
   panOffset: {x: number, y: number},
   canvasCenter: {x: number, y: number},
-  avoidRects: Array<{ x: number, y: number, width: number, height: number }> = []
+  avoidRects: Array<{ x: number, y: number, width: number, height: number }> = [],
+  // Selected labels place first, always show, and block later labels even when they collide.
+  priorityIds: ReadonlySet<string> = new Set(),
 ): Map<string, { rect: LabelRect; elementCenter: { x: number, y: number } }> {
   // Create stable hash of elements that affect positioning
   const avoidRectsHash = avoidRects
@@ -352,7 +360,9 @@ export function calculateMemoizedLabelPositions(
     .join('|');
   const elementHash = elements
     .map(e => getSmartLabelLayoutSignature(e, { showLineDimensions }))
-    .join('|') + `|lineDims:${showLineDimensions ? '1' : '0'}|avoid:${avoidRectsHash}`;
+    .join('|') + `|lineDims:${showLineDimensions ? '1' : '0'}|avoid:${avoidRectsHash}` +
+    // Cached offsets are in pixels, so a zoom invalidates them; a pan does not.
+    `|scale:${scale}|priority:${[...priorityIds].sort().join(',')}`;
 
   // Check if canvas bounds changed significantly (only recalculate if bounds change dramatically)
   // Increased threshold from 200px to 500px to reduce recalculations during pan/zoom
@@ -368,6 +378,9 @@ export function calculateMemoizedLabelPositions(
 
     // Sort elements for consistent ordering
     const sortedElements = [...elements].sort((a, b) => {
+      const ap = priorityIds.has(a.id) ? 0 : 1;
+      const bp = priorityIds.has(b.id) ? 0 : 1;
+      if (ap !== bp) return ap - bp;
       const az = a.coordinates?.[0]?.z || 0;
       const bz = b.coordinates?.[0]?.z || 0;
       if (az !== bz) return az - bz;
@@ -397,7 +410,8 @@ export function calculateMemoizedLabelPositions(
         rect: labelRect,
         elementCenter: { x: elementBounds.centerX, y: elementBounds.centerY }
       });
-      existingLabels.push(labelRect);
+      // A hidden (colliding, non-priority) label must not push later labels away.
+      if (!labelRect.collides || priorityIds.has(element.id)) existingLabels.push(labelRect);
     });
   }
 
