@@ -267,6 +267,7 @@ import {
   type ValidationContext,
 } from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
+import type { Vec3 } from '../geometry/thermalBridge/linearTbSegmentOverlap';
 import { selectPartFData } from '../geometry/validation/partF/selector';
 import { getOverlapBadgeMenuLayerStyle, type OverlapBadgeMenuAnchor } from '../lib/overlapBadgeMenu';
 
@@ -2336,6 +2337,18 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   ]);
 
   const elementsForValidation = useMemo(() => Object.values(elementsById), [elementsById]);
+  const linearGeometryIssues = useMemo(
+    () => findLinearThermalBridgeIssues(elementsForValidation),
+    [elementsForValidation],
+  );
+  // Both issues of an overlap pair carry the same stretch: keep one per pair for the canvas halo.
+  const overlapStretches = useMemo(() => {
+    const byKey = new Map<string, { elementId: string; stretch: [Vec3, Vec3] }>();
+    for (const { elementId, overlapStretch } of linearGeometryIssues) {
+      if (overlapStretch) byKey.set(JSON.stringify(overlapStretch), { elementId, stretch: overlapStretch });
+    }
+    return [...byKey.values()];
+  }, [linearGeometryIssues]);
   const sharedElementValidationContext = useMemo<ValidationContext>(() => {
     const complianceOn = !!complianceSettings?.complianceValidationEnabled;
     return {
@@ -2354,7 +2367,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         junctionPsiDefaultsPath && junctionPsiDefaultsPath.trim() !== ''
           ? junctionPsiDefaultsMap
           : undefined,
-      linearThermalBridgeIssues: findLinearThermalBridgeIssues(elementsForValidation),
+      linearThermalBridgeIssues: linearGeometryIssues,
       floorStackWarningElementIds: getFloorStackWarningElementIds(elementsForValidation, floors),
       partFFindings: complianceOn
         ? selectPartFData({
@@ -2381,6 +2394,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     globalOrientationOffset,
     junctionPsiDefaultsMap,
     junctionPsiDefaultsPath,
+    linearGeometryIssues,
     schemaPort,
     spaceLabelIds,
     spaceLabelsById,
@@ -6180,6 +6194,25 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           </Layer>
 
           <Layer name="main-geometry-layer" listening={true}>
+            {/* Overlap halos sit under the lines they mark; the panel message explains them. */}
+            {overlapStretches.map(({ elementId, stretch }) => {
+              const element = elementsById[elementId];
+              if (!element || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors) || isElementHiddenOnView(element)) {
+                return null;
+              }
+              const [a, b] = stretch.map((point) => worldToCanvas(point, scale, panOffset, canvasCenter));
+              return (
+                <Line
+                  key={`overlap-halo-${JSON.stringify(stretch)}`}
+                  points={[a.x, a.y, b.x, b.y]}
+                  stroke={canvasInteractionPalette.warningGuide}
+                  strokeWidth={10}
+                  opacity={0.4}
+                  lineCap="round"
+                  listening={false}
+                />
+              );
+            })}
             {/* Current-floor geometry remains interactive; overlays and handles stay above it. */}
             {ENABLE_GEOMETRY_CANVAS_REACT_PROFILER && geometryPerf.isEnabled() ? (
               <React.Profiler id="GeometryCanvas.layer2d.currentElements" onRender={recordGeometryCanvasProfiler}>
