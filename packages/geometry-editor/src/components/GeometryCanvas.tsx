@@ -2461,7 +2461,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   const activeGeometrySnapCache = useMemo(() => {
     return geometryPerf.measure('GeometryCanvas.activeGeometrySnapCache', () =>
-      buildGeometrySnapCache(elementsById as any, drawNetworkSegmentFilter),
+      buildGeometrySnapCache(elementsById as Record<string, Element>, drawNetworkSegmentFilter),
     );
   }, [drawNetworkSegmentFilter, elementsById]);
 
@@ -3837,7 +3837,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     } else {
       setSpaceLabelHoverPointIfChanged(null);
     }
-  }, [drawMode, drawPoints, roomWalls, elementsById, geometryStore, spaceLabelSnapCache, selection, scale, panOffset, canvasCenter, spaceLabellerOpen, spaceLabellerSelectedLabelId, spaceLabelsById, setSpaceLabelHoverPointIfChanged, getStageViewportPointer, drawSnapTargetRef, setDrawAngleSnapped, setDrawCursor, setDrawingTooltip, drawingPreviewSignal, beginDrawingPreviewInteraction, endDrawingPreviewInteraction, serviceLineDraftEndZ, serviceLineDraftStartZ, serviceLineDrawBaseZ, resolveDrawSnap]);
+  }, [drawMode, drawPoints, roomWalls, elementsById, geometryStore, selection, scale, panOffset, canvasCenter, spaceLabellerOpen, spaceLabellerSelectedLabelId, spaceLabelsById, setSpaceLabelHoverPointIfChanged, getStageViewportPointer, drawSnapTargetRef, setDrawAngleSnapped, setDrawCursor, setDrawingTooltip, drawingPreviewSignal, beginDrawingPreviewInteraction, endDrawingPreviewInteraction, serviceLineDraftEndZ, serviceLineDraftStartZ, serviceLineDrawBaseZ, resolveDrawSnap]);
 
   // Memoize centerOnElement function to avoid recreating on every render
   const centerOnElement = useCallback((el: Element) => {
