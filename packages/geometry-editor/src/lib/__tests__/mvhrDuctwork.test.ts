@@ -14,13 +14,17 @@ import type {
 import { findLinearThermalBridgeIssues } from '../../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import {
   collectMvhrDuctTopologyWarnings,
+  defaultMvhrTerminalZ,
   planAutoDucts,
   deriveMechanicalVentilationTerminalPosition,
   getMvhrDuctRoleStyle,
+  hostedMvhrTerminalDraft,
   isMvhrTerminalHost,
   looseDuctRunEndNearestUnit,
   MVHR_DUCT_ROLE_STYLES,
+  terminalConnectsToDuctEndpoint,
 } from '../mvhrDuctwork';
+import { networkPoint3 } from '../elementCanvasFloor';
 
 describe('mvhrDuctwork helpers', () => {
   it('defines the required MVHR duct role styles', () => {
@@ -151,8 +155,45 @@ describe('mvhrDuctwork helpers', () => {
     const legA = duct('a', [3, 0], [0.5, 0.5]);
     const elements = [unit, legA, duct('b', [0.5, 0.5], [3, 5])] as unknown as Element[];
 
-    expect(looseDuctRunEndNearestUnit(legA as unknown as MechanicalVentilationDuctwork, elements))
+    expect(looseDuctRunEndNearestUnit(legA as unknown as MechanicalVentilationDuctwork, elements, []))
       .toEqual({ x: 3, y: 0, z: 0 });
+  });
+
+  it('connects a terminal only to a duct end within the 5 mm rule', () => {
+    const terminal = { coordinates: [{ x: 1, y: 0, z: 2.4 }] } as MechanicalVentilationTerminal;
+    const duct = (z: number) => ({ coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1.004, y: 0, z }] }) as MechanicalVentilationDuctwork;
+    expect(terminalConnectsToDuctEndpoint(terminal, [duct(2.404)])).toBe(true);
+    expect(terminalConnectsToDuctEndpoint(terminal, [duct(2.2)])).toBe(false); // within the old 0.35 m, now loose
+  });
+});
+
+describe('storey-index points in metres', () => {
+  // A basement, a ground floor, and a first floor whose base is overridden (a split level).
+  const floors = [
+    { id: 'b', name: 'B', zIndex: -1, height: 2.6, isRoofSpace: false },
+    { id: 'g', name: 'G', zIndex: 0, height: 2.5, isRoofSpace: false },
+    { id: 'u', name: 'U', zIndex: 1, height: 2.5, isRoofSpace: false, baseHeight: 3.1, baseHeightUserOverride: true },
+  ] as Floor[];
+  const point = (type: string, z: number, floorId?: string) =>
+    ({ id: type, name: type, type, floorId, coordinates: [{ x: 1, y: 2, z }] }) as unknown as Element;
+
+  it('places a unit or plant at its storey base height and leaves metre-z types alone', () => {
+    expect(networkPoint3(point('MechanicalVentilation', 0, 'g'), floors)).toEqual({ x: 1, y: 2, z: 0 });
+    expect(networkPoint3(point('MechanicalVentilation', 1, 'u'), floors)).toEqual({ x: 1, y: 2, z: 3.1 });
+    expect(networkPoint3(point('System', -1), floors)).toEqual({ x: 1, y: 2, z: -2.6 });
+    expect(networkPoint3(point('MechanicalVentilationTerminal', 2.4, 'u'), floors)).toEqual({ x: 1, y: 2, z: 2.4 });
+    expect(networkPoint3(point('ThermalBridgePoint', 0.5, 'u'), floors)).toEqual({ x: 1, y: 2, z: 0.5 });
+  });
+
+  it('puts a new terminal 2.4 m above its storey base', () => {
+    expect(defaultMvhrTerminalZ(0, floors)).toBe(2.4);
+    expect(defaultMvhrTerminalZ(1, floors)).toBe(5.5);
+    expect(defaultMvhrTerminalZ(-1, floors)).toBe(-0.2);
+    const wallUp = { id: 'w', name: 'W', type: 'BuildingElementOpaque', floorId: 'u', coordinates: [{ x: 0, y: 0, z: 1 }, { x: 4, y: 0, z: 1 }] } as Element;
+    const draft = hostedMvhrTerminalDraft('intake', 'MV', wallUp, { x: 1.234, y: 0.001 }, floors);
+    expect(draft.coordinates).toEqual([{ x: 1.23, y: 0, z: 5.5 }]);
+    // mid_height_air_flow_path follows the terminal's z.
+    expect(deriveMechanicalVentilationTerminalPosition(draft as MechanicalVentilationTerminal, wallUp)?.mid_height_air_flow_path).toBe(5.5);
   });
 });
 
@@ -178,7 +219,7 @@ describe('planAutoDucts', () => {
     room('b-kitchen', 'kitchen', 0, 4, 2), // extract run 0: centre (5, 3), L with x first
     room('e-bath', 'bathroom', 0, 8, 2), // extract run 1: staggered to (9.05, 3.05)
     room('a-living', 'living_room', 0, -4, -1), // run 2 (indices span roles): (-3, 0) staggered to (-2.9, 0.1)
-    room('c-bed', 'bedroom', 1, 0, 4), // another storey: not planned yet
+    room('c-bed', 'bedroom', 1, 0, 4), // first floor: L at the unit height, riser at the room end
     room('d-hall', 'hall', 0, 0, 8), // no role
   ];
   const p = (x: number, y: number, z = 0) => ({ x, y, z });
@@ -187,7 +228,7 @@ describe('planAutoDucts', () => {
   const asElements = (drafts: ElementDraft[]) =>
     drafts.map((d, i) => ({ ...d, id: `p${i}`, name: `P${i}` }) as Element);
   const overlaps = (els: Element[]) =>
-    findLinearThermalBridgeIssues(els).filter((i) => i.kind === 'overlap_duplicate_colinear_segment');
+    findLinearThermalBridgeIssues(els, floors).filter((i) => i.kind === 'overlap_duplicate_colinear_segment');
   const ducts = (drafts: ElementDraft[]) =>
     drafts.filter((d) => d.type === 'MechanicalVentilationDuctwork') as unknown as MechanicalVentilationDuctwork[];
 
@@ -197,8 +238,13 @@ describe('planAutoDucts', () => {
       [p(0, 0), p(5, 0)], [p(5, 0), p(5, 3)],
       [p(0, 0), p(9.05, 0)], [p(9.05, 0), p(9.05, 3.05)],
     ]);
-    expect(segs(drafts, 'supply')).toEqual([[p(0, 0), p(-2.9, 0)], [p(-2.9, 0), p(-2.9, 0.1)]]);
-    expect(drafts.every((d) => d.floorId === 'f0' && d.parent_element === 'MV')).toBe(true);
+    expect(segs(drafts, 'supply')).toEqual([
+      [p(0, 0), p(-2.9, 0)], [p(-2.9, 0), p(-2.9, 0.1)],
+      [p(0, 0), p(0, 5.15)], [p(0, 5.15), p(1.15, 5.15)], [p(1.15, 5.15), p(1.15, 5.15, 2.5)],
+    ]);
+    expect(drafts.every((d) => d.parent_element === 'MV')).toBe(true);
+    // The riser belongs to the room's storey, every leg at the unit's height to the unit's.
+    expect(drafts.filter((d) => d.floorId === 'f1').map((d) => d.coordinates)).toEqual([[p(1.15, 5.15), p(1.15, 5.15, 2.5)]]);
   });
 
   it('builds terminals like the unit panel and ends each terminal duct on the terminal point', () => {
@@ -239,7 +285,8 @@ describe('planAutoDucts', () => {
       { id: 'j1', name: 'J1', type: 'MechanicalVentilationDuctwork', duct_type: 'extract', parent_element: 'MV', coordinates: [p(0, 0), p(5, 3)] },
       { id: 'j2', name: 'J2', type: 'MechanicalVentilationDuctwork', duct_type: 'extract', parent_element: 'MV', coordinates: [p(5, 3), p(12, 3)] },
     ] as Element[];
-    expect(segs(planAutoDucts(unit(), [unit(), ...joint], [rooms[0]!], floors), 'extract')).toEqual([[p(0, 0), p(5, 0)], [p(5, 0), p(5, 3)]]);
+    // The room is still unserved; its run staggers off the existing joint rather than ending on it.
+    expect(segs(planAutoDucts(unit(), [unit(), ...joint], [rooms[0]!], floors), 'extract')).toEqual([[p(0, 0), p(5.05, 0)], [p(5.05, 0), p(5.05, 3.05)]]);
   });
 
   it('plans nothing for non-MVHR units, without a unit point, or for unreachable rooms', () => {
@@ -252,9 +299,9 @@ describe('planAutoDucts', () => {
     expect(planAutoDucts(unit(), [], [room('n', 'kitchen', 0, 4, 2, 0.15)], floors)).toEqual([]); // no point 0.1 m inside
   });
 
-  it('serves and routes only on the unit storey', () => {
+  it('serves a room only from its own storey, and keeps terminals on the unit storey', () => {
     // A free supply end on storey 1 above the living room does not serve it.
-    const upstairs = { id: 'u', name: 'U', type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MV', floorId: 'f1', coordinates: [p(0, 0), p(-3, 0)] } as Element;
+    const upstairs = { id: 'u', name: 'U', type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MV', floorId: 'f1', coordinates: [p(0, 0, 2.5), p(-3, 0, 2.5)] } as Element;
     expect(segs(planAutoDucts(unit(), [unit(), upstairs], [rooms[2]!], floors), 'supply')).toEqual([[p(0, 0), p(-3, 0)]]);
     // An exhaust terminal on storey 1: no duct to it and no second terminal.
     const wallUp = { ...hosts[0]!, id: 'wu', name: 'Wall Up', floorId: 'f1', coordinates: [p(-5, -3, 1), p(5, -3, 1)] } as Element;
@@ -266,6 +313,35 @@ describe('planAutoDucts', () => {
     const many = Array.from({ length: 18 }, (_, i) => room(`r${String(i).padStart(2, '0')}`, 'bedroom', 0, i * 5, 0, i === 17 ? 1.6 : 3));
     const ends = segs(planAutoDucts({ ...unit(), coordinates: [p(-50, -50)] }, [], many, floors), 'supply').map((c) => c[1]!);
     expect(many.every((r) => ends.some((e) => e.x > r.coordinates[0]!.x && e.x < r.coordinates[1]!.x && e.y > 0 && e.y < 2))).toBe(true);
+  });
+
+  it('routes from a basement unit, reading a label storey as an index into the floors', () => {
+    const withBasement = [{ id: 'fb', name: 'B', zIndex: -1, height: 2.6, isRoofSpace: false }, ...floors] as Floor[];
+    const basementUnit = { ...unit(), floorId: 'fb', coordinates: [p(0, 0, -1)] } as MechanicalVentilation;
+    // storey 1 is floors[1], the ground floor (zIndex 0), not zIndex 1.
+    const drafts = planAutoDucts(basementUnit, [basementUnit], [room('k', 'kitchen', 1, 4, 2)], withBasement);
+    expect(segs(drafts, 'extract')).toEqual([[p(0, 0, -2.6), p(5, 0, -2.6)], [p(5, 0, -2.6), p(5, 3, -2.6)], [p(5, 3, -2.6), p(5, 3, 0)]]);
+    expect(drafts.map((d) => d.floorId)).toEqual(['fb', 'fb', 'f0']);
+  });
+
+  it('starts at an upper-storey unit in metres and rises to an overridden storey base', () => {
+    const split = [floors[0]!, { ...floors[1]!, baseHeight: 3.1, baseHeightUserOverride: true }, { id: 'f2', name: '2', zIndex: 2, height: 2.4, isRoofSpace: false }] as Floor[];
+    const upUnit = { ...unit(), floorId: 'f1', coordinates: [p(0, 0, 1)] } as MechanicalVentilation;
+    const drafts = planAutoDucts(upUnit, [upUnit], [room('k', 'kitchen', 1, 4, 2), room('w', 'wc', 2, 4, 2)], split);
+    expect(segs(drafts, 'extract')).toEqual([
+      [p(0, 0, 3.1), p(5, 0, 3.1)], [p(5, 0, 3.1), p(5, 3, 3.1)],
+      // The WC above the kitchen: the same centroid, so its stagger keeps the runs apart, then a riser to 3.1 + 2.5.
+      [p(0, 0, 3.1), p(5.05, 0, 3.1)], [p(5.05, 0, 3.1), p(5.05, 3.05, 3.1)], [p(5.05, 3.05, 3.1), p(5.05, 3.05, 5.6)],
+    ]);
+  });
+
+  it('keeps stacked rooms on different storeys apart, with no topology warnings or overlap errors', () => {
+    const stacked = [0, 1, 2, 3, 4].map((i) => room(`r${i}`, i % 2 ? 'bathroom' : 'kitchen', i % 2, 4, 2));
+    const drafts = planAutoDucts(unit(), [unit()], stacked, floors);
+    expect(segs(drafts, 'extract').filter((c) => c[0]!.z !== c[1]!.z)).toHaveLength(2); // two risers to storey 1
+    expect(collectMvhrDuctTopologyWarnings(ducts(drafts), { unitPoint: p(0, 0) })).toEqual([]);
+    expect(overlaps([unit(), ...asElements(drafts)])).toEqual([]);
+    expect(planAutoDucts(unit(), [unit(), ...asElements(drafts)], stacked, floors)).toEqual([]);
   });
 
   it('is deterministic whatever the label order', () => {

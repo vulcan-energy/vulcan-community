@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it, vi } from 'vitest';
-import type { Element } from '../../geometry/types';
+import type { Element, Floor } from '../../geometry/types';
 import { createGeometryStore } from '../../stores/geometryStore';
 import { getServiceLineLengthFromCoordinates as lengthOf } from '../serviceLineDrawModes';
 import { getHoverHintText } from '../drawModeTooltipPill';
@@ -610,6 +610,25 @@ describe('getExactSnappedVertices', () => {
     expect(getExactSnappedVertices(duct, { wall, duct, sibling })).toEqual(new Set([1]));
     expect(getExactSnappedVertices(wall, { wall, duct, sibling })).toEqual(new Set());
   });
+
+  it('meets an upper-storey unit at its storey base height, not its storey index', () => {
+    const effectiveFloors = [
+      { id: 'f0', name: '0', zIndex: 0, height: 2.5, isRoofSpace: false },
+      { id: 'f1', name: '1', zIndex: 1, height: 2.5, isRoofSpace: false },
+    ] as Floor[];
+    const unit = { id: 'unit', name: 'MV', type: 'MechanicalVentilation', floorId: 'f1', coordinates: [{ x: 0, y: 0, z: 1 }] } as unknown as Element;
+    const duct = (id: string, z: number) => ({ id, name: id, type: 'MechanicalVentilationDuctwork', parent_element: 'MV',
+      coordinates: [{ x: 0, y: 0, z }, { x: 2, y: 0, z }] }) as unknown as Element;
+    const byId = { unit, metres: duct('metres', 2.5), index: duct('index', 1) };
+    expect(getExactSnappedVertices(byId.metres, byId, { effectiveFloors })).toEqual(new Set([0]));
+    expect(getExactSnappedVertices(byId.index, { unit, index: byId.index }, { effectiveFloors })).toEqual(new Set());
+    expect(getExactSnappedVertices(unit, { unit, metres: byId.metres }, { effectiveFloors })).toEqual(new Set([0]));
+    // Connected drag of the unit carries the metre-z duct end; Snap welds a near end onto it in metres.
+    expect(findConnectedDragNeighbours(unit, byId, 2, effectiveFloors)).toEqual([{ elementId: 'metres', vertexIndex: 0 }]);
+    const near = duct('near', 2.52);
+    expect(planServiceLineEndpointWelds({ unit, near }, ['near'], 0.05, effectiveFloors))
+      .toEqual([{ elementId: 'near', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 2.5 } }]);
+  });
 });
 
 describe('getWallSupportedSnappedVertices', () => {
@@ -783,7 +802,7 @@ describe('planServiceLineEndpointWelds', () => {
       p3: pipeLine('p3', 'distribution', { x: 8.01, y: 5.01 }, { x: 12, y: 5 }),
     } as unknown as Record<string, Element>;
 
-    expect(planServiceLineEndpointWelds(elementsById, ['a', 'b', 'c', 'x', 'p1', 'p2', 'p3'], 0.05)).toEqual([
+    expect(planServiceLineEndpointWelds(elementsById, ['a', 'b', 'c', 'x', 'p1', 'p2', 'p3'], 0.05, [])).toEqual([
       { elementId: 'a', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 0 } },
       { elementId: 'b', vertexIndex: 0, newPosition: { x: 2, y: 0, z: 0 } },
       { elementId: 'c', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 0 } },
@@ -807,7 +826,7 @@ describe('connected drag (Alt)', () => {
     other: duct('other', [4, 0], [4, -2], 'MVHR 2'),
   }) as unknown as Record<string, Element>;
   const plan = (byId: Record<string, Element>, id: string, delta: { x: number; y: number }) =>
-    planConnectedDrag(byId[id]!, findConnectedDragNeighbours(byId[id]!, byId, 2), byId, delta);
+    planConnectedDrag(byId[id]!, findConnectedDragNeighbours(byId[id]!, byId, 2, []), byId, delta);
 
   it('stretches each neighbour by its shared end and keeps its far end', () => {
     const moved = plan(run(), 'b', { x: 1, y: 0 });
@@ -857,13 +876,37 @@ describe('connected drag (Alt)', () => {
       const terminal = byId[terminalId!]!;
       const historyBefore = store.getState().historyIndex;
       // Dropped off the wall: the terminal reprojects onto it and the duct end lands there too.
-      store.getState().commitConnectedPointDrag(terminalId!, [{ x: 4, y: 0.8, z: 0 }], findConnectedDragNeighbours(terminal, byId, 2));
+      store.getState().commitConnectedPointDrag(terminalId!, [{ x: 4, y: 0.8, z: 0 }], findConnectedDragNeighbours(terminal, byId, 2, []));
       vi.runAllTimers();
       const after = store.getState().elementsById;
       expect(after[terminalId!]!.coordinates[0]).toMatchObject({ x: 4, y: 0 });
       expect(after[ductId!]!.coordinates[1]).toEqual(after[terminalId!]!.coordinates[0]);
       expect(after[ductId!]!.coordinates[0]).toMatchObject({ x: 2, y: 3 });
       expect(store.getState().historyIndex).toBe(historyBefore + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Alt-dragging an upper-storey unit moves its duct ends in plan and keeps their height', () => {
+    vi.useFakeTimers();
+    try {
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      const { addFloor, addElements } = store.getState();
+      addFloor('Ground', 2.5, false, 0);
+      const f1 = addFloor('First', 2.5, false, 1);
+      const [unitId, ductId] = addElements([
+        { type: 'MechanicalVentilation', name: 'MVHR', vent_type: 'MVHR', floorId: f1, coordinates: [{ x: 0, y: 0, z: 1 }] },
+        { type: 'MechanicalVentilationDuctwork', name: 'D', duct_type: 'supply', parent_element: 'MVHR', length: 3,
+          coordinates: [{ x: 0, y: 0, z: 2.5 }, { x: 3, y: 0, z: 2.5 }] },
+      ] as never);
+      vi.runAllTimers();
+      const state = store.getState();
+      const neighbours = findConnectedDragNeighbours(state.elementsById[unitId!]!, state.elementsById, 2, state.floors);
+      expect(neighbours).toEqual([{ elementId: ductId, vertexIndex: 0 }]);
+      state.commitConnectedPointDrag(unitId!, [{ x: 0, y: 1, z: 1 }], neighbours);
+      vi.runAllTimers();
+      expect(store.getState().elementsById[ductId!]!.coordinates[0]).toEqual({ x: 0, y: 1, z: 2.5 });
     } finally {
       vi.useRealTimers();
     }
@@ -878,7 +921,7 @@ describe('connected drag (Alt)', () => {
       const byId = store.getState().elementsById;
       const idOf = (name: string) => Object.values(byId).find((el) => el.name === name)!.id;
       const b = byId[idOf('b')]!;
-      const moved = planConnectedDrag(b, findConnectedDragNeighbours(b, byId, 2), byId, { x: 1, y: 0 });
+      const moved = planConnectedDrag(b, findConnectedDragNeighbours(b, byId, 2, []), byId, { x: 1, y: 0 });
       const historyBefore = store.getState().historyIndex;
       store.getState().commitVertexPositionUpdates(Object.entries(moved).flatMap(([elementId, coords]) =>
         coords.map((newPosition, vertexIndex) => ({ elementId, vertexIndex, newPosition }))));
@@ -920,10 +963,10 @@ describe('connected drag (Alt)', () => {
       vi.runAllTimers();
       const byId = store.getState().elementsById;
       const middle = byId[middleId!]!;
-      const neighbours = findConnectedDragNeighbours(middle, byId, 2);
+      const neighbours = findConnectedDragNeighbours(middle, byId, 2, []);
       // Only walls follow: not the window (a building element too), the floor polygon, or colinear C.
       expect(neighbours.map(({ elementId }) => elementId).sort()).toEqual([leftId, rightId].sort());
-      expect(findConnectedDragNeighbours(byId[windowId!]!, byId, 2)).toEqual([]);
+      expect(findConnectedDragNeighbours(byId[windowId!]!, byId, 2, [])).toEqual([]);
       expect(getHoverHintText({ kind: 'body', dragging: false, connected: neighbours.length > 0 })).toBe('Alt moves connected');
 
       // A neighbour that would reverse is left behind, like one that would collapse.

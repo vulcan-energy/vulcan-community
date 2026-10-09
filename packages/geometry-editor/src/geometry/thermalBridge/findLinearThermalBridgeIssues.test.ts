@@ -6,6 +6,7 @@ import type {
   BuildingElementOpaque,
   BuildingElementTransparent,
   Element,
+  Floor,
   ThermalBridgeLinear,
 } from '../types';
 import { findLinearThermalBridgeIssues } from './findLinearThermalBridgeIssues';
@@ -573,7 +574,7 @@ describe('findLinearThermalBridgeIssues', () => {
         ...extra,
       }) as unknown as Element;
     const overlapIds = (els: Element[]) =>
-      findLinearThermalBridgeIssues(els)
+      findLinearThermalBridgeIssues(els, [])
         .filter((i) => i.kind === 'overlap_duplicate_colinear_segment')
         .map((i) => i.elementId);
 
@@ -589,8 +590,22 @@ describe('findLinearThermalBridgeIssues', () => {
       expect(overlapIds([unit, duct('a', 0, 5), duct('b', 5, 2)])).toEqual(['a', 'b']);
     });
 
+    it('places an upper-storey unit at its storey base height when exempting bundled runs', () => {
+      const floors = [
+        { id: 'f0', name: '0', zIndex: 0, height: 2.5, isRoofSpace: false },
+        { id: 'f1', name: '1', zIndex: 1, height: 2.5, isRoofSpace: false },
+      ] as Floor[];
+      const upstairs = { ...unit, coordinates: [{ x: 0, y: 0, z: 1 }] } as unknown as Element;
+      const atBase = (el: Element) => ({ ...el, coordinates: el.coordinates.map((p) => ({ ...p, z: 2.5 })) }) as Element;
+      const runs = [upstairs, atBase(duct('a', 0, 5)), atBase(duct('b', 0, 3))];
+      expect(findLinearThermalBridgeIssues(runs, floors).filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toEqual([]);
+      // Runs at the storey index (z = 1) no longer meet the unit, so they are strays.
+      expect(overlapIds([upstairs, duct('a', 0, 5, 0, { coordinates: [{ x: 0, y: 0, z: 1 }, { x: 5, y: 0, z: 1 }] }),
+        duct('b', 0, 3, 0, { coordinates: [{ x: 0, y: 0, z: 1 }, { x: 3, y: 0, z: 1 }] })])).toEqual(['a', 'b']);
+    });
+
     it('flags a stray same-type run not connected to the unit, with the shared stretch', () => {
-      const issues = findLinearThermalBridgeIssues([unit, duct('a', 0, 5), duct('b', 2, 7)]).filter(
+      const issues = findLinearThermalBridgeIssues([unit, duct('a', 0, 5), duct('b', 2, 7)], []).filter(
         (i) => i.kind === 'overlap_duplicate_colinear_segment',
       );
       expect(issues.map((i) => i.elementId)).toEqual(['a', 'b']);

@@ -117,7 +117,7 @@ import {
 export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
 import { internalAdjacentConditionedAreaMultiplier } from '../../../lib/elementArea';
-import { assertCsvMigrationResolved, csvMigrationIssues, resolveCsvUValueMeaning, upgradePcdbProductReferences, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
+import { assertCsvMigrationResolved, csvMigrationIssues, liftStoreyIndexDuctsToMetres, resolveCsvUValueMeaning, upgradePcdbProductReferences, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
 
 export interface IoSlice {
   sourceCsvVersion: number;
@@ -2172,7 +2172,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const loadedCsvBaseline = get().generateCSV({ allowUnresolvedMigration: true });
     // Applied after the baseline so the upgrade leaves the model dirty and the next save writes it.
     const loadedElements = get().elementIds.map(id => get().elementsById[id]);
-    const upgradedElements = upgradePcdbProductReferences(loadedElements);
+    const upgradedElements = liftStoreyIndexDuctsToMetres(
+      upgradePcdbProductReferences(loadedElements),
+      withEffectiveStoreyHeights(get().floors, loadedElements),
+    );
     const upgraded = upgradedElements !== loadedElements;
     if (upgraded) {
       set({ elementsById: { ...get().elementsById, ...Object.fromEntries(upgradedElements.map(el => [el.id, el])) } });
