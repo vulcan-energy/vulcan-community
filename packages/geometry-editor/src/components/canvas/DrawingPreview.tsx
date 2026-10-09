@@ -821,6 +821,8 @@ export const HoverHintOverlay = memo<{
     let dragging = false;
     let connected = false;
     let altHeld = false;
+    let disposed = false;
+    const later = (fn: () => void) => setTimeout(() => { if (!disposed) fn(); }, 0);
 
     const pointer = (): Point => stage.getPointerPosition() ?? { x: 0, y: 0 };
     const sync = (kind: HoverHintTarget['kind'] | null) => {
@@ -831,11 +833,18 @@ export const HoverHintOverlay = memo<{
     const kindOf = () => classifyHoverHandle(node);
     const onDragStart = () => { dragging = true; sync(kindOf()); };
     const onDragMove = (e: Konva.KonvaEventObject<DragEvent>) => { altHeld = e.evt?.altKey === true; sync(kindOf()); };
+    // After the handle's own dragend has committed: the hint re-reads the moved element.
     const onDragEnd = () => {
       dragging = false;
       altHeld = false;
-      if (stage.getIntersection(pointer()) === node) { sync(kindOf()); return; }
-      leaveSoon();
+      const ended = node;
+      later(() => {
+        if (node !== ended || dragging) return;
+        if (stage.getIntersection(pointer()) !== node) { leave(); return; }
+        const kind = kindOf();
+        connected = kind === 'body' && hasConnectionsRef.current();
+        sync(kind);
+      });
     };
     // Konva fires no mouseout when the hovered handle is unmounted, so a stage
     // mousemove (registered only while hovered) drops a detached node.
@@ -854,7 +863,7 @@ export const HoverHintOverlay = memo<{
     // and unbinding inside a Konva dispatch skips the next listener (the handle's own dragend).
     const leaveSoon = () => {
       const left = node;
-      if (left && !dragging) setTimeout(() => { if (node === left && !dragging) leave(); }, 0);
+      if (left && !dragging) later(() => { if (node === left && !dragging) leave(); });
     };
     const onOver = (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (dragging) return;
@@ -877,6 +886,7 @@ export const HoverHintOverlay = memo<{
     stage.on('mouseover.hoverhint', onOver);
     stage.on('mouseout.hoverhint', onOut);
     return () => {
+      disposed = true;
       stage.off('.hoverhint');
       node?.off('.hoverhint');
       container.style.cursor = '';

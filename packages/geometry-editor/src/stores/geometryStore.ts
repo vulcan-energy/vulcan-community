@@ -1575,6 +1575,15 @@ export interface GeometryState extends
     updates: Array<{ elementId: string, vertexIndex: number, newPosition: {x: number, y: number, z: number} }>,
     skipAutoSave?: boolean,
   ) => void;
+  /**
+   * Alt-drag of a unit or terminal point: commits the point like a plain drag (host placement,
+   * snapping), then moves only the attached duct ends to where it landed. One undo step.
+   */
+  commitConnectedPointDrag: (
+    id: string,
+    coordinates: Element['coordinates'],
+    neighbours: ReadonlyArray<{ elementId: string; vertexIndex: number }>,
+  ) => void;
   removeElement: (id: string) => void;
   duplicateElement: (id: string) => void;
   duplicateElements: (ids: string[]) => void;
@@ -6772,6 +6781,34 @@ const createGeometryState = (
       createElementNameRemapEvent(externalNameMap, 'vertex-commit'),
     ).then(warnForFailedPostCommandEffects);
   }),
+
+  commitConnectedPointDrag: (id, coordinates, neighbours) => {
+    const before = get().elementsById;
+    get().updateElement(id, { coordinates }, true);
+    const after = get().elementsById;
+    const point = after[id]?.coordinates?.[0];
+    if (!point) return;
+    const updates: Array<{ elementId: string; vertexIndex: number; newPosition: { x: number; y: number; z: number } }> = [];
+    // A plain drag carries the unit's children rigidly; move connected leaves everything else put.
+    for (const [elementId, element] of Object.entries(after)) {
+      const previous = before[elementId];
+      if (elementId === id || !previous || previous === element) continue;
+      previous.coordinates?.forEach((newPosition, vertexIndex) => {
+        const current = element.coordinates?.[vertexIndex];
+        if (current && (current.x !== newPosition.x || current.y !== newPosition.y || current.z !== newPosition.z)) {
+          updates.push({ elementId, vertexIndex, newPosition });
+        }
+      });
+    }
+    for (const { elementId, vertexIndex } of neighbours) {
+      const far = before[elementId]?.coordinates?.[1 - vertexIndex];
+      // A neighbour that would collapse is left behind.
+      if (!far || Math.hypot(far.x - point.x, far.y - point.y, far.z - point.z) < 0.01) continue;
+      updates.push({ elementId, vertexIndex, newPosition: { x: point.x, y: point.y, z: point.z } });
+    }
+    if (updates.length > 0) get().commitVertexPositionUpdates(updates, true);
+    get().saveToHistory('commitConnectedPointDrag');
+  },
 
   convertThermalBridgeLineMode: (id, mode, skipAutoSave = false) => {
     const element = get().elementsById[id];

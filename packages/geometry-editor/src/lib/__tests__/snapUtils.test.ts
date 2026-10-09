@@ -834,6 +834,40 @@ describe('connected drag (Alt)', () => {
     expect(moved.a!.map(({ x, y }) => [x, y])).toEqual([[-1, 2], [4, 0]]);
   });
 
+  it('Alt-dragging a hosted terminal keeps it on its wall, with the duct end following', () => {
+    vi.useFakeTimers();
+    try {
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      const { addFloor, addZone, addElements } = store.getState();
+      addFloor('Ground', 2.4);
+      addZone({ name: 'Zone', floorArea: 20, height: 2.4, volume: 48 });
+      const zoneId = store.getState().zones[0]!.id;
+      const [, , terminalId, ductId] = addElements([
+        { type: 'BuildingElementOpaque', name: 'Wall', zoneId, height: 2.4, width: 6, area: 14.4, pitch: 90,
+          base_height: 0, parent_element: null, coordinates: [{ x: 0, y: 0, z: 0 }, { x: 6, y: 0, z: 0 }] },
+        { type: 'MechanicalVentilation', name: 'MVHR', vent_type: 'MVHR', coordinates: [{ x: 2, y: 3, z: 0 }] },
+        { type: 'MechanicalVentilationTerminal', name: 'Out', terminal_type: 'exhaust', parent_element: 'MVHR',
+          host_element: 'Wall', coordinates: [{ x: 2, y: 0, z: 0 }] },
+        { type: 'MechanicalVentilationDuctwork', name: 'D', duct_type: 'exhaust', parent_element: 'MVHR', length: 3,
+          coordinates: [{ x: 2, y: 3, z: 0 }, { x: 2, y: 0, z: 0 }] },
+      ] as never);
+      vi.runAllTimers();
+      const byId = store.getState().elementsById;
+      const terminal = byId[terminalId!]!;
+      const historyBefore = store.getState().historyIndex;
+      // Dropped off the wall: the terminal reprojects onto it and the duct end lands there too.
+      store.getState().commitConnectedPointDrag(terminalId!, [{ x: 4, y: 0.8, z: 0 }], findConnectedDragNeighbours(terminal, byId));
+      vi.runAllTimers();
+      const after = store.getState().elementsById;
+      expect(after[terminalId!]!.coordinates[0]).toMatchObject({ x: 4, y: 0 });
+      expect(after[ductId!]!.coordinates[1]).toEqual(after[terminalId!]!.coordinates[0]);
+      expect(after[ductId!]!.coordinates[0]).toMatchObject({ x: 2, y: 3 });
+      expect(store.getState().historyIndex).toBe(historyBefore + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('commits the drag and every neighbour as one undo step', () => {
     vi.useFakeTimers();
     try {
