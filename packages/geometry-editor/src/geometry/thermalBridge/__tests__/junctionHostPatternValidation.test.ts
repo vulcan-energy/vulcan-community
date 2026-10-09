@@ -438,7 +438,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 1, y: 0, z: 0 },
       { x: 5, y: 0, z: 0 },
     ]);
-    expect(findLinearThermalBridgeIssues([win, t] as Element[])).toHaveLength(0);
+    expect(findLinearThermalBridgeIssues([win, t] as Element[], [])).toHaveLength(0);
   });
 
   it('E3 + external wall parent: host pattern mismatch', () => {
@@ -447,7 +447,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 0, y: 0, z: 0 },
       { x: 6, y: 0, z: 0 },
     ]);
-    const issues = findLinearThermalBridgeIssues([w, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([w, t] as Element[], []);
     expect(issues.some((i) => i.kind === 'mismatch_junction_parent_host_pattern')).toBe(true);
   });
 
@@ -457,7 +457,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 0, y: 0, z: 0 },
       { x: 6, y: 0, z: 0 },
     ]);
-    expect(findLinearThermalBridgeIssues([w, t] as Element[])).toHaveLength(0);
+    expect(findLinearThermalBridgeIssues([w, t] as Element[], [])).toHaveLength(0);
   });
 
   it('E10 + pitched roof polygon + TB along eaves: no issues', () => {
@@ -466,7 +466,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 0, y: 0, z: 3 },
       { x: 8, y: 0, z: 3 },
     ]);
-    expect(findLinearThermalBridgeIssues([r, t] as Element[])).toHaveLength(0);
+    expect(findLinearThermalBridgeIssues([r, t] as Element[], [])).toHaveLength(0);
   });
 
   it('E14 + flat roof deck + TB along deck edge: no issues', () => {
@@ -475,7 +475,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 0, y: 0, z: 4 },
       { x: 10, y: 0, z: 4 },
     ]);
-    expect(findLinearThermalBridgeIssues([d, t] as Element[])).toHaveLength(0);
+    expect(findLinearThermalBridgeIssues([d, t] as Element[], [])).toHaveLength(0);
   });
 
   it('P2 + vertical adjacent segment host: host-pattern mismatch', () => {
@@ -499,7 +499,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 0, y: 3, z: 0 },
     ]);
     expect(
-      findLinearThermalBridgeIssues([adj, t] as Element[]).some((i) => i.kind === 'mismatch_junction_parent_host_pattern'),
+      findLinearThermalBridgeIssues([adj, t] as Element[], []).some((i) => i.kind === 'mismatch_junction_parent_host_pattern'),
     ).toBe(true);
   });
 
@@ -524,7 +524,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 0, y: 1, z: 0 },
       { x: 0, y: 3, z: 0 },
     ]);
-    expect(findLinearThermalBridgeIssues([pwall, t] as Element[])).toHaveLength(0);
+    expect(findLinearThermalBridgeIssues([pwall, t] as Element[], [])).toHaveLength(0);
   });
 
   it('E7 + horizontal party-floor adjacent line is rejected like the proposer', () => {
@@ -550,7 +550,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 0, y: 1, z: 0 },
       { x: 0, y: 3, z: 0 },
     ]);
-    expect(findLinearThermalBridgeIssues([ext, partyFloor, t] as Element[])).toHaveLength(1);
+    expect(findLinearThermalBridgeIssues([ext, partyFloor, t] as Element[], [])).toHaveLength(1);
   });
 
   it('R11 + roof window sill line: no host-pattern issue', () => {
@@ -560,7 +560,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 4, y: 0, z: 3 },
     ]);
     expect(
-      findLinearThermalBridgeIssues([rw, t] as Element[]).filter((i) => i.kind === 'mismatch_junction_parent_host_pattern'),
+      findLinearThermalBridgeIssues([rw, t] as Element[], []).filter((i) => i.kind === 'mismatch_junction_parent_host_pattern'),
     ).toHaveLength(0);
   });
 
@@ -571,7 +571,7 @@ describe('findLinearThermalBridgeIssues + realistic hosts', () => {
       { x: 4, y: 0, z: 3 },
     ]);
     expect(
-      findLinearThermalBridgeIssues([rw, t] as Element[]).some((i) => i.kind === 'mismatch_junction_parent_host_pattern'),
+      findLinearThermalBridgeIssues([rw, t] as Element[], []).some((i) => i.kind === 'mismatch_junction_parent_host_pattern'),
     ).toBe(true);
   });
 });
@@ -809,7 +809,7 @@ describe('golden host per façade-auto junction code', () => {
     'no mismatch_junction_parent_host_pattern for composable golden host — %s',
     (code) => {
       const elements = goldenElementsForFacadeAutoCode(code);
-      const hostIssues = findLinearThermalBridgeIssues(elements).filter(
+      const hostIssues = findLinearThermalBridgeIssues(elements, []).filter(
         (i) => i.kind === 'mismatch_junction_parent_host_pattern',
       );
       expect(hostIssues).toHaveLength(0);

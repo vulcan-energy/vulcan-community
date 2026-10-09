@@ -5,7 +5,11 @@ import type { Element, Floor } from '../geometry/types';
 import type {
   FloorBaseHeightOverrideRow,
   FloorHeightOverrideRow,
+  ParsedCsvGeometry,
 } from '../geometry/io/parseCsvToGeometry';
+import { liftStoreyIndexDuctsToMetres } from '../geometry/io/csvSemanticMigration';
+import { physicalZUsesFloorId } from './elementCanvasFloor';
+import { withEffectiveStoreyHeights } from './zoneDerivation';
 import {
   FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
   FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR,
@@ -84,4 +88,26 @@ export function applyFloorBaseHeightOverrides(
     }
     return floor;
   });
+}
+
+/**
+ * A parsed CSV as the editor holds it after `loadFromCSV`: storeys from the storey-index elements
+ * (metre-z ducts, pipes, terminals and TBs never invent one), the persisted height and base
+ * overrides, and the load-time duct lift. Validation outside the store (CLI, lodge table, support
+ * bot) starts from it so connectivity agrees with the editor on the same file.
+ * ponytail: a storey holding only metre-z elements (by `extra_json.floor_id`) is not created; the
+ * store creates it, but it carries no height, so no base below it changes.
+ */
+export function editorFloorsAndElementsForParsedCsv(
+  parsed: Pick<ParsedCsvGeometry, 'elements' | 'metadata'>,
+): { floors: Floor[]; elements: Element[] } {
+  const floors = applyFloorBaseHeightOverrides(
+    applyFloorHeightOverrides(
+      deriveFloorsFromElements(parsed.elements.filter((element) => !physicalZUsesFloorId(element))),
+      parsed.metadata.floorHeightOverrides,
+    ),
+    parsed.metadata.floorBaseHeightOverrides,
+  );
+  const elements = liftStoreyIndexDuctsToMetres(parsed.elements, withEffectiveStoreyHeights(floors, parsed.elements));
+  return { floors, elements };
 }

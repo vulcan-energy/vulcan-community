@@ -186,12 +186,12 @@ describe('storey-index points in metres', () => {
   });
 
   it('puts a new terminal 2.4 m above its storey base', () => {
-    expect(defaultMvhrTerminalZ(0, floors)).toBe(2.4);
-    expect(defaultMvhrTerminalZ(1, floors)).toBe(5.5);
-    expect(defaultMvhrTerminalZ(-1, floors)).toBe(-0.2);
+    expect(defaultMvhrTerminalZ(0)).toBe(2.4);
+    expect(defaultMvhrTerminalZ(3.1)).toBe(5.5);
+    expect(defaultMvhrTerminalZ(-2.6)).toBe(-0.2);
     const wallUp = { id: 'w', name: 'W', type: 'BuildingElementOpaque', floorId: 'u', coordinates: [{ x: 0, y: 0, z: 1 }, { x: 4, y: 0, z: 1 }] } as Element;
-    const draft = hostedMvhrTerminalDraft('intake', 'MV', wallUp, { x: 1.234, y: 0.001 }, floors);
-    expect(draft.coordinates).toEqual([{ x: 1.23, y: 0, z: 5.5 }]);
+    const draft = hostedMvhrTerminalDraft('intake', 'MV', wallUp, { x: 1.234, y: 0 }, floors);
+    expect(draft.coordinates).toEqual([{ x: 1.234, y: 0, z: 5.5 }]);
     // mid_height_air_flow_path follows the terminal's z.
     expect(deriveMechanicalVentilationTerminalPosition(draft as MechanicalVentilationTerminal, wallUp)?.mid_height_air_flow_path).toBe(5.5);
   });

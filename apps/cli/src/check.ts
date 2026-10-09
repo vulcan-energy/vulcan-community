@@ -16,7 +16,7 @@ import { validateElementCore } from '../../../packages/geometry-editor/src/geome
 import { validateZone } from '../../../packages/geometry-editor/src/geometry/validation/validateZone';
 import type { MissingElement, ValidationIssue } from '../../../packages/geometry-editor/src/geometry/validation/types';
 import { collectGlobalSettingsWarnings } from '../../../packages/geometry-editor/src/lib/globalSettingsValidation';
-import { deriveFloorsFromElements } from '../../../packages/geometry-editor/src/lib/floorDerivation';
+import { editorFloorsAndElementsForParsedCsv } from '../../../packages/geometry-editor/src/lib/floorDerivation';
 
 export type FailOn = 'none' | 'critical' | 'warning';
 type Severity = 'critical' | 'warning';
@@ -108,9 +108,10 @@ export function checkGeometryCsv(csvArg: string) {
   const csvPath = resolve(csvArg);
   const csv = readFileSync(csvPath, 'utf8');
   const parsed = parseCsvToGeometry(csv);
-  const allElements = parsed.elements.filter((element) => !element.isPlaceholder);
-  const byId = elementsById(parsed.elements);
-  const floors = deriveFloorsFromElements(parsed.elements);
+  // The model as the editor loads it, so connectivity matches the canvas.
+  const { floors, elements } = editorFloorsAndElementsForParsedCsv(parsed);
+  const allElements = elements.filter((element) => !element.isPlaceholder);
+  const byId = elementsById(elements);
   const complianceValidationEnabled =
     parsed.metadata.complianceSettings.complianceValidationEnabled === true;
 
@@ -121,11 +122,11 @@ export function checkGeometryCsv(csvArg: string) {
         spaceLabelsById: spaceLabelsById(parsed.spaceLabels),
         spaceLabelIds: parsed.spaceLabels.map((label) => label.id),
         complianceSettings: parsed.metadata.complianceSettings,
-        elements: parsed.elements,
+        elements,
       })
     : undefined;
 
-  const linearThermalBridgeIssues = findLinearThermalBridgeIssues(parsed.elements, floors);
+  const linearThermalBridgeIssues = findLinearThermalBridgeIssues(elements, floors);
   const rows: ValidationRow[] = [];
 
   for (const element of allElements) {
@@ -166,7 +167,7 @@ export function checkGeometryCsv(csvArg: string) {
   }
 
   for (const message of collectGlobalSettingsWarnings({
-    elements: parsed.elements,
+    elements,
     floors,
     complianceSettings: parsed.metadata.complianceSettings,
   })) {

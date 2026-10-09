@@ -98,7 +98,8 @@ export function upgradePcdbProductReferences(elements: readonly Element[]): Elem
 }
 
 /** Saves from before ducts started at the unit's height in metres: a duct drawn from a unit on
- * storey s != 0 started at z = s, the unit's storey index. When both ends sit at exactly s and that
+ * storey s started at z = s, the unit's storey index (0 on the ground floor, where a base
+ * override still moves the storey). When both ends sit at exactly s and that
  * storey's base height is not s, both ends move to the base height, so the duct meets the unit
  * again. Length is unchanged, so HEM output is too. Sloped ducts are left alone (Snap fixes them).
  * `effectiveFloors` come from `withEffectiveStoreyHeights`. Returns the same array when nothing changed. */
@@ -114,10 +115,11 @@ export function liftStoreyIndexDuctsToMetres(elements: readonly Element[], effec
   const result = elements.map((element) => {
     if (element.type !== 'MechanicalVentilationDuctwork' || element.coordinates?.length !== 2) return element;
     const storey = unitStorey.get(element.parent_element?.trim() ?? '');
-    if (storey === undefined || storey === 0 || !element.coordinates.every((p) => p.z === storey)) return element;
+    if (storey === undefined || !element.coordinates.every((p) => p.z === storey)) return element;
     const base = calculateDerivedBaseHeight(storey, effectiveFloors);
-    // Unresolved storey heights put every storey at 0: leave the duct until they resolve.
-    if (base === storey || (storey > 0 ? base <= 0 : base >= 0)) return element;
+    // Storey 0 moves only for a ground base override. Unresolved heights put every other storey
+    // at 0: leave the duct until they resolve.
+    if (base === storey || (storey > 0 && base <= 0) || (storey < 0 && base >= 0)) return element;
     changed = true;
     return { ...element, coordinates: element.coordinates.map((p) => ({ ...p, z: base })) };
   });

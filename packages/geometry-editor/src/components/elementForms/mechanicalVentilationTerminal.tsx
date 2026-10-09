@@ -71,6 +71,7 @@ import { roundToTwoDecimals } from '../../geometry/constants';
 import type { Element } from '../../geometry/types';
 import { getParentByName } from '../../lib/parentOrientation';
 import {
+  defaultMvhrTerminalZ,
   deriveMechanicalVentilationTerminalPosition,
   isMvhrTerminalHost,
   MVHR_TERMINAL_ROLES,
@@ -116,6 +117,8 @@ export interface MechanicalVentilationTerminalFormState {
    * eligible host by name — see module header comment. */
   getCurrentTerminal: () => Element | undefined;
   findEligibleHost: (hostName: string) => Element | undefined;
+  /** A new terminal's height on the selected storey (its base + the default terminal height). */
+  defaultTerminalZ: number;
 }
 
 function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFormState {
@@ -185,6 +188,7 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFo
     setParentElement: ctx.shared.setParentElement,
     getCurrentTerminal,
     findEligibleHost,
+    defaultTerminalZ: defaultMvhrTerminalZ(ctx.derivedBaseHeight),
   };
 }
 
@@ -226,11 +230,11 @@ export const mechanicalVentilationTerminalFormModule: ElementFormModule<Mechanic
     const current = state.getCurrentTerminal();
     const selectedHost = state.hostElement ? state.findEligibleHost(state.hostElement) : undefined;
     const eligibleHostName = isMvhrTerminalHost(selectedHost) ? state.hostElement : '';
-    const currentPoint = current?.coordinates?.[0] ?? { x: 0, y: 0, z: 2.4 };
+    const currentPoint = current?.coordinates?.[0] ?? { x: 0, y: 0, z: state.defaultTerminalZ };
     const z =
       typeof state.mvhrTerminalMidHeightAirFlowPathInput.value === 'number'
         ? state.mvhrTerminalMidHeightAirFlowPathInput.value
-        : (typeof currentPoint.z === 'number' ? currentPoint.z : 2.4);
+        : (typeof currentPoint.z === 'number' ? currentPoint.z : state.defaultTerminalZ);
     return {
       ...ctx.baseData,
       terminal_type: state.terminalType || undefined,

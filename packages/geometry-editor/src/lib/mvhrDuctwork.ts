@@ -394,11 +394,12 @@ type PlanPoint = { x: number; y: number };
 export const DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M = 2.4;
 
 /**
- * Physical z of a new terminal on `storey`, which is also its exported `mid_height_air_flow_path`.
- * `effectiveFloors` carry effective storey heights (`withEffectiveStoreyHeights`).
+ * Physical z of a new terminal on a storey whose base is `storeyBaseHeightM` (from
+ * `calculateDerivedBaseHeight` over effective floors), which is also its exported
+ * `mid_height_air_flow_path`.
  */
-export function defaultMvhrTerminalZ(storey: number, effectiveFloors: Floor[]): number {
-  return roundToTwoDecimals(calculateDerivedBaseHeight(storey, effectiveFloors) + DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M);
+export function defaultMvhrTerminalZ(storeyBaseHeightM: number): number {
+  return roundToTwoDecimals(storeyBaseHeightM + DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M);
 }
 
 /** Clamped plan projection onto a segment, keeping the point's z. The store places hosted children with it. */
@@ -426,7 +427,7 @@ export function hostedMvhrTerminalDraft(
   planPoint: PlanPoint,
   effectiveFloors: Floor[],
 ): Extract<ElementDraft, { type: 'MechanicalVentilationTerminal' }> {
-  const z = defaultMvhrTerminalZ(getElementCanvasFloorZValue(host, effectiveFloors) ?? 0, effectiveFloors);
+  const z = defaultMvhrTerminalZ(calculateDerivedBaseHeight(getElementCanvasFloorZValue(host, effectiveFloors) ?? 0, effectiveFloors));
   return {
     name: '',
     type: 'MechanicalVentilationTerminal',
@@ -434,7 +435,7 @@ export function hostedMvhrTerminalDraft(
     parent_element: unitName,
     host_element: host.name,
     floorId: host.floorId,
-    coordinates: [{ x: roundToTwoDecimals(planPoint.x), y: roundToTwoDecimals(planPoint.y), z }],
+    coordinates: [{ x: planPoint.x, y: planPoint.y, z }],
     isPlaceholder: false,
   };
 }

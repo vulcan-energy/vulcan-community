@@ -65,7 +65,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 0, y: 0, z: 0 },
       { x: 0, y: 0, z: 2.4 },
     ]);
-    const issues = findLinearThermalBridgeIssues([t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([t] as Element[], []);
     const u = issues.find((i) => i.kind === 'orphan_unresolved_parent');
     expect(u).toBeDefined();
     expect(u!.category).toBe('reference_unresolved');
@@ -92,7 +92,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 1, y: 0, z: 0 },
       { x: 1, y: 0, z: 2.4 },
     ]);
-    const issues = findLinearThermalBridgeIssues([win, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([win, t] as Element[], []);
     expect(issues).toHaveLength(0);
   });
 
@@ -102,7 +102,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 0, y: 0, z: 2.4 },
     ]);
     const w = wall('w1', 'Ext', 0, 0, 3, 0);
-    const issues = findLinearThermalBridgeIssues([w, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([w, t] as Element[], []);
     expect(issues.some((i) => i.kind === 'orphan_e16e17_incomplete_walls')).toBe(true);
   });
 
@@ -121,7 +121,7 @@ describe('findLinearThermalBridgeIssues', () => {
         thermal_bridge_source: { host_wall_id: 'wa', host_wall_b_id: 'wb' },
       },
     );
-    const issues = findLinearThermalBridgeIssues([a, b, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([a, b, t] as Element[], []);
     expect(issues).toHaveLength(0);
   });
 
@@ -140,7 +140,7 @@ describe('findLinearThermalBridgeIssues', () => {
         thermal_bridge_source: { host_wall_id: 'wa', host_wall_b_id: 'wb' },
       },
     );
-    const issues = findLinearThermalBridgeIssues([a, b, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([a, b, t] as Element[], []);
     const c = issues.find((i) => i.kind === 'mismatch_e16e17_corner_plan');
     expect(c).toBeDefined();
     expect(c!.category).toBe('multi_host_geometry');
@@ -167,7 +167,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: -1, y: 0, z: 0 },
       { x: 9, y: 0, z: 0 },
     ]);
-    const issues = findLinearThermalBridgeIssues([win, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([win, t] as Element[], []);
     const al = issues.find((i) => i.kind === 'mismatch_tb_plan_alignment');
     expect(al).toBeDefined();
     expect(al!.category).toBe('outline_geometry');
@@ -194,7 +194,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 1, y: 0, z: 0 },
       { x: 2, y: 0, z: 0 },
     ]);
-    const issues = findLinearThermalBridgeIssues([win, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([win, t] as Element[], []);
     expect(issues.some((i) => i.kind === 'mismatch_junction_parent_host_pattern')).toBe(true);
   });
 
@@ -204,7 +204,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 1, y: 0, z: 0 },
       { x: 2, y: 0, z: 0 },
     ]);
-    const issues = findLinearThermalBridgeIssues([w, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([w, t] as Element[], []);
     expect(issues.some((i) => i.kind === 'mismatch_junction_parent_host_pattern')).toBe(true);
   });
 
@@ -233,7 +233,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 1, y: 0, z: 3.5 },
       { x: 2, y: 0, z: 3.5 },
     ]);
-    const issues = findLinearThermalBridgeIssues([roofWin, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([roofWin, t] as Element[], []);
     expect(issues).toHaveLength(0);
   });
 
@@ -243,7 +243,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 0, y: 0, z: 1 },
     ]);
     const w = wall('w1', 'Ext', 0, 0, 3, 0);
-    const issues = findLinearThermalBridgeIssues([w, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([w, t] as Element[], []);
     expect(issues.some((i) => i.kind === 'mismatch_unknown_junction_type')).toBe(true);
   });
 
@@ -274,7 +274,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 0, y: 0, z: 3 },
       { x: 8, y: 0, z: 3 },
     ]);
-    const issues = findLinearThermalBridgeIssues([r, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([r, t] as Element[], []);
     expect(issues.filter((i) => i.kind === 'orphan_segment_far_from_host')).toHaveLength(0);
   });
 
@@ -284,7 +284,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 4, y: 3, z: 3 },
       { x: 4, y: 3.1, z: 3 },
     ]);
-    const issues = findLinearThermalBridgeIssues([r, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([r, t] as Element[], []);
     expect(issues.some((i) => i.kind === 'orphan_segment_far_from_host')).toBe(true);
   });
 
@@ -294,7 +294,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 4, y: 3, z: 3 },
       { x: 5.386, y: 3, z: 3 },
     ]);
-    const issues = findLinearThermalBridgeIssues([r, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([r, t] as Element[], []);
     expect(issues.some((i) => i.kind === 'orphan_segment_far_from_host')).toBe(true);
   });
 
@@ -313,7 +313,7 @@ describe('findLinearThermalBridgeIssues', () => {
         thermal_bridge_source: { host_wall_id: 'r1', host_wall_b_id: 'w-d' },
       },
     );
-    const issues = findLinearThermalBridgeIssues([r, w, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([r, w, t] as Element[], []);
     expect(issues.filter((i) => i.kind === 'orphan_segment_far_from_host')).toHaveLength(0);
     expect(issues.filter((i) => i.kind === 'mismatch_tb_plan_alignment')).toHaveLength(0);
   });
@@ -341,7 +341,7 @@ describe('findLinearThermalBridgeIssues', () => {
         thermal_bridge_source: { host_wall_id: 'r1', host_wall_b_id: 'dormer-roof' },
       },
     );
-    const issues = findLinearThermalBridgeIssues([r, dormerRoof, t] as Element[]);
+    const issues = findLinearThermalBridgeIssues([r, dormerRoof, t] as Element[], []);
     expect(issues.filter((i) => i.kind === 'orphan_segment_far_from_host')).toHaveLength(0);
     expect(issues.filter((i) => i.kind === 'mismatch_tb_plan_alignment')).toHaveLength(0);
   });
@@ -365,7 +365,7 @@ describe('findLinearThermalBridgeIssues', () => {
       ],
       { thermal_bridge_source: { host_wall_id: 'wall-b', host_wall_b_id: 'slab-b' } },
     );
-    const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
+    const issues = findLinearThermalBridgeIssues([a, b] as Element[], []);
     expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(0);
   });
 
@@ -394,7 +394,7 @@ describe('findLinearThermalBridgeIssues', () => {
       ],
       { thermal_bridge_source: { host_wall_id: 'wall-b', host_wall_b_id: 'slab-b' } },
     );
-    const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
+    const issues = findLinearThermalBridgeIssues([a, b] as Element[], []);
     expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(0);
   });
 
@@ -412,7 +412,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 0, y: 0, z: 0 },
       { x: 4, y: 0, z: 0 },
     ], source);
-    const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
+    const issues = findLinearThermalBridgeIssues([a, b] as Element[], []);
     expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(2);
   });
 
@@ -425,7 +425,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 1, y: 0, z: 0 },
       { x: 5, y: 0, z: 0 },
     ]);
-    const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
+    const issues = findLinearThermalBridgeIssues([a, b] as Element[], []);
     const overlap = issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment');
     expect(overlap).toHaveLength(2);
     expect(overlap.every((i) => i.severity === 'error')).toBe(true);
@@ -452,7 +452,7 @@ describe('findLinearThermalBridgeIssues', () => {
       ],
       { thermal_bridge_source: { host_wall_id: 'main-roof', host_wall_b_id: 'dormer-front-wall' } },
     );
-    const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
+    const issues = findLinearThermalBridgeIssues([a, b] as Element[], []);
     expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(0);
   });
 
@@ -477,7 +477,7 @@ describe('findLinearThermalBridgeIssues', () => {
       ],
       { thermal_bridge_source: { host_wall_id: 'wall', host_wall_b_id: 'roof' } },
     );
-    const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
+    const issues = findLinearThermalBridgeIssues([a, b] as Element[], []);
     expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(2);
   });
 
@@ -490,7 +490,7 @@ describe('findLinearThermalBridgeIssues', () => {
       { x: 0, y: 0, z: 2.4 },
       { x: 4, y: 0, z: 2.4 },
     ]);
-    const issues = findLinearThermalBridgeIssues([a, b] as Element[]);
+    const issues = findLinearThermalBridgeIssues([a, b] as Element[], []);
     expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(0);
   });
 
@@ -520,7 +520,7 @@ describe('findLinearThermalBridgeIssues', () => {
     const issues = findLinearThermalBridgeIssues([
       duct('d-a', 0, 0, 5, 0),
       duct('d-b', 2, 0, 6, 0),
-    ] as Element[]);
+    ] as Element[], []);
     const overlap = issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment');
     expect(overlap).toHaveLength(2);
     expect(overlap.every((i) => i.message.includes('duct run'))).toBe(true);
@@ -545,7 +545,7 @@ describe('findLinearThermalBridgeIssues', () => {
       ],
       isPlaceholder: false,
     } as Element;
-    const issues = findLinearThermalBridgeIssues([tb, duct] as Element[]);
+    const issues = findLinearThermalBridgeIssues([tb, duct] as Element[], []);
     expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(0);
   });
 

@@ -5420,6 +5420,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         activeSnapPoints.length > 0 ? activeSnapPoints[activeSnapPoints.length - 1] : null;
       const drawSnapClick = resolveDrawSnap(mouseWorldRaw, lastSnapPoint);
       const mouseWorld = drawSnapClick.point;
+      // A placed point lands on the 0.01 m grid like drawn duct and pipe ends, unless it snapped to
+      // a target: it never leaves the target.
+      const placedPoint = drawSnapClick.geometrySnap
+        ? mouseWorld
+        : { x: roundToTwoDecimals(mouseWorld.x), y: roundToTwoDecimals(mouseWorld.y) };
 
         if (drawMode === 'dormer') {
           const hostRoof = findDormerHostAtPoint(mouseWorld);
@@ -5551,19 +5556,19 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               elementsById as Record<string, Element>,
               getProjectDefaults(geometryStore).snapTol * 2,
             );
-            const terminalPlanPoint = hostPlacement?.point ?? mouseWorld;
+            const terminalPlanPoint = hostPlacement?.point ?? placedPoint;
             updateElement(elementId, {
               ...drawPresetProps,
               ...drawMvhrRolePropsRef.current,
               extra_json: undefined,
               coordinates: [{
-                x: roundToTwoDecimals(terminalPlanPoint.x),
-                y: roundToTwoDecimals(terminalPlanPoint.y),
+                x: terminalPlanPoint.x,
+                y: terminalPlanPoint.y,
                 // The host may sit on another storey: the terminal takes the host's.
-                z: defaultMvhrTerminalZ(
+                z: defaultMvhrTerminalZ(calculateDerivedBaseHeight(
                   hostPlacement ? getElementCanvasFloorZValue(hostPlacement.host, effectiveFloors) ?? currentFloorZ : currentFloorZ,
                   effectiveFloors,
-                ),
+                )),
               }],
               floorId: hostPlacement?.host.floorId ?? ensureFloorForZ(currentFloorZ),
               host_element: hostPlacement?.host.name ?? null,
@@ -5587,8 +5592,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             ...drawPresetProps,
             ...drawMvhrRolePropsRef.current,
             ...(isThermalBridgePoint ? { floorId: pointFloorId } : {}),
-            // On the 0.01 m grid, like drawn duct and pipe ends, so a line drawn from the point meets it exactly.
-            coordinates: [{ x: roundToTwoDecimals(mouseWorld.x), y: roundToTwoDecimals(mouseWorld.y), z: elementZ }],
+            coordinates: [{ x: placedPoint.x, y: placedPoint.y, z: elementZ }],
             ...(hostPrefill || {})
           }, true);
 

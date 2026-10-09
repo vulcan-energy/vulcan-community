@@ -75,7 +75,7 @@ import {
   type MvhrTerminalRole,
 } from '../lib/mvhrDuctwork';
 import { generateUniqueElementName } from '../lib/elementAutoNaming';
-import { getElementCanvasFloorZValue, networkPoint3 } from '../lib/elementCanvasFloor';
+import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, networkPoint3 } from '../lib/elementCanvasFloor';
 import { withEffectiveStoreyHeights } from '../lib/zoneDerivation';
 import { StandardDropdown } from './StandardDropdown';
 import type { ElementFormSelection } from './elementForms/types';
@@ -313,7 +313,7 @@ export function useMvhrDuctTerminalManager(args: {
         coordinates: [{
           x: selectedMvhrUnit.coordinates?.[0]?.x ?? 0,
           y: selectedMvhrUnit.coordinates?.[0]?.y ?? 0,
-          z: defaultMvhrTerminalZ(getElementCanvasFloorZValue(selectedMvhrUnit, floors) ?? 0, floors),
+          z: defaultMvhrTerminalZ(calculateDerivedBaseHeight(getElementCanvasFloorZValue(selectedMvhrUnit, floors) ?? 0, floors)),
         }],
       } as Omit<Element, 'id'>);
     }
