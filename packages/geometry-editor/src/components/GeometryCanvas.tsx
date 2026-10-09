@@ -4449,7 +4449,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     // Read at call time (hover enter, drag end), so the answer reflects a just-committed move.
     const byId = geometryStore.getState().elementsById as Record<string, Element>;
     const selected = byId[selection.id];
-    return !!selected && findConnectedDragNeighbours(selected, byId).length > 0;
+    return !!selected && findConnectedDragNeighbours(selected, byId, getProjectDefaults(geometryStore).angleTol).length > 0;
   }, [selection, selectedElementIds.length, geometryStore]);
 
   // Alt-drag "move connected" for the selected-shape and selected-point handles. Neighbours are
@@ -4457,7 +4457,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   // descendants, in the same session.
   const beginConnectedDrag = (target: Konva.Node, element: Element) => {
     const byId = elementsById as Record<string, Element>;
-    const neighbours = selectedElementIds.length > 1 ? [] : findConnectedDragNeighbours(element, byId);
+    const neighbours = selectedElementIds.length > 1 ? [] : findConnectedDragNeighbours(element, byId, getProjectDefaults(geometryStore).angleTol);
     const previewIds = [...new Set(neighbours.flatMap(({ elementId }) =>
       [elementId, ...collectHostedDescendantElementIds(byId, elementId)]))];
     target.setAttr('connectedNeighbours', neighbours);

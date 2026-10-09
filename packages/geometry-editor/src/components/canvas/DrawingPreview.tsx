@@ -870,7 +870,9 @@ export const HoverHintOverlay = memo<{
       sync(null);
     };
     const onOver = (e: Konva.KonvaEventObject<MouseEvent>) => {
-      if (dragging) return;
+      // A drag starts from the node pressed on, so a press keeps it: a fast first step that
+      // crosses another handle (the rotate grip) before dragstart must not take over the hint.
+      if (dragging || (e.evt?.buttons ?? 0) & 1) return;
       clearTimeout(pendingLeave);
       const kind = classifyHoverHandle(e.target);
       if (!kind) { if (node) leaveAfterDispatch(); return; }

@@ -807,7 +807,7 @@ describe('connected drag (Alt)', () => {
     other: duct('other', [4, 0], [4, -2], 'MVHR 2'),
   }) as unknown as Record<string, Element>;
   const plan = (byId: Record<string, Element>, id: string, delta: { x: number; y: number }) =>
-    planConnectedDrag(byId[id]!, findConnectedDragNeighbours(byId[id]!, byId), byId, delta);
+    planConnectedDrag(byId[id]!, findConnectedDragNeighbours(byId[id]!, byId, 2), byId, delta);
 
   it('stretches each neighbour by its shared end and keeps its far end', () => {
     const moved = plan(run(), 'b', { x: 1, y: 0 });
@@ -857,7 +857,7 @@ describe('connected drag (Alt)', () => {
       const terminal = byId[terminalId!]!;
       const historyBefore = store.getState().historyIndex;
       // Dropped off the wall: the terminal reprojects onto it and the duct end lands there too.
-      store.getState().commitConnectedPointDrag(terminalId!, [{ x: 4, y: 0.8, z: 0 }], findConnectedDragNeighbours(terminal, byId));
+      store.getState().commitConnectedPointDrag(terminalId!, [{ x: 4, y: 0.8, z: 0 }], findConnectedDragNeighbours(terminal, byId, 2));
       vi.runAllTimers();
       const after = store.getState().elementsById;
       expect(after[terminalId!]!.coordinates[0]).toMatchObject({ x: 4, y: 0 });
@@ -878,7 +878,7 @@ describe('connected drag (Alt)', () => {
       const byId = store.getState().elementsById;
       const idOf = (name: string) => Object.values(byId).find((el) => el.name === name)!.id;
       const b = byId[idOf('b')]!;
-      const moved = planConnectedDrag(b, findConnectedDragNeighbours(b, byId), byId, { x: 1, y: 0 });
+      const moved = planConnectedDrag(b, findConnectedDragNeighbours(b, byId, 2), byId, { x: 1, y: 0 });
       const historyBefore = store.getState().historyIndex;
       store.getState().commitVertexPositionUpdates(Object.entries(moved).flatMap(([elementId, coords]) =>
         coords.map((newPosition, vertexIndex) => ({ elementId, vertexIndex, newPosition }))));
@@ -905,8 +905,9 @@ describe('connected drag (Alt)', () => {
         type: 'BuildingElementOpaque', name, zoneId, height: 2.4, pitch: 90, base_height: 0, parent_element: null,
         coordinates: [{ x: a[0], y: a[1], z: 0 }, { x: b[0], y: b[1], z: 0 }],
       });
-      // U of walls L-M-R with a window on L and a ground floor whose corners sit on the junctions.
-      const [leftId, middleId, rightId, windowId, floorId] = addElements([
+      // U of walls L-M-R (C runs on colinear from M) with a window on L and a ground floor whose
+      // corners sit on the junctions.
+      const [leftId, middleId, rightId, windowId, floorId, colinearId] = addElements([
         wall('L', [0, 0], [0, 4]),
         wall('M', [0, 4], [6, 4]),
         wall('R', [6, 4], [6, 0]),
@@ -914,16 +915,19 @@ describe('connected drag (Alt)', () => {
           parent_element: 'L', coordinates: [{ x: 0, y: 1, z: 0 }, { x: 0, y: 2, z: 0 }] },
         { type: 'BuildingElementGround', name: 'Floor', zoneId, pitch: 180,
           coordinates: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 4, z: 0 }, { x: 6, y: 4, z: 0 }, { x: 6, y: 0, z: 0 }] },
+        wall('C', [6, 4], [9, 4]),
       ] as never);
       vi.runAllTimers();
       const byId = store.getState().elementsById;
       const middle = byId[middleId!]!;
-      const neighbours = findConnectedDragNeighbours(middle, byId);
-      // Only walls follow: not the window (a building element too) or the floor polygon.
+      const neighbours = findConnectedDragNeighbours(middle, byId, 2);
+      // Only walls follow: not the window (a building element too), the floor polygon, or colinear C.
       expect(neighbours.map(({ elementId }) => elementId).sort()).toEqual([leftId, rightId].sort());
-      expect(findConnectedDragNeighbours(byId[windowId!]!, byId)).toEqual([]);
+      expect(findConnectedDragNeighbours(byId[windowId!]!, byId, 2)).toEqual([]);
       expect(getHoverHintText({ kind: 'body', dragging: false, connected: neighbours.length > 0 })).toBe('Alt moves connected');
 
+      // A neighbour that would reverse is left behind, like one that would collapse.
+      expect(Object.keys(planConnectedDrag(middle, neighbours, byId, { x: 0, y: -5 }))).toEqual([middleId]);
       // Off-normal drag: only the outward (y) part applies.
       const moved = planConnectedDrag(middle, neighbours, byId, { x: 0.4, y: 1 });
       const historyBefore = store.getState().historyIndex;
@@ -936,12 +940,10 @@ describe('connected drag (Alt)', () => {
       expect(xy(leftId!)).toEqual([[0, 0], [0, 5]]); // far end fixed
       expect(xy(rightId!)).toEqual([[6, 5], [6, 0]]);
       expect((after[leftId!] as { width?: number }).width).toBeCloseTo(5);
-      // The window stays on the stretched wall, inside its ends.
-      for (const { x, y } of after[windowId!]!.coordinates) {
-        expect(x).toBe(0);
-        expect(y).toBeGreaterThanOrEqual(0);
-        expect(y).toBeLessThanOrEqual(5);
-      }
+      // The window keeps its place along the stretched wall (t = 0.375) and its length.
+      const [w0, w1] = after[windowId!]!.coordinates;
+      expect([w0!.x, w1!.x, (w0!.y + w1!.y) / 2, w1!.y - w0!.y]).toEqual([0, 0, 1.875, 1]);
+      expect(xy(colinearId!)).toEqual([[6, 4], [9, 4]]);
       expect(after[floorId!]!.coordinates).toEqual(byId[floorId!]!.coordinates);
       expect(store.getState().historyIndex).toBe(historyBefore + 1);
     } finally {
