@@ -136,11 +136,13 @@ describe('tooltip copy', () => {
   it('hover hints', () => {
     expect(getHoverHintText({ kind: 'rotate-grip', dragging: false })).toBe('Drag to rotate');
     expect(getHoverHintText({ kind: 'rotate-grip', dragging: true })).toBeNull();
+    expect(getHoverHintText({ kind: 'vertex', dragging: false })).toBe('Drag to reshape · Shift: no snap');
     expect(getHoverHintText({ kind: 'vertex', dragging: true })).toBe('Shift: no snap');
-    expect(getHoverHintText({ kind: 'body', dragging: false })).toBeNull();
-    expect(getHoverHintText({ kind: 'body', dragging: false, connected: true })).toBe('Alt: move connected');
+    expect(getHoverHintText({ kind: 'body', dragging: false })).toBe('Drag to move');
+    expect(getHoverHintText({ kind: 'body', dragging: false, connected: true })).toBe('Drag to move · Alt: move connected');
     expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: true })).toBe('Alt: move connected');
     expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: false })).toBeNull();
-    expect(getHoverHintText({ kind: 'label-vertex', dragging: false })).toBeNull();
+    expect(getHoverHintText({ kind: 'label-vertex', dragging: false })).toBe('Drag to reshape');
+    expect(getHoverHintText({ kind: 'label-vertex', dragging: true })).toBeNull();
   });
 });

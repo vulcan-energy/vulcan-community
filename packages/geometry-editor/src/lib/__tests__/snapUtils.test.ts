@@ -992,7 +992,7 @@ describe('connected drag (Alt)', () => {
       // Only walls follow: not the window (a building element too), the floor polygon, or colinear C.
       expect(neighbours.map(({ elementId }) => elementId).sort()).toEqual([leftId, rightId].sort());
       expect(findConnectedDragNeighbours(byId[windowId!]!, byId, 2, [])).toEqual([]);
-      expect(getHoverHintText({ kind: 'body', dragging: false, connected: neighbours.length > 0 })).toBe('Alt: move connected');
+      expect(getHoverHintText({ kind: 'body', dragging: false, connected: neighbours.length > 0 })).toBe('Drag to move · Alt: move connected');
 
       // A neighbour that would reverse is left behind, like one that would collapse.
       expect(Object.keys(planConnectedDrag(middle, neighbours, byId, { x: 0, y: -5 }))).toEqual([middleId]);

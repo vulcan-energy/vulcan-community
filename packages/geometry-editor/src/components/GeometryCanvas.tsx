@@ -6698,19 +6698,20 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           );
         })()}
 
-        {selectedLineOpeningClearance &&
+        {/* While an opening is dragged along its host, the live preview replaces the stored distances. */}
+        {selectedLineOpeningClearance && !lineOpeningClearanceDragPreview &&
           renderLineOpeningClearanceGuidance(
             'selected-line-opening-clearance-marker',
             selectedLineOpeningClearance.clearance,
             true,
           )}
 
-        {!selectedLineOpeningClearance && lineOpeningClearanceDragPreview &&
+        {lineOpeningClearanceDragPreview &&
           renderLineOpeningClearanceGuidance(
             'line-opening-clearance-drag-preview',
             lineOpeningClearanceDragPreview.clearance,
             false,
-            0.86,
+            selectedLineOpeningClearance ? 1 : 0.86,
           )}
 
         {/* Render persistent snap indicators (always visible) */}
