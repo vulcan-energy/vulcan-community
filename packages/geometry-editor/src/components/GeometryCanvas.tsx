@@ -3459,6 +3459,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     selectAllElementsOnCurrentFloor: selectAllElementsRespectingPanelFilter,
     setMarqueeSelection,
     drawMode,
+    drawDraftInProgress: drawPoints.length > 0 || roomWalls.length > 0 || orthogonalRoomStart !== null,
     drawElementType,
     setDrawMode,
     setDrawPoints,

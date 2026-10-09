@@ -148,14 +148,14 @@ describe('temporary suggestion preview keyboard ownership', () => {
   });
 });
 
-describe('shape shortcut for the current draw mode', () => {
+describe('shape shortcut for the current draw mode mid-draft', () => {
   it.each([
     ['L', 'tb-plan-line', 'MechanicalVentilationDuctwork'], // Shift+L mid-duct
     ['l', 'tb-plan-line', 'WaterPipework'],
     ['s', 'tb-slope-line', 'ThermalBridgeLinear'],
     ['p', 'polygon', 'BuildingElementOpaque'],
-  ] as const)('%s in %s keeps the mode and the draft', (key, drawMode, drawElementType) => {
-    const deps = buildDeps({ drawMode, drawElementType });
+  ] as const)('%s in %s mid-draft keeps the mode and the draft', (key, drawMode, drawElementType) => {
+    const deps = buildDeps({ drawMode, drawElementType, drawDraftInProgress: true });
     renderHook(() => useKeyboardShortcuts(deps));
     press(key);
     expect(deps.setDrawMode).not.toHaveBeenCalled();
