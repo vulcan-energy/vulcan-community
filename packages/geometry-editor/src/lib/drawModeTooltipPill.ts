@@ -194,7 +194,7 @@ export function getDrawModeTooltipText(
 }
 
 
-/** Konva name of the draggable whole-shape handle (see `selected-shape-drag`). */
+/** Konva name of the draggable whole-element handle (`selected-shape-drag`, `selected-point-drag`). */
 export const SELECTED_SHAPE_DRAG_HANDLE_NAME = 'selected-shape-drag-handle';
 
 export function classifyHoverHandle(node: Konva.Node | null): HoverHintTarget['kind'] | null {
@@ -204,13 +204,7 @@ export function classifyHoverHandle(node: Konva.Node | null): HoverHintTarget['k
   if (name.startsWith('orientation-arrow-handle-')) return 'rotate-grip';
   if (name.startsWith('vertex-')) return 'vertex';
   if (name.startsWith('space-label-vertex-')) return 'label-vertex';
-  if (name === SELECTED_SHAPE_DRAG_HANDLE_NAME || name.startsWith('point-')) return 'body';
+  if (name === SELECTED_SHAPE_DRAG_HANDLE_NAME) return 'body';
   return null;
-}
-
-/** The drag handle under a hovered node: the node itself, or the selected point group it sits in. */
-export function resolveHoverHandle(node: Konva.Node | null): Konva.Node | null {
-  if (!node || node.draggable()) return node;
-  return node.findAncestor((n: Konva.Node) => n.draggable() && n.name().startsWith('point-')) ?? null;
 }
 

@@ -12,7 +12,6 @@ import {
 } from '../../lib/drawModeTooltipPill';
 import {
   classifyHoverHandle,
-  resolveHoverHandle,
   getDrawModeTooltipText,
   getHoverHintText,
   type HoverHintTarget,
@@ -818,9 +817,7 @@ export const HoverHintOverlay = memo<{
     const stage = stageRef.current;
     if (!enabled || !stage) return;
     const container: HTMLElement = stage.container();
-    // `node` is the hovered shape; `handle` is what drags (a selected point's group).
     let node: Konva.Node | null = null;
-    let handle: Konva.Node | null = null;
     let dragging = false;
     let connected = false;
     let altHeld = false;
@@ -831,54 +828,57 @@ export const HoverHintOverlay = memo<{
         kind === null ? '' : kind === 'vertex' || kind === 'label-vertex' ? 'move' : dragging ? 'grabbing' : 'grab';
       setHover(kind === null ? null : { kind, dragging, connected, altHeld, pos: pointer() });
     };
-    const kindOf = () => classifyHoverHandle(handle);
+    const kindOf = () => classifyHoverHandle(node);
     const onDragStart = () => { dragging = true; sync(kindOf()); };
     const onDragMove = (e: Konva.KonvaEventObject<DragEvent>) => { altHeld = e.evt?.altKey === true; sync(kindOf()); };
     const onDragEnd = () => {
       dragging = false;
       altHeld = false;
       if (stage.getIntersection(pointer()) === node) { sync(kindOf()); return; }
-      leave();
+      leaveSoon();
     };
     // Konva fires no mouseout when the hovered handle is unmounted, so a stage
     // mousemove (registered only while hovered) drops a detached node.
     const onMove = () => {
-      if (!node?.getStage()) { leave(); return; }
+      if (!node?.getStage()) { leaveSoon(); return; }
       if (!dragging) sync(kindOf());
     };
     const leave = () => {
       stage.off('mousemove.hoverhint');
-      handle?.off('.hoverhint');
+      node?.off('.hoverhint');
       node = null;
-      handle = null;
       dragging = false;
       sync(null);
     };
+    // Leave a tick later: a fast first drag step leaves the handle before Konva fires dragstart,
+    // and unbinding inside a Konva dispatch skips the next listener (the handle's own dragend).
+    const leaveSoon = () => {
+      const left = node;
+      if (left && !dragging) setTimeout(() => { if (node === left && !dragging) leave(); }, 0);
+    };
     const onOver = (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (dragging) return;
-      const nextHandle = resolveHoverHandle(e.target);
-      const kind = classifyHoverHandle(nextHandle);
-      if (!kind) { if (node) leave(); return; }
+      const kind = classifyHoverHandle(e.target);
+      if (!kind) { leaveSoon(); return; }
       if (node === e.target) return;
       if (node) leave();
       node = e.target;
-      handle = nextHandle!;
       connected = kind === 'body' && hasConnectionsRef.current();
       stage.on('mousemove.hoverhint', onMove);
-      handle.on('dragstart.hoverhint', onDragStart);
-      handle.on('dragmove.hoverhint', onDragMove);
-      handle.on('dragend.hoverhint', onDragEnd);
+      node.on('dragstart.hoverhint', onDragStart);
+      node.on('dragmove.hoverhint', onDragMove);
+      node.on('dragend.hoverhint', onDragEnd);
       sync(kind);
     };
     const onOut = (e: Konva.KonvaEventObject<MouseEvent>) => {
-      if (e.target === node && !dragging) leave();
+      if (e.target === node) leaveSoon();
     };
 
     stage.on('mouseover.hoverhint', onOver);
     stage.on('mouseout.hoverhint', onOut);
     return () => {
       stage.off('.hoverhint');
-      handle?.off('.hoverhint');
+      node?.off('.hoverhint');
       container.style.cursor = '';
       setHover(null);
     };

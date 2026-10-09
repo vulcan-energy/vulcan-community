@@ -3,7 +3,6 @@
 
 import React, { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Group, Line, Circle, Rect, Text } from 'react-konva';
-import type Konva from 'konva';
 import { getPointElementIconNode } from '../../lib/pointElementIconSpec';
 import { lucideIconNodeToKonva } from '../../lib/lucideIconKonva';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
@@ -85,8 +84,6 @@ import {
   findClosestSnapCorner as utilFindClosestSnapCorner,
   getNearbySnapWallSegments as utilGetNearbySnapWallSegments,
   isLineWallElementForSnap as utilIsLineWallElementForSnap,
-  findConnectedDragNeighbours,
-  planConnectedDrag,
   type GeometrySnapCache,
   type ClosestSnapCorner,
 } from '../../lib/snapUtils';
@@ -1572,15 +1569,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
       const t = Math.max(0, Math.min(1, ((world.x - PA.x) * vx + (world.y - PA.y) * vy) / v2));
       return { x: PA.x + t * vx, y: PA.y + t * vy, z: world.z ?? PA.z };
     };
-    /** Point and attached duct ends after an Alt-drag; null when nothing is attached. */
-    const planConnectedPointDrag = (target: Konva.Node) => {
-      const neighbours = target.getAttr('connectedNeighbours') as ReturnType<typeof findConnectedDragNeighbours> | null;
-      const start = target.getAttr('connectedStartPos') as { x: number; y: number } | null;
-      if (!neighbours?.length || !start) return null;
-      const from = canvasToWorld(start, scale, panOffset, canvasCenter);
-      const to = canvasToWorld({ x: target.x(), y: target.y() }, scale, panOffset, canvasCenter);
-      return planConnectedDrag(element, neighbours, elementsById as Record<string, Element>, { x: to.x - from.x, y: to.y - from.y });
-    };
     return (
       <Group
         key={element.id}
@@ -1681,10 +1669,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             return pos;
           }}
           onDragStart={(e) => {
-            // Alt-drag of a unit or terminal carries its duct ends (move connected).
-            const connectedNeighbours = findConnectedDragNeighbours(element, elementsById as Record<string, Element>);
-            e.target.setAttr('connectedNeighbours', connectedNeighbours);
-            e.target.setAttr('connectedStartPos', { x: e.target.x(), y: e.target.y() });
             const session = beginCanvasInteraction({
               kind: 'point-element-drag',
               targetId: element.id,
@@ -1698,31 +1682,21 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                 elements: [{
                   elementId: element.id,
                   coordinateCount: 1,
-                }, ...connectedNeighbours.map(({ elementId }) => ({ elementId, coordinateCount: 2 }))],
+                }],
                 moveDragTarget: true,
               },
             });
             writeCanvasInteractionSession(e.target, session);
           }}
-          onDragMove={(e) => {
-            // IMPERATIVE DRAG: Konva moves the node; only Alt-drag duct ends preview here.
-            const moved = planConnectedPointDrag(e.target);
-            if (!moved) return;
-            for (const { elementId } of e.target.getAttr('connectedNeighbours') as ReturnType<typeof findConnectedDragNeighbours>) {
-              const coords = e.evt.altKey ? moved[elementId] : elementsById[elementId]?.coordinates;
-              if (coords) updateDraggedElementShapeFromCoords(e.target, elementId, coords, scale, panOffset, canvasCenter, elementsById[elementId], resolvedGlobalOrientationOffset);
-            }
+          onDragMove={() => {
+            // IMPERATIVE DRAG: Update Konva node directly, no React re-renders!
+            // No store updates during drag - only visual updates
+            // Angle calculations deferred to drag end
           }}
           onDragEnd={(e) => {
             const session = readCanvasInteractionSession(e.target);
             endCanvasInteraction(session, { committed: true });
             writeCanvasInteractionSession(e.target, null);
-            const connectedMove = e.evt.altKey ? planConnectedPointDrag(e.target) : null;
-            if (connectedMove) {
-              geometryStore.getState().commitVertexPositionUpdates(Object.entries(connectedMove).flatMap(([elementId, coords]) =>
-                coords.map((newPosition, vertexIndex) => ({ elementId, vertexIndex, newPosition }))));
-              return;
-            }
             const newWorld = canvasToWorld({ x: e.target.x(), y: e.target.y() }, scale, panOffset, canvasCenter);
             const updated = [...coordinates];
             updated[0] = { ...updated[0], x: newWorld.x, y: newWorld.y } as any;

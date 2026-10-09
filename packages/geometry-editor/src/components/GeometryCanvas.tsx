@@ -4417,6 +4417,50 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     };
   }, [drawMode, selection, selectedElementIds.length, elementsById, currentFloorZ, floors]);
 
+  // Alt-drag "move connected" for the selected-shape and selected-point handles: same-network
+  // neighbours (stored on the handle at drag start) stretch, and the handle is pinned to the
+  // normal-constrained delta. Returns false, for the plain drag path, when Alt is up or nothing
+  // is connected.
+  const applyConnectedDrag = (target: Konva.Node, element: Element, altHeld: boolean, isFinal: boolean): boolean => {
+    const neighbours = target.getAttr('connectedNeighbours') as ReturnType<typeof findConnectedDragNeighbours> | null;
+    const startPos = target.getAttr('connectedStartPos') as { x: number; y: number } | null;
+    if (!neighbours?.length || !startPos) return false;
+    if (!altHeld) {
+      // Alt released mid-drag: neighbours drop back to where they are.
+      for (const { elementId } of neighbours) {
+        const neighbour = elementsById[elementId];
+        if (!neighbour?.coordinates) continue;
+        updateDraggedElementShapeFromCoords(target, elementId, neighbour.coordinates, scale, panOffset, canvasCenter, neighbour, globalOrientationOffset);
+      }
+      return false;
+    }
+    const startWorld = canvasToWorld(startPos, scale, panOffset, canvasCenter);
+    const pointerWorld = canvasToWorld({ x: target.x(), y: target.y() }, scale, panOffset, canvasCenter);
+    const moved = planConnectedDrag(element, neighbours, elementsById as Record<string, Element>, {
+      x: pointerWorld.x - startWorld.x,
+      y: pointerWorld.y - startWorld.y,
+    });
+    const from = element.coordinates[0]!;
+    const to = moved[element.id]![0]!;
+    target.position(worldToCanvas({ x: startWorld.x + to.x - from.x, y: startWorld.y + to.y - from.y }, scale, panOffset, canvasCenter));
+    if (isFinal) {
+      commitVertexPositionUpdates(Object.entries(moved).flatMap(([elementId, coords]) =>
+        coords.map((newPosition, vertexIndex) => ({ elementId, vertexIndex, newPosition }))));
+      return true;
+    }
+    for (const [elementId, coords] of Object.entries(moved)) {
+      updateDraggedElementShapeFromCoords(target, elementId, coords, scale, panOffset, canvasCenter, elementsById[elementId], globalOrientationOffset);
+    }
+    return true;
+  };
+  // Neighbours are fixed at drag start; the session previews them alongside the dragged element.
+  const beginConnectedDrag = (target: Konva.Node, element: Element) => {
+    const neighbours = findConnectedDragNeighbours(element, elementsById as Record<string, Element>);
+    target.setAttr('connectedNeighbours', neighbours);
+    target.setAttr('connectedStartPos', { x: target.x(), y: target.y() });
+    return neighbours.map(({ elementId }) => ({ elementId, coordinateCount: 2 }));
+  };
+
   const selectedPvClearanceGuidance = useMemo(() => {
     if (!(selection?.type === 'element' || selection?.type === 'global')) return null;
     const panel = elementsById[selection.id];
@@ -7206,6 +7250,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               };
               return (
                 <Circle
+                  name={SELECTED_SHAPE_DRAG_HANDLE_NAME}
                   x={pointCanvas.x}
                   y={pointCanvas.y}
                   radius={16}
@@ -7217,6 +7262,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                   }}
                   onDragStart={(e) => {
                     e.cancelBubble = true;
+                    const connectedPreview = beginConnectedDrag(e.target, selectedPointDragTarget.element);
                     const session = beginCanvasInteraction({
                       kind: 'selected-point-drag',
                       targetId: selectedPointDragTarget.element.id,
@@ -7230,7 +7276,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                         elements: [{
                           elementId: selectedPointDragTarget.element.id,
                           coordinateCount: 1,
-                        }],
+                        }, ...connectedPreview],
                         moveDragTarget: true,
                       },
                     });
@@ -7238,6 +7284,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                   }}
                   onDragMove={(e) => {
                     e.cancelBubble = true;
+                    if (applyConnectedDrag(e.target, selectedPointDragTarget.element, e.evt.altKey, false)) return;
                     previewSelectedPointFromCanvas(e.target, { x: e.target.x(), y: e.target.y() });
                   }}
                   onDragEnd={(e) => {
@@ -7245,10 +7292,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     const session = readCanvasInteractionSession(e.target);
                     endCanvasInteraction(session, { committed: true });
                     writeCanvasInteractionSession(e.target, null);
-                    applySelectedPointFromCanvas(
-                      { x: e.target.x(), y: e.target.y() },
-                      false,
-                    );
+                    if (!applyConnectedDrag(e.target, selectedPointDragTarget.element, e.evt.altKey, true)) {
+                      applySelectedPointFromCanvas(
+                        { x: e.target.x(), y: e.target.y() },
+                        false,
+                      );
+                    }
                   }}
                 />
               );
@@ -7545,51 +7594,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 return snappedCoords;
               };
 
-              // Alt-drag "move connected": same-network neighbours stretch; the handle is pinned
-              // to the normal-constrained delta. Returns false (plain drag) without neighbours.
-              const applyConnectedShapeDrag = (target: Konva.Node, altHeld: boolean, isFinal: boolean): boolean => {
-                const neighbours = target.getAttr('connectedNeighbours') as
-                  | ReturnType<typeof findConnectedDragNeighbours>
-                  | undefined;
-                const startPos = target.getAttr('startPos') as { x: number; y: number } | undefined;
-                const initialCoords = target.getAttr('initialCoords') as
-                  | Array<{ x: number; y: number; z: number }>
-                  | undefined;
-                if (!neighbours?.length || !startPos || !initialCoords?.length) return false;
-                if (!altHeld) {
-                  // Alt released mid-drag: neighbours drop back to where they are.
-                  for (const { elementId } of neighbours) {
-                    const neighbour = elementsById[elementId];
-                    if (!neighbour?.coordinates) continue;
-                    updateDraggedElementShapeFromCoords(target, elementId, neighbour.coordinates, scale, panOffset, canvasCenter, neighbour, globalOrientationOffset);
-                  }
-                  return false;
-                }
-                const dragEl = selectedShapeDragTarget.element;
-                const startWorld = canvasToWorld(startPos, scale, panOffset, canvasCenter);
-                const pointerWorld = canvasToWorld({ x: target.x(), y: target.y() }, scale, panOffset, canvasCenter);
-                const moved = planConnectedDrag(
-                  { ...dragEl, coordinates: initialCoords } as Element,
-                  neighbours,
-                  elementsById as Record<string, Element>,
-                  { x: pointerWorld.x - startWorld.x, y: pointerWorld.y - startWorld.y },
-                );
-                const movedSelf = moved[dragEl.id]!;
-                target.position(worldToCanvas({
-                  x: startWorld.x + movedSelf[0]!.x - initialCoords[0]!.x,
-                  y: startWorld.y + movedSelf[0]!.y - initialCoords[0]!.y,
-                }, scale, panOffset, canvasCenter));
-                if (isFinal) {
-                  commitVertexPositionUpdates(Object.entries(moved).flatMap(([elementId, coords]) =>
-                    coords.map((newPosition, vertexIndex) => ({ elementId, vertexIndex, newPosition }))));
-                  return true;
-                }
-                for (const [elementId, coords] of Object.entries(moved)) {
-                  updateDraggedElementShapeFromCoords(target, elementId, coords, scale, panOffset, canvasCenter, elementsById[elementId], globalOrientationOffset);
-                }
-                return true;
-              };
-
               const showCentroidHostSnap = selectedShapeParentAxisLock || shapeDragCentroidHostSnap !== 'none';
 
               return (
@@ -7612,11 +7616,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     setLineOpeningClearancePreviewIfChanged(null);
                     e.target.setAttr('startPos', { x: e.target.x(), y: e.target.y() });
                     e.target.setAttr('initialCoords', selectedShapeDragTarget.coords);
-                    const connectedNeighbours = findConnectedDragNeighbours(
-                      selectedShapeDragTarget.element,
-                      elementsById as Record<string, Element>,
-                    );
-                    e.target.setAttr('connectedNeighbours', connectedNeighbours);
+                    const connectedPreview = beginConnectedDrag(e.target, selectedShapeDragTarget.element);
                     const session = beginCanvasInteraction({
                       kind: 'selected-shape-drag',
                       targetId: selectedShapeDragTarget.element.id,
@@ -7636,7 +7636,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                             elementId,
                             coordinateCount: elementsById[elementId]?.coordinates?.length ?? 0,
                           })),
-                          ...connectedNeighbours.map(({ elementId }) => ({ elementId, coordinateCount: 2 })),
+                          ...connectedPreview,
                         ],
                         moveDragTarget: true,
                       },
@@ -7651,7 +7651,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                       | undefined;
                     if (!startPos) return;
                     if (!initialCoords || initialCoords.length === 0) return;
-                    if (applyConnectedShapeDrag(e.target, e.evt.altKey, false)) return;
+                    if (applyConnectedDrag(e.target, selectedShapeDragTarget.element, e.evt.altKey, false)) return;
                     const previewCoords = geometryPerf.measure(
                       'GeometryCanvas.selectedShapeDrag.preview',
                       () => applySelectedShapeDeltaPx(
@@ -7715,7 +7715,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     writeCanvasInteractionSession(e.target, null);
                     if (!startPos) return;
                     if (!initialCoords || initialCoords.length === 0) return;
-                    if (!applyConnectedShapeDrag(e.target, e.evt.altKey, true)) {
+                    if (!applyConnectedDrag(e.target, selectedShapeDragTarget.element, e.evt.altKey, true)) {
                       applySelectedShapeDeltaPx(
                         initialCoords,
                         { x: e.target.x() - startPos.x, y: e.target.y() - startPos.y },
@@ -7726,6 +7726,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     e.target.setAttr('startPos', null);
                     e.target.setAttr('initialCoords', null);
                     e.target.setAttr('connectedNeighbours', null);
+                    e.target.setAttr('connectedStartPos', null);
                   }}
                 />
               );
