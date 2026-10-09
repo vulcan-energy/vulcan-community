@@ -14,7 +14,7 @@ import { getElementShape, getElementColor, worldToCanvas, canvasToWorld, compute
 import { findOverlappingElements, getOverlapCenter } from '../lib/overlapDetection';
 import { readRootCssVar } from '../lib/cssVars';
 import { targetValidationIssues, withTargetIssues } from '../lib/buildErrorDisplay';
-import { getSmartLabelDisplayName, getSmartLabelPillTexts, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, getSmartLabelCandidates, layoutCanvasAnnotations, resolveAnnotationPaint, type CanvasAnnotation, type RectBounds } from '../lib/labelUtils';
+import { getSmartLabelDisplayName, getSmartLabelPillTexts, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, getSmartLabelCandidates, layoutCanvasAnnotations, placedAnnotationRect, resolveAnnotationPaint, type CanvasAnnotation, type RectBounds } from '../lib/labelUtils';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { FilenameBar, type FilenameBarActionContext } from './FilenameBar';
 import type {
@@ -131,8 +131,6 @@ import {
   defaultMvhrTerminalZ,
   getMechanicalVentilationDuctworkRoleStyle,
   isMvhrTerminalHost,
-  looseDuctRunEndNearestUnit,
-  primaryPipeRunGap,
   type MvhrDuctRole,
   type MvhrTerminalRole,
 } from '../lib/mvhrDuctwork';
@@ -232,11 +230,10 @@ import { partitionElementCanvasDataByFloor } from '../lib/geometryCanvasLayerPar
 import {
   getDrawModeTooltipPillWidth,
   getMvhrTerminalBadgeSize,
-  getUnsnappedVertexChipRect,
-  shouldShowUnsnappedVertexGuidance,
+  getSelectedVertexGuidance,
+  getVertexGuidanceChips,
   UNSNAPPED_VERTEX_CHIP_FONT_SIZE,
   UNSNAPPED_VERTEX_CHIP_PADDING_X,
-  UNSNAPPED_VERTEX_CHIP_TEXT,
   DRAW_MODE_TOOLTIP_PILL_FONT_FAMILY,
   DRAW_MODE_TOOLTIP_PILL_HEIGHT,
   DRAW_MODE_TOOLTIP_PILL_PADDING,
@@ -1030,8 +1027,6 @@ const renderCanvasMeasurementPill = (
     </Group>
   );
 };
-
-const DISCONNECTED_DUCT_CHIP_TEXT = 'Disconnected';
 
 function renderUnsnappedVertexChip(rect: RectBounds, text: string, palette: CanvasInteractionPalette) {
   return (
@@ -4774,29 +4769,19 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       return null;
     }
 
-    const openingPoint = worldToCanvas(selectedRoofWindowPlacement.openingPoint, scale, panOffset, canvasCenter);
-    const roofPoint = worldToCanvas(selectedRoofWindowPlacement.roofPoint, scale, panOffset, canvasCenter);
-    const labelX = (openingPoint.x + roofPoint.x) / 2 + 8;
-    const labelY = (openingPoint.y + roofPoint.y) / 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2 - 8;
     const labelText = `Up-slope: ${roofWindowDistanceEditor.value || selectedRoofWindowPlacement.distanceM.toFixed(2)}m`;
     const width = Math.max(
       getDrawModeTooltipPillWidth('Up-slope: 0.00m'),
       getDrawModeTooltipPillWidth(labelText),
     );
 
-    return {
-      left: labelX + width / 2,
-      top: labelY + DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2,
-      width,
-    };
+    // Centred on the laid-out pill (see editorAtPill).
+    return { pillKey: 'selected-roof-window-placement-marker', width };
   }, [
     viewMode,
     roofWindowDistanceEditor,
     selection,
     selectedRoofWindowPlacement,
-    scale,
-    panOffset,
-    canvasCenter,
   ]);
 
   const selectedLineOpeningClearance = useMemo(() => {
@@ -4903,32 +4888,19 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       return null;
     }
 
-    const clearance = selectedLineOpeningClearance.clearance;
-    const segment =
-      lineOpeningDistanceEditor.side === 'start'
-        ? clearance.startGuideSegment
-        : clearance.endGuideSegment;
-    const a = worldToCanvas(segment[0], scale, panOffset, canvasCenter);
-    const b = worldToCanvas(segment[1], scale, panOffset, canvasCenter);
     const distanceText = `${lineOpeningDistanceEditor.value || '0'}m`;
     const width = Math.max(
       getDrawModeTooltipPillWidth('0.00m'),
       getDrawModeTooltipPillWidth(distanceText),
     );
 
-    return {
-      left: (a.x + b.x) / 2,
-      top: (a.y + b.y) / 2,
-      width,
-    };
+    // Centred on the laid-out pill (see editorAtPill).
+    return { pillKey: `selected-line-opening-clearance-marker-${lineOpeningDistanceEditor.side}`, width };
   }, [
     viewMode,
     lineOpeningDistanceEditor,
     selection,
     selectedLineOpeningClearance,
-    scale,
-    panOffset,
-    canvasCenter,
   ]);
 
   /** An opening's two side-distance guides, one annotation each; editable pills open the distance editor. */
@@ -6162,33 +6134,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   // Snapped vertices (handle colour, unsnapped chips) and a loose duct/pipe run end, for selected
   // elements only: O(coords × n) each, so computed once here and handed to the renderer and chips.
-  const selectedVertexGuidance = useMemo(() => {
-    const all = Object.values(elementsById);
-    const guidance = new Map<string, { snapped: ReadonlySet<number>; looseEnd: { x: number; y: number } | null }>();
-    for (const id of rendererHighlightedIds) {
+  const selectedVertexGuidance = useMemo(() => new Map(
+    [...rendererHighlightedIds].flatMap((id) => {
       const element = elementsById[id];
-      if (!element) continue;
-      const isRegularWallOpaque =
-        element.type === 'BuildingElementOpaque' && (element as { is_external_door?: unknown }).is_external_door !== true;
-      // Walls and ground polygons: a vertex on a same-storey wall's span (a T-end) counts as snapped.
-      const getSnappedVertices = shouldShowUnsnappedVertexGuidance(element, getElementShape(element))
-        ? utilGetWallSupportedSnappedVertices
-        : utilGetExactSnappedVertices;
-      const snapped = getSnappedVertices(
-        element,
-        elementsById,
-        isRegularWallOpaque ? { skipVertexMatchFromOtherTypes: ['BuildingElementTransparent'] } : { effectiveFloors },
-      );
-      // A duct or primary pipe on a run the topology check reports as loose: chip at the run end nearest the plant it misses.
-      const looseEnd = element.type === 'WaterPipework'
-        ? primaryPipeRunGap(element, all, effectiveFloors)?.looseEnd ?? null
-        : element.type === 'MechanicalVentilationDuctwork'
-          ? looseDuctRunEndNearestUnit(element, all, effectiveFloors)
-          : null;
-      guidance.set(id, { snapped, looseEnd });
-    }
-    return guidance;
-  }, [rendererHighlightedIds, elementsById, effectiveFloors]);
+      return element ? [[id, getSelectedVertexGuidance(element, elementsById, effectiveFloors)] as const] : [];
+    }),
+  ), [rendererHighlightedIds, elementsById, effectiveFloors]);
 
   const elementPreviewOpacity = useCallback((element: Element) => (
     !thermalBridgePreview.active || (thermalBridgePreview.kind === 'duct'
@@ -6378,36 +6329,20 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     for (const id of rendererHighlightedIds) {
       const element = elementsById[id];
       if (!element?.coordinates?.length || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
-      const shape = getElementShape(element);
       const canvasCoords = element.coordinates.map(project);
-      const isLine = shape === 'line' && canvasCoords.length === 2;
-      // Line handles (and their chips) are not drawn for dormer-bundle members.
-      const hasLineHandles = isLine && getDormerBundleInfo(element) === null;
-      const isHostedPolygonOpening =
-        element.type === 'BuildingElementTransparent' && !!element.parent_element && canvasCoords.length >= 3;
+      const isLine = getElementShape(element) === 'line' && canvasCoords.length === 2;
       const guidance = selectedVertexGuidance.get(id);
-      const pushChip = (key: string, point: { x: number; y: number }, handleRadius: number, text: string) => {
-        items.push({
-          key,
-          rect: getUnsnappedVertexChipRect(point, handleRadius, text),
-          priority: ANNOTATION_PRIORITY.selected,
-          movable: false,
-          render: (rect) => renderUnsnappedVertexChip(rect, text, canvasInteractionPalette),
-        });
-      };
-      if (
-        drawMode === 'none' &&
-        shouldShowUnsnappedVertexGuidance(element, shape) &&
-        (isLine ? hasLineHandles : !isHostedPolygonOpening)
-      ) {
-        canvasCoords.forEach((point, index) => {
-          if (guidance?.snapped.has(index)) return;
-          const isVertexSelected = selectedVertex?.elementId === id && selectedVertex.vertexIndex === index;
-          pushChip(`unsnapped-chip-${id}-${index}`, point, isLine || isVertexSelected ? 6 : 4, UNSNAPPED_VERTEX_CHIP_TEXT);
-        });
-      }
-      if (drawMode === 'none' && hasLineHandles && guidance?.looseEnd) {
-        pushChip(`unsnapped-chip-${id}-run`, project(guidance.looseEnd), 6, DISCONNECTED_DUCT_CHIP_TEXT);
+      if (drawMode === 'none' && guidance) {
+        const selectedVertexIndex = selectedVertex?.elementId === id ? selectedVertex.vertexIndex : null;
+        for (const chip of getVertexGuidanceChips(element, guidance, project, selectedVertexIndex)) {
+          items.push({
+            key: chip.key,
+            rect: chip.rect,
+            priority: ANNOTATION_PRIORITY.selected,
+            movable: false,
+            render: (rect) => renderUnsnappedVertexChip(rect, chip.text, canvasInteractionPalette),
+          });
+        }
       }
       if (isLine && element.type === 'ThermalBridgeLinear' && resolveThermalBridgeLineMode(element) === 'slope') {
         (['z1', 'z2'] as const).forEach((label, index) => {
@@ -6710,6 +6645,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       isCanvasInteractionActive('selected-point-drag') ||
       isCanvasInteractionActive('vertex-drag'),
   ));
+
+  // A distance editor opens centred where the clicked pill is drawn, nudged or not.
+  const editorAtPill = (geometry: { pillKey: string; width: number }) => {
+    const pill = canvasAnnotations.find((item) => item.key === geometry.pillKey);
+    const rect = pill && placedAnnotationRect(pill, annotationPlacements);
+    return rect ? { left: rect.x + rect.width / 2, top: rect.y + rect.height / 2, width: geometry.width } : null;
+  };
+  const roofWindowDistanceEditorStyle = roofWindowDistanceEditorGeometry && editorAtPill(roofWindowDistanceEditorGeometry);
+  const lineOpeningDistanceEditorStyle = lineOpeningDistanceEditorGeometry && editorAtPill(lineOpeningDistanceEditorGeometry);
 
   // Render canvas content - always portal for full-screen
   const canvasViewportInsetStyle = {
@@ -8843,14 +8787,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         })()
       )}
 
-      {viewMode === '2d' && roofWindowDistanceEditorGeometry && (
+      {viewMode === '2d' && roofWindowDistanceEditorStyle && (
         <div
           className={`draw-segment-editor roof-window-distance-editor${roofWindowDistanceEditor?.error ? ' roof-window-distance-editor--error' : ''}`}
-          style={{
-            left: roofWindowDistanceEditorGeometry.left,
-            top: roofWindowDistanceEditorGeometry.top,
-            width: roofWindowDistanceEditorGeometry.width,
-          }}
+          style={roofWindowDistanceEditorStyle}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
@@ -8890,14 +8830,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         </div>
       )}
 
-      {viewMode === '2d' && lineOpeningDistanceEditorGeometry && (
+      {viewMode === '2d' && lineOpeningDistanceEditorStyle && (
         <div
           className={`draw-segment-editor line-opening-distance-editor${lineOpeningDistanceEditor?.error ? ' line-opening-distance-editor--error' : ''}`}
-          style={{
-            left: lineOpeningDistanceEditorGeometry.left,
-            top: lineOpeningDistanceEditorGeometry.top,
-            width: lineOpeningDistanceEditorGeometry.width,
-          }}
+          style={lineOpeningDistanceEditorStyle}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >

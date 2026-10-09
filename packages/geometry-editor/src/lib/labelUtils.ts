@@ -34,7 +34,7 @@ export interface ElementBounds {
 }
 
 /** Lower places first in layout and paints on top. */
-export const ANNOTATION_PRIORITY = { selected: 0, warning: 1, measurement: 2, label: 3 } as const;
+export const ANNOTATION_PRIORITY = { selected: 0, warning: 1, label: 2 } as const;
 
 /**
  * One canvas annotation (chip, badge, pill, label) painted in the single annotations group above
@@ -73,13 +73,20 @@ export function resolveAnnotationPaint(
     .filter((item) => item.render)
     .sort((a, b) => b.priority - a.priority)
     .flatMap((item) => {
-      const placement = placements.get(item.key);
-      if (placement?.hidden && item.key !== revealKey) return [];
-      const rect = placement && !placement.hidden
-        ? { ...item.rect, x: item.rect.x + placement.dx, y: item.rect.y + placement.dy }
-        : item.rect;
-      return [{ item, rect }];
+      const rect = placedAnnotationRect(item, placements) ?? (item.key === revealKey ? item.rect : null);
+      return rect ? [{ item, rect }] : [];
     });
+}
+
+/** Where an annotation is drawn: its laid-out slot, its own rect if unplaced, null if hidden. */
+export function placedAnnotationRect(
+  item: CanvasAnnotation,
+  placements: ReadonlyMap<string, AnnotationPlacement>,
+): RectBounds | null {
+  const placement = placements.get(item.key);
+  if (!placement) return item.rect;
+  if (placement.hidden) return null;
+  return { ...item.rect, x: item.rect.x + placement.dx, y: item.rect.y + placement.dy };
 }
 
 function nudgeCandidates(rect: RectBounds): RectBounds[] {
@@ -339,9 +346,13 @@ export function getSmartLabelCandidates(
     [x + 15, y - 15], [x - 15, y + 15], [x + 15, y + 15], [x - 15, y - 15],
     [x + 20, y], [x - 20, y], [x, y - 20], [x, y + 20],
     [bounds.centerX - width / 2, y],
-    [bounds.maxX + margin, bounds.minY - margin],
-    [bounds.minX - width - margin, bounds.minY - margin],
-    [bounds.maxX + margin, bounds.maxY + margin],
-    [bounds.minX - width - margin, bounds.maxY + margin],
+    // Corner slots hang off the vertex nearest each bounding-box corner, so a diagonal element
+    // never gets a slot at an empty box corner far from its geometry.
+    ...([[1, -1], [-1, -1], [1, 1], [-1, 1]] as const).map(([sx, sy]) => {
+      const corner = { x: sx > 0 ? bounds.maxX : bounds.minX, y: sy > 0 ? bounds.maxY : bounds.minY };
+      const vertex = canvasCoords.reduce((best, point) =>
+        Math.hypot(point.x - corner.x, point.y - corner.y) < Math.hypot(best.x - corner.x, best.y - corner.y) ? point : best);
+      return [sx > 0 ? vertex.x + margin : vertex.x - width - margin, vertex.y + sy * margin];
+    }),
   ].map(([cx, cy]) => ({ x: cx, y: cy, width, height }));
 }

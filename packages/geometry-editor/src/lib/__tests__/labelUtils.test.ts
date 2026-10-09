@@ -8,6 +8,7 @@ import {
   placeCanvasAnnotations,
   resolveAnnotationPaint,
   type CanvasAnnotation,
+  getSmartLabelCandidates,
   getSmartLabelPillTexts,
   getSmartLabelWidth,
 } from '../labelUtils';
@@ -128,5 +129,21 @@ describe('canvas annotation layout', () => {
     }
     // The default nudges try straight up first: clear of the chip, still on canvas.
     expect(drawnAt).toEqual([{ x: 100, y: 76 }]);
+  });
+});
+
+describe('getSmartLabelCandidates', () => {
+  it('keeps every slot next to a diagonal element, never at an empty bounding-box corner', () => {
+    const coords = [{ x: 0, y: 400 }, { x: 400, y: 0 }];
+    const duct = { id: 'diag', name: 'Diagonal', type: 'MechanicalVentilationDuctwork', parent_element: null,
+      coordinates: coords.map((c) => ({ ...c, z: 0 })) } as any;
+    // Nearest distance from a slot rect to the element's vertices or centre.
+    const anchors = [...coords, { x: 200, y: 200 }];
+    const gap = (r: { x: number; y: number; width: number; height: number }) => Math.min(...anchors.map((p) =>
+      Math.hypot(Math.max(r.x - p.x, 0, p.x - r.x - r.width), Math.max(r.y - p.y, 0, p.y - r.y - r.height))));
+
+    for (const slot of getSmartLabelCandidates(duct, coords, false, false)) {
+      expect(gap(slot)).toBeLessThanOrEqual(40);
+    }
   });
 });
