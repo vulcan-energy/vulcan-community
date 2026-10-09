@@ -2341,13 +2341,20 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     () => findLinearThermalBridgeIssues(elementsForValidation),
     [elementsForValidation],
   );
-  // Both issues of an overlap pair carry the same stretch: keep one per pair for the canvas halo.
+  // Both issues of an overlap pair carry the same stretch: keep one per pair for the canvas halo,
+  // skipping stretches with no plan length (vertical TBs, risers) that would draw as a dot.
   const overlapStretches = useMemo(() => {
-    const byKey = new Map<string, { elementId: string; stretch: [Vec3, Vec3] }>();
+    const byKey = new Map<string, { elementIds: string[]; stretch: [Vec3, Vec3] }>();
     for (const { elementId, overlapStretch } of linearGeometryIssues) {
-      if (overlapStretch) byKey.set(JSON.stringify(overlapStretch), { elementId, stretch: overlapStretch });
+      if (!overlapStretch) continue;
+      const [a, b] = overlapStretch;
+      if (Math.hypot(b.x - a.x, b.y - a.y) < 0.01) continue;
+      const key = JSON.stringify(overlapStretch);
+      const entry = byKey.get(key) ?? { elementIds: [], stretch: overlapStretch };
+      entry.elementIds.push(elementId);
+      byKey.set(key, entry);
     }
-    return [...byKey.values()];
+    return [...byKey.entries()];
   }, [linearGeometryIssues]);
   const sharedElementValidationContext = useMemo<ValidationContext>(() => {
     const complianceOn = !!complianceSettings?.complianceValidationEnabled;
@@ -6195,15 +6202,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
           <Layer name="main-geometry-layer" listening={true}>
             {/* Overlap halos sit under the lines they mark; the panel message explains them. */}
-            {overlapStretches.map(({ elementId, stretch }) => {
-              const element = elementsById[elementId];
-              if (!element || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors) || isElementHiddenOnView(element)) {
-                return null;
-              }
+            {overlapStretches.map(([key, { elementIds, stretch }]) => {
+              const shown = elementIds.every((id) => {
+                const element = elementsById[id];
+                return !!element && isElementOnActiveCanvasFloor(element, currentFloorZ, floors) && !isElementHiddenOnView(element);
+              });
+              if (!shown) return null;
               const [a, b] = stretch.map((point) => worldToCanvas(point, scale, panOffset, canvasCenter));
               return (
                 <Line
-                  key={`overlap-halo-${JSON.stringify(stretch)}`}
+                  key={`overlap-halo-${key}`}
                   points={[a.x, a.y, b.x, b.y]}
                   stroke={canvasInteractionPalette.warningGuide}
                   strokeWidth={10}

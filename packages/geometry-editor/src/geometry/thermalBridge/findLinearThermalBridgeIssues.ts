@@ -38,7 +38,7 @@ import {
 import { validateHostForProposerPattern } from './junctionHostPredicates';
 import { overlapStretchBetweenSegmentElements, type Vec3 } from './linearTbSegmentOverlap';
 import { SERVICE_LINE_ELEMENT_TYPES } from '../../lib/serviceLineDrawModes';
-import { ductEndpoints, ductRunConnectsToUnit } from '../../lib/mvhrDuctwork';
+import { ductEndpoints, ductRunUnitPoint } from '../../lib/mvhrDuctwork';
 import { pointsConnected } from '../../lib/snapUtils';
 import { basementFloorSurfaceElevationM, isBasementGroundElement } from '../../lib/basementGeometry';
 
@@ -375,14 +375,22 @@ function sameSegment(a: Element, b: Element): boolean {
 
 /**
  * Different roles or units never clash. Same-role runs that both reach their unit are radial runs
- * bundled side by side, so they may share a stretch, unless they are the same segment twice.
+ * bundled side by side, so they may share a stretch, unless they are the same segment twice or
+ * share a joint away from the unit (one chain folding back on itself).
  */
 function isExemptDuctOverlap(a: Element, b: Element, list: readonly Element[]): boolean {
   const da = a as MechanicalVentilationDuctwork;
   const db = b as MechanicalVentilationDuctwork;
-  if (da.duct_type !== db.duct_type || da.parent_element !== db.parent_element) return true;
+  const parentA = da.parent_element?.trim();
+  const parentB = db.parent_element?.trim();
+  if (da.duct_type !== db.duct_type || (parentA && parentB && parentA !== parentB)) return true;
   if (sameSegment(a, b)) return false;
-  return ductRunConnectsToUnit(da, list) && ductRunConnectsToUnit(db, list);
+  const unitPoint = ductRunUnitPoint(da, list);
+  if (!unitPoint || !ductRunUnitPoint(db, list)) return false;
+  const ea = ductEndpoints(a)!;
+  const eb = ductEndpoints(b)!;
+  return !ea.some((p) =>
+    !pointsConnected(a, p, undefined, unitPoint) && eb.some((q) => pointsConnected(a, p, b, q)));
 }
 
 const COLINEAR_OVERLAP_GROUP_BY_TYPE: Record<(typeof SERVICE_LINE_ELEMENT_TYPES)[number], ColinearOverlapGroup> = {

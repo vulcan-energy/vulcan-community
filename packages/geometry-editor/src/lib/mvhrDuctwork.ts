@@ -357,10 +357,10 @@ function ductRunContext(duct: MechanicalVentilationDuctwork, elements: ReadonlyA
   return run ? { unitPoint, roleDucts, run } : null;
 }
 
-/** True when the duct's run reaches its MVHR unit. */
-export function ductRunConnectsToUnit(duct: MechanicalVentilationDuctwork, elements: ReadonlyArray<Element>): boolean {
+/** The MVHR unit point when the duct's run reaches it, else null. */
+export function ductRunUnitPoint(duct: MechanicalVentilationDuctwork, elements: ReadonlyArray<Element>): Point3 | null {
   const context = ductRunContext(duct, elements);
-  return !!context && ductRunTouchesPoint(context.run, context.unitPoint);
+  return context && ductRunTouchesPoint(context.run, context.unitPoint) ? context.unitPoint : null;
 }
 
 /**
@@ -378,7 +378,11 @@ export function looseDuctRunEndNearestUnit(
     roles: [duct.duct_type],
   });
   if (!warnings.some((w) => w.kind === 'disconnected-role' || w.kind === 'role-not-connected-to-unit')) return null;
-  const ends = context.run.flatMap((runDuct) => ductEndpoints(runDuct)!);
-  return ends.reduce((best, end) =>
+  // Free ends only: a joint shared with another duct of the run is not where the run stops.
+  const freeEnds = context.run.flatMap((runDuct) =>
+    ductEndpoints(runDuct)!.filter((end) =>
+      !context.run.some((other) => other !== runDuct && ductEndpoints(other)!.some((p) => sameDuctPoint(p, end)))));
+  if (freeEnds.length === 0) return null;
+  return freeEnds.reduce((best, end) =>
     distance3d(end, context.unitPoint) < distance3d(best, context.unitPoint) ? end : best);
 }

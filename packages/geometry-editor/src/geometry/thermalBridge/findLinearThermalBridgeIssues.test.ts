@@ -585,6 +585,8 @@ describe('findLinearThermalBridgeIssues', () => {
     it('allows same-type runs bundled from the unit but flags an identical duplicate', () => {
       expect(overlapIds([unit, duct('a', 0, 5), duct('b', 0, 3)])).toEqual([]);
       expect(overlapIds([unit, duct('a', 0, 5), duct('b', 5, 0)])).toEqual(['a', 'b']);
+      // one chain folding back on itself (shared joint away from the unit) is a real double count
+      expect(overlapIds([unit, duct('a', 0, 5), duct('b', 5, 2)])).toEqual(['a', 'b']);
     });
 
     it('flags a stray same-type run not connected to the unit, with the shared stretch', () => {

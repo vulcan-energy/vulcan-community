@@ -1195,11 +1195,12 @@ export function snapPartnerFilter(element: Element): ((other: Element) => boolea
   if (isBuildingElement(element)) return isBuildingElement;
   if (element.type === 'WaterPipework') return (other) => other.type === 'WaterPipework';
   if (element.type !== 'MechanicalVentilationDuctwork') return undefined;
-  const unit = element.parent_element;
+  const unit = element.parent_element?.trim();
+  if (!unit) return () => false;
   return (other) =>
     ((other.type === 'MechanicalVentilationDuctwork' || other.type === 'MechanicalVentilationTerminal') &&
-      other.parent_element === unit) ||
-    (other.type === 'MechanicalVentilation' && other.name === unit);
+      other.parent_element?.trim() === unit) ||
+    (other.type === 'MechanicalVentilation' && other.name?.trim() === unit);
 }
 
 // Helper to detect which vertices of an element are exactly snapped to other elements (for persistent indicators)
