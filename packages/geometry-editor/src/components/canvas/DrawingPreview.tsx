@@ -15,7 +15,6 @@ import {
   classifyHoverHandle,
   getDrawModeTooltipText,
   getHoverHintText,
-  SELECTED_SHAPE_DRAG_HANDLE_NAME,
   type HoverHintTarget,
 } from '../../lib/drawModeTooltipPill';
 import { worldToCanvas } from '../../lib/shapeUtils';
