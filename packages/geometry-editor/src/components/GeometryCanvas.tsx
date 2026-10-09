@@ -63,7 +63,7 @@ import { CompassRose } from './CompassRose';
 import { useDrawingMode, type DrawMode } from '../hooks/useDrawingMode';
 import { roomFloorElementTypeForCanvasFloor, useMarqueeSelection } from '../hooks/useMarqueeSelection';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import { useAutoThermalBridgePreview } from '../hooks/useAutoThermalBridgePreview';
+import { useAutoDuctPreview, useAutoThermalBridgePreview, type CanvasPreview } from '../hooks/useAutoThermalBridgePreview';
 import { ThermalBridgePreview2D } from './canvas/ThermalBridgePreview2D';
 import { ThermalBridgePreviewControls, ThermalBridgePreviewStatus } from './canvas/ThermalBridgePreviewControls';
 import { useDocumentSaveShortcut } from '../hooks/useDocumentSaveShortcut';
@@ -3088,15 +3088,24 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     uploadOverlayEvidence,
     onBeforeEnterCalibrateMode: resetDrawing,
   });
+  const canvasPreviewBlocked = showAutoTbPreview || showShortcuts || zoneDeleteModal.isOpen || elementDeleteModal.isOpen ||
+    overlayPdfImportState.isOpen || !!orthogonalRoomEditing?.isOpen || overlayMoveMode || overlayCalibrateMode;
   const thermalBridgePreview = useAutoThermalBridgePreview({
     enabled: drawElementType === 'ThermalBridgeLinear',
-    blocked: showAutoTbPreview || showShortcuts || zoneDeleteModal.isOpen || elementDeleteModal.isOpen ||
-      overlayPdfImportState.isOpen || !!orthogonalRoomEditing?.isOpen || overlayMoveMode || overlayCalibrateMode,
+    blocked: canvasPreviewBlocked,
     currentFloorZ,
     viewMode,
     isElementHidden: isElementHiddenOnView,
     externalDetailCatalogue,
   });
+  const ductPreview = useAutoDuctPreview({
+    enabled: drawElementType === 'MechanicalVentilationDuctwork' && viewMode === '2d',
+    blocked: canvasPreviewBlocked,
+    currentFloorZ,
+    unitName: activeMvhrDrawParentElement?.name ?? null,
+  });
+  // One hold-A preview at a time: the ductwork tool's, else the thermal-bridge tool's.
+  const canvasPreview: CanvasPreview = drawElementType === 'MechanicalVentilationDuctwork' ? ductPreview : thermalBridgePreview;
   const dismissThermalBridgePreview = thermalBridgePreview.dismiss;
   const inspectPreviewBridge = useCallback((id: string) => {
     dismissThermalBridgePreview();
@@ -3108,12 +3117,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     <div className="tb-preview-toolbar-accessory">
       <DrawToolbarAutoTbSuggest show={showDrawToolbarAutoTbSuggest}
         onPrefetch={prefetchAutoThermalBridgePreviewModal} onShow={handleShowAutoTbPreview} />
-      <ThermalBridgePreviewStatus preview={thermalBridgePreview} viewMode={viewMode} inline />
-      {viewMode === '3d' && drawElementType === 'ThermalBridgeLinear' && !thermalBridgePreview.active && (
+      {ductPreview.runs.length > 0 && drawElementType === 'MechanicalVentilationDuctwork' && (
+        <button type="button" className="draw-button auto-tb-suggest" onClick={ductPreview.addAll}>Add all</button>
+      )}
+      <ThermalBridgePreviewStatus preview={canvasPreview} viewMode={viewMode} inline />
+      {viewMode === '3d' && drawElementType === 'ThermalBridgeLinear' && !canvasPreview.active && (
         <span className="draw-button">Hold A for suggestions</span>
       )}
     </div>
-  ), [handleShowAutoTbPreview, showDrawToolbarAutoTbSuggest, thermalBridgePreview, viewMode, drawElementType]);
+  ), [handleShowAutoTbPreview, showDrawToolbarAutoTbSuggest, canvasPreview, ductPreview.runs.length, ductPreview.addAll, viewMode, drawElementType]);
 
   const guideOverlayCalibrationSessionRef = useRef<CanvasInteractionSession | null>(null);
   const resetGuideOverlayCalibrationPointerState = useCallback(() => {
@@ -3460,7 +3472,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setElementDeleteModal,
     tryPopLastDrawPoint,
     fabricDrawShortcutsDisabled: spaceLabellerOpen,
-    geometryEditingSuspended: thermalBridgePreview.active,
+    geometryEditingSuspended: canvasPreview.active,
   });
 
   // Incremental overlap detection: only recalculate overlaps for changed elements
@@ -5209,8 +5221,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       setIsCanvasPanning(true);
       return;
     }
-    if (!thermalBridgePreview.active) handleMarqueeStart(e);
-  }, [thermalBridgePreview.active, commitViewportPreview, drawMode, endDrawingPreviewInteraction, getContainerViewportPointer, handleMarqueeStart, setDevelopmentContextHoveredStem, setDevelopmentContextStackMenuId, setIsCanvasPanning, viewMode]);
+    if (!canvasPreview.active) handleMarqueeStart(e);
+  }, [canvasPreview.active, commitViewportPreview, drawMode, endDrawingPreviewInteraction, getContainerViewportPointer, handleMarqueeStart, setDevelopmentContextHoveredStem, setDevelopmentContextStackMenuId, setIsCanvasPanning, viewMode]);
 
   const onStageMouseMove = useCallback((e: any) => {
     const activeCanvasInteraction = getActiveCanvasInteraction();
@@ -5233,7 +5245,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       return;
     }
 
-    if (thermalBridgePreview.active) return;
+    if (canvasPreview.active) return;
     const mouseButtons = Number((e.evt as MouseEvent | undefined)?.buttons ?? 0);
     const targetIsDraggable =
       typeof e.target?.draggable === 'function' &&
@@ -5280,7 +5292,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         });
       }) as unknown as number;
     }
-  }, [thermalBridgePreview.active,
+  }, [canvasPreview.active,
     applyPanPreviewDelta,
     drawMode,
     elementsById,
@@ -5369,7 +5381,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       suppressStageClickRef.current = false;
       return;
     }
-    if (thermalBridgePreview.active) return;
+    if (canvasPreview.active) return;
     // While overlay Move/Calibrate is active, do not let stage clicks clear selection or place geometry.
     if (overlayMoveMode || overlayCalibrateMode) return;
     // If a marquee selection just completed, skip clearing selection on this click
@@ -6231,8 +6243,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           vertexSnapMode={vertexSnapMode}
           commitVertexPositionUpdates={commitVertexPositionUpdates}
           selection={selection}
-          previewOpacity={!thermalBridgePreview.active || element.type === 'ThermalBridgeLinear' || element.type === 'ThermalBridgePoint'
-            ? 1 : thermalBridgePreview.highlightedHostIds.has(element.id) ? 0.85 : 0.35}
+          previewOpacity={!canvasPreview.active || (canvasPreview.kind === 'duct'
+            ? element.type === 'MechanicalVentilationDuctwork' || element.type === 'MechanicalVentilationTerminal'
+            : element.type === 'ThermalBridgeLinear' || element.type === 'ThermalBridgePoint')
+            ? 1 : canvasPreview.highlightedHostIds.has(element.id) ? 0.85 : 0.35}
           spaceLabellerSuppressFabricInteraction={spaceLabellerOpen}
         />
       );
@@ -6269,8 +6283,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     vertexSnapMode,
     commitVertexPositionUpdates,
     spaceLabellerOpen,
-    thermalBridgePreview.active,
-    thermalBridgePreview.highlightedHostIds,
+    canvasPreview.active,
+    canvasPreview.kind,
+    canvasPreview.highlightedHostIds,
   ]);
 
   const contextFloorElementRendererNodes = useMemo(() => {
@@ -6458,7 +6473,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             )}
           </Layer>
 
-          <Layer name="main-geometry-layer" listening={!thermalBridgePreview.active}>
+          <Layer name="main-geometry-layer" listening={!canvasPreview.active}>
             {/* Overlap halos sit under the lines they mark; the panel message explains them. */}
             {overlapStretches.map(([key, { elementIds, stretch }]) => {
               const shown = elementIds.every((id) => {
@@ -7874,7 +7889,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               'GeometryCanvas.liveDrawingPreview',
               <LiveDrawingPreview
                 previewSignal={drawingPreviewSignal}
-                drawMode={thermalBridgePreview.active ? 'none' : drawMode}
+                drawMode={canvasPreview.active ? 'none' : drawMode}
                 drawPoints={drawPoints}
                 drawSnapTargetRef={drawSnapTargetRef}
                 roomWalls={roomWalls}
@@ -7900,8 +7915,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           </CanvasLivePreviewLayer>
 
           <Layer name={ACTIVE_GEOMETRY_DRAG_LAYER_NAME} listening={true} />
-          {thermalBridgePreview.active && viewMode === '2d' && (
-            <ThermalBridgePreview2D preview={thermalBridgePreview} scale={scale} panOffset={panOffset}
+          {canvasPreview.active && viewMode === '2d' && (
+            <ThermalBridgePreview2D preview={canvasPreview} scale={scale} panOffset={panOffset}
               canvasCenter={canvasCenter} width={stageSize.width} height={stageSize.height}
               palette={drawingCanvasPalette} onInspect={inspectPreviewBridge}
               canActivate={() => !suppressStageClickRef.current && !panModifierHeldRef.current} />
@@ -8516,7 +8531,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         )
       )}
 
-      <ThermalBridgePreviewControls preview={thermalBridgePreview} width={stageSize.width}
+      <ThermalBridgePreviewControls preview={canvasPreview} width={stageSize.width}
         height={stageSize.height} viewMode={viewMode} showStatus={zenMode || hiddenPanels.drawToolbar} />
 
       {/* Overlay: Draw toolbar (bottom center) */}
