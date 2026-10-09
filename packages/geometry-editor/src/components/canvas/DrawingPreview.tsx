@@ -3,7 +3,6 @@
 
 import React, { memo, useEffect, useState } from 'react';
 import type Konva from 'konva';
-import type { KonvaEventObject } from 'konva/lib/Node';
 import { Group, Line, Circle, Rect, Text } from 'react-konva';
 import {
   getDrawModeTooltipPillWidth,
@@ -845,7 +844,7 @@ export const HoverHintOverlay = memo<{
       dragging = false;
       sync(null);
     };
-    const onOver = (e: KonvaEventObject<MouseEvent>) => {
+    const onOver = (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (dragging) return;
       const kind = classifyHoverHandle(e.target);
       if (!kind) { if (node) leave(); return; }
@@ -858,7 +857,7 @@ export const HoverHintOverlay = memo<{
       node.on('dragend.hoverhint', onDragEnd);
       sync(kind);
     };
-    const onOut = (e: KonvaEventObject<MouseEvent>) => {
+    const onOut = (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (e.target === node && !dragging) leave();
     };
 
