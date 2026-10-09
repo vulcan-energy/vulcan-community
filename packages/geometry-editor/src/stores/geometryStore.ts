@@ -6784,10 +6784,10 @@ const createGeometryState = (
 
   commitConnectedPointDrag: (id, coordinates, neighbours) => {
     const before = get().elementsById;
+    if (!before[id] || !coordinates?.length) return;
     get().updateElement(id, { coordinates }, true);
     const after = get().elementsById;
-    const point = after[id]?.coordinates?.[0];
-    if (!point) return;
+    const point = after[id]!.coordinates[0]!;
     const updates: Array<{ elementId: string; vertexIndex: number; newPosition: { x: number; y: number; z: number } }> = [];
     // A plain drag carries the unit's children rigidly; move connected leaves everything else put.
     for (const [elementId, element] of Object.entries(after)) {
