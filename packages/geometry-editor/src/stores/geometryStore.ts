@@ -297,7 +297,7 @@ export type {
   SpaceLabel,
   SapBuiltFormCode,
 } from '../geometry/types';
-import { isMvhrTerminalHost } from '../lib/mvhrDuctwork';
+import { isMvhrTerminalHost, projectPointToSegment } from '../lib/mvhrDuctwork';
 
 type GeometryStoreDropProbe = {
   active?: boolean;
@@ -423,10 +423,9 @@ function normalizeElementDraftForStore(
       const parentElement = createElementNameLookup(
         Object.values(state.elementsById).filter(isVentParentElement),
       )(normalizedElement.parent_element);
-      const parentCoords = getVentParentLineCoordinates(parentElement);
-      if (parentCoords) {
+      if (parentElement) {
         const currentZ = (normalizedElement.coordinates?.[0] as ElementCoordinate | undefined)?.z;
-        normalizedElement.coordinates = [midpointOnSegment(parentCoords, currentZ)];
+        Object.assign(normalizedElement, buildVentParentPlacementPatch(parentElement, currentZ, normalizedElement));
       }
     }
     if (isHostedMechanicalVentilationFan(normalizedElement) && normalizedElement.parent_element) {
@@ -1928,22 +1927,6 @@ const getTerminalHostLineCoordinates = (
   return host.coordinates as [ElementCoordinate, ElementCoordinate];
 };
 
-const projectPointToSegment = (
-  point: ElementCoordinate,
-  segment: [ElementCoordinate, ElementCoordinate],
-): ElementCoordinate => {
-  const [a, b] = segment;
-  const vx = b.x - a.x;
-  const vy = b.y - a.y;
-  const v2 = vx * vx + vy * vy || 1;
-  const t = Math.max(0, Math.min(1, ((point.x - a.x) * vx + (point.y - a.y) * vy) / v2));
-  return {
-    x: a.x + t * vx,
-    y: a.y + t * vy,
-    z: point.z ?? a.z,
-  };
-};
-
 /**
  * Re-anchor a hosted WindowShading point when its host is flipped.
  *
@@ -2165,6 +2148,25 @@ const buildMechanicalVentilationHostPlacementPatch = (
     patch.coordinates = [midpointOnSegment(parentCoords, currentZ)];
   }
   return patch;
+};
+
+/**
+ * A vent hosted on `parent`: the parent's midpoint (at `z`, the vent's own storey band) and the
+ * parent's orientation and pitch unless `own` already sets them. One rule for addElements and
+ * updateElement, so a vent created either way is identical.
+ */
+const buildVentParentPlacementPatch = (
+  parent: Element,
+  z: number | undefined,
+  own: object,
+): Partial<Vents> => {
+  const { orientation360, pitch } = parent as { orientation360?: number; pitch?: number };
+  const parentCoords = getVentParentLineCoordinates(parent);
+  return {
+    ...(typeof orientation360 === 'number' && !('orientation360' in own) ? { orientation360 } : {}),
+    ...(typeof pitch === 'number' && !('pitch' in own) ? { pitch } : {}),
+    ...(parentCoords ? { coordinates: [midpointOnSegment(parentCoords, z)] } : {}),
+  };
 };
 
 const buildMechanicalVentilationTerminalHostPlacementPatch = (
@@ -5378,20 +5380,8 @@ const createGeometryState = (
         if (nextParentName) {
           const parentElement = createElementNameLookup(Object.values(state.elementsById).filter(isVentParentElement))(nextParentName);
           if (parentElement) {
-            const ventParentFields = parentElement as { orientation360?: number; pitch?: number };
-            const parentOrientation = ventParentFields.orientation360;
-            const parentPitch = ventParentFields.pitch;
-            if (typeof parentOrientation === 'number' && !('orientation360' in updates)) {
-              (normalizedUpdates as any).orientation360 = parentOrientation;
-            }
-            if (typeof parentPitch === 'number' && !('pitch' in updates)) {
-              (normalizedUpdates as any).pitch = parentPitch;
-            }
-            const parentCoords = getVentParentLineCoordinates(parentElement);
-            if (parentCoords) {
-              const currentZ = (prevElement.coordinates?.[0] as ElementCoordinate | undefined)?.z;
-              (normalizedUpdates as any).coordinates = [midpointOnSegment(parentCoords, currentZ)];
-            }
+            const currentZ = (prevElement.coordinates?.[0] as ElementCoordinate | undefined)?.z;
+            Object.assign(normalizedUpdates, buildVentParentPlacementPatch(parentElement, currentZ, updates));
           }
         }
       }
@@ -7654,6 +7644,7 @@ const createGeometryState = (
             defaultsLookup: state.getDefaultsLookup(),
           }).context
         : undefined,
+      state.floors,
     );
   }
   });

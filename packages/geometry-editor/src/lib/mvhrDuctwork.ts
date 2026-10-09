@@ -3,13 +3,19 @@
 
 import type {
   Element,
+  ElementDraft,
+  Floor,
   MechanicalVentilation,
   MechanicalVentilationDuctwork,
   MechanicalVentilationTerminal,
+  SpaceLabel,
 } from '../geometry/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
-import { orientation360FromSegmentOutwardModelXY } from './openingSegmentOutward';
-import { pointsConnected } from './snapUtils';
+import { getElementCanvasFloorZValue } from './elementCanvasFloor';
+import { orientation360FromSegmentOutwardModelXY, polygonPlanCentroid } from './openingSegmentOutward';
+import { planOrthogonalElbow, pointsConnected } from './snapUtils';
+import { isPointInPolygon2D as pointInPolygon } from './pointInPolygon';
+import { resolveRoomTypeRule } from './spaceLabelDerivation';
 
 export const MVHR_DUCT_ROLES = ['supply', 'extract', 'intake', 'exhaust'] as const;
 export type MvhrDuctRole = (typeof MVHR_DUCT_ROLES)[number];
@@ -385,4 +391,209 @@ export function looseDuctRunEndNearestUnit(
   if (freeEnds.length === 0) return null;
   return freeEnds.reduce((best, end) =>
     distance3d(end, context.unitPoint) < distance3d(best, context.unitPoint) ? end : best);
+}
+
+type PlanPoint = { x: number; y: number };
+
+/** Height a new MVHR terminal gets, whether drawn, added from the unit panel or auto-planned. */
+export const DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M = 2.4;
+
+/** Clamped plan projection onto a segment, keeping the point's z. The store places hosted children with it. */
+export function projectPointToSegment(
+  point: { x: number; y: number; z?: number },
+  segment: readonly [Point3, Point3],
+): Point3 {
+  const [a, b] = segment;
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const v2 = vx * vx + vy * vy || 1;
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * vx + (point.y - a.y) * vy) / v2));
+  return { x: a.x + t * vx, y: a.y + t * vy, z: point.z ?? a.z };
+}
+
+/**
+ * A terminal hosted on `host` at `planPoint`, at the default terminal height. The unit panel's add
+ * button and the auto-duct planner both build terminals with it; the store projects the point onto
+ * the host on commit.
+ */
+export function hostedMvhrTerminalDraft(
+  role: MvhrTerminalRole,
+  unitName: string,
+  host: Element,
+  planPoint: PlanPoint,
+): Extract<ElementDraft, { type: 'MechanicalVentilationTerminal' }> {
+  return {
+    name: '',
+    type: 'MechanicalVentilationTerminal',
+    terminal_type: role,
+    parent_element: unitName,
+    host_element: host.name,
+    floorId: host.floorId,
+    coordinates: [{ x: planPoint.x, y: planPoint.y, z: DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M }],
+    isPlaceholder: false,
+  };
+}
+
+/** HEM takes ductwork only for MVHR: extract to wet rooms, supply to habitable rooms, intake and exhaust. */
+const MVHR_AUTO_DUCT_ROLES = {
+  rooms: [{ role: 'extract', wet: true }, { role: 'supply', wet: false }] as Array<{ role: MvhrDuctRole; wet: boolean }>,
+  terminals: ['intake', 'exhaust'] as MvhrTerminalRole[],
+};
+
+/** Run ends sit at least this far inside a room's boundary. */
+const ROOM_END_CLEARANCE_M = 0.1;
+/**
+ * Each run's room end is shifted by this times (its index mod RUN_END_STAGGER_STEPS), so neighbouring
+ * runs never share an elbow or end, and a large plan never pushes a point out of a small room.
+ */
+const RUN_END_STAGGER_M = 0.05;
+const RUN_END_STAGGER_STEPS = 4;
+
+function roomServedByRole(label: SpaceLabel, wet: boolean): boolean {
+  const { increments } = resolveRoomTypeRule(label.room_type ?? '').rule;
+  return wet ? increments.NumberOfWetRooms === 1 : increments.NumberOfHabitableRooms === 1;
+}
+
+function distanceToSegment(p: PlanPoint, a: PlanPoint, b: PlanPoint): number {
+  const q = projectPointToSegment(p, [{ ...a, z: 0 }, { ...b, z: 0 }]);
+  return Math.hypot(p.x - q.x, p.y - q.y);
+}
+
+/**
+ * Where a run ends in a room, shifted by `stagger` on both axes: the label's vertex centroid, or,
+ * for a concave room, the first fan triangle's centroid, whichever lands strictly inside with
+ * ROOM_END_CLEARANCE_M to every edge. Null when none does.
+ */
+function pointInsideRoom(ring: PlanPoint[], stagger: number): PlanPoint | null {
+  const candidates = [polygonPlanCentroid(ring)!];
+  for (let i = 1; i + 1 < ring.length; i += 1) candidates.push(polygonPlanCentroid([ring[0]!, ring[i]!, ring[i + 1]!])!);
+  for (const c of candidates) {
+    const p = { x: roundToTwoDecimals(c.x + stagger), y: roundToTwoDecimals(c.y + stagger) };
+    if (!pointInPolygon(p, ring)) continue;
+    if (ring.every((a, i) => distanceToSegment(p, a, ring[(i + 1) % ring.length]!) >= ROOM_END_CLEARANCE_M)) return p;
+  }
+  return null;
+}
+
+/** Shorter legs than this are dropped: a near-axis end runs straight rather than dog-legging a few mm. */
+const MIN_LEG_M = 0.01;
+
+/** The orthogonal L (longer axis first) at the unit's height from `start` to `end`, then a vertical leg when `end` is higher or lower. */
+function orthogonalRun(start: Point3, end: Point3): Point3[] {
+  const corner = { x: end.x, y: end.y, z: start.z };
+  const elbow = planOrthogonalElbow(start, end, 0, false);
+  const useElbow = elbow && distance3d(start, { ...elbow, z: start.z }) >= MIN_LEG_M && distance3d(corner, { ...elbow, z: start.z }) >= MIN_LEG_M;
+  return [start, ...(useElbow ? [{ ...elbow, z: start.z }] : []), corner, end];
+}
+
+/**
+ * Auto-duct plan for one MVHR unit (other unit types get none): one radial run per wet room
+ * (extract) and per habitable room (supply) on the unit's storey, from the unit point to a point
+ * inside the room's space label, plus a run to an intake and an exhaust terminal. Each segment is
+ * its own duct draft; consecutive segments share exact endpoints so each run is one connected
+ * component touching the unit, and runs share no vertex but the unit point (see RUN_END_STAGGER_M).
+ *
+ * Rooms on other storeys are not planned yet: point elements store z as a storey band while ducts
+ * store metres, so a riser's length would be wrong until that convention is settled.
+ *
+ * A room whose space label already holds a free run end of that role is skipped, as is a terminal
+ * role that already has a duct; an existing terminal without a duct gets one ending on its point.
+ * Re-running only fills gaps. Output order is stable (rooms by id).
+ */
+export function planAutoDucts(
+  unit: MechanicalVentilation,
+  elements: Element[],
+  spaceLabels: readonly SpaceLabel[],
+  floors: Floor[],
+): ElementDraft[] {
+  const roles = unit.vent_type === 'MVHR' ? MVHR_AUTO_DUCT_ROLES : null;
+  const unitPoint = getFirstPoint3(unit);
+  const unitStorey = getElementCanvasFloorZValue(unit, floors);
+  const unitFloorId = floors.find((floor) => floor.zIndex === unitStorey)?.id;
+  if (!roles || !unitPoint || unitStorey === undefined || !unitFloorId) return [];
+
+  const unitDucts = elements.filter(
+    (el): el is MechanicalVentilationDuctwork =>
+      el.type === 'MechanicalVentilationDuctwork' && !el.isPlaceholder && el.parent_element?.trim() === unit.name,
+  );
+  const drafts: ElementDraft[] = [];
+  const addRun = (role: MvhrDuctRole, points: Point3[]) => {
+    for (let i = 0; i + 1 < points.length; i += 1) {
+      const [a, b] = [points[i]!, points[i + 1]!];
+      if (a.x === b.x && a.y === b.y && a.z === b.z) continue;
+      const length = roundToTwoDecimals(distance3d(a, b));
+      drafts.push({
+        name: '',
+        type: 'MechanicalVentilationDuctwork',
+        duct_type: role,
+        parent_element: unit.name,
+        floorId: unitFloorId,
+        coordinates: [a, b],
+        length,
+        isPlaceholder: false,
+      });
+    }
+  };
+
+  const labels = spaceLabels
+    .filter((label) => label.storey === unitStorey)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  let runIndex = 0;
+  for (const { role, wet } of roles.rooms) {
+    // Only runs on the unit's storey (the only storey planned) can serve its rooms.
+    const roleDucts = unitDucts.filter((duct) => duct.duct_type === role && getElementCanvasFloorZValue(duct, floors) === unitStorey);
+    const ends = roleDucts.map((duct) => ductEndpoints(duct)).filter((e): e is [Point3, Point3] => e !== null);
+    // Free run ends: not the unit point, and not a joint or elbow shared with another duct of the role.
+    const freeEnds = ends.flatMap((pair, i) => pair.filter((end) =>
+      !sameDuctPoint(end, unitPoint) && !ends.some((other, j) => j !== i && other.some((q) => sameDuctPoint(q, end)))));
+    for (const label of labels) {
+      if (!roomServedByRole(label, wet)) continue;
+      // Every candidate room takes an index, served or not, so a re-run staggers exactly as the first plan did.
+      const stagger = RUN_END_STAGGER_M * (runIndex++ % RUN_END_STAGGER_STEPS);
+      const ring = (label.coordinates ?? []).map((p) => ({ x: p.x, y: p.y }));
+      if (ring.length < 3 || freeEnds.some((end) => pointInPolygon(end, ring))) continue;
+      const target = pointInsideRoom(ring, stagger);
+      // No interior point, or the unit sits on it: nothing sensible to route.
+      if (!target || Math.hypot(target.x - unitPoint.x, target.y - unitPoint.y) < ROOM_END_CLEARANCE_M) continue;
+      addRun(role, orthogonalRun(unitPoint, { ...target, z: unitPoint.z }));
+    }
+  }
+
+  const terminals = elements.filter(
+    (el): el is MechanicalVentilationTerminal => el.type === 'MechanicalVentilationTerminal' && !el.isPlaceholder,
+  );
+  const takenHosts = new Set(terminals.map((terminal) => terminal.host_element));
+  const freeHosts = elements
+    .flatMap((host) => {
+      if (
+        host.isPlaceholder || !isMvhrTerminalHost(host) || !(host.coordinates?.length >= 2) ||
+        takenHosts.has(host.name) || getElementCanvasFloorZValue(host, floors) !== unitStorey
+      ) return [];
+      const segment = [host.coordinates[0]!, host.coordinates[1]!] as const;
+      const point = projectPointToSegment(unitPoint, segment);
+      return [{ host, segment, distance: Math.hypot(point.x - unitPoint.x, point.y - unitPoint.y) }];
+    })
+    .sort((a, b) => a.distance - b.distance || (a.host.name < b.host.name ? -1 : a.host.name > b.host.name ? 1 : 0));
+  const ownTerminalByRole = new Map(
+    terminals.filter((terminal) => terminal.parent_element?.trim() === unit.name).map((terminal) => [terminal.terminal_type, terminal]),
+  );
+  for (const role of roles.terminals) {
+    if (unitDucts.some((duct) => duct.duct_type === role)) continue;
+    const existing = ownTerminalByRole.get(role);
+    // A terminal on another storey is out of reach for now: no duct to it, and no second terminal.
+    if (existing && getElementCanvasFloorZValue(existing, floors) !== unitStorey) continue;
+    const existingPoint = existing && getTerminalPoint(existing);
+    if (existingPoint) {
+      addRun(role, orthogonalRun(unitPoint, existingPoint));
+      continue;
+    }
+    if (existing) continue;
+    const nearest = freeHosts.shift();
+    if (!nearest) continue;
+    const terminal = hostedMvhrTerminalDraft(role, unit.name, nearest.host, projectPointToSegment(unitPoint, nearest.segment));
+    // The duct ends where the store will put the terminal: the same projection of the same point.
+    addRun(role, orthogonalRun(unitPoint, projectPointToSegment(terminal.coordinates[0] as Point3, nearest.segment)));
+    drafts.push(terminal);
+  }
+  return drafts;
 }

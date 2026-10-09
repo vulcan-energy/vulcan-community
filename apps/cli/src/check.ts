@@ -99,7 +99,7 @@ function printMissingElements(rows: readonly MissingElement[]): void {
   }
   for (const row of rows) {
     const qualifier = row.pillQualifier ? ` ${row.pillQualifier}` : '';
-    const batch = row.batchPlan ? ` batch=${row.batchPlan.vents.length}` : '';
+    const batch = row.batchPlan ? ` batch=${row.batchPlan.drafts.length}` : '';
     console.log(`  - [${row.requiredBy}] ${row.type}${qualifier}${batch}: ${row.message}`);
   }
 }
@@ -185,6 +185,7 @@ export function checkGeometryCsv(csvArg: string) {
     complianceValidationEnabled,
     parsed.metadata.complianceSettings.PartO_active_cooling_required,
     partFData?.context,
+    floors,
   );
 
   const criticalRows = rows.filter((row) => row.severity === 'critical');

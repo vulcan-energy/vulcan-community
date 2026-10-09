@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { detectMissingElements } from '../detectMissingElements';
+import { createGeometryStore } from '../../../stores/geometryStore';
 import type {
   Element,
   BuildingElementOpaque,
@@ -297,7 +298,7 @@ describe('detectMissingElements + Part F', () => {
     expect(row.path).toBe('/InfiltrationVentilation/background_area_continuous');
     expect(row.pillQualifier).toMatch(/0 \/ 6 vents · 0 \/ 200 cm²/);
     expect(row.batchPlan).toBeTruthy();
-    expect(row.batchPlan!.vents).toHaveLength(6); // bedrooms (4) + 2
+    expect(row.batchPlan!.drafts).toHaveLength(6); // bedrooms (4) + 2
   });
 
   it('Part F context omitted → no Part F rows (existing behaviour preserved)', () => {
@@ -374,8 +375,8 @@ describe('detectMissingElements + Part F', () => {
     );
     const areaRow = missing.find((m) => m.path.endsWith('/background_area_continuous'));
     expect(areaRow).toBeTruthy();
-    expect(areaRow!.batchPlan!.vents.length).toBeGreaterThan(0);
-    expect(areaRow!.batchPlan!.vents.every((v) => v.parent_element === 'BedroomWindow')).toBe(true);
+    expect(areaRow!.batchPlan!.drafts.length).toBeGreaterThan(0);
+    expect(areaRow!.batchPlan!.drafts.every((v) => v.parent_element === 'BedroomWindow')).toBe(true);
   });
 
   it('whole-dwelling extract finding emits NO MissingElement (per-element issues handle it)', () => {
@@ -585,5 +586,46 @@ describe('detectMissingElements + Part F', () => {
     expect(row).toBeTruthy();
     expect(row!.type).toBe('MechanicalVentilation');
     expect(row!.batchPlan).toBeUndefined();
+  });
+});
+
+describe('detectMissingElements — MVHR ductwork row', () => {
+  it('routes an MVHR with no ductwork in one history step, then the row is gone', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const { addFloor, addZone, addElement, addSpaceLabel, setComplianceSettings } = store.getState();
+    addFloor('Ground', 2.4);
+    addZone({ name: 'Zone', floorArea: 20, height: 2.4, volume: 48 });
+    const zoneId = store.getState().zones[0]!.id;
+    addElement({
+      type: 'BuildingElementOpaque', name: 'Wall', zoneId, height: 2.4, width: 10, area: 24, pitch: 90,
+      parent_element: null, coordinates: [{ x: -5, y: -2, z: 0 }, { x: 5, y: -2, z: 0 }],
+    });
+    addElement({
+      type: 'MechanicalVentilation', name: 'MVHR 1', vent_type: 'MVHR', parent_element: null,
+      coordinates: [{ x: 0, y: 0, z: 0 }],
+    });
+    addSpaceLabel({
+      zoneId, storey: 0, room_type: 'kitchen',
+      coordinates: [{ x: 4, y: 2, z: 0 }, { x: 6, y: 2, z: 0 }, { x: 6, y: 4, z: 0 }, { x: 4, y: 4, z: 0 }],
+    });
+    setComplianceSettings({ complianceValidationEnabled: true });
+
+    const row = store.getState().detectMissingElements().find((m) => m.type === 'MechanicalVentilationDuctwork');
+    expect(row).toMatchObject({ requiredBy: 'fhs', pillQualifier: 'MVHR 1' });
+    // Kitchen extract L (2) + intake run and riser to its terminal: the wall is the only host, so exhaust has none.
+    expect(row!.batchPlan!.drafts.map((d) => d.type)).toEqual([
+      'MechanicalVentilationDuctwork', 'MechanicalVentilationDuctwork', 'MechanicalVentilationDuctwork',
+      'MechanicalVentilationDuctwork', 'MechanicalVentilationTerminal',
+    ]);
+
+    const historyBefore = store.getState().history.length;
+    const ids = store.getState().addElements(row!.batchPlan!.drafts);
+    expect(ids).toHaveLength(5);
+    expect(store.getState().history).toHaveLength(historyBefore + 1);
+    const terminal = store.getState().elementsById[ids[4]!]!;
+    expect(terminal).toMatchObject({ host_element: 'Wall', coordinates: [{ x: 0, y: -2, z: 2.4 }] });
+    expect(store.getState().elementsById[ids[3]!]!.coordinates[1]).toEqual(terminal.coordinates[0]);
+    expect(store.getState().validateElement(terminal).issues).toEqual([]);
+    expect(store.getState().detectMissingElements().some((m) => m.type === 'MechanicalVentilationDuctwork')).toBe(false);
   });
 });

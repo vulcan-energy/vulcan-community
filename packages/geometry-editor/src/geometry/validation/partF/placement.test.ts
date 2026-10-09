@@ -150,11 +150,11 @@ describe('planBackgroundVents — counts and area distribution', () => {
       spaceLabels: [],
     });
     expect(plan).not.toBeNull();
-    expect(plan!.vents).toHaveLength(6);
-    const totalArea = plan!.vents.reduce((s, v) => s + v.area_cm2, 0);
+    expect(plan!.drafts).toHaveLength(6);
+    const totalArea = plan!.drafts.reduce((s, v) => s + v.area_cm2, 0);
     expect(totalArea).toBeGreaterThanOrEqual(200);
     // First vent absorbs rounding residual; remaining vents at fair share.
-    expect(plan!.vents[1].area_cm2).toBeCloseTo(33.3, 1);
+    expect(plan!.drafts[1].area_cm2).toBeCloseTo(33.3, 1);
   });
 
   it('rounding residual goes to first vent: total never undershoots required', () => {
@@ -171,8 +171,8 @@ describe('planBackgroundVents — counts and area distribution', () => {
         baseInput({ bedrooms: counts.bedrooms }),
         { elements: [], spaceLabels: [] },
       );
-      expect(plan!.vents).toHaveLength(counts.expected);
-      const total = plan!.vents.reduce((s, v) => s + v.area_cm2, 0);
+      expect(plan!.drafts).toHaveLength(counts.expected);
+      const total = plan!.drafts.reduce((s, v) => s + v.area_cm2, 0);
       expect(total).toBeGreaterThanOrEqual(200);
     }
   });
@@ -187,11 +187,11 @@ describe('planBackgroundVents — counts and area distribution', () => {
       spaceLabels: [],
     });
     expect(plan).not.toBeNull();
-    expect(plan!.vents).toHaveLength(4);
+    expect(plan!.drafts).toHaveLength(4);
     // First vent absorbs the rounding residual; the rest sit at the fair share.
-    expect(plan!.vents[0].area_cm2).toBeGreaterThan(0);
-    for (let i = 1; i < plan!.vents.length; i++) {
-      expect(plan!.vents[i].area_cm2).toBeCloseTo(33.3, 1);
+    expect(plan!.drafts[0].area_cm2).toBeGreaterThan(0);
+    for (let i = 1; i < plan!.drafts.length; i++) {
+      expect(plan!.drafts[i].area_cm2).toBeCloseTo(33.3, 1);
     }
   });
 
@@ -205,8 +205,8 @@ describe('planBackgroundVents — counts and area distribution', () => {
       spaceLabels: [],
     });
     expect(plan).not.toBeNull();
-    expect(plan!.vents).toHaveLength(1);
-    expect(plan!.vents[0].area_cm2).toBe(80);
+    expect(plan!.drafts).toHaveLength(1);
+    expect(plan!.drafts[0].area_cm2).toBe(80);
   });
 
   it('intermittent count rule: 4 bedrooms → 5 vents required (not bedrooms+2)', () => {
@@ -216,7 +216,7 @@ describe('planBackgroundVents — counts and area distribution', () => {
       spaceLabels: [],
     });
     expect(plan).not.toBeNull();
-    expect(plan!.vents).toHaveLength(5);
+    expect(plan!.drafts).toHaveLength(5);
   });
 
   it('every emitted vent has non-zero area_cm2 (so per-element validators do not fire)', () => {
@@ -225,7 +225,7 @@ describe('planBackgroundVents — counts and area distribution', () => {
       elements: [],
       spaceLabels: [],
     });
-    expect(plan!.vents.every((v) => v.area_cm2 > 0)).toBe(true);
+    expect(plan!.drafts.every((v) => v.area_cm2 > 0)).toBe(true);
   });
 
   it('every emitted vent has non-zero mid_height_air_flow_path', () => {
@@ -234,7 +234,7 @@ describe('planBackgroundVents — counts and area distribution', () => {
       elements: [],
       spaceLabels: [],
     });
-    expect(plan!.vents.every((v) => v.mid_height_air_flow_path > 0)).toBe(true);
+    expect(plan!.drafts.every((v) => v.mid_height_air_flow_path > 0)).toBe(true);
   });
 });
 
@@ -245,9 +245,9 @@ describe('planBackgroundVents — window selection', () => {
       elements: [],
       spaceLabels: [makeRoomLabel('bedroom', 0, 0)],
     });
-    expect(plan!.vents.every((v) => v.parent_element === null)).toBe(true);
+    expect(plan!.drafts.every((v) => v.parent_element === null)).toBe(true);
     // Fallback mid-height = 1.5
-    expect(plan!.vents.every((v) => v.mid_height_air_flow_path === 1.5)).toBe(true);
+    expect(plan!.drafts.every((v) => v.mid_height_air_flow_path === 1.5)).toBe(true);
   });
 
   it('no habitable spaces: vents created unparented even if windows exist', () => {
@@ -257,7 +257,7 @@ describe('planBackgroundVents — window selection', () => {
       elements: [window],
       spaceLabels: [makeRoomLabel('bathroom', 0, 0)], // bathroom is not habitable
     });
-    expect(plan!.vents.every((v) => v.parent_element === null)).toBe(true);
+    expect(plan!.drafts.every((v) => v.parent_element === null)).toBe(true);
   });
 
   it('bedroom window beats living-room window when both contain a candidate vent', () => {
@@ -274,7 +274,7 @@ describe('planBackgroundVents — window selection', () => {
     );
     expect(plan).not.toBeNull();
     // First (and second, round-robin) vent parents to bedroom window.
-    expect(plan!.vents[0].parent_element).toBe('BedroomW');
+    expect(plan!.drafts[0].parent_element).toBe('BedroomW');
   });
 
   it('nested same-flag polygons: smaller (more specific) polygon wins', () => {
@@ -315,7 +315,7 @@ describe('planBackgroundVents — window selection', () => {
     // The window is selected as a parent because it's inside (at least) one habitable
     // polygon. The point of this test is that the nested-polygon comparator doesn't
     // crash and produces a sensible plan.
-    expect(plan!.vents.every((v) => v.parent_element === 'Wnd')).toBe(true);
+    expect(plan!.drafts.every((v) => v.parent_element === 'Wnd')).toBe(true);
   });
 
   it('requiredCount = 0 edge case does not divide-by-zero (defensive)', () => {
@@ -337,8 +337,8 @@ describe('planBackgroundVents — window selection', () => {
     // → countToAdd>0 branch, fairShare = 0/2 = 0, closeGap = 0/2 = 0 → perVentArea=0
     // → roundOneDp(0) = 0, residual = 0. We get 2 vents at 0 cm² each.
     expect(plan).not.toBeNull();
-    expect(plan!.vents).toHaveLength(2);
-    expect(plan!.vents.every((v) => Number.isFinite(v.area_cm2))).toBe(true);
+    expect(plan!.drafts).toHaveLength(2);
+    expect(plan!.drafts.every((v) => Number.isFinite(v.area_cm2))).toBe(true);
   });
 
   it('more vents than windows: round-robin across available habitable windows', () => {
@@ -350,8 +350,8 @@ describe('planBackgroundVents — window selection', () => {
       spaceLabels: [makeRoomLabel('bedroom', 0, 0), makeRoomLabel('bedroom', 10, 0)],
     });
     expect(plan).not.toBeNull();
-    expect(plan!.vents).toHaveLength(6);
-    const parents = plan!.vents.map((v) => v.parent_element);
+    expect(plan!.drafts).toHaveLength(6);
+    const parents = plan!.drafts.map((v) => v.parent_element);
     // Each window used at least twice (6 vents, 2 windows → 3 each)
     const fromW1 = parents.filter((p) => p === 'W1').length;
     const fromW2 = parents.filter((p) => p === 'W2').length;
@@ -377,10 +377,10 @@ describe('planBackgroundVents — window selection', () => {
       },
     );
     expect(plan).not.toBeNull();
-    expect(plan!.vents[0].coordinates.x).toBe(5);
-    expect(plan!.vents[0].coordinates.y).toBe(7);
+    expect(plan!.drafts[0].coordinates[0]!.x).toBe(5);
+    expect(plan!.drafts[0].coordinates[0]!.y).toBe(7);
     // mid_height field wins.
-    expect(plan!.vents[0].mid_height_air_flow_path).toBe(1.2);
+    expect(plan!.drafts[0].mid_height_air_flow_path).toBe(1.2);
   });
 
   it('window without mid_height: derive from base_height + height/2', () => {
@@ -398,7 +398,7 @@ describe('planBackgroundVents — window selection', () => {
         spaceLabels: [makeRoomLabel('bedroom', 5, 7)],
       },
     );
-    expect(plan!.vents[0].mid_height_air_flow_path).toBeCloseTo(1.5, 1);
+    expect(plan!.drafts[0].mid_height_air_flow_path).toBeCloseTo(1.5, 1);
   });
 
   it('window with no positional info falls back to 1.5 m mid-height (no zero-mid-height vents)', () => {
@@ -419,8 +419,8 @@ describe('planBackgroundVents — window selection', () => {
         spaceLabels: [makeRoomLabel('bedroom', 0, 0)],
       },
     );
-    expect(plan!.vents.every((v) => v.mid_height_air_flow_path > 0)).toBe(true);
-    expect(plan!.vents[0].mid_height_air_flow_path).toBe(1.5);
+    expect(plan!.drafts.every((v) => v.mid_height_air_flow_path > 0)).toBe(true);
+    expect(plan!.drafts[0].mid_height_air_flow_path).toBe(1.5);
   });
 
   it('window outside any habitable space is ignored', () => {
@@ -431,7 +431,7 @@ describe('planBackgroundVents — window selection', () => {
       elements: [insideWindow, outsideWindow],
       spaceLabels: [makeRoomLabel('bedroom', 0, 0)],
     });
-    expect(plan!.vents.every((v) => v.parent_element === 'Inside')).toBe(true);
+    expect(plan!.drafts.every((v) => v.parent_element === 'Inside')).toBe(true);
   });
 });
 

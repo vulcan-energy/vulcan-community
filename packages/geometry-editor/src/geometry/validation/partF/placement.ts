@@ -8,12 +8,13 @@
 // what area each should carry so the gap is closed without misleading the user about the
 // minimum (per-vent area is at least the fair share of the total minimum).
 
-import type { BuildingElementTransparent, Element, SpaceLabel, Vents } from '../../types';
+import type { BuildingElementTransparent, Element, ElementDraft, SpaceLabel, Vents } from '../../types';
 import {
   resolveRoomTypeRule,
   spaceLabelPlanAreaM2,
 } from '../../../lib/spaceLabelDerivation';
 import { pointInPolygon } from '../../../lib/spaceInference';
+import type { BatchPlan } from '../types';
 import type { PartFFinding } from './rules';
 import {
   minimumBackgroundAreaContinuousCm2,
@@ -22,21 +23,8 @@ import {
   minimumBackgroundCountIntermittent,
 } from './rules';
 
-/** A single vent to create as part of a batched fix. */
-export interface PlannedVent {
-  area_cm2: number;
-  mid_height_air_flow_path: number;
-  /** Window/wall name to set as `parent_element`, or null when no host could be found. */
-  parent_element: string | null;
-  /** Plan-projected position (z = parent's centroid z when known, else 0). */
-  coordinates: { x: number; y: number; z: number };
-}
-
-export interface BatchPlan {
-  vents: PlannedVent[];
-  /** Display string e.g. "3 background vents (200 cm² total)". */
-  summary: string;
-}
+/** A vent draft with the sizing this plan always sets. */
+type PlannedVentDraft = Extract<ElementDraft, { type: 'Vents' }> & Pick<Vents, 'area_cm2' | 'mid_height_air_flow_path'>;
 
 interface PlacementContext {
   elements: Element[];
@@ -187,7 +175,7 @@ export function planBackgroundVents(
     storeys: number;
   },
   context: PlacementContext,
-): BatchPlan | null {
+): (BatchPlan & { drafts: PlannedVentDraft[] }) | null {
   const target = backgroundTargetFor(finding, input);
   if (!target) return null;
 
@@ -230,7 +218,7 @@ export function planBackgroundVents(
   const baseSum = baseRoundedArea * countToAdd;
   const residual = totalNeeded > baseSum ? roundUpOneDp(totalNeeded - baseSum) : 0;
 
-  const planned: PlannedVent[] = [];
+  const planned: PlannedVentDraft[] = [];
   for (let i = 0; i < countToAdd; i++) {
     const area = i === 0 ? roundOneDp(baseRoundedArea + residual) : baseRoundedArea;
     if (ranked.length > 0) {
@@ -238,26 +226,32 @@ export function planBackgroundVents(
       const mid = windowPlanMidpoint(host);
       const midHeight = windowMidHeight(host);
       planned.push({
+        name: '',
+        type: 'Vents',
+        isPlaceholder: false,
         area_cm2: area,
         mid_height_air_flow_path: roundOneDp(midHeight),
         parent_element: host.name,
-        coordinates: { x: mid.x, y: mid.y, z: midHeight },
+        coordinates: [mid], // the window's storey band; the store places the vent on its parent,
       });
     } else {
       // No habitable-room windows — create unparented (per-element validator already warns
       // on missing parent, so the user is prompted to attach).
       planned.push({
+        name: '',
+        type: 'Vents',
+        isPlaceholder: false,
         area_cm2: area,
         mid_height_air_flow_path: FALLBACK_MID_HEIGHT_M,
         parent_element: null,
-        coordinates: { x: 0, y: 0, z: 0 },
+        coordinates: [{ x: 0, y: 0, z: 0 }],
       });
     }
   }
 
   const summary = `${planned.length} background vent${planned.length === 1 ? '' : 's'} (${roundOneDp(planned.reduce((s, p) => s + p.area_cm2, 0))} cm² total)`;
 
-  return { vents: planned, summary };
+  return { drafts: planned, summary };
 }
 
 function roundOneDp(n: number): number {

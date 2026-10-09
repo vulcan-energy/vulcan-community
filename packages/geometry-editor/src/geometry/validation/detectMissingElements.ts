@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element, ElementType, SpaceLabel, Zone } from '../types';
+import type { Element, ElementType, Floor, SpaceLabel, Zone } from '../types';
+import { planAutoDucts } from '../../lib/mvhrDuctwork';
 import type { MissingElement } from './types';
 import {
   evaluatePartF,
@@ -255,6 +256,7 @@ export const detectMissingElements = (
   complianceValidationEnabled: boolean,
   partOActiveCoolingRequired?: boolean,
   partFContext?: PartFDetectionContext,
+  floors: Floor[] = [],
 ): MissingElement[] => {
   if (!complianceValidationEnabled) return [];
 
@@ -393,6 +395,25 @@ export const detectMissingElements = (
         path: '/HotWaterDemand/Other',
         message: 'FHS: Other hot water (at least one tap / outlet)',
         pillQualifier: 'Other outlet',
+      });
+    }
+
+    // An MVHR with no ductwork at all: the CTA routes it (planAutoDucts). HEM takes ductwork only
+    // for MVHR, so other unit types get no row.
+    for (const unit of elements) {
+      if (unit.isPlaceholder || unit.type !== 'MechanicalVentilation' || unit.vent_type !== 'MVHR') continue;
+      const hasDuctwork = elements.some((el) =>
+        !el.isPlaceholder && el.type === 'MechanicalVentilationDuctwork' && el.parent_element?.trim() === unit.name);
+      if (hasDuctwork) continue;
+      const drafts = planAutoDucts(unit, elements, partFContext?.spaceLabels ?? [], floors);
+      if (drafts.length === 0) continue;
+      dwellingWide.push({
+        type: 'MechanicalVentilationDuctwork',
+        requiredBy: 'fhs',
+        path: `/MechanicalVentilation/${unit.name}/ductwork`,
+        message: `FHS: ${unit.name} has no ductwork`,
+        pillQualifier: unit.name,
+        batchPlan: { drafts, summary: `${drafts.length} ductwork elements` },
       });
     }
   }
