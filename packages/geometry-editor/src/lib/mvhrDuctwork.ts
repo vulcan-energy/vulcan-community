@@ -639,8 +639,8 @@ export function planAutoDucts(
 export type PrimaryPipeworkPair = { heatSource: Element; cylinder: Element; heatSourcePoint: Point3; cylinderPoint: Point3 };
 
 /** Names of the HeatSourceWet a cylinder heats from: its StorageTank entries' HeatSourceWet heat sources. */
-function cylinderHeatSourceNames(cylinder: Element): string[] {
-  const names: string[] = [];
+function cylinderHeatSourceNames(cylinder: Element): Set<string> {
+  const names = new Set<string>();
   const tanks = parseExtraJsonRecord(parseExtraJsonRecord(cylinder.extra_json)?.HotWaterSource) ?? {};
   for (const tank of Object.values(tanks)) {
     const record = parseExtraJsonRecord(tank);
@@ -649,7 +649,7 @@ function cylinderHeatSourceNames(cylinder: Element): string[] {
     for (const [key, source] of Object.entries(parseExtraJsonRecord(record.HeatSource) ?? {})) {
       const heatSource = parseExtraJsonRecord(source);
       if (heatSource?.type !== 'HeatSourceWet') continue;
-      names.push(typeof heatSource.name === 'string' && heatSource.name.trim() ? heatSource.name.trim() : key);
+      names.add(typeof heatSource.name === 'string' && heatSource.name.trim() ? heatSource.name.trim() : key);
     }
   }
   return names;
@@ -669,7 +669,7 @@ export function primaryPipeworkPairs(elements: ReadonlyArray<Element>, effective
     const cylinderPoint = networkPoint3(cylinder, effectiveFloors);
     for (const heatSource of plant) {
       const keys = Object.keys(parseExtraJsonRecord(parseExtraJsonRecord(heatSource.extra_json)?.HeatSourceWet) ?? {});
-      if (subcategory(heatSource) !== 'HeatSourceWet' || !keys.some((key) => names.includes(key))) continue;
+      if (subcategory(heatSource) !== 'HeatSourceWet' || !keys.some((key) => names.has(key))) continue;
       const heatSourcePoint = networkPoint3(heatSource, effectiveFloors);
       if (cylinderPoint && heatSourcePoint) pairs.push({ heatSource, cylinder, heatSourcePoint, cylinderPoint });
     }

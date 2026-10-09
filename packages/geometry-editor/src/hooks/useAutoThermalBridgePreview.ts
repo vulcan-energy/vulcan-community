@@ -203,6 +203,8 @@ export function groupAutoDuctRuns(
   drafts: readonly ElementDraft[],
   starts: ReadonlyArray<{ point: Point3; storey: number | undefined }>,
 ): AutoDuctRun[] {
+  const pointKey = (p: Point3) => `${p.x},${p.y},${p.z}`;
+  const startStorey = new Map(starts.map(({ point, storey }) => [pointKey(point), storey]));
   const runs: AutoDuctRun[] = [];
   for (const draft of drafts) {
     const run = runs[runs.length - 1];
@@ -211,21 +213,21 @@ export function groupAutoDuctRuns(
       continue;
     }
     const [a, b] = draft.coordinates as [Point3, Point3];
-    const start = starts.find(({ point }) => a.x === point.x && a.y === point.y && a.z === point.z);
-    if (run && !start) {
+    const startsRun = startStorey.has(pointKey(a));
+    if (run && !startsRun) {
       run.drafts.push(draft);
       run.segments.push([a, b]);
       run.lengthM += draft.length!;
     } else {
       const role = draft.type === 'WaterPipework' ? 'primary' : draft.duct_type!;
-      runs.push({ proposalId: '', role, storey: start?.storey, drafts: [draft], segments: [[a, b]], lengthM: draft.length! });
+      runs.push({ proposalId: '', role, storey: startStorey.get(pointKey(a)), drafts: [draft], segments: [[a, b]], lengthM: draft.length! });
     }
   }
   // Role and far end survive re-planning after an add; the index among equal keys keeps duplicates apart.
   const seen = new Map<string, number>();
   return runs.map((run) => {
     const end = run.segments[run.segments.length - 1]![1];
-    const key = `${run.role}:${end.x},${end.y},${end.z}`;
+    const key = `${run.role}:${pointKey(end)}`;
     const index = seen.get(key) ?? 0;
     seen.set(key, index + 1);
     return { ...run, proposalId: `${key}:${index}` };
