@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
+import { createGeometryStore } from '../../stores/geometryStore';
 import {
   applyAngleSnapIfClose,
   buildGeometrySnapCache,
@@ -13,8 +14,11 @@ import {
   resolveDrawSnapPoint,
   getExactSnappedVertices,
   getWallSupportedSnappedVertices,
+  planOrthogonalElbow,
   planServiceLineEndpointWelds,
+  planServiceLineTeeSplits,
   pointsConnected,
+  serviceNetworkSegmentFilter,
   snapCornerToOtherCornersFromCache,
 } from '../snapUtils';
 
@@ -35,6 +39,56 @@ describe('constrainPointOrthogonally', () => {
       point: { x: 1, y: 7 },
       snapped: true,
     });
+  });
+});
+
+describe('planOrthogonalElbow', () => {
+  it('routes the larger move first, flips, and stays straight on-axis', () => {
+    const start = { x: 0, y: 0 };
+    expect(planOrthogonalElbow(start, { x: 4, y: 1 }, 2, false)).toEqual({ x: 4, y: 0 });
+    expect(planOrthogonalElbow(start, { x: 4, y: 1 }, 2, true)).toEqual({ x: 0, y: 1 });
+    expect(planOrthogonalElbow(start, { x: 1, y: -3 }, 2, false)).toEqual({ x: 0, y: -3 });
+    expect(planOrthogonalElbow(start, { x: 4, y: 0.05 }, 2, false)).toBeNull();
+  });
+});
+
+describe('planServiceLineTeeSplits', () => {
+  it('splits a same-network duct at a mid-leg tee, applied with the branch in one history step', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const duct = (name: string, duct_type: 'supply' | 'extract') => ({
+      type: 'MechanicalVentilationDuctwork' as const,
+      name,
+      duct_type,
+      parent_element: 'MVHR',
+      length: 4,
+      coordinates: [{ x: 0, y: 0, z: 2 }, { x: 4, y: 0, z: 2 }],
+    });
+    const [mainId] = store.getState().addElements([duct('Main', 'supply'), duct('Other role', 'extract')]);
+    const isNetwork = serviceNetworkSegmentFilter({
+      type: 'MechanicalVentilationDuctwork',
+      parent_element: 'MVHR',
+      duct_type: 'supply',
+    })!;
+    const before = store.getState();
+    expect(planServiceLineTeeSplits(before.elementsById, isNetwork, [{ x: 3.996, y: 0, z: 2 }])).toEqual([]);
+    const splits = planServiceLineTeeSplits(before.elementsById, isNetwork, [{ x: 1.5, y: 0, z: 2 }]);
+    expect(splits.map((split) => split.elementId)).toEqual([mainId]);
+
+    // As the duct draw click applies it: the head in place, then the branch and the tail together.
+    const [split] = splits;
+    before.updateElement(split!.elementId, { coordinates: split!.head, length: 1.5 }, true);
+    const [, tailId] = before.addElements([
+      { ...duct('', 'supply'), length: 2, coordinates: [{ x: 1.5, y: 0, z: 2 }, { x: 1.5, y: 2, z: 2 }] },
+      { ...before.elementsById[mainId!]!, name: '', coordinates: split!.tail, length: 2.5 } as never,
+    ]);
+
+    const after = store.getState();
+    expect(after.history).toHaveLength(before.history.length + 1);
+    const main = after.elementsById[mainId!]! as Element & { length: number };
+    const tail = after.elementsById[tailId!]! as Element & { length: number; duct_type: string };
+    expect([main.name, main.length, main.coordinates[1]]).toEqual(['Main', 1.5, { x: 1.5, y: 0, z: 2 }]);
+    expect(tail.name).not.toBe('Main');
+    expect([tail.length, tail.duct_type, tail.coordinates]).toEqual([2.5, 'supply', split!.tail]);
   });
 });
 

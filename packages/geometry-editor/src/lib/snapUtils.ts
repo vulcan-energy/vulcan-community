@@ -387,7 +387,11 @@ export function findClosestSnapCorner(
   return best;
 }
 
-export function buildGeometrySnapCache(elementsById: Record<string, Element>): GeometrySnapCache {
+/** `isExtraEdge` adds more two-point edge targets beside line walls (a duct or pipe network while drawing one). */
+export function buildGeometrySnapCache(
+  elementsById: Record<string, Element>,
+  isExtraEdge?: (el: Element) => boolean,
+): GeometrySnapCache {
   const cornerTargets: SnapCornerTarget[] = [];
   const wallSegments: SnapWallSegmentTarget[] = [];
   let cornerOrder = 0;
@@ -408,7 +412,7 @@ export function buildGeometrySnapCache(elementsById: Record<string, Element>): G
       });
     }
 
-    if (!isLineWallElementForSnap(el) || coords.length !== 2) continue;
+    if (!(isLineWallElementForSnap(el) || (el && isExtraEdge?.(el))) || coords.length !== 2) continue;
     wallSegments.push({
       elementId: id,
       elementName: (el as any).name || '',
@@ -1201,6 +1205,73 @@ export function snapPartnerFilter(element: Element): ((other: Element) => boolea
     ((other.type === 'MechanicalVentilationDuctwork' || other.type === 'MechanicalVentilationTerminal') &&
       other.parent_element?.trim() === unit) ||
     (other.type === 'MechanicalVentilation' && other.name?.trim() === unit);
+}
+
+type ServiceNetworkDraft = { type: string; duct_type?: unknown; parent_element?: unknown; pipework_type?: unknown };
+
+/**
+ * Segments a duct or pipe being drawn may branch from: ducts of the same unit and duct_type, pipes
+ * of the same pipework_type. Undefined for every other type.
+ */
+export function serviceNetworkSegmentFilter(draft: ServiceNetworkDraft): ((el: Element) => boolean) | undefined {
+  if (draft.type === 'WaterPipework') {
+    return (el) => el.type === 'WaterPipework' && el.pipework_type === draft.pipework_type && el.coordinates?.length === 2;
+  }
+  if (draft.type !== 'MechanicalVentilationDuctwork') return undefined;
+  const unit = typeof draft.parent_element === 'string' ? draft.parent_element.trim() : '';
+  if (!unit) return undefined;
+  return (el) =>
+    el.type === 'MechanicalVentilationDuctwork' &&
+    el.parent_element?.trim() === unit &&
+    el.duct_type === draft.duct_type &&
+    el.coordinates?.length === 2;
+}
+
+/**
+ * Shift on the duct/pipe plan tool: an off-axis end routes as an L whose first leg runs along the
+ * larger move (`flip` swaps the legs). Null when the end is on-axis, which keeps the ortho lock.
+ */
+export function planOrthogonalElbow(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  angleTolDeg: number,
+  flip: boolean,
+): { x: number; y: number } | null {
+  if (end.x === start.x || end.y === start.y || applyAngleSnapIfClose(end, start, angleTolDeg).snapped) return null;
+  const xFirst = (Math.abs(end.x - start.x) >= Math.abs(end.y - start.y)) !== flip;
+  return xFirst ? { x: end.x, y: start.y } : { x: start.x, y: end.y };
+}
+
+/** Drawn ends sit on the 0.01 m grid, so a tee on a diagonal segment can land up to ~7 mm off its line. */
+const TEE_ON_SEGMENT_TOL_M = 0.01;
+
+export type ServiceLineTeeSplit = { elementId: string; head: WeldPoint[]; tail: WeldPoint[] };
+
+/**
+ * A drawn end that lands inside a network segment (not within SERVICE_POINT_COINCIDENCE_EPS_M of
+ * its ends) splits that segment at the tee, so every branch stays an endpoint coincidence. The
+ * original keeps `head`; `tail` becomes a new element. One split per segment.
+ */
+export function planServiceLineTeeSplits(
+  elementsById: Record<string, Element>,
+  isNetworkSegment: (el: Element) => boolean,
+  ends: WeldPoint[],
+): ServiceLineTeeSplit[] {
+  const splits: ServiceLineTeeSplit[] = [];
+  for (const p of ends) {
+    for (const el of Object.values(elementsById)) {
+      if (!isNetworkSegment(el) || splits.some((split) => split.elementId === el.id)) continue;
+      const [a, b] = el.coordinates as [WeldPoint, WeldPoint];
+      if (distance(p, a) <= SERVICE_POINT_COINCIDENCE_EPS_M || distance(p, b) <= SERVICE_POINT_COINCIDENCE_EPS_M) continue;
+      const v = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
+      const t = ((p.x - a.x) * v.x + (p.y - a.y) * v.y + (p.z - a.z) * v.z) / (v.x * v.x + v.y * v.y + v.z * v.z);
+      if (!(t > 0 && t < 1)) continue;
+      if (distance(p, { x: a.x + t * v.x, y: a.y + t * v.y, z: a.z + t * v.z }) > TEE_ON_SEGMENT_TOL_M) continue;
+      splits.push({ elementId: el.id, head: [{ ...a }, { ...p }], tail: [{ ...p }, { ...b }] });
+      break;
+    }
+  }
+  return splits;
 }
 
 // Helper to detect which vertices of an element are exactly snapped to other elements (for persistent indicators)

@@ -99,6 +99,16 @@ describe('tooltip copy', () => {
     expect(text('tb-slope-line', 1, true)).toBe('Place end point + continue (P/V/S switches shape)');
   });
 
+  it('adds the L-route hint on the duct and pipe plan tool only', () => {
+    const base = 'Place final point (Alt/Option+Click to keep drawing; P/V/S switches shape)';
+    expect(text('tb-plan-line', 1, false, 'MechanicalVentilationDuctwork')).toBe(`${base} · Shift L`);
+    expect(
+      getDrawModeTooltipText('tb-plan-line', [{ x: 0, y: 0 }], [], null, null, null, { current: null }, 'WaterPipework', true, true),
+    ).toBe('Place end point + continue (P/V/S switches shape) · F flip');
+    expect(text('tb-plan-line', 1, false, 'ThermalBridgeLinear')).toBe(base);
+    expect(text('tb-slope-line', 1, false, 'WaterPipework')).toBe('Place second point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
+  });
+
   it('hover hints', () => {
     expect(getHoverHintText({ kind: 'rotate-grip', dragging: false })).toBe('Drag to rotate');
     expect(getHoverHintText({ kind: 'rotate-grip', dragging: true })).toBeNull();
