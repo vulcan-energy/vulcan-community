@@ -82,8 +82,9 @@ export const ThermalBridgePreview2D = memo(function ThermalBridgePreview2D({
       {projected.map(({ id, key, style, a, b }) => {
         const hovered = preview.hover?.ids.includes(id);
         if (style) {
-          return <Line key={key} points={[a.x, a.y, b.x, b.y]} stroke={style.stroke}
-            strokeWidth={hovered ? 4 : style.strokeWidth} dash={[...style.dash]} opacity={hovered ? 1 : 0.7} listening={false} />;
+          // The candidate colour reads as a suggestion; the role's dash keeps roles apart.
+          return <Line key={key} points={[a.x, a.y, b.x, b.y]} stroke={palette.guide}
+            strokeWidth={hovered ? 4 : 2} dash={[...style.dash]} listening={false} />;
         }
         const common = { stroke: palette.guide, strokeWidth: hovered ? 4 : 2, listening: false };
         return Math.hypot(b.x - a.x, b.y - a.y) < 2
