@@ -2919,6 +2919,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/geometry/thermalBridge/autoThermalBridgeCandidates.ts",
+      "source_path": "packages/geometry-editor/src/geometry/thermalBridge/autoThermalBridgeCandidates.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/geometry/thermalBridge/autoThermalBridgePipeline.ts",
       "source_path": "packages/geometry-editor/src/geometry/thermalBridge/autoThermalBridgePipeline.ts",
       "license": "AGPL-3.0-only",
