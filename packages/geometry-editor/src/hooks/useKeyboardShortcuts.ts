@@ -187,6 +187,8 @@ export interface UseKeyboardShortcutsDeps {
   tryPopLastDrawPoint?: () => boolean;
   /** When true, L/P/O/… do not start fabric draw (e.g. Space Labeller is open). */
   fabricDrawShortcutsDisabled?: boolean;
+  /** A temporary canvas preview owns editing, while undo/redo and navigation stay available. */
+  geometryEditingSuspended?: boolean;
 }
 
 /**
@@ -218,12 +220,13 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
     setOrthogonalRoomEnd,
     resetDrawing,
     fabricDrawShortcutsDisabled,
+    geometryEditingSuspended = false,
   } = deps;
 
   // First effect: Escape + Ctrl+A (document)
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isCanvasKeydownTargetAFormControl(event.target)) {
+      if (geometryEditingSuspended || isCanvasKeydownTargetAFormControl(event.target)) {
         return;
       }
 
@@ -251,6 +254,7 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
     setMarqueeSelection,
     drawMode,
     resetDrawing,
+    geometryEditingSuspended,
   ]);
 
   // Second effect: undo/redo, zoom, arrows, delete, draw mode shortcuts (window)
@@ -299,6 +303,8 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
       if (typeof document !== 'undefined' && document.querySelector('[data-suppress-canvas-keyboard]')) {
         return;
       }
+
+      if (geometryEditingSuspended && !e.ctrlKey && !e.metaKey && !['+', '=', '-', 'z', 'Z'].includes(e.key)) return;
 
       if (e.ctrlKey || e.metaKey) {
         switch (e.key) {
@@ -507,5 +513,6 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
     updateSpaceLabel,
     tryPopLastDrawPoint,
     fabricDrawShortcutsDisabled,
+    geometryEditingSuspended,
   ]);
 }

@@ -61,6 +61,10 @@ import {
   cascadeHostedDescendantGeometry,
   cascadeHostedDescendantTranslation,
 } from '../../lib/hostedDescendantCascade';
+import type { AutoThermalBridgePreview } from '../../hooks/useAutoThermalBridgePreview';
+import { ThermalBridgePreview3D } from './ThermalBridgePreview3D';
+import type { ThermalBridgePreviewHostSurface } from './thermalBridgePreview3dGeometry';
+import { findHostElementForAutoTbProposal } from '../../geometry/thermalBridge/resolveTbHostFloorId';
 interface Selection {
   type: 'zone' | 'element' | 'global' | 'dormer';
   id: string;
@@ -644,9 +648,76 @@ export interface GeometryCanvas3DProps {
   isElementCategoryGhost?: (elementId: string) => boolean;
   /** Shared 2D geometry snap cache; reused so 3D handle drags snap to the same corner targets. */
   snapCache?: GeometrySnapCache;
+  /** Shared, non-persisted thermal bridge preview state and actions. */
+  thermalBridgePreview?: AutoThermalBridgePreview;
+  onInspectThermalBridge?: (id: string) => void;
 }
 
 const DEFAULT_IS_ELEMENT_CATEGORY_GHOST: NonNullable<GeometryCanvas3DProps['isElementCategoryGhost']> = () => false;
+
+const THERMAL_BRIDGE_FABRIC_TYPES = new Set<Element['type']>([
+  'BuildingElementOpaque',
+  'BuildingElementTransparent',
+  'BuildingElementGround',
+  'BuildingElementAdjacentConditionedSpace',
+  'BuildingElementAdjacentUnconditionedSpace_Simple',
+  'BuildingElementPartyWall',
+]);
+
+function thermalBridgePreviewSurfaceForPrimitive(
+  primitive: Geometry3DPrimitive,
+): ThermalBridgePreviewHostSurface | null {
+  let normal: THREE.Vector3 | null = null;
+  let point: THREE.Vector3 | null = null;
+  let thicknessM = 0;
+  if (primitive.kind === 'wall-segment') {
+    const [ax, az] = modelXYToThreeXZ(primitive.start);
+    const [bx, bz] = modelXYToThreeXZ(primitive.end);
+    normal = new THREE.Vector3(bz - az, 0, ax - bx);
+    point = new THREE.Vector3((ax + bx) / 2, primitive.baseElevationM + primitive.heightM / 2, (az + bz) / 2);
+    thicknessM = primitive.thicknessM;
+  } else if (primitive.kind === 'planar-face' && primitive.points.length >= 3) {
+    const origin = new THREE.Vector3(...primitive.points[0]!);
+    point = origin;
+    for (let index = 1; index < primitive.points.length - 1 && !normal; index += 1) {
+      const first = new THREE.Vector3(...primitive.points[index]!).sub(origin);
+      const second = new THREE.Vector3(...primitive.points[index + 1]!).sub(origin);
+      const cross = first.cross(second);
+      if (cross.lengthSq() > 1e-12) normal = cross.normalize();
+    }
+    thicknessM = primitive.thicknessM ?? 0;
+  } else if (primitive.kind === 'polygon-sloped') {
+    const radians = primitive.pitchDeg * Math.PI / 180;
+    const [x, z] = modelXYToThreeXZ(primitive.points[0]!);
+    const deltaX = primitive.points[0]![0] - primitive.hingeAnchorXY[0];
+    const deltaY = primitive.points[0]![1] - primitive.hingeAnchorXY[1];
+    const riseM = (deltaX * primitive.inwardNormal2D[0] + deltaY * primitive.inwardNormal2D[1]) * Math.tan(radians);
+    point = new THREE.Vector3(x, primitive.baseElevationM + riseM, z);
+    normal = new THREE.Vector3(
+      -primitive.inwardNormal2D[0] * Math.tan(radians),
+      1,
+      primitive.inwardNormal2D[1] * Math.tan(radians),
+    );
+    thicknessM = primitive.thicknessM;
+  } else if (primitive.kind === 'polygon-prism' && primitive.heightM < 0.5) {
+    const [x, z] = modelXYToThreeXZ(primitive.points[0]!);
+    point = new THREE.Vector3(x, primitive.baseElevationM + primitive.heightM, z);
+    normal = new THREE.Vector3(0, 1, 0);
+    thicknessM = primitive.heightM;
+  }
+  if (!normal || !point || normal.lengthSq() < 1e-12) return null;
+  normal.normalize();
+  return {
+    hostElementId: primitive.elementId,
+    point: [point.x, point.y, point.z],
+    normal: [normal.x, normal.y, normal.z],
+    thicknessM,
+  };
+}
+
+function muteThermalBridgePreviewFabricColor(color: string): string {
+  return `#${new THREE.Color(color).lerp(new THREE.Color('#35434a'), 0.62).getHexString()}`;
+}
 
 const CAMERA_FRAME_OFFSET = new THREE.Vector3(10, 8, 10);
 
@@ -1744,14 +1815,24 @@ const PolygonPrismMesh: React.FC<{
   onSelect: (id: string, additive: boolean) => void;
   currentFloorZ?: number;
   categoryGhost?: boolean;
-}> = ({ primitive, selected, showDetail, onSelect, currentFloorZ, categoryGhost = false }) => {
+  previewActive?: boolean;
+  previewDimmed?: boolean;
+  previewOpaque?: boolean;
+  onPreviewBackgroundHover?: () => void;
+}> = ({ primitive, selected, showDetail, onSelect, currentFloorZ, categoryGhost = false, previewActive = false, previewDimmed = false, previewOpaque = false, onPreviewBackgroundHover }) => {
   const isWindow = primitive.elementType === 'BuildingElementTransparent';
   const isOpening = primitive.isOpening;
   const isAboveCurrentFloor = isPrimitiveAboveActiveFloor(primitive.floorZ, currentFloorZ);
   const isInteractive = primitive.isCurrentFloor && !categoryGhost;
+  const canPick = previewActive
+    ? previewOpaque && !categoryGhost
+    : isInteractive;
   const [hovered, hoverHandlers] = useHoverHalo(isInteractive);
   const showHoverHalo = hovered && !selected && !categoryGhost;
-  const displayColor = floorDimmedMeshColor(primitive.color, primitive.isCurrentFloor);
+  const displayColor = floorDimmedMeshColor(
+    previewDimmed ? muteThermalBridgePreviewFabricColor(primitive.color) : primitive.color,
+    primitive.isCurrentFloor,
+  );
   const matDim = materialDimForCategoryGhost(
     primitive.usesFallbackHeight
       ? meshStandardFloorDimmingPropsWithBaseOpacity(
@@ -1795,14 +1876,17 @@ const PolygonPrismMesh: React.FC<{
 
   return (
     <group visible={!categoryGhost}>
+      {/* react-doctor-disable-next-line react-doctor/no-unknown-property -- R3F stores pick-occlusion metadata on Three.js userData. */}
       <mesh
         geometry={geometry}
-        onClick={isInteractive ? ((event) => {
+        userData={{ thermalBridgePreviewOccludes: previewActive && previewOpaque }}
+        onPointerMove={previewActive && previewOpaque ? (event) => { event.stopPropagation(); onPreviewBackgroundHover?.(); } : undefined}
+        onClick={canPick ? ((event) => {
           event.stopPropagation();
           onSelect(primitive.elementId, !!event.nativeEvent.shiftKey);
         }) : undefined}
-        {...hoverHandlers}
-        raycast={meshRaycastForInteractivity(isInteractive)}
+        {...(previewActive ? EMPTY_HOVER_HANDLERS : hoverHandlers)}
+        raycast={meshRaycastForInteractivity(canPick)}
         castShadow={!isAboveCurrentFloor}
         receiveShadow={!isAboveCurrentFloor}
         renderOrder={renderOrder}
@@ -1873,10 +1957,20 @@ const PolygonSlopedMesh: React.FC<{
   onSelect: (id: string, additive: boolean) => void;
   currentFloorZ?: number;
   categoryGhost?: boolean;
-}> = ({ primitive, selected, onSelect, currentFloorZ, categoryGhost = false }) => {
-  const displayColor = floorDimmedMeshColor(primitive.color, primitive.isCurrentFloor);
+  previewActive?: boolean;
+  previewDimmed?: boolean;
+  previewOpaque?: boolean;
+  onPreviewBackgroundHover?: () => void;
+}> = ({ primitive, selected, onSelect, currentFloorZ, categoryGhost = false, previewActive = false, previewDimmed = false, previewOpaque = false, onPreviewBackgroundHover }) => {
+  const displayColor = floorDimmedMeshColor(
+    previewDimmed ? muteThermalBridgePreviewFabricColor(primitive.color) : primitive.color,
+    primitive.isCurrentFloor,
+  );
   const isAboveCurrentFloor = isPrimitiveAboveActiveFloor(primitive.floorZ, currentFloorZ);
   const isInteractive = primitive.isCurrentFloor && !categoryGhost;
+  const canPick = previewActive
+    ? previewOpaque && !categoryGhost
+    : isInteractive;
   const [hovered, hoverHandlers] = useHoverHalo(isInteractive);
   const showHoverHalo = hovered && !selected && !categoryGhost;
   const opacity = primitive.opacity ?? 1;
@@ -1904,15 +1998,19 @@ const PolygonSlopedMesh: React.FC<{
   }, [primitive]);
 
   return (
-    <mesh
+    <>
+      {/* react-doctor-disable-next-line react-doctor/no-unknown-property -- R3F stores pick-occlusion metadata on Three.js userData. */}
+      <mesh
       visible={!categoryGhost}
       geometry={geometry}
-      onClick={isInteractive ? ((event) => {
+      userData={{ thermalBridgePreviewOccludes: previewActive && previewOpaque }}
+      onPointerMove={previewActive && previewOpaque ? (event) => { event.stopPropagation(); onPreviewBackgroundHover?.(); } : undefined}
+      onClick={canPick ? ((event) => {
         event.stopPropagation();
         onSelect(primitive.elementId, !!event.nativeEvent.shiftKey);
       }) : undefined}
-      {...hoverHandlers}
-      raycast={meshRaycastForInteractivity(isInteractive)}
+      {...(previewActive ? EMPTY_HOVER_HANDLERS : hoverHandlers)}
+      raycast={meshRaycastForInteractivity(canPick)}
       castShadow={!isAboveCurrentFloor && !hasExplicitTransparency}
       receiveShadow={!isAboveCurrentFloor && !hasExplicitTransparency}
       renderOrder={renderOrder}
@@ -1946,7 +2044,8 @@ const PolygonSlopedMesh: React.FC<{
           <HoverOverlayMaterial doubleSided />
         </mesh>
       ) : null}
-    </mesh>
+      </mesh>
+    </>
   );
 };
 
@@ -1956,9 +2055,16 @@ const PlanarFaceMesh: React.FC<{
   onSelect: (id: string, additive: boolean) => void;
   currentFloorZ?: number;
   categoryGhost?: boolean;
-}> = ({ primitive, selected, onSelect, currentFloorZ, categoryGhost = false }) => {
+  previewActive?: boolean;
+  previewDimmed?: boolean;
+  previewOpaque?: boolean;
+  onPreviewBackgroundHover?: () => void;
+}> = ({ primitive, selected, onSelect, currentFloorZ, categoryGhost = false, previewActive = false, previewDimmed = false, previewOpaque = false, onPreviewBackgroundHover }) => {
   const isAboveCurrentFloor = isPrimitiveAboveActiveFloor(primitive.floorZ, currentFloorZ);
   const isInteractive = primitive.isCurrentFloor && !categoryGhost;
+  const canPick = previewActive
+    ? previewOpaque && !categoryGhost
+    : isInteractive;
   const [hovered, hoverHandlers] = useHoverHalo(isInteractive);
   const showHoverHalo = hovered && !selected && !categoryGhost;
   const hasThickness = primitive.thicknessM !== undefined;
@@ -1966,7 +2072,10 @@ const PlanarFaceMesh: React.FC<{
     () => buildPlanarFaceGeometry(primitive.points, primitive.thicknessM),
     [primitive.points, primitive.thicknessM],
   );
-  const displayColor = floorDimmedMeshColor(primitive.color, primitive.isCurrentFloor);
+  const displayColor = floorDimmedMeshColor(
+    previewDimmed ? muteThermalBridgePreviewFabricColor(primitive.color) : primitive.color,
+    primitive.isCurrentFloor,
+  );
   const isOpening = primitive.isOpening;
   // Wall-style dimming (opaque off-floor, wireframe above) is only for solid OPAQUE faces;
   // profiled openings carry thickness too (they must protrude beyond the host wall's prism)
@@ -1981,15 +2090,19 @@ const PlanarFaceMesh: React.FC<{
   );
 
   return (
-    <mesh
+    <>
+      {/* react-doctor-disable-next-line react-doctor/no-unknown-property -- R3F stores pick-occlusion metadata on Three.js userData. */}
+      <mesh
       visible={!categoryGhost}
       geometry={geometry}
-      onClick={isInteractive ? ((event) => {
+      userData={{ thermalBridgePreviewOccludes: previewActive && previewOpaque }}
+      onPointerMove={previewActive && previewOpaque ? (event) => { event.stopPropagation(); onPreviewBackgroundHover?.(); } : undefined}
+      onClick={canPick ? ((event) => {
         event.stopPropagation();
         onSelect(primitive.elementId, !!event.nativeEvent.shiftKey);
       }) : undefined}
-      {...hoverHandlers}
-      raycast={meshRaycastForInteractivity(isInteractive)}
+      {...(previewActive ? EMPTY_HOVER_HANDLERS : hoverHandlers)}
+      raycast={meshRaycastForInteractivity(canPick)}
       castShadow={!isAboveCurrentFloor && !isOpening && !hasExplicitTransparency}
       receiveShadow={!isAboveCurrentFloor && !hasExplicitTransparency}
       renderOrder={renderOrder}
@@ -2030,7 +2143,8 @@ const PlanarFaceMesh: React.FC<{
           />
         </mesh>
       ) : null}
-    </mesh>
+      </mesh>
+    </>
   );
 };
 
@@ -2070,6 +2184,7 @@ const ThermalBridgeLinearHorizontalCylinder: React.FC<{
 
   return (
     <group visible={!categoryGhost}>
+      {/* react-doctor-disable-next-line react-doctor/no-unknown-property -- R3F stores pick-occlusion metadata on Three.js userData. */}
       <mesh
         position={[cx, primitive.baseElevationM + primitive.heightM / 2, cz]}
         quaternion={quat}
@@ -2255,13 +2370,20 @@ const WallSegmentMesh: React.FC<{
   onSelect: (id: string, additive: boolean) => void;
   currentFloorZ?: number;
   categoryGhost?: boolean;
-}> = ({ primitive, selected, showDetail, onSelect, currentFloorZ, categoryGhost = false }) => {
+  previewActive?: boolean;
+  previewDimmed?: boolean;
+  previewOpaque?: boolean;
+  onPreviewBackgroundHover?: () => void;
+}> = ({ primitive, selected, showDetail, onSelect, currentFloorZ, categoryGhost = false, previewActive = false, previewDimmed = false, previewOpaque = false, onPreviewBackgroundHover }) => {
   const isWindow = primitive.elementType === 'BuildingElementTransparent';
   const isOpening = primitive.isOpening;
   /** Linear TB strips: same depth bias as openings so they are not hidden inside wall volume. */
   const depthLikeOpening = isOpening || Boolean(primitive.renderAboveWallPlane);
   const isAboveCurrentFloor = isPrimitiveAboveActiveFloor(primitive.floorZ, currentFloorZ);
   const isInteractive = primitive.isCurrentFloor && !categoryGhost;
+  const canPick = previewActive
+    ? previewOpaque && !categoryGhost
+    : isInteractive;
   const [hovered, hoverHandlers] = useHoverHalo(isInteractive);
   const showHoverHalo = hovered && !selected && !categoryGhost;
   const wallMatDim = materialDimForCategoryGhost(
@@ -2274,7 +2396,10 @@ const WallSegmentMesh: React.FC<{
       : meshStandardFloorDimmingProps(primitive.isCurrentFloor, isAboveCurrentFloor),
     categoryGhost,
   );
-  const displayColor = floorDimmedMeshColor(primitive.color, primitive.isCurrentFloor);
+  const displayColor = floorDimmedMeshColor(
+    previewDimmed ? muteThermalBridgePreviewFabricColor(primitive.color) : primitive.color,
+    primitive.isCurrentFloor,
+  );
   const openingKind: 'window' | 'door' | null = isOpening
     ? (isWindow ? 'window' : 'door')
     : null;
@@ -2315,12 +2440,14 @@ const WallSegmentMesh: React.FC<{
       <mesh
         position={[cx, primitive.baseElevationM + primitive.heightM / 2, cz]}
         rotation={[0, angle, 0]}
-        onClick={isInteractive ? ((event) => {
+        userData={{ thermalBridgePreviewOccludes: previewActive && previewOpaque }}
+        onPointerMove={previewActive && previewOpaque ? (event) => { event.stopPropagation(); onPreviewBackgroundHover?.(); } : undefined}
+        onClick={canPick ? ((event) => {
           event.stopPropagation();
           onSelect(primitive.elementId, !!event.nativeEvent.shiftKey);
         }) : undefined}
-        {...hoverHandlers}
-        raycast={meshRaycastForInteractivity(isInteractive)}
+        {...(previewActive ? EMPTY_HOVER_HANDLERS : hoverHandlers)}
+        raycast={meshRaycastForInteractivity(canPick)}
         castShadow={!isAboveCurrentFloor}
         receiveShadow={!isAboveCurrentFloor}
         renderOrder={renderOrder}
@@ -2706,6 +2833,8 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
   onFrameRequestConsumed,
   isElementCategoryGhost = DEFAULT_IS_ELEMENT_CATEGORY_GHOST,
   snapCache,
+  thermalBridgePreview,
+  onInspectThermalBridge,
 }) {
   const themeId = useThemeStore((state) => state.themeId);
   const customTheme = useThemeStore((state) => state.customTheme);
@@ -2713,6 +2842,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
   const commitVertexPositionUpdates = useGeometryStore((state) => state.commitVertexPositionUpdates);
   const snapCorners = useGeometryStore((state) => state.snapCorners);
   const snapTol = useGeometryStore((state) => ((state as { PROJECT_DEFAULTS?: { snap_m?: number } }).PROJECT_DEFAULTS?.snap_m ?? 0.1));
+  const previewActive = Boolean(thermalBridgePreview?.active);
   const [editDragging, setEditDragging] = useState(false);
   const [editPreviewElementsById, setEditPreviewElementsById] = useState<Geometry3DEditPreviewElementsById | null>(null);
   const primitives = useMemo(
@@ -2723,6 +2853,36 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
     },
     [elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset, themeId, customTheme],
   );
+  const previewRelatedElementIds = useMemo(() => {
+    return new Set(thermalBridgePreview?.highlightedHostIds ?? []);
+  }, [thermalBridgePreview?.highlightedHostIds]);
+  const previewHostSurfaceMaps = useMemo(() => {
+    const surfacesByProposalId = new Map<string, ThermalBridgePreviewHostSurface[]>();
+    const surfacesByElementId = new Map<string, ThermalBridgePreviewHostSurface[]>();
+    if (!previewActive) return { byProposalId: surfacesByProposalId, byElementId: surfacesByElementId };
+    for (const primitive of primitives) {
+      const surface = thermalBridgePreviewSurfaceForPrimitive(primitive);
+      if (!surface) continue;
+      const surfaces = surfacesByElementId.get(primitive.elementId) ?? [];
+      const surfaceKey = `${surface.normal.map((value) => value.toFixed(6)).join(',')}:${surface.point.map((value) => value.toFixed(4)).join(',')}:${surface.thicknessM.toFixed(4)}`;
+      if (!surfaces.some((existing) =>
+        `${existing.normal.map((value) => value.toFixed(6)).join(',')}:${existing.point.map((value) => value.toFixed(4)).join(',')}:${existing.thicknessM.toFixed(4)}` === surfaceKey,
+      )) surfaces.push(surface);
+      surfacesByElementId.set(primitive.elementId, surfaces);
+    }
+    for (const candidate of thermalBridgePreview?.candidates ?? []) {
+      const host = findHostElementForAutoTbProposal(candidate, elementsById);
+      const hostIds = new Set([
+        ...(host ? [host.id] : []),
+        ...(elementsById[candidate.openingId] ? [candidate.openingId] : []),
+        ...(candidate.hostElementIds ?? []),
+        ...(candidate.cornerHostWallIds ?? []),
+        ...(candidate.roofAdjacentPairIds ?? []),
+      ]);
+      surfacesByProposalId.set(candidate.proposalId, [...hostIds].flatMap((id) => surfacesByElementId.get(id) ?? []));
+    }
+    return { byProposalId: surfacesByProposalId, byElementId: surfacesByElementId };
+  }, [elementsById, previewActive, primitives, thermalBridgePreview?.candidates]);
   const editPreviewElementIds = useMemo(
     () => Object.keys(editPreviewElementsById ?? {}),
     [editPreviewElementsById],
@@ -2827,6 +2987,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
     [elementsById, floors, selection, globalOrientationOffset],
   );
   const editHandleModel = useMemo(() => {
+    if (previewActive) return null;
     if (selection?.type !== 'element' && selection?.type !== 'global') return null;
     const element = editPreviewSceneElementsById[selection.id];
     if (!element) return null;
@@ -2846,6 +3007,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
     isElementCategoryGhost,
     primitives,
     selection,
+    previewActive,
   ]);
 
   const renderPrimitive = (primitive: Geometry3DPrimitive, index: number, keyPrefix = '') => {
@@ -2855,10 +3017,11 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
       (selection?.type === 'element' || selection?.type === 'global') &&
       selection.id === primitive.elementId;
     const selected =
-      primitive.isCurrentFloor &&
+      !previewActive && primitive.isCurrentFloor &&
       (selectedElementIds ?? []).includes(primitive.elementId);
     const key = `${keyPrefix}${primitive.kind}-${primitive.elementId}-${index}`;
     const onSelect = (id: string, additive: boolean) => {
+      if (previewActive) { thermalBridgePreview?.closeMenu(); return; }
       const info = getDormerBundleInfo(editPreviewSceneElementsById[id] ?? elementsById[id]);
       if (info) {
         setSelection({ type: 'dormer', id: info.bundle_id }, additive);
@@ -2868,6 +3031,17 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
       if (!selectedElement) return;
       setSelection(selectionForElement(selectedElement), additive);
     };
+    const onPreviewBackgroundHover = () => {
+      if (!thermalBridgePreview?.pinned) thermalBridgePreview?.onHover([], { x: 0, y: 0 });
+    };
+    const element = elementsById[primitive.elementId];
+    const previewOpaque = !!element &&
+      THERMAL_BRIDGE_FABRIC_TYPES.has(element.type) &&
+      element.type !== 'BuildingElementTransparent' &&
+      !isPrimitiveAboveActiveFloor(primitive.floorZ, currentFloorZ);
+    const previewDimmed = previewActive && !!element &&
+      THERMAL_BRIDGE_FABRIC_TYPES.has(element.type) &&
+      !previewRelatedElementIds.has(primitive.elementId);
 
     switch (primitive.kind) {
       case 'wall-segment':
@@ -2876,10 +3050,14 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
             key={key}
             primitive={primitive}
             selected={selected}
-            showDetail={directlySelected}
+            showDetail={!previewActive && directlySelected}
             onSelect={onSelect}
             currentFloorZ={currentFloorZ}
             categoryGhost={categoryGhost}
+            previewActive={previewActive}
+            previewDimmed={previewDimmed}
+            previewOpaque={previewOpaque}
+            onPreviewBackgroundHover={onPreviewBackgroundHover}
           />
         );
       case 'thermal-bridge-vertical-line':
@@ -2935,6 +3113,10 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
             onSelect={onSelect}
             currentFloorZ={currentFloorZ}
             categoryGhost={categoryGhost}
+            previewActive={previewActive}
+            previewDimmed={previewDimmed}
+            previewOpaque={previewOpaque}
+            onPreviewBackgroundHover={onPreviewBackgroundHover}
           />
         );
       case 'planar-face':
@@ -2946,6 +3128,10 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
             onSelect={onSelect}
             currentFloorZ={currentFloorZ}
             categoryGhost={categoryGhost}
+            previewActive={previewActive}
+            previewDimmed={previewDimmed}
+            previewOpaque={previewOpaque}
+            onPreviewBackgroundHover={onPreviewBackgroundHover}
           />
         );
       case 'polygon-prism':
@@ -2954,10 +3140,14 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
             key={key}
             primitive={primitive}
             selected={selected}
-            showDetail={directlySelected}
+            showDetail={!previewActive && directlySelected}
             onSelect={onSelect}
             currentFloorZ={currentFloorZ}
             categoryGhost={categoryGhost}
+            previewActive={previewActive}
+            previewDimmed={previewDimmed}
+            previewOpaque={previewOpaque}
+            onPreviewBackgroundHover={onPreviewBackgroundHover}
           />
         );
       default: {
@@ -2988,7 +3178,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
       <Canvas
         gl={createGeometryCanvasRenderer}
         shadows="percentage"
-        onPointerMissed={() => setSelection(null)}
+        onPointerMissed={() => { if (previewActive) thermalBridgePreview?.closeMenu(); else setSelection(null); }}
       >
         <color attach="background" args={[readRootCssVar('--canvas-3d-bg', '#0d1417')]} />
         <InitialPerspectiveCamera orbitTargetRef={orbitTargetRef} />
@@ -3013,6 +3203,13 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
             : renderPrimitive(primitive, index)
         ))}
         {editPreviewPrimitives.map((primitive, index) => renderPrimitive(primitive, index, 'preview-'))}
+        <ThermalBridgePreview3D
+          preview={thermalBridgePreview}
+          onInspectThermalBridge={onInspectThermalBridge}
+          hostSurfacesByProposalId={previewHostSurfaceMaps.byProposalId}
+          hostSurfacesByElementId={previewHostSurfaceMaps.byElementId}
+          elementsById={elementsById}
+        />
         {dormerCutoutOverlays.map((overlay, index) => (
           <Line
             key={`dormer-cutout-${overlay.hostElementId}-${index}`}

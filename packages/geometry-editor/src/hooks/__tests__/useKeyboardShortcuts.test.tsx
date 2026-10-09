@@ -127,3 +127,23 @@ describe('useKeyboardShortcuts global element selection', () => {
     expect(setHoverPoint).toHaveBeenCalledWith(null);
   });
 });
+
+describe('temporary suggestion preview keyboard ownership', () => {
+  it('preserves the suspended draft and selection while allowing undo and zoom', () => {
+    const deps = buildDeps({
+      geometryEditingSuspended: true, drawMode: 'tb-plan-line', drawElementType: 'ThermalBridgeLinear',
+      canUndo: true, selectedElementIds: ['bridge'], tryPopLastDrawPoint: vi.fn(() => true),
+    });
+    renderHook(() => useKeyboardShortcuts(deps));
+    for (const key of ['s', 'v', 'l', 'Backspace', 'Delete', 'ArrowLeft']) press(key);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(deps.setDrawMode).not.toHaveBeenCalled();
+    expect(deps.tryPopLastDrawPoint).not.toHaveBeenCalled();
+    expect(deps.updateElement).not.toHaveBeenCalled();
+    expect(deps.resetDrawing).not.toHaveBeenCalled();
+    press('+');
+    expect(deps.setScale).toHaveBeenCalledOnce();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+    expect(deps.undo).toHaveBeenCalledOnce();
+  });
+});

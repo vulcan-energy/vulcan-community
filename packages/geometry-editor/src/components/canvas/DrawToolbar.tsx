@@ -198,9 +198,9 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
     const nextType = value as ElementType;
     const nextMode = getDefaultDrawModeForElementType(nextType);
     setDrawElementType(nextType);
-    setDrawMode(nextMode);
-    resetDraftForMode(nextMode);
-  }, [resetDraftForMode, setDrawElementType, setDrawMode]);
+    setDrawMode(in3D ? 'none' : nextMode);
+    resetDraftForMode(in3D ? 'none' : nextMode);
+  }, [in3D, resetDraftForMode, setDrawElementType, setDrawMode]);
 
   useEffect(() => {
     if (complianceValidationEnabled && COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(drawElementType)) {
@@ -280,7 +280,6 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
           options={drawElementTypeOptions}
           ariaLabel="Element type for new drawings"
           className="draw-element-type-picker"
-          disabled={in3D}
         />
 
         {drawElementType === 'MechanicalVentilationDuctwork' && (
