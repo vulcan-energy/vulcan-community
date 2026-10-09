@@ -8,10 +8,12 @@ import { worldToCanvas } from '../../lib/shapeUtils';
 import { readRootCssVar } from '../../lib/cssVars';
 import type { CanvasPreview, ThermalBridgePreviewAnchor } from '../../hooks/useAutoThermalBridgePreview';
 import { MVHR_DUCT_ROLE_STYLES } from '../../lib/mvhrDuctwork';
+import type { AutoThermalBridgeCandidate } from '../../geometry/thermalBridge/autoThermalBridgeCandidates';
 import type { DrawingCanvasPalette } from './drawingPreviewPalette';
 import { thermalBridgeCandidatesForRender, thermalBridgeIssuesForRender } from './thermalBridgePreviewRenderRows';
 
 type Point = { x: number; y: number };
+const NO_CANDIDATES: readonly AutoThermalBridgeCandidate[] = [];
 function distanceToPreviewSegment(point: Point, a: Point, b: Point): number {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -38,24 +40,26 @@ export const ThermalBridgePreview2D = memo(function ThermalBridgePreview2D({
   onInspect: (id: string) => void;
   canActivate: () => boolean;
 }) {
-  const candidatesToRender = preview.kind === 'duct' ? [] : thermalBridgeCandidatesForRender(preview.candidates, preview);
+  const candidatesToRender = preview.kind === 'duct' ? NO_CANDIDATES : thermalBridgeCandidatesForRender(preview.candidates, preview);
   const issuesToRender = preview.kind === 'duct' ? [] : thermalBridgeIssuesForRender(preview.issues, preview);
   const runs = preview.kind === 'duct' ? preview.runs : null;
   // A thermal-bridge candidate is one segment; a duct run is several, drawn in its role's style.
   const projected = useMemo(() => runs
-    ? runs.flatMap((run) => run.segments.map(([a, b]) => ({
-        id: run.proposalId, style: MVHR_DUCT_ROLE_STYLES[run.role],
+    ? runs.flatMap((run) => run.segments.map(([a, b], segment) => ({
+        id: run.proposalId, key: `${run.proposalId}:${segment}`, style: MVHR_DUCT_ROLE_STYLES[run.role],
         a: worldToCanvas(a, scale, panOffset, canvasCenter), b: worldToCanvas(b, scale, panOffset, canvasCenter),
       })))
     : candidatesToRender.map((candidate) => ({
-        id: candidate.proposalId, style: null,
+        id: candidate.proposalId, key: candidate.proposalId, style: null,
         a: worldToCanvas(candidate.coordinates[0], scale, panOffset, canvasCenter),
         b: worldToCanvas(candidate.coordinates[1], scale, panOffset, canvasCenter),
       })), [runs, candidatesToRender, scale, panOffset, canvasCenter]);
   // Every run meets at the unit, so a duct click takes only the nearest run; overlapping bridges all go to the chooser.
   const hitIds = (point: Point) => {
-    const hits = projected.map((row) => ({ id: row.id, d: distanceToPreviewSegment(point, row.a, row.b) }))
-      .filter(({ d }) => d <= 8);
+    const hits = projected.flatMap((row) => {
+      const d = distanceToPreviewSegment(point, row.a, row.b);
+      return d <= 8 ? [{ id: row.id, d }] : [];
+    });
     if (!runs) return hits.map(({ id }) => id);
     return hits.length ? [hits.reduce((best, hit) => (hit.d < best.d ? hit : best)).id] : [];
   };
@@ -75,10 +79,10 @@ export const ThermalBridgePreview2D = memo(function ThermalBridgePreview2D({
           preview.onActivate(hitIds(point), point);
         }}
       />
-      {projected.map(({ id, style, a, b }, index) => {
+      {projected.map(({ id, key, style, a, b }) => {
         const hovered = preview.hover?.ids.includes(id);
         if (style) {
-          return <Line key={`${id}:${index}`} points={[a.x, a.y, b.x, b.y]} stroke={style.stroke}
+          return <Line key={key} points={[a.x, a.y, b.x, b.y]} stroke={style.stroke}
             strokeWidth={hovered ? 4 : style.strokeWidth} dash={[...style.dash]} opacity={hovered ? 1 : 0.7} listening={false} />;
         }
         const common = { stroke: palette.guide, strokeWidth: hovered ? 4 : 2, listening: false };

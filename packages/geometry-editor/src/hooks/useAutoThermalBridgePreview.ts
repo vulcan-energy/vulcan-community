@@ -225,7 +225,7 @@ function planAutoDuctRuns(state: DuctPlanState, unitName: string | null) {
     : mvhrUnits.length === 1 ? mvhrUnits[0] : undefined;
   const unitPoint = unit && getFirstPoint3(unit);
   if (!unit || !unitPoint) return null;
-  const labels = state.spaceLabelIds.map((id) => state.spaceLabelsById[id]).filter(Boolean);
+  const labels = state.spaceLabelIds.flatMap((id) => state.spaceLabelsById[id] ?? []);
   return {
     unit,
     storey: getElementCanvasFloorZValue(unit, state.floors),
