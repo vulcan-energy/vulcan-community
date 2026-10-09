@@ -108,14 +108,6 @@ function distanceSq(a: { x: number; y: number }, b: { x: number; y: number }): n
   return dx * dx + dy * dy;
 }
 
-function pointToSegmentDistanceSqXY(
-  p: { x: number; y: number },
-  A: { x: number; y: number },
-  B: { x: number; y: number },
-): number {
-  return distanceSq(p, projectPointOntoSegmentXY(p, A, B));
-}
-
 type ConnectivityElement = { type?: unknown } | undefined;
 type ConnectivityPoint = { x: number; y: number; z?: unknown };
 
@@ -1397,14 +1389,17 @@ export function planServiceLineTeeSplits(
 
 type ConnectedDragPoint = { x: number; y: number; z: number };
 
-const isConnectedDragWall = (el: Element): boolean =>
+/** A two-point line wall that is not an external door: the walls whose ends connect, T or corner. */
+export const isConnectedDragWall = (el: Element): boolean =>
   isLineWallElementForSnap(el) && el.coordinates?.length === 2 && !(el as { is_external_door?: unknown }).is_external_door;
 
 /**
  * Line ends that Alt-drag "move connected" carries along with `element`: vertices of same-network
  * ducts and pipes (by their own `snapPartnerFilter`), or for a line wall of other line walls,
- * connected to one of its vertices. Points (unit, terminals) never follow a dragged line; a dragged
- * unit or terminal carries its duct ends. Openings, floors, roofs and labels never follow a wall.
+ * connected to one of its vertices or ending on its span (a T-stem). A line wall's own T-ends (on a
+ * host's span) come back as entries for `element` itself: `planConnectedDrag` slides them along the
+ * host. Points (unit, terminals) never follow a dragged line; a dragged unit or terminal carries
+ * its duct ends. Openings, floors, roofs and labels never follow a wall.
  * A line colinear with a dragged line (within `angleTolDeg`) is left behind: it detaches.
  * `effectiveFloors` (`withEffectiveStoreyHeights`) place a dragged unit in metres.
  */
@@ -1431,10 +1426,35 @@ export function findConnectedDragNeighbours(
     if (serviceLine ? !snapPartnerFilter(other, pairedPlantIds)?.(element) : !(isConnectedDragWall(element) && isConnectedDragWall(other))) continue;
     other.coordinates.forEach((q, vertexIndex) => {
       if (parallel(q, other.coordinates[1 - vertexIndex]!)) return;
-      if (own.some((p) => pointsConnected(element, p, other, q))) out.push({ elementId: other.id, vertexIndex });
+      // A wall also carries the T-stems whose end lies on its span. One level only: a stem's own
+      // stems stay put.
+      if (own.some((p) => pointsConnected(element, p, other, q)) || (!serviceLine && onLineWallSpan(q, element))) {
+        out.push({ elementId: other.id, vertexIndex });
+      }
+    });
+  }
+  if (isConnectedDragWall(element)) {
+    own.forEach((_, vertexIndex) => {
+      const host = lineWallTeeHost(element, vertexIndex, elementsById);
+      if (host && !parallel(host.coordinates[0]!, host.coordinates[1]!)) out.push({ elementId: element.id, vertexIndex });
     });
   }
   return out;
+}
+
+/**
+ * The wall whose span (not corner) line wall `element`'s end `vertexIndex` lies on, when that end
+ * meets no other wall's corner: a T-end, which slides along the host instead of following a corner.
+ */
+function lineWallTeeHost(element: Element, vertexIndex: number, elementsById: Record<string, Element>): Element | undefined {
+  const p = element.coordinates[vertexIndex]!;
+  let host: Element | undefined;
+  for (const other of Object.values(elementsById)) {
+    if (other.id === element.id || !isConnectedDragWall(other)) continue;
+    if (other.coordinates.some((q) => pointsConnected(element, p, other, q))) return undefined;
+    if (!host && onLineWallSpan(p, other)) host = other;
+  }
+  return host;
 }
 
 /**
@@ -1464,6 +1484,7 @@ export function planConnectedDrag(
     [element.id]: coords.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })),
   };
   for (const { elementId, vertexIndex } of neighbours) {
+    if (elementId === element.id) continue;
     const next = [...((moved[elementId] ?? elementsById[elementId]?.coordinates ?? []) as ConnectedDragPoint[])];
     const p = next[vertexIndex];
     const far = next[1 - vertexIndex];
@@ -1473,6 +1494,27 @@ export function planConnectedDrag(
     if ((p.x - far.x) * (q.x - far.x) + (p.y - far.y) * (q.y - far.y) < 0) continue;
     next[vertexIndex] = q;
     moved[elementId] = next;
+  }
+  // The dragged wall's own T-ends land where its moved line meets the host's line: the end stays
+  // exactly on the host and the angle is kept.
+  for (const { elementId, vertexIndex } of neighbours) {
+    if (elementId !== element.id) continue;
+    const host = lineWallTeeHost(element, vertexIndex, elementsById);
+    if (!host) continue;
+    const [A, B] = (moved[host.id] ?? host.coordinates) as [ConnectedDragPoint, ConnectedDragPoint];
+    const own = moved[element.id]!;
+    const [P, Q] = own as [ConnectedDragPoint, ConnectedDragPoint];
+    const ux = Q.x - P.x, uy = Q.y - P.y, hx = B.x - A.x, hy = B.y - A.y;
+    const cross = ux * hy - uy * hx;
+    if (cross === 0) continue;
+    const s = ((A.x - P.x) * hy - (A.y - P.y) * hx) / cross;
+    const end = { ...own[vertexIndex]!, x: P.x + s * ux, y: P.y + s * uy };
+    const translated = own[vertexIndex]!;
+    const far = own[1 - vertexIndex]!;
+    // The same collapse and reversal guards as a neighbour: such an end just translates.
+    if (Math.hypot(end.x - far.x, end.y - far.y) < 0.01) continue;
+    if ((translated.x - far.x) * (end.x - far.x) + (translated.y - far.y) * (end.y - far.y) < 0) continue;
+    own[vertexIndex] = end;
   }
   return moved;
 }
@@ -1530,8 +1572,28 @@ export type GetWallSupportedSnappedVerticesOptions = GetExactSnappedVerticesOpti
 
 const DEFAULT_WALL_SUPPORTED_VERTEX_TOLERANCE_M = 0.01;
 
-// Polygon guidance can be satisfied by a vertex landing on a same-storey wall segment,
-// even when it is not exactly on another element corner.
+/**
+ * `p` lies on two-point `wall`'s span in plan, same storey: within `tolerance` of the segment and
+ * between its ends (a point just past an end is not on it).
+ */
+function onLineWallSpan(
+  p: ConnectivityPoint,
+  wall: Element,
+  tolerance = DEFAULT_WALL_SUPPORTED_VERTEX_TOLERANCE_M,
+): boolean {
+  const [A, B] = wall.coordinates ?? [];
+  if (!A || !B || !sameStorey(p.z, A.z) || !sameStorey(p.z, B.z)) return false;
+  const vx = B.x - A.x;
+  const vy = B.y - A.y;
+  const length = Math.hypot(vx, vy);
+  const t = ((p.x - A.x) * vx + (p.y - A.y) * vy) / (length * length);
+  // ε = 1e-6 m past an end absorbs float noise at a corner; also rejects a zero-length wall (NaN).
+  if (!(t >= -1e-6 / length && t <= 1 + 1e-6 / length)) return false;
+  return distanceSq(p, { x: A.x + t * vx, y: A.y + t * vy }) <= tolerance * tolerance;
+}
+
+// A vertex is also supported by landing on a same-storey wall segment (a polygon corner on a
+// wall, a line wall's T-end), even when it is not exactly on another element corner.
 export const getWallSupportedSnappedVertices = (
   element: Element,
   elementsById: Record<string, Element>,
@@ -1542,7 +1604,6 @@ export const getWallSupportedSnappedVertices = (
 
   const skipTypes = options?.skipVertexMatchFromOtherTypes;
   const tolerance = options?.wallSegmentTolerance ?? DEFAULT_WALL_SUPPORTED_VERTEX_TOLERANCE_M;
-  const toleranceSq = tolerance * tolerance;
 
   element.coordinates.forEach((coord, index) => {
     if (supportedVertices.has(index)) return;
@@ -1552,17 +1613,9 @@ export const getWallSupportedSnappedVertices = (
       const other = elementsById[otherId];
       if (!other || !isBuildingElement(other)) continue;
       if (skipTypes?.length && other.type && skipTypes.includes(String(other.type))) continue;
-      if (!isLineWallElementForSnap(other) || other.coordinates?.length !== 2) continue;
+      if (!isConnectedDragWall(other)) continue; // external doors never host a T
 
-      const [A, B] = other.coordinates;
-      if (
-        !sameStorey(coord.z, A.z) ||
-        !sameStorey(coord.z, B.z)
-      ) {
-        continue;
-      }
-
-      if (pointToSegmentDistanceSqXY(coord, A, B) <= toleranceSq) {
+      if (onLineWallSpan(coord, other, tolerance)) {
         supportedVertices.add(index);
         break;
       }

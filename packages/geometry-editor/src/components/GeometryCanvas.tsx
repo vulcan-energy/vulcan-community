@@ -87,6 +87,8 @@ import {
   constrainPointOrthogonally as utilConstrainPointOrthogonally,
   findClosestPointOnPolygon as utilFindClosestPointOnPolygon,
   getExactSnappedVertices as utilGetExactSnappedVertices,
+  getWallSupportedSnappedVertices as utilGetWallSupportedSnappedVertices,
+  isConnectedDragWall,
   isAll90DegreeConnections as utilIsAll90DegreeConnections,
   translateShapeToSnapFromCache as utilTranslateShapeToSnapFromCache,
   findNearestWallProjectionFromCache as utilFindNearestWallProjectionFromCache,
@@ -4538,8 +4540,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     const neighbours = selectedElementIds.length > 1
       ? []
       : findConnectedDragNeighbours(element, byId, getProjectDefaults(geometryStore).angleTol, effectiveFloors);
-    const previewIds = [...new Set(neighbours.flatMap(({ elementId }) =>
-      [elementId, ...collectHostedDescendantElementIds(byId, elementId)]))];
+    // A wall's own T-end entries are previewed with the dragged element itself.
+    const previewIds = [...new Set(neighbours.flatMap(({ elementId }) => elementId === element.id
+      ? []
+      : [elementId, ...collectHostedDescendantElementIds(byId, elementId)]))];
     target.setAttr('connectedNeighbours', neighbours);
     target.setAttr('connectedPreviewIds', previewIds);
     target.setAttr('connectedStartPos', { x: target.x(), y: target.y() });
@@ -5011,7 +5015,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
         const isRegularWallOpaque =
           element.type === 'BuildingElementOpaque' && (element as any).is_external_door !== true;
-        const snappedVertices = utilGetExactSnappedVertices(
+        // A line wall's T-end (on another wall's span) counts as snapped too.
+        const snappedVertices = (isConnectedDragWall(element) ? utilGetWallSupportedSnappedVertices : utilGetExactSnappedVertices)(
           element,
           elementsById,
           isRegularWallOpaque

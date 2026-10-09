@@ -723,6 +723,39 @@ describe('getWallSupportedSnappedVertices', () => {
 
     expect(getWallSupportedSnappedVertices(ground, { ground, upperWall })).toEqual(new Set());
   });
+
+  // A T-junction: internal and party walls meet an external wall part-way along its span.
+  const lineWall = (id: string, type: string, a: [number, number], b: [number, number], z = 0) =>
+    ({ id, name: id, type, coordinates: [{ x: a[0], y: a[1], z }, { x: b[0], y: b[1], z }] }) as unknown as Element;
+
+  it('counts a line wall end on a same-storey wall span (a T-end), not one just past its end', () => {
+    const host = lineWall('host', 'BuildingElementOpaque', [0, 0], [10, 0]);
+    // Edge-glided onto a diagonal host: off the 0.01 m grid, floating-point close to the line.
+    const diagonal = lineWall('diag', 'BuildingElementPartyWall', [0, 5], [3, 9]);
+    const t = 0.37;
+    const byId: Record<string, Element> = {
+      host,
+      diagonal,
+      stem: lineWall('stem', 'BuildingElementAdjacentConditionedSpace', [4, 0.004], [4, 3]),
+      past: lineWall('past', 'BuildingElementAdjacentConditionedSpace', [10.005, 0], [10.005, 3]),
+      upper: lineWall('upper', 'BuildingElementAdjacentConditionedSpace', [6, 0], [6, 3], 2.5),
+      glided: lineWall('glided', 'BuildingElementAdjacentUnconditionedSpace_Simple', [0 + 3 * t, 5 + 4 * t], [-2, 9]),
+      onWindow: lineWall('onWindow', 'BuildingElementAdjacentConditionedSpace', [20.5, 0], [20.5, 3]),
+      window: { id: 'window', type: 'BuildingElementTransparent', coordinates: [{ x: 20, y: 0, z: 0 }, { x: 21, y: 0, z: 0 }] } as unknown as Element,
+      door: { ...lineWall('door', 'BuildingElementOpaque', [30, 0], [31, 0]), is_external_door: true } as unknown as Element,
+      onDoor: lineWall('onDoor', 'BuildingElementAdjacentConditionedSpace', [30.5, 0], [30.5, 3]),
+      noise: lineWall('noise', 'BuildingElementAdjacentConditionedSpace', [3 + 0.6e-9, 9 + 0.8e-9], [5, 12]),
+    };
+    const supported = (id: string) => [...getWallSupportedSnappedVertices(byId[id]!, byId)];
+    expect(getExactSnappedVertices(byId.stem!, byId)).toEqual(new Set());
+    expect(supported('stem')).toEqual([0]);
+    expect(supported('past')).toEqual([]); // 5 mm beyond the host's end is a gap
+    expect(supported('upper')).toEqual([]); // the host is on another storey
+    expect(supported('glided')).toEqual([0]);
+    expect(supported('onWindow')).toEqual([]); // a window is never a wall host
+    expect(supported('onDoor')).toEqual([]); // nor is an external door
+    expect(supported('noise')).toEqual([0]); // 1e-9 m past a diagonal's end: float noise, still on it
+  });
 });
 
 describe('findClosestSnapCorner', () => {
@@ -1017,6 +1050,101 @@ describe('connected drag (Alt)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('T-junction walls', () => {
+    const lineWall = (id: string, type: string, a: [number, number], b: [number, number], z = 0) =>
+      ({ id, name: id, type, coordinates: [{ x: a[0], y: a[1], z }, { x: b[0], y: b[1], z }] });
+    // External wall `host` (x = 0) with two internal stems running east from its span, a party
+    // wall T-ing in, a wall at its corner, an upper-storey wall over its span and a colinear one.
+    const tee = () => ({
+      host: lineWall('host', 'BuildingElementOpaque', [0, 0], [0, 10]),
+      s1: lineWall('s1', 'BuildingElementAdjacentConditionedSpace', [0, 3], [4, 3]),
+      s2: lineWall('s2', 'BuildingElementAdjacentConditionedSpace', [5, 6], [0.004, 6]),
+      party: lineWall('party', 'BuildingElementPartyWall', [0, 8], [3, 8]),
+      corner: lineWall('corner', 'BuildingElementOpaque', [0, 10], [6, 10]),
+      upper: lineWall('upper', 'BuildingElementAdjacentConditionedSpace', [0, 4], [3, 4], 2.5),
+      colinear: lineWall('colinear', 'BuildingElementOpaque', [0, 9], [0, 12]),
+    }) as unknown as Record<string, Element>;
+    const neighboursOf = (byId: Record<string, Element>, id: string) =>
+      findConnectedDragNeighbours(byId[id]!, byId, 2, []);
+
+    it('Alt-dragging a wall carries the stems whose end lies on its span, far ends fixed', () => {
+      const byId = tee();
+      const neighbours = neighboursOf(byId, 'host');
+      expect(neighbours).toEqual([
+        { elementId: 's1', vertexIndex: 0 },
+        { elementId: 's2', vertexIndex: 1 },
+        { elementId: 'party', vertexIndex: 0 },
+        { elementId: 'corner', vertexIndex: 0 },
+      ]);
+      const moved = planConnectedDrag(byId.host!, neighbours, byId, { x: -1, y: 0.5 });
+      const xy = (id: string) => moved[id]!.map(({ x, y }) => [x, y]);
+      expect(xy('host')).toEqual([[-1, 0], [-1, 10]]);
+      expect(xy('s1')).toEqual([[-1, 3], [4, 3]]);
+      expect(xy('s2')).toEqual([[5, 6], [-0.996, 6]]);
+      expect(xy('party')).toEqual([[-1, 8], [3, 8]]);
+      // Every T-end is still on the moved wall.
+      const after = { ...byId, ...Object.fromEntries(Object.entries(moved).map(([id, coordinates]) => [id, { ...byId[id]!, coordinates }])) };
+      for (const id of ['s1', 's2', 'party']) expect(getWallSupportedSnappedVertices(after[id]!, after).size).toBe(1);
+      // A stem that would collapse or reverse is left behind.
+      expect(Object.keys(planConnectedDrag(byId.host!, neighbours, byId, { x: 3.5, y: 0 })).sort()).toEqual(['corner', 'host', 's1', 's2']); // party (far end x = 3) would reverse
+    });
+
+    it('a wall whose only connections are T-stems offers move connected', () => {
+      const byId = tee();
+      delete byId.corner;
+      expect(getHoverHintText({ kind: 'body', dragging: false, connected: neighboursOf(byId, 'host').length > 0 }))
+        .toBe('Drag to move · Alt: move connected');
+    });
+
+    it('a lone stem offers move connected; Alt-dragging it slides its T-end along the host, which stays put', () => {
+      const byId = tee();
+      const neighbours = neighboursOf(byId, 's1');
+      expect(neighbours).toEqual([{ elementId: 's1', vertexIndex: 0 }]);
+      expect(getHoverHintText({ kind: 'body', dragging: false, connected: neighbours.length > 0 })).toBe('Drag to move · Alt: move connected');
+      const moved = planConnectedDrag(byId.s1!, neighbours, byId, { x: 0.3, y: 1.2 });
+      expect(Object.keys(moved)).toEqual(['s1']);
+      expect(moved.s1!.map(({ x, y }) => [x, y])).toEqual([[0, 4.2], [4, 4.2]]);
+    });
+
+    it('a skewed stem dragged 1 m keeps its T-end exactly on the host and its angle', () => {
+      const rad = (5 * Math.PI) / 180;
+      const byId = {
+        host: lineWall('host', 'BuildingElementOpaque', [0, 0], [0, 10]),
+        stem: lineWall('stem', 'BuildingElementAdjacentConditionedSpace', [0, 3], [4 * Math.cos(rad), 3 + 4 * Math.sin(rad)]),
+      } as unknown as Record<string, Element>;
+      const neighbours = neighboursOf(byId, 'stem');
+      expect(neighbours).toEqual([{ elementId: 'stem', vertexIndex: 0 }]);
+      // 1 m along the stem's normal.
+      const [p0, p1] = planConnectedDrag(byId.stem!, neighbours, byId, { x: -Math.sin(rad), y: Math.cos(rad) }).stem!;
+      expect(Math.abs(p0!.x)).toBeLessThan(1e-9);
+      expect(Math.atan2(p1!.y - p0!.y, p1!.x - p0!.x)).toBeCloseTo(rad, 12);
+      expect(p1!.x).toBeCloseTo(4 * Math.cos(rad) - Math.sin(rad), 12); // the far end only translates
+    });
+
+    it('squaring a stem keeps its exact corner and moves its T-end', () => {
+      vi.useFakeTimers();
+      try {
+        const store = createGeometryStore({ defaultDefaultsPath: null });
+        const wall = (name: string, a: [number, number], b: [number, number]) => ({
+          type: 'BuildingElementOpaque', name, height: 2.4, pitch: 90, base_height: 0, parent_element: null,
+          coordinates: [{ x: a[0], y: a[1], z: 0 }, { x: b[0], y: b[1], z: 0 }],
+        });
+        const [, stemId] = store.getState().addElements([
+          wall('Host', [0, 0], [0, 10]),
+          wall('Stem', [0, 3], [4, 3.1]), // T on Host at p1, corner with Return at p2
+          wall('Return', [4, 3.1], [4, 8]),
+        ] as never);
+        vi.runAllTimers();
+        store.getState().rightAlignSelectedElements([stemId!], 5);
+        const [p1, p2] = store.getState().elementsById[stemId!]!.coordinates;
+        expect([p2!.x, p2!.y]).toEqual([4, 3.1]);
+        expect(p1!.y).toBeCloseTo(3.1, 12);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
 
