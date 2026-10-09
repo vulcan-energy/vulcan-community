@@ -54,6 +54,7 @@ import {
   calculateDerivedHeight,
   calculateBaseHeightPatchForFloorMove,
   cascadeWallChangeIfAny,
+  storeyForMetreZ,
   deriveZoneProperties,
   isWalkableFloorHorizontalPolygon,
   withEffectiveStoreyHeights,
@@ -359,7 +360,8 @@ function applyWallStackCascade(
   );
   for (const { elementId, patch } of patches) {
     const el = nextElementsById[elementId];
-    if (el) nextElementsById[elementId] = {
+    // Elements new in this change were authored against the new stack already.
+    if (el && prevElementsById[elementId]) nextElementsById[elementId] = {
       ...el,
       ...patch,
       _v: Math.max(el._v ?? 0, (prevElementsById[elementId]?._v ?? 0) + 1),
@@ -498,10 +500,17 @@ function normalizeElementDraftForStore(
           typeof (normalizedElement as { floorId?: unknown }).floorId === 'string'
             ? ((normalizedElement as { floorId: string }).floorId).trim()
             : '';
-        let floorId = ensureFloorForZ(0);
+        // Without a floor, the storey whose band holds the (metre) z, not storey 0.
+        const firstZ = coords?.[0]?.z;
+        const bandStorey = () => typeof firstZ === 'number' && Number.isFinite(firstZ)
+          ? storeyForMetreZ(firstZ, withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById)))
+          : 0;
+        let floorId: string;
         if (explicitFloorId) {
           const match = state.floors.find((floor) => floor.id === explicitFloorId);
-          floorId = match ? ensureFloorForZ(match.zIndex) : ensureFloorForZ(0);
+          floorId = match ? ensureFloorForZ(match.zIndex) : ensureFloorForZ(bandStorey());
+        } else {
+          floorId = ensureFloorForZ(bandStorey());
         }
         normalizedElement.floorId = floorId;
         if (

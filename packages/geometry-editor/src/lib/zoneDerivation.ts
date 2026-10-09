@@ -994,12 +994,27 @@ export function cascadeFloorStackChange(
 const STOREY_BAND_EPS_M = 0.005;
 
 /**
+ * The storey a metre height sits in: the highest storey whose base is at or below it (the lowest
+ * storey when below them all, 0 with no floors). `floors` carry effective storey heights.
+ */
+export function storeyForMetreZ(z: number, floors: Floor[]): number {
+  let storey = floors.length ? Math.min(...floors.map((floor) => floor.zIndex)) : 0;
+  for (const floor of floors) {
+    if (floor.zIndex > storey && calculateDerivedBaseHeight(floor.zIndex, floors) <= z + STOREY_BAND_EPS_M) storey = floor.zIndex;
+  }
+  return storey;
+}
+
+/**
  * Metre-z elements (ducts, pipes, terminals, TB lines and points) store absolute z, so when a
  * storey's base moves they move with it, staying connected to the units and plant placed at the
- * base. Each vertex moves by the base change of the storey it sits on: a point takes its floor; a
- * line end takes its own floor when it lies within that storey's old band (base to ceiling), else
- * the highest storey whose old base is at or below it, so a riser's two ends each follow their own
- * storey. A line whose ends moved apart gets its length re-derived, when the length was derived.
+ * base. Each vertex moves by the base change of the storey it sits on:
+ * - a point takes its floor;
+ * - a line end takes its own floor when it lies within that storey's old band, else the highest
+ *   storey whose old base is at or below it, so a riser's two ends each follow their own storey.
+ *   A duct or pipe end at its storey's ceiling belongs to the storey above (a riser up to a unit
+ *   there); a TB end at the ceiling stays with its wall (a door head).
+ * A line whose ends moved apart gets its length re-derived, when the length was derived.
  */
 function metreZPatchForFloorStackChange(
   element: Element,
@@ -1012,13 +1027,14 @@ function metreZPatchForFloorStackChange(
   if (own === undefined) return null;
   const oldBase = (z: number) => calculateDerivedBaseHeight(z, oldFloors);
   const delta = (z: number) => calculateDerivedBaseHeight(z, newFloors) - oldBase(z);
-  const ownCeiling = oldBase(own) + (oldFloors.find((floor) => floor.zIndex === own)?.height ?? 0);
-  const storeys = oldFloors.map((floor) => floor.zIndex).sort((a, b) => a - b);
+  const ownBase = oldBase(own);
+  const ownCeiling = ownBase + (oldFloors.find((floor) => floor.zIndex === own)?.height ?? 0);
+  const ceilingIsAbove = element.type === 'MechanicalVentilationDuctwork' || element.type === 'WaterPipework';
   const storeyOf = (z: number): number => {
-    if (coords.length === 1 || (z >= oldBase(own) - STOREY_BAND_EPS_M && z <= ownCeiling + STOREY_BAND_EPS_M)) return own;
-    let storey = storeys[0] ?? own;
-    for (const candidate of storeys) if (oldBase(candidate) <= z + STOREY_BAND_EPS_M) storey = candidate;
-    return storey;
+    if (coords.length === 1) return own;
+    if (Math.abs(z - ownBase) <= STOREY_BAND_EPS_M) return own;
+    const top = ceilingIsAbove ? ownCeiling - STOREY_BAND_EPS_M : ownCeiling + STOREY_BAND_EPS_M;
+    return z > ownBase && (ceilingIsAbove ? z < top : z <= top) ? own : storeyForMetreZ(z, oldFloors);
   };
   let moved = false;
   // Rounded to a micrometre only to drop float noise from the addition.

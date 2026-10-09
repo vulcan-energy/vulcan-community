@@ -4,6 +4,7 @@
 import type { Element, Floor } from '../geometry/types';
 import { isStoreyIndexPoint, networkPoint3, normalizeStoreyIndex, physicalZUsesFloorId } from './elementCanvasFloor';
 import type { SnapEvent } from './snapEvent';
+import { roundToTwoDecimals } from '../geometry/constants';
 
 /** Two-point “wall line” types that participate in mutual segment snapping while drawing. */
 export const LINE_WALL_SNAP_TYPES: ReadonlySet<string> = new Set<string>([
@@ -866,6 +867,16 @@ export type DrawSnapResult = {
   orthogonalAxisLock: boolean;
   snap?: SnapEvent;
 };
+
+/**
+ * Where a draw click places a point: on the 0.01 m grid, like drawn duct and pipe ends, unless it
+ * snapped to a target, which it never leaves.
+ */
+export function placedDrawPoint(snap: Pick<DrawSnapResult, 'point' | 'geometrySnap'>): { x: number; y: number } {
+  return snap.geometrySnap
+    ? snap.point
+    : { x: roundToTwoDecimals(snap.point.x), y: roundToTwoDecimals(snap.point.y) };
+}
 
 function resolveOrthogonalDrawSnap(params: {
   mouseWorld: { x: number; y: number };

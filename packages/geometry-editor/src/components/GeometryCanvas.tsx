@@ -98,6 +98,7 @@ import {
   serviceNetworkSegmentFilter,
   isLineWallElementForSnap,
   findConnectedDragNeighbours,
+  placedDrawPoint,
   planConnectedDrag,
   type GeometrySnapCache,
   type SnapCornerTarget,
@@ -5420,11 +5421,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         activeSnapPoints.length > 0 ? activeSnapPoints[activeSnapPoints.length - 1] : null;
       const drawSnapClick = resolveDrawSnap(mouseWorldRaw, lastSnapPoint);
       const mouseWorld = drawSnapClick.point;
-      // A placed point lands on the 0.01 m grid like drawn duct and pipe ends, unless it snapped to
-      // a target: it never leaves the target.
-      const placedPoint = drawSnapClick.geometrySnap
-        ? mouseWorld
-        : { x: roundToTwoDecimals(mouseWorld.x), y: roundToTwoDecimals(mouseWorld.y) };
+      const placedPoint = placedDrawPoint(drawSnapClick);
 
         if (drawMode === 'dormer') {
           const hostRoof = findDormerHostAtPoint(mouseWorld);
