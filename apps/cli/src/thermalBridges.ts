@@ -262,7 +262,7 @@ export function validateThermalBridges(csvArg: string, includeAuto: boolean) {
     elements = [...originalElements, ...synthetic];
   }
 
-  const issues = findLinearThermalBridgeIssues(elements);
+  const issues = findLinearThermalBridgeIssues(elements, floors);
   const validationRows = thermalBridgeRowsWithValidation(elements, parsed.zones, floors, issues);
 
   return {

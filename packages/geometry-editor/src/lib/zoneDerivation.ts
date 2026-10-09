@@ -5,6 +5,11 @@ import type { Element, Floor, Zone } from '../geometry/types';
 import { calculatePolygonArea } from './polygonSync';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { canvasFloorToFhsStorey, fhsStoreyToCanvasFloor } from './storeySemantics';
+import { calculateDerivedBaseHeight } from './elementCanvasFloor';
+
+// Lives beside the storey convention (elementCanvasFloor) so connectivity code can use it without
+// importing this module's polygon and 3D dependencies.
+export { calculateDerivedBaseHeight };
 
 /** One geometry element that contributed to {@link calculateDerivedFloorArea}. */
 export interface FloorAreaContribution {
@@ -516,55 +521,6 @@ export function calculateSuggestedVentilationBaseHeight(
     ?? (floorIndex < 0 ? basementGroundFloorBaseHeight : null)
     ?? heightFromVentilation(floorIndex)
     ?? 0;
-}
-
-/**
- * Calculate the derived base_height for an element based on its Z-level.
- *
- * base_height = the height above ground of the bottom of the element.
- * Computed from an explicit floor base when present, otherwise as the cumulative sum of
- * `floor.height` for every floor below the element's floor.
- *
- * `floor.height` here is expected to be the *effective* storey height — callers should pre-process
- * with {@link withEffectiveStoreyHeights} so wall-derived heights and user overrides are baked in.
- *
- * For Z=0: returns the explicit F1 base when present, otherwise 0.
- * For Z=N (N>=1): uses the explicit base for FN when present, otherwise the stack below it.
- * For Z=-N: uses the explicit base for F-N when present, otherwise the stack above it.
- * Missing floors contribute 0 — callers should `ensureFloorForZ` first. For user-facing base
- * elevation display and validation, use {@link getCumulativeBaseHeightsByFloorId}, which keeps
- * an unresolved base distinct from a real zero elevation.
- */
-export function calculateDerivedBaseHeight(
-  elementZ: number,
-  floors: Floor[],
-): number {
-  const floorZIndex = Math.floor(elementZ);
-  const floorByZ = new Map(floors.map((floor) => [floor.zIndex, floor]));
-  const explicitBase = (floor: Floor | undefined): number | undefined => {
-    if (!floor || floor.baseHeightUserOverride !== true) return undefined;
-    return Number.isFinite(floor.baseHeight) ? floor.baseHeight : undefined;
-  };
-  const heightOf = (floor: Floor | undefined): number =>
-    floor && Number.isFinite(floor.height) && floor.height > 0 ? floor.height : 0;
-
-  let baseHeight = explicitBase(floorByZ.get(0)) ?? 0;
-  if (floorZIndex === 0) return roundToTwoDecimals(baseHeight);
-
-  if (floorZIndex > 0) {
-    for (let z = 0; z < floorZIndex; z++) {
-      const floor = floorByZ.get(z);
-      baseHeight = explicitBase(floor) ?? baseHeight;
-      baseHeight += heightOf(floor);
-    }
-    return roundToTwoDecimals(explicitBase(floorByZ.get(floorZIndex)) ?? baseHeight);
-  }
-
-  for (let z = -1; z >= floorZIndex; z--) {
-    const floor = floorByZ.get(z);
-    baseHeight = explicitBase(floor) ?? baseHeight - heightOf(floor);
-  }
-  return roundToTwoDecimals(baseHeight);
 }
 
 /**

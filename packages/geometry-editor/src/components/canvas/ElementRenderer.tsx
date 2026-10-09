@@ -6,6 +6,7 @@ import { Group, Line, Circle, Rect, Text } from 'react-konva';
 import { getPointElementIconNode } from '../../lib/pointElementIconSpec';
 import { lucideIconNodeToKonva } from '../../lib/lucideIconKonva';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
+import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { Element, Floor } from '../../geometry/types';
 import {
   useGeometryStoreApi,
@@ -84,6 +85,7 @@ import {
   findClosestSnapCorner as utilFindClosestSnapCorner,
   getNearbySnapWallSegments as utilGetNearbySnapWallSegments,
   isLineWallElementForSnap as utilIsLineWallElementForSnap,
+  LINE_WALL_SNAP_TYPES,
   type GeometrySnapCache,
   type ClosestSnapCorner,
 } from '../../lib/snapUtils';
@@ -541,22 +543,15 @@ const UNSNAPPED_VERTEX_CHIP_PADDING_X = 8;
 const UNSNAPPED_VERTEX_CHIP_CHAR_WIDTH = 6.2;
 const UNSNAPPED_VERTEX_CHIP_OFFSET_Y = 10;
 
-const LINE_WALL_VERTEX_GUIDANCE_TYPES = new Set<string>([
-  'BuildingElementOpaque',
-  'BuildingElementAdjacentConditionedSpace',
-  'BuildingElementAdjacentUnconditionedSpace_Simple',
-  'BuildingElementPartyWall',
-]);
-
 const POLYGON_VERTEX_GUIDANCE_TYPES = new Set<string>([
-  ...LINE_WALL_VERTEX_GUIDANCE_TYPES,
+  ...LINE_WALL_SNAP_TYPES,
   'BuildingElementGround',
 ]);
 
 function shouldShowUnsnappedVertexGuidance(element: Element, shape: string): boolean {
   if (shape === 'line' && element.coordinates?.length === 2) {
     if (element.type === 'BuildingElementOpaque' && (element as any).is_external_door) return false;
-    return LINE_WALL_VERTEX_GUIDANCE_TYPES.has(element.type);
+    return LINE_WALL_SNAP_TYPES.has(element.type);
   }
 
   if (shape === 'polygon' && !!element.coordinates && element.coordinates.length >= 3) {
@@ -1463,16 +1458,17 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
       elementsById,
       isRegularWallOpaque
         ? { skipVertexMatchFromOtherTypes: ['BuildingElementTransparent'] }
-        : undefined,
+        : { effectiveFloors: withEffectiveStoreyHeights(floors, Object.values(elementsById)) },
     );
-  }, [showDirectSelectionHandles, isSelected, useWallSupportedPolygonSnaps, element, elementsById, isRegularWallOpaque]);
+  }, [showDirectSelectionHandles, isSelected, useWallSupportedPolygonSnaps, element, elementsById, isRegularWallOpaque, floors]);
   // A selected duct on a run the topology check reports as loose: chip at the run end nearest the unit.
   const looseDuctRunEnd = useMemo(
-    () =>
-      isSelected && element.type === 'MechanicalVentilationDuctwork'
-        ? looseDuctRunEndNearestUnit(element, Object.values(elementsById))
-        : null,
-    [isSelected, element, elementsById],
+    () => {
+      if (!isSelected || element.type !== 'MechanicalVentilationDuctwork') return null;
+      const all = Object.values(elementsById);
+      return looseDuctRunEndNearestUnit(element, all, withEffectiveStoreyHeights(floors, all));
+    },
+    [isSelected, element, elementsById, floors],
   );
   // Memo: dormer cutouts iterate all elements; reproject only when geometry or view changes.
   const dormerCutoutCanvasPolygons = useMemo(

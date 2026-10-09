@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../geometry/types';
+import type { Element, Floor } from '../geometry/types';
+import { roundToTwoDecimals } from '../geometry/constants';
 
 /** Storey index (..., -1, 0, 1, 2, …) in `extra_json.floor_id` for TB / pipework / ductwork — not `Floor.id`. Legacy CSV may still carry string `Floor.id`. */
 export const THERMAL_BRIDGE_EXTRA_JSON_FLOOR_ID_KEY = 'floor_id' as const;
@@ -33,16 +34,41 @@ export function parseExtraJsonRecord(raw: unknown): Record<string, unknown> | un
 
 /**
  * Element types whose coordinate `z` is physical metres, so the canvas storey must come
- * from `extra_json.floor_id` / `floorId` instead. Exported for `elementFloorZIndexForTb`,
- * which needs to know the canvas path already honours `floorId` for these types.
+ * from `extra_json.floor_id` / `floorId` instead. Every other type stores z as a storey index
+ * (`floor(z)`), including point elements such as MVHR units, plant, emitters and outlets.
  */
-export function physicalZUsesFloorId(element: Element): boolean {
+export function physicalZUsesFloorId(element: Pick<Element, 'type'>): boolean {
   return (
     element.type === 'ThermalBridgeLinear' ||
     element.type === 'ThermalBridgePoint' ||
     element.type === 'WaterPipework' ||
-    element.type === 'MechanicalVentilationDuctwork'
+    element.type === 'MechanicalVentilationDuctwork' ||
+    element.type === 'MechanicalVentilationTerminal'
   );
+}
+
+/**
+ * A point element whose stored z is a storey index (units, plant, emitters, outlets): its physical
+ * position is its storey's base height, which is where ducts and pipes drawn from it start.
+ */
+export function isStoreyIndexPoint(element: Pick<Element, 'type' | 'coordinates'>): boolean {
+  return element.coordinates?.length === 1 && !physicalZUsesFloorId(element);
+}
+
+/**
+ * An element's first point in physical metres, for connectivity with ducts and pipes: a
+ * storey-index point sits at its storey's base height; metre-z types are returned unchanged.
+ * `effectiveFloors` must carry effective storey heights (`withEffectiveStoreyHeights`).
+ */
+export function networkPoint3(
+  element: Pick<Element, 'type' | 'coordinates' | 'floorId'>,
+  effectiveFloors: Floor[],
+): { x: number; y: number; z: number } | undefined {
+  const point = element.coordinates?.[0];
+  if (!point || ![point.x, point.y, point.z].every(Number.isFinite)) return undefined;
+  if (!isStoreyIndexPoint(element)) return { x: point.x, y: point.y, z: point.z };
+  const storey = getElementCanvasFloorZValue(element as Element, effectiveFloors)!; // z is finite, so defined
+  return { x: point.x, y: point.y, z: calculateDerivedBaseHeight(storey, effectiveFloors) };
 }
 
 /**
@@ -221,4 +247,53 @@ export function resolvePhysicalZElementStoreyForCsvLoad(
   const z0 = coords && coords.length > 0 ? coords[0]!.z : 0;
   const n = normalizeStoreyIndex(z0);
   return n === undefined ? 0 : n;
+}
+
+/**
+ * Calculate the derived base_height for an element based on its Z-level.
+ *
+ * base_height = the height above ground of the bottom of the element.
+ * Computed from an explicit floor base when present, otherwise as the cumulative sum of
+ * `floor.height` for every floor below the element's floor.
+ *
+ * `floor.height` here is expected to be the *effective* storey height — callers should pre-process
+ * with {@link withEffectiveStoreyHeights} so wall-derived heights and user overrides are baked in.
+ *
+ * For Z=0: returns the explicit F1 base when present, otherwise 0.
+ * For Z=N (N>=1): uses the explicit base for FN when present, otherwise the stack below it.
+ * For Z=-N: uses the explicit base for F-N when present, otherwise the stack above it.
+ * Missing floors contribute 0 — callers should `ensureFloorForZ` first. For user-facing base
+ * elevation display and validation, use {@link getCumulativeBaseHeightsByFloorId}, which keeps
+ * an unresolved base distinct from a real zero elevation.
+ */
+export function calculateDerivedBaseHeight(
+  elementZ: number,
+  floors: Floor[],
+): number {
+  const floorZIndex = Math.floor(elementZ);
+  const floorByZ = new Map(floors.map((floor) => [floor.zIndex, floor]));
+  const explicitBase = (floor: Floor | undefined): number | undefined => {
+    if (!floor || floor.baseHeightUserOverride !== true) return undefined;
+    return Number.isFinite(floor.baseHeight) ? floor.baseHeight : undefined;
+  };
+  const heightOf = (floor: Floor | undefined): number =>
+    floor && Number.isFinite(floor.height) && floor.height > 0 ? floor.height : 0;
+
+  let baseHeight = explicitBase(floorByZ.get(0)) ?? 0;
+  if (floorZIndex === 0) return roundToTwoDecimals(baseHeight);
+
+  if (floorZIndex > 0) {
+    for (let z = 0; z < floorZIndex; z++) {
+      const floor = floorByZ.get(z);
+      baseHeight = explicitBase(floor) ?? baseHeight;
+      baseHeight += heightOf(floor);
+    }
+    return roundToTwoDecimals(explicitBase(floorByZ.get(floorZIndex)) ?? baseHeight);
+  }
+
+  for (let z = -1; z >= floorZIndex; z--) {
+    const floor = floorByZ.get(z);
+    baseHeight = explicitBase(floor) ?? baseHeight - heightOf(floor);
+  }
+  return roundToTwoDecimals(baseHeight);
 }

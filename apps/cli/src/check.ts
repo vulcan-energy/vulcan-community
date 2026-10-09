@@ -125,7 +125,7 @@ export function checkGeometryCsv(csvArg: string) {
       })
     : undefined;
 
-  const linearThermalBridgeIssues = findLinearThermalBridgeIssues(parsed.elements);
+  const linearThermalBridgeIssues = findLinearThermalBridgeIssues(parsed.elements, floors);
   const rows: ValidationRow[] = [];
 
   for (const element of allElements) {

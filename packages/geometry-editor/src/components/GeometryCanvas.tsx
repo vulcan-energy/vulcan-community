@@ -125,9 +125,8 @@ import {
 } from '../lib/serviceLineDrawModes';
 import { roundToTwoDecimals } from '../geometry/constants';
 import {
-  DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M,
+  defaultMvhrTerminalZ,
   getMechanicalVentilationDuctworkRoleStyle,
-  getFirstPoint3,
   isMvhrTerminalHost,
   type MvhrDuctRole,
   type MvhrTerminalRole,
@@ -222,7 +221,7 @@ import { useHiddenElementIds } from '../hooks/useHiddenElementIds';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { elementIsHiddenFromView } from '../lib/elementCategoryVisibility';
 import type { BuildErrorItem } from '../types/buildErrors';
-import { isElementOnActiveCanvasFloor, mergeServiceLineExtraJsonFloorId } from '../lib/elementCanvasFloor';
+import { getElementCanvasFloorZValue, isElementOnActiveCanvasFloor, mergeServiceLineExtraJsonFloorId, networkPoint3 } from '../lib/elementCanvasFloor';
 import { partitionElementCanvasDataByFloor } from '../lib/geometryCanvasLayerPartition';
 import {
   getDrawModeTooltipPillWidth,
@@ -1948,15 +1947,19 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     ) ?? null;
   }, [drawMvhrParentElement, drawMvhrRoleProps, findElementByName]);
 
+  // Storey base heights in metres, for placing storey-index points (units, plant) among ducts and pipes.
+  const effectiveFloors = useMemo(
+    () => withEffectiveStoreyHeights(floors, Object.values(elementsById)),
+    [elementsById, floors],
+  );
+
   const serviceLineDrawBaseZ = useMemo(() => {
     const mvhrDuctUnitPoint =
       drawElementType === 'MechanicalVentilationDuctwork' && activeMvhrDrawParentElement
-        ? getFirstPoint3(activeMvhrDrawParentElement)
+        ? networkPoint3(activeMvhrDrawParentElement, effectiveFloors)
         : undefined;
-    return typeof mvhrDuctUnitPoint?.z === 'number'
-      ? mvhrDuctUnitPoint.z
-      : calculateDerivedBaseHeight(currentFloorZ, withEffectiveStoreyHeights(floors, Object.values(elementsById)));
-  }, [activeMvhrDrawParentElement, currentFloorZ, drawElementType, elementsById, floors]);
+    return mvhrDuctUnitPoint?.z ?? calculateDerivedBaseHeight(currentFloorZ, effectiveFloors);
+  }, [activeMvhrDrawParentElement, currentFloorZ, drawElementType, effectiveFloors]);
 
   const mvhrDuctDrawFloorId =
     drawElementType === 'MechanicalVentilationDuctwork'
@@ -2392,8 +2395,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   const elementsForValidation = useMemo(() => Object.values(elementsById), [elementsById]);
   const linearGeometryIssues = useMemo(
-    () => findLinearThermalBridgeIssues(elementsForValidation),
-    [elementsForValidation],
+    () => findLinearThermalBridgeIssues(elementsForValidation, floors),
+    [elementsForValidation, floors],
   );
   // Both issues of an overlap pair carry the same stretch: keep one per pair for the canvas halo,
   // skipping stretches with no plan length (vertical TBs, risers) that would draw as a dot.
@@ -4472,7 +4475,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     // Read at call time (hover enter, drag end), so the answer reflects a just-committed move.
     const byId = geometryStore.getState().elementsById as Record<string, Element>;
     const selected = byId[selection.id];
-    return !!selected && findConnectedDragNeighbours(selected, byId, getProjectDefaults(geometryStore).angleTol).length > 0;
+    const state = geometryStore.getState();
+    const effective = withEffectiveStoreyHeights(state.floors, Object.values(byId));
+    return !!selected && findConnectedDragNeighbours(selected, byId, getProjectDefaults(geometryStore).angleTol, effective).length > 0;
   }, [selection, selectedElementIds.length, geometryStore]);
 
   // Alt-drag "move connected" for the selected-shape and selected-point handles. Neighbours are
@@ -4480,7 +4485,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   // descendants, in the same session.
   const beginConnectedDrag = (target: Konva.Node, element: Element) => {
     const byId = elementsById as Record<string, Element>;
-    const neighbours = selectedElementIds.length > 1 ? [] : findConnectedDragNeighbours(element, byId, getProjectDefaults(geometryStore).angleTol);
+    const neighbours = selectedElementIds.length > 1
+      ? []
+      : findConnectedDragNeighbours(element, byId, getProjectDefaults(geometryStore).angleTol, effectiveFloors);
     const previewIds = [...new Set(neighbours.flatMap(({ elementId }) =>
       [elementId, ...collectHostedDescendantElementIds(byId, elementId)]))];
     target.setAttr('connectedNeighbours', neighbours);
@@ -4959,7 +4966,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           elementsById,
           isRegularWallOpaque
             ? { skipVertexMatchFromOtherTypes: ['BuildingElementTransparent'] }
-            : undefined,
+            : { effectiveFloors },
         );
 
         canvasCoords.forEach((coord, index) => {
@@ -5005,7 +5012,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       snapIndicatorsRef.current = indicators;
       return indicators;
     });
-  }, [elementCanvasData, elementsById, currentFloorZ, floors, geometryStore, isElementHiddenOnView]);
+  }, [elementCanvasData, elementsById, currentFloorZ, floors, effectiveFloors, geometryStore, isElementHiddenOnView]);
   /* eslint-enable react-hooks/refs */
 
   // Memoized label positions calculation for performance optimization
@@ -5550,9 +5557,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               ...drawMvhrRolePropsRef.current,
               extra_json: undefined,
               coordinates: [{
-                x: terminalPlanPoint.x,
-                y: terminalPlanPoint.y,
-                z: DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M,
+                x: roundToTwoDecimals(terminalPlanPoint.x),
+                y: roundToTwoDecimals(terminalPlanPoint.y),
+                // The host may sit on another storey: the terminal takes the host's.
+                z: defaultMvhrTerminalZ(
+                  hostPlacement ? getElementCanvasFloorZValue(hostPlacement.host, effectiveFloors) ?? currentFloorZ : currentFloorZ,
+                  effectiveFloors,
+                ),
               }],
               floorId: hostPlacement?.host.floorId ?? ensureFloorForZ(currentFloorZ),
               host_element: hostPlacement?.host.name ?? null,
@@ -5569,14 +5580,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           const { elementId, hostPrefill } = beginDrawnElement(targetZoneId, drawElementType);
           const isThermalBridgePoint = drawElementType === 'ThermalBridgePoint';
           const elementZ = isThermalBridgePoint
-            ? calculateDerivedBaseHeight(currentFloorZ, withEffectiveStoreyHeights(floors, Object.values(elementsById)))
+            ? calculateDerivedBaseHeight(currentFloorZ, effectiveFloors)
             : currentFloorZ;
           const pointFloorId = isThermalBridgePoint ? ensureFloorForZ(currentFloorZ) : undefined;
           updateElement(elementId, {
             ...drawPresetProps,
             ...drawMvhrRolePropsRef.current,
             ...(isThermalBridgePoint ? { floorId: pointFloorId } : {}),
-            coordinates: [{ x: mouseWorld.x, y: mouseWorld.y, z: elementZ }],
+            // On the 0.01 m grid, like drawn duct and pipe ends, so a line drawn from the point meets it exactly.
+            coordinates: [{ x: roundToTwoDecimals(mouseWorld.x), y: roundToTwoDecimals(mouseWorld.y), z: elementZ }],
             ...(hostPrefill || {})
           }, true);
 

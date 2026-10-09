@@ -164,6 +164,7 @@ import {
   mergeServiceLineExtraJsonFloorId,
   normalizeStoreyIndex,
   parsePersistedExtraJsonFloorStorey,
+  physicalZUsesFloorId,
 } from '../lib/elementCanvasFloor';
 import {
   applyThermalBridgeLinearLengthToCoordinates,
@@ -476,7 +477,7 @@ function normalizeElementDraftForStore(
 
   try {
     const coords = normalizedElement.coordinates as ElementCoordinate[] | undefined;
-    if (usesPhysicalZWithFloorMembership(normalizedElement as Element)) {
+    if (physicalZUsesFloorId(normalizedElement as Element)) {
       if (normalizedElement.type === 'ThermalBridgeLinear') {
         ingestThermalBridgeLinearPostParse(
           normalizedElement as ThermalBridgeLinear,
@@ -2386,13 +2387,6 @@ const ensureExplicitFabricPitchForShape = (element: Element): void => {
   }
 };
 
-const usesPhysicalZWithFloorMembership = (element: Pick<Element, 'type'>): boolean =>
-  element.type === 'ThermalBridgeLinear' ||
-  element.type === 'ThermalBridgePoint' ||
-  element.type === 'WaterPipework' ||
-  element.type === 'MechanicalVentilationDuctwork' ||
-  element.type === 'MechanicalVentilationTerminal';
-
 function floorZFromFloorId(raw: unknown, floors: Pick<Floor, 'id' | 'zIndex'>[]): number | undefined {
   return parsePersistedExtraJsonFloorStorey(raw, floors) ?? normalizeStoreyIndex(raw);
 }
@@ -2458,7 +2452,7 @@ function enforceParentControlledFloorOnUpdate(
   const floorMismatch = requestedFloorZ !== undefined && requestedFloorZ !== targetFloorZ;
 
   (normalizedUpdates as { floorId?: string }).floorId = ensureFloorForZ(targetFloorZ);
-  if (!usesPhysicalZWithFloorMembership(draft) && !preservesCoordinateZForParentControlledFloor(draft)) {
+  if (!physicalZUsesFloorId(draft) && !preservesCoordinateZForParentControlledFloor(draft)) {
     const sourceCoordinates =
       (Array.isArray((normalizedUpdates as { coordinates?: unknown }).coordinates)
         ? (normalizedUpdates as { coordinates?: ElementCoordinate[] }).coordinates
@@ -2765,7 +2759,7 @@ const validateElementForState = (
   elementsById?: Record<string, Element>,
 ): ValidationResult => {
   const eb = elementsById ?? state.elementsById;
-  const linearThermalBridgeIssues = findLinearThermalBridgeIssues(Object.values(eb));
+  const linearThermalBridgeIssues = findLinearThermalBridgeIssues(Object.values(eb), state.floors);
   const cs = state.complianceSettings;
   const complianceOn = !!cs?.complianceValidationEnabled;
   let partFFindings: PartFFinding[] | undefined;
@@ -3304,7 +3298,7 @@ const createGeometryState = (
           if (isElementFloorControlledByParent(element, state.elementsById)) {
             return;
           }
-          if (usesPhysicalZWithFloorMembership(element)) {
+          if (physicalZUsesFloorId(element)) {
             // These elements keep vertex z in metres for 3D; canvas floor uses floor membership.
             updatedElementsById[elementId] = {
               ...element,
@@ -3344,7 +3338,7 @@ const createGeometryState = (
       for (const elementId of changedElementIds) {
         const el = updatedElementsById[elementId];
         const originalEl = state.elementsById[elementId];
-        const patch = usesPhysicalZWithFloorMembership(el)
+        const patch = physicalZUsesFloorId(el)
           ? null
           : calculateBaseHeightPatchForFloorMove(originalEl, newFloorZ, effFloorsForMove);
         updatedElementsById[elementId] = syncWindowSecurityRiskForStorey(
@@ -3835,7 +3829,12 @@ const createGeometryState = (
 
   snapSelectedElements: (elementIds, snapTol) => {
     // Walls and service lines are disjoint, so both plans read the same starting state.
-    const serviceLineWelds = planServiceLineEndpointWelds(get().elementsById, elementIds, snapTol);
+    const serviceLineWelds = planServiceLineEndpointWelds(
+      get().elementsById,
+      elementIds,
+      snapTol,
+      withEffectiveStoreyHeights(get().floors, Object.values(get().elementsById)),
+    );
     let wallsChanged = false;
     set((state) => {
       // Filter to BuildingElementOpaque walls only
@@ -5482,7 +5481,7 @@ const createGeometryState = (
           !parentControlledFloorUpdate
         ) {
           const coords = (normalizedUpdates as any).coordinates as Array<{ x: number; y: number; z: number }> | undefined;
-          if (usesPhysicalZWithFloorMembership(prevElement)) {
+          if (physicalZUsesFloorId(prevElement)) {
             const merged = { ...prevElement, ...normalizedUpdates } as Element;
             let storey: number | undefined = getThermalBridgeExtraJsonFloorStorey(merged, state.floors);
             if (storey === undefined && prevElement.type === 'ThermalBridgeLinear') {
@@ -5561,7 +5560,7 @@ const createGeometryState = (
                 prevElement.type === 'MechanicalVentilationDuctwork'
               ) {
                 (normalizedUpdates as any).extra_json = mergeServiceLineExtraJsonFloorId(prevElement, zIndex);
-              } else if (usesPhysicalZWithFloorMembership(prevElement)) {
+              } else if (physicalZUsesFloorId(prevElement)) {
                 // no-op: top-level floorId is enough for point-like physical-Z elements
               } else {
                 const coords = prevElement.coordinates;
@@ -6791,10 +6790,14 @@ const createGeometryState = (
       });
     }
     for (const { elementId, vertexIndex } of neighbours) {
-      const far = before[elementId]?.coordinates?.[1 - vertexIndex];
+      const coords = before[elementId]?.coordinates;
+      const far = coords?.[1 - vertexIndex];
+      const end = coords?.[vertexIndex];
+      // The drag is in plan: each end keeps its own z (metres), never the unit's storey-index z.
+      const newPosition = end && { x: point.x, y: point.y, z: end.z };
       // A neighbour that would collapse is left behind.
-      if (!far || Math.hypot(far.x - point.x, far.y - point.y, far.z - point.z) < 0.01) continue;
-      updates.push({ elementId, vertexIndex, newPosition: { x: point.x, y: point.y, z: point.z } });
+      if (!far || !newPosition || Math.hypot(far.x - newPosition.x, far.y - newPosition.y, far.z - newPosition.z) < 0.01) continue;
+      updates.push({ elementId, vertexIndex, newPosition });
     }
     if (updates.length > 0) get().commitVertexPositionUpdates(updates, true);
     get().saveToHistory('commitConnectedPointDrag');
@@ -7539,6 +7542,7 @@ const createGeometryState = (
       : undefined;
     const linearThermalBridgeIssues = findLinearThermalBridgeIssues(
       Object.values(state.elementsById),
+      state.floors,
     );
     const floorStackWarningElementIds = getFloorStackWarningElementIds(
       Object.values(state.elementsById),

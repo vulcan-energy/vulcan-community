@@ -75,7 +75,7 @@ import { computeGroundExposedPerimeterDetails } from '../../lib/groundExposedPer
 import { isExternalLineWall } from '../thermalBridge/proposeExternalCorners';
 import type { LinearThermalBridgeIssue } from '../thermalBridge/findLinearThermalBridgeIssues';
 import { findLinearThermalBridgeIssues } from '../thermalBridge/findLinearThermalBridgeIssues';
-import { getWallSupportedSnappedVertices, pointsConnected, snapPartnerFilter } from '../../lib/snapUtils';
+import { getExactSnappedVertices, getWallSupportedSnappedVertices } from '../../lib/snapUtils';
 import {
   collectGlobalSettingsWarnings,
   resolveEffectiveVentilationZoneBaseHeight,
@@ -96,16 +96,15 @@ import {
   getParentControlledFloorZ,
   preservesCoordinateZForParentControlledFloor,
 } from '../../lib/parentControlledFloor';
-import { getElementCanvasFloorZValue } from '../../lib/elementCanvasFloor';
+import { getElementCanvasFloorZValue, networkPoint3 } from '../../lib/elementCanvasFloor';
 import {
   MVHR_DUCT_ROLES,
   collectMvhrDuctTopologyWarnings,
   deriveMechanicalVentilationTerminalPosition,
-  getFirstPoint3,
   isMvhrDuctRole,
   isMvhrTerminalHost,
   isMvhrTerminalRole,
-  terminalIsNearDuctEndpoint,
+  terminalConnectsToDuctEndpoint,
 } from '../../lib/mvhrDuctwork';
 
 // ---------------- Module-level pure helpers ----------------
@@ -781,7 +780,7 @@ export const validateElementCore = (
   const getLinearThermalBridgeIssuesForModel = (): LinearThermalBridgeIssue[] => {
     if (linearThermalBridgeIssuesMemo) return linearThermalBridgeIssuesMemo;
     if (!elementsById || Object.keys(elementsById).length === 0) return [];
-    linearThermalBridgeIssuesMemo = findLinearThermalBridgeIssues(Object.values(elementsById));
+    linearThermalBridgeIssuesMemo = findLinearThermalBridgeIssues(Object.values(elementsById), floors ?? []);
     return linearThermalBridgeIssuesMemo;
   };
 
@@ -813,6 +812,9 @@ export const validateElementCore = (
   };
 
   const allElements = elementsById ? Object.values(elementsById) : [];
+  // Effective storey heights, for MVHR units placed in metres; only duct and unit checks need them.
+  let effectiveFloorsMemo: Floor[] | undefined;
+  const effectiveFloors = (): Floor[] => (effectiveFloorsMemo ??= withEffectiveStoreyHeights(floors ?? [], allElements));
   const floorStackWarnings = context.floorStackWarningElementIds
     ?? (floors ? getFloorStackWarningElementIds(allElements, floors) : new Set<string>());
   if (floorStackWarnings.has(element.id)) {
@@ -1295,7 +1297,7 @@ export const validateElementCore = (
           issues.push(geo('Parent ventilation system must use MVHR', 'parent_element'));
         } else if (isMvhrDuctRole(ductElement.duct_type)) {
           collectMvhrDuctTopologyWarnings(linkedMvhrDucts(parent.name), {
-            unitPoint: getFirstPoint3(parent),
+            unitPoint: networkPoint3(parent, effectiveFloors()),
             unitLabel: parent.name,
             roles: [ductElement.duct_type],
           }).forEach((warning) => warnings.push(geo(warning.message, 'coordinates')));
@@ -1380,7 +1382,7 @@ export const validateElementCore = (
           issues.push(geo(`MVHR accepts one ${terminalElement.terminal_type} terminal`, 'terminal_type'));
         }
         const matchingDucts = linkedMvhrDucts(parent.name).filter((duct) => duct.duct_type === terminalElement.terminal_type);
-        if (matchingDucts.length > 0 && !terminalIsNearDuctEndpoint(terminalElement, matchingDucts)) {
+        if (matchingDucts.length > 0 && !terminalConnectsToDuctEndpoint(terminalElement, matchingDucts)) {
           warnings.push(geo(`Terminal is not near a ${terminalElement.terminal_type} duct endpoint`, 'coordinates'));
         }
       }
@@ -1597,7 +1599,7 @@ export const validateElementCore = (
       if (complianceValidationEnabled) appendPartFIssuesForElement(mechVentElement.id);
       if (mechVentElement.vent_type === 'MVHR' && elementsById) {
         const ducts = linkedMvhrDucts(mechVentElement.name);
-        const unitPoint = getFirstPoint3(mechVentElement);
+        const unitPoint = networkPoint3(mechVentElement, effectiveFloors());
         if (ducts.length === 0) {
           issues.push(
             (complianceValidationEnabled ? fhs : geo)('MVHR needs linked ductwork', 'vent_type'),
@@ -1625,7 +1627,7 @@ export const validateElementCore = (
           if (
             roleTerminals.length === 1 &&
             roleDucts.length > 0 &&
-            !terminalIsNearDuctEndpoint(roleTerminals[0]!, roleDucts)
+            !terminalConnectsToDuctEndpoint(roleTerminals[0]!, roleDucts)
           ) {
             warnings.push(geo(`${role} terminal is not near a matching duct endpoint`));
           }
@@ -2124,27 +2126,6 @@ export const validateElementCore = (
       }
     }
 
-    // Helper functions for warning checks
-    const getSnappedVertices = (el: Element): number => {
-      if (!el.coordinates) return 0;
-      const isPartner = snapPartnerFilter(el);
-      let count = 0;
-      el.coordinates.forEach((coord) => {
-        for (const otherId of Object.keys(elementsById)) {
-          if (otherId === el.id) continue;
-          const other = elementsById[otherId];
-          if (!other.coordinates || (isPartner && !isPartner(other))) continue;
-          for (const otherCoord of other.coordinates) {
-            if (pointsConnected(el, coord, other, otherCoord)) {
-              count++;
-              return;
-            }
-          }
-        }
-      });
-      return count;
-    };
-
     // Warning 1: Windows/doors without parents
     if (element.type === 'BuildingElementTransparent' ||
         (element.type === 'BuildingElementOpaque' && (element as BuildingElementOpaque).is_external_door)) {
@@ -2174,7 +2155,7 @@ export const validateElementCore = (
     if (element.type === 'BuildingElementOpaque') {
       const opaque = element as BuildingElementOpaque;
       if (!opaque.is_external_door && opaque.coordinates && opaque.coordinates.length === 2) {
-        const snappedCount = getSnappedVertices(opaque);
+        const snappedCount = getExactSnappedVertices(opaque, elementsById).size;
         if (snappedCount < 2) {
           warnings.push(geo('Line ends not snapped'));
         }
@@ -2401,7 +2382,7 @@ export const collectGeometryValidation = (
     elementsById[element.id] = element;
   });
 
-  const linearThermalBridgeIssues = findLinearThermalBridgeIssues(elements);
+  const linearThermalBridgeIssues = findLinearThermalBridgeIssues(elements, options.floors ?? []);
   const floorStackWarningElementIds = options.floors
     ? getFloorStackWarningElementIds(elements, options.floors)
     : new Set<string>();
