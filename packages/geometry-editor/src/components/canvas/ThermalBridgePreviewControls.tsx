@@ -65,6 +65,9 @@ export function ThermalBridgePreviewControls({ preview, width, height, viewMode,
       role={preview.menu ? 'dialog' : undefined}
       aria-label={preview.menu ? 'Choose thermal bridge' : undefined}
       data-suppress-canvas-keyboard={preview.menu ? '' : undefined}
+      onMouseEnter={() => preview.onHover(shown.ids, shown.anchor)}
+      onFocus={() => preview.onHover(shown.ids, shown.anchor)}
+      onMouseLeave={() => preview.onHover([], shown.anchor)}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
@@ -77,14 +80,14 @@ export function ThermalBridgePreviewControls({ preview, width, height, viewMode,
           onMouseEnter={() => preview.onHover([row.proposalId], shown.anchor)}
           onFocus={() => preview.onHover([row.proposalId], shown.anchor)}>
           <button type="button" className="btn btn-ghost tb-preview-add" disabled={!!row.addabilityError} onClick={() => preview.add(row.proposalId)} title={row.reason}>
-            Add {row.junctionCode} · {row.suggestedLengthM.toFixed(2)} m
+            Add {JUNCTION_TYPE_DESCRIPTIONS[row.junctionCode] ?? 'Junction'} ({row.junctionCode}) · {row.suggestedLengthM.toFixed(2)} m
             <span>{row.openingName}</span>
           </button>
           {row.junctionOptions.length > 1 && <select
             className="standard-dropdown standard-dropdown-ghost"
             aria-label={`Junction type for ${row.openingName}`}
             value={row.junctionCode}
-            onChange={(event) => preview.override(row.proposalId, event.target.value)}
+            onChange={(event) => preview.add(row.proposalId, event.target.value)}
           >{row.junctionOptions.map((code) => <option key={code} value={code}>{code} — {JUNCTION_TYPE_DESCRIPTIONS[code]}</option>)}</select>}
           {row.externalDetailSuggestion && row.externalDetailSuggestion.candidates.length > 1 && <select
             className="standard-dropdown standard-dropdown-ghost"
@@ -101,11 +104,12 @@ export function ThermalBridgePreviewControls({ preview, width, height, viewMode,
           <small>{row.externalDetailSuggestion?.selected ? row.externalDetailSuggestion.selected.detail.detailCode : 'Default ψ'} · {row.linearThermalTransmittance}</small>
         </div>)}
       </> : issue ? <span>{issue.notes.join(' · ')} · Click to inspect</span> : rows.length > 1
-        ? <span>{rows.length} suggestions · Click to choose</span>
+        ? <span>{rows.length} junctions</span>
         : rows[0] && <>
-          <span>{rows[0].junctionCode} · {rows[0].suggestedLengthM.toFixed(2)} m · {rows[0].addabilityError ?? 'Click to add'}</span>
+          <span>{JUNCTION_TYPE_DESCRIPTIONS[rows[0].junctionCode] ?? 'Junction'} · {rows[0].junctionCode} · {rows[0].suggestedLengthM.toFixed(2)} m</span>
+          {rows[0].addabilityError && <small>{rows[0].addabilityError}</small>}
           {(rows[0].junctionOptions.length > 1 || (rows[0].externalDetailSuggestion?.candidates.length ?? 0) > 1) && <button type="button" className="btn btn-ghost btn-small"
-            aria-label="Change suggested junction type" onClick={() => preview.configure(rows[0].proposalId, shown.anchor)}>▾</button>}
+            aria-label="Choose junction or detail" onClick={() => preview.configure(rows[0].proposalId, shown.anchor)}>▾</button>}
           {rows[0].externalDetailSuggestion && !rows[0].externalDetailSuggestion.selected && <small>Default ψ</small>}
         </>}
     </div>}
@@ -129,9 +133,11 @@ export function ThermalBridgePreviewStatus({ preview, viewMode, inline = false }
             : preview.runs.length ? `${preview.runs.length} suggestion${preview.runs.length === 1 ? '' : 's'} · Click to add · Release A to draw`
             : 'No suggestions on this floor'
           : preview.candidates.some((candidate) => !candidate.addabilityError)
-          ? `Click to add · Release A to ${viewMode === '3d' ? 'exit' : 'draw'}`
+          ? `Release A to ${viewMode === '3d' ? 'exit' : 'draw'}`
           : preview.candidates.length ? 'No addable suggestions on this floor' : 'No suggestions on this floor'}</span>}
-      {preview.unplacedCount > 0 && <span>{preview.unplacedCount} suggestions need a floor · Review all…</span>}
+      {preview.unplacedCount > 0 && <span>{preview.kind === 'thermalBridge'
+        ? `${preview.unplacedCount} suggestions need a floor · Add thermal bridges…`
+        : `${preview.unplacedCount} suggestions need a floor · Review all…`}</span>}
       {preview.otherFloorCount > 0 && <span>{preview.otherFloorCount} suggestions on other floors</span>}
     </div>
   );

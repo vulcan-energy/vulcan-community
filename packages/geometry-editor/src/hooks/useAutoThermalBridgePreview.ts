@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useKeyedState } from './useKeyedState';
 import type { Element, ElementDraft, MechanicalVentilation } from '../geometry/types';
@@ -49,11 +49,17 @@ export function useAutoThermalBridgePreview(options: {
   });
   const { active, held, pinned, pin, unpin, dismiss: dismissMode } = mode;
   const [externalDetailSelection, setExternalDetailSelection] = useState<Record<string, string>>({});
-  const [junctionOverrides, setJunctionOverrides] = useState<Record<string, string>>({});
   const interactionKey = `${viewMode}:${currentFloorZ}:${active}`;
   const [hover, setHover] = useKeyedState<{ ids: string[]; anchor: ThermalBridgePreviewAnchor } | null>(interactionKey, null);
   const [menu, setMenu] = useKeyedState<{ ids: string[]; anchor: ThermalBridgePreviewAnchor } | null>(interactionKey, null);
   const [error, setError] = useKeyedState<string | null>(interactionKey, null);
+  const hoverClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearHoverClearTimeout = useCallback(() => {
+    if (hoverClearTimeoutRef.current === null) return;
+    clearTimeout(hoverClearTimeoutRef.current);
+    hoverClearTimeoutRef.current = null;
+  }, []);
+  useEffect(() => clearHoverClearTimeout, [clearHoverClearTimeout, interactionKey]);
   const allElements = useMemo(() => Object.values(elementsById), [elementsById]);
   // Existing bridge changes affect dedupe, not fabric inference. Shallow selection preserves this
   // array while only bridges/selection change, so additions do not re-run the geometry proposers.
@@ -64,9 +70,9 @@ export function useAutoThermalBridgePreview(options: {
         proposeAutoThermalBridges(fabricElements, floors, globalOrientationOffset))
     : [], [enabled, fabricElements, floors, globalOrientationOffset]);
   const candidates = useMemo(() => enabled ? enrichAutoThermalBridgeCandidates(proposals, {
-    elements: allElements, floors, junctionPsiDefaultsMap, junctionOverrides, externalDetailSelection,
+    elements: allElements, floors, junctionPsiDefaultsMap, externalDetailSelection,
     externalDetailCatalogue, defaultDetailProfile,
-  }) : [], [enabled, proposals, allElements, floors, junctionPsiDefaultsMap, junctionOverrides,
+  }) : [], [enabled, proposals, allElements, floors, junctionPsiDefaultsMap,
     externalDetailCatalogue, defaultDetailProfile, externalDetailSelection]);
   const visibleAcrossFloors = useMemo(() => candidates.filter((candidate) => {
     const host = findHostElementForAutoTbProposal(candidate, elementsById);
@@ -112,22 +118,46 @@ export function useAutoThermalBridgePreview(options: {
   }, [active, visibleCandidates, hover, elementsById]);
 
   const onHover = useCallback((ids: string[], anchor: ThermalBridgePreviewAnchor) => {
+    if (ids.length === 0) {
+      if (hoverClearTimeoutRef.current !== null) return;
+      hoverClearTimeoutRef.current = setTimeout(() => {
+        hoverClearTimeoutRef.current = null;
+        setHover(null);
+      }, 250);
+      return;
+    }
+    clearHoverClearTimeout();
     setHover((previous) => previous?.ids.join('\0') === ids.join('\0') ? previous : { ids, anchor });
-  }, [setHover]);
-  const add = useCallback((id: string) => {
+  }, [clearHoverClearTimeout, setHover]);
+  const add = useCallback((id: string, junctionCode?: string) => {
     try {
       const current = store.getState();
       const elements = Object.values(current.elementsById);
       // Commit against live geometry, including changes while a chooser was open.
-      const fresh = enrichAutoThermalBridgeCandidates(
-        proposeAutoThermalBridges(elements, current.floors, current.globalOrientationOffset), {
+      const proposals = proposeAutoThermalBridges(elements, current.floors, current.globalOrientationOffset);
+      const enrichLiveCandidates = (junctionOverridesForCommit: Record<string, string | undefined> = {}) =>
+        enrichAutoThermalBridgeCandidates(proposals, {
           elements, floors: current.floors,
-          junctionPsiDefaultsMap: current.junctionPsiDefaultsMap, junctionOverrides, externalDetailSelection,
+          junctionPsiDefaultsMap: current.junctionPsiDefaultsMap,
+          junctionOverrides: junctionOverridesForCommit,
+          externalDetailSelection,
           externalDetailCatalogue,
           defaultDetailProfile: current.detailedBridgePsiProfile,
-        }).find((candidate) => candidate.proposalId === id);
+        });
+      const liveCandidate = enrichLiveCandidates().find((candidate) => candidate.proposalId === id);
+      if (!liveCandidate) throw new Error('This suggestion is no longer available.');
+      if (junctionCode !== undefined && !liveCandidate.junctionOptions.includes(junctionCode)) {
+        throw new Error(`Junction type ${junctionCode} is not available for this suggestion.`);
+      }
+      const fresh = junctionCode === undefined
+        ? liveCandidate
+        : enrichLiveCandidates({ [id]: junctionCode })
+            .find((candidate) => candidate.proposalId === id);
       if (fresh?.status === 'duplicate') return;
       if (!fresh) throw new Error('This suggestion is no longer available.');
+      if (junctionCode !== undefined && fresh.junctionCode !== junctionCode) {
+        throw new Error(`Junction type ${junctionCode} could not be applied to this suggestion.`);
+      }
       if (fresh.addabilityError) throw new Error(fresh.addabilityError);
       if (fresh.floorStoreyIndexForTb !== currentFloorZ) {
         throw new Error('This suggestion is no longer on the current floor.');
@@ -142,7 +172,7 @@ export function useAutoThermalBridgePreview(options: {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [store, junctionOverrides, externalDetailSelection, externalDetailCatalogue, currentFloorZ, unpin, held, menu, setError, setHover, setMenu]);
+  }, [store, externalDetailSelection, externalDetailCatalogue, currentFloorZ, unpin, held, menu, setError, setHover, setMenu]);
   const closeMenu = useCallback(() => {
     setMenu(null);
     setHover(null);
@@ -160,9 +190,6 @@ export function useAutoThermalBridgePreview(options: {
     setMenu({ ids: [id], anchor });
     pin();
   }, [pin, setMenu]);
-  const override = useCallback((id: string, code: string) => {
-    setJunctionOverrides((previous) => ({ ...previous, [id]: code }));
-  }, []);
   const chooseDetail = useCallback((groupKey: string, key: string) => {
     setExternalDetailSelection((previous) => ({ ...previous, [groupKey]: key }));
   }, []);
@@ -177,7 +204,7 @@ export function useAutoThermalBridgePreview(options: {
     ...mode, dismiss, candidates: visibleCandidates, issues, otherFloorCount, unplacedCount, error, highlightedHostIds,
     hover: active ? hover : null,
     menu: pinned ? menu : null,
-    onHover, onActivate, configure, add, override, closeMenu, chooseDetail,
+    onHover, onActivate, configure, add, closeMenu, chooseDetail,
   };
 }
 
