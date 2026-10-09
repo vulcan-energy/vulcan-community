@@ -12,37 +12,23 @@ import {
   junctionCodesGroupedBySeries,
   junctionCodesNotAutoSuggestedByFacadeTool,
 } from '../geometry/thermalBridge/facadeAutoTbScope';
-import {
-  annotateProposalsWithDedupe,
-  coerceJunctionCodeForEdgeRole,
-  junctionOptionsForFacadeEdgeRole,
-  type AnnotatedFacadeProposal,
-  type FacadeOpeningEdgeRole,
-} from '../geometry/thermalBridge/proposeFacadeOpenings';
+import type { FacadeOpeningEdgeRole } from '../geometry/thermalBridge/proposeFacadeOpenings';
 import { ADJACENT_WALL_COINCIDENT_PERP_TOL_M } from '../geometry/thermalBridge/proposeAdjacentWallJunction';
 import { proposeAutoThermalBridges } from '../geometry/thermalBridge/autoThermalBridgePipeline';
-import type { Element, ThermalBridgeLinear } from '../geometry/types';
-import {
-  resolveFloorStoreyIndexForAutoTbFromHostZ,
-  thermalBridgeSourceExtraJsonForAutoProposal,
-} from '../geometry/thermalBridge/resolveTbHostFloorId';
+import type { Element } from '../geometry/types';
 import {
   buildThermalBridgeInventoryRows,
   type ThermalBridgeInventoryBucket,
   type ThermalBridgeInventoryRow,
 } from '../geometry/thermalBridge/thermalBridgeInventory';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
+import type { ExternalDetailAutoTbCandidate } from '../geometry/thermalBridge/externalDetailsForAutoTb';
 import {
-  getEffectiveLinearPsiForFacadeProposal,
-  VULCAN_UI_TB_ADJACENT_ELEMENT_ID_KEY,
-} from '../geometry/thermalBridge/linearTbPsi';
-import { THERMAL_BRIDGE_EXTRA_JSON_FLOOR_ID_KEY } from '../lib/elementCanvasFloor';
-import {
-  getExternalDetailSuggestionForAutoProposal,
-  externalDetailThermalBridgeSourceExtraJson,
-  type ExternalDetailAutoTbCandidate,
-  type ExternalDetailAutoTbSuggestion,
-} from '../geometry/thermalBridge/externalDetailsForAutoTb';
+  createThermalBridgeLinearFromAutoProposal,
+  enrichAutoThermalBridgeCandidates,
+  junctionOptionsForAutoThermalBridgeCandidate,
+  type AutoThermalBridgeCandidate,
+} from '../geometry/thermalBridge/autoThermalBridgeCandidates';
 import {
   externalDetailCandidateKey,
   type ExternalDetailCataloguePort,
@@ -72,15 +58,8 @@ const TB_PREVIEW_CATEGORIES: readonly {
     id: 'roof_window_head_sill',
     title: 'Roof window head & sill',
     rule:
-      'Top and bottom of each roof window or flat rooflight drawn on a roof plane, with pitch set (not 90°). Table 3.7 R1 / R2.',
+      'Top and bottom of each roof window or flat rooflight drawn on a roof plane, with pitch set (not 90°). Table 3.7 R1 / R2. The lower edge can use R11 instead of R2 for a kerb or upstand.',
     roles: ['roof_window_head', 'roof_window_sill'],
-  },
-  {
-    id: 'rooflight_kerb',
-    title: 'Rooflight kerb / upstand',
-    rule:
-      'Optional R11 along the bottom in plan, same line as the sill. Use R2 for a sill construction; R11 for a kerb or upstand (do not count both in SAP).',
-    roles: ['rooflight_kerb'],
   },
   {
     id: 'roof_window_jambs',
@@ -185,9 +164,7 @@ const INVENTORY_BUCKET_TITLE: Record<ThermalBridgeInventoryBucket, string> = {
   validated: 'Validated',
 };
 
-type FacadeProposalWithExternalDetail = AnnotatedFacadeProposal & {
-  externalDetailSuggestion?: ExternalDetailAutoTbSuggestion;
-};
+type FacadeProposalWithExternalDetail = AutoThermalBridgeCandidate;
 
 function junctionSelectLabel(code: string): string {
   const desc = JUNCTION_TYPE_DESCRIPTIONS[code];
@@ -214,10 +191,8 @@ export const AutoThermalBridgePreviewModal: React.FC<AutoThermalBridgePreviewMod
   const elementsById = useGeometryStore((s) => s.elementsById);
   const zones = useGeometryStore((s) => s.zones);
   const floors = useGeometryStore((s) => s.floors);
-  const addElement = useGeometryStore((s) => s.addElement);
+  const addElements = useGeometryStore((s) => s.addElements);
   const removeElement = useGeometryStore((s) => s.removeElement);
-  const ensureFloorForZ = useGeometryStore((s) => s.ensureFloorForZ);
-  const floorsForAutoTb = useGeometryStore((s) => s.floors);
   const junctionPsiDefaultsMap = useGeometryStore((s) => s.junctionPsiDefaultsMap);
   const detailedBridgePsiProfile = useGeometryStore((s) => s.detailedBridgePsiProfile);
   const globalOrientationOffset = useGeometryStore((s) => s.globalOrientationOffset);
@@ -233,17 +208,23 @@ export const AutoThermalBridgePreviewModal: React.FC<AutoThermalBridgePreviewMod
   const proposalDraft = useMemo(() => {
     const junctionOverride: Record<string, string> = {};
     const selected: Record<string, boolean> = {};
-    const annotated = annotateProposalsWithDedupe(baseProposals, allElements);
+    const annotated = enrichAutoThermalBridgeCandidates(baseProposals, {
+      elements: allElements,
+      floors,
+      junctionPsiDefaultsMap,
+      externalDetailCatalogue,
+      defaultDetailProfile: detailedBridgePsiProfile,
+    });
     for (const row of annotated) {
       junctionOverride[row.proposalId] = row.junctionCode;
-      selected[row.proposalId] = row.status === 'new';
+      selected[row.proposalId] = row.status === 'new' && !row.addabilityError;
     }
     return {
-      key: JSON.stringify(annotated.map((row) => [row.proposalId, row.junctionCode, row.status])),
+      key: JSON.stringify(annotated.map((row) => [row.proposalId, row.junctionCode, row.status, row.addabilityError])),
       junctionOverride,
       selected,
     };
-  }, [allElements, baseProposals]);
+  }, [allElements, baseProposals, floors, junctionPsiDefaultsMap, externalDetailCatalogue, detailedBridgePsiProfile]);
   const proposalResetKey = `${isOpen ? 'open' : 'closed'}\0${proposalDraft.key}`;
   const [junctionOverride, setJunctionOverride] = useKeyedState(
     proposalResetKey,
@@ -258,46 +239,28 @@ export const AutoThermalBridgePreviewModal: React.FC<AutoThermalBridgePreviewMod
   const [activeTab, setActiveTab] = useState<'suggested' | 'inventory'>('suggested');
 
   const mergedProposals = useMemo(() => {
-    return baseProposals.map((p) => {
-      const code = coerceJunctionCodeForEdgeRole(p.edgeRole, p.junctionCode, junctionOverride[p.proposalId]);
-      const proposalWithCode = { ...p, junctionCode: code };
-      const externalDetailSuggestion = externalDetailProfilesEnabled
-        ? getExternalDetailSuggestionForAutoProposal(
-            proposalWithCode,
-            elementsById,
-            externalDetailSelection,
-            externalDetailCatalogue,
-            detailedBridgePsiProfile,
-          )
-        : undefined;
-      return {
-        ...proposalWithCode,
-        junctionCode: code,
-        linearThermalTransmittance:
-          externalDetailSuggestion?.selected?.detail.psiWPerMK ??
-          getEffectiveLinearPsiForFacadeProposal(
-            proposalWithCode,
-            junctionPsiDefaultsMap,
-            elementsById,
-          ),
-        externalDetailSuggestion,
-      };
+    return enrichAutoThermalBridgeCandidates(baseProposals, {
+      elements: allElements,
+      floors,
+      junctionPsiDefaultsMap,
+      junctionOverrides: junctionOverride,
+      externalDetailSelection,
+      externalDetailCatalogue: externalDetailProfilesEnabled ? externalDetailCatalogue : undefined,
+      defaultDetailProfile: detailedBridgePsiProfile,
     });
   }, [
     baseProposals,
+    allElements,
+    floors,
     junctionOverride,
     junctionPsiDefaultsMap,
-    elementsById,
     externalDetailSelection,
     externalDetailProfilesEnabled,
     detailedBridgePsiProfile,
     externalDetailCatalogue,
   ]);
 
-  const annotated = useMemo(
-    () => annotateProposalsWithDedupe(mergedProposals, allElements) as FacadeProposalWithExternalDetail[],
-    [mergedProposals, allElements],
-  );
+  const annotated = mergedProposals;
 
   const suggestedRows = useMemo(() => annotated.filter((row) => row.status === 'new'), [annotated]);
 
@@ -394,78 +357,10 @@ export const AutoThermalBridgePreviewModal: React.FC<AutoThermalBridgePreviewMod
   };
 
   const handleAddSelected = () => {
-    for (const row of annotated) {
-      if (!selected[row.proposalId]) continue;
-      if (row.status !== 'new') continue;
-
-      const zoneId =
-        row.zoneId ??
-        (allElements.find((e) => e.id === row.openingId) as { zoneId?: string } | undefined)?.zoneId;
-      if (!zoneId) continue;
-
-      const parentElement =
-        row.parentElementForTb !== undefined && row.parentElementForTb !== null && String(row.parentElementForTb).trim() !== ''
-          ? String(row.parentElementForTb).trim()
-          : row.openingName;
-
-      const floorStorey = row.floorStoreyIndexForTb ?? resolveFloorStoreyIndexForAutoTbFromHostZ(
-        {
-          openingId: row.openingId,
-          zoneId: row.zoneId,
-          parentElementForTb: row.parentElementForTb,
-        },
-        elementsById,
-        floorsForAutoTb,
-      );
-      const extraJson: Record<string, unknown> = { junction_type: row.junctionCode };
-      let floorIdForTb: string | undefined;
-      if (floorStorey !== undefined) {
-        extraJson[THERMAL_BRIDGE_EXTRA_JSON_FLOOR_ID_KEY] = floorStorey;
-        floorIdForTb = ensureFloorForZ(floorStorey);
-      }
-      const src = thermalBridgeSourceExtraJsonForAutoProposal(
-        {
-          openingId: row.openingId,
-          zoneId: row.zoneId,
-          parentElementForTb: row.parentElementForTb,
-          cornerHostWallIds: row.cornerHostWallIds,
-          hostElementIds: row.hostElementIds,
-          roofAdjacentPairIds: row.roofAdjacentPairIds,
-        },
-        elementsById,
-      );
-      const externalDetailSource = externalDetailThermalBridgeSourceExtraJson(row.externalDetailSuggestion);
-      if (src || externalDetailSource) {
-        extraJson.thermal_bridge_source = {
-          ...(src ?? {}),
-          ...(externalDetailSource ?? {}),
-        };
-      }
-      if (
-        row.edgeRole === 'e7_party_floor_external' ||
-        row.edgeRole === 'party_wall_junction' ||
-        row.edgeRole === 'unheated_adjacent_wall_junction' ||
-        row.edgeRole === 'party_to_external_e18' ||
-        row.edgeRole === 'party_wall_to_sloped_roof' ||
-        row.edgeRole === 'party_wall_to_flat_roof' ||
-        row.edgeRole === 'sloped_roof_to_adjacent_wall_r8_r9'
-      ) {
-        extraJson[VULCAN_UI_TB_ADJACENT_ELEMENT_ID_KEY] = row.openingId;
-      }
-
-      addElement({
-        type: 'ThermalBridgeLinear',
-        name: '',
-        zoneId,
-        length: row.suggestedLengthM,
-        linear_thermal_transmittance: row.linearThermalTransmittance,
-        parent_element: parentElement,
-        coordinates: [row.coordinates[0], row.coordinates[1]],
-        floorId: floorIdForTb,
-        extra_json: extraJson as ThermalBridgeLinear['extra_json'],
-        isPlaceholder: false,
-      } as Omit<Element, 'id'>);
-    }
+    const drafts = annotated
+      .filter((row) => selected[row.proposalId] && row.status === 'new' && !row.addabilityError)
+      .map((row) => createThermalBridgeLinearFromAutoProposal(row, elementsById, floors));
+    if (drafts.length > 0) addElements(drafts);
     onClose();
   };
 
@@ -889,7 +784,7 @@ const edgeLabel: Record<string, string> = {
   external_corner_convex: 'External corner (convex)',
   external_corner_reentrant: 'External corner (re-entrant)',
   roof_window_head: 'Roof window head (R1)',
-  roof_window_sill: 'Roof window sill (R2)',
+  roof_window_sill: 'Roof window lower edge',
   roof_window_jamb_first: 'Roof window jamb (1st line point)',
   roof_window_jamb_second: 'Roof window jamb (2nd line point)',
   rooflight_kerb: 'Rooflight kerb / upstand (R11)',
@@ -915,13 +810,14 @@ const SuggestedFacadeRow: React.FC<{
   onJunctionChange: (code: string) => void;
   onToggle: (v: boolean) => void;
 }> = ({ row, selected, junctionCode, onJunctionChange, onToggle }) => (
-  <tr title={row.reason}>
+  <tr title={row.addabilityError ? `${row.reason}. Cannot add: ${row.addabilityError}` : row.reason}>
     <td style={{ padding: '5px 6px', verticalAlign: 'top' }}>
       <input
         type="checkbox"
         checked={selected}
+        disabled={Boolean(row.addabilityError)}
         onChange={(e) => onToggle(e.target.checked)}
-        title='Checked rows are added with "Add selected"'
+        title={row.addabilityError ?? 'Checked rows are added with "Add selected"'}
       />
     </td>
     <td style={{ padding: '5px 6px', verticalAlign: 'top' }}>{row.openingName}</td>
@@ -934,7 +830,7 @@ const SuggestedFacadeRow: React.FC<{
         aria-label="Junction type and short description (Table 3.7)"
         style={{ minWidth: 180, maxWidth: 340 }}
       >
-        {junctionOptionsForFacadeEdgeRole(row.edgeRole).map((c) => (
+        {junctionOptionsForAutoThermalBridgeCandidate(row).map((c) => (
           <option key={c} value={c}>
             {junctionSelectLabel(c)}
           </option>

@@ -366,6 +366,192 @@ function applyWallStackCascade(
   }
 }
 
+function normalizeElementDraftForStore(
+  element: ElementDraft,
+  state: GeometryState,
+  ensureFloorForZ: (zIndex: number) => string,
+  coerceElement: (element: Element) => Element,
+): Element {
+  const hasProvidedName = typeof element.name === 'string' && element.name.trim() !== '';
+  const elementWithName = {
+    ...element,
+    name: hasProvidedName
+      ? element.name
+      : generateDefaultElementName(
+          element as Pick<Element, 'type'> & Partial<Element>,
+          state.elementsById,
+          undefined,
+          state.floors,
+          state.namingPreferences,
+          undefined,
+          state.globalOrientationOffset,
+        ),
+    _nameAutoSync: hasProvidedName ? false : true,
+  };
+
+  const normalizedElement = {
+    ...elementWithName,
+    parent_element: (!elementWithName.parent_element || elementWithName.parent_element === '')
+      ? null
+      : elementWithName.parent_element,
+  } as Element & {
+    coordinates: ElementCoordinate[] | string;
+    isPlaceholder?: boolean;
+    floorId?: string;
+    extra_json?: Record<string, unknown>;
+  };
+  if (normalizedElement.type === 'MechanicalVentilationTerminal') {
+    const host = (normalizedElement as MechanicalVentilationTerminal).host_element;
+    (normalizedElement as MechanicalVentilationTerminal).host_element = (!host || host === '') ? null : host;
+  }
+
+  try {
+    const rawCoords = normalizedElement.coordinates;
+    if (typeof rawCoords === 'string') normalizedElement.coordinates = parseCoords(rawCoords);
+    const coords = normalizedElement.coordinates as ElementCoordinate[] | undefined;
+    const coordsMissing = !Array.isArray(coords) || coords.length === 0;
+    if (coordsMissing) {
+      normalizedElement.coordinates = generateDefaultCoordinates(normalizedElement);
+    } else {
+      const shape = getElementShape(normalizedElement);
+      if (!isTypeShapeCompatible(normalizedElement.type, shape)) {
+        normalizedElement.coordinates = generateDefaultCoordinates(normalizedElement);
+      }
+    }
+    ensureExplicitFabricPitchForShape(normalizedElement);
+    if (normalizedElement.type === 'Vents' && normalizedElement.parent_element) {
+      const parentElement = createElementNameLookup(
+        Object.values(state.elementsById).filter(isVentParentElement),
+      )(normalizedElement.parent_element);
+      const parentCoords = getVentParentLineCoordinates(parentElement);
+      if (parentCoords) {
+        const currentZ = (normalizedElement.coordinates?.[0] as ElementCoordinate | undefined)?.z;
+        normalizedElement.coordinates = [midpointOnSegment(parentCoords, currentZ)];
+      }
+    }
+    if (isHostedMechanicalVentilationFan(normalizedElement) && normalizedElement.parent_element) {
+      const parentElement = createElementNameLookup(
+        Object.values(state.elementsById).filter(isVentParentElement),
+      )(normalizedElement.parent_element);
+      Object.assign(
+        normalizedElement,
+        buildMechanicalVentilationHostPlacementPatch(
+          normalizedElement,
+          parentElement,
+          state.globalOrientationOffset,
+        ),
+      );
+    }
+    if (isHostedMvhrTerminalPointElement(normalizedElement)) {
+      const hostElement = createElementNameLookup(
+        Object.values(state.elementsById).filter(isMvhrTerminalHost),
+      )(normalizedElement.host_element);
+      Object.assign(
+        normalizedElement,
+        buildMechanicalVentilationTerminalHostPlacementPatch(
+          normalizedElement,
+          hostElement,
+          state.floors,
+          ensureFloorForZ,
+        ),
+      );
+    }
+    if (!hasProvidedName) {
+      normalizedElement.name = generateDefaultElementName(
+        normalizedElement as Pick<Element, 'type'> & Partial<Element>,
+        state.elementsById,
+        undefined,
+        state.floors,
+        state.namingPreferences,
+        undefined,
+        state.globalOrientationOffset,
+      );
+      normalizedElement._nameAutoSync = true;
+    }
+    if (normalizedElement.isPlaceholder && normalizedElement.name.trim()) {
+      normalizedElement.isPlaceholder = false;
+    }
+  } catch {
+    // Preserve addElement's best-effort normalization for malformed optional fields.
+  }
+
+  try {
+    const coords = normalizedElement.coordinates as ElementCoordinate[] | undefined;
+    if (usesPhysicalZWithFloorMembership(normalizedElement as Element)) {
+      if (normalizedElement.type === 'ThermalBridgeLinear') {
+        ingestThermalBridgeLinearPostParse(
+          normalizedElement as ThermalBridgeLinear,
+          Object.values(state.elementsById),
+        );
+        const storey = resolveThermalBridgeLinearFloorIdAfterHostsReady(
+          normalizedElement as Element,
+          Object.values(state.elementsById),
+          state.floors,
+        );
+        normalizedElement.floorId = ensureFloorForZ(storey);
+        normalizedElement.extra_json = mergeServiceLineExtraJsonFloorId(
+          normalizedElement as Element,
+          storey,
+        );
+      } else {
+        const explicitFloorId =
+          typeof (normalizedElement as { floorId?: unknown }).floorId === 'string'
+            ? ((normalizedElement as { floorId: string }).floorId).trim()
+            : '';
+        let floorId = ensureFloorForZ(0);
+        if (explicitFloorId) {
+          const match = state.floors.find((floor) => floor.id === explicitFloorId);
+          floorId = match ? ensureFloorForZ(match.zIndex) : ensureFloorForZ(0);
+        }
+        normalizedElement.floorId = floorId;
+        if (
+          normalizedElement.type === 'WaterPipework' ||
+          normalizedElement.type === 'MechanicalVentilationDuctwork'
+        ) {
+          const pipeStorey = state.floors.find((floor) => floor.id === floorId)?.zIndex ?? 0;
+          normalizedElement.extra_json = mergeServiceLineExtraJsonFloorId(
+            normalizedElement as Element,
+            pipeStorey,
+          );
+        }
+      }
+    } else {
+      const firstZ = Array.isArray(coords) && coords.length > 0 ? Math.floor(coords[0].z ?? 0) : 0;
+      normalizedElement.floorId = ensureFloorForZ(firstZ);
+    }
+  } catch {
+    // Preserve addElement's best-effort normalization for malformed optional fields.
+  }
+
+  applyNewContextShadingElementDerivations(normalizedElement, state);
+  if (Array.isArray(normalizedElement.coordinates) && normalizedElement.coordinates.length >= 3) {
+    Object.assign(
+      normalizedElement,
+      syncPolygonElement(normalizedElement, state.globalOrientationOffset),
+    );
+  }
+
+  const isGlobalElement = isGlobalObject(normalizedElement);
+  const existingElementNames = Object.values(state.elementsById)
+    .filter((existing) => isGlobalElement
+      ? existing.type === normalizedElement.type && isGlobalObject(existing)
+      : existing.zoneId === normalizedElement.zoneId)
+    .map((existing) => existing.name);
+  if (existingElementNames.includes(normalizedElement.name)) {
+    throw new Error(
+      `Element name "${normalizedElement.name}" already exists${isGlobalElement ? ' for this type' : ' in this zone'}. Please choose a different name.`,
+    );
+  }
+
+  return coerceElement(
+    syncWindowSecurityRiskForStorey(
+      { ...normalizedElement, id: generateId(), _v: 0 } as Element,
+      undefined,
+      state.floors,
+    ),
+  );
+}
+
 /** Refresh hosted floor-dependent fields after coordinates settle; roots keep their authored patches. */
 function applyHostedFloorMovePatches(
   previousElementsById: Record<string, Element>,
@@ -1376,6 +1562,7 @@ export interface GeometryState extends
   removeZone: (id: string) => void;
 
   addElement: (element: ElementDraft) => void;
+  addElements: (elements: ElementDraft[]) => string[];
   updateElement: (id: string, updates: Partial<Element>, skipAutoSave?: boolean) => void;
   setSlopePitchAxis: (id: string, axis: SlopePitchAxis) => void;
   flipElementOrientation: (id: string, skipAutoSave?: boolean) => void;
@@ -2718,6 +2905,77 @@ const createGeometryState = (
       }
     }));
     return outcomes.filter((outcome): outcome is GeometryPostCommandEffectResult => outcome !== undefined);
+  };
+  const commitElementDrafts = (
+    elements: ElementDraft[],
+    historySource: string,
+    deferHistory: boolean,
+  ): string[] => {
+    if (elements.length === 0) return [];
+    const addedIds: string[] = [];
+    set((state) => {
+      const workingState: GeometryState = {
+        ...state,
+        elementsById: { ...state.elementsById },
+        elementIds: [...state.elementIds],
+        floors: [...state.floors],
+        floorIds: [...state.floorIds],
+      };
+      const ensureFloorForZ = (z: number): string => {
+        const zIndex = Math.floor(z);
+        const existingFloor = workingState.floors.find((floor) => floor.zIndex === zIndex);
+        if (existingFloor) return existingFloor.id;
+
+        const id = generateId();
+        const newFloor = {
+          id,
+          name: String(zIndex),
+          zIndex,
+          height: 0,
+          isRoofSpace: false,
+        };
+        const allFloors = [...workingState.floors, newFloor];
+        const maxZIndex = Math.max(...allFloors.map((floor) => floor.zIndex));
+        workingState.floors = allFloors.map((floor) => ({
+          ...floor,
+          isRoofSpace: floor.zIndex === maxZIndex && floor.zIndex > 0,
+        }));
+        workingState.floorIds = [...workingState.floorIds, id];
+        if (!workingState.currentFloorId) workingState.currentFloorId = id;
+        return id;
+      };
+
+      for (const draft of elements) {
+        const newElement = normalizeElementDraftForStore(
+          draft,
+          workingState,
+          ensureFloorForZ,
+          coerceElementForStore,
+        );
+        workingState.elementsById[newElement.id] = newElement;
+        workingState.elementIds.push(newElement.id);
+        addedIds.push(newElement.id);
+      }
+
+      // Apply wall-derived storey height changes once for the complete transaction.
+      applyWallStackCascade(
+        state.floors,
+        state.elementsById,
+        workingState.elementsById,
+        workingState.floors,
+      );
+      return {
+        elementsById: workingState.elementsById,
+        elementIds: workingState.elementIds,
+        floors: workingState.floors,
+        floorIds: workingState.floorIds,
+        currentFloorId: workingState.currentFloorId,
+      };
+    });
+    const saveHistory = () => get().saveToHistory(historySource);
+    if (deferHistory) setTimeout(saveHistory, 0);
+    else saveHistory();
+    return addedIds;
   };
   return ({
   namingPreferences: sanitizeNamingPreferences(
@@ -4870,211 +5128,11 @@ const createGeometryState = (
     get().syncDerivedValuesFromSpaceLabels();
   },
 
-  addElement: (element) => set((state) => {
-    const hasProvidedName = typeof element.name === 'string' && element.name.trim() !== '';
-    // Auto-assign name if empty
-    const elementWithName = {
-      ...element,
-      name: hasProvidedName
-        ? element.name
-        : generateDefaultElementName(
-            element as Pick<Element, 'type'> & Partial<Element>,
-            state.elementsById,
-            undefined,
-            state.floors,
-            state.namingPreferences,
-            undefined,
-            state.globalOrientationOffset,
-          ),
-      _nameAutoSync: hasProvidedName ? false : true,
-    };
+  addElement: (element) => {
+    commitElementDrafts([element], 'addElement', true);
+  },
 
-    // Normalize parent_element and coordinates
-    const normalizedElement = {
-      ...elementWithName,
-      parent_element: (!elementWithName.parent_element || elementWithName.parent_element === '') ? null : elementWithName.parent_element
-    } as Element & {
-      coordinates: ElementCoordinate[] | string;
-      isPlaceholder?: boolean;
-      floorId?: string;
-      extra_json?: Record<string, unknown>;
-    };
-    if (normalizedElement.type === 'MechanicalVentilationTerminal') {
-      const host = (normalizedElement as MechanicalVentilationTerminal).host_element;
-      (normalizedElement as MechanicalVentilationTerminal).host_element = (!host || host === '') ? null : host;
-    }
-    // Normalize coordinates coming from CSV string or missing/invalid arrays
-    try {
-      const rawCoords = normalizedElement.coordinates;
-      if (typeof rawCoords === 'string') {
-        normalizedElement.coordinates = parseCoords(rawCoords);
-      }
-      const coords = normalizedElement.coordinates as ElementCoordinate[] | undefined;
-      const coordsMissing = !Array.isArray(coords) || coords.length === 0;
-      if (coordsMissing) {
-        normalizedElement.coordinates = generateDefaultCoordinates(normalizedElement);
-      } else {
-        // Respect shape if compatible with the chosen type; otherwise fall back to defaults
-        const shape = getElementShape(normalizedElement);
-        const compatible = isTypeShapeCompatible(normalizedElement.type, shape);
-        if (!compatible) {
-          normalizedElement.coordinates = generateDefaultCoordinates(normalizedElement);
-        }
-      }
-      ensureExplicitFabricPitchForShape(normalizedElement);
-      if (normalizedElement.type === 'Vents' && normalizedElement.parent_element) {
-        const parentElement = createElementNameLookup(Object.values(state.elementsById).filter(isVentParentElement))(normalizedElement.parent_element);
-        const parentCoords = getVentParentLineCoordinates(parentElement);
-        if (parentCoords) {
-          const currentZ = (normalizedElement.coordinates?.[0] as ElementCoordinate | undefined)?.z;
-          normalizedElement.coordinates = [midpointOnSegment(parentCoords, currentZ)];
-        }
-      }
-      if (isHostedMechanicalVentilationFan(normalizedElement) && normalizedElement.parent_element) {
-        const parentElement = createElementNameLookup(Object.values(state.elementsById).filter(isVentParentElement))(normalizedElement.parent_element);
-        Object.assign(
-          normalizedElement,
-          buildMechanicalVentilationHostPlacementPatch(
-            normalizedElement,
-            parentElement,
-            state.globalOrientationOffset,
-          ),
-        );
-      }
-      if (isHostedMvhrTerminalPointElement(normalizedElement)) {
-        const hostElement = createElementNameLookup(Object.values(state.elementsById).filter(isMvhrTerminalHost))(normalizedElement.host_element);
-        Object.assign(
-          normalizedElement,
-          buildMechanicalVentilationTerminalHostPlacementPatch(
-            normalizedElement,
-            hostElement,
-            state.floors,
-            get().ensureFloorForZ,
-          ),
-        );
-      }
-      if (!hasProvidedName) {
-        normalizedElement.name = generateDefaultElementName(
-          normalizedElement as Pick<Element, 'type'> & Partial<Element>,
-          state.elementsById,
-          undefined,
-          state.floors,
-          state.namingPreferences,
-          undefined,
-          state.globalOrientationOffset,
-        );
-        normalizedElement._nameAutoSync = true;
-      }
-      // Finalize if it came in as placeholder - but preserve placeholder flag for CSV elements with empty names
-      if (normalizedElement.isPlaceholder && normalizedElement.name.trim()) {
-        normalizedElement.isPlaceholder = false;
-      }
-    } catch { /* swallow: best-effort */ }
-
-    // Auto-assign floorId from z-coordinate (simplified integer floors). Physical-Z elements never
-    // infer storey from coordinate z (z is metres); use explicit floor membership instead.
-    try {
-      const coords = normalizedElement.coordinates as ElementCoordinate[] | undefined;
-      if (usesPhysicalZWithFloorMembership(normalizedElement as Element)) {
-        if (normalizedElement.type === 'ThermalBridgeLinear') {
-          ingestThermalBridgeLinearPostParse(
-            normalizedElement as ThermalBridgeLinear,
-            Object.values(state.elementsById),
-          );
-          const storey = resolveThermalBridgeLinearFloorIdAfterHostsReady(
-            normalizedElement as Element,
-            Object.values(state.elementsById),
-            state.floors,
-          );
-          const floorId = get().ensureFloorForZ(storey);
-          normalizedElement.floorId = floorId;
-          normalizedElement.extra_json = mergeServiceLineExtraJsonFloorId(
-            normalizedElement as Element,
-            storey,
-          );
-        } else {
-          const explicitFloorId =
-            typeof (normalizedElement as { floorId?: unknown }).floorId === 'string'
-              ? ((normalizedElement as { floorId: string }).floorId).trim()
-              : '';
-          const fid = explicitFloorId || undefined;
-          let floorId = get().ensureFloorForZ(0);
-          if (fid) {
-            const match = state.floors.find((f) => f.id === fid);
-            floorId = match ? get().ensureFloorForZ(match.zIndex) : get().ensureFloorForZ(0);
-          }
-          normalizedElement.floorId = floorId;
-          if (
-            normalizedElement.type === 'WaterPipework' ||
-            normalizedElement.type === 'MechanicalVentilationDuctwork'
-          ) {
-            const pipeStorey = state.floors.find((f) => f.id === floorId)?.zIndex ?? 0;
-            normalizedElement.extra_json = mergeServiceLineExtraJsonFloorId(
-              normalizedElement as Element,
-              pipeStorey,
-            );
-          }
-        }
-      } else {
-        const firstZ = Array.isArray(coords) && coords.length > 0 ? Math.floor(coords[0].z ?? 0) : 0;
-        normalizedElement.floorId = get().ensureFloorForZ(firstZ);
-      }
-    } catch { /* swallow: best-effort */ }
-
-    applyNewContextShadingElementDerivations(normalizedElement, state);
-    if (Array.isArray(normalizedElement.coordinates) && normalizedElement.coordinates.length >= 3) {
-      Object.assign(
-        normalizedElement,
-        syncPolygonElement(normalizedElement, state.globalOrientationOffset),
-      );
-    }
-
-    // Check for duplicate element names
-    const isGlobalElement = isGlobalObject(normalizedElement);
-    let existingElementNames: string[];
-
-    if (isGlobalElement) {
-      // For global objects, check for duplicates across all global objects of the same type
-      existingElementNames = Object.values(state.elementsById)
-        .filter(e => e.type === element.type && isGlobalObject(e))
-        .map(e => e.name);
-    } else {
-      // For zone-specific objects, check for duplicates within the same zone
-      existingElementNames = Object.values(state.elementsById)
-        .filter(e => e.zoneId === element.zoneId)
-        .map(e => e.name);
-    }
-
-    if (existingElementNames.includes(element.name)) {
-      throw new Error(`Element name "${element.name}" already exists${isGlobalElement ? ` for this type` : ` in this zone`}. Please choose a different name.`);
-    }
-
-    const newElement = coerceElementForStore(
-      syncWindowSecurityRiskForStorey(
-        { ...normalizedElement, id: generateId(), _v: 0 } as Element,
-        undefined,
-        state.floors,
-      )
-    );
-
-    // IMMUTABLE UPDATE: Add to normalized structure
-    const newElementsById = { ...state.elementsById, [newElement.id]: newElement };
-    const newElementIds = [...state.elementIds, newElement.id];
-
-    // Adding a wall can raise this floor's effective storey height. Cascade base_height on
-    // every element above (preserving each one's offset above the old slab).
-    applyWallStackCascade(state.floors, state.elementsById, newElementsById, get().floors);
-
-    // Save to history immediately for significant operations like adding elements
-      setTimeout(() => {
-      get().saveToHistory('addElement');
-      }, 0);
-
-    return {
-      elementsById: newElementsById,
-      elementIds: newElementIds
-    };
-  }),
+  addElements: (elements) => commitElementDrafts(elements, 'addElements', false),
 
   syncAutoGeneratedElementNames: async (options = {}) => {
     const result = createAutoNameSyncResult();

@@ -49,6 +49,20 @@ function seedSparseIntermediateFloorStack() {
   return { store, movingWallId, higherWallId };
 }
 
+function wallDraft(name: string, z: number) {
+  return {
+    type: 'BuildingElementOpaque' as const,
+    name,
+    height: 2.4,
+    width: 4,
+    area: 9.6,
+    pitch: 90,
+    base_height: 0,
+    parent_element: null,
+    coordinates: [{ x: 0, y: 0, z }, { x: 4, y: 0, z }],
+  };
+}
+
 describe('floor mutation invariants', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
@@ -217,5 +231,117 @@ describe('floor mutation invariants', () => {
       base_height: 2.4,
     });
     expect(store.getState().elementsById[higherWallId]).toMatchObject({ base_height: 5.4 });
+  });
+
+  it('commits single and batch additions as one history entry each, including floor records', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().saveToHistory('before-additions');
+    const initialHistoryLength = store.getState().history.length;
+
+    store.getState().addElement(wallDraft('Ground wall', 0));
+    const singleId = store.getState().elementIds.at(-1)!;
+    vi.advanceTimersByTime(0);
+    expect(store.getState().history).toHaveLength(initialHistoryLength + 1);
+
+    const batchIds = store.getState().addElements([
+      wallDraft('First wall', 2),
+      wallDraft('Second wall', 3),
+    ]);
+    expect(batchIds).toHaveLength(2);
+    expect(store.getState().elementIds.slice(-2)).toEqual(batchIds);
+    expect(store.getState().history).toHaveLength(initialHistoryLength + 2);
+    expect(store.getState().floors.map((floor) => floor.zIndex).sort()).toEqual([0, 2, 3]);
+
+    store.getState().undo();
+    expect(store.getState().elementIds).toEqual([singleId]);
+    expect(store.getState().floors.map((floor) => floor.zIndex)).toEqual([0]);
+    store.getState().redo();
+    expect(store.getState().elementIds.slice(-2)).toEqual(batchIds);
+    expect(store.getState().floors.map((floor) => floor.zIndex).sort()).toEqual([0, 2, 3]);
+
+    store.getState().undo();
+    store.getState().undo();
+    expect(store.getState().elementIds).toEqual([]);
+    expect(store.getState().floors).toEqual([]);
+  });
+
+  it('keeps synchronous legacy addElement calls in one deferred history snapshot', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().saveToHistory('before-additions');
+    const initialHistoryLength = store.getState().history.length;
+
+    store.getState().addElement(wallDraft('First wall', 0));
+    store.getState().addElement(wallDraft('Second wall', 2));
+    expect(store.getState().history).toHaveLength(initialHistoryLength);
+
+    vi.advanceTimersByTime(0);
+    expect(store.getState().history).toHaveLength(initialHistoryLength + 1);
+    expect(store.getState().elementIds).toHaveLength(2);
+    expect(store.getState().floors.map((floor) => floor.zIndex).sort()).toEqual([0, 2]);
+
+    store.getState().undo();
+    expect(store.getState().elementIds).toEqual([]);
+    expect(store.getState().floors).toEqual([]);
+  });
+
+  it('resolves a thermal bridge storey from floor metadata in the same atomic batch', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().saveToHistory('before-additions');
+    const ids = store.getState().addElements([
+      wallDraft('Host wall', 2),
+      {
+        type: 'ThermalBridgeLinear',
+        name: 'Host junction',
+        zoneId: 'zone-1',
+        length: 1,
+        linear_thermal_transmittance: 0.12,
+        parent_element: 'Host wall',
+        coordinates: [{ x: 0, y: 0, z: 2 }, { x: 1, y: 0, z: 2 }],
+        extra_json: { junction_type: 'R2', floor_id: 2 },
+        isPlaceholder: false,
+      },
+    ]);
+
+    const bridge = store.getState().elementsById[ids[1]!];
+    const floor = store.getState().floors.find((candidate) => candidate.zIndex === 2);
+    expect(floor).toBeDefined();
+    expect(bridge).toMatchObject({ floorId: floor!.id, extra_json: { floor_id: 2 } });
+
+    store.getState().undo();
+    expect(store.getState().elementsById[ids[0]!]).toBeUndefined();
+    expect(store.getState().elementsById[ids[1]!]).toBeUndefined();
+    expect(store.getState().floors).toEqual([]);
+    store.getState().redo();
+    expect(store.getState().elementsById[ids[1]!]).toMatchObject({ floorId: floor!.id });
+  });
+
+  it('assigns sequential automatic names within an additions batch', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().saveToHistory('before-additions');
+
+    const ids = store.getState().addElements([
+      wallDraft('', 0),
+      wallDraft('', 0),
+    ]);
+    const names = ids.map((id) => store.getState().elementsById[id].name);
+    expect(names.every((name) => name.trim().length > 0)).toBe(true);
+    expect(new Set(names).size).toBe(2);
+  });
+
+  it('leaves elements, floors, and history untouched when a batch has a duplicate name', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().saveToHistory('before-additions');
+    const before = store.getState();
+
+    expect(() => store.getState().addElements([
+      wallDraft('Duplicate', 2),
+      wallDraft('Duplicate', 4),
+    ])).toThrow(/already exists/);
+
+    expect(store.getState().elementsById).toBe(before.elementsById);
+    expect(store.getState().elementIds).toBe(before.elementIds);
+    expect(store.getState().floors).toBe(before.floors);
+    expect(store.getState().floorIds).toBe(before.floorIds);
+    expect(store.getState().history).toBe(before.history);
   });
 });

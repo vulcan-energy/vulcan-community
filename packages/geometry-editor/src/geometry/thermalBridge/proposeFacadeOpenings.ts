@@ -656,6 +656,7 @@ export function annotateProposalsWithDedupe(
   return proposals.map((p) => {
     const jt = p.junctionCode;
     const roleOptions = new Set(junctionOptionsForFacadeEdgeRole(p.edgeRole));
+    if (p.edgeRole === 'roof_window_sill') roleOptions.add('R11');
     const mid = midpoint3(p.coordinates[0], p.coordinates[1]);
 
     let matched: ThermalBridgeLinear | undefined;
