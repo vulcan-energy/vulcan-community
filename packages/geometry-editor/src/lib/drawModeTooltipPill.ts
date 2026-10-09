@@ -108,6 +108,8 @@ export function getDrawModeTooltipText(
   drawSnapTargetRef: React.RefObject<{ x: number; y: number } | null>,
   drawElementType: ElementType,
   multiDrawModifierHeld: boolean,
+  /** Duct/pipe plan tool only: an L (Shift) preview is showing. */
+  elbowPreviewActive = false,
 ): string | null {
   if (drawMode === 'none') return null;
 
@@ -123,7 +125,9 @@ export function getDrawModeTooltipText(
     if (drawPoints.length === 0) return 'Place first point';
     if (drawPoints.length === 1) {
       if (drawMode === 'tb-plan-line') {
-        return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point', true);
+        const base = withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point', true);
+        if (drawElementType !== 'MechanicalVentilationDuctwork' && drawElementType !== 'WaterPipework') return base;
+        return `${base} · ${elbowPreviewActive ? 'F flip' : 'Shift L'}`;
       }
       return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point');
     }

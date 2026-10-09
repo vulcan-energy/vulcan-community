@@ -159,6 +159,8 @@ export interface DrawingPreviewProps {
   dormerDrawPreviewCutout: Array<{ x: number; y: number; z: number }> | null;
   drawingTooltip: { visible: boolean; text: string; position: { x: number; y: number } };
   segmentLengthPreview: { visible: boolean; text: string; position: { x: number; y: number } };
+  /** Elbow of a Shift L-route preview; the preview line runs through it. */
+  drawElbow?: { x: number; y: number } | null;
   canvasPalette: DrawingCanvasPalette;
 }
 
@@ -180,6 +182,7 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
   dormerDrawPreviewCutout,
   drawingTooltip,
   segmentLengthPreview,
+  drawElbow = null,
   canvasPalette,
 }) {
   const w2c = (p: { x: number; y: number }) => worldToCanvas(p, scale, panOffset, canvasCenter);
@@ -192,12 +195,7 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
       {(drawMode === 'line' || drawMode === 'tb-plan-line' || drawMode === 'tb-slope-line') && drawPoints.length === 1 && drawCursor && (
         <>
           <Line
-            points={[
-              w2c(drawPoints[0]).x,
-              w2c(drawPoints[0]).y,
-              w2c(drawCursor).x,
-              w2c(drawCursor).y,
-            ]}
+            points={[drawPoints[0], ...(drawElbow ? [drawElbow] : []), drawCursor].flatMap((p) => [w2c(p).x, w2c(p).y])}
             stroke={drawAngleSnapped ? palette.snap : palette.guide}
             strokeWidth={2}
             dash={[4, 4]}
@@ -281,6 +279,7 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
           drawSnapTargetRef,
           drawElementType,
           multiDrawModifierHeld,
+          !!drawElbow,
         );
         const canvasPos = w2c(placementPoint);
         const tooltipWidth = tooltipText ? getDrawModeTooltipPillWidth(tooltipText) : 0;

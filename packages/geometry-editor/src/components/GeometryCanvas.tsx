@@ -89,6 +89,9 @@ import {
   projectSegmentOntoParent as utilProjectSegmentOntoParent,
   resolveOpeningSegmentParentFromCache as utilResolveOpeningSegmentParentFromCache,
   resolveDrawSnapPoint as utilResolveDrawSnapPoint,
+  planOrthogonalElbow,
+  planServiceLineTeeSplits,
+  serviceNetworkSegmentFilter,
   isLineWallElementForSnap,
   type GeometrySnapCache,
   type SnapCornerTarget,
@@ -240,7 +243,7 @@ import {
   spaceLabelPlanAreaM2,
 } from '../lib/spaceLabelDerivation';
 import { getSpaceLabelBaseNameForRoomType } from '../lib/spaceLabelNaming';
-import type { ContextShading, SpaceLabel, Element, ElementType, Floor } from '../geometry/types';
+import type { ContextShading, SpaceLabel, Element, ElementDraft, ElementType, Floor } from '../geometry/types';
 import { geometryPerf } from '../lib/geometryPerf';
 import {
   getDevelopmentContextStems,
@@ -1076,13 +1079,28 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     uploadOverlayEvidence,
   } = canvasEvidenceContribution.useEvidence(documentFileName);
 
-  const { drawMode, setDrawMode, drawElementType, setDrawElementType, drawPoints, setDrawPoints, drawCursor, setDrawCursor, setDrawAngleSnapped, drawSnapTargetRef, roomWalls, setRoomWalls, roomWallElements, setRoomWallElements, orthogonalRoomStart, setOrthogonalRoomStart, orthogonalRoomEnd, setOrthogonalRoomEnd, orthogonalRoomEditing, setOrthogonalRoomEditing, pendingHostElementCreationRef, drawPreset, setDrawPreset, drawPresetData, setDrawPresetData, resetDrawing } = useDrawingMode();
+  const { drawMode, setDrawMode, drawElementType, setDrawElementType: setDrawElementTypeState, drawPoints, setDrawPoints, drawCursor, setDrawCursor, setDrawAngleSnapped, drawSnapTargetRef, roomWalls, setRoomWalls, roomWallElements, setRoomWallElements, orthogonalRoomStart, setOrthogonalRoomStart, orthogonalRoomEnd, setOrthogonalRoomEnd, orthogonalRoomEditing, setOrthogonalRoomEditing, pendingHostElementCreationRef, drawPreset, setDrawPreset, drawPresetData, setDrawPresetData, resetDrawing } = useDrawingMode();
   const [drawMvhrDuctRole, setDrawMvhrDuctRole] = useState<MvhrDuctRole>('supply');
   const [drawMvhrTerminalRole, setDrawMvhrTerminalRole] = useState<MvhrTerminalRole>('intake');
-  const [drawMvhrParentName, setDrawMvhrParentName] = useKeyedState<string | null>(
-    drawMode === 'none' ? 'inactive' : 'active',
-    null,
+  // The MVHR manager sets the unit in the same batch that starts the draw, so it clears when the
+  // draw session ends (finish, cancel) rather than keying on drawMode, which dropped it at the start.
+  // The toolbar type pick clears it too.
+  const [drawMvhrParent, setDrawMvhrParent] = useState<{ name: string | null; drawMode: typeof drawMode }>(
+    () => ({ name: null, drawMode }),
   );
+  if (drawMvhrParent.drawMode !== drawMode) {
+    setDrawMvhrParent({ name: drawMode === 'none' ? null : drawMvhrParent.name, drawMode });
+  }
+  const drawMvhrParentName = drawMvhrParent.name;
+  const setDrawMvhrParentName = useCallback(
+    (name: string | null) => setDrawMvhrParent((current) => ({ ...current, name })),
+    [],
+  );
+  // Every element-type change drops the unit; the MVHR manager sets it again after its type pick.
+  const setDrawElementType = useCallback((type: ElementType) => {
+    setDrawMvhrParentName(null);
+    setDrawElementTypeState(type);
+  }, [setDrawElementTypeState, setDrawMvhrParentName]);
   const drawMvhrRolePropsRef = useRef<Record<string, unknown>>({});
   const themeId = useThemeStore((s) => s.themeId);
   const customTheme = useThemeStore((s) => s.customTheme);
@@ -1185,6 +1203,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const [isCanvasPanning, setIsCanvasPanning] = useState(false);
   const orthogonalModifierHeldRef = useRef(false);
   const multiDrawModifierHeldRef = useRef(false);
+  /** F flips the elbow of a Shift L-route preview; reset per segment. */
+  const elbowFlippedRef = useRef(false);
   const panModifierHeldRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<any>(null);
@@ -1459,7 +1479,23 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           event.preventDefault();
           setDrawMode(key === 'v' ? 'tb-vertical-line' : key === 's' ? 'tb-slope-line' : 'tb-plan-line');
           setSegmentLengthPreviewRef.current(EMPTY_SEGMENT_LENGTH_PREVIEW);
+          drawingPreviewSignal.set({ drawElbow: null });
+          elbowFlippedRef.current = false;
           setActiveSegmentEditor(null);
+          return;
+        }
+        const preview = drawingPreviewSignal.getSnapshot();
+        const start = drawPoints[0];
+        if (event.code === 'KeyF' && !event.ctrlKey && !event.metaKey && preview.drawElbow && start) {
+          event.preventDefault();
+          elbowFlippedRef.current = !elbowFlippedRef.current;
+          // The other corner of the start/end box.
+          drawingPreviewSignal.set({
+            drawElbow: {
+              x: start.x + (preview.drawCursor?.x ?? 0) - preview.drawElbow.x,
+              y: start.y + (preview.drawCursor?.y ?? 0) - preview.drawElbow.y,
+            },
+          });
           return;
         }
       }
@@ -1499,7 +1535,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', clearHeldModifiers);
     };
-  }, [drawElementType, drawMode, setActiveSegmentEditor, setDrawMode]);
+  }, [drawElementType, drawMode, drawPoints, drawingPreviewSignal, setActiveSegmentEditor, setDrawMode]);
 
   const endCanvasPanGesture = useCallback(() => {
     const session = activePanGestureRef.current?.session ?? null;
@@ -1643,10 +1679,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   const handleDrawElementTypeFromToolbar = useCallback((type: ElementType) => {
     drawMvhrRolePropsRef.current = {};
-    setDrawMvhrParentName(null);
     setActiveServiceLineElementId(null);
     setDrawElementType(type);
-  }, [setActiveServiceLineElementId, setDrawElementType, setDrawMvhrParentName]);
+  }, [setActiveServiceLineElementId, setDrawElementType]);
 
   const handleStartMvhrDuctDraw = useCallback(({ role, parentName }: { role: MvhrDuctRole; parentName: string }) => {
     resetMvhrDrawDraft();
@@ -2430,11 +2465,26 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   const overlayFileInputRef = useRef<HTMLInputElement>(null);
 
+  const isDuctOrPipePlanDraw = drawMode === 'tb-plan-line' && isDuctOrPipeElementType(drawElementType);
+  // While drawing a duct or pipe, its network's segments are edge targets too, so a branch can end mid-leg.
+  const drawNetworkSegmentFilter = useMemo(
+    () =>
+      isDuctOrPipePlanDraw
+        ? serviceNetworkSegmentFilter({ type: drawElementType, pipework_type: 'primary', ...drawPresetProps, ...drawMvhrRoleProps })
+        : undefined,
+    [drawElementType, drawMvhrRoleProps, drawPresetProps, isDuctOrPipePlanDraw],
+  );
+  // Only segments on the active canvas floor, like the other plan snap targets.
+  const drawNetworkEdgeFilter = useMemo(
+    () => drawNetworkSegmentFilter && ((el: Element) => drawNetworkSegmentFilter(el) && isElementOnActiveCanvasFloor(el, currentFloorZ, floors)),
+    [currentFloorZ, drawNetworkSegmentFilter, floors],
+  );
+
   const activeGeometrySnapCache = useMemo(() => {
     return geometryPerf.measure('GeometryCanvas.activeGeometrySnapCache', () =>
-      buildGeometrySnapCache(elementsById as any),
+      buildGeometrySnapCache(elementsById as Record<string, Element>, drawNetworkEdgeFilter),
     );
-  }, [elementsById]);
+  }, [drawNetworkEdgeFilter, elementsById]);
 
   const developmentContextSnapCache = useMemo(() => {
     return geometryPerf.measure('GeometryCanvas.developmentContextSnapCache', () =>
@@ -3673,6 +3723,31 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return resolveAxisLockedPoint(moving, fixed);
   }, [resolveAxisLockedPoint]);
 
+  // One draw-snap resolution for move and click. Shift on the duct/pipe plan tool routes an
+  // off-axis end as an L (`elbow`); on-axis it keeps the ortho lock.
+  const resolveDrawSnap = useCallback((
+    mouseWorld: { x: number; y: number },
+    lastPoint: { x: number; y: number } | null,
+  ) => {
+    const pd = getProjectDefaults(geometryStore);
+    const params = {
+      mouseWorld,
+      lastPoint,
+      elementsById: elementsById as Record<string, Element>,
+      snapCache: spaceLabelSnapCache,
+      excludeElementId: '__draw__',
+      snapTol: pd.snapTol,
+      orthogonalModifierHeld: orthogonalModifierHeldRef.current,
+      angleTolDeg: pd.angleTol,
+    };
+    if (lastPoint && params.orthogonalModifierHeld && isDuctOrPipePlanDraw) {
+      const free = utilResolveDrawSnapPoint({ ...params, orthogonalModifierHeld: false });
+      const elbow = planOrthogonalElbow(lastPoint, free.point, pd.angleTol, elbowFlippedRef.current);
+      if (elbow) return { ...free, elbow };
+    }
+    return { ...utilResolveDrawSnapPoint(params), elbow: null };
+  }, [elementsById, geometryStore, isDuctOrPipePlanDraw, spaceLabelSnapCache]);
+
   // Handle mouse move: update draw preview cursor and polygon split hover
   const handleMouseMove = useCallback((e: any) => {
     // For draw preview: track cursor in world coords
@@ -3683,22 +3758,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     if (drawMode !== 'none') {
       beginDrawingPreviewInteraction();
       const activePoints = drawMode === 'room' ? roomWalls : drawPoints;
-      const pd = getProjectDefaults(geometryStore);
       const lastPoint =
         activePoints.length > 0 ? activePoints[activePoints.length - 1] : null;
-      const snapRes = utilResolveDrawSnapPoint({
-        mouseWorld: mouseWorld as { x: number; y: number },
-        lastPoint,
-        elementsById: elementsById as any,
-        snapCache: spaceLabelSnapCache,
-        excludeElementId: '__draw__',
-        snapTol: pd.snapTol,
-        orthogonalModifierHeld: orthogonalModifierHeldRef.current,
-        angleTolDeg: pd.angleTol,
-      });
+      const snapRes = resolveDrawSnap(mouseWorld as { x: number; y: number }, lastPoint);
       const chosen = snapRes.point;
       const nextDrawAngleSnapped =
-        snapRes.snap !== undefined || snapRes.orthogonalAxisLock;
+        snapRes.snap !== undefined || snapRes.orthogonalAxisLock || !!snapRes.elbow;
       let nextSegmentLengthPreview: DrawingPreviewSegment = EMPTY_SEGMENT_LENGTH_PREVIEW;
       drawSnapTargetRef.current = chosen as any;
 
@@ -3711,7 +3776,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               (parseEditorDecimal(serviceLineDraftEndZ) ?? serviceLineDrawBaseZ + 1) -
               (parseEditorDecimal(serviceLineDraftStartZ) ?? serviceLineDrawBaseZ),
             )
-          : Math.hypot(previewPoint.x - lastPoint.x, previewPoint.y - lastPoint.y);
+          : snapRes.elbow
+            ? Math.abs(previewPoint.x - lastPoint.x) + Math.abs(previewPoint.y - lastPoint.y)
+            : Math.hypot(previewPoint.x - lastPoint.x, previewPoint.y - lastPoint.y);
         const midpointCanvas = worldToCanvas(
           {
             x: (lastPoint.x + previewPoint.x) / 2,
@@ -3732,6 +3799,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         drawCursor: chosen as any,
         drawAngleSnapped: nextDrawAngleSnapped,
         segmentLengthPreview: nextSegmentLengthPreview,
+        drawElbow: snapRes.elbow,
       });
 
       if (drawMode === 'dormer') {
@@ -3790,7 +3858,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     } else {
       setSpaceLabelHoverPointIfChanged(null);
     }
-  }, [drawMode, drawPoints, roomWalls, elementsById, geometryStore, spaceLabelSnapCache, selection, scale, panOffset, canvasCenter, spaceLabellerOpen, spaceLabellerSelectedLabelId, spaceLabelsById, setSpaceLabelHoverPointIfChanged, getStageViewportPointer, drawSnapTargetRef, setDrawAngleSnapped, setDrawCursor, setDrawingTooltip, drawingPreviewSignal, beginDrawingPreviewInteraction, endDrawingPreviewInteraction, serviceLineDraftEndZ, serviceLineDraftStartZ, serviceLineDrawBaseZ]);
+  }, [drawMode, drawPoints, roomWalls, elementsById, geometryStore, selection, scale, panOffset, canvasCenter, spaceLabellerOpen, spaceLabellerSelectedLabelId, spaceLabelsById, setSpaceLabelHoverPointIfChanged, getStageViewportPointer, drawSnapTargetRef, setDrawAngleSnapped, setDrawCursor, setDrawingTooltip, drawingPreviewSignal, beginDrawingPreviewInteraction, endDrawingPreviewInteraction, serviceLineDraftEndZ, serviceLineDraftStartZ, serviceLineDrawBaseZ, resolveDrawSnap]);
 
   // Memoize centerOnElement function to avoid recreating on every render
   const centerOnElement = useCallback((el: Element) => {
@@ -5181,22 +5249,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
     // Always process draw-mode clicks, regardless of target (shapes may stop propagation)
     if (drawMode !== 'none') {
+      // A move still queued for the next frame belongs to the pre-click draft; dropping it keeps a
+      // committed segment's length label from reappearing.
+      latestMouseEventRef.current = null;
       // Get pointer position from stage (with snap-to-vertex for draw clicks)
       const mouseWorldRaw = getMouseWorld(stage, scale, panOffset, canvasCenter);
       const activeSnapPoints = drawMode === 'room' ? roomWalls : drawPoints;
       const lastSnapPoint =
         activeSnapPoints.length > 0 ? activeSnapPoints[activeSnapPoints.length - 1] : null;
-      const pdSnap = getProjectDefaults(geometryStore);
-      const drawSnapClick = utilResolveDrawSnapPoint({
-        mouseWorld: mouseWorldRaw,
-        lastPoint: lastSnapPoint,
-        elementsById: elementsById as any,
-        snapCache: spaceLabelSnapCache,
-        excludeElementId: '__draw__',
-        snapTol: pdSnap.snapTol,
-        orthogonalModifierHeld: orthogonalModifierHeldRef.current,
-        angleTolDeg: pdSnap.angleTol,
-      });
+      const drawSnapClick = resolveDrawSnap(mouseWorldRaw, lastSnapPoint);
       const mouseWorld = drawSnapClick.point;
 
         if (drawMode === 'dormer') {
@@ -5446,15 +5507,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             serviceLineDraftAnchorKeyRef.current = null;
             setServiceLineDraftStartZ(formatServiceLineEditorNumber(verticalEndPoint?.z ?? draftEndZ));
             setServiceLineDraftEndZ(formatServiceLineEditorNumber((verticalEndPoint?.z ?? draftEndZ) + 1));
+            geometryStore.getState().saveToHistory('drawServiceLine');
             return;
           }
           if (drawPoints.length === 0) {
             // First point (mouseWorld already resolved via resolveDrawSnapPoint at click)
             setDrawPoints([{ x: mouseWorld.x, y: mouseWorld.y }]);
+            elbowFlippedRef.current = false;
           } else {
             // Second point - create line
             const targetZoneId = resolveDrawTargetZoneId();
-            const { elementId, hostPrefill } = beginDrawnElement(targetZoneId, drawElementType);
             const elementZ = currentFloorZ;
             const lastPoint = drawPoints[0];
             const endPoint = { x: mouseWorld.x, y: mouseWorld.y };
@@ -5489,8 +5551,34 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     { x: lastPoint.x, y: lastPoint.y, z: elementZ },
                     { x: endPoint.x, y: endPoint.y, z: elementZ },
                   ];
+            // Duct/pipe plan tool: a Shift L commits two legs, and an end landing mid-way along a
+            // same-network segment splits it at the tee. Both land as one history step.
+            const drawnLegs = drawSnapClick.elbow
+              ? [
+                  createServiceLineCoordinatesWithEndpointZ(lastPoint, drawSnapClick.elbow, draftStartZ, draftEndZ, serviceLineMode),
+                  createServiceLineCoordinatesWithEndpointZ(drawSnapClick.elbow, endPoint, draftStartZ, draftEndZ, serviceLineMode),
+                ]
+              : [lineCoordinates];
+            const placedCoordinates = drawnLegs[drawnLegs.length - 1]!;
+            const teeSplits = drawNetworkEdgeFilter
+              ? planServiceLineTeeSplits(elementsById as Record<string, Element>, drawNetworkEdgeFilter, [
+                  drawnLegs[0]![0]!,
+                  placedCoordinates[1]!,
+                ])
+              : [];
+            // A teeing end moves onto the exact split point: the branch and both pieces of the main meet there.
+            for (const split of teeSplits) {
+              if (split.endIndex === 0) drawnLegs[0]![0] = { ...split.point };
+              else placedCoordinates[1] = { ...split.point };
+            }
+            // The first L leg takes the same create path, first so it names first; a pending host
+            // prefill applies to both legs.
+            const firstLeg = drawnLegs.length > 1 ? beginDrawnElement(targetZoneId, drawElementType) : null;
+            const drawn = beginDrawnElement(targetZoneId, drawElementType);
+            const elementId = drawn.elementId;
+            const hostPrefill = firstLeg?.hostPrefill ?? drawn.hostPrefill;
             const serviceLineLengthPatch = isServiceLineElementType(drawElementType)
-              ? { length: getServiceLineLengthFromCoordinates(lineCoordinates), isPlaceholder: false }
+              ? { length: getServiceLineLengthFromCoordinates(placedCoordinates), isPlaceholder: false }
               : {};
             const openingParentPatch =
               drawElementType === 'BuildingElementTransparent' && !isServiceLineElementType(drawElementType)
@@ -5503,12 +5591,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                   )
                 : null;
 
-            updateElement(elementId, {
+            const linePatch: Partial<Element> = {
               ...drawPresetProps,
               ...drawMvhrRolePropsRef.current,
               ...(getDefaultLinePitchPatch(drawElementType, drawPresetProps) ?? {}),
               ...(drawFloorId ? { floorId: drawFloorId } : {}),
-              coordinates: openingParentPatch?.coordinates ?? lineCoordinates,
+              coordinates: openingParentPatch?.coordinates ?? placedCoordinates,
               ...serviceLineLengthPatch,
               ...(openingParentPatch ? { parent_element: openingParentPatch.parentName } : {}),
               ...(hostPrefill || {}),
@@ -5516,7 +5604,35 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
               // If WetEmitter drawn as a line, default to radiator subcategory
               ...(drawElementType === 'WetEmitter' ? { subcategory: 'radiator' as any } : {})
-            }, true);
+            };
+            updateElement(elementId, linePatch, true);
+            if (firstLeg) {
+              updateElement(firstLeg.elementId, {
+                ...linePatch,
+                coordinates: drawnLegs[0],
+                length: getServiceLineLengthFromCoordinates(drawnLegs[0]),
+              } as Partial<Element>, true);
+            }
+            const tailDrafts = teeSplits.flatMap((split) => {
+              if (!split.head || !split.tail) return [];
+              updateElement(split.elementId, {
+                coordinates: split.head,
+                length: getServiceLineLengthFromCoordinates(split.head),
+              } as Partial<Element>, true);
+              return [{
+                ...elementsById[split.elementId],
+                name: '',
+                coordinates: split.tail,
+                length: getServiceLineLengthFromCoordinates(split.tail),
+              }];
+            });
+            // One history step per service-line commit (legs and any split): addElements saves it
+            // with the tails.
+            if (tailDrafts.length > 0) {
+              geometryStore.getState().addElements(tailDrafts as ElementDraft[]);
+            } else if (isServiceLineElementType(drawElementType)) {
+              geometryStore.getState().saveToHistory('drawServiceLine');
+            }
 
             // Auto-switch to the floor where the element was created
             setCurrentFloorZ(elementZ);
@@ -5524,7 +5640,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               type: drawElementType === 'WaterPipework' || drawElementType === 'MechanicalVentilationDuctwork' ? 'global' : 'element',
               id: elementId,
             });
-            const placedEndPoint = lineCoordinates[1] ?? { x: endPoint.x, y: endPoint.y, z: draftEndZ };
+            const placedEndPoint = placedCoordinates[1] ?? { x: endPoint.x, y: endPoint.y, z: draftEndZ };
+            elbowFlippedRef.current = false;
+            drawingPreviewSignal.set({ drawElbow: null });
             setDrawPoints(
               multiDrawActive
                 ? [{ x: placedEndPoint.x, y: placedEndPoint.y }]

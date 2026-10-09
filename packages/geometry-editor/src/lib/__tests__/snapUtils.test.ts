@@ -3,6 +3,8 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
+import { createGeometryStore } from '../../stores/geometryStore';
+import { getServiceLineLengthFromCoordinates as lengthOf } from '../serviceLineDrawModes';
 import {
   applyAngleSnapIfClose,
   buildGeometrySnapCache,
@@ -13,8 +15,11 @@ import {
   resolveDrawSnapPoint,
   getExactSnappedVertices,
   getWallSupportedSnappedVertices,
+  planOrthogonalElbow,
   planServiceLineEndpointWelds,
+  planServiceLineTeeSplits,
   pointsConnected,
+  serviceNetworkSegmentFilter,
   snapCornerToOtherCornersFromCache,
 } from '../snapUtils';
 
@@ -35,6 +40,93 @@ describe('constrainPointOrthogonally', () => {
       point: { x: 1, y: 7 },
       snapped: true,
     });
+  });
+});
+
+describe('planOrthogonalElbow', () => {
+  it('routes the larger move first, flips, and stays straight on-axis', () => {
+    const start = { x: 0, y: 0 };
+    expect(planOrthogonalElbow(start, { x: 4, y: 1 }, 2, false)).toEqual({ x: 4, y: 0 });
+    expect(planOrthogonalElbow(start, { x: 4, y: 1 }, 2, true)).toEqual({ x: 0, y: 1 });
+    expect(planOrthogonalElbow(start, { x: 1, y: -3 }, 2, false)).toEqual({ x: 0, y: -3 });
+    expect(planOrthogonalElbow(start, { x: 4, y: 0.05 }, 2, false)).toBeNull();
+  });
+});
+
+describe('planServiceLineTeeSplits', () => {
+  const line = (id: string, z0: number, z1: number) =>
+    ({ id, type: 'WaterPipework', pipework_type: 'primary', coordinates: [{ x: 0, y: 0, z: z0 }, { x: 4, y: 0, z: z1 }] }) as unknown as Element;
+  const anyPipe = (el: Element) => el.type === 'WaterPipework';
+
+  it('tees in plan at the segment z there, and lands near an end instead of leaving a stub', () => {
+    const byId = { sloped: line('sloped', 2, 3) };
+    const [tee] = planServiceLineTeeSplits(byId, anyPipe, [{ x: 1, y: 0.004, z: 0.5 }]);
+    expect(tee!.point).toEqual({ x: 1, y: 0, z: 2.25 });
+    expect([tee!.head![1], tee!.tail![0]]).toEqual([tee!.point, tee!.point]);
+    const [nearEnd] = planServiceLineTeeSplits(byId, anyPipe, [{ x: 3.97, y: 0, z: 0.5 }]);
+    expect(nearEnd).toEqual({ endIndex: 0, elementId: 'sloped', point: { x: 4, y: 0, z: 3 } });
+  });
+
+  it('keeps each network rule', () => {
+    const el = (props: Record<string, unknown>) =>
+      ({ type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MVHR', coordinates: [{}, {}], ...props }) as unknown as Element;
+    const isDuct = serviceNetworkSegmentFilter({ type: 'MechanicalVentilationDuctwork', parent_element: 'MVHR', duct_type: 'supply' })!;
+    const isPipe = serviceNetworkSegmentFilter({ type: 'WaterPipework', pipework_type: 'primary' })!;
+    expect(isDuct(el({}))).toBe(true);
+    expect(isDuct(el({ duct_type: 'extract' }))).toBe(false);
+    expect(isDuct(el({ parent_element: 'Other' }))).toBe(false);
+    expect(isDuct(el({ parent_element: null }))).toBe(false);
+    expect(isDuct(el({ type: 'WaterPipework', pipework_type: 'primary' }))).toBe(false);
+    expect(isDuct(el({ type: 'BuildingElementOpaque' }))).toBe(false);
+    expect(isPipe(el({ type: 'WaterPipework', pipework_type: 'primary' }))).toBe(true);
+    expect(isPipe(el({ type: 'WaterPipework', pipework_type: 'distribution' }))).toBe(false);
+    expect(isPipe(el({}))).toBe(false);
+    expect(serviceNetworkSegmentFilter({ type: 'MechanicalVentilationDuctwork', duct_type: 'supply' })).toBeUndefined();
+  });
+
+  it('splits a same-network duct at a mid-leg tee, applied with the branch in one history step', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const duct = (name: string, duct_type: 'supply' | 'extract') => ({
+      type: 'MechanicalVentilationDuctwork' as const,
+      name,
+      duct_type,
+      parent_element: 'MVHR',
+      length: 4,
+      coordinates: [{ x: 0, y: 0, z: 2 }, { x: 4, y: 3, z: 2 }],
+    });
+    const [mainId] = store.getState().addElements([duct('Main', 'supply'), duct('Other role', 'extract')]);
+    const isNetwork = serviceNetworkSegmentFilter({
+      type: 'MechanicalVentilationDuctwork',
+      parent_element: 'MVHR',
+      duct_type: 'supply',
+    })!;
+    const before = store.getState();
+    expect(planServiceLineTeeSplits(before.elementsById, isNetwork, [{ x: 3.997, y: 2.998, z: 2 }])).toEqual([]);
+    // A drawn end on the 0.01 m grid, a few mm off the diagonal main.
+    const splits = planServiceLineTeeSplits(before.elementsById, isNetwork, [{ x: 0, y: 3, z: 2 }, { x: 1.6, y: 1.21, z: 2 }]);
+    expect(splits.map((split) => [split.endIndex, split.elementId])).toEqual([[1, mainId]]);
+    const [split] = splits;
+    const { point, head, tail: tailCoords } = split!;
+    // Exact projection: both pieces stay colinear with the main and meet the branch end.
+    expect(head[1]).toEqual(point);
+    expect(tailCoords[0]).toEqual(point);
+    expect(point.x * 3 - point.y * 4).toBeCloseTo(0, 12);
+
+    // As the duct draw click applies it: the head in place, then the branch and the tail together.
+    before.updateElement(split!.elementId, { coordinates: head, length: lengthOf(head) }, true);
+    const [branchId, tailId] = before.addElements([
+      { ...duct('', 'supply'), length: 1, coordinates: [{ ...point }, { x: point.x, y: point.y + 1, z: 2 }] },
+      { ...before.elementsById[mainId!]!, name: '', coordinates: tailCoords, length: lengthOf(tailCoords) } as never,
+    ]);
+
+    const after = store.getState();
+    expect(after.history).toHaveLength(before.history.length + 1);
+    const main = after.elementsById[mainId!]! as Element & { length: number };
+    const tail = after.elementsById[tailId!]! as Element & { length: number; duct_type: string };
+    expect([main.name, main.length, main.coordinates[1]]).toEqual(['Main', 2.01, point]);
+    expect(after.elementsById[branchId!]!.coordinates[0]).toEqual(point);
+    expect(tail.name).not.toBe('Main');
+    expect([tail.length, tail.duct_type, tail.coordinates]).toEqual([2.99, 'supply', tailCoords]);
   });
 });
 
