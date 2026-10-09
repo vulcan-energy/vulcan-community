@@ -14,7 +14,7 @@ import { getElementShape, getElementColor, worldToCanvas, canvasToWorld, compute
 import { findOverlappingElements, getOverlapCenter } from '../lib/overlapDetection';
 import { readRootCssVar } from '../lib/cssVars';
 import { targetValidationIssues, withTargetIssues } from '../lib/buildErrorDisplay';
-import { getSmartLabelDisplayName, getSmartLabelPillTexts, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, getSmartLabelCandidates, layoutCanvasAnnotations, placedAnnotationRect, resolveAnnotationPaint, type CanvasAnnotation, type RectBounds } from '../lib/labelUtils';
+import { getSmartLabelDisplayName, getSmartLabelPillTexts, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, calculateElementBounds, createAnnotationLayoutState, getSmartLabelCandidates, layoutCanvasAnnotations, placedAnnotationRect, resolveAnnotationPaint, type CanvasAnnotation, type RectBounds } from '../lib/labelUtils';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { FilenameBar, type FilenameBarActionContext } from './FilenameBar';
 import type {
@@ -165,6 +165,7 @@ import {
   getActiveCanvasInteraction,
   isCanvasInteractionActive,
   readCanvasInteractionSession,
+  type CanvasInteractionKind,
   type CanvasInteractionSession,
   writeCanvasInteractionSession,
 } from './canvas/canvasInteractionSession';
@@ -1028,6 +1029,20 @@ const renderCanvasMeasurementPill = (
   );
 };
 
+/** Interactions that move geometry live, without a React render per frame: layout reuses its last pass. */
+const LIVE_GEOMETRY_INTERACTION_KINDS: readonly CanvasInteractionKind[] = [
+  'selected-shape-drag',
+  'selected-point-drag',
+  'point-element-drag',
+  'vertex-drag',
+  'multi-select-drag',
+  'space-label-vertex-drag',
+  'guide-overlay-drag',
+  'orientation-arrow-drag',
+  'slope-rotate-drag',
+  'line-rotate-drag',
+];
+
 function renderUnsnappedVertexChip(rect: RectBounds, text: string, palette: CanvasInteractionPalette) {
   return (
     <Group listening={false}>
@@ -1255,6 +1270,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const [hoverPoint, setHoverPoint] = useState<{x: number, y: number, insertIndex: number} | null>(null);
   const [spaceLabelHoverPoint, setSpaceLabelHoverPoint] = useState<{x: number, y: number, insertIndex: number} | null>(null);
   const spaceLabelHoverPointRef = useRef<{x: number, y: number, insertIndex: number} | null>(null);
+  // This canvas's annotation layout memory (last pass, sticky slots); mutated by layoutCanvasAnnotations.
+  const [annotationLayoutState] = useState(createAnnotationLayoutState);
   const snapIndicatorsRef = useRef<{ nodes: React.ReactElement[]; dots: RectBounds[] }>({ nodes: [], dots: [] });
   const [renderCauses] = useState(() => new Set<string>());
   const markNextGeometryCanvasRender = useCallback((cause: string) => {
@@ -6141,6 +6158,24 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }),
   ), [rendererHighlightedIds, elementsById, effectiveFloors]);
 
+  // MVHR boxes a selected element's vertex handle sits on: drawn inline by the terminal's renderer,
+  // which paints before the (raised) selected element, so the handle stays visible and on top.
+  const inlineMvhrBadgeIds = useMemo(() => {
+    const handles = elementCanvasData.flatMap(({ element, canvasCoords }) =>
+      rendererHighlightedIds.has(element.id) && element.type !== 'MechanicalVentilationTerminal' ? canvasCoords : []);
+    const ids = new Set<string>();
+    if (handles.length === 0) return ids;
+    for (const { element, canvasCoords } of elementCanvasData) {
+      if (element.type !== 'MechanicalVentilationTerminal' || !canvasCoords[0]) continue;
+      const { width, height } = getMvhrTerminalBadgeSize(element.terminal_type === 'exhaust' ? 'OUT' : 'IN');
+      const centre = canvasCoords[0];
+      if (handles.some((p) => Math.abs(p.x - centre.x) <= width / 2 + 8 && Math.abs(p.y - centre.y) <= height / 2 + 8)) {
+        ids.add(element.id);
+      }
+    }
+    return ids;
+  }, [elementCanvasData, rendererHighlightedIds]);
+
   const elementPreviewOpacity = useCallback((element: Element) => (
     !thermalBridgePreview.active || (thermalBridgePreview.kind === 'duct'
       ? element.type === 'MechanicalVentilationDuctwork' || element.type === 'MechanicalVentilationTerminal'
@@ -6191,12 +6226,14 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           previewOpacity={elementPreviewOpacity(element)}
           spaceLabellerSuppressFabricInteraction={spaceLabellerOpen}
           snappedVertices={selectedVertexGuidance.get(element.id)?.snapped}
+          mvhrBadgeInline={inlineMvhrBadgeIds.has(element.id)}
         />
       );
     });
   }, [
     rendererHighlightedIds,
     selectedVertexGuidance,
+    inlineMvhrBadgeIds,
     elementPreviewOpacity,
     selection,
     scale,
@@ -6360,7 +6397,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
     // MVHR terminal IN/OUT boxes; named so a point drag carries them (elementDragPreview).
     for (const { element, canvasCoords } of elementCanvasData) {
-      if (element.type !== 'MechanicalVentilationTerminal' || !canvasCoords[0]) continue;
+      if (element.type !== 'MechanicalVentilationTerminal' || !canvasCoords[0] || inlineMvhrBadgeIds.has(element.id)) continue;
       if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors) || isElementHiddenOnView(element)) continue;
       const isSelected = rendererHighlightedIds.has(element.id);
       const label = element.terminal_type === 'exhaust' ? 'OUT' : 'IN';
@@ -6590,10 +6627,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
       if (labelVisibility === 'selected' && !isHighlighted && !isHovered) continue;
       const candidates = getSmartLabelCandidates(element, canvasCoords, isHighlighted, showLineDimensions);
+      const bounds = calculateElementBounds(canvasCoords);
       items.push({
         key: `label-${element.id}`,
         rect: candidates[0],
         candidates,
+        ownerBounds: { x: bounds.minX, y: bounds.minY, width: bounds.maxX - bounds.minX, height: bounds.maxY - bounds.minY },
         priority: isHighlighted ? ANNOTATION_PRIORITY.selected : ANNOTATION_PRIORITY.label,
         movable: true,
         render: (rect) => renderSmartLabel(
@@ -6630,7 +6669,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     if (selectedPointDragTarget) pushObstacle('drag-grip-point', project(selectedPointDragTarget.coord), 18);
     snapIndicators.dots.forEach((rect, index) => items.push({ key: `snap-dot-${index}`, rect, priority: ANNOTATION_PRIORITY.label, movable: false }));
     for (const { element, canvasCoords } of elementCanvasData) {
-      if (canvasCoords.length !== 1 || element.type === 'MechanicalVentilationTerminal') continue;
+      if (canvasCoords.length !== 1 || (element.type === 'MechanicalVentilationTerminal' && !inlineMvhrBadgeIds.has(element.id))) continue;
       if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors) || isElementHiddenOnView(element)) continue;
       pushObstacle(`point-icon-${element.id}`, canvasCoords[0], rendererHighlightedIds.has(element.id) ? 11 : 9);
     }
@@ -6639,11 +6678,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   // Pan and zoom commit once they settle, so this re-places items at each pan end; a drag reuses the last pass.
   const annotationPlacements = geometryPerf.measure('GeometryCanvas.annotationLayout', () => layoutCanvasAnnotations(
+    annotationLayoutState,
     canvasAnnotations,
     stageSize,
-    isCanvasInteractionActive('selected-shape-drag') ||
-      isCanvasInteractionActive('selected-point-drag') ||
-      isCanvasInteractionActive('vertex-drag'),
+    LIVE_GEOMETRY_INTERACTION_KINDS.some((kind) => isCanvasInteractionActive(kind)),
   ));
 
   // A distance editor opens centred where the clicked pill is drawn, nudged or not.
@@ -7086,6 +7124,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               return <>{nodes}</>;
             })()}
 
+            {/* Chips, badges, pills and labels: one group above all geometry. The selected element's
+                grips (group centre, point and shape drag handles) render after it, so they stay on top. */}
+            <Group name="canvas-annotations">
+              {resolveAnnotationPaint(
+                canvasAnnotations,
+                annotationPlacements,
+                elementHover ? `label-${elementHover}` : null,
+              ).map(({ item, rect }) => <React.Fragment key={item.key}>{item.render?.(rect)}</React.Fragment>)}
+            </Group>
             {/* Render hover point for ground element splitting */}
             {hoverPoint && (
               <Circle
@@ -7809,14 +7856,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               );
             })()}
 
-            {/* Chips, badges, pills and labels: one group above all geometry and handles, below hover pills. */}
-            <Group name="canvas-annotations">
-              {resolveAnnotationPaint(
-                canvasAnnotations,
-                annotationPlacements,
-                elementHover ? `label-${elementHover}` : null,
-              ).map(({ item, rect }) => <React.Fragment key={item.key}>{item.render?.(rect)}</React.Fragment>)}
-            </Group>
           </Layer>
 
           <CanvasLivePreviewLayer>

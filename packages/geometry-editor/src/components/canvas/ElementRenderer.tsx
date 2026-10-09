@@ -620,6 +620,8 @@ export interface ElementRendererProps {
   globalOrientationOffset?: number;
   /** Selected element only: vertex indices snapped to other geometry (handle colour). Memoised by the canvas. */
   snappedVertices?: ReadonlySet<number> | null;
+  /** MVHR terminal under a selected element's handle: draw its IN/OUT box here, below those handles. */
+  mvhrBadgeInline?: boolean;
 }
 
 function getDormerCutoutPolygonsForHost(
@@ -678,6 +680,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   canvasCoords: canvasCoordsProp,
   globalOrientationOffset,
   snappedVertices,
+  mvhrBadgeInline = false,
 }) => {
   const geometryStore = useGeometryStoreApi();
   const arrowRotateInteractionRef = useRef<{
@@ -1651,8 +1654,9 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                 fill="rgba(0,0,0,0.001)"
                 listening={isInteractive}
               />
-              {/* Active-floor badges paint in the canvas annotations group, above snap dots. */}
-              {!isCurrentFloor && (
+              {/* Active-floor badges paint in the canvas annotations group, above snap dots, unless
+                  a selected element's handle sits on them. */}
+              {(!isCurrentFloor || mvhrBadgeInline) && (
                 <MvhrTerminalBadge
                   label={mvhrTerminalLabel}
                   stroke={isSelected ? typeStroke : mvhrTerminalStyle?.stroke ?? typeStroke}
@@ -3279,6 +3283,7 @@ export const ElementRenderer = memo(ElementRendererComponent, (prevProps, nextPr
   if (prevProps.categoryGhostOnCanvas !== nextProps.categoryGhostOnCanvas) return false;
   if (prevProps.previewOpacity !== nextProps.previewOpacity) return false;
   if (prevProps.snappedVertices !== nextProps.snappedVertices) return false;
+  if (prevProps.mvhrBadgeInline !== nextProps.mvhrBadgeInline) return false;
   if (prevProps.spaceLabellerSuppressFabricInteraction !== nextProps.spaceLabellerSuppressFabricInteraction)
     return false;
 

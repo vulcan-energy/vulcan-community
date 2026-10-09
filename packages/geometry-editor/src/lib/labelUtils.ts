@@ -49,6 +49,8 @@ export interface CanvasAnnotation {
   movable: boolean;
   /** Movable only: slots to try in order; defaults to small nudges around `rect`. */
   candidates?: RectBounds[];
+  /** Movable only: the owning element's canvas bounds; a loser hides only while these are fully on canvas. */
+  ownerBounds?: RectBounds;
   render?: (rect: RectBounds) => ReactNode;
 }
 
@@ -96,8 +98,15 @@ function nudgeCandidates(rect: RectBounds): RectBounds[] {
     .map(([ox, oy]) => ({ ...rect, x: rect.x + ox, y: rect.y + oy }));
 }
 
-// Last slot each movable annotation took; tried first next pass so items do not jump on relayout.
-const annotationSlotCache = new Map<string, number>();
+/** One canvas's layout memory: its last pass, and each movable item's last slot (tried first next pass). */
+export interface AnnotationLayoutState {
+  last: { signature: string; placements: Map<string, AnnotationPlacement> } | null;
+  slots: Map<string, number>;
+}
+
+export function createAnnotationLayoutState(): AnnotationLayoutState {
+  return { last: null, slots: new Map() };
+}
 
 /**
  * One layout pass: fixed items (chips, badges, handles, snap dots, point icons) claim their rects,
@@ -109,37 +118,39 @@ const annotationSlotCache = new Map<string, number>();
 export function placeCanvasAnnotations(
   items: readonly CanvasAnnotation[],
   canvasBounds: { width: number; height: number },
+  slots: Map<string, number> = new Map(),
 ): Map<string, AnnotationPlacement> {
   const occupied = items.flatMap((item) => (item.movable ? [] : [item.rect]));
   const placements = new Map<string, AnnotationPlacement>();
-  const canvasRect = { x: 0, y: 0, ...canvasBounds };
   const fits = (rect: RectBounds) =>
     rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= canvasBounds.width && rect.y + rect.height <= canvasBounds.height &&
     !occupied.some((other) => rectsOverlap(rect, other));
   const movable = items.filter((item) => item.movable).sort((a, b) => a.priority - b.priority);
   for (const item of movable) {
     const candidates = item.candidates ?? nudgeCandidates(item.rect);
-    const sticky = annotationSlotCache.get(item.key);
+    const sticky = slots.get(item.key);
     let chosen = sticky !== undefined && sticky < candidates.length && fits(candidates[sticky]) ? sticky : -1;
     for (let index = 0; chosen < 0 && index < candidates.length; index += 1) {
       if (fits(candidates[index])) chosen = index;
     }
     if (chosen >= 0) {
       const slot = candidates[chosen];
-      annotationSlotCache.set(item.key, chosen);
+      slots.set(item.key, chosen);
       occupied.push(slot);
       placements.set(item.key, { dx: slot.x - item.rect.x, dy: slot.y - item.rect.y, hidden: false });
       continue;
     }
     const revealed = item.priority === ANNOTATION_PRIORITY.selected;
     if (revealed) occupied.push(item.rect);
-    // Off-canvas items fail every slot; they stay unhidden and the pan-end pass places them.
-    placements.set(item.key, { dx: 0, dy: 0, hidden: !revealed && rectsOverlap(item.rect, canvasRect) });
+    // Only a loser whose element is wholly on canvas hides; one straddling the edge (or off it)
+    // keeps its preferred rect, and a later pan-end pass places it.
+    const owner = item.ownerBounds ?? item.rect;
+    const ownerOnCanvas = owner.x >= 0 && owner.y >= 0 &&
+      owner.x + owner.width <= canvasBounds.width && owner.y + owner.height <= canvasBounds.height;
+    placements.set(item.key, { dx: 0, dy: 0, hidden: !revealed && ownerOnCanvas });
   }
   return placements;
 }
-
-let lastAnnotationLayout: { signature: string; placements: Map<string, AnnotationPlacement> } | null = null;
 
 /**
  * `placeCanvasAnnotations`, re-run only when an item's rect, priority or the canvas changes: the
@@ -147,19 +158,23 @@ let lastAnnotationLayout: { signature: string; placements: Map<string, Annotatio
  * `frozen` (an active drag) reuses the previous result; placements are offsets, so they follow.
  */
 export function layoutCanvasAnnotations(
+  state: AnnotationLayoutState,
   items: readonly CanvasAnnotation[],
   canvasBounds: { width: number; height: number },
   frozen = false,
 ): Map<string, AnnotationPlacement> {
-  if (frozen && lastAnnotationLayout) return lastAnnotationLayout.placements;
+  if (frozen && state.last) return state.last.placements;
   const signature = `${canvasBounds.width}x${canvasBounds.height}|` + items
     .map(({ key, rect, priority, movable }) =>
       `${key}:${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}:${priority}${movable ? 'm' : ''}`)
     .join('|');
-  if (lastAnnotationLayout?.signature !== signature) {
-    lastAnnotationLayout = { signature, placements: placeCanvasAnnotations(items, canvasBounds) };
+  if (state.last?.signature !== signature) {
+    // Keep slot memory only for items still in the scene, so it cannot grow without bound.
+    const keys = new Set(items.map((item) => item.key));
+    for (const key of state.slots.keys()) if (!keys.has(key)) state.slots.delete(key);
+    state.last = { signature, placements: placeCanvasAnnotations(items, canvasBounds, state.slots) };
   }
-  return lastAnnotationLayout.placements;
+  return state.last.placements;
 }
 
 export function calculateElementBounds(canvasCoords: Array<{x: number, y: number}>): ElementBounds {

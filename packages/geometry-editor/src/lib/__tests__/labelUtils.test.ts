@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
+import type { Element } from '../../geometry/types';
 import {
   ANNOTATION_PRIORITY,
+  createAnnotationLayoutState,
   layoutCanvasAnnotations,
   placeCanvasAnnotations,
   resolveAnnotationPaint,
@@ -57,13 +59,13 @@ describe('getSmartLabelPillTexts', () => {
   });
 
   it('widens the label when the derived line dimension text grows', () => {
-    const wall = {
+    const wall: Element = {
       id: 'label-width-line-dimensions',
       name: 'Wall',
       type: 'BuildingElementOpaque',
       parent_element: null,
       coordinates: [{ x: 0, y: 100, z: 0 }, { x: 10, y: 100, z: 0 }],
-    } as any;
+    };
 
     expect(getSmartLabelWidth({ ...wall, height: 12345 }, false, true))
       .toBeGreaterThan(getSmartLabelWidth({ ...wall, height: 2 }, false, true));
@@ -104,11 +106,29 @@ describe('canvas annotation layout', () => {
   it('places an item that a pan brings on canvas, and reuses the last pass while frozen', () => {
     const at = (panX: number) => [fixedChip(100 + panX, 100), label('pan-label', [rect(110 + panX, 105), rect(110 + panX, 140)])];
     // Off canvas: every slot fails the bounds check, so the item is left visible and unplaced.
-    expect(layoutCanvasAnnotations(at(1000), canvas).get('pan-label')).toEqual({ dx: 0, dy: 0, hidden: false });
+    const state = createAnnotationLayoutState();
+    expect(layoutCanvasAnnotations(state, at(1000), canvas).get('pan-label')).toEqual({ dx: 0, dy: 0, hidden: false });
     // Settled pan: a fresh pass moves it clear of the chip.
-    expect(layoutCanvasAnnotations(at(0), canvas).get('pan-label')).toEqual({ dx: 0, dy: 35, hidden: false });
+    expect(layoutCanvasAnnotations(state, at(0), canvas).get('pan-label')).toEqual({ dx: 0, dy: 35, hidden: false });
     // Mid-drag the previous pass is reused.
-    expect(layoutCanvasAnnotations(at(1000), canvas, true).get('pan-label')).toEqual({ dx: 0, dy: 35, hidden: false });
+    expect(layoutCanvasAnnotations(state, at(1000), canvas, true).get('pan-label')).toEqual({ dx: 0, dy: 35, hidden: false });
+  });
+
+  it('keeps a loser visible while its element straddles the canvas edge, and hides it once wholly on canvas', () => {
+    const edgeLabel = (ownerX: number): CanvasAnnotation => ({
+      ...label('edge-label', [rect(110, 105)]),
+      ownerBounds: rect(ownerX, 100, 60, 10),
+    });
+    expect(placeCanvasAnnotations([fixedChip(100, 100), edgeLabel(-30)], canvas).get('edge-label'))
+      .toEqual({ dx: 0, dy: 0, hidden: false });
+    expect(placeCanvasAnnotations([fixedChip(100, 100), edgeLabel(30)], canvas).get('edge-label')?.hidden).toBe(true);
+  });
+
+  it('forgets slots of items that left the scene', () => {
+    const state = createAnnotationLayoutState();
+    layoutCanvasAnnotations(state, [label('gone-label', [rect(10, 10)])], canvas);
+    layoutCanvasAnnotations(state, [label('kept-label', [rect(10, 10)])], canvas);
+    expect([...state.slots.keys()]).toEqual(['kept-label']);
   });
 
   it('draws a moved click-to-edit pill (and the hit rect it renders) at its placed slot', () => {
@@ -135,14 +155,14 @@ describe('canvas annotation layout', () => {
 describe('getSmartLabelCandidates', () => {
   it('keeps every slot next to a diagonal element, never at an empty bounding-box corner', () => {
     const coords = [{ x: 0, y: 400 }, { x: 400, y: 0 }];
-    const duct = { id: 'diag', name: 'Diagonal', type: 'MechanicalVentilationDuctwork', parent_element: null,
-      coordinates: coords.map((c) => ({ ...c, z: 0 })) } as any;
+    const wall: Element = { id: 'diag', name: 'Diagonal', type: 'BuildingElementOpaque', parent_element: null,
+      coordinates: coords.map((c) => ({ ...c, z: 0 })) };
     // Nearest distance from a slot rect to the element's vertices or centre.
     const anchors = [...coords, { x: 200, y: 200 }];
     const gap = (r: { x: number; y: number; width: number; height: number }) => Math.min(...anchors.map((p) =>
       Math.hypot(Math.max(r.x - p.x, 0, p.x - r.x - r.width), Math.max(r.y - p.y, 0, p.y - r.y - r.height))));
 
-    for (const slot of getSmartLabelCandidates(duct, coords, false, false)) {
+    for (const slot of getSmartLabelCandidates(wall, coords, false, false)) {
       expect(gap(slot)).toBeLessThanOrEqual(40);
     }
   });
