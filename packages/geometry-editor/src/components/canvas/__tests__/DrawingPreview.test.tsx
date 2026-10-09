@@ -4,12 +4,10 @@
 import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  DrawingPreview,
-  getDrawModeTooltipText,
-  getHoverHintText,
-  type DrawingPreviewProps,
-} from '../DrawingPreview';
+import { DrawingPreview, type DrawingPreviewProps } from '../DrawingPreview';
+import { getDrawModeTooltipText, getHoverHintText } from '../../../lib/drawModeTooltipPill';
+import type { DrawMode } from '../../../hooks/useDrawingMode';
+import type { ElementType } from '../../../geometry/types';
 
 vi.mock('react-konva', () => {
   const Group = ({ children }: { children?: React.ReactNode }) => <div data-testid="konva-group">{children}</div>;
@@ -83,7 +81,7 @@ describe('DrawingPreview', () => {
 });
 
 describe('tooltip copy', () => {
-  const text = (mode: any, n: number, held: boolean, type: any = 'BuildingElementOpaque') =>
+  const text = (mode: DrawMode, n: number, held: boolean, type: ElementType = 'BuildingElementOpaque') =>
     getDrawModeTooltipText(mode, Array(n).fill({ x: 0, y: 0 }), [], null, null, null, { current: null }, type, held);
 
   it('keeps the draw-mode strings', () => {

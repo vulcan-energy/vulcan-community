@@ -2,12 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import React, { memo, useEffect, useState } from 'react';
+import type Konva from 'konva';
+import type { KonvaEventObject } from 'konva/lib/Node';
 import { Group, Line, Circle, Rect, Text } from 'react-konva';
 import {
   getDrawModeTooltipPillWidth,
   DRAW_MODE_TOOLTIP_PILL_HEIGHT,
   DRAW_MODE_TOOLTIP_PILL_FONT_FAMILY,
   DRAW_MODE_TOOLTIP_PILL_PADDING,
+} from '../../lib/drawModeTooltipPill';
+import {
+  classifyHoverHandle,
+  getDrawModeTooltipText,
+  getHoverHintText,
+  SELECTED_SHAPE_DRAG_HANDLE_NAME,
+  type HoverHintTarget,
 } from '../../lib/drawModeTooltipPill';
 import { worldToCanvas } from '../../lib/shapeUtils';
 import { calculateDrawingPreviewArrow, calculateArrowPoints } from '../../lib/directionArrows';
@@ -50,144 +59,6 @@ function getPlacementStartPoint(
     if (snapOrCursor) return snapOrCursor;
     if (orthogonalRoomStart) return orthogonalRoomStart;
     return null;
-  }
-
-  return null;
-}
-
-// Helper: Check if cursor is near first point (for completion detection)
-function isNearFirstPoint(
-  cursor: { x: number; y: number } | null,
-  firstPoint: { x: number; y: number } | null,
-  drawSnapTargetRef: React.RefObject<{ x: number; y: number } | null>,
-  tolerance: number = 0.1
-): boolean {
-  if (!cursor || !firstPoint) return false;
-
-  if (drawSnapTargetRef.current) {
-    const snapDist = Math.hypot(
-      drawSnapTargetRef.current.x - firstPoint.x,
-      drawSnapTargetRef.current.y - firstPoint.y
-    );
-    if (snapDist < tolerance) return true;
-  }
-
-  const dist = Math.hypot(cursor.x - firstPoint.x, cursor.y - firstPoint.y);
-  return dist < tolerance;
-}
-
-// Modifier suffixes live once: Alt/Option multi-draw and the P/V/S shape switch.
-const PVS_HINT = 'P/V/S switches shape';
-function withMultiDrawHint(
-  held: boolean,
-  heldText: string,
-  idleText: string,
-  withShapeSwitch = false,
-): string {
-  if (held) return withShapeSwitch ? `${heldText} (${PVS_HINT})` : heldText;
-  return withShapeSwitch
-    ? `${idleText} (Alt/Option+Click to keep drawing; ${PVS_HINT})`
-    : `${idleText} (Alt/Option+Click for multi-draw)`;
-}
-
-export type HoverHintTarget = {
-  kind: 'rotate-grip' | 'vertex' | 'body' | 'label-vertex';
-  dragging: boolean;
-};
-
-/** Hint for a selected element's drag handle; null means native cursor only. */
-// eslint-disable-next-line react-refresh/only-export-components -- sits beside getDrawModeTooltipText.
-export function getHoverHintText(target: HoverHintTarget): string | null {
-  if (target.kind === 'rotate-grip') return target.dragging ? null : 'Drag to rotate';
-  if (target.kind === 'vertex') return 'Shift: no snap';
-  // label-vertex: Shift is orthogonal lock there, so cursor only.
-  // body: a later slice adds 'Alt moves connected' for connected lines here.
-  return null;
-}
-
-// Helper: Get tooltip text based on draw mode and state
-// eslint-disable-next-line react-refresh/only-export-components -- exported for output tests.
-export function getDrawModeTooltipText(
-  drawMode: DrawMode,
-  drawPoints: Array<{ x: number; y: number }>,
-  roomWalls: Array<{ x: number; y: number }>,
-  orthogonalRoomStart: { x: number; y: number } | null,
-  orthogonalRoomEnd: { x: number; y: number } | null,
-  drawCursor: { x: number; y: number } | null,
-  drawSnapTargetRef: React.RefObject<{ x: number; y: number } | null>,
-  drawElementType: ElementType,
-  multiDrawModifierHeld: boolean,
-): string | null {
-  if (drawMode === 'none') return null;
-
-  if (drawMode === 'point') {
-    return withMultiDrawHint(multiDrawModifierHeld, 'Place object + continue', 'Place object');
-  }
-
-  if (drawMode === 'dormer') {
-    return 'Click a sloped roof where the dormer window centre should go';
-  }
-
-  if (drawMode === 'line' || drawMode === 'tb-plan-line') {
-    if (drawPoints.length === 0) return 'Place first point';
-    if (drawPoints.length === 1) {
-      if (drawMode === 'tb-plan-line') {
-        return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point', true);
-      }
-      return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point');
-    }
-    return null;
-  }
-  if (drawMode === 'tb-vertical-line') {
-    if (drawPoints.length === 0) {
-      return withMultiDrawHint(multiDrawModifierHeld, 'Place vertical run + continue', 'Place vertical run', true);
-    }
-    return withMultiDrawHint(multiDrawModifierHeld, 'Create vertical run + continue', 'Create vertical run from current point', true);
-  }
-  if (drawMode === 'tb-slope-line') {
-    if (drawPoints.length === 0) return 'Place first point';
-    if (drawPoints.length === 1) {
-      return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place second point', true);
-    }
-    return null;
-  }
-
-  if (drawMode === 'polygon' || drawMode === 'space-label-polygon') {
-    if (drawPoints.length === 0) return 'Place first point';
-    const firstPoint = drawPoints[0];
-    const isNear = isNearFirstPoint(drawCursor, firstPoint, drawSnapTargetRef, 0.1);
-    if (isNear && drawPoints.length >= 3) return 'Complete shape';
-    return 'Place another point';
-  }
-
-  if (drawMode === 'sloped-polygon') {
-    if (drawElementType === 'OnSiteGeneration') {
-      if (drawPoints.length === 0) return 'Place first point (bottom edge / eaves side)';
-      if (drawPoints.length === 1) return 'Place second point (along bottom; depth from module size)';
-      return null;
-    }
-    if (drawPoints.length === 0) return 'Place first point (bottom edge)';
-    if (drawPoints.length === 1) return 'Place second point (bottom edge)';
-    const firstPoint = drawPoints[0];
-    const isNear = isNearFirstPoint(drawCursor, firstPoint, drawSnapTargetRef, 0.1);
-    if (isNear && drawPoints.length >= 3) return 'Complete shape';
-    return 'Place another point';
-  }
-
-  if (drawMode === 'room') {
-    if (roomWalls.length === 0) return 'Place first point, draw anti-clockwise';
-    const firstPoint = roomWalls[0];
-    const isNear =
-      roomWalls.length >= 2 &&
-      isNearFirstPoint(drawCursor, firstPoint, drawSnapTargetRef, 0.1);
-    if (isNear) return 'Complete shape';
-    return 'Place another point';
-  }
-
-  if (drawMode === 'orthogonal-room') {
-    if (!orthogonalRoomStart) return 'Click and drag to draw room';
-    if (orthogonalRoomEnd) return 'Release to finalize';
-    return 'Click and drag to draw room';
   }
 
   return null;
@@ -926,23 +797,8 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
   );
 });
 
-/** Konva name of the draggable whole-shape handle (see `selected-shape-drag`). */
-// eslint-disable-next-line react-refresh/only-export-components -- shared name constant.
-export const SELECTED_SHAPE_DRAG_HANDLE_NAME = 'selected-shape-drag-handle';
-
 type Point = { x: number; y: number };
 type Hover = HoverHintTarget & { pos: Point };
-
-function classify(node: any): HoverHintTarget['kind'] | null {
-  // Handles only render for a selected element, and read-only ones are not draggable.
-  if (!node?.draggable?.()) return null;
-  const name: string = node.name?.() ?? '';
-  if (name.startsWith('orientation-arrow-handle-')) return 'rotate-grip';
-  if (name.startsWith('vertex-')) return 'vertex';
-  if (name.startsWith('space-label-vertex-')) return 'label-vertex';
-  if (name === SELECTED_SHAPE_DRAG_HANDLE_NAME) return 'body';
-  return null;
-}
 
 /**
  * Cursor + hint for the drag handles of the selected element. Hover state lives
@@ -950,18 +806,17 @@ function classify(node: any): HoverHintTarget['kind'] | null {
  * the canvas; only handle enter/leave and drag start/end/move re-render this pill.
  */
 export const HoverHintOverlay = memo<{
-  stageRef: { current: any };
+  stageRef: React.RefObject<Konva.Stage | null>;
   enabled: boolean;
   palette: DrawingCanvasPalette;
 }>(function HoverHintOverlay({ stageRef, enabled, palette }) {
   const [hover, setHover] = useState<Hover | null>(null);
 
   useEffect(() => {
-    const wrapper = stageRef.current;
-    const stage = wrapper && typeof wrapper.getStage === 'function' ? wrapper.getStage() : wrapper;
+    const stage = stageRef.current;
     if (!enabled || !stage) return;
     const container: HTMLElement = stage.container();
-    let node: any = null;
+    let node: Konva.Node | null = null;
     let dragging = false;
 
     const pointer = (): Point => stage.getPointerPosition() ?? { x: 0, y: 0 };
@@ -970,7 +825,7 @@ export const HoverHintOverlay = memo<{
         kind === null ? '' : kind === 'vertex' || kind === 'label-vertex' ? 'move' : dragging ? 'grabbing' : 'grab';
       setHover(kind === null ? null : { kind, dragging, pos: pointer() });
     };
-    const kindOf = () => classify(node);
+    const kindOf = () => classifyHoverHandle(node);
     const onDragStart = () => { dragging = true; sync(kindOf()); };
     const onDragMove = () => sync(kindOf());
     const onDragEnd = () => {
@@ -991,10 +846,12 @@ export const HoverHintOverlay = memo<{
       dragging = false;
       sync(null);
     };
-    const onOver = (e: any) => {
+    const onOver = (e: KonvaEventObject<MouseEvent>) => {
       if (dragging) return;
-      const kind = classify(e.target);
+      const kind = classifyHoverHandle(e.target);
       if (!kind) { if (node) leave(); return; }
+      if (node === e.target) return;
+      if (node) leave();
       node = e.target;
       stage.on('mousemove.hoverhint', onMove);
       node.on('dragstart.hoverhint', onDragStart);
@@ -1002,7 +859,7 @@ export const HoverHintOverlay = memo<{
       node.on('dragend.hoverhint', onDragEnd);
       sync(kind);
     };
-    const onOut = (e: any) => {
+    const onOut = (e: KonvaEventObject<MouseEvent>) => {
       if (e.target === node && !dragging) leave();
     };
 
