@@ -14,7 +14,8 @@ import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/cons
 import { getElementCanvasFloorZValue } from './elementCanvasFloor';
 import { orientation360FromSegmentOutwardModelXY } from './openingSegmentOutward';
 import { planOrthogonalElbow, pointsConnected } from './snapUtils';
-import { pointInPolygon, polygonCentroid2d } from './spaceInference';
+import { isPointInPolygon2D as pointInPolygon } from './pointInPolygon';
+import { polygonCentroid2d } from './spaceInference/remapInferredSpaceLabels';
 import { resolveRoomTypeRule } from './spaceLabelDerivation';
 
 export const MVHR_DUCT_ROLES = ['supply', 'extract', 'intake', 'exhaust'] as const;
@@ -569,9 +570,12 @@ export function planAutoDucts(
       return [{ host, segment, distance: Math.hypot(point.x - unitPoint.x, point.y - unitPoint.y) }];
     })
     .sort((a, b) => a.distance - b.distance || (a.host.name < b.host.name ? -1 : a.host.name > b.host.name ? 1 : 0));
+  const ownTerminalByRole = new Map(
+    terminals.filter((terminal) => terminal.parent_element?.trim() === unit.name).map((terminal) => [terminal.terminal_type, terminal]),
+  );
   for (const role of roles.terminals) {
     if (unitDucts.some((duct) => duct.duct_type === role)) continue;
-    const existing = terminals.find((terminal) => terminal.parent_element?.trim() === unit.name && terminal.terminal_type === role);
+    const existing = ownTerminalByRole.get(role);
     const existingPoint = existing && getTerminalPoint(existing);
     if (existingPoint) {
       addRun(role, orthogonalRun(unitPoint, existingPoint));
