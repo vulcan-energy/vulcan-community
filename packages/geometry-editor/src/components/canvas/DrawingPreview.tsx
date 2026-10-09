@@ -298,9 +298,9 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
             />
             {tooltipText &&
               renderDrawModeTooltipPill(tooltipText, {
-                // Keep the pill inside the canvas horizontally (canvasCenter is half the stage size).
+                // Keep the pill inside the canvas (canvasCenter is half the stage size).
                 x: Math.max(4, Math.min(canvasPos.x - tooltipWidth / 2, canvasCenter.x * 2 - tooltipWidth - 4)),
-                y: canvasPos.y - 15 - DRAW_MODE_TOOLTIP_PILL_HEIGHT,
+                y: Math.max(4, Math.min(canvasPos.y - 15 - DRAW_MODE_TOOLTIP_PILL_HEIGHT, canvasCenter.y * 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT - 4)),
               }, palette)}
           </Group>
         );

@@ -15,7 +15,7 @@ vi.mock('react-konva', () => {
     <div data-testid="konva-line" data-points={JSON.stringify(points ?? [])} data-stroke={stroke ?? ''} />
   );
   const Circle = ({ fill }: { fill?: string }) => <div data-testid="konva-circle" data-fill={fill ?? ''} />;
-  const Rect = ({ fill }: { fill?: string }) => <div data-testid="konva-rect" data-fill={fill ?? ''} />;
+  const Rect = ({ fill, y }: { fill?: string; y?: number }) => <div data-testid="konva-rect" data-fill={fill ?? ''} data-y={y} />;
   const Text = ({ text, fill }: { text?: string; fill?: string }) => (
     <div data-testid="konva-text" data-text={text ?? ''} data-fill={fill ?? ''} />
   );
@@ -77,6 +77,29 @@ describe('DrawingPreview', () => {
       getComputedStyleSpy.mockRestore();
       getContextSpy.mockRestore();
     }
+  });
+});
+
+describe('draw-mode pill', () => {
+  const pill = (drawPoints: Array<{ x: number; y: number }>) => {
+    const view = render(<DrawingPreview {...previewProps({
+      drawMode: 'tb-plan-line', drawElementType: 'MechanicalVentilationDuctwork', drawPoints,
+      drawCursor: { x: 0, y: 9.5 }, canvasCenter: { x: 400, y: 100 },
+    })} />);
+    const text = view.getAllByTestId('konva-text').map((node) => node.getAttribute('data-text')).find((t) => t?.startsWith('Place'));
+    const y = Number(view.getAllByTestId('konva-rect').find((node) => node.getAttribute('data-fill') === sharedDrawingPalette.snap)?.getAttribute('data-y'));
+    view.unmount();
+    return { text, y };
+  };
+
+  it('offers Hold A only before the first point', () => {
+    expect(pill([]).text).toBe('Place first point · Hold A for suggestions');
+    expect(pill([{ x: 0, y: 0 }]).text).not.toContain('Hold A');
+  });
+
+  it('stays inside the canvas vertically', () => {
+    // The cursor sits 5 px below the canvas top; unclamped, the pill would start above it.
+    expect(pill([]).y).toBe(4);
   });
 });
 

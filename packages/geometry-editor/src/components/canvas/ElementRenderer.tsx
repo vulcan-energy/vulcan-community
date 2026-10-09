@@ -537,7 +537,7 @@ function getWindowShadingObjectScreenGeometry(
 }
 
 const UNSNAPPED_VERTEX_CHIP_TEXT = 'Unsnapped vertex';
-export const DISCONNECTED_DUCT_CHIP_TEXT = 'Disconnected';
+const DISCONNECTED_DUCT_CHIP_TEXT = 'Disconnected';
 const UNSNAPPED_VERTEX_CHIP_FONT_SIZE = 11;
 const UNSNAPPED_VERTEX_CHIP_HEIGHT = 20;
 const UNSNAPPED_VERTEX_CHIP_PADDING_X = 8;

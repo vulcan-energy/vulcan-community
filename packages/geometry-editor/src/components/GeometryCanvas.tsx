@@ -1290,10 +1290,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     const value = typeof next === 'function' ? next(current) : next;
     drawingPreviewSignal.set({ segmentLengthPreview: value });
   }, [drawingPreviewSignal]);
-  const setSegmentLengthPreviewRef = useRef(setSegmentLengthPreview);
-  useEffect(() => {
-    setSegmentLengthPreviewRef.current = setSegmentLengthPreview;
-  }, [setSegmentLengthPreview]);
   useEffect(() => {
     if (drawMode !== 'none') return;
     endDrawingPreviewInteraction();
@@ -1472,11 +1468,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     geometryStore.getState().closeSpaceLabeller();
   }, [drawMode, geometryStore, setDrawMode, viewMode]);
 
+  // Any mode change (L/V/S shortcuts live in useKeyboardShortcuts) drops the last segment's
+  // length label and L-route elbow.
   useEffect(() => {
-    if (drawMode === 'none') {
-      setSegmentLengthPreview(EMPTY_SEGMENT_LENGTH_PREVIEW);
-    }
-  }, [drawMode, setSegmentLengthPreview]);
+    setSegmentLengthPreview(EMPTY_SEGMENT_LENGTH_PREVIEW);
+    drawingPreviewSignal.set({ drawElbow: null });
+    elbowFlippedRef.current = false;
+  }, [drawMode, drawingPreviewSignal, setSegmentLengthPreview]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1485,16 +1483,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         isDuctOrPipeElementType(drawElementType) &&
         isServiceLineDrawMode(drawMode)
       ) {
-        const key = event.key.toLowerCase();
-        if (key === 'p' || key === 'v' || key === 's') {
-          event.preventDefault();
-          setDrawMode(key === 'v' ? 'tb-vertical-line' : key === 's' ? 'tb-slope-line' : 'tb-plan-line');
-          setSegmentLengthPreviewRef.current(EMPTY_SEGMENT_LENGTH_PREVIEW);
-          drawingPreviewSignal.set({ drawElbow: null });
-          elbowFlippedRef.current = false;
-          setActiveSegmentEditor(null);
-          return;
-        }
         const preview = drawingPreviewSignal.getSnapshot();
         const start = drawPoints[0];
         if (event.code === 'KeyF' && !event.ctrlKey && !event.metaKey && preview.drawElbow && start) {
@@ -1551,7 +1539,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', clearHeldModifiers);
     };
-  }, [canvasCenter, drawElementType, drawMode, drawPoints, drawingPreviewSignal, panOffset, scale, setActiveSegmentEditor, setDrawMode]);
+  }, [canvasCenter, drawElementType, drawMode, drawPoints, drawingPreviewSignal, panOffset, scale]);
 
   const endCanvasPanGesture = useCallback(() => {
     const session = activePanGestureRef.current?.session ?? null;
@@ -3459,7 +3447,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     selectAllElementsOnCurrentFloor: selectAllElementsRespectingPanelFilter,
     setMarqueeSelection,
     drawMode,
-    drawDraftInProgress: drawPoints.length > 0 || roomWalls.length > 0 || orthogonalRoomStart !== null,
+    // The active mode's own draft only: room walls or an orthogonal start can outlive their mode.
+    drawDraftInProgress: drawMode === 'room' ? roomWalls.length > 0
+      : drawMode === 'orthogonal-room' ? orthogonalRoomStart !== null
+      : drawPoints.length > 0,
     drawElementType,
     setDrawMode,
     setDrawPoints,

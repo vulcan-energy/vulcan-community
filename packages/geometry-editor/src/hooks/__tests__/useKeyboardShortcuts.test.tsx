@@ -161,4 +161,11 @@ describe('shape shortcut for the current draw mode mid-draft', () => {
     expect(deps.setDrawMode).not.toHaveBeenCalled();
     expect(deps.setDrawPoints).not.toHaveBeenCalled();
   });
+
+  it('toggles drawing off when idle', () => {
+    const deps = buildDeps({ drawMode: 'tb-plan-line', drawElementType: 'MechanicalVentilationDuctwork' });
+    renderHook(() => useKeyboardShortcuts(deps));
+    press('l');
+    expect(deps.setDrawMode).toHaveBeenCalledWith('none');
+  });
 });
