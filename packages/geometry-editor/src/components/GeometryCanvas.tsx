@@ -240,6 +240,7 @@ import {
   isValidDormerHost,
 } from '../lib/dormerGeometry';
 import {
+  cascadeHostedDescendantGeometry,
   cascadeHostedDescendantTranslation,
   collectHostedDescendantElementIds,
 } from '../lib/hostedDescendantCascade';
@@ -4448,19 +4449,22 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     // Read at call time (hover enter, drag end), so the answer reflects a just-committed move.
     const byId = geometryStore.getState().elementsById as Record<string, Element>;
     const selected = byId[selection.id];
-    return !!selected && findConnectedDragNeighbours(selected, byId).length > 0;
+    return !!selected && findConnectedDragNeighbours(selected, byId, getProjectDefaults(geometryStore).angleTol).length > 0;
   }, [selection, selectedElementIds.length, geometryStore]);
 
   // Alt-drag "move connected" for the selected-shape and selected-point handles. Neighbours are
-  // fixed at drag start (none with a multi-selection) and previewed in the same session.
+  // fixed at drag start (none with a multi-selection) and previewed, with their hosted
+  // descendants, in the same session.
   const beginConnectedDrag = (target: Konva.Node, element: Element) => {
-    const neighbours = selectedElementIds.length > 1
-      ? []
-      : findConnectedDragNeighbours(element, elementsById as Record<string, Element>);
+    const byId = elementsById as Record<string, Element>;
+    const neighbours = selectedElementIds.length > 1 ? [] : findConnectedDragNeighbours(element, byId, getProjectDefaults(geometryStore).angleTol);
+    const previewIds = [...new Set(neighbours.flatMap(({ elementId }) =>
+      [elementId, ...collectHostedDescendantElementIds(byId, elementId)]))];
     target.setAttr('connectedNeighbours', neighbours);
+    target.setAttr('connectedPreviewIds', previewIds);
     target.setAttr('connectedStartPos', { x: target.x(), y: target.y() });
     target.setAttr('connectedAlt', false);
-    return neighbours.map(({ elementId }) => ({ elementId, coordinateCount: 2 }));
+    return previewIds.map((elementId) => ({ elementId, coordinateCount: byId[elementId]?.coordinates?.length ?? 0 }));
   };
   // Per dragmove: the neighbours to carry while Alt is held, else null. Releasing Alt mid-drag
   // puts the neighbour previews back once; a plain drag never touches them.
@@ -4471,7 +4475,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     target.setAttr('connectedAlt', altHeld);
     if (altHeld) return neighbours;
     if (wasAlt) {
-      for (const { elementId } of neighbours) {
+      for (const elementId of target.getAttr('connectedPreviewIds') as string[]) {
         const neighbour = elementsById[elementId];
         if (neighbour?.coordinates) {
           updateDraggedElementShapeFromCoords(target, elementId, neighbour.coordinates, scale, panOffset, canvasCenter, neighbour, globalOrientationOffset);
@@ -4487,6 +4491,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       ? { neighbours, moved: planConnectedDragFromHandle(target, element, neighbours) }
       : null;
     target.setAttr('connectedNeighbours', null);
+    target.setAttr('connectedPreviewIds', null);
     target.setAttr('connectedStartPos', null);
     target.setAttr('connectedAlt', null);
     return connected;
@@ -4508,10 +4513,34 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     target.position(worldToCanvas({ x: start.x + to.x - from.x, y: start.y + to.y - from.y }, scale, panOffset, canvasCenter));
     return moved;
   };
+  // Openings on stretched walls re-anchor as the commit will (cascadeHostedDescendantGeometry).
   const previewConnectedDrag = (target: Konva.Node, moved: Record<string, Element['coordinates']>) => {
-    for (const [elementId, coords] of Object.entries(moved)) {
-      updateDraggedElementShapeFromCoords(target, elementId, coords, scale, panOffset, canvasCenter, elementsById[elementId], globalOrientationOffset);
+    const byId = elementsById as Record<string, Element>;
+    const next = { ...byId };
+    for (const [elementId, coordinates] of Object.entries(moved)) next[elementId] = { ...byId[elementId]!, coordinates };
+    const cascade = cascadeHostedDescendantGeometry({
+      previousElementsById: byId,
+      nextElementsById: next,
+      changedElementIds: Object.keys(moved),
+      floors,
+    });
+    for (const elementId of cascade.changedElementIds) {
+      const element = cascade.elementsById[elementId];
+      if (!element?.coordinates?.length) continue;
+      updateDraggedElementShapeFromCoords(target, elementId, element.coordinates, scale, panOffset, canvasCenter, element, globalOrientationOffset);
     }
+  };
+  // A dragged wall's hosted descendants translate with it, as in a plain drag.
+  const withTranslatedDescendants = (elementId: string, moved: Record<string, Element['coordinates']>) => {
+    const byId = elementsById as Record<string, Element>;
+    const translated = cascadeHostedDescendantTranslation({
+      previousElementsById: byId,
+      nextElementsById: { ...byId, [elementId]: { ...byId[elementId]!, coordinates: moved[elementId]! } },
+      changedElementIds: [elementId],
+    });
+    const out = { ...moved };
+    for (const id of translated.changedElementIds) out[id] ??= translated.elementsById[id]!.coordinates;
+    return out;
   };
 
   const selectedPvClearanceGuidance = useMemo(() => {
@@ -7726,7 +7755,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     if (!initialCoords || initialCoords.length === 0) return;
                     const neighbours = connectedDragNeighbours(e.target, e.evt.altKey);
                     if (neighbours) {
-                      previewConnectedDrag(e.target, planConnectedDragFromHandle(e.target, selectedShapeDragTarget.element, neighbours));
+                      previewConnectedDrag(e.target, withTranslatedDescendants(
+                        selectedShapeDragTarget.element.id,
+                        planConnectedDragFromHandle(e.target, selectedShapeDragTarget.element, neighbours),
+                      ));
                       return;
                     }
                     const previewCoords = geometryPerf.measure(
@@ -7794,7 +7826,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     if (!startPos) return;
                     if (!initialCoords || initialCoords.length === 0) return;
                     if (connected) {
-                      commitVertexPositionUpdates(Object.entries(connected.moved).flatMap(([elementId, coords]) =>
+                      const moved = withTranslatedDescendants(selectedShapeDragTarget.element.id, connected.moved);
+                      commitVertexPositionUpdates(Object.entries(moved).flatMap(([elementId, coords]) =>
                         coords.map((newPosition, vertexIndex) => ({ elementId, vertexIndex, newPosition }))));
                     } else {
                       applySelectedShapeDeltaPx(

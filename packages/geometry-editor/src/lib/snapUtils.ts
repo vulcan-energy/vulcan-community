@@ -1304,22 +1304,35 @@ export function planServiceLineTeeSplits(
 
 type ConnectedDragPoint = { x: number; y: number; z: number };
 
+const isConnectedDragWall = (el: Element): boolean =>
+  isLineWallElementForSnap(el) && el.coordinates?.length === 2 && !(el as { is_external_door?: unknown }).is_external_door;
+
 /**
- * Duct and pipe ends that Alt-drag "move connected" carries along with `element`: vertices of
- * same-network lines (by their own `snapPartnerFilter`) connected to one of its vertices. Points
- * (unit, terminals) never follow a dragged line; a dragged unit or terminal carries its duct ends.
+ * Line ends that Alt-drag "move connected" carries along with `element`: vertices of same-network
+ * ducts and pipes (by their own `snapPartnerFilter`), or for a line wall of other line walls,
+ * connected to one of its vertices. Points (unit, terminals) never follow a dragged line; a dragged
+ * unit or terminal carries its duct ends. Openings, floors, roofs and labels never follow a wall.
+ * A line colinear with a dragged line (within `angleTolDeg`) is left behind: it detaches.
  */
 export function findConnectedDragNeighbours(
   element: Element,
   elementsById: Record<string, Element>,
+  angleTolDeg: number,
 ): Array<{ elementId: string; vertexIndex: number }> {
   const own = element.coordinates ?? [];
+  const [a, b] = own;
+  const parallel = (q: { x: number; y: number }, far: { x: number; y: number }) => {
+    if (own.length !== 2 || !a || !b) return false;
+    const ux = b.x - a.x, uy = b.y - a.y, vx = far.x - q.x, vy = far.y - q.y;
+    return Math.abs(ux * vy - uy * vx) <= Math.sin((angleTolDeg * Math.PI) / 180) * Math.hypot(ux, uy) * Math.hypot(vx, vy);
+  };
   const out: Array<{ elementId: string; vertexIndex: number }> = [];
   for (const other of Object.values(elementsById)) {
     if (other.id === element.id || other.coordinates?.length !== 2) continue;
-    if (other.type !== 'MechanicalVentilationDuctwork' && other.type !== 'WaterPipework') continue;
-    if (!snapPartnerFilter(other)?.(element)) continue;
+    const serviceLine = other.type === 'MechanicalVentilationDuctwork' || other.type === 'WaterPipework';
+    if (serviceLine ? !snapPartnerFilter(other)?.(element) : !(isConnectedDragWall(element) && isConnectedDragWall(other))) continue;
     other.coordinates.forEach((q, vertexIndex) => {
+      if (parallel(q, other.coordinates[1 - vertexIndex]!)) return;
       if (own.some((p) => pointsConnected(element, p, other, q))) out.push({ elementId: other.id, vertexIndex });
     });
   }
@@ -1329,7 +1342,7 @@ export function findConnectedDragNeighbours(
 /**
  * Coordinates after an Alt-drag of `element` by plan `delta`: the element translates (a line only
  * along its plan normal, so right-angle neighbours stay square) and each neighbour end moves with
- * it while the far end stays put. A neighbour that would collapse to zero length is left behind.
+ * it while the far end stays put. A neighbour that would collapse or reverse is left behind.
  */
 export function planConnectedDrag(
   element: Element,
@@ -1359,6 +1372,7 @@ export function planConnectedDrag(
     if (!p || !far) continue;
     const q = { ...p, x: p.x + dx, y: p.y + dy };
     if (Math.hypot(q.x - far.x, q.y - far.y, q.z - far.z) < 0.01) continue;
+    if ((p.x - far.x) * (q.x - far.x) + (p.y - far.y) * (q.y - far.y) < 0) continue;
     next[vertexIndex] = q;
     moved[elementId] = next;
   }
