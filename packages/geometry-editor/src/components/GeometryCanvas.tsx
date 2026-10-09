@@ -4588,7 +4588,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   ) => {
     const color = clearance.isWithinWall
       ? readRootCssVar('--semantic-snap', '#1E90FF')
-      : CANVAS_CONSTANTS.COLORS.VALIDATION_WARNING;
+      : canvasInteractionPalette.warningGuide;
 
     const renderSide = (side: LineOpeningClearanceSide) => {
       const segment = side === 'start' ? clearance.startGuideSegment : clearance.endGuideSegment;
@@ -4665,6 +4665,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     lineOpeningDistanceEditor,
     selectedLineOpeningClearance,
     beginLineOpeningDistanceEditor,
+    canvasInteractionPalette,
   ]);
 
   // Memoized snap indicators calculation for performance
@@ -6205,7 +6206,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 const featureB = worldToCanvas(item.featureSegment[1], scale, panOffset, canvasCenter);
                 const color =
                   item.status === 'below-guidance'
-                    ? CANVAS_CONSTANTS.COLORS.VALIDATION_WARNING
+                    ? canvasInteractionPalette.warningGuide
                     : readRootCssVar('--semantic-snap', '#1E90FF');
                 const labelText = `${item.label}: ${item.distanceM.toFixed(2)}m / ${item.guidanceDistanceM.toFixed(2)}m`;
                 const measureDx = featurePoint.x - panelPoint.x;

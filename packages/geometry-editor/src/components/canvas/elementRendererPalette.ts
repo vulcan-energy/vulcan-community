@@ -3,6 +3,7 @@
 
 import { withCanvasAlpha, type ElementCanvasPalette } from '../../lib/shapeUtils';
 import { readRootCssVar } from '../../lib/cssVars';
+import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 
 export type CanvasElementRendererPalette = ElementCanvasPalette & { hover: string };
 
@@ -15,6 +16,8 @@ export interface CanvasInteractionPalette {
   guideFill: string;
   dormerGuide: string;
   warningGuide: string;
+  warningBorder: string;
+  warningOnFill: string;
 }
 
 export function getHexRelativeLuminance(hex: string): number | null {
@@ -143,6 +146,8 @@ export function readCanvasInteractionPalette(): CanvasInteractionPalette {
     guide: readRootCssVar('--canvas-drawing-guide', '#DDEE63'),
     guideFill: readRootCssVar('--canvas-drawing-guide-fill', 'rgba(221, 238, 99, 0.14)'),
     dormerGuide: readRootCssVar('--canvas-drawing-guide', '#f6df5a'),
-    warningGuide: readRootCssVar('--validation-warning', '#F59E0B'),
+    warningGuide: readRootCssVar('--validation-warning', CANVAS_CONSTANTS.COLORS.VALIDATION_WARNING),
+    warningBorder: readRootCssVar('--validation-warning-border', CANVAS_CONSTANTS.COLORS.VALIDATION_WARNING_BORDER),
+    warningOnFill: readRootCssVar('--validation-warning-on-fill', '#111827'),
   };
 }
