@@ -1082,10 +1082,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const { drawMode, setDrawMode, drawElementType, setDrawElementType, drawPoints, setDrawPoints, drawCursor, setDrawCursor, setDrawAngleSnapped, drawSnapTargetRef, roomWalls, setRoomWalls, roomWallElements, setRoomWallElements, orthogonalRoomStart, setOrthogonalRoomStart, orthogonalRoomEnd, setOrthogonalRoomEnd, orthogonalRoomEditing, setOrthogonalRoomEditing, pendingHostElementCreationRef, drawPreset, setDrawPreset, drawPresetData, setDrawPresetData, resetDrawing } = useDrawingMode();
   const [drawMvhrDuctRole, setDrawMvhrDuctRole] = useState<MvhrDuctRole>('supply');
   const [drawMvhrTerminalRole, setDrawMvhrTerminalRole] = useState<MvhrTerminalRole>('intake');
-  const [drawMvhrParentName, setDrawMvhrParentName] = useKeyedState<string | null>(
-    drawMode === 'none' ? 'inactive' : 'active',
-    null,
-  );
+  // Plain state, like the role: keyed on drawMode it reset in the same batch that the MVHR
+  // manager started a draw, so manager-drawn ducts lost their unit. The toolbar type pick clears it.
+  const [drawMvhrParentName, setDrawMvhrParentName] = useState<string | null>(null);
   const drawMvhrRolePropsRef = useRef<Record<string, unknown>>({});
   const themeId = useThemeStore((s) => s.themeId);
   const customTheme = useThemeStore((s) => s.customTheme);
