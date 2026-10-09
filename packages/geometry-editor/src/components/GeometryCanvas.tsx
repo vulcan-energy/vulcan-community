@@ -5109,6 +5109,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       selectedPointDragTarget?.element.id ?? '',
       overlapHash,
       currentFloorZ,
+      drawMode,
       selectedLineOpeningClearance
         ? `${selectedLineOpeningClearance.elementId}:${selectedLineOpeningClearance.clearance.startDistanceM}:${selectedLineOpeningClearance.clearance.endDistanceM}`
         : '',
@@ -5120,6 +5121,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     selectedPointDragTarget,
     overlapGroups,
     currentFloorZ,
+    drawMode,
     selectedLineOpeningClearance,
   ]);
 
@@ -5150,7 +5152,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       const coords = element.coordinates ?? [];
       // ponytail: reserves the chip slot above every vertex, snapped or not; precise needs the
       // renderer's snapped-vertex set (one registry pass, see the label-layout refactor note).
-      const reserveChipSlots = shouldShowUnsnappedVertexGuidance(element, getElementShape(element));
+      const reserveChipSlots =
+        drawMode === 'none' && shouldShowUnsnappedVertexGuidance(element, getElementShape(element));
       for (const coord of coords) {
         const point = worldToCanvas(coord, scale, panOffset, canvasCenter);
         addAvoidRect(point, 14);

@@ -337,8 +337,10 @@ export function calculateSmartLabelPosition(
     }
   }
 
-  // Fallback: centre on the element. The caller hides it unless the label is a priority one.
-  return { anchor: 'center', x: bounds.centerX - labelWidth / 2, y: centerY, width: labelWidth, height: labelHeight, collides: true };
+  // Fallback: centre on the element. Only an on-canvas element's fallback is a real collision
+  // (the caller hides it); off-canvas slots all fail the bounds check, and a later pan reuses them.
+  const onCanvas = bounds.maxX >= 0 && bounds.minX <= canvasBounds.width && bounds.maxY >= 0 && bounds.minY <= canvasBounds.height;
+  return { anchor: 'center', x: bounds.centerX - labelWidth / 2, y: centerY, width: labelWidth, height: labelHeight, ...(onCanvas ? { collides: true } : {}) };
 }
 
 // Memoized label position calculation for performance optimization

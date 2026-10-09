@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
+import type { Element } from '../../geometry/types';
 import {
   calculateMemoizedLabelPositions,
   getSmartLabelPillTexts,
@@ -155,13 +156,13 @@ describe('getSmartLabelPillTexts', () => {
 
   it('places priority labels first and marks unplaceable ones as colliding instead of stacking them', () => {
     const projectIdentity = (coord: { x: number; y: number }) => ({ x: coord.x, y: coord.y });
-    const stacked = Array.from({ length: 30 }, (_, index) => ({
+    const stacked: Element[] = Array.from({ length: 30 }, (_, index): Element => ({
       id: `stack-${String(index).padStart(2, '0')}`,
       name: 'Light',
       type: 'Lighting',
       parent_element: null,
       coordinates: [{ x: 200, y: 200, z: 0 }],
-    })) as any[];
+    }) as Element);
     const priorityId = 'stack-29';
 
     const positions = calculateMemoizedLabelPositions(
@@ -184,5 +185,28 @@ describe('getSmartLabelPillTexts', () => {
         expect(rectsOverlap(placed[i], placed[j])).toBe(false);
       }
     }
+  });
+
+  it('keeps the visible fallback for an element that is off-canvas at layout time', () => {
+    const projectIdentity = (coord: { x: number; y: number }) => ({ x: coord.x, y: coord.y });
+    const offCanvas = {
+      id: 'off-canvas-light',
+      name: 'Light',
+      type: 'Lighting',
+      parent_element: null,
+      coordinates: [{ x: 2000, y: 200, z: 0 }],
+    } as Element;
+
+    const positions = calculateMemoizedLabelPositions(
+      [offCanvas],
+      { width: 800, height: 600 },
+      false,
+      projectIdentity,
+      1,
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+    );
+
+    expect(positions.get(offCanvas.id)?.rect.collides).toBeUndefined();
   });
 });
