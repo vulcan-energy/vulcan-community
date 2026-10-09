@@ -2874,6 +2874,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
       const host = findHostElementForAutoTbProposal(candidate, elementsById);
       const hostIds = new Set([
         ...(host ? [host.id] : []),
+        ...(elementsById[candidate.openingId] ? [candidate.openingId] : []),
         ...(candidate.hostElementIds ?? []),
         ...(candidate.cornerHostWallIds ?? []),
         ...(candidate.roofAdjacentPairIds ?? []),

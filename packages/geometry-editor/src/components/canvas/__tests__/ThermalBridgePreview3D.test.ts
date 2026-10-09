@@ -83,6 +83,29 @@ describe('ThermalBridgePreview3D helpers', () => {
     expect(incidentThermalBridgePreviewSurfaces(cornerLine, [faceA, unrelatedFace])).toEqual([faceA, unrelatedFace]);
   });
 
+  it('uses the thicker coplanar opening face so a displayed bridge clears the opening prism', () => {
+    const wallFace = {
+      hostElementId: 'wall', point: [0, 1, 0] as [number, number, number],
+      normal: [0, 0, 1] as [number, number, number], thicknessM: 0.05,
+    };
+    const openingFace = {
+      hostElementId: 'window', point: [0, 1, 0] as [number, number, number],
+      normal: [0, 0, 1] as [number, number, number], thicknessM: 0.15,
+    };
+    const modelPoints = [[0, 1, 0], [2, 1, 0]] as [number, number, number][];
+    const incident = incidentThermalBridgePreviewSurfaces(modelPoints, [wallFace, openingFace]);
+
+    expect(incident).toEqual([openingFace]);
+    const displayedPoints = offsetThermalBridgePreviewWorldPoints(
+      modelPoints,
+      { x: 0, y: 1, z: 1 },
+      incident[0]!,
+    );
+    expect(displayedPoints[0]![2]).toBeCloseTo(0.08);
+    expect(displayedPoints[1]![2]).toBeCloseTo(0.08);
+    expect(modelPoints).toEqual([[0, 1, 0], [2, 1, 0]]);
+  });
+
   it('accepts a stationary click and rejects orbit-drag movement', () => {
     expect(isThermalBridgePreviewClick(0)).toBe(true);
     expect(isThermalBridgePreviewClick(5)).toBe(true);

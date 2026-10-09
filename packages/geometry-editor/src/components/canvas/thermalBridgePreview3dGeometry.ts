@@ -78,17 +78,22 @@ export function incidentThermalBridgePreviewSurfaces(
   const nearest = Math.min(...distances);
   if (!Number.isFinite(nearest)) return [...surfaces];
   const incident = surfaces.filter((_, index) => distances[index]! <= nearest + tieToleranceM);
-  const seenOffsets = new Set<string>();
-  return incident.filter((surface) => {
+  const thickestByPlane = new Map<string, ThermalBridgePreviewHostSurface>();
+  for (const surface of incident) {
     const length = Math.hypot(...surface.normal);
     const normal = surface.normal.map((component) => component / length);
     const firstSignificant = normal.find((component) => Math.abs(component) > 1e-6) ?? 1;
     const sign = firstSignificant < 0 ? -1 : 1;
-    const key = `${normal.map((component) => (component * sign).toFixed(6)).join(',')}:${surface.thicknessM.toFixed(4)}`;
-    if (seenOffsets.has(key)) return false;
-    seenOffsets.add(key);
-    return true;
-  });
+    const canonicalNormal = normal.map((component) => component * sign);
+    const planeOffset = surface.point.reduce(
+      (sum, component, index) => sum + component * canonicalNormal[index]!,
+      0,
+    );
+    const key = `${canonicalNormal.map((component) => component.toFixed(6)).join(',')}:${planeOffset.toFixed(4)}`;
+    const existing = thickestByPlane.get(key);
+    if (!existing || surface.thicknessM > existing.thicknessM) thickestByPlane.set(key, surface);
+  }
+  return Array.from(thickestByPlane.values());
 }
 
 /** Group candidate lines hit by one ray, stopping at the nearest opaque fabric hit. */

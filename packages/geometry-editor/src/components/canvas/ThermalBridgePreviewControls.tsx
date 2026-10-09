@@ -43,7 +43,7 @@ export function ThermalBridgePreviewControls({ preview, width, height, viewMode,
   const issue = preview.issues.find((row) => shown?.ids.includes(`issue:${row.tb.id}`));
   const position = shown ? {
     left: Math.max(8, Math.min(shown.anchor.x + 12, width - 290)),
-    top: Math.max(8, Math.min(shown.anchor.y + 12, height - (preview.menu ? 220 : 70))),
+    top: Math.max(8, Math.min(shown.anchor.y + 12, height - (preview.menu ? Math.min(300, height / 2) + 80 : 70))),
   } : undefined;
   return <>
     {shown && (rows.length > 0 || issue || preview.menu) && <div

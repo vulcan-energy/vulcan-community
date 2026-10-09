@@ -11,11 +11,11 @@
   background: var(--canvas-drawing-tooltip-bg, rgba(18, 31, 34, 0.96));
   font-size: 12px;
 }
-.tb-preview-menu { max-height: min(300px, 50vh); overflow-y: auto; }
+.tb-preview-menu { box-sizing: border-box; max-height: min(300px, 50vh); overflow-y: auto; }
 .tb-preview-menu-heading { display: flex; justify-content: space-between; align-items: center; }
 .tb-preview-row { display: grid; gap: 4px; padding: 6px 0; border-top: 1px solid var(--border-overlay); }
 .tb-preview-row select { max-width: 100%; width: 250px; }
-.tb-preview-add { text-align: left; }
+.tb-preview-add { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; height: auto; min-height: 32px; padding: 6px 8px; text-align: left; white-space: normal; }
 .tb-preview-add span, .tb-preview-label small { display: block; font-size: 12px; opacity: .8; }
 .tb-preview-status {
   position: absolute;
