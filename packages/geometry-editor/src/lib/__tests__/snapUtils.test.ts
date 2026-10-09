@@ -500,6 +500,21 @@ describe('getExactSnappedVertices', () => {
 
     expect(getExactSnappedVertices(point, { point, other })).toEqual(new Set());
   });
+
+  it('only counts a duct end as snapped within its own network, not on a wall corner', () => {
+    const el = (id: string, type: string, coordinates: Element['coordinates'], extra: object = {}) =>
+      ({ id, type, name: id, coordinates, ...extra }) as unknown as Element;
+    const wall = el('wall', 'BuildingElementOpaque', [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }]);
+    const duct = el('duct', 'MechanicalVentilationDuctwork', [{ x: 0, y: 0, z: 0 }, { x: 2, y: 2, z: 0 }], {
+      parent_element: 'MV',
+    });
+    const sibling = el('sibling', 'MechanicalVentilationDuctwork', [{ x: 2, y: 2, z: 0 }, { x: 3, y: 3, z: 0 }], {
+      parent_element: 'MV',
+    });
+
+    expect(getExactSnappedVertices(duct, { wall, duct, sibling })).toEqual(new Set([1]));
+    expect(getExactSnappedVertices(wall, { wall, duct, sibling })).toEqual(new Set());
+  });
 });
 
 describe('getWallSupportedSnappedVertices', () => {

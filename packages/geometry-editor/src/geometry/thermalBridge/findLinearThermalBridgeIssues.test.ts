@@ -547,4 +547,74 @@ describe('findLinearThermalBridgeIssues', () => {
     const issues = findLinearThermalBridgeIssues([tb, duct] as Element[]);
     expect(issues.filter((i) => i.kind === 'overlap_duplicate_colinear_segment')).toHaveLength(0);
   });
+
+  describe('service-line overlap exemptions', () => {
+    const unit = {
+      type: 'MechanicalVentilation',
+      id: 'mv',
+      name: 'MV',
+      vent_type: 'MVHR',
+      coordinates: [{ x: 0, y: 0, z: 0 }],
+      isPlaceholder: false,
+    } as unknown as Element;
+    const duct = (id: string, x0: number, x1: number, y = 0, extra: Record<string, unknown> = {}): Element =>
+      ({
+        type: 'MechanicalVentilationDuctwork',
+        id,
+        name: id,
+        parent_element: 'MV',
+        duct_type: 'supply',
+        length: Math.abs(x1 - x0),
+        coordinates: [
+          { x: x0, y, z: 0 },
+          { x: x1, y, z: 0 },
+        ],
+        isPlaceholder: false,
+        ...extra,
+      }) as unknown as Element;
+    const overlapIds = (els: Element[]) =>
+      findLinearThermalBridgeIssues(els)
+        .filter((i) => i.kind === 'overlap_duplicate_colinear_segment')
+        .map((i) => i.elementId);
+
+    it('never flags ducts of different types or units', () => {
+      expect(overlapIds([duct('a', 1, 5), duct('b', 2, 6, 0, { duct_type: 'extract' })])).toEqual([]);
+      expect(overlapIds([duct('a', 1, 5), duct('b', 2, 6, 0, { parent_element: 'MV2' })])).toEqual([]);
+    });
+
+    it('allows same-type runs bundled from the unit but flags an identical duplicate', () => {
+      expect(overlapIds([unit, duct('a', 0, 5), duct('b', 0, 3)])).toEqual([]);
+      expect(overlapIds([unit, duct('a', 0, 5), duct('b', 5, 0)])).toEqual(['a', 'b']);
+      // one chain folding back on itself (shared joint away from the unit) is a real double count
+      expect(overlapIds([unit, duct('a', 0, 5), duct('b', 5, 2)])).toEqual(['a', 'b']);
+    });
+
+    it('flags a stray same-type run not connected to the unit, with the shared stretch', () => {
+      const issues = findLinearThermalBridgeIssues([unit, duct('a', 0, 5), duct('b', 2, 7)]).filter(
+        (i) => i.kind === 'overlap_duplicate_colinear_segment',
+      );
+      expect(issues.map((i) => i.elementId)).toEqual(['a', 'b']);
+      expect(issues[0]!.overlapStretch).toEqual([
+        { x: 2, y: 0, z: 0 },
+        { x: 5, y: 0, z: 0 },
+      ]);
+    });
+
+    it('never flags a primary pipe against a distribution pipe', () => {
+      const pipe = (id: string, pipework_type: string, x0: number, x1: number): Element =>
+        ({
+          type: 'WaterPipework',
+          id,
+          name: id,
+          pipework_type,
+          coordinates: [
+            { x: x0, y: 0, z: 0 },
+            { x: x1, y: 0, z: 0 },
+          ],
+          isPlaceholder: false,
+        }) as unknown as Element;
+      expect(overlapIds([pipe('p', 'primary', 0, 5), pipe('d', 'distribution', 1, 6)])).toEqual([]);
+      expect(overlapIds([pipe('p', 'primary', 0, 5), pipe('q', 'primary', 1, 6)])).toEqual(['p', 'q']);
+    });
+  });
 });

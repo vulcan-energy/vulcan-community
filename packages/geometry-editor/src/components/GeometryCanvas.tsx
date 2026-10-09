@@ -267,6 +267,7 @@ import {
   type ValidationContext,
 } from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
+import type { Vec3 } from '../geometry/thermalBridge/linearTbSegmentOverlap';
 import { selectPartFData } from '../geometry/validation/partF/selector';
 import { getOverlapBadgeMenuLayerStyle, type OverlapBadgeMenuAnchor } from '../lib/overlapBadgeMenu';
 
@@ -2336,6 +2337,25 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   ]);
 
   const elementsForValidation = useMemo(() => Object.values(elementsById), [elementsById]);
+  const linearGeometryIssues = useMemo(
+    () => findLinearThermalBridgeIssues(elementsForValidation),
+    [elementsForValidation],
+  );
+  // Both issues of an overlap pair carry the same stretch: keep one per pair for the canvas halo,
+  // skipping stretches with no plan length (vertical TBs, risers) that would draw as a dot.
+  const overlapStretches = useMemo(() => {
+    const byKey = new Map<string, { elementIds: string[]; stretch: [Vec3, Vec3] }>();
+    for (const { elementId, overlapStretch } of linearGeometryIssues) {
+      if (!overlapStretch) continue;
+      const [a, b] = overlapStretch;
+      if (Math.hypot(b.x - a.x, b.y - a.y) < 0.01) continue;
+      const key = JSON.stringify(overlapStretch);
+      const entry = byKey.get(key) ?? { elementIds: [], stretch: overlapStretch };
+      entry.elementIds.push(elementId);
+      byKey.set(key, entry);
+    }
+    return [...byKey.entries()];
+  }, [linearGeometryIssues]);
   const sharedElementValidationContext = useMemo<ValidationContext>(() => {
     const complianceOn = !!complianceSettings?.complianceValidationEnabled;
     return {
@@ -2354,7 +2374,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         junctionPsiDefaultsPath && junctionPsiDefaultsPath.trim() !== ''
           ? junctionPsiDefaultsMap
           : undefined,
-      linearThermalBridgeIssues: findLinearThermalBridgeIssues(elementsForValidation),
+      linearThermalBridgeIssues: linearGeometryIssues,
       floorStackWarningElementIds: getFloorStackWarningElementIds(elementsForValidation, floors),
       partFFindings: complianceOn
         ? selectPartFData({
@@ -2381,6 +2401,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     globalOrientationOffset,
     junctionPsiDefaultsMap,
     junctionPsiDefaultsPath,
+    linearGeometryIssues,
     schemaPort,
     spaceLabelIds,
     spaceLabelsById,
@@ -4588,7 +4609,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   ) => {
     const color = clearance.isWithinWall
       ? readRootCssVar('--semantic-snap', '#1E90FF')
-      : CANVAS_CONSTANTS.COLORS.VALIDATION_WARNING;
+      : canvasInteractionPalette.warningGuide;
 
     const renderSide = (side: LineOpeningClearanceSide) => {
       const segment = side === 'start' ? clearance.startGuideSegment : clearance.endGuideSegment;
@@ -4665,6 +4686,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     lineOpeningDistanceEditor,
     selectedLineOpeningClearance,
     beginLineOpeningDistanceEditor,
+    canvasInteractionPalette,
   ]);
 
   // Memoized snap indicators calculation for performance
@@ -6179,6 +6201,26 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           </Layer>
 
           <Layer name="main-geometry-layer" listening={true}>
+            {/* Overlap halos sit under the lines they mark; the panel message explains them. */}
+            {overlapStretches.map(([key, { elementIds, stretch }]) => {
+              const shown = elementIds.every((id) => {
+                const element = elementsById[id];
+                return !!element && isElementOnActiveCanvasFloor(element, currentFloorZ, floors) && !isElementHiddenOnView(element);
+              });
+              if (!shown) return null;
+              const [a, b] = stretch.map((point) => worldToCanvas(point, scale, panOffset, canvasCenter));
+              return (
+                <Line
+                  key={`overlap-halo-${key}`}
+                  points={[a.x, a.y, b.x, b.y]}
+                  stroke={canvasInteractionPalette.warningGuide}
+                  strokeWidth={10}
+                  opacity={0.4}
+                  lineCap="round"
+                  listening={false}
+                />
+              );
+            })}
             {/* Current-floor geometry remains interactive; overlays and handles stay above it. */}
             {ENABLE_GEOMETRY_CANVAS_REACT_PROFILER && geometryPerf.isEnabled() ? (
               <React.Profiler id="GeometryCanvas.layer2d.currentElements" onRender={recordGeometryCanvasProfiler}>
@@ -6205,7 +6247,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 const featureB = worldToCanvas(item.featureSegment[1], scale, panOffset, canvasCenter);
                 const color =
                   item.status === 'below-guidance'
-                    ? CANVAS_CONSTANTS.COLORS.VALIDATION_WARNING
+                    ? canvasInteractionPalette.warningGuide
                     : readRootCssVar('--semantic-snap', '#1E90FF');
                 const labelText = `${item.label}: ${item.distanceM.toFixed(2)}m / ${item.guidanceDistanceM.toFixed(2)}m`;
                 const measureDx = featurePoint.x - panelPoint.x;

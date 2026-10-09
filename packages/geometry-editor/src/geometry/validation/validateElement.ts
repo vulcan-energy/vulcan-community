@@ -75,7 +75,7 @@ import { computeGroundExposedPerimeterDetails } from '../../lib/groundExposedPer
 import { isExternalLineWall } from '../thermalBridge/proposeExternalCorners';
 import type { LinearThermalBridgeIssue } from '../thermalBridge/findLinearThermalBridgeIssues';
 import { findLinearThermalBridgeIssues } from '../thermalBridge/findLinearThermalBridgeIssues';
-import { getWallSupportedSnappedVertices, pointsConnected } from '../../lib/snapUtils';
+import { getWallSupportedSnappedVertices, pointsConnected, snapPartnerFilter } from '../../lib/snapUtils';
 import {
   collectGlobalSettingsWarnings,
   resolveEffectiveVentilationZoneBaseHeight,
@@ -2127,12 +2127,13 @@ export const validateElementCore = (
     // Helper functions for warning checks
     const getSnappedVertices = (el: Element): number => {
       if (!el.coordinates) return 0;
+      const isPartner = snapPartnerFilter(el);
       let count = 0;
       el.coordinates.forEach((coord) => {
         for (const otherId of Object.keys(elementsById)) {
           if (otherId === el.id) continue;
           const other = elementsById[otherId];
-          if (!other.coordinates) continue;
+          if (!other.coordinates || (isPartner && !isPartner(other))) continue;
           for (const otherCoord of other.coordinates) {
             if (pointsConnected(el, coord, other, otherCoord)) {
               count++;

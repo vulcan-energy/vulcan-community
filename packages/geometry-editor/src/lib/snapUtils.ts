@@ -1185,6 +1185,24 @@ export type GetExactSnappedVerticesOptions = {
   skipVertexMatchFromOtherTypes?: string[];
 };
 
+/**
+ * Which partners can make a vertex "snapped". Building elements count only building elements (a
+ * duct, pipe or TB end on a free wall end leaves it loose). Ducts and pipes count only their own
+ * network: a duct with same-unit ducts and terminals and the unit's point, a pipe with other pipes.
+ * Undefined (any partner) for every other type, so TBs still count wall corners.
+ */
+export function snapPartnerFilter(element: Element): ((other: Element) => boolean) | undefined {
+  if (isBuildingElement(element)) return isBuildingElement;
+  if (element.type === 'WaterPipework') return (other) => other.type === 'WaterPipework';
+  if (element.type !== 'MechanicalVentilationDuctwork') return undefined;
+  const unit = element.parent_element?.trim();
+  if (!unit) return () => false;
+  return (other) =>
+    ((other.type === 'MechanicalVentilationDuctwork' || other.type === 'MechanicalVentilationTerminal') &&
+      other.parent_element?.trim() === unit) ||
+    (other.type === 'MechanicalVentilation' && other.name?.trim() === unit);
+}
+
 // Helper to detect which vertices of an element are exactly snapped to other elements (for persistent indicators)
 export const getExactSnappedVertices = (
   element: Element,
@@ -1193,6 +1211,7 @@ export const getExactSnappedVertices = (
 ): Set<number> => {
   const snappedVertices = new Set<number>();
   const skipTypes = options?.skipVertexMatchFromOtherTypes;
+  const isPartner = snapPartnerFilter(element);
 
   if (!element.coordinates) return snappedVertices;
 
@@ -1206,6 +1225,7 @@ export const getExactSnappedVertices = (
       if (skipTypes?.length && other.type && skipTypes.includes(String(other.type))) {
         continue;
       }
+      if (isPartner && !isPartner(other)) continue;
       if (!other.coordinates) continue;
 
       for (const otherCoord of other.coordinates) {

@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import type { Element, MechanicalVentilationTerminal } from '../../geometry/types';
+import type { Element, MechanicalVentilationDuctwork, MechanicalVentilationTerminal } from '../../geometry/types';
 import {
   collectMvhrDuctTopologyWarnings,
   deriveMechanicalVentilationTerminalPosition,
   getMvhrDuctRoleStyle,
   isMvhrTerminalHost,
+  looseDuctRunEndNearestUnit,
   MVHR_DUCT_ROLE_STYLES,
 } from '../mvhrDuctwork';
 
@@ -129,5 +130,18 @@ describe('mvhrDuctwork helpers', () => {
     );
 
     expect(warnings.map((warning) => warning.kind)).toEqual(['disconnected-role', 'role-not-connected-to-unit']);
+  });
+
+  it('marks a loose run at its free end nearest the unit, never at an interior joint', () => {
+    const unit = { type: 'MechanicalVentilation', id: 'mv', name: 'MV', vent_type: 'MVHR', coordinates: [{ x: 0, y: 0, z: 0 }] };
+    const duct = (id: string, a: [number, number], b: [number, number]) => ({
+      type: 'MechanicalVentilationDuctwork', id, name: id, parent_element: 'MV', duct_type: 'supply',
+      coordinates: [{ x: a[0], y: a[1], z: 0 }, { x: b[0], y: b[1], z: 0 }],
+    });
+    const legA = duct('a', [3, 0], [0.5, 0.5]);
+    const elements = [unit, legA, duct('b', [0.5, 0.5], [3, 5])] as unknown as Element[];
+
+    expect(looseDuctRunEndNearestUnit(legA as unknown as MechanicalVentilationDuctwork, elements))
+      .toEqual({ x: 3, y: 0, z: 0 });
   });
 });

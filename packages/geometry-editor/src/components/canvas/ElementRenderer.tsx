@@ -91,7 +91,7 @@ import { tryAxisAlignedRightAngleSnapForVertex } from '../../lib/vertexEditSnap'
 import type { SnapEvent } from '../../lib/snapEvent';
 import type { SnapFeedbackSignal } from './snapFeedbackSignal';
 import { geometryPerf } from '../../lib/geometryPerf';
-import { getMechanicalVentilationDuctworkRoleStyle } from '../../lib/mvhrDuctwork';
+import { getMechanicalVentilationDuctworkRoleStyle, looseDuctRunEndNearestUnit } from '../../lib/mvhrDuctwork';
 import {
   isOrientationPitchAxis,
   slopedPolygonPlaneBasis,
@@ -570,6 +570,7 @@ function renderUnsnappedVertexChip(
   position: { x: number; y: number },
   handleRadius: number,
   key: string,
+  palette: CanvasInteractionPalette,
 ): React.ReactNode {
   const width = (UNSNAPPED_VERTEX_CHIP_TEXT.length * UNSNAPPED_VERTEX_CHIP_CHAR_WIDTH) + (UNSNAPPED_VERTEX_CHIP_PADDING_X * 2);
   const x = position.x - (width / 2);
@@ -582,8 +583,8 @@ function renderUnsnappedVertexChip(
         y={y}
         width={width}
         height={UNSNAPPED_VERTEX_CHIP_HEIGHT}
-        fill={CANVAS_CONSTANTS.COLORS.VALIDATION_WARNING}
-        stroke={CANVAS_CONSTANTS.COLORS.VALIDATION_WARNING_BORDER}
+        fill={palette.warningGuide}
+        stroke={palette.warningBorder}
         strokeWidth={1}
         cornerRadius={10}
         listening={false}
@@ -594,7 +595,7 @@ function renderUnsnappedVertexChip(
         width={width - (UNSNAPPED_VERTEX_CHIP_PADDING_X * 2)}
         text={UNSNAPPED_VERTEX_CHIP_TEXT}
         fontSize={UNSNAPPED_VERTEX_CHIP_FONT_SIZE}
-        fill={CANVAS_CONSTANTS.COLORS.TEXT}
+        fill={palette.warningOnFill}
         align="center"
         listening={false}
       />
@@ -1462,6 +1463,14 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
         : undefined,
     );
   }, [showDirectSelectionHandles, isSelected, useWallSupportedPolygonSnaps, element, elementsById, isRegularWallOpaque]);
+  // A selected duct on a run the topology check reports as loose: chip at the run end nearest the unit.
+  const looseDuctRunEnd = useMemo(
+    () =>
+      isSelected && element.type === 'MechanicalVentilationDuctwork'
+        ? looseDuctRunEndNearestUnit(element, Object.values(elementsById))
+        : null,
+    [isSelected, element, elementsById],
+  );
   // Memo: dormer cutouts iterate all elements; reproject only when geometry or view changes.
   const dormerCutoutCanvasPolygons = useMemo(
     () => getDormerCutoutPolygonsForHost(element, elementsById, selection).map((polygon) =>
@@ -2018,7 +2027,13 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
 
             return (
               <>
-                {showUnsnappedVertexGuidance && !startSnapped && renderUnsnappedVertexChip(start, 6, `unsnapped-chip-${element.id}-0`)}
+                {showUnsnappedVertexGuidance && !startSnapped && renderUnsnappedVertexChip(start, 6, `unsnapped-chip-${element.id}-0`, canvasInteractionPalette)}
+                {drawMode === 'none' && looseDuctRunEnd && renderUnsnappedVertexChip(
+                  worldToCanvas(looseDuctRunEnd, scale, panOffset, canvasCenter),
+                  6,
+                  `unsnapped-chip-${element.id}-run`,
+                  canvasInteractionPalette,
+                )}
                 <Circle
                   name={`vertex-${element.id}-0`}
                   x={start.x}
@@ -2239,7 +2254,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   cleanupVertexInteractionAfterDragEnd(draggedNode);
                 }}
               />
-                {showUnsnappedVertexGuidance && !endSnapped && renderUnsnappedVertexChip(end, 6, `unsnapped-chip-${element.id}-1`)}
+                {showUnsnappedVertexGuidance && !endSnapped && renderUnsnappedVertexChip(end, 6, `unsnapped-chip-${element.id}-1`, canvasInteractionPalette)}
                 <Circle
                   name={`vertex-${element.id}-1`}
                   x={end.x}
@@ -2550,7 +2565,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
 
             return (
               <React.Fragment key={index}>
-                {showUnsnappedVertexGuidance && !isHandleHostSnapped && renderUnsnappedVertexChip(coord, handleRadius, `unsnapped-chip-${element.id}-${index}`)}
+                {showUnsnappedVertexGuidance && !isHandleHostSnapped && renderUnsnappedVertexChip(coord, handleRadius, `unsnapped-chip-${element.id}-${index}`, canvasInteractionPalette)}
                 <Circle
                   name={`vertex-${element.id}-${index}`}
                   x={coord.x}
@@ -3158,7 +3173,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
 
             return (
               <React.Fragment key={index}>
-                {showUnsnappedVertexGuidance && !isHandleHostSnapped && renderUnsnappedVertexChip(coord, handleRadius, `unsnapped-chip-${element.id}-${index}`)}
+                {showUnsnappedVertexGuidance && !isHandleHostSnapped && renderUnsnappedVertexChip(coord, handleRadius, `unsnapped-chip-${element.id}-${index}`, canvasInteractionPalette)}
                 <Circle
                   name={`vertex-${element.id}-${index}`}
                   x={coord.x}
