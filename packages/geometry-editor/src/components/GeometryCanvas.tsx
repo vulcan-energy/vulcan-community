@@ -158,10 +158,9 @@ import {
 } from './canvas/canvasInteractionSession';
 import { LiveDrawingPreview } from './canvas/LiveDrawingPreview';
 import { LiveSnapFeedback } from './canvas/LiveSnapFeedback';
-import { HoverHintOverlay, SELECTED_SHAPE_DRAG_HANDLE_NAME } from './canvas/HoverHintOverlay';
 import { LiveMarqueeSelection } from './canvas/LiveMarqueeSelection';
 import { CanvasLivePreviewLayer } from './canvas/CanvasLivePreviewLayer';
-import { renderDrawModeTooltipPill } from './canvas/DrawingPreview';
+import { HoverHintOverlay, renderDrawModeTooltipPill, SELECTED_SHAPE_DRAG_HANDLE_NAME } from './canvas/DrawingPreview';
 import {
   canCanvasInteractionUpdateElementHover,
   canCanvasInteractionRunStageMouseMove,
