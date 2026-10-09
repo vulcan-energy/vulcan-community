@@ -269,7 +269,7 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
           drawSnapTargetRef
         );
         if (!placementPoint) return null;
-        const tooltipText = getDrawModeTooltipText(
+        const baseTooltipText = getDrawModeTooltipText(
           drawMode,
           drawPoints,
           roomWalls,
@@ -281,6 +281,9 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
           multiDrawModifierHeld,
           !!drawElbow,
         );
+        const tooltipText = baseTooltipText && drawElementType === 'ThermalBridgeLinear'
+          ? `${baseTooltipText} · Hold A for suggestions`
+          : baseTooltipText;
         const canvasPos = w2c(placementPoint);
         const tooltipWidth = tooltipText ? getDrawModeTooltipPillWidth(tooltipText) : 0;
         return (

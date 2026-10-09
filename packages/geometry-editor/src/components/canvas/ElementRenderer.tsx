@@ -694,6 +694,8 @@ export interface ElementRendererProps {
   categoryGhostOnCanvas?: boolean;
   /** Space Labeller mode: dim fabric on the active floor and block hits so footprints stay the focus. */
   spaceLabellerSuppressFabricInteraction?: boolean;
+  /** Temporary preview emphasis; never persisted into the element style. */
+  previewOpacity?: number;
   /** Pre-projected canvas coords from the parent's elementCanvasData. Skips a redundant worldToCanvas pass per element per render. */
   canvasCoords?: Array<{ x: number; y: number }>;
   /** Live project offset; required by Orientation-axis slope visuals and editing. */
@@ -752,6 +754,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   snapFeedbackSignal,
   categoryGhostOnCanvas = false,
   spaceLabellerSuppressFabricInteraction = false,
+  previewOpacity = 1,
   canvasCoords: canvasCoordsProp,
   globalOrientationOffset,
 }) => {
@@ -1429,7 +1432,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   const spaceLabellerDim =
     spaceLabellerSuppressFabricInteraction && isCurrentFloor && !categoryGhostOnCanvas ? 0.34 : 1;
   const opacity =
-    baseFloorOpacity * spaceLabellerDim * (categoryGhostOnCanvas ? CATEGORY_GHOST_OPACITY_FACTOR : 1);
+    baseFloorOpacity * spaceLabellerDim * previewOpacity * (categoryGhostOnCanvas ? CATEGORY_GHOST_OPACITY_FACTOR : 1);
 
   const shape = getElementShape(element as any);
   const orientationPitchAxis = shape === 'sloped-polygon' && isOrientationPitchAxis(element);
@@ -1518,6 +1521,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
           snapFeedbackSignal={snapFeedbackSignal}
           categoryGhostOnCanvas={categoryGhostOnCanvas}
           spaceLabellerSuppressFabricInteraction={spaceLabellerSuppressFabricInteraction}
+          previewOpacity={previewOpacity}
         />
       );
     }
@@ -3430,6 +3434,7 @@ export const ElementRenderer = memo(ElementRendererComponent, (prevProps, nextPr
   if (prevProps.vertexSnapMode !== nextProps.vertexSnapMode) return false;
   // Category hide/show from Elements panel (useElementCategoryGhost) — not part of store element
   if (prevProps.categoryGhostOnCanvas !== nextProps.categoryGhostOnCanvas) return false;
+  if (prevProps.previewOpacity !== nextProps.previewOpacity) return false;
   if (prevProps.spaceLabellerSuppressFabricInteraction !== nextProps.spaceLabellerSuppressFabricInteraction)
     return false;
 

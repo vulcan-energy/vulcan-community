@@ -1,0 +1,43 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+.tb-preview-label {
+  position: absolute;
+  z-index: 30;
+  max-width: min(280px, calc(100% - 16px));
+  padding: 6px 9px;
+  border: 1px solid var(--border-overlay);
+  border-radius: 8px;
+  color: var(--text-overlay-primary);
+  background: var(--canvas-drawing-tooltip-bg, rgba(18, 31, 34, 0.96));
+  font-size: 12px;
+}
+.tb-preview-menu { max-height: min(300px, 50vh); overflow-y: auto; }
+.tb-preview-menu-heading { display: flex; justify-content: space-between; align-items: center; }
+.tb-preview-row { display: grid; gap: 4px; padding: 6px 0; border-top: 1px solid var(--border-overlay); }
+.tb-preview-row select { max-width: 100%; width: 250px; }
+.tb-preview-add { text-align: left; }
+.tb-preview-add span, .tb-preview-label small { display: block; font-size: 12px; opacity: .8; }
+.tb-preview-status {
+  position: absolute;
+  bottom: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: calc(100% - 32px);
+  pointer-events: none;
+  font-size: 12px;
+}
+.tb-preview-status > span {
+  padding: 5px 10px;
+  border-radius: 12px;
+  background: var(--canvas-drawing-tooltip-bg, rgba(18, 31, 34, .96));
+  color: var(--text-overlay-primary);
+  border: 1px solid var(--border-overlay);
+}
+
+.tb-preview-status-inline { position: static; transform: none; max-width: 100%; }
+.tb-preview-toolbar-accessory { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; }
