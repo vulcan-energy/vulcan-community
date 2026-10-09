@@ -76,8 +76,37 @@ function isNearFirstPoint(
   return dist < tolerance;
 }
 
+// Modifier suffixes live once: Alt/Option multi-draw and the P/V/S shape switch.
+const PVS_HINT = 'P/V/S switches shape';
+function withMultiDrawHint(
+  held: boolean,
+  heldText: string,
+  idleText: string,
+  withShapeSwitch = false,
+): string {
+  if (held) return withShapeSwitch ? `${heldText} (${PVS_HINT})` : heldText;
+  return withShapeSwitch
+    ? `${idleText} (Alt/Option+Click to keep drawing; ${PVS_HINT})`
+    : `${idleText} (Alt/Option+Click for multi-draw)`;
+}
+
+export type HoverHintTarget = {
+  kind: 'rotate-grip' | 'vertex' | 'body';
+  dragging: boolean;
+};
+
+/** Hint for a selected element's drag handle; null means native cursor only. */
+// eslint-disable-next-line react-refresh/only-export-components -- sits beside getDrawModeTooltipText.
+export function getHoverHintText(target: HoverHintTarget): string | null {
+  if (target.kind === 'rotate-grip') return target.dragging ? null : 'Drag to rotate';
+  if (target.kind === 'vertex') return 'Shift: no snap';
+  // body: a later slice adds 'Alt moves connected' for connected lines here.
+  return null;
+}
+
 // Helper: Get tooltip text based on draw mode and state
-function getDrawModeTooltipText(
+// eslint-disable-next-line react-refresh/only-export-components -- exported for output tests.
+export function getDrawModeTooltipText(
   drawMode: DrawMode,
   drawPoints: Array<{ x: number; y: number }>,
   roomWalls: Array<{ x: number; y: number }>,
@@ -91,9 +120,7 @@ function getDrawModeTooltipText(
   if (drawMode === 'none') return null;
 
   if (drawMode === 'point') {
-    return multiDrawModifierHeld
-      ? 'Place object + continue'
-      : 'Place object (Alt/Option+Click for multi-draw)';
+    return withMultiDrawHint(multiDrawModifierHeld, 'Place object + continue', 'Place object');
   }
 
   if (drawMode === 'dormer') {
@@ -104,32 +131,22 @@ function getDrawModeTooltipText(
     if (drawPoints.length === 0) return 'Place first point';
     if (drawPoints.length === 1) {
       if (drawMode === 'tb-plan-line') {
-        return multiDrawModifierHeld
-          ? 'Place end point + continue (P/V/S switches shape)'
-          : 'Place final point (Alt/Option+Click to keep drawing; P/V/S switches shape)';
+        return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point', true);
       }
-      return multiDrawModifierHeld
-        ? 'Place end point + continue'
-        : 'Place final point (Alt/Option+Click for multi-draw)';
+      return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point');
     }
     return null;
   }
   if (drawMode === 'tb-vertical-line') {
     if (drawPoints.length === 0) {
-      return multiDrawModifierHeld
-        ? 'Place vertical run + continue (P/V/S switches shape)'
-        : 'Place vertical run (Alt/Option+Click to keep drawing; P/V/S switches shape)';
+      return withMultiDrawHint(multiDrawModifierHeld, 'Place vertical run + continue', 'Place vertical run', true);
     }
-    return multiDrawModifierHeld
-      ? 'Create vertical run + continue (P/V/S switches shape)'
-      : 'Create vertical run from current point (Alt/Option+Click to keep drawing; P/V/S switches shape)';
+    return withMultiDrawHint(multiDrawModifierHeld, 'Create vertical run + continue', 'Create vertical run from current point', true);
   }
   if (drawMode === 'tb-slope-line') {
     if (drawPoints.length === 0) return 'Place first point';
     if (drawPoints.length === 1) {
-      return multiDrawModifierHeld
-        ? 'Place end point + continue (P/V/S switches shape)'
-        : 'Place second point (Alt/Option+Click to keep drawing; P/V/S switches shape)';
+      return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place second point', true);
     }
     return null;
   }
@@ -220,12 +237,13 @@ export function renderDrawModeTooltipPill(
   text: string,
   position: { x: number; y: number },
   palette: DrawingCanvasPalette,
+  key = 'draw-mode-tooltip-pill',
 ) {
   const width = getDrawModeTooltipPillWidth(text);
   const innerW = width - DRAW_MODE_TOOLTIP_PILL_PADDING * 2;
 
   return (
-    <Group key="draw-mode-tooltip-pill">
+    <Group key={key}>
       <Rect
         x={position.x}
         y={position.y}

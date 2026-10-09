@@ -4,7 +4,12 @@
 import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { DrawingPreview, type DrawingPreviewProps } from '../DrawingPreview';
+import {
+  DrawingPreview,
+  getDrawModeTooltipText,
+  getHoverHintText,
+  type DrawingPreviewProps,
+} from '../DrawingPreview';
 
 vi.mock('react-konva', () => {
   const Group = ({ children }: { children?: React.ReactNode }) => <div data-testid="konva-group">{children}</div>;
@@ -74,5 +79,32 @@ describe('DrawingPreview', () => {
       getComputedStyleSpy.mockRestore();
       getContextSpy.mockRestore();
     }
+  });
+});
+
+describe('tooltip copy', () => {
+  const text = (mode: any, n: number, held: boolean, type: any = 'BuildingElementOpaque') =>
+    getDrawModeTooltipText(mode, Array(n).fill({ x: 0, y: 0 }), [], null, null, null, { current: null }, type, held);
+
+  it('keeps the draw-mode strings', () => {
+    expect(text('point', 0, false)).toBe('Place object (Alt/Option+Click for multi-draw)');
+    expect(text('point', 0, true)).toBe('Place object + continue');
+    expect(text('line', 1, false)).toBe('Place final point (Alt/Option+Click for multi-draw)');
+    expect(text('line', 1, true)).toBe('Place end point + continue');
+    expect(text('tb-plan-line', 1, false)).toBe('Place final point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
+    expect(text('tb-plan-line', 1, true)).toBe('Place end point + continue (P/V/S switches shape)');
+    expect(text('tb-vertical-line', 0, false)).toBe('Place vertical run (Alt/Option+Click to keep drawing; P/V/S switches shape)');
+    expect(text('tb-vertical-line', 0, true)).toBe('Place vertical run + continue (P/V/S switches shape)');
+    expect(text('tb-vertical-line', 1, false)).toBe('Create vertical run from current point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
+    expect(text('tb-vertical-line', 1, true)).toBe('Create vertical run + continue (P/V/S switches shape)');
+    expect(text('tb-slope-line', 1, false)).toBe('Place second point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
+    expect(text('tb-slope-line', 1, true)).toBe('Place end point + continue (P/V/S switches shape)');
+  });
+
+  it('hover hints', () => {
+    expect(getHoverHintText({ kind: 'rotate-grip', dragging: false })).toBe('Drag to rotate');
+    expect(getHoverHintText({ kind: 'rotate-grip', dragging: true })).toBeNull();
+    expect(getHoverHintText({ kind: 'vertex', dragging: true })).toBe('Shift: no snap');
+    expect(getHoverHintText({ kind: 'body', dragging: false })).toBeNull();
   });
 });

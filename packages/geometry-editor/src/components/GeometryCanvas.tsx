@@ -158,6 +158,7 @@ import {
 } from './canvas/canvasInteractionSession';
 import { LiveDrawingPreview } from './canvas/LiveDrawingPreview';
 import { LiveSnapFeedback } from './canvas/LiveSnapFeedback';
+import { HoverHintOverlay, SELECTED_SHAPE_DRAG_HANDLE_NAME } from './canvas/HoverHintOverlay';
 import { LiveMarqueeSelection } from './canvas/LiveMarqueeSelection';
 import { CanvasLivePreviewLayer } from './canvas/CanvasLivePreviewLayer';
 import { renderDrawModeTooltipPill } from './canvas/DrawingPreview';
@@ -7385,6 +7386,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
               return (
                 <Circle
+                  name={SELECTED_SHAPE_DRAG_HANDLE_NAME}
                   x={centroidCanvas.x}
                   y={centroidCanvas.y}
                   radius={7}
@@ -7559,6 +7561,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 canvasPalette={drawingCanvasPalette}
               />,
             )}
+            <HoverHintOverlay
+              stageRef={stageRef}
+              enabled={drawMode === 'none' && !isCanvasPanning}
+              palette={drawingCanvasPalette}
+            />
           </CanvasLivePreviewLayer>
 
           <Layer name={ACTIVE_GEOMETRY_DRAG_LAYER_NAME} listening={true} />
