@@ -3,7 +3,7 @@
 
 import React, { useCallback, useState, useRef, useEffect, useLayoutEffect, useMemo, memo, useSyncExternalStore } from 'react';
 import { Rnd } from 'react-rnd';
-import type { Element, ElementType, Zone } from '../../geometry/types';
+import type { Element, ElementDraft, ElementType, Zone } from '../../geometry/types';
 import { useGeometryStore, useGeometryStoreApi, validateZone } from '../../stores/geometryStore';
 import type { ValidationIssue, ValidationResult, MissingElement } from '../../geometry/validation/types';
 import { withTargetIssues } from '../../lib/buildErrorDisplay';
@@ -1231,26 +1231,13 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                             try {
                               const targetZoneId = missing.zoneId || zones[0]?.id || createPlaceholderZone();
 
-                              // Part F batched CTA: create all planned vents in one go, parented
-                              // and sized per the placement plan. Selects the first as the user's
-                              // entry point.
-                              if (missing.batchPlan && missing.batchPlan.vents.length > 0) {
-                                const ids: string[] = [];
-                                for (const planned of missing.batchPlan.vents) {
-                                  const id = createPlaceholderElement(targetZoneId, missing.type);
-                                  ids.push(id);
-                                  updateElement(
-                                    id,
-                                    {
-                                      area_cm2: planned.area_cm2,
-                                      mid_height_air_flow_path: planned.mid_height_air_flow_path,
-                                      parent_element: planned.parent_element ?? '',
-                                      coordinates: [planned.coordinates],
-                                    } as any,
-                                    true,
-                                  );
-                                }
-                                const firstId = ids[0];
+                              // Batched CTA (Part F vents, auto-ducts): one history step, then the
+                              // first created element is the user's entry point.
+                              if (missing.batchPlan && missing.batchPlan.drafts.length > 0) {
+                                const ids = geometryStore.getState().addElements(
+                                  missing.batchPlan.drafts.map((draft) => ({ ...draft, zoneId: draft.zoneId ?? targetZoneId }) as ElementDraft),
+                                );
+                                const firstId = ids[0]!;
                                 const firstElement = geometryStore.getState().elementsById[firstId];
                                 if (!firstElement) throw new Error('Created element is missing from the geometry store');
                                 setSelectedElementIds([firstId]);

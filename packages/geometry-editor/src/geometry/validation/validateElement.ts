@@ -2445,6 +2445,7 @@ export const collectGeometryValidation = (
     options.complianceValidationEnabled || false,
     options.partOActiveCoolingRequired,
     options.partFContext,
+    options.floors,
   );
   if (options.complianceValidationEnabled) {
     const partFInput = options.partFContext

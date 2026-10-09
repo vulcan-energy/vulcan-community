@@ -1,8 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { ElementType } from '../types';
-import type { BatchPlan } from './partF';
+import type { ElementDraft, ElementType } from '../types';
+
+/** Elements a missing-element CTA creates in one history step (Part F vents, auto-ducts). */
+export interface BatchPlan {
+  drafts: ElementDraft[];
+  /** Display string e.g. "3 background vents (200 cm² total)". */
+  summary: string;
+}
 
 export interface MissingElement {
   type: ElementType;
@@ -16,8 +22,7 @@ export interface MissingElement {
   fieldKey?: string;
   /**
    * When present, clicking the pill creates the listed elements in one batch (instead of a
-   * single placeholder). Used for Part F shortfalls where the user needs multiple vents
-   * with specific sizes / parents to close the gap.
+   * single placeholder): Part F vent shortfalls and missing MVHR ductwork.
    */
   batchPlan?: BatchPlan;
 }

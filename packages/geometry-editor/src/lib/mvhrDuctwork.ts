@@ -3,13 +3,20 @@
 
 import type {
   Element,
+  ElementDraft,
+  Floor,
   MechanicalVentilation,
   MechanicalVentilationDuctwork,
   MechanicalVentilationTerminal,
+  SpaceLabel,
 } from '../geometry/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
+import { getElementCanvasFloorZValue } from './elementCanvasFloor';
 import { orientation360FromSegmentOutwardModelXY } from './openingSegmentOutward';
-import { pointsConnected } from './snapUtils';
+import { planOrthogonalElbow, pointsConnected } from './snapUtils';
+import { pointInPolygon, polygonCentroid2d } from './spaceInference';
+import { resolveRoomTypeRule } from './spaceLabelDerivation';
+import { calculateDerivedBaseHeight, withEffectiveStoreyHeights } from './zoneDerivation';
 
 export const MVHR_DUCT_ROLES = ['supply', 'extract', 'intake', 'exhaust'] as const;
 export type MvhrDuctRole = (typeof MVHR_DUCT_ROLES)[number];
@@ -385,4 +392,154 @@ export function looseDuctRunEndNearestUnit(
   if (freeEnds.length === 0) return null;
   return freeEnds.reduce((best, end) =>
     distance3d(end, context.unitPoint) < distance3d(best, context.unitPoint) ? end : best);
+}
+
+type PlanPoint = { x: number; y: number };
+
+/** Room roles and terminal roles each unit type gets ductwork for. Unlisted types get none. */
+const AUTO_DUCT_ROLES: Partial<Record<MechanicalVentilation['vent_type'], {
+  rooms: Array<{ role: MvhrDuctRole; wet: boolean }>;
+  terminals: MvhrTerminalRole[];
+}>> = {
+  MVHR: { rooms: [{ role: 'extract', wet: true }, { role: 'supply', wet: false }], terminals: ['intake', 'exhaust'] },
+  'Centralised continuous MEV': { rooms: [{ role: 'extract', wet: true }], terminals: ['exhaust'] },
+};
+
+function roomServedByRole(label: SpaceLabel, wet: boolean): boolean {
+  const { increments } = resolveRoomTypeRule(label.room_type ?? '').rule;
+  return wet ? increments.NumberOfWetRooms === 1 : increments.NumberOfHabitableRooms === 1;
+}
+
+/**
+ * Where a run ends in a room: the label's vertex centroid, or, for a concave room whose centroid
+ * falls outside it, the first fan triangle's centroid that lands inside.
+ */
+function pointInsideRoom(ring: PlanPoint[]): PlanPoint | null {
+  const candidates = [polygonCentroid2d(ring)];
+  for (let i = 1; i + 1 < ring.length; i += 1) candidates.push(polygonCentroid2d([ring[0]!, ring[i]!, ring[i + 1]!]));
+  const inside = candidates.find((p) => pointInPolygon(p, ring));
+  return inside ? { x: roundToTwoDecimals(inside.x), y: roundToTwoDecimals(inside.y) } : null;
+}
+
+/** The orthogonal L (longer axis first) from `start` to `end` at height z, or one leg when on-axis. */
+function orthogonalRun(start: Point3, end: PlanPoint, z: number): Point3[] {
+  const elbow = planOrthogonalElbow(start, end, 0, false);
+  return [start, ...(elbow ? [{ ...elbow, z }] : []), { ...end, z }];
+}
+
+function projectOntoSegment(p: PlanPoint, a: PlanPoint, b: PlanPoint): PlanPoint {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / (vx * vx + vy * vy || 1)));
+  return { x: roundToTwoDecimals(a.x + t * vx), y: roundToTwoDecimals(a.y + t * vy) };
+}
+
+/**
+ * Auto-duct plan for one ventilation unit: one radial run per wet room (extract) and, for MVHR,
+ * per habitable room (supply), from the unit point to a point inside the room's space label, plus
+ * a run to the nearest free external host and an intake or exhaust terminal on it. Each segment is
+ * its own duct draft; consecutive segments share exact endpoints so each run is one connected
+ * component touching the unit.
+ *
+ * A room on another storey is reached by an L at the unit's height, then a riser at the room point
+ * to that storey's draw height. The riser sits at the room end, not the unit, because every run
+ * must leave the unit point itself: the bundle overlap exemption and the cross-role endpoint check
+ * both key on the unit point, so a shared riser top would be flagged.
+ *
+ * Rooms already reached by a duct of that role, and terminal roles that already have a terminal or
+ * duct, are skipped, so re-running only fills gaps. Output order is stable (rooms by id).
+ */
+export function planAutoDucts(
+  unit: MechanicalVentilation,
+  elements: Element[],
+  spaceLabels: readonly SpaceLabel[],
+  floors: Floor[],
+): ElementDraft[] {
+  const roles = AUTO_DUCT_ROLES[unit.vent_type];
+  const unitPoint = getFirstPoint3(unit);
+  const unitStorey = getElementCanvasFloorZValue(unit, floors);
+  const unitFloorId = floors.find((floor) => floor.zIndex === unitStorey)?.id;
+  if (!roles || !unitPoint || unitStorey === undefined || !unitFloorId) return [];
+
+  const unitDucts = elements.filter(
+    (el): el is MechanicalVentilationDuctwork =>
+      el.type === 'MechanicalVentilationDuctwork' && !el.isPlaceholder && el.parent_element?.trim() === unit.name,
+  );
+  const drafts: ElementDraft[] = [];
+  const addRun = (role: MvhrDuctRole, points: Point3[], floorIds: string[]) => {
+    for (let i = 0; i + 1 < points.length; i += 1) {
+      const [a, b] = [points[i]!, points[i + 1]!];
+      const length = roundToTwoDecimals(distance3d(a, b));
+      if (length === 0) continue;
+      drafts.push({
+        name: '',
+        type: 'MechanicalVentilationDuctwork',
+        duct_type: role,
+        parent_element: unit.name,
+        floorId: floorIds[i],
+        coordinates: [a, b],
+        length,
+        isPlaceholder: false,
+      });
+    }
+  };
+
+  const effectiveFloors = withEffectiveStoreyHeights(floors, elements);
+  const labels = [...spaceLabels].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const { role, wet } of roles.rooms) {
+    for (const label of labels) {
+      if (!roomServedByRole(label, wet)) continue;
+      const ring = (label.coordinates ?? []).map((p) => ({ x: p.x, y: p.y }));
+      if (ring.length < 3) continue;
+      const served = unitDucts.some((duct) =>
+        duct.duct_type === role &&
+        getElementCanvasFloorZValue(duct, floors) === label.storey &&
+        (ductEndpoints(duct) ?? []).some((end) => pointInPolygon(end, ring)));
+      if (served) continue;
+      const target = pointInsideRoom(ring);
+      const roomFloorId = floors.find((floor) => floor.zIndex === label.storey)?.id;
+      if (!target || !roomFloorId) continue;
+      const run = orthogonalRun(unitPoint, target, unitPoint.z);
+      const floorIds = run.slice(1).map(() => unitFloorId);
+      if (label.storey !== unitStorey) {
+        run.push({ ...target, z: calculateDerivedBaseHeight(label.storey, effectiveFloors) });
+        floorIds.push(roomFloorId);
+      }
+      addRun(role, run, floorIds);
+    }
+  }
+
+  const unitTerminals = elements.filter(
+    (el): el is MechanicalVentilationTerminal =>
+      el.type === 'MechanicalVentilationTerminal' && !el.isPlaceholder && el.parent_element?.trim() === unit.name,
+  );
+  const takenHosts = new Set(unitTerminals.map((terminal) => terminal.host_element));
+  const hosts = elements
+    .filter((el) =>
+      !el.isPlaceholder && isMvhrTerminalHost(el) && el.coordinates?.length >= 2 &&
+      getElementCanvasFloorZValue(el, floors) === unitStorey)
+    .map((host) => ({ host, point: projectOntoSegment(unitPoint, host.coordinates[0]!, host.coordinates[1]!) }))
+    .map((entry) => ({ ...entry, distance: Math.hypot(entry.point.x - unitPoint.x, entry.point.y - unitPoint.y) }))
+    .sort((a, b) => a.distance - b.distance || (a.host.name < b.host.name ? -1 : a.host.name > b.host.name ? 1 : 0));
+  for (const role of roles.terminals) {
+    const done =
+      unitTerminals.some((terminal) => terminal.terminal_type === role) ||
+      unitDucts.some((duct) => duct.duct_type === role);
+    const nearest = done ? undefined : hosts.find((entry) => !takenHosts.has(entry.host.name));
+    if (!nearest) continue;
+    takenHosts.add(nearest.host.name);
+    const run = orthogonalRun(unitPoint, nearest.point, unitPoint.z);
+    addRun(role, run, run.slice(1).map(() => unitFloorId));
+    drafts.push({
+      name: '',
+      type: 'MechanicalVentilationTerminal',
+      terminal_type: role,
+      parent_element: unit.name,
+      host_element: nearest.host.name,
+      floorId: nearest.host.floorId ?? unitFloorId,
+      coordinates: [run[run.length - 1]!],
+      isPlaceholder: false,
+    });
+  }
+  return drafts;
 }

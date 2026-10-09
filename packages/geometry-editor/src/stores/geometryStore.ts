@@ -7654,6 +7654,7 @@ const createGeometryState = (
             defaultsLookup: state.getDefaultsLookup(),
           }).context
         : undefined,
+      state.floors,
     );
   }
   });
