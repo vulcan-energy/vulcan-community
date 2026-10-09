@@ -904,14 +904,21 @@ export const HoverHintOverlay = memo<{
 
   const text = hover ? getHoverHintText(hover) : null;
   if (!hover || !text) return null;
-  // Usual cursor-tooltip offset: left edge right of and below the pointer, never centred over the target.
+  // Usual cursor-tooltip offset: right of and below the pointer, never centred over the target.
+  // Near the canvas edge it flips to the pointer's other side so it is never clipped.
+  const stage = stageRef.current;
+  const width = getDrawModeTooltipPillWidth(text);
+  const right = hover.pos.x + 14;
+  const below = hover.pos.y + 18;
   return (
     <Group listening={false}>
       {renderDrawModeTooltipPill(
         text,
         {
-          x: hover.pos.x + 14,
-          y: hover.pos.y + 18,
+          x: stage && right + width > stage.width() - 4 ? Math.max(4, hover.pos.x - 14 - width) : right,
+          y: stage && below + DRAW_MODE_TOOLTIP_PILL_HEIGHT > stage.height() - 4
+            ? Math.max(4, hover.pos.y - 18 - DRAW_MODE_TOOLTIP_PILL_HEIGHT)
+            : below,
         },
         palette,
         'hover-hint-pill',
