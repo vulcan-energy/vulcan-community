@@ -4541,8 +4541,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       ? []
       : findConnectedDragNeighbours(element, byId, getProjectDefaults(geometryStore).angleTol, effectiveFloors);
     // A wall's own T-end entries are previewed with the dragged element itself.
-    const previewIds = [...new Set(neighbours.filter(({ elementId }) => elementId !== element.id).flatMap(({ elementId }) =>
-      [elementId, ...collectHostedDescendantElementIds(byId, elementId)]))];
+    const previewIds = [...new Set(neighbours.flatMap(({ elementId }) => elementId === element.id
+      ? []
+      : [elementId, ...collectHostedDescendantElementIds(byId, elementId)]))];
     target.setAttr('connectedNeighbours', neighbours);
     target.setAttr('connectedPreviewIds', previewIds);
     target.setAttr('connectedStartPos', { x: target.x(), y: target.y() });
