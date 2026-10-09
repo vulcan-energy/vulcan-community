@@ -176,5 +176,10 @@ describe('auto duct canvas preview', () => {
     act(() => result.current.addAll());
     expect(count()).toBe(elements.length + [first!, ...rest].reduce((n, run) => n + run.drafts.length, 0));
     expect(result.current.runs).toEqual([]);
+    act(() => store.getState().undo()); // Add all is one step too.
+    expect(count()).toBe(elements.length);
+    act(() => result.current.add('stale'));
+    expect(result.current.error).toBe('This suggestion is no longer available.');
+    expect(count()).toBe(elements.length);
   });
 });

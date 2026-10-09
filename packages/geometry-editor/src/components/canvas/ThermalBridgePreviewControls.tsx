@@ -125,7 +125,9 @@ export function ThermalBridgePreviewStatus({ preview, viewMode, inline = false }
     <div className={`tb-preview-status${inline ? ' tb-preview-status-inline' : ''}`} aria-live="polite">
       {preview.error ? <span role="alert">{preview.error}</span> : (preview.menu || (preview.kind !== 'duct' && (preview.hover?.ids.length ?? 0) > 0)) ? null :
         <span>{preview.kind === 'duct'
-          ? preview.runs.length ? `${preview.runs.length} runs · Click to add · Release A to draw` : 'No suggestions on this floor'
+          ? preview.chooseUnit ? 'Choose an MVHR unit'
+            : preview.runs.length ? `${preview.runs.length} run${preview.runs.length === 1 ? '' : 's'} · Click to add · Release A to draw`
+            : 'No suggestions on this floor'
           : preview.candidates.some((candidate) => !candidate.addabilityError)
           ? `Click to add · Release A to ${viewMode === '3d' ? 'exit' : 'draw'}`
           : preview.candidates.length ? 'No addable suggestions on this floor' : 'No suggestions on this floor'}</span>}

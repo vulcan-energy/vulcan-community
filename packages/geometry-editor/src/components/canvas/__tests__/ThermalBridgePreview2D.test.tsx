@@ -4,7 +4,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AutoThermalBridgeCandidate } from '../../../geometry/thermalBridge/autoThermalBridgeCandidates';
-import type { AutoThermalBridgePreview } from '../../../hooks/useAutoThermalBridgePreview';
+import type { AutoDuctPreview, AutoThermalBridgePreview } from '../../../hooks/useAutoThermalBridgePreview';
 import { ThermalBridgePreview2D } from '../ThermalBridgePreview2D';
 import type { DrawingCanvasPalette } from '../drawingPreviewPalette';
 
@@ -177,5 +177,27 @@ describe('ThermalBridgePreview2D hit testing', () => {
     fireEvent.click(screen.getByTestId('issue-marker'));
     expect(onInspect).not.toHaveBeenCalled();
     expect(bubbledClick).toHaveBeenCalledOnce();
+  });
+});
+
+describe('ThermalBridgePreview2D duct runs', () => {
+  it('takes the run whose room end is nearest on a shared stretch, the same for hover and click', () => {
+    const p = (x: number, y: number) => ({ x, y, z: 0 });
+    const run = (proposalId: string, segments: Array<[ReturnType<typeof p>, ReturnType<typeof p>]>) =>
+      ({ proposalId, role: 'supply', drafts: [], segments, lengthM: 1 });
+    const preview = {
+      kind: 'duct', pinned: false, hover: null, onHover: vi.fn(), onActivate: vi.fn(),
+      runs: [run('far', [[p(0, 0), p(2, 0)]]), run('near', [[p(0, 0), p(1, 0)], [p(1, 0), p(1, 0.6)]])],
+    } as unknown as AutoDuctPreview;
+    render(<ThermalBridgePreview2D preview={preview} scale={1} panOffset={{ x: 0, y: 0 }}
+      canvasCenter={{ x: 100, y: 100 }} width={400} height={300} palette={palette}
+      onInspect={vi.fn()} canActivate={() => true} />);
+    const area = screen.getByTestId('preview-hit-area');
+    fireEvent.mouseMove(area, { clientX: 140, clientY: 100, buttons: 0 });
+    expect(preview.onHover).toHaveBeenLastCalledWith(['near'], { x: 140, y: 100 });
+    fireEvent.click(area, { clientX: 140, clientY: 100, button: 0 });
+    expect(preview.onActivate).toHaveBeenCalledWith(['near'], { x: 140, y: 100 });
+    fireEvent.click(area, { clientX: 180, clientY: 100, button: 0 });
+    expect(preview.onActivate).toHaveBeenLastCalledWith(['far'], { x: 180, y: 100 });
   });
 });

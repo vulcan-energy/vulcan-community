@@ -3117,7 +3117,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     <div className="tb-preview-toolbar-accessory">
       <DrawToolbarAutoTbSuggest show={showDrawToolbarAutoTbSuggest}
         onPrefetch={prefetchAutoThermalBridgePreviewModal} onShow={handleShowAutoTbPreview} />
-      {ductPreview.runs.length > 0 && drawElementType === 'MechanicalVentilationDuctwork' && (
+      {ductPreview.active && ductPreview.runs.length > 0 && drawElementType === 'MechanicalVentilationDuctwork' && (
         <button type="button" className="draw-button auto-tb-suggest" onClick={ductPreview.addAll}>Add all</button>
       )}
       <ThermalBridgePreviewStatus preview={thermalBridgePreview} viewMode={viewMode} inline />
@@ -3125,7 +3125,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         <span className="draw-button">Hold A for suggestions</span>
       )}
     </div>
-  ), [handleShowAutoTbPreview, showDrawToolbarAutoTbSuggest, thermalBridgePreview, ductPreview.runs.length, ductPreview.addAll, viewMode, drawElementType]);
+  ), [handleShowAutoTbPreview, showDrawToolbarAutoTbSuggest, thermalBridgePreview, ductPreview.active, ductPreview.runs.length, ductPreview.addAll, viewMode, drawElementType]);
 
   const guideOverlayCalibrationSessionRef = useRef<CanvasInteractionSession | null>(null);
   const resetGuideOverlayCalibrationPointerState = useCallback(() => {

@@ -47,21 +47,24 @@ export const ThermalBridgePreview2D = memo(function ThermalBridgePreview2D({
   const projected = useMemo(() => runs
     ? runs.flatMap((run) => run.segments.map(([a, b], segment) => ({
         id: run.proposalId, key: `${run.proposalId}:${segment}`, style: MVHR_DUCT_ROLE_STYLES[run.role],
+        end: worldToCanvas(run.segments[run.segments.length - 1]![1], scale, panOffset, canvasCenter),
         a: worldToCanvas(a, scale, panOffset, canvasCenter), b: worldToCanvas(b, scale, panOffset, canvasCenter),
       })))
     : candidatesToRender.map((candidate) => ({
-        id: candidate.proposalId, key: candidate.proposalId, style: null,
+        id: candidate.proposalId, key: candidate.proposalId, style: null, end: null,
         a: worldToCanvas(candidate.coordinates[0], scale, panOffset, canvasCenter),
         b: worldToCanvas(candidate.coordinates[1], scale, panOffset, canvasCenter),
       })), [runs, candidatesToRender, scale, panOffset, canvasCenter]);
-  // Every run meets at the unit, so a duct click takes only the nearest run; overlapping bridges all go to the chooser.
+  // Every run meets at the unit, so hover and click take one run: the nearest, and on a stretch runs
+  // share (within half a pixel), the one whose room end is nearest. Overlapping bridges all go to the chooser.
   const hitIds = (point: Point) => {
     const hits = projected.flatMap((row) => {
       const d = distanceToPreviewSegment(point, row.a, row.b);
-      return d <= 8 ? [{ id: row.id, d }] : [];
+      return d <= 8 ? [{ id: row.id, d, toEnd: row.end ? Math.hypot(point.x - row.end.x, point.y - row.end.y) : 0 }] : [];
     });
     if (!runs) return hits.map(({ id }) => id);
-    return hits.length ? [hits.reduce((best, hit) => (hit.d < best.d ? hit : best)).id] : [];
+    return hits.length ? [hits.reduce((best, hit) =>
+      (hit.d < best.d - 0.5 || (Math.abs(hit.d - best.d) <= 0.5 && hit.toEnd < best.toEnd) ? hit : best)).id] : [];
   };
   return (
     <Layer name="thermal-bridge-suggestions">

@@ -191,12 +191,18 @@ export interface AutoDuctRun {
   lengthM: number;
 }
 
-/** planAutoDucts' flat drafts as runs: every run's first duct starts at the unit; a terminal ends the run before it. */
+/**
+ * planAutoDucts' flat drafts as runs: every run's first duct starts at the unit; a terminal ends the
+ * run of its own role just before it. A terminal with no such run (its duct was zero-length) is dropped.
+ */
 export function groupAutoDuctRuns(drafts: readonly ElementDraft[], unitPoint: Point3): AutoDuctRun[] {
   const runs: AutoDuctRun[] = [];
   for (const draft of drafts) {
     const run = runs[runs.length - 1];
-    if (draft.type !== 'MechanicalVentilationDuctwork') { run!.drafts.push(draft); continue; }
+    if (draft.type !== 'MechanicalVentilationDuctwork') {
+      if (run && run.role === draft.terminal_type) run.drafts.push(draft);
+      continue;
+    }
     const [a, b] = draft.coordinates as [Point3, Point3];
     if (run && !(a.x === unitPoint.x && a.y === unitPoint.y && a.z === unitPoint.z)) {
       run.drafts.push(draft);
@@ -206,10 +212,14 @@ export function groupAutoDuctRuns(drafts: readonly ElementDraft[], unitPoint: Po
       runs.push({ proposalId: '', role: draft.duct_type!, drafts: [draft], segments: [[a, b]], lengthM: draft.length! });
     }
   }
-  // The run's far end is unique (the planner staggers room ends) and survives re-planning after an add.
+  // Role and far end survive re-planning after an add; the index among equal keys keeps duplicates apart.
+  const seen = new Map<string, number>();
   return runs.map((run) => {
     const end = run.segments[run.segments.length - 1]![1];
-    return { ...run, proposalId: `${run.role}:${end.x},${end.y},${end.z}` };
+    const key = `${run.role}:${end.x},${end.y},${end.z}`;
+    const index = seen.get(key) ?? 0;
+    seen.set(key, index + 1);
+    return { ...run, proposalId: `${key}:${index}` };
   });
 }
 
@@ -246,14 +256,19 @@ export function useAutoDuctPreview(options: {
   const floors = useGeometryStore(useShallow((s) => s.floors));
   const spaceLabelIds = useGeometryStore((s) => s.spaceLabelIds);
   const spaceLabelsById = useGeometryStore((s) => s.spaceLabelsById);
-  const mode = useThermalBridgePreviewMode({ enabled, blocked, scopeKey: String(currentFloorZ) });
+  // A new unit is a new scope: hover, errors and any pin reset, and the plan rebuilds for that unit.
+  const mode = useThermalBridgePreviewMode({ enabled, blocked, scopeKey: `${currentFloorZ}:${unitName}` });
   const { active, dismiss: dismissMode } = mode;
-  const interactionKey = `${currentFloorZ}:${active}`;
+  const interactionKey = `${currentFloorZ}:${unitName}:${active}`;
   const [hover, setHover] = useKeyedState<{ ids: string[]; anchor: ThermalBridgePreviewAnchor } | null>(interactionKey, null);
   const [error, setError] = useKeyedState<string | null>(interactionKey, null);
-  const plan = useMemo(() => enabled
+  // Planned only while the preview shows, so edits with A released never re-plan.
+  const plan = useMemo(() => active
     ? planAutoDuctRuns({ elementsById, floors, spaceLabelIds, spaceLabelsById }, unitName)
-    : null, [enabled, elementsById, floors, spaceLabelIds, spaceLabelsById, unitName]);
+    : null, [active, elementsById, floors, spaceLabelIds, spaceLabelsById, unitName]);
+  const chooseUnit = useMemo(() => active && !unitName && Object.values(elementsById).filter((element) =>
+    element.type === 'MechanicalVentilation' && !element.isPlaceholder && element.vent_type === 'MVHR').length > 1,
+  [active, unitName, elementsById]);
   const onFloor = plan?.storey === currentFloorZ;
   const runs = useMemo(() => (plan && onFloor ? plan.runs : []), [plan, onFloor]);
   const otherFloorCount = plan && !onFloor ? plan.runs.length : 0;
@@ -291,7 +306,7 @@ export function useAutoDuctPreview(options: {
 
   return {
     kind: 'duct' as const,
-    ...mode, dismiss, runs, otherFloorCount, unplacedCount: 0, error, highlightedHostIds,
+    ...mode, dismiss, runs, chooseUnit, otherFloorCount, unplacedCount: 0, error, highlightedHostIds,
     hover: active ? hover : null,
     menu: null,
     onHover, onActivate, add, addAll, closeMenu,
