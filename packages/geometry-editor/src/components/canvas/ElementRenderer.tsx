@@ -6,7 +6,6 @@ import { Group, Line, Circle, Rect, Text } from 'react-konva';
 import { getPointElementIconNode } from '../../lib/pointElementIconSpec';
 import { lucideIconNodeToKonva } from '../../lib/lucideIconKonva';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
-import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { Element, Floor } from '../../geometry/types';
 import {
   useGeometryStoreApi,
@@ -34,7 +33,6 @@ import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { CATEGORY_GHOST_OPACITY_FACTOR } from '../../lib/elementCategoryVisibility';
 import { getDormerBundleInfo } from '../../lib/dormerGeometry';
 import { isElementOnActiveCanvasFloor } from '../../lib/elementCanvasFloor';
-import { resolveThermalBridgeLineMode } from '../../lib/thermalBridgeLinearGeometry';
 import { isDevelopmentContextGeneratedShading } from '../../lib/developmentContextShading';
 import {
   cascadeHostedDescendantGeometry,
@@ -79,8 +77,6 @@ import {
   applyAngleSnapIfClose as utilApplyAngleSnapIfClose,
   projectSegmentOntoParent as utilProjectSegmentOntoParent,
   findNearestWallProjectionFromCache as utilFindNearestWallProjectionFromCache,
-  getExactSnappedVertices as utilGetExactSnappedVertices,
-  getWallSupportedSnappedVertices as utilGetWallSupportedSnappedVertices,
   findPerpendicularFootOnWallInfiniteFromCache as utilFindPerpFootOnWallInfiniteFromCache,
   findClosestSnapCorner as utilFindClosestSnapCorner,
   getNearbySnapWallSegments as utilGetNearbySnapWallSegments,
@@ -89,18 +85,11 @@ import {
   type ClosestSnapCorner,
 } from '../../lib/snapUtils';
 import { tryAxisAlignedRightAngleSnapForVertex } from '../../lib/vertexEditSnap';
-import {
-  getUnsnappedVertexChipRect,
-  shouldShowUnsnappedVertexGuidance,
-  UNSNAPPED_VERTEX_CHIP_FONT_SIZE,
-  UNSNAPPED_VERTEX_CHIP_HEIGHT,
-  UNSNAPPED_VERTEX_CHIP_PADDING_X,
-  UNSNAPPED_VERTEX_CHIP_TEXT,
-} from '../../lib/drawModeTooltipPill';
+import { getMvhrTerminalBadgeSize } from '../../lib/drawModeTooltipPill';
 import type { SnapEvent } from '../../lib/snapEvent';
 import type { SnapFeedbackSignal } from './snapFeedbackSignal';
 import { geometryPerf } from '../../lib/geometryPerf';
-import { getMechanicalVentilationDuctworkRoleStyle, looseDuctRunEndNearestUnit, primaryPipeRunGap } from '../../lib/mvhrDuctwork';
+import { getMechanicalVentilationDuctworkRoleStyle } from '../../lib/mvhrDuctwork';
 import {
   isOrientationPitchAxis,
   slopedPolygonPlaneBasis,
@@ -543,85 +532,36 @@ function getWindowShadingObjectScreenGeometry(
   return { parent, midpoint, center, start, end, tangent, openingOutward, width, distance };
 }
 
-const DISCONNECTED_DUCT_CHIP_TEXT = 'Disconnected';
-
-function renderUnsnappedVertexChip(
-  position: { x: number; y: number },
-  handleRadius: number,
-  key: string,
-  palette: CanvasInteractionPalette,
-  text = UNSNAPPED_VERTEX_CHIP_TEXT,
-): React.ReactNode {
-  const { x, y, width } = getUnsnappedVertexChipRect(position, handleRadius, text);
-
+/** An MVHR terminal's IN/OUT box, centred on the origin. */
+export function MvhrTerminalBadge({ label, stroke, isSelected }: { label: 'IN' | 'OUT'; stroke: string; isSelected: boolean }) {
+  const { width, height } = getMvhrTerminalBadgeSize(label);
   return (
-    <Group key={key} listening={false}>
+    <>
       <Rect
-        x={x}
-        y={y}
+        x={-(width / 2)}
+        y={-(height / 2)}
         width={width}
-        height={UNSNAPPED_VERTEX_CHIP_HEIGHT}
-        fill={palette.warningGuide}
-        stroke={palette.warningBorder}
-        strokeWidth={1}
-        cornerRadius={10}
+        height={height}
+        fill="rgba(8, 28, 25, 0.96)"
+        stroke={stroke}
+        strokeWidth={isSelected ? 2.5 : 2}
+        cornerRadius={4}
         listening={false}
       />
       <Text
-        x={x + UNSNAPPED_VERTEX_CHIP_PADDING_X}
-        y={y + 4}
-        width={width - (UNSNAPPED_VERTEX_CHIP_PADDING_X * 2)}
-        text={text}
-        fontSize={UNSNAPPED_VERTEX_CHIP_FONT_SIZE}
-        fill={palette.warningOnFill}
-        align="center"
-        listening={false}
-      />
-    </Group>
-  );
-}
-
-function formatTbZChipText(label: 'z1' | 'z2', z: number | undefined) {
-  const t = typeof z === 'number' && Number.isFinite(z) ? z.toFixed(2) : '—';
-  return `${label} ${t}m`;
-}
-
-function renderTbSlopeZPill(
-  position: { x: number; y: number },
-  text: string,
-  key: string,
-): React.ReactNode {
-  const charW = 6.5;
-  const padX = 6;
-  const h = 18;
-  const w = Math.max(40, text.length * charW + padX * 2);
-  const x = position.x - w / 2;
-  const y = position.y - 6 - 22;
-  return (
-    <Group key={key} listening={false}>
-      <Rect
-        x={x}
-        y={y}
-        width={w}
-        height={h}
-        fill={readRootCssVar('--semantic-snap', '#1E90FF')}
-        stroke={readRootCssVar('--border-overlay', 'rgba(255, 255, 255, 0.2)')}
-        strokeWidth={1}
-        cornerRadius={8}
-        listening={false}
-      />
-      <Text
-        x={x + padX}
-        y={y + 3}
-        width={w - padX * 2}
-        text={text}
-        fontSize={11}
+        x={-(width / 2)}
+        y={-(height / 2)}
+        width={width}
+        height={height}
+        text={label}
+        fontSize={10}
         fontStyle="bold"
-        fill={readRootCssVar('--semantic-on-color', '#FFFFFF')}
+        fill="#FFFFFF"
         align="center"
+        verticalAlign="middle"
         listening={false}
       />
-    </Group>
+    </>
   );
 }
 
@@ -678,6 +618,10 @@ export interface ElementRendererProps {
   canvasCoords?: Array<{ x: number; y: number }>;
   /** Live project offset; required by Orientation-axis slope visuals and editing. */
   globalOrientationOffset?: number;
+  /** Selected element only: vertex indices snapped to other geometry (handle colour). Memoised by the canvas. */
+  snappedVertices?: ReadonlySet<number> | null;
+  /** MVHR terminal under a selected element's handle: draw its IN/OUT box here, below those handles. */
+  mvhrBadgeInline?: boolean;
 }
 
 function getDormerCutoutPolygonsForHost(
@@ -735,6 +679,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   previewOpacity = 1,
   canvasCoords: canvasCoordsProp,
   globalOrientationOffset,
+  snappedVertices,
+  mvhrBadgeInline = false,
 }) => {
   const geometryStore = useGeometryStoreApi();
   const arrowRotateInteractionRef = useRef<{
@@ -1422,37 +1368,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
     !parentElementName &&
     element.type !== 'OnSiteGeneration';
   const showDirectSelectionHandles = isSelected && !isDormerBundleMember;
-  const isRegularWallOpaque =
-    element.type === 'BuildingElementOpaque' && (element as any).is_external_door !== true;
-  // Memo: snapped-vertex detection is O(coords × n × otherCoords). Only the selected
-  // element runs it, but pan/zoom otherwise re-renders that element every frame.
-  const snappedVertices = useMemo(() => {
-    if (!(showDirectSelectionHandles || isSelected)) return null;
-    // Walls and ground polygons: a vertex on a same-storey wall's span (a T-end) counts as snapped.
-    const getSnappedVertices = shouldShowUnsnappedVertexGuidance(element, shape)
-      ? utilGetWallSupportedSnappedVertices
-      : utilGetExactSnappedVertices;
-    return getSnappedVertices(
-      element,
-      elementsById,
-      isRegularWallOpaque
-        ? { skipVertexMatchFromOtherTypes: ['BuildingElementTransparent'] }
-        : { effectiveFloors: withEffectiveStoreyHeights(floors, Object.values(elementsById)) },
-    );
-  }, [showDirectSelectionHandles, isSelected, shape, element, elementsById, isRegularWallOpaque, floors]);
-  // A selected duct or primary pipe on a run the topology check reports as loose: chip at the run
-  // end nearest the plant it misses.
-  const looseDuctRunEnd = useMemo(
-    () => {
-      if (!isSelected || (element.type !== 'MechanicalVentilationDuctwork' && element.type !== 'WaterPipework')) return null;
-      const all = Object.values(elementsById);
-      const effectiveFloors = withEffectiveStoreyHeights(floors, all);
-      return element.type === 'WaterPipework'
-        ? primaryPipeRunGap(element, all, effectiveFloors)?.looseEnd ?? null
-        : looseDuctRunEndNearestUnit(element, all, effectiveFloors);
-    },
-    [isSelected, element, elementsById, floors],
-  );
   // Memo: dormer cutouts iterate all elements; reproject only when geometry or view changes.
   const dormerCutoutCanvasPolygons = useMemo(
     () => getDormerCutoutPolygonsForHost(element, elementsById, selection).map((polygon) =>
@@ -1517,18 +1432,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   const elementColor = typeColor.stroke || CANVAS_CONSTANTS.COLORS.WALL;
   const elementFill = typeColor.fill || elementColor;
   const hoverStroke = isHoveredFromMenu ? canvasElementPalette.hover : elementColor;
-  const showUnsnappedVertexGuidance = drawMode === 'none' && shouldShowUnsnappedVertexGuidance(element, shape);
-  // Polygon vertex chips render in their own pass after every handle, so they paint above them.
-  const renderPolygonVertexChips = () => isSelected && showUnsnappedVertexGuidance && canvasCoords.map((coord, index) => {
-    const isHostedPolygonOpening =
-      element.type === 'BuildingElementTransparent' &&
-      !!(element as { parent_element?: string | null }).parent_element &&
-      coordinates.length >= 3;
-    if ((snappedVertices?.has(index) ?? false) || isHostedPolygonOpening) return null;
-    const isVertexSelected = selectedVertex?.elementId === element.id && selectedVertex?.vertexIndex === index;
-    return renderUnsnappedVertexChip(coord, isVertexSelected ? 6 : 4, `unsnapped-chip-${element.id}-${index}`, canvasInteractionPalette);
-  });
-
   // Render point elements (single coordinate)
   if (shape === 'point') {
     const windowObjectScreen = getWindowShadingObjectScreenGeometry(element, elementsById, nameToId);
@@ -1681,10 +1584,9 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             });
             writeCanvasInteractionSession(e.target, session);
           }}
-          onDragMove={() => {
-            // IMPERATIVE DRAG: Update Konva node directly, no React re-renders!
-            // No store updates during drag - only visual updates
-            // Angle calculations deferred to drag end
+          onDragMove={(e) => {
+            // IMPERATIVE DRAG: no React re-renders. The MVHR badge lives in the annotations group.
+            if (isMvhrTerminal) e.target.getStage()?.findOne(`.point-badge-${element.id}`)?.position(e.target.position());
           }}
           onDragEnd={(e) => {
             const session = readCanvasInteractionSession(e.target);
@@ -1743,47 +1645,25 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
           }}
         >
           {isMvhrTerminal ? (
-            (() => {
-              const boxW = mvhrTerminalLabel === 'OUT' ? 34 : 28;
-              const boxH = 18;
-              const stroke = isSelected ? typeStroke : mvhrTerminalStyle?.stroke ?? typeStroke;
-              return (
-                <Group>
-                  <Rect
-                    x={-16}
-                    y={-16}
-                    width={32}
-                    height={32}
-                    fill="rgba(0,0,0,0.001)"
-                    listening={isInteractive}
-                  />
-                  <Rect
-                    x={-(boxW / 2)}
-                    y={-(boxH / 2)}
-                    width={boxW}
-                    height={boxH}
-                    fill="rgba(8, 28, 25, 0.96)"
-                    stroke={stroke}
-                    strokeWidth={isSelected ? 2.5 : 2}
-                    cornerRadius={4}
-                    listening={false}
-                  />
-                  <Text
-                    x={-(boxW / 2)}
-                    y={-(boxH / 2)}
-                    width={boxW}
-                    height={boxH}
-                    text={mvhrTerminalLabel}
-                    fontSize={10}
-                    fontStyle="bold"
-                    fill="#FFFFFF"
-                    align="center"
-                    verticalAlign="middle"
-                    listening={false}
-                  />
-                </Group>
-              );
-            })()
+            <Group>
+              <Rect
+                x={-16}
+                y={-16}
+                width={32}
+                height={32}
+                fill="rgba(0,0,0,0.001)"
+                listening={isInteractive}
+              />
+              {/* Active-floor badges paint in the canvas annotations group, above snap dots, unless
+                  a selected element's handle sits on them. */}
+              {(!isCurrentFloor || mvhrBadgeInline) && (
+                <MvhrTerminalBadge
+                  label={mvhrTerminalLabel}
+                  stroke={isSelected ? typeStroke : mvhrTerminalStyle?.stroke ?? typeStroke}
+                  isSelected={isSelected}
+                />
+              )}
+            </Group>
           ) : (
             <Group scaleX={iconScale} scaleY={iconScale}>
               <Group x={-12} y={-12}>
@@ -1979,18 +1859,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
           />
           {/* Direction control stays below endpoint handles so vertex editing wins overlap hits. */}
           {lineDirectionArrowRender}
-          {isSelected
-            && element.type === 'ThermalBridgeLinear'
-            && resolveThermalBridgeLineMode(element as any) === 'slope'
-            && (() => {
-              const wz = (i: 0 | 1) => coordinates[i]?.z;
-              return (
-                <>
-                  {renderTbSlopeZPill(start, formatTbZChipText('z1', wz(0)), `tb-zchip-${element.id}-0`)}
-                  {renderTbSlopeZPill(end, formatTbZChipText('z2', wz(1)), `tb-zchip-${element.id}-1`)}
-                </>
-              );
-            })()}
 
           {/* Labels will be rendered separately with smart positioning */}
 
@@ -2445,16 +2313,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   cleanupVertexInteractionAfterDragEnd(draggedNode);
                 }}
               />
-                {/* Chips paint after the handles so they sit above them. */}
-                {showUnsnappedVertexGuidance && !startSnapped && renderUnsnappedVertexChip(start, 6, `unsnapped-chip-${element.id}-0`, canvasInteractionPalette)}
-                {showUnsnappedVertexGuidance && !endSnapped && renderUnsnappedVertexChip(end, 6, `unsnapped-chip-${element.id}-1`, canvasInteractionPalette)}
-                {drawMode === 'none' && looseDuctRunEnd && renderUnsnappedVertexChip(
-                  worldToCanvas(looseDuctRunEnd, scale, panOffset, canvasCenter),
-                  6,
-                  `unsnapped-chip-${element.id}-run`,
-                  canvasInteractionPalette,
-                  DISCONNECTED_DUCT_CHIP_TEXT,
-                )}
               </>
             );
           })()}
@@ -2823,7 +2681,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               </React.Fragment>
             );
           })}
-          {renderPolygonVertexChips()}
 
           {/* ContextShading Visual Arc */}
           {isSelected && element.type === 'ContextShading' && (element as any).parent_element && (
@@ -3317,7 +3174,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               </React.Fragment>
             );
           })}
-          {renderPolygonVertexChips()}
 
         </Group>
       );
@@ -3426,6 +3282,8 @@ export const ElementRenderer = memo(ElementRendererComponent, (prevProps, nextPr
   // Category hide/show from Elements panel (useElementCategoryGhost) — not part of store element
   if (prevProps.categoryGhostOnCanvas !== nextProps.categoryGhostOnCanvas) return false;
   if (prevProps.previewOpacity !== nextProps.previewOpacity) return false;
+  if (prevProps.snappedVertices !== nextProps.snappedVertices) return false;
+  if (prevProps.mvhrBadgeInline !== nextProps.mvhrBadgeInline) return false;
   if (prevProps.spaceLabellerSuppressFabricInteraction !== nextProps.spaceLabellerSuppressFabricInteraction)
     return false;
 

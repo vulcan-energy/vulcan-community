@@ -3,8 +3,15 @@
 
 import type Konva from 'konva';
 import type { DrawMode } from '../hooks/useDrawingMode';
-import type { Element, ElementType } from '../geometry/types';
-import { LINE_WALL_SNAP_TYPES } from './snapUtils';
+import type { Element, ElementType, Floor } from '../geometry/types';
+import {
+  getExactSnappedVertices,
+  getWallSupportedSnappedVertices,
+  LINE_WALL_SNAP_TYPES,
+} from './snapUtils';
+import { getElementShape } from './shapeUtils';
+import { getDormerBundleInfo } from './dormerGeometry';
+import { looseDuctRunEndNearestUnit, primaryPipeRunGap } from './mvhrDuctwork';
 
 /** Horizontal padding inside the blue draw-mode tooltip pill (matches GeometryCanvas). */
 export const DRAW_MODE_TOOLTIP_PILL_PADDING = 6;
@@ -74,7 +81,7 @@ export function shouldShowUnsnappedVertexGuidance(element: Element, shape: strin
   return false;
 }
 
-/** Canvas rect of the warning chip drawn above a vertex handle (shared by renderer and label layout). */
+/** Canvas rect of the warning chip drawn above a vertex handle. */
 export function getUnsnappedVertexChipRect(
   position: { x: number; y: number },
   handleRadius: number,
@@ -87,6 +94,78 @@ export function getUnsnappedVertexChipRect(
     width,
     height: UNSNAPPED_VERTEX_CHIP_HEIGHT,
   };
+}
+
+export const DISCONNECTED_DUCT_CHIP_TEXT = 'Disconnected';
+
+export type VertexGuidance = { snapped: ReadonlySet<number>; looseEnd: { x: number; y: number } | null };
+
+/** A selected element's snapped vertices (handle colour, chips) and, for a duct or primary pipe, its loose run end. */
+export function getSelectedVertexGuidance(
+  element: Element,
+  elementsById: Record<string, Element>,
+  effectiveFloors: Floor[],
+): VertexGuidance {
+  const isRegularWallOpaque =
+    element.type === 'BuildingElementOpaque' && (element as { is_external_door?: unknown }).is_external_door !== true;
+  // Walls and ground polygons: a vertex on a same-storey wall's span (a T-end) counts as snapped.
+  const getSnappedVertices = shouldShowUnsnappedVertexGuidance(element, getElementShape(element))
+    ? getWallSupportedSnappedVertices
+    : getExactSnappedVertices;
+  const snapped = getSnappedVertices(
+    element,
+    elementsById,
+    isRegularWallOpaque ? { skipVertexMatchFromOtherTypes: ['BuildingElementTransparent'] } : { effectiveFloors },
+  );
+  // A run the topology check reports as loose: chip at the run end nearest the plant it misses.
+  const all = Object.values(elementsById);
+  const looseEnd = element.type === 'WaterPipework'
+    ? primaryPipeRunGap(element, all, effectiveFloors)?.looseEnd ?? null
+    : element.type === 'MechanicalVentilationDuctwork'
+      ? looseDuctRunEndNearestUnit(element, all, effectiveFloors)
+      : null;
+  return { snapped, looseEnd };
+}
+
+/** A selected element's warning chips: above each unsnapped vertex, and at a loose run's free end. */
+export function getVertexGuidanceChips(
+  element: Element,
+  guidance: VertexGuidance,
+  project: (point: { x: number; y: number }) => { x: number; y: number },
+  selectedVertexIndex: number | null,
+): Array<{ key: string; text: string; rect: { x: number; y: number; width: number; height: number } }> {
+  const shape = getElementShape(element);
+  const canvasCoords = (element.coordinates ?? []).map(project);
+  const isLine = shape === 'line' && canvasCoords.length === 2;
+  // Line handles (and their chips) are not drawn for dormer-bundle members.
+  const hasLineHandles = isLine && getDormerBundleInfo(element) === null;
+  const isHostedPolygonOpening =
+    element.type === 'BuildingElementTransparent' && !!element.parent_element && canvasCoords.length >= 3;
+  const chips: Array<{ key: string; text: string; rect: { x: number; y: number; width: number; height: number } }> = [];
+  if (shouldShowUnsnappedVertexGuidance(element, shape) && (isLine ? hasLineHandles : !isHostedPolygonOpening)) {
+    canvasCoords.forEach((point, index) => {
+      if (guidance.snapped.has(index)) return;
+      const handleRadius = isLine || selectedVertexIndex === index ? 6 : 4;
+      chips.push({
+        key: `unsnapped-chip-${element.id}-${index}`,
+        text: UNSNAPPED_VERTEX_CHIP_TEXT,
+        rect: getUnsnappedVertexChipRect(point, handleRadius),
+      });
+    });
+  }
+  if (hasLineHandles && guidance.looseEnd) {
+    chips.push({
+      key: `unsnapped-chip-${element.id}-run`,
+      text: DISCONNECTED_DUCT_CHIP_TEXT,
+      rect: getUnsnappedVertexChipRect(project(guidance.looseEnd), 6, DISCONNECTED_DUCT_CHIP_TEXT),
+    });
+  }
+  return chips;
+}
+
+/** An MVHR terminal's IN/OUT box size; the box is centred on the terminal point. */
+export function getMvhrTerminalBadgeSize(label: 'IN' | 'OUT'): { width: number; height: number } {
+  return { width: label === 'OUT' ? 34 : 28, height: 18 };
 }
 
 // Helper: Check if cursor is near first point (for completion detection)

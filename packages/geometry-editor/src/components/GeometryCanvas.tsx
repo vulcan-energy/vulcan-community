@@ -14,7 +14,7 @@ import { getElementShape, getElementColor, worldToCanvas, canvasToWorld, compute
 import { findOverlappingElements, getOverlapCenter } from '../lib/overlapDetection';
 import { readRootCssVar } from '../lib/cssVars';
 import { targetValidationIssues, withTargetIssues } from '../lib/buildErrorDisplay';
-import { calculateMemoizedLabelPositions, transformCachedLabelPosition, getSmartLabelPillTexts, getSmartLabelLayoutSignature, SMART_LABEL_METRICS, type LabelPosition } from '../lib/labelUtils';
+import { getSmartLabelDisplayName, getSmartLabelPillTexts, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, calculateElementBounds, createAnnotationLayoutState, getSmartLabelCandidates, layoutCanvasAnnotations, placedAnnotationRect, resolveAnnotationPaint, type CanvasAnnotation, type RectBounds } from '../lib/labelUtils';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { FilenameBar, type FilenameBarActionContext } from './FilenameBar';
 import type {
@@ -77,7 +77,6 @@ import {
   DETAILS_PANEL_DEFAULT_H,
 } from '../hooks/usePanelLayout';
 import { useOverlay } from '../hooks/useOverlay';
-import { getElementTypeBaseName } from '../lib/displayNames';
 import './GeometryCanvas.css';
 import {
   buildGeometrySnapCache,
@@ -107,6 +106,7 @@ import {
   type SnapWallSegmentTarget,
 } from '../lib/snapUtils';
 import { CANVAS_CONSTANTS } from '../lib/canvasConstants';
+import { resolveThermalBridgeLineMode } from '../lib/thermalBridgeLinearGeometry';
 import { writeTbLineMode, type TbLineMode } from '../lib/thermalBridgeLineMode';
 import { loadBundledAssemblyLibrary } from '../lib/assemblyLibrary';
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
@@ -151,7 +151,7 @@ import {
   type LineOpeningClearanceSide,
   type LineHostedOpeningClearance,
 } from '../lib/lineHostedOpeningPlacement';
-import { ElementRenderer } from './canvas/ElementRenderer';
+import { ElementRenderer, MvhrTerminalBadge } from './canvas/ElementRenderer';
 import {
   ACTIVE_GEOMETRY_DRAG_LAYER_NAME,
   type ActiveCloneDragPreviewSession,
@@ -165,6 +165,7 @@ import {
   getActiveCanvasInteraction,
   isCanvasInteractionActive,
   readCanvasInteractionSession,
+  type CanvasInteractionKind,
   type CanvasInteractionSession,
   writeCanvasInteractionSession,
 } from './canvas/canvasInteractionSession';
@@ -185,6 +186,7 @@ import {
   readCanvasElementPalette,
   readBaseCanvasElementPalette,
   readCanvasInteractionPalette,
+  type CanvasInteractionPalette,
 } from './canvas/elementRendererPalette';
 import { readDrawingCanvasPalette } from './canvas/drawingPreviewPalette';
 import {
@@ -228,8 +230,11 @@ import { getElementCanvasFloorZValue, isElementOnActiveCanvasFloor, mergeService
 import { partitionElementCanvasDataByFloor } from '../lib/geometryCanvasLayerPartition';
 import {
   getDrawModeTooltipPillWidth,
-  getUnsnappedVertexChipRect,
-  shouldShowUnsnappedVertexGuidance,
+  getMvhrTerminalBadgeSize,
+  getSelectedVertexGuidance,
+  getVertexGuidanceChips,
+  UNSNAPPED_VERTEX_CHIP_FONT_SIZE,
+  UNSNAPPED_VERTEX_CHIP_PADDING_X,
   DRAW_MODE_TOOLTIP_PILL_FONT_FAMILY,
   DRAW_MODE_TOOLTIP_PILL_HEIGHT,
   DRAW_MODE_TOOLTIP_PILL_PADDING,
@@ -867,7 +872,7 @@ function readCanvasLabelTheme(): CanvasLabelTheme {
 
 const renderSmartLabel = (
   element: Element,
-  labelPos: LabelPosition,
+  labelPos: RectBounds,
   isHighlighted: boolean,
   showLineDimensions: boolean,
   theme: CanvasLabelTheme,
@@ -884,37 +889,11 @@ const renderSmartLabel = (
     pillPadding
   } = SMART_LABEL_METRICS;
 
-  // Get base name with truncation for non-highlighted elements
-  let baseName: string;
-  let displayName: string; // Truncated version for display
-  const MAX_LABEL_LENGTH = isHighlighted ? 40 : 20; // Show more when selected
-
-  if ((element as any).isPlaceholder) {
-    baseName = '…';
-    displayName = '…';
-  } else if (element.name && element.name.trim()) {
-    baseName = element.name;
-    displayName = baseName.length > MAX_LABEL_LENGTH ? baseName.substring(0, MAX_LABEL_LENGTH) + '…' : baseName;
-  } else {
-    baseName = getElementTypeBaseName(element.type as ElementType);
-    displayName = baseName;
-  }
-
+  const displayName = getSmartLabelDisplayName(element, isHighlighted);
   const pillTexts = getSmartLabelPillTexts(element, { showLineDimensions });
-
-  // Calculate dynamic width based on displayed (possibly truncated) name
-  const displayNameWidth = displayName.length * nameCharWidth; // Approximate character width
+  const displayNameWidth = displayName.length * nameCharWidth;
   const pillWidth = (text: string) => text.length * pillCharWidth + pillPadding * 2;
-
-  let totalContentWidth = displayNameWidth;
-  for (const text of pillTexts) {
-    totalContentWidth += spacing + pillWidth(text);
-  }
-
-  const labelWidth = Math.max(
-    68,
-    totalContentWidth + padding * 2
-  );
+  const labelWidth = labelPos.width;
 
   // Calculate positions for each element
   let currentX = labelPos.x + padding;
@@ -990,7 +969,7 @@ const renderSmartLabel = (
   );
 };
 
-/** An opening's side-distance pill in canvas space: drawn by the guidance, avoided by labels. */
+/** An opening's side-distance pill in canvas space, centred on its guide segment. */
 function getLineOpeningClearancePill(
   clearance: LineHostedOpeningClearance,
   side: LineOpeningClearanceSide,
@@ -1049,6 +1028,88 @@ const renderCanvasMeasurementPill = (
     </Group>
   );
 };
+
+/** Interactions that move geometry live, without a React render per frame: layout reuses its last pass. */
+const LIVE_GEOMETRY_INTERACTION_KINDS: readonly CanvasInteractionKind[] = [
+  'selected-shape-drag',
+  'selected-point-drag',
+  'point-element-drag',
+  'vertex-drag',
+  'multi-select-drag',
+  'space-label-vertex-drag',
+  'guide-overlay-drag',
+  'orientation-arrow-drag',
+  'slope-rotate-drag',
+  'line-rotate-drag',
+];
+
+function renderUnsnappedVertexChip(rect: RectBounds, text: string, palette: CanvasInteractionPalette) {
+  return (
+    <Group listening={false}>
+      <Rect
+        x={rect.x}
+        y={rect.y}
+        width={rect.width}
+        height={rect.height}
+        fill={palette.warningGuide}
+        stroke={palette.warningBorder}
+        strokeWidth={1}
+        cornerRadius={10}
+        listening={false}
+      />
+      <Text
+        x={rect.x + UNSNAPPED_VERTEX_CHIP_PADDING_X}
+        y={rect.y + 4}
+        width={rect.width - (UNSNAPPED_VERTEX_CHIP_PADDING_X * 2)}
+        text={text}
+        fontSize={UNSNAPPED_VERTEX_CHIP_FONT_SIZE}
+        fill={palette.warningOnFill}
+        align="center"
+        listening={false}
+      />
+    </Group>
+  );
+}
+
+function formatTbZChipText(label: 'z1' | 'z2', z: number | undefined) {
+  const t = typeof z === 'number' && Number.isFinite(z) ? z.toFixed(2) : '—';
+  return `${label} ${t}m`;
+}
+
+/** A slope thermal bridge's end-height pill, above its vertex. */
+function getTbSlopeZPillRect(position: { x: number; y: number }, text: string): RectBounds {
+  const width = Math.max(40, text.length * 6.5 + 12);
+  return { x: position.x - width / 2, y: position.y - 28, width, height: 18 };
+}
+
+function renderTbSlopeZPill(rect: RectBounds, text: string) {
+  return (
+    <Group listening={false}>
+      <Rect
+        x={rect.x}
+        y={rect.y}
+        width={rect.width}
+        height={rect.height}
+        fill={readRootCssVar('--semantic-snap', '#1E90FF')}
+        stroke={readRootCssVar('--border-overlay', 'rgba(255, 255, 255, 0.2)')}
+        strokeWidth={1}
+        cornerRadius={8}
+        listening={false}
+      />
+      <Text
+        x={rect.x + 6}
+        y={rect.y + 3}
+        width={rect.width - 12}
+        text={text}
+        fontSize={11}
+        fontStyle="bold"
+        fill={readRootCssVar('--semantic-on-color', '#FFFFFF')}
+        align="center"
+        listening={false}
+      />
+    </Group>
+  );
+}
 
 function projectPlanPointToSegment(
   point: { x: number; y: number },
@@ -1209,7 +1270,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const [hoverPoint, setHoverPoint] = useState<{x: number, y: number, insertIndex: number} | null>(null);
   const [spaceLabelHoverPoint, setSpaceLabelHoverPoint] = useState<{x: number, y: number, insertIndex: number} | null>(null);
   const spaceLabelHoverPointRef = useRef<{x: number, y: number, insertIndex: number} | null>(null);
-  const snapIndicatorsRef = useRef<React.ReactElement[]>([]);
+  // This canvas's annotation layout memory (last pass, sticky slots); mutated by layoutCanvasAnnotations.
+  const [annotationLayoutState] = useState(createAnnotationLayoutState);
+  const snapIndicatorsRef = useRef<{ nodes: React.ReactElement[]; dots: RectBounds[] }>({ nodes: [], dots: [] });
   const [renderCauses] = useState(() => new Set<string>());
   const markNextGeometryCanvasRender = useCallback((cause: string) => {
     if (!geometryPerf.isEnabled()) return;
@@ -1230,8 +1293,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     anchor: OverlapBadgeMenuAnchor;
     elementIds: string[];
   } | null>(null);
-  const [badgeTextOffsetY, setBadgeTextOffsetY] = useState<number | null>(null);
-  const [badgeTextOffsetX, setBadgeTextOffsetX] = useState<number | null>(null);
 
   // Label visibility mode: 'always' or 'selected'
   const [labelVisibility, setLabelVisibility] = useState<'always' | 'selected'>('selected');
@@ -4725,29 +4786,19 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       return null;
     }
 
-    const openingPoint = worldToCanvas(selectedRoofWindowPlacement.openingPoint, scale, panOffset, canvasCenter);
-    const roofPoint = worldToCanvas(selectedRoofWindowPlacement.roofPoint, scale, panOffset, canvasCenter);
-    const labelX = (openingPoint.x + roofPoint.x) / 2 + 8;
-    const labelY = (openingPoint.y + roofPoint.y) / 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2 - 8;
     const labelText = `Up-slope: ${roofWindowDistanceEditor.value || selectedRoofWindowPlacement.distanceM.toFixed(2)}m`;
     const width = Math.max(
       getDrawModeTooltipPillWidth('Up-slope: 0.00m'),
       getDrawModeTooltipPillWidth(labelText),
     );
 
-    return {
-      left: labelX + width / 2,
-      top: labelY + DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2,
-      width,
-    };
+    // Centred on the laid-out pill (see editorAtPill).
+    return { pillKey: 'selected-roof-window-placement-marker', width };
   }, [
     viewMode,
     roofWindowDistanceEditor,
     selection,
     selectedRoofWindowPlacement,
-    scale,
-    panOffset,
-    canvasCenter,
   ]);
 
   const selectedLineOpeningClearance = useMemo(() => {
@@ -4854,112 +4905,80 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       return null;
     }
 
-    const clearance = selectedLineOpeningClearance.clearance;
-    const segment =
-      lineOpeningDistanceEditor.side === 'start'
-        ? clearance.startGuideSegment
-        : clearance.endGuideSegment;
-    const a = worldToCanvas(segment[0], scale, panOffset, canvasCenter);
-    const b = worldToCanvas(segment[1], scale, panOffset, canvasCenter);
     const distanceText = `${lineOpeningDistanceEditor.value || '0'}m`;
     const width = Math.max(
       getDrawModeTooltipPillWidth('0.00m'),
       getDrawModeTooltipPillWidth(distanceText),
     );
 
-    return {
-      left: (a.x + b.x) / 2,
-      top: (a.y + b.y) / 2,
-      width,
-    };
+    // Centred on the laid-out pill (see editorAtPill).
+    return { pillKey: `selected-line-opening-clearance-marker-${lineOpeningDistanceEditor.side}`, width };
   }, [
     viewMode,
     lineOpeningDistanceEditor,
     selection,
     selectedLineOpeningClearance,
-    scale,
-    panOffset,
-    canvasCenter,
   ]);
 
-  const renderLineOpeningClearanceGuidance = useCallback((
+  /** An opening's two side-distance guides, one annotation each; editable pills open the distance editor. */
+  const lineOpeningClearanceAnnotations = useCallback((
     key: string,
     clearance: LineHostedOpeningClearance,
     editable: boolean,
     opacity = 1,
-  ) => {
+  ): CanvasAnnotation[] => {
     const color = clearance.isWithinWall
       ? readRootCssVar('--semantic-snap', '#1E90FF')
       : canvasInteractionPalette.warningGuide;
 
-    const renderSide = (side: LineOpeningClearanceSide) => {
-      const {
-        a,
-        b,
-        text: labelText,
-        x: labelX,
-        y: labelY,
-        width: pillWidth,
-      } = getLineOpeningClearancePill(clearance, side, scale, panOffset, canvasCenter);
+    return (['start', 'end'] as const).map((side) => {
+      const { a, b, text: labelText, ...rect } = getLineOpeningClearancePill(clearance, side, scale, panOffset, canvasCenter);
       const measureLen = Math.hypot(b.x - a.x, b.y - a.y);
       const isEditing =
         editable &&
         lineOpeningDistanceEditor?.elementId === selectedLineOpeningClearance?.elementId &&
         lineOpeningDistanceEditor?.side === side;
 
-      return (
-        <Group key={`${key}-${side}`} listening={editable && !isEditing}>
-          {measureLen > 2 && (
-            <Line
-              points={[a.x, a.y, b.x, b.y]}
-              stroke={color}
-              strokeWidth={2}
-              opacity={0.95}
-              listening={false}
-            />
-          )}
-          <Circle
-            x={a.x}
-            y={a.y}
-            radius={3}
-            fill={color}
-            listening={false}
-          />
-          <Circle
-            x={b.x}
-            y={b.y}
-            radius={3}
-            fill={color}
-            listening={false}
-          />
-          {!isEditing && (
-            <>
-              {renderCanvasMeasurementPill(labelText, { x: labelX, y: labelY }, color)}
-              {editable && (
-                <Rect
-                  x={labelX}
-                  y={labelY}
-                  width={pillWidth}
-                  height={DRAW_MODE_TOOLTIP_PILL_HEIGHT}
-                  fill={color}
-                  opacity={0}
-                  listening
-                  onClick={(event) => beginLineOpeningDistanceEditor(side, event)}
-                  onTap={(event) => beginLineOpeningDistanceEditor(side, event)}
-                />
-              )}
-            </>
-          )}
-        </Group>
-      );
-    };
-
-    return (
-      <Group key={key} listening={editable} opacity={opacity}>
-        {renderSide('start')}
-        {renderSide('end')}
-      </Group>
-    );
+      return {
+        key: `${key}-${side}`,
+        rect,
+        priority: ANNOTATION_PRIORITY.selected,
+        movable: true,
+        render: (pill) => (
+          <Group listening={editable && !isEditing} opacity={opacity}>
+            {measureLen > 2 && (
+              <Line
+                points={[a.x, a.y, b.x, b.y]}
+                stroke={color}
+                strokeWidth={2}
+                opacity={0.95}
+                listening={false}
+              />
+            )}
+            <Circle x={a.x} y={a.y} radius={3} fill={color} listening={false} />
+            <Circle x={b.x} y={b.y} radius={3} fill={color} listening={false} />
+            {!isEditing && (
+              <>
+                {renderCanvasMeasurementPill(labelText, pill, color)}
+                {editable && (
+                  <Rect
+                    x={pill.x}
+                    y={pill.y}
+                    width={pill.width}
+                    height={pill.height}
+                    fill={color}
+                    opacity={0}
+                    listening
+                    onClick={(event) => beginLineOpeningDistanceEditor(side, event)}
+                    onTap={(event) => beginLineOpeningDistanceEditor(side, event)}
+                  />
+                )}
+              </>
+            )}
+          </Group>
+        ),
+      };
+    });
   }, [
     scale,
     panOffset,
@@ -4983,31 +5002,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
     return geometryPerf.measure('GeometryCanvas.snapIndicators', () => {
       const indicators: React.ReactElement[] = [];
+      const dots: RectBounds[] = [];
       // Extract store access outside loop to avoid calling getState() for every element
       const angleTol = getProjectDefaults(geometryStore).angleTol;
       // `readRootCssVar` runs `getComputedStyle(document.documentElement)`, so resolve the
       // indicator paint once per pass rather than once per snapped vertex.
       const snapFill = readRootCssVar('--semantic-snap', '#1E90FF');
       const snapStroke = readRootCssVar('--semantic-on-color', '#FFFFFF');
-      const mvhrTerminalBadgeBounds = elementCanvasData
-        .filter(({ element, canvasCoords }) =>
-          element.type === 'MechanicalVentilationTerminal' &&
-          canvasCoords.length > 0 &&
-          isElementOnActiveCanvasFloor(element, currentFloorZ, floors) &&
-          !isElementHiddenOnView(element)
-        )
-        .map(({ canvasCoords }) => ({
-          x: canvasCoords[0].x,
-          y: canvasCoords[0].y,
-          halfWidth: 19,
-          halfHeight: 12,
-        }));
-      const overlapsMvhrTerminalBadge = (coord: { x: number; y: number }) =>
-        mvhrTerminalBadgeBounds.some((bounds) =>
-          Math.abs(coord.x - bounds.x) <= bounds.halfWidth &&
-          Math.abs(coord.y - bounds.y) <= bounds.halfHeight
-        );
-
       elementCanvasData.forEach(({ element, canvasCoords }) => {
         // Floor filtering: same rule as ElementRenderer / 3D (normalized storey z)
         if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) return;
@@ -5026,7 +5027,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
         canvasCoords.forEach((coord, index) => {
           if (snappedVertices.has(index)) {
-            if (overlapsMvhrTerminalBadge(coord)) return;
+            dots.push({ x: coord.x - 4, y: coord.y - 4, width: 8, height: 8 });
             const all90Degree = utilIsAll90DegreeConnections(element, index, elementsById, angleTol);
 
             if (all90Degree) {
@@ -5064,172 +5065,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         });
       });
 
-      snapIndicatorsRef.current = indicators;
-      return indicators;
+      snapIndicatorsRef.current = { nodes: indicators, dots };
+      return snapIndicatorsRef.current;
     });
   }, [elementCanvasData, elementsById, currentFloorZ, floors, effectiveFloors, geometryStore, isElementHiddenOnView]);
   /* eslint-enable react-hooks/refs */
-
-  // Memoized label positions calculation for performance optimization
-  // Optimized for 'selected' mode (default) - only calculate positions for visible labels
-  // Only calculate label positions for elements that will be visible in 'selected' mode
-  // This significantly reduces computation when most labels are hidden
-  const elementsForLabelCalculation = useMemo(() => {
-    if (labelVisibility === 'always') {
-      // In 'always' mode, calculate for all elements
-      return renderableElements;
-    }
-    // In 'selected' mode (default), only calculate for highlighted/hovered elements
-    return renderableElements.filter((element) => {
-      const isSelected =
-        (selection?.type === 'element' || selection?.type === 'global') &&
-        selection.id === element.id;
-      const isMultiSelected = selectedElementIdSet.has(element.id);
-      const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
-      return isSelected || isMultiSelected || isHovered;
-    });
-  }, [renderableElements, labelVisibility, selection, selectedElementIdSet, elementHover, isElementHiddenOnView]);
-
-  // Create stable hash for elementsForLabelCalculation to use in dependency array
-  const elementsForLabelHash = useMemo(() => {
-    return elementsForLabelCalculation
-      .map(e => getSmartLabelLayoutSignature(e, { showLineDimensions }))
-      .join('|');
-  }, [elementsForLabelCalculation, showLineDimensions]);
-
-  const labelAvoidRectsHash = useMemo(() => {
-    const selectedIds = new Set(selectedElementIds);
-    if (
-      (selection?.type === 'element' || selection?.type === 'global') &&
-      selection.id
-    ) {
-      selectedIds.add(selection.id);
-    }
-    const overlapHash = Array.from(overlapGroups.entries())
-      .map(([id, group]) => `${id}:${group.join(',')}`)
-      .join('|');
-    return [
-      Array.from(selectedIds).sort().join(','),
-      selectedShapeDragTarget?.element.id ?? '',
-      selectedPointDragTarget?.element.id ?? '',
-      overlapHash,
-      currentFloorZ,
-      drawMode,
-      selectedLineOpeningClearance
-        ? `${selectedLineOpeningClearance.elementId}:${selectedLineOpeningClearance.clearance.startDistanceM}:${selectedLineOpeningClearance.clearance.endDistanceM}`
-        : '',
-    ].join('|');
-  }, [
-    selectedElementIds,
-    selection,
-    selectedShapeDragTarget,
-    selectedPointDragTarget,
-    overlapGroups,
-    currentFloorZ,
-    drawMode,
-    selectedLineOpeningClearance,
-  ]);
-
-  const memoizedLabelPositions = useMemo(() => {
-    return geometryPerf.measure('GeometryCanvas.memoizedLabelPositions', () => {
-    const canvasBounds = { width: stageSize.width, height: stageSize.height };
-    const avoidRects: Array<{ x: number, y: number, width: number, height: number }> = [];
-    const addAvoidRect = (point: { x: number, y: number }, halfSize: number) => {
-      avoidRects.push({
-        x: point.x - halfSize,
-        y: point.y - halfSize,
-        width: halfSize * 2,
-        height: halfSize * 2,
-      });
-    };
-
-    const selectedIds = new Set(selectedElementIds);
-    if (
-      (selection?.type === 'element' || selection?.type === 'global') &&
-      selection.id
-    ) {
-      selectedIds.add(selection.id);
-    }
-
-    for (const id of selectedIds) {
-      const element = elementsById[id];
-      if (!element || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
-      const coords = element.coordinates ?? [];
-      // ponytail: reserves the chip slot above every vertex, snapped or not; precise needs the
-      // renderer's snapped-vertex set (one registry pass, see the label-layout refactor note).
-      const reserveChipSlots =
-        drawMode === 'none' && shouldShowUnsnappedVertexGuidance(element, getElementShape(element));
-      for (const coord of coords) {
-        const point = worldToCanvas(coord, scale, panOffset, canvasCenter);
-        addAvoidRect(point, 14);
-        if (reserveChipSlots) avoidRects.push(getUnsnappedVertexChipRect(point, 6));
-      }
-      if (coords.length > 1) {
-        const centroid = {
-          x: coords.reduce((sum, coord) => sum + coord.x, 0) / coords.length,
-          y: coords.reduce((sum, coord) => sum + coord.y, 0) / coords.length,
-        };
-        addAvoidRect(worldToCanvas(centroid, scale, panOffset, canvasCenter), 16);
-      }
-    }
-
-    if (selectedShapeDragTarget) {
-      addAvoidRect(
-        worldToCanvas(selectedShapeDragTarget.centroid, scale, panOffset, canvasCenter),
-        18,
-      );
-    }
-
-    if (selectedPointDragTarget) {
-      addAvoidRect(
-        worldToCanvas(selectedPointDragTarget.coord, scale, panOffset, canvasCenter),
-        18,
-      );
-    }
-
-    const processed = new Set<string>();
-    for (const [elementId, group] of overlapGroups.entries()) {
-      if (processed.has(elementId)) continue;
-      group.forEach((id) => processed.add(id));
-      if (group.length <= 1) continue;
-      const element = elementsById[elementId];
-      if (!element || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
-      const overlappingElements = group.slice(1).map((id) => elementsById[id]).filter(Boolean);
-      const center = getOverlapCenter(element, overlappingElements);
-      if (center) {
-        addAvoidRect(worldToCanvas(center, scale, panOffset, canvasCenter), 14);
-      }
-    }
-
-    if (selectedLineOpeningClearance) {
-      for (const side of ['start', 'end'] as const) {
-        avoidRects.push(getLineOpeningClearancePill(selectedLineOpeningClearance.clearance, side, scale, panOffset, canvasCenter));
-      }
-    }
-
-    return calculateMemoizedLabelPositions(
-      elementsForLabelCalculation,
-      canvasBounds,
-      showLineDimensions,
-      worldToCanvas,
-      scale,
-      panOffset,
-      canvasCenter,
-      avoidRects,
-      selectedIds,
-    );
-    });
-  // Use stable hashes instead of recalculating on every render.
-  // Offsets are cached in pixels: a zoom must re-place them, a pan (panOffset, canvasCenter) need not.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    elementsForLabelHash,
-    labelAvoidRectsHash,
-    stageSize.width,
-    stageSize.height,
-    showLineDimensions,
-    scale,
-  ]);
 
   // Handle element click - optimized with batched state updates
   const handleElementClick = useCallback((elementId: string, e: any) => {
@@ -6297,15 +6137,56 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     });
   }, [applyPanPreviewDelta, applyZoomPreview, scale, scheduleViewportPreviewCommit]);
 
+  // Elements the renderer draws as selected: single, multi and dormer-bundle selection.
+  const rendererHighlightedIds = useMemo(() => {
+    const ids = new Set(selectedElementIds);
+    if (selection?.type === 'element' || selection?.type === 'global') ids.add(selection.id);
+    if (selection?.type === 'dormer') {
+      for (const element of Object.values(elementsById)) {
+        if (getDormerBundleInfo(element)?.bundle_id === selection.id) ids.add(element.id);
+      }
+    }
+    return ids;
+  }, [selectedElementIds, selection, elementsById]);
+
+  // Snapped vertices (handle colour, unsnapped chips) and a loose duct/pipe run end, for selected
+  // elements only: O(coords × n) each, so computed once here and handed to the renderer and chips.
+  const selectedVertexGuidance = useMemo(() => new Map(
+    [...rendererHighlightedIds].flatMap((id) => {
+      const element = elementsById[id];
+      return element ? [[id, getSelectedVertexGuidance(element, elementsById, effectiveFloors)] as const] : [];
+    }),
+  ), [rendererHighlightedIds, elementsById, effectiveFloors]);
+
+  // MVHR boxes a selected element's vertex handle sits on: drawn inline by the terminal's renderer,
+  // which paints before the (raised) selected element, so the handle stays visible and on top.
+  const inlineMvhrBadgeIds = useMemo(() => {
+    const handles = elementCanvasData.flatMap(({ element, canvasCoords }) =>
+      rendererHighlightedIds.has(element.id) && element.type !== 'MechanicalVentilationTerminal' ? canvasCoords : []);
+    const ids = new Set<string>();
+    if (handles.length === 0) return ids;
+    for (const { element, canvasCoords } of elementCanvasData) {
+      if (element.type !== 'MechanicalVentilationTerminal' || !canvasCoords[0]) continue;
+      const { width, height } = getMvhrTerminalBadgeSize(element.terminal_type === 'exhaust' ? 'OUT' : 'IN');
+      const centre = canvasCoords[0];
+      if (handles.some((p) => Math.abs(p.x - centre.x) <= width / 2 + 8 && Math.abs(p.y - centre.y) <= height / 2 + 8)) {
+        ids.add(element.id);
+      }
+    }
+    return ids;
+  }, [elementCanvasData, rendererHighlightedIds]);
+
+  const elementPreviewOpacity = useCallback((element: Element) => (
+    !thermalBridgePreview.active || (thermalBridgePreview.kind === 'duct'
+      ? element.type === 'MechanicalVentilationDuctwork' || element.type === 'MechanicalVentilationTerminal'
+      : thermalBridgePreview.kind === 'pipe' ? element.type === 'WaterPipework'
+      : element.type === 'ThermalBridgeLinear' || element.type === 'ThermalBridgePoint')
+      ? 1 : thermalBridgePreview.highlightedHostIds.has(element.id) ? 0.85 : 0.35
+  ), [thermalBridgePreview.active, thermalBridgePreview.kind, thermalBridgePreview.highlightedHostIds]);
+
   const buildElementRendererNodes = useCallback((rows: typeof sortedElementCanvasData) => {
-    const selectedIds = new Set(selectedElementIds);
     return rows.map(({ element, canvasCoords }) => {
-      const isSelected =
-        (selection?.type === 'element' && selection.id === element.id) ||
-        (selection?.type === 'global' && selection.id === element.id) ||
-        (selection?.type === 'dormer' && getDormerBundleInfo(element)?.bundle_id === selection.id);
-      const isMultiSelected = selectedIds.has(element.id);
-      const isHighlighted = isSelected || isMultiSelected;
+      const isHighlighted = rendererHighlightedIds.has(element.id);
 
       return (
         <ElementRenderer
@@ -6342,17 +6223,18 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           vertexSnapMode={vertexSnapMode}
           commitVertexPositionUpdates={commitVertexPositionUpdates}
           selection={selection}
-          previewOpacity={!thermalBridgePreview.active || (thermalBridgePreview.kind === 'duct'
-            ? element.type === 'MechanicalVentilationDuctwork' || element.type === 'MechanicalVentilationTerminal'
-            : thermalBridgePreview.kind === 'pipe' ? element.type === 'WaterPipework'
-            : element.type === 'ThermalBridgeLinear' || element.type === 'ThermalBridgePoint')
-            ? 1 : thermalBridgePreview.highlightedHostIds.has(element.id) ? 0.85 : 0.35}
+          previewOpacity={elementPreviewOpacity(element)}
           spaceLabellerSuppressFabricInteraction={spaceLabellerOpen}
+          snappedVertices={selectedVertexGuidance.get(element.id)?.snapped}
+          mvhrBadgeInline={inlineMvhrBadgeIds.has(element.id)}
         />
       );
     });
   }, [
-    selectedElementIds,
+    rendererHighlightedIds,
+    selectedVertexGuidance,
+    inlineMvhrBadgeIds,
+    elementPreviewOpacity,
     selection,
     scale,
     panOffset,
@@ -6383,9 +6265,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     vertexSnapMode,
     commitVertexPositionUpdates,
     spaceLabellerOpen,
-    thermalBridgePreview.active,
-    thermalBridgePreview.kind,
-    thermalBridgePreview.highlightedHostIds,
   ]);
 
   const contextFloorElementRendererNodes = useMemo(() => {
@@ -6476,6 +6355,343 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       window.clearTimeout(handle);
     };
   }, []);
+
+  // Canvas annotations: every chip, badge, pill and label, painted in one group above all geometry.
+  const canvasAnnotations = ((): CanvasAnnotation[] => {
+    const items: CanvasAnnotation[] = [];
+    const project = (point: { x: number; y: number }) => worldToCanvas(point, scale, panOffset, canvasCenter);
+    const snapColor = readRootCssVar('--semantic-snap', '#1E90FF');
+
+    // Selected elements: unsnapped/disconnected chips above their vertex, slope-bridge end heights.
+    for (const id of rendererHighlightedIds) {
+      const element = elementsById[id];
+      if (!element?.coordinates?.length || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
+      const canvasCoords = element.coordinates.map(project);
+      const isLine = getElementShape(element) === 'line' && canvasCoords.length === 2;
+      const guidance = selectedVertexGuidance.get(id);
+      if (drawMode === 'none' && guidance) {
+        const selectedVertexIndex = selectedVertex?.elementId === id ? selectedVertex.vertexIndex : null;
+        for (const chip of getVertexGuidanceChips(element, guidance, project, selectedVertexIndex)) {
+          items.push({
+            key: chip.key,
+            rect: chip.rect,
+            priority: ANNOTATION_PRIORITY.selected,
+            movable: false,
+            render: (rect) => renderUnsnappedVertexChip(rect, chip.text, canvasInteractionPalette),
+          });
+        }
+      }
+      if (isLine && element.type === 'ThermalBridgeLinear' && resolveThermalBridgeLineMode(element) === 'slope') {
+        (['z1', 'z2'] as const).forEach((label, index) => {
+          const text = formatTbZChipText(label, element.coordinates?.[index]?.z);
+          items.push({
+            key: `tb-zchip-${id}-${index}`,
+            rect: getTbSlopeZPillRect(canvasCoords[index], text),
+            priority: ANNOTATION_PRIORITY.selected,
+            movable: false,
+            render: (rect) => renderTbSlopeZPill(rect, text),
+          });
+        });
+      }
+    }
+
+    // MVHR terminal IN/OUT boxes; named so a point drag carries them (elementDragPreview).
+    for (const { element, canvasCoords } of elementCanvasData) {
+      if (element.type !== 'MechanicalVentilationTerminal' || !canvasCoords[0] || inlineMvhrBadgeIds.has(element.id)) continue;
+      if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors) || isElementHiddenOnView(element)) continue;
+      const isSelected = rendererHighlightedIds.has(element.id);
+      const label = element.terminal_type === 'exhaust' ? 'OUT' : 'IN';
+      const typeStroke = getElementColor(element, isSelected, canvasElementPalette).stroke;
+      const stroke = isSelected
+        ? typeStroke
+        : getMechanicalVentilationDuctworkRoleStyle({ duct_type: label === 'OUT' ? 'exhaust' : 'intake' }).stroke ?? typeStroke;
+      const { width, height } = getMvhrTerminalBadgeSize(label);
+      const center = canvasCoords[0];
+      const opacity = CANVAS_CONSTANTS.OPACITY.CURRENT_FLOOR * (spaceLabellerOpen ? 0.34 : 1) * elementPreviewOpacity(element);
+      items.push({
+        key: `point-badge-${element.id}`,
+        rect: { x: center.x - width / 2, y: center.y - height / 2, width, height },
+        priority: ANNOTATION_PRIORITY.label,
+        movable: false,
+        render: (rect) => (
+          <Group name={`point-badge-${element.id}`} x={rect.x + width / 2} y={rect.y + height / 2} opacity={opacity} listening={false}>
+            <MvhrTerminalBadge label={label} stroke={stroke} isSelected={isSelected} />
+          </Group>
+        ),
+      });
+    }
+
+    // Selected PV clearance guidance: advisory measurements, no compliance checklist.
+    if (selectedPvClearanceGuidance?.primary) {
+      const belowGuidanceItems = selectedPvClearanceGuidance.items.filter((item) => item.status === 'below-guidance');
+      const itemsToRender = belowGuidanceItems.length > 0 ? belowGuidanceItems : [selectedPvClearanceGuidance.primary];
+      itemsToRender.forEach((item, index) => {
+        const panelPoint = project(item.panelPoint);
+        const featurePoint = project(item.featurePoint);
+        const featureA = project(item.featureSegment[0]);
+        const featureB = project(item.featureSegment[1]);
+        const color = item.status === 'below-guidance' ? canvasInteractionPalette.warningGuide : snapColor;
+        const labelText = `${item.label}: ${item.distanceM.toFixed(2)}m / ${item.guidanceDistanceM.toFixed(2)}m`;
+        const measureDx = featurePoint.x - panelPoint.x;
+        const measureDy = featurePoint.y - panelPoint.y;
+        const measureLen = Math.hypot(measureDx, measureDy);
+        const labelOffsetX = measureLen > 2 ? (measureDx / measureLen) * 18 : 8;
+        const labelOffsetY = measureLen > 2 ? (measureDy / measureLen) * 18 : -28;
+        items.push({
+          key: `pv-clearance-${item.feature}-${index}`,
+          rect: {
+            x: featurePoint.x + labelOffsetX + 8,
+            y: featurePoint.y + labelOffsetY - DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2 + index * 6,
+            width: getDrawModeTooltipPillWidth(labelText),
+            height: DRAW_MODE_TOOLTIP_PILL_HEIGHT,
+          },
+          priority: ANNOTATION_PRIORITY.selected,
+          movable: true,
+          render: (pill) => (
+            <Group listening={false}>
+              <Line
+                points={[featureA.x, featureA.y, featureB.x, featureB.y]}
+                stroke={color}
+                strokeWidth={2}
+                dash={[7, 5]}
+                opacity={0.95}
+                listening={false}
+              />
+              {measureLen > 2 && (
+                <Line
+                  points={[panelPoint.x, panelPoint.y, featurePoint.x, featurePoint.y]}
+                  stroke={color}
+                  strokeWidth={2}
+                  opacity={0.95}
+                  listening={false}
+                />
+              )}
+              <Circle x={panelPoint.x} y={panelPoint.y} radius={3} fill={color} listening={false} />
+              <Circle x={featurePoint.x} y={featurePoint.y} radius={3} fill={color} listening={false} />
+              {renderCanvasMeasurementPill(labelText, pill, color)}
+            </Group>
+          ),
+        });
+      });
+    }
+
+    // Selected roof-window placement marker: click the pill to edit up-slope distance.
+    if (selectedRoofWindowPlacement) {
+      const openingPoint = project(selectedRoofWindowPlacement.openingPoint);
+      const roofPoint = project(selectedRoofWindowPlacement.roofPoint);
+      const roofA = project(selectedRoofWindowPlacement.roofLowEdgeSegment[0]);
+      const roofB = project(selectedRoofWindowPlacement.roofLowEdgeSegment[1]);
+      const openingA = project(selectedRoofWindowPlacement.openingEdgeSegment[0]);
+      const openingB = project(selectedRoofWindowPlacement.openingEdgeSegment[1]);
+      const measureLen = Math.hypot(openingPoint.x - roofPoint.x, openingPoint.y - roofPoint.y);
+      const labelText = `Up-slope: ${selectedRoofWindowPlacement.distanceM.toFixed(2)}m`;
+      const isEditingDistance =
+        selection?.type === 'element' &&
+        roofWindowDistanceEditor?.elementId === selection.id;
+      items.push({
+        key: 'selected-roof-window-placement-marker',
+        rect: {
+          x: (openingPoint.x + roofPoint.x) / 2 + 8,
+          y: (openingPoint.y + roofPoint.y) / 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2 - 8,
+          width: getDrawModeTooltipPillWidth(labelText),
+          height: DRAW_MODE_TOOLTIP_PILL_HEIGHT,
+        },
+        priority: ANNOTATION_PRIORITY.selected,
+        movable: true,
+        render: (pill) => (
+          <Group listening={!isEditingDistance}>
+            <Line
+              points={[roofA.x, roofA.y, roofB.x, roofB.y]}
+              stroke={snapColor}
+              strokeWidth={2}
+              dash={[7, 5]}
+              opacity={0.75}
+              listening={false}
+            />
+            <Line
+              points={[openingA.x, openingA.y, openingB.x, openingB.y]}
+              stroke={snapColor}
+              strokeWidth={2}
+              opacity={0.95}
+              listening={false}
+            />
+            {measureLen > 2 && (
+              <Line
+                points={[roofPoint.x, roofPoint.y, openingPoint.x, openingPoint.y]}
+                stroke={snapColor}
+                strokeWidth={2}
+                opacity={0.95}
+                listening={false}
+              />
+            )}
+            <Circle x={roofPoint.x} y={roofPoint.y} radius={3} fill={snapColor} listening={false} />
+            <Circle x={openingPoint.x} y={openingPoint.y} radius={3} fill={snapColor} listening={false} />
+            {!isEditingDistance && (
+              <>
+                {renderCanvasMeasurementPill(labelText, pill, snapColor)}
+                <Rect
+                  x={pill.x}
+                  y={pill.y}
+                  width={pill.width}
+                  height={pill.height}
+                  fill={snapColor}
+                  opacity={0}
+                  listening
+                  onClick={beginRoofWindowDistanceEditor}
+                  onTap={beginRoofWindowDistanceEditor}
+                />
+              </>
+            )}
+          </Group>
+        ),
+      });
+    }
+
+    // While an opening is dragged along its host, the live preview replaces the stored distances.
+    if (selectedLineOpeningClearance && !lineOpeningClearanceDragPreview) {
+      items.push(...lineOpeningClearanceAnnotations(
+        'selected-line-opening-clearance-marker',
+        selectedLineOpeningClearance.clearance,
+        true,
+      ));
+    }
+    if (lineOpeningClearanceDragPreview) {
+      items.push(...lineOpeningClearanceAnnotations(
+        'line-opening-clearance-drag-preview',
+        lineOpeningClearanceDragPreview.clearance,
+        false,
+        selectedLineOpeningClearance ? 1 : 0.86,
+      ));
+    }
+
+    if (spaceLabellerOpen) return items;
+
+    // Overlap count badges: one per overlap group; click lists the overlapping elements.
+    const overlapBadgeListening = drawMode === 'none';
+    const processedOverlapIds = new Set<string>();
+    for (const [elementId, group] of overlapGroups.entries()) {
+      if (processedOverlapIds.has(elementId)) continue;
+      group.forEach((id) => processedOverlapIds.add(id));
+      const element = elementsById[elementId];
+      if (!element || group.length <= 1 || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
+      const center = getOverlapCenter(element, group.slice(1).map((id) => elementsById[id]).filter(Boolean));
+      if (!center) continue;
+      const canvasPos = project(center);
+      const openMenu = (e: Konva.KonvaEventObject<Event>) => {
+        if (!overlapBadgeListening) return;
+        e.cancelBubble = true;
+        setOverlapBadgeMenu({ anchor: center, elementIds: group });
+      };
+      items.push({
+        key: `overlap-badge-${elementId}`,
+        rect: { x: canvasPos.x - 6, y: canvasPos.y - 6, width: 12, height: 12 },
+        priority: ANNOTATION_PRIORITY.warning,
+        movable: false,
+        render: (rect) => (
+          <Group x={rect.x + 6} y={rect.y + 6}>
+            <Circle
+              radius={6}
+              fill="rgba(255, 255, 255, 0.1)"
+              stroke="rgba(255, 255, 255, 0.3)"
+              strokeWidth={1.5}
+              listening={overlapBadgeListening}
+              onClick={openMenu}
+              onTap={openMenu}
+              onMouseEnter={() => {
+                if (overlapBadgeListening) setCanvasElementHover(elementId);
+              }}
+            />
+            <Text
+              x={-10}
+              y={-6}
+              width={20}
+              height={12}
+              text={String(group.length)}
+              fontSize={10}
+              fill="#FFFFFF"
+              fontStyle="bold"
+              align="center"
+              verticalAlign="middle"
+              listening={false}
+            />
+          </Group>
+        ),
+      });
+    }
+
+    // Element-name labels; visual-only so the geometry underneath stays interactive.
+    for (const { element, canvasCoords } of sortedForLabels) {
+      if (canvasCoords.length === 0 || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
+      const isHighlighted = selectedElementIdSet.has(element.id) ||
+        ((selection?.type === 'element' || selection?.type === 'global') && selection.id === element.id);
+      const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
+      if (labelVisibility === 'selected' && !isHighlighted && !isHovered) continue;
+      const candidates = getSmartLabelCandidates(element, canvasCoords, isHighlighted, showLineDimensions);
+      const bounds = calculateElementBounds(canvasCoords);
+      items.push({
+        key: `label-${element.id}`,
+        rect: candidates[0],
+        candidates,
+        ownerBounds: { x: bounds.minX, y: bounds.minY, width: bounds.maxX - bounds.minX, height: bounds.maxY - bounds.minY },
+        priority: isHighlighted ? ANNOTATION_PRIORITY.selected : ANNOTATION_PRIORITY.label,
+        movable: true,
+        render: (rect) => renderSmartLabel(
+          element,
+          rect,
+          isHighlighted,
+          showLineDimensions,
+          canvasLabelTheme,
+        ),
+      });
+    }
+
+    // Obstacles movable items avoid: selected handles, drag grips, snap dots and point icons.
+    const pushObstacle = (key: string, point: { x: number; y: number }, halfSize: number) => {
+      items.push({
+        key,
+        rect: { x: point.x - halfSize, y: point.y - halfSize, width: halfSize * 2, height: halfSize * 2 },
+        priority: ANNOTATION_PRIORITY.label,
+        movable: false,
+      });
+    };
+    for (const id of rendererHighlightedIds) {
+      const coords = elementsById[id]?.coordinates ?? [];
+      coords.forEach((coord, index) => pushObstacle(`handle-${id}-${index}`, project(coord), 14));
+      if (coords.length > 1) {
+        const centroid = {
+          x: coords.reduce((sum, coord) => sum + coord.x, 0) / coords.length,
+          y: coords.reduce((sum, coord) => sum + coord.y, 0) / coords.length,
+        };
+        pushObstacle(`handle-${id}-centroid`, project(centroid), 16);
+      }
+    }
+    if (selectedShapeDragTarget) pushObstacle('drag-grip-shape', project(selectedShapeDragTarget.centroid), 18);
+    if (selectedPointDragTarget) pushObstacle('drag-grip-point', project(selectedPointDragTarget.coord), 18);
+    snapIndicators.dots.forEach((rect, index) => items.push({ key: `snap-dot-${index}`, rect, priority: ANNOTATION_PRIORITY.label, movable: false }));
+    for (const { element, canvasCoords } of elementCanvasData) {
+      if (canvasCoords.length !== 1 || (element.type === 'MechanicalVentilationTerminal' && !inlineMvhrBadgeIds.has(element.id))) continue;
+      if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors) || isElementHiddenOnView(element)) continue;
+      pushObstacle(`point-icon-${element.id}`, canvasCoords[0], rendererHighlightedIds.has(element.id) ? 11 : 9);
+    }
+    return items;
+  })();
+
+  // Pan and zoom commit once they settle, so this re-places items at each pan end; a drag reuses the last pass.
+  const annotationPlacements = geometryPerf.measure('GeometryCanvas.annotationLayout', () => layoutCanvasAnnotations(
+    annotationLayoutState,
+    canvasAnnotations,
+    stageSize,
+    LIVE_GEOMETRY_INTERACTION_KINDS.some((kind) => isCanvasInteractionActive(kind)),
+  ));
+
+  // A distance editor opens centred where the clicked pill is drawn, nudged or not.
+  const editorAtPill = (geometry: { pillKey: string; width: number }) => {
+    const pill = canvasAnnotations.find((item) => item.key === geometry.pillKey);
+    const rect = pill && placedAnnotationRect(pill, annotationPlacements);
+    return rect ? { left: rect.x + rect.width / 2, top: rect.y + rect.height / 2, width: geometry.width } : null;
+  };
+  const roofWindowDistanceEditorStyle = roofWindowDistanceEditorGeometry && editorAtPill(roofWindowDistanceEditorGeometry);
+  const lineOpeningDistanceEditorStyle = lineOpeningDistanceEditorGeometry && editorAtPill(lineOpeningDistanceEditorGeometry);
 
   // Render canvas content - always portal for full-screen
   const canvasViewportInsetStyle = {
@@ -6603,339 +6819,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               currentFloorElementRendererNodes
             )}
 
-        {/* Selected PV clearance guidance: advisory measurements, no compliance checklist. */}
-        {selectedPvClearanceGuidance?.primary && (() => {
-          const belowGuidanceItems = selectedPvClearanceGuidance.items.filter((item) => item.status === 'below-guidance');
-          const itemsToRender =
-            belowGuidanceItems.length > 0
-              ? belowGuidanceItems
-              : [selectedPvClearanceGuidance.primary];
-
-          return (
-            <Group key="selected-pv-clearance-guidance" listening={false}>
-              {itemsToRender.map((item, index) => {
-                const panelPoint = worldToCanvas(item.panelPoint, scale, panOffset, canvasCenter);
-                const featurePoint = worldToCanvas(item.featurePoint, scale, panOffset, canvasCenter);
-                const featureA = worldToCanvas(item.featureSegment[0], scale, panOffset, canvasCenter);
-                const featureB = worldToCanvas(item.featureSegment[1], scale, panOffset, canvasCenter);
-                const color =
-                  item.status === 'below-guidance'
-                    ? canvasInteractionPalette.warningGuide
-                    : readRootCssVar('--semantic-snap', '#1E90FF');
-                const labelText = `${item.label}: ${item.distanceM.toFixed(2)}m / ${item.guidanceDistanceM.toFixed(2)}m`;
-                const measureDx = featurePoint.x - panelPoint.x;
-                const measureDy = featurePoint.y - panelPoint.y;
-                const measureLen = Math.hypot(measureDx, measureDy);
-                const labelOffsetX = measureLen > 2 ? (measureDx / measureLen) * 18 : 8;
-                const labelOffsetY = measureLen > 2 ? (measureDy / measureLen) * 18 : -28;
-                const labelX = featurePoint.x + labelOffsetX + 8;
-                const labelY = featurePoint.y + labelOffsetY - DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2 + index * 6;
-                const hasVisibleMeasureLine = measureLen > 2;
-
-                return (
-                  <Group key={`${item.feature}-${index}`} listening={false}>
-                    <Line
-                      points={[featureA.x, featureA.y, featureB.x, featureB.y]}
-                      stroke={color}
-                      strokeWidth={2}
-                      dash={[7, 5]}
-                      opacity={0.95}
-                      listening={false}
-                    />
-                    {hasVisibleMeasureLine && (
-                      <Line
-                        points={[panelPoint.x, panelPoint.y, featurePoint.x, featurePoint.y]}
-                        stroke={color}
-                        strokeWidth={2}
-                        opacity={0.95}
-                        listening={false}
-                      />
-                    )}
-                    <Circle
-                      x={panelPoint.x}
-                      y={panelPoint.y}
-                      radius={3}
-                      fill={color}
-                      listening={false}
-                    />
-                    <Circle
-                      x={featurePoint.x}
-                      y={featurePoint.y}
-                      radius={3}
-                      fill={color}
-                      listening={false}
-                    />
-                    {renderCanvasMeasurementPill(labelText, { x: labelX, y: labelY }, color)}
-                  </Group>
-                );
-              })}
-            </Group>
-          );
-        })()}
-
-        {/* Selected roof-window placement marker: click the pill to edit up-slope distance. */}
-        {selectedRoofWindowPlacement && (() => {
-          const color = readRootCssVar('--semantic-snap', '#1E90FF');
-          const openingPoint = worldToCanvas(selectedRoofWindowPlacement.openingPoint, scale, panOffset, canvasCenter);
-          const roofPoint = worldToCanvas(selectedRoofWindowPlacement.roofPoint, scale, panOffset, canvasCenter);
-          const roofA = worldToCanvas(selectedRoofWindowPlacement.roofLowEdgeSegment[0], scale, panOffset, canvasCenter);
-          const roofB = worldToCanvas(selectedRoofWindowPlacement.roofLowEdgeSegment[1], scale, panOffset, canvasCenter);
-          const openingA = worldToCanvas(selectedRoofWindowPlacement.openingEdgeSegment[0], scale, panOffset, canvasCenter);
-          const openingB = worldToCanvas(selectedRoofWindowPlacement.openingEdgeSegment[1], scale, panOffset, canvasCenter);
-          const measureDx = openingPoint.x - roofPoint.x;
-          const measureDy = openingPoint.y - roofPoint.y;
-          const measureLen = Math.hypot(measureDx, measureDy);
-          const labelX = (openingPoint.x + roofPoint.x) / 2 + 8;
-          const labelY = (openingPoint.y + roofPoint.y) / 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT / 2 - 8;
-          const labelText = `Up-slope: ${selectedRoofWindowPlacement.distanceM.toFixed(2)}m`;
-          const pillWidth = getDrawModeTooltipPillWidth(labelText);
-          const isEditingDistance =
-            selection?.type === 'element' &&
-            roofWindowDistanceEditor?.elementId === selection.id;
-
-          return (
-            <Group key="selected-roof-window-placement-marker" listening={!isEditingDistance}>
-              <Line
-                points={[roofA.x, roofA.y, roofB.x, roofB.y]}
-                stroke={color}
-                strokeWidth={2}
-                dash={[7, 5]}
-                opacity={0.75}
-                listening={false}
-              />
-              <Line
-                points={[openingA.x, openingA.y, openingB.x, openingB.y]}
-                stroke={color}
-                strokeWidth={2}
-                opacity={0.95}
-                listening={false}
-              />
-              {measureLen > 2 && (
-                <Line
-                  points={[roofPoint.x, roofPoint.y, openingPoint.x, openingPoint.y]}
-                  stroke={color}
-                  strokeWidth={2}
-                  opacity={0.95}
-                  listening={false}
-                />
-              )}
-              <Circle
-                x={roofPoint.x}
-                y={roofPoint.y}
-                radius={3}
-                fill={color}
-                listening={false}
-              />
-              <Circle
-                x={openingPoint.x}
-                y={openingPoint.y}
-                radius={3}
-                fill={color}
-                listening={false}
-              />
-              {!isEditingDistance && (
-                <>
-                  {renderCanvasMeasurementPill(labelText, { x: labelX, y: labelY }, color)}
-                  <Rect
-                    x={labelX}
-                    y={labelY}
-                    width={pillWidth}
-                    height={DRAW_MODE_TOOLTIP_PILL_HEIGHT}
-                    fill={color}
-                    opacity={0}
-                    listening
-                    onClick={beginRoofWindowDistanceEditor}
-                    onTap={beginRoofWindowDistanceEditor}
-                  />
-                </>
-              )}
-            </Group>
-          );
-        })()}
-
-        {/* While an opening is dragged along its host, the live preview replaces the stored distances. */}
-        {selectedLineOpeningClearance && !lineOpeningClearanceDragPreview &&
-          renderLineOpeningClearanceGuidance(
-            'selected-line-opening-clearance-marker',
-            selectedLineOpeningClearance.clearance,
-            true,
-          )}
-
-        {lineOpeningClearanceDragPreview &&
-          renderLineOpeningClearanceGuidance(
-            'line-opening-clearance-drag-preview',
-            lineOpeningClearanceDragPreview.clearance,
-            false,
-            selectedLineOpeningClearance ? 1 : 0.86,
-          )}
-
         {/* Render persistent snap indicators (always visible) */}
-        {snapIndicators}
+        {snapIndicators.nodes}
         <Group name={VERTEX_LENGTH_PILLS_GROUP_NAME} listening={false} />
-
-            {/* Render overlap count badges */}
-            {!spaceLabellerOpen && (() => {
-              // Deduplicate: if A overlaps with B, we only need one badge
-              const processed = new Set<string>();
-              const badges: Array<{ elementId: string, overlappingIds: string[], center: { x: number, y: number, z: number } }> = [];
-
-              for (const [elementId, group] of overlapGroups.entries()) {
-                if (processed.has(elementId)) continue;
-
-                // Mark all in group as processed
-                group.forEach(id => processed.add(id));
-
-                const element = elementsById[elementId];
-                if (!element) continue;
-
-                // Floor filtering: same rule as ElementRenderer / 3D (normalized storey z)
-                if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
-
-                const overlappingElements = group.slice(1).map(id => elementsById[id]).filter(Boolean);
-                const center = getOverlapCenter(element, overlappingElements);
-
-                if (center && group.length > 1) {
-                  badges.push({
-                    elementId,
-                    overlappingIds: group,
-                    center
-                  });
-                }
-              }
-
-              return badges.map(({ elementId, overlappingIds, center }) => {
-                const canvasPos = worldToCanvas(center, scale, panOffset, canvasCenter);
-                const count = overlappingIds.length;
-
-                const overlapBadgeListening = drawMode === 'none';
-                return (
-                  <Group key={`overlap-badge-${elementId}`} x={canvasPos.x} y={canvasPos.y}>
-                    <Circle
-                      x={0}
-                      y={0}
-                      radius={6}
-                      fill="rgba(255, 255, 255, 0.1)"
-                      stroke="rgba(255, 255, 255, 0.3)"
-                      strokeWidth={1.5}
-                      listening={overlapBadgeListening}
-                      onClick={(e) => {
-                        if (!overlapBadgeListening) return;
-                        e.cancelBubble = true;
-                        setOverlapBadgeMenu({
-                          anchor: center,
-                          elementIds: overlappingIds,
-                        });
-                      }}
-                      onTap={(e) => {
-                        if (!overlapBadgeListening) return;
-                        // Also handle tap for mobile
-                        e.cancelBubble = true;
-                        setOverlapBadgeMenu({
-                          anchor: center,
-                          elementIds: overlappingIds,
-                        });
-                      }}
-                      onMouseEnter={() => {
-                        if (!overlapBadgeListening) return;
-                        setCanvasElementHover(elementId);
-                      }}
-                      onMouseLeave={() => {
-                        // Don't clear elementHover - let element geometry handle it
-                      }}
-                    />
-                    <Text
-                      x={0}
-                      y={0}
-                      text={String(count)}
-                      fontSize={10}
-                      fill="#FFFFFF"
-                      fontStyle="bold"
-                      align="center"
-                      offsetX={badgeTextOffsetX ?? 0}
-                      offsetY={badgeTextOffsetY ?? 5}
-                      listening={false}
-                      ref={(node) => {
-                        // Measure text dimensions on first render to calculate proper centering
-                        if (node && (badgeTextOffsetY === null || badgeTextOffsetX === null)) {
-                          // Get the Konva node instance (react-konva wraps it)
-                          const konvaNode = (node as any).getNode ? (node as any).getNode() : node;
-                          // Measure text dimensions using getClientRect
-                          try {
-                            const rect = konvaNode.getClientRect();
-                            const textWidth = rect.width;
-                            const textHeight = rect.height;
-
-                            // Center horizontally: offsetX should be half the text width
-                            if (textWidth > 0 && badgeTextOffsetX === null) {
-                              setBadgeTextOffsetX(textWidth / 2);
-                            }
-
-                            // Center vertically: offsetY should be half the text height
-                            if (textHeight > 0 && badgeTextOffsetY === null) {
-                              setBadgeTextOffsetY(textHeight / 2);
-                            }
-                          } catch {
-                            // Fallback to fontSize-based calculation if measurement fails
-                            if (badgeTextOffsetX === null) {
-                              // Approximate text width: roughly 0.6 * fontSize per character for single digits
-                              setBadgeTextOffsetX(10 * 0.6 / 2); // Approximate half width
-                            }
-                            if (badgeTextOffsetY === null) {
-                              setBadgeTextOffsetY(10 * 0.6); // fontSize * 0.6
-                            }
-                          }
-                        }
-                      }}
-                    />
-                  </Group>
-                  );
-                });
-            })()}
-
-        {/* Render smart labels above overlap badges; visual-only so underlying canvas geometry stays interactive. */}
-        {!spaceLabellerOpen && (() => {
-              return sortedForLabels
-                .map(({ element, canvasCoords }) => {
-                  const isSelected =
-                    (selection?.type === 'element' || selection?.type === 'global') &&
-                    selection.id === element.id;
-                  const isMultiSelected = selectedElementIdSet.has(element.id);
-                  const isHighlighted = isSelected || isMultiSelected;
-                  const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
-
-                  if (canvasCoords.length === 0) return null;
-
-                  // Floor filtering: same rule as ElementRenderer / 3D (normalized storey z)
-                  if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) return null;
-
-                  // Label visibility filtering based on mode
-                  // Show label if: highlighted or directly hovered (not overlapping elements)
-                  if (labelVisibility === 'selected' && !isHighlighted && !isHovered) return null;
-
-                  // Get cached label position and transform it to current canvas space
-                  const cachedData = memoizedLabelPositions.get(element.id);
-                  if (!cachedData) return null;
-                  // A label with no free slot stays hidden until its element is hovered or selected.
-                  if (cachedData.rect.collides && !isHighlighted && !isHovered) return null;
-
-                  const labelRect = transformCachedLabelPosition(
-                    cachedData,
-                    element,
-                    worldToCanvas,
-                    scale,
-                    panOffset,
-                    canvasCenter
-                  );
-
-                  return renderSmartLabel(
-                    element,
-                    { x: labelRect.x, y: labelRect.y, anchor: labelRect.anchor },
-                    isHighlighted,
-                    showLineDimensions,
-                    canvasLabelTheme,
-                  );
-                });
-            })()}
 
             {/* Space-label footprints (only while Space Labeller is open): above fabric, below draw preview */}
             {spaceLabellerOpen && spaceLabellerZoneId && (() => {
@@ -7238,6 +7124,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               return <>{nodes}</>;
             })()}
 
+            {/* Chips, badges, pills and labels: one group above all geometry. The selected element's
+                grips (group centre, point and shape drag handles) render after it, so they stay on top. */}
+            <Group name="canvas-annotations">
+              {resolveAnnotationPaint(
+                canvasAnnotations,
+                annotationPlacements,
+                elementHover ? `label-${elementHover}` : null,
+              ).map(({ item, rect }) => <React.Fragment key={item.key}>{item.render?.(rect)}</React.Fragment>)}
+            </Group>
             {/* Render hover point for ground element splitting */}
             {hoverPoint && (
               <Circle
@@ -8931,14 +8826,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         })()
       )}
 
-      {viewMode === '2d' && roofWindowDistanceEditorGeometry && (
+      {viewMode === '2d' && roofWindowDistanceEditorStyle && (
         <div
           className={`draw-segment-editor roof-window-distance-editor${roofWindowDistanceEditor?.error ? ' roof-window-distance-editor--error' : ''}`}
-          style={{
-            left: roofWindowDistanceEditorGeometry.left,
-            top: roofWindowDistanceEditorGeometry.top,
-            width: roofWindowDistanceEditorGeometry.width,
-          }}
+          style={roofWindowDistanceEditorStyle}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
@@ -8978,14 +8869,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         </div>
       )}
 
-      {viewMode === '2d' && lineOpeningDistanceEditorGeometry && (
+      {viewMode === '2d' && lineOpeningDistanceEditorStyle && (
         <div
           className={`draw-segment-editor line-opening-distance-editor${lineOpeningDistanceEditor?.error ? ' line-opening-distance-editor--error' : ''}`}
-          style={{
-            left: lineOpeningDistanceEditorGeometry.left,
-            top: lineOpeningDistanceEditorGeometry.top,
-            width: lineOpeningDistanceEditorGeometry.width,
-          }}
+          style={lineOpeningDistanceEditorStyle}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
