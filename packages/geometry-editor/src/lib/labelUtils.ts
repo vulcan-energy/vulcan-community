@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { ReactNode } from 'react';
-import type { Element } from '../geometry/types';
+import type { Element, ElementType } from '../geometry/types';
+import { getElementTypeBaseName } from './displayNames';
 
 export const SMART_LABEL_METRICS = {
   labelHeight: 18,
@@ -16,24 +17,11 @@ export const SMART_LABEL_METRICS = {
   pillPadding: 4
 };
 
-// Label positioning and rendering utilities
-
-export interface LabelPosition {
-  x: number;
-  y: number;
-  anchor: 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-}
-
 export interface RectBounds {
   x: number;
   y: number;
   width: number;
   height: number;
-}
-
-export interface LabelRect extends LabelPosition, RectBounds {
-  /** No candidate slot was free: the rect is the on-element fallback and overlaps something. */
-  collides?: boolean;
 }
 
 export interface ElementBounds {
@@ -166,25 +154,6 @@ export function layoutCanvasAnnotations(
   }
   return lastAnnotationLayout.placements;
 }
-
-// In-memory stickiness cache: stores a placement choice per element
-// We cache the candidate index and a small offset (dx, dy) rather than absolute canvas coords
-// so positions naturally recompute from current element bounds on pan/zoom.
-const labelChoiceCache: Map<string, { idx: number; dx: number; dy: number; anchor: LabelPosition['anchor'] }>
-  = new Map();
-
-// Smart memoization cache for label positions
-interface LabelPositionCache {
-  positions: Map<string, { rect: LabelRect; elementCenter: { x: number, y: number } }>;
-  lastElementHash: string;
-  lastCanvasBounds: { width: number, height: number };
-}
-
-const labelPositionCache: LabelPositionCache = {
-  positions: new Map(),
-  lastElementHash: '',
-  lastCanvasBounds: { width: 0, height: 0 }
-};
 
 export function calculateElementBounds(canvasCoords: Array<{x: number, y: number}>): ElementBounds {
   if (canvasCoords.length === 0) {
@@ -333,29 +302,18 @@ export function getSmartLabelPillTexts(
   return pills;
 }
 
-export function getSmartLabelLayoutSignature(
-  element: Element,
-  options: { showLineDimensions: boolean },
-): string {
-  const coords = element.coordinates || [];
-  return JSON.stringify([
-    element.id,
-    coords.map((coord) => [
-      Number(coord.x),
-      Number(coord.y),
-      Number(coord.z),
-    ]),
-    element.name || '',
-    element.type || '',
-    !!element.isPlaceholder,
-    getSmartLabelPillTexts(element, options),
-  ]);
+/** The label's name: truncated unless the element is selected, else its type's display name. */
+export function getSmartLabelDisplayName(element: Element, isHighlighted: boolean): string {
+  if (element.isPlaceholder) return '…';
+  const name = element.name?.trim() ? element.name : '';
+  if (!name) return getElementTypeBaseName(element.type as ElementType);
+  const maxLength = isHighlighted ? 40 : 20;
+  return name.length > maxLength ? `${name.substring(0, maxLength)}…` : name;
 }
 
-/** Estimated label width; matches renderSmartLabel's layout of name plus metric pills. */
-export function getSmartLabelWidth(element: Element, showLineDimensions: boolean): number {
-  const baseName = element.isPlaceholder ? '…' : (element.name && element.name.trim() ? element.name : (element.type || ''));
-  let width = baseName.length * SMART_LABEL_METRICS.nameCharWidth;
+/** Label width from the same character metrics renderSmartLabel draws with. */
+export function getSmartLabelWidth(element: Element, isHighlighted: boolean, showLineDimensions: boolean): number {
+  let width = getSmartLabelDisplayName(element, isHighlighted).length * SMART_LABEL_METRICS.nameCharWidth;
   for (const text of getSmartLabelPillTexts(element, { showLineDimensions })) {
     width += SMART_LABEL_METRICS.spacing + text.length * SMART_LABEL_METRICS.pillCharWidth + SMART_LABEL_METRICS.pillPadding * 2;
   }
@@ -366,11 +324,12 @@ export function getSmartLabelWidth(element: Element, showLineDimensions: boolean
 export function getSmartLabelCandidates(
   element: Element,
   canvasCoords: Array<{ x: number; y: number }>,
+  isHighlighted: boolean,
   showLineDimensions: boolean,
 ): RectBounds[] {
   const bounds = calculateElementBounds(canvasCoords);
   const height = SMART_LABEL_METRICS.labelHeight;
-  const width = getSmartLabelWidth(element, showLineDimensions);
+  const width = getSmartLabelWidth(element, isHighlighted, showLineDimensions);
   // Clears the 14px handle reserve on selected vertices, so a selected line's edge slots stay usable.
   const margin = 16;
   const x = bounds.centerX + 20;
@@ -385,224 +344,4 @@ export function getSmartLabelCandidates(
     [bounds.maxX + margin, bounds.maxY + margin],
     [bounds.minX - width - margin, bounds.maxY + margin],
   ].map(([cx, cy]) => ({ x: cx, y: cy, width, height }));
-}
-
-export function calculateSmartLabelPosition(
-  element: Element,
-  canvasCoords: Array<{x: number, y: number}>,
-  existingLabels: LabelRect[],
-  canvasBounds: {width: number, height: number},
-  showLineDimensions: boolean,
-  avoidRects?: Array<{ x: number, y: number, width: number, height: number }>
-): LabelRect {
-  const bounds = calculateElementBounds(canvasCoords);
-  const labelHeight = SMART_LABEL_METRICS.labelHeight;
-  // Clears the 14px half-size reserve GeometryCanvas puts on selected vertices; at 8 every
-  // edge slot of a selected line hit its own end vertices and the label fell back onto the line.
-  const margin = 16;
-
-  // Estimate label width using same logic as renderer
-  const padding = SMART_LABEL_METRICS.padding;
-  const spacing = SMART_LABEL_METRICS.spacing;
-  const baseName = element.isPlaceholder ? '…' : (element.name && element.name.trim() ? element.name : (element.type || ''));
-  const baseNameWidth = (baseName || '').length * SMART_LABEL_METRICS.nameCharWidth;
-  const pillTexts = getSmartLabelPillTexts(element, { showLineDimensions });
-  const pillWidth = (text: string) =>
-    text.length * SMART_LABEL_METRICS.pillCharWidth + SMART_LABEL_METRICS.pillPadding * 2;
-
-  let totalContentWidth = baseNameWidth;
-  for (const text of pillTexts) {
-    totalContentWidth += spacing + pillWidth(text);
-  }
-  const labelWidth = Math.max(
-    68,
-    totalContentWidth + padding * 2
-  );
-
-  // Start with position to the right of center
-  const rightOfCenterX = bounds.centerX + 20; // 20px to the right of center
-  const centerY = bounds.centerY - labelHeight / 2;
-
-  // Generate positions starting to the right of center
-  const positions: Array<{anchor: LabelPosition['anchor'], x: number, y: number}> = [
-    // Start to the right of center
-    { anchor: 'center', x: rightOfCenterX, y: centerY },
-
-    // Small offsets around right-of-center position
-    { anchor: 'center', x: rightOfCenterX + 10, y: centerY },
-    { anchor: 'center', x: rightOfCenterX - 10, y: centerY },
-    { anchor: 'center', x: rightOfCenterX, y: centerY - 10 },
-    { anchor: 'center', x: rightOfCenterX, y: centerY + 10 },
-    { anchor: 'center', x: rightOfCenterX + 15, y: centerY - 15 },
-    { anchor: 'center', x: rightOfCenterX - 15, y: centerY + 15 },
-    { anchor: 'center', x: rightOfCenterX + 15, y: centerY + 15 },
-    { anchor: 'center', x: rightOfCenterX - 15, y: centerY - 15 },
-
-    // Slightly larger offsets
-    { anchor: 'center', x: rightOfCenterX + 20, y: centerY },
-    { anchor: 'center', x: rightOfCenterX - 20, y: centerY },
-    { anchor: 'center', x: rightOfCenterX, y: centerY - 20 },
-    { anchor: 'center', x: rightOfCenterX, y: centerY + 20 },
-
-    // Fallback to center if right positioning doesn't work
-    { anchor: 'center', x: bounds.centerX - labelWidth / 2, y: centerY },
-
-    // Edge positions as final fallback
-    { anchor: 'top-right', x: bounds.maxX + margin, y: bounds.minY - margin },
-    { anchor: 'top-left', x: bounds.minX - labelWidth - margin, y: bounds.minY - margin },
-    { anchor: 'bottom-right', x: bounds.maxX + margin, y: bounds.maxY + margin },
-    { anchor: 'bottom-left', x: bounds.minX - labelWidth - margin, y: bounds.maxY + margin }
-  ];
-
-  // 1) Try cached choice first (stickiness)
-  const cached = labelChoiceCache.get(element.id);
-  if (cached && positions[cached.idx]) {
-    const cachedPos = positions[cached.idx];
-    const cx = cachedPos.x + (cached.dx || 0);
-    const cy = cachedPos.y + (cached.dy || 0);
-    const cachedRect: LabelRect = { x: cx, y: cy, width: labelWidth, height: labelHeight, anchor: cached.anchor || cachedPos.anchor };
-    const inBoundsCached = cachedRect.x >= 0 && cachedRect.x + cachedRect.width <= canvasBounds.width &&
-      cachedRect.y >= 0 && cachedRect.y + cachedRect.height <= canvasBounds.height;
-    if (inBoundsCached) {
-      const cachedOverlaps =
-        existingLabels.some((ex) => rectsOverlap(cachedRect, ex)) ||
-        (avoidRects ?? []).some((av) => rectsOverlap(cachedRect, av));
-      if (!cachedOverlaps) {
-        return cachedRect;
-      }
-    }
-  }
-
-  // Use consistent positioning regardless of selection state
-  // Selected elements get center position first, but positioning doesn't change when selection changes
-  const priorityPositions = positions;
-
-  // Find first position that doesn't overlap and stays within canvas bounds
-  for (let i = 0; i < priorityPositions.length; i++) {
-    const pos = priorityPositions[i];
-    const rect: LabelRect = { x: pos.x, y: pos.y, width: labelWidth, height: labelHeight, anchor: pos.anchor };
-    const inBounds = rect.x >= 0 && rect.x + rect.width <= canvasBounds.width && rect.y >= 0 && rect.y + rect.height <= canvasBounds.height;
-    if (!inBounds) continue;
-    let overlaps = false;
-    for (const ex of existingLabels) { if (rectsOverlap(rect, ex)) { overlaps = true; break; } }
-    if (!overlaps && Array.isArray(avoidRects) && avoidRects.length > 0) {
-      for (const av of avoidRects) { if (rectsOverlap(rect, av)) { overlaps = true; break; } }
-    }
-    if (!overlaps) {
-      // Cache the successful choice (no offset used yet)
-      labelChoiceCache.set(element.id, { idx: i, dx: 0, dy: 0, anchor: pos.anchor });
-      return rect;
-    }
-  }
-
-  // Fallback: centre on the element. Only an on-canvas element's fallback is a real collision
-  // (the caller hides it); off-canvas slots all fail the bounds check, and a later pan reuses them.
-  const onCanvas = bounds.maxX >= 0 && bounds.minX <= canvasBounds.width && bounds.maxY >= 0 && bounds.minY <= canvasBounds.height;
-  return { anchor: 'center', x: bounds.centerX - labelWidth / 2, y: centerY, width: labelWidth, height: labelHeight, ...(onCanvas ? { collides: true } : {}) };
-}
-
-// Memoized label position calculation for performance optimization
-export function calculateMemoizedLabelPositions(
-  elements: Element[],
-  canvasBounds: { width: number, height: number },
-  showLineDimensions: boolean,
-  worldToCanvas: (coord: {x: number, y: number}, scale: number, panOffset: {x: number, y: number}, canvasCenter: {x: number, y: number}) => {x: number, y: number},
-  scale: number,
-  panOffset: {x: number, y: number},
-  canvasCenter: {x: number, y: number},
-  avoidRects: Array<{ x: number, y: number, width: number, height: number }> = [],
-  // Selected labels place first, always show, and block later labels even when they collide.
-  priorityIds: ReadonlySet<string> = new Set(),
-): Map<string, { rect: LabelRect; elementCenter: { x: number, y: number } }> {
-  // Create stable hash of elements that affect positioning
-  const avoidRectsHash = avoidRects
-    .map((r) => `${Math.round(r.x)}:${Math.round(r.y)}:${Math.round(r.width)}:${Math.round(r.height)}`)
-    .join('|');
-  const elementHash = elements
-    .map(e => getSmartLabelLayoutSignature(e, { showLineDimensions }))
-    .join('|') + `|lineDims:${showLineDimensions ? '1' : '0'}|avoid:${avoidRectsHash}` +
-    // Cached offsets are in pixels, so a zoom invalidates them; a pan does not.
-    `|scale:${scale}|priority:${[...priorityIds].sort().join(',')}`;
-
-  // Check if canvas bounds changed significantly (only recalculate if bounds change dramatically)
-  // Increased threshold from 200px to 500px to reduce recalculations during pan/zoom
-  const boundsChanged = Math.abs(canvasBounds.width - labelPositionCache.lastCanvasBounds.width) > 500 ||
-                       Math.abs(canvasBounds.height - labelPositionCache.lastCanvasBounds.height) > 500;
-
-  // Only recalculate if elements changed or canvas bounds changed significantly
-  if (elementHash !== labelPositionCache.lastElementHash || boundsChanged) {
-    // Clear cache and recalculate
-    labelPositionCache.positions.clear();
-    labelPositionCache.lastElementHash = elementHash;
-    labelPositionCache.lastCanvasBounds = canvasBounds;
-
-    // Sort elements for consistent ordering
-    const sortedElements = [...elements].sort((a, b) => {
-      const ap = priorityIds.has(a.id) ? 0 : 1;
-      const bp = priorityIds.has(b.id) ? 0 : 1;
-      if (ap !== bp) return ap - bp;
-      const az = a.coordinates?.[0]?.z || 0;
-      const bz = b.coordinates?.[0]?.z || 0;
-      if (az !== bz) return az - bz;
-      if ((a.type || '') !== (b.type || '')) return (a.type || '').localeCompare(b.type || '');
-      return (a.id || '').localeCompare(b.id || '');
-    });
-
-    // Calculate positions with overlap detection
-    const existingLabels: LabelRect[] = [];
-
-    sortedElements.forEach(element => {
-      const canvasCoords = (element.coordinates || []).map(coord =>
-        worldToCanvas(coord, scale, panOffset, canvasCenter)
-      );
-
-      const labelRect = calculateSmartLabelPosition(
-        element,
-        canvasCoords,
-        existingLabels,
-        canvasBounds,
-        showLineDimensions,
-        avoidRects
-      );
-
-      const elementBounds = calculateElementBounds(canvasCoords);
-      labelPositionCache.positions.set(element.id, {
-        rect: labelRect,
-        elementCenter: { x: elementBounds.centerX, y: elementBounds.centerY }
-      });
-      // A hidden (colliding, non-priority) label must not push later labels away.
-      if (!labelRect.collides || priorityIds.has(element.id)) existingLabels.push(labelRect);
-    });
-  }
-
-  return labelPositionCache.positions;
-}
-
-// Transform cached label position to current canvas space
-export function transformCachedLabelPosition(
-  cachedData: { rect: LabelRect; elementCenter: { x: number, y: number } },
-  element: Element,
-  worldToCanvas: (coord: {x: number, y: number}, scale: number, panOffset: {x: number, y: number}, canvasCenter: {x: number, y: number}) => {x: number, y: number},
-  scale: number,
-  panOffset: {x: number, y: number},
-  canvasCenter: {x: number, y: number}
-): LabelRect {
-  // Calculate current element bounds
-  const currentCanvasCoords = (element.coordinates || []).map(coord =>
-    worldToCanvas(coord, scale, panOffset, canvasCenter)
-  );
-  const currentBounds = calculateElementBounds(currentCanvasCoords);
-
-  // Calculate the offset from cached position to cached element center
-  const offsetX = cachedData.rect.x - cachedData.elementCenter.x;
-  const offsetY = cachedData.rect.y - cachedData.elementCenter.y;
-
-  // Apply the same offset to current element center
-  return {
-    x: currentBounds.centerX + offsetX,
-    y: currentBounds.centerY + offsetY,
-    width: cachedData.rect.width,
-    height: cachedData.rect.height,
-    anchor: cachedData.rect.anchor
-  };
 }

@@ -14,7 +14,7 @@ import { getElementShape, getElementColor, worldToCanvas, canvasToWorld, compute
 import { findOverlappingElements, getOverlapCenter } from '../lib/overlapDetection';
 import { readRootCssVar } from '../lib/cssVars';
 import { targetValidationIssues, withTargetIssues } from '../lib/buildErrorDisplay';
-import { getSmartLabelPillTexts, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, getSmartLabelCandidates, layoutCanvasAnnotations, resolveAnnotationPaint, type CanvasAnnotation, type LabelPosition, type RectBounds } from '../lib/labelUtils';
+import { getSmartLabelDisplayName, getSmartLabelPillTexts, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, getSmartLabelCandidates, layoutCanvasAnnotations, resolveAnnotationPaint, type CanvasAnnotation, type RectBounds } from '../lib/labelUtils';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { FilenameBar, type FilenameBarActionContext } from './FilenameBar';
 import type {
@@ -77,7 +77,6 @@ import {
   DETAILS_PANEL_DEFAULT_H,
 } from '../hooks/usePanelLayout';
 import { useOverlay } from '../hooks/useOverlay';
-import { getElementTypeBaseName } from '../lib/displayNames';
 import './GeometryCanvas.css';
 import {
   buildGeometrySnapCache,
@@ -875,7 +874,7 @@ function readCanvasLabelTheme(): CanvasLabelTheme {
 
 const renderSmartLabel = (
   element: Element,
-  labelPos: LabelPosition,
+  labelPos: RectBounds,
   isHighlighted: boolean,
   showLineDimensions: boolean,
   theme: CanvasLabelTheme,
@@ -892,37 +891,11 @@ const renderSmartLabel = (
     pillPadding
   } = SMART_LABEL_METRICS;
 
-  // Get base name with truncation for non-highlighted elements
-  let baseName: string;
-  let displayName: string; // Truncated version for display
-  const MAX_LABEL_LENGTH = isHighlighted ? 40 : 20; // Show more when selected
-
-  if ((element as any).isPlaceholder) {
-    baseName = '…';
-    displayName = '…';
-  } else if (element.name && element.name.trim()) {
-    baseName = element.name;
-    displayName = baseName.length > MAX_LABEL_LENGTH ? baseName.substring(0, MAX_LABEL_LENGTH) + '…' : baseName;
-  } else {
-    baseName = getElementTypeBaseName(element.type as ElementType);
-    displayName = baseName;
-  }
-
+  const displayName = getSmartLabelDisplayName(element, isHighlighted);
   const pillTexts = getSmartLabelPillTexts(element, { showLineDimensions });
-
-  // Calculate dynamic width based on displayed (possibly truncated) name
-  const displayNameWidth = displayName.length * nameCharWidth; // Approximate character width
+  const displayNameWidth = displayName.length * nameCharWidth;
   const pillWidth = (text: string) => text.length * pillCharWidth + pillPadding * 2;
-
-  let totalContentWidth = displayNameWidth;
-  for (const text of pillTexts) {
-    totalContentWidth += spacing + pillWidth(text);
-  }
-
-  const labelWidth = Math.max(
-    68,
-    totalContentWidth + padding * 2
-  );
+  const labelWidth = labelPos.width;
 
   // Calculate positions for each element
   let currentX = labelPos.x + padding;
@@ -998,7 +971,7 @@ const renderSmartLabel = (
   );
 };
 
-/** An opening's side-distance pill in canvas space: drawn by the guidance, avoided by labels. */
+/** An opening's side-distance pill in canvas space, centred on its guide segment. */
 function getLineOpeningClearancePill(
   clearance: LineHostedOpeningClearance,
   side: LineOpeningClearanceSide,
@@ -5047,25 +5020,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       // indicator paint once per pass rather than once per snapped vertex.
       const snapFill = readRootCssVar('--semantic-snap', '#1E90FF');
       const snapStroke = readRootCssVar('--semantic-on-color', '#FFFFFF');
-      const mvhrTerminalBadgeBounds = elementCanvasData
-        .filter(({ element, canvasCoords }) =>
-          element.type === 'MechanicalVentilationTerminal' &&
-          canvasCoords.length > 0 &&
-          isElementOnActiveCanvasFloor(element, currentFloorZ, floors) &&
-          !isElementHiddenOnView(element)
-        )
-        .map(({ canvasCoords }) => ({
-          x: canvasCoords[0].x,
-          y: canvasCoords[0].y,
-          halfWidth: 19,
-          halfHeight: 12,
-        }));
-      const overlapsMvhrTerminalBadge = (coord: { x: number; y: number }) =>
-        mvhrTerminalBadgeBounds.some((bounds) =>
-          Math.abs(coord.x - bounds.x) <= bounds.halfWidth &&
-          Math.abs(coord.y - bounds.y) <= bounds.halfHeight
-        );
-
       elementCanvasData.forEach(({ element, canvasCoords }) => {
         // Floor filtering: same rule as ElementRenderer / 3D (normalized storey z)
         if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) return;
@@ -5084,7 +5038,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
         canvasCoords.forEach((coord, index) => {
           if (snappedVertices.has(index)) {
-            if (overlapsMvhrTerminalBadge(coord)) return;
             dots.push({ x: coord.x - 4, y: coord.y - 4, width: 8, height: 8 });
             const all90Degree = utilIsAll90DegreeConnections(element, index, elementsById, angleTol);
 
@@ -6701,7 +6654,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         ((selection?.type === 'element' || selection?.type === 'global') && selection.id === element.id);
       const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
       if (labelVisibility === 'selected' && !isHighlighted && !isHovered) continue;
-      const candidates = getSmartLabelCandidates(element, canvasCoords, showLineDimensions);
+      const candidates = getSmartLabelCandidates(element, canvasCoords, isHighlighted, showLineDimensions);
       items.push({
         key: `label-${element.id}`,
         rect: candidates[0],
@@ -6710,7 +6663,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         movable: true,
         render: (rect) => renderSmartLabel(
           element,
-          { x: rect.x, y: rect.y, anchor: 'center' },
+          rect,
           isHighlighted,
           showLineDimensions,
           canvasLabelTheme,

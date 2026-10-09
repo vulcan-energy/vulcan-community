@@ -74,7 +74,7 @@ export function shouldShowUnsnappedVertexGuidance(element: Element, shape: strin
   return false;
 }
 
-/** Canvas rect of the warning chip drawn above a vertex handle (shared by renderer and label layout). */
+/** Canvas rect of the warning chip drawn above a vertex handle. */
 export function getUnsnappedVertexChipRect(
   position: { x: number; y: number },
   handleRadius: number,

@@ -2,17 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import type { Element } from '../../geometry/types';
 import {
   ANNOTATION_PRIORITY,
   layoutCanvasAnnotations,
   placeCanvasAnnotations,
   resolveAnnotationPaint,
   type CanvasAnnotation,
-  calculateMemoizedLabelPositions,
   getSmartLabelPillTexts,
-  rectsOverlap,
-  transformCachedLabelPosition,
+  getSmartLabelWidth,
 } from '../labelUtils';
 
 describe('getSmartLabelPillTexts', () => {
@@ -58,161 +55,17 @@ describe('getSmartLabelPillTexts', () => {
     expect(pills).toEqual(['12.0m²']);
   });
 
-  it('recalculates cached label bounds when derived line dimension text changes', () => {
-    const projectIdentity = (
-      coord: { x: number; y: number },
-    ): { x: number; y: number } => ({ x: coord.x, y: coord.y });
-    const baseElement = {
-      id: 'label-cache-line-dimensions',
+  it('widens the label when the derived line dimension text grows', () => {
+    const wall = {
+      id: 'label-width-line-dimensions',
       name: 'Wall',
       type: 'BuildingElementOpaque',
       parent_element: null,
-      coordinates: [
-        { x: 0, y: 100, z: 0 },
-        { x: 10, y: 100, z: 0 },
-      ],
+      coordinates: [{ x: 0, y: 100, z: 0 }, { x: 10, y: 100, z: 0 }],
     } as any;
 
-    const smallHeightPositions = calculateMemoizedLabelPositions(
-      [{ ...baseElement, height: 2 }],
-      { width: 800, height: 600 },
-      true,
-      projectIdentity,
-      1,
-      { x: 0, y: 0 },
-      { x: 0, y: 0 },
-    );
-    const smallWidth = smallHeightPositions.get(baseElement.id)?.rect.width ?? 0;
-
-    const largeHeightPositions = calculateMemoizedLabelPositions(
-      [{ ...baseElement, height: 12345 }],
-      { width: 800, height: 600 },
-      true,
-      projectIdentity,
-      1,
-      { x: 0, y: 0 },
-      { x: 0, y: 0 },
-    );
-
-    expect(largeHeightPositions.get(baseElement.id)?.rect.width ?? 0).toBeGreaterThan(smallWidth);
-  });
-
-  it('recalculates label placement when coordinates move labels into collision', () => {
-    const projectIdentity = (
-      coord: { x: number; y: number },
-    ): { x: number; y: number } => ({ x: coord.x, y: coord.y });
-    const elementA = {
-      id: 'label-cache-move-a',
-      name: 'Wall A',
-      type: 'BuildingElementOpaque',
-      parent_element: null,
-      coordinates: [
-        { x: 0, y: 0, z: 0 },
-        { x: 10, y: 0, z: 0 },
-      ],
-    } as any;
-    const elementBFar = {
-      id: 'label-cache-move-b',
-      name: 'Wall B',
-      type: 'BuildingElementOpaque',
-      parent_element: null,
-      coordinates: [
-        { x: 200, y: 100, z: 0 },
-        { x: 210, y: 100, z: 0 },
-      ],
-    } as any;
-
-    calculateMemoizedLabelPositions(
-      [elementA, elementBFar],
-      { width: 800, height: 600 },
-      false,
-      projectIdentity,
-      1,
-      { x: 0, y: 0 },
-      { x: 0, y: 0 },
-    );
-
-    const elementBNear = {
-      ...elementBFar,
-      coordinates: [
-        { x: 0, y: 100, z: 0 },
-        { x: 10, y: 100, z: 0 },
-      ],
-    };
-    const movedPositions = calculateMemoizedLabelPositions(
-      [elementA, elementBNear],
-      { width: 800, height: 600 },
-      false,
-      projectIdentity,
-      1,
-      { x: 0, y: 0 },
-      { x: 0, y: 0 },
-    );
-    const labelA = movedPositions.get(elementA.id);
-    const labelB = movedPositions.get(elementBNear.id);
-    expect(labelA).toBeTruthy();
-    expect(labelB).toBeTruthy();
-
-    const rectA = transformCachedLabelPosition(labelA!, elementA, projectIdentity, 1, { x: 0, y: 0 }, { x: 0, y: 0 });
-    const rectB = transformCachedLabelPosition(labelB!, elementBNear, projectIdentity, 1, { x: 0, y: 0 }, { x: 0, y: 0 });
-
-    expect(rectsOverlap(rectA, rectB)).toBe(false);
-  });
-
-  it('places priority labels first and marks unplaceable ones as colliding instead of stacking them', () => {
-    const projectIdentity = (coord: { x: number; y: number }) => ({ x: coord.x, y: coord.y });
-    const stacked: Element[] = Array.from({ length: 30 }, (_, index): Element => ({
-      id: `stack-${String(index).padStart(2, '0')}`,
-      name: 'Light',
-      type: 'Lighting',
-      parent_element: null,
-      coordinates: [{ x: 200, y: 200, z: 0 }],
-    }) as Element);
-    const priorityId = 'stack-29';
-
-    const positions = calculateMemoizedLabelPositions(
-      stacked,
-      { width: 800, height: 600 },
-      false,
-      projectIdentity,
-      1,
-      { x: 0, y: 0 },
-      { x: 0, y: 0 },
-      [],
-      new Set([priorityId]),
-    );
-
-    expect(positions.get(priorityId)?.rect.collides).toBeUndefined();
-    const placed = stacked.map((e) => positions.get(e.id)!.rect).filter((rect) => !rect.collides);
-    expect(placed.length).toBeLessThan(stacked.length);
-    for (let i = 0; i < placed.length; i += 1) {
-      for (let j = i + 1; j < placed.length; j += 1) {
-        expect(rectsOverlap(placed[i], placed[j])).toBe(false);
-      }
-    }
-  });
-
-  it('keeps the visible fallback for an element that is off-canvas at layout time', () => {
-    const projectIdentity = (coord: { x: number; y: number }) => ({ x: coord.x, y: coord.y });
-    const offCanvas = {
-      id: 'off-canvas-light',
-      name: 'Light',
-      type: 'Lighting',
-      parent_element: null,
-      coordinates: [{ x: 2000, y: 200, z: 0 }],
-    } as Element;
-
-    const positions = calculateMemoizedLabelPositions(
-      [offCanvas],
-      { width: 800, height: 600 },
-      false,
-      projectIdentity,
-      1,
-      { x: 0, y: 0 },
-      { x: 0, y: 0 },
-    );
-
-    expect(positions.get(offCanvas.id)?.rect.collides).toBeUndefined();
+    expect(getSmartLabelWidth({ ...wall, height: 12345 }, false, true))
+      .toBeGreaterThan(getSmartLabelWidth({ ...wall, height: 2 }, false, true));
   });
 });
 
