@@ -228,10 +228,11 @@ export function planBackgroundVents(
       planned.push({
         name: '',
         type: 'Vents',
+        isPlaceholder: false,
         area_cm2: area,
         mid_height_air_flow_path: roundOneDp(midHeight),
         parent_element: host.name,
-        coordinates: [{ x: mid.x, y: mid.y, z: midHeight }],
+        coordinates: [mid], // the window's storey band; the store places the vent on its parent,
       });
     } else {
       // No habitable-room windows — create unparented (per-element validator already warns
@@ -239,6 +240,7 @@ export function planBackgroundVents(
       planned.push({
         name: '',
         type: 'Vents',
+        isPlaceholder: false,
         area_cm2: area,
         mid_height_air_flow_path: FALLBACK_MID_HEIGHT_M,
         parent_element: null,
