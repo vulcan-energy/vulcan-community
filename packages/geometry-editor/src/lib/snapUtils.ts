@@ -1186,10 +1186,13 @@ export type GetExactSnappedVerticesOptions = {
 };
 
 /**
- * Ducts and pipes only count a match within their own network: a duct with same-unit ducts and
- * terminals and the unit's point, a pipe with other pipes. Undefined for every other type.
+ * Which partners can make a vertex "snapped". Building elements count only building elements (a
+ * duct, pipe or TB end on a free wall end leaves it loose). Ducts and pipes count only their own
+ * network: a duct with same-unit ducts and terminals and the unit's point, a pipe with other pipes.
+ * Undefined (any partner) for every other type, so TBs still count wall corners.
  */
-function sameServiceNetwork(element: Element): ((other: Element) => boolean) | undefined {
+export function snapPartnerFilter(element: Element): ((other: Element) => boolean) | undefined {
+  if (isBuildingElement(element)) return isBuildingElement;
   if (element.type === 'WaterPipework') return (other) => other.type === 'WaterPipework';
   if (element.type !== 'MechanicalVentilationDuctwork') return undefined;
   const unit = element.parent_element;
@@ -1207,7 +1210,7 @@ export const getExactSnappedVertices = (
 ): Set<number> => {
   const snappedVertices = new Set<number>();
   const skipTypes = options?.skipVertexMatchFromOtherTypes;
-  const inNetwork = sameServiceNetwork(element);
+  const isPartner = snapPartnerFilter(element);
 
   if (!element.coordinates) return snappedVertices;
 
@@ -1221,7 +1224,7 @@ export const getExactSnappedVertices = (
       if (skipTypes?.length && other.type && skipTypes.includes(String(other.type))) {
         continue;
       }
-      if (inNetwork && !inNetwork(other)) continue;
+      if (isPartner && !isPartner(other)) continue;
       if (!other.coordinates) continue;
 
       for (const otherCoord of other.coordinates) {

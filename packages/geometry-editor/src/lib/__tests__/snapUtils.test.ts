@@ -513,6 +513,7 @@ describe('getExactSnappedVertices', () => {
     });
 
     expect(getExactSnappedVertices(duct, { wall, duct, sibling })).toEqual(new Set([1]));
+    expect(getExactSnappedVertices(wall, { wall, duct, sibling })).toEqual(new Set());
   });
 });
 
