@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Element } from '../../geometry/types';
 import { createGeometryStore } from '../../stores/geometryStore';
 import { getServiceLineLengthFromCoordinates as lengthOf } from '../serviceLineDrawModes';
@@ -11,6 +11,8 @@ import {
   buildGeometrySnapCacheFromTargets,
   constrainPointOrthogonally,
   findClosestSnapCorner,
+  findConnectedDragNeighbours,
+  planConnectedDrag,
   resolveOpeningSegmentParentFromCache,
   resolveDrawSnapPoint,
   getExactSnappedVertices,
@@ -786,5 +788,107 @@ describe('planServiceLineEndpointWelds', () => {
       { elementId: 'c', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 0 } },
       { elementId: 'p2', vertexIndex: 0, newPosition: { x: 8, y: 5, z: 0 } },
     ]);
+  });
+});
+
+describe('connected drag (Alt)', () => {
+  const duct = (id: string, a: [number, number], b: [number, number], unit = 'MVHR') => ({
+    id, name: id, type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: unit,
+    coordinates: [{ x: a[0], y: a[1], z: 0 }, { x: b[0], y: b[1], z: 0 }],
+  });
+  // L-run from the unit: a east, b north (the dog-leg), c east again.
+  const run = () => ({
+    unit: { id: 'unit', name: 'MVHR', type: 'MechanicalVentilation', coordinates: [{ x: 0, y: 0, z: 0 }] },
+    a: duct('a', [0, 0], [4, 0]),
+    b: duct('b', [4, 0], [4, 3]),
+    c: duct('c', [4, 3], [7, 3]),
+    wall: { id: 'wall', name: 'Wall', type: 'BuildingElementOpaque', coordinates: [{ x: 4, y: 3, z: 0 }, { x: 4, y: 9, z: 0 }] },
+    other: duct('other', [4, 0], [4, -2], 'MVHR 2'),
+  }) as unknown as Record<string, Element>;
+  const plan = (byId: Record<string, Element>, id: string, delta: { x: number; y: number }) =>
+    planConnectedDrag(byId[id]!, findConnectedDragNeighbours(byId[id]!, byId), byId, delta);
+
+  it('stretches each neighbour by its shared end and keeps its far end', () => {
+    const moved = plan(run(), 'b', { x: 1, y: 0 });
+    expect(moved.b!.map(({ x, y }) => [x, y])).toEqual([[5, 0], [5, 3]]);
+    expect(moved.a!.map(({ x, y }) => [x, y])).toEqual([[0, 0], [5, 0]]);
+    expect(moved.c!.map(({ x, y }) => [x, y])).toEqual([[5, 3], [7, 3]]);
+  });
+
+  it('moves a line only along its plan normal, so the dog-leg stays square', () => {
+    const moved = plan(run(), 'b', { x: 1, y: 0.7 });
+    expect(moved.b!.map(({ x, y }) => [x, y])).toEqual([[5, 0], [5, 3]]);
+    expect(moved.a![1]!.y).toBe(0);
+  });
+
+  it('never follows across networks or collapses a neighbour', () => {
+    const byId = run();
+    expect(Object.keys(plan(byId, 'b', { x: 1, y: 0 })).sort()).toEqual(['a', 'b', 'c']);
+    // Dragging c down onto a's line would collapse b (4,0)-(4,3): b is left behind.
+    expect(plan(byId, 'c', { x: 0, y: -3 }).b).toBeUndefined();
+  });
+
+  it('carries the duct ends attached to a dragged unit point', () => {
+    const moved = plan(run(), 'unit', { x: -1, y: 2 });
+    expect(Object.keys(moved).sort()).toEqual(['a', 'unit']);
+    expect(moved.a!.map(({ x, y }) => [x, y])).toEqual([[-1, 2], [4, 0]]);
+  });
+
+  it('Alt-dragging a hosted terminal keeps it on its wall, with the duct end following', () => {
+    vi.useFakeTimers();
+    try {
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      const { addFloor, addZone, addElements } = store.getState();
+      addFloor('Ground', 2.4);
+      addZone({ name: 'Zone', floorArea: 20, height: 2.4, volume: 48 });
+      const zoneId = store.getState().zones[0]!.id;
+      const [, , terminalId, ductId] = addElements([
+        { type: 'BuildingElementOpaque', name: 'Wall', zoneId, height: 2.4, width: 6, area: 14.4, pitch: 90,
+          base_height: 0, parent_element: null, coordinates: [{ x: 0, y: 0, z: 0 }, { x: 6, y: 0, z: 0 }] },
+        { type: 'MechanicalVentilation', name: 'MVHR', vent_type: 'MVHR', coordinates: [{ x: 2, y: 3, z: 0 }] },
+        { type: 'MechanicalVentilationTerminal', name: 'Out', terminal_type: 'exhaust', parent_element: 'MVHR',
+          host_element: 'Wall', coordinates: [{ x: 2, y: 0, z: 0 }] },
+        { type: 'MechanicalVentilationDuctwork', name: 'D', duct_type: 'exhaust', parent_element: 'MVHR', length: 3,
+          coordinates: [{ x: 2, y: 3, z: 0 }, { x: 2, y: 0, z: 0 }] },
+      ] as never);
+      vi.runAllTimers();
+      const byId = store.getState().elementsById;
+      const terminal = byId[terminalId!]!;
+      const historyBefore = store.getState().historyIndex;
+      // Dropped off the wall: the terminal reprojects onto it and the duct end lands there too.
+      store.getState().commitConnectedPointDrag(terminalId!, [{ x: 4, y: 0.8, z: 0 }], findConnectedDragNeighbours(terminal, byId));
+      vi.runAllTimers();
+      const after = store.getState().elementsById;
+      expect(after[terminalId!]!.coordinates[0]).toMatchObject({ x: 4, y: 0 });
+      expect(after[ductId!]!.coordinates[1]).toEqual(after[terminalId!]!.coordinates[0]);
+      expect(after[ductId!]!.coordinates[0]).toMatchObject({ x: 2, y: 3 });
+      expect(store.getState().historyIndex).toBe(historyBefore + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('commits the drag and every neighbour as one undo step', () => {
+    vi.useFakeTimers();
+    try {
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      for (const el of Object.values(run())) store.getState().addElement({ ...el, id: undefined } as never);
+      vi.runAllTimers();
+      const byId = store.getState().elementsById;
+      const idOf = (name: string) => Object.values(byId).find((el) => el.name === name)!.id;
+      const b = byId[idOf('b')]!;
+      const moved = planConnectedDrag(b, findConnectedDragNeighbours(b, byId), byId, { x: 1, y: 0 });
+      const historyBefore = store.getState().historyIndex;
+      store.getState().commitVertexPositionUpdates(Object.entries(moved).flatMap(([elementId, coords]) =>
+        coords.map((newPosition, vertexIndex) => ({ elementId, vertexIndex, newPosition }))));
+      vi.runAllTimers();
+      expect(store.getState().historyIndex).toBe(historyBefore + 1);
+      expect(store.getState().elementsById[idOf('a')]!.length).toBe(5);
+      store.getState().undo();
+      expect(store.getState().elementsById[idOf('a')]!.coordinates[1]!.x).toBe(4);
+      expect(store.getState().elementsById[idOf('c')]!.coordinates[0]!.x).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -114,6 +114,9 @@ describe('tooltip copy', () => {
     expect(getHoverHintText({ kind: 'rotate-grip', dragging: true })).toBeNull();
     expect(getHoverHintText({ kind: 'vertex', dragging: true })).toBe('Shift: no snap');
     expect(getHoverHintText({ kind: 'body', dragging: false })).toBeNull();
+    expect(getHoverHintText({ kind: 'body', dragging: false, connected: true })).toBe('Alt moves connected');
+    expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: true })).toBe('Alt moves connected');
+    expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: false })).toBeNull();
     expect(getHoverHintText({ kind: 'label-vertex', dragging: false })).toBeNull();
   });
 });

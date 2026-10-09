@@ -86,14 +86,19 @@ function withMultiDrawHint(
 export type HoverHintTarget = {
   kind: 'rotate-grip' | 'vertex' | 'body' | 'label-vertex';
   dragging: boolean;
+  /** Body only: the element has same-network connections that Alt-drag carries along. */
+  connected?: boolean;
+  altHeld?: boolean;
 };
 
 /** Hint for a selected element's drag handle; null means native cursor only. */
 export function getHoverHintText(target: HoverHintTarget): string | null {
   if (target.kind === 'rotate-grip') return target.dragging ? null : 'Drag to rotate';
   if (target.kind === 'vertex') return 'Shift: no snap';
+  if (target.kind === 'body' && target.connected && (!target.dragging || target.altHeld)) {
+    return 'Alt moves connected';
+  }
   // label-vertex: Shift is orthogonal lock there, so cursor only.
-  // body: a later slice adds 'Alt moves connected' for connected lines here.
   return null;
 }
 
@@ -189,7 +194,7 @@ export function getDrawModeTooltipText(
 }
 
 
-/** Konva name of the draggable whole-shape handle (see `selected-shape-drag`). */
+/** Konva name of the draggable whole-element handle (`selected-shape-drag`, `selected-point-drag`). */
 export const SELECTED_SHAPE_DRAG_HANDLE_NAME = 'selected-shape-drag-handle';
 
 export function classifyHoverHandle(node: Konva.Node | null): HoverHintTarget['kind'] | null {
