@@ -1185,6 +1185,20 @@ export type GetExactSnappedVerticesOptions = {
   skipVertexMatchFromOtherTypes?: string[];
 };
 
+/**
+ * Ducts and pipes only count a match within their own network: a duct with same-unit ducts and
+ * terminals and the unit's point, a pipe with other pipes. Undefined for every other type.
+ */
+function sameServiceNetwork(element: Element): ((other: Element) => boolean) | undefined {
+  if (element.type === 'WaterPipework') return (other) => other.type === 'WaterPipework';
+  if (element.type !== 'MechanicalVentilationDuctwork') return undefined;
+  const unit = element.parent_element;
+  return (other) =>
+    ((other.type === 'MechanicalVentilationDuctwork' || other.type === 'MechanicalVentilationTerminal') &&
+      other.parent_element === unit) ||
+    (other.type === 'MechanicalVentilation' && other.name === unit);
+}
+
 // Helper to detect which vertices of an element are exactly snapped to other elements (for persistent indicators)
 export const getExactSnappedVertices = (
   element: Element,
@@ -1193,6 +1207,7 @@ export const getExactSnappedVertices = (
 ): Set<number> => {
   const snappedVertices = new Set<number>();
   const skipTypes = options?.skipVertexMatchFromOtherTypes;
+  const inNetwork = sameServiceNetwork(element);
 
   if (!element.coordinates) return snappedVertices;
 
@@ -1206,6 +1221,7 @@ export const getExactSnappedVertices = (
       if (skipTypes?.length && other.type && skipTypes.includes(String(other.type))) {
         continue;
       }
+      if (inNetwork && !inNetwork(other)) continue;
       if (!other.coordinates) continue;
 
       for (const otherCoord of other.coordinates) {
