@@ -1085,17 +1085,22 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   // The MVHR manager sets the unit in the same batch that starts the draw, so it clears when the
   // draw session ends (finish, cancel) rather than keying on drawMode, which dropped it at the start.
   // The toolbar type pick clears it too.
-  const [drawMvhrParentName, setDrawMvhrParentName] = useState<string | null>(null);
-  const [drawMvhrParentDrawMode, setDrawMvhrParentDrawMode] = useState(drawMode);
-  if (drawMvhrParentDrawMode !== drawMode) {
-    setDrawMvhrParentDrawMode(drawMode);
-    if (drawMode === 'none') setDrawMvhrParentName(null);
+  const [drawMvhrParent, setDrawMvhrParent] = useState<{ name: string | null; drawMode: typeof drawMode }>(
+    () => ({ name: null, drawMode }),
+  );
+  if (drawMvhrParent.drawMode !== drawMode) {
+    setDrawMvhrParent({ name: drawMode === 'none' ? null : drawMvhrParent.name, drawMode });
   }
+  const drawMvhrParentName = drawMvhrParent.name;
+  const setDrawMvhrParentName = useCallback(
+    (name: string | null) => setDrawMvhrParent((current) => ({ ...current, name })),
+    [],
+  );
   // Every element-type change drops the unit; the MVHR manager sets it again after its type pick.
   const setDrawElementType = useCallback((type: ElementType) => {
     setDrawMvhrParentName(null);
     setDrawElementTypeState(type);
-  }, [setDrawElementTypeState]);
+  }, [setDrawElementTypeState, setDrawMvhrParentName]);
   const drawMvhrRolePropsRef = useRef<Record<string, unknown>>({});
   const themeId = useThemeStore((s) => s.themeId);
   const customTheme = useThemeStore((s) => s.customTheme);
