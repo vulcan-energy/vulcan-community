@@ -1082,9 +1082,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const { drawMode, setDrawMode, drawElementType, setDrawElementType, drawPoints, setDrawPoints, drawCursor, setDrawCursor, setDrawAngleSnapped, drawSnapTargetRef, roomWalls, setRoomWalls, roomWallElements, setRoomWallElements, orthogonalRoomStart, setOrthogonalRoomStart, orthogonalRoomEnd, setOrthogonalRoomEnd, orthogonalRoomEditing, setOrthogonalRoomEditing, pendingHostElementCreationRef, drawPreset, setDrawPreset, drawPresetData, setDrawPresetData, resetDrawing } = useDrawingMode();
   const [drawMvhrDuctRole, setDrawMvhrDuctRole] = useState<MvhrDuctRole>('supply');
   const [drawMvhrTerminalRole, setDrawMvhrTerminalRole] = useState<MvhrTerminalRole>('intake');
-  // Plain state, like the role: keyed on drawMode it reset in the same batch that the MVHR
-  // manager started a draw, so manager-drawn ducts lost their unit. The toolbar type pick clears it.
+  // The MVHR manager sets the unit in the same batch that starts the draw, so it clears when the
+  // draw session ends (finish, cancel) rather than keying on drawMode, which dropped it at the start.
+  // The toolbar type pick clears it too.
   const [drawMvhrParentName, setDrawMvhrParentName] = useState<string | null>(null);
+  const [drawMvhrParentDrawMode, setDrawMvhrParentDrawMode] = useState(drawMode);
+  if (drawMvhrParentDrawMode !== drawMode) {
+    setDrawMvhrParentDrawMode(drawMode);
+    if (drawMode === 'none') setDrawMvhrParentName(null);
+  }
   const drawMvhrRolePropsRef = useRef<Record<string, unknown>>({});
   const themeId = useThemeStore((s) => s.themeId);
   const customTheme = useThemeStore((s) => s.customTheme);
@@ -2457,12 +2463,17 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         : undefined,
     [drawElementType, drawMvhrRoleProps, drawPresetProps, isDuctOrPipePlanDraw],
   );
+  // Only segments on the active canvas floor, like the other plan snap targets.
+  const drawNetworkEdgeFilter = useMemo(
+    () => drawNetworkSegmentFilter && ((el: Element) => drawNetworkSegmentFilter(el) && isElementOnActiveCanvasFloor(el, currentFloorZ, floors)),
+    [currentFloorZ, drawNetworkSegmentFilter, floors],
+  );
 
   const activeGeometrySnapCache = useMemo(() => {
     return geometryPerf.measure('GeometryCanvas.activeGeometrySnapCache', () =>
-      buildGeometrySnapCache(elementsById as Record<string, Element>, drawNetworkSegmentFilter),
+      buildGeometrySnapCache(elementsById as Record<string, Element>, drawNetworkEdgeFilter),
     );
-  }, [drawNetworkSegmentFilter, elementsById]);
+  }, [drawNetworkEdgeFilter, elementsById]);
 
   const developmentContextSnapCache = useMemo(() => {
     return geometryPerf.measure('GeometryCanvas.developmentContextSnapCache', () =>
@@ -5227,6 +5238,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
     // Always process draw-mode clicks, regardless of target (shapes may stop propagation)
     if (drawMode !== 'none') {
+      // A move still queued for the next frame belongs to the pre-click draft; dropping it keeps a
+      // committed segment's length label from reappearing.
+      latestMouseEventRef.current = null;
       // Get pointer position from stage (with snap-to-vertex for draw clicks)
       const mouseWorldRaw = getMouseWorld(stage, scale, panOffset, canvasCenter);
       const activeSnapPoints = drawMode === 'room' ? roomWalls : drawPoints;
@@ -5534,48 +5548,25 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 ]
               : [lineCoordinates];
             const placedCoordinates = drawnLegs[drawnLegs.length - 1]!;
-            const teeSplits = drawNetworkSegmentFilter
-              ? planServiceLineTeeSplits(elementsById as Record<string, Element>, drawNetworkSegmentFilter, [
+            const teeSplits = drawNetworkEdgeFilter
+              ? planServiceLineTeeSplits(elementsById as Record<string, Element>, drawNetworkEdgeFilter, [
                   drawnLegs[0]![0]!,
                   placedCoordinates[1]!,
                 ])
               : [];
-            let networkElementId: string | null = null;
-            if (drawnLegs.length > 1 || teeSplits.length > 0) {
-              for (const split of teeSplits) {
-                updateElement(split.elementId, {
-                  coordinates: split.head,
-                  length: getServiceLineLengthFromCoordinates(split.head),
-                } as Partial<Element>, true);
-              }
-              const legDrafts = drawnLegs.map((coordinates) => ({
-                type: drawElementType,
-                name: '',
-                parent_element: null,
-                ...(drawElementType === 'WaterPipework'
-                  ? { simplified_pipework: false, pipework_type: 'primary' }
-                  : { zoneId: targetZoneId }),
-                ...drawPresetProps,
-                ...drawMvhrRolePropsRef.current,
-                ...(drawFloorId ? { floorId: drawFloorId } : {}),
-                coordinates,
-                length: getServiceLineLengthFromCoordinates(coordinates),
-                ...(extraWithServiceFloor ? { extra_json: extraWithServiceFloor } : {}),
-              }));
-              const tailDrafts = teeSplits.map((split) => ({
-                ...elementsById[split.elementId],
-                name: '',
-                coordinates: split.tail,
-                length: getServiceLineLengthFromCoordinates(split.tail),
-              }));
-              const addedIds = geometryStore.getState().addElements([...legDrafts, ...tailDrafts] as ElementDraft[]);
-              networkElementId = addedIds[drawnLegs.length - 1]!;
+            // A teeing end moves onto the exact split point: the branch and both pieces of the main meet there.
+            for (const split of teeSplits) {
+              if (split.endIndex === 0) drawnLegs[0]![0] = { ...split.point };
+              else placedCoordinates[1] = { ...split.point };
             }
-            const { elementId, hostPrefill } = networkElementId
-              ? { elementId: networkElementId, hostPrefill: undefined }
-              : beginDrawnElement(targetZoneId, drawElementType);
+            // The first L leg takes the same create path, first so it names first; a pending host
+            // prefill applies to both legs.
+            const firstLeg = drawnLegs.length > 1 ? beginDrawnElement(targetZoneId, drawElementType) : null;
+            const drawn = beginDrawnElement(targetZoneId, drawElementType);
+            const elementId = drawn.elementId;
+            const hostPrefill = firstLeg?.hostPrefill ?? drawn.hostPrefill;
             const serviceLineLengthPatch = isServiceLineElementType(drawElementType)
-              ? { length: getServiceLineLengthFromCoordinates(lineCoordinates), isPlaceholder: false }
+              ? { length: getServiceLineLengthFromCoordinates(placedCoordinates), isPlaceholder: false }
               : {};
             const openingParentPatch =
               drawElementType === 'BuildingElementTransparent' && !isServiceLineElementType(drawElementType)
@@ -5588,12 +5579,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                   )
                 : null;
 
-            if (!networkElementId) updateElement(elementId, {
+            const linePatch: Partial<Element> = {
               ...drawPresetProps,
               ...drawMvhrRolePropsRef.current,
               ...(getDefaultLinePitchPatch(drawElementType, drawPresetProps) ?? {}),
               ...(drawFloorId ? { floorId: drawFloorId } : {}),
-              coordinates: openingParentPatch?.coordinates ?? lineCoordinates,
+              coordinates: openingParentPatch?.coordinates ?? placedCoordinates,
               ...serviceLineLengthPatch,
               ...(openingParentPatch ? { parent_element: openingParentPatch.parentName } : {}),
               ...(hostPrefill || {}),
@@ -5601,7 +5592,32 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
               // If WetEmitter drawn as a line, default to radiator subcategory
               ...(drawElementType === 'WetEmitter' ? { subcategory: 'radiator' as any } : {})
-            }, true);
+            };
+            updateElement(elementId, linePatch, true);
+            if (firstLeg) {
+              updateElement(firstLeg.elementId, {
+                ...linePatch,
+                coordinates: drawnLegs[0],
+                length: getServiceLineLengthFromCoordinates(drawnLegs[0]),
+              } as Partial<Element>, true);
+            }
+            for (const split of teeSplits) {
+              updateElement(split.elementId, {
+                coordinates: split.head,
+                length: getServiceLineLengthFromCoordinates(split.head),
+              } as Partial<Element>, true);
+            }
+            // One history step for the legs and the split: addElements saves it with the tails.
+            if (teeSplits.length > 0) {
+              geometryStore.getState().addElements(teeSplits.map((split) => ({
+                ...elementsById[split.elementId],
+                name: '',
+                coordinates: split.tail,
+                length: getServiceLineLengthFromCoordinates(split.tail),
+              })) as ElementDraft[]);
+            } else if (firstLeg) {
+              geometryStore.getState().saveToHistory('drawServiceLineL');
+            }
 
             // Auto-switch to the floor where the element was created
             setCurrentFloorZ(elementZ);

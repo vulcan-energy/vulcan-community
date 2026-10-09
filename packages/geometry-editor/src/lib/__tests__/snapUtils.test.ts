@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
 import { createGeometryStore } from '../../stores/geometryStore';
+import { getServiceLineLengthFromCoordinates as lengthOf } from '../serviceLineDrawModes';
 import {
   applyAngleSnapIfClose,
   buildGeometrySnapCache,
@@ -61,7 +62,7 @@ describe('planServiceLineTeeSplits', () => {
       duct_type,
       parent_element: 'MVHR',
       length: 4,
-      coordinates: [{ x: 0, y: 0, z: 2 }, { x: 4, y: 0, z: 2 }],
+      coordinates: [{ x: 0, y: 0, z: 2 }, { x: 4, y: 3, z: 2 }],
     });
     const [mainId] = store.getState().addElements([duct('Main', 'supply'), duct('Other role', 'extract')]);
     const isNetwork = serviceNetworkSegmentFilter({
@@ -70,25 +71,32 @@ describe('planServiceLineTeeSplits', () => {
       duct_type: 'supply',
     })!;
     const before = store.getState();
-    expect(planServiceLineTeeSplits(before.elementsById, isNetwork, [{ x: 3.996, y: 0, z: 2 }])).toEqual([]);
-    const splits = planServiceLineTeeSplits(before.elementsById, isNetwork, [{ x: 1.5, y: 0, z: 2 }]);
-    expect(splits.map((split) => split.elementId)).toEqual([mainId]);
+    expect(planServiceLineTeeSplits(before.elementsById, isNetwork, [{ x: 3.997, y: 2.998, z: 2 }])).toEqual([]);
+    // A drawn end on the 0.01 m grid, a few mm off the diagonal main.
+    const splits = planServiceLineTeeSplits(before.elementsById, isNetwork, [{ x: 0, y: 3, z: 2 }, { x: 1.6, y: 1.21, z: 2 }]);
+    expect(splits.map((split) => [split.endIndex, split.elementId])).toEqual([[1, mainId]]);
+    const [split] = splits;
+    const { point, head, tail: tailCoords } = split!;
+    // Exact projection: both pieces stay colinear with the main and meet the branch end.
+    expect(head[1]).toEqual(point);
+    expect(tailCoords[0]).toEqual(point);
+    expect(point.x * 3 - point.y * 4).toBeCloseTo(0, 12);
 
     // As the duct draw click applies it: the head in place, then the branch and the tail together.
-    const [split] = splits;
-    before.updateElement(split!.elementId, { coordinates: split!.head, length: 1.5 }, true);
-    const [, tailId] = before.addElements([
-      { ...duct('', 'supply'), length: 2, coordinates: [{ x: 1.5, y: 0, z: 2 }, { x: 1.5, y: 2, z: 2 }] },
-      { ...before.elementsById[mainId!]!, name: '', coordinates: split!.tail, length: 2.5 } as never,
+    before.updateElement(split!.elementId, { coordinates: head, length: lengthOf(head) }, true);
+    const [branchId, tailId] = before.addElements([
+      { ...duct('', 'supply'), length: 1, coordinates: [{ ...point }, { x: point.x, y: point.y + 1, z: 2 }] },
+      { ...before.elementsById[mainId!]!, name: '', coordinates: tailCoords, length: lengthOf(tailCoords) } as never,
     ]);
 
     const after = store.getState();
     expect(after.history).toHaveLength(before.history.length + 1);
     const main = after.elementsById[mainId!]! as Element & { length: number };
     const tail = after.elementsById[tailId!]! as Element & { length: number; duct_type: string };
-    expect([main.name, main.length, main.coordinates[1]]).toEqual(['Main', 1.5, { x: 1.5, y: 0, z: 2 }]);
+    expect([main.name, main.length, main.coordinates[1]]).toEqual(['Main', 2.01, point]);
+    expect(after.elementsById[branchId!]!.coordinates[0]).toEqual(point);
     expect(tail.name).not.toBe('Main');
-    expect([tail.length, tail.duct_type, tail.coordinates]).toEqual([2.5, 'supply', split!.tail]);
+    expect([tail.length, tail.duct_type, tail.coordinates]).toEqual([2.99, 'supply', tailCoords]);
   });
 });
 

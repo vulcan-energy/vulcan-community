@@ -1245,7 +1245,15 @@ export function planOrthogonalElbow(
 /** Drawn ends sit on the 0.01 m grid, so a tee on a diagonal segment can land up to ~7 mm off its line. */
 const TEE_ON_SEGMENT_TOL_M = 0.01;
 
-export type ServiceLineTeeSplit = { elementId: string; head: WeldPoint[]; tail: WeldPoint[] };
+export type ServiceLineTeeSplit = {
+  /** Index into `ends` of the drawn end that tees in; the caller moves that end onto `point`. */
+  endIndex: number;
+  elementId: string;
+  /** The drawn end projected exactly onto the segment, so both pieces stay colinear. */
+  point: WeldPoint;
+  head: WeldPoint[];
+  tail: WeldPoint[];
+};
 
 /**
  * A drawn end that lands inside a network segment (not within SERVICE_POINT_COINCIDENCE_EPS_M of
@@ -1258,7 +1266,7 @@ export function planServiceLineTeeSplits(
   ends: WeldPoint[],
 ): ServiceLineTeeSplit[] {
   const splits: ServiceLineTeeSplit[] = [];
-  for (const p of ends) {
+  ends.forEach((p, endIndex) => {
     for (const el of Object.values(elementsById)) {
       if (!isNetworkSegment(el) || splits.some((split) => split.elementId === el.id)) continue;
       const [a, b] = el.coordinates as [WeldPoint, WeldPoint];
@@ -1266,11 +1274,12 @@ export function planServiceLineTeeSplits(
       const v = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
       const t = ((p.x - a.x) * v.x + (p.y - a.y) * v.y + (p.z - a.z) * v.z) / (v.x * v.x + v.y * v.y + v.z * v.z);
       if (!(t > 0 && t < 1)) continue;
-      if (distance(p, { x: a.x + t * v.x, y: a.y + t * v.y, z: a.z + t * v.z }) > TEE_ON_SEGMENT_TOL_M) continue;
-      splits.push({ elementId: el.id, head: [{ ...a }, { ...p }], tail: [{ ...p }, { ...b }] });
+      const point = { x: a.x + t * v.x, y: a.y + t * v.y, z: a.z + t * v.z };
+      if (distance(p, point) > TEE_ON_SEGMENT_TOL_M) continue;
+      splits.push({ endIndex, elementId: el.id, point, head: [{ ...a }, { ...point }], tail: [{ ...point }, { ...b }] });
       break;
     }
-  }
+  });
   return splits;
 }
 
