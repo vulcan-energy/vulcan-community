@@ -74,6 +74,8 @@ export type ElementShapeNodeRefs = {
   arrowLineNode: PreviewLineNode | null;
   arrowHeadNode: PreviewLineNode | null;
   pointNode?: PreviewPositionNode | null;
+  /** MVHR terminal IN/OUT box, drawn in the canvas annotations group; follows `pointNode`. */
+  pointBadgeNode?: PreviewPositionNode | null;
   vertexNodes: Array<PreviewPositionNode | null>;
 };
 
@@ -352,6 +354,7 @@ export function findElementShapeNodeRefs(
     arrowLineNode: findPreviewLineNode(stage, `arrow-line-${elementId}`),
     arrowHeadNode: findPreviewLineNode(stage, `arrow-head-${elementId}`),
     pointNode: findPreviewPositionNode(stage, `point-${elementId}`),
+    pointBadgeNode: findPreviewPositionNode(stage, `point-badge-${elementId}`),
     vertexNodes: findElementVertexNodeRefs(stage, elementId, coordinateCount),
   };
 }
@@ -384,6 +387,7 @@ function refsToMovableNodes(refs: ElementShapeNodeRefs): unknown[] {
     // After the arrowhead so drag-layer moveToTop keeps the static stacking order.
     refs.orientationGripNode,
     refs.pointNode,
+    refs.pointBadgeNode,
     ...refs.vertexNodes,
   ];
 }
@@ -727,12 +731,15 @@ export function updateElementShapeNodeRefsFromCoords(
 
   const canvasCoords = coords.map((coord) => worldToCanvas(coord, scale, panOffset, canvasCenter));
   const pointCoord = canvasCoords[0];
-  if (pointCoord && refs.pointNode) {
-    if (typeof refs.pointNode.position === 'function') {
-      refs.pointNode.position({ x: pointCoord.x, y: pointCoord.y });
-    } else {
-      refs.pointNode.x?.(pointCoord.x);
-      refs.pointNode.y?.(pointCoord.y);
+  if (pointCoord) {
+    for (const node of [refs.pointNode, refs.pointBadgeNode]) {
+      if (!node) continue;
+      if (typeof node.position === 'function') {
+        node.position({ x: pointCoord.x, y: pointCoord.y });
+      } else {
+        node.x?.(pointCoord.x);
+        node.y?.(pointCoord.y);
+      }
     }
   }
 

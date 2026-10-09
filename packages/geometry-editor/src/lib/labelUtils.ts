@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { ReactNode } from 'react';
 import type { Element } from '../geometry/types';
 
 export const SMART_LABEL_METRICS = {
@@ -42,6 +43,28 @@ export interface ElementBounds {
   maxY: number;
   centerX: number;
   centerY: number;
+}
+
+/** Lower places first in layout and paints on top. */
+export const ANNOTATION_PRIORITY = { selected: 0, warning: 1, measurement: 2, label: 3 } as const;
+
+/**
+ * One canvas annotation (chip, badge, pill, label) painted in the single annotations group above
+ * all geometry. Producers return these; obstacles such as handles and snap dots omit `render`.
+ */
+export interface CanvasAnnotation {
+  key: string;
+  /** Canvas rect at the current view; a movable item's preferred slot. */
+  rect: RectBounds;
+  priority: number;
+  /** Layout may move it to a free slot or hide it; fixed items stay put and are avoided. */
+  movable: boolean;
+  render?: (rect: RectBounds) => ReactNode;
+}
+
+/** Back to front: higher priority numbers first, so priority 0 paints on top; ties keep producer order. */
+export function sortAnnotationsForPaint(items: readonly CanvasAnnotation[]): CanvasAnnotation[] {
+  return items.filter((item) => item.render).sort((a, b) => b.priority - a.priority);
 }
 
 // In-memory stickiness cache: stores a placement choice per element

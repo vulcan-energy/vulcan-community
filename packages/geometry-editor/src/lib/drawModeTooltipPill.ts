@@ -89,6 +89,11 @@ export function getUnsnappedVertexChipRect(
   };
 }
 
+/** An MVHR terminal's IN/OUT box size; the box is centred on the terminal point. */
+export function getMvhrTerminalBadgeSize(label: 'IN' | 'OUT'): { width: number; height: number } {
+  return { width: label === 'OUT' ? 34 : 28, height: 18 };
+}
+
 // Helper: Check if cursor is near first point (for completion detection)
 function isNearFirstPoint(
   cursor: { x: number; y: number } | null,
