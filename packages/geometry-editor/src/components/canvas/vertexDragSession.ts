@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element } from '../../geometry/types';
+import { pointsConnected } from '../../lib/snapUtils';
 import {
   findElementShapeNodeRefs,
   type ActiveDragPreviewElement,
@@ -212,11 +213,7 @@ export function buildVertexDragStateForElement({
 
     for (let k = 0; k < other.coordinates.length; k++) {
       const otherCoord = other.coordinates[k];
-      if (
-        vertex.x === otherCoord.x &&
-        vertex.y === otherCoord.y &&
-        vertex.z === otherCoord.z
-      ) {
+      if (pointsConnected(element, vertex, other, otherCoord)) {
         connectedElements.push({ elementId: other.id, vertexIndex: k });
         break;
       }

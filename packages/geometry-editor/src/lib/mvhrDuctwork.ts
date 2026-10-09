@@ -4,6 +4,7 @@
 import type { Element, MechanicalVentilationDuctwork, MechanicalVentilationTerminal } from '../geometry/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
 import { orientation360FromSegmentOutwardModelXY } from './openingSegmentOutward';
+import { pointsConnected } from './snapUtils';
 
 export const MVHR_DUCT_ROLES = ['supply', 'extract', 'intake', 'exhaust'] as const;
 export type MvhrDuctRole = (typeof MVHR_DUCT_ROLES)[number];
@@ -24,7 +25,12 @@ export const MVHR_DUCT_ROLE_STYLES: Record<MvhrDuctRole, MvhrDuctRoleStyle> = {
   exhaust: { stroke: '#15803D', strokeWidth: 2, dash: [10, 4, 2, 4] },
 };
 
-export const MVHR_DUCT_TOPOLOGY_TOLERANCE_M = 0.35;
+/**
+ * Terminals are the one near-miss exception to exact connectivity: a hosted terminal's point is
+ * re-projected onto its wall or window (unrounded, z = air-flow-path height), while drawn duct ends
+ * are rounded to 0.01 m, so the two cannot be relied on to coincide exactly.
+ */
+export const MVHR_TERMINAL_DUCT_TOLERANCE_M = 0.35;
 
 export function isMvhrDuctRole(value: unknown): value is MvhrDuctRole {
   return typeof value === 'string' && (MVHR_DUCT_ROLES as readonly string[]).includes(value);
@@ -121,8 +127,8 @@ export function distance3d(a: Point3, b: Point3): number {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
-export function point3dEquals(a: Point3, b: Point3): boolean {
-  return a.x === b.x && a.y === b.y && a.z === b.z;
+function sameDuctPoint(a: Point3, b: Point3): boolean {
+  return pointsConnected(undefined, a, undefined, b);
 }
 
 export function ductEndpoints(duct: Pick<MechanicalVentilationDuctwork, 'coordinates'>): [Point3, Point3] | null {
@@ -141,7 +147,6 @@ type DuctEndpointComponents = {
 
 function buildDuctEndpointComponents(
   ducts: ReadonlyArray<Pick<MechanicalVentilationDuctwork, 'coordinates'>>,
-  tolerance = MVHR_DUCT_TOPOLOGY_TOLERANCE_M,
 ): DuctEndpointComponents {
   const endpoints = ducts.map(ductEndpoints).filter((v): v is [Point3, Point3] => v !== null);
   if (endpoints.length <= 1) return { endpoints, roots: endpoints.map((_, index) => index) };
@@ -163,10 +168,10 @@ function buildDuctEndpointComponents(
       const a = endpoints[i]!;
       const b = endpoints[j]!;
       if (
-        distance3d(a[0], b[0]) <= tolerance ||
-        distance3d(a[0], b[1]) <= tolerance ||
-        distance3d(a[1], b[0]) <= tolerance ||
-        distance3d(a[1], b[1]) <= tolerance
+        sameDuctPoint(a[0], b[0]) ||
+        sameDuctPoint(a[0], b[1]) ||
+        sameDuctPoint(a[1], b[0]) ||
+        sameDuctPoint(a[1], b[1])
       ) {
         union(i, j);
       }
@@ -177,23 +182,21 @@ function buildDuctEndpointComponents(
 
 export function countDuctEndpointComponents(
   ducts: ReadonlyArray<Pick<MechanicalVentilationDuctwork, 'coordinates'>>,
-  tolerance = MVHR_DUCT_TOPOLOGY_TOLERANCE_M,
 ): number {
-  const components = buildDuctEndpointComponents(ducts, tolerance);
+  const components = buildDuctEndpointComponents(ducts);
   return new Set(components.roots).size;
 }
 
 export function allDuctEndpointComponentsConnectToPoint(
   ducts: ReadonlyArray<Pick<MechanicalVentilationDuctwork, 'coordinates'>>,
   point: Point3,
-  tolerance = MVHR_DUCT_TOPOLOGY_TOLERANCE_M,
 ): boolean {
-  const components = buildDuctEndpointComponents(ducts, tolerance);
+  const components = buildDuctEndpointComponents(ducts);
   if (components.endpoints.length === 0) return false;
   const roots = new Set(components.roots);
   const connectedRoots = new Set<number>();
   components.endpoints.forEach((endpoints, index) => {
-    if (distance3d(endpoints[0], point) <= tolerance || distance3d(endpoints[1], point) <= tolerance) {
+    if (sameDuctPoint(endpoints[0], point) || sameDuctPoint(endpoints[1], point)) {
       connectedRoots.add(components.roots[index]!);
     }
   });
@@ -209,7 +212,6 @@ export type MvhrCrossRoleEndpointOverlap = {
 export function findExactCrossRoleDuctEndpointOverlap(
   ducts: ReadonlyArray<Pick<MechanicalVentilationDuctwork, 'coordinates' | 'duct_type' | 'name'>>,
   ignoredPoint?: Point3,
-  ignoredTolerance = MVHR_DUCT_TOPOLOGY_TOLERANCE_M,
 ): MvhrCrossRoleEndpointOverlap | null {
   for (let i = 0; i < ducts.length; i += 1) {
     const ductA = ducts[i]!;
@@ -225,8 +227,8 @@ export function findExactCrossRoleDuctEndpointOverlap(
 
       for (const pointA of endpointsA) {
         for (const pointB of endpointsB) {
-          if (!point3dEquals(pointA, pointB)) continue;
-          if (ignoredPoint && distance3d(pointA, ignoredPoint) <= ignoredTolerance) continue;
+          if (!sameDuctPoint(pointA, pointB)) continue;
+          if (ignoredPoint && sameDuctPoint(pointA, ignoredPoint)) continue;
           return {
             roles: [ductA.duct_type, ductB.duct_type],
             ductNames: [ductA.name, ductB.name],
@@ -293,7 +295,7 @@ export function collectMvhrDuctTopologyWarnings(
 export function terminalIsNearDuctEndpoint(
   terminal: Pick<MechanicalVentilationTerminal, 'coordinates'>,
   ducts: ReadonlyArray<Pick<MechanicalVentilationDuctwork, 'coordinates'>>,
-  tolerance = MVHR_DUCT_TOPOLOGY_TOLERANCE_M,
+  tolerance = MVHR_TERMINAL_DUCT_TOLERANCE_M,
 ): boolean {
   const point = getTerminalPoint(terminal);
   if (!point) return false;

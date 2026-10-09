@@ -25,7 +25,7 @@ import {
   deriveSlopedElementDimensions,
   slopedDimensionDiffers,
 } from '../lib/slopedElementDimensions';
-import { getExactSnappedVertices } from '../lib/snapUtils';
+import { getExactSnappedVertices, planServiceLineEndpointWelds } from '../lib/snapUtils';
 import { isVulcanUiPartyFloorElement } from '../lib/assemblyMaterialFabric';
 import { coerceElementToStrictestNumericTyping } from '../lib/schemaCoercion';
 import { cloneJsonValue, jsonValuesEqual } from '../lib/jsonTypes';
@@ -3823,6 +3823,9 @@ const createGeometryState = (
   },
 
   snapSelectedElements: (elementIds, snapTol) => {
+    // Walls and service lines are disjoint, so both plans read the same starting state.
+    const serviceLineWelds = planServiceLineEndpointWelds(get().elementsById, elementIds, snapTol);
+    let wallsChanged = false;
     set((state) => {
       // Filter to BuildingElementOpaque walls only
       const walls = elementIds
@@ -3943,12 +3946,14 @@ const createGeometryState = (
       }
 
       if (!changed) return state;
-
-      // Save to history for undo/redo
-      try { get().saveToHistory('snapSelectedElements'); } catch { /* swallow: best-effort */ }
-
+      wallsChanged = true;
       return { elementsById: updatedElementsById };
     });
+    if (serviceLineWelds.length > 0) get().commitVertexPositionUpdates(serviceLineWelds, true);
+    // One undo step for the whole Snap, taken after both edits land.
+    if (wallsChanged || serviceLineWelds.length > 0) {
+      try { get().saveToHistory('snapSelectedElements'); } catch { /* swallow: best-effort */ }
+    }
   },
 
   rightAlignSelectedElements: (elementIds, angleTolDeg) => {

@@ -113,36 +113,135 @@ function pointToSegmentDistanceSqXY(
   return distanceSq(p, projectPointOntoSegmentXY(p, A, B));
 }
 
-function isBuildingElementForPlanSnap(el: Element | undefined): boolean {
-  return typeof el?.type === 'string' && el.type.startsWith('BuildingElement');
+type ConnectivityElement = { type?: unknown } | undefined;
+type ConnectivityPoint = { x: number; y: number; z?: unknown };
+
+function isBuildingElement(element: ConnectivityElement): boolean {
+  return typeof element?.type === 'string' && element.type.startsWith('BuildingElement');
 }
 
-function storeyIndex(z: unknown): number | null {
-  return normalizeStoreyIndex(z) ?? null;
+/** Half the 0.01 m grid service-line ends are rounded to: absorbs that rounding, invisible on screen. */
+export const SERVICE_POINT_COINCIDENCE_EPS_M = 0.005;
+
+/** Same canvas storey: building elements snap in plan, so their z only has to share a storey. */
+function sameStorey(aZ: unknown, bZ: unknown): boolean {
+  const aStorey = normalizeStoreyIndex(aZ);
+  return aStorey !== undefined && aStorey === normalizeStoreyIndex(bZ);
 }
 
-function isSamePlanSnapFloor(
-  source: Element,
-  sourceZ: unknown,
-  target: Element | undefined,
-  targetZ: unknown,
+function withinServiceEps(u: unknown, v: unknown): boolean {
+  return u === v || (typeof u === 'number' && typeof v === 'number' && Math.abs(u - v) <= SERVICE_POINT_COINCIDENCE_EPS_M);
+}
+
+/**
+ * The one rule for "these two element vertices are the same point". Building-element pairs: exact
+ * x, y on the same storey. Mixed pairs: exact x, y, z. Pairs with no building element (ducts,
+ * pipes, plant and terminal points): within SERVICE_POINT_COINCIDENCE_EPS_M on each axis.
+ */
+export function pointsConnected(
+  a: ConnectivityElement,
+  aPoint: ConnectivityPoint,
+  b: ConnectivityElement,
+  bPoint: ConnectivityPoint,
 ): boolean {
-  if (isBuildingElementForPlanSnap(source) && isBuildingElementForPlanSnap(target)) {
-    const aFloor = storeyIndex(sourceZ);
-    const bFloor = storeyIndex(targetZ);
-    return aFloor !== null && bFloor !== null && aFloor === bFloor;
+  // Cheap reject first (also rejects NaN): this runs per vertex pair on every canvas pass.
+  if (!(Math.abs(aPoint.x - bPoint.x) <= SERVICE_POINT_COINCIDENCE_EPS_M)) return false;
+  if (!(Math.abs(aPoint.y - bPoint.y) <= SERVICE_POINT_COINCIDENCE_EPS_M)) return false;
+  const aBuilding = isBuildingElement(a);
+  const bBuilding = isBuildingElement(b);
+  if (!aBuilding && !bBuilding) return withinServiceEps(aPoint.z, bPoint.z);
+  if (aPoint.x !== bPoint.x || aPoint.y !== bPoint.y) return false;
+  return aBuilding && bBuilding ? sameStorey(aPoint.z, bPoint.z) : aPoint.z === bPoint.z;
+}
+
+type WeldPoint = { x: number; y: number; z: number };
+type NetworkElement = Element & { duct_type?: string; terminal_type?: string; pipework_type?: string; parent_element?: string | null };
+export type ServiceLineWeld = { elementId: string; vertexIndex: number; newPosition: WeldPoint };
+
+function distance(a: WeldPoint, b: WeldPoint): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+/** Fixed points a duct's ends may weld to: its MVHR unit and same-role terminals. */
+function ductPointTargets(duct: NetworkElement, all: NetworkElement[]): WeldPoint[] {
+  if (!duct.parent_element) return [];
+  return all
+    .filter((el) =>
+      el.coordinates?.length === 1 &&
+      ((el.type === 'MechanicalVentilation' && el.name === duct.parent_element) ||
+        (el.type === 'MechanicalVentilationTerminal' &&
+          el.parent_element === duct.parent_element &&
+          el.terminal_type === duct.duct_type)))
+    .map((el) => el.coordinates[0]!);
+}
+
+/**
+ * Multi-select "Snap" for ducts and pipes: selected line ends within `tolerance` (3D) weld onto a
+ * fixed network point when one is in reach, and onto each other otherwise (a cluster lands on its
+ * first fixed point, else its first end in selection order). Ducts weld only within the same unit
+ * and role, pipes only within the same pipework_type. Pipe-to-plant welds arrive with the
+ * auto-pipes slice.
+ */
+export function planServiceLineEndpointWelds(
+  elementsById: Record<string, Element>,
+  elementIds: string[],
+  tolerance: number,
+): ServiceLineWeld[] {
+  const all = Object.values(elementsById) as NetworkElement[];
+  const ends: Array<{ elementId: string; vertexIndex: number; network: string; original: WeldPoint; point: WeldPoint; fixed: boolean }> = [];
+  for (const id of elementIds) {
+    const line = elementsById[id] as NetworkElement | undefined;
+    if (!line || (line.type !== 'MechanicalVentilationDuctwork' && line.type !== 'WaterPipework')) continue;
+    if (line.coordinates?.length !== 2) continue;
+    const network = line.type === 'WaterPipework'
+      ? `pipe:${line.pipework_type ?? ''}`
+      : `duct:${line.parent_element ?? ''}:${line.duct_type}`;
+    const targets = line.type === 'WaterPipework' ? [] : ductPointTargets(line, all);
+    line.coordinates.forEach((original, vertexIndex) => {
+      let nearest: WeldPoint | undefined;
+      for (const target of targets) {
+        if (distance(original, target) <= tolerance && (!nearest || distance(original, target) < distance(original, nearest))) {
+          nearest = target;
+        }
+      }
+      ends.push({ elementId: id, vertexIndex, network, original, point: nearest ?? original, fixed: !!nearest });
+    });
   }
-  return sourceZ === targetZ;
-}
 
-function isSamePlanSnapVertex(
-  element: Element,
-  coord: { x: number; y: number; z?: number },
-  other: Element,
-  otherCoord: { x: number; y: number; z?: number },
-): boolean {
-  if (coord.x !== otherCoord.x || coord.y !== otherCoord.y) return false;
-  return isSamePlanSnapFloor(element, coord.z, other, otherCoord.z);
+  // Single-linkage clusters of ends within tolerance of each other; a fixed end keeps its own
+  // target, the rest land on the cluster's first fixed point, else its first end.
+  const root = ends.map((_, i) => i);
+  const find = (i: number): number => (root[i] === i ? i : (root[i] = find(root[i]!)));
+  for (let i = 0; i < ends.length; i += 1) {
+    for (let j = i + 1; j < ends.length; j += 1) {
+      const a = ends[i]!;
+      const b = ends[j]!;
+      if (a.elementId !== b.elementId && a.network === b.network && distance(a.original, b.original) <= tolerance) {
+        root[find(j)] = find(i);
+      }
+    }
+  }
+  const clusterPoint = new Map<number, WeldPoint>();
+  ends.forEach((end, i) => {
+    if (end.fixed && !clusterPoint.has(find(i))) clusterPoint.set(find(i), end.point);
+  });
+  ends.forEach((end, i) => {
+    if (!clusterPoint.has(find(i))) clusterPoint.set(find(i), end.point);
+  });
+  const finalPoints = ends.map((end, i) => (end.fixed ? end.point : clusterPoint.get(find(i))!));
+
+  const welds: ServiceLineWeld[] = [];
+  for (let i = 0; i < ends.length; i += 2) {
+    const [start, end] = [finalPoints[i]!, finalPoints[i + 1]!];
+    if (pointsConnected(undefined, start, undefined, end)) continue; // would collapse the line
+    for (const k of [i, i + 1]) {
+      const { elementId, vertexIndex, original } = ends[k]!;
+      if (!pointsConnected(undefined, original, undefined, finalPoints[k]!)) {
+        welds.push({ elementId, vertexIndex, newPosition: { ...finalPoints[k]! } });
+      }
+    }
+  }
+  return welds;
 }
 
 function buildSnapSpatialIndex(
@@ -1110,8 +1209,7 @@ export const getExactSnappedVertices = (
       if (!other.coordinates) continue;
 
       for (const otherCoord of other.coordinates) {
-        // Exact plan matching; building elements use same-storey Z because canvas snapping is 2D.
-        if (isSamePlanSnapVertex(element, coord, other, otherCoord)) {
+        if (pointsConnected(element, coord, other, otherCoord)) {
           snappedVertices.add(index);
           break; // Early exit: found an exact match
         }
@@ -1140,7 +1238,7 @@ export const getWallSupportedSnappedVertices = (
   options?: GetWallSupportedSnappedVerticesOptions,
 ): Set<number> => {
   const supportedVertices = getExactSnappedVertices(element, elementsById, options);
-  if (!element.coordinates || !isBuildingElementForPlanSnap(element)) return supportedVertices;
+  if (!element.coordinates || !isBuildingElement(element)) return supportedVertices;
 
   const skipTypes = options?.skipVertexMatchFromOtherTypes;
   const tolerance = options?.wallSegmentTolerance ?? DEFAULT_WALL_SUPPORTED_VERTEX_TOLERANCE_M;
@@ -1152,14 +1250,14 @@ export const getWallSupportedSnappedVertices = (
     for (const otherId of Object.keys(elementsById)) {
       if (otherId === element.id) continue;
       const other = elementsById[otherId];
-      if (!other || !isBuildingElementForPlanSnap(other)) continue;
+      if (!other || !isBuildingElement(other)) continue;
       if (skipTypes?.length && other.type && skipTypes.includes(String(other.type))) continue;
       if (!isLineWallElementForSnap(other) || other.coordinates?.length !== 2) continue;
 
       const [A, B] = other.coordinates;
       if (
-        !isSamePlanSnapFloor(element, coord.z, other, A.z) ||
-        !isSamePlanSnapFloor(element, coord.z, other, B.z)
+        !sameStorey(coord.z, A.z) ||
+        !sameStorey(coord.z, B.z)
       ) {
         continue;
       }
@@ -1192,7 +1290,7 @@ export const calculateAngleBetweenSegments = (
   let otherVertex2 = null;
   for (let i = 0; i < element2.coordinates.length; i++) {
     const coord = element2.coordinates[i];
-    if (coord.x === sharedVertex.x && coord.y === sharedVertex.y && coord.z === sharedVertex.z) {
+    if (pointsConnected(element2, coord, element1, sharedVertex)) {
       // This is the shared vertex, get the other one
       otherVertex2 = element2.coordinates[i === 0 ? 1 : 0];
       break;
@@ -1244,7 +1342,7 @@ export const findConnectedElementsAtVertex = (
 
     // Check if any vertex of the other element matches this vertex
     for (const otherCoord of other.coordinates) {
-      if (vertex.x === otherCoord.x && vertex.y === otherCoord.y && vertex.z === otherCoord.z) {
+      if (pointsConnected(element, vertex, other, otherCoord)) {
         connectedElements.push(other);
         break; // Found connection, move to next element
       }

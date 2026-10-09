@@ -1292,6 +1292,11 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       activeElements.some(isLineWallLike),
     [activeElements]
   );
+  const hasServiceLines = useMemo(
+    () => activeElements.some((el) =>
+      (el.type === 'MechanicalVentilationDuctwork' || el.type === 'WaterPipework') && el.coordinates?.length === 2),
+    [activeElements],
+  );
   const hasWindows = useMemo(() => selectionKinds.has('BuildingElementTransparent'), [selectionKinds]);
   const activeWindows = useMemo(() => activeElements.filter(isTransparent), [activeElements]);
   const windowSurfaceModeGroups = useMemo(
@@ -3775,21 +3780,21 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       {/* Sticky footer: geometry operations row + actions row */}
       <div className="element-creator-sticky-footer multi-select-footer">
         {/* Geometry Operations Row */}
-        {(hasLineWalls || hasFloors || canTransform) && (
+        {(hasLineWalls || hasServiceLines || hasFloors || canTransform) && (
           <div className="form-actions multi-select-geometry-row">
             <div className="multi-select-geometry-actions">
-              {hasLineWalls && (
+              {(hasLineWalls || hasServiceLines) && (
                 <div className="multi-select-operation-group">
                   <button
                     type="button"
                     className="btn editor-action-btn editor-action-btn--secondary multi-select-geometry-action"
                     onClick={handleSnap}
-                    disabled={!canSnap || parseFloat(snapTolerance) <= 0}
-                    title={canSnap ? 'Snap selected line-wall endpoints to nearby intersections using this tolerance.' : 'Select 2+ line walls on the same floor'}
+                    disabled={!(canSnap || hasServiceLines) || parseFloat(snapTolerance) <= 0}
+                    title={canSnap || hasServiceLines ? 'Snap nearby ends together using this tolerance.' : 'Select 2+ line walls, ducts or pipes'}
                   >
                     Snap Ends
                   </button>
-                  <button
+                  {hasLineWalls && <button
                     type="button"
                     className="btn editor-action-btn editor-action-btn--secondary multi-select-geometry-action"
                     onClick={handleTrim}
@@ -3797,7 +3802,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
                     title={canSnap ? 'Trim selected line walls at overlaps and extensions using this tolerance.' : 'Select 2+ line walls on the same floor'}
                   >
                     Trim Walls
-                  </button>
+                  </button>}
                   <label className="multi-select-operation-label" htmlFor="multi-select-snap-tolerance">Tol.</label>
                   <StandardInput
                     id="multi-select-snap-tolerance"
