@@ -91,7 +91,7 @@ function withMultiDrawHint(
 }
 
 export type HoverHintTarget = {
-  kind: 'rotate-grip' | 'vertex' | 'body';
+  kind: 'rotate-grip' | 'vertex' | 'body' | 'label-vertex';
   dragging: boolean;
 };
 
@@ -100,6 +100,7 @@ export type HoverHintTarget = {
 export function getHoverHintText(target: HoverHintTarget): string | null {
   if (target.kind === 'rotate-grip') return target.dragging ? null : 'Drag to rotate';
   if (target.kind === 'vertex') return 'Shift: no snap';
+  // label-vertex: Shift is orthogonal lock there, so cursor only.
   // body: a later slice adds 'Alt moves connected' for connected lines here.
   return null;
 }
@@ -938,6 +939,7 @@ function classify(node: any): HoverHintTarget['kind'] | null {
   const name: string = node.name?.() ?? '';
   if (name.startsWith('orientation-arrow-handle-')) return 'rotate-grip';
   if (name.startsWith('vertex-')) return 'vertex';
+  if (name.startsWith('space-label-vertex-')) return 'label-vertex';
   if (name === SELECTED_SHAPE_DRAG_HANDLE_NAME) return 'body';
   return null;
 }
@@ -965,7 +967,7 @@ export const HoverHintOverlay = memo<{
     const pointer = (): Point => stage.getPointerPosition() ?? { x: 0, y: 0 };
     const sync = (kind: HoverHintTarget['kind'] | null) => {
       container.style.cursor =
-        kind === null ? '' : kind === 'vertex' ? 'move' : dragging ? 'grabbing' : 'grab';
+        kind === null ? '' : kind === 'vertex' || kind === 'label-vertex' ? 'move' : dragging ? 'grabbing' : 'grab';
       setHover(kind === null ? null : { kind, dragging, pos: pointer() });
     };
     const kindOf = () => classify(node);
@@ -976,7 +978,14 @@ export const HoverHintOverlay = memo<{
       if (stage.getIntersection(pointer()) === node) { sync(kindOf()); return; }
       leave();
     };
+    // Konva fires no mouseout when the hovered handle is unmounted, so a stage
+    // mousemove (registered only while hovered) drops a detached node.
+    const onMove = () => {
+      if (!node?.getStage()) { leave(); return; }
+      if (!dragging) sync(kindOf());
+    };
     const leave = () => {
+      stage.off('mousemove.hoverhint');
       node?.off('.hoverhint');
       node = null;
       dragging = false;
@@ -985,8 +994,9 @@ export const HoverHintOverlay = memo<{
     const onOver = (e: any) => {
       if (dragging) return;
       const kind = classify(e.target);
-      if (!kind) return;
+      if (!kind) { if (node) leave(); return; }
       node = e.target;
+      stage.on('mousemove.hoverhint', onMove);
       node.on('dragstart.hoverhint', onDragStart);
       node.on('dragmove.hoverhint', onDragMove);
       node.on('dragend.hoverhint', onDragEnd);
