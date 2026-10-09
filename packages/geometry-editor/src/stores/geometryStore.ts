@@ -25,7 +25,7 @@ import {
   deriveSlopedElementDimensions,
   slopedDimensionDiffers,
 } from '../lib/slopedElementDimensions';
-import { getExactSnappedVertices, planServiceLineEndpointWelds } from '../lib/snapUtils';
+import { getExactSnappedVertices, getWallSupportedSnappedVertices, planServiceLineEndpointWelds } from '../lib/snapUtils';
 import { isVulcanUiPartyFloorElement } from '../lib/assemblyMaterialFabric';
 import { coerceElementToStrictestNumericTyping } from '../lib/schemaCoercion';
 import { cloneJsonValue, jsonValuesEqual } from '../lib/jsonTypes';
@@ -4006,7 +4006,7 @@ const createGeometryState = (
         if (len <= 0) continue;
 
         // Check which vertices are snapped to other elements
-        const snappedVertices = getExactSnappedVertices(wall, state.elementsById);
+        const snappedVertices = getWallSupportedSnappedVertices(wall, state.elementsById);
         const p1Snapped = snappedVertices.has(0);
         const p2Snapped = snappedVertices.has(1);
 

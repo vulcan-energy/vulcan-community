@@ -87,6 +87,8 @@ import {
   constrainPointOrthogonally as utilConstrainPointOrthogonally,
   findClosestPointOnPolygon as utilFindClosestPointOnPolygon,
   getExactSnappedVertices as utilGetExactSnappedVertices,
+  getWallSupportedSnappedVertices as utilGetWallSupportedSnappedVertices,
+  isConnectedDragWall,
   isAll90DegreeConnections as utilIsAll90DegreeConnections,
   translateShapeToSnapFromCache as utilTranslateShapeToSnapFromCache,
   findNearestWallProjectionFromCache as utilFindNearestWallProjectionFromCache,
@@ -5011,7 +5013,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
         const isRegularWallOpaque =
           element.type === 'BuildingElementOpaque' && (element as any).is_external_door !== true;
-        const snappedVertices = utilGetExactSnappedVertices(
+        // A line wall's T-end (on another wall's span) counts as snapped too.
+        const snappedVertices = (isConnectedDragWall(element) ? utilGetWallSupportedSnappedVertices : utilGetExactSnappedVertices)(
           element,
           elementsById,
           isRegularWallOpaque

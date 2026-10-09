@@ -108,14 +108,6 @@ function distanceSq(a: { x: number; y: number }, b: { x: number; y: number }): n
   return dx * dx + dy * dy;
 }
 
-function pointToSegmentDistanceSqXY(
-  p: { x: number; y: number },
-  A: { x: number; y: number },
-  B: { x: number; y: number },
-): number {
-  return distanceSq(p, projectPointOntoSegmentXY(p, A, B));
-}
-
 type ConnectivityElement = { type?: unknown } | undefined;
 type ConnectivityPoint = { x: number; y: number; z?: unknown };
 
@@ -1397,13 +1389,14 @@ export function planServiceLineTeeSplits(
 
 type ConnectedDragPoint = { x: number; y: number; z: number };
 
-const isConnectedDragWall = (el: Element): boolean =>
+/** A two-point line wall that is not an external door: the walls whose ends connect, T or corner. */
+export const isConnectedDragWall = (el: Element): boolean =>
   isLineWallElementForSnap(el) && el.coordinates?.length === 2 && !(el as { is_external_door?: unknown }).is_external_door;
 
 /**
  * Line ends that Alt-drag "move connected" carries along with `element`: vertices of same-network
  * ducts and pipes (by their own `snapPartnerFilter`), or for a line wall of other line walls,
- * connected to one of its vertices. Points (unit, terminals) never follow a dragged line; a dragged
+ * connected to one of its vertices or ending on its span (a T-stem). Points (unit, terminals) never follow a dragged line; a dragged
  * unit or terminal carries its duct ends. Openings, floors, roofs and labels never follow a wall.
  * A line colinear with a dragged line (within `angleTolDeg`) is left behind: it detaches.
  * `effectiveFloors` (`withEffectiveStoreyHeights`) place a dragged unit in metres.
@@ -1431,7 +1424,10 @@ export function findConnectedDragNeighbours(
     if (serviceLine ? !snapPartnerFilter(other, pairedPlantIds)?.(element) : !(isConnectedDragWall(element) && isConnectedDragWall(other))) continue;
     other.coordinates.forEach((q, vertexIndex) => {
       if (parallel(q, other.coordinates[1 - vertexIndex]!)) return;
-      if (own.some((p) => pointsConnected(element, p, other, q))) out.push({ elementId: other.id, vertexIndex });
+      // A wall also carries the T-stems whose end lies on its span.
+      if (own.some((p) => pointsConnected(element, p, other, q)) || (!serviceLine && onLineWallSpan(q, element))) {
+        out.push({ elementId: other.id, vertexIndex });
+      }
     });
   }
   return out;
@@ -1530,8 +1526,26 @@ export type GetWallSupportedSnappedVerticesOptions = GetExactSnappedVerticesOpti
 
 const DEFAULT_WALL_SUPPORTED_VERTEX_TOLERANCE_M = 0.01;
 
-// Polygon guidance can be satisfied by a vertex landing on a same-storey wall segment,
-// even when it is not exactly on another element corner.
+/**
+ * `p` lies on two-point `wall`'s span in plan, same storey: within `tolerance` of the segment and
+ * between its ends (a point just past an end is not on it).
+ */
+function onLineWallSpan(
+  p: ConnectivityPoint,
+  wall: Element,
+  tolerance = DEFAULT_WALL_SUPPORTED_VERTEX_TOLERANCE_M,
+): boolean {
+  const [A, B] = wall.coordinates ?? [];
+  if (!A || !B || !sameStorey(p.z, A.z) || !sameStorey(p.z, B.z)) return false;
+  const vx = B.x - A.x;
+  const vy = B.y - A.y;
+  const t = ((p.x - A.x) * vx + (p.y - A.y) * vy) / (vx * vx + vy * vy);
+  if (!(t >= 0 && t <= 1)) return false; // also a zero-length wall (NaN)
+  return distanceSq(p, { x: A.x + t * vx, y: A.y + t * vy }) <= tolerance * tolerance;
+}
+
+// A vertex is also supported by landing on a same-storey wall segment (a polygon corner on a
+// wall, a line wall's T-end), even when it is not exactly on another element corner.
 export const getWallSupportedSnappedVertices = (
   element: Element,
   elementsById: Record<string, Element>,
@@ -1542,7 +1556,6 @@ export const getWallSupportedSnappedVertices = (
 
   const skipTypes = options?.skipVertexMatchFromOtherTypes;
   const tolerance = options?.wallSegmentTolerance ?? DEFAULT_WALL_SUPPORTED_VERTEX_TOLERANCE_M;
-  const toleranceSq = tolerance * tolerance;
 
   element.coordinates.forEach((coord, index) => {
     if (supportedVertices.has(index)) return;
@@ -1554,15 +1567,7 @@ export const getWallSupportedSnappedVertices = (
       if (skipTypes?.length && other.type && skipTypes.includes(String(other.type))) continue;
       if (!isLineWallElementForSnap(other) || other.coordinates?.length !== 2) continue;
 
-      const [A, B] = other.coordinates;
-      if (
-        !sameStorey(coord.z, A.z) ||
-        !sameStorey(coord.z, B.z)
-      ) {
-        continue;
-      }
-
-      if (pointToSegmentDistanceSqXY(coord, A, B) <= toleranceSq) {
+      if (onLineWallSpan(coord, other, tolerance)) {
         supportedVertices.add(index);
         break;
       }

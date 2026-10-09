@@ -75,7 +75,7 @@ import { computeGroundExposedPerimeterDetails } from '../../lib/groundExposedPer
 import { isExternalLineWall } from '../thermalBridge/proposeExternalCorners';
 import type { LinearThermalBridgeIssue } from '../thermalBridge/findLinearThermalBridgeIssues';
 import { findLinearThermalBridgeIssues } from '../thermalBridge/findLinearThermalBridgeIssues';
-import { getExactSnappedVertices, getWallSupportedSnappedVertices } from '../../lib/snapUtils';
+import { getWallSupportedSnappedVertices } from '../../lib/snapUtils';
 import {
   collectGlobalSettingsWarnings,
   resolveEffectiveVentilationZoneBaseHeight,
@@ -2158,7 +2158,7 @@ export const validateElementCore = (
     if (element.type === 'BuildingElementOpaque') {
       const opaque = element as BuildingElementOpaque;
       if (!opaque.is_external_door && opaque.coordinates && opaque.coordinates.length === 2) {
-        const snappedCount = getExactSnappedVertices(opaque, elementsById).size;
+        const snappedCount = getWallSupportedSnappedVertices(opaque, elementsById).size;
         if (snappedCount < 2) {
           warnings.push(geo('Line ends not snapped'));
         }
