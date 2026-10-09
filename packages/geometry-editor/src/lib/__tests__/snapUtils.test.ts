@@ -1104,3 +1104,10 @@ describe('connected drag (Alt)', () => {
     });
   });
 });
+
+describe('placedDrawPoint', () => {
+  it('rounds a free click to the 0.01 m grid and never moves a snapped one', () => {
+    expect(placedDrawPoint({ point: { x: 1.23456, y: -0.004 }, geometrySnap: false })).toEqual({ x: 1.23, y: -0 });
+    expect(placedDrawPoint({ point: { x: 1.23456, y: 2.0001 }, geometrySnap: true })).toEqual({ x: 1.23456, y: 2.0001 });
+  });
+});

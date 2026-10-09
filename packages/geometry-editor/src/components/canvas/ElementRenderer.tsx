@@ -1425,13 +1425,12 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   const showDirectSelectionHandles = isSelected && !isDormerBundleMember;
   const isRegularWallOpaque =
     element.type === 'BuildingElementOpaque' && (element as any).is_external_door !== true;
-  // Walls and ground polygons: a vertex on a same-storey wall's span (a T-end) counts as snapped.
-  const useWallSupportedSnaps = shouldShowUnsnappedVertexGuidance(element, shape);
   // Memo: snapped-vertex detection is O(coords × n × otherCoords). Only the selected
   // element runs it, but pan/zoom otherwise re-renders that element every frame.
   const snappedVertices = useMemo(() => {
     if (!(showDirectSelectionHandles || isSelected)) return null;
-    const getSnappedVertices = useWallSupportedSnaps
+    // Walls and ground polygons: a vertex on a same-storey wall's span (a T-end) counts as snapped.
+    const getSnappedVertices = shouldShowUnsnappedVertexGuidance(element, shape)
       ? utilGetWallSupportedSnappedVertices
       : utilGetExactSnappedVertices;
     return getSnappedVertices(
@@ -1441,7 +1440,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
         ? { skipVertexMatchFromOtherTypes: ['BuildingElementTransparent'] }
         : { effectiveFloors: withEffectiveStoreyHeights(floors, Object.values(elementsById)) },
     );
-  }, [showDirectSelectionHandles, isSelected, useWallSupportedSnaps, element, elementsById, isRegularWallOpaque, floors]);
+  }, [showDirectSelectionHandles, isSelected, shape, element, elementsById, isRegularWallOpaque, floors]);
   // A selected duct or primary pipe on a run the topology check reports as loose: chip at the run
   // end nearest the plant it misses.
   const looseDuctRunEnd = useMemo(
