@@ -4,9 +4,10 @@ import { act, fireEvent, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
-import { useAutoThermalBridgePreview } from '../useAutoThermalBridgePreview';
+import { groupAutoDuctRuns, useAutoDuctPreview, useAutoThermalBridgePreview } from '../useAutoThermalBridgePreview';
+import { planAutoDucts } from '../../lib/mvhrDuctwork';
 import * as pipeline from '../../geometry/thermalBridge/autoThermalBridgePipeline';
-import type { Element } from '../../geometry/types';
+import type { Element, MechanicalVentilation, SpaceLabel } from '../../geometry/types';
 const visible: (element: Element) => boolean = () => false;
 function setup() {
   const store = createGeometryStore({ defaultDefaultsPath: null });
@@ -130,5 +131,50 @@ describe('auto thermal bridge preview host visibility regressions', () => {
     expect(result.current.otherFloorCount).toBeGreaterThan(0);
     rerender({ floor: 0, hidden: (element: Element) => element.id === 'window-1' });
     expect(result.current.otherFloorCount).toBe(0);
+  });
+});
+
+describe('auto duct canvas preview', () => {
+  const floor = { id: 'f0', zIndex: 0, name: '0', height: 2.5, isRoofSpace: false };
+  const unit = { id: 'mv', name: 'MV', type: 'MechanicalVentilation', vent_type: 'MVHR', parent_element: null,
+    floorId: 'f0', zoneId: 'zone', coordinates: [{ x: 0, y: 0, z: 0 }] } as unknown as MechanicalVentilation;
+  const hosts = [['Wall N', 'BuildingElementOpaque', -5, -2, 5, -2], ['Win E', 'BuildingElementTransparent', 7, -5, 7, 5]]
+    .map(([name, type, ax, ay, bx, by]) => ({ id: name, name, type, zoneId: 'zone', floorId: 'f0', parent_element: null,
+      height: 2.5, width: 1, area: 10, pitch: 90,
+      coordinates: [{ x: ax, y: ay, z: 0 }, { x: bx, y: by, z: 0 }] }) as unknown as Element);
+  const labels = [['kitchen', 4], ['bathroom', 8], ['living_room', -4]].map(([roomType, x]) => ({
+    id: String(roomType), name: String(roomType), zoneId: 'zone', storey: 0, room_type: roomType,
+    coordinates: [[0, 0], [2, 0], [2, 2], [0, 2]].map(([dx, dy]) => ({ x: Number(x) + dx, y: 2 + dy, z: 0 })),
+  }) as SpaceLabel);
+
+  it('groups the plan into one run per room and per terminal role, terminals with their duct', () => {
+    const runs = groupAutoDuctRuns(planAutoDucts(unit, [unit, ...hosts], labels, [floor]), { x: 0, y: 0, z: 0 });
+    expect(runs.map((run) => [run.role, run.drafts.map((d) => d.type === 'MechanicalVentilationTerminal' ? 'T' : 'D').join('')]))
+      .toEqual([['extract', 'DD'], ['extract', 'DD'], ['supply', 'DD'], ['intake', 'DDT'], ['exhaust', 'DDT']]);
+    expect(new Set(runs.map((run) => run.proposalId)).size).toBe(5);
+  });
+
+  it('adds a clicked run as one history step and the rest with Add all', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const elements = [unit, ...hosts];
+    store.setState({ floors: [floor], floorIds: ['f0'],
+      zones: [{ id: 'zone', name: 'Zone', floorArea: 20, height: 2.5, volume: 50 }],
+      elementsById: Object.fromEntries(elements.map((e) => [e.id, e])), elementIds: elements.map((e) => e.id),
+      spaceLabelsById: Object.fromEntries(labels.map((l) => [l.id, l])), spaceLabelIds: labels.map((l) => l.id) });
+    store.getState().saveToHistory('seed');
+    const wrapper = ({ children }: { children: ReactNode }) => <GeometryStoreProvider store={store}>{children}</GeometryStoreProvider>;
+    const { result } = renderHook(() => useAutoDuctPreview({ enabled: true, blocked: false, currentFloorZ: 0, unitName: null }), { wrapper });
+    const count = () => store.getState().elementIds.length;
+    fireEvent.keyDown(document.body, { key: 'a' });
+    expect(result.current.active).toBe(true);
+    const [first, ...rest] = result.current.runs;
+    act(() => result.current.onActivate([first!.proposalId]));
+    expect(count()).toBe(elements.length + first!.drafts.length);
+    expect(result.current.runs.map((run) => run.proposalId)).toEqual(rest.map((run) => run.proposalId));
+    act(() => store.getState().undo());
+    expect(count()).toBe(elements.length);
+    act(() => result.current.addAll());
+    expect(count()).toBe(elements.length + [first!, ...rest].reduce((n, run) => n + run.drafts.length, 0));
+    expect(result.current.runs).toEqual([]);
   });
 });
