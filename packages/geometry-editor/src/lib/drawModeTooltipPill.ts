@@ -86,14 +86,19 @@ function withMultiDrawHint(
 export type HoverHintTarget = {
   kind: 'rotate-grip' | 'vertex' | 'body' | 'label-vertex';
   dragging: boolean;
+  /** Body only: the element has same-network connections that Alt-drag carries along. */
+  connected?: boolean;
+  altHeld?: boolean;
 };
 
 /** Hint for a selected element's drag handle; null means native cursor only. */
 export function getHoverHintText(target: HoverHintTarget): string | null {
   if (target.kind === 'rotate-grip') return target.dragging ? null : 'Drag to rotate';
   if (target.kind === 'vertex') return 'Shift: no snap';
+  if (target.kind === 'body' && target.connected && (!target.dragging || target.altHeld)) {
+    return 'Alt moves connected';
+  }
   // label-vertex: Shift is orthogonal lock there, so cursor only.
-  // body: a later slice adds 'Alt moves connected' for connected lines here.
   return null;
 }
 
@@ -199,7 +204,13 @@ export function classifyHoverHandle(node: Konva.Node | null): HoverHintTarget['k
   if (name.startsWith('orientation-arrow-handle-')) return 'rotate-grip';
   if (name.startsWith('vertex-')) return 'vertex';
   if (name.startsWith('space-label-vertex-')) return 'label-vertex';
-  if (name === SELECTED_SHAPE_DRAG_HANDLE_NAME) return 'body';
+  if (name === SELECTED_SHAPE_DRAG_HANDLE_NAME || name.startsWith('point-')) return 'body';
   return null;
+}
+
+/** The drag handle under a hovered node: the node itself, or the selected point group it sits in. */
+export function resolveHoverHandle(node: Konva.Node | null): Konva.Node | null {
+  if (!node || node.draggable()) return node;
+  return node.findAncestor((n: Konva.Node) => n.draggable() && n.name().startsWith('point-')) ?? null;
 }
 

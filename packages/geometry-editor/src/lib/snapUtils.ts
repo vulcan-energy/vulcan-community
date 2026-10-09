@@ -1300,6 +1300,67 @@ export function planServiceLineTeeSplits(
     }
   });
   return splits;
+type ConnectedDragPoint = { x: number; y: number; z: number };
+
+/**
+ * Duct and pipe ends that Alt-drag "move connected" carries along with `element`: vertices of
+ * same-network lines (by their own `snapPartnerFilter`) connected to one of its vertices. Points
+ * (unit, terminals) never follow a dragged line; a dragged unit or terminal carries its duct ends.
+ */
+export function findConnectedDragNeighbours(
+  element: Element,
+  elementsById: Record<string, Element>,
+): Array<{ elementId: string; vertexIndex: number }> {
+  const own = element.coordinates ?? [];
+  const out: Array<{ elementId: string; vertexIndex: number }> = [];
+  for (const other of Object.values(elementsById)) {
+    if (other.id === element.id || other.coordinates?.length !== 2) continue;
+    if (other.type !== 'MechanicalVentilationDuctwork' && other.type !== 'WaterPipework') continue;
+    if (!snapPartnerFilter(other)?.(element)) continue;
+    other.coordinates.forEach((q, vertexIndex) => {
+      if (own.some((p) => pointsConnected(element, p, other, q))) out.push({ elementId: other.id, vertexIndex });
+    });
+  }
+  return out;
+}
+
+/**
+ * Coordinates after an Alt-drag of `element` by plan `delta`: the element translates (a line only
+ * along its plan normal, so right-angle neighbours stay square) and each neighbour end moves with
+ * it while the far end stays put. A neighbour that would collapse to zero length is left behind.
+ */
+export function planConnectedDrag(
+  element: Element,
+  neighbours: ReadonlyArray<{ elementId: string; vertexIndex: number }>,
+  elementsById: Record<string, Element>,
+  delta: { x: number; y: number },
+): Record<string, ConnectedDragPoint[]> {
+  const coords = (element.coordinates ?? []) as ConnectedDragPoint[];
+  let { x: dx, y: dy } = delta;
+  if (coords.length === 2) {
+    const nx = coords[0]!.y - coords[1]!.y;
+    const ny = coords[1]!.x - coords[0]!.x;
+    const n2 = nx * nx + ny * ny;
+    if (n2 > 0) {
+      const t = (dx * nx + dy * ny) / n2;
+      dx = t * nx;
+      dy = t * ny;
+    }
+  }
+  const moved: Record<string, ConnectedDragPoint[]> = {
+    [element.id]: coords.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })),
+  };
+  for (const { elementId, vertexIndex } of neighbours) {
+    const next = [...((moved[elementId] ?? elementsById[elementId]?.coordinates ?? []) as ConnectedDragPoint[])];
+    const p = next[vertexIndex];
+    const far = next[1 - vertexIndex];
+    if (!p || !far) continue;
+    const q = { ...p, x: p.x + dx, y: p.y + dy };
+    if (Math.hypot(q.x - far.x, q.y - far.y, q.z - far.z) < 0.01) continue;
+    next[vertexIndex] = q;
+    moved[elementId] = next;
+  }
+  return moved;
 }
 
 // Helper to detect which vertices of an element are exactly snapped to other elements (for persistent indicators)
