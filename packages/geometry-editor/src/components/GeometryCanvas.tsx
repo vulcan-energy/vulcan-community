@@ -1079,7 +1079,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     uploadOverlayEvidence,
   } = canvasEvidenceContribution.useEvidence(documentFileName);
 
-  const { drawMode, setDrawMode, drawElementType, setDrawElementType, drawPoints, setDrawPoints, drawCursor, setDrawCursor, setDrawAngleSnapped, drawSnapTargetRef, roomWalls, setRoomWalls, roomWallElements, setRoomWallElements, orthogonalRoomStart, setOrthogonalRoomStart, orthogonalRoomEnd, setOrthogonalRoomEnd, orthogonalRoomEditing, setOrthogonalRoomEditing, pendingHostElementCreationRef, drawPreset, setDrawPreset, drawPresetData, setDrawPresetData, resetDrawing } = useDrawingMode();
+  const { drawMode, setDrawMode, drawElementType, setDrawElementType: setDrawElementTypeState, drawPoints, setDrawPoints, drawCursor, setDrawCursor, setDrawAngleSnapped, drawSnapTargetRef, roomWalls, setRoomWalls, roomWallElements, setRoomWallElements, orthogonalRoomStart, setOrthogonalRoomStart, orthogonalRoomEnd, setOrthogonalRoomEnd, orthogonalRoomEditing, setOrthogonalRoomEditing, pendingHostElementCreationRef, drawPreset, setDrawPreset, drawPresetData, setDrawPresetData, resetDrawing } = useDrawingMode();
   const [drawMvhrDuctRole, setDrawMvhrDuctRole] = useState<MvhrDuctRole>('supply');
   const [drawMvhrTerminalRole, setDrawMvhrTerminalRole] = useState<MvhrTerminalRole>('intake');
   // The MVHR manager sets the unit in the same batch that starts the draw, so it clears when the
@@ -1091,6 +1091,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setDrawMvhrParentDrawMode(drawMode);
     if (drawMode === 'none') setDrawMvhrParentName(null);
   }
+  // Every element-type change drops the unit; the MVHR manager sets it again after its type pick.
+  const setDrawElementType = useCallback((type: ElementType) => {
+    setDrawMvhrParentName(null);
+    setDrawElementTypeState(type);
+  }, [setDrawElementTypeState]);
   const drawMvhrRolePropsRef = useRef<Record<string, unknown>>({});
   const themeId = useThemeStore((s) => s.themeId);
   const customTheme = useThemeStore((s) => s.customTheme);
@@ -1469,6 +1474,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           event.preventDefault();
           setDrawMode(key === 'v' ? 'tb-vertical-line' : key === 's' ? 'tb-slope-line' : 'tb-plan-line');
           setSegmentLengthPreviewRef.current(EMPTY_SEGMENT_LENGTH_PREVIEW);
+          drawingPreviewSignal.set({ drawElbow: null });
+          elbowFlippedRef.current = false;
           setActiveSegmentEditor(null);
           return;
         }
@@ -1667,10 +1674,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   const handleDrawElementTypeFromToolbar = useCallback((type: ElementType) => {
     drawMvhrRolePropsRef.current = {};
-    setDrawMvhrParentName(null);
     setActiveServiceLineElementId(null);
     setDrawElementType(type);
-  }, [setActiveServiceLineElementId, setDrawElementType, setDrawMvhrParentName]);
+  }, [setActiveServiceLineElementId, setDrawElementType]);
 
   const handleStartMvhrDuctDraw = useCallback(({ role, parentName }: { role: MvhrDuctRole; parentName: string }) => {
     resetMvhrDrawDraft();
@@ -5496,6 +5502,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             serviceLineDraftAnchorKeyRef.current = null;
             setServiceLineDraftStartZ(formatServiceLineEditorNumber(verticalEndPoint?.z ?? draftEndZ));
             setServiceLineDraftEndZ(formatServiceLineEditorNumber((verticalEndPoint?.z ?? draftEndZ) + 1));
+            geometryStore.getState().saveToHistory('drawServiceLine');
             return;
           }
           if (drawPoints.length === 0) {
@@ -5601,22 +5608,25 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 length: getServiceLineLengthFromCoordinates(drawnLegs[0]),
               } as Partial<Element>, true);
             }
-            for (const split of teeSplits) {
+            const tailDrafts = teeSplits.flatMap((split) => {
+              if (!split.head || !split.tail) return [];
               updateElement(split.elementId, {
                 coordinates: split.head,
                 length: getServiceLineLengthFromCoordinates(split.head),
               } as Partial<Element>, true);
-            }
-            // One history step for the legs and the split: addElements saves it with the tails.
-            if (teeSplits.length > 0) {
-              geometryStore.getState().addElements(teeSplits.map((split) => ({
+              return [{
                 ...elementsById[split.elementId],
                 name: '',
                 coordinates: split.tail,
                 length: getServiceLineLengthFromCoordinates(split.tail),
-              })) as ElementDraft[]);
-            } else if (firstLeg) {
-              geometryStore.getState().saveToHistory('drawServiceLineL');
+              }];
+            });
+            // One history step per service-line commit (legs and any split): addElements saves it
+            // with the tails.
+            if (tailDrafts.length > 0) {
+              geometryStore.getState().addElements(tailDrafts as ElementDraft[]);
+            } else if (isServiceLineElementType(drawElementType)) {
+              geometryStore.getState().saveToHistory('drawServiceLine');
             }
 
             // Auto-switch to the floor where the element was created
@@ -5627,6 +5637,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             });
             const placedEndPoint = placedCoordinates[1] ?? { x: endPoint.x, y: endPoint.y, z: draftEndZ };
             elbowFlippedRef.current = false;
+            drawingPreviewSignal.set({ drawElbow: null });
             setDrawPoints(
               multiDrawActive
                 ? [{ x: placedEndPoint.x, y: placedEndPoint.y }]

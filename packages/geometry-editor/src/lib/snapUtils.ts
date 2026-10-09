@@ -66,6 +66,8 @@ export type SnapWallSegmentTarget = {
   order: number;
   A: { x: number; y: number };
   B: { x: number; y: number };
+  /** Edge glide only, never a perpendicular-foot target (duct and pipe network segments). */
+  edgeOnly?: boolean;
 };
 
 export type GeometrySnapCache = {
@@ -412,13 +414,15 @@ export function buildGeometrySnapCache(
       });
     }
 
-    if (!(isLineWallElementForSnap(el) || (el && isExtraEdge?.(el))) || coords.length !== 2) continue;
+    const edgeOnly = !isLineWallElementForSnap(el);
+    if ((edgeOnly && !(el && isExtraEdge?.(el))) || coords.length !== 2) continue;
     wallSegments.push({
       elementId: id,
       elementName: (el as any).name || '',
       order: wallOrder++,
       A: coords[0],
       B: coords[1],
+      ...(edgeOnly ? { edgeOnly } : {}),
     });
   }
 
@@ -835,8 +839,8 @@ export const findPerpendicularFootOnWallInfiniteFromCache = (
   let best: { parentId: string, parentName: string, foot: {x:number,y:number}, order: number } | null = null;
   let bestMouseDistSq = Infinity;
   const toleranceSq = tolerance * tolerance;
-  for (const { elementId, elementName, order, A, B } of getNearbySnapWallSegments(snapCache, mouseWorld, tolerance)) {
-    if (elementId === excludeElementId) continue;
+  for (const { elementId, elementName, order, A, B, edgeOnly } of getNearbySnapWallSegments(snapCache, mouseWorld, tolerance)) {
+    if (elementId === excludeElementId || edgeOnly) continue;
     const foot = projectPointOntoSegmentXY(fixedPoint, A, B);
     const mouseDSq = distanceSq(mouseWorld, foot);
     if (
@@ -938,12 +942,15 @@ function resolveOrthogonalDrawSnap(params: {
     B,
     id,
     elementId,
+    edgeOnly,
   }: {
     A: { x: number; y: number };
     B: { x: number; y: number };
     id?: string;
     elementId?: string;
+    edgeOnly?: boolean;
   }) => {
+    if (edgeOnly) return;
     const foot = projectPointOntoSegmentXY(lastPoint, A, B);
     if (!pointOnOrthogonalRayForDraw(lastPoint, mouseWorld, foot, rayEps)) return;
     hit2 = maybeBetter(hit2, foot, { sourceElementId: elementId ?? id });
@@ -1242,23 +1249,28 @@ export function planOrthogonalElbow(
   return xFirst ? { x: end.x, y: start.y } : { x: start.x, y: end.y };
 }
 
-/** Drawn ends sit on the 0.01 m grid, so a tee on a diagonal segment can land up to ~7 mm off its line. */
+/** Drawn ends sit on the 0.01 m grid, so a tee on a diagonal segment can land up to ~7 mm off its line in plan. */
 const TEE_ON_SEGMENT_TOL_M = 0.01;
+/** Closer than this to a segment end, a tee would leave a stub: the drawn end lands on that end instead. */
+export const TEE_MIN_STUB_M = 0.05;
 
 export type ServiceLineTeeSplit = {
   /** Index into `ends` of the drawn end that tees in; the caller moves that end onto `point`. */
   endIndex: number;
   elementId: string;
-  /** The drawn end projected exactly onto the segment, so both pieces stay colinear. */
+  /** Plan projection onto the segment at the segment's z there, or the segment end it lands near. */
   point: WeldPoint;
-  head: WeldPoint[];
-  tail: WeldPoint[];
+  /** The split pieces; absent when the end lands near a segment end (no split). */
+  head?: WeldPoint[];
+  tail?: WeldPoint[];
 };
 
 /**
- * A drawn end that lands inside a network segment (not within SERVICE_POINT_COINCIDENCE_EPS_M of
- * its ends) splits that segment at the tee, so every branch stays an endpoint coincidence. The
- * original keeps `head`; `tail` becomes a new element. One split per segment.
+ * A drawn end that lands in plan inside a network segment splits that segment at the tee, so every
+ * branch stays an endpoint coincidence. Snapping is in plan, so the match is too, and the tee takes
+ * the segment's z there (sloped segments, mains at another height). The original keeps `head`;
+ * `tail` becomes a new element. Within TEE_MIN_STUB_M of an end the drawn end lands on that end
+ * instead; within SERVICE_POINT_COINCIDENCE_EPS_M it is already there. One entry per segment.
  */
 export function planServiceLineTeeSplits(
   elementsById: Record<string, Element>,
@@ -1270,13 +1282,20 @@ export function planServiceLineTeeSplits(
     for (const el of Object.values(elementsById)) {
       if (!isNetworkSegment(el) || splits.some((split) => split.elementId === el.id)) continue;
       const [a, b] = el.coordinates as [WeldPoint, WeldPoint];
-      if (distance(p, a) <= SERVICE_POINT_COINCIDENCE_EPS_M || distance(p, b) <= SERVICE_POINT_COINCIDENCE_EPS_M) continue;
-      const v = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
-      const t = ((p.x - a.x) * v.x + (p.y - a.y) * v.y + (p.z - a.z) * v.z) / (v.x * v.x + v.y * v.y + v.z * v.z);
-      if (!(t > 0 && t < 1)) continue;
-      const point = { x: a.x + t * v.x, y: a.y + t * v.y, z: a.z + t * v.z };
-      if (distance(p, point) > TEE_ON_SEGMENT_TOL_M) continue;
-      splits.push({ endIndex, elementId: el.id, point, head: [{ ...a }, { ...point }], tail: [{ ...point }, { ...b }] });
+      const vx = b.x - a.x;
+      const vy = b.y - a.y;
+      const t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / (vx * vx + vy * vy);
+      if (!(t >= 0 && t <= 1)) continue; // also a vertical riser (NaN)
+      const point = { x: a.x + t * vx, y: a.y + t * vy, z: a.z + t * (b.z - a.z) };
+      if (Math.hypot(p.x - point.x, p.y - point.y) > TEE_ON_SEGMENT_TOL_M) continue;
+      const planLength = Math.hypot(vx, vy);
+      const nearest = Math.min(t, 1 - t) * planLength;
+      if (nearest <= SERVICE_POINT_COINCIDENCE_EPS_M) continue;
+      if (nearest < TEE_MIN_STUB_M) {
+        splits.push({ endIndex, elementId: el.id, point: { ...(t < 0.5 ? a : b) } });
+      } else {
+        splits.push({ endIndex, elementId: el.id, point, head: [{ ...a }, { ...point }], tail: [{ ...point }, { ...b }] });
+      }
       break;
     }
   });

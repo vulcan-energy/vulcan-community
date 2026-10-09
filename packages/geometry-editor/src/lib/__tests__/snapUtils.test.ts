@@ -54,6 +54,36 @@ describe('planOrthogonalElbow', () => {
 });
 
 describe('planServiceLineTeeSplits', () => {
+  const line = (id: string, z0: number, z1: number) =>
+    ({ id, type: 'WaterPipework', pipework_type: 'primary', coordinates: [{ x: 0, y: 0, z: z0 }, { x: 4, y: 0, z: z1 }] }) as unknown as Element;
+  const anyPipe = (el: Element) => el.type === 'WaterPipework';
+
+  it('tees in plan at the segment z there, and lands near an end instead of leaving a stub', () => {
+    const byId = { sloped: line('sloped', 2, 3) };
+    const [tee] = planServiceLineTeeSplits(byId, anyPipe, [{ x: 1, y: 0.004, z: 0.5 }]);
+    expect(tee!.point).toEqual({ x: 1, y: 0, z: 2.25 });
+    expect([tee!.head![1], tee!.tail![0]]).toEqual([tee!.point, tee!.point]);
+    const [nearEnd] = planServiceLineTeeSplits(byId, anyPipe, [{ x: 3.97, y: 0, z: 0.5 }]);
+    expect(nearEnd).toEqual({ endIndex: 0, elementId: 'sloped', point: { x: 4, y: 0, z: 3 } });
+  });
+
+  it('keeps each network rule', () => {
+    const el = (props: Record<string, unknown>) =>
+      ({ type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MVHR', coordinates: [{}, {}], ...props }) as unknown as Element;
+    const isDuct = serviceNetworkSegmentFilter({ type: 'MechanicalVentilationDuctwork', parent_element: 'MVHR', duct_type: 'supply' })!;
+    const isPipe = serviceNetworkSegmentFilter({ type: 'WaterPipework', pipework_type: 'primary' })!;
+    expect(isDuct(el({}))).toBe(true);
+    expect(isDuct(el({ duct_type: 'extract' }))).toBe(false);
+    expect(isDuct(el({ parent_element: 'Other' }))).toBe(false);
+    expect(isDuct(el({ parent_element: null }))).toBe(false);
+    expect(isDuct(el({ type: 'WaterPipework', pipework_type: 'primary' }))).toBe(false);
+    expect(isDuct(el({ type: 'BuildingElementOpaque' }))).toBe(false);
+    expect(isPipe(el({ type: 'WaterPipework', pipework_type: 'primary' }))).toBe(true);
+    expect(isPipe(el({ type: 'WaterPipework', pipework_type: 'distribution' }))).toBe(false);
+    expect(isPipe(el({}))).toBe(false);
+    expect(serviceNetworkSegmentFilter({ type: 'MechanicalVentilationDuctwork', duct_type: 'supply' })).toBeUndefined();
+  });
+
   it('splits a same-network duct at a mid-leg tee, applied with the branch in one history step', () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
     const duct = (name: string, duct_type: 'supply' | 'extract') => ({
