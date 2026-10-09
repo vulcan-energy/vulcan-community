@@ -638,7 +638,7 @@ const duct = { type: 'MechanicalVentilationDuctwork' };
 const unit = { type: 'MechanicalVentilation' };
 
 describe('pointsConnected', () => {
-  it('uses the storey for building-element pairs and strict z for everything else', () => {
+  it('uses the storey for building pairs, exact xyz for mixed pairs and 5 mm for service pairs', () => {
     expect(pointsConnected(wall, { x: 1, y: 2, z: 0 }, wall, { x: 1, y: 2, z: 0.4 })).toBe(true);
     expect(pointsConnected(wall, { x: 1, y: 2, z: 0 }, wall, { x: 1, y: 2, z: 1 })).toBe(false);
     expect(pointsConnected(duct, { x: 1, y: 2, z: 0 }, duct, { x: 1, y: 2, z: 0.4 })).toBe(false);
@@ -647,25 +647,37 @@ describe('pointsConnected', () => {
     expect(pointsConnected(duct, { x: 3.14, y: 2, z: 0 }, unit, { x: 3.14159, y: 2.0031, z: 0 })).toBe(true);
     expect(pointsConnected(duct, { x: 3.13, y: 2, z: 0 }, unit, { x: 3.14159, y: 2, z: 0 })).toBe(false);
     expect(pointsConnected(wall, { x: 1, y: 2, z: 0 }, wall, { x: 1, y: 2.001, z: 0 })).toBe(false);
+    expect(pointsConnected(wall, { x: 1, y: 2, z: 0 }, duct, { x: 1, y: 2.003, z: 0 })).toBe(false);
   });
 });
 
 describe('planServiceLineEndpointWelds', () => {
-  it('welds duct ends onto the unit point and onto each other, and pipe ends onto plant', () => {
+  it('welds duct ends onto the unit and each other, never across roles, and pipes within one type', () => {
+    const ductLine = (id: string, role: string, start: { x: number; y: number }, end: { x: number; y: number }) => ({
+      id, name: id, type: 'MechanicalVentilationDuctwork', duct_type: role, parent_element: 'MVHR',
+      coordinates: [{ ...start, z: 0 }, { ...end, z: 0 }],
+    });
+    const pipeLine = (id: string, pipework_type: string, start: { x: number; y: number }, end: { x: number; y: number }) => ({
+      id, name: id, type: 'WaterPipework', pipework_type, coordinates: [{ ...start, z: 0 }, { ...end, z: 0 }],
+    });
     const elementsById = {
       unit: { id: 'unit', name: 'MVHR', type: 'MechanicalVentilation', coordinates: [{ x: 0, y: 0, z: 0 }] },
-      a: { id: 'a', name: 'A', type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MVHR',
-        coordinates: [{ x: 0.01, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }] },
-      b: { id: 'b', name: 'B', type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MVHR',
-        coordinates: [{ x: 2.01, y: 0.01, z: 0 }, { x: 2, y: 3, z: 0 }] },
+      // a's start is fixed on the unit; c and the exhaust x sit in one 3-end cluster with it.
+      a: ductLine('a', 'supply', { x: 0.01, y: 0 }, { x: 2, y: 0 }),
+      b: ductLine('b', 'supply', { x: 2.01, y: 0.01 }, { x: 2, y: 3 }),
+      c: ductLine('c', 'supply', { x: 0.055, y: 0 }, { x: 0, y: -3 }),
+      x: ductLine('x', 'exhaust', { x: 0.06, y: 0.02 }, { x: 0.06, y: 3 }),
       boiler: { id: 'boiler', name: 'Boiler', type: 'System', coordinates: [{ x: 5, y: 5, z: 0 }] },
-      pipe: { id: 'pipe', name: 'P', type: 'WaterPipework', coordinates: [{ x: 5.02, y: 5, z: 0 }, { x: 8, y: 5, z: 0 }] },
+      p1: pipeLine('p1', 'primary', { x: 5.02, y: 5 }, { x: 8, y: 5 }),
+      p2: pipeLine('p2', 'primary', { x: 8.02, y: 5 }, { x: 8, y: 9 }),
+      p3: pipeLine('p3', 'distribution', { x: 8.01, y: 5.01 }, { x: 12, y: 5 }),
     } as unknown as Record<string, Element>;
 
-    expect(planServiceLineEndpointWelds(elementsById, ['a', 'b', 'pipe'], 0.05)).toEqual([
+    expect(planServiceLineEndpointWelds(elementsById, ['a', 'b', 'c', 'x', 'p1', 'p2', 'p3'], 0.05)).toEqual([
       { elementId: 'a', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 0 } },
       { elementId: 'b', vertexIndex: 0, newPosition: { x: 2, y: 0, z: 0 } },
-      { elementId: 'pipe', vertexIndex: 0, newPosition: { x: 5, y: 5, z: 0 } },
+      { elementId: 'c', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 0 } },
+      { elementId: 'p2', vertexIndex: 0, newPosition: { x: 8, y: 5, z: 0 } },
     ]);
   });
 });

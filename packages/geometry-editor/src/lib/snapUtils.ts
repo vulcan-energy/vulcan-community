@@ -116,34 +116,27 @@ function pointToSegmentDistanceSqXY(
 type ConnectivityElement = { type?: unknown } | undefined;
 type ConnectivityPoint = { x: number; y: number; z?: unknown };
 
-export function isBuildingElement(element: ConnectivityElement): boolean {
+function isBuildingElement(element: ConnectivityElement): boolean {
   return typeof element?.type === 'string' && element.type.startsWith('BuildingElement');
 }
 
 /** Half the 0.01 m grid service-line ends are rounded to: absorbs that rounding, invisible on screen. */
 export const SERVICE_POINT_COINCIDENCE_EPS_M = 0.005;
 
-/**
- * Whether two vertices sit at the same level. Building-element pairs compare storeys, because the
- * plan canvas snaps them in 2D; every other pair (ducts, pipes, plant and terminal points, mixed
- * pairs) compares z exactly, because risers and terminals need real heights.
- */
-export function pointsAtSameLevel(
-  a: ConnectivityElement,
-  aZ: unknown,
-  b: ConnectivityElement,
-  bZ: unknown,
-): boolean {
-  if (isBuildingElement(a) && isBuildingElement(b)) {
-    const aStorey = normalizeStoreyIndex(aZ);
-    return aStorey !== undefined && aStorey === normalizeStoreyIndex(bZ);
-  }
-  return aZ === bZ;
+/** Same canvas storey: building elements snap in plan, so their z only has to share a storey. */
+function sameStorey(aZ: unknown, bZ: unknown): boolean {
+  const aStorey = normalizeStoreyIndex(aZ);
+  return aStorey !== undefined && aStorey === normalizeStoreyIndex(bZ);
+}
+
+function withinServiceEps(u: unknown, v: unknown): boolean {
+  return u === v || (typeof u === 'number' && typeof v === 'number' && Math.abs(u - v) <= SERVICE_POINT_COINCIDENCE_EPS_M);
 }
 
 /**
- * The one rule for "these two element vertices are the same point": exactly coincident for
- * building-element pairs, within SERVICE_POINT_COINCIDENCE_EPS_M per axis for everything else.
+ * The one rule for "these two element vertices are the same point". Building-element pairs: exact
+ * x, y on the same storey. Mixed pairs: exact x, y, z. Pairs with no building element (ducts,
+ * pipes, plant and terminal points): within SERVICE_POINT_COINCIDENCE_EPS_M on each axis.
  */
 export function pointsConnected(
   a: ConnectivityElement,
@@ -151,43 +144,43 @@ export function pointsConnected(
   b: ConnectivityElement,
   bPoint: ConnectivityPoint,
 ): boolean {
-  if (isBuildingElement(a) && isBuildingElement(b)) {
-    return aPoint.x === bPoint.x && aPoint.y === bPoint.y && pointsAtSameLevel(a, aPoint.z, b, bPoint.z);
-  }
-  const near = (u: unknown, v: unknown) =>
-    u === v || (typeof u === 'number' && typeof v === 'number' && Math.abs(u - v) <= SERVICE_POINT_COINCIDENCE_EPS_M);
-  return near(aPoint.x, bPoint.x) && near(aPoint.y, bPoint.y) && near(aPoint.z, bPoint.z);
+  // Cheap reject first (also rejects NaN): this runs per vertex pair on every canvas pass.
+  if (!(Math.abs(aPoint.x - bPoint.x) <= SERVICE_POINT_COINCIDENCE_EPS_M)) return false;
+  if (!(Math.abs(aPoint.y - bPoint.y) <= SERVICE_POINT_COINCIDENCE_EPS_M)) return false;
+  const aBuilding = isBuildingElement(a);
+  const bBuilding = isBuildingElement(b);
+  if (!aBuilding && !bBuilding) return withinServiceEps(aPoint.z, bPoint.z);
+  if (aPoint.x !== bPoint.x || aPoint.y !== bPoint.y) return false;
+  return aBuilding && bBuilding ? sameStorey(aPoint.z, bPoint.z) : aPoint.z === bPoint.z;
 }
 
 type WeldPoint = { x: number; y: number; z: number };
-type NetworkElement = Element & { duct_type?: string; terminal_type?: string; parent_element?: string | null };
+type NetworkElement = Element & { duct_type?: string; terminal_type?: string; pipework_type?: string; parent_element?: string | null };
 export type ServiceLineWeld = { elementId: string; vertexIndex: number; newPosition: WeldPoint };
-
-const PIPE_NETWORK_POINT_TYPES = new Set(['System', 'WetEmitter', 'HotWaterDemand']);
 
 function distance(a: WeldPoint, b: WeldPoint): number {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
-/** Fixed points a service line's ends may weld to: its MVHR unit and same-role terminals, or plant. */
-function networkPointTargets(line: NetworkElement, all: NetworkElement[]): WeldPoint[] {
-  // ponytail: point elements store the storey index as z while pipes store metres, so upper-floor
-  // plant doesn't weld; the auto-pipes slice owns the fix.
-  const isTarget = line.type === 'WaterPipework'
-    ? (el: NetworkElement) => PIPE_NETWORK_POINT_TYPES.has(el.type)
-    : (el: NetworkElement) =>
-        !!line.parent_element &&
-        ((el.type === 'MechanicalVentilation' && el.name === line.parent_element) ||
-          (el.type === 'MechanicalVentilationTerminal' &&
-            el.parent_element === line.parent_element &&
-            el.terminal_type === line.duct_type));
-  return all.filter((el) => el.coordinates?.length === 1 && isTarget(el)).map((el) => el.coordinates[0]!);
+/** Fixed points a duct's ends may weld to: its MVHR unit and same-role terminals. */
+function ductPointTargets(duct: NetworkElement, all: NetworkElement[]): WeldPoint[] {
+  if (!duct.parent_element) return [];
+  return all
+    .filter((el) =>
+      el.coordinates?.length === 1 &&
+      ((el.type === 'MechanicalVentilation' && el.name === duct.parent_element) ||
+        (el.type === 'MechanicalVentilationTerminal' &&
+          el.parent_element === duct.parent_element &&
+          el.terminal_type === duct.duct_type)))
+    .map((el) => el.coordinates[0]!);
 }
 
 /**
  * Multi-select "Snap" for ducts and pipes: selected line ends within `tolerance` (3D) weld onto a
- * fixed network point when one is in reach, and onto each other otherwise (the first end in
- * selection order is the shared point). Ducts weld only within the same unit and role.
+ * fixed network point when one is in reach, and onto each other otherwise (a cluster lands on its
+ * first fixed point, else its first end in selection order). Ducts weld only within the same unit
+ * and role, pipes only within the same pipework_type. Pipe-to-plant welds arrive with the
+ * auto-pipes slice.
  */
 export function planServiceLineEndpointWelds(
   elementsById: Record<string, Element>,
@@ -200,8 +193,10 @@ export function planServiceLineEndpointWelds(
     const line = elementsById[id] as NetworkElement | undefined;
     if (!line || (line.type !== 'MechanicalVentilationDuctwork' && line.type !== 'WaterPipework')) continue;
     if (line.coordinates?.length !== 2) continue;
-    const network = line.type === 'WaterPipework' ? 'pipe' : `duct:${line.parent_element ?? ''}:${line.duct_type}`;
-    const targets = networkPointTargets(line, all);
+    const network = line.type === 'WaterPipework'
+      ? `pipe:${line.pipework_type ?? ''}`
+      : `duct:${line.parent_element ?? ''}:${line.duct_type}`;
+    const targets = line.type === 'WaterPipework' ? [] : ductPointTargets(line, all);
     line.coordinates.forEach((original, vertexIndex) => {
       let nearest: WeldPoint | undefined;
       for (const target of targets) {
@@ -213,15 +208,15 @@ export function planServiceLineEndpointWelds(
     });
   }
 
-  // Single-linkage clusters of nearby ends; each cluster collapses onto its first fixed point,
-  // or onto its first end.
+  // Single-linkage clusters of ends within tolerance of each other; a fixed end keeps its own
+  // target, the rest land on the cluster's first fixed point, else its first end.
   const root = ends.map((_, i) => i);
   const find = (i: number): number => (root[i] === i ? i : (root[i] = find(root[i]!)));
   for (let i = 0; i < ends.length; i += 1) {
     for (let j = i + 1; j < ends.length; j += 1) {
       const a = ends[i]!;
       const b = ends[j]!;
-      if (a.elementId !== b.elementId && a.network === b.network && distance(a.point, b.point) <= tolerance) {
+      if (a.elementId !== b.elementId && a.network === b.network && distance(a.original, b.original) <= tolerance) {
         root[find(j)] = find(i);
       }
     }
@@ -233,7 +228,7 @@ export function planServiceLineEndpointWelds(
   ends.forEach((end, i) => {
     if (!clusterPoint.has(find(i))) clusterPoint.set(find(i), end.point);
   });
-  const finalPoints = ends.map((_, i) => clusterPoint.get(find(i))!);
+  const finalPoints = ends.map((end, i) => (end.fixed ? end.point : clusterPoint.get(find(i))!));
 
   const welds: ServiceLineWeld[] = [];
   for (let i = 0; i < ends.length; i += 2) {
@@ -1261,8 +1256,8 @@ export const getWallSupportedSnappedVertices = (
 
       const [A, B] = other.coordinates;
       if (
-        !pointsAtSameLevel(element, coord.z, other, A.z) ||
-        !pointsAtSameLevel(element, coord.z, other, B.z)
+        !sameStorey(coord.z, A.z) ||
+        !sameStorey(coord.z, B.z)
       ) {
         continue;
       }
