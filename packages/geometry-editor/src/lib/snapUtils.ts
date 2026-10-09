@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, Floor } from '../geometry/types';
-import { isStoreyIndexPoint, networkPoint3, normalizeStoreyIndex, physicalZUsesFloorId } from './elementCanvasFloor';
+import { isStoreyIndexPoint, networkPoint3, normalizeStoreyIndex, parseExtraJsonRecord, physicalZUsesFloorId } from './elementCanvasFloor';
 import type { SnapEvent } from './snapEvent';
 import { roundToTwoDecimals } from '../geometry/constants';
 
@@ -179,21 +179,69 @@ function ductPointTargets(duct: NetworkElement, all: NetworkElement[], effective
     .filter((point): point is WeldPoint => !!point);
 }
 
-/** Plant a primary pipe ends on: a heat source or hot water source System point. */
-export function isPrimaryPipeworkPlant(element: Pick<Element, 'type' | 'isPlaceholder' | 'coordinates'> & { subcategory?: unknown }): boolean {
+function isPlacedSystem(element: Element, subcategory: string): boolean {
   return element.type === 'System' && !element.isPlaceholder && element.coordinates?.length === 1 &&
-    (element.subcategory === 'HeatSourceWet' || element.subcategory === 'HotWaterSource');
+    (element as { subcategory?: unknown }).subcategory === subcategory;
+}
+
+/**
+ * Names of the HeatSourceWet a cylinder heats from: the HeatSourceWet heat sources of its
+ * StorageTank entries, wrapped (`HotWaterSource.<name>`) or the legacy flat payload the model
+ * transform wraps under the row name.
+ */
+function cylinderHeatSourceNames(cylinder: Element): Set<string> {
+  const names = new Set<string>();
+  const extra = parseExtraJsonRecord(cylinder.extra_json);
+  const wrapped = parseExtraJsonRecord(extra?.HotWaterSource);
+  const tanks = wrapped ? Object.values(wrapped) : extra?.type ? [extra] : [];
+  for (const tank of tanks) {
+    const record = parseExtraJsonRecord(tank);
+    // The model transform attaches primary pipework to StorageTank sources only; a combi has none.
+    if (record?.type !== 'StorageTank') continue;
+    for (const [key, source] of Object.entries(parseExtraJsonRecord(record.HeatSource) ?? {})) {
+      const heatSource = parseExtraJsonRecord(source);
+      if (heatSource?.type !== 'HeatSourceWet') continue;
+      names.add(typeof heatSource.name === 'string' && heatSource.name.trim() ? heatSource.name.trim() : key);
+    }
+  }
+  return names;
+}
+
+/**
+ * Each placed cylinder (a HotWaterSource System row with a StorageTank) with each placed
+ * HeatSourceWet System row it heats from. Sorted by cylinder then heat source id.
+ */
+export function primaryPipeworkPlantPairs(elements: ReadonlyArray<Element>): Array<{ heatSource: Element; cylinder: Element }> {
+  const heatSources = elements.filter((el) => isPlacedSystem(el, 'HeatSourceWet'));
+  const pairs: Array<{ heatSource: Element; cylinder: Element }> = [];
+  for (const cylinder of elements) {
+    if (!isPlacedSystem(cylinder, 'HotWaterSource')) continue;
+    const names = cylinderHeatSourceNames(cylinder);
+    if (names.size === 0) continue;
+    for (const heatSource of heatSources) {
+      const keys = Object.keys(parseExtraJsonRecord(parseExtraJsonRecord(heatSource.extra_json)?.HeatSourceWet) ?? {});
+      if (keys.some((key) => names.has(key))) pairs.push({ heatSource, cylinder });
+    }
+  }
+  const byId = (a: Element, b: Element) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return pairs.sort((a, b) => byId(a.cylinder, b.cylinder) || byId(a.heatSource, b.heatSource));
+}
+
+/** Ids of the plant a primary pipe ends on: every heat source and cylinder of a pair (never a combi). */
+export function pairedPrimaryPlantIds(elements: ReadonlyArray<Element>): Set<string> {
+  return new Set(primaryPipeworkPlantPairs(elements).flatMap(({ heatSource, cylinder }) => [heatSource.id, cylinder.id]));
 }
 
 function isPrimaryPipe(pipe: { pipework_type?: string }): boolean {
   return (pipe.pipework_type ?? 'primary') === 'primary';
 }
 
-/** Fixed points a primary pipe's ends may weld to, in metres: heat source and hot water source plant. */
+/** Fixed points a primary pipe's ends may weld to, in metres: paired heat source and cylinder plant. */
 function pipePointTargets(pipe: NetworkElement, all: NetworkElement[], effectiveFloors: Floor[]): WeldPoint[] {
   if (!isPrimaryPipe(pipe)) return [];
+  const paired = pairedPrimaryPlantIds(all);
   return all
-    .filter(isPrimaryPipeworkPlant)
+    .filter((el) => paired.has(el.id))
     .map((el) => networkPoint3(el, effectiveFloors))
     .filter((point): point is WeldPoint => !!point);
 }
@@ -202,8 +250,8 @@ function pipePointTargets(pipe: NetworkElement, all: NetworkElement[], effective
  * Multi-select "Snap" for ducts and pipes: selected line ends within `tolerance` (3D) weld onto a
  * fixed network point when one is in reach, and onto each other otherwise (a cluster lands on its
  * first fixed point, else its first end in selection order). Ducts weld only within the same unit
- * and role, pipes only within the same pipework_type; primary pipes also weld to heat source and
- * hot water source plant. `effectiveFloors` (`withEffectiveStoreyHeights`) place units and plant in metres.
+ * and role, pipes only within the same pipework_type; primary pipes also weld to paired heat source
+ * and cylinder plant. `effectiveFloors` (`withEffectiveStoreyHeights`) place units and plant in metres.
  */
 export function planServiceLineEndpointWelds(
   elementsById: Record<string, Element>,
@@ -1238,14 +1286,17 @@ export type GetExactSnappedVerticesOptions = {
  * Which partners can make a vertex "snapped". Building elements count only building elements (a
  * duct, pipe or TB end on a free wall end leaves it loose). Ducts and pipes count only their own
  * network: a duct with same-unit ducts and terminals and the unit's point, a pipe with other pipes
- * and, for a primary pipe, heat source and hot water source plant.
+ * and, for a primary pipe, the paired heat source and cylinder (`pairedPlantIds`, called lazily).
  * Undefined (any partner) for every other type, so TBs still count wall corners.
  */
-export function snapPartnerFilter(element: Element): ((other: Element) => boolean) | undefined {
+export function snapPartnerFilter(
+  element: Element,
+  pairedPlantIds: () => ReadonlySet<string>,
+): ((other: Element) => boolean) | undefined {
   if (isBuildingElement(element)) return isBuildingElement;
   if (element.type === 'WaterPipework') {
-    const primary = isPrimaryPipe(element);
-    return (other) => other.type === 'WaterPipework' || (primary && isPrimaryPipeworkPlant(other));
+    const plant = isPrimaryPipe(element) ? pairedPlantIds() : new Set<string>();
+    return (other) => other.type === 'WaterPipework' || plant.has(other.id);
   }
   if (element.type !== 'MechanicalVentilationDuctwork') return undefined;
   const unit = element.parent_element?.trim();
@@ -1364,6 +1415,8 @@ export function findConnectedDragNeighbours(
   effectiveFloors: Floor[],
 ): Array<{ elementId: string; vertexIndex: number }> {
   const pointInMetres = isStoreyIndexPoint(element) ? networkPoint3(element, effectiveFloors) : undefined;
+  let pairedIds: Set<string> | undefined;
+  const pairedPlantIds = () => (pairedIds ??= pairedPrimaryPlantIds(Object.values(elementsById)));
   const own = pointInMetres ? [pointInMetres] : element.coordinates ?? [];
   const [a, b] = own;
   const parallel = (q: { x: number; y: number }, far: { x: number; y: number }) => {
@@ -1375,7 +1428,7 @@ export function findConnectedDragNeighbours(
   for (const other of Object.values(elementsById)) {
     if (other.id === element.id || other.coordinates?.length !== 2) continue;
     const serviceLine = other.type === 'MechanicalVentilationDuctwork' || other.type === 'WaterPipework';
-    if (serviceLine ? !snapPartnerFilter(other)?.(element) : !(isConnectedDragWall(element) && isConnectedDragWall(other))) continue;
+    if (serviceLine ? !snapPartnerFilter(other, pairedPlantIds)?.(element) : !(isConnectedDragWall(element) && isConnectedDragWall(other))) continue;
     other.coordinates.forEach((q, vertexIndex) => {
       if (parallel(q, other.coordinates[1 - vertexIndex]!)) return;
       if (own.some((p) => pointsConnected(element, p, other, q))) out.push({ elementId: other.id, vertexIndex });
@@ -1432,7 +1485,7 @@ export const getExactSnappedVertices = (
 ): Set<number> => {
   const snappedVertices = new Set<number>();
   const skipTypes = options?.skipVertexMatchFromOtherTypes;
-  const isPartner = snapPartnerFilter(element);
+  const isPartner = snapPartnerFilter(element, () => pairedPrimaryPlantIds(Object.values(elementsById)));
   const floors = options?.effectiveFloors;
   // A storey-index point meets a metre-z partner at its storey's base height.
   const inMetres = (el: Element, metreZPartner: Element) =>

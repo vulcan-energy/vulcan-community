@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, ElementType, Floor, SpaceLabel, Zone } from '../types';
-import { planAutoDucts, planPrimaryPipework, primaryPipeworkPairs } from '../../lib/mvhrDuctwork';
+import { planAutoDucts, planPrimaryPipeworkByPair } from '../../lib/mvhrDuctwork';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { MissingElement } from './types';
 import {
@@ -421,9 +421,10 @@ export const detectMissingElements = (
 
     // A heat source and cylinder with no primary pipework at all: the CTA routes it
     // (planPrimaryPipework, which is empty once any primary pipe exists). A combi has no cylinder, so no row.
-    const pipeDrafts = planPrimaryPipework(elements, effectiveFloors);
-    if (pipeDrafts.length > 0) {
-      const cylinder = primaryPipeworkPairs(elements, effectiveFloors)[0]!.cylinder;
+    const pipeRuns = planPrimaryPipeworkByPair(elements, effectiveFloors).filter((run) => run.drafts.length > 0);
+    const pipeDrafts = pipeRuns.flatMap((run) => run.drafts);
+    if (pipeRuns.length > 0) {
+      const cylinder = pipeRuns[0]!.pair.cylinder;
       dwellingWide.push({
         type: 'WaterPipework',
         requiredBy: 'fhs',

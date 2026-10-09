@@ -111,5 +111,8 @@ describe('detectMissingElements FHS payload rules', () => {
       batchPlan: { summary: '2 pipework elements' },
     });
     expect(row([cylinder('CombiBoiler'), ground, heatPump])).toBeUndefined();
+    // The row names the cylinder of the first pair that plans pipes: 'a' sits 2 cm from the heat pump.
+    const tooClose = { ...cylinder('StorageTank'), id: 'a', name: 'Next to the heat pump', coordinates: [{ x: 0.02, y: 0, z: 0 }] };
+    expect(row([tooClose, { ...cylinder('StorageTank'), id: 'b' }, ground, heatPump])?.message).toBe('FHS: Cylinder has no primary pipework');
   });
 });

@@ -154,6 +154,21 @@ describe('auto duct canvas preview', () => {
     expect(new Set(runs.map((run) => run.proposalId)).size).toBe(5);
   });
 
+  it('groups an upper-storey unit\'s runs from its point in metres, not its storey index', () => {
+    const floors = [0, 1].map((zIndex) => ({ id: `f${zIndex}`, zIndex, name: String(zIndex), height: 2.5, heightUserOverride: true, isRoofSpace: false }));
+    const up = <T extends { floorId?: string; coordinates?: Array<{ z: number }> }>(el: T) =>
+      ({ ...el, floorId: 'f1', coordinates: el.coordinates?.map((c) => ({ ...c, z: 1 })) }) as T;
+    const elements = [up(unit), ...hosts.map(up)] as Element[];
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.setState({ floors, floorIds: ['f0', 'f1'], zones: [{ id: 'zone', name: 'Zone', floorArea: 20, height: 2.5, volume: 50 }],
+      elementsById: Object.fromEntries(elements.map((e) => [e.id, e])), elementIds: elements.map((e) => e.id),
+      spaceLabelsById: Object.fromEntries(labels.map((l) => [l.id, { ...l, storey: 1 }])), spaceLabelIds: labels.map((l) => l.id) });
+    const wrapper = ({ children }: { children: ReactNode }) => <GeometryStoreProvider store={store}>{children}</GeometryStoreProvider>;
+    const { result } = renderHook(() => useAutoDuctPreview({ enabled: true, blocked: false, currentFloorZ: 1, unitName: null }), { wrapper });
+    fireEvent.keyDown(document.body, { key: 'a' });
+    expect(result.current.runs.map((run) => run.role)).toEqual(['extract', 'extract', 'supply', 'intake', 'exhaust']);
+  });
+
   it('adds a clicked run as one history step and the rest with Add all', () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
     const elements = [unit, ...hosts];
