@@ -77,6 +77,12 @@ describe('ThermalBridgePreviewControls', () => {
     expect(closeMenu).toHaveBeenCalledOnce();
   });
 
+  it('does not invite adding when every current-floor candidate has a blocking reason', () => {
+    renderControls(preview({ candidates: [{ ...candidate('blocked', 'E5'), addabilityError: 'Missing host floor.' }] }));
+    expect(screen.getByText('No addable suggestions on this floor')).toBeInTheDocument();
+    expect(screen.queryByText(/Click to add/)).not.toBeInTheDocument();
+  });
+
   it('shows one candidate as a direct add with an optional junction control', () => {
     const row = candidate('roof-window-lower', 'R2', ['R2', 'R11']);
     const configure = vi.fn();

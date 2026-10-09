@@ -129,6 +129,7 @@ export function useThermalBridgePreviewMode({
         !enabledRef.current ||
         blockedRef.current ||
         isCanvasKeydownTargetAFormControl(event.target) ||
+        document.querySelector('[role="dialog"][aria-modal="true"]') ||
         document.querySelector('[data-suppress-canvas-keyboard]') ||
         heldRef.current
       ) {
@@ -163,12 +164,19 @@ export function useThermalBridgePreviewMode({
     const clearWhenHidden = () => {
       if (document.hidden) dismiss();
     };
+    const dismissWhenModalReceivesFocus = (event: FocusEvent) => {
+      if (!(heldRef.current || pinnedRef.current)) return;
+      if (event.target instanceof HTMLElement && event.target.closest('[role="dialog"][aria-modal="true"]')) {
+        dismiss();
+      }
+    };
 
     window.addEventListener('keydown', handleEscape, true);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('blur', clearOnBlur);
     document.addEventListener('visibilitychange', clearWhenHidden);
+    document.addEventListener('focusin', dismissWhenModalReceivesFocus);
 
     return () => {
       window.removeEventListener('keydown', handleEscape, true);
@@ -176,6 +184,7 @@ export function useThermalBridgePreviewMode({
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', clearOnBlur);
       document.removeEventListener('visibilitychange', clearWhenHidden);
+      document.removeEventListener('focusin', dismissWhenModalReceivesFocus);
     };
   }, [dismiss, release, setHeldState]);
 

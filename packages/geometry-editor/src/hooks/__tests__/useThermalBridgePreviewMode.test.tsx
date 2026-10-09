@@ -16,6 +16,7 @@ function keyUp(key: string, init: KeyboardEventInit = {}, target: HTMLElement = 
 describe('useThermalBridgePreviewMode', () => {
   afterEach(() => {
     document.querySelector('[data-suppress-canvas-keyboard]')?.remove();
+    document.querySelector('[role="dialog"][aria-modal="true"]')?.remove();
     vi.restoreAllMocks();
   });
 
@@ -41,6 +42,42 @@ describe('useThermalBridgePreviewMode', () => {
 
     keyDown('a');
     expect(result.current).toMatchObject({ active: true, held: true, pinned: false });
+  });
+
+  it('does not start when focus is inside an aria-modal dialog', () => {
+    const { result } = renderHook(() =>
+      useThermalBridgePreviewMode({ enabled: true, scopeKey: 'floor-1:2d', blocked: false }),
+    );
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const button = document.createElement('button');
+    dialog.append(button);
+    document.body.append(dialog);
+
+    keyDown('a', {}, button);
+
+    expect(result.current.active).toBe(false);
+    dialog.remove();
+  });
+
+  it('dismisses a held preview when focus moves into an aria-modal dialog', () => {
+    const { result } = renderHook(() =>
+      useThermalBridgePreviewMode({ enabled: true, scopeKey: 'floor-1:2d', blocked: false }),
+    );
+    keyDown('a');
+    expect(result.current.held).toBe(true);
+
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const button = document.createElement('button');
+    dialog.append(button);
+    document.body.append(dialog);
+    fireEvent.focusIn(button);
+
+    expect(result.current).toMatchObject({ active: false, held: false, pinned: false });
+    dialog.remove();
   });
 
   it('ignores repeated keydown work and releases on A keyup', () => {

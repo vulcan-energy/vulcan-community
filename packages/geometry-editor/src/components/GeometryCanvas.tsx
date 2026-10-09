@@ -3090,7 +3090,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   });
   const thermalBridgePreview = useAutoThermalBridgePreview({
     enabled: drawElementType === 'ThermalBridgeLinear',
-    blocked: showAutoTbPreview || showShortcuts || zoneDeleteModal.isOpen || elementDeleteModal.isOpen || overlayMoveMode || overlayCalibrateMode,
+    blocked: showAutoTbPreview || showShortcuts || zoneDeleteModal.isOpen || elementDeleteModal.isOpen ||
+      overlayPdfImportState.isOpen || !!orthogonalRoomEditing?.isOpen || overlayMoveMode || overlayCalibrateMode,
     currentFloorZ,
     viewMode,
     isElementHidden: isElementHiddenOnView,

@@ -112,7 +112,9 @@ export function ThermalBridgePreviewStatus({ preview, viewMode, inline = false }
   return (
     <div className={`tb-preview-status${inline ? ' tb-preview-status-inline' : ''}`} aria-live="polite">
       {preview.error ? <span role="alert">{preview.error}</span> : (preview.menu || (preview.hover?.ids.length ?? 0) > 0) ? null :
-        <span>{preview.candidates.length ? `Click to add · Release A to ${viewMode === '3d' ? 'exit' : 'draw'}` : 'No suggestions on this floor'}</span>}
+        <span>{preview.candidates.some((candidate) => !candidate.addabilityError)
+          ? `Click to add · Release A to ${viewMode === '3d' ? 'exit' : 'draw'}`
+          : preview.candidates.length ? 'No addable suggestions on this floor' : 'No suggestions on this floor'}</span>}
       {preview.unplacedCount > 0 && <span>{preview.unplacedCount} suggestions need a floor · Review all…</span>}
       {preview.otherFloorCount > 0 && <span>{preview.otherFloorCount} suggestions on other floors</span>}
     </div>
