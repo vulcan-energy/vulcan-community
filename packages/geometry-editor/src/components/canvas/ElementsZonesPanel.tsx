@@ -1217,7 +1217,8 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                               const targetZoneId = missing.zoneId || zones[0]?.id || createPlaceholderZone();
 
                               // Batched CTA (Part F vents, auto-ducts): one history step, then the
-                              // first created element is the user's entry point.
+                              // first created element is the user's entry point. Not a placeholder:
+                              // Discard would delete only that one element (undo reverses the batch).
                               if (missing.batchPlan && missing.batchPlan.drafts.length > 0) {
                                 const ids = geometryStore.getState().addElements(
                                   missing.batchPlan.drafts.map((draft) =>
@@ -1227,7 +1228,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                 const firstElement = geometryStore.getState().elementsById[firstId];
                                 if (!firstElement) throw new Error('Created element is missing from the geometry store');
                                 setSelectedElementIds([firstId]);
-                                setSelection({ ...selectionForElement(firstElement), isPlaceholder: true });
+                                setSelection(selectionForElement(firstElement));
                                 return;
                               }
 

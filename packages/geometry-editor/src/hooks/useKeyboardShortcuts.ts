@@ -371,7 +371,9 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
               break;
             }
             if (isServiceLineElementType(drawElementType)) {
-              setDrawMode(drawMode === 'tb-slope-line' ? 'none' : 'tb-slope-line');
+              // Re-selecting the current mode is a no-op, so the draft survives.
+              if (drawMode === 'tb-slope-line') break;
+              setDrawMode('tb-slope-line');
               setDrawPoints([]);
             } else if ((selection?.type === 'element' || selection?.type === 'global') && hoverPoint) {
               const element = elementsById[selection.id];
@@ -461,7 +463,9 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
             const shortcut = resolveDrawModeShortcut(e.key, drawElementType);
             if (!shortcut) break;
             e.preventDefault();
-            setDrawMode(drawMode === shortcut.mode ? 'none' : shortcut.mode);
+            // Re-selecting the current mode (e.g. Shift+L mid-duct) is a no-op, so the draft survives.
+            if (drawMode === shortcut.mode) break;
+            setDrawMode(shortcut.mode);
             setDrawPoints([]);
             if (shortcut.reset === 'room' || shortcut.reset === 'orthogonal-room') {
               setRoomWalls([]);

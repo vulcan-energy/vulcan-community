@@ -82,7 +82,9 @@ export const ThermalBridgePreview2D = memo(function ThermalBridgePreview2D({
           preview.onActivate(hitIds(point), point);
         }}
       />
-      {projected.map(({ id, key, style, a, b }) => {
+      {/* Hovered rows paint last, so a hovered run sits on top of the runs it shares a stretch with. */}
+      {[...projected].sort((r, s) => Number(!!preview.hover?.ids.includes(r.id)) - Number(!!preview.hover?.ids.includes(s.id)))
+        .map(({ id, key, style, a, b }) => {
         const hovered = preview.hover?.ids.includes(id);
         if (style) {
           // The candidate colour reads as a suggestion; the role's dash keeps roles apart.

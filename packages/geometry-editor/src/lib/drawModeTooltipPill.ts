@@ -69,18 +69,18 @@ function isNearFirstPoint(
   return dist < tolerance;
 }
 
-// Modifier suffixes live once: Alt/Option multi-draw and the P/V/S shape switch.
-const PVS_HINT = 'P/V/S switches shape';
+// Modifier suffixes live once: Alt/Option multi-draw and the L/V/S shape switch.
+const SHAPE_SWITCH_HINT = 'L/V/S switches shape';
+/** `shapeSwitch` is set for service-line tools only; undefined keeps the multi-draw phrasing. */
 function withMultiDrawHint(
   held: boolean,
   heldText: string,
   idleText: string,
-  withShapeSwitch = false,
+  shapeSwitch?: boolean,
 ): string {
-  if (held) return withShapeSwitch ? `${heldText} (${PVS_HINT})` : heldText;
-  return withShapeSwitch
-    ? `${idleText} (Alt/Option+Click to keep drawing; ${PVS_HINT})`
-    : `${idleText} (Alt/Option+Click for multi-draw)`;
+  if (held) return shapeSwitch ? `${heldText} (${SHAPE_SWITCH_HINT})` : heldText;
+  if (shapeSwitch === undefined) return `${idleText} (Alt/Option+Click for multi-draw)`;
+  return `${idleText} (Alt/Option+Click to keep drawing${shapeSwitch ? `; ${SHAPE_SWITCH_HINT}` : ''})`;
 }
 
 export type HoverHintTarget = {
@@ -96,7 +96,7 @@ export function getHoverHintText(target: HoverHintTarget): string | null {
   if (target.kind === 'rotate-grip') return target.dragging ? null : 'Drag to rotate';
   if (target.kind === 'vertex') return 'Shift: no snap';
   if (target.kind === 'body' && target.connected && (!target.dragging || target.altHeld)) {
-    return 'Alt moves connected';
+    return 'Alt: move connected';
   }
   // label-vertex: Shift is orthogonal lock there, so cursor only.
   return null;
@@ -126,13 +126,15 @@ export function getDrawModeTooltipText(
     return 'Click a sloped roof where the dormer window centre should go';
   }
 
+  // Ducts and pipes skip the shape-switch clause: their dropdown already shows the keys.
+  const showShapeSwitch = drawElementType !== 'MechanicalVentilationDuctwork' && drawElementType !== 'WaterPipework';
   if (drawMode === 'line' || drawMode === 'tb-plan-line') {
     if (drawPoints.length === 0) return 'Place first point';
     if (drawPoints.length === 1) {
       if (drawMode === 'tb-plan-line') {
-        const base = withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point', true);
-        if (drawElementType !== 'MechanicalVentilationDuctwork' && drawElementType !== 'WaterPipework') return base;
-        return `${base} · ${elbowPreviewActive ? 'F flip' : 'Shift L'}`;
+        const base = withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point', showShapeSwitch);
+        if (showShapeSwitch) return base;
+        return `${base} · ${elbowPreviewActive ? 'F: flip bend' : 'Shift: L-bend'}`;
       }
       return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point');
     }
@@ -140,14 +142,14 @@ export function getDrawModeTooltipText(
   }
   if (drawMode === 'tb-vertical-line') {
     if (drawPoints.length === 0) {
-      return withMultiDrawHint(multiDrawModifierHeld, 'Place vertical run + continue', 'Place vertical run', true);
+      return withMultiDrawHint(multiDrawModifierHeld, 'Place vertical run + continue', 'Place vertical run', showShapeSwitch);
     }
-    return withMultiDrawHint(multiDrawModifierHeld, 'Create vertical run + continue', 'Create vertical run from current point', true);
+    return withMultiDrawHint(multiDrawModifierHeld, 'Create vertical run + continue', 'Create vertical run from current point', showShapeSwitch);
   }
   if (drawMode === 'tb-slope-line') {
     if (drawPoints.length === 0) return 'Place first point';
     if (drawPoints.length === 1) {
-      return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place second point', true);
+      return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place second point', showShapeSwitch);
     }
     return null;
   }

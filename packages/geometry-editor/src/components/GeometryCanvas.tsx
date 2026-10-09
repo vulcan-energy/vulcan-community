@@ -1163,6 +1163,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const [stageSize, setStageSize] = useState(CANVAS_CONSTANTS.DEFAULTS.STAGE_SIZE);
   const [scale, setScale] = useState(CANVAS_CONSTANTS.DEFAULTS.SCALE); // Zoom scale (1 = 1m = 50px)
   const [panOffset, setPanOffset] = useState(CANVAS_CONSTANTS.DEFAULTS.PAN_OFFSET); // Pan offset in pixels
+  // Calculate canvas center
+  const canvasCenter = useMemo(() => ({
+    x: stageSize.width / 2,
+    y: stageSize.height / 2
+  }), [stageSize.width, stageSize.height]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [zenMode, setZenMode] = useState(false);
   const [hiddenPanels, setHiddenPanels] = useState<Partial<Record<HidePanelKey, boolean>>>(DEFAULT_HIDDEN_PANELS);
@@ -1495,11 +1500,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         if (event.code === 'KeyF' && !event.ctrlKey && !event.metaKey && preview.drawElbow && start) {
           event.preventDefault();
           elbowFlippedRef.current = !elbowFlippedRef.current;
-          // The other corner of the start/end box.
+          // The other corner of the start/end box; the length label follows the elbow.
+          const drawElbow = {
+            x: start.x + (preview.drawCursor?.x ?? 0) - preview.drawElbow.x,
+            y: start.y + (preview.drawCursor?.y ?? 0) - preview.drawElbow.y,
+          };
           drawingPreviewSignal.set({
-            drawElbow: {
-              x: start.x + (preview.drawCursor?.x ?? 0) - preview.drawElbow.x,
-              y: start.y + (preview.drawCursor?.y ?? 0) - preview.drawElbow.y,
+            drawElbow,
+            segmentLengthPreview: {
+              ...preview.segmentLengthPreview,
+              position: worldToCanvas(drawElbow, scale, panOffset, canvasCenter),
             },
           });
           return;
@@ -1541,7 +1551,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', clearHeldModifiers);
     };
-  }, [drawElementType, drawMode, drawPoints, drawingPreviewSignal, setActiveSegmentEditor, setDrawMode]);
+  }, [canvasCenter, drawElementType, drawMode, drawPoints, drawingPreviewSignal, panOffset, scale, setActiveSegmentEditor, setDrawMode]);
 
   const endCanvasPanGesture = useCallback(() => {
     const session = activePanGestureRef.current?.session ?? null;
@@ -3040,11 +3050,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [overlapBadgeMenu]);
 
-  // Calculate canvas center
-  const canvasCenter = useMemo(() => ({
-    x: stageSize.width / 2,
-    y: stageSize.height / 2
-  }), [stageSize.width, stageSize.height]);
   const getTransparentRoofHostPatch = useCallback(
     (coordinates: Array<{ x: number; y: number; z: number }>): { parent_element: string } | Record<string, never> => {
       const roofId = findHostRoofId({ coordinates }, elementsById as Record<string, Element>);
@@ -3835,8 +3840,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           : snapRes.elbow
             ? Math.abs(previewPoint.x - lastPoint.x) + Math.abs(previewPoint.y - lastPoint.y)
             : Math.hypot(previewPoint.x - lastPoint.x, previewPoint.y - lastPoint.y);
+        // An L route anchors its length label at the elbow, not the chord midpoint.
         const midpointCanvas = worldToCanvas(
-          {
+          snapRes.elbow ?? {
             x: (lastPoint.x + previewPoint.x) / 2,
             y: (lastPoint.y + previewPoint.y) / 2,
           },
@@ -6513,7 +6519,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                   points={[a.x, a.y, b.x, b.y]}
                   stroke={canvasInteractionPalette.warningGuide}
                   strokeWidth={10}
-                  opacity={0.4}
+                  opacity={0.65}
                   lineCap="round"
                   listening={false}
                 />

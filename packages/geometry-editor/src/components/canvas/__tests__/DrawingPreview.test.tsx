@@ -89,24 +89,25 @@ describe('tooltip copy', () => {
     expect(text('point', 0, true)).toBe('Place object + continue');
     expect(text('line', 1, false)).toBe('Place final point (Alt/Option+Click for multi-draw)');
     expect(text('line', 1, true)).toBe('Place end point + continue');
-    expect(text('tb-plan-line', 1, false)).toBe('Place final point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
-    expect(text('tb-plan-line', 1, true)).toBe('Place end point + continue (P/V/S switches shape)');
-    expect(text('tb-vertical-line', 0, false)).toBe('Place vertical run (Alt/Option+Click to keep drawing; P/V/S switches shape)');
-    expect(text('tb-vertical-line', 0, true)).toBe('Place vertical run + continue (P/V/S switches shape)');
-    expect(text('tb-vertical-line', 1, false)).toBe('Create vertical run from current point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
-    expect(text('tb-vertical-line', 1, true)).toBe('Create vertical run + continue (P/V/S switches shape)');
-    expect(text('tb-slope-line', 1, false)).toBe('Place second point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
-    expect(text('tb-slope-line', 1, true)).toBe('Place end point + continue (P/V/S switches shape)');
+    expect(text('tb-plan-line', 1, false)).toBe('Place final point (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-plan-line', 1, true)).toBe('Place end point + continue (L/V/S switches shape)');
+    expect(text('tb-vertical-line', 0, false)).toBe('Place vertical run (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-vertical-line', 0, true)).toBe('Place vertical run + continue (L/V/S switches shape)');
+    expect(text('tb-vertical-line', 1, false)).toBe('Create vertical run from current point (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-vertical-line', 1, true)).toBe('Create vertical run + continue (L/V/S switches shape)');
+    expect(text('tb-slope-line', 1, false)).toBe('Place second point (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-slope-line', 1, true)).toBe('Place end point + continue (L/V/S switches shape)');
   });
 
-  it('adds the L-route hint on the duct and pipe plan tool only', () => {
-    const base = 'Place final point (Alt/Option+Click to keep drawing; P/V/S switches shape)';
-    expect(text('tb-plan-line', 1, false, 'MechanicalVentilationDuctwork')).toBe(`${base} · Shift L`);
+  it('adds the L-bend hint on the duct and pipe plan tool, which drop the shape-switch clause', () => {
+    expect(text('tb-plan-line', 1, false, 'MechanicalVentilationDuctwork'))
+      .toBe('Place final point (Alt/Option+Click to keep drawing) · Shift: L-bend');
     expect(
       getDrawModeTooltipText('tb-plan-line', [{ x: 0, y: 0 }], [], null, null, null, { current: null }, 'WaterPipework', true, true),
-    ).toBe('Place end point + continue (P/V/S switches shape) · F flip');
-    expect(text('tb-plan-line', 1, false, 'ThermalBridgeLinear')).toBe(base);
-    expect(text('tb-slope-line', 1, false, 'WaterPipework')).toBe('Place second point (Alt/Option+Click to keep drawing; P/V/S switches shape)');
+    ).toBe('Place end point + continue · F: flip bend');
+    expect(text('tb-plan-line', 1, false, 'ThermalBridgeLinear'))
+      .toBe('Place final point (Alt/Option+Click to keep drawing; L/V/S switches shape)');
+    expect(text('tb-slope-line', 1, false, 'WaterPipework')).toBe('Place second point (Alt/Option+Click to keep drawing)');
   });
 
   it('hover hints', () => {
@@ -114,8 +115,8 @@ describe('tooltip copy', () => {
     expect(getHoverHintText({ kind: 'rotate-grip', dragging: true })).toBeNull();
     expect(getHoverHintText({ kind: 'vertex', dragging: true })).toBe('Shift: no snap');
     expect(getHoverHintText({ kind: 'body', dragging: false })).toBeNull();
-    expect(getHoverHintText({ kind: 'body', dragging: false, connected: true })).toBe('Alt moves connected');
-    expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: true })).toBe('Alt moves connected');
+    expect(getHoverHintText({ kind: 'body', dragging: false, connected: true })).toBe('Alt: move connected');
+    expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: true })).toBe('Alt: move connected');
     expect(getHoverHintText({ kind: 'body', dragging: true, connected: true, altHeld: false })).toBeNull();
     expect(getHoverHintText({ kind: 'label-vertex', dragging: false })).toBeNull();
   });

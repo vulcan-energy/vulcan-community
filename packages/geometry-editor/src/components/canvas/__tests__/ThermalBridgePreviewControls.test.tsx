@@ -8,7 +8,7 @@ import type { Element } from '../../../geometry/types';
 import type { AutoThermalBridgeCandidate } from '../../../geometry/thermalBridge/autoThermalBridgeCandidates';
 import type { ExternalDetailAutoTbSuggestion } from '../../../geometry/thermalBridge/externalDetailsForAutoTb';
 import type { ThermalBridgePreviewAnchor, AutoThermalBridgePreview } from '../../../hooks/useAutoThermalBridgePreview';
-import { ThermalBridgePreviewControls } from '../ThermalBridgePreviewControls';
+import { ThermalBridgePreviewControls, ThermalBridgePreviewStatus } from '../ThermalBridgePreviewControls';
 
 function candidate(
   proposalId: string,
@@ -75,6 +75,13 @@ describe('ThermalBridgePreviewControls', () => {
     expect(closeMenu).not.toHaveBeenCalled();
     fireEvent.click(document.body);
     expect(closeMenu).toHaveBeenCalledOnce();
+  });
+
+  it.each([[1, '1 suggestion'], [3, '3 suggestions']])('counts %i duct run(s) as suggestions', (count, noun) => {
+    const duct = { active: true, kind: 'duct', runs: Array.from({ length: count }, () => ({})), chooseUnit: false,
+      error: null, menu: null, hover: null, unplacedCount: 0, otherFloorCount: 0 } as never;
+    render(<ThermalBridgePreviewStatus preview={duct} viewMode="2d" />);
+    expect(screen.getByText(`${noun} · Click to add · Release A to draw`)).toBeInTheDocument();
   });
 
   it('does not invite adding when every current-floor candidate has a blocking reason', () => {
