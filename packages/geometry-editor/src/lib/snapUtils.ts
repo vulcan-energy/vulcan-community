@@ -1300,6 +1300,8 @@ export function planServiceLineTeeSplits(
     }
   });
   return splits;
+}
+
 type ConnectedDragPoint = { x: number; y: number; z: number };
 
 /**
