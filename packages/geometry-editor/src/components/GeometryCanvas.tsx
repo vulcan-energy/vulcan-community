@@ -1107,16 +1107,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setDrawMvhrParentName(null);
     setDrawElementTypeState(type);
   }, [setDrawElementTypeState, setDrawMvhrParentName]);
-  const drawMissingElement = useCallback((type: ElementType, mode: DrawMode, pending: PendingHostElementCreation) => {
-    pendingHostElementCreationRef.current = pending;
-    setDrawElementType(type);
-    setDrawPoints([]);
-    setRoomWalls([]);
-    setRoomWallElements([]);
-    setOrthogonalRoomStart(null);
-    setOrthogonalRoomEnd(null);
-    setDrawMode(mode);
-  }, [pendingHostElementCreationRef, setDrawElementType, setDrawPoints, setRoomWalls, setRoomWallElements, setOrthogonalRoomStart, setOrthogonalRoomEnd, setDrawMode]);
   const drawMvhrRolePropsRef = useRef<Record<string, unknown>>({});
   const themeId = useThemeStore((s) => s.themeId);
   const customTheme = useThemeStore((s) => s.customTheme);
@@ -1698,6 +1688,18 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setActiveServiceLineElementId(null);
     setDrawElementType(type);
   }, [setActiveServiceLineElementId, setDrawElementType]);
+
+  // The elements panel's "Draw" for a missing item: the toolbar's type pick, then its draw mode.
+  const drawMissingElement = useCallback((type: ElementType, mode: DrawMode, pending: PendingHostElementCreation) => {
+    pendingHostElementCreationRef.current = pending;
+    handleDrawElementTypeFromToolbar(type);
+    setDrawPoints([]);
+    setRoomWalls([]);
+    setRoomWallElements([]);
+    setOrthogonalRoomStart(null);
+    setOrthogonalRoomEnd(null);
+    setDrawMode(mode);
+  }, [pendingHostElementCreationRef, handleDrawElementTypeFromToolbar, setDrawPoints, setRoomWalls, setRoomWallElements, setOrthogonalRoomStart, setOrthogonalRoomEnd, setDrawMode]);
 
   const handleStartMvhrDuctDraw = useCallback(({ role, parentName }: { role: MvhrDuctRole; parentName: string }) => {
     resetMvhrDrawDraft();
