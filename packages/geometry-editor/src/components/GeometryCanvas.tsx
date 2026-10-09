@@ -63,7 +63,7 @@ import { CompassRose } from './CompassRose';
 import { useDrawingMode, type DrawMode, type PendingHostElementCreation } from '../hooks/useDrawingMode';
 import { roomFloorElementTypeForCanvasFloor, useMarqueeSelection } from '../hooks/useMarqueeSelection';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import { useAutoDuctPreview, useAutoThermalBridgePreview, type CanvasPreview } from '../hooks/useAutoThermalBridgePreview';
+import { useAutoDuctPreview, useAutoPipePreview, useAutoThermalBridgePreview, type CanvasPreview } from '../hooks/useAutoThermalBridgePreview';
 import { ThermalBridgePreview2D } from './canvas/ThermalBridgePreview2D';
 import { ThermalBridgePreviewControls, ThermalBridgePreviewStatus } from './canvas/ThermalBridgePreviewControls';
 import { useDocumentSaveShortcut } from '../hooks/useDocumentSaveShortcut';
@@ -3113,8 +3113,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     currentFloorZ,
     unitName: activeMvhrDrawParentElement?.name ?? null,
   });
-  // One hold-A preview at a time: the ductwork tool's, else the thermal-bridge tool's (3D shows only the latter).
-  const thermalBridgePreview: CanvasPreview = drawElementType === 'MechanicalVentilationDuctwork' ? ductPreview : tbPreview;
+  const pipePreview = useAutoPipePreview({
+    enabled: drawElementType === 'WaterPipework' && viewMode === '2d',
+    blocked: canvasPreviewBlocked,
+    currentFloorZ,
+  });
+  // One hold-A preview at a time: the ductwork or pipework tool's, else the thermal-bridge tool's (3D shows only the latter).
+  const runPreview = drawElementType === 'MechanicalVentilationDuctwork' ? ductPreview
+    : drawElementType === 'WaterPipework' ? pipePreview : null;
+  const thermalBridgePreview: CanvasPreview = runPreview ?? tbPreview;
   const dismissThermalBridgePreview = tbPreview.dismiss;
   const inspectPreviewBridge = useCallback((id: string) => {
     dismissThermalBridgePreview();
@@ -3126,15 +3133,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     <div className="tb-preview-toolbar-accessory">
       <DrawToolbarAutoTbSuggest show={showDrawToolbarAutoTbSuggest}
         onPrefetch={prefetchAutoThermalBridgePreviewModal} onShow={handleShowAutoTbPreview} />
-      {ductPreview.active && ductPreview.runs.length > 0 && drawElementType === 'MechanicalVentilationDuctwork' && (
-        <button type="button" className="draw-button auto-tb-suggest" onClick={ductPreview.addAll}>Add all</button>
+      {runPreview?.active && runPreview.runs.length > 0 && (
+        <button type="button" className="draw-button auto-tb-suggest" onClick={runPreview.addAll}>Add all</button>
       )}
       <ThermalBridgePreviewStatus preview={thermalBridgePreview} viewMode={viewMode} inline />
       {viewMode === '3d' && drawElementType === 'ThermalBridgeLinear' && !thermalBridgePreview.active && (
         <span className="draw-button">Hold A for suggestions</span>
       )}
     </div>
-  ), [handleShowAutoTbPreview, showDrawToolbarAutoTbSuggest, thermalBridgePreview, ductPreview.active, ductPreview.runs.length, ductPreview.addAll, viewMode, drawElementType]);
+  ), [handleShowAutoTbPreview, showDrawToolbarAutoTbSuggest, thermalBridgePreview, runPreview, viewMode, drawElementType]);
 
   const guideOverlayCalibrationSessionRef = useRef<CanvasInteractionSession | null>(null);
   const resetGuideOverlayCalibrationPointerState = useCallback(() => {
@@ -6268,6 +6275,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           selection={selection}
           previewOpacity={!thermalBridgePreview.active || (thermalBridgePreview.kind === 'duct'
             ? element.type === 'MechanicalVentilationDuctwork' || element.type === 'MechanicalVentilationTerminal'
+            : thermalBridgePreview.kind === 'pipe' ? element.type === 'WaterPipework'
             : element.type === 'ThermalBridgeLinear' || element.type === 'ThermalBridgePoint')
             ? 1 : thermalBridgePreview.highlightedHostIds.has(element.id) ? 0.85 : 0.35}
           spaceLabellerSuppressFabricInteraction={spaceLabellerOpen}

@@ -36,7 +36,7 @@ export function ThermalBridgePreviewControls({ preview, width, height, viewMode,
   }, [menuOpen, closeMenu]);
   if (!preview.active) return null;
   const shown = preview.menu ?? preview.hover;
-  if (preview.kind === 'duct') {
+  if (preview.kind === 'duct' || preview.kind === 'pipe') {
     const run = preview.runs.find((candidate) => shown?.ids.includes(candidate.proposalId));
     return <>
       {shown && run && <div className="tb-preview-label" style={{
@@ -123,8 +123,8 @@ export function ThermalBridgePreviewStatus({ preview, viewMode, inline = false }
   if (!preview.active) return null;
   return (
     <div className={`tb-preview-status${inline ? ' tb-preview-status-inline' : ''}`} aria-live="polite">
-      {preview.error ? <span role="alert">{preview.error}</span> : (preview.menu || (preview.kind !== 'duct' && (preview.hover?.ids.length ?? 0) > 0)) ? null :
-        <span>{preview.kind === 'duct'
+      {preview.error ? <span role="alert">{preview.error}</span> : (preview.menu || (preview.kind !== 'duct' && preview.kind !== 'pipe' && (preview.hover?.ids.length ?? 0) > 0)) ? null :
+        <span>{preview.kind === 'duct' || preview.kind === 'pipe'
           ? preview.chooseUnit ? 'Choose an MVHR unit'
             : preview.runs.length ? `${preview.runs.length} suggestion${preview.runs.length === 1 ? '' : 's'} · Click to add · Release A to draw`
             : 'No suggestions on this floor'

@@ -93,7 +93,7 @@ import { tryAxisAlignedRightAngleSnapForVertex } from '../../lib/vertexEditSnap'
 import type { SnapEvent } from '../../lib/snapEvent';
 import type { SnapFeedbackSignal } from './snapFeedbackSignal';
 import { geometryPerf } from '../../lib/geometryPerf';
-import { getMechanicalVentilationDuctworkRoleStyle, looseDuctRunEndNearestUnit } from '../../lib/mvhrDuctwork';
+import { getMechanicalVentilationDuctworkRoleStyle, looseDuctRunEndNearestUnit, primaryPipeRunGap } from '../../lib/mvhrDuctwork';
 import {
   isOrientationPitchAxis,
   slopedPolygonPlaneBasis,
@@ -1463,12 +1463,16 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
         : { effectiveFloors: withEffectiveStoreyHeights(floors, Object.values(elementsById)) },
     );
   }, [showDirectSelectionHandles, isSelected, useWallSupportedPolygonSnaps, element, elementsById, isRegularWallOpaque, floors]);
-  // A selected duct on a run the topology check reports as loose: chip at the run end nearest the unit.
+  // A selected duct or primary pipe on a run the topology check reports as loose: chip at the run
+  // end nearest the plant it misses.
   const looseDuctRunEnd = useMemo(
     () => {
-      if (!isSelected || element.type !== 'MechanicalVentilationDuctwork') return null;
+      if (!isSelected || (element.type !== 'MechanicalVentilationDuctwork' && element.type !== 'WaterPipework')) return null;
       const all = Object.values(elementsById);
-      return looseDuctRunEndNearestUnit(element, all, withEffectiveStoreyHeights(floors, all));
+      const effectiveFloors = withEffectiveStoreyHeights(floors, all);
+      return element.type === 'WaterPipework'
+        ? primaryPipeRunGap(element, all, effectiveFloors)?.looseEnd ?? null
+        : looseDuctRunEndNearestUnit(element, all, effectiveFloors);
     },
     [isSelected, element, elementsById, floors],
   );

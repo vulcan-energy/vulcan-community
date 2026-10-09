@@ -104,6 +104,7 @@ import {
   isMvhrDuctRole,
   isMvhrTerminalHost,
   isMvhrTerminalRole,
+  primaryPipeRunGap,
   terminalConnectsToDuctEndpoint,
 } from '../../lib/mvhrDuctwork';
 
@@ -1433,6 +1434,8 @@ export const validateElementCore = (
       if (!pipeworkElement.length || pipeworkElement.length === 0) {
         issues.push(geo('Length cannot be 0', 'length'));
       }
+      const runGap = elementsById ? primaryPipeRunGap(pipeworkElement, allElements, effectiveFloors()) : null;
+      if (runGap) warnings.push(geo(runGap.message, 'coordinates'));
       mergeLinearGeometryIssuesFromModel(pipeworkElement);
       break;
     }

@@ -22,6 +22,8 @@ import {
   isMvhrTerminalHost,
   looseDuctRunEndNearestUnit,
   MVHR_DUCT_ROLE_STYLES,
+  planPrimaryPipework,
+  primaryPipeRunGap,
   terminalConnectsToDuctEndpoint,
 } from '../mvhrDuctwork';
 import { networkPoint3 } from '../elementCanvasFloor';
@@ -346,5 +348,47 @@ describe('planAutoDucts', () => {
 
   it('is deterministic whatever the label order', () => {
     expect(planAutoDucts(unit(), hosts, [...rooms].reverse(), floors)).toEqual(planAutoDucts(unit(), hosts, rooms, floors));
+  });
+});
+
+describe('planPrimaryPipework', () => {
+  const p = (x: number, y: number, z = 0) => ({ x, y, z });
+  const floors = [0, 1].map((zIndex) => ({ id: `f${zIndex}`, name: String(zIndex), zIndex, height: 2.5, heightUserOverride: true, isRoofSpace: false })) as Floor[];
+  const ground = { id: 'g', name: 'Ground', type: 'BuildingElementGround', coordinates: [p(0, 0), p(10, 0), p(10, 8), p(0, 8)] } as unknown as Element;
+  const heatPump = { id: 'hp', name: 'Heat Pump', type: 'System', subcategory: 'HeatSourceWet', floorId: 'f0',
+    coordinates: [p(12, 2)], extra_json: { HeatSourceWet: { hp: { type: 'HeatPump' } } } } as unknown as Element;
+  const cylinder = (storey = 0, type = 'StorageTank') => ({ id: 'cyl', name: 'Cylinder', type: 'System', subcategory: 'HotWaterSource',
+    floorId: `f${storey}`, coordinates: [p(3, 6, storey)],
+    extra_json: { HotWaterSource: { 'hw cylinder': { type, HeatSource: { hp: { type: 'HeatSourceWet', name: 'hp' } } } } } }) as unknown as Element;
+  const pipes = (drafts: ElementDraft[]) => drafts.map((d, i) => ({ ...d, id: `pipe${i}` }) as unknown as Element);
+  const legs = (drafts: ElementDraft[]) => drafts.map((d) => [(d as { location: string }).location, d.length, d.floorId, d.coordinates]);
+
+  it('routes an L from the heat source to the cylinder, external outside the footprint, split at the wall', () => {
+    expect(legs(planPrimaryPipework([ground, heatPump, cylinder()], floors))).toEqual([
+      ['external', 2, 'f0', [p(12, 2), p(10, 2)]],
+      ['internal', 7, 'f0', [p(10, 2), p(3, 2)]],
+      ['internal', 4, 'f0', [p(3, 2), p(3, 6)]],
+    ]);
+  });
+
+  it('rises at the cylinder to an upper storey, and the riser belongs to that storey', () => {
+    const drafts = planPrimaryPipework([ground, heatPump, cylinder(1)], floors);
+    expect(legs(drafts).slice(2)).toEqual([['internal', 4, 'f0', [p(3, 2), p(3, 6)]], ['internal', 2.5, 'f1', [p(3, 6), p(3, 6, 2.5)]]]);
+    expect(primaryPipeRunGap(pipes(drafts)[0]!, [ground, heatPump, cylinder(1), ...pipes(drafts)], floors)).toBeNull();
+  });
+
+  it('plans nothing for a combi, a served pair or a model without a footprint, and is deterministic', () => {
+    expect(planPrimaryPipework([ground, heatPump, cylinder(0, 'CombiBoiler')], floors)).toEqual([]);
+    expect(planPrimaryPipework([heatPump, cylinder()], floors)).toEqual([]);
+    const drafts = planPrimaryPipework([ground, heatPump, cylinder()], floors);
+    expect(planPrimaryPipework([ground, heatPump, cylinder(), ...pipes(drafts)], floors)).toEqual([]);
+    expect(planPrimaryPipework([cylinder(), heatPump, ground], floors)).toEqual(drafts);
+  });
+
+  it('warns on a run that misses its cylinder, marking the free end nearest it', () => {
+    const run = pipes(planPrimaryPipework([ground, heatPump, cylinder()], floors)).slice(0, 2);
+    expect(primaryPipeRunGap(run[0]!, [ground, heatPump, cylinder(), ...run], floors)).toEqual({
+      message: 'Primary pipework run is not connected to Cylinder', looseEnd: p(3, 2),
+    });
   });
 });

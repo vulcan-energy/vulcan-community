@@ -630,6 +630,20 @@ describe('getExactSnappedVertices', () => {
     expect(planServiceLineEndpointWelds({ unit, near }, ['near'], 0.05, effectiveFloors))
       .toEqual([{ elementId: 'near', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 2.5 } }]);
   });
+
+  it('welds a primary pipe end onto upper-storey plant in metres, and counts it as snapped', () => {
+    const effectiveFloors = [0, 1].map((zIndex) => ({ id: `f${zIndex}`, name: String(zIndex), zIndex, height: 2.5, isRoofSpace: false })) as Floor[];
+    const cylinder = { id: 'cyl', name: 'Cylinder', type: 'System', subcategory: 'HotWaterSource', floorId: 'f1', coordinates: [{ x: 0, y: 0, z: 1 }] } as unknown as Element;
+    const pipe = (id: string, z: number, pipework_type = 'primary') => ({ id, name: id, type: 'WaterPipework', pipework_type,
+      coordinates: [{ x: 0, y: 0, z }, { x: 2, y: 0, z }] }) as unknown as Element;
+    const near = pipe('near', 2.52);
+    expect(planServiceLineEndpointWelds({ cylinder, near }, ['near'], 0.05, effectiveFloors))
+      .toEqual([{ elementId: 'near', vertexIndex: 0, newPosition: { x: 0, y: 0, z: 2.5 } }]);
+    const distribution = pipe('distribution', 2.52, 'distribution');
+    expect(planServiceLineEndpointWelds({ cylinder, distribution }, ['distribution'], 0.05, effectiveFloors)).toEqual([]);
+    const welded = pipe('welded', 2.5);
+    expect(getExactSnappedVertices(welded, { cylinder, welded }, { effectiveFloors })).toEqual(new Set([0]));
+  });
 });
 
 describe('getWallSupportedSnappedVertices', () => {

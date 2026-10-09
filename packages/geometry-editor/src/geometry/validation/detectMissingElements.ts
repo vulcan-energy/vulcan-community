@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, ElementType, Floor, SpaceLabel, Zone } from '../types';
-import { planAutoDucts } from '../../lib/mvhrDuctwork';
+import { planAutoDucts, planPrimaryPipework, primaryPipeworkPairs } from '../../lib/mvhrDuctwork';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { MissingElement } from './types';
 import {
@@ -416,6 +416,23 @@ export const detectMissingElements = (
         message: `FHS: ${unit.name} has no ductwork`,
         pillQualifier: unit.name,
         batchPlan: { drafts, summary: `${drafts.length} ductwork elements` },
+      });
+    }
+
+    // A heat source and cylinder with no primary pipework at all: the CTA routes it
+    // (planPrimaryPipework). A combi has no cylinder, so no row.
+    const hasPrimaryPipework = elements.some((el) =>
+      !el.isPlaceholder && el.type === 'WaterPipework' && (el.pipework_type ?? 'primary') === 'primary');
+    const pipeDrafts = hasPrimaryPipework ? [] : planPrimaryPipework(elements, effectiveFloors);
+    if (pipeDrafts.length > 0) {
+      const cylinder = primaryPipeworkPairs(elements, effectiveFloors)[0]!.cylinder;
+      dwellingWide.push({
+        type: 'WaterPipework',
+        requiredBy: 'fhs',
+        path: '/HotWaterSource/primary_pipework',
+        message: `FHS: ${cylinder.name} has no primary pipework`,
+        pillQualifier: 'Primary',
+        batchPlan: { drafts: pipeDrafts, summary: `${pipeDrafts.length} pipework elements` },
       });
     }
   }

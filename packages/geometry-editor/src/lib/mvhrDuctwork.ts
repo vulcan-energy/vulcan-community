@@ -9,11 +9,13 @@ import type {
   MechanicalVentilationDuctwork,
   MechanicalVentilationTerminal,
   SpaceLabel,
+  WaterPipework,
 } from '../geometry/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
-import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, networkPoint3 } from './elementCanvasFloor';
+import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, networkPoint3, parseExtraJsonRecord } from './elementCanvasFloor';
+import { extractAdjacentConditionedFootprintOuterRings, extractGroundFootprintOuterRings } from './buildingFootprintDimensions';
 import { orientation360FromSegmentOutwardModelXY, polygonPlanCentroid } from './openingSegmentOutward';
-import { planOrthogonalElbow, pointsConnected } from './snapUtils';
+import { isPrimaryPipeworkPlant, planOrthogonalElbow, pointsConnected } from './snapUtils';
 import { isPointInPolygon2D as pointInPolygon } from './pointInPolygon';
 import { resolveRoomTypeRule } from './spaceLabelDerivation';
 
@@ -379,13 +381,16 @@ export function looseDuctRunEndNearestUnit(
     roles: [duct.duct_type],
   });
   if (!warnings.some((w) => w.kind === 'disconnected-role' || w.kind === 'role-not-connected-to-unit')) return null;
-  // Free ends only: a joint shared with another duct of the run is not where the run stops.
-  const freeEnds = context.run.flatMap((runDuct) =>
-    ductEndpoints(runDuct)!.filter((end) =>
-      !context.run.some((other) => other !== runDuct && ductEndpoints(other)!.some((p) => sameDuctPoint(p, end)))));
-  if (freeEnds.length === 0) return null;
-  return freeEnds.reduce((best, end) =>
-    distance3d(end, context.unitPoint) < distance3d(best, context.unitPoint) ? end : best);
+  return runEndNearest(context.run, [context.unitPoint]);
+}
+
+/** The run's free end (not a joint shared with another segment of the run) nearest any of `targets`. */
+function runEndNearest(run: ReadonlyArray<Pick<Element, 'coordinates'>>, targets: Point3[]): Point3 | null {
+  const freeEnds = run.flatMap((segment) =>
+    ductEndpoints(segment)!.filter((end) =>
+      !run.some((other) => other !== segment && ductEndpoints(other)!.some((p) => sameDuctPoint(p, end)))));
+  const reach = (end: Point3) => Math.min(...targets.map((target) => distance3d(end, target)));
+  return freeEnds.length === 0 ? null : freeEnds.reduce((best, end) => (reach(end) < reach(best) ? end : best));
 }
 
 type PlanPoint = { x: number; y: number };
@@ -629,4 +634,162 @@ export function planAutoDucts(
     drafts.push(terminal);
   }
   return drafts;
+}
+
+export type PrimaryPipeworkPair = { heatSource: Element; cylinder: Element; heatSourcePoint: Point3; cylinderPoint: Point3 };
+
+/** Names of the HeatSourceWet a cylinder heats from: its StorageTank entries' HeatSourceWet heat sources. */
+function cylinderHeatSourceNames(cylinder: Element): string[] {
+  const names: string[] = [];
+  const tanks = parseExtraJsonRecord(parseExtraJsonRecord(cylinder.extra_json)?.HotWaterSource) ?? {};
+  for (const tank of Object.values(tanks)) {
+    const record = parseExtraJsonRecord(tank);
+    // The model transform attaches primary pipework to StorageTank sources only; a combi has none.
+    if (record?.type !== 'StorageTank') continue;
+    for (const [key, source] of Object.entries(parseExtraJsonRecord(record.HeatSource) ?? {})) {
+      const heatSource = parseExtraJsonRecord(source);
+      if (heatSource?.type !== 'HeatSourceWet') continue;
+      names.push(typeof heatSource.name === 'string' && heatSource.name.trim() ? heatSource.name.trim() : key);
+    }
+  }
+  return names;
+}
+
+/**
+ * Each cylinder (a HotWaterSource System row with a StorageTank) with each HeatSourceWet System row
+ * it heats from, both placed, in metres. Sorted by cylinder then heat source id.
+ */
+export function primaryPipeworkPairs(elements: ReadonlyArray<Element>, effectiveFloors: Floor[]): PrimaryPipeworkPair[] {
+  const plant = elements.filter((el) => isPrimaryPipeworkPlant(el));
+  const subcategory = (el: Element) => (el as { subcategory?: unknown }).subcategory;
+  const pairs: PrimaryPipeworkPair[] = [];
+  for (const cylinder of plant) {
+    if (subcategory(cylinder) !== 'HotWaterSource') continue;
+    const names = cylinderHeatSourceNames(cylinder);
+    const cylinderPoint = networkPoint3(cylinder, effectiveFloors);
+    for (const heatSource of plant) {
+      const keys = Object.keys(parseExtraJsonRecord(parseExtraJsonRecord(heatSource.extra_json)?.HeatSourceWet) ?? {});
+      if (subcategory(heatSource) !== 'HeatSourceWet' || !keys.some((key) => names.includes(key))) continue;
+      const heatSourcePoint = networkPoint3(heatSource, effectiveFloors);
+      if (cylinderPoint && heatSourcePoint) pairs.push({ heatSource, cylinder, heatSourcePoint, cylinderPoint });
+    }
+  }
+  const byId = (a: Element, b: Element) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return pairs.sort((a, b) => byId(a.cylinder, b.cylinder) || byId(a.heatSource, b.heatSource));
+}
+
+function primaryPipes(elements: ReadonlyArray<Element>): WaterPipework[] {
+  return elements.filter((el): el is WaterPipework =>
+    el.type === 'WaterPipework' && !el.isPlaceholder && (el.pipework_type ?? 'primary') === 'primary');
+}
+
+/**
+ * The dwelling footprint in plan: the lowest ground floor polygons, else (a flat) the lowest
+ * horizontal adjacent-conditioned polygons, as for the FHS length and width.
+ */
+function dwellingFootprintRings(elements: Element[]): PlanPoint[][] {
+  const ground = extractGroundFootprintOuterRings(elements);
+  return ground.length > 0 ? ground : extractAdjacentConditionedFootprintOuterRings(elements);
+}
+
+/**
+ * `a`→`b` split where its plan projection crosses a footprint edge, each piece with its location:
+ * `internal` when its plan midpoint is inside the footprint. Adjacent pieces of one location merge.
+ */
+function splitAtFootprint(a: Point3, b: Point3, rings: PlanPoint[][]): Array<{ a: Point3; b: Point3; location: 'internal' | 'external' }> {
+  const ts = [0, 1];
+  const [dx, dy] = [b.x - a.x, b.y - a.y];
+  for (const ring of rings) {
+    ring.forEach((p, i) => {
+      const q = ring[(i + 1) % ring.length]!;
+      const [ex, ey] = [q.x - p.x, q.y - p.y];
+      const denom = dx * ey - dy * ex;
+      if (denom === 0) return; // Parallel (or a vertical leg): no crossing point.
+      const t = ((p.x - a.x) * ey - (p.y - a.y) * ex) / denom;
+      const u = ((p.x - a.x) * dy - (p.y - a.y) * dx) / denom;
+      if (t > 1e-9 && t < 1 - 1e-9 && u >= 0 && u <= 1) ts.push(t);
+    });
+  }
+  const at = (t: number): Point3 => (t === 0 ? a : t === 1 ? b : { x: a.x + t * dx, y: a.y + t * dy, z: a.z + t * (b.z - a.z) });
+  const pieces: Array<{ a: Point3; b: Point3; location: 'internal' | 'external' }> = [];
+  [...new Set(ts)].sort((m, n) => m - n).forEach((t, i, sorted) => {
+    if (i === 0) return;
+    const [p, q] = [at(sorted[i - 1]!), at(t)];
+    const mid = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+    const location = rings.some((ring) => pointInPolygon(mid, ring)) ? 'internal' : 'external';
+    const last = pieces[pieces.length - 1];
+    if (last?.location === location) last.b = q;
+    else pieces.push({ a: p, b: q, location });
+  });
+  return pieces;
+}
+
+/**
+ * Auto-pipe plan: primary pipework from each heat source to each cylinder it heats (see
+ * `primaryPipeworkPairs`; a combi has no cylinder, so nothing). One orthogonal L at the heat
+ * source's height, longer axis first, then a riser at the cylinder when it is on another storey,
+ * as `planAutoDucts` routes. Runs start and end exactly on the two plant points. Each leg is split
+ * where it crosses the dwelling footprint, so every pipe draft has one `location`; the HEM pipe
+ * fields (diameters, insulation, contents) come from the defaults' primary pipework at merge, as
+ * for drawn pipes. A pair already joined by a run of primary pipes is skipped. Without a footprint
+ * the location can't be derived, so the plan is empty. Output order is stable (pairs by id).
+ * `effectiveFloors` carry effective storey heights (`withEffectiveStoreyHeights`).
+ */
+export function planPrimaryPipework(elements: Element[], effectiveFloors: Floor[]): ElementDraft[] {
+  const rings = dwellingFootprintRings(elements);
+  if (rings.length === 0) return [];
+  const runs = ductEndpointRuns(primaryPipes(elements));
+  const floorIdOf = (el: Element) => effectiveFloors.find((floor) => floor.zIndex === getElementCanvasFloorZValue(el, effectiveFloors))?.id;
+  const drafts: ElementDraft[] = [];
+  for (const { heatSource, cylinder, heatSourcePoint: start, cylinderPoint: end } of primaryPipeworkPairs(elements, effectiveFloors)) {
+    if (runs.some((run) => ductRunTouchesPoint(run, start) && ductRunTouchesPoint(run, end))) continue;
+    const [startFloorId, endFloorId] = [floorIdOf(heatSource), floorIdOf(cylinder)];
+    if (!startFloorId || !endFloorId) continue;
+    const points = orthogonalRun(start, end);
+    for (let i = 0; i + 1 < points.length; i += 1) {
+      const [a, b] = [points[i]!, points[i + 1]!];
+      if (a.x === b.x && a.y === b.y && a.z === b.z) continue;
+      for (const piece of splitAtFootprint(a, b, rings)) {
+        drafts.push({
+          name: '',
+          type: 'WaterPipework',
+          pipework_type: 'primary',
+          location: piece.location,
+          simplified_pipework: false,
+          parent_element: null,
+          // Legs at the heat source's height belong to its storey; a riser to the cylinder's.
+          floorId: a.z === start.z && b.z === start.z ? startFloorId : endFloorId,
+          coordinates: [piece.a, piece.b],
+          length: roundToTwoDecimals(distance3d(piece.a, piece.b)),
+          isPlaceholder: false,
+        });
+      }
+    }
+  }
+  return drafts;
+}
+
+/**
+ * Why a primary pipe's run is loose: it does not reach both the heat source and the cylinder of any
+ * pair. `looseEnd` is the run's free end nearest the plant it misses (the chip goes there). Null for
+ * a connected run, a non-primary pipe, or a model with no heat source and cylinder pair.
+ */
+export function primaryPipeRunGap(
+  pipe: Element,
+  elements: ReadonlyArray<Element>,
+  effectiveFloors: Floor[],
+): { message: string; looseEnd: Point3 | null } | null {
+  if (pipe.type !== 'WaterPipework' || pipe.isPlaceholder || (pipe.pipework_type ?? 'primary') !== 'primary') return null;
+  const pairs = primaryPipeworkPairs(elements, effectiveFloors);
+  const run = pairs.length > 0 ? ductEndpointRuns(primaryPipes(elements)).find((r) => r.some((p) => p.id === pipe.id)) : undefined;
+  if (!run) return null;
+  const reaches = (point: Point3) => ductRunTouchesPoint(run, point);
+  if (pairs.some((pair) => reaches(pair.heatSourcePoint) && reaches(pair.cylinderPoint))) return null;
+  const pair = pairs.find((p) => reaches(p.heatSourcePoint) || reaches(p.cylinderPoint)) ?? pairs[0]!;
+  const missed = ([[pair.heatSource, pair.heatSourcePoint], [pair.cylinder, pair.cylinderPoint]] as const)
+    .filter(([, point]) => !reaches(point));
+  return {
+    message: `Primary pipework run is not connected to ${missed.map(([el]) => el.name).join(' and ')}`,
+    looseEnd: runEndNearest(run, missed.map(([, point]) => point)),
+  };
 }

@@ -96,4 +96,20 @@ describe('detectMissingElements FHS payload rules', () => {
       ).toBe(false);
     },
   );
+
+  it('offers primary pipework for a heat source and cylinder with none, planned as a batch', () => {
+    const floors = [{ id: 'f0', name: '0', zIndex: 0, height: 2.5, heightUserOverride: true, isRoofSpace: false }];
+    const ground = { id: 'g', name: 'Ground', type: 'BuildingElementGround', coordinates: [{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, { x: 10, y: 8, z: 0 }] } as unknown as Element;
+    const heatPump = system({ id: 'hp', name: 'Heat Pump', subcategory: 'HeatSourceWet', extra_json: { HeatSourceWet: { hp: { type: 'HeatPump' } } } });
+    const cylinder = (type: string) => system({ id: 'cyl', name: 'Cylinder', coordinates: [{ x: 6, y: 1, z: 0 }],
+      extra_json: { HotWaterSource: { 'hw cylinder': { type, HeatSource: { hp: { type: 'HeatSourceWet', name: 'hp' } } } } } });
+    const row = (elements: Element[]) => detectMissingElements([], byId(elements), true, undefined, undefined, floors)
+      .find((finding) => finding.type === 'WaterPipework');
+
+    expect(row(['StorageTank'].map(cylinder).concat(ground, heatPump))).toMatchObject({
+      requiredBy: 'fhs', message: 'FHS: Cylinder has no primary pipework', pillQualifier: 'Primary',
+      batchPlan: { summary: '2 pipework elements' },
+    });
+    expect(row([cylinder('CombiBoiler'), ground, heatPump])).toBeUndefined();
+  });
 });

@@ -179,12 +179,31 @@ function ductPointTargets(duct: NetworkElement, all: NetworkElement[], effective
     .filter((point): point is WeldPoint => !!point);
 }
 
+/** Plant a primary pipe ends on: a heat source or hot water source System point. */
+export function isPrimaryPipeworkPlant(element: Pick<Element, 'type' | 'isPlaceholder' | 'coordinates'> & { subcategory?: unknown }): boolean {
+  return element.type === 'System' && !element.isPlaceholder && element.coordinates?.length === 1 &&
+    (element.subcategory === 'HeatSourceWet' || element.subcategory === 'HotWaterSource');
+}
+
+function isPrimaryPipe(pipe: { pipework_type?: string }): boolean {
+  return (pipe.pipework_type ?? 'primary') === 'primary';
+}
+
+/** Fixed points a primary pipe's ends may weld to, in metres: heat source and hot water source plant. */
+function pipePointTargets(pipe: NetworkElement, all: NetworkElement[], effectiveFloors: Floor[]): WeldPoint[] {
+  if (!isPrimaryPipe(pipe)) return [];
+  return all
+    .filter(isPrimaryPipeworkPlant)
+    .map((el) => networkPoint3(el, effectiveFloors))
+    .filter((point): point is WeldPoint => !!point);
+}
+
 /**
  * Multi-select "Snap" for ducts and pipes: selected line ends within `tolerance` (3D) weld onto a
  * fixed network point when one is in reach, and onto each other otherwise (a cluster lands on its
  * first fixed point, else its first end in selection order). Ducts weld only within the same unit
- * and role, pipes only within the same pipework_type. Pipe-to-plant welds arrive with the
- * auto-pipes slice. `effectiveFloors` (`withEffectiveStoreyHeights`) place the unit in metres.
+ * and role, pipes only within the same pipework_type; primary pipes also weld to heat source and
+ * hot water source plant. `effectiveFloors` (`withEffectiveStoreyHeights`) place units and plant in metres.
  */
 export function planServiceLineEndpointWelds(
   elementsById: Record<string, Element>,
@@ -201,7 +220,7 @@ export function planServiceLineEndpointWelds(
     const network = line.type === 'WaterPipework'
       ? `pipe:${line.pipework_type ?? ''}`
       : `duct:${line.parent_element ?? ''}:${line.duct_type}`;
-    const targets = line.type === 'WaterPipework' ? [] : ductPointTargets(line, all, effectiveFloors);
+    const targets = line.type === 'WaterPipework' ? pipePointTargets(line, all, effectiveFloors) : ductPointTargets(line, all, effectiveFloors);
     line.coordinates.forEach((original, vertexIndex) => {
       let nearest: WeldPoint | undefined;
       for (const target of targets) {
@@ -1218,12 +1237,16 @@ export type GetExactSnappedVerticesOptions = {
 /**
  * Which partners can make a vertex "snapped". Building elements count only building elements (a
  * duct, pipe or TB end on a free wall end leaves it loose). Ducts and pipes count only their own
- * network: a duct with same-unit ducts and terminals and the unit's point, a pipe with other pipes.
+ * network: a duct with same-unit ducts and terminals and the unit's point, a pipe with other pipes
+ * and, for a primary pipe, heat source and hot water source plant.
  * Undefined (any partner) for every other type, so TBs still count wall corners.
  */
 export function snapPartnerFilter(element: Element): ((other: Element) => boolean) | undefined {
   if (isBuildingElement(element)) return isBuildingElement;
-  if (element.type === 'WaterPipework') return (other) => other.type === 'WaterPipework';
+  if (element.type === 'WaterPipework') {
+    const primary = isPrimaryPipe(element);
+    return (other) => other.type === 'WaterPipework' || (primary && isPrimaryPipeworkPlant(other));
+  }
   if (element.type !== 'MechanicalVentilationDuctwork') return undefined;
   const unit = element.parent_element?.trim();
   if (!unit) return () => false;
