@@ -14,7 +14,7 @@ import { getElementShape, getElementColor, worldToCanvas, canvasToWorld, compute
 import { findOverlappingElements, getOverlapCenter } from '../lib/overlapDetection';
 import { readRootCssVar } from '../lib/cssVars';
 import { targetValidationIssues, withTargetIssues } from '../lib/buildErrorDisplay';
-import { calculateMemoizedLabelPositions, transformCachedLabelPosition, getSmartLabelPillTexts, getSmartLabelLayoutSignature, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, sortAnnotationsForPaint, type CanvasAnnotation, type LabelPosition, type RectBounds } from '../lib/labelUtils';
+import { getSmartLabelPillTexts, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, getSmartLabelCandidates, layoutCanvasAnnotations, resolveAnnotationPaint, type CanvasAnnotation, type LabelPosition, type RectBounds } from '../lib/labelUtils';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { FilenameBar, type FilenameBarActionContext } from './FilenameBar';
 import type {
@@ -1287,7 +1287,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const [hoverPoint, setHoverPoint] = useState<{x: number, y: number, insertIndex: number} | null>(null);
   const [spaceLabelHoverPoint, setSpaceLabelHoverPoint] = useState<{x: number, y: number, insertIndex: number} | null>(null);
   const spaceLabelHoverPointRef = useRef<{x: number, y: number, insertIndex: number} | null>(null);
-  const snapIndicatorsRef = useRef<React.ReactElement[]>([]);
+  const snapIndicatorsRef = useRef<{ nodes: React.ReactElement[]; dots: RectBounds[] }>({ nodes: [], dots: [] });
   const [renderCauses] = useState(() => new Set<string>());
   const markNextGeometryCanvasRender = useCallback((cause: string) => {
     if (!geometryPerf.isEnabled()) return;
@@ -5040,6 +5040,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
     return geometryPerf.measure('GeometryCanvas.snapIndicators', () => {
       const indicators: React.ReactElement[] = [];
+      const dots: RectBounds[] = [];
       // Extract store access outside loop to avoid calling getState() for every element
       const angleTol = getProjectDefaults(geometryStore).angleTol;
       // `readRootCssVar` runs `getComputedStyle(document.documentElement)`, so resolve the
@@ -5084,6 +5085,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         canvasCoords.forEach((coord, index) => {
           if (snappedVertices.has(index)) {
             if (overlapsMvhrTerminalBadge(coord)) return;
+            dots.push({ x: coord.x - 4, y: coord.y - 4, width: 8, height: 8 });
             const all90Degree = utilIsAll90DegreeConnections(element, index, elementsById, angleTol);
 
             if (all90Degree) {
@@ -5121,172 +5123,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         });
       });
 
-      snapIndicatorsRef.current = indicators;
-      return indicators;
+      snapIndicatorsRef.current = { nodes: indicators, dots };
+      return snapIndicatorsRef.current;
     });
   }, [elementCanvasData, elementsById, currentFloorZ, floors, effectiveFloors, geometryStore, isElementHiddenOnView]);
   /* eslint-enable react-hooks/refs */
-
-  // Memoized label positions calculation for performance optimization
-  // Optimized for 'selected' mode (default) - only calculate positions for visible labels
-  // Only calculate label positions for elements that will be visible in 'selected' mode
-  // This significantly reduces computation when most labels are hidden
-  const elementsForLabelCalculation = useMemo(() => {
-    if (labelVisibility === 'always') {
-      // In 'always' mode, calculate for all elements
-      return renderableElements;
-    }
-    // In 'selected' mode (default), only calculate for highlighted/hovered elements
-    return renderableElements.filter((element) => {
-      const isSelected =
-        (selection?.type === 'element' || selection?.type === 'global') &&
-        selection.id === element.id;
-      const isMultiSelected = selectedElementIdSet.has(element.id);
-      const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
-      return isSelected || isMultiSelected || isHovered;
-    });
-  }, [renderableElements, labelVisibility, selection, selectedElementIdSet, elementHover, isElementHiddenOnView]);
-
-  // Create stable hash for elementsForLabelCalculation to use in dependency array
-  const elementsForLabelHash = useMemo(() => {
-    return elementsForLabelCalculation
-      .map(e => getSmartLabelLayoutSignature(e, { showLineDimensions }))
-      .join('|');
-  }, [elementsForLabelCalculation, showLineDimensions]);
-
-  const labelAvoidRectsHash = useMemo(() => {
-    const selectedIds = new Set(selectedElementIds);
-    if (
-      (selection?.type === 'element' || selection?.type === 'global') &&
-      selection.id
-    ) {
-      selectedIds.add(selection.id);
-    }
-    const overlapHash = Array.from(overlapGroups.entries())
-      .map(([id, group]) => `${id}:${group.join(',')}`)
-      .join('|');
-    return [
-      Array.from(selectedIds).sort().join(','),
-      selectedShapeDragTarget?.element.id ?? '',
-      selectedPointDragTarget?.element.id ?? '',
-      overlapHash,
-      currentFloorZ,
-      drawMode,
-      selectedLineOpeningClearance
-        ? `${selectedLineOpeningClearance.elementId}:${selectedLineOpeningClearance.clearance.startDistanceM}:${selectedLineOpeningClearance.clearance.endDistanceM}`
-        : '',
-    ].join('|');
-  }, [
-    selectedElementIds,
-    selection,
-    selectedShapeDragTarget,
-    selectedPointDragTarget,
-    overlapGroups,
-    currentFloorZ,
-    drawMode,
-    selectedLineOpeningClearance,
-  ]);
-
-  const memoizedLabelPositions = useMemo(() => {
-    return geometryPerf.measure('GeometryCanvas.memoizedLabelPositions', () => {
-    const canvasBounds = { width: stageSize.width, height: stageSize.height };
-    const avoidRects: Array<{ x: number, y: number, width: number, height: number }> = [];
-    const addAvoidRect = (point: { x: number, y: number }, halfSize: number) => {
-      avoidRects.push({
-        x: point.x - halfSize,
-        y: point.y - halfSize,
-        width: halfSize * 2,
-        height: halfSize * 2,
-      });
-    };
-
-    const selectedIds = new Set(selectedElementIds);
-    if (
-      (selection?.type === 'element' || selection?.type === 'global') &&
-      selection.id
-    ) {
-      selectedIds.add(selection.id);
-    }
-
-    for (const id of selectedIds) {
-      const element = elementsById[id];
-      if (!element || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
-      const coords = element.coordinates ?? [];
-      // ponytail: reserves the chip slot above every vertex, snapped or not; precise needs the
-      // renderer's snapped-vertex set (one registry pass, see the label-layout refactor note).
-      const reserveChipSlots =
-        drawMode === 'none' && shouldShowUnsnappedVertexGuidance(element, getElementShape(element));
-      for (const coord of coords) {
-        const point = worldToCanvas(coord, scale, panOffset, canvasCenter);
-        addAvoidRect(point, 14);
-        if (reserveChipSlots) avoidRects.push(getUnsnappedVertexChipRect(point, 6));
-      }
-      if (coords.length > 1) {
-        const centroid = {
-          x: coords.reduce((sum, coord) => sum + coord.x, 0) / coords.length,
-          y: coords.reduce((sum, coord) => sum + coord.y, 0) / coords.length,
-        };
-        addAvoidRect(worldToCanvas(centroid, scale, panOffset, canvasCenter), 16);
-      }
-    }
-
-    if (selectedShapeDragTarget) {
-      addAvoidRect(
-        worldToCanvas(selectedShapeDragTarget.centroid, scale, panOffset, canvasCenter),
-        18,
-      );
-    }
-
-    if (selectedPointDragTarget) {
-      addAvoidRect(
-        worldToCanvas(selectedPointDragTarget.coord, scale, panOffset, canvasCenter),
-        18,
-      );
-    }
-
-    const processed = new Set<string>();
-    for (const [elementId, group] of overlapGroups.entries()) {
-      if (processed.has(elementId)) continue;
-      group.forEach((id) => processed.add(id));
-      if (group.length <= 1) continue;
-      const element = elementsById[elementId];
-      if (!element || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
-      const overlappingElements = group.slice(1).map((id) => elementsById[id]).filter(Boolean);
-      const center = getOverlapCenter(element, overlappingElements);
-      if (center) {
-        addAvoidRect(worldToCanvas(center, scale, panOffset, canvasCenter), 14);
-      }
-    }
-
-    if (selectedLineOpeningClearance) {
-      for (const side of ['start', 'end'] as const) {
-        avoidRects.push(getLineOpeningClearancePill(selectedLineOpeningClearance.clearance, side, scale, panOffset, canvasCenter));
-      }
-    }
-
-    return calculateMemoizedLabelPositions(
-      elementsForLabelCalculation,
-      canvasBounds,
-      showLineDimensions,
-      worldToCanvas,
-      scale,
-      panOffset,
-      canvasCenter,
-      avoidRects,
-      selectedIds,
-    );
-    });
-  // Use stable hashes instead of recalculating on every render.
-  // Offsets are cached in pixels: a zoom must re-place them, a pan (panOffset, canvasCenter) need not.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    elementsForLabelHash,
-    labelAvoidRectsHash,
-    stageSize.width,
-    stageSize.height,
-    showLineDimensions,
-    scale,
-  ]);
 
   // Handle element click - optimized with batched state updates
   const handleElementClick = useCallback((elementId: string, e: any) => {
@@ -6860,27 +6701,62 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         ((selection?.type === 'element' || selection?.type === 'global') && selection.id === element.id);
       const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
       if (labelVisibility === 'selected' && !isHighlighted && !isHovered) continue;
-      const cachedData = memoizedLabelPositions.get(element.id);
-      if (!cachedData) continue;
-      // A label with no free slot stays hidden until its element is hovered or selected.
-      if (cachedData.rect.collides && !isHighlighted && !isHovered) continue;
-      const labelRect = transformCachedLabelPosition(cachedData, element, worldToCanvas, scale, panOffset, canvasCenter);
+      const candidates = getSmartLabelCandidates(element, canvasCoords, showLineDimensions);
       items.push({
         key: `label-${element.id}`,
-        rect: labelRect,
+        rect: candidates[0],
+        candidates,
         priority: isHighlighted ? ANNOTATION_PRIORITY.selected : ANNOTATION_PRIORITY.label,
         movable: true,
         render: (rect) => renderSmartLabel(
           element,
-          { x: rect.x, y: rect.y, anchor: labelRect.anchor },
+          { x: rect.x, y: rect.y, anchor: 'center' },
           isHighlighted,
           showLineDimensions,
           canvasLabelTheme,
         ),
       });
     }
+
+    // Obstacles movable items avoid: selected handles, drag grips, snap dots and point icons.
+    const pushObstacle = (key: string, point: { x: number; y: number }, halfSize: number) => {
+      items.push({
+        key,
+        rect: { x: point.x - halfSize, y: point.y - halfSize, width: halfSize * 2, height: halfSize * 2 },
+        priority: ANNOTATION_PRIORITY.label,
+        movable: false,
+      });
+    };
+    for (const id of rendererHighlightedIds) {
+      const coords = elementsById[id]?.coordinates ?? [];
+      coords.forEach((coord, index) => pushObstacle(`handle-${id}-${index}`, project(coord), 14));
+      if (coords.length > 1) {
+        const centroid = {
+          x: coords.reduce((sum, coord) => sum + coord.x, 0) / coords.length,
+          y: coords.reduce((sum, coord) => sum + coord.y, 0) / coords.length,
+        };
+        pushObstacle(`handle-${id}-centroid`, project(centroid), 16);
+      }
+    }
+    if (selectedShapeDragTarget) pushObstacle('drag-grip-shape', project(selectedShapeDragTarget.centroid), 18);
+    if (selectedPointDragTarget) pushObstacle('drag-grip-point', project(selectedPointDragTarget.coord), 18);
+    snapIndicators.dots.forEach((rect, index) => items.push({ key: `snap-dot-${index}`, rect, priority: ANNOTATION_PRIORITY.label, movable: false }));
+    for (const { element, canvasCoords } of elementCanvasData) {
+      if (canvasCoords.length !== 1 || element.type === 'MechanicalVentilationTerminal') continue;
+      if (!isElementOnActiveCanvasFloor(element, currentFloorZ, floors) || isElementHiddenOnView(element)) continue;
+      pushObstacle(`point-icon-${element.id}`, canvasCoords[0], rendererHighlightedIds.has(element.id) ? 11 : 9);
+    }
     return items;
   })();
+
+  // Pan and zoom commit once they settle, so this re-places items at each pan end; a drag reuses the last pass.
+  const annotationPlacements = geometryPerf.measure('GeometryCanvas.annotationLayout', () => layoutCanvasAnnotations(
+    canvasAnnotations,
+    stageSize,
+    isCanvasInteractionActive('selected-shape-drag') ||
+      isCanvasInteractionActive('selected-point-drag') ||
+      isCanvasInteractionActive('vertex-drag'),
+  ));
 
   // Render canvas content - always portal for full-screen
   const canvasViewportInsetStyle = {
@@ -7009,7 +6885,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             )}
 
         {/* Render persistent snap indicators (always visible) */}
-        {snapIndicators}
+        {snapIndicators.nodes}
         <Group name={VERTEX_LENGTH_PILLS_GROUP_NAME} listening={false} />
 
             {/* Space-label footprints (only while Space Labeller is open): above fabric, below draw preview */}
@@ -8038,9 +7914,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
             {/* Chips, badges, pills and labels: one group above all geometry and handles, below hover pills. */}
             <Group name="canvas-annotations">
-              {sortAnnotationsForPaint(canvasAnnotations).map((item) => (
-                <React.Fragment key={item.key}>{item.render?.(item.rect)}</React.Fragment>
-              ))}
+              {resolveAnnotationPaint(
+                canvasAnnotations,
+                annotationPlacements,
+                elementHover ? `label-${elementHover}` : null,
+              ).map(({ item, rect }) => <React.Fragment key={item.key}>{item.render?.(rect)}</React.Fragment>)}
             </Group>
           </Layer>
 

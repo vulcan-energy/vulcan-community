@@ -4,6 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
 import {
+  ANNOTATION_PRIORITY,
+  layoutCanvasAnnotations,
+  placeCanvasAnnotations,
+  resolveAnnotationPaint,
+  type CanvasAnnotation,
   calculateMemoizedLabelPositions,
   getSmartLabelPillTexts,
   rectsOverlap,
@@ -208,5 +213,67 @@ describe('getSmartLabelPillTexts', () => {
     );
 
     expect(positions.get(offCanvas.id)?.rect.collides).toBeUndefined();
+  });
+});
+
+describe('canvas annotation layout', () => {
+  const canvas = { width: 400, height: 300 };
+  const rect = (x: number, y: number, width = 40, height = 20) => ({ x, y, width, height });
+  const fixedChip = (x: number, y: number): CanvasAnnotation =>
+    ({ key: `chip-${x}-${y}`, rect: rect(x, y), priority: ANNOTATION_PRIORITY.warning, movable: false, render: () => null });
+  const label = (key: string, slots: ReturnType<typeof rect>[], priority: number = ANNOTATION_PRIORITY.label): CanvasAnnotation =>
+    ({ key, rect: slots[0], candidates: slots, priority, movable: true, render: () => null });
+
+  it('gives the contested slot to the higher priority item, whatever the input order', () => {
+    const slots = [rect(100, 100), rect(100, 140)];
+    const placements = placeCanvasAnnotations(
+      [label('order-label', slots), label('order-selected', slots, ANNOTATION_PRIORITY.selected)],
+      canvas,
+    );
+    expect(placements.get('order-selected')).toEqual({ dx: 0, dy: 0, hidden: false });
+    expect(placements.get('order-label')).toEqual({ dx: 0, dy: 40, hidden: false });
+  });
+
+  it('hides a loser with no free slot, except a selected one, and reveals it on hover', () => {
+    const items = [
+      fixedChip(100, 100),
+      label('loser-label', [rect(110, 105)]),
+      label('loser-selected', [rect(120, 105)], ANNOTATION_PRIORITY.selected),
+    ];
+    const placements = placeCanvasAnnotations(items, canvas);
+    expect(placements.get('loser-label')?.hidden).toBe(true);
+    expect(placements.get('loser-selected')).toEqual({ dx: 0, dy: 0, hidden: false });
+    expect(resolveAnnotationPaint(items, placements, null).map(({ item }) => item.key)).not.toContain('loser-label');
+    expect(resolveAnnotationPaint(items, placements, 'loser-label').map(({ item }) => item.key)).toContain('loser-label');
+  });
+
+  it('places an item that a pan brings on canvas, and reuses the last pass while frozen', () => {
+    const at = (panX: number) => [fixedChip(100 + panX, 100), label('pan-label', [rect(110 + panX, 105), rect(110 + panX, 140)])];
+    // Off canvas: every slot fails the bounds check, so the item is left visible and unplaced.
+    expect(layoutCanvasAnnotations(at(1000), canvas).get('pan-label')).toEqual({ dx: 0, dy: 0, hidden: false });
+    // Settled pan: a fresh pass moves it clear of the chip.
+    expect(layoutCanvasAnnotations(at(0), canvas).get('pan-label')).toEqual({ dx: 0, dy: 35, hidden: false });
+    // Mid-drag the previous pass is reused.
+    expect(layoutCanvasAnnotations(at(1000), canvas, true).get('pan-label')).toEqual({ dx: 0, dy: 35, hidden: false });
+  });
+
+  it('draws a moved click-to-edit pill (and the hit rect it renders) at its placed slot', () => {
+    const drawnAt: Array<{ x: number; y: number }> = [];
+    const pill: CanvasAnnotation = {
+      key: 'distance-pill',
+      rect: rect(100, 100),
+      priority: ANNOTATION_PRIORITY.selected,
+      movable: true,
+      render: (placed) => {
+        drawnAt.push({ x: placed.x, y: placed.y });
+        return null;
+      },
+    };
+    const items = [fixedChip(100, 100), pill];
+    for (const { item, rect: placed } of resolveAnnotationPaint(items, placeCanvasAnnotations(items, canvas), null)) {
+      item.render?.(placed);
+    }
+    // The default nudges try straight up first: clear of the chip, still on canvas.
+    expect(drawnAt).toEqual([{ x: 100, y: 76 }]);
   });
 });

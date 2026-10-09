@@ -59,12 +59,112 @@ export interface CanvasAnnotation {
   priority: number;
   /** Layout may move it to a free slot or hide it; fixed items stay put and are avoided. */
   movable: boolean;
+  /** Movable only: slots to try in order; defaults to small nudges around `rect`. */
+  candidates?: RectBounds[];
   render?: (rect: RectBounds) => ReactNode;
 }
 
-/** Back to front: higher priority numbers first, so priority 0 paints on top; ties keep producer order. */
-export function sortAnnotationsForPaint(items: readonly CanvasAnnotation[]): CanvasAnnotation[] {
-  return items.filter((item) => item.render).sort((a, b) => b.priority - a.priority);
+/** Where layout put a movable annotation, as an offset from its `rect` so it survives a pan. */
+export interface AnnotationPlacement {
+  dx: number;
+  dy: number;
+  /** No free slot: drawn only while its element is hovered. Selected-priority items never hide. */
+  hidden: boolean;
+}
+
+/**
+ * Back to front (priority 0 paints on top; ties keep producer order), each at its placed rect.
+ * A hidden loser is dropped unless `revealKey` names it (its element is hovered).
+ */
+export function resolveAnnotationPaint(
+  items: readonly CanvasAnnotation[],
+  placements: ReadonlyMap<string, AnnotationPlacement>,
+  revealKey: string | null,
+): Array<{ item: CanvasAnnotation; rect: RectBounds }> {
+  return items
+    .filter((item) => item.render)
+    .sort((a, b) => b.priority - a.priority)
+    .flatMap((item) => {
+      const placement = placements.get(item.key);
+      if (placement?.hidden && item.key !== revealKey) return [];
+      const rect = placement && !placement.hidden
+        ? { ...item.rect, x: item.rect.x + placement.dx, y: item.rect.y + placement.dy }
+        : item.rect;
+      return [{ item, rect }];
+    });
+}
+
+function nudgeCandidates(rect: RectBounds): RectBounds[] {
+  const dx = rect.width / 2 + 8;
+  const dy = rect.height + 4;
+  return [[0, 0], [0, -dy], [0, dy], [dx, 0], [-dx, 0], [dx, -dy], [-dx, -dy], [dx, dy], [-dx, dy]]
+    .map(([ox, oy]) => ({ ...rect, x: rect.x + ox, y: rect.y + oy }));
+}
+
+// Last slot each movable annotation took; tried first next pass so items do not jump on relayout.
+const annotationSlotCache = new Map<string, number>();
+
+/**
+ * One layout pass: fixed items (chips, badges, handles, snap dots, point icons) claim their rects,
+ * then movable items, by priority, take their first in-canvas slot that overlaps nothing placed.
+ * A loser hides unless it has selected priority, which keeps its preferred rect and still blocks.
+ * ponytail: linear overlap scan, ~3 ms for 280 labels plus their dots on one canvas; bucket the
+ * occupied rects in a grid if scenes grow well past that.
+ */
+export function placeCanvasAnnotations(
+  items: readonly CanvasAnnotation[],
+  canvasBounds: { width: number; height: number },
+): Map<string, AnnotationPlacement> {
+  const occupied = items.flatMap((item) => (item.movable ? [] : [item.rect]));
+  const placements = new Map<string, AnnotationPlacement>();
+  const canvasRect = { x: 0, y: 0, ...canvasBounds };
+  const fits = (rect: RectBounds) =>
+    rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= canvasBounds.width && rect.y + rect.height <= canvasBounds.height &&
+    !occupied.some((other) => rectsOverlap(rect, other));
+  const movable = items.filter((item) => item.movable).sort((a, b) => a.priority - b.priority);
+  for (const item of movable) {
+    const candidates = item.candidates ?? nudgeCandidates(item.rect);
+    const sticky = annotationSlotCache.get(item.key);
+    let chosen = sticky !== undefined && sticky < candidates.length && fits(candidates[sticky]) ? sticky : -1;
+    for (let index = 0; chosen < 0 && index < candidates.length; index += 1) {
+      if (fits(candidates[index])) chosen = index;
+    }
+    if (chosen >= 0) {
+      const slot = candidates[chosen];
+      annotationSlotCache.set(item.key, chosen);
+      occupied.push(slot);
+      placements.set(item.key, { dx: slot.x - item.rect.x, dy: slot.y - item.rect.y, hidden: false });
+      continue;
+    }
+    const revealed = item.priority === ANNOTATION_PRIORITY.selected;
+    if (revealed) occupied.push(item.rect);
+    // Off-canvas items fail every slot; they stay unhidden and the pan-end pass places them.
+    placements.set(item.key, { dx: 0, dy: 0, hidden: !revealed && rectsOverlap(item.rect, canvasRect) });
+  }
+  return placements;
+}
+
+let lastAnnotationLayout: { signature: string; placements: Map<string, AnnotationPlacement> } | null = null;
+
+/**
+ * `placeCanvasAnnotations`, re-run only when an item's rect, priority or the canvas changes: the
+ * canvas commits pan and zoom once they settle, so this runs per scene, zoom and pan end.
+ * `frozen` (an active drag) reuses the previous result; placements are offsets, so they follow.
+ */
+export function layoutCanvasAnnotations(
+  items: readonly CanvasAnnotation[],
+  canvasBounds: { width: number; height: number },
+  frozen = false,
+): Map<string, AnnotationPlacement> {
+  if (frozen && lastAnnotationLayout) return lastAnnotationLayout.placements;
+  const signature = `${canvasBounds.width}x${canvasBounds.height}|` + items
+    .map(({ key, rect, priority, movable }) =>
+      `${key}:${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}:${priority}${movable ? 'm' : ''}`)
+    .join('|');
+  if (lastAnnotationLayout?.signature !== signature) {
+    lastAnnotationLayout = { signature, placements: placeCanvasAnnotations(items, canvasBounds) };
+  }
+  return lastAnnotationLayout.placements;
 }
 
 // In-memory stickiness cache: stores a placement choice per element
@@ -250,6 +350,41 @@ export function getSmartLabelLayoutSignature(
     !!element.isPlaceholder,
     getSmartLabelPillTexts(element, options),
   ]);
+}
+
+/** Estimated label width; matches renderSmartLabel's layout of name plus metric pills. */
+export function getSmartLabelWidth(element: Element, showLineDimensions: boolean): number {
+  const baseName = element.isPlaceholder ? '…' : (element.name && element.name.trim() ? element.name : (element.type || ''));
+  let width = baseName.length * SMART_LABEL_METRICS.nameCharWidth;
+  for (const text of getSmartLabelPillTexts(element, { showLineDimensions })) {
+    width += SMART_LABEL_METRICS.spacing + text.length * SMART_LABEL_METRICS.pillCharWidth + SMART_LABEL_METRICS.pillPadding * 2;
+  }
+  return Math.max(68, width + SMART_LABEL_METRICS.padding * 2);
+}
+
+/** Label slots around an element, preferred first: right of centre, nudges, centred, then the corners. */
+export function getSmartLabelCandidates(
+  element: Element,
+  canvasCoords: Array<{ x: number; y: number }>,
+  showLineDimensions: boolean,
+): RectBounds[] {
+  const bounds = calculateElementBounds(canvasCoords);
+  const height = SMART_LABEL_METRICS.labelHeight;
+  const width = getSmartLabelWidth(element, showLineDimensions);
+  // Clears the 14px handle reserve on selected vertices, so a selected line's edge slots stay usable.
+  const margin = 16;
+  const x = bounds.centerX + 20;
+  const y = bounds.centerY - height / 2;
+  return [
+    [x, y], [x + 10, y], [x - 10, y], [x, y - 10], [x, y + 10],
+    [x + 15, y - 15], [x - 15, y + 15], [x + 15, y + 15], [x - 15, y - 15],
+    [x + 20, y], [x - 20, y], [x, y - 20], [x, y + 20],
+    [bounds.centerX - width / 2, y],
+    [bounds.maxX + margin, bounds.minY - margin],
+    [bounds.minX - width - margin, bounds.minY - margin],
+    [bounds.maxX + margin, bounds.maxY + margin],
+    [bounds.minX - width - margin, bounds.maxY + margin],
+  ].map(([cx, cy]) => ({ x: cx, y: cy, width, height }));
 }
 
 export function calculateSmartLabelPosition(
