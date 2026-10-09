@@ -3790,7 +3790,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
                     className="btn editor-action-btn editor-action-btn--secondary multi-select-geometry-action"
                     onClick={handleSnap}
                     disabled={!(canSnap || hasServiceLines) || parseFloat(snapTolerance) <= 0}
-                    title={canSnap || hasServiceLines ? 'Snap selected line-wall endpoints to nearby intersections using this tolerance.' : 'Select 2+ line walls on the same floor'}
+                    title={canSnap || hasServiceLines ? 'Snap nearby ends together using this tolerance.' : 'Select 2+ line walls, ducts or pipes'}
                   >
                     Snap Ends
                   </button>

@@ -635,6 +635,7 @@ describe('findClosestSnapCorner', () => {
 
 const wall = { type: 'BuildingElementOpaque' };
 const duct = { type: 'MechanicalVentilationDuctwork' };
+const unit = { type: 'MechanicalVentilation' };
 
 describe('pointsConnected', () => {
   it('uses the storey for building-element pairs and strict z for everything else', () => {
@@ -642,7 +643,10 @@ describe('pointsConnected', () => {
     expect(pointsConnected(wall, { x: 1, y: 2, z: 0 }, wall, { x: 1, y: 2, z: 1 })).toBe(false);
     expect(pointsConnected(duct, { x: 1, y: 2, z: 0 }, duct, { x: 1, y: 2, z: 0.4 })).toBe(false);
     expect(pointsConnected(duct, { x: 1, y: 2, z: 0 }, wall, { x: 1, y: 2, z: 0.4 })).toBe(false);
-    expect(pointsConnected(duct, { x: 1, y: 2, z: 0 }, duct, { x: 1, y: 2.001, z: 0 })).toBe(false);
+    // A 2 dp duct end next to an unrounded unit point connects; a 1 cm miss doesn't.
+    expect(pointsConnected(duct, { x: 3.14, y: 2, z: 0 }, unit, { x: 3.14159, y: 2.0031, z: 0 })).toBe(true);
+    expect(pointsConnected(duct, { x: 3.13, y: 2, z: 0 }, unit, { x: 3.14159, y: 2, z: 0 })).toBe(false);
+    expect(pointsConnected(wall, { x: 1, y: 2, z: 0 }, wall, { x: 1, y: 2.001, z: 0 })).toBe(false);
   });
 });
 

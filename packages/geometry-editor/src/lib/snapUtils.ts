@@ -120,6 +120,9 @@ export function isBuildingElement(element: ConnectivityElement): boolean {
   return typeof element?.type === 'string' && element.type.startsWith('BuildingElement');
 }
 
+/** Half the 0.01 m grid service-line ends are rounded to: absorbs that rounding, invisible on screen. */
+export const SERVICE_POINT_COINCIDENCE_EPS_M = 0.005;
+
 /**
  * Whether two vertices sit at the same level. Building-element pairs compare storeys, because the
  * plan canvas snaps them in 2D; every other pair (ducts, pipes, plant and terminal points, mixed
@@ -138,14 +141,22 @@ export function pointsAtSameLevel(
   return aZ === bZ;
 }
 
-/** The one rule for "these two element vertices are the same point": exactly coincident. */
+/**
+ * The one rule for "these two element vertices are the same point": exactly coincident for
+ * building-element pairs, within SERVICE_POINT_COINCIDENCE_EPS_M per axis for everything else.
+ */
 export function pointsConnected(
   a: ConnectivityElement,
   aPoint: ConnectivityPoint,
   b: ConnectivityElement,
   bPoint: ConnectivityPoint,
 ): boolean {
-  return aPoint.x === bPoint.x && aPoint.y === bPoint.y && pointsAtSameLevel(a, aPoint.z, b, bPoint.z);
+  if (isBuildingElement(a) && isBuildingElement(b)) {
+    return aPoint.x === bPoint.x && aPoint.y === bPoint.y && pointsAtSameLevel(a, aPoint.z, b, bPoint.z);
+  }
+  const near = (u: unknown, v: unknown) =>
+    u === v || (typeof u === 'number' && typeof v === 'number' && Math.abs(u - v) <= SERVICE_POINT_COINCIDENCE_EPS_M);
+  return near(aPoint.x, bPoint.x) && near(aPoint.y, bPoint.y) && near(aPoint.z, bPoint.z);
 }
 
 type WeldPoint = { x: number; y: number; z: number };
@@ -160,6 +171,8 @@ function distance(a: WeldPoint, b: WeldPoint): number {
 
 /** Fixed points a service line's ends may weld to: its MVHR unit and same-role terminals, or plant. */
 function networkPointTargets(line: NetworkElement, all: NetworkElement[]): WeldPoint[] {
+  // ponytail: point elements store the storey index as z while pipes store metres, so upper-floor
+  // plant doesn't weld; the auto-pipes slice owns the fix.
   const isTarget = line.type === 'WaterPipework'
     ? (el: NetworkElement) => PIPE_NETWORK_POINT_TYPES.has(el.type)
     : (el: NetworkElement) =>
