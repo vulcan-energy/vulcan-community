@@ -816,6 +816,7 @@ export const HoverHintOverlay = memo<{
     const container: HTMLElement = stage.container();
     let node: Konva.Node | null = null;
     let dragging = false;
+    let pendingLeave: ReturnType<typeof setTimeout> | undefined;
 
     const pointer = (): Point => stage.getPointerPosition() ?? { x: 0, y: 0 };
     const sync = (kind: HoverHintTarget['kind'] | null) => {
@@ -829,15 +830,23 @@ export const HoverHintOverlay = memo<{
     const onDragEnd = () => {
       dragging = false;
       if (stage.getIntersection(pointer()) === node) { sync(kindOf()); return; }
-      leave();
+      leaveAfterDispatch();
     };
     // Konva fires no mouseout when the hovered handle is unmounted, so a stage
     // mousemove (registered only while hovered) drops a detached node.
     const onMove = () => {
-      if (!node?.getStage()) { leave(); return; }
+      if (!node?.getStage()) { leaveAfterDispatch(); return; }
       if (!dragging) sync(kindOf());
     };
+    // Konva's off() splices the listener array it is dispatching, which skips the next
+    // listener (on dragend, the handle's own: the drag never commits). Leave a tick later
+    // from inside node/stage dispatch; any newer hover or leave cancels the pending one.
+    const leaveAfterDispatch = () => {
+      clearTimeout(pendingLeave);
+      pendingLeave = setTimeout(leave, 0);
+    };
     const leave = () => {
+      clearTimeout(pendingLeave);
       stage.off('mousemove.hoverhint');
       node?.off('.hoverhint');
       node = null;
@@ -846,6 +855,7 @@ export const HoverHintOverlay = memo<{
     };
     const onOver = (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (dragging) return;
+      clearTimeout(pendingLeave);
       const kind = classifyHoverHandle(e.target);
       if (!kind) { if (node) leave(); return; }
       if (node === e.target) return;
@@ -864,6 +874,7 @@ export const HoverHintOverlay = memo<{
     stage.on('mouseover.hoverhint', onOver);
     stage.on('mouseout.hoverhint', onOut);
     return () => {
+      clearTimeout(pendingLeave);
       stage.off('.hoverhint');
       node?.off('.hoverhint');
       container.style.cursor = '';
