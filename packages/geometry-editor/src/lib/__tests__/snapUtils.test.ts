@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Element } from '../../geometry/types';
 import { createGeometryStore } from '../../stores/geometryStore';
 import { getServiceLineLengthFromCoordinates as lengthOf } from '../serviceLineDrawModes';
+import { getHoverHintText } from '../drawModeTooltipPill';
 import {
   applyAngleSnapIfClose,
   buildGeometrySnapCache,
@@ -887,6 +888,62 @@ describe('connected drag (Alt)', () => {
       store.getState().undo();
       expect(store.getState().elementsById[idOf('a')]!.coordinates[1]!.x).toBe(4);
       expect(store.getState().elementsById[idOf('c')]!.coordinates[0]!.x).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Alt-dragging a wall stretches only connected walls, keeps openings on their host, as one undo step', () => {
+    vi.useFakeTimers();
+    try {
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      const { addFloor, addZone, addElements } = store.getState();
+      addFloor('Ground', 2.4);
+      addZone({ name: 'Zone', floorArea: 24, height: 2.4, volume: 57.6 });
+      const zoneId = store.getState().zones[0]!.id;
+      const wall = (name: string, a: [number, number], b: [number, number]) => ({
+        type: 'BuildingElementOpaque', name, zoneId, height: 2.4, pitch: 90, base_height: 0, parent_element: null,
+        coordinates: [{ x: a[0], y: a[1], z: 0 }, { x: b[0], y: b[1], z: 0 }],
+      });
+      // U of walls L-M-R with a window on L and a ground floor whose corners sit on the junctions.
+      const [leftId, middleId, rightId, windowId, floorId] = addElements([
+        wall('L', [0, 0], [0, 4]),
+        wall('M', [0, 4], [6, 4]),
+        wall('R', [6, 4], [6, 0]),
+        { type: 'BuildingElementTransparent', name: 'Win', zoneId, height: 1.2, width: 1, base_height: 0.9,
+          parent_element: 'L', coordinates: [{ x: 0, y: 1, z: 0 }, { x: 0, y: 2, z: 0 }] },
+        { type: 'BuildingElementGround', name: 'Floor', zoneId, pitch: 180,
+          coordinates: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 4, z: 0 }, { x: 6, y: 4, z: 0 }, { x: 6, y: 0, z: 0 }] },
+      ] as never);
+      vi.runAllTimers();
+      const byId = store.getState().elementsById;
+      const middle = byId[middleId!]!;
+      const neighbours = findConnectedDragNeighbours(middle, byId);
+      // Only walls follow: not the window (a building element too) or the floor polygon.
+      expect(neighbours.map(({ elementId }) => elementId).sort()).toEqual([leftId, rightId].sort());
+      expect(findConnectedDragNeighbours(byId[windowId!]!, byId)).toEqual([]);
+      expect(getHoverHintText({ kind: 'body', dragging: false, connected: neighbours.length > 0 })).toBe('Alt moves connected');
+
+      // Off-normal drag: only the outward (y) part applies.
+      const moved = planConnectedDrag(middle, neighbours, byId, { x: 0.4, y: 1 });
+      const historyBefore = store.getState().historyIndex;
+      store.getState().commitVertexPositionUpdates(Object.entries(moved).flatMap(([elementId, coords]) =>
+        coords.map((newPosition, vertexIndex) => ({ elementId, vertexIndex, newPosition }))));
+      vi.runAllTimers();
+      const after = store.getState().elementsById;
+      const xy = (id: string) => after[id]!.coordinates.map(({ x, y }) => [x, y]);
+      expect(xy(middleId!)).toEqual([[0, 5], [6, 5]]);
+      expect(xy(leftId!)).toEqual([[0, 0], [0, 5]]); // far end fixed
+      expect(xy(rightId!)).toEqual([[6, 5], [6, 0]]);
+      expect((after[leftId!] as { width?: number }).width).toBeCloseTo(5);
+      // The window stays on the stretched wall, inside its ends.
+      for (const { x, y } of after[windowId!]!.coordinates) {
+        expect(x).toBe(0);
+        expect(y).toBeGreaterThanOrEqual(0);
+        expect(y).toBeLessThanOrEqual(5);
+      }
+      expect(after[floorId!]!.coordinates).toEqual(byId[floorId!]!.coordinates);
+      expect(store.getState().historyIndex).toBe(historyBefore + 1);
     } finally {
       vi.useRealTimers();
     }

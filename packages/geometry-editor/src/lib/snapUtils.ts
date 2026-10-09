@@ -1304,10 +1304,14 @@ export function planServiceLineTeeSplits(
 
 type ConnectedDragPoint = { x: number; y: number; z: number };
 
+const isConnectedDragWall = (el: Element): boolean =>
+  isLineWallElementForSnap(el) && el.coordinates?.length === 2 && !(el as { is_external_door?: unknown }).is_external_door;
+
 /**
- * Duct and pipe ends that Alt-drag "move connected" carries along with `element`: vertices of
- * same-network lines (by their own `snapPartnerFilter`) connected to one of its vertices. Points
- * (unit, terminals) never follow a dragged line; a dragged unit or terminal carries its duct ends.
+ * Line ends that Alt-drag "move connected" carries along with `element`: vertices of same-network
+ * ducts and pipes (by their own `snapPartnerFilter`), or for a line wall of other line walls,
+ * connected to one of its vertices. Points (unit, terminals) never follow a dragged line; a dragged
+ * unit or terminal carries its duct ends. Openings, floors, roofs and labels never follow a wall.
  */
 export function findConnectedDragNeighbours(
   element: Element,
@@ -1317,8 +1321,8 @@ export function findConnectedDragNeighbours(
   const out: Array<{ elementId: string; vertexIndex: number }> = [];
   for (const other of Object.values(elementsById)) {
     if (other.id === element.id || other.coordinates?.length !== 2) continue;
-    if (other.type !== 'MechanicalVentilationDuctwork' && other.type !== 'WaterPipework') continue;
-    if (!snapPartnerFilter(other)?.(element)) continue;
+    const serviceLine = other.type === 'MechanicalVentilationDuctwork' || other.type === 'WaterPipework';
+    if (serviceLine ? !snapPartnerFilter(other)?.(element) : !(isConnectedDragWall(element) && isConnectedDragWall(other))) continue;
     other.coordinates.forEach((q, vertexIndex) => {
       if (own.some((p) => pointsConnected(element, p, other, q))) out.push({ elementId: other.id, vertexIndex });
     });
