@@ -3,6 +3,7 @@
 
 import type { Element, ElementType, Floor, SpaceLabel, Zone } from '../types';
 import { planAutoDucts } from '../../lib/mvhrDuctwork';
+import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { MissingElement } from './types';
 import {
   evaluatePartF,
@@ -400,12 +401,13 @@ export const detectMissingElements = (
 
     // An MVHR with no ductwork at all: the CTA routes it (planAutoDucts). HEM takes ductwork only
     // for MVHR, so other unit types get no row.
+    const effectiveFloors = withEffectiveStoreyHeights(floors, elements);
     for (const unit of elements) {
       if (unit.isPlaceholder || unit.type !== 'MechanicalVentilation' || unit.vent_type !== 'MVHR') continue;
       const hasDuctwork = elements.some((el) =>
         !el.isPlaceholder && el.type === 'MechanicalVentilationDuctwork' && el.parent_element?.trim() === unit.name);
       if (hasDuctwork) continue;
-      const drafts = planAutoDucts(unit, elements, partFContext?.spaceLabels ?? [], floors);
+      const drafts = planAutoDucts(unit, elements, partFContext?.spaceLabels ?? [], effectiveFloors);
       if (drafts.length === 0) continue;
       dwellingWide.push({
         type: 'MechanicalVentilationDuctwork',

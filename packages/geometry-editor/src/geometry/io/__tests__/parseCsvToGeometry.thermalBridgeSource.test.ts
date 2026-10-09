@@ -37,7 +37,7 @@ Corner,Living,ThermalBridgeLinear,,2.4,0.05,,"0,0,0|0,0,2.4","{""junction_type""
     expect(new Set([source.host_wall_id, source.host_wall_b_id])).toEqual(new Set([south.id, west.id]));
     expect(source.note).toBe('keep');
     expect(
-      findLinearThermalBridgeIssues(elements).some((issue) => issue.kind === 'orphan_e16e17_incomplete_walls'),
+      findLinearThermalBridgeIssues(elements, []).some((issue) => issue.kind === 'orphan_e16e17_incomplete_walls'),
     ).toBe(false);
   });
 

@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createGeometryStore } from '../../stores/geometryStore';
+import { networkPoint3 } from '../elementCanvasFloor';
 import type { Element } from '../../geometry/types';
 import {
   calculateDerivedHeight,
@@ -10,6 +12,7 @@ import {
   getStrictStoreyHeight,
   getMaxLineWallHeightOnFloor,
   calculateSharedGroundElementArea,
+  withEffectiveStoreyHeights,
 } from '../zoneDerivation';
 
 const LINE_WALL_TYPES = [
@@ -348,5 +351,130 @@ describe('getStrictStoreyHeight source resolution', () => {
     expect(calculateBaseHeightPatchForFloorStackChange(wall, oldFloors, newFloors)).toEqual({
       base_height: 0.3,
     });
+  });
+});
+
+describe('storey base changes carry metre-z elements', () => {
+  it('raising storey 0 lifts storey-1 ducts, a riser top and a terminal with their unit, leaves storey 0 alone, in one undo step', () => {
+    vi.useFakeTimers();
+    try {
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      const { addFloor, addElements } = store.getState();
+      const f0 = addFloor('Ground', 2.5, false, 0);
+      const f1 = addFloor('First', 2.5, false, 1);
+      store.getState().updateFloor(f0, { heightUserOverride: true });
+      const ids = addElements([
+        { type: 'MechanicalVentilation', name: 'MV', vent_type: 'MVHR', floorId: f1, coordinates: [{ x: 0, y: 0, z: 1 }] },
+        { type: 'MechanicalVentilationDuctwork', name: 'Up', duct_type: 'supply', parent_element: 'MV', length: 3, floorId: f1,
+          coordinates: [{ x: 0, y: 0, z: 2.5 }, { x: 3, y: 0, z: 2.5 }] },
+        { type: 'MechanicalVentilationTerminal', name: 'T', terminal_type: 'intake', parent_element: 'MV', host_element: null,
+          orientation360: 0, pitch: 90, floorId: f1, coordinates: [{ x: 5, y: 0, z: 4.9 }] },
+        { type: 'MechanicalVentilationDuctwork', name: 'Down', duct_type: 'extract', parent_element: 'MV', length: 2, floorId: f0,
+          coordinates: [{ x: 0, y: 1, z: 0 }, { x: 2, y: 1, z: 0 }] },
+        // A riser on the first floor's membership from the ground slab up to the first floor.
+        { type: 'MechanicalVentilationDuctwork', name: 'Riser', duct_type: 'extract', parent_element: 'MV', length: 2.5, floorId: f1,
+          coordinates: [{ x: 2, y: 1, z: 0 }, { x: 2, y: 1, z: 2.5 }] },
+      ] as never);
+      vi.runAllTimers();
+      const historyBefore = store.getState().historyIndex;
+      store.getState().updateFloor(f0, { height: 2.8 });
+      vi.runAllTimers();
+      const byName = (name: string) => Object.values(store.getState().elementsById).find((el) => el.name === name)!;
+      expect(byName('Up').coordinates.map((p) => p.z)).toEqual([2.8, 2.8]);
+      expect(byName('T').coordinates[0]!.z).toBe(5.2);
+      expect(byName('Down').coordinates.map((p) => p.z)).toEqual([0, 0]);
+      expect(byName('Riser').coordinates.map((p) => p.z)).toEqual([0, 2.8]);
+      expect((byName('Riser') as { length?: number }).length).toBe(2.8);
+      expect((byName('Up') as { length?: number }).length).toBe(3);
+      // Still connected to the unit, now at the first floor's new base.
+      const state = store.getState();
+      const effective = withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById));
+      expect(networkPoint3(byName('MV'), effective)!.z).toBe(2.8);
+      expect(store.getState().historyIndex).toBe(historyBefore + 1);
+      expect(ids).toHaveLength(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('storey base changes: each source and each storey rule', () => {
+  const setup = () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const { addFloor, addZone, addElements } = store.getState();
+    const f0 = addFloor('Ground', 2.5, false, 0);
+    const f1 = addFloor('First', 2.5, false, 1);
+    addZone({ name: 'Zone', floorArea: 20, height: 5, volume: 100 });
+    const zoneId = store.getState().zones[0]!.id;
+    const wall = (name: string, z: number, floorId: string, height = 2.5) => ({ type: 'BuildingElementOpaque', name, zoneId, height, width: 10,
+      area: 25, pitch: 90, floorId, parent_element: null, coordinates: [{ x: -5, y: -5 + z, z }, { x: 5, y: -5 + z, z }] });
+    addElements([
+      wall('W0', 0, f0), wall('W1', 1, f1),
+      { type: 'MechanicalVentilation', name: 'MV', vent_type: 'MVHR', floorId: f1, coordinates: [{ x: 0, y: 0, z: 1 }] },
+      // Ground membership, up to the unit upstairs: its ceiling end belongs to the first floor.
+      { type: 'MechanicalVentilationDuctwork', name: 'RiserG', duct_type: 'supply', parent_element: 'MV', length: 2.5, floorId: f0,
+        coordinates: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 2.5 }] },
+      { type: 'MechanicalVentilationDuctwork', name: 'Up', duct_type: 'supply', parent_element: 'MV', length: 3, floorId: f1,
+        coordinates: [{ x: 0, y: 0, z: 2.5 }, { x: 3, y: 0, z: 2.5 }] },
+      // No floor recorded: the first floor by its z band.
+      { type: 'ThermalBridgePoint', name: 'TBP', zoneId, heat_transfer_coeff: 0.1, coordinates: [{ x: 1, y: 1, z: 3.5 }] },
+    ] as never);
+    vi.runAllTimers();
+    return { store, f0, wall };
+  };
+  const zs = (store: ReturnType<typeof setup>['store'], name: string) =>
+    Object.values(store.getState().elementsById).find((el) => el.name === name)!.coordinates.map((p) => p.z);
+
+  it('a storey height edit carries a ground-membership riser top and a floorless TB point with the first floor', () => {
+    vi.useFakeTimers();
+    try {
+      const { store, f0 } = setup();
+      store.getState().updateFloor(f0, { height: 3.0, heightUserOverride: true });
+      vi.runAllTimers();
+      expect(zs(store, 'RiserG')).toEqual([0, 3]);
+      expect(zs(store, 'Up')).toEqual([3, 3]);
+      expect(zs(store, 'TBP')).toEqual([4]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a taller wall and a ground base override cascade too', () => {
+    vi.useFakeTimers();
+    try {
+      const { store, f0 } = setup();
+      const w0 = Object.values(store.getState().elementsById).find((el) => el.name === 'W0')!;
+      store.getState().updateElement(w0.id, { height: 3.0 } as never);
+      vi.runAllTimers();
+      expect(zs(store, 'Up')).toEqual([3, 3]);
+      store.getState().updateFloor(f0, { baseHeight: 0.5, baseHeightUserOverride: true });
+      vi.runAllTimers();
+      expect(zs(store, 'RiserG')).toEqual([0.5, 3.5]);
+      expect(zs(store, 'Up')).toEqual([3.5, 3.5]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never shifts elements added in the same batch as the change, or on load', () => {
+    vi.useFakeTimers();
+    try {
+      const { store, f0, wall } = setup();
+      store.getState().addElements([
+        wall('W0b', 0, f0, 3.0),
+        { type: 'MechanicalVentilationDuctwork', name: 'New', duct_type: 'supply', parent_element: 'MV', length: 3,
+          floorId: store.getState().floors[1]!.id, coordinates: [{ x: 0, y: 0, z: 3 }, { x: 0, y: 3, z: 3 }] },
+      ] as never);
+      vi.runAllTimers();
+      expect(zs(store, 'New')).toEqual([3, 3]);
+      expect(zs(store, 'Up')).toEqual([3, 3]);
+      const csv = store.getState().generateCSV({ allowUnresolvedMigration: true });
+      const reloaded = createGeometryStore({ defaultDefaultsPath: null });
+      reloaded.getState().loadFromCSV(csv);
+      vi.runAllTimers();
+      for (const name of ['New', 'Up', 'RiserG', 'TBP']) expect(zs(reloaded, name)).toEqual(zs(store, name));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

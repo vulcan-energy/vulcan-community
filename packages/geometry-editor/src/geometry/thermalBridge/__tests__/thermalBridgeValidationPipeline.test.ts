@@ -49,7 +49,7 @@ describe('thermalBridgeValidationPipeline', () => {
     } as ThermalBridgeLinear;
 
     expect(planCoordinatesForHostElement(ground)).not.toBeNull();
-    const issues = findLinearThermalBridgeIssues([ground, tb] as Element[]);
+    const issues = findLinearThermalBridgeIssues([ground, tb] as Element[], []);
     expect(issues.filter((i) => i.elementId === 'tb1')).toHaveLength(0);
   });
 
@@ -91,7 +91,7 @@ describe('thermalBridgeValidationPipeline', () => {
       isPlaceholder: false,
     } as ThermalBridgeLinear;
 
-    const issues = findLinearThermalBridgeIssues([ground, tb] as Element[]);
+    const issues = findLinearThermalBridgeIssues([ground, tb] as Element[], []);
     expect(issues.some((i) => i.kind === 'mismatch_basement_e22_elevation')).toBe(true);
   });
 });

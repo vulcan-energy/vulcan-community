@@ -37,7 +37,7 @@ import {
   thermalBridgeSourceExtraJsonForAutoProposal,
 } from '../../../packages/geometry-editor/src/geometry/thermalBridge/resolveTbHostFloorId';
 import { THERMAL_BRIDGE_EXTRA_JSON_FLOOR_ID_KEY } from '../../../packages/geometry-editor/src/lib/elementCanvasFloor';
-import { deriveFloorsFromElements } from '../../../packages/geometry-editor/src/lib/floorDerivation';
+import { editorFloorsAndElementsForParsedCsv } from '../../../packages/geometry-editor/src/lib/floorDerivation';
 
 interface ElementValidationRow {
   elementId: string;
@@ -55,8 +55,8 @@ function byId(elements: readonly Element[]): Record<string, Element> {
 
 function loadGeometry(csvPath: string) {
   const parsed = parseCsvToGeometry(readFileSync(csvPath, 'utf-8'));
-  const elements = parsed.elements as Element[];
-  return { parsed, elements, floors: deriveFloorsFromElements(elements), elementsById: byId(elements) };
+  const { floors, elements } = editorFloorsAndElementsForParsedCsv(parsed);
+  return { parsed, elements, floors, elementsById: byId(elements) };
 }
 
 function proposalsWithEffectivePsi(
@@ -262,7 +262,7 @@ export function validateThermalBridges(csvArg: string, includeAuto: boolean) {
     elements = [...originalElements, ...synthetic];
   }
 
-  const issues = findLinearThermalBridgeIssues(elements);
+  const issues = findLinearThermalBridgeIssues(elements, floors);
   const validationRows = thermalBridgeRowsWithValidation(elements, parsed.zones, floors, issues);
 
   return {

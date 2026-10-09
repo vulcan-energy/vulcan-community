@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../geometry/types';
-import { normalizeStoreyIndex } from './elementCanvasFloor';
+import type { Element, Floor } from '../geometry/types';
+import { isStoreyIndexPoint, networkPoint3, normalizeStoreyIndex, physicalZUsesFloorId } from './elementCanvasFloor';
 import type { SnapEvent } from './snapEvent';
+import { roundToTwoDecimals } from '../geometry/constants';
 
 /** Two-point “wall line” types that participate in mutual segment snapping while drawing. */
-const LINE_WALL_SNAP_TYPES = new Set<string>([
+export const LINE_WALL_SNAP_TYPES: ReadonlySet<string> = new Set<string>([
   'BuildingElementOpaque',
   'BuildingElementAdjacentConditionedSpace',
   'BuildingElementAdjacentUnconditionedSpace_Simple',
@@ -164,8 +165,8 @@ function distance(a: WeldPoint, b: WeldPoint): number {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
-/** Fixed points a duct's ends may weld to: its MVHR unit and same-role terminals. */
-function ductPointTargets(duct: NetworkElement, all: NetworkElement[]): WeldPoint[] {
+/** Fixed points a duct's ends may weld to, in metres: its MVHR unit and same-role terminals. */
+function ductPointTargets(duct: NetworkElement, all: NetworkElement[], effectiveFloors: Floor[]): WeldPoint[] {
   if (!duct.parent_element) return [];
   return all
     .filter((el) =>
@@ -174,7 +175,8 @@ function ductPointTargets(duct: NetworkElement, all: NetworkElement[]): WeldPoin
         (el.type === 'MechanicalVentilationTerminal' &&
           el.parent_element === duct.parent_element &&
           el.terminal_type === duct.duct_type)))
-    .map((el) => el.coordinates[0]!);
+    .map((el) => networkPoint3(el, effectiveFloors))
+    .filter((point): point is WeldPoint => !!point);
 }
 
 /**
@@ -182,12 +184,13 @@ function ductPointTargets(duct: NetworkElement, all: NetworkElement[]): WeldPoin
  * fixed network point when one is in reach, and onto each other otherwise (a cluster lands on its
  * first fixed point, else its first end in selection order). Ducts weld only within the same unit
  * and role, pipes only within the same pipework_type. Pipe-to-plant welds arrive with the
- * auto-pipes slice.
+ * auto-pipes slice. `effectiveFloors` (`withEffectiveStoreyHeights`) place the unit in metres.
  */
 export function planServiceLineEndpointWelds(
   elementsById: Record<string, Element>,
   elementIds: string[],
   tolerance: number,
+  effectiveFloors: Floor[],
 ): ServiceLineWeld[] {
   const all = Object.values(elementsById) as NetworkElement[];
   const ends: Array<{ elementId: string; vertexIndex: number; network: string; original: WeldPoint; point: WeldPoint; fixed: boolean }> = [];
@@ -198,7 +201,7 @@ export function planServiceLineEndpointWelds(
     const network = line.type === 'WaterPipework'
       ? `pipe:${line.pipework_type ?? ''}`
       : `duct:${line.parent_element ?? ''}:${line.duct_type}`;
-    const targets = line.type === 'WaterPipework' ? [] : ductPointTargets(line, all);
+    const targets = line.type === 'WaterPipework' ? [] : ductPointTargets(line, all, effectiveFloors);
     line.coordinates.forEach((original, vertexIndex) => {
       let nearest: WeldPoint | undefined;
       for (const target of targets) {
@@ -865,6 +868,16 @@ export type DrawSnapResult = {
   snap?: SnapEvent;
 };
 
+/**
+ * Where a draw click places a point: on the 0.01 m grid, like drawn duct and pipe ends, unless it
+ * snapped to a target, which it never leaves.
+ */
+export function placedDrawPoint(snap: Pick<DrawSnapResult, 'point' | 'geometrySnap'>): { x: number; y: number } {
+  return snap.geometrySnap
+    ? snap.point
+    : { x: roundToTwoDecimals(snap.point.x), y: roundToTwoDecimals(snap.point.y) };
+}
+
 function resolveOrthogonalDrawSnap(params: {
   mouseWorld: { x: number; y: number };
   lastPoint: { x: number; y: number };
@@ -1194,6 +1207,12 @@ export type GetExactSnappedVerticesOptions = {
    * snap markers purely because a window's endpoint shares coordinates on the line.
    */
   skipVertexMatchFromOtherTypes?: string[];
+  /**
+   * Effective floors (`withEffectiveStoreyHeights`): a storey-index point (unit, plant) paired
+   * with a metre-z element (duct, pipe, terminal) is compared at its storey's base height.
+   * Without them both points are compared as stored.
+   */
+  effectiveFloors?: Floor[];
 };
 
 /**
@@ -1313,13 +1332,16 @@ const isConnectedDragWall = (el: Element): boolean =>
  * connected to one of its vertices. Points (unit, terminals) never follow a dragged line; a dragged
  * unit or terminal carries its duct ends. Openings, floors, roofs and labels never follow a wall.
  * A line colinear with a dragged line (within `angleTolDeg`) is left behind: it detaches.
+ * `effectiveFloors` (`withEffectiveStoreyHeights`) place a dragged unit in metres.
  */
 export function findConnectedDragNeighbours(
   element: Element,
   elementsById: Record<string, Element>,
   angleTolDeg: number,
+  effectiveFloors: Floor[],
 ): Array<{ elementId: string; vertexIndex: number }> {
-  const own = element.coordinates ?? [];
+  const pointInMetres = isStoreyIndexPoint(element) ? networkPoint3(element, effectiveFloors) : undefined;
+  const own = pointInMetres ? [pointInMetres] : element.coordinates ?? [];
   const [a, b] = own;
   const parallel = (q: { x: number; y: number }, far: { x: number; y: number }) => {
     if (own.length !== 2 || !a || !b) return false;
@@ -1388,10 +1410,14 @@ export const getExactSnappedVertices = (
   const snappedVertices = new Set<number>();
   const skipTypes = options?.skipVertexMatchFromOtherTypes;
   const isPartner = snapPartnerFilter(element);
+  const floors = options?.effectiveFloors;
+  // A storey-index point meets a metre-z partner at its storey's base height.
+  const inMetres = (el: Element, metreZPartner: Element) =>
+    !!floors && isStoreyIndexPoint(el) && physicalZUsesFloorId(metreZPartner);
 
   if (!element.coordinates) return snappedVertices;
 
-  element.coordinates.forEach((coord, index) => {
+  element.coordinates.forEach((storedCoord, index) => {
     // Early exit: if this vertex is already snapped, skip further checks
     if (snappedVertices.has(index)) return;
 
@@ -1403,8 +1429,10 @@ export const getExactSnappedVertices = (
       }
       if (isPartner && !isPartner(other)) continue;
       if (!other.coordinates) continue;
+      const coord = inMetres(element, other) ? networkPoint3(element, floors!) ?? storedCoord : storedCoord;
+      const otherCoords = inMetres(other, element) ? [networkPoint3(other, floors!) ?? other.coordinates[0]!] : other.coordinates;
 
-      for (const otherCoord of other.coordinates) {
+      for (const otherCoord of otherCoords) {
         if (pointsConnected(element, coord, other, otherCoord)) {
           snappedVertices.add(index);
           break; // Early exit: found an exact match

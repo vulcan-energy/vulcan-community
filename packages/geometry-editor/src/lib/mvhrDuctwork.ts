@@ -11,7 +11,7 @@ import type {
   SpaceLabel,
 } from '../geometry/types';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
-import { getElementCanvasFloorZValue } from './elementCanvasFloor';
+import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, networkPoint3 } from './elementCanvasFloor';
 import { orientation360FromSegmentOutwardModelXY, polygonPlanCentroid } from './openingSegmentOutward';
 import { planOrthogonalElbow, pointsConnected } from './snapUtils';
 import { isPointInPolygon2D as pointInPolygon } from './pointInPolygon';
@@ -35,13 +35,6 @@ export const MVHR_DUCT_ROLE_STYLES: Record<MvhrDuctRole, MvhrDuctRoleStyle> = {
   intake: { stroke: '#86EFAC', strokeWidth: 2, dash: [12, 5] },
   exhaust: { stroke: '#15803D', strokeWidth: 2, dash: [10, 4, 2, 4] },
 };
-
-/**
- * Terminals are the one near-miss exception to exact connectivity: a hosted terminal's point is
- * re-projected onto its wall or window (unrounded, z = air-flow-path height), while drawn duct ends
- * are rounded to 0.01 m, so the two cannot be relied on to coincide exactly.
- */
-export const MVHR_TERMINAL_DUCT_TOLERANCE_M = 0.35;
 
 export function isMvhrDuctRole(value: unknown): value is MvhrDuctRole {
   return typeof value === 'string' && (MVHR_DUCT_ROLES as readonly string[]).includes(value);
@@ -316,21 +309,13 @@ export function collectMvhrDuctTopologyWarnings(
   return warnings;
 }
 
-export function terminalIsNearDuctEndpoint(
+/** A duct end coincides with the terminal point (both are metres, so the one connectivity rule applies). */
+export function terminalConnectsToDuctEndpoint(
   terminal: Pick<MechanicalVentilationTerminal, 'coordinates'>,
   ducts: ReadonlyArray<Pick<MechanicalVentilationDuctwork, 'coordinates'>>,
-  tolerance = MVHR_TERMINAL_DUCT_TOLERANCE_M,
 ): boolean {
   const point = getTerminalPoint(terminal);
-  if (!point) return false;
-  for (const duct of ducts) {
-    const endpoints = ductEndpoints(duct);
-    if (!endpoints) continue;
-    if (distance3d(point, endpoints[0]) <= tolerance || distance3d(point, endpoints[1]) <= tolerance) {
-      return true;
-    }
-  }
-  return false;
+  return !!point && ducts.some((duct) => ductEndpoints(duct)?.some((end) => sameDuctPoint(end, point)));
 }
 
 type DuctRunContext = {
@@ -340,17 +325,22 @@ type DuctRunContext = {
 };
 
 /**
- * The duct's run (its endpoint component among same-unit, same-role ducts) and its MVHR unit point,
- * resolved the way validation resolves them. Null when the unit or the duct's geometry is missing.
+ * The duct's run (its endpoint component among same-unit, same-role ducts) and its MVHR unit point
+ * in metres, resolved the way validation resolves them. Null when the unit or the duct's geometry
+ * is missing. `effectiveFloors` carry effective storey heights (`withEffectiveStoreyHeights`).
  */
-function ductRunContext(duct: MechanicalVentilationDuctwork, elements: ReadonlyArray<Element>): DuctRunContext | null {
+function ductRunContext(
+  duct: MechanicalVentilationDuctwork,
+  elements: ReadonlyArray<Element>,
+  effectiveFloors: Floor[],
+): DuctRunContext | null {
   const parentName = duct.parent_element?.trim();
   if (!parentName || !isMvhrDuctRole(duct.duct_type)) return null;
   const units = elements.filter(
     (el): el is MechanicalVentilation => el.type === 'MechanicalVentilation' && el.name.trim() === parentName,
   );
   const unit = units.length === 1 ? units[0]! : undefined;
-  const unitPoint = unit && unit.vent_type === 'MVHR' ? getFirstPoint3(unit) : undefined;
+  const unitPoint = unit && unit.vent_type === 'MVHR' ? networkPoint3(unit, effectiveFloors) : undefined;
   if (!unit || !unitPoint) return null;
   const roleDucts = elements.filter(
     (el): el is MechanicalVentilationDuctwork =>
@@ -364,8 +354,12 @@ function ductRunContext(duct: MechanicalVentilationDuctwork, elements: ReadonlyA
 }
 
 /** The MVHR unit point when the duct's run reaches it, else null. */
-export function ductRunUnitPoint(duct: MechanicalVentilationDuctwork, elements: ReadonlyArray<Element>): Point3 | null {
-  const context = ductRunContext(duct, elements);
+export function ductRunUnitPoint(
+  duct: MechanicalVentilationDuctwork,
+  elements: ReadonlyArray<Element>,
+  effectiveFloors: Floor[],
+): Point3 | null {
+  const context = ductRunContext(duct, elements, effectiveFloors);
   return context && ductRunTouchesPoint(context.run, context.unitPoint) ? context.unitPoint : null;
 }
 
@@ -376,8 +370,9 @@ export function ductRunUnitPoint(duct: MechanicalVentilationDuctwork, elements: 
 export function looseDuctRunEndNearestUnit(
   duct: MechanicalVentilationDuctwork,
   elements: ReadonlyArray<Element>,
+  effectiveFloors: Floor[],
 ): Point3 | null {
-  const context = ductRunContext(duct, elements);
+  const context = ductRunContext(duct, elements, effectiveFloors);
   if (!context || ductRunTouchesPoint(context.run, context.unitPoint)) return null;
   const warnings = collectMvhrDuctTopologyWarnings(context.roleDucts, {
     unitPoint: context.unitPoint,
@@ -395,8 +390,17 @@ export function looseDuctRunEndNearestUnit(
 
 type PlanPoint = { x: number; y: number };
 
-/** Height a new MVHR terminal gets, whether drawn, added from the unit panel or auto-planned. */
+/** Height above its storey's base a new MVHR terminal gets, whether drawn, added from the unit panel or auto-planned. */
 export const DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M = 2.4;
+
+/**
+ * Physical z of a new terminal on a storey whose base is `storeyBaseHeightM` (from
+ * `calculateDerivedBaseHeight` over effective floors), which is also its exported
+ * `mid_height_air_flow_path`.
+ */
+export function defaultMvhrTerminalZ(storeyBaseHeightM: number): number {
+  return roundToTwoDecimals(storeyBaseHeightM + DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M);
+}
 
 /** Clamped plan projection onto a segment, keeping the point's z. The store places hosted children with it. */
 export function projectPointToSegment(
@@ -412,16 +416,18 @@ export function projectPointToSegment(
 }
 
 /**
- * A terminal hosted on `host` at `planPoint`, at the default terminal height. The unit panel's add
- * button and the auto-duct planner both build terminals with it; the store projects the point onto
- * the host on commit.
+ * A terminal hosted on `host` at `planPoint`, at the default terminal height on the host's storey.
+ * The unit panel's add button and the auto-duct planner both build terminals with it; the store
+ * projects the point onto the host on commit.
  */
 export function hostedMvhrTerminalDraft(
   role: MvhrTerminalRole,
   unitName: string,
   host: Element,
   planPoint: PlanPoint,
+  effectiveFloors: Floor[],
 ): Extract<ElementDraft, { type: 'MechanicalVentilationTerminal' }> {
+  const z = defaultMvhrTerminalZ(calculateDerivedBaseHeight(getElementCanvasFloorZValue(host, effectiveFloors) ?? 0, effectiveFloors));
   return {
     name: '',
     type: 'MechanicalVentilationTerminal',
@@ -429,7 +435,7 @@ export function hostedMvhrTerminalDraft(
     parent_element: unitName,
     host_element: host.name,
     floorId: host.floorId,
-    coordinates: [{ x: planPoint.x, y: planPoint.y, z: DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M }],
+    coordinates: [{ x: planPoint.x, y: planPoint.y, z }],
     isPlaceholder: false,
   };
 }
@@ -488,36 +494,46 @@ function orthogonalRun(start: Point3, end: Point3): Point3[] {
 
 /**
  * Auto-duct plan for one MVHR unit (other unit types get none): one radial run per wet room
- * (extract) and per habitable room (supply) on the unit's storey, from the unit point to a point
- * inside the room's space label, plus a run to an intake and an exhaust terminal. Each segment is
- * its own duct draft; consecutive segments share exact endpoints so each run is one connected
- * component touching the unit, and runs share no vertex but the unit point (see RUN_END_STAGGER_M).
+ * (extract) and per habitable room (supply), from the unit point to a point inside the room's space
+ * label, plus a run to an intake and an exhaust terminal. Each segment is its own duct draft;
+ * consecutive segments share exact endpoints so each run is one connected component touching the
+ * unit, and runs share no vertex but the unit point (see RUN_END_STAGGER_M).
  *
- * Rooms on other storeys are not planned yet: point elements store z as a storey band while ducts
- * store metres, so a riser's length would be wrong until that convention is settled.
+ * Everything is in metres: the unit sits at its storey's base height. A room on another storey
+ * gets its L at the unit's height and a riser at the room end up (or down) to the room storey's
+ * base height; the riser belongs to the room's storey. A room's storey is its label's floor
+ * (`floors[label.storey]`), never `label.storey` read as a zIndex, which differs once a basement
+ * exists.
  *
- * A room whose space label already holds a free run end of that role is skipped, as is a terminal
- * role that already has a duct; an existing terminal without a duct gets one ending on its point.
- * Re-running only fills gaps. Output order is stable (rooms by id).
+ * A room whose space label already holds a free run end of that role on the room's storey is
+ * skipped, as is a terminal role that already has a duct; an existing terminal without a duct gets
+ * one ending on its point. Re-running only fills gaps. Output order is stable (rooms by id).
+ * `effectiveFloors` carry effective storey heights (`withEffectiveStoreyHeights`) in store order.
  */
 export function planAutoDucts(
   unit: MechanicalVentilation,
   elements: Element[],
   spaceLabels: readonly SpaceLabel[],
-  floors: Floor[],
+  effectiveFloors: Floor[],
 ): ElementDraft[] {
   const roles = unit.vent_type === 'MVHR' ? MVHR_AUTO_DUCT_ROLES : null;
-  const unitPoint = getFirstPoint3(unit);
-  const unitStorey = getElementCanvasFloorZValue(unit, floors);
-  const unitFloorId = floors.find((floor) => floor.zIndex === unitStorey)?.id;
+  const unitPoint = networkPoint3(unit, effectiveFloors);
+  const unitStorey = getElementCanvasFloorZValue(unit, effectiveFloors);
+  const unitFloorId = effectiveFloors.find((floor) => floor.zIndex === unitStorey)?.id;
   if (!roles || !unitPoint || unitStorey === undefined || !unitFloorId) return [];
 
   const unitDucts = elements.filter(
     (el): el is MechanicalVentilationDuctwork =>
       el.type === 'MechanicalVentilationDuctwork' && !el.isPlaceholder && el.parent_element?.trim() === unit.name,
   );
+  // Every duct vertex of this unit, existing or planned, bar the unit point: a new run may not
+  // share one (a shared joint away from the unit is a topology warning or an overlap error).
+  const takenPoints: Point3[] = [];
+  for (const duct of unitDucts) {
+    for (const q of ductEndpoints(duct) ?? []) if (!sameDuctPoint(q, unitPoint)) takenPoints.push(q);
+  }
   const drafts: ElementDraft[] = [];
-  const addRun = (role: MvhrDuctRole, points: Point3[]) => {
+  const addRun = (role: MvhrDuctRole, points: Point3[], endFloorId = unitFloorId) => {
     for (let i = 0; i + 1 < points.length; i += 1) {
       const [a, b] = [points[i]!, points[i + 1]!];
       if (a.x === b.x && a.y === b.y && a.z === b.z) continue;
@@ -527,35 +543,52 @@ export function planAutoDucts(
         type: 'MechanicalVentilationDuctwork',
         duct_type: role,
         parent_element: unit.name,
-        floorId: unitFloorId,
+        // Legs at the unit's height belong to its storey; a riser to the room's.
+        floorId: a.z === unitPoint.z && b.z === unitPoint.z ? unitFloorId : endFloorId,
         coordinates: [a, b],
         length,
         isPlaceholder: false,
       });
+      takenPoints.push(b);
     }
   };
 
   const labels = spaceLabels
-    .filter((label) => label.storey === unitStorey)
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .flatMap((label) => {
+      const floor = effectiveFloors[label.storey];
+      return floor ? [{ label, floor, z: calculateDerivedBaseHeight(floor.zIndex, effectiveFloors) }] : [];
+    })
+    .sort((a, b) => (a.label.id < b.label.id ? -1 : a.label.id > b.label.id ? 1 : 0));
   let runIndex = 0;
   for (const { role, wet } of roles.rooms) {
-    // Only runs on the unit's storey (the only storey planned) can serve its rooms.
-    const roleDucts = unitDucts.filter((duct) => duct.duct_type === role && getElementCanvasFloorZValue(duct, floors) === unitStorey);
-    const ends = roleDucts.map((duct) => ductEndpoints(duct)).filter((e): e is [Point3, Point3] => e !== null);
-    // Free run ends: not the unit point, and not a joint or elbow shared with another duct of the role.
-    const freeEnds = ends.flatMap((pair, i) => pair.filter((end) =>
-      !sameDuctPoint(end, unitPoint) && !ends.some((other, j) => j !== i && other.some((q) => sameDuctPoint(q, end)))));
-    for (const label of labels) {
+    const roleDucts = unitDucts.filter((duct) => duct.duct_type === role);
+    const ends = roleDucts.map((duct) => ductEndpoints(duct));
+    // Free run ends with their duct's storey: not the unit point, and not a joint or elbow shared with another duct of the role.
+    const freeEnds: Array<{ end: Point3; storey: number | undefined }> = [];
+    roleDucts.forEach((duct, i) => {
+      for (const end of ends[i] ?? []) {
+        if (sameDuctPoint(end, unitPoint) || ends.some((other, j) => j !== i && other?.some((q) => sameDuctPoint(q, end)))) continue;
+        freeEnds.push({ end, storey: getElementCanvasFloorZValue(duct, effectiveFloors) });
+      }
+    });
+    for (const { label, floor, z } of labels) {
       if (!roomServedByRole(label, wet)) continue;
       // Every candidate room takes an index, served or not, so a re-run staggers exactly as the first plan did.
-      const stagger = RUN_END_STAGGER_M * (runIndex++ % RUN_END_STAGGER_STEPS);
+      const index = runIndex++;
       const ring = (label.coordinates ?? []).map((p) => ({ x: p.x, y: p.y }));
-      if (ring.length < 3 || freeEnds.some((end) => pointInPolygon(end, ring))) continue;
-      const target = pointInsideRoom(ring, stagger);
-      // No interior point, or the unit sits on it: nothing sensible to route.
-      if (!target || Math.hypot(target.x - unitPoint.x, target.y - unitPoint.y) < ROOM_END_CLEARANCE_M) continue;
-      addRun(role, orthogonalRun(unitPoint, { ...target, z: unitPoint.z }));
+      if (ring.length < 3 || freeEnds.some(({ end, storey }) => storey === floor.zIndex && pointInPolygon(end, ring))) continue;
+      // The first stagger whose run shares no vertex with another run. Stacked rooms on different
+      // storeys share a centroid, so their runs would otherwise coincide on the unit's storey.
+      // ponytail: a room whose every stagger collides is left for hand drawing; never seen in practice.
+      for (let bump = 0; bump < RUN_END_STAGGER_STEPS; bump += 1) {
+        const target = pointInsideRoom(ring, RUN_END_STAGGER_M * ((index + bump) % RUN_END_STAGGER_STEPS));
+        // No interior point, or the unit sits on it: nothing sensible to route.
+        if (!target || Math.hypot(target.x - unitPoint.x, target.y - unitPoint.y) < ROOM_END_CLEARANCE_M) break;
+        const run = orthogonalRun(unitPoint, { ...target, z });
+        if (run.slice(1).some((q) => takenPoints.some((t) => sameDuctPoint(q, t)))) continue;
+        addRun(role, run, floor.id);
+        break;
+      }
     }
   }
 
@@ -567,7 +600,7 @@ export function planAutoDucts(
     .flatMap((host) => {
       if (
         host.isPlaceholder || !isMvhrTerminalHost(host) || !(host.coordinates?.length >= 2) ||
-        takenHosts.has(host.name) || getElementCanvasFloorZValue(host, floors) !== unitStorey
+        takenHosts.has(host.name) || getElementCanvasFloorZValue(host, effectiveFloors) !== unitStorey
       ) return [];
       const segment = [host.coordinates[0]!, host.coordinates[1]!] as const;
       const point = projectPointToSegment(unitPoint, segment);
@@ -581,7 +614,7 @@ export function planAutoDucts(
     if (unitDucts.some((duct) => duct.duct_type === role)) continue;
     const existing = ownTerminalByRole.get(role);
     // A terminal on another storey is out of reach for now: no duct to it, and no second terminal.
-    if (existing && getElementCanvasFloorZValue(existing, floors) !== unitStorey) continue;
+    if (existing && getElementCanvasFloorZValue(existing, effectiveFloors) !== unitStorey) continue;
     const existingPoint = existing && getTerminalPoint(existing);
     if (existingPoint) {
       addRun(role, orthogonalRun(unitPoint, existingPoint));
@@ -590,7 +623,7 @@ export function planAutoDucts(
     if (existing) continue;
     const nearest = freeHosts.shift();
     if (!nearest) continue;
-    const terminal = hostedMvhrTerminalDraft(role, unit.name, nearest.host, projectPointToSegment(unitPoint, nearest.segment));
+    const terminal = hostedMvhrTerminalDraft(role, unit.name, nearest.host, projectPointToSegment(unitPoint, nearest.segment), effectiveFloors);
     // The duct ends where the store will put the terminal: the same projection of the same point.
     addRun(role, orthogonalRun(unitPoint, projectPointToSegment(terminal.coordinates[0] as Point3, nearest.segment)));
     drafts.push(terminal);

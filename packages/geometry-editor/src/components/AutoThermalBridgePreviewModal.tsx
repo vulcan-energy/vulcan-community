@@ -199,7 +199,7 @@ export const AutoThermalBridgePreviewModal: React.FC<AutoThermalBridgePreviewMod
 
   const allElements = useMemo(() => Object.values(elementsById) as Element[], [elementsById]);
 
-  const linearTbIssues = useMemo(() => findLinearThermalBridgeIssues(allElements), [allElements]);
+  const linearTbIssues = useMemo(() => findLinearThermalBridgeIssues(allElements, floors), [allElements, floors]);
 
   const baseProposals = useMemo(() => {
     return proposeAutoThermalBridges(allElements, floors, globalOrientationOffset);

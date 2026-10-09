@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { describe, expect, it } from 'vitest';
-import { assertCsvMigrationResolved, csvMigrationIssues, resolveCsvUValueMeaning, normalizeCsvConstructionProvenance } from '../csvSemanticMigration';
+import { describe, expect, it, vi } from 'vitest';
+import { assertCsvMigrationResolved, csvMigrationIssues, liftStoreyIndexDuctsToMetres, resolveCsvUValueMeaning, normalizeCsvConstructionProvenance } from '../csvSemanticMigration';
 import { createGeometryStore } from '../../../stores/geometryStore';
 import { parseCsvToGeometry } from '../parseCsvToGeometry';
+import { deriveFloorsFromElements, editorFloorsAndElementsForParsedCsv } from '../../../lib/floorDerivation';
+import { validateElementCore } from '../../validation/validateElement';
+import { unavailableGeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../../lib/overrideProvenance';
-import type { Element } from '../../types';
+import type { Element, Floor } from '../../types';
 
 const wall = (id = 'p'): Element => ({ id, name: `Party ${id}`, type: 'BuildingElementPartyWall', zoneId: 'z', width: 2, height: 3, area: 6, parent_element: null, coordinates: [], extra_json: { u_value: .25, advanced: 'keep' } });
 
@@ -337,5 +340,121 @@ Heat Pump,Living,System,HeatSourceWet,,0,"0.000,0.000,0.000","${JSON.stringify(e
   });
   it.each([['AirSourceHeatPump:2721', 9999], ['2721', 2721]])('leaves %s with productID %s untouched and clean', (reference, id) => {
     expect(loadSystem(reference, id)).toEqual({ reference, dirty: false });
+  });
+});
+
+describe('storey-index duct load fix', () => {
+  const floors = [
+    { id: 'f0', name: '0', zIndex: 0, height: 2.5, isRoofSpace: false },
+    { id: 'f1', name: '1', zIndex: 1, height: 2.5, isRoofSpace: false },
+  ] as Floor[];
+  const unit = (z: number): Element => ({ id: 'mv', name: 'MV', type: 'MechanicalVentilation', vent_type: 'MVHR', coordinates: [{ x: 0, y: 0, z }] }) as unknown as Element;
+  const duct = (z0: number, z1 = z0): Element => ({ id: 'd', name: 'D', type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MV', length: 3,
+    coordinates: [{ x: 0, y: 0, z: z0 }, { x: 3, y: 0, z: z1 }] }) as unknown as Element;
+
+  it('lifts a flat duct at the unit storey index to the storey base height, and nothing else', () => {
+    const [, lifted] = liftStoreyIndexDuctsToMetres([unit(1), duct(1)], floors);
+    expect(lifted!.coordinates.map((p) => p.z)).toEqual([2.5, 2.5]);
+    for (const untouched of [[unit(0), duct(0)], [unit(1), duct(1, 1.5)], [unit(1), duct(2.5)], [unit(1), duct(1), unit(1)]]) {
+      expect(liftStoreyIndexDuctsToMetres(untouched, floors)).toBe(untouched);
+    }
+    // Unresolved storey heights: left alone rather than dropped to 0.
+    const noHeights = floors.map((f) => ({ ...f, height: 0 }));
+    const both = [unit(1), duct(1)];
+    expect(liftStoreyIndexDuctsToMetres(both, noHeights)).toBe(both);
+  });
+
+  it('applies on CSV load, keeps the length and leaves the model dirty', () => {
+    vi.useFakeTimers();
+    try {
+      const source = createGeometryStore({ defaultDefaultsPath: null });
+      const { addFloor, addZone, addElements } = source.getState();
+      addFloor('Ground', 2.5, false, 0);
+      const f1 = addFloor('First', 2.5, false, 1);
+      addZone({ name: 'Zone', floorArea: 20, height: 5, volume: 100 });
+      const zoneId = source.getState().zones[0]!.id;
+      addElements([
+        { type: 'BuildingElementOpaque', name: 'Wall', zoneId, height: 2.5, width: 6, area: 15, pitch: 90, base_height: 0,
+          parent_element: null, coordinates: [{ x: 0, y: 0, z: 0 }, { x: 6, y: 0, z: 0 }] },
+        { type: 'MechanicalVentilation', name: 'MV', vent_type: 'MVHR', floorId: f1, coordinates: [{ x: 1, y: 1, z: 1 }] },
+        { type: 'MechanicalVentilationDuctwork', name: 'D', duct_type: 'supply', parent_element: 'MV', length: 3, floorId: f1,
+          coordinates: [{ x: 1, y: 1, z: 1 }, { x: 4, y: 1, z: 1 }] },
+      ] as never);
+      vi.runAllTimers();
+      const csv = source.getState().generateCSV({ allowUnresolvedMigration: true });
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      expect(store.getState().loadFromCSV(csv).upgraded).toBe(true);
+      const loaded = Object.values(store.getState().elementsById).find((el) => el.type === 'MechanicalVentilationDuctwork')!;
+      expect(loaded.coordinates.map((p) => p.z)).toEqual([2.5, 2.5]);
+      expect((loaded as { length?: number }).length).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('storey-index duct load fix: ground base override', () => {
+  it('lifts a ground-floor network to a ground base override, so it meets the unit again', () => {
+    const floors = [{ id: 'f0', name: 'G', zIndex: 0, height: 2.5, isRoofSpace: false, baseHeight: 0.45, baseHeightUserOverride: true }] as Floor[];
+    const unit = { id: 'mv', name: 'MV', type: 'MechanicalVentilation', vent_type: 'MVHR', floorId: 'f0', coordinates: [{ x: 0, y: 0, z: 0 }] } as unknown as Element;
+    const duct = { id: 'd', name: 'D', type: 'MechanicalVentilationDuctwork', duct_type: 'supply', parent_element: 'MV', floorId: 'f0', length: 3,
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }] } as unknown as Element;
+    const [, lifted] = liftStoreyIndexDuctsToMetres([unit, duct], floors);
+    expect(lifted!.coordinates.map((p) => p.z)).toEqual([0.45, 0.45]);
+    const plain = [{ ...floors[0]!, baseHeight: undefined, baseHeightUserOverride: undefined }] as Floor[];
+    const untouched = [unit, duct];
+    expect(liftStoreyIndexDuctsToMetres(untouched, plain)).toBe(untouched);
+  });
+});
+
+describe('CSV-side validation matches the editor', () => {
+  it('gives the same duct connectivity for a model with a storey height override', () => {
+    vi.useFakeTimers();
+    try {
+      const source = createGeometryStore({ defaultDefaultsPath: null });
+      const { addFloor, addZone, addElements } = source.getState();
+      const f0 = addFloor('Ground', 2.5, false, 0);
+      const f1 = addFloor('First', 2.5, false, 1);
+      addZone({ name: 'Zone', floorArea: 20, height: 5, volume: 100 });
+      const zoneId = source.getState().zones[0]!.id;
+      const wall = (name: string, z: number, floorId: string) => ({ type: 'BuildingElementOpaque', name, zoneId, height: 2.5, width: 10,
+        area: 25, pitch: 90, floorId, parent_element: null, coordinates: [{ x: -5, y: -5, z }, { x: 5, y: -5, z }] });
+      addElements([
+        wall('W0', 0, f0), wall('W1', 1, f1),
+        { type: 'MechanicalVentilation', name: 'MV', vent_type: 'MVHR', floorId: f1, coordinates: [{ x: 0, y: 0, z: 1 }] },
+        { type: 'MechanicalVentilationDuctwork', name: 'A', duct_type: 'supply', parent_element: 'MV', length: 4, floorId: f1,
+          coordinates: [{ x: 0, y: 0, z: 2.5 }, { x: 4, y: 0, z: 2.5 }] },
+        { type: 'MechanicalVentilationDuctwork', name: 'B', duct_type: 'supply', parent_element: 'MV', length: 3, floorId: f1,
+          coordinates: [{ x: 0, y: 0, z: 2.5 }, { x: 3, y: 0, z: 2.5 }] },
+      ] as never);
+      // The ground storey is 2.7 m by override, not the 2.5 m its walls give; the ducts follow to 2.7.
+      source.getState().updateFloor(f0, { height: 2.7, heightUserOverride: true });
+      vi.runAllTimers();
+      expect(Object.values(source.getState().elementsById)
+        .filter((el) => el.type === 'MechanicalVentilationDuctwork')
+        .flatMap((el) => el.coordinates.map((p) => p.z))).toEqual([2.7, 2.7, 2.7, 2.7]);
+      const csv = source.getState().generateCSV({ allowUnresolvedMigration: true });
+
+      const findings = (elements: Element[], floors: Floor[]) => {
+        const byId = Object.fromEntries(elements.map((el) => [el.id, el]));
+        return elements
+          .filter((el) => el.type === 'MechanicalVentilation' || el.type === 'MechanicalVentilationDuctwork')
+          .map((el) => [el.name, validateElementCore(el, { elementsById: byId, floors, schemaPort: unavailableGeometrySchemaPort }).warnings
+            .map((w) => w.message).filter((m) => /not connected|Overlaps/.test(m))] as const)
+          .sort();
+      };
+      const editor = createGeometryStore({ defaultDefaultsPath: null });
+      editor.getState().loadFromCSV(csv);
+      const editorState = editor.getState();
+      const csvSide = editorFloorsAndElementsForParsedCsv(parseCsvToGeometry(csv));
+      const expected = findings(Object.values(editorState.elementsById), editorState.floors);
+      expect(findings(csvSide.elements, csvSide.floors)).toEqual(expected);
+      expect(expected.every(([, messages]) => messages.length === 0)).toBe(true);
+      // Floors guessed from coordinates alone (no overrides) put the unit at 2.5 m: the old disagreement.
+      const parsed = parseCsvToGeometry(csv);
+      expect(findings(parsed.elements, deriveFloorsFromElements(parsed.elements))).not.toEqual(expected);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

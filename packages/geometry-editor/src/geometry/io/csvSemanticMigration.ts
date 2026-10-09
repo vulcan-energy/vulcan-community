@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { Element } from '../types';
+import type { Element, Floor } from '../types';
+import { calculateDerivedBaseHeight, getElementCanvasFloorZValue } from '../../lib/elementCanvasFloor';
 
 export type UValueInterpretation = 'whole_wall' | 'half_construction';
 export type CsvMigrationIssue = { elementId: string; elementName: string; value: number; code: 'CSV_U_VALUE_MEANING_REQUIRED' };
@@ -92,6 +93,35 @@ export function upgradePcdbProductReferences(elements: readonly Element[]): Elem
     if (!upgraded) return element;
     changed = true;
     return { ...element, extra_json: next };
+  });
+  return changed ? result : (elements as Element[]);
+}
+
+/** Saves from before ducts started at the unit's height in metres: a duct drawn from a unit on
+ * storey s started at z = s, the unit's storey index (0 on the ground floor, where a base
+ * override still moves the storey). When both ends sit at exactly s and that
+ * storey's base height is not s, both ends move to the base height, so the duct meets the unit
+ * again. Length is unchanged, so HEM output is too. Sloped ducts are left alone (Snap fixes them).
+ * `effectiveFloors` come from `withEffectiveStoreyHeights`. Returns the same array when nothing changed. */
+export function liftStoreyIndexDuctsToMetres(elements: readonly Element[], effectiveFloors: Floor[]): Element[] {
+  const unitStorey = new Map<string, number | undefined>();
+  for (const el of elements) {
+    if (el.type !== 'MechanicalVentilation') continue;
+    const name = el.name.trim();
+    // An ambiguous name has no single unit to follow.
+    unitStorey.set(name, unitStorey.has(name) ? undefined : getElementCanvasFloorZValue(el, effectiveFloors));
+  }
+  let changed = false;
+  const result = elements.map((element) => {
+    if (element.type !== 'MechanicalVentilationDuctwork' || element.coordinates?.length !== 2) return element;
+    const storey = unitStorey.get(element.parent_element?.trim() ?? '');
+    if (storey === undefined || !element.coordinates.every((p) => p.z === storey)) return element;
+    const base = calculateDerivedBaseHeight(storey, effectiveFloors);
+    // Storey 0 moves only for a ground base override. Unresolved heights put every other storey
+    // at 0: leave the duct until they resolve.
+    if (base === storey || (storey > 0 && base <= 0) || (storey < 0 && base >= 0)) return element;
+    changed = true;
+    return { ...element, coordinates: element.coordinates.map((p) => ({ ...p, z: base })) };
   });
   return changed ? result : (elements as Element[]);
 }

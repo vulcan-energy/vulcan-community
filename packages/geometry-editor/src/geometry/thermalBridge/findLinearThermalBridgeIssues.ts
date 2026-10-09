@@ -15,6 +15,7 @@
 import type {
   BuildingElementGround,
   Element,
+  Floor,
   MechanicalVentilationDuctwork,
   ThermalBridgeLinear,
   WaterPipework,
@@ -40,6 +41,7 @@ import { overlapStretchBetweenSegmentElements, type Vec3 } from './linearTbSegme
 import { SERVICE_LINE_ELEMENT_TYPES } from '../../lib/serviceLineDrawModes';
 import { ductEndpoints, ductRunUnitPoint } from '../../lib/mvhrDuctwork';
 import { pointsConnected } from '../../lib/snapUtils';
+import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { basementFloorSurfaceElevationM, isBasementGroundElement } from '../../lib/basementGeometry';
 
 const JUNCTION_SET = new Set(JUNCTION_TYPE_ENUM);
@@ -157,9 +159,13 @@ function basementE22ElevationMessage(
 
 /**
  * All detected issues. Per-TB singleton checks emit at most one issue each (priority chain); pairwise overlap
- * may add further issues so the same TB can appear in multiple issue rows.
+ * may add further issues so the same TB can appear in multiple issue rows. `floors` (the store's, not
+ * yet effective) place each MVHR unit in metres for the duct overlap exemption.
  */
-export function findLinearThermalBridgeIssues(elements: Element[] | ReadonlyArray<Element>): LinearThermalBridgeIssue[] {
+export function findLinearThermalBridgeIssues(
+  elements: Element[] | ReadonlyArray<Element>,
+  floors: Floor[],
+): LinearThermalBridgeIssue[] {
   const list = Array.isArray(elements) ? elements : [...elements];
   const byId: Record<string, Element> = {};
   for (const e of list) {
@@ -352,7 +358,7 @@ export function findLinearThermalBridgeIssues(elements: Element[] | ReadonlyArra
     }
   }
 
-  appendColinearSegmentOverlapIssues(out, list);
+  appendColinearSegmentOverlapIssues(out, list, floors);
 
   return out;
 }
@@ -360,8 +366,8 @@ export function findLinearThermalBridgeIssues(elements: Element[] | ReadonlyArra
 type ColinearOverlapGroup = {
   singular: string;
   riskNote: string;
-  /** Pairs of this type that may legitimately share a stretch. */
-  isExempt: (a: Element, b: Element, list: readonly Element[]) => boolean;
+  /** Pairs of this type that may legitimately share a stretch; `unitPoint` is a duct's reached unit point. */
+  isExempt: (a: Element, b: Element, unitPoint: (duct: Element) => Vec3 | null) => boolean;
 };
 
 /** Identical end to end: both ends coincide (either direction). */
@@ -378,15 +384,15 @@ function sameSegment(a: Element, b: Element): boolean {
  * bundled side by side, so they may share a stretch, unless they are the same segment twice or
  * share a joint away from the unit (one chain folding back on itself).
  */
-function isExemptDuctOverlap(a: Element, b: Element, list: readonly Element[]): boolean {
+function isExemptDuctOverlap(a: Element, b: Element, ductUnitPoint: (duct: Element) => Vec3 | null): boolean {
   const da = a as MechanicalVentilationDuctwork;
   const db = b as MechanicalVentilationDuctwork;
   const parentA = da.parent_element?.trim();
   const parentB = db.parent_element?.trim();
   if (da.duct_type !== db.duct_type || (parentA && parentB && parentA !== parentB)) return true;
   if (sameSegment(a, b)) return false;
-  const unitPoint = ductRunUnitPoint(da, list);
-  if (!unitPoint || !ductRunUnitPoint(db, list)) return false;
+  const unitPoint = ductUnitPoint(da);
+  if (!unitPoint || !ductUnitPoint(db)) return false;
   const ea = ductEndpoints(a)!;
   const eb = ductEndpoints(b)!;
   return !ea.some((p) =>
@@ -455,7 +461,22 @@ function shouldSuppressThermalBridgeColinearOverlapPair(
 }
 
 /** TB × TB, duct × duct, pipe × pipe — not cross-type. */
-function appendColinearSegmentOverlapIssues(out: LinearThermalBridgeIssue[], list: readonly Element[]): void {
+function appendColinearSegmentOverlapIssues(
+  out: LinearThermalBridgeIssue[],
+  list: readonly Element[],
+  floors: Floor[],
+): void {
+  // Each duct's unit point once per pass (resolving it rebuilds the unit's runs), and the
+  // effective floors only when a duct pair needs them.
+  let effectiveFloors: Floor[] | undefined;
+  const unitPointByDuct = new Map<Element, Vec3 | null>();
+  const ductUnitPoint = (duct: Element): Vec3 | null => {
+    if (!unitPointByDuct.has(duct)) {
+      effectiveFloors ??= withEffectiveStoreyHeights(floors, list as Element[]);
+      unitPointByDuct.set(duct, ductRunUnitPoint(duct as MechanicalVentilationDuctwork, list, effectiveFloors));
+    }
+    return unitPointByDuct.get(duct)!;
+  };
   for (const elementType of SERVICE_LINE_ELEMENT_TYPES) {
     const g = COLINEAR_OVERLAP_GROUP_BY_TYPE[elementType];
     const els = list.filter((e) => e.type === elementType && !e.isPlaceholder) as Element[];
@@ -464,7 +485,7 @@ function appendColinearSegmentOverlapIssues(out: LinearThermalBridgeIssue[], lis
         const a = els[i]!;
         const b = els[j]!;
         const stretch = overlapStretchBetweenSegmentElements(a, b);
-        if (!stretch || g.isExempt(a, b, list)) continue;
+        if (!stretch || g.isExempt(a, b, ductUnitPoint)) continue;
         const overlapLen = stretch.length;
         const overlapStretch: [Vec3, Vec3] = [stretch.start, stretch.end];
 

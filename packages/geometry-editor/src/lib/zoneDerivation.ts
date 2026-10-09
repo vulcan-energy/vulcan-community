@@ -5,6 +5,11 @@ import type { Element, Floor, Zone } from '../geometry/types';
 import { calculatePolygonArea } from './polygonSync';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { canvasFloorToFhsStorey, fhsStoreyToCanvasFloor } from './storeySemantics';
+import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, physicalZUsesFloorId } from './elementCanvasFloor';
+
+// Lives beside the storey convention (elementCanvasFloor) so connectivity code can use it without
+// importing this module's polygon and 3D dependencies.
+export { calculateDerivedBaseHeight };
 
 /** One geometry element that contributed to {@link calculateDerivedFloorArea}. */
 export interface FloorAreaContribution {
@@ -28,6 +33,12 @@ export type FloorMoveBaseHeightPatch = {
   _base_height?: number;
   mid_height?: number;
   extra_json?: Record<string, any>;
+  /** Metre-z elements only: vertices carried by their storey's base change. */
+  coordinates?: Element['coordinates'];
+  /** With `coordinates`, when a line's ends moved by different amounts (a riser between storeys). */
+  length?: number;
+  /** A terminal's stored export height follows its point. */
+  mid_height_air_flow_path?: number;
 };
 
 const HORIZONTAL_FLOOR_POLYGON_TYPES: Array<Element['type']> = [
@@ -519,55 +530,6 @@ export function calculateSuggestedVentilationBaseHeight(
 }
 
 /**
- * Calculate the derived base_height for an element based on its Z-level.
- *
- * base_height = the height above ground of the bottom of the element.
- * Computed from an explicit floor base when present, otherwise as the cumulative sum of
- * `floor.height` for every floor below the element's floor.
- *
- * `floor.height` here is expected to be the *effective* storey height — callers should pre-process
- * with {@link withEffectiveStoreyHeights} so wall-derived heights and user overrides are baked in.
- *
- * For Z=0: returns the explicit F1 base when present, otherwise 0.
- * For Z=N (N>=1): uses the explicit base for FN when present, otherwise the stack below it.
- * For Z=-N: uses the explicit base for F-N when present, otherwise the stack above it.
- * Missing floors contribute 0 — callers should `ensureFloorForZ` first. For user-facing base
- * elevation display and validation, use {@link getCumulativeBaseHeightsByFloorId}, which keeps
- * an unresolved base distinct from a real zero elevation.
- */
-export function calculateDerivedBaseHeight(
-  elementZ: number,
-  floors: Floor[],
-): number {
-  const floorZIndex = Math.floor(elementZ);
-  const floorByZ = new Map(floors.map((floor) => [floor.zIndex, floor]));
-  const explicitBase = (floor: Floor | undefined): number | undefined => {
-    if (!floor || floor.baseHeightUserOverride !== true) return undefined;
-    return Number.isFinite(floor.baseHeight) ? floor.baseHeight : undefined;
-  };
-  const heightOf = (floor: Floor | undefined): number =>
-    floor && Number.isFinite(floor.height) && floor.height > 0 ? floor.height : 0;
-
-  let baseHeight = explicitBase(floorByZ.get(0)) ?? 0;
-  if (floorZIndex === 0) return roundToTwoDecimals(baseHeight);
-
-  if (floorZIndex > 0) {
-    for (let z = 0; z < floorZIndex; z++) {
-      const floor = floorByZ.get(z);
-      baseHeight = explicitBase(floor) ?? baseHeight;
-      baseHeight += heightOf(floor);
-    }
-    return roundToTwoDecimals(explicitBase(floorByZ.get(floorZIndex)) ?? baseHeight);
-  }
-
-  for (let z = -1; z >= floorZIndex; z--) {
-    const floor = floorByZ.get(z);
-    baseHeight = explicitBase(floor) ?? baseHeight - heightOf(floor);
-  }
-  return roundToTwoDecimals(baseHeight);
-}
-
-/**
  * Max effective wall height for line walls on a given floor. Returns 0 when no qualifying walls
  * exist. This uses the same vertical line-wall filtering as zone-height derivation: pitched and
  * horizontal surfaces, polygon walls, windows, and external doors are excluded. Polygon walls are
@@ -1021,10 +983,79 @@ export function cascadeFloorStackChange(
 ): Array<{ elementId: string; patch: FloorMoveBaseHeightPatch }> {
   const results: Array<{ elementId: string; patch: FloorMoveBaseHeightPatch }> = [];
   for (const el of elements) {
-    const patch = calculateBaseHeightPatchForFloorStackChange(el, oldFloors, newFloors);
-    if (patch) results.push({ elementId: el.id, patch });
+    const basePatch = calculateBaseHeightPatchForFloorStackChange(el, oldFloors, newFloors);
+    const metrePatch = metreZPatchForFloorStackChange(el, oldFloors, newFloors);
+    if (basePatch || metrePatch) results.push({ elementId: el.id, patch: { ...basePatch, ...metrePatch } });
   }
   return results;
+}
+
+/** Within this of a storey band's bounds a line end still counts as on that storey. */
+const STOREY_BAND_EPS_M = 0.005;
+
+/**
+ * The storey a metre height sits in: the highest storey whose base is at or below it (the lowest
+ * storey when below them all, 0 with no floors). `floors` carry effective storey heights.
+ */
+export function storeyForMetreZ(z: number, floors: Floor[]): number {
+  let storey = floors.length ? Math.min(...floors.map((floor) => floor.zIndex)) : 0;
+  for (const floor of floors) {
+    if (floor.zIndex > storey && calculateDerivedBaseHeight(floor.zIndex, floors) <= z + STOREY_BAND_EPS_M) storey = floor.zIndex;
+  }
+  return storey;
+}
+
+/**
+ * Metre-z elements (ducts, pipes, terminals, TB lines and points) store absolute z, so when a
+ * storey's base moves they move with it, staying connected to the units and plant placed at the
+ * base. Each vertex moves by the base change of the storey it sits on:
+ * - a point takes its floor;
+ * - a line end takes its own floor when it lies within that storey's old band, else the highest
+ *   storey whose old base is at or below it, so a riser's two ends each follow their own storey.
+ *   A duct or pipe end at its storey's ceiling belongs to the storey above (a riser up to a unit
+ *   there); a TB end at the ceiling stays with its wall (a door head).
+ * A line whose ends moved apart gets its length re-derived, when the length was derived.
+ */
+function metreZPatchForFloorStackChange(
+  element: Element,
+  oldFloors: Floor[],
+  newFloors: Floor[],
+): Pick<FloorMoveBaseHeightPatch, 'coordinates' | 'length' | 'mid_height_air_flow_path'> | null {
+  const coords = element.coordinates;
+  if (!physicalZUsesFloorId(element) || !Array.isArray(coords) || coords.length === 0) return null;
+  const own = getElementCanvasFloorZValue(element, oldFloors);
+  if (own === undefined) return null;
+  const oldBase = (z: number) => calculateDerivedBaseHeight(z, oldFloors);
+  const delta = (z: number) => calculateDerivedBaseHeight(z, newFloors) - oldBase(z);
+  const ownBase = oldBase(own);
+  const ownCeiling = ownBase + (oldFloors.find((floor) => floor.zIndex === own)?.height ?? 0);
+  const ceilingIsAbove = element.type === 'MechanicalVentilationDuctwork' || element.type === 'WaterPipework';
+  const storeyOf = (z: number): number => {
+    if (coords.length === 1) return own;
+    if (Math.abs(z - ownBase) <= STOREY_BAND_EPS_M) return own;
+    const top = ceilingIsAbove ? ownCeiling - STOREY_BAND_EPS_M : ownCeiling + STOREY_BAND_EPS_M;
+    return z > ownBase && (ceilingIsAbove ? z < top : z <= top) ? own : storeyForMetreZ(z, oldFloors);
+  };
+  let moved = false;
+  // Rounded to a micrometre only to drop float noise from the addition.
+  const next = coords.map((p) => {
+    const d = delta(storeyOf(p.z));
+    if (Math.abs(d) < 1e-4) return p;
+    moved = true;
+    return { ...p, z: Math.round((p.z + d) * 1e6) / 1e6 };
+  });
+  if (!moved) return null;
+  const midHeight = (element as { mid_height_air_flow_path?: unknown }).mid_height_air_flow_path;
+  if (element.type === 'MechanicalVentilationTerminal' && typeof midHeight === 'number') {
+    return { coordinates: next, mid_height_air_flow_path: roundToTwoDecimals(midHeight + next[0]!.z - coords[0]!.z) };
+  }
+  const length = (element as { length?: unknown }).length;
+  if (coords.length !== 2 || typeof length !== 'number') return { coordinates: next };
+  const span = (c: typeof coords) => Math.hypot(c[1]!.x - c[0]!.x, c[1]!.y - c[0]!.y, c[1]!.z - c[0]!.z);
+  const derived = Math.abs(length - span(coords)) < 0.01;
+  return derived && Math.abs(span(next) - span(coords)) > 1e-6
+    ? { coordinates: next, length: roundToTwoDecimals(span(next)) }
+    : { coordinates: next };
 }
 
 /**

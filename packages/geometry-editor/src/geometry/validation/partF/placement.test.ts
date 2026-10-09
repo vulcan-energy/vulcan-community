@@ -6,8 +6,10 @@
 // The pure logic in partF.ts already has parity with upstream; this file covers the
 // vent-distribution + window-ranking decisions that only this app makes.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { planBackgroundVents } from './placement';
+import { createGeometryStore } from '../../../stores/geometryStore';
+import { getElementCanvasFloorZValue } from '../../../lib/elementCanvasFloor';
 import type { PartFFinding } from './rules';
 import type {
   BuildingElementTransparent,
@@ -453,5 +455,51 @@ describe('planBackgroundVents — summary', () => {
       spaceLabels: [],
     });
     expect(plan!.summary).toMatch(/^1 background vent \(/);
+  });
+});
+
+describe('planBackgroundVents — CSV round trip', () => {
+  it('a vent added from the CTA on an upper storey survives save and load on that storey', () => {
+    vi.useFakeTimers();
+    try {
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      const { addFloor, addZone, addElements } = store.getState();
+      addFloor('Ground', 2.5, false, 0);
+      const f1 = addFloor('First', 2.5, false, 1);
+      addZone({ name: 'Zone', floorArea: 20, height: 5, volume: 100 });
+      const zoneId = store.getState().zones[0]!.id;
+      addElements([
+        { type: 'BuildingElementOpaque', name: 'Wall Up', zoneId, height: 2.5, width: 6, area: 15, pitch: 90, floorId: f1,
+          parent_element: null, coordinates: [{ x: 0, y: 0, z: 1 }, { x: 6, y: 0, z: 1 }] },
+        { type: 'BuildingElementTransparent', name: 'Window Up', zoneId, height: 1, width: 1, area: 1, pitch: 90, floorId: f1,
+          parent_element: 'Wall Up', coordinates: [{ x: 2, y: 0, z: 1 }, { x: 3, y: 0, z: 1 }] },
+      ] as never);
+      vi.runAllTimers();
+      const plan = planBackgroundVents(makeBgAreaContinuousFinding(40, 0), baseInput({ bedrooms: 0, habitableRooms: 1 }), {
+        elements: Object.values(store.getState().elementsById),
+        spaceLabels: [{ ...makeRoomLabel('bedroom', 2.5, 1), storey: 1 }],
+      });
+      store.getState().addElements(plan!.drafts);
+      vi.runAllTimers();
+
+      const ventsOf = (state: ReturnType<typeof store.getState>) =>
+        Object.values(state.elementsById)
+          .filter((el): el is Vents => el.type === 'Vents')
+          .map((vent) => ({
+            parent: vent.parent_element,
+            storey: getElementCanvasFloorZValue(vent, state.floors),
+            mid: vent.mid_height_air_flow_path,
+            area: vent.area_cm2,
+          }));
+      const before = ventsOf(store.getState());
+      expect(before.length).toBe(plan!.drafts.length);
+      expect(before.every((vent) => vent.parent === 'Window Up' && vent.storey === 1)).toBe(true);
+
+      const reloaded = createGeometryStore({ defaultDefaultsPath: null });
+      reloaded.getState().loadFromCSV(store.getState().generateCSV({ allowUnresolvedMigration: true }));
+      expect(ventsOf(reloaded.getState())).toEqual(before);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -56,15 +56,15 @@ describe('proposed junction contract coverage (façade auto tool)', () => {
 
   it('issue finder accepts one minimal TB per proposed code in a single batch', () => {
     const elements = proposed.map((jt, i) => minimalLinearTb(jt, String(i), i));
-    expect(() => findLinearThermalBridgeIssues(elements)).not.toThrow();
-    const issues = findLinearThermalBridgeIssues(elements);
+    expect(() => findLinearThermalBridgeIssues(elements, [])).not.toThrow();
+    const issues = findLinearThermalBridgeIssues(elements, []);
     expect(Array.isArray(issues)).toBe(true);
   });
 
   it('issue finder accepts each proposed code individually', () => {
     for (let i = 0; i < proposed.length; i++) {
       const code = proposed[i]!;
-      expect(() => findLinearThermalBridgeIssues([minimalLinearTb(code, `solo-${i}`)])).not.toThrow();
+      expect(() => findLinearThermalBridgeIssues([minimalLinearTb(code, `solo-${i}`)], [])).not.toThrow();
     }
   });
 });

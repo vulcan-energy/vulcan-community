@@ -84,7 +84,7 @@ export function useAutoThermalBridgePreview(options: {
     candidate.floorStoreyIndexForTb !== undefined && candidate.floorStoreyIndexForTb !== currentFloorZ).length;
   const issues = useMemo(() => {
     if (!enabled) return [];
-    const findings = findLinearThermalBridgeIssues(allElements);
+    const findings = findLinearThermalBridgeIssues(allElements, floors);
     const errorIds = new Set<string>();
     for (const finding of findings) {
       if (finding.severity === 'error') errorIds.add(finding.elementId);

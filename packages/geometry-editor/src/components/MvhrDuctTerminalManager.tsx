@@ -66,15 +66,17 @@ import { Pencil, Plus, X as XIcon } from 'lucide';
 import type { Element } from '../geometry/types';
 import { isGlobalObject, type GeometryStoreApi } from '../stores/geometryStore';
 import {
-  DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M,
   MVHR_DUCT_ROLES,
   MVHR_TERMINAL_ROLES,
+  defaultMvhrTerminalZ,
   hostedMvhrTerminalDraft,
   isMvhrTerminalHost,
   type MvhrDuctRole,
   type MvhrTerminalRole,
 } from '../lib/mvhrDuctwork';
 import { generateUniqueElementName } from '../lib/elementAutoNaming';
+import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, networkPoint3 } from '../lib/elementCanvasFloor';
+import { withEffectiveStoreyHeights } from '../lib/zoneDerivation';
 import { StandardDropdown } from './StandardDropdown';
 import type { ElementFormSelection } from './elementForms/types';
 
@@ -236,6 +238,11 @@ export function useMvhrDuctTerminalManager(args: {
     return element?.type === 'MechanicalVentilation' && element.vent_type === 'MVHR' ? element : null;
   }, [selection, elementsById, getElementById]);
 
+  const effectiveFloors = () => {
+    const state = geometryStore.getState();
+    return withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById));
+  };
+
   const selectElementById = (id: string) => {
     const element = getElementById(id);
     if (!element) return;
@@ -259,8 +266,9 @@ export function useMvhrDuctTerminalManager(args: {
     if (!selectedMvhrUnit?.name) return;
     const existingNames = allElements.map((element) => element.name).filter((name): name is string => !!name);
     const name = generateUniqueElementName(`${role} duct`, existingNames);
-    const anchor = selectedMvhrUnit.coordinates?.[0] ?? { x: 0, y: 0, z: 0 };
-    const z = typeof anchor.z === 'number' && Number.isFinite(anchor.z) ? anchor.z : 0;
+    // The unit in metres: its storey's base height, where ducts drawn from it start.
+    const anchor = networkPoint3(selectedMvhrUnit, effectiveFloors()) ?? { x: 0, y: 0, z: 0 };
+    const z = anchor.z;
     addElement({
       name,
       type: 'MechanicalVentilationDuctwork',
@@ -282,12 +290,13 @@ export function useMvhrDuctTerminalManager(args: {
     const name = generateUniqueElementName(`${role} terminal`, existingNames);
     const firstHost = allElements.find((element) => isMvhrTerminalHost(element));
     const hostCoords = firstHost?.coordinates;
+    const floors = effectiveFloors();
     if (firstHost && hostCoords && hostCoords.length >= 2) {
       addElement({
         ...hostedMvhrTerminalDraft(role, selectedMvhrUnit.name, firstHost, {
           x: (hostCoords[0]!.x + hostCoords[1]!.x) / 2,
           y: (hostCoords[0]!.y + hostCoords[1]!.y) / 2,
-        }),
+        }, floors),
         name,
       } as Omit<Element, 'id'>);
     } else {
@@ -300,7 +309,12 @@ export function useMvhrDuctTerminalManager(args: {
         orientation360: firstHost ? undefined : 0,
         pitch: firstHost ? undefined : 90,
         floorId: firstHost?.floorId ?? selectedMvhrUnit.floorId,
-        coordinates: [selectedMvhrUnit.coordinates?.[0] ?? { x: 0, y: 0, z: DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M }],
+        // At the unit in plan, at the default terminal height on the unit's storey (not its storey-index z).
+        coordinates: [{
+          x: selectedMvhrUnit.coordinates?.[0]?.x ?? 0,
+          y: selectedMvhrUnit.coordinates?.[0]?.y ?? 0,
+          z: defaultMvhrTerminalZ(calculateDerivedBaseHeight(getElementCanvasFloorZValue(selectedMvhrUnit, floors) ?? 0, floors)),
+        }],
       } as Omit<Element, 'id'>);
     }
     selectElementByNameAfterCreate('MechanicalVentilationTerminal', name);
