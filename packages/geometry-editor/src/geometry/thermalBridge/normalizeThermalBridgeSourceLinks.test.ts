@@ -172,4 +172,20 @@ describe('normalizeThermalBridgeSourceLinks', () => {
     );
     expect(written?.thermal_bridge_source).toEqual({ host_wall_id: 'wall-current-id', host_wall_b_id: 'gone-id' });
   });
+
+  it('keeps the resolved id when a record carries both a name and a stale id', () => {
+    const bridge = {
+      type: 'ThermalBridgeLinear',
+      id: 'tb-id',
+      name: 'TB',
+      zoneId: 'z1',
+      parent_element: null,
+      coordinates: [{ x: 0, y: 2, z: 0 }, { x: 9, y: 9, z: 9 }],
+      length: 2.4,
+      linear_thermal_transmittance: 0.06,
+      extra_json: { junction_type: 'E18', thermal_bridge_source: { host_wall_name: 'External wall', host_wall_id: 'stale-id' } },
+    } as ThermalBridgeLinear;
+    const [, normalized] = normalizeThermalBridgeSourceLinks([externalWall, bridge] as Element[]);
+    expect((normalized as ThermalBridgeLinear).extra_json?.thermal_bridge_source).toEqual({ host_wall_id: 'wall-current-id' });
+  });
 });

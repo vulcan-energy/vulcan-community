@@ -13,6 +13,7 @@ import {
  * line endings included, is left as it is.
  */
 export const stripModelVersionRow = (csv: string): string => {
+  // Metadata values are host-set and never contain newlines, so a plain line split is exact here.
   const lines = csv.split('\n');
   if (!lines[0]?.startsWith('Metadata,')) return csv;
   for (let index = 1; index < lines.length; index += 1) {

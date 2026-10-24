@@ -222,7 +222,7 @@ function hostNamesToIds(
   resolveName: NameLookup,
 ): Record<string, unknown> | undefined {
   const next: Record<string, unknown> = {};
-  let resolved = false;
+  const resolvedIdKeys = new Set<string>();
   for (const [key, value] of Object.entries(record)) {
     const idKey = key.replace(/_name$/, '_id');
     const host = idKey !== key && idKeys.has(idKey) && typeof value === 'string'
@@ -230,12 +230,13 @@ function hostNamesToIds(
       : undefined;
     if (host) {
       next[idKey] = host.id;
-      resolved = true;
-    } else {
+      resolvedIdKeys.add(idKey);
+    } else if (!resolvedIdKeys.has(key)) {
       next[key] = value;
     }
   }
-  return resolved ? next : undefined;
+  // An `_id` key placed before its resolved `_name` sibling was overwritten in place above.
+  return resolvedIdKeys.size > 0 ? next : undefined;
 }
 
 /**

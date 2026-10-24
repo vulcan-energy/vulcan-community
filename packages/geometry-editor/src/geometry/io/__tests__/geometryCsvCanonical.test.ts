@@ -3,7 +3,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createGeometryStore } from '../../../stores/geometryStore';
 import { stripModelVersionRow } from '../geometryCsvCanonical';
@@ -132,6 +132,21 @@ describe('shared-model identity rows', () => {
     expect(store.getState().modelId).toBeUndefined();
     expect(store.getState().modelVersion).toBeUndefined();
     expect(store.getState().ensureModelId()).not.toBe(id);
+  });
+
+  it('serialises in load order when element ids are all digits', () => {
+    const sample = sampleCsv();
+    const baseline = loadAndGenerate(sample);
+    // Descending all-digit ids enumerate in reverse load order from `Object.values(elementsById)`.
+    let next = 899999999;
+    const random = vi.spyOn(Math, 'random').mockImplementation(() => (parseInt(String(next--), 36) + 0.5) / 36 ** 9);
+    try {
+      const first = loadAndGenerate(sample);
+      expect(first).toBe(baseline);
+      expect(loadAndGenerate(first)).toBe(baseline);
+    } finally {
+      random.mockRestore();
+    }
   });
 
   it('stamps an id once, sets the version, and clears both on New', () => {

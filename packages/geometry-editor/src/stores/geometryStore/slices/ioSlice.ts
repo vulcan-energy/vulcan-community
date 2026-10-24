@@ -351,10 +351,32 @@ const formatLooseOptionalCsvCell = (value: unknown): string =>
   value == null || value === '' ? '' : String(value);
 
 const getElementsOfType = <T extends Element['type']>(
-  elementsById: Record<string, Element>,
+  elements: readonly Element[],
   type: T,
 ): ElementByType<T>[] =>
-  Object.values(elementsById).filter((element): element is ElementByType<T> => element.type === type);
+  elements.filter((element): element is ElementByType<T> => element.type === type);
+
+/**
+ * Elements in load order (`elementIds`). `Object.values(elementsById)` is not: an all-digit id
+ * (about 7e-6 of `generateId` output) is an integer-like key and enumerates first, which would move
+ * that element to the top of its CSV section and re-number its siblings on the next load.
+ */
+const elementsInLoadOrder = (state: Pick<GeometryState, 'elementIds' | 'elementsById'>): Element[] => {
+  const ordered: Element[] = [];
+  const seen = new Set<string>();
+  for (const id of state.elementIds) {
+    const element = state.elementsById[id];
+    if (element && !seen.has(id)) {
+      ordered.push(element);
+      seen.add(id);
+    }
+  }
+  // ponytail: ids missing from elementIds keep enumeration order rather than being dropped.
+  for (const [id, element] of Object.entries(state.elementsById)) {
+    if (!seen.has(id)) ordered.push(element);
+  }
+  return ordered;
+};
 
 const isOriginPoint = (point: unknown): boolean => {
   if (!point || typeof point !== 'object') return false;
@@ -685,6 +707,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         OVERRIDE_PROVENANCE_REGISTRY.spaceLabel,
       ),
     };
+    const exportElements = elementsInLoadOrder(state);
     const lines: string[] = [];
 
     const ensureColumnCount = (row: string[], expectedCount: number): string => {
@@ -716,7 +739,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     if (state.modelVersion !== undefined) lines.push(`ModelVersion,${state.modelVersion},,,,,,,,,,,,,`);
     if (options.modelSchemaProfilePort.availability === 'available') {
       const modelSchemaProfile = options.modelSchemaProfilePort.metadataValueForElements(
-        Object.values(state.elementsById),
+        exportElements,
       );
       lines.push(`SchemaProfile,${modelSchemaProfile},,,,,,,,,,,,,`);
     }
@@ -827,7 +850,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // (`partFEffectiveContext.ts`). When that resolver gains a new field, all
     // three call sites pick it up.
     // ----------------------------------------------------------------
-    const allElementsForExport = Object.values(state.elementsById);
+    const allElementsForExport = exportElements;
     const dd = resolveEffectiveDwellingDetails({
       zones: state.zones,
       elementsById: state.elementsById,
@@ -1062,7 +1085,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       lines.push('');
     }
 
-    const opaqueElements = getElementsOfType(state.elementsById, 'BuildingElementOpaque');
+    const opaqueElements = getElementsOfType(exportElements, 'BuildingElementOpaque');
     if (opaqueElements.length > 0) {
       const exposedHeader = [...EXPECTED_SECTION_HEADERS['Exposed Elements']];
       const exposedColumnCount = exposedHeader.length;
@@ -1102,7 +1125,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       lines.push('');
     }
 
-    const transparentElements = getElementsOfType(state.elementsById, 'BuildingElementTransparent');
+    const transparentElements = getElementsOfType(exportElements, 'BuildingElementTransparent');
     if (transparentElements.length > 0) {
       const windowHeader = [...EXPECTED_SECTION_HEADERS['Window Elements']];
       const windowColumnCount = windowHeader.length;
@@ -1184,7 +1207,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 4. Window Shading section
-    const windowShadingElements = getElementsOfType(state.elementsById, 'WindowShading');
+    const windowShadingElements = getElementsOfType(exportElements, 'WindowShading');
     if (windowShadingElements.length > 0) {
       const shadingHeader = [...EXPECTED_SECTION_HEADERS['Window Shading']];
       const shadingColumnCount = shadingHeader.length;
@@ -1223,7 +1246,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 5. Lighting section (explicit elements only; no per-zone autofill)
-    const lightingElements = getElementsOfType(state.elementsById, 'Lighting');
+    const lightingElements = getElementsOfType(exportElements, 'Lighting');
 
     if (lightingElements.length > 0) {
       const lightingHeader = [...EXPECTED_SECTION_HEADERS.Lighting];
@@ -1256,7 +1279,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 6. Ground Elements section
-    const groundElements = getElementsOfType(state.elementsById, 'BuildingElementGround');
+    const groundElements = getElementsOfType(exportElements, 'BuildingElementGround');
     if (groundElements.length > 0) {
       const groundHeader = [...EXPECTED_SECTION_HEADERS['Ground Elements']];
       const groundColumnCount = groundHeader.length;
@@ -1292,7 +1315,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 7. Non-Exposed Elements section
-    const nonExposedElements = Object.values(state.elementsById).filter((e): e is NonExposedElement =>
+    const nonExposedElements = exportElements.filter((e): e is NonExposedElement =>
       (
         e.type === 'BuildingElementAdjacentConditionedSpace'
         || e.type === 'BuildingElementAdjacentUnconditionedSpace_Simple'
@@ -1332,7 +1355,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 8. Thermal Bridging Elements section
-    const thermalBridgeElements = Object.values(state.elementsById).filter((e): e is ThermalBridgeElement =>
+    const thermalBridgeElements = exportElements.filter((e): e is ThermalBridgeElement =>
       (e.type === 'ThermalBridgeLinear' || e.type === 'ThermalBridgePoint')
     );
     if (thermalBridgeElements.length > 0) {
@@ -1341,7 +1364,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
       lines.push('Thermal Bridging Elements,,,,,,,,,');
       lines.push(ensureColumnCount(bridgeHeader, bridgeColumnCount));
-      const resolveHostName = createElementNameLookup(Object.values(state.elementsById));
+      const resolveHostName = createElementNameLookup(exportElements);
       thermalBridgeElements.forEach(element => {
         const extraJson = thermalBridgeExtraJsonForCsv(element.extra_json, element.zoneId, state.elementsById, resolveHostName);
         const zone = resolveZoneForExport(element);
@@ -1364,7 +1387,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 9. Ventilation Systems section
-    const ventilationElements = Object.values(state.elementsById).filter((e): e is VentilationElement =>
+    const ventilationElements = exportElements.filter((e): e is VentilationElement =>
       (
         e.type === 'MechanicalVentilation' ||
         e.type === 'Vents' ||
@@ -1417,7 +1440,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 10. Combustion Appliances section
-    const combustionElements = getElementsOfType(state.elementsById, 'CombustionAppliances');
+    const combustionElements = getElementsOfType(exportElements, 'CombustionAppliances');
     if (combustionElements.length > 0) {
       const combustionHeader = [...EXPECTED_SECTION_HEADERS['Combustion Appliances']];
       const combustionColumnCount = combustionHeader.length;
@@ -1442,7 +1465,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 11. Water Pipework section
-    const pipeworkElements = Object.values(state.elementsById).filter((e): e is ElementByType<'WaterPipework'> =>
+    const pipeworkElements = exportElements.filter((e): e is ElementByType<'WaterPipework'> =>
       e.type === 'WaterPipework' &&
       (!compliance.complianceValidationEnabled || (e.pipework_type ?? 'primary') !== 'distribution')
     );
@@ -1468,7 +1491,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 12. Wet Emitters section
-    const wetEmitterElements = getElementsOfType(state.elementsById, 'WetEmitter');
+    const wetEmitterElements = getElementsOfType(exportElements, 'WetEmitter');
     if (wetEmitterElements.length > 0) {
       const emittersHeader = [...EXPECTED_SECTION_HEADERS['Wet Emitters']];
       const emittersColumnCount = emittersHeader.length;
@@ -1497,7 +1520,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 13. Appliances section
-    const applianceElements = getElementsOfType(state.elementsById, 'Appliance');
+    const applianceElements = getElementsOfType(exportElements, 'Appliance');
     if (applianceElements.length > 0) {
       const appliancesHeader = [...EXPECTED_SECTION_HEADERS.Appliances];
       const appliancesColumnCount = appliancesHeader.length;
@@ -1519,7 +1542,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 14. Hot Water Outlets section
-    const hotWaterElements = getElementsOfType(state.elementsById, 'HotWaterDemand');
+    const hotWaterElements = getElementsOfType(exportElements, 'HotWaterDemand');
     if (hotWaterElements.length > 0) {
       const hotWaterHeader = [...EXPECTED_SECTION_HEADERS['Hot Water Outlets']];
       const hotWaterColumnCount = hotWaterHeader.length;
@@ -1552,7 +1575,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 15. Context Shading section (headers from `geometryCsvLayouts`)
-    const contextShadingElements = getElementsOfType(state.elementsById, 'ContextShading');
+    const contextShadingElements = getElementsOfType(exportElements, 'ContextShading');
     if (contextShadingElements.length > 0) {
       const contextHeader = [...EXPECTED_SECTION_HEADERS['Context Shading']];
       const contextColumnCount = contextHeader.length;
@@ -1580,7 +1603,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 16. On-Site Generation section
-    const onSiteElements = getElementsOfType(state.elementsById, 'OnSiteGeneration');
+    const onSiteElements = getElementsOfType(exportElements, 'OnSiteGeneration');
     if (onSiteElements.length > 0) {
       const onSiteHeader = [...EXPECTED_SECTION_HEADERS['On-Site Generation']];
       const onSiteColumnCount = onSiteHeader.length;
@@ -1613,8 +1636,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 17. Systems section (ElectricBattery + System)
-    const batteryElements = getElementsOfType(state.elementsById, 'ElectricBattery');
-    const systemElements = getElementsOfType(state.elementsById, 'System');
+    const batteryElements = getElementsOfType(exportElements, 'ElectricBattery');
+    const systemElements = getElementsOfType(exportElements, 'System');
     if (batteryElements.length > 0 || systemElements.length > 0) {
       // subcategory doubles as battery column for ElectricBattery rows
       const systemsHeader = [...EXPECTED_SECTION_HEADERS.Systems];
