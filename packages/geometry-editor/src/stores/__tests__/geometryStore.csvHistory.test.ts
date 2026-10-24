@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createGeometryStore } from '../geometryStore';
-import { HISTORY_CAPTURE_QUIET_MS } from '../geometryStore/slices/historySlice';
+import { GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS, HISTORY_CAPTURE_QUIET_MS } from '../geometryStore/slices/historySlice';
 
 type Store = ReturnType<typeof createGeometryStore>;
 
@@ -201,12 +201,30 @@ describe('CSV document history', () => {
     const store = loadedStore();
     for (const value of ['1', '11', '110']) {
       store.getState().setComplianceSettings({ ColdWaterSource: value });
-      vi.advanceTimersByTime(HISTORY_CAPTURE_QUIET_MS - 100);
+      // Longer than the dirty debounce, shorter than the capture window: one step, not three.
+      vi.advanceTimersByTime(GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS + 50);
     }
     settle();
     expect(store.getState().history).toHaveLength(2);
     store.getState().undo();
     expect(store.getState().complianceSettings.ColdWaterSource).not.toBe('11');
+  });
+
+  it('does not leave currentFloorId dangling after undoing a new document\'s first wall', () => {
+    const store = createGeometryStore();
+    store.getState().clearAll();
+    settle();
+    store.getState().addZone({ name: 'Living', floorArea: 25, height: 2.4, volume: 60 });
+    const zoneId = store.getState().zones[0].id;
+    store.getState().addElements([{
+      zoneId, name: 'wall1', type: 'BuildingElementOpaque', width: 5, height: 2.4, area: 12,
+      pitch: 90, orientation360: 180, base_height: 0, parent_element: null,
+    }] as Parameters<ReturnType<typeof store.getState>['addElements']>[0]);
+    settle();
+    expect(store.getState().canUndo).toBe(true);
+    store.getState().undo();
+    const { currentFloorId, floors } = store.getState();
+    expect(currentFloorId === null || floors.some((floor) => floor.id === currentFloorId)).toBe(true);
   });
 
   it('keeps the space labeller selection across undo', () => {
