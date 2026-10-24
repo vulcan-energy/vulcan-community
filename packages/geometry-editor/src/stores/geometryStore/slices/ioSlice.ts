@@ -711,6 +711,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       `${VULCAN_CSV_VERSION_METADATA_KEY},${exportVersion},,,,,,,,,,,,,`,
     );
     if (state.targetBundleId) lines.push(`TargetBundleId,${escapeCSV(state.targetBundleId)},,,,,,,,,,,,,`);
+    if (state.modelId) lines.push(`ModelId,${escapeCSV(state.modelId)},,,,,,,,,,,,,`);
+    if (state.modelVersion !== undefined) lines.push(`ModelVersion,${state.modelVersion},,,,,,,,,,,,,`);
     if (options.modelSchemaProfilePort.availability === 'available') {
       const modelSchemaProfile = options.modelSchemaProfilePort.metadataValueForElements(
         Object.values(state.elementsById),
@@ -1788,6 +1790,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       targetBundleId: metadata.targetBundleId,
       targetValidation: null,
       propertyPostcode: metadata.propertyPostcode,
+      modelId: metadata.modelId,
+      modelVersion: metadata.modelVersion,
     });
     {
       const overlayByFloor = metadata.guideOverlayByFloor ?? {};
