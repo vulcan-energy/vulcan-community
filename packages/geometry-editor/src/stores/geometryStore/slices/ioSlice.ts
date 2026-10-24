@@ -1767,9 +1767,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels, metadata, warnings: parseWarnings } =
       parseCsvToGeometry(csvContent, {
         hostDocumentMetadataKeys: options.hostDocumentMetadataKeys,
+        assignIds: replace
+          ? ({ zones, elements, spaceLabels }) => reuseKnownIds(get(), knownIds, zones, elements, spaceLabels)
+          : undefined,
       });
     if (replace) {
-      reuseKnownIds(get(), knownIds, newZones, newElements, newSpaceLabels);
       // The entry's floors (empty ones included) come back with their ids;
       // ensureFloorForZ below reuses them and adds any the elements still need.
       set({ floors: replace.floors, floorIds: replace.floors.map((floor) => floor.id) });

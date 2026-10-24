@@ -238,6 +238,11 @@ export type ParsedCsvGeometry = {
 
 export type ParseCsvToGeometryOptions = Readonly<{
   hostDocumentMetadataKeys?: readonly string[];
+  /**
+   * Replaces freshly minted ids (in place) before anything links by id, so
+   * thermal-bridge host links resolve to the assigned ids. Used by Undo/Redo.
+   */
+  assignIds?: (parsed: { zones: Zone[]; elements: Element[]; spaceLabels: SpaceLabel[] }) => void;
 }>;
 
 export const parseCsvToGeometry = (
@@ -651,6 +656,7 @@ export const parseCsvToGeometry = (
     sections,
     parseExtraJson,
   );
+  options.assignIds?.({ zones: newZones, elements: newElements, spaceLabels: newSpaceLabels });
 
   const csvVersion = parseVulcanCsvVersion(detectedVulcanCsvVersion);
   const authorityVersion = overrideAuthorityVersion(csvVersion, detectedProvenanceMarkersVersion);
