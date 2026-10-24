@@ -1343,7 +1343,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       lines.push(ensureColumnCount(bridgeHeader, bridgeColumnCount));
       const resolveHostName = createElementNameLookup(Object.values(state.elementsById));
       thermalBridgeElements.forEach(element => {
-        const extraJson = thermalBridgeExtraJsonForCsv(element.extra_json, state.elementsById, resolveHostName);
+        const extraJson = thermalBridgeExtraJsonForCsv(element.extra_json, element.zoneId, state.elementsById, resolveHostName);
         const zone = resolveZoneForExport(element);
         if (zone) {
           const bridgeRow = [

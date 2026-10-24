@@ -141,7 +141,7 @@ describe('normalizeThermalBridgeSourceLinks', () => {
     } as ThermalBridgeLinear;
     const elements = [externalWall, partyWall, bridge] as Element[];
     const byId = Object.fromEntries(elements.map((element) => [element.id, element]));
-    const written = thermalBridgeExtraJsonForCsv(bridge.extra_json, byId, createElementNameLookup(elements));
+    const written = thermalBridgeExtraJsonForCsv(bridge.extra_json, 'z1', byId, createElementNameLookup(elements));
     expect(written).toEqual({
       junction_type: 'E18',
       thermal_bridge_source: { host_wall_name: 'External wall', host_wall_b_name: 'Party wall', note: 'keep' },
@@ -165,7 +165,8 @@ describe('normalizeThermalBridgeSourceLinks', () => {
     const elements = [externalWall, twin] as Element[];
     const byId = Object.fromEntries(elements.map((element) => [element.id, element]));
     const written = thermalBridgeExtraJsonForCsv(
-      { thermal_bridge_source: { host_wall_id: 'wall-current-id', host_wall_b_id: 'gone-id' } },
+      { thermal_bridge_source: { host_wall_name: 'stale', host_wall_id: 'wall-current-id', host_wall_b_id: 'gone-id' } },
+      'z1',
       byId,
       createElementNameLookup(elements),
     );

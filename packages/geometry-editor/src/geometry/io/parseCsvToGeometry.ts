@@ -322,7 +322,8 @@ export const parseCsvToGeometry = (
     }
     if (hostMetadataKey === 'ModelVersion') {
       const rawVersion = metadataFields[1]?.trim() ?? '';
-      if (/^\d+$/.test(rawVersion)) detectedModelVersion = Number.parseInt(rawVersion, 10);
+      const version = /^\d+$/.test(rawVersion) ? Number(rawVersion) : NaN;
+      if (Number.isSafeInteger(version)) detectedModelVersion = version;
       continue;
     }
     if (hostMetadataKey === VULCAN_CSV_VERSION_METADATA_KEY) {

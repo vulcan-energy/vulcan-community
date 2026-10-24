@@ -36,7 +36,10 @@ export interface MetadataSlice {
   ensureModelId: () => string;
   /** Shared-model base version row `ModelVersion`; excluded from the content hash. */
   modelVersion?: number;
+  /** Ignores anything but `undefined` or a non-negative safe integer. */
   setModelVersion: (version: number | undefined) => void;
+  /** Clears `modelId` and `modelVersion`, so a duplicate mints a new id via `ensureModelId`. */
+  resetModelId: () => void;
   // Guide Overlay (floorplan tracing) — per-floor records with inherit-from-below semantics.
   // `guideOverlay` / `guideOverlaySource` are denormalized views of the active floor (resolved
   // via `currentFloorZ`); `*ByFloor` maps hold the source of truth.
@@ -149,7 +152,11 @@ export const createMetadataSlice = (
     set({ modelId });
     return modelId;
   },
-  setModelVersion: (version) => set({ modelVersion: version }),
+  setModelVersion: (version) => {
+    if (version !== undefined && !(Number.isSafeInteger(version) && version >= 0)) return;
+    set({ modelVersion: version });
+  },
+  resetModelId: () => set({ modelId: undefined, modelVersion: undefined }),
   setGuideOverlay: (overlay: GuideOverlay | null) => {
     set((state) => {
       const floorZ = state.currentFloorZ ?? 0;

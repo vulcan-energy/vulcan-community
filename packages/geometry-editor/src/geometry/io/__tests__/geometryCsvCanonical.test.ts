@@ -42,6 +42,26 @@ const sampleCsv = (): string => {
   return lines.join('\n');
 };
 
+// Two zones each with a wall named "Wall 1": names are unique per zone, not per model.
+const TWO_ZONE_CSV = `Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+VulcanCsvVersion,3,,,,,,,,,,,,,
+,,,,,,,,,,,,
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Zone A,Zone,60,25,2.4,FALSE
+Zone B,Zone,60,25,2.4,FALSE
+
+Exposed Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Wall 1,Zone A,BuildingElementOpaque,12,90,5,2.4,180,0,FALSE,FALSE,,"0.000,0.000,0.000|5.000,0.000,0.000","{""_name_auto_sync"":false}"
+Wall 1,Zone B,BuildingElementOpaque,12,90,5,2.4,180,0,FALSE,FALSE,,"10.000,0.000,0.000|15.000,0.000,0.000","{""_name_auto_sync"":false}"
+
+Thermal Bridging Elements,,,,,,,,,
+Name,Zone,Type,heat_transfer_coeff,length,linear_thermal_transmittance,parent_element,coords,extra_json
+TB 1,Zone B,ThermalBridgeLinear,,2.4,0.06,,"10.000,0.000,0.000|10.000,0.000,2.400","{""junction_type"":""E18"",""thermal_bridge_source"":{""host_wall_name"":""Wall 1""},""_vulcan_ui_tb_adjacent_element_name"":""Wall 1""}"
+`;
+
 const loadAndGenerate = (csv: string): string => {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   store.getState().loadFromCSV(csv);
@@ -80,6 +100,40 @@ describe('shared-model identity rows', () => {
     expect(store.getState().generateCSV()).not.toMatch(/^Model(Id|Version),/m);
   });
 
+  it('serialises thermal-bridge hosts by name, resolved within the bridge zone', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().loadFromCSV(TWO_ZONE_CSV);
+    const first = store.getState().generateCSV();
+    const reloaded = createGeometryStore({ defaultDefaultsPath: null });
+    reloaded.getState().loadFromCSV(first);
+    expect(reloaded.getState().generateCSV()).toBe(first);
+
+    expect(first).toContain('""host_wall_name"":""Wall 1""');
+    expect(first).toContain('""_vulcan_ui_tb_adjacent_element_name"":""Wall 1""');
+    const { elementsById, zones } = reloaded.getState();
+    for (const id of Object.keys(elementsById)) expect(first).not.toContain(id);
+    const bridge = Object.values(elementsById).find((element) => element.type === 'ThermalBridgeLinear')!;
+    const extra = bridge.extra_json as { thermal_bridge_source: { host_wall_id: string }; _vulcan_ui_tb_adjacent_element_id: string };
+    const zoneB = zones.find((zone) => zone.name === 'Zone B')!;
+    for (const hostId of [extra.thermal_bridge_source.host_wall_id, extra._vulcan_ui_tb_adjacent_element_id]) {
+      expect(elementsById[hostId]).toMatchObject({ name: 'Wall 1', zoneId: zoneB.id });
+    }
+  });
+
+  it('range-checks ModelVersion and resets the identity for a duplicate', () => {
+    const unsafe = parseCsvToGeometry(sampleCsv().replace('ModelVersion,7,', 'ModelVersion,9007199254740993,'));
+    expect(unsafe.metadata.modelVersion).toBeUndefined();
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().setModelVersion(4);
+    for (const bad of [-1, 1.5, Number.NaN, 2 ** 53]) store.getState().setModelVersion(bad);
+    expect(store.getState().modelVersion).toBe(4);
+    const id = store.getState().ensureModelId();
+    store.getState().resetModelId();
+    expect(store.getState().modelId).toBeUndefined();
+    expect(store.getState().modelVersion).toBeUndefined();
+    expect(store.getState().ensureModelId()).not.toBe(id);
+  });
+
   it('stamps an id once, sets the version, and clears both on New', () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
     const id = store.getState().ensureModelId();
@@ -99,5 +153,7 @@ describe('shared-model identity rows', () => {
     expect(stripModelVersionRow(stripped)).toBe(stripped);
     const generated = loadAndGenerate(sampleCsv());
     expect(stripModelVersionRow(generated)).toBe(generated.replace('ModelVersion,7,,,,,,,,,,,,,\n', ''));
+    const elementNamedModelVersion = 'Metadata,,\nModelId,x,,\n,,,\nZone,,\nModelVersion,Zone,,\n';
+    expect(stripModelVersionRow(elementNamedModelVersion)).toBe(elementNamedModelVersion);
   });
 });

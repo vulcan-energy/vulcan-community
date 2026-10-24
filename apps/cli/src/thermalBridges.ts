@@ -97,7 +97,7 @@ export function printAutoCsvSection({ proposals, elementsById, zones }: ReturnTy
       .join('|');
     const src = thermalBridgeSourceExtraJsonForAutoProposal(p, elementsById);
     const extraJson = src
-      ? `"${JSON.stringify(thermalBridgeExtraJsonForCsv({ thermal_bridge_source: src }, elementsById, resolveHostName)).replace(/"/g, '""')}"`
+      ? `"${JSON.stringify(thermalBridgeExtraJsonForCsv({ thermal_bridge_source: src }, p.zoneId, elementsById, resolveHostName)).replace(/"/g, '""')}"`
       : '';
     console.log(
       [
