@@ -3983,14 +3983,6 @@
       "classification": "public_community_test_suite"
     },
     {
-      "path": "packages/geometry-editor/src/lib/__tests__/geometryHistorySnapshot.test.ts",
-      "source_path": "packages/geometry-editor/src/lib/__tests__/geometryHistorySnapshot.test.ts",
-      "license": "AGPL-3.0-only",
-      "additional_terms": "Vulcan-Origin-Terms-1.0",
-      "rights_status": "approved",
-      "classification": "public_community_test_suite"
-    },
-    {
       "path": "packages/geometry-editor/src/lib/__tests__/geometryPerf.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/geometryPerf.test.ts",
       "license": "AGPL-3.0-only",
@@ -4841,14 +4833,6 @@
     {
       "path": "packages/geometry-editor/src/lib/geometryHistoryDebug.ts",
       "source_path": "packages/geometry-editor/src/lib/geometryHistoryDebug.ts",
-      "license": "AGPL-3.0-only",
-      "additional_terms": "Vulcan-Origin-Terms-1.0",
-      "rights_status": "approved",
-      "classification": "public_canonical_editor_dependency"
-    },
-    {
-      "path": "packages/geometry-editor/src/lib/geometryHistorySnapshot.ts",
-      "source_path": "packages/geometry-editor/src/lib/geometryHistorySnapshot.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
