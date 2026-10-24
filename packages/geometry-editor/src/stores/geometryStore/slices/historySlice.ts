@@ -105,6 +105,36 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     logGeometryHistory('capture:push', { label, historyIndex: history.length - 1 });
   };
 
+  const goTo = (index: number) => {
+    // An edit still inside the debounce window is a step of its own.
+    capture('auto');
+    const state = get();
+    const target = state.historyIndex + index;
+    const entry = state.history[target];
+    if (!entry) return;
+    try {
+      state.replaceDocumentFromCsv(entry.csv, { currentFloorId: entry.currentFloorId });
+    } catch (error) {
+      console.error('[GeometryHistory] could not restore history entry:', error);
+      return;
+    }
+    // Store the text the editor now emits, so a round-trip difference is not
+    // captured later as a new edit that discards the redo stack.
+    let csv = entry.csv;
+    try {
+      csv = getDocumentCsv();
+    } catch { /* keep the entry text */ }
+    const history = state.history.slice();
+    history[target] = { ...entry, csv };
+    setHistory({
+      history,
+      historyIndex: target,
+      canUndo: target > 0,
+      canRedo: target < history.length - 1,
+    });
+    logGeometryHistory(index < 0 ? 'undo:applied' : 'redo:applied', { toIndex: target });
+  };
+
   // The one document pass: every store change schedules a capture.
   api.subscribe((state, previous) => {
     if (isHistoryOnlyChange(state, previous)) return;
@@ -135,8 +165,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
       setHistory({ history: [], historyIndex: -1, canUndo: false, canRedo: false });
       capture(label);
     },
-    // Restored from entry text in the next commit (needs the replace path).
-    undo: () => {},
-    redo: () => {},
+    undo: () => goTo(-1),
+    redo: () => goTo(1),
   };
 };

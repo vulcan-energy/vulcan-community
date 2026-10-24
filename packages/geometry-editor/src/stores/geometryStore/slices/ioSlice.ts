@@ -37,7 +37,7 @@ import {
 import { resolveBuildingElementPitch } from '../../../geometry/derivePitchFromGeometry';
 import { formatCoords } from '../../../geometry/coords';
 import { roundToTwoDecimals } from '../../../geometry/constants';
-import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel } from '../../../geometry/types';
+import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
 import type { GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
@@ -135,6 +135,11 @@ export interface IoSlice {
     csvContent: string,
     loadOptions?: { keepUnchangedDefaults?: boolean },
   ) => { warnings: string[]; upgraded: boolean };
+  /**
+   * Internal (Undo/Redo): make `csvContent` the document without resetting history,
+   * the saved baseline or the viewport; surviving element and zone ids and the selection stay.
+   */
+  replaceDocumentFromCsv: (csvContent: string, options: { currentFloorId: string | null }) => void;
   /** CSV at the moment of the last successful save or load; null until either occurs. */
   lastSavedCsv: string | null;
   /** Set after a successful save or load. */
@@ -169,6 +174,51 @@ type ServiceLineFloorElement =
   | ElementByType<'WaterPipework'>
   | ElementByType<'MechanicalVentilationDuctwork'>
   | ElementByType<'ThermalBridgePoint'>;
+
+type KnownIds = { zones: Map<string, string>; elements: Map<string, string>; floors: Map<number, Floor> };
+
+const elementIdentity = (element: Element): string => `${element.type}\u0000${element.name}`;
+
+function rememberIds(state: GeometryState, known: KnownIds): void {
+  for (const zone of state.zones) known.zones.set(zone.name, zone.id);
+  for (const id of state.elementIds) {
+    const element = state.elementsById[id];
+    if (element) known.elements.set(elementIdentity(element), id);
+  }
+}
+
+/**
+ * Parsing mints fresh ids. A history replace gives elements (by type and name)
+ * and zones (by name) the id they had at load or at the last replace, so
+ * selection, open panels and id-keyed UI state carry across Undo/Redo.
+ */
+function reuseKnownIds(
+  state: GeometryState,
+  known: KnownIds,
+  zones: Zone[],
+  elements: Element[],
+  spaceLabels: SpaceLabel[],
+): void {
+  rememberIds(state, known);
+  const used = new Set<string>();
+  const zoneIdMap = new Map<string, string>();
+  for (const zone of zones) {
+    const id = known.zones.get(zone.name);
+    if (id === undefined || used.has(id)) continue;
+    used.add(id);
+    zoneIdMap.set(zone.id, id);
+    zone.id = id;
+  }
+  for (const element of elements) {
+    const id = known.elements.get(elementIdentity(element));
+    if (id !== undefined && !used.has(id)) {
+      used.add(id);
+      element.id = id;
+    }
+    if (element.zoneId) element.zoneId = zoneIdMap.get(element.zoneId) ?? element.zoneId;
+  }
+  for (const label of spaceLabels) label.zoneId = zoneIdMap.get(label.zoneId) ?? label.zoneId;
+}
 
 function invalidatePendingDefaultsWork(scheduler: LoadedCsvWorkScheduler): number {
   scheduler.defaultsVersion += 1;
@@ -600,8 +650,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     defaultsVersion: 0,
     defaultsRetryTimers: new Set(),
   };
+  let knownIds: KnownIds = { zones: new Map(), elements: new Map(), floors: new Map() };
 
-  return (set, get) => ({
+  return (set, get) => {
+  const slice: IoSlice = {
   sourceCsvVersion: CURRENT_VULCAN_CSV_VERSION,
   sourceProvenanceMarkersVersion: undefined,
   csvUpgradeRequested: false,
@@ -1654,11 +1706,44 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     return csvContent;
   },
 
-  loadFromCSV: (csvContent, loadOptions) => {
+  loadFromCSV: (csvContent, loadOptions) => applyCsvDocument(csvContent, loadOptions),
+  replaceDocumentFromCsv: (csvContent, { currentFloorId }) => {
+    applyCsvDocument(csvContent, { keepUnchangedDefaults: true }, { currentFloorId });
+  },
+  };
+
+  /**
+   * Parses a CSV and makes it the store's document. Load also resets the view,
+   * re-baselines and seeds history; a history `replace` does none of those,
+   * restores the entry's floor and keeps surviving ids and selection.
+   */
+  function applyCsvDocument(
+    csvContent: string,
+    loadOptions: { keepUnchangedDefaults?: boolean } | undefined,
+    replace?: { currentFloorId: string | null },
+  ): { warnings: string[]; upgraded: boolean } {
     const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels, metadata, warnings: parseWarnings } =
       parseCsvToGeometry(csvContent, {
         hostDocumentMetadataKeys: options.hostDocumentMetadataKeys,
       });
+    let floorSetChanged = false;
+    if (replace) {
+      reuseKnownIds(get(), knownIds, newZones, newElements, newSpaceLabels);
+      // Offer floors pruned by earlier replaces back to ensureFloorForZ, ids and all.
+      set((current) => {
+        const restored = [...knownIds.floors.values()].filter(
+          (floor) => !current.floors.some((existing) => existing.zIndex === floor.zIndex),
+        );
+        if (restored.length === 0) return current;
+        floorSetChanged = true;
+        return {
+          floors: [...current.floors, ...restored],
+          floorIds: [...current.floorIds, ...restored.map((floor) => floor.id)],
+        };
+      });
+    } else {
+      knownIds = { zones: new Map(), elements: new Map(), floors: new Map() };
+    }
     const duplicateNameWarnings = collectDuplicateElementNameWarnings(newElements, newZones);
 
     const spaceLabelsById: Record<string, SpaceLabel> = {};
@@ -1985,6 +2070,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       floors: applyFloorBaseHeightOverrides(
         applyFloorHeightOverrides(state.floors, metadata.floorHeightOverrides),
         metadata.floorBaseHeightOverrides,
+      ).map((floor) =>
+        // A replace leaves an unsaved Floor.height exactly as a fresh load would (0 = derived).
+        replace && !floor[FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR.flag] && floor.height !== 0 ? { ...floor, height: 0 } : floor,
       ),
     }));
 
@@ -2130,7 +2218,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       elementIds,
       spaceLabelsById,
       spaceLabelIds,
-      canvasViewResetKey: (get().canvasViewResetKey ?? 0) + 1,
+      ...(replace ? {} : { canvasViewResetKey: (get().canvasViewResetKey ?? 0) + 1 }),
     });
 
     // Missing name markers deliberately degrade to the existing naming heuristic in every
@@ -2155,15 +2243,52 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       get().setComplianceSettings(complianceFromLabels);
     }
 
+    if (replace) {
+      // Floors are derived from elements: keep the ones in use and the restored view's.
+      set((current) => {
+        const usedFloorIds = new Set(Object.values(current.elementsById).map((element) => element.floorId));
+        usedFloorIds.add(replace.currentFloorId ?? undefined);
+        for (const floor of current.floors) if (!usedFloorIds.has(floor.id)) knownIds.floors.set(floor.zIndex, floor);
+        const kept = current.floors.filter((floor) => usedFloorIds.has(floor.id));
+        const topZ = Math.max(0, ...kept.map((floor) => floor.zIndex));
+        // Same roof-space rule as addFloor/removeFloor, only when the floor set changed.
+        if (!floorSetChanged && kept.length === current.floors.length) return current;
+        return {
+          floors: kept.map((floor) => ({ ...floor, isRoofSpace: floor.zIndex === topZ && floor.zIndex > 0 })),
+          floorIds: current.floorIds.filter((id) => usedFloorIds.has(id)),
+          currentFloorId: usedFloorIds.has(current.currentFloorId ?? undefined) ? current.currentFloorId : null,
+        };
+      });
+    }
+
     const state = get();
     const floorsWithElements = state.floors.filter(floor =>
       Object.values(state.elementsById).some(element => element.floorId === floor.id)
     );
 
-    if (floorsWithElements.length > 0) {
+    const keptFloorId = replace?.currentFloorId;
+    if (keptFloorId && state.floors.some((floor) => floor.id === keptFloorId)) {
+      get().setCurrentFloor(keptFloorId);
+    } else if (floorsWithElements.length > 0) {
       get().setCurrentFloor(floorsWithElements[0].id);
     }
     void get().syncAutoGeneratedElementNames();
+    if (replace) {
+      // Selection survives by id: reuseKnownIds kept the ids of surviving elements and zones.
+      set((current) => {
+        const sel = current.selection;
+        const selectionSurvives =
+          !sel ||
+          sel.type === 'global' ||
+          sel.type === 'dormer' ||
+          (sel.type === 'zone' ? current.zones.some((zone) => zone.id === sel.id) : sel.id in current.elementsById);
+        return {
+          selectedElementIds: current.selectedElementIds.filter((id) => id in current.elementsById),
+          selection: selectionSurvives ? sel : null,
+        };
+      });
+      return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded: false };
+    }
 
     // Round-trip through the canonical serializer after all synchronous load
     // normalization, before control returns to callers that may edit immediately.
@@ -2179,10 +2304,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       set({ elementsById: { ...get().elementsById, ...Object.fromEntries(upgradedElements.map(el => [el.id, el])) } });
     }
     // Load is a history boundary: the loaded document is the only entry.
+    rememberIds(get(), knownIds);
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
     return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded };
-  },
-  });
+  }
+
+  return slice;
+  };
 };
