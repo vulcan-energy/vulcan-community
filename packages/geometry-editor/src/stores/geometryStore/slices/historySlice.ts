@@ -4,17 +4,28 @@
 import type { StateCreator } from 'zustand';
 import { logGeometryHistory } from '../../../lib/geometryHistoryDebug';
 import type { GeometryState } from '../../geometryStore';
+import type { Floor } from '../../../geometry/types';
 
 /**
- * Debounce between geometry-state changes and the next document pass (history
- * capture and the dirty check). Short enough that the chip feels responsive
- * after the user stops editing, long enough to skip sustained typing or drags.
+ * Debounce between geometry-state changes and the next dirty check. Short
+ * enough that the chip feels responsive after the user stops editing.
  */
 export const GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS = 150;
 
-/** One undo step: the document exactly as Save would write it. */
+/**
+ * Quiet window before a change becomes an undo step. Longer than the dirty
+ * check so per-keystroke field commits coalesce into one step; the capture
+ * reuses the text the dirty check already generated for the same state.
+ */
+export const HISTORY_CAPTURE_QUIET_MS = 300;
+
+/**
+ * One undo step: the document exactly as Save would write it, plus the floor
+ * list (Save does not persist empty floors). Entries compare by `csv` only.
+ */
 export type HistoryEntry = {
   csv: string;
+  floors: Floor[];
   currentFloorId: string | null;
   label: string;
 };
@@ -91,10 +102,19 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
       return;
     }
     const state = get();
-    if (state.history[state.historyIndex]?.csv === csv) return;
+    const head = state.history[state.historyIndex];
+    if (head?.csv === csv) {
+      // Same document; an empty floor added or removed since still belongs to this step.
+      if (head.floors !== state.floors) {
+        const history = state.history.slice();
+        history[state.historyIndex] = { ...head, floors: state.floors };
+        setHistory({ history });
+      }
+      return;
+    }
     const history = [
       ...state.history.slice(0, state.historyIndex + 1),
-      { csv, currentFloorId: state.currentFloorId, label },
+      { csv, floors: state.floors, currentFloorId: state.currentFloorId, label },
     ].slice(-state.maxHistorySize);
     setHistory({
       history,
@@ -113,7 +133,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     const entry = state.history[target];
     if (!entry) return;
     try {
-      state.replaceDocumentFromCsv(entry.csv, { currentFloorId: entry.currentFloorId });
+      state.replaceDocumentFromCsv(entry.csv, { currentFloorId: entry.currentFloorId, floors: entry.floors });
     } catch (error) {
       console.error('[GeometryHistory] could not restore history entry:', error);
       return;
@@ -125,7 +145,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
       csv = getDocumentCsv();
     } catch { /* keep the entry text */ }
     const history = state.history.slice();
-    history[target] = { ...entry, csv };
+    history[target] = { ...entry, csv, floors: get().floors };
     setHistory({
       history,
       historyIndex: target,
@@ -135,14 +155,14 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     logGeometryHistory(index < 0 ? 'undo:applied' : 'redo:applied', { toIndex: target });
   };
 
-  // The one document pass: every store change schedules a capture.
+  // Every document change (re)starts the capture window.
   api.subscribe((state, previous) => {
     if (isHistoryOnlyChange(state, previous)) return;
     if (captureTimer !== null) clearTimeout(captureTimer);
     captureTimer = setTimeout(() => {
       captureTimer = null;
       capture('auto');
-    }, GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS);
+    }, HISTORY_CAPTURE_QUIET_MS);
   });
 
   return {

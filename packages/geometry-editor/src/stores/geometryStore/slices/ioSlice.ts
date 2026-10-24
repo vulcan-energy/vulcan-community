@@ -139,7 +139,10 @@ export interface IoSlice {
    * Internal (Undo/Redo): make `csvContent` the document without resetting history,
    * the saved baseline or the viewport; surviving element and zone ids and the selection stay.
    */
-  replaceDocumentFromCsv: (csvContent: string, options: { currentFloorId: string | null }) => void;
+  replaceDocumentFromCsv: (
+    csvContent: string,
+    options: { currentFloorId: string | null; floors: Floor[] },
+  ) => void;
   /** CSV at the moment of the last successful save or load; null until either occurs. */
   lastSavedCsv: string | null;
   /** Set after a successful save or load. */
@@ -175,22 +178,45 @@ type ServiceLineFloorElement =
   | ElementByType<'MechanicalVentilationDuctwork'>
   | ElementByType<'ThermalBridgePoint'>;
 
-type KnownIds = { zones: Map<string, string>; elements: Map<string, string>; floors: Map<number, Floor> };
+type KnownIds = {
+  zones: Map<string, string>;
+  /** zone name + type + name */
+  elements: Map<string, string>;
+  /** type + name; null when more than one element had it */
+  elementsByName: Map<string, string | null>;
+  /** zone name + label name */
+  labels: Map<string, string>;
+};
 
-const elementIdentity = (element: Element): string => `${element.type}\u0000${element.name}`;
+const emptyKnownIds = (): KnownIds => ({
+  zones: new Map(), elements: new Map(), elementsByName: new Map(), labels: new Map(),
+});
+
+const nameKey = (element: Element): string => `${element.type}\u0000${element.name}`;
+const zonedKey = (zoneName: string, key: string): string => `${zoneName}\u0000${key}`;
 
 function rememberIds(state: GeometryState, known: KnownIds): void {
+  const zoneName = new Map(state.zones.map((zone) => [zone.id, zone.name]));
   for (const zone of state.zones) known.zones.set(zone.name, zone.id);
+  const byName = new Map<string, string | null>();
   for (const id of state.elementIds) {
     const element = state.elementsById[id];
-    if (element) known.elements.set(elementIdentity(element), id);
+    if (!element) continue;
+    known.elements.set(zonedKey(zoneName.get(element.zoneId ?? '') ?? '', nameKey(element)), id);
+    byName.set(nameKey(element), byName.has(nameKey(element)) ? null : id);
+  }
+  for (const [key, id] of byName) known.elementsByName.set(key, id);
+  for (const id of state.spaceLabelIds) {
+    const label = state.spaceLabelsById[id];
+    if (label) known.labels.set(zonedKey(zoneName.get(label.zoneId) ?? '', label.name), id);
   }
 }
 
 /**
- * Parsing mints fresh ids. A history replace gives elements (by type and name)
- * and zones (by name) the id they had at load or at the last replace, so
- * selection, open panels and id-keyed UI state carry across Undo/Redo.
+ * Parsing mints fresh ids. A history replace gives zones (by name), elements
+ * (by zone name + type + name, or type + name when that alone was unique) and
+ * space labels (by zone name + label name) the id they had at load or at the
+ * last replace, so selection, open panels and id-keyed UI carry across Undo/Redo.
  */
 function reuseKnownIds(
   state: GeometryState,
@@ -200,24 +226,40 @@ function reuseKnownIds(
   spaceLabels: SpaceLabel[],
 ): void {
   rememberIds(state, known);
+  const parsedZoneName = new Map(zones.map((zone) => [zone.id, zone.name]));
   const used = new Set<string>();
+  const claim = (id: string | null | undefined): string | undefined => {
+    if (!id || used.has(id)) return undefined;
+    used.add(id);
+    return id;
+  };
   const zoneIdMap = new Map<string, string>();
   for (const zone of zones) {
-    const id = known.zones.get(zone.name);
-    if (id === undefined || used.has(id)) continue;
-    used.add(id);
+    const id = claim(known.zones.get(zone.name));
+    if (id === undefined) continue;
     zoneIdMap.set(zone.id, id);
     zone.id = id;
   }
+  // Exact zone matches first, so a same-named element elsewhere cannot take their id.
+  const unmatched: Element[] = [];
   for (const element of elements) {
-    const id = known.elements.get(elementIdentity(element));
-    if (id !== undefined && !used.has(id)) {
-      used.add(id);
-      element.id = id;
-    }
+    const zoneName = parsedZoneName.get(element.zoneId ?? '') ?? '';
+    const id = claim(known.elements.get(zonedKey(zoneName, nameKey(element))));
+    if (id !== undefined) element.id = id;
+    else unmatched.push(element);
+  }
+  for (const element of unmatched) {
+    const id = claim(known.elementsByName.get(nameKey(element)));
+    if (id !== undefined) element.id = id;
+  }
+  for (const element of elements) {
     if (element.zoneId) element.zoneId = zoneIdMap.get(element.zoneId) ?? element.zoneId;
   }
-  for (const label of spaceLabels) label.zoneId = zoneIdMap.get(label.zoneId) ?? label.zoneId;
+  for (const label of spaceLabels) {
+    const id = claim(known.labels.get(zonedKey(parsedZoneName.get(label.zoneId) ?? '', label.name)));
+    if (id !== undefined) label.id = id;
+    label.zoneId = zoneIdMap.get(label.zoneId) ?? label.zoneId;
+  }
 }
 
 function invalidatePendingDefaultsWork(scheduler: LoadedCsvWorkScheduler): number {
@@ -650,7 +692,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     defaultsVersion: 0,
     defaultsRetryTimers: new Set(),
   };
-  let knownIds: KnownIds = { zones: new Map(), elements: new Map(), floors: new Map() };
+  let knownIds = emptyKnownIds();
 
   return (set, get) => {
   const slice: IoSlice = {
@@ -1707,8 +1749,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   },
 
   loadFromCSV: (csvContent, loadOptions) => applyCsvDocument(csvContent, loadOptions),
-  replaceDocumentFromCsv: (csvContent, { currentFloorId }) => {
-    applyCsvDocument(csvContent, { keepUnchangedDefaults: true }, { currentFloorId });
+  replaceDocumentFromCsv: (csvContent, { currentFloorId, floors }) => {
+    applyCsvDocument(csvContent, { keepUnchangedDefaults: true }, { currentFloorId, floors });
   },
   };
 
@@ -1720,29 +1762,19 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   function applyCsvDocument(
     csvContent: string,
     loadOptions: { keepUnchangedDefaults?: boolean } | undefined,
-    replace?: { currentFloorId: string | null },
+    replace?: { currentFloorId: string | null; floors: Floor[] },
   ): { warnings: string[]; upgraded: boolean } {
     const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels, metadata, warnings: parseWarnings } =
       parseCsvToGeometry(csvContent, {
         hostDocumentMetadataKeys: options.hostDocumentMetadataKeys,
       });
-    let floorSetChanged = false;
     if (replace) {
       reuseKnownIds(get(), knownIds, newZones, newElements, newSpaceLabels);
-      // Offer floors pruned by earlier replaces back to ensureFloorForZ, ids and all.
-      set((current) => {
-        const restored = [...knownIds.floors.values()].filter(
-          (floor) => !current.floors.some((existing) => existing.zIndex === floor.zIndex),
-        );
-        if (restored.length === 0) return current;
-        floorSetChanged = true;
-        return {
-          floors: [...current.floors, ...restored],
-          floorIds: [...current.floorIds, ...restored.map((floor) => floor.id)],
-        };
-      });
+      // The entry's floors (empty ones included) come back with their ids;
+      // ensureFloorForZ below reuses them and adds any the elements still need.
+      set({ floors: replace.floors, floorIds: replace.floors.map((floor) => floor.id) });
     } else {
-      knownIds = { zones: new Map(), elements: new Map(), floors: new Map() };
+      knownIds = emptyKnownIds();
     }
     const duplicateNameWarnings = collectDuplicateElementNameWarnings(newElements, newZones);
 
@@ -2070,9 +2102,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       floors: applyFloorBaseHeightOverrides(
         applyFloorHeightOverrides(state.floors, metadata.floorHeightOverrides),
         metadata.floorBaseHeightOverrides,
-      ).map((floor) =>
-        // A replace leaves an unsaved Floor.height exactly as a fresh load would (0 = derived).
-        replace && !floor[FLOOR_HEIGHT_OVERRIDE_DESCRIPTOR.flag] && floor.height !== 0 ? { ...floor, height: 0 } : floor,
       ),
     }));
 
@@ -2241,24 +2270,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     if (Object.keys(complianceFromLabels).length > 0) {
       get().setComplianceSettings(complianceFromLabels);
-    }
-
-    if (replace) {
-      // Floors are derived from elements: keep the ones in use and the restored view's.
-      set((current) => {
-        const usedFloorIds = new Set(Object.values(current.elementsById).map((element) => element.floorId));
-        usedFloorIds.add(replace.currentFloorId ?? undefined);
-        for (const floor of current.floors) if (!usedFloorIds.has(floor.id)) knownIds.floors.set(floor.zIndex, floor);
-        const kept = current.floors.filter((floor) => usedFloorIds.has(floor.id));
-        const topZ = Math.max(0, ...kept.map((floor) => floor.zIndex));
-        // Same roof-space rule as addFloor/removeFloor, only when the floor set changed.
-        if (!floorSetChanged && kept.length === current.floors.length) return current;
-        return {
-          floors: kept.map((floor) => ({ ...floor, isRoofSpace: floor.zIndex === topZ && floor.zIndex > 0 })),
-          floorIds: current.floorIds.filter((id) => usedFloorIds.has(id)),
-          currentFloorId: usedFloorIds.has(current.currentFloorId ?? undefined) ? current.currentFloorId : null,
-        };
-      });
     }
 
     const state = get();
