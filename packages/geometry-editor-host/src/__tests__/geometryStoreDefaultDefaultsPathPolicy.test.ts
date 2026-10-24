@@ -78,4 +78,42 @@ describe('geometry store default defaults-path policy', () => {
     store.getState().resetGeometryDocumentForAccountBoundary();
     expect(store.getState().defaultsPath).toBeUndefined();
   });
+
+  it('keepUnchangedDefaults skips re-reading unchanged defaults and psi tables; default loads still re-read', async () => {
+    const csv = [
+      'Metadata,,,,,,,,,,,,,',
+      'DefaultsPath,input/defaults/community.json,,,,,,,,,,,,',
+      'JunctionPsiDefaultsPath,input/psi.csv,,,,,,,,,,,,',
+      'Zone,,,,',
+      '',
+    ].join('\n');
+    const readText = vi.fn(async (path: string) => (path.endsWith('.json') ? '{"a":1}' : ''));
+    const store = createGeometryStore({ workspaceResourcePort: createWorkspaceResourcePort(readText) });
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    store.getState().loadFromCSV(csv);
+    await settle();
+    expect(store.getState().defaultsJson).toEqual({ a: 1 });
+    expect(readText).toHaveBeenCalledTimes(2);
+
+    store.getState().loadFromCSV(csv, { keepUnchangedDefaults: true });
+    expect(store.getState().defaultsJson).toEqual({ a: 1 });
+    await settle();
+    expect(readText).toHaveBeenCalledTimes(2);
+
+    // A different DefaultsPath is not "unchanged": the option must still re-read it.
+    const csvOtherDefaults = csv.replace('input/defaults/community.json', 'input/defaults/other.json');
+    store.getState().loadFromCSV(csvOtherDefaults, { keepUnchangedDefaults: true });
+    expect(store.getState().defaultsJson).toBeNull();
+    await settle();
+    expect(readText).toHaveBeenCalledWith('input/defaults/other.json');
+    expect(readText).toHaveBeenCalledTimes(3);
+    expect(store.getState().defaultsJson).toEqual({ a: 1 });
+
+    store.getState().loadFromCSV(csv);
+    expect(store.getState().defaultsJson).toBeNull();
+    await settle();
+    expect(readText).toHaveBeenCalledTimes(5);
+    expect(store.getState().defaultsJson).toEqual({ a: 1 });
+  });
 });
