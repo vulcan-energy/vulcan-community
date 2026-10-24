@@ -974,7 +974,12 @@ describe('connected drag (Alt)', () => {
     vi.useFakeTimers();
     try {
       const store = createGeometryStore({ defaultDefaultsPath: null });
-      for (const el of Object.values(run())) store.getState().addElement({ ...el, id: undefined } as never);
+      // History entries are the saved CSV, so the wall needs a zone to be exportable.
+      store.getState().addZone({ name: 'Zone', floorArea: 20, height: 2.4, volume: 48 });
+      const zoneId = store.getState().zones[0]!.id;
+      for (const el of Object.values(run())) {
+        store.getState().addElement({ ...el, id: undefined, ...(el.type === 'BuildingElementOpaque' ? { zoneId } : {}) } as never);
+      }
       vi.runAllTimers();
       const byId = store.getState().elementsById;
       const idOf = (name: string) => Object.values(byId).find((el) => el.name === name)!.id;

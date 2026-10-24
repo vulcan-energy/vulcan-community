@@ -710,19 +710,14 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
   it('groups one multi-element edit into one undo step and restores both elements', () => {
     vi.useFakeTimers();
     const { store } = mount([
-      lighting('a', { efficacy: 90, count: 4, power: 8 }),
-      lighting('b', { efficacy: 80, count: 2, power: 6 }),
+      // History entries are the saved CSV, so the fixture must be exportable.
+      lighting('a', { efficacy: 90, count: 4, power: 8, zoneId: 'zone' }),
+      lighting('b', { efficacy: 80, count: 2, power: 6, zoneId: 'zone' }),
     ]);
     act(() => store.getState().saveToHistory('fixture baseline'));
-    const originalSaveToHistory = store.getState().saveToHistory;
-    const saveToHistory = vi.fn((...args: Parameters<typeof originalSaveToHistory>) => (
-      originalSaveToHistory(...args)
-    ));
-    act(() => store.setState({ saveToHistory }));
     fireEvent.change(input('Efficacy'), { target: { value: '110' } });
-    expect(saveToHistory).not.toHaveBeenCalled();
+    expect(store.getState().history).toHaveLength(1);
     act(() => vi.advanceTimersByTime(350));
-    expect(saveToHistory).toHaveBeenCalledExactlyOnceWith('debounced-flush');
     expect(store.getState().history).toHaveLength(2);
     expect(store.getState().canUndo).toBe(true);
     act(() => store.getState().undo());
