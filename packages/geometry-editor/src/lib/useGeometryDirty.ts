@@ -7,12 +7,12 @@ import {
   type GeometryStoreApi,
 } from '../stores/geometryStore';
 
-/**
- * Debounce window between geometry-state changes and the next dirty check.
- * 150ms is short enough that the chip feels responsive after the user stops editing,
- * long enough that we skip recomputes during sustained typing or drag operations.
- */
-export const GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS = 150;
+import {
+  GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS,
+  isHistoryOnlyChange,
+} from '../stores/geometryStore/slices/historySlice';
+
+export { GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS };
 
 /**
  * Runs one document refresh immediately, then coalesces geometry-store changes.
@@ -26,7 +26,9 @@ export function subscribeToDebouncedGeometryChanges(
   refresh();
 
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const unsubscribe = store.subscribe(() => {
+  const unsubscribe = store.subscribe((state, previous) => {
+    // History capture runs on the same debounce; its push must not restart this one.
+    if (isHistoryOnlyChange(state, previous)) return;
     if (timer !== null) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
@@ -52,8 +54,8 @@ export function subscribeToDebouncedGeometryChanges(
  * last successful save or load. `false` when the model matches its on-disk baseline (or no baseline exists yet —
  * a brand-new draft reads as clean until the user edits it).
  *
- * Implementation note: runs `generateCSV()` and string-compares against `lastSavedCsv` after a debounce.
- * `generateCSV()` is non-trivial on large models; the debounce keeps it off the typing hot path.
+ * Implementation note: string-compares `getDocumentCsv()` against `lastSavedCsv` after a debounce.
+ * The text is shared with history capture, so each store state is serialized once.
  */
 export function useGeometryDirty(): boolean {
   const store = useGeometryStoreApi();
@@ -67,7 +69,7 @@ export function useGeometryDirty(): boolean {
         return;
       }
       try {
-        setIsDirty(state.generateCSV({ allowUnresolvedMigration: true }) !== state.lastSavedCsv);
+        setIsDirty(state.getDocumentCsv() !== state.lastSavedCsv);
       } catch (error) {
         // generateCSV fails loudly when elements reference missing zones; the
         // save flow surfaces that error to the user. For the dirty indicator,

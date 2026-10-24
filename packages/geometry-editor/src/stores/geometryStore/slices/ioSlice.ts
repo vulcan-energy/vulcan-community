@@ -92,7 +92,6 @@ import {
 import { syncSpaceHeatSystemZoneNameInExtraJson } from '../../../lib/spaceHeatSystemSync';
 import { windowSecurityRiskDefaultForElement } from '../../../lib/windowSecurityRisk';
 import { collectDuplicateElementNameWarnings } from '../../../lib/elementNameDuplicates';
-import { buildHistoryDocumentSnapshotFromState } from '../../../lib/geometryHistorySnapshot';
 import { isMvhrTerminalHost } from '../../../lib/mvhrDuctwork';
 import {
   applyFloorBaseHeightOverrides,
@@ -151,10 +150,7 @@ export type IoSliceOptions = Readonly<{
   workspaceResourcePort: GeometryWorkspaceResourcePort;
   hostDocumentMetadataKeys: readonly string[];
 }>;
-type CancelScheduledWork = () => void;
 type LoadedCsvWorkScheduler = {
-  cancelPending: CancelScheduledWork | null;
-  version: number;
   defaultsVersion: number;
   defaultsRetryTimers: Set<ReturnType<typeof globalThis.setTimeout>>;
 };
@@ -173,53 +169,6 @@ type ServiceLineFloorElement =
   | ElementByType<'WaterPipework'>
   | ElementByType<'MechanicalVentilationDuctwork'>
   | ElementByType<'ThermalBridgePoint'>;
-
-function scheduleIdleWork(callback: () => void): CancelScheduledWork {
-  if (
-    typeof globalThis.requestIdleCallback === 'function' &&
-    typeof globalThis.cancelIdleCallback === 'function'
-  ) {
-    const id = globalThis.requestIdleCallback(callback, { timeout: 1200 });
-    return () => globalThis.cancelIdleCallback(id);
-  }
-
-  const id = globalThis.setTimeout(callback, 180);
-  return () => globalThis.clearTimeout(id);
-}
-
-function scheduleLoadedCsvBaseline(
-  get: () => GeometryState,
-  set: (partial: Partial<GeometryState>) => void,
-  scheduler: LoadedCsvWorkScheduler,
-  loadedCsvBaseline: string,
-): void {
-  scheduler.cancelPending?.();
-  const version = ++scheduler.version;
-
-  set({
-    history: [],
-    historyIndex: -1,
-    canUndo: false,
-    canRedo: false,
-    // Capture the normalized loaded document synchronously. Idle history work
-    // may observe later edits, but it must never redefine what was loaded.
-    lastSavedCsv: loadedCsvBaseline,
-  });
-
-  scheduler.cancelPending = scheduleIdleWork(() => {
-    if (version !== scheduler.version) return;
-    scheduler.cancelPending = null;
-    const state = get();
-    const snapshot = buildHistoryDocumentSnapshotFromState(state) as GeometryState['history'][number];
-
-    set({
-      history: [snapshot],
-      historyIndex: 0,
-      canUndo: false,
-      canRedo: false,
-    });
-  });
-}
 
 function invalidatePendingDefaultsWork(scheduler: LoadedCsvWorkScheduler): number {
   scheduler.defaultsVersion += 1;
@@ -646,10 +595,8 @@ const migrateElementsToNormalized = (
 
 export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   // Scheduling belongs to this store instance. Separate editor stores must not
-  // cancel or version one another's post-load history work.
+  // cancel or version one another's pending defaults reads.
   const loadedCsvWorkScheduler: LoadedCsvWorkScheduler = {
-    cancelPending: null,
-    version: 0,
     defaultsVersion: 0,
     defaultsRetryTimers: new Set(),
   };
@@ -677,9 +624,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   lastSavedCsv: null,
   setLastSavedCsv: (csv) => set({ lastSavedCsv: csv }),
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => {
-    loadedCsvWorkScheduler.cancelPending?.();
-    loadedCsvWorkScheduler.cancelPending = null;
-    loadedCsvWorkScheduler.version += 1;
     invalidatePendingDefaultsWork(loadedCsvWorkScheduler);
   },
 
@@ -2234,7 +2178,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     if (upgraded) {
       set({ elementsById: { ...get().elementsById, ...Object.fromEntries(upgradedElements.map(el => [el.id, el])) } });
     }
-    scheduleLoadedCsvBaseline(get, set, loadedCsvWorkScheduler, loadedCsvBaseline);
+    // Load is a history boundary: the loaded document is the only entry.
+    set({ lastSavedCsv: loadedCsvBaseline });
+    get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
     return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded };
   },
