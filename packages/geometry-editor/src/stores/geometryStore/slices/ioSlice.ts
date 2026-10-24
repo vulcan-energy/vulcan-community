@@ -73,6 +73,7 @@ import {
   resolveThermalBridgeLinearFloorIdAfterHostsReady,
 } from '../../../lib/thermalBridgeFloorIngest';
 import { createElementNameLookup } from '../../../lib/elementNameRemap';
+import { thermalBridgeExtraJsonForCsv } from '../../../geometry/thermalBridge/normalizeThermalBridgeSourceLinks';
 import {
   encodePromotedExtraJsonFields,
   EXPECTED_SECTION_HEADERS,
@@ -1340,7 +1341,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
       lines.push('Thermal Bridging Elements,,,,,,,,,');
       lines.push(ensureColumnCount(bridgeHeader, bridgeColumnCount));
+      const resolveHostName = createElementNameLookup(Object.values(state.elementsById));
       thermalBridgeElements.forEach(element => {
+        const extraJson = thermalBridgeExtraJsonForCsv(element.extra_json, state.elementsById, resolveHostName);
         const zone = resolveZoneForExport(element);
         if (zone) {
           const bridgeRow = [
@@ -1352,7 +1355,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(element.type === 'ThermalBridgeLinear' ? element.linear_thermal_transmittance : ''),
             escapeCSV(element.parent_element || ''),
             formatElementCoordsForCsv(element),
-            escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
+            escapeCSVJson(extraJson ? JSON.stringify(extraJson) : '')
           ];
           lines.push(ensureColumnCount(bridgeRow, bridgeColumnCount));
         }

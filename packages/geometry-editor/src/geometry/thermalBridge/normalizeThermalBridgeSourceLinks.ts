@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, ThermalBridgeLinear } from '../types';
+import { createElementNameLookup } from '../../lib/elementNameRemap';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { proposeAutoThermalBridges } from './autoThermalBridgePipeline';
 import { tbPlanAnchorXY } from './linearTbCornerValidation';
+import { VULCAN_UI_TB_ADJACENT_ELEMENT_ID_KEY } from './linearTbPsi';
 import { overlapLengthBetweenSegmentElements } from './linearTbSegmentOverlap';
 import {
   E16_E17_CORNER_PLAN_TOL_M,
@@ -172,15 +174,101 @@ function segmentsSubstantiallyMatch(
     Math.abs(segmentLength(tb.coordinates) - proposal.suggestedLengthM) <= 0.02;
 }
 
+/** `_id` keys holding runtime element ids; the CSV carries the matching `_name` key instead. */
+const SOURCE_HOST_ID_KEYS = new Set(['host_wall_id', 'host_wall_b_id', 'host_floor_id']);
+const EXTRA_JSON_HOST_ID_KEYS = new Set<string>([VULCAN_UI_TB_ADJACENT_ELEMENT_ID_KEY]);
+
+type NameLookup = ReturnType<typeof createElementNameLookup>;
+
+function hostIdsToNames(
+  record: Record<string, unknown>,
+  idKeys: ReadonlySet<string>,
+  elementsById: Record<string, Element>,
+  resolveName: NameLookup,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const host = idKeys.has(key) && typeof value === 'string' ? elementsById[value] : undefined;
+    if (host?.name && resolveName(host.name) === host) {
+      next[key.replace(/_id$/, '_name')] = host.name.trim();
+    } else if (!(key in next)) {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+function hostNamesToIds(
+  record: Record<string, unknown>,
+  idKeys: ReadonlySet<string>,
+  resolveName: NameLookup,
+): Record<string, unknown> | undefined {
+  const next: Record<string, unknown> = {};
+  let resolved = false;
+  for (const [key, value] of Object.entries(record)) {
+    const idKey = key.replace(/_name$/, '_id');
+    const host = idKey !== key && idKeys.has(idKey) && typeof value === 'string' ? resolveName(value) : undefined;
+    if (host) {
+      next[idKey] = host.id;
+      resolved = true;
+    } else {
+      next[key] = value;
+    }
+  }
+  return resolved ? next : undefined;
+}
+
+/**
+ * CSV form of a thermal bridge's `extra_json`. Runtime host ids (`thermal_bridge_source.host_wall_id`,
+ * `host_wall_b_id`, `host_floor_id` and `_vulcan_ui_tb_adjacent_element_id`) are written as the host's
+ * name under the matching `_name` key, the identity a CSV keeps across parses. An id whose host is
+ * missing or whose name is not unique in the model is written as the id, as before; reload then
+ * relinks a source from geometry.
+ */
+export function thermalBridgeExtraJsonForCsv(
+  extraJson: Record<string, unknown> | undefined,
+  elementsById: Record<string, Element>,
+  resolveName: NameLookup,
+): Record<string, unknown> | undefined {
+  if (!extraJson) return extraJson;
+  const next = hostIdsToNames(extraJson, EXTRA_JSON_HOST_ID_KEYS, elementsById, resolveName);
+  const source = asRecord(next.thermal_bridge_source);
+  if (source) next.thermal_bridge_source = hostIdsToNames(source, SOURCE_HOST_ID_KEYS, elementsById, resolveName);
+  return next;
+}
+
+/** Inverse of {@link thermalBridgeExtraJsonForCsv}: host names that resolve uniquely become runtime ids. */
+function resolveHostNames(elements: Element[]): Element[] {
+  const resolveName = createElementNameLookup(elements);
+  let changed = false;
+  const next = elements.map((element) => {
+    if (element.type !== 'ThermalBridgeLinear' && element.type !== 'ThermalBridgePoint') return element;
+    const extra = asRecord(element.extra_json);
+    if (!extra) return element;
+    const extraIds = hostNamesToIds(extra, EXTRA_JSON_HOST_ID_KEYS, resolveName);
+    const nextExtra = extraIds ?? extra;
+    const source = asRecord(nextExtra.thermal_bridge_source);
+    const sourceIds = source ? hostNamesToIds(source, SOURCE_HOST_ID_KEYS, resolveName) : undefined;
+    if (!extraIds && !sourceIds) return element;
+    changed = true;
+    return {
+      ...element,
+      extra_json: sourceIds ? { ...nextExtra, thermal_bridge_source: sourceIds } : nextExtra,
+    } as Element;
+  });
+  return changed ? next : elements;
+}
+
 /**
  * CSV reload regenerates element ids, while legacy `extra_json.thermal_bridge_source`
  * persists those ids. Rebind source ids from the same coordinate-driven auto-TB proposals
  * used to create them, leaving ambiguous or unlocated cases visible to validation.
  */
 export function normalizeThermalBridgeSourceLinks(
-  elements: Element[],
+  parsedElements: Element[],
   globalOrientationOffset?: number,
 ): Element[] {
+  const elements = resolveHostNames(parsedElements);
   const elementsById: Record<string, Element> = {};
   for (const element of elements) {
     elementsById[element.id] = element;

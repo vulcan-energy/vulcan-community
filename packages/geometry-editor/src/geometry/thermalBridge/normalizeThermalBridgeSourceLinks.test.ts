@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from 'vitest';
 import type { BuildingElementOpaque, BuildingElementPartyWall, Element, ThermalBridgeLinear } from '../types';
-import { normalizeThermalBridgeSourceLinks } from './normalizeThermalBridgeSourceLinks';
+import { createElementNameLookup } from '../../lib/elementNameRemap';
+import { normalizeThermalBridgeSourceLinks, thermalBridgeExtraJsonForCsv } from './normalizeThermalBridgeSourceLinks';
 
 const externalWall: BuildingElementOpaque = {
   type: 'BuildingElementOpaque',
@@ -120,5 +121,54 @@ describe('normalizeThermalBridgeSourceLinks', () => {
     const normalized = normalizeThermalBridgeSourceLinks([roof, bridge], 45);
     const source = (normalized[1] as ThermalBridgeLinear).extra_json?.thermal_bridge_source as Record<string, unknown>;
     expect(source.host_wall_id).toBe(roof.id);
+  });
+
+  it('writes hosts by name for the CSV and resolves the names back to runtime ids on load', () => {
+    const bridge = {
+      type: 'ThermalBridgeLinear',
+      id: 'tb-current-id',
+      name: 'TB E18',
+      zoneId: 'z1',
+      parent_element: null,
+      coordinates: [{ x: 0, y: 2, z: 0 }, { x: 9, y: 9, z: 9 }],
+      length: 2.4,
+      linear_thermal_transmittance: 0.06,
+      extra_json: {
+        junction_type: 'E18',
+        thermal_bridge_source: { host_wall_id: 'wall-current-id', host_wall_b_id: 'party-current-id', note: 'keep' },
+        _vulcan_ui_tb_adjacent_element_id: 'party-current-id',
+      },
+    } as ThermalBridgeLinear;
+    const elements = [externalWall, partyWall, bridge] as Element[];
+    const byId = Object.fromEntries(elements.map((element) => [element.id, element]));
+    const written = thermalBridgeExtraJsonForCsv(bridge.extra_json, byId, createElementNameLookup(elements));
+    expect(written).toEqual({
+      junction_type: 'E18',
+      thermal_bridge_source: { host_wall_name: 'External wall', host_wall_b_name: 'Party wall', note: 'keep' },
+      _vulcan_ui_tb_adjacent_element_name: 'Party wall',
+    });
+
+    const reloaded = normalizeThermalBridgeSourceLinks([
+      { ...externalWall, id: 'wall-new-id' },
+      { ...partyWall, id: 'party-new-id' },
+      { ...bridge, extra_json: written },
+    ] as Element[]);
+    expect((reloaded[2] as ThermalBridgeLinear).extra_json).toEqual({
+      junction_type: 'E18',
+      thermal_bridge_source: { host_wall_id: 'wall-new-id', host_wall_b_id: 'party-new-id', note: 'keep' },
+      _vulcan_ui_tb_adjacent_element_id: 'party-new-id',
+    });
+  });
+
+  it('writes the id as before when the host name is ambiguous or the host is missing', () => {
+    const twin = { ...externalWall, id: 'twin-id' };
+    const elements = [externalWall, twin] as Element[];
+    const byId = Object.fromEntries(elements.map((element) => [element.id, element]));
+    const written = thermalBridgeExtraJsonForCsv(
+      { thermal_bridge_source: { host_wall_id: 'wall-current-id', host_wall_b_id: 'gone-id' } },
+      byId,
+      createElementNameLookup(elements),
+    );
+    expect(written?.thermal_bridge_source).toEqual({ host_wall_id: 'wall-current-id', host_wall_b_id: 'gone-id' });
   });
 });

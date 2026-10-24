@@ -48,7 +48,18 @@ const loadAndGenerate = (csv: string): string => {
   return store.getState().generateCSV();
 };
 
+// Every geometry CSV this repository ships as a sample.
+const SHIPPED_SAMPLES = [
+  '../../__fixtures__/example_semi_detached.csv',
+  '../../../../../../crates/vulcan-model-wasm/tests/fixtures/min_working.csv',
+];
+
 describe('shared-model identity rows', () => {
+  it.each(SHIPPED_SAMPLES)('load → generate → load → generate is byte-identical for %s', (path) => {
+    const first = loadAndGenerate(readFileSync(resolve(import.meta.dirname, path), 'utf8'));
+    expect(loadAndGenerate(first)).toBe(first);
+  });
+
   it('parse → generate → parse → generate is byte-stable with every metadata row', () => {
     const first = loadAndGenerate(sampleCsv());
     const second = loadAndGenerate(first);

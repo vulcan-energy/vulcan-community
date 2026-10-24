@@ -36,6 +36,8 @@ import {
   resolveFloorStoreyIndexForAutoTbFromHostZ,
   thermalBridgeSourceExtraJsonForAutoProposal,
 } from '../../../packages/geometry-editor/src/geometry/thermalBridge/resolveTbHostFloorId';
+import { thermalBridgeExtraJsonForCsv } from '../../../packages/geometry-editor/src/geometry/thermalBridge/normalizeThermalBridgeSourceLinks';
+import { createElementNameLookup } from '../../../packages/geometry-editor/src/lib/elementNameRemap';
 import { THERMAL_BRIDGE_EXTRA_JSON_FLOOR_ID_KEY } from '../../../packages/geometry-editor/src/lib/elementCanvasFloor';
 import { editorFloorsAndElementsForParsedCsv } from '../../../packages/geometry-editor/src/lib/floorDerivation';
 
@@ -72,13 +74,20 @@ function proposalsWithEffectivePsi(
 
 export function autoThermalBridges(csvArg: string) {
   const csvPath = resolve(csvArg);
-  const { elements, floors, elementsById } = loadGeometry(csvPath);
-  return { csvPath, elementsById, proposals: proposalsWithEffectivePsi(elements, floors, elementsById) };
+  const { parsed, elements, floors, elementsById } = loadGeometry(csvPath);
+  return {
+    csvPath,
+    elementsById,
+    zones: parsed.zones,
+    proposals: proposalsWithEffectivePsi(elements, floors, elementsById),
+  };
 }
 
-export function printAutoCsvSection({ proposals, elementsById }: ReturnType<typeof autoThermalBridges>): void {
+export function printAutoCsvSection({ proposals, elementsById, zones }: ReturnType<typeof autoThermalBridges>): void {
+  const zoneNameById = new Map(zones.map((zone) => [zone.id, zone.name]));
   console.log('Thermal Bridging Elements,,,,,,,,,,,');
   console.log('Name,Zone,Type,linear_thermal_transmittance,length,junction_type,heat_transfer_coefficient,parent_element,coords,extra_json');
+  const resolveHostName = createElementNameLookup(Object.values(elementsById));
   let i = 0;
   for (const p of proposals) {
     i++;
@@ -88,12 +97,12 @@ export function printAutoCsvSection({ proposals, elementsById }: ReturnType<type
       .join('|');
     const src = thermalBridgeSourceExtraJsonForAutoProposal(p, elementsById);
     const extraJson = src
-      ? `"${JSON.stringify({ thermal_bridge_source: src }).replace(/"/g, '""')}"`
+      ? `"${JSON.stringify(thermalBridgeExtraJsonForCsv({ thermal_bridge_source: src }, elementsById, resolveHostName)).replace(/"/g, '""')}"`
       : '';
     console.log(
       [
         name,
-        p.zoneId ?? '',
+        zoneNameById.get(p.zoneId ?? '') ?? '',
         'ThermalBridgeLinear',
         p.linearThermalTransmittance.toFixed(4),
         p.suggestedLengthM.toFixed(3),
