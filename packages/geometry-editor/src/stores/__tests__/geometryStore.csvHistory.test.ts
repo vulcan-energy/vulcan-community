@@ -220,7 +220,44 @@ describe('CSV document history', () => {
     expect(store.getState().spaceLabellerSelectedLabelId).toBe(labelId);
   });
 
-  // TODO(after the host_wall_id section+name rebase): undo/redo must leave
-  // thermal_bridge_source.host_wall_id pointing at the reused host id.
-  it.todo('keeps thermal-bridge host links on reused ids across undo and redo');
+  it('keeps thermal-bridge host links on reused ids across undo and redo', () => {
+    const builder = createGeometryStore({ defaultDefaultsPath: null });
+    builder.getState().addZone({ name: 'Living', floorArea: 20, height: 2.4, volume: 48 });
+    const zoneId = builder.getState().zones[0]!.id;
+    builder.getState().addElements([{
+      type: 'BuildingElementOpaque', name: 'Host wall', zoneId, height: 2.4, width: 4, area: 9.6,
+      pitch: 90, base_height: 0, parent_element: null,
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+    }] as never);
+    const builderWallId = builder.getState().elementIds[0]!;
+    builder.getState().addElements([{
+      type: 'ThermalBridgeLinear', name: 'Host junction', zoneId, length: 4,
+      linear_thermal_transmittance: 0.1, parent_element: null,
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+      extra_json: { junction_type: 'E2', thermal_bridge_source: { host_wall_id: builderWallId } },
+    }] as never);
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().loadFromCSV(builder.getState().generateCSV({ allowUnresolvedMigration: true }));
+    const wallId = idOf(store, 'Host wall');
+    const hostOf = () => {
+      const bridge = store.getState().elementsById[idOf(store, 'Host junction')]!;
+      return (bridge.extra_json?.thermal_bridge_source as { host_wall_id?: string } | undefined)?.host_wall_id;
+    };
+    expect(hostOf()).toBe(wallId);
+
+    store.getState().setComplianceSettings({ ColdWaterSource: 'header tank' });
+    settle();
+    store.getState().undo();
+    expect(idOf(store, 'Host wall')).toBe(wallId);
+    expect(hostOf()).toBe(wallId);
+    // Back at the loaded entry: the document is clean against its saved baseline.
+    expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
+
+    store.getState().redo();
+    expect(idOf(store, 'Host wall')).toBe(wallId);
+    expect(hostOf()).toBe(wallId);
+    store.getState().undo();
+    expect(hostOf()).toBe(wallId);
+    expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
+  });
 });
