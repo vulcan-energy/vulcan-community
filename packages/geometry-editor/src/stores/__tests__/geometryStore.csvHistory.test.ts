@@ -4,12 +4,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createGeometryStore } from '../geometryStore';
-import { GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS } from '../geometryStore/slices/historySlice';
+import { HISTORY_CAPTURE_QUIET_MS } from '../geometryStore/slices/historySlice';
 
 type Store = ReturnType<typeof createGeometryStore>;
 
 /** A loaded two-zone document: history holds exactly the loaded entry. */
-function loadedStore(): Store {
+function loadedStore(options: { twins?: boolean } = {}): Store {
   const builder = createGeometryStore({ defaultDefaultsPath: null });
   const { addZone, addElements } = builder.getState();
   addZone({ name: 'Living', floorArea: 20, height: 2.4, volume: 48 });
@@ -21,6 +21,10 @@ function loadedStore(): Store {
     coordinates: [{ x, y: 0, z: 0 }, { x: x + 4, y: 0, z: 0 }],
   });
   addElements([wall('Living wall', living!.id, 0), wall('Annex wall', annex!.id, 10)] as never);
+  if (options.twins) {
+    addElements([wall('Twin', living!.id, 20)] as never);
+    addElements([wall('Twin', annex!.id, 30)] as never);
+  }
   builder.getState().addSpaceLabel({ zoneId: annex!.id, name: 'Store', room_type: 'other' });
 
   const store = createGeometryStore({ defaultDefaultsPath: null });
@@ -28,7 +32,7 @@ function loadedStore(): Store {
   return store;
 }
 
-const settle = () => vi.advanceTimersByTime(GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS);
+const settle = () => vi.advanceTimersByTime(HISTORY_CAPTURE_QUIET_MS);
 const idOf = (store: Store, name: string) =>
   store.getState().elementIds.find((id) => store.getState().elementsById[id]?.name === name)!;
 
@@ -158,4 +162,65 @@ describe('CSV document history', () => {
     store.getState().redo();
     expect(store.getState().complianceSettings.ColdWaterSource).toBe('header tank');
   });
+
+  it('keeps the ids of same-named elements in different zones', () => {
+    const store = loadedStore({ twins: true });
+    const twinIdIn = (zoneName: string) => {
+      const zoneId = store.getState().zones.find((zone) => zone.name === zoneName)!.id;
+      return store.getState().elementIds.find((id) => {
+        const element = store.getState().elementsById[id]!;
+        return element.name === 'Twin' && element.zoneId === zoneId;
+      });
+    };
+    const before = [twinIdIn('Living'), twinIdIn('Annex')];
+    expect(before.every(Boolean) && before[0] !== before[1]).toBe(true);
+    store.getState().setComplianceSettings({ ColdWaterSource: 'header tank' });
+    settle();
+    store.getState().undo();
+    expect([twinIdIn('Living'), twinIdIn('Annex')]).toEqual(before);
+  });
+
+  it('keeps an empty floor across an unrelated undo and brings it back on redo', () => {
+    const store = loadedStore();
+    const loftId = store.getState().addFloor('Loft', 2.4, false, 4);
+    settle();
+    store.getState().setComplianceSettings({ ColdWaterSource: 'header tank' });
+    settle();
+    store.getState().undo();
+    expect(store.getState().floors.find((floor) => floor.zIndex === 4)?.id).toBe(loftId);
+
+    store.getState().removeFloor(loftId);
+    settle();
+    expect(store.getState().floors.some((floor) => floor.zIndex === 4)).toBe(false);
+    store.getState().redo();
+    expect(store.getState().complianceSettings.ColdWaterSource).toBe('header tank');
+    expect(store.getState().floors.find((floor) => floor.zIndex === 4)?.id).toBe(loftId);
+  });
+
+  it('turns keystrokes inside the quiet window into one step', () => {
+    const store = loadedStore();
+    for (const value of ['1', '11', '110']) {
+      store.getState().setComplianceSettings({ ColdWaterSource: value });
+      vi.advanceTimersByTime(HISTORY_CAPTURE_QUIET_MS - 100);
+    }
+    settle();
+    expect(store.getState().history).toHaveLength(2);
+    store.getState().undo();
+    expect(store.getState().complianceSettings.ColdWaterSource).not.toBe('11');
+  });
+
+  it('keeps the space labeller selection across undo', () => {
+    const store = loadedStore();
+    const labelId = store.getState().spaceLabelIds[0]!;
+    store.getState().setSpaceLabellerSelectedLabelId(labelId);
+    store.getState().setComplianceSettings({ ColdWaterSource: 'header tank' });
+    settle();
+    store.getState().undo();
+    expect(store.getState().spaceLabelIds).toEqual([labelId]);
+    expect(store.getState().spaceLabellerSelectedLabelId).toBe(labelId);
+  });
+
+  // TODO(after the host_wall_id section+name rebase): undo/redo must leave
+  // thermal_bridge_source.host_wall_id pointing at the reused host id.
+  it.todo('keeps thermal-bridge host links on reused ids across undo and redo');
 });
