@@ -7412,6 +7412,9 @@ const createGeometryState = (
       globalThis.clearTimeout(stateBeforeClear.historyDebounceTimeout);
     }
     stateBeforeClear.cancelPendingLoadedCsvWorkForDocumentBoundary();
+    // Invalidate any in-flight junction defaults read before removing its path,
+    // as the account-boundary reset does; a late read must not refill the map.
+    stateBeforeClear.setJunctionPsiDefaultsPath(undefined);
     set((state) => ({
       sourceCsvVersion: 3,
       sourceProvenanceMarkersVersion: undefined,
@@ -7437,6 +7440,8 @@ const createGeometryState = (
       defaultsPath: defaultDefaultsPath,
       creationDefaultAssemblyIds: {},
       defaultsJson: null,
+      // A cancelled defaults read never clears this flag itself.
+      defaultsLoading: false,
       hostDocumentMetadata: {},
       propertyPostcode: undefined,
       guideOverlay: null,

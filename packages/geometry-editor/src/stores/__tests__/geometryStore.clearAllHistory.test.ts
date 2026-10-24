@@ -27,8 +27,11 @@ describe('clearAll history boundary', () => {
     expect(store.getState().canUndo).toBe(true);
 
     store.getState().clearAll();
+    // The empty document is the only history entry: Undo has nowhere earlier to go.
+    expect(store.getState().history).toHaveLength(1);
     expect(store.getState().canUndo).toBe(false);
     expect(store.getState().canRedo).toBe(false);
+    expect(store.getState().defaultsLoading).toBe(false);
 
     store.getState().undo();
     expect(store.getState().elementIds).toEqual([]);

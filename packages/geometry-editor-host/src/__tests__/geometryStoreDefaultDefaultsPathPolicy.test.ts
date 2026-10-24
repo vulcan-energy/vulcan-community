@@ -101,10 +101,19 @@ describe('geometry store default defaults-path policy', () => {
     await settle();
     expect(readText).toHaveBeenCalledTimes(2);
 
+    // A different DefaultsPath is not "unchanged": the option must still re-read it.
+    const csvOtherDefaults = csv.replace('input/defaults/community.json', 'input/defaults/other.json');
+    store.getState().loadFromCSV(csvOtherDefaults, { keepUnchangedDefaults: true });
+    expect(store.getState().defaultsJson).toBeNull();
+    await settle();
+    expect(readText).toHaveBeenCalledWith('input/defaults/other.json');
+    expect(readText).toHaveBeenCalledTimes(3);
+    expect(store.getState().defaultsJson).toEqual({ a: 1 });
+
     store.getState().loadFromCSV(csv);
     expect(store.getState().defaultsJson).toBeNull();
     await settle();
-    expect(readText).toHaveBeenCalledTimes(4);
+    expect(readText).toHaveBeenCalledTimes(5);
     expect(store.getState().defaultsJson).toEqual({ a: 1 });
   });
 });
