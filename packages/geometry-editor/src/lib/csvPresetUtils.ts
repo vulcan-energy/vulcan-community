@@ -51,6 +51,8 @@ export const EXTRA_JSON_UI_KEYS = [
   '_vulcan_ui_party_element',
   /** P1–P3: id of the adjacent / party line for ψ apportion; not a HEM input field. */
   '_vulcan_ui_tb_adjacent_element_id',
+  /** CSV form of the key above: the adjacent / party line's name, resolved back to its id on load. */
+  '_vulcan_ui_tb_adjacent_element_name',
   /** Legacy UI hint key (removed from product); strip so it never reaches HEM merge. */
   '_vulcan_ui_tb_suggest_junction',
   /**

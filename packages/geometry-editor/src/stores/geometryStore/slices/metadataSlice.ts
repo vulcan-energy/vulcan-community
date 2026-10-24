@@ -30,6 +30,16 @@ export interface MetadataSlice {
   /** Property postcode written to SAP report metadata; it does not select native SAP climate data. */
   propertyPostcode?: string;
   setPropertyPostcode: (postcode: string | undefined) => void;
+  /** Shared-model identity row `ModelId`; opaque uuid. */
+  modelId?: string;
+  /** Returns `modelId`, generating and storing one first if absent. */
+  ensureModelId: () => string;
+  /** Shared-model base version row `ModelVersion`; excluded from the content hash. */
+  modelVersion?: number;
+  /** Ignores anything but `undefined` or a non-negative safe integer. */
+  setModelVersion: (version: number | undefined) => void;
+  /** Clears `modelId` and `modelVersion`, so a duplicate mints a new id via `ensureModelId`. */
+  resetModelId: () => void;
   // Guide Overlay (floorplan tracing) — per-floor records with inherit-from-below semantics.
   // `guideOverlay` / `guideOverlaySource` are denormalized views of the active floor (resolved
   // via `currentFloorZ`); `*ByFloor` maps hold the source of truth.
@@ -83,7 +93,7 @@ const computeActiveOverlayView = (
 
 export const createMetadataSlice = (
   options: MetadataSliceOptions,
-): GeometryStoreSlice => (set) => {
+): GeometryStoreSlice => (set, get) => {
   let junctionPsiDefaultsLoadVersion = 0;
 
   return {
@@ -119,6 +129,8 @@ export const createMetadataSlice = (
   setDefaultsLoading: (loading: boolean) => set({ defaultsLoading: loading }),
   hostDocumentMetadata: {},
   propertyPostcode: undefined,
+  modelId: undefined,
+  modelVersion: undefined,
   guideOverlay: null,
   guideOverlaySource: null,
   guideOverlayByFloor: {} as GuideOverlayByFloor,
@@ -133,6 +145,18 @@ export const createMetadataSlice = (
     return { hostDocumentMetadata: next };
   }),
   setPropertyPostcode: (postcode) => set({ propertyPostcode: postcode }),
+  ensureModelId: () => {
+    const existing = get().modelId;
+    if (existing) return existing;
+    const modelId = crypto.randomUUID();
+    set({ modelId });
+    return modelId;
+  },
+  setModelVersion: (version) => {
+    if (version !== undefined && !(Number.isSafeInteger(version) && version >= 0)) return;
+    set({ modelVersion: version });
+  },
+  resetModelId: () => set({ modelId: undefined, modelVersion: undefined }),
   setGuideOverlay: (overlay: GuideOverlay | null) => {
     set((state) => {
       const floorZ = state.currentFloorZ ?? 0;

@@ -203,6 +203,10 @@ export type ParsedCsvMetadata = {
   globalOrientationOffset: number;
   vulcanCsvVersion: number;
   targetBundleId?: string;
+  /** Opaque shared-model identity (a uuid), stamped by the host on first save. */
+  modelId?: string;
+  /** Shared-model base version for the next push; excluded from the content hash. */
+  modelVersion?: number;
   /** Resolved import authority: CSV v3+ or the supported legacy marker capabilities. */
   provenanceMarkersVersion?: number;
   /** Original legacy row value, retained only for saving an unupgraded source. */
@@ -267,6 +271,8 @@ export const parseCsvToGeometry = (
   let detectedVulcanCsvVersion: string | undefined;
   let detectedDefaultsPath: string | undefined;
   let targetBundleId: string | undefined;
+  let detectedModelId: string | undefined;
+  let detectedModelVersion: number | undefined;
   let detectedSchemaProfile: ModelSchemaProfile | undefined;
   const hostDocumentMetadataKeys = new Set(options.hostDocumentMetadataKeys ?? []);
   const detectedHostDocumentMetadata: Record<string, string> = {};
@@ -310,6 +316,16 @@ export const parseCsvToGeometry = (
       continue;
     }
     if (hostMetadataKey === 'TargetBundleId') { targetBundleId = metadataFields[1]?.trim() || undefined; }
+    if (hostMetadataKey === 'ModelId') {
+      detectedModelId = metadataFields[1]?.trim() || undefined;
+      continue;
+    }
+    if (hostMetadataKey === 'ModelVersion') {
+      const rawVersion = metadataFields[1]?.trim() ?? '';
+      const version = /^\d+$/.test(rawVersion) ? Number(rawVersion) : NaN;
+      if (Number.isSafeInteger(version)) detectedModelVersion = version;
+      continue;
+    }
     if (hostMetadataKey === VULCAN_CSV_VERSION_METADATA_KEY) {
       detectedVulcanCsvVersion = metadataFields[1]?.trim() || '';
       continue;
@@ -715,6 +731,8 @@ export const parseCsvToGeometry = (
       globalOrientationOffset: globalOffset,
       vulcanCsvVersion: csvVersion,
       targetBundleId,
+      modelId: detectedModelId,
+      modelVersion: detectedModelVersion,
       provenanceMarkersVersion: authorityVersion,
       legacyProvenanceMarkersVersion: detectedProvenanceMarkersVersion,
       schemaProfile: detectedSchemaProfile,
