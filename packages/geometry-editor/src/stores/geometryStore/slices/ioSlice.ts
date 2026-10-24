@@ -37,7 +37,7 @@ import {
 import { resolveBuildingElementPitch } from '../../../geometry/derivePitchFromGeometry';
 import { formatCoords } from '../../../geometry/coords';
 import { roundToTwoDecimals } from '../../../geometry/constants';
-import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel } from '../../../geometry/types';
+import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
 import type { GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
@@ -92,7 +92,6 @@ import {
 import { syncSpaceHeatSystemZoneNameInExtraJson } from '../../../lib/spaceHeatSystemSync';
 import { windowSecurityRiskDefaultForElement } from '../../../lib/windowSecurityRisk';
 import { collectDuplicateElementNameWarnings } from '../../../lib/elementNameDuplicates';
-import { buildHistoryDocumentSnapshotFromState } from '../../../lib/geometryHistorySnapshot';
 import { isMvhrTerminalHost } from '../../../lib/mvhrDuctwork';
 import {
   applyFloorBaseHeightOverrides,
@@ -136,6 +135,14 @@ export interface IoSlice {
     csvContent: string,
     loadOptions?: { keepUnchangedDefaults?: boolean },
   ) => { warnings: string[]; upgraded: boolean };
+  /**
+   * Internal (Undo/Redo): make `csvContent` the document without resetting history,
+   * the saved baseline or the viewport; surviving element and zone ids and the selection stay.
+   */
+  replaceDocumentFromCsv: (
+    csvContent: string,
+    options: { currentFloorId: string | null; floors: Floor[] },
+  ) => void;
   /** CSV at the moment of the last successful save or load; null until either occurs. */
   lastSavedCsv: string | null;
   /** Set after a successful save or load. */
@@ -151,10 +158,7 @@ export type IoSliceOptions = Readonly<{
   workspaceResourcePort: GeometryWorkspaceResourcePort;
   hostDocumentMetadataKeys: readonly string[];
 }>;
-type CancelScheduledWork = () => void;
 type LoadedCsvWorkScheduler = {
-  cancelPending: CancelScheduledWork | null;
-  version: number;
   defaultsVersion: number;
   defaultsRetryTimers: Set<ReturnType<typeof globalThis.setTimeout>>;
 };
@@ -174,51 +178,88 @@ type ServiceLineFloorElement =
   | ElementByType<'MechanicalVentilationDuctwork'>
   | ElementByType<'ThermalBridgePoint'>;
 
-function scheduleIdleWork(callback: () => void): CancelScheduledWork {
-  if (
-    typeof globalThis.requestIdleCallback === 'function' &&
-    typeof globalThis.cancelIdleCallback === 'function'
-  ) {
-    const id = globalThis.requestIdleCallback(callback, { timeout: 1200 });
-    return () => globalThis.cancelIdleCallback(id);
-  }
+type KnownIds = {
+  zones: Map<string, string>;
+  /** zone name + type + name */
+  elements: Map<string, string>;
+  /** type + name; null when more than one element had it */
+  elementsByName: Map<string, string | null>;
+  /** zone name + label name */
+  labels: Map<string, string>;
+};
 
-  const id = globalThis.setTimeout(callback, 180);
-  return () => globalThis.clearTimeout(id);
+const emptyKnownIds = (): KnownIds => ({
+  zones: new Map(), elements: new Map(), elementsByName: new Map(), labels: new Map(),
+});
+
+const nameKey = (element: Element): string => `${element.type}\u0000${element.name}`;
+const zonedKey = (zoneName: string, key: string): string => `${zoneName}\u0000${key}`;
+
+function rememberIds(state: GeometryState, known: KnownIds): void {
+  const zoneName = new Map(state.zones.map((zone) => [zone.id, zone.name]));
+  for (const zone of state.zones) known.zones.set(zone.name, zone.id);
+  const byName = new Map<string, string | null>();
+  for (const id of state.elementIds) {
+    const element = state.elementsById[id];
+    if (!element) continue;
+    known.elements.set(zonedKey(zoneName.get(element.zoneId ?? '') ?? '', nameKey(element)), id);
+    byName.set(nameKey(element), byName.has(nameKey(element)) ? null : id);
+  }
+  for (const [key, id] of byName) known.elementsByName.set(key, id);
+  for (const id of state.spaceLabelIds) {
+    const label = state.spaceLabelsById[id];
+    if (label) known.labels.set(zonedKey(zoneName.get(label.zoneId) ?? '', label.name), id);
+  }
 }
 
-function scheduleLoadedCsvBaseline(
-  get: () => GeometryState,
-  set: (partial: Partial<GeometryState>) => void,
-  scheduler: LoadedCsvWorkScheduler,
-  loadedCsvBaseline: string,
+/**
+ * Parsing mints fresh ids. A history replace gives zones (by name), elements
+ * (by zone name + type + name, or type + name when that alone was unique) and
+ * space labels (by zone name + label name) the id they had at load or at the
+ * last replace, so selection, open panels and id-keyed UI carry across Undo/Redo.
+ */
+function reuseKnownIds(
+  state: GeometryState,
+  known: KnownIds,
+  zones: Zone[],
+  elements: Element[],
+  spaceLabels: SpaceLabel[],
 ): void {
-  scheduler.cancelPending?.();
-  const version = ++scheduler.version;
-
-  set({
-    history: [],
-    historyIndex: -1,
-    canUndo: false,
-    canRedo: false,
-    // Capture the normalized loaded document synchronously. Idle history work
-    // may observe later edits, but it must never redefine what was loaded.
-    lastSavedCsv: loadedCsvBaseline,
-  });
-
-  scheduler.cancelPending = scheduleIdleWork(() => {
-    if (version !== scheduler.version) return;
-    scheduler.cancelPending = null;
-    const state = get();
-    const snapshot = buildHistoryDocumentSnapshotFromState(state) as GeometryState['history'][number];
-
-    set({
-      history: [snapshot],
-      historyIndex: 0,
-      canUndo: false,
-      canRedo: false,
-    });
-  });
+  rememberIds(state, known);
+  const parsedZoneName = new Map(zones.map((zone) => [zone.id, zone.name]));
+  const used = new Set<string>();
+  const claim = (id: string | null | undefined): string | undefined => {
+    if (!id || used.has(id)) return undefined;
+    used.add(id);
+    return id;
+  };
+  const zoneIdMap = new Map<string, string>();
+  for (const zone of zones) {
+    const id = claim(known.zones.get(zone.name));
+    if (id === undefined) continue;
+    zoneIdMap.set(zone.id, id);
+    zone.id = id;
+  }
+  // Exact zone matches first, so a same-named element elsewhere cannot take their id.
+  const unmatched: Element[] = [];
+  for (const element of elements) {
+    const zoneName = parsedZoneName.get(element.zoneId ?? '') ?? '';
+    const id = claim(known.elements.get(zonedKey(zoneName, nameKey(element))));
+    if (id !== undefined) element.id = id;
+    else unmatched.push(element);
+  }
+  for (const element of unmatched) {
+    const id = claim(known.elementsByName.get(nameKey(element)));
+    if (id !== undefined) element.id = id;
+  }
+  for (const element of elements) {
+    if (element.zoneId) element.zoneId = zoneIdMap.get(element.zoneId) ?? element.zoneId;
+  }
+  for (const label of spaceLabels) {
+    const id = claim(known.labels.get(zonedKey(parsedZoneName.get(label.zoneId) ?? '', label.name)));
+    if (id !== undefined) label.id = id;
+    label.zoneId = zoneIdMap.get(label.zoneId) ?? label.zoneId;
+  }
 }
 
 function invalidatePendingDefaultsWork(scheduler: LoadedCsvWorkScheduler): number {
@@ -646,15 +687,15 @@ const migrateElementsToNormalized = (
 
 export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   // Scheduling belongs to this store instance. Separate editor stores must not
-  // cancel or version one another's post-load history work.
+  // cancel or version one another's pending defaults reads.
   const loadedCsvWorkScheduler: LoadedCsvWorkScheduler = {
-    cancelPending: null,
-    version: 0,
     defaultsVersion: 0,
     defaultsRetryTimers: new Set(),
   };
+  let knownIds = emptyKnownIds();
 
-  return (set, get) => ({
+  return (set, get) => {
+  const slice: IoSlice = {
   sourceCsvVersion: CURRENT_VULCAN_CSV_VERSION,
   sourceProvenanceMarkersVersion: undefined,
   csvUpgradeRequested: false,
@@ -677,9 +718,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   lastSavedCsv: null,
   setLastSavedCsv: (csv) => set({ lastSavedCsv: csv }),
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => {
-    loadedCsvWorkScheduler.cancelPending?.();
-    loadedCsvWorkScheduler.cancelPending = null;
-    loadedCsvWorkScheduler.version += 1;
     invalidatePendingDefaultsWork(loadedCsvWorkScheduler);
   },
 
@@ -1710,11 +1748,36 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     return csvContent;
   },
 
-  loadFromCSV: (csvContent, loadOptions) => {
+  loadFromCSV: (csvContent, loadOptions) => applyCsvDocument(csvContent, loadOptions),
+  replaceDocumentFromCsv: (csvContent, { currentFloorId, floors }) => {
+    applyCsvDocument(csvContent, { keepUnchangedDefaults: true }, { currentFloorId, floors });
+  },
+  };
+
+  /**
+   * Parses a CSV and makes it the store's document. Load also resets the view,
+   * re-baselines and seeds history; a history `replace` does none of those,
+   * restores the entry's floor and keeps surviving ids and selection.
+   */
+  function applyCsvDocument(
+    csvContent: string,
+    loadOptions: { keepUnchangedDefaults?: boolean } | undefined,
+    replace?: { currentFloorId: string | null; floors: Floor[] },
+  ): { warnings: string[]; upgraded: boolean } {
     const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels, metadata, warnings: parseWarnings } =
       parseCsvToGeometry(csvContent, {
         hostDocumentMetadataKeys: options.hostDocumentMetadataKeys,
+        assignIds: replace
+          ? ({ zones, elements, spaceLabels }) => reuseKnownIds(get(), knownIds, zones, elements, spaceLabels)
+          : undefined,
       });
+    if (replace) {
+      // The entry's floors (empty ones included) come back with their ids;
+      // ensureFloorForZ below reuses them and adds any the elements still need.
+      set({ floors: replace.floors, floorIds: replace.floors.map((floor) => floor.id) });
+    } else {
+      knownIds = emptyKnownIds();
+    }
     const duplicateNameWarnings = collectDuplicateElementNameWarnings(newElements, newZones);
 
     const spaceLabelsById: Record<string, SpaceLabel> = {};
@@ -2186,7 +2249,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       elementIds,
       spaceLabelsById,
       spaceLabelIds,
-      canvasViewResetKey: (get().canvasViewResetKey ?? 0) + 1,
+      ...(replace ? {} : { canvasViewResetKey: (get().canvasViewResetKey ?? 0) + 1 }),
     });
 
     // Missing name markers deliberately degrade to the existing naming heuristic in every
@@ -2216,10 +2279,35 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       Object.values(state.elementsById).some(element => element.floorId === floor.id)
     );
 
-    if (floorsWithElements.length > 0) {
+    const keptFloorId = replace?.currentFloorId;
+    if (keptFloorId && state.floors.some((floor) => floor.id === keptFloorId)) {
+      get().setCurrentFloor(keptFloorId);
+    } else if (floorsWithElements.length > 0) {
       get().setCurrentFloor(floorsWithElements[0].id);
+    } else if (replace) {
+      // Undo to an entry with no elements (a new document's first step): the current
+      // floor must not dangle, or ensureFloorForZ never re-selects one.
+      const firstFloor = state.floors[0];
+      if (firstFloor) get().setCurrentFloor(firstFloor.id);
+      else set({ currentFloorId: null, currentFloorZ: 0 });
     }
     void get().syncAutoGeneratedElementNames();
+    if (replace) {
+      // Selection survives by id: reuseKnownIds kept the ids of surviving elements and zones.
+      set((current) => {
+        const sel = current.selection;
+        const selectionSurvives =
+          !sel ||
+          sel.type === 'global' ||
+          sel.type === 'dormer' ||
+          (sel.type === 'zone' ? current.zones.some((zone) => zone.id === sel.id) : sel.id in current.elementsById);
+        return {
+          selectedElementIds: current.selectedElementIds.filter((id) => id in current.elementsById),
+          selection: selectionSurvives ? sel : null,
+        };
+      });
+      return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded: false };
+    }
 
     // Round-trip through the canonical serializer after all synchronous load
     // normalization, before control returns to callers that may edit immediately.
@@ -2234,9 +2322,14 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     if (upgraded) {
       set({ elementsById: { ...get().elementsById, ...Object.fromEntries(upgradedElements.map(el => [el.id, el])) } });
     }
-    scheduleLoadedCsvBaseline(get, set, loadedCsvWorkScheduler, loadedCsvBaseline);
+    // Load is a history boundary: the loaded document is the only entry.
+    rememberIds(get(), knownIds);
+    set({ lastSavedCsv: loadedCsvBaseline });
+    get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
     return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded };
-  },
-  });
+  }
+
+  return slice;
+  };
 };

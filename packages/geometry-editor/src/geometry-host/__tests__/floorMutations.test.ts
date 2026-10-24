@@ -49,10 +49,18 @@ function seedSparseIntermediateFloorStack() {
   return { store, movingWallId, higherWallId };
 }
 
-function wallDraft(name: string, z: number) {
+/** History entries are the saved CSV, so walls need a zone to be exportable. */
+function storeWithZone() {
+  const store = createGeometryStore({ defaultDefaultsPath: null });
+  store.getState().addZone({ name: 'Zone', floorArea: 20, height: 2.4, volume: 48 });
+  return { store, zoneId: store.getState().zones[0].id };
+}
+
+function wallDraft(name: string, z: number, zoneId?: string) {
   return {
     type: 'BuildingElementOpaque' as const,
     name,
+    ...(zoneId ? { zoneId } : {}),
     height: 2.4,
     width: 4,
     area: 9.6,
@@ -234,18 +242,18 @@ describe('floor mutation invariants', () => {
   });
 
   it('commits single and batch additions as one history entry each, including floor records', () => {
-    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const { store, zoneId } = storeWithZone();
     store.getState().saveToHistory('before-additions');
     const initialHistoryLength = store.getState().history.length;
 
-    store.getState().addElement(wallDraft('Ground wall', 0));
+    store.getState().addElement(wallDraft('Ground wall', 0, zoneId));
     const singleId = store.getState().elementIds.at(-1)!;
     vi.advanceTimersByTime(0);
     expect(store.getState().history).toHaveLength(initialHistoryLength + 1);
 
     const batchIds = store.getState().addElements([
-      wallDraft('First wall', 2),
-      wallDraft('Second wall', 3),
+      wallDraft('First wall', 2, zoneId),
+      wallDraft('Second wall', 3, zoneId),
     ]);
     expect(batchIds).toHaveLength(2);
     expect(store.getState().elementIds.slice(-2)).toEqual(batchIds);
@@ -266,12 +274,12 @@ describe('floor mutation invariants', () => {
   });
 
   it('keeps synchronous legacy addElement calls in one deferred history snapshot', () => {
-    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const { store, zoneId } = storeWithZone();
     store.getState().saveToHistory('before-additions');
     const initialHistoryLength = store.getState().history.length;
 
-    store.getState().addElement(wallDraft('First wall', 0));
-    store.getState().addElement(wallDraft('Second wall', 2));
+    store.getState().addElement(wallDraft('First wall', 0, zoneId));
+    store.getState().addElement(wallDraft('Second wall', 2, zoneId));
     expect(store.getState().history).toHaveLength(initialHistoryLength);
 
     vi.advanceTimersByTime(0);
@@ -285,14 +293,14 @@ describe('floor mutation invariants', () => {
   });
 
   it('resolves a thermal bridge storey from floor metadata in the same atomic batch', () => {
-    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const { store, zoneId } = storeWithZone();
     store.getState().saveToHistory('before-additions');
     const ids = store.getState().addElements([
-      wallDraft('Host wall', 2),
+      wallDraft('Host wall', 2, zoneId),
       {
         type: 'ThermalBridgeLinear',
         name: 'Host junction',
-        zoneId: 'zone-1',
+        zoneId,
         length: 1,
         linear_thermal_transmittance: 0.12,
         parent_element: 'Host wall',

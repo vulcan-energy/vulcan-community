@@ -7347,9 +7347,6 @@ const createGeometryState = (
 
   resetGeometryDocumentForAccountBoundary: () => {
     const stateBeforeReset = get();
-    if (stateBeforeReset.historyDebounceTimeout) {
-      globalThis.clearTimeout(stateBeforeReset.historyDebounceTimeout);
-    }
     stateBeforeReset.cancelPendingLoadedCsvWorkForDocumentBoundary();
     // Invalidate any in-flight junction defaults read before removing its path.
     stateBeforeReset.setJunctionPsiDefaultsPath(undefined);
@@ -7400,7 +7397,6 @@ const createGeometryState = (
       historyIndex: -1,
       canUndo: false,
       canRedo: false,
-      historyDebounceTimeout: null,
       lastSavedCsv: null,
       csvValidationCache: {},
       targetValidation: null,
@@ -7410,9 +7406,6 @@ const createGeometryState = (
 
   clearAll: () => {
     const stateBeforeClear = get();
-    if (stateBeforeClear.historyDebounceTimeout) {
-      globalThis.clearTimeout(stateBeforeClear.historyDebounceTimeout);
-    }
     stateBeforeClear.cancelPendingLoadedCsvWorkForDocumentBoundary();
     // Invalidate any in-flight junction defaults read before removing its path,
     // as the account-boundary reset does; a late read must not refill the map.
@@ -7461,12 +7454,11 @@ const createGeometryState = (
       historyIndex: -1,
       canUndo: false,
       canRedo: false,
-      historyDebounceTimeout: null,
       lastSavedCsv: null,
     }));
     // New Document is a history boundary like load: seed the empty document as
     // the only entry so Undo can return to it but never to the previous model.
-    get().saveToHistory('clearAll');
+    get().seedHistory('clearAll');
   },
 
 
