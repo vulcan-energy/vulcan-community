@@ -131,7 +131,10 @@ export interface IoSlice {
   generateCSV: (options?: { allowUnresolvedMigration?: boolean }) => string;
   /** Returns non-fatal data-loss warnings from CSV parsing; load UIs must surface them.
    * `upgraded` means a load-time data upgrade left the model dirty against its baseline. */
-  loadFromCSV: (csvContent: string) => { warnings: string[]; upgraded: boolean };
+  loadFromCSV: (
+    csvContent: string,
+    loadOptions?: { keepUnchangedDefaults?: boolean },
+  ) => { warnings: string[]; upgraded: boolean };
   /** CSV at the moment of the last successful save or load; null until either occurs. */
   lastSavedCsv: string | null;
   /** Set after a successful save or load. */
@@ -1679,7 +1682,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     return csvContent;
   },
 
-  loadFromCSV: (csvContent) => {
+  loadFromCSV: (csvContent, loadOptions) => {
     const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels, metadata, warnings: parseWarnings } =
       parseCsvToGeometry(csvContent, {
         hostDocumentMetadataKeys: options.hostDocumentMetadataKeys,
@@ -1707,63 +1710,74 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const defaultsPathForStore = rawFromCsv
         ? normalizeDefaultsPathForMetadata(rawFromCsv)
         : undefined;
-      const defaultsLoadVersion = invalidatePendingDefaultsWork(loadedCsvWorkScheduler);
-      set({
-        defaultsPath: defaultsPathForStore,
-        defaultsJson: null,
-        defaultsLoading: pathsToTry.length > 0,
-        creationDefaultAssemblyIds: metadata.creationDefaultAssemblyIds ?? {},
-      });
-      if (pathsToTry.length > 0) {
-        // Clear any previous defaults and load per-CSV defaults asynchronously.
-        // Uses retry logic (up to 5 attempts with increasing delay) because
-        // the file system handle may not be ready on initial load, causing a
-        // race condition where validation runs before defaults are available.
-        const MAX_DEFAULTS_RETRIES = 5;
-        const tryReadFirstAvailable = async (): Promise<string> => {
-          let lastErr: unknown;
-          for (const p of pathsToTry) {
-            try {
-              return await options.workspaceResourcePort.readText(p);
-            } catch (e) {
-              lastErr = e;
-            }
-          }
-          throw lastErr ?? new Error('No defaults paths to try');
-        };
-        const loadDefaultsWithRetry = (attempt: number) => {
-          tryReadFirstAvailable()
-            .then((content) => {
-              if (defaultsLoadVersion !== loadedCsvWorkScheduler.defaultsVersion) return;
+      // A light reload of the same document keeps already-loaded defaults
+      // instead of blanking them and re-reading the file.
+      const stateBeforeDefaults = get();
+      const keepDefaults =
+        loadOptions?.keepUnchangedDefaults === true &&
+        stateBeforeDefaults.defaultsJson != null &&
+        stateBeforeDefaults.defaultsPath === defaultsPathForStore;
+      if (keepDefaults) {
+        set({ creationDefaultAssemblyIds: metadata.creationDefaultAssemblyIds ?? {} });
+      } else {
+        const defaultsLoadVersion = invalidatePendingDefaultsWork(loadedCsvWorkScheduler);
+        set({
+          defaultsPath: defaultsPathForStore,
+          defaultsJson: null,
+          defaultsLoading: pathsToTry.length > 0,
+          creationDefaultAssemblyIds: metadata.creationDefaultAssemblyIds ?? {},
+        });
+        if (pathsToTry.length > 0) {
+          // Clear any previous defaults and load per-CSV defaults asynchronously.
+          // Uses retry logic (up to 5 attempts with increasing delay) because
+          // the file system handle may not be ready on initial load, causing a
+          // race condition where validation runs before defaults are available.
+          const MAX_DEFAULTS_RETRIES = 5;
+          const tryReadFirstAvailable = async (): Promise<string> => {
+            let lastErr: unknown;
+            for (const p of pathsToTry) {
               try {
-                const parsed = JSON.parse(content);
-                set({ defaultsJson: parsed, defaultsLoading: false });
-              } catch (error) {
-                console.warn('[DefaultsCache] Failed to parse CSV defaults JSON:', error);
-                set({ defaultsLoading: false });
+                return await options.workspaceResourcePort.readText(p);
+              } catch (e) {
+                lastErr = e;
               }
-            })
-            .catch((error) => {
-              if (defaultsLoadVersion !== loadedCsvWorkScheduler.defaultsVersion) return;
-              if (isWorkspaceUnavailableError(error)) {
-                set({ defaultsLoading: false });
-                return;
-              }
-              if (attempt < MAX_DEFAULTS_RETRIES) {
-                const delayMs = 1500 * attempt;
-                const retryTimer = globalThis.setTimeout(() => {
-                  loadedCsvWorkScheduler.defaultsRetryTimers.delete(retryTimer);
-                  if (defaultsLoadVersion !== loadedCsvWorkScheduler.defaultsVersion) return;
-                  loadDefaultsWithRetry(attempt + 1);
-                }, delayMs);
-                loadedCsvWorkScheduler.defaultsRetryTimers.add(retryTimer);
-              } else {
-                console.warn('[DefaultsCache] Failed to load CSV defaults after', MAX_DEFAULTS_RETRIES, 'attempts:', error);
-                set({ defaultsLoading: false });
-              }
-            });
-        };
-        loadDefaultsWithRetry(1);
+            }
+            throw lastErr ?? new Error('No defaults paths to try');
+          };
+          const loadDefaultsWithRetry = (attempt: number) => {
+            tryReadFirstAvailable()
+              .then((content) => {
+                if (defaultsLoadVersion !== loadedCsvWorkScheduler.defaultsVersion) return;
+                try {
+                  const parsed = JSON.parse(content);
+                  set({ defaultsJson: parsed, defaultsLoading: false });
+                } catch (error) {
+                  console.warn('[DefaultsCache] Failed to parse CSV defaults JSON:', error);
+                  set({ defaultsLoading: false });
+                }
+              })
+              .catch((error) => {
+                if (defaultsLoadVersion !== loadedCsvWorkScheduler.defaultsVersion) return;
+                if (isWorkspaceUnavailableError(error)) {
+                  set({ defaultsLoading: false });
+                  return;
+                }
+                if (attempt < MAX_DEFAULTS_RETRIES) {
+                  const delayMs = 1500 * attempt;
+                  const retryTimer = globalThis.setTimeout(() => {
+                    loadedCsvWorkScheduler.defaultsRetryTimers.delete(retryTimer);
+                    if (defaultsLoadVersion !== loadedCsvWorkScheduler.defaultsVersion) return;
+                    loadDefaultsWithRetry(attempt + 1);
+                  }, delayMs);
+                  loadedCsvWorkScheduler.defaultsRetryTimers.add(retryTimer);
+                } else {
+                  console.warn('[DefaultsCache] Failed to load CSV defaults after', MAX_DEFAULTS_RETRIES, 'attempts:', error);
+                  set({ defaultsLoading: false });
+                }
+              });
+          };
+          loadDefaultsWithRetry(1);
+        }
       }
     }
     set({
@@ -1786,7 +1800,17 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         guideOverlaySource: resolveGuideOverlaySourceForFloor(sourceByFloor, activeZ).value,
       });
     }
-    get().setJunctionPsiDefaultsPath(metadata.junctionPsiDefaultsPath);
+    {
+      // Same light-reload rule for a junction psi table that loaded cleanly.
+      const state = get();
+      const keepJunctionPsiDefaults =
+        loadOptions?.keepUnchangedDefaults === true &&
+        !state.junctionPsiDefaultsLoading &&
+        state.junctionPsiDefaultsError == null &&
+        state.junctionPsiDefaultsPath != null &&
+        state.junctionPsiDefaultsPath === metadata.junctionPsiDefaultsPath?.trim();
+      if (!keepJunctionPsiDefaults) get().setJunctionPsiDefaultsPath(metadata.junctionPsiDefaultsPath);
+    }
     get().setDetailedBridgePsiProfile(metadata.detailedBridgePsiProfile);
     const importedSettings: typeof metadata.complianceSettings = { ...metadata.complianceSettings };
     if (Object.keys(importedSettings).length > 0) {
