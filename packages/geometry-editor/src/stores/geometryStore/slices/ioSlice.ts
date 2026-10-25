@@ -137,7 +137,8 @@ export interface IoSlice {
   ) => { warnings: string[]; upgraded: boolean };
   /**
    * Internal (Undo/Redo): make `csvContent` the document without resetting history,
-   * the saved baseline or the viewport; surviving element and zone ids and the selection stay.
+   * the saved baseline or the viewport; surviving element and zone ids, the selection and the
+   * shared-model identity (`modelId`, `modelVersion`) stay.
    */
   replaceDocumentFromCsv: (
     csvContent: string,
@@ -1879,8 +1880,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       targetBundleId: metadata.targetBundleId,
       targetValidation: null,
       propertyPostcode: metadata.propertyPostcode,
-      modelId: metadata.modelId,
-      modelVersion: metadata.modelVersion,
+      // Replacing the document is never an identity change: undo/redo keep the
+      // live shared-model id and base version. Hosts change them with the setters.
+      ...(replace ? {} : { modelId: metadata.modelId, modelVersion: metadata.modelVersion }),
     });
     {
       const overlayByFloor = metadata.guideOverlayByFloor ?? {};
