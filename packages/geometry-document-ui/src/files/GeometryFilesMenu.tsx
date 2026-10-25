@@ -67,6 +67,7 @@ export function GeometryFilesMenu({
   onDownloadPortable,
   onImportCad,
   projectPresentation,
+  afterDocuments,
 }: GeometryFilesMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPositioned, setIsPositioned] = useState(false);
@@ -770,6 +771,7 @@ export function GeometryFilesMenu({
             })}
           </div>
         )}
+        {afterDocuments}
       </div>
 
       {onNewDocument || onImportCsv || onOpenPortable || onDownloadCsv ||
