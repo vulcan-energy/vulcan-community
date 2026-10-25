@@ -49,6 +49,7 @@ export function GeometryFilesMenu({
   onChangeWorkspace,
   onDisconnectWorkspace,
   onRefresh,
+  onOpen,
   onSearchChange,
   onFilterChange,
   onOpenDocument,
@@ -914,6 +915,7 @@ export function GeometryFilesMenu({
           else {
             setIsPositioned(false);
             setIsOpen(true);
+            onOpen?.();
           }
         }}
       >
