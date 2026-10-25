@@ -113,6 +113,16 @@ describe('shared Geometry Files menu', () => {
     expect(screen.getByText('No matching files.')).toBeInTheDocument();
   });
 
+  it('tells the host each time the trigger opens Files, not when it closes', () => {
+    const onOpen = vi.fn();
+    renderMenu({ onOpen });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Files menu' }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Files menu' }));
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
   it('resets search and the project submenu when the trigger closes Files', () => {
     renderMenu();
     fireEvent.change(screen.getByRole('textbox', { name: 'Search models' }), {

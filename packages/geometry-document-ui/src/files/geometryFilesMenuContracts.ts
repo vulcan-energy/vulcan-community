@@ -110,6 +110,8 @@ export type GeometryFilesMenuProps = Readonly<{
   onChangeWorkspace?: () => void;
   onDisconnectWorkspace?: () => void;
   onRefresh?: () => void;
+  /** The menu was just opened; a host may refresh a listing it reads lazily. */
+  onOpen?: () => void;
   onSearchChange?: (search: string) => void;
   onFilterChange?: (filter: GeometryDocumentCatalogueFilter) => void;
 
