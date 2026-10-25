@@ -266,6 +266,11 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
       ),
     [filenameActionContext, filenameActionContributions],
   );
+  let saveLabel: React.ReactNode | null = null;
+  for (const action of availableFilenameActions) {
+    saveLabel = action.renderSaveLabel?.(filenameActionContext) ?? null;
+    if (saveLabel !== null) break;
+  }
 
   const closeSaveErrorDropdown = useCallback(() => {
     setIsSaveErrorModalOpen(false);
@@ -710,7 +715,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
         >
           <span className="save-button-content">
             {getSaveButtonIcon()}
-            <span className="save-button-text">Save</span>
+            {saveLabel ?? <span className="save-button-text">Save</span>}
             {showSaveErrorIndicator && (
               <span
                 role="button"
