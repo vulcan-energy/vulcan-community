@@ -8,6 +8,12 @@ export type FilenameActionContribution<HostContext, RenderResult> = Readonly<{
   placement?: 'start' | 'save';
   isAvailable?: (context: HostContext) => boolean;
   render: (context: HostContext) => RenderResult;
+  /**
+   * Replaces the Save button's "Save" text while it returns a value (null keeps
+   * "Save"), so a host can make the button itself read as the save status.
+   * The first available contribution that returns a value wins.
+   */
+  renderSaveLabel?: (context: HostContext) => RenderResult | null;
 }>;
 
 export type FilenameActionContributions<HostContext, RenderResult> = Readonly<{
