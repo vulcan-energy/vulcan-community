@@ -504,6 +504,16 @@ export const NEUTRAL_GEOMETRY_CANVAS_VIEWPORT_INSETS: GeometryCanvasViewportInse
     mobileTopPx: 0,
   });
 
+/** Another user's selection, drawn as a coloured outline with their name (host-supplied presence). */
+export type GeometryCanvasRemoteSelection = Readonly<{
+  key: string;
+  label: string;
+  color: string;
+  elementIds: readonly string[];
+}>;
+
+const NO_REMOTE_SELECTIONS: readonly GeometryCanvasRemoteSelection[] = [];
+
 export interface GeometryCanvasProps {
   selection: GeometryCanvasSelection;
   setSelection: (selection: GeometryCanvasSelection) => void;
@@ -516,6 +526,7 @@ export interface GeometryCanvasProps {
   modelSchemaProfilePort?: GeometryModelSchemaProfilePort;
   inspectorContributions?: GeometryInspectorContributions;
   externalDetailCatalogue?: ExternalDetailCataloguePort;
+  remoteSelections?: readonly GeometryCanvasRemoteSelection[];
   // File bar controls (threaded from GeometryBuilder)
   fileControls?: {
     documentHost: GeometryDocumentHostPort;
@@ -1155,6 +1166,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   modelSchemaProfilePort = unavailableGeometryModelSchemaProfilePort,
   inspectorContributions = emptyGeometryInspectorContributions,
   externalDetailCatalogue,
+  remoteSelections = NO_REMOTE_SELECTIONS,
   viewportInsets = NEUTRAL_GEOMETRY_CANVAS_VIEWPORT_INSETS,
   initialElementsPanelPlacement = 'right',
 }) => {
@@ -7857,6 +7869,27 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             })()}
 
           </Layer>
+
+          {remoteSelections.length > 0 ? (
+            <Layer name="remote-selection-layer" listening={false}>
+              {remoteSelections.flatMap((remote) => {
+                const ids = new Set(remote.elementIds);
+                const nodes: React.ReactNode[] = [];
+                for (const { element, canvasCoords } of elementCanvasData) {
+                  if (!ids.has(element.id) || !canvasCoords[0]) continue;
+                  const key = `${remote.key}:${element.id}`;
+                  const shape = getElementShape(element);
+                  nodes.push(shape === 'point'
+                    ? <Circle key={key} x={canvasCoords[0].x} y={canvasCoords[0].y} radius={9} stroke={remote.color} strokeWidth={2} />
+                    : <Line key={key} points={canvasCoords.flatMap((point) => [point.x, point.y])} closed={shape !== 'line'} stroke={remote.color} strokeWidth={3} />);
+                  if (nodes.length === 1) {
+                    nodes.push(<Text key={`${key}:label`} x={canvasCoords[0].x + 6} y={canvasCoords[0].y - 18} text={remote.label} fontSize={11} fontStyle="bold" fill={remote.color} />);
+                  }
+                }
+                return nodes;
+              })}
+            </Layer>
+          ) : null}
 
           <CanvasLivePreviewLayer>
             {profileGeometryCanvasNode(

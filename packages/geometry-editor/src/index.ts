@@ -6,6 +6,7 @@ export {
   type GeometryCanvasContributions,
   type GeometryCanvasPanelContext,
   type GeometryCanvasProps,
+  type GeometryCanvasRemoteSelection,
   type GeometryCanvasSelection,
 } from './components/GeometryCanvas';
 export {
