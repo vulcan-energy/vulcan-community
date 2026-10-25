@@ -111,6 +111,42 @@ describe('CSV document history', () => {
     expect(store.getState().history).toHaveLength(1);
   });
 
+  it('keeps the live shared-model identity across undo and redo; a version adopt is not a step', () => {
+    const store = loadedStore();
+    const postcode = () => store.getState().propertyPostcode;
+    // Content A, first share: id minted, push lands v6.
+    store.getState().setPropertyPostcode('A');
+    settle();
+    const modelId = store.getState().ensureModelId();
+    store.getState().setModelVersion(6);
+    settle();
+    const afterA = store.getState().history.length;
+    // Content B, push lands v7.
+    store.getState().setPropertyPostcode('B');
+    settle();
+    store.getState().setModelVersion(7);
+    settle();
+    store.getState().setPropertyPostcode('C');
+    settle();
+    store.getState().undo();
+    expect(postcode()).toBe('B');
+    // Adopting a version after an undo creates no step and keeps redo.
+    store.getState().setModelVersion(8);
+    settle();
+    expect(store.getState().canRedo).toBe(true);
+    store.getState().redo();
+    expect(postcode()).toBe('C');
+    store.getState().undo();
+    store.getState().undo();
+    expect(postcode()).toBe('A');
+    expect(store.getState().history.length).toBe(afterA + 2);
+    expect(store.getState().modelVersion).toBe(8);
+    // Undo past the first share keeps the identity, so the next save pushes, not creates.
+    while (store.getState().canUndo) store.getState().undo();
+    expect(store.getState().modelId).toBe(modelId);
+    expect(store.getState().modelVersion).toBe(8);
+  });
+
   it('keeps the newest 50 entries', () => {
     const store = loadedStore();
     for (let bedrooms = 1; bedrooms <= 55; bedrooms += 1) {

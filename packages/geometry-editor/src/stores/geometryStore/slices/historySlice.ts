@@ -5,6 +5,7 @@ import type { StateCreator } from 'zustand';
 import { logGeometryHistory } from '../../../lib/geometryHistoryDebug';
 import type { GeometryState } from '../../geometryStore';
 import type { Floor } from '../../../geometry/types';
+import { stripModelVersionRow } from '../../../geometry/io/geometryCsvCanonical';
 
 /**
  * Debounce between geometry-state changes and the next dirty check. Short
@@ -20,8 +21,13 @@ export const GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS = 150;
 export const HISTORY_CAPTURE_QUIET_MS = 300;
 
 /**
- * One undo step: the document exactly as Save would write it, plus the floor
- * list (Save does not persist empty floors). Entries compare by `csv` only.
+ * One undo step: the document as Save would write it minus the `ModelVersion`
+ * row, plus the floor list (Save does not persist empty floors). Entries
+ * compare by `csv` only. The version is the base a shared-model push was made
+ * from, not content: adopting it after a push is not a step, and undo keeps the
+ * live version (`replaceDocumentFromCsv` never changes identity). The dirty
+ * check still compares the full text with `lastSavedCsv`, which both carry the
+ * row, so only history entries are stripped.
  */
 export type HistoryEntry = {
   csv: string;
@@ -95,7 +101,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     }
     let csv: string;
     try {
-      csv = getDocumentCsv();
+      csv = stripModelVersionRow(getDocumentCsv());
     } catch (error) {
       // An un-exportable model cannot be a history step; the save flow reports why.
       logGeometryHistory('capture:skip-unexportable', { label, error: String(error) });
@@ -142,7 +148,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     // captured later as a new edit that discards the redo stack.
     let csv = entry.csv;
     try {
-      csv = getDocumentCsv();
+      csv = stripModelVersionRow(getDocumentCsv());
     } catch { /* keep the entry text */ }
     const history = state.history.slice();
     history[target] = { ...entry, csv, floors: get().floors };
