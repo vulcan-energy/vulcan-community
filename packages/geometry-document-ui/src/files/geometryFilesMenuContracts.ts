@@ -145,4 +145,6 @@ export type GeometryFilesMenuProps = Readonly<{
   onImportCad?: () => void;
 
   projectPresentation?: GeometryFilesMenuProjectPresentation;
+  /** Host content rendered below the document list. */
+  afterDocuments?: ReactNode;
 }>;

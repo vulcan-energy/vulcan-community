@@ -649,7 +649,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     />}
     <div className="filename-bar">
       <div className="filename-bar-left">
-        {availableFilenameActions.map((action) => (
+        {availableFilenameActions.map((action) => action.placement === 'save' ? null : (
           <React.Fragment key={action.id}>
             {action.render(filenameActionContext)}
           </React.Fragment>
@@ -735,6 +735,11 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
             )}
           </span>
         </button>
+        {availableFilenameActions.map((action) => action.placement === 'save' ? (
+          <React.Fragment key={action.id}>
+            {action.render(filenameActionContext)}
+          </React.Fragment>
+        ) : null)}
         </div>
         {buildError && currentSaveStatus !== 'saving' && (
           <button

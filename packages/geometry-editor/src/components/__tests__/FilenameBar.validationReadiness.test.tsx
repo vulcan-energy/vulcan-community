@@ -5,7 +5,9 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { GeometryDocumentHostPort } from '../../../../geometry-document/src';
-import { FilenameBar } from '../FilenameBar';
+import type { ReactNode } from 'react';
+import { FilenameBar, type FilenameBarActionContext } from '../FilenameBar';
+import { defineFilenameActionContributions } from '../../../../geometry-editor-host/src';
 import {
   createGeometryStore,
   GeometryStoreProvider,
@@ -161,5 +163,30 @@ describe('FilenameBar build error rows', () => {
     await user.click(screen.getByRole('button', { name: 'Whole-window and airflow-division mid-heights disagree.' }));
     expect(store.getState().selection).toEqual({ type: 'element', id: 'w1', focusFieldKey: 'mid_height' });
     expect(store.getState().currentFloorZ).toBe(3);
+  });
+});
+
+describe('FilenameBar action placement', () => {
+  it('renders save-placed actions beside Save and the rest with the leading actions', () => {
+    const store = createGeometryStore();
+    const contributions = defineFilenameActionContributions<FilenameBarActionContext, ReactNode>({
+      filenameActions: [
+        { id: 'lead', render: () => <button type="button">Lead</button> },
+        { id: 'menu', placement: 'save', render: () => <button type="button">Save menu</button> },
+      ],
+    });
+    const { container } = render(
+      <GeometryStoreProvider store={store}>
+        <FilenameBar
+          documentHost={documentHostHarness()}
+          saveStatus="idle"
+          saveError={null}
+          filenameActionContributions={contributions}
+        />
+      </GeometryStoreProvider>,
+    );
+    const saveStack = container.querySelector('.filename-bar-save-stack')!;
+    expect(saveStack.contains(screen.getByRole('button', { name: 'Save menu' }))).toBe(true);
+    expect(container.querySelector('.filename-bar-left')!.contains(screen.getByRole('button', { name: 'Lead' }))).toBe(true);
   });
 });
