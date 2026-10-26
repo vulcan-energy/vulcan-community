@@ -112,6 +112,15 @@
   gap: 8px;
 }
 
+/* Header controls with a text label (folder) size to their text. */
+.geometry-files-menu .files-dropdown-action-btn.files-dropdown-header-text-btn {
+  width: auto;
+  padding: 0 8px;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .geometry-files-menu .files-dropdown-refresh {
   display: flex;
   align-items: center;
@@ -263,20 +272,6 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-}
-
-.geometry-files-menu .files-dropdown-item-current {
-  flex-shrink: 0;
-  color: var(--accent-primary);
-}
-
-.geometry-files-menu .files-dropdown-item.active .files-dropdown-item-current {
-  color: var(--text-on-accent);
-}
-
-.geometry-files-menu .files-dropdown-item-current svg {
-  width: 16px;
-  height: 16px;
 }
 
 .geometry-files-menu .files-dropdown-item-container {

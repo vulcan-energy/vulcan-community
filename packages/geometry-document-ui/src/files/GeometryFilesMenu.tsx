@@ -319,16 +319,13 @@ export function GeometryFilesMenu({
         <div className="files-dropdown-header-actions">
           <button
             type="button"
-            className="files-dropdown-action-btn"
+            className="files-dropdown-action-btn files-dropdown-header-text-btn"
             aria-label={workspaceCapability.label}
             title={workspaceCapability.title}
             disabled={Boolean(workspaceCapability.action) && isBusy}
             onClick={() => workspaceCapability.action?.()}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" strokeWidth="2" />
-              <polyline points="15,3 21,3 21,9" stroke="currentColor" strokeWidth="2" />
-            </svg>
+            {workspaceCapability.label}
           </button>
           {workspace.status === 'connected' && onChangeWorkspace && onDisconnectWorkspace ? (
             <button
@@ -706,13 +703,6 @@ export function GeometryFilesMenu({
                     </div>
                     <div className="files-dropdown-item-right">
                       {!isSaved ? <span className="files-dropdown-unsaved-chip">Unsaved</span> : null}
-                      {isActive ? (
-                        <div className="files-dropdown-item-current" aria-hidden>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" />
-                          </svg>
-                        </div>
-                      ) : null}
                     </div>
                   </button>
                   {isSaved ? (
