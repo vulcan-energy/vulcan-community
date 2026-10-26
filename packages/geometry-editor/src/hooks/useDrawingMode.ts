@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { CANVAS_CONSTANTS } from '../lib/canvasConstants';
 import type { ElementType } from '../geometry/types';
+import type { GeometryCanvasLiveEdit } from '../components/canvas/canvasInteractionSession';
+import type { DrawingPreviewSignal } from '../components/canvas/drawingPreviewSignal';
 
 export type DrawMode =
   | 'none'
@@ -112,4 +114,45 @@ export function useDrawingMode() {
     setDrawPresetData,
     resetDrawing,
   };
+}
+
+/**
+ * Reports a drawing in progress as live edits: its placed points (empty while
+ * not drawing) and the snapped cursor, once per frame while they change; then
+ * `end` when it finished into an element (`elementCount` grew since the last
+ * point) or `cancel` when it was dropped.
+ */
+export function useLiveDrawReport(
+  onLiveEdit: ((edit: GeometryCanvasLiveEdit) => void) | undefined,
+  points: ReadonlyArray<{ x: number; y: number }>,
+  previewSignal: DrawingPreviewSignal,
+  elementCount: () => number,
+): void {
+  // The element count at the last point change; null while nothing is reported.
+  const countAtPointRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!onLiveEdit) return;
+    if (points.length === 0) {
+      const before = countAtPointRef.current;
+      countAtPointRef.current = null;
+      if (before !== null) onLiveEdit({ kind: 'draw', phase: elementCount() > before ? 'end' : 'cancel' });
+      return;
+    }
+    countAtPointRef.current = elementCount();
+    const placed = points.map(({ x, y }) => [x, y] as const);
+    let frame: number | null = null;
+    const report = () => {
+      frame = null;
+      const cursor = previewSignal.getSnapshot().drawCursor;
+      onLiveEdit({ kind: 'draw', phase: 'move', points: placed, ...(cursor ? { cursor: [cursor.x, cursor.y] as const } : {}) });
+    };
+    report();
+    const unsubscribe = previewSignal.subscribe(() => {
+      frame ??= requestAnimationFrame(report);
+    });
+    return () => {
+      unsubscribe();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [elementCount, onLiveEdit, points, previewSignal]);
 }

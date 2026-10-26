@@ -713,6 +713,17 @@ export function cacheDraggedElementShapeNodes(
   target?.setAttr?.('__vulcanDraggedVertexNodes', refs.vertexNodes);
 }
 
+type DragPreviewCoordsListener = (element: Element, coords: ReadonlyArray<{ x: number; y: number }>) => void;
+const dragPreviewCoordsListeners = new Set<DragPreviewCoordsListener>();
+
+/** Every element a drag preview draws, at its previewed model coordinates (the live-edit report). */
+export function subscribeDragPreviewCoords(listener: DragPreviewCoordsListener): () => void {
+  dragPreviewCoordsListeners.add(listener);
+  return () => {
+    dragPreviewCoordsListeners.delete(listener);
+  };
+}
+
 export function updateElementShapeNodeRefsFromCoords(
   refs: Partial<ElementShapeNodeRefs>,
   element: Element | undefined,
@@ -722,6 +733,7 @@ export function updateElementShapeNodeRefsFromCoords(
   canvasCenter: { x: number; y: number },
   globalOrientationOffset?: number,
 ): PreviewLayerNode | null {
+  if (element) for (const listener of dragPreviewCoordsListeners) listener(element, coords);
   const points = coords.flatMap((coord) => {
     const canvas = worldToCanvas(coord, scale, panOffset, canvasCenter);
     return [canvas.x, canvas.y];
