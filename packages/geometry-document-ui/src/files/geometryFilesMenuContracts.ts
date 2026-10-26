@@ -19,6 +19,8 @@ export type GeometryFilesMenuDocument = GeometryDocumentCatalogueEntry &
     summary?: GeometryFilesMenuDocumentSummary;
     /** A host may show a not-yet-persisted catalogue placeholder. */
     isSaved?: boolean;
+    /** Shared with the host's organisation; the Shared filter lists these. */
+    shared?: boolean;
   }>;
 
 export type GeometryFilesMenuProject = GeometryProjectGroupCatalogueEntry;
@@ -147,6 +149,10 @@ export type GeometryFilesMenuProps = Readonly<{
   onImportCad?: () => void;
 
   projectPresentation?: GeometryFilesMenuProjectPresentation;
+  /** Host chips in a saved row's right-hand cell. */
+  renderRowBadges?: (document: GeometryFilesMenuDocument) => ReactNode;
+  /** Host actions before Duplicate and Delete in a saved row. */
+  renderRowActions?: (document: GeometryFilesMenuDocument) => ReactNode;
   /** Host content rendered below the document list. */
   afterDocuments?: ReactNode;
 }>;

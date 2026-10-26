@@ -86,6 +86,8 @@ export type GeometryWorkspaceSnapshot = Readonly<{
 export type GeometryDocumentCatalogueFilter =
   | Readonly<{ kind: 'all' }>
   | Readonly<{ kind: 'unassigned' }>
+  /** Documents a host reports as shared with its organisation; providers do not offer it. */
+  | Readonly<{ kind: 'shared' }>
   | Readonly<{ kind: 'project'; projectGroupId: string }>;
 
 function requireOpaqueId(

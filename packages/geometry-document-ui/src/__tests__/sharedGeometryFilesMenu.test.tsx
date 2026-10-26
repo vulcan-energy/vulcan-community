@@ -3,7 +3,7 @@
 
 import React from 'react';
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   GeometryFilesMenu,
@@ -110,6 +110,41 @@ describe('shared Geometry Files menu', () => {
     expect(screen.queryByRole('button', { name: 'Load House.csv' })).not.toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: 'missing' } });
+    expect(screen.getByText('No matching files.')).toBeInTheDocument();
+  });
+
+  it('renders host row badges and actions, and offers a Shared filter only when something is shared', () => {
+    renderMenu({
+      renderRowBadges: (document) => <span>badge {document.fileName}</span>,
+      renderRowActions: (document) => <button type="button">Share {document.fileName}</button>,
+    });
+    const flatRow = screen.getByRole('button', { name: 'Load Flat.csv' }).parentElement!;
+    expect(within(flatRow).getByRole('button', { name: 'Load Flat.csv' })).toHaveTextContent('badge Flat.csv');
+    expect(within(flatRow).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent))
+      .toEqual(['Load Flat.csv', 'Share Flat.csv', 'Duplicate Flat.csv', 'Delete Flat.csv']);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter base models by project' }));
+    expect(screen.queryByRole('menuitemradio', { name: /Shared/ })).not.toBeInTheDocument();
+  });
+
+  it('lists only shared documents under the Shared filter, and search still applies', () => {
+    const onFilterChange = vi.fn();
+    renderMenu({
+      onFilterChange,
+      documents: [documents[0], { ...documents[1], shared: true }],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter base models by project' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Shared/ }));
+    expect(onFilterChange).toHaveBeenCalledWith({ kind: 'shared' });
+    cleanup();
+
+    renderMenu({
+      filter: Object.freeze({ kind: 'shared' as const }),
+      documents: [documents[0], { ...documents[1], shared: true }],
+    });
+    expect(screen.getByRole('button', { name: 'Filter base models by project' })).toHaveTextContent('Shared');
+    expect(screen.getByRole('button', { name: 'Load Flat.csv' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load House.csv' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search models' }), { target: { value: 'house' } });
     expect(screen.getByText('No matching files.')).toBeInTheDocument();
   });
 

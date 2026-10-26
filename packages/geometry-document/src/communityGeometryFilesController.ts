@@ -1389,7 +1389,8 @@ class DefaultCommunityGeometryFilesController {
           this.filter.kind === 'all' ||
           (this.filter.kind === 'unassigned'
             ? document.projectGroupIds.length === 0
-            : document.projectGroupIds.includes(this.filter.projectGroupId));
+            : this.filter.kind === 'project'
+              && document.projectGroupIds.includes(this.filter.projectGroupId));
         return (
           matchesFilter &&
           (normalizedSearch.length === 0 ||
