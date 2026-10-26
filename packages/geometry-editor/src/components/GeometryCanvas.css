@@ -2366,6 +2366,8 @@
   flex-direction: column;
   gap: 6px;
   align-items: stretch;
+  /* Full height in the zones list, which scrolls, so People rows are never squeezed out. */
+  flex-shrink: 0;
 }
 
 .hide-control {

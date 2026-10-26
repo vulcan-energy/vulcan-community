@@ -13,7 +13,8 @@ export type GeometryCanvasRemoteSelection = Readonly<{
   key: string;
   label: string;
   color: string;
-  initials: string;
+  /** Shown until an image loads; taken from `label` when absent. */
+  initials?: string;
   imageUrl?: string;
   elementIds: readonly string[];
 }>;
@@ -64,9 +65,33 @@ function loadedAvatar(url: string | undefined): HTMLImageElement | undefined {
 const PILL_HEIGHT = 20;
 const DISC_RADIUS = 7;
 const FONT_SIZE = 11;
-const LEADER = 14;
-// The arrow's tip is its origin.
-const ARROW = [0, 0, 0, 16, 4.5, 12, 7.5, 18.5, 10, 17.5, 7, 11, 12.5, 11];
+const LEADER = 22;
+// A ~22 px pointer; its tip is the origin.
+const ARROW = [0, 0, 0, 19, 5.5, 14.5, 9, 22, 12, 20.8, 8.5, 13.3, 15, 13.3];
+
+/** Two letters from a label's words, for a pill without host-supplied initials. */
+function initialsOf(label: string): string {
+  let result = '';
+  for (const word of label.split(/[\s@._-]+/)) {
+    if (word && /\w/.test(word[0]!)) result += word[0]!.toUpperCase();
+    if (result.length === 2) break;
+  }
+  return result || '?';
+}
+
+/** Where a selection's pill sits: a line's midpoint, a closed shape's top centre, a point itself. */
+function pillAnchor(shape: string, points: readonly Point[]): Point {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const point of points) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+  const x = (minX + maxX) / 2;
+  if (shape === 'point') return points[0]!;
+  return { x, y: shape === 'line' ? (minY + maxY) / 2 : minY };
+}
 
 let measurer: Konva.Text | null = null;
 function labelWidth(label: string): number {
@@ -210,9 +235,9 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
         for (const { element, canvasCoords } of elementCanvasData) {
           const first = canvasCoords[0];
           if (!ids.has(element.id) || !first) continue;
-          anchor ??= first;
           const shape = getElementShape(element);
-          const glow = { shadowColor: remote.color, shadowBlur: 12, shadowOpacity: 0.9 };
+          anchor ??= pillAnchor(shape, canvasCoords);
+          const glow = { shadowColor: remote.color, shadowBlur: 16, shadowOpacity: 0.9 };
           if (shape === 'point') {
             shapes.push(<Circle key={element.id} x={first.x} y={first.y} radius={9} stroke={remote.color} strokeWidth={2} {...glow} />);
             continue;
@@ -220,24 +245,24 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
           const points = canvasCoords.flatMap((point) => [point.x, point.y]);
           if (shape !== 'line') shapes.push(<Line key={`${element.id}:tint`} points={points} closed fill={remote.color} opacity={0.12} />);
           shapes.push(
-            <Line key={element.id} points={points} closed={shape !== 'line'} stroke={remote.color} strokeWidth={3} lineJoin="round" {...glow} />,
+            <Line key={element.id} points={points} closed={shape !== 'line'} stroke={remote.color} strokeWidth={4} lineJoin="round" {...glow} />,
           );
         }
         if (!anchor) return null;
         return (
           <Group key={remote.key} ref={keep(selectionNodes, remote.key)}>
             {shapes}
-            <Line points={[anchor.x, anchor.y, anchor.x, anchor.y - LEADER]} stroke={remote.color} strokeWidth={1.5} />
+            <Line points={[anchor.x, anchor.y, anchor.x, anchor.y - LEADER]} stroke={remote.color} strokeWidth={2} />
             <Group x={anchor.x} y={anchor.y - LEADER} ref={keep(selectionNodes, `${remote.key}:pill`)}>
-              <NamePill color={remote.color} label={remote.label} initials={remote.initials} imageUrl={remote.imageUrl} centred />
+              <NamePill color={remote.color} label={remote.label} initials={remote.initials ?? initialsOf(remote.label)} imageUrl={remote.imageUrl} centred />
             </Group>
           </Group>
         );
       })}
       {cursors.map((cursor) => (
-        <Group key={cursor.key} ref={keep(cursorNodes, cursor.key)}>
-          <Line points={ARROW} closed fill={cursor.color} stroke="#fff" strokeWidth={1.5} lineJoin="round" />
-          <Group x={12} y={18}>
+        <Group key={cursor.key} name="remote-cursor" id={`remote-cursor:${cursor.key}`} ref={keep(cursorNodes, cursor.key)}>
+          <Line points={ARROW} closed fill={cursor.color} fillEnabled stroke="#fff" strokeWidth={1.5} lineJoin="round" />
+          <Group x={14} y={22}>
             <NamePill color={cursor.color} label={cursor.label} initials={cursor.initials} imageUrl={cursor.imageUrl} />
           </Group>
         </Group>

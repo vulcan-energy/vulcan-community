@@ -1316,19 +1316,25 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       people.onFollow(key);
     },
   }, [followViewport, panOffset, people, scale]);
-  // The keyboard's zoom and pan are the user's: reported as they apply.
-  const setScaleByKey = useCallback((update: (previous: number) => number) => {
-    const next = update(scale);
-    setScale(next);
-    setPanOffset(panOffset);
-    onViewportChange?.(viewportFromPan(next, panOffset));
-  }, [onViewportChange, panOffset, scale]);
-  const setPanOffsetByKey = useCallback((update: (previous: { x: number; y: number }) => { x: number; y: number }) => {
-    const next = update(panOffset);
-    setScale(scale);
-    setPanOffset(next);
-    onViewportChange?.(viewportFromPan(scale, next));
-  }, [onViewportChange, panOffset, scale]);
+  // A view the user chose (keyboard, centring on an element): applied as
+  // theirs, both axes, and reported, which ends follow mode.
+  const applyUserViewport = useCallback((nextScale: number, nextPanOffset: { x: number; y: number }) => {
+    setScale(nextScale);
+    setPanOffset(nextPanOffset);
+    onViewportChange?.(viewportFromPan(nextScale, nextPanOffset));
+  }, [onViewportChange]);
+  const setPanOffsetAsUser = useCallback(
+    (next: { x: number; y: number }) => applyUserViewport(scale, next),
+    [applyUserViewport, scale],
+  );
+  const setScaleByKey = useCallback(
+    (update: (previous: number) => number) => applyUserViewport(update(scale), panOffset),
+    [applyUserViewport, panOffset, scale],
+  );
+  const setPanOffsetByKey = useCallback(
+    (update: (previous: { x: number; y: number }) => { x: number; y: number }) => applyUserViewport(scale, update(panOffset)),
+    [applyUserViewport, panOffset, scale],
+  );
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [zenMode, setZenMode] = useState(false);
   const [hiddenPanels, setHiddenPanels] = useState<Partial<Record<HidePanelKey, boolean>>>(DEFAULT_HIDDEN_PANELS);
@@ -1598,14 +1604,19 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setStageLayerViewportPreview({ x: 0, y: 0, scale: 1 });
   }, [panOffset.x, panOffset.y, scale, setStageLayerViewportPreview]);
 
+  const commitViewportPreviewRef = useRef(commitViewportPreview);
+  useEffect(() => {
+    commitViewportPreviewRef.current = commitViewportPreview;
+  });
   const scheduleViewportPreviewCommit = useCallback(() => {
     clearViewportPreviewCommitTimeout();
     viewportPreviewCommitTimeoutRef.current = window.setTimeout(() => {
       viewportPreviewCommitTimeoutRef.current = null;
       if (activePanGestureRef.current) return;
-      commitViewportPreview();
+      // The latest: a followed view may have changed scale and pan since this was scheduled.
+      commitViewportPreviewRef.current();
     }, VIEWPORT_PREVIEW_COMMIT_IDLE_MS);
-  }, [clearViewportPreviewCommitTimeout, commitViewportPreview]);
+  }, [clearViewportPreviewCommitTimeout]);
 
   useEffect(() => {
     return () => {
@@ -4114,8 +4125,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     }
     const target = worldToCanvas({ x: cx, y: cy }, scale, { x: 0, y: 0 }, canvasCenter);
-    setPanOffset({ x: canvasCenter.x - target.x, y: canvasCenter.y - target.y });
-  }, [scale, canvasCenter, setPanOffset]);
+    setPanOffsetAsUser({ x: canvasCenter.x - target.x, y: canvasCenter.y - target.y });
+  }, [scale, canvasCenter, setPanOffsetAsUser]);
 
   const centerOnSpaceLabelFootprint = useCallback((sl: SpaceLabel) => {
     const coords = sl.coordinates || [];
@@ -4125,8 +4136,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     const target = worldToCanvas({ x: cx, y: cy }, scale, { x: 0, y: 0 }, canvasCenter);
-    setPanOffset({ x: canvasCenter.x - target.x, y: canvasCenter.y - target.y });
-  }, [scale, canvasCenter, setPanOffset]);
+    setPanOffsetAsUser({ x: canvasCenter.x - target.x, y: canvasCenter.y - target.y });
+  }, [scale, canvasCenter, setPanOffsetAsUser]);
 
   const centerSpaceLabelFootprintInView = useCallback(
     (labelId: string) => {
@@ -5238,7 +5249,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   const onStageMouseMove = useCallback((e: any) => {
     // Every move, drags included; the host throttles what it sends.
-    if (onPointerWorldMove && !activePanGestureRef.current) {
+    // Not mid-gesture: until a wheel or pan preview commits, scale and pan lag what is shown.
+    const preview = viewportPreviewTransformRef.current;
+    if (onPointerWorldMove && !activePanGestureRef.current && preview.x === 0 && preview.y === 0 && preview.scale === 1) {
       const pointer = getStageViewportPointer(e.target?.getStage?.());
       if (pointer) onPointerWorldMove(canvasToWorld(pointer, scale, panOffset, canvasCenter), viewportFromPan(scale, panOffset));
     }
@@ -8601,7 +8614,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             canvasCenter={canvasCenter}
             scale={scale}
             panOffset={panOffset}
-            setPanOffset={setPanOffset}
+            setPanOffset={setPanOffsetAsUser}
             createPlaceholderZone={createPlaceholderZone}
             createPlaceholderElement={createPlaceholderElement}
             onDrawMissingElement={drawMissingElement}
@@ -9044,7 +9057,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             onResetDrawingState={resetDrawing}
             scale={scale}
             canvasCenter={canvasCenter}
-            setPanOffset={setPanOffset}
+            setPanOffset={setPanOffsetAsUser}
           />,
         )
       )}
