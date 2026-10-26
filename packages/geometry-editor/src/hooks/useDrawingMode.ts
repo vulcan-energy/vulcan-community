@@ -120,7 +120,10 @@ export function useDrawingMode() {
  * Reports a drawing in progress as live edits: its placed points (empty while
  * not drawing) and the snapped cursor, once per frame while they change; then
  * `end` when it finished into an element (`elementCount` grew since the last
- * point) or `cancel` when it was dropped.
+ * point) or `cancel` when it was dropped. The editor offers no finish-or-cancel
+ * signal (both go through the same reset), so a colleague's version adding
+ * elements mid-draw can make a cancel read as an end: its ghost then holds
+ * until the next version applies or 3 s pass.
  */
 export function useLiveDrawReport(
   onLiveEdit: ((edit: GeometryCanvasLiveEdit) => void) | undefined,
@@ -155,4 +158,10 @@ export function useLiveDrawReport(
       if (frame !== null) cancelAnimationFrame(frame);
     };
   }, [elementCount, onLiveEdit, points, previewSignal]);
+  // Unmounted (or the host's callback replaced) mid-drawing: nothing will end it.
+  useEffect(() => () => {
+    if (countAtPointRef.current === null) return;
+    countAtPointRef.current = null;
+    onLiveEdit?.({ kind: 'draw', phase: 'cancel' });
+  }, [onLiveEdit]);
 }

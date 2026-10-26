@@ -1473,7 +1473,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const countElements = useCallback(() => geometryStore.getState().elementIds.length, [geometryStore]);
   useLiveDrawReport(
     onLiveEdit,
-    drawMode === 'none' ? NO_DRAW_POINTS : drawMode === 'room' ? roomWalls : drawPoints,
+    // Space labels are not elements: no ghost.
+    drawMode === 'none' || drawMode === 'space-label-polygon' ? NO_DRAW_POINTS : drawMode === 'room' ? roomWalls : drawPoints,
     drawingPreviewSignal,
     countElements,
   );

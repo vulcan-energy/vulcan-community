@@ -96,14 +96,20 @@ describe('live edit reports', () => {
     preview(4);
     await nextFrame();
     expect(edits).toHaveLength(3);
+
+    // Torn down mid-drag: what was reported is cancelled.
+    const torn = beginCanvasInteraction({ kind: 'selected-point-drag' })!;
+    preview(5);
     stop();
+    expect(edits.at(-1)).toEqual({ kind: 'drag', phase: 'cancel' });
+    torn.cancel();
   });
 
   it('reports a drawing\'s points and snapped cursor, then end when it made an element or cancel when dropped', async () => {
     const signal = createDrawingPreviewSignal();
     const onLiveEdit = vi.fn();
     let count = 5;
-    const { rerender } = renderHook(
+    const { rerender, unmount } = renderHook(
       ({ points }) => useLiveDrawReport(onLiveEdit, points, signal, () => count),
       { initialProps: { points: [{ x: 0, y: 0 }] } },
     );
@@ -119,5 +125,11 @@ describe('live edit reports', () => {
     rerender({ points: [{ x: 1, y: 1 }] });
     rerender({ points: [] });
     expect(onLiveEdit).toHaveBeenLastCalledWith({ kind: 'draw', phase: 'cancel' });
+
+    // Unmounted mid-drawing: cancelled, once.
+    rerender({ points: [{ x: 2, y: 2 }] });
+    const calls = onLiveEdit.mock.calls.length;
+    unmount();
+    expect(onLiveEdit.mock.calls.slice(calls)).toEqual([[{ kind: 'draw', phase: 'cancel' }]]);
   });
 });

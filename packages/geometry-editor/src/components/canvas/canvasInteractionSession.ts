@@ -280,5 +280,7 @@ export function reportLiveDragEdits(onLiveEdit: (edit: GeometryCanvasLiveEdit) =
     offPreview();
     completionListeners.delete(onComplete);
     if (frame !== null) cancelAnimationFrame(frame);
+    // Torn down mid-gesture: nothing will end what was reported.
+    if (moved.size > 0) onLiveEdit({ kind: 'drag', phase: 'cancel' });
   };
 }
