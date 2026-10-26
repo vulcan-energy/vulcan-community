@@ -516,6 +516,8 @@ import {
   updateSpaceHeatSystemHeatSourceNameInExtraJson,
 } from './systemEditorUtils';
 import { groundFloorTypeSupportsViewerElevation } from '../lib/groundFloorSubtype';
+import { ColleagueDiscs } from './canvas/ColleagueDiscs';
+import type { GeometryCanvasRemoteSelection } from './canvas/RemotePresenceLayer';
 
 const loadAdvancedFieldsEditor = () => import('./AdvancedFieldsEditor');
 const loadAssemblyCalculatorModal = () => import('./AssemblyCalculatorModal');
@@ -714,6 +716,8 @@ interface ElementCreatorProps {
   inspectorContributions?: GeometryInspectorContributions;
   workspaceResourcePort?: GeometryWorkspaceResourcePort;
   externalDetailCataloguePort?: ExternalDetailCataloguePort;
+  /** Colleagues' selections: theirs on this element show beside the header. */
+  remoteSelections?: readonly GeometryCanvasRemoteSelection[];
 }
 
 function escapeRegExp(value: string): string {
@@ -952,6 +956,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   inspectorContributions = emptyGeometryInspectorContributions,
   workspaceResourcePort = unavailableGeometryWorkspaceResourcePort,
   externalDetailCataloguePort,
+  remoteSelections,
 }) => {
   const geometryStore = useGeometryStoreApi();
   const schemaPort = useGeometrySchemaPort();
@@ -4642,6 +4647,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             <span className="controls-label element-editor-header__title">
               {selectedIsDormerAnchor ? 'Edit Dormer' : 'Edit Element'}
             </span>
+            {remoteSelections ? <ColleagueDiscs colleagues={remoteSelections.filter((remote) => remote.elementIds.includes(selection.id))} /> : null}
             <div className="element-editor-header__name" ref={registerBaseFieldRefs('name')}>
               <StandardInput
                 id={ELEMENT_NAME_INPUT_ID}

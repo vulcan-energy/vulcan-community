@@ -25,6 +25,8 @@ import {
 import type { PanelRect } from '../../hooks/usePanelLayout';
 import { getDormerAnchorName, getDormerBundleInfo, getDormerBundleName } from '../../lib/dormerGeometry';
 import type { CanvasViewMode } from './DrawToolbar';
+import type { GeometryCanvasRemoteSelection } from './RemotePresenceLayer';
+import { ColleagueDiscs, PersonDisc } from './ColleagueDiscs';
 import {
   unavailableGeometryModelSchemaProfilePort,
   type GeometryModelSchemaProfilePort,
@@ -61,23 +63,7 @@ export type GeometryCanvasPeople = Readonly<{
   onFollow: (key: string) => void;
 }>;
 
-function PersonDisc({ person }: Readonly<{ person: GeometryCanvasPerson }>) {
-  return (
-    <span aria-hidden className="people-disc" style={{ '--person-colour': person.color } as React.CSSProperties}>
-      {person.initials}
-      {person.imageUrl ? (
-        <img
-          src={person.imageUrl}
-          alt=""
-          crossOrigin="anonymous"
-          onError={(event) => {
-            event.currentTarget.style.display = 'none';
-          }}
-        />
-      ) : null}
-    </span>
-  );
-}
+const NO_COLLEAGUES: readonly GeometryCanvasRemoteSelection[] = [];
 
 // The People block's height: its label and top rule, then one zone-pill row per person.
 const PEOPLE_LABEL_PX = 24;
@@ -103,7 +89,7 @@ export function PeopleControl({ people }: Readonly<{ people: GeometryCanvasPeopl
               onClick={() => people.onFollow(person.key)}
             >
               <span className="zone-name people-row">
-                <PersonDisc person={person} />
+                <PersonDisc color={person.color} initials={person.initials} imageUrl={person.imageUrl} />
                 <span className="people-row__name">{person.name}</span>
                 {person.qualifier ? <span className="zone-details">{person.qualifier}</span> : null}
               </span>
@@ -216,6 +202,8 @@ export interface ElementsZonesPanelProps {
    */
   cmdASelectIdsRef?: React.MutableRefObject<(() => string[] | null) | null>;
   people?: GeometryCanvasPeople;
+  /** Colleagues' selections on this floor: their discs mark the rows they have selected. */
+  remoteSelections?: readonly GeometryCanvasRemoteSelection[];
 }
 
 type ElementEntryRowProps = {
@@ -231,6 +219,7 @@ type ElementEntryRowProps = {
   hasEvidenceDraft: boolean;
   evidenceCount: number;
   allMembersIndividuallyHidden: boolean;
+  colleagues: readonly GeometryCanvasRemoteSelection[];
   onEntryClick: (entry: ElementsPanelEntry, isFullySelected: boolean, event: React.MouseEvent<HTMLButtonElement>) => void;
   onEntryDoubleClick: (entry: ElementsPanelEntry, elementFloorZ: number) => void;
   onToggleEntryHidden: (entry: ElementsPanelEntry, event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -249,6 +238,7 @@ const ElementEntryRow = memo(function ElementEntryRow({
   hasEvidenceDraft,
   evidenceCount,
   allMembersIndividuallyHidden,
+  colleagues,
   onEntryClick,
   onEntryDoubleClick,
   onToggleEntryHidden,
@@ -308,6 +298,7 @@ const ElementEntryRow = memo(function ElementEntryRow({
               className="element-evidence-dot"
             />
           )}
+          <ColleagueDiscs colleagues={colleagues} />
         </div>
       </button>
       <button
@@ -403,6 +394,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   unhideElement,
   cmdASelectIdsRef,
   people,
+  remoteSelections = NO_COLLEAGUES,
 }: ElementsZonesPanelProps) {
   const geometryStore = useGeometryStoreApi();
   const elementsMenuRef = useRef<HTMLDivElement>(null);
@@ -745,6 +737,21 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     }
     return summaries;
   }, [currentFloorZ, elementHasComparisonInfo, floors, getValidation, sortedElementEntries]);
+  // Rows a colleague has selected, keyed by entry; a dormer bundle counts when any member is.
+  const colleaguesByEntry = useMemo(() => {
+    const byEntry = new Map<string, GeometryCanvasRemoteSelection[]>();
+    if (remoteSelections.length === 0) return byEntry;
+    const byElement = new Map<string, GeometryCanvasRemoteSelection[]>();
+    for (const remote of remoteSelections) {
+      for (const id of remote.elementIds) byElement.set(id, [...(byElement.get(id) ?? []), remote]);
+    }
+    for (const entry of sortedElementEntries) {
+      const here = new Set<GeometryCanvasRemoteSelection>();
+      for (const id of entry.memberIds) for (const remote of byElement.get(id) ?? []) here.add(remote);
+      if (here.size > 0) byEntry.set(getElementEntryKey(entry), [...here]);
+    }
+    return byEntry;
+  }, [remoteSelections, sortedElementEntries]);
   const elementStatusCounts = useMemo(() => {
     let criticalCount = 0;
     let warningCount = 0;
@@ -1127,6 +1134,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                   const isFullySelected = areAllEntryMembersSelected(entry, selectedElementIdSet);
                   const allMembersIndividuallyHidden = entry.memberIds.every((id) => hiddenElementIds.has(id));
                   const evidenceCount = lookupByElement.get(element.name ?? '')?.length ?? 0;
+                  const colleagues = colleaguesByEntry.get(entryKey) ?? NO_COLLEAGUES;
                   return (
                     <ElementEntryRow
                       key={entryKey}
@@ -1142,6 +1150,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                       hasEvidenceDraft={hasEvidenceDraft}
                       evidenceCount={evidenceCount}
                       allMembersIndividuallyHidden={allMembersIndividuallyHidden}
+                      colleagues={colleagues}
                       onEntryClick={handleElementEntryClick}
                       onEntryDoubleClick={handleElementEntryDoubleClick}
                       onToggleEntryHidden={handleToggleEntryHidden}

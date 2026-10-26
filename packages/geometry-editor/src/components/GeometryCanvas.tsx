@@ -8686,6 +8686,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             unhideElement={unhideElement}
             cmdASelectIdsRef={elementsPanelCmdASelectIdsRef}
             people={panelPeople}
+            remoteSelections={remoteSelections}
           />,
         )
       )}
@@ -9420,6 +9421,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                       inspectorContributions={inspectorContributions}
                       workspaceResourcePort={workspaceResourcePort}
                       externalDetailCataloguePort={externalDetailCatalogue}
+                      remoteSelections={remoteSelections}
                     />,
                   )
                 ) : (
