@@ -57,3 +57,40 @@ export function modelXYToExtrudeShapeXY(point: [number, number]): [number, numbe
 export function modelSegmentToThreeYaw(start: [number, number], end: [number, number]): number {
   return Math.atan2(end[1] - start[1], end[0] - start[0]);
 }
+
+/**
+ * One animation step toward moving targets: each displayed point covers
+ * 1 - e^(-elapsed/timeConstant) of its remaining gap; a new key starts at its
+ * target and a key no longer targeted is dropped. Returns whether any point
+ * is still moving (within a millimetre counts as arrived).
+ */
+export function easePointsToward(
+  displayed: Map<string, ModelPoint2D>,
+  targets: readonly Readonly<{ key: string; x: number; y: number }>[],
+  elapsedMs: number,
+  timeConstantMs: number,
+): boolean {
+  const k = 1 - Math.exp(-Math.max(0, elapsedMs) / timeConstantMs);
+  const live = new Set<string>();
+  let moving = false;
+  for (const target of targets) {
+    live.add(target.key);
+    const point = displayed.get(target.key);
+    if (!point) {
+      displayed.set(target.key, { x: target.x, y: target.y });
+      continue;
+    }
+    const dx = target.x - point.x;
+    const dy = target.y - point.y;
+    if (Math.hypot(dx, dy) < 1e-3) {
+      point.x = target.x;
+      point.y = target.y;
+      continue;
+    }
+    point.x += dx * k;
+    point.y += dy * k;
+    moving = true;
+  }
+  for (const key of displayed.keys()) if (!live.has(key)) displayed.delete(key);
+  return moving;
+}

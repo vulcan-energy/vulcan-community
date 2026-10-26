@@ -2366,6 +2366,8 @@
   flex-direction: column;
   gap: 6px;
   align-items: stretch;
+  /* Full height in the zones list, which scrolls, so People rows are never squeezed out. */
+  flex-shrink: 0;
 }
 
 .hide-control {
@@ -2395,6 +2397,44 @@
 
 .hide-control-button-wrap {
   min-width: 0;
+}
+
+/* People (shared models): a colleague's avatar disc, ringed in their colour. */
+.zone-pill .people-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.people-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.people-disc {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--person-colour);
+  box-shadow: 0 0 0 1.5px var(--bg-secondary), 0 0 0 3px var(--person-colour);
+  color: #fff;
+  font-size: 7px;
+  font-weight: 700;
+}
+
+.people-disc img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .elements-panel__toolbar {
