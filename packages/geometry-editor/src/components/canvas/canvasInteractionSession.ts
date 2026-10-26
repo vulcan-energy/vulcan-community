@@ -3,9 +3,26 @@
 
 import {
   beginActiveDragPreviewBackend,
+  subscribeDragPreviewCoords,
   type ActiveDragPreviewBackend,
   type ActiveDragPreviewBackendSession,
 } from './elementDragPreview';
+
+/** A point in model metres, as `[x, y]`. */
+export type GeometryCanvasLivePoint = readonly [number, number];
+
+/**
+ * This user's edit in progress, for a host's presence: a drag's previewed
+ * elements (by section and name) or a drawing's placed points and its snapped
+ * cursor, in model metres. `end` follows a commit; `cancel` follows nothing.
+ */
+export type GeometryCanvasLiveEdit = Readonly<{
+  kind: 'drag' | 'draw';
+  phase: 'move' | 'end' | 'cancel';
+  elements?: readonly Readonly<{ section: string; name: string; points: readonly GeometryCanvasLivePoint[] }>[];
+  points?: readonly GeometryCanvasLivePoint[];
+  cursor?: GeometryCanvasLivePoint;
+}>;
 
 export type CanvasInteractionKind =
   | 'selected-shape-drag'
@@ -72,6 +89,7 @@ export type BeginCanvasInteractionConfig<TSnapshot = unknown, TResult = unknown>
 
 let nextSessionId = 1;
 let activeSession: CanvasInteractionSession | null = null;
+const completionListeners = new Set<(mode: 'end' | 'cancel', result: unknown) => void>();
 
 export function readCanvasInteractionSession(
   target: CanvasInteractionTarget | null | undefined,
@@ -184,6 +202,7 @@ export function beginCanvasInteraction<TSnapshot = unknown, TResult = unknown>(
     if (activeSession === currentSession) {
       activeSession = null;
     }
+    for (const listener of completionListeners) listener(mode, result);
 
     throwFirstError(callbackErrors);
     throwFirstError(cleanupErrors);
@@ -228,4 +247,40 @@ export function getActiveCanvasInteraction(): CanvasInteractionSnapshot | null {
 export function isCanvasInteractionActive(kind?: CanvasInteractionKind): boolean {
   if (!activeSession) return false;
   return kind ? activeSession.kind === kind : true;
+}
+
+/**
+ * Reports element drags (moves, vertices, points, rotations) as live edits:
+ * the previewed elements once per frame while a gesture runs, then `end` when
+ * it commits or `cancel` when it does not. Only element previews report, so a
+ * pan or marquee never does.
+ */
+export function reportLiveDragEdits(onLiveEdit: (edit: GeometryCanvasLiveEdit) => void): () => void {
+  const moved = new Map<string, NonNullable<GeometryCanvasLiveEdit['elements']>[number]>();
+  let frame: number | null = null;
+  const flush = () => {
+    frame = null;
+    if (moved.size > 0) onLiveEdit({ kind: 'drag', phase: 'move', elements: [...moved.values()] });
+  };
+  const offPreview = subscribeDragPreviewCoords((element, coords) => {
+    if (!activeSession) return;
+    moved.set(element.id, { section: element.type, name: element.name, points: coords.map(({ x, y }) => [x, y] as const) });
+    frame ??= requestAnimationFrame(flush);
+  });
+  const onComplete = (mode: 'end' | 'cancel', result: unknown) => {
+    if (moved.size === 0) return;
+    moved.clear();
+    if (frame !== null) cancelAnimationFrame(frame);
+    frame = null;
+    const committed = mode === 'end' && (result as { committed?: unknown } | undefined)?.committed !== false;
+    onLiveEdit({ kind: 'drag', phase: committed ? 'end' : 'cancel' });
+  };
+  completionListeners.add(onComplete);
+  return () => {
+    offPreview();
+    completionListeners.delete(onComplete);
+    if (frame !== null) cancelAnimationFrame(frame);
+    // Torn down mid-gesture: nothing will end what was reported.
+    if (moved.size > 0) onLiveEdit({ kind: 'drag', phase: 'cancel' });
+  };
 }

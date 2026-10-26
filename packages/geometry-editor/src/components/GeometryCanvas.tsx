@@ -60,7 +60,7 @@ import { selectionForDrawnElement, selectionForElement } from '../lib/drawnEleme
 import { isPointInPolygon2D } from '../lib/pointInPolygon';
 import { compareElementPaintOrder } from '../lib/canvasPaintOrder';
 import { CompassRose } from './CompassRose';
-import { useDrawingMode, type DrawMode, type PendingHostElementCreation } from '../hooks/useDrawingMode';
+import { useDrawingMode, useLiveDrawReport, type DrawMode, type PendingHostElementCreation } from '../hooks/useDrawingMode';
 import { roomFloorElementTypeForCanvasFloor, useMarqueeSelection } from '../hooks/useMarqueeSelection';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useAutoDuctPreview, useAutoPipePreview, useAutoThermalBridgePreview, type CanvasPreview } from '../hooks/useAutoThermalBridgePreview';
@@ -165,7 +165,9 @@ import {
   getActiveCanvasInteraction,
   isCanvasInteractionActive,
   readCanvasInteractionSession,
+  reportLiveDragEdits,
   type CanvasInteractionKind,
+  type GeometryCanvasLiveEdit,
   type CanvasInteractionSession,
   writeCanvasInteractionSession,
 } from './canvas/canvasInteractionSession';
@@ -206,6 +208,7 @@ import { ElementsZonesPanel, type GeometryCanvasPeople } from './canvas/Elements
 import {
   RemotePresenceLayer,
   type GeometryCanvasRemoteCursor,
+  type GeometryCanvasRemoteGhost,
   type GeometryCanvasRemoteSelection,
   type GeometryCanvasViewport,
 } from './canvas/RemotePresenceLayer';
@@ -510,7 +513,8 @@ export const NEUTRAL_GEOMETRY_CANVAS_VIEWPORT_INSETS: GeometryCanvasViewportInse
     mobileTopPx: 0,
   });
 
-export type { GeometryCanvasRemoteCursor, GeometryCanvasRemoteSelection, GeometryCanvasViewport };
+export type { GeometryCanvasRemoteCursor, GeometryCanvasRemoteGhost, GeometryCanvasRemoteSelection, GeometryCanvasViewport };
+export type { GeometryCanvasLiveEdit, GeometryCanvasLivePoint } from './canvas/canvasInteractionSession';
 export type { GeometryCanvasPeople, GeometryCanvasPerson } from './canvas/ElementsZonesPanel';
 
 const NO_REMOTE_SELECTIONS: readonly GeometryCanvasRemoteSelection[] = [];
@@ -521,6 +525,8 @@ function viewportFromPan(scale: number, panOffset: Readonly<{ x: number; y: numb
   return { cx: centre.x, cy: centre.y, scale };
 }
 const NO_REMOTE_CURSORS: readonly GeometryCanvasRemoteCursor[] = [];
+const NO_REMOTE_GHOSTS: readonly GeometryCanvasRemoteGhost[] = [];
+const NO_DRAW_POINTS: ReadonlyArray<{ x: number; y: number }> = [];
 
 export interface GeometryCanvasProps {
   selection: GeometryCanvasSelection;
@@ -537,6 +543,10 @@ export interface GeometryCanvasProps {
   remoteSelections?: readonly GeometryCanvasRemoteSelection[];
   /** Colleagues' pointers on the current floor (model coordinates); eased between updates. */
   remoteCursors?: readonly GeometryCanvasRemoteCursor[];
+  /** Colleagues' drags and drawings in progress on the current floor; dashed, eased between updates. */
+  remoteGhosts?: readonly GeometryCanvasRemoteGhost[];
+  /** This user's drags and drawings in progress, at most once a frame, then how each ended. */
+  onLiveEdit?: (edit: GeometryCanvasLiveEdit) => void;
   /** The pointer over the 2D stage in model coordinates (null when it leaves) and the current viewport. */
   onPointerWorldMove?: (point: Readonly<{ x: number; y: number }> | null, view: GeometryCanvasViewport) => void;
   /** The user panned or zoomed (wheel, pinch, drag, keyboard) or pressed the stage; never for `followViewport`. */
@@ -1186,6 +1196,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   externalDetailCatalogue,
   remoteSelections = NO_REMOTE_SELECTIONS,
   remoteCursors = NO_REMOTE_CURSORS,
+  remoteGhosts = NO_REMOTE_GHOSTS,
+  onLiveEdit,
   onPointerWorldMove,
   onViewportChange,
   followViewport = null,
@@ -1456,6 +1468,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
     drawingPreviewSignal.reset();
   }, [drawingPreviewSignal]);
+  // This user's edits in progress, for the host's presence.
+  useEffect(() => (onLiveEdit ? reportLiveDragEdits(onLiveEdit) : undefined), [onLiveEdit]);
+  const countElements = useCallback(() => geometryStore.getState().elementIds.length, [geometryStore]);
+  useLiveDrawReport(
+    onLiveEdit,
+    // Space labels are not elements: no ghost.
+    drawMode === 'none' || drawMode === 'space-label-polygon' ? NO_DRAW_POINTS : drawMode === 'room' ? roomWalls : drawPoints,
+    drawingPreviewSignal,
+    countElements,
+  );
   const setSegmentLengthPreview = useCallback((
     next:
       | DrawingPreviewSegment
@@ -7974,6 +7996,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           <RemotePresenceLayer
             selections={remoteSelections}
             cursors={remoteCursors}
+            ghosts={remoteGhosts}
             elementCanvasData={elementCanvasData}
             scale={scale}
             panOffset={panOffset}

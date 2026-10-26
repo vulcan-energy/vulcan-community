@@ -30,6 +30,21 @@ export type GeometryCanvasRemoteCursor = Readonly<{
   y: number;
 }>;
 
+/**
+ * Another user's edit in progress, dashed in their colour with a name pill:
+ * each dragged element at its provisional position, or a drawing's path to
+ * their cursor. Model coordinates (metres); one point draws as a ring.
+ */
+export type GeometryCanvasRemoteGhost = Readonly<{
+  key: string;
+  label: string;
+  color: string;
+  initials?: string;
+  imageUrl?: string;
+  /** `key` names a path within its ghost (the dragged element, say), so its points ease in place. */
+  paths: readonly Readonly<{ key: string; points: readonly Readonly<{ x: number; y: number }>[]; closed: boolean }>[];
+}>;
+
 /** A viewport as its centre in model coordinates and the canvas zoom scale. */
 export type GeometryCanvasViewport = Readonly<{ cx: number; cy: number; scale: number }>;
 
@@ -168,7 +183,7 @@ function NamePill({ color, label, initials, imageUrl, toward }: Readonly<{
 }
 
 /** A ref callback that registers a node under `key`. */
-const keep = (map: Map<string, Konva.Group>, key: string) => (node: Konva.Group | null) => {
+const keep = <T,>(map: Map<string, T>, key: string) => (node: T | null) => {
   if (node) map.set(key, node);
   else map.delete(key);
 };
@@ -178,20 +193,24 @@ type ElementCanvasDatum = Readonly<{ element: Element; canvasCoords: readonly Po
 type RemotePresenceLayerProps = Readonly<{
   selections: readonly GeometryCanvasRemoteSelection[];
   cursors: readonly GeometryCanvasRemoteCursor[];
+  ghosts: readonly GeometryCanvasRemoteGhost[];
   elementCanvasData: readonly ElementCanvasDatum[];
   scale: number;
   panOffset: Point;
   canvasCenter: Point;
 }>;
 
+const ghostPointKey = (ghost: string, path: string, point: number) => `ghost:${ghost}\n${path}\n${point}`;
+
 /**
  * Colleagues on this floor: their selections (glow, tint, name pill, a pulse
- * when it changes) and their pointers, eased toward each update so ~10 Hz
- * input moves smoothly. Not listening: it never takes a click.
+ * when it changes), their edits in progress and their pointers, the last two
+ * eased toward each update so ~10 Hz input moves smoothly. Not listening: it never takes a click.
  */
 export const RemotePresenceLayer = memo(function RemotePresenceLayer({
   selections,
   cursors,
+  ghosts,
   elementCanvasData,
   scale,
   panOffset,
@@ -203,30 +222,68 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
   const [displayed] = useState(() => new Map<string, Point>());
   const [selectionNodes] = useState(() => new Map<string, Konva.Group>());
   const [selectionSignatures] = useState(() => new Map<string, string>());
+  const [ghostNodes] = useState(() => new Map<string, Konva.Shape>());
+  const [ghostPills] = useState(() => new Map<string, Konva.Group>());
 
-  // Positions are set here, not as props, so a re-render never jumps a cursor to its target.
+  // Cursors and every ghost point ease as one set of targets.
+  const targets = useMemo(() => {
+    if (ghosts.length === 0) return cursors;
+    const all: { key: string; x: number; y: number }[] = [...cursors];
+    for (const ghost of ghosts) {
+      for (const path of ghost.paths) {
+        path.points.forEach((point, index) => all.push({ key: ghostPointKey(ghost.key, path.key, index), x: point.x, y: point.y }));
+      }
+    }
+    return all;
+  }, [cursors, ghosts]);
+
+  // Positions are set here, not as props, so a re-render never jumps a cursor or ghost to its target.
   useLayoutEffect(() => {
+    const toCanvas = (key: string) => {
+      const point = displayed.get(key);
+      return point ? worldToCanvas(point, scale, panOffset, canvasCenter) : null;
+    };
     const place = () => {
-      for (const [key, point] of displayed) {
-        cursorNodes.get(key)?.position(worldToCanvas(point, scale, panOffset, canvasCenter));
+      for (const cursor of cursors) {
+        const at = toCanvas(cursor.key);
+        if (at) cursorNodes.get(cursor.key)?.position(at);
+      }
+      for (const ghost of ghosts) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity;
+        for (const path of ghost.paths) {
+          const flat: number[] = [];
+          path.points.forEach((_, index) => {
+            const at = toCanvas(ghostPointKey(ghost.key, path.key, index));
+            if (!at) return;
+            flat.push(at.x, at.y);
+            minX = Math.min(minX, at.x);
+            maxX = Math.max(maxX, at.x);
+            minY = Math.min(minY, at.y);
+          });
+          const node = ghostNodes.get(`${ghost.key}\n${path.key}`);
+          if (node instanceof Konva.Line) node.points(flat);
+          else if (node && flat.length >= 2) node.position({ x: flat[0]!, y: flat[1]! });
+        }
+        // The pill rides above the ghost's top centre.
+        if (minY !== Infinity) ghostPills.get(ghost.key)?.position({ x: (minX + maxX) / 2, y: minY - LEADER / 2 });
       }
       layerRef.current?.batchDraw();
     };
     let last = performance.now();
     let frame: number | null = null;
     const tick = (time: number) => {
-      const moving = easePointsToward(displayed, cursors, time - last, CURSOR_EASE_MS);
+      const moving = easePointsToward(displayed, targets, time - last, CURSOR_EASE_MS);
       last = time;
       place();
       frame = moving ? requestAnimationFrame(tick) : null;
     };
-    const moving = easePointsToward(displayed, cursors, 0, CURSOR_EASE_MS);
+    const moving = easePointsToward(displayed, targets, 0, CURSOR_EASE_MS);
     place();
     if (moving) frame = requestAnimationFrame(tick);
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [cursors, displayed, cursorNodes, scale, panOffset, canvasCenter]);
+  }, [targets, cursors, ghosts, displayed, cursorNodes, ghostNodes, ghostPills, scale, panOffset, canvasCenter]);
 
   // A changed selection pulses once.
   useEffect(() => {
@@ -246,7 +303,7 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
     for (const key of selectionSignatures.keys()) if (!present.has(key)) selectionSignatures.delete(key);
   }, [selectionNodes, selectionSignatures, selections]);
 
-  if (selections.length === 0 && cursors.length === 0) return null;
+  if (selections.length === 0 && cursors.length === 0 && ghosts.length === 0) return null;
   // The floor's centre, for pointing a wall's pill outward.
   let layoutCentre: Point | null = null;
   if (selections.length > 0) {
@@ -296,6 +353,19 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
           </Group>
         );
       })}
+      {ghosts.map((ghost) => (
+        <Group key={ghost.key} name="remote-ghost" id={`remote-ghost:${ghost.key}`}>
+          {ghost.paths.map((path) => {
+            const ref = keep<Konva.Shape>(ghostNodes, `${ghost.key}\n${path.key}`);
+            return path.points.length === 1
+              ? <Circle key={path.key} ref={ref} radius={9} stroke={ghost.color} strokeWidth={2} dash={[4, 3]} />
+              : <Line key={path.key} ref={ref} closed={path.closed} stroke={ghost.color} strokeWidth={2} dash={[8, 5]} lineJoin="round" />;
+          })}
+          <Group ref={keep(ghostPills, ghost.key)}>
+            <NamePill color={ghost.color} label={ghost.label} initials={ghost.initials ?? initialsOf(ghost.label)} imageUrl={ghost.imageUrl} toward={UP} />
+          </Group>
+        </Group>
+      ))}
       {cursors.map((cursor) => (
         <Group key={cursor.key} name="remote-cursor" id={`remote-cursor:${cursor.key}`} ref={keep(cursorNodes, cursor.key)}>
           <Line points={ARROW} closed fill={cursor.color} fillEnabled stroke="#fff" strokeWidth={1.5} lineJoin="round" />
