@@ -1327,14 +1327,19 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     (next: { x: number; y: number }) => applyUserViewport(scale, next),
     [applyUserViewport, scale],
   );
-  const setScaleByKey = useCallback(
-    (update: (previous: number) => number) => applyUserViewport(update(scale), panOffset),
-    [applyUserViewport, panOffset, scale],
-  );
-  const setPanOffsetByKey = useCallback(
-    (update: (previous: { x: number; y: number }) => { x: number; y: number }) => applyUserViewport(scale, update(panOffset)),
-    [applyUserViewport, panOffset, scale],
-  );
+  // Read through a ref, so the keyboard listener is not rebound on every pan or zoom.
+  const shownViewportRef = useRef({ scale, panOffset });
+  useEffect(() => {
+    shownViewportRef.current = { scale, panOffset };
+  });
+  const setScaleByKey = useCallback((update: (previous: number) => number) => {
+    const shown = shownViewportRef.current;
+    applyUserViewport(update(shown.scale), shown.panOffset);
+  }, [applyUserViewport]);
+  const setPanOffsetByKey = useCallback((update: (previous: { x: number; y: number }) => { x: number; y: number }) => {
+    const shown = shownViewportRef.current;
+    applyUserViewport(shown.scale, update(shown.panOffset));
+  }, [applyUserViewport]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [zenMode, setZenMode] = useState(false);
   const [hiddenPanels, setHiddenPanels] = useState<Partial<Record<HidePanelKey, boolean>>>(DEFAULT_HIDDEN_PANELS);
@@ -1547,9 +1552,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   }, []);
 
   const applyViewportPreviewTransform = useCallback((transform: { x: number; y: number; scale: number }) => {
+    const previous = viewportPreviewTransformRef.current;
+    // A wheel or pan starting while following takes the shown view first, so no
+    // follow apply replaces the gesture's base before it commits.
+    if (followViewport && previous.x === 0 && previous.y === 0 && previous.scale === 1) {
+      applyUserViewport(scale, panOffset);
+    }
     viewportPreviewTransformRef.current = transform;
     setStageLayerViewportPreview(transform);
-  }, [setStageLayerViewportPreview]);
+  }, [applyUserViewport, followViewport, panOffset, scale, setStageLayerViewportPreview]);
 
   const applyPanPreviewDelta = useCallback((delta: { x: number; y: number }) => {
     const current = viewportPreviewTransformRef.current;

@@ -79,6 +79,10 @@ function PersonDisc({ person }: Readonly<{ person: GeometryCanvasPerson }>) {
   );
 }
 
+// The People block's height: its label and top rule, then one zone-pill row per person.
+const PEOPLE_LABEL_PX = 24;
+const PEOPLE_ROW_PX = 29;
+
 /** The Elements panel's People list: renders nothing when nobody else is here. */
 export function PeopleControl({ people }: Readonly<{ people: GeometryCanvasPeople }>) {
   if (people.items.length === 0) return null;
@@ -876,15 +880,22 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     state.toggleElementsHidden(entry.memberIds);
   }, []);
 
+  // The People list adds its own height, so its rows show without scrolling the
+  // zones column; the stored (user-sized) height stays the height without it.
+  const maxHeight = Math.max(ELEMENTS_PANEL_MIN_H, Math.floor(stageSize.height * 0.8));
+  const peopleCount = people?.items.length ?? 0;
+  const peopleHeight = peopleCount > 0 ? PEOPLE_LABEL_PX + peopleCount * PEOPLE_ROW_PX : 0;
+  const shownHeight = Math.min(maxHeight, elementsRect.height + peopleHeight);
+
   return (
     <Rnd
       bounds="parent"
-      size={{ width: elementsRect.width, height: elementsRect.height }}
+      size={{ width: elementsRect.width, height: shownHeight }}
       position={{ x: elementsRect.x, y: elementsRect.y }}
       minWidth={ELEMENTS_PANEL_MIN_W}
       minHeight={ELEMENTS_PANEL_MIN_H}
       maxWidth={Math.max(ELEMENTS_PANEL_MIN_W, Math.floor(stageSize.width - 24))}
-      maxHeight={Math.max(ELEMENTS_PANEL_MIN_H, Math.floor(stageSize.height * 0.8))}
+      maxHeight={maxHeight}
       dragHandleClassName="panel-drag-handle"
       cancel="input, textarea, select, button"
       style={{ zIndex: activePanel === 'elements' ? 2100 : 2000 }}
@@ -896,7 +907,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
       }}
       onResizeStop={(_e, _dir, ref, _delta, position) => {
         const width = parseInt(ref.style.width, 10) || ELEMENTS_PANEL_DEFAULT_W;
-        const height = parseInt(ref.style.height, 10) || ELEMENTS_PANEL_DEFAULT_H;
+        const height = Math.max(ELEMENTS_PANEL_MIN_H, (parseInt(ref.style.height, 10) || ELEMENTS_PANEL_DEFAULT_H) - peopleHeight);
         setElementsRect(clampElementsRectToCanvas({ x: position.x, y: position.y, width, height }));
       }}
     >

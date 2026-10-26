@@ -213,7 +213,12 @@ export const createFloorSlice: GeometryStoreSlice = (set, get) => ({
   },
   setCurrentFloorZ: (z: number) => {
     const state = get();
+    // The floor id follows the height (the picker, issue jumps and marquee move
+    // by height); otherwise readers keyed on the id stay on the previous floor.
+    const zIndex = Math.floor(z);
+    const floor = state.floors.find((candidate) => candidate.zIndex === zIndex);
     set({
+      ...(floor ? { currentFloorId: floor.id } : {}),
       currentFloorZ: z,
       guideOverlay: resolveGuideOverlayForFloor(state.guideOverlayByFloor, z).value,
       guideOverlaySource: resolveGuideOverlaySourceForFloor(state.guideOverlaySourceByFloor, z).value,

@@ -79,8 +79,17 @@ function initialsOf(label: string): string {
   return result || '?';
 }
 
-/** Where a selection's pill sits: a line's midpoint, a closed shape's top centre, a point itself. */
-function pillAnchor(shape: string, points: readonly Point[]): Point {
+type PillPlacement = Readonly<{ anchor: Point; direction: Point }>;
+
+const UP: Point = { x: 0, y: -1 };
+
+/**
+ * Where a selection's pill sits and which way its leader runs: a line's
+ * midpoint, out along its normal (away from `centre`, else right or up), so the
+ * leader never lies along the line; a closed shape's top centre, upward; a point, upward.
+ */
+function pillPlacement(shape: string, points: readonly Point[], centre: Point | null): PillPlacement {
+  if (shape === 'point' || points.length < 2) return { anchor: points[0]!, direction: UP };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const point of points) {
     minX = Math.min(minX, point.x);
@@ -88,9 +97,17 @@ function pillAnchor(shape: string, points: readonly Point[]): Point {
     minY = Math.min(minY, point.y);
     maxY = Math.max(maxY, point.y);
   }
-  const x = (minX + maxX) / 2;
-  if (shape === 'point') return points[0]!;
-  return { x, y: shape === 'line' ? (minY + maxY) / 2 : minY };
+  if (shape !== 'line') return { anchor: { x: (minX + maxX) / 2, y: minY }, direction: UP };
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  const anchor = { x: (first.x + last.x) / 2, y: (first.y + last.y) / 2 };
+  const length = Math.hypot(last.x - first.x, last.y - first.y);
+  if (length === 0) return { anchor, direction: UP };
+  let direction = { x: -(last.y - first.y) / length, y: (last.x - first.x) / length };
+  const outward = centre ? (anchor.x - centre.x) * direction.x + (anchor.y - centre.y) * direction.y : 0;
+  const flip = outward !== 0 ? outward < 0 : direction.x < 0 || (direction.x === 0 && direction.y > 0);
+  if (flip) direction = { x: -direction.x, y: -direction.y };
+  return { anchor, direction };
 }
 
 let measurer: Konva.Text | null = null;
@@ -131,13 +148,18 @@ function AvatarDisc({ x, y, color, initials, imageUrl }: Readonly<{
   );
 }
 
-/** Avatar and name on the person's colour; origin top-left, or bottom-centre when `centred`. */
-function NamePill({ color, label, initials, imageUrl, centred = false }: Readonly<{
-  color: string; label: string; initials: string; imageUrl?: string; centred?: boolean;
+/**
+ * Avatar and name on the person's colour; origin top-left, or with `toward`
+ * the pill lies beyond its origin in that direction (UP: bottom-centre on it).
+ */
+function NamePill({ color, label, initials, imageUrl, toward }: Readonly<{
+  color: string; label: string; initials: string; imageUrl?: string; toward?: Point;
 }>) {
   const width = useMemo(() => PILL_HEIGHT + labelWidth(label) + 8, [label]);
+  const x = toward ? -width / 2 + (toward.x * width) / 2 : 0;
+  const y = toward ? -PILL_HEIGHT / 2 + (toward.y * PILL_HEIGHT) / 2 : 0;
   return (
-    <Group x={centred ? -width / 2 : 0} y={centred ? -PILL_HEIGHT : 0}>
+    <Group x={x} y={y}>
       <Rect width={width} height={PILL_HEIGHT} cornerRadius={PILL_HEIGHT / 2} fill={color} shadowColor="#000" shadowBlur={4} shadowOpacity={0.25} />
       <AvatarDisc x={PILL_HEIGHT / 2} y={PILL_HEIGHT / 2} color={color} initials={initials} imageUrl={imageUrl} />
       <Text x={PILL_HEIGHT + 1} height={PILL_HEIGHT} verticalAlign="middle" text={label} fontSize={FONT_SIZE} fontStyle="bold" fill="#fff" />
@@ -225,18 +247,31 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
   }, [selectionNodes, selectionSignatures, selections]);
 
   if (selections.length === 0 && cursors.length === 0) return null;
+  // The floor's centre, for pointing a wall's pill outward.
+  let layoutCentre: Point | null = null;
+  if (selections.length > 0) {
+    let sumX = 0, sumY = 0, count = 0;
+    for (const { canvasCoords } of elementCanvasData) {
+      for (const point of canvasCoords) {
+        sumX += point.x;
+        sumY += point.y;
+        count += 1;
+      }
+    }
+    if (count > 0) layoutCentre = { x: sumX / count, y: sumY / count };
+  }
 
   return (
     <Layer ref={layerRef} name="remote-presence-layer" listening={false}>
       {selections.map((remote) => {
         const ids = new Set(remote.elementIds);
         const shapes: ReactNode[] = [];
-        let anchor: Point | null = null;
+        let placement: PillPlacement | null = null;
         for (const { element, canvasCoords } of elementCanvasData) {
           const first = canvasCoords[0];
           if (!ids.has(element.id) || !first) continue;
           const shape = getElementShape(element);
-          anchor ??= pillAnchor(shape, canvasCoords);
+          placement ??= pillPlacement(shape, canvasCoords, layoutCentre);
           const glow = { shadowColor: remote.color, shadowBlur: 16, shadowOpacity: 0.9 };
           if (shape === 'point') {
             shapes.push(<Circle key={element.id} x={first.x} y={first.y} radius={9} stroke={remote.color} strokeWidth={2} {...glow} />);
@@ -248,13 +283,15 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
             <Line key={element.id} points={points} closed={shape !== 'line'} stroke={remote.color} strokeWidth={4} lineJoin="round" {...glow} />,
           );
         }
-        if (!anchor) return null;
+        if (!placement) return null;
+        const { anchor, direction } = placement;
+        const end = { x: anchor.x + direction.x * LEADER, y: anchor.y + direction.y * LEADER };
         return (
           <Group key={remote.key} ref={keep(selectionNodes, remote.key)}>
             {shapes}
-            <Line points={[anchor.x, anchor.y, anchor.x, anchor.y - LEADER]} stroke={remote.color} strokeWidth={2} />
-            <Group x={anchor.x} y={anchor.y - LEADER} ref={keep(selectionNodes, `${remote.key}:pill`)}>
-              <NamePill color={remote.color} label={remote.label} initials={remote.initials ?? initialsOf(remote.label)} imageUrl={remote.imageUrl} centred />
+            <Line points={[anchor.x, anchor.y, end.x, end.y]} stroke={remote.color} strokeWidth={2} />
+            <Group x={end.x} y={end.y} ref={keep(selectionNodes, `${remote.key}:pill`)}>
+              <NamePill color={remote.color} label={remote.label} initials={remote.initials ?? initialsOf(remote.label)} imageUrl={remote.imageUrl} toward={direction} />
             </Group>
           </Group>
         );
