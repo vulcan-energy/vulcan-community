@@ -151,3 +151,6 @@ export function readCanvasInteractionPalette(): CanvasInteractionPalette {
     warningOnFill: readRootCssVar('--validation-warning-on-fill', '#111827'),
   };
 }
+
+/** The glow that draws the eye to an element: a colleague's selection, a hovered element. */
+export const ATTENTION_GLOW = { shadowBlur: 16, shadowOpacity: 0.9 } as const;
