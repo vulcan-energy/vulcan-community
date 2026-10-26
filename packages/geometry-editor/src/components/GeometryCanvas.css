@@ -2429,6 +2429,13 @@
   font-weight: 700;
 }
 
+.people-discs {
+  flex: none;
+  display: inline-flex;
+  gap: 5px;
+  padding: 0 3px;
+}
+
 .people-disc img {
   position: absolute;
   inset: 0;
