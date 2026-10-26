@@ -63,22 +63,13 @@ export type GeometryCanvasPeople = Readonly<{
 
 function PersonDisc({ person }: Readonly<{ person: GeometryCanvasPerson }>) {
   return (
-    <span
-      aria-hidden
-      style={{
-        position: 'relative', flex: 'none', width: 16, height: 16, borderRadius: '50%', overflow: 'hidden',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        background: person.color, color: '#fff', fontSize: 7, fontWeight: 700,
-        boxShadow: `0 0 0 1.5px var(--bg-secondary), 0 0 0 3px ${person.color}`,
-      }}
-    >
+    <span aria-hidden className="people-disc" style={{ '--person-colour': person.color } as React.CSSProperties}>
       {person.initials}
       {person.imageUrl ? (
         <img
           src={person.imageUrl}
           alt=""
           crossOrigin="anonymous"
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
           onError={(event) => {
             event.currentTarget.style.display = 'none';
           }}
@@ -107,9 +98,9 @@ export function PeopleControl({ people }: Readonly<{ people: GeometryCanvasPeopl
               title={following ? 'Following · click to stop' : `Follow ${person.name}`}
               onClick={() => people.onFollow(person.key)}
             >
-              <span className="zone-name" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <span className="zone-name people-row">
                 <PersonDisc person={person} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{person.name}</span>
+                <span className="people-row__name">{person.name}</span>
                 {person.qualifier ? <span className="zone-details">{person.qualifier}</span> : null}
               </span>
             </button>

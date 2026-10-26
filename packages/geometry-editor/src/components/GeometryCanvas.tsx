@@ -514,6 +514,12 @@ export type { GeometryCanvasRemoteCursor, GeometryCanvasRemoteSelection, Geometr
 export type { GeometryCanvasPeople, GeometryCanvasPerson } from './canvas/ElementsZonesPanel';
 
 const NO_REMOTE_SELECTIONS: readonly GeometryCanvasRemoteSelection[] = [];
+
+/** The viewport a scale and pan offset show: the model point at the stage centre (independent of stage size). */
+function viewportFromPan(scale: number, panOffset: Readonly<{ x: number; y: number }>): GeometryCanvasViewport {
+  const centre = canvasToWorld({ x: 0, y: 0 }, scale, panOffset, { x: 0, y: 0 });
+  return { cx: centre.x, cy: centre.y, scale };
+}
 const NO_REMOTE_CURSORS: readonly GeometryCanvasRemoteCursor[] = [];
 
 export interface GeometryCanvasProps {
@@ -531,9 +537,9 @@ export interface GeometryCanvasProps {
   remoteSelections?: readonly GeometryCanvasRemoteSelection[];
   /** Colleagues' pointers on the current floor (model coordinates); eased between updates. */
   remoteCursors?: readonly GeometryCanvasRemoteCursor[];
-  /** The pointer over the 2D stage in model coordinates; null when it leaves. */
-  onPointerWorldMove?: (point: Readonly<{ x: number; y: number }> | null) => void;
-  /** The viewport after a change this canvas made (pan, zoom, centring), and on any stage press; never for `followViewport`. */
+  /** The pointer over the 2D stage in model coordinates (null when it leaves) and the current viewport. */
+  onPointerWorldMove?: (point: Readonly<{ x: number; y: number }> | null, view: GeometryCanvasViewport) => void;
+  /** The user panned or zoomed (wheel, pinch, drag, keyboard) or pressed the stage; never for `followViewport`. */
   onViewportChange?: (view: GeometryCanvasViewport) => void;
   /** Applied whenever it changes (follow mode). */
   followViewport?: GeometryCanvasViewport | null;
@@ -1283,40 +1289,46 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   }, [themeId, customTheme]);
 
   const [stageSize, setStageSize] = useState(CANVAS_CONSTANTS.DEFAULTS.STAGE_SIZE);
-  const [scale, setScale] = useState(CANVAS_CONSTANTS.DEFAULTS.SCALE); // Zoom scale (1 = 1m = 50px)
-  const [panOffset, setPanOffset] = useState(CANVAS_CONSTANTS.DEFAULTS.PAN_OFFSET); // Pan offset in pixels
+  const [ownScale, setScale] = useState(CANVAS_CONSTANTS.DEFAULTS.SCALE); // Zoom scale (1 = 1m = 50px)
+  const [ownPanOffset, setPanOffset] = useState(CANVAS_CONSTANTS.DEFAULTS.PAN_OFFSET); // Pan offset in pixels
   // Calculate canvas center
   const canvasCenter = useMemo(() => ({
     x: stageSize.width / 2,
     y: stageSize.height / 2
   }), [stageSize.width, stageSize.height]);
-  // Follow mode: a new followed viewport becomes this one (adjusted while rendering, not in an effect).
-  const [appliedFollowViewport, setAppliedFollowViewport] = useState<GeometryCanvasViewport | null>(null);
-  if (followViewport !== appliedFollowViewport) {
-    setAppliedFollowViewport(followViewport);
-    if (followViewport) {
-      const target = worldToCanvas({ x: followViewport.cx, y: followViewport.cy }, followViewport.scale, { x: 0, y: 0 }, canvasCenter);
-      setScale(followViewport.scale);
-      setPanOffset({ x: canvasCenter.x - target.x, y: canvasCenter.y - target.y });
-    }
-  }
-  const currentViewport = useCallback((): GeometryCanvasViewport => {
-    const centre = canvasToWorld(canvasCenter, scale, panOffset, canvasCenter);
-    return { cx: centre.x, cy: centre.y, scale };
-  }, [canvasCenter, panOffset, scale]);
-  // Reports the viewport on mount and after each change, except one follow mode applied.
-  const reportedViewportRef = useRef<{ scale: number; x: number; y: number } | null>(null);
-  useEffect(() => {
-    const reported = reportedViewportRef.current;
-    if (reported && reported.scale === scale && reported.x === panOffset.x && reported.y === panOffset.y) return;
-    reportedViewportRef.current = { scale, x: panOffset.x, y: panOffset.y };
-    const view = currentViewport();
-    if (
-      followViewport && followViewport.scale === scale
-      && Math.abs(followViewport.cx - view.cx) < 1e-6 && Math.abs(followViewport.cy - view.cy) < 1e-6
-    ) return;
-    onViewportChange?.(view);
-  }, [currentViewport, followViewport, onViewportChange, panOffset, scale]);
+  // Follow mode shows the followed viewport without copying it into state; the
+  // user's own pan, zoom or press first takes the shown view as theirs.
+  const followPanOffset = useMemo(() => {
+    if (!followViewport) return null;
+    const target = worldToCanvas({ x: followViewport.cx, y: followViewport.cy }, followViewport.scale, { x: 0, y: 0 }, canvasCenter);
+    return { x: canvasCenter.x - target.x, y: canvasCenter.y - target.y };
+  }, [canvasCenter, followViewport]);
+  const scale = followViewport ? followViewport.scale : ownScale;
+  const panOffset = followPanOffset ?? ownPanOffset;
+  // A People row click while following keeps the shown view when following stops.
+  const panelPeople = useMemo<GeometryCanvasPeople | undefined>(() => people && {
+    ...people,
+    onFollow: (key) => {
+      if (followViewport) {
+        setScale(scale);
+        setPanOffset(panOffset);
+      }
+      people.onFollow(key);
+    },
+  }, [followViewport, panOffset, people, scale]);
+  // The keyboard's zoom and pan are the user's: reported as they apply.
+  const setScaleByKey = useCallback((update: (previous: number) => number) => {
+    const next = update(scale);
+    setScale(next);
+    setPanOffset(panOffset);
+    onViewportChange?.(viewportFromPan(next, panOffset));
+  }, [onViewportChange, panOffset, scale]);
+  const setPanOffsetByKey = useCallback((update: (previous: { x: number; y: number }) => { x: number; y: number }) => {
+    const next = update(panOffset);
+    setScale(scale);
+    setPanOffset(next);
+    onViewportChange?.(viewportFromPan(scale, next));
+  }, [onViewportChange, panOffset, scale]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [zenMode, setZenMode] = useState(false);
   const [hiddenPanels, setHiddenPanels] = useState<Partial<Record<HidePanelKey, boolean>>>(DEFAULT_HIDDEN_PANELS);
@@ -1569,12 +1581,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     };
     const viewportTransformX = transform.x + (transform.scale - 1) * VIEWPORT_PREVIEW_OVERSCAN_PX;
     const viewportTransformY = transform.y + (transform.scale - 1) * VIEWPORT_PREVIEW_OVERSCAN_PX;
-    setScale(scale * transform.scale);
-    setPanOffset({
+    const nextScale = scale * transform.scale;
+    const nextPanOffset = {
       x: transform.scale * (currentCanvasCenter.x + panOffset.x) + viewportTransformX - currentCanvasCenter.x,
       y: transform.scale * (currentCanvasCenter.y + panOffset.y) + viewportTransformY - currentCanvasCenter.y,
-    });
-  }, [clearViewportPreviewCommitTimeout, panOffset, scale, stageSize.height, stageSize.width]);
+    };
+    setScale(nextScale);
+    setPanOffset(nextPanOffset);
+    // Wheel, pinch and drag pans all commit here.
+    onViewportChange?.(viewportFromPan(nextScale, nextPanOffset));
+  }, [clearViewportPreviewCommitTimeout, onViewportChange, panOffset, scale, stageSize.height, stageSize.width]);
 
   useLayoutEffect(() => {
     if (!viewportPreviewPendingStateCommitRef.current) return;
@@ -3649,8 +3665,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setSpaceLabelHoverPoint: setSpaceLabelHoverPointIfChanged,
     spaceLabelsById,
     updateSpaceLabel,
-    setScale,
-    setPanOffset,
+    setScale: setScaleByKey,
+    setPanOffset: setPanOffsetByKey,
     setZenMode: setZenModeWithPanelCleanup,
     setElementDeleteModal,
     tryPopLastDrawPoint,
@@ -5180,7 +5196,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const stageMouseMoveWorkRef = useRef<StageMouseMoveWork>({ draw: false, marquee: false, hover: false });
   const handleStageMouseDown = useCallback((e: any) => {
     // A press on the stage takes the viewport back from follow mode.
-    onViewportChange?.(currentViewport());
+    if (followViewport) {
+      setScale(scale);
+      setPanOffset(panOffset);
+    }
+    onViewportChange?.(viewportFromPan(scale, panOffset));
     setDevelopmentContextStackMenuId(null);
     setDevelopmentContextHoveredStem(null);
     commitViewportPreview();
@@ -5214,13 +5234,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       return;
     }
     if (!thermalBridgePreview.active) handleMarqueeStart(e);
-  }, [thermalBridgePreview.active, commitViewportPreview, currentViewport, drawMode, endDrawingPreviewInteraction, getContainerViewportPointer, handleMarqueeStart, onViewportChange, setDevelopmentContextHoveredStem, setDevelopmentContextStackMenuId, setIsCanvasPanning, viewMode]);
+  }, [thermalBridgePreview.active, commitViewportPreview, drawMode, endDrawingPreviewInteraction, followViewport, getContainerViewportPointer, handleMarqueeStart, onViewportChange, panOffset, scale, setDevelopmentContextHoveredStem, setDevelopmentContextStackMenuId, setIsCanvasPanning, viewMode]);
 
   const onStageMouseMove = useCallback((e: any) => {
     // Every move, drags included; the host throttles what it sends.
     if (onPointerWorldMove && !activePanGestureRef.current) {
       const pointer = getStageViewportPointer(e.target?.getStage?.());
-      if (pointer) onPointerWorldMove(canvasToWorld(pointer, scale, panOffset, canvasCenter));
+      if (pointer) onPointerWorldMove(canvasToWorld(pointer, scale, panOffset, canvasCenter), viewportFromPan(scale, panOffset));
     }
     const activeCanvasInteraction = getActiveCanvasInteraction();
     if (!canCanvasInteractionRunStageMouseMove(activeCanvasInteraction?.kind)) return;
@@ -6816,7 +6836,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           onClick={stableHandleStageClick}
           onTap={stableHandleStageClick}
           onMouseMove={onStageMouseMove}
-          onMouseLeave={onPointerWorldMove ? () => onPointerWorldMove(null) : undefined}
+          onMouseLeave={onPointerWorldMove ? () => onPointerWorldMove(null, viewportFromPan(scale, panOffset)) : undefined}
           onMouseDown={handleStageMouseDown}
           onMouseUp={handleStageMouseUp}
           onWheel={handleStageWheel}
@@ -8604,7 +8624,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             toggleElementsHidden={toggleElementsHidden}
             unhideElement={unhideElement}
             cmdASelectIdsRef={elementsPanelCmdASelectIdsRef}
-            people={people}
+            people={panelPeople}
           />,
         )
       )}

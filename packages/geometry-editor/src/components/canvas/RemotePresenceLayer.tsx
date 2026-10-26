@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Konva from 'konva';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Text } from 'react-konva';
 import type { Element } from '../../geometry/types';
+import { easePointsToward } from '../../lib/geometryTransform';
 import { getElementShape, worldToCanvas } from '../../lib/shapeUtils';
 
 /** Another user's selection: a glowing outline in their colour with a name pill (host-supplied presence). */
@@ -34,43 +35,7 @@ export type GeometryCanvasViewport = Readonly<{ cx: number; cy: number; scale: n
 type Point = { x: number; y: number };
 
 /** Easing time constant: a cursor covers ~95% of a jump in 150 ms. */
-export const REMOTE_CURSOR_EASE_MS = 50;
-
-/**
- * One animation step: each displayed point eases toward its target; a new key
- * starts at its target and a key no longer targeted is dropped. Returns
- * whether any point is still moving.
- */
-export function easeRemoteCursors(
-  displayed: Map<string, Point>,
-  targets: readonly Readonly<{ key: string; x: number; y: number }>[],
-  elapsedMs: number,
-): boolean {
-  const k = 1 - Math.exp(-Math.max(0, elapsedMs) / REMOTE_CURSOR_EASE_MS);
-  const live = new Set<string>();
-  let moving = false;
-  for (const target of targets) {
-    live.add(target.key);
-    const point = displayed.get(target.key);
-    if (!point) {
-      displayed.set(target.key, { x: target.x, y: target.y });
-      continue;
-    }
-    const dx = target.x - point.x;
-    const dy = target.y - point.y;
-    // Within a millimetre: settle.
-    if (Math.hypot(dx, dy) < 1e-3) {
-      point.x = target.x;
-      point.y = target.y;
-      continue;
-    }
-    point.x += dx * k;
-    point.y += dy * k;
-    moving = true;
-  }
-  for (const key of displayed.keys()) if (!live.has(key)) displayed.delete(key);
-  return moving;
-}
+const CURSOR_EASE_MS = 50;
 
 // Profile images load once per URL; initials show until one loads, or for good if it fails.
 const avatarImages = new Map<string, HTMLImageElement>();
@@ -155,6 +120,12 @@ function NamePill({ color, label, initials, imageUrl, centred = false }: Readonl
   );
 }
 
+/** A ref callback that registers a node under `key`. */
+const keep = (map: Map<string, Konva.Group>, key: string) => (node: Konva.Group | null) => {
+  if (node) map.set(key, node);
+  else map.delete(key);
+};
+
 type ElementCanvasDatum = Readonly<{ element: Element; canvasCoords: readonly Point[] }>;
 
 type RemotePresenceLayerProps = Readonly<{
@@ -180,57 +151,55 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
   canvasCenter,
 }: RemotePresenceLayerProps) {
   const layerRef = useRef<Konva.Layer>(null);
-  const cursorNodes = useRef(new Map<string, Konva.Group>());
-  const displayed = useRef(new Map<string, Point>());
-  const selectionNodes = useRef(new Map<string, Konva.Group>());
-  const selectionSignatures = useRef(new Map<string, string>());
+  // Mutable registries that never trigger a render.
+  const [cursorNodes] = useState(() => new Map<string, Konva.Group>());
+  const [displayed] = useState(() => new Map<string, Point>());
+  const [selectionNodes] = useState(() => new Map<string, Konva.Group>());
+  const [selectionSignatures] = useState(() => new Map<string, string>());
 
   // Positions are set here, not as props, so a re-render never jumps a cursor to its target.
   useLayoutEffect(() => {
     const place = () => {
-      for (const [key, point] of displayed.current) {
-        cursorNodes.current.get(key)?.position(worldToCanvas(point, scale, panOffset, canvasCenter));
+      for (const [key, point] of displayed) {
+        cursorNodes.get(key)?.position(worldToCanvas(point, scale, panOffset, canvasCenter));
       }
       layerRef.current?.batchDraw();
     };
     let last = performance.now();
     let frame: number | null = null;
     const tick = (time: number) => {
-      const moving = easeRemoteCursors(displayed.current, cursors, time - last);
+      const moving = easePointsToward(displayed, cursors, time - last, CURSOR_EASE_MS);
       last = time;
       place();
       frame = moving ? requestAnimationFrame(tick) : null;
     };
-    const moving = easeRemoteCursors(displayed.current, cursors, 0);
+    const moving = easePointsToward(displayed, cursors, 0, CURSOR_EASE_MS);
     place();
     if (moving) frame = requestAnimationFrame(tick);
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [cursors, scale, panOffset, canvasCenter]);
+  }, [cursors, displayed, cursorNodes, scale, panOffset, canvasCenter]);
 
   // A changed selection pulses once.
   useEffect(() => {
-    const next = new Map<string, string>();
+    const present = new Set<string>();
     for (const selection of selections) {
       const signature = selection.elementIds.join('\n');
-      next.set(selection.key, signature);
-      if (selectionSignatures.current.get(selection.key) === signature) continue;
-      const group = selectionNodes.current.get(selection.key);
-      const pill = selectionNodes.current.get(`${selection.key}:pill`);
+      present.add(selection.key);
+      if (selectionSignatures.get(selection.key) === signature) continue;
+      selectionSignatures.set(selection.key, signature);
+      const group = selectionNodes.get(selection.key);
+      const pill = selectionNodes.get(`${selection.key}:pill`);
       group?.opacity(0.3);
       group?.to({ opacity: 1, duration: 0.4 });
       pill?.scale({ x: 1.25, y: 1.25 });
       pill?.to({ scaleX: 1, scaleY: 1, duration: 0.4 });
     }
-    selectionSignatures.current = next;
-  }, [selections]);
+    for (const key of selectionSignatures.keys()) if (!present.has(key)) selectionSignatures.delete(key);
+  }, [selectionNodes, selectionSignatures, selections]);
 
   if (selections.length === 0 && cursors.length === 0) return null;
-  const keep = (map: Map<string, Konva.Group>, key: string) => (node: Konva.Group | null) => {
-    if (node) map.set(key, node);
-    else map.delete(key);
-  };
 
   return (
     <Layer ref={layerRef} name="remote-presence-layer" listening={false}>
@@ -256,17 +225,17 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
         }
         if (!anchor) return null;
         return (
-          <Group key={remote.key} ref={keep(selectionNodes.current, remote.key)}>
+          <Group key={remote.key} ref={keep(selectionNodes, remote.key)}>
             {shapes}
             <Line points={[anchor.x, anchor.y, anchor.x, anchor.y - LEADER]} stroke={remote.color} strokeWidth={1.5} />
-            <Group x={anchor.x} y={anchor.y - LEADER} ref={keep(selectionNodes.current, `${remote.key}:pill`)}>
+            <Group x={anchor.x} y={anchor.y - LEADER} ref={keep(selectionNodes, `${remote.key}:pill`)}>
               <NamePill color={remote.color} label={remote.label} initials={remote.initials} imageUrl={remote.imageUrl} centred />
             </Group>
           </Group>
         );
       })}
       {cursors.map((cursor) => (
-        <Group key={cursor.key} ref={keep(cursorNodes.current, cursor.key)}>
+        <Group key={cursor.key} ref={keep(cursorNodes, cursor.key)}>
           <Line points={ARROW} closed fill={cursor.color} stroke="#fff" strokeWidth={1.5} lineJoin="round" />
           <Group x={12} y={18}>
             <NamePill color={cursor.color} label={cursor.label} initials={cursor.initials} imageUrl={cursor.imageUrl} />

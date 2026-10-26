@@ -4,27 +4,27 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { easeRemoteCursors } from '../RemotePresenceLayer';
+import { easePointsToward } from '../../../lib/geometryTransform';
 import { PeopleControl } from '../ElementsZonesPanel';
 
-describe('easeRemoteCursors', () => {
+describe('easePointsToward (remote cursor interpolation)', () => {
   it('starts a new cursor at its target, eases an existing one, settles, and drops one no longer targeted', () => {
     const displayed = new Map<string, { x: number; y: number }>();
-    expect(easeRemoteCursors(displayed, [{ key: 'a', x: 1, y: 2 }], 16)).toBe(false);
+    expect(easePointsToward(displayed, [{ key: 'a', x: 1, y: 2 }], 16, 50)).toBe(false);
     expect(displayed.get('a')).toEqual({ x: 1, y: 2 });
 
     // A jump of 1 m: part of the way in one frame, nearly all of it by 150 ms.
-    expect(easeRemoteCursors(displayed, [{ key: 'a', x: 2, y: 2 }], 16)).toBe(true);
+    expect(easePointsToward(displayed, [{ key: 'a', x: 2, y: 2 }], 16, 50)).toBe(true);
     const afterFrame = displayed.get('a')!.x;
     expect(afterFrame).toBeGreaterThan(1.2);
     expect(afterFrame).toBeLessThan(1.4);
-    for (let elapsed = 16; elapsed < 150; elapsed += 16) easeRemoteCursors(displayed, [{ key: 'a', x: 2, y: 2 }], 16);
+    for (let elapsed = 16; elapsed < 150; elapsed += 16) easePointsToward(displayed, [{ key: 'a', x: 2, y: 2 }], 16, 50);
     expect(displayed.get('a')!.x).toBeGreaterThan(1.95);
-    for (let frame = 0; frame < 30; frame += 1) easeRemoteCursors(displayed, [{ key: 'a', x: 2, y: 2 }], 16);
-    expect(easeRemoteCursors(displayed, [{ key: 'a', x: 2, y: 2 }], 16)).toBe(false);
+    for (let frame = 0; frame < 30; frame += 1) easePointsToward(displayed, [{ key: 'a', x: 2, y: 2 }], 16, 50);
+    expect(easePointsToward(displayed, [{ key: 'a', x: 2, y: 2 }], 16, 50)).toBe(false);
     expect(displayed.get('a')).toEqual({ x: 2, y: 2 });
 
-    easeRemoteCursors(displayed, [], 16);
+    easePointsToward(displayed, [], 16, 50);
     expect(displayed.size).toBe(0);
   });
 });
