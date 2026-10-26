@@ -166,6 +166,7 @@ import {
   isCanvasInteractionActive,
   readCanvasInteractionSession,
   reportLiveDragEdits,
+  type GeometryCanvasLivePoint,
   type CanvasInteractionKind,
   type GeometryCanvasLiveEdit,
   type CanvasInteractionSession,
@@ -1468,8 +1469,21 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
     drawingPreviewSignal.reset();
   }, [drawingPreviewSignal]);
-  // This user's edits in progress, for the host's presence.
-  useEffect(() => (onLiveEdit ? reportLiveDragEdits(onLiveEdit) : undefined), [onLiveEdit]);
+  // This user's edits in progress, for the host's presence. A drag moves its nodes into the
+  // non-listening preview layer, where Konva stops bubbling, so no mousemove or dragmove reaches
+  // the stage while it runs: the pointer rides on the drag report instead.
+  const dragPointerWorld = useCallback((): GeometryCanvasLivePoint | null => {
+    const pointer = getStageViewportPointer(stageRef.current);
+    if (!pointer) return null;
+    const world = canvasToWorld(pointer, scale, panOffset, canvasCenter);
+    return [world.x, world.y];
+  }, [canvasCenter, getStageViewportPointer, panOffset, scale]);
+  const dragPointerWorldRef = useRef(dragPointerWorld);
+  useEffect(() => { dragPointerWorldRef.current = dragPointerWorld; }, [dragPointerWorld]);
+  useEffect(() => (onLiveEdit ? reportLiveDragEdits((edit) => {
+    const cursor = edit.phase === 'move' ? dragPointerWorldRef.current() : null;
+    onLiveEdit(cursor ? { ...edit, cursor } : edit);
+  }) : undefined), [onLiveEdit]);
   const countElements = useCallback(() => geometryStore.getState().elementIds.length, [geometryStore]);
   useLiveDrawReport(
     onLiveEdit,
