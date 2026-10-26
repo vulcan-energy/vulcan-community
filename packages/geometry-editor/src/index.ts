@@ -5,8 +5,12 @@ export {
   GeometryCanvas,
   type GeometryCanvasContributions,
   type GeometryCanvasPanelContext,
+  type GeometryCanvasPeople,
+  type GeometryCanvasPerson,
   type GeometryCanvasProps,
+  type GeometryCanvasRemoteCursor,
   type GeometryCanvasRemoteSelection,
+  type GeometryCanvasViewport,
   type GeometryCanvasSelection,
 } from './components/GeometryCanvas';
 export {

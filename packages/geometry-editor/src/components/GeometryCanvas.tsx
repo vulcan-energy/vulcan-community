@@ -202,7 +202,13 @@ import {
   type GeometryCanvasSelectionRenderState,
 } from './canvas/geometryCanvasRenderState';
 import { SpaceLabellerPanel } from './spaceLabels/SpaceLabellerPanel';
-import { ElementsZonesPanel } from './canvas/ElementsZonesPanel';
+import { ElementsZonesPanel, type GeometryCanvasPeople } from './canvas/ElementsZonesPanel';
+import {
+  RemotePresenceLayer,
+  type GeometryCanvasRemoteCursor,
+  type GeometryCanvasRemoteSelection,
+  type GeometryCanvasViewport,
+} from './canvas/RemotePresenceLayer';
 import { OverlayPanel } from './canvas/OverlayPanel';
 import { OverlayPdfImportModal } from './canvas/OverlayPdfImportModal';
 import { DrawToolbar, type CanvasViewMode } from './canvas/DrawToolbar';
@@ -504,15 +510,11 @@ export const NEUTRAL_GEOMETRY_CANVAS_VIEWPORT_INSETS: GeometryCanvasViewportInse
     mobileTopPx: 0,
   });
 
-/** Another user's selection, drawn as a coloured outline with their name (host-supplied presence). */
-export type GeometryCanvasRemoteSelection = Readonly<{
-  key: string;
-  label: string;
-  color: string;
-  elementIds: readonly string[];
-}>;
+export type { GeometryCanvasRemoteCursor, GeometryCanvasRemoteSelection, GeometryCanvasViewport };
+export type { GeometryCanvasPeople, GeometryCanvasPerson } from './canvas/ElementsZonesPanel';
 
 const NO_REMOTE_SELECTIONS: readonly GeometryCanvasRemoteSelection[] = [];
+const NO_REMOTE_CURSORS: readonly GeometryCanvasRemoteCursor[] = [];
 
 export interface GeometryCanvasProps {
   selection: GeometryCanvasSelection;
@@ -527,6 +529,16 @@ export interface GeometryCanvasProps {
   inspectorContributions?: GeometryInspectorContributions;
   externalDetailCatalogue?: ExternalDetailCataloguePort;
   remoteSelections?: readonly GeometryCanvasRemoteSelection[];
+  /** Colleagues' pointers on the current floor (model coordinates); eased between updates. */
+  remoteCursors?: readonly GeometryCanvasRemoteCursor[];
+  /** The pointer over the 2D stage in model coordinates; null when it leaves. */
+  onPointerWorldMove?: (point: Readonly<{ x: number; y: number }> | null) => void;
+  /** The viewport after a change this canvas made (pan, zoom, centring), and on any stage press; never for `followViewport`. */
+  onViewportChange?: (view: GeometryCanvasViewport) => void;
+  /** Applied whenever it changes (follow mode). */
+  followViewport?: GeometryCanvasViewport | null;
+  /** Colleagues listed in the Elements panel; nothing renders when empty. */
+  people?: GeometryCanvasPeople;
   // File bar controls (threaded from GeometryBuilder)
   fileControls?: {
     documentHost: GeometryDocumentHostPort;
@@ -1167,6 +1179,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   inspectorContributions = emptyGeometryInspectorContributions,
   externalDetailCatalogue,
   remoteSelections = NO_REMOTE_SELECTIONS,
+  remoteCursors = NO_REMOTE_CURSORS,
+  onPointerWorldMove,
+  onViewportChange,
+  followViewport = null,
+  people,
   viewportInsets = NEUTRAL_GEOMETRY_CANVAS_VIEWPORT_INSETS,
   initialElementsPanelPlacement = 'right',
 }) => {
@@ -1273,6 +1290,33 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     x: stageSize.width / 2,
     y: stageSize.height / 2
   }), [stageSize.width, stageSize.height]);
+  // Follow mode: a new followed viewport becomes this one (adjusted while rendering, not in an effect).
+  const [appliedFollowViewport, setAppliedFollowViewport] = useState<GeometryCanvasViewport | null>(null);
+  if (followViewport !== appliedFollowViewport) {
+    setAppliedFollowViewport(followViewport);
+    if (followViewport) {
+      const target = worldToCanvas({ x: followViewport.cx, y: followViewport.cy }, followViewport.scale, { x: 0, y: 0 }, canvasCenter);
+      setScale(followViewport.scale);
+      setPanOffset({ x: canvasCenter.x - target.x, y: canvasCenter.y - target.y });
+    }
+  }
+  const currentViewport = useCallback((): GeometryCanvasViewport => {
+    const centre = canvasToWorld(canvasCenter, scale, panOffset, canvasCenter);
+    return { cx: centre.x, cy: centre.y, scale };
+  }, [canvasCenter, panOffset, scale]);
+  // Reports the viewport on mount and after each change, except one follow mode applied.
+  const reportedViewportRef = useRef<{ scale: number; x: number; y: number } | null>(null);
+  useEffect(() => {
+    const reported = reportedViewportRef.current;
+    if (reported && reported.scale === scale && reported.x === panOffset.x && reported.y === panOffset.y) return;
+    reportedViewportRef.current = { scale, x: panOffset.x, y: panOffset.y };
+    const view = currentViewport();
+    if (
+      followViewport && followViewport.scale === scale
+      && Math.abs(followViewport.cx - view.cx) < 1e-6 && Math.abs(followViewport.cy - view.cy) < 1e-6
+    ) return;
+    onViewportChange?.(view);
+  }, [currentViewport, followViewport, onViewportChange, panOffset, scale]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [zenMode, setZenMode] = useState(false);
   const [hiddenPanels, setHiddenPanels] = useState<Partial<Record<HidePanelKey, boolean>>>(DEFAULT_HIDDEN_PANELS);
@@ -5135,6 +5179,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const mouseMoveRafIdRef = useRef<number | null>(null);
   const stageMouseMoveWorkRef = useRef<StageMouseMoveWork>({ draw: false, marquee: false, hover: false });
   const handleStageMouseDown = useCallback((e: any) => {
+    // A press on the stage takes the viewport back from follow mode.
+    onViewportChange?.(currentViewport());
     setDevelopmentContextStackMenuId(null);
     setDevelopmentContextHoveredStem(null);
     commitViewportPreview();
@@ -5168,9 +5214,14 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       return;
     }
     if (!thermalBridgePreview.active) handleMarqueeStart(e);
-  }, [thermalBridgePreview.active, commitViewportPreview, drawMode, endDrawingPreviewInteraction, getContainerViewportPointer, handleMarqueeStart, setDevelopmentContextHoveredStem, setDevelopmentContextStackMenuId, setIsCanvasPanning, viewMode]);
+  }, [thermalBridgePreview.active, commitViewportPreview, currentViewport, drawMode, endDrawingPreviewInteraction, getContainerViewportPointer, handleMarqueeStart, onViewportChange, setDevelopmentContextHoveredStem, setDevelopmentContextStackMenuId, setIsCanvasPanning, viewMode]);
 
   const onStageMouseMove = useCallback((e: any) => {
+    // Every move, drags included; the host throttles what it sends.
+    if (onPointerWorldMove && !activePanGestureRef.current) {
+      const pointer = getStageViewportPointer(e.target?.getStage?.());
+      if (pointer) onPointerWorldMove(canvasToWorld(pointer, scale, panOffset, canvasCenter));
+    }
     const activeCanvasInteraction = getActiveCanvasInteraction();
     if (!canCanvasInteractionRunStageMouseMove(activeCanvasInteraction?.kind)) return;
     if (typeof e.target?.isDragging === 'function' && e.target.isDragging()) return;
@@ -5240,12 +5291,17 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
   }, [thermalBridgePreview.active,
     applyPanPreviewDelta,
+    canvasCenter,
     drawMode,
     elementsById,
     getContainerViewportPointer,
     handleMouseMove,
     handleMarqueeMove,
+    getStageViewportPointer,
     marqueeSelection,
+    onPointerWorldMove,
+    panOffset,
+    scale,
     scheduleViewportPreviewCommit,
     selection,
     spaceLabellerOpen,
@@ -6760,6 +6816,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           onClick={stableHandleStageClick}
           onTap={stableHandleStageClick}
           onMouseMove={onStageMouseMove}
+          onMouseLeave={onPointerWorldMove ? () => onPointerWorldMove(null) : undefined}
           onMouseDown={handleStageMouseDown}
           onMouseUp={handleStageMouseUp}
           onWheel={handleStageWheel}
@@ -7870,26 +7927,14 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
           </Layer>
 
-          {remoteSelections.length > 0 ? (
-            <Layer name="remote-selection-layer" listening={false}>
-              {remoteSelections.flatMap((remote) => {
-                const ids = new Set(remote.elementIds);
-                const nodes: React.ReactNode[] = [];
-                for (const { element, canvasCoords } of elementCanvasData) {
-                  if (!ids.has(element.id) || !canvasCoords[0]) continue;
-                  const key = `${remote.key}:${element.id}`;
-                  const shape = getElementShape(element);
-                  nodes.push(shape === 'point'
-                    ? <Circle key={key} x={canvasCoords[0].x} y={canvasCoords[0].y} radius={9} stroke={remote.color} strokeWidth={2} />
-                    : <Line key={key} points={canvasCoords.flatMap((point) => [point.x, point.y])} closed={shape !== 'line'} stroke={remote.color} strokeWidth={3} />);
-                  if (nodes.length === 1) {
-                    nodes.push(<Text key={`${key}:label`} x={canvasCoords[0].x + 6} y={canvasCoords[0].y - 18} text={remote.label} fontSize={11} fontStyle="bold" fill={remote.color} />);
-                  }
-                }
-                return nodes;
-              })}
-            </Layer>
-          ) : null}
+          <RemotePresenceLayer
+            selections={remoteSelections}
+            cursors={remoteCursors}
+            elementCanvasData={elementCanvasData}
+            scale={scale}
+            panOffset={panOffset}
+            canvasCenter={canvasCenter}
+          />
 
           <CanvasLivePreviewLayer>
             {profileGeometryCanvasNode(
@@ -8559,6 +8604,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             toggleElementsHidden={toggleElementsHidden}
             unhideElement={unhideElement}
             cmdASelectIdsRef={elementsPanelCmdASelectIdsRef}
+            people={people}
           />,
         )
       )}

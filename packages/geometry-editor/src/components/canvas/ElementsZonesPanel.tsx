@@ -44,6 +44,82 @@ import {
   type ElementsPanelEntrySummary,
 } from './elementsZonesPanelModel';
 
+/** A colleague in the People list; `qualifier` is at most one muted word (a floor tag or a state). */
+export type GeometryCanvasPerson = Readonly<{
+  key: string;
+  name: string;
+  color: string;
+  initials: string;
+  imageUrl?: string;
+  qualifier?: string;
+}>;
+
+export type GeometryCanvasPeople = Readonly<{
+  items: readonly GeometryCanvasPerson[];
+  followingKey: string | null;
+  /** Follow this person, or stop when already following them. */
+  onFollow: (key: string) => void;
+}>;
+
+function PersonDisc({ person }: Readonly<{ person: GeometryCanvasPerson }>) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        position: 'relative', flex: 'none', width: 16, height: 16, borderRadius: '50%', overflow: 'hidden',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: person.color, color: '#fff', fontSize: 7, fontWeight: 700,
+        boxShadow: `0 0 0 1.5px var(--bg-secondary), 0 0 0 3px ${person.color}`,
+      }}
+    >
+      {person.initials}
+      {person.imageUrl ? (
+        <img
+          src={person.imageUrl}
+          alt=""
+          crossOrigin="anonymous"
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+          onError={(event) => {
+            event.currentTarget.style.display = 'none';
+          }}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+/** The Elements panel's People list: renders nothing when nobody else is here. */
+export function PeopleControl({ people }: Readonly<{ people: GeometryCanvasPeople }>) {
+  if (people.items.length === 0) return null;
+  return (
+    <div className="hide-control" data-people>
+      <div className="hide-control__label">People</div>
+      <div className="hide-control__buttons">
+        {people.items.map((person) => {
+          const following = people.followingKey === person.key;
+          return (
+            <button
+              key={person.key}
+              type="button"
+              className={`zone-pill ${following ? 'selected' : ''}`}
+              aria-pressed={following}
+              data-person={person.key}
+              title={following ? 'Following · click to stop' : `Follow ${person.name}`}
+              onClick={() => people.onFollow(person.key)}
+            >
+              <span className="zone-name" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <PersonDisc person={person} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{person.name}</span>
+                {person.qualifier ? <span className="zone-details">{person.qualifier}</span> : null}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export type Selection = { type: 'zone' | 'element' | 'global' | 'dormer'; id: string; isPlaceholder?: boolean } | null;
 
 const EMPTY_VALIDATION_RESULT: ValidationResult = {
@@ -144,6 +220,7 @@ export interface ElementsZonesPanelProps {
    * Parent sets ref to null on unmount via cleanup.
    */
   cmdASelectIdsRef?: React.MutableRefObject<(() => string[] | null) | null>;
+  people?: GeometryCanvasPeople;
 }
 
 type ElementEntryRowProps = {
@@ -330,6 +407,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   toggleElementsHidden,
   unhideElement,
   cmdASelectIdsRef,
+  people,
 }: ElementsZonesPanelProps) {
   const geometryStore = useGeometryStoreApi();
   const elementsMenuRef = useRef<HTMLDivElement>(null);
@@ -960,6 +1038,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                     />
                   </div>
                 </div>
+                {people ? <PeopleControl people={people} /> : null}
               </div>
             </div>
           </div>
