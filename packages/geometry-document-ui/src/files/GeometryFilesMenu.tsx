@@ -24,6 +24,7 @@ function filterMatchesProject(
 ): boolean {
   if (filter.kind === 'all') return true;
   if (filter.kind === 'unassigned') return document.projectGroupIds.length === 0;
+  if (filter.kind === 'shared') return document.shared === true;
   return document.projectGroupIds.includes(filter.projectGroupId);
 }
 
@@ -68,6 +69,8 @@ export function GeometryFilesMenu({
   onDownloadPortable,
   onImportCad,
   projectPresentation,
+  renderRowBadges,
+  renderRowActions,
   afterDocuments,
 }: GeometryFilesMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -204,6 +207,10 @@ export function GeometryFilesMenu({
     : projectMembershipDocument;
   const savedDocumentCount = useMemo(
     () => documents.filter((document) => document.isSaved !== false).length,
+    [documents],
+  );
+  const sharedDocumentCount = useMemo(
+    () => documents.filter((document) => document.shared === true).length,
     [documents],
   );
 
@@ -405,7 +412,9 @@ export function GeometryFilesMenu({
                     ? 'All models'
                     : filter.kind === 'unassigned'
                       ? 'Unassigned'
-                      : selectedProject?.name ?? 'All models'}
+                      : filter.kind === 'shared'
+                        ? 'Shared'
+                        : selectedProject?.name ?? 'All models'}
                 </span>
                 <span aria-hidden>⌄</span>
               </button>
@@ -426,6 +435,18 @@ export function GeometryFilesMenu({
                     <span>All models</span>
                     <span className="fproj-menu-meta">{savedDocumentCount}</span>
                   </button>
+                  {sharedDocumentCount > 0 || filter.kind === 'shared' ? (
+                    <button
+                      type="button"
+                      className={`fproj-menu-item ${filter.kind === 'shared' ? 'fproj-menu-item--selected' : ''}`}
+                      role="menuitemradio"
+                      aria-checked={filter.kind === 'shared'}
+                      onClick={() => selectFilter({ kind: 'shared' })}
+                    >
+                      <span>Shared</span>
+                      <span className="fproj-menu-meta">{sharedDocumentCount}</span>
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className={`fproj-menu-item ${filter.kind === 'unassigned' ? 'fproj-menu-item--selected' : ''}`}
@@ -703,10 +724,12 @@ export function GeometryFilesMenu({
                     </div>
                     <div className="files-dropdown-item-right">
                       {!isSaved ? <span className="files-dropdown-unsaved-chip">Unsaved</span> : null}
+                      {isSaved ? renderRowBadges?.(document) : null}
                     </div>
                   </button>
                   {isSaved ? (
                     <div className="files-dropdown-item-actions">
+                    {renderRowActions?.(document)}
                     {onDuplicateDocument ? (
                       <button
                         type="button"
