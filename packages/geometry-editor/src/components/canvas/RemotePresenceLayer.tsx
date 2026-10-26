@@ -7,6 +7,7 @@ import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Text } from 'rea
 import type { Element } from '../../geometry/types';
 import { easePointsToward } from '../../lib/geometryTransform';
 import { getElementShape, worldToCanvas } from '../../lib/shapeUtils';
+import { ATTENTION_GLOW } from './elementRendererPalette';
 
 /** Another user's selection: a glowing outline in their colour with a name pill (host-supplied presence). */
 export type GeometryCanvasRemoteSelection = Readonly<{
@@ -329,7 +330,7 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
           if (!ids.has(element.id) || !first) continue;
           const shape = getElementShape(element);
           placement ??= pillPlacement(shape, canvasCoords, layoutCentre);
-          const glow = { shadowColor: remote.color, shadowBlur: 16, shadowOpacity: 0.9 };
+          const glow = { shadowColor: remote.color, ...ATTENTION_GLOW };
           if (shape === 'point') {
             shapes.push(<Circle key={element.id} x={first.x} y={first.y} radius={9} stroke={remote.color} strokeWidth={2} {...glow} />);
             continue;

@@ -5,6 +5,7 @@ import React, { memo, useState, useCallback, useEffect, useMemo, useRef } from '
 import { Group, Line, Circle, Rect, Text } from 'react-konva';
 import { getPointElementIconNode } from '../../lib/pointElementIconSpec';
 import { lucideIconNodeToKonva } from '../../lib/lucideIconKonva';
+import { ATTENTION_GLOW } from './elementRendererPalette';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
 import type { Element, Floor } from '../../geometry/types';
 import {
@@ -1426,10 +1427,13 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
     ? canvasCoordsProp
     : coordinates.map(coord => worldToCanvas(coord, scale, panOffset, canvasCenter));
 
-  // Only highlight when hovering menu items (not general hover)
-  const isHoveredFromMenu = elementHover === element.id && overlapBadgeMenu !== null;
+  // Any hover (canvas, elements panel, history) thickens the shape and glows in its colour;
+  // the overlap menu's hover also switches to the hover colour.
+  const isHovered = elementHover === element.id;
+  const isHoveredFromMenu = isHovered && overlapBadgeMenu !== null;
   const typeColor = getElementColor(element as any, isSelected, canvasElementPalette);
   const elementColor = typeColor.stroke || CANVAS_CONSTANTS.COLORS.WALL;
+  const hoverGlow = isHovered ? { shadowColor: elementColor, ...ATTENTION_GLOW } : undefined;
   const elementFill = typeColor.fill || elementColor;
   const hoverStroke = isHoveredFromMenu ? canvasElementPalette.hover : elementColor;
   // Render point elements (single coordinate)
@@ -1830,12 +1834,13 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             name={`shape-${element.id}`}
             points={[start.x, start.y, end.x, end.y]}
             stroke={hoverStroke}
+            {...hoverGlow}
             strokeWidth={
               ductRoleStyle
                 ? (isSelected ? 4 : ductRoleStyle.strokeWidth)
                 : isThermalBridgeLine
-                ? (isSelected ? 5 : (isHoveredFromMenu ? 5 : 4))
-                : (isSelected ? 6 : (isHoveredFromMenu ? 5 : 4))
+                ? (isSelected ? 5 : (isHovered ? 8 : 4))
+                : (isSelected ? 6 : (isHovered ? 8 : 4))
             }
             hitStrokeWidth={12}
             lineCap="round"
@@ -2363,7 +2368,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             name={`shape-${element.id}`}
             points={canvasCoords.flatMap(coord => [coord.x, coord.y])}
             stroke={hoverStroke}
-            strokeWidth={isSelected ? 3 : (isHoveredFromMenu ? 3 : 2)}
+            strokeWidth={isHovered ? 5 : (isSelected ? 3 : 2)}
+            {...hoverGlow}
             closed={true}
             fill={elementFill}
             opacity={typeColor.fill ? 1 : 0.3}
@@ -2873,7 +2879,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             name={`shape-${element.id}`}
             points={canvasCoords.flatMap(coord => [coord.x, coord.y])}
             stroke={orientationPitchAxis && !isHoveredFromMenu ? 'transparent' : hoverStroke}
-            strokeWidth={isSelected ? 3 : (isHoveredFromMenu ? 3 : 2)}
+            strokeWidth={isHovered ? 5 : (isSelected ? 3 : 2)}
+            {...hoverGlow}
             closed={true}
             fill={elementFill}
             opacity={typeColor.fill ? 1 : 0.3}

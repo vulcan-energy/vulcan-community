@@ -223,6 +223,8 @@ type ElementEntryRowProps = {
   onEntryClick: (entry: ElementsPanelEntry, isFullySelected: boolean, event: React.MouseEvent<HTMLButtonElement>) => void;
   onEntryDoubleClick: (entry: ElementsPanelEntry, elementFloorZ: number) => void;
   onToggleEntryHidden: (entry: ElementsPanelEntry, event: React.MouseEvent<HTMLButtonElement>) => void;
+  /** Highlights the row's element on the canvas while the pointer is over the row. */
+  onEntryHover: (elementId: string | null) => void;
 };
 
 const ElementEntryRow = memo(function ElementEntryRow({
@@ -242,6 +244,7 @@ const ElementEntryRow = memo(function ElementEntryRow({
   onEntryClick,
   onEntryDoubleClick,
   onToggleEntryHidden,
+  onEntryHover,
 }: ElementEntryRowProps) {
   const element = entry.representative;
   const pillOpacity = isCurrentFloor ? 1.0 : 0.3;
@@ -250,6 +253,8 @@ const ElementEntryRow = memo(function ElementEntryRow({
     <div
       className={`element-pill element-pill--with-visibility ${isSelected ? 'selected' : ''}`}
       style={{ opacity: pillOpacity }}
+      onPointerEnter={() => onEntryHover(element.id)}
+      onPointerLeave={() => onEntryHover(null)}
     >
       <button
         type="button"
@@ -502,6 +507,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   const spaceInferenceWallPrintByZone = useGeometryStore((s) => s.spaceInferenceWallPrintByZone);
   const detectMissingElementsThunk = useGeometryStore((s) => s.detectMissingElements);
   const storeZones = useGeometryStore((s) => s.zones);
+  const setHoveredElementId = useGeometryStore((s) => s.setHoveredElementId);
   const missingElements = useMemo(
     (): MissingElement[] => {
       void zones;
@@ -1154,6 +1160,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                       onEntryClick={handleElementEntryClick}
                       onEntryDoubleClick={handleElementEntryDoubleClick}
                       onToggleEntryHidden={handleToggleEntryHidden}
+                      onEntryHover={setHoveredElementId}
                     />
                   );
                 })}

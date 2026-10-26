@@ -1374,7 +1374,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const [selectedVertex, setSelectedVertex] = useState<{elementId: string, vertexIndex: number} | null>(null);
   const [selectedSpaceLabelVertex, setSelectedSpaceLabelVertex] = useState<{labelId: string, vertexIndex: number} | null>(null);
 
-  const [hoveredElementId, setElementHover] = useState<string | null>(null);
+  // In the store so the elements panel and the host's lists can highlight an element too.
+  const hoveredElementId = useGeometryStore((s) => s.hoveredElementId);
+  const setElementHover = useGeometryStore((s) => s.setHoveredElementId);
   const setCanvasElementHover = useCallback((next: string | null) => {
     if (!canCanvasInteractionUpdateElementHover(getActiveCanvasInteraction()?.kind)) return;
     if (hoveredElementId === next) return;
