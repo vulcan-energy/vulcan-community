@@ -32,7 +32,7 @@ export function ColleagueDiscs({ colleagues }: Readonly<{ colleagues: readonly G
         <PersonDisc
           key={colleague.key}
           color={colleague.color}
-          initials={colleague.initials ?? colleague.label.charAt(0).toUpperCase()}
+          initials={colleague.initials}
           imageUrl={colleague.imageUrl}
         />
       ))}
