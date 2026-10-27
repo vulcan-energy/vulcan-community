@@ -10271,6 +10271,23 @@ FrontWallGround,Living,BuildingElementOpaque,10,90,4,2.5,0,0,FALSE,FALSE,,"0.000
     }
 
     #[test]
+    fn blank_pitch_on_a_polygon_fails_and_an_explicit_pitch_is_kept() {
+        let polygon = build_non_exposed_row(
+            r#"Internal,Living,BuildingElementAdjacentConditionedSpace,7.25,,1.29,2.8,"0,0,0|0,1.29,0|1,1.29,0","{}""#,
+        )
+        .unwrap_err();
+        assert_eq!(polygon.code, "E061", "{}", polygon.message);
+        let explicit = build_non_exposed_row(
+            r#"Internal,Living,BuildingElementAdjacentConditionedSpace,7.25,0,1.29,2.8,"0,0,0|0,1.29,0","{}""#,
+        )
+        .unwrap();
+        assert_eq!(
+            explicit["Zone"]["Living"]["BuildingElement"]["Internal"]["pitch"],
+            json!(0)
+        );
+    }
+
+    #[test]
     fn removes_invalid_properties_from_building_element_ground_based_on_floor_type() {
         // Suspended_floor should not have depth_basement_floor
         let mut json = json!({
