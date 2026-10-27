@@ -7,14 +7,16 @@ is required, and project files stay on the user's machine.
 
 It authors and validates HEM and FHS model inputs; it does not run simulations.
 The included WASM exposes CSV-to-HEM conversion, FHS preflight and version
-reporting, with no simulation run entry point. To calculate results, use the
+reporting, with no simulation run entry point; the `vulcan-community` command
+line uses the same WASM. To calculate results, use the
 public, MIT-licensed
 [upstream HEM engine](https://github.com/communitiesuk/epb-home-energy-model)
 separately; this repository pins it as the `hem_engine_upstream` submodule.
 
-The editor includes 2D/3D geometry authoring, Core/FHS fields, local documents
-and projects, editable defaults, an assembly calculator, automatic thermal
-bridges, CSV-to-HEM conversion and FHS preflight validation. Optional IFC import
+The editor includes 2D/3D geometry authoring with undo/redo, service networks
+(pipework and MVHR ductwork), Core/FHS fields, local documents and projects,
+editable defaults, an assembly calculator, automatic thermal bridges,
+CSV-to-HEM conversion and FHS preflight validation. Optional IFC import
 is described below.
 
 ## Run locally
@@ -95,6 +97,30 @@ Theme and naming configuration lives in
 `apps/geometry-editor/src/communityEditorConfig.ts`; forks can change that
 composition value without changing editor components.
 
+## Command line
+
+The `vulcan-community` command line in `apps/cli` checks, converts and
+preflights geometry CSVs without opening the editor. Like the editor, it does
+not run simulations. Build it after the model WASM, from the repository root:
+
+```bash
+npm run build:model-wasm
+npm run build -w @vulcan-energy/community-cli
+node apps/cli/dist/cli.js --help
+```
+
+| Command | What it does |
+| --- | --- |
+| `check <csv>` | Validates a geometry CSV; exits 1 when issues reach `--fail-on` (default `critical`) |
+| `thermal-bridges <csv>` | Proposes automatic thermal bridges; `--validate [--with-auto]` checks the CSV's own |
+| `convert <csv>` | Writes HEM input JSON to stdout or `--output`; exits 1 on schema failure |
+| `preflight <csv\|json>` | Runs FHS preflight on a HEM JSON, or on a CSV after conversion; exits 1 on any issue |
+| `version` | Prints the version, HEM core and FHS wrapper versions, and legal notices |
+
+Every command accepts `--json` for machine-readable output. `convert` and
+`preflight` take defaults from `--defaults`, else the CSV's `DefaultsPath`
+(relative to the current directory), else the bundled template.
+
 ## Self-hosting
 
 Self-hosted deployments must be cross-origin isolated for FHS preflight because
@@ -116,7 +142,7 @@ npm run quality
 npm run licence
 ```
 
-`npm run lint` is the raw ESLint report and exits non-zero while the recorded debt remains.
+`npm run lint` is the raw ESLint report; the recorded debt is warnings, so it exits zero unless ESLint finds an error.
 `npm run quality` is the enforcing ratchet: it accepts the baseline but fails if ESLint or
 React Doctor gets worse.
 
@@ -129,7 +155,8 @@ which produces misleading hook errors instead of exercising the application.
 Vulcan Community covers the browser editor and its local authoring and
 validation workflow: geometry, Core/FHS fields, local documents and defaults,
 the assembly calculator, automatic thermal bridges, CSV-to-HEM conversion and
-FHS preflight. Simulation, SAP/RdSAP calculation and lodgement,
+FHS preflight, in the editor and the `vulcan-community` command line.
+Simulation, SAP/RdSAP calculation and lodgement,
 account-backed managed workspaces and other commercial services are separate
 [Vulcan products](https://usevulcan.app) and are not part of this repository.
 
@@ -144,9 +171,10 @@ account-backed managed workspaces and other commercial services are separate
 | The pinned HEM/FHS upstreams and exact copied upstream schemas | Their upstream `MIT` terms |
 | Other `third_party/**` material | Its identified upstream terms; never a Vulcan first-party header |
 
-The full standard texts are in [`LICENSES/`](LICENSES/), and
-[`PATH_RIGHTS.md`](PATH_RIGHTS.md) records the authoritative path treatment and
-provenance summary. Unlisted paths default to exclusion under
+The AGPL-3.0 text is in [`LICENSE`](LICENSE), the upstream MIT text is in
+`hem_engine_upstream/LICENSE.md`, and the other standard texts are in
+[`LICENSES/`](LICENSES/). [`PATH_RIGHTS.md`](PATH_RIGHTS.md) records the
+authoritative path treatment and provenance summary. Unlisted paths default to exclusion under
 `licence-manifest.json`.
 
 ## Contributing and project policy
