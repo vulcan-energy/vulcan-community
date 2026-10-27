@@ -757,13 +757,11 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
       //
       // IMPORTANT CAVEAT — do not "simplify" further: core-input.schema.json's
       // BuildingElementGround* variants DO list `pitch` in properties AND
-      // required. That requirement is satisfied because the Rust builder
-      // always seeds Ground elements from
-      // data/defaults/defaults_template.json, which bakes in `"pitch": 180`
-      // for the Ground template — independent of anything the editor
-      // persists. Removing that defaults seed WOULD break core-input-mode
-      // schema validation for every Ground element; only the editor-side
-      // phantom emission was dead. Dropped here.
+      // required. That requirement is satisfied by the Rust builder's
+      // `derive_blank_csv_pitch`, which gives every Ground row pitch 180 (pitch
+      // never comes from the defaults template) — independent of anything the
+      // editor persists. Only the editor-side phantom emission was dead.
+      // Dropped here.
       total_area: authoredTotalArea,
       [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: groundTotalAreaMismatch(
         authoredTotalArea,

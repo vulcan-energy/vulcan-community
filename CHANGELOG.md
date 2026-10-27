@@ -70,6 +70,9 @@ from earlier private Vulcan development.
 
 ### Fixed
 
+- A blank CSV `pitch` no longer inherits the defaults template's pitch, which made
+  internal walls horizontal. A two-point base line is a vertical wall (90), a ground
+  element a floor (180), and any other blank-pitch row fails with E061 (#171).
 - Dimension overrides, storey heights and manual element names persist across save and
   load (#21, #25, #27, #29).
 - Cleared Advanced Fields no longer reach the merged HEM JSON, and System Advanced Fields
