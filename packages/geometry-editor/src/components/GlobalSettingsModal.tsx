@@ -4,7 +4,9 @@
 import React, {
   useCallback,
   useEffect,
+  useId,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -129,6 +131,18 @@ const ROOM_COUNT_COMPLIANCE_ROWS: {
     evidenceShort: "Sanitary accommodations",
   },
 ];
+
+// Shared models store their defaults by content hash; the raw path means nothing to a reader.
+const CONTENT_HASH_DEFAULTS_PATH = /^input\/defaults\/([0-9a-f]{64})\.json$/;
+
+function contentHashDefaultsShortHash(path: string): string | undefined {
+  return CONTENT_HASH_DEFAULTS_PATH.exec(path)?.[1]?.slice(0, 8);
+}
+
+function defaultsFileLabel(path: string): string {
+  const shortHash = contentHashDefaultsShortHash(path);
+  return shortHash ? `This model's defaults (${shortHash})` : path;
+}
 
 const COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED = true;
 const COMPLIANCE_VALIDATION_LOCK_NOTE =
@@ -869,7 +883,7 @@ export function GlobalSettingsModal({
   const defaultsListForDisplay = useMemo(() => {
     const query = defaultsSearchQuery.toLowerCase().trim();
     let filtered = availableDefaults.filter((path) =>
-      path.toLowerCase().includes(query)
+      `${path} ${defaultsFileLabel(path)}`.toLowerCase().includes(query)
     );
     const effective = (selectedDefaults || effectiveDefaultsPath).trim();
     if (
@@ -941,7 +955,9 @@ export function GlobalSettingsModal({
     return {
       variant: "error",
       issues: [
-        `Defaults file not found: ${selectedDefaults || effectiveDefaultsPath}`,
+        `Defaults file not found: ${defaultsFileLabel(
+          selectedDefaults || effectiveDefaultsPath
+        )}`,
       ],
     };
   }, [effectiveDefaultsPath, selectedDefaults, selectedExists]);
@@ -1172,6 +1188,14 @@ export function GlobalSettingsModal({
     onIndicatorChange?.(indicator);
   }, [indicator, onIndicatorChange]);
 
+  const titleId = useId();
+  const containerRef = useRef<HTMLDialogElement | null>(null);
+  // Focus lands inside the dialog on open so Escape reaches its key handler.
+  const attachContainer = useCallback((el: HTMLDialogElement | null) => {
+    containerRef.current = el;
+    el?.focus();
+  }, []);
+
   if (!isOpen || typeof document === "undefined") return null;
 
   return ReactDOM.createPortal(
@@ -1180,10 +1204,29 @@ export function GlobalSettingsModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented) return;
+        // Escape from a portalled child dialog, or one an expanded combobox consumes, is not ours.
+        const target = e.target as Element;
+        if (!containerRef.current?.contains(target)) return;
+        if (target.getAttribute("aria-expanded") === "true") return;
+        onClose();
+      }}
     >
-      <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+      <dialog
+        open
+        ref={attachContainer}
+        tabIndex={-1}
+        className="modal-container"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
         <div style={{ flexShrink: 0 }}>
-          <ModalHeader title="Global Settings" onClose={() => onClose()} />
+          <ModalHeader
+            title="Global Settings"
+            titleId={titleId}
+            onClose={() => onClose()}
+          />
           <div
             role="tablist"
             style={{
@@ -1390,6 +1433,7 @@ export function GlobalSettingsModal({
                 ) : (
                   defaultsListForDisplay.map((p) => {
                     const selected = p === selectedDefaults;
+                    const shortHash = contentHashDefaultsShortHash(p);
                     const compat = compatibilityMap.get(p);
                     const hasWarnings = !!compat?.warnings?.length;
                     return (
@@ -1445,6 +1489,7 @@ export function GlobalSettingsModal({
                             }}
                           />
                           <span
+                            title={shortHash ? p : undefined}
                             style={{
                               fontWeight: 600,
                               overflow: "hidden",
@@ -1454,7 +1499,21 @@ export function GlobalSettingsModal({
                               minWidth: 0,
                             }}
                           >
-                            {p}
+                            {shortHash ? (
+                              <>
+                                This model's defaults{" "}
+                                <span
+                                  style={{
+                                    fontWeight: 400,
+                                    color: "var(--text-muted)",
+                                  }}
+                                >
+                                  {shortHash}
+                                </span>
+                              </>
+                            ) : (
+                              p
+                            )}
                           </span>
                           {selected && selectedExists === false ? (
                             <span
@@ -3390,7 +3449,7 @@ export function GlobalSettingsModal({
             </>
           )}
         </div>
-      </div>
+      </dialog>
     </div>,
     document.body
   );

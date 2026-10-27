@@ -35,6 +35,12 @@
   max-height: 85vh;
 }
 
+/* A non-modal <dialog open> container: drop the UA absolute positioning and colour. */
+dialog.modal-container {
+  position: static;
+  color: inherit;
+}
+
 @keyframes modal-slide-in {
   from {
     opacity: 0;
