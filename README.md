@@ -13,9 +13,10 @@ public, MIT-licensed
 [upstream HEM engine](https://github.com/communitiesuk/epb-home-energy-model)
 separately; this repository pins it as the `hem_engine_upstream` submodule.
 
-The editor includes 2D/3D geometry authoring, Core/FHS fields, local documents
-and projects, editable defaults, an assembly calculator, automatic thermal
-bridges, CSV-to-HEM conversion and FHS preflight validation. Optional IFC import
+The editor includes 2D/3D geometry authoring with undo/redo, service networks
+(pipework and MVHR ductwork), Core/FHS fields, local documents and projects,
+editable defaults, an assembly calculator, automatic thermal bridges,
+CSV-to-HEM conversion and FHS preflight validation. Optional IFC import
 is described below.
 
 ## Run locally
@@ -141,7 +142,7 @@ npm run quality
 npm run licence
 ```
 
-`npm run lint` is the raw ESLint report and exits non-zero while the recorded debt remains.
+`npm run lint` is the raw ESLint report; the recorded debt is warnings, so it exits zero unless ESLint finds an error.
 `npm run quality` is the enforcing ratchet: it accepts the baseline but fails if ESLint or
 React Doctor gets worse.
 
