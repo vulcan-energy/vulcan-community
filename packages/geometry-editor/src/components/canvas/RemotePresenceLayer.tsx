@@ -14,8 +14,8 @@ export type GeometryCanvasRemoteSelection = Readonly<{
   key: string;
   label: string;
   color: string;
-  /** Shown until an image loads; taken from `label` when absent. */
-  initials?: string;
+  /** Shown until an image loads. */
+  initials: string;
   imageUrl?: string;
   elementIds: readonly string[];
 }>;
@@ -40,7 +40,7 @@ export type GeometryCanvasRemoteGhost = Readonly<{
   key: string;
   label: string;
   color: string;
-  initials?: string;
+  initials: string;
   imageUrl?: string;
   /** `key` names a path within its ghost (the dragged element, say), so its points ease in place. */
   paths: readonly Readonly<{ key: string; points: readonly Readonly<{ x: number; y: number }>[]; closed: boolean }>[];
@@ -84,16 +84,6 @@ const FONT_SIZE = 11;
 const LEADER = 22;
 // A ~22 px pointer; its tip is the origin.
 const ARROW = [0, 0, 0, 19, 5.5, 14.5, 9, 22, 12, 20.8, 8.5, 13.3, 15, 13.3];
-
-/** Two letters from a label's words, for a pill without host-supplied initials. */
-function initialsOf(label: string): string {
-  let result = '';
-  for (const word of label.split(/[\s@._-]+/)) {
-    if (word && /\w/.test(word[0]!)) result += word[0]!.toUpperCase();
-    if (result.length === 2) break;
-  }
-  return result || '?';
-}
 
 type PillPlacement = Readonly<{ anchor: Point; direction: Point }>;
 
@@ -349,7 +339,7 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
             {shapes}
             <Line points={[anchor.x, anchor.y, end.x, end.y]} stroke={remote.color} strokeWidth={2} />
             <Group x={end.x} y={end.y} ref={keep(selectionNodes, `${remote.key}:pill`)}>
-              <NamePill color={remote.color} label={remote.label} initials={remote.initials ?? initialsOf(remote.label)} imageUrl={remote.imageUrl} toward={direction} />
+              <NamePill color={remote.color} label={remote.label} initials={remote.initials} imageUrl={remote.imageUrl} toward={direction} />
             </Group>
           </Group>
         );
@@ -363,7 +353,7 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
               : <Line key={path.key} ref={ref} closed={path.closed} stroke={ghost.color} strokeWidth={2} dash={[8, 5]} lineJoin="round" />;
           })}
           <Group ref={keep(ghostPills, ghost.key)}>
-            <NamePill color={ghost.color} label={ghost.label} initials={ghost.initials ?? initialsOf(ghost.label)} imageUrl={ghost.imageUrl} toward={UP} />
+            <NamePill color={ghost.color} label={ghost.label} initials={ghost.initials} imageUrl={ghost.imageUrl} toward={UP} />
           </Group>
         </Group>
       ))}
