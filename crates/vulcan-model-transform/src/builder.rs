@@ -407,6 +407,45 @@ fn should_coerce_horizontal_adjacent_pitch_90(
         .unwrap_or(false)
 }
 
+/// Pitch is geometry, so a blank CSV pitch is derived from the row's own shape and never
+/// taken from the defaults template (whose adjacent-space element is horizontal, pitch 0).
+/// Ok(None) means the row already carries a pitch (or the type has none).
+fn derive_blank_csv_pitch(
+    section_name: &str,
+    schema_element_type: &str,
+    element_name: &str,
+    row: &HashMap<String, Value>,
+) -> Result<Option<i64>, BuildError> {
+    if !matches!(
+        schema_element_type,
+        "BuildingElementOpaque"
+            | "BuildingElementTransparent"
+            | "BuildingElementGround"
+            | "BuildingElementAdjacentConditionedSpace"
+            | "BuildingElementAdjacentUnconditionedSpace_Simple"
+            | "BuildingElementPartyWall"
+    ) || parse_csv_number_cell(row.get("pitch"), "pitch")?.is_some()
+    {
+        return Ok(None);
+    }
+    // Ground Elements has no pitch column: a ground element is a floor facing down.
+    if schema_element_type == "BuildingElementGround" {
+        return Ok(Some(180));
+    }
+    // Two points are a base line, so the element is a vertical wall (as for MVHR hosts).
+    if parse_coords_points(row.get("coords"), "coords")?.len() == 2 {
+        return Ok(Some(90));
+    }
+    Err(BuildError::new(
+        "E061",
+        &format!(
+            "{section_name} element '{element_name}' ({schema_element_type}) has no pitch, and \
+             its coords do not determine one (only a two-point base line is read as a vertical \
+             wall). Enter the pitch in degrees: 0 faces up, 90 is vertical, 180 faces down."
+        ),
+    ))
+}
+
 /// Parse an optional CSV cell as a finite f64, failing loudly on garbage.
 /// Empty / absent → Ok(None); a non-empty unparseable value → E055 (a silently
 /// skipped value would let the defaults profile win over what the user typed).
@@ -2164,6 +2203,22 @@ impl JSONBuilder {
                         ));
                     }
 
+                    let row_with_derived_pitch;
+                    let element_row = match derive_blank_csv_pitch(
+                        section_name,
+                        &schema_element_type,
+                        element_name,
+                        element_row,
+                    )? {
+                        Some(pitch) => {
+                            let mut row = element_row.clone();
+                            row.insert("pitch".to_string(), Value::from(pitch));
+                            row_with_derived_pitch = row;
+                            &row_with_derived_pitch
+                        }
+                        None => element_row,
+                    };
+
                     // Start with a default template for this element type
                     // For BuildingElementGround, we need to get the floor_type from CSV first to select the right variant
                     // Extract floor_type early so it's available throughout the function
@@ -2255,6 +2310,8 @@ impl JSONBuilder {
 
                     // Ensure defaults don't introduce unknown keys (schema uses additionalProperties=false)
                     if let Some(obj) = element_obj.as_object_mut() {
+                        // Pitch is geometry: only the row (or `derive_blank_csv_pitch`) sets it.
+                        obj.remove("pitch");
                         if !allowed_building_element_props.is_empty() {
                             obj.retain(|k, _| allowed_building_element_props.contains(k));
                         } else {
@@ -10175,6 +10232,42 @@ FrontWallGround,Living,BuildingElementOpaque,10,90,4,2.5,0,0,FALSE,FALSE,,"0.000
             !wall.contains_key("colour"),
             "Missing colour should surface as a validation issue rather than being auto-filled"
         );
+    }
+
+    fn build_non_exposed_row(row: &str) -> Result<Value, BuildError> {
+        let csv = format!(
+            "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n\n\
+             Non-Exposed Elements\nName,Zone,Type,area,pitch,width,height,coords,extra_json\n{row}\n"
+        );
+        let data = crate::parser::CSVParser::new()
+            .parse_csv(&csv)
+            .expect("CSV should parse");
+        let mut builder = JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).unwrap();
+        let mut result = builder.defaults.clone();
+        builder.build_zone_structure(&mut result, &data)?;
+        Ok(result)
+    }
+
+    #[test]
+    fn blank_pitch_on_a_base_line_is_a_vertical_wall_not_the_template_pitch() {
+        // The defaults template's adjacent-space element is horizontal (pitch 0).
+        let result = build_non_exposed_row(
+            r#"Internal,Living,BuildingElementAdjacentConditionedSpace,7.25,,1.29,2.8,"0,0,0|0,1.29,0","{}""#,
+        )
+        .unwrap();
+        assert_eq!(
+            result["Zone"]["Living"]["BuildingElement"]["Internal"]["pitch"],
+            json!(90)
+        );
+    }
+
+    #[test]
+    fn blank_pitch_without_determining_geometry_fails_loudly() {
+        let err = build_non_exposed_row(
+            r#"Internal,Living,BuildingElementAdjacentConditionedSpace,7.25,,1.29,2.8,,"{}""#,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "E061", "{}", err.message);
     }
 
     #[test]
