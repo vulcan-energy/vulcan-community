@@ -127,6 +127,60 @@ describe("GlobalSettingsModal", () => {
     expect(store.getState().defaultsPath).toBe("input/defaults/copy.json");
   });
 
+  it("is a labelled modal dialog that Escape closes", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <GeometryStoreProvider store={createGeometryStore()}>
+        <GlobalSettingsModal isOpen onClose={onClose} workspaceResourcePort={createResources()} />
+      </GeometryStoreProvider>
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Global Settings" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("names a content-hash defaults file as this model's defaults and duplicates the real path", async () => {
+    const user = userEvent.setup();
+    const hash = "0123456789abcdef".repeat(4);
+    const hashPath = `input/defaults/${hash}.json`;
+    const writeText = vi.fn(async () => undefined);
+    const resources = createResources({
+      exists: vi.fn(async (path) => !path.endsWith("/copy.json")),
+      writeText,
+      list: vi.fn(async (path) =>
+        path === "input/defaults"
+          ? [
+              { name: `${hash}.json`, kind: "file" as const },
+              { name: "defaults_template.json", kind: "file" as const },
+            ]
+          : []
+      ),
+    });
+    vi.spyOn(window, "prompt").mockReturnValue("copy");
+    const store = createGeometryStore();
+    store.getState().setDefaultsPath(hashPath);
+
+    render(
+      <GeometryStoreProvider store={store}>
+        <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={resources} />
+      </GeometryStoreProvider>
+    );
+
+    const label = await screen.findByText(/This model's defaults/);
+    expect(label).toHaveTextContent("This model's defaults 01234567");
+    expect(screen.queryByText(hashPath)).not.toBeInTheDocument();
+    expect(screen.getByText("input/defaults/defaults_template.json")).toBeInTheDocument();
+
+    await user.click(screen.getAllByTitle("Duplicate")[0]!);
+    await waitFor(() => {
+      expect(resources.readText).toHaveBeenCalledWith(hashPath);
+      expect(writeText).toHaveBeenCalledWith("input/defaults/copy.json", '{"name":"Community defaults"}');
+    });
+  });
+
   it("keeps global values usable when the Community host has no implicit defaults file", async () => {
     const user = userEvent.setup();
     const store = createGeometryStore({ defaultDefaultsPath: null });
