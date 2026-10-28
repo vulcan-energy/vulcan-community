@@ -42,7 +42,7 @@ describe('PeopleControl', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('lists people by first name, the full name and qualifier on hover, and follows on click', () => {
+  it('lists people by first name with their state, the full name on hover, and follows on click', () => {
     const onFollow = vi.fn();
     render(
       <PeopleControl
@@ -57,10 +57,10 @@ describe('PeopleControl', () => {
       />,
     );
     const alex = screen.getByRole('button', { name: /Alex/ });
-    expect(alex).toHaveTextContent(/^AAlex$/);
-    expect(alex).toHaveAttribute('title', 'Alex · F2 · Click to follow');
+    expect(alex).toHaveTextContent(/^AAlexF2$/);
+    expect(alex).toHaveAttribute('title', 'Alex · Click to follow');
     expect(alex).toHaveAttribute('aria-pressed', 'false');
-    const sam = screen.getByRole('button', { name: /Sam/ });
+    const sam = screen.getByRole('button', { name: 'Sam Jones' });
     expect(sam).toHaveTextContent(/^SJSam$/);
     expect(sam).toHaveAttribute('aria-pressed', 'true');
     expect(sam).toHaveAttribute('title', 'Sam Jones · Following · click to stop');
