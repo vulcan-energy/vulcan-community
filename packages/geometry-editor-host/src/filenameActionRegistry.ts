@@ -9,8 +9,9 @@ export type FilenameActionContribution<HostContext, RenderResult> = Readonly<{
   isAvailable?: (context: HostContext) => boolean;
   render: (context: HostContext) => RenderResult;
   /**
-   * Replaces the Save button's "Save" text while it returns a value (null keeps
-   * "Save"), so a host can make the button itself read as the save status.
+   * Replaces the Save button's icon and "Save" text while it returns a value
+   * (null keeps both), so a host can make the button itself read as the save
+   * status; it renders `SaveButtonIcon` to keep the icon agreeing with its text.
    * The first available contribution that returns a value wins.
    */
   renderSaveLabel?: (context: HostContext) => RenderResult | null;
