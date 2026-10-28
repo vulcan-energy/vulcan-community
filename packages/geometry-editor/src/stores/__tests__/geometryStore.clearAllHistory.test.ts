@@ -38,11 +38,13 @@ describe('clearAll history boundary', () => {
     expect(store.getState().zones).toEqual([]);
   });
 
-  it('does not carry the previous model\'s compliance settings into the new one', () => {
+  it('does not carry the previous model\'s compliance settings or orientation into the new one', () => {
     const store = createGeometryStore();
     store.getState().setComplianceSettings({ scenariosBaseModelEnabled: false, NumberOfBedrooms: 4 });
+    store.getState().setGlobalOrientationOffset(30);
     store.getState().clearAll();
     expect(store.getState().complianceSettings.scenariosBaseModelEnabled).toBeUndefined();
     expect(store.getState().complianceSettings.NumberOfBedrooms).not.toBe(4);
+    expect(store.getState().globalOrientationOffset).toBe(0);
   });
 });

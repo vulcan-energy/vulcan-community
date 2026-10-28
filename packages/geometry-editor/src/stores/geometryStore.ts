@@ -2899,6 +2899,69 @@ const createGeometryState = (
       return withPrecomputedDefaultsLookup(state, update);
     }, replace as false);
   }) as typeof rawSet;
+
+  /**
+   * The empty document both New (clearAll) and the account-boundary reset
+   * start from, so neither carries the previous model into the next; `extras`
+   * are what only one of them clears.
+   */
+  const resetToEmptyDocument = (extras: Partial<GeometryState> = {}) => {
+    const stateBeforeReset = get();
+    stateBeforeReset.cancelPendingLoadedCsvWorkForDocumentBoundary();
+    // Invalidate any in-flight junction defaults read before removing its path,
+    // so a late read cannot refill the map.
+    stateBeforeReset.setJunctionPsiDefaultsPath(undefined);
+    set((state) => ({
+      sourceCsvVersion: 3,
+      sourceProvenanceMarkersVersion: undefined,
+      csvUpgradeRequested: false,
+      targetBundleId: undefined,
+      zones: [],
+      elementsById: {},
+      elementIds: [],
+      spaceLabelsById: {},
+      spaceLabelIds: [],
+      spaceLabelsOverlayExpanded: false,
+      spaceLabellerOpen: false,
+      spaceLabellerZoneId: null,
+      spaceLabellerSelectedLabelId: null,
+      spaceInferenceWallPrintByZone: {},
+      floors: [],
+      floorIds: [],
+      currentFloorId: null,
+      currentFloorZ: 0,
+      selection: null,
+      selectedElementIds: [],
+      canvasViewResetKey: state.canvasViewResetKey + 1,
+      defaultsPath: defaultDefaultsPath,
+      defaultsJson: null,
+      // A cancelled defaults read never clears this flag itself.
+      defaultsLoading: false,
+      creationDefaultAssemblyIds: {},
+      hostDocumentMetadata: {},
+      propertyPostcode: undefined,
+      modelId: undefined,
+      modelVersion: undefined,
+      guideOverlay: null,
+      guideOverlaySource: null,
+      guideOverlayByFloor: {},
+      guideOverlaySourceByFloor: {},
+      junctionPsiDefaultsPath: undefined,
+      junctionPsiDefaultsMap: {},
+      junctionPsiDefaultsLoading: false,
+      junctionPsiDefaultsError: null,
+      detailedBridgePsiProfile: null,
+      complianceSettings: createInitialComplianceSettings(),
+      history: [],
+      historyIndex: -1,
+      canUndo: false,
+      canRedo: false,
+      lastSavedCsv: null,
+      targetValidation: null,
+      globalOrientationOffset: 0,
+      ...extras,
+    }));
+  };
   const postCommandEffects = new Set<GeometryPostCommandEffect>();
   const dispatchPostCommandEvent = async (
     event: GeometryPostCommandEvent,
@@ -7372,117 +7435,17 @@ const createGeometryState = (
   },
 
   resetGeometryDocumentForAccountBoundary: () => {
-    const stateBeforeReset = get();
-    stateBeforeReset.cancelPendingLoadedCsvWorkForDocumentBoundary();
-    // Invalidate any in-flight junction defaults read before removing its path.
-    stateBeforeReset.setJunctionPsiDefaultsPath(undefined);
-    set((state) => ({
-      sourceCsvVersion: 3,
-      sourceProvenanceMarkersVersion: undefined,
-      csvUpgradeRequested: false,
-      targetBundleId: undefined,
-      zones: [],
-      elementsById: {},
-      elementIds: [],
-      spaceLabelsById: {},
-      spaceLabelIds: [],
-      spaceLabelsOverlayExpanded: false,
-      spaceLabellerOpen: false,
-      spaceLabellerZoneId: null,
-      spaceLabellerSelectedLabelId: null,
-      spaceInferenceWallPrintByZone: {},
-      floors: [],
-      floorIds: [],
-      currentFloorId: null,
-      currentFloorZ: 0,
-      selection: null,
-      selectedElementIds: [],
-      canvasViewResetKey: state.canvasViewResetKey + 1,
-      defaultsPath: defaultDefaultsPath,
-      defaultsJson: null,
-      defaultsLoading: false,
-      creationDefaultAssemblyIds: {},
+    // Another account's folder: its resources and validated files go too.
+    resetToEmptyDocument({
       bundledAssemblyLibrary: null,
       bundledAssemblyLibraryLoading: false,
       bundledAssemblyLibraryError: null,
-      hostDocumentMetadata: {},
-      propertyPostcode: undefined,
-      modelId: undefined,
-      modelVersion: undefined,
-      guideOverlay: null,
-      guideOverlaySource: null,
-      guideOverlayByFloor: {},
-      guideOverlaySourceByFloor: {},
-      junctionPsiDefaultsPath: undefined,
-      junctionPsiDefaultsMap: {},
-      junctionPsiDefaultsLoading: false,
-      junctionPsiDefaultsError: null,
-      detailedBridgePsiProfile: null,
-      complianceSettings: createInitialComplianceSettings(),
-      history: [],
-      historyIndex: -1,
-      canUndo: false,
-      canRedo: false,
-      lastSavedCsv: null,
       csvValidationCache: {},
-      targetValidation: null,
-      globalOrientationOffset: 0,
-    }));
+    });
   },
 
   clearAll: () => {
-    const stateBeforeClear = get();
-    stateBeforeClear.cancelPendingLoadedCsvWorkForDocumentBoundary();
-    // Invalidate any in-flight junction defaults read before removing its path,
-    // as the account-boundary reset does; a late read must not refill the map.
-    stateBeforeClear.setJunctionPsiDefaultsPath(undefined);
-    set((state) => ({
-      sourceCsvVersion: 3,
-      sourceProvenanceMarkersVersion: undefined,
-      csvUpgradeRequested: false,
-      targetBundleId: undefined,
-      selection: null,
-      selectedElementIds: [],
-      zones: [],
-      elementsById: {},
-      elementIds: [],
-      spaceLabelsById: {},
-      spaceLabelIds: [],
-      spaceLabelsOverlayExpanded: false,
-      spaceLabellerOpen: false,
-      spaceLabellerZoneId: null,
-      spaceLabellerSelectedLabelId: null,
-      spaceInferenceWallPrintByZone: {},
-      floors: [],
-      floorIds: [],
-      currentFloorId: null,
-      currentFloorZ: 0,
-      canvasViewResetKey: state.canvasViewResetKey + 1,
-      defaultsPath: defaultDefaultsPath,
-      creationDefaultAssemblyIds: {},
-      defaultsJson: null,
-      // A cancelled defaults read never clears this flag itself.
-      defaultsLoading: false,
-      hostDocumentMetadata: {},
-      propertyPostcode: undefined,
-      modelId: undefined,
-      modelVersion: undefined,
-      guideOverlay: null,
-      guideOverlaySource: null,
-      guideOverlayByFloor: {},
-      guideOverlaySourceByFloor: {},
-      junctionPsiDefaultsPath: undefined,
-      junctionPsiDefaultsMap: {},
-      junctionPsiDefaultsLoading: false,
-      junctionPsiDefaultsError: null,
-      detailedBridgePsiProfile: null,
-      complianceSettings: createInitialComplianceSettings(),
-      history: [],
-      historyIndex: -1,
-      canUndo: false,
-      canRedo: false,
-      lastSavedCsv: null,
-    }));
+    resetToEmptyDocument();
     // New Document is a history boundary like load: seed the empty document as
     // the only entry so Undo can return to it but never to the previous model.
     get().seedHistory('clearAll');
