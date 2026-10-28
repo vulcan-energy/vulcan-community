@@ -7476,6 +7476,7 @@ const createGeometryState = (
       junctionPsiDefaultsLoading: false,
       junctionPsiDefaultsError: null,
       detailedBridgePsiProfile: null,
+      complianceSettings: createInitialComplianceSettings(),
       history: [],
       historyIndex: -1,
       canUndo: false,

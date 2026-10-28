@@ -160,6 +160,37 @@ const filenameWithExtension = (fileName: string, extension: string) => {
   return `${filenameWithoutExtension(fileName, extension)}${extension}`;
 };
 
+/** The Save button's icon for a status; a host save label renders it beside its own text. */
+export function SaveButtonIcon({ status }: Readonly<{ status: FilenameBarActionContext['saveStatus'] }>) {
+  switch (status) {
+    case 'saving':
+      return (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="animate-spin">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeDasharray="31.416" strokeDashoffset="31.416">
+            <animate attributeName="stroke-dasharray" dur="2s" values="0 31.416;15.708 15.708;0 31.416" repeatCount="indefinite"/>
+            <animate attributeName="stroke-dashoffset" dur="2s" values="0;-15.708;-31.416" repeatCount="indefinite"/>
+          </circle>
+        </svg>
+      );
+    case 'success':
+      return (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      );
+    case 'error':
+      return null;
+    default:
+      return (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M17 21v-8H7v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M7 3v5h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      );
+  }
+}
+
 export const FilenameBar: React.FC<FilenameBarProps> = ({
   documentHost,
   hostModelName,
@@ -453,36 +484,6 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     };
   }, []);
 
-  const getSaveButtonIcon = () => {
-    switch (currentSaveStatus) {
-      case 'saving':
-        return (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="animate-spin">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeDasharray="31.416" strokeDashoffset="31.416">
-              <animate attributeName="stroke-dasharray" dur="2s" values="0 31.416;15.708 15.708;0 31.416" repeatCount="indefinite"/>
-              <animate attributeName="stroke-dashoffset" dur="2s" values="0;-15.708;-31.416" repeatCount="indefinite"/>
-            </circle>
-          </svg>
-        );
-      case 'success':
-        return (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        );
-      case 'error':
-        return null;
-      default:
-        return (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M17 21v-8H7v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M7 3v5h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        );
-    }
-  };
-
   const getSaveButtonClass = () => {
     switch (currentSaveStatus) {
       case 'saving':
@@ -714,8 +715,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           title={getSaveButtonTooltip()}
         >
           <span className="save-button-content">
-            {getSaveButtonIcon()}
-            {saveLabel ?? <span className="save-button-text">Save</span>}
+            {saveLabel ?? <><SaveButtonIcon status={currentSaveStatus} /><span className="save-button-text">Save</span></>}
             {showSaveErrorIndicator && (
               <span
                 role="button"
