@@ -46,7 +46,7 @@ import {
   type ElementsPanelEntrySummary,
 } from './elementsZonesPanelModel';
 
-/** A colleague in the People list; `qualifier` is at most one muted word (a floor tag or a state). */
+/** A colleague in the People list; `qualifier` is at most one word (a floor tag or a state), shown on hover. */
 export type GeometryCanvasPerson = Readonly<{
   key: string;
   name: string;
@@ -85,13 +85,13 @@ export function PeopleControl({ people }: Readonly<{ people: GeometryCanvasPeopl
               className={`zone-pill ${following ? 'selected' : ''}`}
               aria-pressed={following}
               data-person={person.key}
-              title={following ? 'Following · click to stop' : `Follow ${person.name}`}
+              title={[person.name, person.qualifier, following ? 'Following · click to stop' : 'Click to follow'].filter(Boolean).join(' · ')}
               onClick={() => people.onFollow(person.key)}
             >
               <span className="zone-name people-row">
                 <PersonDisc color={person.color} initials={person.initials} imageUrl={person.imageUrl} />
-                <span className="people-row__name">{person.name}</span>
-                {person.qualifier ? <span className="zone-details">{person.qualifier}</span> : null}
+                {/* The first name only; the full name and the qualifier are in the title. */}
+                <span className="people-row__name">{person.name.split(/\s+/)[0] || person.name}</span>
               </span>
             </button>
           );
