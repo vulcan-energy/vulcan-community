@@ -85,12 +85,14 @@ export function PeopleControl({ people }: Readonly<{ people: GeometryCanvasPeopl
               className={`zone-pill ${following ? 'selected' : ''}`}
               aria-pressed={following}
               data-person={person.key}
-              title={following ? 'Following · click to stop' : `Follow ${person.name}`}
+              aria-label={person.name}
+              title={`${person.name} · ${following ? 'Following · click to stop' : 'Click to follow'}`}
               onClick={() => people.onFollow(person.key)}
             >
               <span className="zone-name people-row">
                 <PersonDisc color={person.color} initials={person.initials} imageUrl={person.imageUrl} />
-                <span className="people-row__name">{person.name}</span>
+                {/* The first name only; the full name is in the title. */}
+                <span className="people-row__name">{person.name.split(/\s+/)[0] || person.name}</span>
                 {person.qualifier ? <span className="zone-details">{person.qualifier}</span> : null}
               </span>
             </button>

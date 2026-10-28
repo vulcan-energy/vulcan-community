@@ -2412,6 +2412,11 @@
   text-overflow: ellipsis;
 }
 
+/* A little less inset than other pills, so an email-style name ("shared-models-a") fits the column. */
+.geometry-canvas .zone-pill[data-person] {
+  padding-inline: 8px !important;
+}
+
 .people-disc {
   position: relative;
   flex: none;
