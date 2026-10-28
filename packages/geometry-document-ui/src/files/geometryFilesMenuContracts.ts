@@ -21,6 +21,8 @@ export type GeometryFilesMenuDocument = GeometryDocumentCatalogueEntry &
     isSaved?: boolean;
     /** Shared with the host's organisation; the Shared filter lists these. */
     shared?: boolean;
+    /** Not in the local folder (it downloads when opened): Duplicate and Delete do not apply. */
+    cloudOnly?: boolean;
   }>;
 
 export type GeometryFilesMenuProject = GeometryProjectGroupCatalogueEntry;
