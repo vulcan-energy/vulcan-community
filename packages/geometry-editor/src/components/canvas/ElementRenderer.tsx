@@ -5,7 +5,7 @@ import React, { memo, useState, useCallback, useEffect, useMemo, useRef } from '
 import { Group, Line, Circle, Rect, Text } from 'react-konva';
 import { getPointElementIconNode } from '../../lib/pointElementIconSpec';
 import { lucideIconNodeToKonva } from '../../lib/lucideIconKonva';
-import { ATTENTION_GLOW } from './elementRendererPalette';
+import { HOVER_GLOW } from './elementRendererPalette';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
 import type { Element, Floor } from '../../geometry/types';
 import {
@@ -1433,7 +1433,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   const isHoveredFromMenu = isHovered && overlapBadgeMenu !== null;
   const typeColor = getElementColor(element as any, isSelected, canvasElementPalette);
   const elementColor = typeColor.stroke || CANVAS_CONSTANTS.COLORS.WALL;
-  const hoverGlow = isHovered ? { shadowColor: elementColor, ...ATTENTION_GLOW } : undefined;
+  const hoverGlow = isHovered ? { shadowColor: elementColor, ...HOVER_GLOW } : undefined;
   const elementFill = typeColor.fill || elementColor;
   const hoverStroke = isHoveredFromMenu ? canvasElementPalette.hover : elementColor;
   // Render point elements (single coordinate)

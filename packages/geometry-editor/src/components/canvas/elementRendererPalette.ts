@@ -152,5 +152,8 @@ export function readCanvasInteractionPalette(): CanvasInteractionPalette {
   };
 }
 
-/** The glow that draws the eye to an element: a colleague's selection, a hovered element. */
+/** The glow that draws the eye to an element a colleague has selected. */
 export const ATTENTION_GLOW = { shadowBlur: 16, shadowOpacity: 0.9 } as const;
+
+/** A hovered element: a faint hint beside the thicker stroke, not a halo. */
+export const HOVER_GLOW = { shadowBlur: 8, shadowOpacity: 0.7 } as const;
