@@ -1185,12 +1185,19 @@ function renderAdvancedFieldResetToSourceButton(
   return renderResetToSourceButton(handleChange, path, fieldSource);
 }
 
+/**
+ * `alignItems` is never `'flex-end'`: `StandardInput`/`StandardDropdown` render helper and
+ * error text inside `main`, under the control, so bottom-aligning the actions drops them
+ * below the control by that text's height. `'flex-start'` puts the actions (which are
+ * `--form-input-height` tall, like the control) level with the control whatever renders
+ * under it; `'center'` is for a `main` that is a single line, such as a checkbox label.
+ */
 function renderAdvancedFieldRow(
   propKey: string | undefined,
   isCompact: boolean,
   main: React.ReactNode,
   actions: React.ReactNode[],
-  alignItems: React.CSSProperties['alignItems'] = 'flex-end',
+  alignItems: 'flex-start' | 'center' = 'flex-start',
   actionsOffsetTop = 0,
   fullWidthHeader?: React.ReactNode,
 ) {
@@ -1947,7 +1954,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
           groundUControlData: data,
         }),
       ],
-    'flex-end',
+    'flex-start',
     0,
     renderAdvancedFieldLabelRow(
       indicatorMessages,
@@ -2196,7 +2203,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
         groundUControlData: data,
       }),
     ],
-    'flex-end',
+    'flex-start',
     0,
     cfg.tableCell ? null : renderAdvancedFieldLabelRow(
       indicatorMessages,
@@ -2455,7 +2462,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       className={isCustom ? 'custom-value' : ''}
     />,
     showReset && !cfg.tableCell ? [renderResetToSourceButton(handleChange, path, fieldSource)] : [],
-    'flex-end',
+    'flex-start',
     0,
     cfg.tableCell ? null : renderAdvancedFieldLabelRow(
       indicatorMessages,
