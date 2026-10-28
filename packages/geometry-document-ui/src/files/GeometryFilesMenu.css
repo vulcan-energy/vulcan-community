@@ -309,6 +309,7 @@
   transition: background-color 0.2s ease;
   text-align: left;
   width: 100%;
+  min-width: 0;
 }
 
 .geometry-files-menu .files-dropdown-item:hover {
