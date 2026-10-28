@@ -126,6 +126,16 @@ describe('shared Geometry Files menu', () => {
     expect(screen.queryByRole('menuitemradio', { name: /Shared/ })).not.toBeInTheDocument();
   });
 
+  it('offers no Duplicate or Delete on a cloud-only row', () => {
+    renderMenu({
+      documents: [documents[0], { ...documents[1], cloudOnly: true }],
+      renderRowActions: (document) => <button type="button">Share {document.fileName}</button>,
+    });
+    const flatRow = screen.getByRole('button', { name: 'Load Flat.csv' }).parentElement!;
+    expect(within(flatRow).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent))
+      .toEqual(['Load Flat.csv', 'Share Flat.csv']);
+  });
+
   it('lists only shared documents under the Shared filter, and search still applies', () => {
     const onFilterChange = vi.fn();
     renderMenu({

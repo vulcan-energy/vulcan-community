@@ -730,7 +730,7 @@ export function GeometryFilesMenu({
                   {isSaved ? (
                     <div className="files-dropdown-item-actions">
                     {renderRowActions?.(document)}
-                    {onDuplicateDocument ? (
+                    {onDuplicateDocument && !document.cloudOnly ? (
                       <button
                         type="button"
                         className="files-dropdown-action-btn"
@@ -754,7 +754,7 @@ export function GeometryFilesMenu({
                         </svg>
                       </button>
                     ) : null}
-                    {onDeleteDocument ? (
+                    {onDeleteDocument && !document.cloudOnly ? (
                       <button
                         type="button"
                         className="files-dropdown-action-btn files-dropdown-delete-btn"
