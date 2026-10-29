@@ -61,19 +61,20 @@ export function SaveReviewPopover({ anchorRef, title, children, actions, onClose
   const closeRef = useRef(onClose);
   useLayoutEffect(() => { closeRef.current = onClose; }, [onClose]);
   const titleId = useId();
-  const [position, setPosition] = useState({ left: 0, top: 0, maxHeight: 0 });
+  const [position, setPosition] = useState<Readonly<{ left: number; top?: number; bottom?: number; maxHeight: number }>>({ left: 0, top: 0, maxHeight: 0 });
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     const positionPanel = () => {
       const panel = panelRef.current;
       if (!anchor || !panel) return;
       const rect = anchor.getBoundingClientRect();
-      const top = rect.bottom + 8;
-      setPosition({
-        left: Math.max(12, Math.min(rect.right - panel.offsetWidth, window.innerWidth - panel.offsetWidth - 12)),
-        top,
-        maxHeight: Math.max(0, window.innerHeight - top - 12),
-      });
+      const left = Math.max(12, Math.min(rect.right - panel.offsetWidth, window.innerWidth - panel.offsetWidth - 12));
+      const below = window.innerHeight - rect.bottom - 20;
+      const above = rect.top - 20;
+      // Opens above when below is cramped and above has more room, as SearchableDescribedSelect does.
+      setPosition(below < 260 && above > below
+        ? { left, bottom: window.innerHeight - rect.top + 8, maxHeight: above }
+        : { left, top: rect.bottom + 8, maxHeight: Math.max(0, below) });
     };
     positionPanel();
     window.addEventListener('resize', positionPanel);
