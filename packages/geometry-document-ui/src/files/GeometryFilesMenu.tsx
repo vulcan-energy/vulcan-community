@@ -406,8 +406,8 @@ export function GeometryFilesMenu({
                 ref={projectButtonRef}
                 type="button"
                 className="fproj-scope"
-                title={projectFilterTitle}
-                aria-label="Filter base models by project"
+                title={projectFilters ? projectFilterTitle : 'Filter models'}
+                aria-label={projectFilters ? 'Filter base models by project' : 'Filter models'}
                 aria-haspopup="menu"
                 aria-expanded={isProjectMenuOpen}
                 onClick={() => setIsProjectMenuOpen((open) => !open)}
@@ -739,7 +739,7 @@ export function GeometryFilesMenu({
                           </div>
                         ) : document.cloudOnly ? (
                           <div className="files-dropdown-item-stats" title="Not in this folder; it downloads when opened">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="Not in this folder">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" role="img" aria-label="Not in this folder">
                               <path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.5 11a4 4 0 0 1-2 8Z" />
                             </svg>
                           </div>
