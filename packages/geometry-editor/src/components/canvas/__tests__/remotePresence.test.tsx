@@ -48,8 +48,8 @@ describe('PeopleControl', () => {
       <PeopleControl
         people={{
           items: [
-            { key: 'u-alex', name: 'Alex', color: 'red', initials: 'A', qualifier: 'F2' },
-            { key: 'u-sam', name: 'Sam Jones', color: 'blue', initials: 'SJ' },
+            { key: 'u-alex', name: 'Alex', color: 'red', qualifier: 'F2' },
+            { key: 'u-sam', name: 'Sam Jones', color: 'blue' },
           ],
           followingKey: 'u-sam',
           onFollow,
@@ -57,11 +57,11 @@ describe('PeopleControl', () => {
       />,
     );
     const alex = screen.getByRole('button', { name: /Alex/ });
-    expect(alex).toHaveTextContent(/^AAlexF2$/);
+    expect(alex).toHaveTextContent(/^AlexF2$/);
     expect(alex).toHaveAttribute('title', 'Alex · Click to follow');
     expect(alex).toHaveAttribute('aria-pressed', 'false');
     const sam = screen.getByRole('button', { name: 'Sam Jones' });
-    expect(sam).toHaveTextContent(/^SJSam$/);
+    expect(sam).toHaveTextContent(/^Sam$/);
     expect(sam).toHaveAttribute('aria-pressed', 'true');
     expect(sam).toHaveAttribute('title', 'Sam Jones · Following · click to stop');
     fireEvent.click(alex);

@@ -749,14 +749,15 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           </React.Fragment>
         ) : null)}
         </div>
-        {buildError && currentSaveStatus !== 'saving' && (
+        {/* A model saved with a failed validation reads Build Error too: Saved stands beside it. */}
+        {(buildError && currentSaveStatus !== 'saving') || showLastSaveValidationFailure ? (
           <button
             ref={buildErrorChipRef}
             type="button"
             onClick={() => {
               openSaveErrorDropdown(buildErrorChipRef.current);
             }}
-            title={buildErrorCopyText || buildError || undefined}
+            title={showLastSaveValidationFailure ? LAST_SAVE_VALIDATION_MESSAGE : buildErrorCopyText || buildError || undefined}
             style={{
               fontSize: '12px', padding: '4px 8px',
               backgroundColor: 'var(--validation-error)',
@@ -765,24 +766,6 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
             }}
           >
             Build Error{displayedBuildErrorCount > 0 ? ` (${displayedBuildErrorCount})` : ''}
-          </button>
-        )}
-        {showLastSaveValidationFailure ? (
-          <button
-            ref={buildErrorChipRef}
-            type="button"
-            onClick={() => {
-              openSaveErrorDropdown(buildErrorChipRef.current);
-            }}
-            title="View validation status"
-            style={{
-              fontSize: '12px', padding: '4px 8px',
-              backgroundColor: 'var(--validation-warning)',
-              color: 'var(--validation-warning-on-fill)', borderRadius: '4px',
-              border: 'none', cursor: 'pointer', flexShrink: 0,
-            }}
-          >
-            Validation failed at last save
           </button>
         ) : null}
       </div>

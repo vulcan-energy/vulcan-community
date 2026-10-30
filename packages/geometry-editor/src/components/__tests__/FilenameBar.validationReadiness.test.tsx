@@ -70,7 +70,7 @@ describe('FilenameBar validation readiness', () => {
     const user = userEvent.setup();
     renderFilenameBar(false);
 
-    await user.click(screen.getByRole('button', { name: 'Validation failed at last save' }));
+    await user.click(screen.getByRole('button', { name: 'Build Error' }));
 
     expect(screen.getByText(
       'This saved model is hidden from Scenarios until it passes validation on re-save.',
@@ -83,14 +83,13 @@ describe('FilenameBar validation readiness', () => {
   it('does not double-render the persisted chip while live build errors are present', () => {
     renderFilenameBar(false, true);
 
-    expect(screen.getByRole('button', { name: /Build Error/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Validation failed at last save' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Build Error/ })).toHaveLength(1);
   });
 
   it.each([true, undefined])('renders no readiness chip for a %s verdict', (verdict) => {
     renderFilenameBar(verdict);
 
-    expect(screen.queryByRole('button', { name: 'Validation failed at last save' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Build Error/ })).not.toBeInTheDocument();
   });
 });
 

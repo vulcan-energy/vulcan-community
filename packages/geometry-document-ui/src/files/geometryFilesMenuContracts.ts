@@ -155,6 +155,9 @@ export type GeometryFilesMenuProps = Readonly<{
   renderRowBadges?: (document: GeometryFilesMenuDocument) => ReactNode;
   /** Host actions before Duplicate and Delete in a saved row. */
   renderRowActions?: (document: GeometryFilesMenuDocument) => ReactNode;
-  /** Host content rendered below the document list. */
-  afterDocuments?: ReactNode;
+  /**
+   * The host's Trash: a Trash filter while `count` models are in it, whose
+   * view shows `content` (the host's rows, already searched) instead of documents.
+   */
+  trash?: Readonly<{ count: number; content: ReactNode }>;
 }>;
