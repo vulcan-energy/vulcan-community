@@ -34,7 +34,8 @@ interface DeleteConfirmModalProps {
   title: string;
   message: string;
   itemName?: string;
-  itemType: 'zone' | 'element' | 'file';
+  /** The header icon and pill label; omit for a confirmation about no item (no icon). */
+  itemType?: 'zone' | 'element' | 'file';
   itemTypeLabel?: string;
   childElements?: Array<{ name: string; type: string }>;
   actionButtonText?: string;
@@ -203,7 +204,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
         tabIndex={-1}
       >
         <ModalHeader
-          icon={<div className="modal-icon destructive">{getItemTypeIcon()}</div>}
+          icon={itemType ? <div className="modal-icon destructive">{getItemTypeIcon()}</div> : undefined}
           title={title}
           titleId={titleId}
           onClose={onClose}
@@ -214,7 +215,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', margin: '0 0 18px 0' }}>
             <div className="delete-pill">
               <span className="delete-pill-name">{itemName}</span>
-              <span className="delete-pill-type">{itemTypeLabel || (itemType.charAt(0).toUpperCase() + itemType.slice(1))}</span>
+              <span className="delete-pill-type">{itemTypeLabel || (itemType ? itemType.charAt(0).toUpperCase() + itemType.slice(1) : '')}</span>
             </div>
           </div>
         )}
