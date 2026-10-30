@@ -50,9 +50,11 @@ export type FilenameBarProps = Omit<FilenameBarActionContext, 'filename'> & Read
 }>;
 
 /** Shared save-decision surface. Content and decisions belong to the caller. */
-export function SaveReviewPopover({ anchorRef, title, children, actions, onClose }: {
+export function SaveReviewPopover({ anchorRef, title, hideTitle = false, children, actions, onClose }: {
   anchorRef: React.RefObject<HTMLButtonElement | null>;
   title: string;
+  /** The title names the dialog without showing (its anchor already says what it is for). */
+  hideTitle?: boolean;
   children: React.ReactNode;
   actions: React.ReactNode;
   onClose: () => void;
@@ -101,8 +103,8 @@ export function SaveReviewPopover({ anchorRef, title, children, actions, onClose
     };
   }, [anchorRef]);
   return ReactDOM.createPortal(
-    <dialog open ref={panelRef} className="save-review-popover" aria-labelledby={titleId} tabIndex={-1} style={position}>
-      <h3 id={titleId}>{title}</h3>
+    <dialog open ref={panelRef} className="save-review-popover" aria-label={hideTitle ? title : undefined} aria-labelledby={hideTitle ? undefined : titleId} tabIndex={-1} style={position}>
+      {hideTitle ? null : <h3 id={titleId}>{title}</h3>}
       <div className="save-review-content">{children}</div>
       <div className="save-review-actions">{actions}</div>
     </dialog>, document.body,
