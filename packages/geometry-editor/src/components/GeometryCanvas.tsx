@@ -552,7 +552,7 @@ export interface GeometryCanvasProps {
   onPointerWorldMove?: (point: Readonly<{ x: number; y: number }> | null, view: GeometryCanvasViewport) => void;
   /** The user panned or zoomed (wheel, pinch, drag, keyboard) or pressed the stage; never for `followViewport`. */
   onViewportChange?: (view: GeometryCanvasViewport) => void;
-  /** Holds this user's own viewport, whatever last moved it (opening, a reset, the user); null while unmounted. */
+  /** Given this user's own viewport on mount and whenever it changes (opening, a reset, the user); null on unmount. */
   viewRef?: React.Ref<GeometryCanvasViewport>;
   /** Applied whenever it changes (follow mode). */
   followViewport?: GeometryCanvasViewport | null;
