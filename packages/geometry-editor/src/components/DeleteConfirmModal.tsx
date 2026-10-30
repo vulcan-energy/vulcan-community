@@ -34,7 +34,7 @@ interface DeleteConfirmModalProps {
   title: string;
   message: string;
   itemName?: string;
-  /** The header icon and pill label; omit for a confirmation about no item (no icon). */
+  /** The item pill's type label, unless `itemTypeLabel` gives one. */
   itemType?: 'zone' | 'element' | 'file';
   itemTypeLabel?: string;
   childElements?: Array<{ name: string; type: string }>;
@@ -157,38 +157,6 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
     }
   };
 
-  const getItemTypeIcon = () => {
-    switch (itemType) {
-      case 'zone':
-        return (
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-label="Zone">
-            <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2"/>
-            <path d="M3 9h18M9 21V9" stroke="currentColor" strokeWidth="2"/>
-          </svg>
-        );
-      case 'element':
-        return (
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-label="Element">
-            <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="2"/>
-            <line x1="8" y1="8" x2="16" y2="16" stroke="currentColor" strokeWidth="2"/>
-            <line x1="16" y1="8" x2="8" y2="16" stroke="currentColor" strokeWidth="2"/>
-          </svg>
-        );
-      case 'file':
-        return (
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-label="File">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="2"/>
-            <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2"/>
-            <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="2"/>
-            <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="2"/>
-            <polyline points="10,9 9,9 8,9" stroke="currentColor" strokeWidth="2"/>
-          </svg>
-        );
-      default:
-        return null;
-    }
-  };
-
   const modalContent = (
     <div
       className="modal-backdrop"
@@ -203,8 +171,8 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
         aria-labelledby={titleId}
         tabIndex={-1}
       >
+        {/* No icon: a confirmation reads the same whatever it confirms. */}
         <ModalHeader
-          icon={itemType ? <div className="modal-icon destructive">{getItemTypeIcon()}</div> : undefined}
           title={title}
           titleId={titleId}
           onClose={onClose}

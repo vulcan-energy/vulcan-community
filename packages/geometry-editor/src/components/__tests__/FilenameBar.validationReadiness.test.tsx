@@ -66,11 +66,11 @@ function renderFilenameBar(scenariosBaseModelEnabled?: boolean, withLiveBuildErr
 }
 
 describe('FilenameBar validation readiness', () => {
-  it('shows the persisted failed-verdict chip and explanatory dropdown after reload', async () => {
+  it('shows the persisted failed verdict as the same Build Error chip, with an explanatory dropdown, after reload', async () => {
     const user = userEvent.setup();
     renderFilenameBar(false);
 
-    await user.click(screen.getByRole('button', { name: 'Not validated' }));
+    await user.click(screen.getByRole('button', { name: 'Build Error' }));
 
     expect(screen.getByText(
       'This saved model is hidden from Scenarios until it passes validation on re-save.',
@@ -83,14 +83,13 @@ describe('FilenameBar validation readiness', () => {
   it('does not double-render the persisted chip while live build errors are present', () => {
     renderFilenameBar(false, true);
 
-    expect(screen.getByRole('button', { name: 'Build Error (1)' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Not validated' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^Build Error/ }).map((chip) => chip.textContent)).toEqual(['Build Error (1)']);
   });
 
   it.each([true, undefined])('renders no readiness chip for a %s verdict', (verdict) => {
     renderFilenameBar(verdict);
 
-    expect(screen.queryByRole('button', { name: /Build Error|Not validated/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Build Error/ })).not.toBeInTheDocument();
   });
 });
 
