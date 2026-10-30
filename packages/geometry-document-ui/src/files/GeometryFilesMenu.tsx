@@ -73,6 +73,7 @@ export function GeometryFilesMenu({
   renderRowBadges,
   renderRowActions,
   trash,
+  projectFilters = true,
 }: GeometryFilesMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPositioned, setIsPositioned] = useState(false);
@@ -295,6 +296,9 @@ export function GeometryFilesMenu({
       ? Object.freeze({ status: 'ready' as const })
       : Object.freeze({ status: 'hidden' as const })
   );
+  const showFilter = projectFilters
+    ? resolvedProjectPanel.status === 'ready'
+    : sharedDocumentCount > 0 || (trash?.count ?? 0) > 0 || filter.kind !== 'all';
 
   const menu = isOpen ? (
     <div
@@ -396,7 +400,7 @@ export function GeometryFilesMenu({
               {resolvedProjectPanel.message}
             </p>
           ) : null}
-          {resolvedProjectPanel.status === 'ready' ? <div className="fproj-toolbar">
+          {showFilter ? <div className="fproj-toolbar">
             <div className="fproj-selector">
               <button
                 ref={projectButtonRef}
@@ -450,7 +454,7 @@ export function GeometryFilesMenu({
                       <span className="fproj-menu-meta">{sharedDocumentCount}</span>
                     </button>
                   ) : null}
-                  <button
+                  {projectFilters ? <button
                     type="button"
                     className={`fproj-menu-item ${filter.kind === 'unassigned' ? 'fproj-menu-item--selected' : ''}`}
                     role="menuitemradio"
@@ -462,7 +466,7 @@ export function GeometryFilesMenu({
                       {documents.filter((document) =>
                         document.isSaved !== false && document.projectGroupIds.length === 0).length}
                     </span>
-                  </button>
+                  </button> : null}
                   {trash && (trash.count > 0 || filter.kind === 'trash') ? (
                     <button
                       type="button"

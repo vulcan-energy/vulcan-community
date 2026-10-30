@@ -160,4 +160,10 @@ export type GeometryFilesMenuProps = Readonly<{
    * view shows `content` (the host's rows, already searched) instead of documents.
    */
   trash?: Readonly<{ count: number; content: ReactNode }>;
+  /**
+   * False while the host cannot filter by project (projects locked or not
+   * loaded): the filter offers All models, Shared and Trash only, and shows
+   * only while Shared or Trash has models. Defaults to true.
+   */
+  projectFilters?: boolean;
 }>;
