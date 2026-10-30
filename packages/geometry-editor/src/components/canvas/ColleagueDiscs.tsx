@@ -4,8 +4,8 @@
 import type React from 'react';
 import type { GeometryCanvasRemoteSelection } from './RemotePresenceLayer';
 
-/** A colleague's avatar disc, ringed in their colour: initials, under their image once it loads. */
-export function PersonDisc({ color, initials, imageUrl }: Readonly<{ color: string; initials: string; imageUrl?: string }>) {
+/** A colleague's avatar disc, ringed in their colour: initials if given, under their image once it loads. */
+export function PersonDisc({ color, initials, imageUrl }: Readonly<{ color: string; initials?: string; imageUrl?: string }>) {
   return (
     <span aria-hidden className="people-disc" style={{ '--person-colour': color } as React.CSSProperties}>
       {initials}

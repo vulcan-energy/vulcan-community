@@ -25,7 +25,6 @@ export type GeometryCanvasRemoteCursor = Readonly<{
   key: string;
   label: string;
   color: string;
-  initials: string;
   imageUrl?: string;
   x: number;
   y: number;
@@ -40,7 +39,6 @@ export type GeometryCanvasRemoteGhost = Readonly<{
   key: string;
   label: string;
   color: string;
-  initials: string;
   imageUrl?: string;
   /** `key` names a path within its ghost (the dragged element, say), so its points ease in place. */
   paths: readonly Readonly<{ key: string; points: readonly Readonly<{ x: number; y: number }>[]; closed: boolean }>[];
@@ -54,7 +52,7 @@ type Point = { x: number; y: number };
 /** Easing time constant: a cursor covers ~95% of a jump in 150 ms. */
 const CURSOR_EASE_MS = 50;
 
-// Profile images load once per URL; initials show until one loads, or for good if it fails.
+// Profile images load once per URL; the plain disc shows until one loads, or for good if it fails.
 const avatarImages = new Map<string, HTMLImageElement>();
 const avatarListeners = new Set<() => void>();
 const subscribeAvatars = (listener: () => void) => {
@@ -122,8 +120,8 @@ function labelWidth(label: string): number {
   return measurer.text(label).width();
 }
 
-function AvatarDisc({ x, y, color, initials, imageUrl }: Readonly<{
-  x: number; y: number; color: string; initials: string; imageUrl?: string;
+function AvatarDisc({ x, y, color, imageUrl }: Readonly<{
+  x: number; y: number; color: string; imageUrl?: string;
 }>) {
   useEffect(() => {
     if (imageUrl) loadAvatar(imageUrl);
@@ -136,20 +134,7 @@ function AvatarDisc({ x, y, color, initials, imageUrl }: Readonly<{
         <Group clipFunc={(context) => context.arc(0, 0, DISC_RADIUS, 0, Math.PI * 2, false)}>
           <KonvaImage image={image} x={-DISC_RADIUS} y={-DISC_RADIUS} width={DISC_RADIUS * 2} height={DISC_RADIUS * 2} />
         </Group>
-      ) : (
-        <Text
-          text={initials}
-          x={-DISC_RADIUS}
-          y={-DISC_RADIUS}
-          width={DISC_RADIUS * 2}
-          height={DISC_RADIUS * 2}
-          align="center"
-          verticalAlign="middle"
-          fontSize={7}
-          fontStyle="bold"
-          fill="#fff"
-        />
-      )}
+      ) : null}
     </Group>
   );
 }
@@ -158,8 +143,8 @@ function AvatarDisc({ x, y, color, initials, imageUrl }: Readonly<{
  * Avatar and name on the person's colour; origin top-left, or with `toward`
  * the pill lies beyond its origin in that direction (UP: bottom-centre on it).
  */
-function NamePill({ color, label, initials, imageUrl, toward }: Readonly<{
-  color: string; label: string; initials: string; imageUrl?: string; toward?: Point;
+function NamePill({ color, label, imageUrl, toward }: Readonly<{
+  color: string; label: string; imageUrl?: string; toward?: Point;
 }>) {
   const width = useMemo(() => PILL_HEIGHT + labelWidth(label) + 8, [label]);
   const x = toward ? -width / 2 + (toward.x * width) / 2 : 0;
@@ -167,7 +152,7 @@ function NamePill({ color, label, initials, imageUrl, toward }: Readonly<{
   return (
     <Group x={x} y={y}>
       <Rect width={width} height={PILL_HEIGHT} cornerRadius={PILL_HEIGHT / 2} fill={color} shadowColor="#000" shadowBlur={4} shadowOpacity={0.25} />
-      <AvatarDisc x={PILL_HEIGHT / 2} y={PILL_HEIGHT / 2} color={color} initials={initials} imageUrl={imageUrl} />
+      <AvatarDisc x={PILL_HEIGHT / 2} y={PILL_HEIGHT / 2} color={color} imageUrl={imageUrl} />
       <Text x={PILL_HEIGHT + 1} height={PILL_HEIGHT} verticalAlign="middle" text={label} fontSize={FONT_SIZE} fontStyle="bold" fill="#fff" />
     </Group>
   );
@@ -339,7 +324,7 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
             {shapes}
             <Line points={[anchor.x, anchor.y, end.x, end.y]} stroke={remote.color} strokeWidth={2} />
             <Group x={end.x} y={end.y} ref={keep(selectionNodes, `${remote.key}:pill`)}>
-              <NamePill color={remote.color} label={remote.label} initials={remote.initials} imageUrl={remote.imageUrl} toward={direction} />
+              <NamePill color={remote.color} label={remote.label} imageUrl={remote.imageUrl} toward={direction} />
             </Group>
           </Group>
         );
@@ -353,7 +338,7 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
               : <Line key={path.key} ref={ref} closed={path.closed} stroke={ghost.color} strokeWidth={2} dash={[8, 5]} lineJoin="round" />;
           })}
           <Group ref={keep(ghostPills, ghost.key)}>
-            <NamePill color={ghost.color} label={ghost.label} initials={ghost.initials} imageUrl={ghost.imageUrl} toward={UP} />
+            <NamePill color={ghost.color} label={ghost.label} imageUrl={ghost.imageUrl} toward={UP} />
           </Group>
         </Group>
       ))}
@@ -361,7 +346,7 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
         <Group key={cursor.key} name="remote-cursor" id={`remote-cursor:${cursor.key}`} ref={keep(cursorNodes, cursor.key)}>
           <Line points={ARROW} closed fill={cursor.color} fillEnabled stroke="#fff" strokeWidth={1.5} lineJoin="round" />
           <Group x={14} y={22}>
-            <NamePill color={cursor.color} label={cursor.label} initials={cursor.initials} imageUrl={cursor.imageUrl} />
+            <NamePill color={cursor.color} label={cursor.label} imageUrl={cursor.imageUrl} />
           </Group>
         </Group>
       ))}

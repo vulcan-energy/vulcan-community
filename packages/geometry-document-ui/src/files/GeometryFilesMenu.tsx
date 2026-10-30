@@ -25,6 +25,7 @@ function filterMatchesProject(
   if (filter.kind === 'all') return true;
   if (filter.kind === 'unassigned') return document.projectGroupIds.length === 0;
   if (filter.kind === 'shared') return document.shared === true;
+  if (filter.kind === 'trash') return false;
   return document.projectGroupIds.includes(filter.projectGroupId);
 }
 
@@ -71,7 +72,8 @@ export function GeometryFilesMenu({
   projectPresentation,
   renderRowBadges,
   renderRowActions,
-  afterDocuments,
+  trash,
+  projectFilters = true,
 }: GeometryFilesMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPositioned, setIsPositioned] = useState(false);
@@ -294,6 +296,9 @@ export function GeometryFilesMenu({
       ? Object.freeze({ status: 'ready' as const })
       : Object.freeze({ status: 'hidden' as const })
   );
+  const showFilter = projectFilters
+    ? resolvedProjectPanel.status === 'ready'
+    : sharedDocumentCount > 0 || (trash?.count ?? 0) > 0 || filter.kind !== 'all';
 
   const menu = isOpen ? (
     <div
@@ -316,7 +321,7 @@ export function GeometryFilesMenu({
           type="text"
           className="files-dropdown-search"
           aria-label="Search models"
-          placeholder={`Search ${filteredByProject.length} models`}
+          placeholder={`Search ${filter.kind === 'trash' ? trash?.count ?? 0 : filteredByProject.length} models`}
           value={currentSearch}
           onChange={(event) => {
             if (search === undefined) setSearchQuery(event.target.value);
@@ -395,14 +400,14 @@ export function GeometryFilesMenu({
               {resolvedProjectPanel.message}
             </p>
           ) : null}
-          {resolvedProjectPanel.status === 'ready' ? <div className="fproj-toolbar">
+          {showFilter ? <div className="fproj-toolbar">
             <div className="fproj-selector">
               <button
                 ref={projectButtonRef}
                 type="button"
                 className="fproj-scope"
-                title={projectFilterTitle}
-                aria-label="Filter base models by project"
+                title={projectFilters ? projectFilterTitle : 'Filter models'}
+                aria-label={projectFilters ? 'Filter base models by project' : 'Filter models'}
                 aria-haspopup="menu"
                 aria-expanded={isProjectMenuOpen}
                 onClick={() => setIsProjectMenuOpen((open) => !open)}
@@ -414,7 +419,9 @@ export function GeometryFilesMenu({
                       ? 'Unassigned'
                       : filter.kind === 'shared'
                         ? 'Shared'
-                        : selectedProject?.name ?? 'All models'}
+                        : filter.kind === 'trash'
+                          ? 'Trash'
+                          : selectedProject?.name ?? 'All models'}
                 </span>
                 <span aria-hidden>⌄</span>
               </button>
@@ -447,7 +454,7 @@ export function GeometryFilesMenu({
                       <span className="fproj-menu-meta">{sharedDocumentCount}</span>
                     </button>
                   ) : null}
-                  <button
+                  {projectFilters ? <button
                     type="button"
                     className={`fproj-menu-item ${filter.kind === 'unassigned' ? 'fproj-menu-item--selected' : ''}`}
                     role="menuitemradio"
@@ -459,7 +466,19 @@ export function GeometryFilesMenu({
                       {documents.filter((document) =>
                         document.isSaved !== false && document.projectGroupIds.length === 0).length}
                     </span>
-                  </button>
+                  </button> : null}
+                  {trash && (trash.count > 0 || filter.kind === 'trash') ? (
+                    <button
+                      type="button"
+                      className={`fproj-menu-item ${filter.kind === 'trash' ? 'fproj-menu-item--selected' : ''}`}
+                      role="menuitemradio"
+                      aria-checked={filter.kind === 'trash'}
+                      onClick={() => selectFilter({ kind: 'trash' })}
+                    >
+                      <span>Trash</span>
+                      <span className="fproj-menu-meta">{trash.count}</span>
+                    </button>
+                  ) : null}
                   {projects.length > 0 ? <div className="fproj-menu-divider" /> : null}
                   {projects.map((project) => {
                     const selected = filter.kind === 'project' && filter.projectGroupId === project.id;
@@ -664,6 +683,8 @@ export function GeometryFilesMenu({
           <div className="files-dropdown-loading" role="status">
             <p>Loading saved files...</p>
           </div>
+        ) : filter.kind === 'trash' ? (
+          trash?.content
         ) : filteredByProject.length === 0 && documents.length === 0 ? (
           <div className="files-dropdown-empty">
             <p>No saved models found.</p>
@@ -716,6 +737,12 @@ export function GeometryFilesMenu({
                           <div className="files-dropdown-item-stats">
                             {document.summary.elements} {document.summary.elements === 1 ? 'element' : 'elements'}
                           </div>
+                        ) : document.cloudOnly ? (
+                          <div className="files-dropdown-item-stats" title="Not in this folder; it downloads when opened">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" role="img" aria-label="Not in this folder">
+                              <path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.5 11a4 4 0 0 1-2 8Z" />
+                            </svg>
+                          </div>
                         ) : null}
                       </div>
                       {filter.kind === 'all' && projectNames.length > 0 ? (
@@ -730,6 +757,13 @@ export function GeometryFilesMenu({
                   {isSaved ? (
                     <div className="files-dropdown-item-actions">
                     {renderRowActions?.(document)}
+                    {/* Not in this folder: no Duplicate or Delete, but their columns stay. */}
+                    {document.cloudOnly ? (
+                      <>
+                        {onDuplicateDocument ? <span className="files-dropdown-action-btn" aria-hidden /> : null}
+                        {onDeleteDocument ? <span className="files-dropdown-action-btn" aria-hidden /> : null}
+                      </>
+                    ) : null}
                     {onDuplicateDocument && !document.cloudOnly ? (
                       <button
                         type="button"
@@ -785,7 +819,6 @@ export function GeometryFilesMenu({
             })}
           </div>
         )}
-        {afterDocuments}
       </div>
 
       {onNewDocument || onImportCsv || onOpenPortable || onDownloadCsv ||

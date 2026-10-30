@@ -384,6 +384,11 @@
   color: var(--text-secondary);
 }
 
+/* An empty action slot (a cloud-only row's Duplicate and Delete) keeps the columns aligned. */
+.geometry-files-menu span.files-dropdown-action-btn {
+  visibility: hidden;
+}
+
 .geometry-files-menu .files-dropdown-action-btn:hover {
   background: var(--hover-bg);
   color: var(--text-primary);

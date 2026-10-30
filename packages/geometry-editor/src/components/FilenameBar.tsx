@@ -749,40 +749,27 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           </React.Fragment>
         ) : null)}
         </div>
-        {buildError && currentSaveStatus !== 'saving' && (
+        {/* One chip: live build errors, else a saved file that failed validation (Saved stands beside it). */}
+        {(buildError && currentSaveStatus !== 'saving') || showLastSaveValidationFailure ? (
           <button
             ref={buildErrorChipRef}
             type="button"
             onClick={() => {
               openSaveErrorDropdown(buildErrorChipRef.current);
             }}
-            title={buildErrorCopyText || buildError || undefined}
+            title={showLastSaveValidationFailure
+              ? 'The saved file failed validation; save again to re-check'
+              : buildErrorCopyText || buildError || undefined}
             style={{
               fontSize: '12px', padding: '4px 8px',
-              backgroundColor: 'var(--validation-error)',
-              color: 'var(--semantic-on-color)', borderRadius: '4px',
-              border: 'none', cursor: 'pointer', flexShrink: 0,
+              backgroundColor: showLastSaveValidationFailure ? 'var(--validation-warning)' : 'var(--validation-error)',
+              color: showLastSaveValidationFailure ? 'var(--validation-warning-on-fill)' : 'var(--semantic-on-color)',
+              borderRadius: '4px', border: 'none', cursor: 'pointer', flexShrink: 0,
             }}
           >
-            Build Error{displayedBuildErrorCount > 0 ? ` (${displayedBuildErrorCount})` : ''}
-          </button>
-        )}
-        {showLastSaveValidationFailure ? (
-          <button
-            ref={buildErrorChipRef}
-            type="button"
-            onClick={() => {
-              openSaveErrorDropdown(buildErrorChipRef.current);
-            }}
-            title="View validation status"
-            style={{
-              fontSize: '12px', padding: '4px 8px',
-              backgroundColor: 'var(--validation-warning)',
-              color: 'var(--validation-warning-on-fill)', borderRadius: '4px',
-              border: 'none', cursor: 'pointer', flexShrink: 0,
-            }}
-          >
-            Validation failed at last save
+            {showLastSaveValidationFailure
+              ? 'Not validated'
+              : `Build Error${displayedBuildErrorCount > 0 ? ` (${displayedBuildErrorCount})` : ''}`}
           </button>
         ) : null}
       </div>

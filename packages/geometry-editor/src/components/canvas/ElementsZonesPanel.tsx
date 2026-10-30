@@ -51,7 +51,6 @@ export type GeometryCanvasPerson = Readonly<{
   key: string;
   name: string;
   color: string;
-  initials: string;
   imageUrl?: string;
   qualifier?: string;
 }>;
@@ -90,7 +89,8 @@ export function PeopleControl({ people }: Readonly<{ people: GeometryCanvasPeopl
               onClick={() => people.onFollow(person.key)}
             >
               <span className="zone-name people-row">
-                <PersonDisc color={person.color} initials={person.initials} imageUrl={person.imageUrl} />
+                {/* A plain disc: the name is beside it. */}
+                <PersonDisc color={person.color} imageUrl={person.imageUrl} />
                 {/* The first name only; the full name is in the title. */}
                 <span className="people-row__name">{person.name.split(/\s+/)[0] || person.name}</span>
                 {person.qualifier ? <span className="zone-details">{person.qualifier}</span> : null}

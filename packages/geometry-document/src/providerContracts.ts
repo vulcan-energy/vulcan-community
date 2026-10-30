@@ -88,6 +88,8 @@ export type GeometryDocumentCatalogueFilter =
   | Readonly<{ kind: 'unassigned' }>
   /** Documents a host reports as shared with its organisation; providers do not offer it. */
   | Readonly<{ kind: 'shared' }>
+  /** The host's Trash, listed by the host; providers do not offer it. */
+  | Readonly<{ kind: 'trash' }>
   | Readonly<{ kind: 'project'; projectGroupId: string }>;
 
 function requireOpaqueId(
