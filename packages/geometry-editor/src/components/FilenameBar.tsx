@@ -32,6 +32,8 @@ export type FilenameBarActionContext = Readonly<{
 
 export type FilenameBarProps = Omit<FilenameBarActionContext, 'filename'> & Readonly<{
   saveError: string | null;
+  /** Why the typed filename cannot be saved: a chip beside the field. */
+  filenameError?: string | null;
   /**
    * Required storage suffix for hosts that present a stem-only filename field.
    * Hosts that present the full filename omit this and retain their existing
@@ -199,6 +201,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   hostModelName,
   saveStatus,
   saveError,
+  filenameError,
   fileNameExtension = '',
   saveErrorTitle = 'HEM input build failed',
   onOpenDefaults,
@@ -677,7 +680,16 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
             placeholder="Enter filename (without extension)"
             variant="ghost"
           />
-          {isUnnamedDraft ? (
+          {filenameError ? (
+            <button
+              type="button"
+              onClick={() => document.getElementById('filename-field')?.focus()}
+              title={filenameError}
+              className="status-chip status-chip--error"
+            >
+              {filenameError}
+            </button>
+          ) : isUnnamedDraft ? (
             <button
               type="button"
               onClick={() => document.getElementById('filename-field')?.focus()}

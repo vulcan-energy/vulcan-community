@@ -566,6 +566,8 @@ export interface GeometryCanvasProps {
     resolveDocumentTarget: (fileName: string) => GeometryDocumentHostTarget;
     saveStatus: 'idle' | 'saving' | 'success' | 'error';
     saveError: string | null;
+    /** Why the typed filename cannot be saved, shown beside the field. */
+    filenameError?: string | null;
     fileNameExtension?: string;
     saveErrorTitle?: string;
     buildError?: string | null;
@@ -8527,6 +8529,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               documentHost={fileControls.documentHost}
               saveStatus={fileControls.saveStatus}
               saveError={fileControls.saveError}
+              filenameError={fileControls.filenameError}
               fileNameExtension={fileControls.fileNameExtension}
               saveErrorTitle={fileControls.saveErrorTitle}
               buildError={fileControls.buildError}

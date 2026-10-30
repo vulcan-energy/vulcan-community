@@ -713,6 +713,9 @@
   position: absolute;
   top: calc(12px + var(--geometry-canvas-host-top-inset));
   left: 12px;
+  /* Sizes to its content, up to the viewport: chips wrap under it rather than run past the edge or under the grip. */
+  box-sizing: border-box;
+  max-width: calc(100% - 24px);
   /* Room for the drag handle plus right inset. */
   padding: 8px 34px 8px 10px;
   display: flex;
@@ -721,6 +724,12 @@
   /* Keep file controls above same-level draggable editor panels so an open
      panel cannot intercept clicks on Save, Global Settings, or Files. */
   z-index: 2200;
+}
+
+.overlay-filebar .filename-bar,
+.overlay-filebar .filename-bar-right {
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .overlay-filebar .filename-bar {
