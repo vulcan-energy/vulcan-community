@@ -116,10 +116,6 @@ dialog.modal-container {
   border-radius: 8px;
 }
 
-.modal-icon.destructive {
-  background-color: rgba(229, 72, 77, 0.15);
-}
-
 .modal-icon.accent {
   background-color: var(--accent-primary);
 }

@@ -80,6 +80,8 @@ const PILL_HEIGHT = 20;
 const DISC_RADIUS = 7;
 const FONT_SIZE = 11;
 const LEADER = 22;
+/** A cursor's pill sits below and right of its pointer. */
+const CURSOR_PILL_OFFSET: Point = { x: 14, y: 22 };
 // A ~22 px pointer; its tip is the origin.
 const ARROW = [0, 0, 0, 19, 5.5, 14.5, 9, 22, 12, 20.8, 8.5, 13.3, 15, 13.3];
 
@@ -120,8 +122,9 @@ function labelWidth(label: string): number {
   return measurer.text(label).width();
 }
 
-function AvatarDisc({ x, y, color, imageUrl }: Readonly<{
-  x: number; y: number; color: string; imageUrl?: string;
+/** The People list's filled dot, in white on the pill's colour (a profile image covers it). */
+function AvatarDisc({ x, y, imageUrl }: Readonly<{
+  x: number; y: number; imageUrl?: string;
 }>) {
   useEffect(() => {
     if (imageUrl) loadAvatar(imageUrl);
@@ -129,7 +132,7 @@ function AvatarDisc({ x, y, color, imageUrl }: Readonly<{
   const image = useSyncExternalStore(subscribeAvatars, () => loadedAvatar(imageUrl));
   return (
     <Group x={x} y={y}>
-      <Circle radius={DISC_RADIUS} fill={color} stroke="#fff" strokeWidth={1.5} />
+      <Circle radius={DISC_RADIUS} fill="#fff" />
       {image ? (
         <Group clipFunc={(context) => context.arc(0, 0, DISC_RADIUS, 0, Math.PI * 2, false)}>
           <KonvaImage image={image} x={-DISC_RADIUS} y={-DISC_RADIUS} width={DISC_RADIUS * 2} height={DISC_RADIUS * 2} />
@@ -152,7 +155,7 @@ function NamePill({ color, label, imageUrl, toward }: Readonly<{
   return (
     <Group x={x} y={y}>
       <Rect width={width} height={PILL_HEIGHT} cornerRadius={PILL_HEIGHT / 2} fill={color} shadowColor="#000" shadowBlur={4} shadowOpacity={0.25} />
-      <AvatarDisc x={PILL_HEIGHT / 2} y={PILL_HEIGHT / 2} color={color} imageUrl={imageUrl} />
+      <AvatarDisc x={PILL_HEIGHT / 2} y={PILL_HEIGHT / 2} imageUrl={imageUrl} />
       <Text x={PILL_HEIGHT + 1} height={PILL_HEIGHT} verticalAlign="middle" text={label} fontSize={FONT_SIZE} fontStyle="bold" fill="#fff" />
     </Group>
   );
@@ -220,9 +223,24 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
       return point ? worldToCanvas(point, scale, panOffset, canvasCenter) : null;
     };
     const place = () => {
+      // The floating file bar, in canvas pixels: a pointer just above it has its pill flipped above.
+      const stage = layerRef.current?.getStage();
+      const bar = cursors.length > 0
+        ? stage?.container().closest('.geometry-canvas')?.querySelector('.overlay-filebar')?.getBoundingClientRect()
+        : undefined;
+      const origin = bar ? stage!.container().getBoundingClientRect() : undefined;
       for (const cursor of cursors) {
         const at = toCanvas(cursor.key);
-        if (at) cursorNodes.get(cursor.key)?.position(at);
+        if (!at) continue;
+        const node = cursorNodes.get(cursor.key);
+        node?.position(at);
+        const pillTop = at.y + CURSOR_PILL_OFFSET.y;
+        const underBar = !!bar && !!origin
+          && at.y < bar.top - origin.top
+          && pillTop + PILL_HEIGHT > bar.top - origin.top
+          && at.x + CURSOR_PILL_OFFSET.x < bar.right - origin.left
+          && at.x + CURSOR_PILL_OFFSET.x + PILL_HEIGHT + labelWidth(cursor.label) + 8 > bar.left - origin.left;
+        node?.findOne('.remote-cursor-pill')?.y(underBar ? -PILL_HEIGHT - 4 : CURSOR_PILL_OFFSET.y);
       }
       for (const ghost of ghosts) {
         let minX = Infinity, maxX = -Infinity, minY = Infinity;
@@ -345,7 +363,7 @@ export const RemotePresenceLayer = memo(function RemotePresenceLayer({
       {cursors.map((cursor) => (
         <Group key={cursor.key} name="remote-cursor" id={`remote-cursor:${cursor.key}`} ref={keep(cursorNodes, cursor.key)}>
           <Line points={ARROW} closed fill={cursor.color} fillEnabled stroke="#fff" strokeWidth={1.5} lineJoin="round" />
-          <Group x={14} y={22}>
+          <Group name="remote-cursor-pill" x={CURSOR_PILL_OFFSET.x} y={CURSOR_PILL_OFFSET.y}>
             <NamePill color={cursor.color} label={cursor.label} imageUrl={cursor.imageUrl} />
           </Group>
         </Group>

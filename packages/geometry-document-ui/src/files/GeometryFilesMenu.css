@@ -238,6 +238,11 @@
   white-space: nowrap;
 }
 
+/* A cloud-only row's icon sits on the row's centre line, with the action icons. */
+.geometry-files-menu .files-dropdown-item-stats > svg {
+  display: block;
+}
+
 .geometry-files-menu .files-dropdown-item-projects {
   margin-top: 2px;
   overflow: hidden;
@@ -344,7 +349,7 @@
   background: none;
 }
 
-.geometry-files-menu .files-dropdown-unsaved-chip {
+.geometry-files-menu .files-dropdown-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -357,7 +362,7 @@
   font-weight: 700;
 }
 
-.geometry-files-menu .files-dropdown-item.active .files-dropdown-unsaved-chip {
+.geometry-files-menu .files-dropdown-item.active .files-dropdown-chip {
   border-color: color-mix(in srgb, var(--text-on-accent) 70%, transparent);
   color: var(--text-on-accent);
 }

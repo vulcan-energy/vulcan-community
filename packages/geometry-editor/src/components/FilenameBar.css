@@ -42,6 +42,43 @@
   align-items: center;
 }
 
+/* One status chip beside the file controls (Build Error, Rename to Save, and
+   the host's Updated by…, Live paused) and in the app header: the file bar
+   buttons' 28px shape, outlined, or filled for an error. */
+.status-chip {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+button.status-chip {
+  cursor: pointer;
+}
+
+.status-chip--error {
+  border-color: var(--validation-error);
+  background: var(--validation-error);
+  color: var(--semantic-on-color);
+}
+
+.status-chip--warning {
+  border-color: var(--validation-warning);
+  background: var(--validation-warning);
+  color: var(--validation-warning-on-fill);
+}
+
 /* The save-error details portal is owned by FilenameBar, so it must carry its
    own styling rather than rely on a host application's files menu. */
 .save-error-dropdown.files-dropdown {
@@ -187,4 +224,5 @@
 .save-review-item span:last-child { margin-left: auto; white-space: nowrap; color: var(--text-secondary); }
 .save-review-item input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent-primary); }
 .save-review-content .save-review-hint { margin: 12px 0; color: var(--text-secondary); font-size: 0.85rem; }
+.save-review-content .save-review-hint[role="alert"] { color: var(--error-text); }
 .save-review-actions { flex-shrink: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border-subtle); }

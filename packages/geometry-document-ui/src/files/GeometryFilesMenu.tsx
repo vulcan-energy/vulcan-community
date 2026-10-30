@@ -750,7 +750,7 @@ export function GeometryFilesMenu({
                       ) : null}
                     </div>
                     <div className="files-dropdown-item-right">
-                      {!isSaved ? <span className="files-dropdown-unsaved-chip">Unsaved</span> : null}
+                      {!isSaved ? <span className="files-dropdown-chip">Unsaved</span> : null}
                       {isSaved ? renderRowBadges?.(document) : null}
                     </div>
                   </button>
