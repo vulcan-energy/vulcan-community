@@ -180,6 +180,7 @@
 }
 .save-review-popover h3 { flex-shrink: 0; margin: 0; padding: 16px; font-size: 1rem; }
 .save-review-content { padding: 0 16px; overflow-y: auto; }
+.save-review-content:first-child { padding-top: 16px; }
 .save-review-content p { margin: 0 0 12px; }
 .save-review-items { display: grid; gap: 8px; margin-bottom: 16px; }
 .save-review-item { display: flex; align-items: center; gap: 8px; cursor: pointer; }

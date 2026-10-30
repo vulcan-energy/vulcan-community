@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { Suspense, useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, useSyncExternalStore } from 'react';
+import React, { Suspense, useState, useRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useCallback, useSyncExternalStore } from 'react';
 import ReactDOM from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { Stage, Layer, Rect, Text, Group, Line, Circle } from 'react-konva';
@@ -552,6 +552,8 @@ export interface GeometryCanvasProps {
   onPointerWorldMove?: (point: Readonly<{ x: number; y: number }> | null, view: GeometryCanvasViewport) => void;
   /** The user panned or zoomed (wheel, pinch, drag, keyboard) or pressed the stage; never for `followViewport`. */
   onViewportChange?: (view: GeometryCanvasViewport) => void;
+  /** Holds this user's own viewport, whatever last moved it (opening, a reset, the user); null while unmounted. */
+  viewRef?: React.Ref<GeometryCanvasViewport>;
   /** Applied whenever it changes (follow mode). */
   followViewport?: GeometryCanvasViewport | null;
   /** Colleagues listed in the Elements panel; nothing renders when empty. */
@@ -1201,6 +1203,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   onLiveEdit,
   onPointerWorldMove,
   onViewportChange,
+  viewRef,
   followViewport = null,
   people,
   viewportInsets = NEUTRAL_GEOMETRY_CANVAS_VIEWPORT_INSETS,
@@ -1318,6 +1321,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   }, [canvasCenter, followViewport]);
   const scale = followViewport ? followViewport.scale : ownScale;
   const panOffset = followPanOffset ?? ownPanOffset;
+  // Readable from the first render, so colleagues can follow a view before any pan or pointer move.
+  useImperativeHandle(viewRef, () => viewportFromPan(ownScale, ownPanOffset), [ownPanOffset, ownScale]);
   // A People row click while following keeps the shown view when following stops.
   const panelPeople = useMemo<GeometryCanvasPeople | undefined>(() => people && {
     ...people,
