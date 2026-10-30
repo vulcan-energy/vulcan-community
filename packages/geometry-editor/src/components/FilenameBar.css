@@ -73,6 +73,12 @@ button.status-chip {
   color: var(--semantic-on-color);
 }
 
+.status-chip--warning {
+  border-color: var(--validation-warning);
+  background: var(--validation-warning);
+  color: var(--validation-warning-on-fill);
+}
+
 /* The save-error details portal is owned by FilenameBar, so it must carry its
    own styling rather than rely on a host application's files menu. */
 .save-error-dropdown.files-dropdown {

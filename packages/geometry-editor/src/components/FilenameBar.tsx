@@ -744,21 +744,23 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           </React.Fragment>
         ) : null)}
         </div>
-        {/* One chip, one label: live build errors, else a saved file that failed
-            validation (its errors are listed again on the next save; Saved stands beside it). */}
+        {/* One chip: live build errors, else a saved file that failed validation
+            (a saved flag, not a current error: it may pass now; Saved stands beside it). */}
         {(buildError && currentSaveStatus !== 'saving') || showLastSaveValidationFailure ? (
           <button
             ref={buildErrorChipRef}
             type="button"
-            className="status-chip status-chip--error"
+            className={`status-chip ${showLastSaveValidationFailure ? 'status-chip--warning' : 'status-chip--error'}`}
             onClick={() => {
               openSaveErrorDropdown(buildErrorChipRef.current);
             }}
             title={showLastSaveValidationFailure
-              ? 'The saved file failed validation; save again to list the errors'
+              ? 'The saved file failed validation; save again to re-check'
               : buildErrorCopyText || buildError || undefined}
           >
-            {`Build Error${displayedBuildErrorCount > 0 ? ` (${displayedBuildErrorCount})` : ''}`}
+            {showLastSaveValidationFailure
+              ? 'Not validated'
+              : `Build Error${displayedBuildErrorCount > 0 ? ` (${displayedBuildErrorCount})` : ''}`}
           </button>
         ) : null}
       </div>
