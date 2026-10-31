@@ -143,9 +143,8 @@ export async function preloadSchema(): Promise<void> {
       if (generation === schemaAssetGeneration) preloadCoreSchemaPromise = null;
     });
   }
-  await preloadCoreSchemaPromise;
-  // Still empty only when a target change superseded the load awaited above.
-  if (!schemaObj) return preloadSchema();
+  // Still empty afterwards only when a target change superseded that load.
+  return preloadCoreSchemaPromise.then(() => (schemaObj ? undefined : preloadSchema()));
 }
 
 export function getSchemaText(): string | null { return schemaText; }
@@ -274,8 +273,7 @@ export async function preloadFHSSchema(): Promise<void> {
         throw e;
       }).finally(() => { if (generation === schemaAssetGeneration) preloadFhsSchemaPromise = null; });
   }
-  await preloadFhsSchemaPromise;
-  if (!fhsSchemaObj) return preloadFHSSchema();
+  return preloadFhsSchemaPromise.then(() => (fhsSchemaObj ? undefined : preloadFHSSchema()));
 }
 
 export function getFHSSchemaText(): string | null { return fhsSchemaText; }
