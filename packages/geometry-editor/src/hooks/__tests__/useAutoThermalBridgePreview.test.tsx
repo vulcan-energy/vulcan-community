@@ -273,16 +273,17 @@ describe('auto pipe canvas preview', () => {
     const wrapper = ({ children }: { children: ReactNode }) => <GeometryStoreProvider store={store}>{children}</GeometryStoreProvider>;
     const { result } = renderHook(() => useAutoPipePreview({ enabled: true, blocked: false, currentFloorZ: 0 }), { wrapper });
     fireEvent.keyDown(document.body, { key: 'a' });
-    expect(result.current.runs.map((run) => [run.role, run.drafts.length, run.lengthM])).toEqual([['primary', 3, 13]]);
+    expect(result.current.runs.map((run) => [run.role, run.drafts.length, run.lengthM])).toEqual([['primary', 4, 13]]);
     expect([...result.current.highlightedHostIds]).toEqual(['hp', 'cyl']);
     act(() => result.current.onActivate([result.current.runs[0]!.proposalId]));
-    expect(store.getState().elementIds).toHaveLength(plant.length + 3);
+    expect(store.getState().elementIds).toHaveLength(plant.length + 4);
     expect(result.current.runs).toEqual([]);
     const csv = store.getState().generateCSV();
     const section = csv.slice(csv.indexOf('Water Pipework')).split('\n\n')[0]!.split('\n');
     expect(section[1]).toBe('Name,Type,length,location,pipework_type,coords,extra_json');
     expect(section.slice(2).map((row) => row.split(',').slice(1, 5))).toEqual([
-      ['WaterPipework', '2', 'external', 'primary'], ['WaterPipework', '7', 'internal', 'primary'], ['WaterPipework', '4', 'internal', 'primary'],
+      ['WaterPipework', '2', 'external', 'primary'], ['WaterPipework', '3.5', 'internal', 'primary'],
+      ['WaterPipework', '4', 'internal', 'primary'], ['WaterPipework', '3.5', 'internal', 'primary'],
     ]);
     act(() => store.getState().undo());
     expect(store.getState().elementIds).toHaveLength(plant.length);

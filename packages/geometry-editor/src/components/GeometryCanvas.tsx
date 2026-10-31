@@ -94,7 +94,9 @@ import {
   projectSegmentOntoParent as utilProjectSegmentOntoParent,
   resolveOpeningSegmentParentFromCache as utilResolveOpeningSegmentParentFromCache,
   resolveDrawSnapPoint as utilResolveDrawSnapPoint,
-  planOrthogonalElbow,
+  ORTHOGONAL_BEND_SHAPES,
+  type OrthogonalBendShape,
+  planOrthogonalBend,
   planServiceLineTeeSplits,
   serviceNetworkSegmentFilter,
   isLineWallElementForSnap,
@@ -1409,8 +1411,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   // Set when a pointer press happens with Alt held (Alt-drag, Alt-click multi-draw). A ref, so
   // the key effect re-registering mid-hold (drawPoints changes on each Alt-click) keeps it.
   const altUsedByCanvasRef = useRef(false);
-  /** F flips the elbow of a Shift L-route preview; reset per segment. */
-  const elbowFlippedRef = useRef(false);
+  /** F cycles the bend shape of a Shift route preview; reset per segment. */
+  const bendShapeRef = useRef<OrthogonalBendShape>('L');
   const panModifierHeldRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<any>(null);
@@ -1702,11 +1704,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   }, [drawMode, geometryStore, setDrawMode, viewMode]);
 
   // Any mode change (L/V/S shortcuts live in useKeyboardShortcuts) drops the last segment's
-  // length label and L-route elbow.
+  // length label and route bends.
   useEffect(() => {
     setSegmentLengthPreview(EMPTY_SEGMENT_LENGTH_PREVIEW);
-    drawingPreviewSignal.set({ drawElbow: null });
-    elbowFlippedRef.current = false;
+    drawingPreviewSignal.set({ drawBends: [] });
+    bendShapeRef.current = 'L';
   }, [drawMode, drawingPreviewSignal, setSegmentLengthPreview]);
 
   useEffect(() => {
@@ -1718,19 +1720,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       ) {
         const preview = drawingPreviewSignal.getSnapshot();
         const start = drawPoints[0];
-        if (event.code === 'KeyF' && !event.ctrlKey && !event.metaKey && preview.drawElbow && start) {
+        if (event.code === 'KeyF' && !event.repeat && !event.ctrlKey && !event.metaKey && preview.drawBends.length > 0 && preview.drawCursor && start) {
           event.preventDefault();
-          elbowFlippedRef.current = !elbowFlippedRef.current;
-          // The other corner of the start/end box; the length label follows the elbow.
-          const drawElbow = {
-            x: start.x + (preview.drawCursor?.x ?? 0) - preview.drawElbow.x,
-            y: start.y + (preview.drawCursor?.y ?? 0) - preview.drawElbow.y,
-          };
+          const shapes = ORTHOGONAL_BEND_SHAPES;
+          bendShapeRef.current = shapes[(shapes.indexOf(bendShapeRef.current) + 1) % shapes.length]!;
+          const drawBends = planOrthogonalBend(start, preview.drawCursor, getProjectDefaults(geometryStore).angleTol, bendShapeRef.current) ?? [];
           drawingPreviewSignal.set({
-            drawElbow,
+            drawBends,
             segmentLengthPreview: {
               ...preview.segmentLengthPreview,
-              position: worldToCanvas(drawElbow, scale, panOffset, canvasCenter),
+              position: worldToCanvas(drawBends[0] ?? start, scale, panOffset, canvasCenter),
             },
           });
           return;
@@ -1783,7 +1782,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('blur', clearHeldModifiers);
     };
-  }, [canvasCenter, drawElementType, drawMode, drawPoints, drawingPreviewSignal, panOffset, scale]);
+  }, [canvasCenter, drawElementType, drawMode, drawPoints, drawingPreviewSignal, geometryStore, panOffset, scale]);
 
   const endCanvasPanGesture = useCallback(() => {
     const session = activePanGestureRef.current?.session ?? null;
@@ -4028,7 +4027,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   }, [resolveAxisLockedPoint]);
 
   // One draw-snap resolution for move and click. Shift on the duct/pipe plan tool routes an
-  // off-axis end as an L (`elbow`); on-axis it keeps the ortho lock.
+  // off-axis end through `bends` (an L or a dog-leg); on-axis it keeps the ortho lock.
   const resolveDrawSnap = useCallback((
     mouseWorld: { x: number; y: number },
     lastPoint: { x: number; y: number } | null,
@@ -4046,10 +4045,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     };
     if (lastPoint && params.orthogonalModifierHeld && isDuctOrPipePlanDraw) {
       const free = utilResolveDrawSnapPoint({ ...params, orthogonalModifierHeld: false });
-      const elbow = planOrthogonalElbow(lastPoint, free.point, pd.angleTol, elbowFlippedRef.current);
-      if (elbow) return { ...free, elbow };
+      const bends = planOrthogonalBend(lastPoint, free.point, pd.angleTol, bendShapeRef.current);
+      if (bends) return { ...free, bends };
     }
-    return { ...utilResolveDrawSnapPoint(params), elbow: null };
+    return { ...utilResolveDrawSnapPoint(params), bends: [] as Array<{ x: number; y: number }> };
   }, [elementsById, geometryStore, isDuctOrPipePlanDraw, spaceLabelSnapCache]);
 
   // Handle mouse move: update draw preview cursor and polygon split hover
@@ -4067,7 +4066,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       const snapRes = resolveDrawSnap(mouseWorld as { x: number; y: number }, lastPoint);
       const chosen = snapRes.point;
       const nextDrawAngleSnapped =
-        snapRes.snap !== undefined || snapRes.orthogonalAxisLock || !!snapRes.elbow;
+        snapRes.snap !== undefined || snapRes.orthogonalAxisLock || snapRes.bends.length > 0;
       let nextSegmentLengthPreview: DrawingPreviewSegment = EMPTY_SEGMENT_LENGTH_PREVIEW;
       drawSnapTargetRef.current = chosen as any;
 
@@ -4080,12 +4079,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               (parseEditorDecimal(serviceLineDraftEndZ) ?? serviceLineDrawBaseZ + 1) -
               (parseEditorDecimal(serviceLineDraftStartZ) ?? serviceLineDrawBaseZ),
             )
-          : snapRes.elbow
+          : snapRes.bends.length > 0
             ? Math.abs(previewPoint.x - lastPoint.x) + Math.abs(previewPoint.y - lastPoint.y)
             : Math.hypot(previewPoint.x - lastPoint.x, previewPoint.y - lastPoint.y);
-        // An L route anchors its length label at the elbow, not the chord midpoint.
+        // A bent route anchors its length label at its first bend (an L's elbow).
         const midpointCanvas = worldToCanvas(
-          snapRes.elbow ?? {
+          snapRes.bends[0] ?? {
             x: (lastPoint.x + previewPoint.x) / 2,
             y: (lastPoint.y + previewPoint.y) / 2,
           },
@@ -4104,7 +4103,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         drawCursor: chosen as any,
         drawAngleSnapped: nextDrawAngleSnapped,
         segmentLengthPreview: nextSegmentLengthPreview,
-        drawElbow: snapRes.elbow,
+        drawBends: snapRes.bends,
       });
 
       if (drawMode === 'dormer') {
@@ -5749,7 +5748,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           if (drawPoints.length === 0) {
             // First point (mouseWorld already resolved via resolveDrawSnapPoint at click)
             setDrawPoints([{ x: mouseWorld.x, y: mouseWorld.y }]);
-            elbowFlippedRef.current = false;
+            bendShapeRef.current = 'L';
           } else {
             // Second point - create line
             const targetZoneId = resolveDrawTargetZoneId();
@@ -5787,13 +5786,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     { x: lastPoint.x, y: lastPoint.y, z: elementZ },
                     { x: endPoint.x, y: endPoint.y, z: elementZ },
                   ];
-            // Duct/pipe plan tool: a Shift L commits two legs, and an end landing mid-way along a
-            // same-network segment splits it at the tee. Both land as one history step.
-            const drawnLegs = drawSnapClick.elbow
-              ? [
-                  createServiceLineCoordinatesWithEndpointZ(lastPoint, drawSnapClick.elbow, draftStartZ, draftEndZ, serviceLineMode),
-                  createServiceLineCoordinatesWithEndpointZ(drawSnapClick.elbow, endPoint, draftStartZ, draftEndZ, serviceLineMode),
-                ]
+            // Duct/pipe plan tool: a Shift route commits one leg per bend plus one (an L two, a
+            // dog-leg three), and an end landing mid-way along a same-network segment splits it at
+            // the tee. All land as one history step.
+            const routePoints = [lastPoint, ...drawSnapClick.bends, endPoint];
+            const drawnLegs = drawSnapClick.bends.length > 0
+              ? routePoints.slice(1).map((point, i) =>
+                  createServiceLineCoordinatesWithEndpointZ(routePoints[i]!, point, draftStartZ, draftEndZ, serviceLineMode))
               : [lineCoordinates];
             const placedCoordinates = drawnLegs[drawnLegs.length - 1]!;
             const teeSplits = drawNetworkEdgeFilter
@@ -5807,12 +5806,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               if (split.endIndex === 0) drawnLegs[0]![0] = { ...split.point };
               else placedCoordinates[1] = { ...split.point };
             }
-            // The first L leg takes the same create path, first so it names first; a pending host
-            // prefill applies to both legs.
-            const firstLeg = drawnLegs.length > 1 ? beginDrawnElement(targetZoneId, drawElementType) : null;
+            // Earlier legs take the same create path, first so they name in order; a pending host
+            // prefill applies to every leg.
+            const earlierLegs = drawnLegs.slice(0, -1).map(() => beginDrawnElement(targetZoneId, drawElementType));
             const drawn = beginDrawnElement(targetZoneId, drawElementType);
             const elementId = drawn.elementId;
-            const hostPrefill = firstLeg?.hostPrefill ?? drawn.hostPrefill;
+            const hostPrefill = earlierLegs[0]?.hostPrefill ?? drawn.hostPrefill;
             const serviceLineLengthPatch = isServiceLineElementType(drawElementType)
               ? { length: getServiceLineLengthFromCoordinates(placedCoordinates), isPlaceholder: false }
               : {};
@@ -5842,13 +5841,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               ...(drawElementType === 'WetEmitter' ? { subcategory: 'radiator' as any } : {})
             };
             updateElement(elementId, linePatch, true);
-            if (firstLeg) {
-              updateElement(firstLeg.elementId, {
+            earlierLegs.forEach((leg, i) => {
+              updateElement(leg.elementId, {
                 ...linePatch,
-                coordinates: drawnLegs[0],
-                length: getServiceLineLengthFromCoordinates(drawnLegs[0]),
+                coordinates: drawnLegs[i],
+                length: getServiceLineLengthFromCoordinates(drawnLegs[i]),
               } as Partial<Element>, true);
-            }
+            });
             const tailDrafts = teeSplits.flatMap((split) => {
               if (!split.head || !split.tail) return [];
               updateElement(split.elementId, {
@@ -5877,8 +5876,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               id: elementId,
             });
             const placedEndPoint = placedCoordinates[1] ?? { x: endPoint.x, y: endPoint.y, z: draftEndZ };
-            elbowFlippedRef.current = false;
-            drawingPreviewSignal.set({ drawElbow: null });
+            bendShapeRef.current = 'L';
+            drawingPreviewSignal.set({ drawBends: [] });
             setDrawPoints(
               multiDrawActive
                 ? [{ x: placedEndPoint.x, y: placedEndPoint.y }]

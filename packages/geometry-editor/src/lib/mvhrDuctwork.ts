@@ -15,7 +15,7 @@ import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/cons
 import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, networkPoint3 } from './elementCanvasFloor';
 import { extractAdjacentConditionedFootprintOuterRings, extractGroundFootprintOuterRings } from './buildingFootprintDimensions';
 import { orientation360FromSegmentOutwardModelXY, polygonPlanCentroid } from './openingSegmentOutward';
-import { planOrthogonalElbow, pointsConnected, primaryPipeworkPlantPairs } from './snapUtils';
+import { orthogonalBendPoints, pointsConnected, primaryPipeworkPlantPairs, type PlanAxis } from './snapUtils';
 import { isPointInPolygon2D as pointInPolygon } from './pointInPolygon';
 import { resolveRoomTypeRule } from './spaceLabelDerivation';
 
@@ -407,7 +407,10 @@ export function defaultMvhrTerminalZ(storeyBaseHeightM: number): number {
   return roundToTwoDecimals(storeyBaseHeightM + DEFAULT_DRAWN_MVHR_TERMINAL_HEIGHT_M);
 }
 
-/** Clamped plan projection onto a segment, keeping the point's z. The store places hosted children with it. */
+/**
+ * Clamped plan projection onto a segment, keeping the point's z. The store places hosted children
+ * with it. A point already on the segment comes back unchanged, so re-projecting adds no float noise.
+ */
 export function projectPointToSegment(
   point: { x: number; y: number; z?: number },
   segment: readonly [Point3, Point3],
@@ -417,7 +420,9 @@ export function projectPointToSegment(
   const vy = b.y - a.y;
   const v2 = vx * vx + vy * vy || 1;
   const t = Math.max(0, Math.min(1, ((point.x - a.x) * vx + (point.y - a.y) * vy) / v2));
-  return { x: a.x + t * vx, y: a.y + t * vy, z: point.z ?? a.z };
+  const q = { x: a.x + t * vx, y: a.y + t * vy };
+  const onSegment = Math.hypot(q.x - point.x, q.y - point.y) < 1e-9;
+  return { x: onSegment ? point.x : q.x, y: onSegment ? point.y : q.y, z: point.z ?? a.z };
 }
 
 /**
@@ -486,23 +491,82 @@ function pointInsideRoom(ring: PlanPoint[], stagger: number): PlanPoint | null {
   return null;
 }
 
-/** Shorter legs than this are dropped: a near-axis end runs straight rather than dog-legging a few mm. */
-const MIN_LEG_M = 0.01;
+/** Shorter duct legs than this are dropped: a near-axis end runs straight rather than dog-legging a few mm. */
+const MIN_DUCT_LEG_M = 0.01;
 
-/** The orthogonal L (longer axis first) at the unit's height from `start` to `end`, then a vertical leg when `end` is higher or lower. */
-function orthogonalRun(start: Point3, end: Point3): Point3[] {
-  const corner = { x: end.x, y: end.y, z: start.z };
-  const elbow = planOrthogonalElbow(start, end, 0, false);
-  const useElbow = elbow && distance3d(start, { ...elbow, z: start.z }) >= MIN_LEG_M && distance3d(corner, { ...elbow, z: start.z }) >= MIN_LEG_M;
-  return [start, ...(useElbow ? [{ ...elbow, z: start.z }] : []), corner, end];
+/** A dog-leg leg shorter than this reads as clutter, so the run becomes the L that still meets the constrained end. */
+const MIN_DOG_LEG_LEG_M = 0.3;
+
+const otherAxis = (axis: PlanAxis): PlanAxis => (axis === 'x' ? 'y' : 'x');
+
+/**
+ * The orthogonal plan route (see `orthogonalBendPoints`) at `start`'s height, then a vertical leg
+ * at `end` when it is higher or lower. A Z with a leg under MIN_DOG_LEG_LEG_M becomes the L that
+ * meets the constrained end. Callers pass it through `withoutShortLegs`.
+ */
+function orthogonalRoute(start: Point3, end: Point3, startAxis?: PlanAxis, endAxis?: PlanAxis, jog = 0.5): Point3[] {
+  let bends = orthogonalBendPoints(start, end, startAxis, endAxis, jog);
+  const plan = [start, ...bends, end];
+  if (bends.length === 2 && plan.some((q, i) => i > 0 && Math.hypot(q.x - plan[i - 1]!.x, q.y - plan[i - 1]!.y) < MIN_DOG_LEG_LEG_M)) {
+    bends = orthogonalBendPoints(start, end, startAxis ?? otherAxis(endAxis!), endAxis ?? otherAxis(startAxis!));
+  }
+  return [start, ...bends.map((q) => ({ ...q, z: start.z })), { x: end.x, y: end.y, z: start.z }, end];
+}
+
+/** The nearer grid axis to a plan direction. */
+function nearerAxis(dx: number, dy: number): PlanAxis {
+  return Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+}
+
+/** The axis a segment's plan normal is nearer to. */
+function segmentNormalAxis(a: PlanPoint, b: PlanPoint): PlanAxis {
+  // ponytail: diagonal hosts snap to the nearest grid axis, so the last leg is not truly
+  // perpendicular; route a true off-grid final leg if bay-window hosts show it.
+  return nearerAxis(b.y - a.y, a.x - b.x);
+}
+
+/**
+ * The axis a duct must arrive at an existing terminal along: its host's normal, else its
+ * orientation (compass degrees, 0 = +y), else free.
+ */
+function terminalAxis(terminal: MechanicalVentilationTerminal, elements: Element[]): PlanAxis | undefined {
+  const host = elements.find((el) => el.name === terminal.host_element && isMvhrTerminalHost(el));
+  if (host && host.coordinates?.length >= 2) return segmentNormalAxis(host.coordinates[0]!, host.coordinates[1]!);
+  const orientation = finiteNumber(terminal.orientation360);
+  if (orientation === undefined) return undefined;
+  const radians = (orientation * Math.PI) / 180;
+  return nearerAxis(Math.sin(radians), Math.cos(radians));
+}
+
+/** New terminals sit at least this far from either end of their host. */
+const TERMINAL_HOST_END_INSET_M = 0.5;
+
+/**
+ * Where a new terminal goes on its host: the foot of the unit on it, kept TERMINAL_HOST_END_INSET_M
+ * from either end (a host shorter than twice that takes its midpoint), rounded to 2 dp. A diagonal
+ * host then re-projects the rounded point so it lies on the host, where the store keeps it.
+ */
+function terminalPointOnHost(unitPoint: PlanPoint, segment: readonly [Point3, Point3]): PlanPoint {
+  const [a, b] = segment;
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  const inset = Math.min(TERMINAL_HOST_END_INSET_M / (length || 1), 0.5);
+  const foot = projectPointToSegment(unitPoint, segment);
+  const t = Math.max(inset, Math.min(1 - inset, length ? Math.hypot(foot.x - a.x, foot.y - a.y) / length : 0.5));
+  const rounded = { x: roundToTwoDecimals(a.x + t * (b.x - a.x)), y: roundToTwoDecimals(a.y + t * (b.y - a.y)) };
+  const onHost = projectPointToSegment(rounded, segment);
+  return { x: onHost.x, y: onHost.y };
 }
 
 /**
  * Auto-duct plan for one MVHR unit (other unit types get none): one radial run per wet room
  * (extract) and per habitable room (supply), from the unit point to a point inside the room's space
- * label, plus a run to an intake and an exhaust terminal. Each segment is its own duct draft;
- * consecutive segments share exact endpoints so each run is one connected component touching the
- * unit, and runs share no vertex but the unit point (see RUN_END_STAGGER_M).
+ * label, plus a run to an intake and an exhaust terminal. Room runs are an L, longer axis first; a
+ * terminal run arrives along its host's normal, as a Z dog-leg when the terminal is off the unit's
+ * axis (an L when a Z leg would be under MIN_DOG_LEG_LEG_M or a Z bend hits another run or terminal;
+ * then a Z jogging at 0.45 or 0.55). Terminal points are all resolved before any terminal run, and
+ * terminal runs plan first, so the room runs' stagger avoids them. Each segment is its own duct
+ * draft; consecutive segments share exact endpoints so each run is one connected component touching
+ * the unit, and runs share no vertex but the unit point (see RUN_END_STAGGER_M).
  *
  * Everything is in metres: the unit sits at its storey's base height. A room on another storey
  * gets its L at the unit's height and a riser at the room end up (or down) to the room storey's
@@ -512,7 +576,8 @@ function orthogonalRun(start: Point3, end: Point3): Point3[] {
  *
  * A room whose space label already holds a free run end of that role on the room's storey is
  * skipped, as is a terminal role that already has a duct; an existing terminal without a duct gets
- * one ending on its point. Re-running only fills gaps. Output order is stable (rooms by id).
+ * one ending on its point. Re-running only fills gaps. Output order is stable (rooms by id, then
+ * terminals).
  * `effectiveFloors` carry effective storey heights (`withEffectiveStoreyHeights`) in store order.
  */
 export function planAutoDucts(
@@ -558,6 +623,86 @@ export function planAutoDucts(
     }
   };
 
+  const terminals = elements.filter(
+    (el): el is MechanicalVentilationTerminal => el.type === 'MechanicalVentilationTerminal' && !el.isPlaceholder,
+  );
+  const takenHosts = new Set(terminals.map((terminal) => terminal.host_element));
+  const freeHosts = elements
+    .flatMap((host) => {
+      if (
+        host.isPlaceholder || !isMvhrTerminalHost(host) || !(host.coordinates?.length >= 2) ||
+        takenHosts.has(host.name) || getElementCanvasFloorZValue(host, effectiveFloors) !== unitStorey
+      ) return [];
+      const segment = [host.coordinates[0]!, host.coordinates[1]!] as const;
+      const point = projectPointToSegment(unitPoint, segment);
+      return [{ host, segment, distance: Math.hypot(point.x - unitPoint.x, point.y - unitPoint.y) }];
+    })
+    .sort((a, b) => a.distance - b.distance || (a.host.name < b.host.name ? -1 : a.host.name > b.host.name ? 1 : 0));
+  const ownTerminalByRole = new Map(
+    terminals.filter((terminal) => terminal.parent_element?.trim() === unit.name).map((terminal) => [terminal.terminal_type, terminal]),
+  );
+
+  // Every terminal role's end point is resolved before any terminal run routes, so no run's bend
+  // or elbow lands on another terminal's end: existing terminals first, then new ones on the
+  // nearest free host whose terminal point is not already reserved (a window colinear with its
+  // wall would otherwise give intake and exhaust the same point). Any existing terminal's point,
+  // ducted or not, is held too, so a re-run never lands a new terminal on one.
+  type TerminalEnd = { role: MvhrTerminalRole; point?: Point3; axis?: PlanAxis; terminal?: ElementDraft };
+  const terminalEnds: TerminalEnd[] = [];
+  for (const role of roles.terminals) {
+    if (unitDucts.some((duct) => duct.duct_type === role)) continue;
+    const existing = ownTerminalByRole.get(role);
+    if (!existing) { terminalEnds.push({ role }); continue; }
+    // A terminal on another storey is out of reach for now: no duct to it, and no second terminal.
+    if (getElementCanvasFloorZValue(existing, effectiveFloors) !== unitStorey) continue;
+    const point = getTerminalPoint(existing);
+    if (point) terminalEnds.push({ role, point, axis: terminalAxis(existing, elements) });
+  }
+  const reserved = terminalEnds.flatMap(({ point }) => (point ? [point] : []));
+  // In plan, on the unit's storey: two terminals at one plan point share their risers' foot.
+  const held = terminals
+    .filter((terminal) => getElementCanvasFloorZValue(terminal, effectiveFloors) === unitStorey)
+    .flatMap((terminal) => getTerminalPoint(terminal) ?? []);
+  for (const end of terminalEnds) {
+    while (!end.point && freeHosts.length > 0) {
+      const next = freeHosts.shift()!;
+      const terminal = hostedMvhrTerminalDraft(end.role, unit.name, next.host, terminalPointOnHost(unitPoint, next.segment), effectiveFloors);
+      // The duct ends on the terminal's own point, which already lies on the host, so the store keeps it.
+      const point = terminal.coordinates[0] as Point3;
+      if ([...held, ...reserved].some((q) => sameDuctPoint({ ...q, z: point.z }, point))) continue;
+      Object.assign(end, { point, axis: segmentNormalAxis(...next.segment), terminal });
+      reserved.push(point);
+    }
+  }
+
+  // Terminal runs plan first, so the room runs' stagger steers clear of their vertices. Candidates
+  // that still arrive along `axis`: the Z at half way, the L, then the Z jogging a little either side.
+  // Another terminal's end is reserved in plan, at any height: its run's riser foot sits below it.
+  const terminalRun = (end: Point3, axis: PlanAxis | undefined) => {
+    const collides = (run: Point3[]) => run.slice(1).some((q) =>
+      takenPoints.some((t) => sameDuctPoint(q, t)) || reserved.some((r) => r !== end && sameDuctPoint(q, { ...r, z: q.z })));
+    const routes = axis
+      ? [
+        orthogonalRoute(unitPoint, end, undefined, axis),
+        orthogonalRoute(unitPoint, end, otherAxis(axis), axis),
+        orthogonalRoute(unitPoint, end, undefined, axis, 0.45),
+        orthogonalRoute(unitPoint, end, undefined, axis, 0.55),
+      ]
+      : [orthogonalRoute(unitPoint, end)];
+    const candidates = routes.map((route) => withoutShortLegs(route, MIN_DUCT_LEG_M));
+    // ponytail: when every candidate collides the first is kept, and the topology warning asks for a
+    // hand fix (seen when a sub-0.6 m offset collapses every candidate to one L); re-pick the host if
+    // real models hit that.
+    return candidates.find((run) => run && !collides(run)) ?? candidates[0];
+  };
+  for (const { role, point, axis, terminal } of terminalEnds) {
+    const run = point && terminalRun(point, axis);
+    if (!run) continue;
+    addRun(role, run);
+    if (terminal) drafts.push(terminal);
+  }
+  const terminalDraftCount = drafts.length;
+
   const labels = spaceLabels
     .flatMap((label) => {
       const floor = effectiveFloors[label.storey];
@@ -589,51 +734,14 @@ export function planAutoDucts(
         const target = pointInsideRoom(ring, RUN_END_STAGGER_M * ((index + bump) % RUN_END_STAGGER_STEPS));
         // No interior point, or the unit sits on it: nothing sensible to route.
         if (!target || Math.hypot(target.x - unitPoint.x, target.y - unitPoint.y) < ROOM_END_CLEARANCE_M) break;
-        const run = orthogonalRun(unitPoint, { ...target, z });
+        const run = withoutShortLegs(orthogonalRoute(unitPoint, { ...target, z }), MIN_DUCT_LEG_M)!;
         if (run.slice(1).some((q) => takenPoints.some((t) => sameDuctPoint(q, t)))) continue;
         addRun(role, run, floor.id);
         break;
       }
     }
   }
-
-  const terminals = elements.filter(
-    (el): el is MechanicalVentilationTerminal => el.type === 'MechanicalVentilationTerminal' && !el.isPlaceholder,
-  );
-  const takenHosts = new Set(terminals.map((terminal) => terminal.host_element));
-  const freeHosts = elements
-    .flatMap((host) => {
-      if (
-        host.isPlaceholder || !isMvhrTerminalHost(host) || !(host.coordinates?.length >= 2) ||
-        takenHosts.has(host.name) || getElementCanvasFloorZValue(host, effectiveFloors) !== unitStorey
-      ) return [];
-      const segment = [host.coordinates[0]!, host.coordinates[1]!] as const;
-      const point = projectPointToSegment(unitPoint, segment);
-      return [{ host, segment, distance: Math.hypot(point.x - unitPoint.x, point.y - unitPoint.y) }];
-    })
-    .sort((a, b) => a.distance - b.distance || (a.host.name < b.host.name ? -1 : a.host.name > b.host.name ? 1 : 0));
-  const ownTerminalByRole = new Map(
-    terminals.filter((terminal) => terminal.parent_element?.trim() === unit.name).map((terminal) => [terminal.terminal_type, terminal]),
-  );
-  for (const role of roles.terminals) {
-    if (unitDucts.some((duct) => duct.duct_type === role)) continue;
-    const existing = ownTerminalByRole.get(role);
-    // A terminal on another storey is out of reach for now: no duct to it, and no second terminal.
-    if (existing && getElementCanvasFloorZValue(existing, effectiveFloors) !== unitStorey) continue;
-    const existingPoint = existing && getTerminalPoint(existing);
-    if (existingPoint) {
-      addRun(role, orthogonalRun(unitPoint, existingPoint));
-      continue;
-    }
-    if (existing) continue;
-    const nearest = freeHosts.shift();
-    if (!nearest) continue;
-    const terminal = hostedMvhrTerminalDraft(role, unit.name, nearest.host, projectPointToSegment(unitPoint, nearest.segment), effectiveFloors);
-    // The duct ends where the store will put the terminal: the same projection of the same point.
-    addRun(role, orthogonalRun(unitPoint, projectPointToSegment(terminal.coordinates[0] as Point3, nearest.segment)));
-    drafts.push(terminal);
-  }
-  return drafts;
+  return [...drafts.slice(terminalDraftCount), ...drafts.slice(0, terminalDraftCount)];
 }
 
 export type PrimaryPipeworkPair = { heatSource: Element; cylinder: Element; heatSourcePoint: Point3; cylinderPoint: Point3 };
@@ -672,18 +780,43 @@ function insideFootprint(p: PlanPoint, rings: PlanPoint[][]): boolean {
 }
 
 /**
- * `points` with interior points dropped until every leg is at least `min` long (a short leg joins
- * its neighbour). The ends stay exact. Null when the whole run is shorter than `min`.
+ * `points` with interior points dropped until every leg is at least `min` long. A short leg loses
+ * its interior ends, so a dog-leg's tiny jog collapses to one straight-ish run and an L's short leg
+ * joins its neighbour. The ends stay exact, and so does a riser's foot (a riser stays vertical
+ * unless it is itself short). Null when the whole run is shorter than `min`.
  */
 function withoutShortLegs(points: Point3[], min: number): Point3[] | null {
   const pts = points.filter((p, i) => i === 0 || distance3d(p, points[i - 1]!) > 0);
+  const kept = (k: number) => k === 0 || k === pts.length - 1 || (pts[k + 1]!.x === pts[k]!.x && pts[k + 1]!.y === pts[k]!.y);
   for (let i = 0; i + 1 < pts.length;) {
     if (distance3d(pts[i]!, pts[i + 1]!) >= min) { i += 1; continue; }
     if (pts.length === 2) return null;
-    pts.splice(i + 1 === pts.length - 1 ? i : i + 1, 1);
+    const drop = [i + 1, i].filter((k) => !kept(k));
+    // Both ends kept (a short first leg into a riser foot, or a short riser): drop the interior one.
+    for (const k of drop.length > 0 ? drop : [i + 1 === pts.length - 1 ? i : i + 1]) pts.splice(k, 1);
     i = Math.max(0, i - 1);
   }
   return pts;
+}
+
+/**
+ * A heat source outside the footprint leaves along the normal of its nearest footprint edge and
+ * jogs halfway between that edge and the cylinder. Facing a wall, the external leg is just the
+ * stand-off. Inside, both ends are free (an L).
+ */
+function primaryPipeRoute(start: Point3, end: Point3, rings: PlanPoint[][]): Point3[] {
+  if (insideFootprint(start, rings)) return orthogonalRoute(start, end);
+  // ponytail: one route, no search. Beyond a footprint corner or in the notch of an L-shaped
+  // footprint the external run is longer than the stand-off; score candidate routes by external
+  // length if that shows up.
+  const edges = rings.flatMap((ring) => ring.map((a, i) => [a, ring[(i + 1) % ring.length]!] as const));
+  const [a, b] = edges.reduce((best, edge) =>
+    (distanceToSegment(start, ...edge) < distanceToSegment(start, ...best) ? edge : best));
+  const axis = segmentNormalAxis(a, b);
+  const edgeAt = projectPointToSegment(start, [{ ...a, z: 0 }, { ...b, z: 0 }])[axis];
+  const along = end[axis] - start[axis];
+  const jog = along === 0 ? 0.5 : Math.max(0, Math.min(1, ((edgeAt + end[axis]) / 2 - start[axis]) / along));
+  return orthogonalRoute(start, end, axis, undefined, jog);
 }
 
 type PipePiece = { a: Point3; b: Point3; location: 'internal' | 'external' };
@@ -733,12 +866,12 @@ function splitAtFootprint(a: Point3, b: Point3, rings: PlanPoint[][]): PipePiece
 
 /**
  * Auto-pipe plan per pair: primary pipework from each heat source to each cylinder it heats (see
- * `primaryPipeworkPlantPairs`; a combi has no cylinder, so nothing). One orthogonal L at the heat
- * source's height, longer axis first, then a riser at the cylinder when it is on another storey,
- * as `planAutoDucts` routes. Runs start and end exactly on the two plant points. A leg shorter than
- * HEM's 0.05 m minimum joins its neighbour, and each leg is split where it crosses the dwelling
- * footprint, so every pipe draft has one `location` and is at least 0.05 m; a pair closer than that
- * gets nothing. The HEM pipe fields (diameters, insulation, contents) come from the defaults'
+ * `primaryPipeworkPlantPairs`; a combi has no cylinder, so nothing). One orthogonal route at the
+ * heat source's height (see `primaryPipeRoute`), then a riser at the cylinder when it is on another
+ * storey, as `planAutoDucts` routes. Runs start and end exactly on the two plant points. A leg
+ * shorter than HEM's 0.05 m minimum joins its neighbour, and each leg is split where it crosses the
+ * dwelling footprint, so every pipe draft has one `location` and is at least 0.05 m; a pair closer
+ * than that gets nothing. The HEM pipe fields (diameters, insulation, contents) come from the defaults'
  * primary pipework at merge, as for drawn pipes.
  *
  * Primary rows have no parent and the model transform attaches every one to every StorageTank (so
@@ -758,7 +891,7 @@ export function planPrimaryPipeworkByPair(
   for (const pair of primaryPipeworkPairs(elements, effectiveFloors)) {
     const { heatSourcePoint: start, cylinderPoint: end } = pair;
     const [startFloorId, endFloorId] = [floorIdOf(pair.heatSource), floorIdOf(pair.cylinder)];
-    const points = withoutShortLegs(orthogonalRun(start, end), MIN_PRIMARY_PIPE_M);
+    const points = withoutShortLegs(primaryPipeRoute(start, end, rings), MIN_PRIMARY_PIPE_M);
     if (!startFloorId || !endFloorId || !points) continue;
     const drafts: ElementDraft[] = [];
     for (let i = 0; i + 1 < points.length; i += 1) {

@@ -233,8 +233,8 @@ export function getDrawModeTooltipText(
   drawSnapTargetRef: React.RefObject<{ x: number; y: number } | null>,
   drawElementType: ElementType,
   multiDrawModifierHeld: boolean,
-  /** Duct/pipe plan tool only: an L (Shift) preview is showing. */
-  elbowPreviewActive = false,
+  /** Duct/pipe plan tool only: a bent (Shift) route preview is showing. */
+  bendPreviewActive = false,
 ): string | null {
   if (drawMode === 'none') return null;
 
@@ -254,7 +254,7 @@ export function getDrawModeTooltipText(
       if (drawMode === 'tb-plan-line') {
         const base = withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point', showShapeSwitch);
         if (showShapeSwitch) return base;
-        return `${base} · ${elbowPreviewActive ? 'F: flip bend' : 'Shift: L-bend'}`;
+        return `${base} · ${bendPreviewActive ? 'F: next bend' : 'Shift: L-bend'}`;
       }
       return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point');
     }
