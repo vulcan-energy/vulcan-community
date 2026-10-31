@@ -4082,7 +4082,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           : snapRes.bends.length > 0
             ? Math.abs(previewPoint.x - lastPoint.x) + Math.abs(previewPoint.y - lastPoint.y)
             : Math.hypot(previewPoint.x - lastPoint.x, previewPoint.y - lastPoint.y);
-        // A bent route anchors its length label at its first bend (an L's elbow), clear of a dog-leg's jog.
+        // A bent route anchors its length label at its first bend (an L's elbow).
         const midpointCanvas = worldToCanvas(
           snapRes.bends[0] ?? {
             x: (lastPoint.x + previewPoint.x) / 2,

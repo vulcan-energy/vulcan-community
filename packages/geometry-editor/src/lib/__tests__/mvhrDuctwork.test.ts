@@ -284,6 +284,18 @@ describe('planAutoDucts', () => {
     const wallS = host('Wall S', 'BuildingElementOpaque', [-6, -8], [2.2, -8]);
     const drafts = planAutoDucts(unit('MVHR', 2, 0), [unit('MVHR', 2, 0), wallS], [room('k', 'kitchen', 0, -1, -5)], floors);
     expect(collectMvhrDuctTopologyWarnings(ducts(drafts), { unitPoint: p(2, 0) })).toEqual([]);
+
+    // Terminal runs share no vertex. Here the exhaust's Z bend and its L elbow both sit on the
+    // intake's Z, so the exhaust jogs at 0.45 of the way.
+    const wallA = host('A', 'BuildingElementOpaque', [-5, 1], [-4, 1]);
+    const wallC = host('C', 'BuildingElementOpaque', [-9, -6], [-9, 4]);
+    const zPlan = planAutoDucts(unit('MVHR', 0, 6), [unit('MVHR', 0, 6), wallA, wallC], [], floors);
+    expect(collectMvhrDuctTopologyWarnings(ducts(zPlan), { unitPoint: p(0, 6) })).toEqual([]);
+    // Here the user-placed intake's Z bend would sit under the new exhaust terminal, so it takes the L.
+    const intake = { id: 't', name: 'T', type: 'MechanicalVentilationTerminal', terminal_type: 'intake', parent_element: 'MV', host_element: 'H0', floorId: 'f0', coordinates: [p(13.95, -6.5, 2.4)] } as Element;
+    const scene = [unit('MVHR', 2.5, 2.5), host('W', 'BuildingElementOpaque', [1.5, -2], [4, -2]), host('H0', 'BuildingElementOpaque', [9, -6.5], [14.5, -6.5]), intake];
+    const userPlan = planAutoDucts(unit('MVHR', 2.5, 2.5), scene, [], floors);
+    expect(collectMvhrDuctTopologyWarnings(ducts(userPlan), { unitPoint: p(2.5, 2.5) })).toEqual([]);
   });
 
   it('plans a connected network with no topology warnings or overlap errors, and fills only gaps on re-run', () => {

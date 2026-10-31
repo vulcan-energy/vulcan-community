@@ -1368,9 +1368,10 @@ export function planOrthogonalBend(
   const longer: PlanAxis = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y) ? 'x' : 'y';
   const other: PlanAxis = longer === 'x' ? 'y' : 'x';
   if (shape === 'dog-leg') {
-    // A jog rounded onto an end (a tiny move) would commit a zero-length leg: draw the L instead.
+    // A jog within 1 cm of an end would commit a sliver leg: draw the L instead.
     const bends = orthogonalBendPoints(start, end, longer, longer);
-    if (!bends.some((q) => (q.x === start.x && q.y === start.y) || (q.x === end.x && q.y === end.y))) return bends;
+    const plan = [start, ...bends, end];
+    if (plan.every((q, i) => i === 0 || Math.hypot(q.x - plan[i - 1]!.x, q.y - plan[i - 1]!.y) >= 0.01)) return bends;
   }
   return shape !== 'flipped-L' ? orthogonalBendPoints(start, end, longer, other) : orthogonalBendPoints(start, end, other, longer);
 }

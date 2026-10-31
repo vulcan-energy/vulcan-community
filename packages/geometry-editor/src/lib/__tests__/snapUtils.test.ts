@@ -57,6 +57,8 @@ describe('planOrthogonalBend', () => {
     expect(planOrthogonalBend(start, { x: 4, y: 0.05 }, 2, 'dog-leg')).toBeNull();
     // A jog that rounds onto an end would commit a zero-length leg, so the dog-leg draws as the L.
     expect(planOrthogonalBend(start, { x: 0.01, y: 0.01 }, 2, 'dog-leg')).toEqual([{ x: 0.01, y: 0 }]);
+    // Off-grid ends: a jog within 1 cm of an end would commit a mm sliver leg, so this too is the L.
+    expect(planOrthogonalBend({ x: 1.234567, y: 2 }, { x: 1.25, y: 2.01 }, 2, 'dog-leg')).toEqual([{ x: 1.25, y: 2 }]);
   });
 });
 

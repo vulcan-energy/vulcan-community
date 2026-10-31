@@ -562,10 +562,11 @@ function terminalPointOnHost(unitPoint: PlanPoint, segment: readonly [Point3, Po
  * (extract) and per habitable room (supply), from the unit point to a point inside the room's space
  * label, plus a run to an intake and an exhaust terminal. Room runs are an L, longer axis first; a
  * terminal run arrives along its host's normal, as a Z dog-leg when the terminal is off the unit's
- * axis (an L when a Z leg would be under MIN_DOG_LEG_LEG_M or a Z bend hits another run). Terminal
- * runs plan first, so the room runs' stagger avoids them. Each segment is its own duct draft; consecutive segments share exact endpoints so each run
- * is one connected component touching the unit, and runs share no vertex but the unit point (see
- * RUN_END_STAGGER_M).
+ * axis (an L when a Z leg would be under MIN_DOG_LEG_LEG_M or a Z bend hits another run or terminal;
+ * then a Z jogging at 0.45 or 0.55). Terminal points are all resolved before any terminal run, and
+ * terminal runs plan first, so the room runs' stagger avoids them. Each segment is its own duct
+ * draft; consecutive segments share exact endpoints so each run is one connected component touching
+ * the unit, and runs share no vertex but the unit point (see RUN_END_STAGGER_M).
  *
  * Everything is in metres: the unit sits at its storey's base height. A room on another storey
  * gets its L at the unit's height and a riser at the room end up (or down) to the room storey's
@@ -575,7 +576,8 @@ function terminalPointOnHost(unitPoint: PlanPoint, segment: readonly [Point3, Po
  *
  * A room whose space label already holds a free run end of that role on the room's storey is
  * skipped, as is a terminal role that already has a duct; an existing terminal without a duct gets
- * one ending on its point. Re-running only fills gaps. Output order is stable (rooms by id, then terminals).
+ * one ending on its point. Re-running only fills gaps. Output order is stable (rooms by id, then
+ * terminals).
  * `effectiveFloors` carry effective storey heights (`withEffectiveStoreyHeights`) in store order.
  */
 export function planAutoDucts(
@@ -621,16 +623,6 @@ export function planAutoDucts(
     }
   };
 
-  // Terminal runs plan first, so the room runs' stagger steers clear of their vertices. A terminal
-  // run whose Z dog-leg hits a taken vertex falls back to the L that still arrives along `axis`.
-  const terminalRun = (end: Point3, axis: PlanAxis | undefined) => {
-    const collides = (run: Point3[]) => run.slice(1, -1).some((q) => takenPoints.some((t) => sameDuctPoint(q, t)));
-    const run = withoutShortLegs(orthogonalRoute(unitPoint, end, undefined, axis), MIN_DUCT_LEG_M);
-    if (!run || !axis || !collides(run)) return run;
-    // ponytail: if the L collides too it is kept; never seen, so a hand fix.
-    return withoutShortLegs(orthogonalRoute(unitPoint, end, otherAxis(axis), axis), MIN_DUCT_LEG_M);
-  };
-
   const terminals = elements.filter(
     (el): el is MechanicalVentilationTerminal => el.type === 'MechanicalVentilationTerminal' && !el.isPlaceholder,
   );
@@ -649,27 +641,61 @@ export function planAutoDucts(
   const ownTerminalByRole = new Map(
     terminals.filter((terminal) => terminal.parent_element?.trim() === unit.name).map((terminal) => [terminal.terminal_type, terminal]),
   );
+
+  // Every terminal role's end point is resolved before any terminal run routes, so no run's bend
+  // or elbow lands on another terminal's end: existing terminals first, then new ones on the
+  // nearest free host whose terminal point is not already reserved (a window colinear with its
+  // wall would otherwise give intake and exhaust the same point). Any existing terminal's point,
+  // ducted or not, is held too, so a re-run never lands a new terminal on one.
+  type TerminalEnd = { role: MvhrTerminalRole; point?: Point3; axis?: PlanAxis; terminal?: ElementDraft };
+  const terminalEnds: TerminalEnd[] = [];
   for (const role of roles.terminals) {
     if (unitDucts.some((duct) => duct.duct_type === role)) continue;
     const existing = ownTerminalByRole.get(role);
+    if (!existing) { terminalEnds.push({ role }); continue; }
     // A terminal on another storey is out of reach for now: no duct to it, and no second terminal.
-    if (existing && getElementCanvasFloorZValue(existing, effectiveFloors) !== unitStorey) continue;
-    const existingPoint = existing && getTerminalPoint(existing);
-    if (existingPoint) {
-      const run = terminalRun(existingPoint, terminalAxis(existing, elements));
-      if (run) addRun(role, run);
-      continue;
+    if (getElementCanvasFloorZValue(existing, effectiveFloors) !== unitStorey) continue;
+    const point = getTerminalPoint(existing);
+    if (point) terminalEnds.push({ role, point, axis: terminalAxis(existing, elements) });
+  }
+  const reserved = terminalEnds.flatMap(({ point }) => (point ? [point] : []));
+  const held = terminals.flatMap((terminal) => getTerminalPoint(terminal) ?? []);
+  for (const end of terminalEnds) {
+    while (!end.point && freeHosts.length > 0) {
+      const next = freeHosts.shift()!;
+      const terminal = hostedMvhrTerminalDraft(end.role, unit.name, next.host, terminalPointOnHost(unitPoint, next.segment), effectiveFloors);
+      // The duct ends on the terminal's own point, which already lies on the host, so the store keeps it.
+      const point = terminal.coordinates[0] as Point3;
+      if ([...held, ...reserved].some((q) => sameDuctPoint(q, point))) continue;
+      Object.assign(end, { point, axis: segmentNormalAxis(...next.segment), terminal });
+      reserved.push(point);
     }
-    if (existing) continue;
-    const nearest = freeHosts.shift();
-    if (!nearest) continue;
-    const terminal = hostedMvhrTerminalDraft(role, unit.name, nearest.host, terminalPointOnHost(unitPoint, nearest.segment), effectiveFloors);
-    // The duct ends on the terminal's own point, which already lies on the host, so the store keeps it.
-    const terminalPoint = terminal.coordinates[0] as Point3;
-    const run = terminalRun(terminalPoint, segmentNormalAxis(...nearest.segment));
+  }
+
+  // Terminal runs plan first, so the room runs' stagger steers clear of their vertices. Candidates
+  // that still arrive along `axis`: the Z at half way, the L, then the Z jogging a little either side.
+  // Another terminal's end is reserved in plan, at any height: its run's riser foot sits below it.
+  const terminalRun = (end: Point3, axis: PlanAxis | undefined) => {
+    const collides = (run: Point3[]) => run.slice(1).some((q) =>
+      takenPoints.some((t) => sameDuctPoint(q, t)) || reserved.some((r) => r !== end && sameDuctPoint(q, { ...r, z: q.z })));
+    const routes = axis
+      ? [
+        orthogonalRoute(unitPoint, end, undefined, axis),
+        orthogonalRoute(unitPoint, end, otherAxis(axis), axis),
+        orthogonalRoute(unitPoint, end, undefined, axis, 0.45),
+        orthogonalRoute(unitPoint, end, undefined, axis, 0.55),
+      ]
+      : [orthogonalRoute(unitPoint, end)];
+    const candidates = routes.map((route) => withoutShortLegs(route, MIN_DUCT_LEG_M));
+    // ponytail: when every candidate collides the first is kept, and the topology warning asks for a
+    // hand fix; search more jogs if real models hit that.
+    return candidates.find((run) => run && !collides(run)) ?? candidates[0];
+  };
+  for (const { role, point, axis, terminal } of terminalEnds) {
+    const run = point && terminalRun(point, axis);
     if (!run) continue;
     addRun(role, run);
-    drafts.push(terminal);
+    if (terminal) drafts.push(terminal);
   }
   const terminalDraftCount = drafts.length;
 
