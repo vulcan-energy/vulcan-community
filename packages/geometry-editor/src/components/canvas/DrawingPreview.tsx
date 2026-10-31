@@ -283,7 +283,7 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
           multiDrawModifierHeld,
           drawBends.length > 0,
         );
-        const tooltipText = baseTooltipText && drawPoints.length === 0 && (drawElementType === 'ThermalBridgeLinear' || drawElementType === 'MechanicalVentilationDuctwork')
+        const tooltipText = baseTooltipText && drawPoints.length === 0 && (drawElementType === 'ThermalBridgeLinear' || drawElementType === 'MechanicalVentilationDuctwork' || drawElementType === 'WaterPipework')
           ? `${baseTooltipText} · Hold A for suggestions`
           : baseTooltipText;
         const canvasPos = w2c(placementPoint);
