@@ -49,8 +49,8 @@ export type GeometryCanvasViewport = Readonly<{ cx: number; cy: number; scale: n
 
 type Point = { x: number; y: number };
 
-/** Easing time constant: a cursor covers ~95% of a jump in 150 ms. */
-const CURSOR_EASE_MS = 50;
+/** Easing time constant: a cursor covers ~95% of a jump in 300 ms, so 5 Hz updates glide instead of stepping. */
+const CURSOR_EASE_MS = 100;
 
 // Profile images load once per URL; the plain disc shows until one loads, or for good if it fails.
 const avatarImages = new Map<string, HTMLImageElement>();
@@ -184,7 +184,7 @@ const ghostPointKey = (ghost: string, path: string, point: number) => `ghost:${g
 /**
  * Colleagues on this floor: their selections (glow, tint, name pill, a pulse
  * when it changes), their edits in progress and their pointers, the last two
- * eased toward each update so ~10 Hz input moves smoothly. Not listening: it never takes a click.
+ * eased toward each update so ~5 Hz input moves smoothly. Not listening: it never takes a click.
  */
 export const RemotePresenceLayer = memo(function RemotePresenceLayer({
   selections,
