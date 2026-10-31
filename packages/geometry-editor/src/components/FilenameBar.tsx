@@ -25,6 +25,8 @@ export type FilenameBarActionContext = Readonly<{
   filename: string;
   hostModelName?: string;
   saveStatus: 'idle' | 'saving' | 'success' | 'error';
+  /** Why the typed filename cannot be saved: a chip beside the field. */
+  filenameError?: string | null;
   onOpenDefaults?: () => void;
   defaultsInvalid?: boolean;
   globalSettingsIndicator?: { variant: 'error' | 'warning' | 'info'; issues: string[] } | null;
@@ -32,8 +34,6 @@ export type FilenameBarActionContext = Readonly<{
 
 export type FilenameBarProps = Omit<FilenameBarActionContext, 'filename'> & Readonly<{
   saveError: string | null;
-  /** Why the typed filename cannot be saved: a chip beside the field. */
-  filenameError?: string | null;
   /**
    * Required storage suffix for hosts that present a stem-only filename field.
    * Hosts that present the full filename omit this and retain their existing
@@ -281,6 +281,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
       filename,
       hostModelName,
       saveStatus,
+      filenameError,
       onOpenDefaults,
       defaultsInvalid,
       globalSettingsIndicator,
@@ -289,6 +290,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
       defaultsInvalid,
       documentHost,
       filename,
+      filenameError,
       globalSettingsIndicator,
       onOpenDefaults,
       hostModelName,
