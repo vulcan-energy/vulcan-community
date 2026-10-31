@@ -738,7 +738,7 @@ export function GeometryFilesMenu({
                             {document.summary.elements} {document.summary.elements === 1 ? 'element' : 'elements'}
                           </div>
                         ) : document.cloudOnly ? (
-                          <div className="files-dropdown-item-stats" title="Not in this folder; it downloads when opened">
+                          <div className="files-dropdown-item-stats" title="Not in this folder. Vulcan downloads the model when you open it.">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" role="img" aria-label="Not in this folder">
                               <path d="M17.5 19H7a5 5 0 1 1 1.1-9.9A6 6 0 0 1 19.5 11a4 4 0 0 1-2 8Z" />
                             </svg>

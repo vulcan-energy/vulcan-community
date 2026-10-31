@@ -15,6 +15,12 @@ export type FilenameActionContribution<HostContext, RenderResult> = Readonly<{
    * The first available contribution that returns a value wins.
    */
   renderSaveLabel?: (context: HostContext) => RenderResult | null;
+  /**
+   * Renders the Save button (`button`, label included) or, by returning null,
+   * no Save button at all: for a host state where another control owns the
+   * decision (a conflict bar). The first available contribution with it wins.
+   */
+  renderSaveButton?: (context: HostContext, button: RenderResult) => RenderResult | null;
 }>;
 
 export type FilenameActionContributions<HostContext, RenderResult> = Readonly<{

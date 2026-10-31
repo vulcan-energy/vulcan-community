@@ -25,6 +25,8 @@ export type FilenameBarActionContext = Readonly<{
   filename: string;
   hostModelName?: string;
   saveStatus: 'idle' | 'saving' | 'success' | 'error';
+  /** Why the typed filename cannot be saved: a chip beside the field. */
+  filenameError?: string | null;
   onOpenDefaults?: () => void;
   defaultsInvalid?: boolean;
   globalSettingsIndicator?: { variant: 'error' | 'warning' | 'info'; issues: string[] } | null;
@@ -199,6 +201,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   hostModelName,
   saveStatus,
   saveError,
+  filenameError,
   fileNameExtension = '',
   saveErrorTitle = 'HEM input build failed',
   onOpenDefaults,
@@ -278,6 +281,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
       filename,
       hostModelName,
       saveStatus,
+      filenameError,
       onOpenDefaults,
       defaultsInvalid,
       globalSettingsIndicator,
@@ -286,6 +290,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
       defaultsInvalid,
       documentHost,
       filename,
+      filenameError,
       globalSettingsIndicator,
       onOpenDefaults,
       hostModelName,
@@ -305,6 +310,9 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     saveLabel = action.renderSaveLabel?.(filenameActionContext) ?? null;
     if (saveLabel !== null) break;
   }
+  const saveButtonSlot = availableFilenameActions.find((action) => action.renderSaveButton)?.renderSaveButton;
+  const renderSaveButton = (button: React.ReactNode) =>
+    saveButtonSlot ? saveButtonSlot(filenameActionContext, button) : button;
 
   const closeSaveErrorDropdown = useCallback(() => {
     setIsSaveErrorModalOpen(false);
@@ -677,7 +685,16 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
             placeholder="Enter filename (without extension)"
             variant="ghost"
           />
-          {isUnnamedDraft ? (
+          {filenameError ? (
+            <button
+              type="button"
+              onClick={() => document.getElementById('filename-field')?.focus()}
+              title={filenameError}
+              className="status-chip status-chip--error"
+            >
+              {filenameError}
+            </button>
+          ) : isUnnamedDraft ? (
             <button
               type="button"
               onClick={() => document.getElementById('filename-field')?.focus()}
@@ -692,7 +709,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
 
       <div className="filename-bar-right">
         <div className="filename-bar-save-stack">
-        <button
+        {renderSaveButton(<button
           ref={saveButtonRef}
           data-geometry-save-action
           type="button"
@@ -737,7 +754,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
               </span>
             )}
           </span>
-        </button>
+        </button>)}
         {availableFilenameActions.map((action) => action.placement === 'save' ? (
           <React.Fragment key={action.id}>
             {action.render(filenameActionContext)}
