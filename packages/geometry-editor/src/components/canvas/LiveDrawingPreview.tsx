@@ -7,7 +7,7 @@ import type { DrawingPreviewSignal } from './drawingPreviewSignal';
 
 type LiveDrawingPreviewProps = Omit<
   DrawingPreviewProps,
-  'drawCursor' | 'drawAngleSnapped' | 'segmentLengthPreview' | 'drawElbow'
+  'drawCursor' | 'drawAngleSnapped' | 'segmentLengthPreview' | 'drawBends'
 > & {
   previewSignal: DrawingPreviewSignal;
 };
@@ -28,7 +28,7 @@ export const LiveDrawingPreview = memo<LiveDrawingPreviewProps>(function LiveDra
       drawCursor={livePreview.drawCursor}
       drawAngleSnapped={livePreview.drawAngleSnapped}
       segmentLengthPreview={livePreview.segmentLengthPreview}
-      drawElbow={livePreview.drawElbow}
+      drawBends={livePreview.drawBends}
     />
   );
 });

@@ -32,7 +32,7 @@ describe('drawing preview signal', () => {
         text: '1.00m',
         position: { x: 10, y: 20 },
       },
-      drawElbow: null,
+      drawBends: [],
     });
 
     signal.set({

@@ -266,6 +266,20 @@ describe('planAutoDucts', () => {
     expect(segs(filled, 'exhaust')).toEqual([[p(0, 0), p(0, 4)], [p(0, 4), p(-3, 4)], [p(-3, 4), p(-3, 4, 1.5)]]);
   });
 
+  it('dog-legs to a terminal placed along its wall, arriving through the wall, never along it', () => {
+    const placed = { id: 't', name: 'T', type: 'MechanicalVentilationTerminal', terminal_type: 'intake', parent_element: 'MV', host_element: 'Wall N', floorId: 'f0', coordinates: [p(3, -2, 2.4)] } as Element;
+    const plan = segs(planAutoDucts(unit(), [unit(), hosts[0]!, placed], [], floors), 'intake');
+    expect(plan).toEqual([[p(0, 0), p(0, -1)], [p(0, -1), p(3, -1)], [p(3, -1), p(3, -2)], [p(3, -2), p(3, -2, 2.4)]]);
+    expect(plan.some(([a, b]) => a!.y === -2 && b!.y === -2 && a!.x !== b!.x)).toBe(false);
+  });
+
+  it('keeps a new terminal 0.5 m in from its wall ends, on the duct end', () => {
+    const drafts = planAutoDucts(unit('MVHR', 8, 0), [unit('MVHR', 8, 0), hosts[0]!], [], floors);
+    const terminal = drafts.find((d) => d.type === 'MechanicalVentilationTerminal')!.coordinates[0]!;
+    expect(terminal).toEqual(p(4.5, -2, 2.4));
+    expect(segs(drafts, 'intake').at(-1)![1]).toBe(terminal);
+  });
+
   it('plans a connected network with no topology warnings or overlap errors, and fills only gaps on re-run', () => {
     const drafts = planAutoDucts(unit(), [unit(), ...hosts], rooms, floors);
     expect(collectMvhrDuctTopologyWarnings(ducts(drafts), { unitPoint: p(0, 0) })).toEqual([]);
@@ -364,17 +378,29 @@ describe('planPrimaryPipework', () => {
   const pipes = (drafts: ElementDraft[]) => drafts.map((d, i) => ({ ...d, id: `pipe${i}` }) as unknown as Element);
   const legs = (drafts: ElementDraft[]) => drafts.map((d) => [(d as { location: string }).location, d.length, d.floorId, d.coordinates]);
 
-  it('routes an L from the heat source to the cylinder, external outside the footprint, split at the wall', () => {
+  it('leaves an outside heat source along the wall normal, jogs inside the footprint, and splits at the wall', () => {
+    // The jog sits halfway between the wall (x = 10) and the cylinder (x = 3).
     expect(legs(planPrimaryPipework([ground, heatPump, cylinder()], floors))).toEqual([
       ['external', 2, 'f0', [p(12, 2), p(10, 2)]],
-      ['internal', 7, 'f0', [p(10, 2), p(3, 2)]],
-      ['internal', 4, 'f0', [p(3, 2), p(3, 6)]],
+      ['internal', 3.5, 'f0', [p(10, 2), p(6.5, 2)]],
+      ['internal', 4, 'f0', [p(6.5, 2), p(6.5, 6)]],
+      ['internal', 3.5, 'f0', [p(6.5, 6), p(3, 6)]],
     ]);
+  });
+
+  it('keeps the external pipe of a heat pump beside a long wall to its 1 m stand-off', () => {
+    const north = { ...heatPump, coordinates: [p(2, 9)] } as Element;
+    const run = [ground, north, cylinder(0, 'StorageTank', p(9, 6))];
+    const drafts = planPrimaryPipework(run, floors);
+    const external = legs(drafts).filter(([location]) => location === 'external');
+    expect(external).toEqual([['external', 1, 'f0', [p(2, 9), p(2, 8)]]]);
+    expect(drafts.every((d) => d.coordinates[0]!.x === d.coordinates[1]!.x || d.coordinates[0]!.y === d.coordinates[1]!.y)).toBe(true);
+    expect(primaryPipeRunGap(pipes(drafts)[0]!, [...run, ...pipes(drafts)], floors)).toBeNull();
   });
 
   it('rises at the cylinder to an upper storey, and the riser belongs to that storey', () => {
     const drafts = planPrimaryPipework([ground, heatPump, cylinder(1)], floors);
-    expect(legs(drafts).slice(2)).toEqual([['internal', 4, 'f0', [p(3, 2), p(3, 6)]], ['internal', 2.5, 'f1', [p(3, 6), p(3, 6, 2.5)]]]);
+    expect(legs(drafts).slice(3)).toEqual([['internal', 3.5, 'f0', [p(6.5, 6), p(3, 6)]], ['internal', 2.5, 'f1', [p(3, 6), p(3, 6, 2.5)]]]);
     expect(primaryPipeRunGap(pipes(drafts)[0]!, [ground, heatPump, cylinder(1), ...pipes(drafts)], floors)).toBeNull();
   });
 
@@ -392,7 +418,7 @@ describe('planPrimaryPipework', () => {
     const at = (x: number, y: number) => ({ ...heatPump, coordinates: [p(x, y)] }) as Element;
     const min = (drafts: ElementDraft[]) => Math.min(...drafts.map((d) => d.length!));
     // A heat pump 3 cm and 4 mm outside the wall: the sliver joins the internal leg.
-    expect(legs(planPrimaryPipework([ground, at(10.03, 2), cylinder()], floors))[0]).toEqual(['internal', 7.03, 'f0', [p(10.03, 2), p(3, 2)]]);
+    expect(legs(planPrimaryPipework([ground, at(10.03, 2), cylinder()], floors))[0]).toEqual(['internal', 3.53, 'f0', [p(10.03, 2), p(6.5, 2)]]);
     expect(legs(planPrimaryPipework([ground, at(10.004, 2), cylinder()], floors))[0]).toEqual(['internal', 7, 'f0', [p(10.004, 2), p(3, 2)]]);
     // A cylinder 3 cm off the heat pump's axis: no 3 cm elbow leg, one straight run split at the wall.
     const offAxis = planPrimaryPipework([ground, heatPump, cylinder(0, 'StorageTank', p(3, 2.03))], floors);
@@ -416,7 +442,7 @@ describe('planPrimaryPipework', () => {
   it('warns on a run that misses its cylinder, marking the free end nearest it', () => {
     const run = pipes(planPrimaryPipework([ground, heatPump, cylinder()], floors)).slice(0, 2);
     expect(primaryPipeRunGap(run[0]!, [ground, heatPump, cylinder(), ...run], floors)).toEqual({
-      message: 'Primary pipework run is not connected to Cylinder', looseEnd: p(3, 2),
+      message: 'Primary pipework run is not connected to Cylinder', looseEnd: p(6.5, 2),
     });
   });
 });

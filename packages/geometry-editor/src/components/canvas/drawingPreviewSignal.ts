@@ -13,8 +13,8 @@ export type DrawingPreviewLiveState = {
   drawCursor: DrawingPreviewPoint | null;
   drawAngleSnapped: boolean;
   segmentLengthPreview: DrawingPreviewSegment;
-  /** Elbow of a Shift L-route preview (duct/pipe plan tool); null for a straight segment. */
-  drawElbow: DrawingPreviewPoint | null;
+  /** Bends of a Shift route preview (duct/pipe plan tool): one for an L, two for a dog-leg; empty when straight. */
+  drawBends: DrawingPreviewPoint[];
 };
 
 export type DrawingPreviewSignal = {
@@ -34,11 +34,15 @@ const EMPTY_DRAWING_PREVIEW: DrawingPreviewLiveState = {
   drawCursor: null,
   drawAngleSnapped: false,
   segmentLengthPreview: EMPTY_SEGMENT_LENGTH_PREVIEW,
-  drawElbow: null,
+  drawBends: [],
 };
 
 function samePoint(a: DrawingPreviewPoint | null, b: DrawingPreviewPoint | null): boolean {
   return a === b || (!!a && !!b && a.x === b.x && a.y === b.y);
+}
+
+function samePoints(a: DrawingPreviewPoint[], b: DrawingPreviewPoint[]): boolean {
+  return a.length === b.length && a.every((p, i) => samePoint(p, b[i]!));
 }
 
 function sameSegment(a: DrawingPreviewSegment, b: DrawingPreviewSegment): boolean {
@@ -54,7 +58,7 @@ function sameState(a: DrawingPreviewLiveState, b: DrawingPreviewLiveState): bool
     samePoint(a.drawCursor, b.drawCursor) &&
     a.drawAngleSnapped === b.drawAngleSnapped &&
     sameSegment(a.segmentLengthPreview, b.segmentLengthPreview) &&
-    samePoint(a.drawElbow, b.drawElbow)
+    samePoints(a.drawBends, b.drawBends)
   );
 }
 
@@ -63,7 +67,7 @@ function normalizeState(patch: Partial<DrawingPreviewLiveState>): DrawingPreview
     drawCursor: patch.drawCursor ?? EMPTY_DRAWING_PREVIEW.drawCursor,
     drawAngleSnapped: patch.drawAngleSnapped ?? EMPTY_DRAWING_PREVIEW.drawAngleSnapped,
     segmentLengthPreview: patch.segmentLengthPreview ?? EMPTY_DRAWING_PREVIEW.segmentLengthPreview,
-    drawElbow: patch.drawElbow ?? EMPTY_DRAWING_PREVIEW.drawElbow,
+    drawBends: patch.drawBends ?? EMPTY_DRAWING_PREVIEW.drawBends,
   };
 }
 

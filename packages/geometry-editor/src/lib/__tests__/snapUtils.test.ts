@@ -18,7 +18,7 @@ import {
   resolveDrawSnapPoint,
   getExactSnappedVertices,
   getWallSupportedSnappedVertices,
-  planOrthogonalElbow,
+  planOrthogonalBend,
   placedDrawPoint,
   planServiceLineEndpointWelds,
   planServiceLineTeeSplits,
@@ -47,13 +47,14 @@ describe('constrainPointOrthogonally', () => {
   });
 });
 
-describe('planOrthogonalElbow', () => {
-  it('routes the larger move first, flips, and stays straight on-axis', () => {
+describe('planOrthogonalBend', () => {
+  it('cycles L, flipped L and a dog-leg along the larger move, and stays straight on-axis', () => {
     const start = { x: 0, y: 0 };
-    expect(planOrthogonalElbow(start, { x: 4, y: 1 }, 2, false)).toEqual({ x: 4, y: 0 });
-    expect(planOrthogonalElbow(start, { x: 4, y: 1 }, 2, true)).toEqual({ x: 0, y: 1 });
-    expect(planOrthogonalElbow(start, { x: 1, y: -3 }, 2, false)).toEqual({ x: 0, y: -3 });
-    expect(planOrthogonalElbow(start, { x: 4, y: 0.05 }, 2, false)).toBeNull();
+    expect(planOrthogonalBend(start, { x: 4, y: 1 }, 2, 'L')).toEqual([{ x: 4, y: 0 }]);
+    expect(planOrthogonalBend(start, { x: 4, y: 1 }, 2, 'flipped-L')).toEqual([{ x: 0, y: 1 }]);
+    expect(planOrthogonalBend(start, { x: 4, y: 1 }, 2, 'dog-leg')).toEqual([{ x: 2, y: 0 }, { x: 2, y: 1 }]);
+    expect(planOrthogonalBend(start, { x: 1, y: -3 }, 2, 'L')).toEqual([{ x: 0, y: -3 }]);
+    expect(planOrthogonalBend(start, { x: 4, y: 0.05 }, 2, 'dog-leg')).toBeNull();
   });
 });
 

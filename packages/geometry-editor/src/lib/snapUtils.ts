@@ -1319,19 +1319,56 @@ export function serviceNetworkSegmentFilter(draft: ServiceNetworkDraft): ((el: E
     el.coordinates?.length === 2;
 }
 
+/** The plan axis a run leaves or enters an end along. */
+export type PlanAxis = 'x' | 'y';
+
 /**
- * Shift on the duct/pipe plan tool: an off-axis end routes as an L whose first leg runs along the
- * larger move (`flip` swaps the legs). Null when the end is on-axis, which keeps the ortho lock.
+ * Interior bend points of an orthogonal plan route from `start` to `end`; empty when they share an
+ * axis (a straight run). `startAxis` / `endAxis` are the axes the run must leave and arrive along.
+ * Neither: an L, longer axis first. Different axes: the L that meets both. The same axis, or only
+ * one given (the free end adopts it): a Z dog-leg along that axis, crossing at `jog` of the way
+ * (rounded to the 0.01 m grid).
  */
-export function planOrthogonalElbow(
+export function orthogonalBendPoints(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  startAxis?: PlanAxis,
+  endAxis?: PlanAxis,
+  jog = 0.5,
+): Array<{ x: number; y: number }> {
+  if (start.x === end.x || start.y === end.y) return [];
+  const longer: PlanAxis = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y) ? 'x' : 'y';
+  const first = startAxis ?? endAxis ?? longer;
+  const last = endAxis ?? startAxis ?? (longer === 'x' ? 'y' : 'x');
+  if (first !== last) return [first === 'x' ? { x: end.x, y: start.y } : { x: start.x, y: end.y }];
+  if (first === 'x') {
+    const x = roundToTwoDecimals(start.x + jog * (end.x - start.x)); // the jog sits on the 0.01 m grid
+    return [{ x, y: start.y }, { x, y: end.y }];
+  }
+  const y = roundToTwoDecimals(start.y + jog * (end.y - start.y));
+  return [{ x: start.x, y }, { x: end.x, y }];
+}
+
+/** Shapes F cycles through while Shift-drawing a duct or pipe: L, flipped L, dog-leg. */
+export const ORTHOGONAL_BEND_SHAPES = ['L', 'flipped-L', 'dog-leg'] as const;
+export type OrthogonalBendShape = (typeof ORTHOGONAL_BEND_SHAPES)[number];
+
+/**
+ * Shift on the duct/pipe plan tool: an off-axis end routes through these bend points. An L runs
+ * the larger move first (flipped: last); a dog-leg runs along the larger move and jogs halfway.
+ * Null when the end is on-axis, which keeps the ortho lock.
+ */
+export function planOrthogonalBend(
   start: { x: number; y: number },
   end: { x: number; y: number },
   angleTolDeg: number,
-  flip: boolean,
-): { x: number; y: number } | null {
+  shape: OrthogonalBendShape,
+): Array<{ x: number; y: number }> | null {
   if (end.x === start.x || end.y === start.y || applyAngleSnapIfClose(end, start, angleTolDeg).snapped) return null;
-  const xFirst = (Math.abs(end.x - start.x) >= Math.abs(end.y - start.y)) !== flip;
-  return xFirst ? { x: end.x, y: start.y } : { x: start.x, y: end.y };
+  const longer: PlanAxis = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y) ? 'x' : 'y';
+  const other: PlanAxis = longer === 'x' ? 'y' : 'x';
+  if (shape === 'dog-leg') return orthogonalBendPoints(start, end, longer, longer);
+  return shape === 'L' ? orthogonalBendPoints(start, end, longer, other) : orthogonalBendPoints(start, end, other, longer);
 }
 
 /** Drawn ends sit on the 0.01 m grid, so a tee on a diagonal segment can land up to ~7 mm off its line in plan. */
