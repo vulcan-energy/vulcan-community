@@ -120,7 +120,8 @@ export async function preloadSchema(): Promise<void> {
   if (!preloadCoreSchemaPromise) {
     const generation = schemaAssetGeneration;
     preloadCoreSchemaPromise = loadSchemaText('core').then((txt) => {
-        if (generation !== schemaAssetGeneration) throw new Error('Geometry schema load superseded by a target change');
+        // A target change replaced this load: join the current one instead of rejecting.
+        if (generation !== schemaAssetGeneration) return preloadSchema();
         schemaText = txt;
         schemaObj = asSchemaNode(JSON.parse(txt));
         if (!schemaObj) {
@@ -254,7 +255,7 @@ export async function preloadFHSSchema(): Promise<void> {
   if (!preloadFhsSchemaPromise) {
     const generation = schemaAssetGeneration;
     preloadFhsSchemaPromise = loadSchemaText('fhs').then((txt) => {
-        if (generation !== schemaAssetGeneration) throw new Error('Geometry schema load superseded by a target change');
+        if (generation !== schemaAssetGeneration) return preloadFHSSchema();
         const obj = asSchemaNode(JSON.parse(txt));
         if (!obj || (!obj.$defs && !obj.properties)) throw new Error('FHS geometry schema is missing properties and $defs');
         fhsSchemaText = txt;

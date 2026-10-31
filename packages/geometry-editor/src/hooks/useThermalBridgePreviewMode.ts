@@ -121,7 +121,7 @@ export function useThermalBridgePreviewMode({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
-        event.key.toLowerCase() !== 'a' ||
+        event.key?.toLowerCase() !== 'a' ||
         event.ctrlKey ||
         event.metaKey ||
         event.altKey ||
@@ -140,7 +140,7 @@ export function useThermalBridgePreviewMode({
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === 'a') {
+      if (event.key?.toLowerCase() === 'a') {
         release();
       }
     };
