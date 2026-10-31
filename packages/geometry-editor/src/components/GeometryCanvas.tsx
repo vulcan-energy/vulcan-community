@@ -800,12 +800,6 @@ function createServiceLineCoordinatesWithEndpointZ(
   ];
 }
 
-/** Where a bent route's length label sits: the L's elbow, or the middle of a dog-leg's jog. */
-function routeLabelAnchor(bends: Array<{ x: number; y: number }>): { x: number; y: number } {
-  const [first, last] = [bends[0]!, bends[bends.length - 1]!];
-  return { x: (first.x + last.x) / 2, y: (first.y + last.y) / 2 };
-}
-
 const getDormerBundleSelectionIds = (
   elementId: string,
   elementsById: Record<string, Element>,
@@ -1726,7 +1720,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       ) {
         const preview = drawingPreviewSignal.getSnapshot();
         const start = drawPoints[0];
-        if (event.code === 'KeyF' && !event.ctrlKey && !event.metaKey && preview.drawBends.length > 0 && preview.drawCursor && start) {
+        if (event.code === 'KeyF' && !event.repeat && !event.ctrlKey && !event.metaKey && preview.drawBends.length > 0 && preview.drawCursor && start) {
           event.preventDefault();
           const shapes = ORTHOGONAL_BEND_SHAPES;
           bendShapeRef.current = shapes[(shapes.indexOf(bendShapeRef.current) + 1) % shapes.length]!;
@@ -1735,7 +1729,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             drawBends,
             segmentLengthPreview: {
               ...preview.segmentLengthPreview,
-              position: worldToCanvas(routeLabelAnchor(drawBends), scale, panOffset, canvasCenter),
+              position: worldToCanvas(drawBends[0] ?? start, scale, panOffset, canvasCenter),
             },
           });
           return;
@@ -4088,9 +4082,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           : snapRes.bends.length > 0
             ? Math.abs(previewPoint.x - lastPoint.x) + Math.abs(previewPoint.y - lastPoint.y)
             : Math.hypot(previewPoint.x - lastPoint.x, previewPoint.y - lastPoint.y);
-        // A bent route anchors its length label at its bends, not the chord midpoint.
+        // A bent route anchors its length label at its first bend (an L's elbow), clear of a dog-leg's jog.
         const midpointCanvas = worldToCanvas(
-          snapRes.bends.length > 0 ? routeLabelAnchor(snapRes.bends) : {
+          snapRes.bends[0] ?? {
             x: (lastPoint.x + previewPoint.x) / 2,
             y: (lastPoint.y + previewPoint.y) / 2,
           },

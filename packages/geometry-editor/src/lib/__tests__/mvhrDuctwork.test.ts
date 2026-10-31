@@ -280,6 +280,12 @@ describe('planAutoDucts', () => {
     expect(segs(drafts, 'intake').at(-1)![1]).toBe(terminal);
   });
 
+  it('plans terminal runs first, so a room run never lands on a terminal dog-leg bend', () => {
+    const wallS = host('Wall S', 'BuildingElementOpaque', [-6, -8], [2.2, -8]);
+    const drafts = planAutoDucts(unit('MVHR', 2, 0), [unit('MVHR', 2, 0), wallS], [room('k', 'kitchen', 0, -1, -5)], floors);
+    expect(collectMvhrDuctTopologyWarnings(ducts(drafts), { unitPoint: p(2, 0) })).toEqual([]);
+  });
+
   it('plans a connected network with no topology warnings or overlap errors, and fills only gaps on re-run', () => {
     const drafts = planAutoDucts(unit(), [unit(), ...hosts], rooms, floors);
     expect(collectMvhrDuctTopologyWarnings(ducts(drafts), { unitPoint: p(0, 0) })).toEqual([]);

@@ -127,7 +127,7 @@ describe('tooltip copy', () => {
       .toBe('Place final point (Alt/Option+Click to keep drawing) · Shift: L-bend');
     expect(
       getDrawModeTooltipText('tb-plan-line', [{ x: 0, y: 0 }], [], null, null, null, { current: null }, 'WaterPipework', true, true),
-    ).toBe('Place end point + continue · F: next shape');
+    ).toBe('Place end point + continue · F: next bend');
     expect(text('tb-plan-line', 1, false, 'ThermalBridgeLinear'))
       .toBe('Place final point (Alt/Option+Click to keep drawing; L/V/S switches shape)');
     expect(text('tb-slope-line', 1, false, 'WaterPipework')).toBe('Place second point (Alt/Option+Click to keep drawing)');

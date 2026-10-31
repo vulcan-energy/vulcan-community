@@ -68,7 +68,8 @@ from earlier private Vulcan development.
 - Systems rows combine by name, without guessed repoints (#104).
 - Floor bases are editable and floor stacks are validated (#64, #65, #67, #68, #98).
 - Auto-routed ducts and primary pipes enter terminals and leave heat sources along the
-  wall normal, with a dog-leg where needed; F cycles L, flipped L and dog-leg when drawing.
+  wall normal, with a dog-leg where needed; F (next bend) cycles L, flipped L and dog-leg
+  when drawing.
 
 ### Fixed
 

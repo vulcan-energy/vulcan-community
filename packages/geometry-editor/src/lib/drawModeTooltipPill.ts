@@ -254,7 +254,7 @@ export function getDrawModeTooltipText(
       if (drawMode === 'tb-plan-line') {
         const base = withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point', showShapeSwitch);
         if (showShapeSwitch) return base;
-        return `${base} · ${bendPreviewActive ? 'F: next shape' : 'Shift: L-bend'}`;
+        return `${base} · ${bendPreviewActive ? 'F: next bend' : 'Shift: L-bend'}`;
       }
       return withMultiDrawHint(multiDrawModifierHeld, 'Place end point + continue', 'Place final point');
     }

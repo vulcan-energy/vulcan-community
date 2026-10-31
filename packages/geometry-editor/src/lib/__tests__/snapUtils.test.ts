@@ -55,6 +55,8 @@ describe('planOrthogonalBend', () => {
     expect(planOrthogonalBend(start, { x: 4, y: 1 }, 2, 'dog-leg')).toEqual([{ x: 2, y: 0 }, { x: 2, y: 1 }]);
     expect(planOrthogonalBend(start, { x: 1, y: -3 }, 2, 'L')).toEqual([{ x: 0, y: -3 }]);
     expect(planOrthogonalBend(start, { x: 4, y: 0.05 }, 2, 'dog-leg')).toBeNull();
+    // A jog that rounds onto an end would commit a zero-length leg, so the dog-leg draws as the L.
+    expect(planOrthogonalBend(start, { x: 0.01, y: 0.01 }, 2, 'dog-leg')).toEqual([{ x: 0.01, y: 0 }]);
   });
 });
 
