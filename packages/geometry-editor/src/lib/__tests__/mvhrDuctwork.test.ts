@@ -296,6 +296,12 @@ describe('planAutoDucts', () => {
     const scene = [unit('MVHR', 2.5, 2.5), host('W', 'BuildingElementOpaque', [1.5, -2], [4, -2]), host('H0', 'BuildingElementOpaque', [9, -6.5], [14.5, -6.5]), intake];
     const userPlan = planAutoDucts(unit('MVHR', 2.5, 2.5), scene, [], floors);
     expect(collectMvhrDuctTopologyWarnings(ducts(userPlan), { unitPoint: p(2.5, 2.5) })).toEqual([]);
+    // A placed intake at 1.2 m blocks its plan point for the new exhaust on the colinear window.
+    const low = { ...intake, host_element: 'H1', coordinates: [p(-2.2, -0.9, 1.2)] } as Element;
+    const lowScene = [unit('MVHR', 4.5, -0.9), host('H1', 'BuildingElementOpaque', [-2.2, -2.6], [-2.2, 0.8]),
+      host('W0', 'BuildingElementTransparent', [-2.2, -2.6], [-2.2, -0.22]), low];
+    const lowPlan = planAutoDucts(unit('MVHR', 4.5, -0.9), lowScene, [], floors);
+    expect(collectMvhrDuctTopologyWarnings(ducts(lowPlan), { unitPoint: p(4.5, -0.9) })).toEqual([]);
   });
 
   it('plans a connected network with no topology warnings or overlap errors, and fills only gaps on re-run', () => {

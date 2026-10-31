@@ -1371,7 +1371,7 @@ export function planOrthogonalBend(
     // A jog within 1 cm of an end would commit a sliver leg: draw the L instead.
     const bends = orthogonalBendPoints(start, end, longer, longer);
     const plan = [start, ...bends, end];
-    if (plan.every((q, i) => i === 0 || Math.hypot(q.x - plan[i - 1]!.x, q.y - plan[i - 1]!.y) >= 0.01)) return bends;
+    if (plan.every((q, i) => i === 0 || Math.hypot(q.x - plan[i - 1]!.x, q.y - plan[i - 1]!.y) >= 0.01 - 1e-9)) return bends;
   }
   return shape !== 'flipped-L' ? orthogonalBendPoints(start, end, longer, other) : orthogonalBendPoints(start, end, other, longer);
 }

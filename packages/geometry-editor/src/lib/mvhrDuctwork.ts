@@ -659,14 +659,17 @@ export function planAutoDucts(
     if (point) terminalEnds.push({ role, point, axis: terminalAxis(existing, elements) });
   }
   const reserved = terminalEnds.flatMap(({ point }) => (point ? [point] : []));
-  const held = terminals.flatMap((terminal) => getTerminalPoint(terminal) ?? []);
+  // In plan, on the unit's storey: two terminals at one plan point share their risers' foot.
+  const held = terminals
+    .filter((terminal) => getElementCanvasFloorZValue(terminal, effectiveFloors) === unitStorey)
+    .flatMap((terminal) => getTerminalPoint(terminal) ?? []);
   for (const end of terminalEnds) {
     while (!end.point && freeHosts.length > 0) {
       const next = freeHosts.shift()!;
       const terminal = hostedMvhrTerminalDraft(end.role, unit.name, next.host, terminalPointOnHost(unitPoint, next.segment), effectiveFloors);
       // The duct ends on the terminal's own point, which already lies on the host, so the store keeps it.
       const point = terminal.coordinates[0] as Point3;
-      if ([...held, ...reserved].some((q) => sameDuctPoint(q, point))) continue;
+      if ([...held, ...reserved].some((q) => sameDuctPoint({ ...q, z: point.z }, point))) continue;
       Object.assign(end, { point, axis: segmentNormalAxis(...next.segment), terminal });
       reserved.push(point);
     }
@@ -688,7 +691,8 @@ export function planAutoDucts(
       : [orthogonalRoute(unitPoint, end)];
     const candidates = routes.map((route) => withoutShortLegs(route, MIN_DUCT_LEG_M));
     // ponytail: when every candidate collides the first is kept, and the topology warning asks for a
-    // hand fix; search more jogs if real models hit that.
+    // hand fix (seen when a sub-0.6 m offset collapses every candidate to one L); re-pick the host if
+    // real models hit that.
     return candidates.find((run) => run && !collides(run)) ?? candidates[0];
   };
   for (const { role, point, axis, terminal } of terminalEnds) {
