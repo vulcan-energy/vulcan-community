@@ -308,6 +308,9 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     saveLabel = action.renderSaveLabel?.(filenameActionContext) ?? null;
     if (saveLabel !== null) break;
   }
+  const saveButtonSlot = availableFilenameActions.find((action) => action.renderSaveButton)?.renderSaveButton;
+  const renderSaveButton = (button: React.ReactNode) =>
+    saveButtonSlot ? saveButtonSlot(filenameActionContext, button) : button;
 
   const closeSaveErrorDropdown = useCallback(() => {
     setIsSaveErrorModalOpen(false);
@@ -704,7 +707,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
 
       <div className="filename-bar-right">
         <div className="filename-bar-save-stack">
-        <button
+        {renderSaveButton(<button
           ref={saveButtonRef}
           data-geometry-save-action
           type="button"
@@ -749,7 +752,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
               </span>
             )}
           </span>
-        </button>
+        </button>)}
         {availableFilenameActions.map((action) => action.placement === 'save' ? (
           <React.Fragment key={action.id}>
             {action.render(filenameActionContext)}
