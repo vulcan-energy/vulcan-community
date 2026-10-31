@@ -32,20 +32,30 @@ describe('target-scoped schema caches', () => {
     configureGeometrySchemaAssetSource({ loadText: async () => JSON.stringify(schema(1)) });
     expect(revisions).toHaveLength(2);
   });
-  it.each(['core', 'fhs'] as const)('rejects late %s results from a previous target without clearing the new schema', async mode => {
+  it.each(['core', 'fhs'] as const)('a superseded %s load joins the current target instead of rejecting', async mode => {
     let finish!: (text: string) => void;
     configureGeometrySchemaAssetSource({ loadText: () => new Promise(resolve => { finish = resolve; }) });
     const preload = mode === 'core' ? preloadSchema : preloadFHSSchema;
     const current = mode === 'core' ? getSchemaObject : getFHSSchemaObject;
     const old = preload();
-    const oldResult = expect(old).rejects.toThrow('superseded');
     configureGeometrySchemaAssetSource({ loadText: async () => JSON.stringify(schema(9)) });
     expect(current()).toBeNull();
     await preload();
     finish(JSON.stringify(schema(1)));
-    await oldResult;
+    await old;
     expect(current()?.properties?.value.minimum).toBe(9);
     await preload();
+    expect(current()?.properties?.value.minimum).toBe(9);
+  });
+  it.each(['core', 'fhs'] as const)('a superseded %s load that fails still joins the current target', async mode => {
+    let fail!: (error: Error) => void;
+    configureGeometrySchemaAssetSource({ loadText: () => new Promise((_, reject) => { fail = reject; }) });
+    const preload = mode === 'core' ? preloadSchema : preloadFHSSchema;
+    const current = mode === 'core' ? getSchemaObject : getFHSSchemaObject;
+    const old = preload();
+    configureGeometrySchemaAssetSource({ loadText: async () => JSON.stringify(schema(9)) });
+    fail(new Error('old target 404'));
+    await old;
     expect(current()?.properties?.value.minimum).toBe(9);
   });
   it('coalesces FHS loads and awaits their actual completion', async () => {
