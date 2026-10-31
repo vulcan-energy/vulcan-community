@@ -47,6 +47,17 @@ describe('target-scoped schema caches', () => {
     await preload();
     expect(current()?.properties?.value.minimum).toBe(9);
   });
+  it.each(['core', 'fhs'] as const)('a superseded %s load that fails still joins the current target', async mode => {
+    let fail!: (error: Error) => void;
+    configureGeometrySchemaAssetSource({ loadText: () => new Promise((_, reject) => { fail = reject; }) });
+    const preload = mode === 'core' ? preloadSchema : preloadFHSSchema;
+    const current = mode === 'core' ? getSchemaObject : getFHSSchemaObject;
+    const old = preload();
+    configureGeometrySchemaAssetSource({ loadText: async () => JSON.stringify(schema(9)) });
+    fail(new Error('old target 404'));
+    await old;
+    expect(current()?.properties?.value.minimum).toBe(9);
+  });
   it('coalesces FHS loads and awaits their actual completion', async () => {
     let finish!: (text: string) => void;
     let count = 0;
