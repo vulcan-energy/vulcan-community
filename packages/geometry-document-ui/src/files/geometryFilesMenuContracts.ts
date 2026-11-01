@@ -156,6 +156,11 @@ export type GeometryFilesMenuProps = Readonly<{
   /** Host actions before Duplicate and Delete in a saved row. */
   renderRowActions?: (document: GeometryFilesMenuDocument) => ReactNode;
   /**
+   * Host actions in Delete's place, by document id, also on a row without
+   * Delete (not in this folder). A row not in the map keeps Delete.
+   */
+  rowDeleteActions?: ReadonlyMap<string, ReactNode>;
+  /**
    * The host's Trash: a Trash filter while `count` models are in it, whose
    * view shows `content` (the host's rows, already searched) instead of documents.
    */
@@ -163,7 +168,13 @@ export type GeometryFilesMenuProps = Readonly<{
   /**
    * False while the host cannot filter by project (projects locked or not
    * loaded): the filter offers All models, Shared and Trash only, and shows
-   * only while Shared or Trash has models. Defaults to true.
+   * only while Shared or Trash has models (or `lockedProjectFilter` is set).
+   * Defaults to true.
    */
   projectFilters?: boolean;
+  /**
+   * While `projectFilters` is false: the host's entry for projects it cannot
+   * offer (a locked feature), last in the filter menu, which then always shows.
+   */
+  lockedProjectFilter?: ReactNode;
 }>;
