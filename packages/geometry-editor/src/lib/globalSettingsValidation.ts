@@ -389,3 +389,35 @@ export function collectGlobalSettingsWarnings(args: {
 
   return Array.from(new Set(warnings));
 }
+
+export type GlobalSettingsFieldSection =
+  | "defaults"
+  | "target"
+  | "dwelling"
+  | "airTightness"
+  | "ventilation"
+  | "thermalBridging";
+
+const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
+  "Postcode",
+  "ComplianceValidationEnabled",
+  "PartO_active_cooling_required",
+  "GroundFloorArea",
+  "HeatingControlType",
+  "PartGcompliance",
+  "ColdWaterSource",
+  "BuildingLength",
+  "BuildingWidth",
+  "KitchenExtractorHoodExternal",
+]);
+
+/** Where a CSV Metadata key is edited in Global Settings; null when it is not. */
+export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSection | null {
+  if (key.startsWith("DefaultAssembly")) return "defaults";
+  if (key === "TargetBundleId") return "target";
+  if (key.startsWith("AirPermeability_test_")) return "airTightness";
+  if (key.startsWith("Ventilation_") || key === "AirPermeability_ventilation_zone_height") return "ventilation";
+  if (key === "JunctionPsiDefaultsPath" || key.startsWith("DetailedBridgePsiProfile")) return "thermalBridging";
+  if (key.startsWith("General_") || key.startsWith("NumberOf") || DWELLING_FIELD_KEYS.has(key)) return "dwelling";
+  return null;
+}

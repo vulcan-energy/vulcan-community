@@ -26,6 +26,7 @@ import { resolveFieldPresentation } from "../lib/fieldPresentation";
 import {
   collectGlobalSettingsWarnings,
   fhsBedroomCountIssue,
+  globalSettingsFieldSection,
 } from "../lib/globalSettingsValidation";
 import {
   DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH,
@@ -88,38 +89,6 @@ export type GlobalSettingsModalProps = Readonly<{
   /** A CSV Metadata key: on open, its tab and section open and its field scrolls into view and takes focus. */
   focusFieldKey?: string;
 }>;
-
-export type GlobalSettingsFieldSection =
-  | "defaults"
-  | "target"
-  | "dwelling"
-  | "airTightness"
-  | "ventilation"
-  | "thermalBridging";
-
-const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
-  "Postcode",
-  "ComplianceValidationEnabled",
-  "PartO_active_cooling_required",
-  "GroundFloorArea",
-  "HeatingControlType",
-  "PartGcompliance",
-  "ColdWaterSource",
-  "BuildingLength",
-  "BuildingWidth",
-  "KitchenExtractorHoodExternal",
-]);
-
-/** Where a CSV Metadata key is edited in Global Settings; null when it is not. */
-export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSection | null {
-  if (key.startsWith("DefaultAssembly")) return "defaults";
-  if (key === "TargetBundleId") return "target";
-  if (key.startsWith("AirPermeability_test_")) return "airTightness";
-  if (key.startsWith("Ventilation_") || key === "AirPermeability_ventilation_zone_height") return "ventilation";
-  if (key === "JunctionPsiDefaultsPath" || key.startsWith("DetailedBridgePsiProfile")) return "thermalBridging";
-  if (key.startsWith("General_") || key.startsWith("NumberOf") || DWELLING_FIELD_KEYS.has(key)) return "dwelling";
-  return null;
-}
 
 const ROOM_COUNT_COMPLIANCE_ROWS: {
   field: DwellingCountField;
@@ -1232,33 +1201,31 @@ export function GlobalSettingsModal({
     el?.focus();
   }, []);
 
-  // focusFieldKey: open its tab and section, then scroll to and focus the field once it renders.
-  // State, not a ref: setting it re-renders even when the tab and section are already open.
-  const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null);
-  // Declared first, so it runs in the commit after the one that opened the section.
+  // focusFieldKey: a new request opens its tab and section during render; the effect
+  // then scrolls to and focuses the field, also when they were already open.
+  const focusRequest = isOpen ? focusFieldKey ?? null : null;
+  const [focusRequestOpened, setFocusRequestOpened] = useKeyedState(focusRequest ?? "", false);
+  if (focusRequest && !focusRequestOpened) {
+    setFocusRequestOpened(true);
+    const section = globalSettingsFieldSection(focusRequest);
+    if (section) {
+      setActiveTab(section === "defaults" ? "defaults" : "settings");
+      if (section === "dwelling") setComplianceSettingsExpanded(true);
+      if (section === "airTightness") setAirTightnessExpanded(true);
+      if (section === "ventilation") setVentilationEnvExpanded(true);
+      if (section === "thermalBridging") setThermalBridgingExpanded(true);
+      if (focusRequest === "JunctionPsiDefaultsPath") setJunctionPsiFallbackExpanded(true);
+    }
+  }
   useEffect(() => {
-    const key = pendingFocusKey;
     const container = containerRef.current;
-    if (!key || !container) return;
-    setPendingFocusKey(null);
+    if (!focusRequest || !container) return;
     const target =
-      container.querySelector(`[data-field-key="${CSS.escape(key)}"]`)
-      ?? container.querySelector(`[data-field-section="${globalSettingsFieldSection(key)}"]`);
+      container.querySelector(`[data-field-key="${CSS.escape(focusRequest)}"]`)
+      ?? container.querySelector(`[data-field-section="${globalSettingsFieldSection(focusRequest)}"]`);
     target?.scrollIntoView?.({ block: "center" });
     target?.closest("label")?.control?.focus({ preventScroll: true });
-  });
-
-  useEffect(() => {
-    const section = isOpen && focusFieldKey ? globalSettingsFieldSection(focusFieldKey) : null;
-    if (!section) return;
-    setActiveTab(section === "defaults" ? "defaults" : "settings");
-    if (section === "dwelling") setComplianceSettingsExpanded(true);
-    if (section === "airTightness") setAirTightnessExpanded(true);
-    if (section === "ventilation") setVentilationEnvExpanded(true);
-    if (section === "thermalBridging") setThermalBridgingExpanded(true);
-    if (focusFieldKey === "JunctionPsiDefaultsPath") setJunctionPsiFallbackExpanded(true);
-    setPendingFocusKey(focusFieldKey ?? null);
-  }, [isOpen, focusFieldKey]);
+  }, [focusRequest]);
   if (!isOpen || typeof document === "undefined") return null;
 
   return ReactDOM.createPortal(
