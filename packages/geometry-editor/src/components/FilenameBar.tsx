@@ -666,7 +666,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     />}
     <div className="filename-bar">
       <div className="filename-bar-left">
-        {availableFilenameActions.map((action) => action.placement === 'save' ? null : (
+        {availableFilenameActions.map((action) => (action.placement ?? 'start') !== 'start' ? null : (
           <React.Fragment key={action.id}>
             {action.render(filenameActionContext)}
           </React.Fragment>
@@ -685,6 +685,11 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
             placeholder="Enter filename (without extension)"
             variant="ghost"
           />
+          {availableFilenameActions.map((action) => action.placement === 'field' ? (
+            <React.Fragment key={action.id}>
+              {action.render(filenameActionContext)}
+            </React.Fragment>
+          ) : null)}
           {filenameError ? (
             <button
               type="button"
