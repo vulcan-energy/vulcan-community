@@ -156,10 +156,10 @@ export type GeometryFilesMenuProps = Readonly<{
   /** Host actions before Duplicate and Delete in a saved row. */
   renderRowActions?: (document: GeometryFilesMenuDocument) => ReactNode;
   /**
-   * Host action in Delete's place, also on a row without Delete (not in this
-   * folder). `undefined` keeps Delete.
+   * Host actions in Delete's place, by document id, also on a row without
+   * Delete (not in this folder). A row not in the map keeps Delete.
    */
-  renderRowDeleteAction?: (document: GeometryFilesMenuDocument) => ReactNode;
+  rowDeleteActions?: ReadonlyMap<string, ReactNode>;
   /**
    * The host's Trash: a Trash filter while `count` models are in it, whose
    * view shows `content` (the host's rows, already searched) instead of documents.

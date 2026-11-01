@@ -72,7 +72,7 @@ export function GeometryFilesMenu({
   projectPresentation,
   renderRowBadges,
   renderRowActions,
-  renderRowDeleteAction,
+  rowDeleteActions,
   trash,
   projectFilters = true,
   lockedProjectFilter,
@@ -714,7 +714,7 @@ export function GeometryFilesMenu({
               const isActive = document.id === activeDocumentId;
               const isSaved = document.isSaved !== false;
               const canOpen = isSaved || isActive;
-              const hostDelete = renderRowDeleteAction?.(document);
+              const hostDelete = rowDeleteActions?.get(document.id);
               const projectNames = projects
                 .filter((project) => document.projectGroupIds.includes(project.id))
                 .map((project) => project.name);

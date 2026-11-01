@@ -139,7 +139,7 @@ describe('shared Geometry Files menu', () => {
   it('puts a host action in Delete\'s place, cloud-only rows included, and a locked projects entry in the filter', () => {
     renderMenu({
       documents: [documents[0], { ...documents[1], cloudOnly: true }],
-      renderRowDeleteAction: (document) => <button type="button">Leave {document.fileName}</button>,
+      rowDeleteActions: new Map(documents.map((document) => [document.id, <button key={document.id} type="button">Leave {document.fileName}</button>])),
       projectFilters: false,
       lockedProjectFilter: <a href="#pro">Projects</a>,
     });
