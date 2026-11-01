@@ -4,8 +4,11 @@
 export type FilenameActionContribution<HostContext, RenderResult> = Readonly<{
   id: string;
   order?: number;
-  /** `save` renders beside the Save button instead of with the leading actions. */
-  placement?: 'start' | 'save';
+  /**
+   * `save` renders beside the Save button instead of with the leading actions;
+   * `field` right after the filename field.
+   */
+  placement?: 'start' | 'field' | 'save';
   isAvailable?: (context: HostContext) => boolean;
   render: (context: HostContext) => RenderResult;
   /**

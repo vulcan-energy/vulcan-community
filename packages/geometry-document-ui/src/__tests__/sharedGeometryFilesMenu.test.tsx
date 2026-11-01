@@ -136,6 +136,23 @@ describe('shared Geometry Files menu', () => {
       .toEqual(['Load Flat.csv', 'Share Flat.csv']);
   });
 
+  it('puts a host action in Delete\'s place, cloud-only rows included, and a locked projects entry in the filter', () => {
+    renderMenu({
+      documents: [documents[0], { ...documents[1], cloudOnly: true }],
+      rowDeleteActions: new Map(documents.map((document) => [document.id, <button key={document.id} type="button">Leave {document.fileName}</button>])),
+      projectFilters: false,
+      lockedProjectFilter: <a href="#pro">Projects</a>,
+    });
+    const actions = (name: string) => within(screen.getByRole('button', { name: `Load ${name}` }).parentElement!)
+      .getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent);
+    expect(actions('House.csv')).toEqual(['Load House.csv', 'Duplicate House.csv', 'Leave House.csv']);
+    expect(actions('Flat.csv')).toEqual(['Load Flat.csv', 'Leave Flat.csv']);
+    // Nothing shared or trashed: the locked entry alone shows the filter.
+    fireEvent.click(screen.getByRole('button', { name: 'Filter models' }));
+    expect(screen.getByRole('link', { name: 'Projects' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitemradio', { name: /Unassigned/ })).not.toBeInTheDocument();
+  });
+
   it('lists only shared documents under the Shared filter, and search still applies', () => {
     const onFilterChange = vi.fn();
     renderMenu({

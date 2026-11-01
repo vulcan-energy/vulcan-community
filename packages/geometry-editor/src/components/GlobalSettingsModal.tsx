@@ -26,6 +26,7 @@ import { resolveFieldPresentation } from "../lib/fieldPresentation";
 import {
   collectGlobalSettingsWarnings,
   fhsBedroomCountIssue,
+  globalSettingsFieldSection,
 } from "../lib/globalSettingsValidation";
 import {
   DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH,
@@ -85,6 +86,8 @@ export type GlobalSettingsModalProps = Readonly<{
   renderEvidencePill?: (fieldKey: string, label: string) => ReactNode;
   externalDetailProfileSection?: ReactNode;
   onIndicatorChange?: (indicator: GlobalSettingsIndicator | null) => void;
+  /** A CSV Metadata key: on open, its tab and section open and its field scrolls into view and takes focus. */
+  focusFieldKey?: string;
 }>;
 
 const ROOM_COUNT_COMPLIANCE_ROWS: {
@@ -197,6 +200,7 @@ function buildComplianceFieldLabel(
   }, schemaPort);
   const labelSpan = (
     <span
+      data-field-key={paramId}
       style={{
         fontSize: "12px",
         fontWeight: 500,
@@ -480,6 +484,7 @@ export function GlobalSettingsModal({
   renderEvidencePill = () => null,
   externalDetailProfileSection,
   onIndicatorChange,
+  focusFieldKey,
 }: GlobalSettingsModalProps) {
   const schemaPort = useGeometrySchemaPort();
   const sourceComparisonPort = useGeometrySourceComparisonPort();
@@ -1196,6 +1201,31 @@ export function GlobalSettingsModal({
     el?.focus();
   }, []);
 
+  // focusFieldKey: a new request opens its tab and section during render; the effect
+  // then scrolls to and focuses the field, also when they were already open.
+  const focusRequest = isOpen ? focusFieldKey ?? null : null;
+  const [focusRequestOpened, setFocusRequestOpened] = useKeyedState(focusRequest ?? "", false);
+  if (focusRequest && !focusRequestOpened) {
+    setFocusRequestOpened(true);
+    const section = globalSettingsFieldSection(focusRequest);
+    if (section) {
+      setActiveTab(section === "defaults" ? "defaults" : "settings");
+      if (section === "dwelling") setComplianceSettingsExpanded(true);
+      if (section === "airTightness") setAirTightnessExpanded(true);
+      if (section === "ventilation") setVentilationEnvExpanded(true);
+      if (section === "thermalBridging") setThermalBridgingExpanded(true);
+      if (focusRequest === "JunctionPsiDefaultsPath") setJunctionPsiFallbackExpanded(true);
+    }
+  }
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!focusRequest || !container) return;
+    const target =
+      container.querySelector(`[data-field-key="${CSS.escape(focusRequest)}"]`)
+      ?? container.querySelector(`[data-field-section="${globalSettingsFieldSection(focusRequest)}"]`);
+    target?.scrollIntoView?.({ block: "center" });
+    target?.closest("label")?.control?.focus({ preventScroll: true });
+  }, [focusRequest]);
   if (!isOpen || typeof document === "undefined") return null;
 
   return ReactDOM.createPortal(
@@ -1654,7 +1684,7 @@ export function GlobalSettingsModal({
                   style={{ display: "flex", flexDirection: "column", gap: 12 }}
                 >
                   <StandardDropdown
-                    label="Walls (and wall-like adjacent)"
+                    label={<span data-field-key="DefaultAssemblyWall">Walls (and wall-like adjacent)</span>}
                     value={creationDefaultAssemblyIds.wall ?? ""}
                     onChange={(v) =>
                       setCreationDefaultAssemblyIds({ wall: v || undefined })
@@ -1665,7 +1695,7 @@ export function GlobalSettingsModal({
                     disabled={!bundledAssemblyLibrary}
                   />
                   <StandardDropdown
-                    label="Roofs (and roof-like adjacent)"
+                    label={<span data-field-key="DefaultAssemblyRoof">Roofs (and roof-like adjacent)</span>}
                     value={creationDefaultAssemblyIds.roof ?? ""}
                     onChange={(v) =>
                       setCreationDefaultAssemblyIds({ roof: v || undefined })
@@ -1676,7 +1706,7 @@ export function GlobalSettingsModal({
                     disabled={!bundledAssemblyLibrary}
                   />
                   <StandardDropdown
-                    label="Ground floors"
+                    label={<span data-field-key="DefaultAssemblyGroundFloor">Ground floors</span>}
                     value={creationDefaultAssemblyIds.ground_floor ?? ""}
                     onChange={(v) =>
                       setCreationDefaultAssemblyIds({
@@ -1740,7 +1770,7 @@ export function GlobalSettingsModal({
               {evidenceSection}
 
               {/* Dwelling Details Section */}
-              <div style={{ marginTop: "var(--spacing-md)" }}>
+              <div data-field-section="dwelling" style={{ marginTop: "var(--spacing-md)" }}>
                 <GlobalSettingsAccordionHeader
                   title="Dwelling Details"
                   expanded={complianceSettingsExpanded}
@@ -1796,6 +1826,7 @@ export function GlobalSettingsModal({
                         }}
                       >
                         <label
+                          data-field-key="ComplianceValidationEnabled"
                           style={{
                             display: "flex",
                             alignItems: "flex-start",
@@ -1921,7 +1952,7 @@ export function GlobalSettingsModal({
                       >
                         <StandardInput
                           type="text"
-                          label="Property postcode"
+                          label={<span data-field-key="Postcode">Property postcode</span>}
                           value={propertyPostcode ?? ""}
                           onChange={(event) => {
                             const value = event.target.value.toUpperCase();
@@ -2731,6 +2762,7 @@ export function GlobalSettingsModal({
 
               {/* Air Tightness Settings Section */}
               <div
+                data-field-section="airTightness"
                 style={{
                   marginTop: "var(--spacing-md)",
                   borderTop: "1px solid var(--border-subtle)",
@@ -2780,7 +2812,7 @@ export function GlobalSettingsModal({
                             gap: "6px",
                           }}
                         >
-                          <span>Test Pressure</span>
+                          <span data-field-key="AirPermeability_test_pressure">Test Pressure</span>
                           {renderEvidencePill(
                             "AirPermeability_test_pressure",
                             "Test Pressure"
@@ -2818,7 +2850,7 @@ export function GlobalSettingsModal({
                             gap: "6px",
                           }}
                         >
-                          <span>Test Result</span>
+                          <span data-field-key="AirPermeability_test_result">Test Result</span>
                           {comparisonGlobalFieldIndicators.AirPermeability_test_result
                             ?.length ? (
                             <ValidationIndicator
@@ -2862,6 +2894,7 @@ export function GlobalSettingsModal({
 
               {/* Ventilation Environment Settings Section */}
               <div
+                data-field-section="ventilation"
                 style={{
                   marginTop: "var(--spacing-md)",
                   borderTop: "1px solid var(--border-subtle)",
@@ -3035,7 +3068,7 @@ export function GlobalSettingsModal({
                     </div>
 
                     <StandardDropdown
-                      label="Shield Class"
+                      label={<span data-field-key="Ventilation_shield_class">Shield Class</span>}
                       value={complianceSettings.Ventilation_shield_class || ""}
                       onChange={(value) => {
                         const val =
@@ -3058,7 +3091,7 @@ export function GlobalSettingsModal({
                     />
 
                     <StandardDropdown
-                      label="Terrain Class"
+                      label={<span data-field-key="Ventilation_terrain_class">Terrain Class</span>}
                       value={complianceSettings.Ventilation_terrain_class || ""}
                       onChange={(value) => {
                         const val =
@@ -3226,6 +3259,7 @@ export function GlobalSettingsModal({
                         style={{ margin: 0 }}
                       />
                       <label
+                        data-field-key="Ventilation_noise_nuisance"
                         htmlFor="noise_nuisance"
                         style={{
                           fontSize: "var(--font-size-sm)",
@@ -3259,6 +3293,7 @@ export function GlobalSettingsModal({
 
               {/* Thermal Bridging Settings Section */}
               <div
+                data-field-section="thermalBridging"
                 style={{
                   marginTop: "var(--spacing-md)",
                   borderTop: "1px solid var(--border-subtle)",
