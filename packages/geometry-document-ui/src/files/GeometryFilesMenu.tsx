@@ -72,8 +72,10 @@ export function GeometryFilesMenu({
   projectPresentation,
   renderRowBadges,
   renderRowActions,
+  renderRowDeleteAction,
   trash,
   projectFilters = true,
+  lockedProjectFilter,
 }: GeometryFilesMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPositioned, setIsPositioned] = useState(false);
@@ -298,7 +300,7 @@ export function GeometryFilesMenu({
   );
   const showFilter = projectFilters
     ? resolvedProjectPanel.status === 'ready'
-    : sharedDocumentCount > 0 || (trash?.count ?? 0) > 0 || filter.kind !== 'all';
+    : Boolean(lockedProjectFilter) || sharedDocumentCount > 0 || (trash?.count ?? 0) > 0 || filter.kind !== 'all';
 
   const menu = isOpen ? (
     <div
@@ -478,6 +480,12 @@ export function GeometryFilesMenu({
                       <span>Trash</span>
                       <span className="fproj-menu-meta">{trash.count}</span>
                     </button>
+                  ) : null}
+                  {!projectFilters && lockedProjectFilter ? (
+                    <>
+                      <div className="fproj-menu-divider" />
+                      {lockedProjectFilter}
+                    </>
                   ) : null}
                   {projects.length > 0 ? <div className="fproj-menu-divider" /> : null}
                   {projects.map((project) => {
@@ -706,6 +714,7 @@ export function GeometryFilesMenu({
               const isActive = document.id === activeDocumentId;
               const isSaved = document.isSaved !== false;
               const canOpen = isSaved || isActive;
+              const hostDelete = renderRowDeleteAction?.(document);
               const projectNames = projects
                 .filter((project) => document.projectGroupIds.includes(project.id))
                 .map((project) => project.name);
@@ -761,7 +770,7 @@ export function GeometryFilesMenu({
                     {document.cloudOnly ? (
                       <>
                         {onDuplicateDocument ? <span className="files-dropdown-action-btn" aria-hidden /> : null}
-                        {onDeleteDocument ? <span className="files-dropdown-action-btn" aria-hidden /> : null}
+                        {onDeleteDocument && hostDelete === undefined ? <span className="files-dropdown-action-btn" aria-hidden /> : null}
                       </>
                     ) : null}
                     {onDuplicateDocument && !document.cloudOnly ? (
@@ -788,7 +797,7 @@ export function GeometryFilesMenu({
                         </svg>
                       </button>
                     ) : null}
-                    {onDeleteDocument && !document.cloudOnly ? (
+                    {hostDelete !== undefined ? hostDelete : onDeleteDocument && !document.cloudOnly ? (
                       <button
                         type="button"
                         className="files-dropdown-action-btn files-dropdown-delete-btn"
