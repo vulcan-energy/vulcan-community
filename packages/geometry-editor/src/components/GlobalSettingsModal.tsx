@@ -1233,13 +1233,14 @@ export function GlobalSettingsModal({
   }, []);
 
   // focusFieldKey: open its tab and section, then scroll to and focus the field once it renders.
-  const pendingFocusKey = useRef<string | null>(null);
+  // State, not a ref: setting it re-renders even when the tab and section are already open.
+  const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null);
   // Declared first, so it runs in the commit after the one that opened the section.
   useEffect(() => {
-    const key = pendingFocusKey.current;
+    const key = pendingFocusKey;
     const container = containerRef.current;
     if (!key || !container) return;
-    pendingFocusKey.current = null;
+    setPendingFocusKey(null);
     const target =
       container.querySelector(`[data-field-key="${CSS.escape(key)}"]`)
       ?? container.querySelector(`[data-field-section="${globalSettingsFieldSection(key)}"]`);
@@ -1256,7 +1257,7 @@ export function GlobalSettingsModal({
     if (section === "ventilation") setVentilationEnvExpanded(true);
     if (section === "thermalBridging") setThermalBridgingExpanded(true);
     if (focusFieldKey === "JunctionPsiDefaultsPath") setJunctionPsiFallbackExpanded(true);
-    pendingFocusKey.current = focusFieldKey ?? null;
+    setPendingFocusKey(focusFieldKey ?? null);
   }, [isOpen, focusFieldKey]);
   if (!isOpen || typeof document === "undefined") return null;
 

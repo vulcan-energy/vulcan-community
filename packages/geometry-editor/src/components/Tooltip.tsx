@@ -363,6 +363,9 @@ export const Tooltip: React.FC<TooltipProps> = ({
       ref={triggerRef}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      // A focusable trigger shows it to keyboard users too.
+      onFocus={handleMouseEnter}
+      onBlur={handleMouseLeave}
     >
       {children}
       {typeof window !== 'undefined' && ReactDOM.createPortal(tooltipElement, document.body)}

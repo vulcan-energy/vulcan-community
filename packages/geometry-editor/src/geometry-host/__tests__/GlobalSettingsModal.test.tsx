@@ -145,6 +145,22 @@ describe("GlobalSettingsModal", () => {
     await waitFor(() => expect(screen.getByLabelText("Property postcode")).toHaveFocus());
   });
 
+  it("focuses the field again when its tab and section are already open", async () => {
+    const store = createGeometryStore();
+    const resources = createResources();
+    const modal = (focusFieldKey?: string) => (
+      <GeometryStoreProvider store={store}>
+        <GlobalSettingsModal isOpen focusFieldKey={focusFieldKey} onClose={vi.fn()} workspaceResourcePort={resources} />
+      </GeometryStoreProvider>
+    );
+    const { rerender } = render(modal("Ventilation_shield_class"));
+    await waitFor(() => expect(screen.getByLabelText("Shield Class")).toHaveFocus());
+    screen.getByLabelText("Shield Class").blur();
+    rerender(modal());
+    rerender(modal("Ventilation_shield_class"));
+    await waitFor(() => expect(screen.getByLabelText("Shield Class")).toHaveFocus());
+  });
+
   it("is a labelled modal dialog that Escape closes", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
