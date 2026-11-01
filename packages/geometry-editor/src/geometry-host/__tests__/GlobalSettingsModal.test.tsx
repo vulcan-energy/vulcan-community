@@ -127,6 +127,24 @@ describe("GlobalSettingsModal", () => {
     expect(store.getState().defaultsPath).toBe("input/defaults/copy.json");
   });
 
+  it("opens at a focused field: its tab and section open and its control takes focus", async () => {
+    const store = createGeometryStore();
+    const { rerender } = render(
+      <GeometryStoreProvider store={store}>
+        <GlobalSettingsModal isOpen focusFieldKey="Ventilation_shield_class" onClose={vi.fn()} workspaceResourcePort={createResources()} />
+      </GeometryStoreProvider>
+    );
+    await waitFor(() => expect(screen.getByLabelText("Shield Class")).toHaveFocus());
+    expect(screen.queryByLabelText("Property postcode")).not.toBeInTheDocument();
+
+    rerender(
+      <GeometryStoreProvider store={store}>
+        <GlobalSettingsModal isOpen focusFieldKey="Postcode" onClose={vi.fn()} workspaceResourcePort={createResources()} />
+      </GeometryStoreProvider>
+    );
+    await waitFor(() => expect(screen.getByLabelText("Property postcode")).toHaveFocus());
+  });
+
   it("is a labelled modal dialog that Escape closes", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
