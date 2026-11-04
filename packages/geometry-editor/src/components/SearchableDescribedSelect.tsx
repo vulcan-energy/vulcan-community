@@ -57,6 +57,10 @@ interface SearchableDescribedSelectProps {
   'aria-label'?: string;
 }
 
+const focusOnMount = (node: HTMLElement | null) => node?.focus();
+const scrollActiveOptionIntoView = (node: HTMLElement | null) =>
+  node?.scrollIntoView?.({ block: 'nearest' });
+
 export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps> = ({
   id,
   value,
@@ -90,7 +94,6 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   const [expandedSectionIndices, setExpandedSectionIndices] = useState<Set<number>>(() => new Set());
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const listboxRef = useRef<HTMLDivElement>(null);
   const prevCloseMenuSignal = useRef<number | undefined>(undefined);
   const [menuPosition, setMenuPosition] = useState<{
     x: number;
@@ -220,15 +223,6 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
       closeMenuToTrigger();
     }
   };
-
-  useEffect(() => {
-    if (!isOpen || !activeOptionId) return;
-    document.getElementById(activeOptionId)?.scrollIntoView?.({ block: 'nearest' });
-  }, [isOpen, isPositioned, activeOptionId]);
-
-  useEffect(() => {
-    if (isOpen && !searchable) listboxRef.current?.focus();
-  }, [isOpen, searchable]);
 
   useEffect(() => {
     if (closeMenuSignal === undefined) return;
@@ -456,9 +450,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                 onKeyDown={handleMenuKeyDown}
                 placeholder={searchPlaceholder}
                 autoFocus
-                role="combobox"
                 aria-label={searchPlaceholder}
-                aria-expanded
                 aria-controls={listboxId}
                 aria-autocomplete="list"
                 aria-activedescendant={activeOptionId}
@@ -475,7 +467,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
           )}
 
           <div
-            ref={listboxRef}
+            ref={searchable ? undefined : focusOnMount}
             id={listboxId}
             role="listbox"
             tabIndex={searchable ? undefined : -1}
@@ -483,7 +475,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
             aria-labelledby={ariaLabel ? undefined : ariaLabelledBy}
             aria-activedescendant={searchable ? undefined : activeOptionId}
             onKeyDown={searchable ? undefined : handleMenuKeyDown}
-            style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0, outline: 'none' }}
+            style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}
           >
             {showEmpty ? (
               <div style={{ padding: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
@@ -568,6 +560,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                           <button
                             key={opt.value}
                             id={`${optionIdPrefix}-${navigableIndex.get(opt)}`}
+                            ref={isActive ? scrollActiveOptionIntoView : undefined}
                             type="button"
                             role="option"
                             tabIndex={-1}

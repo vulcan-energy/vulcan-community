@@ -34,7 +34,7 @@ describe('SearchableDescribedSelect keyboard', () => {
     trigger.focus();
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
 
-    const search = screen.getByRole('combobox', { name: 'Search…' });
+    const search = screen.getByRole('textbox', { name: 'Search…' });
     // Opens on the current answer; the id holds no space even for a value that does.
     const active = () => document.getElementById(search.getAttribute('aria-activedescendant')!);
     expect(active()).toHaveAccessibleName('Wales');
@@ -53,7 +53,7 @@ describe('SearchableDescribedSelect keyboard', () => {
   it('Enter picks the first match of a search', () => {
     const { onChange, trigger } = setup();
     fireEvent.click(trigger);
-    const search = screen.getByRole('combobox', { name: 'Search…' });
+    const search = screen.getByRole('textbox', { name: 'Search…' });
     fireEvent.change(search, { target: { value: 'north' } });
     fireEvent.keyDown(search, { key: 'Enter' });
     expect(onChange).toHaveBeenCalledWith('northern ireland');
@@ -62,7 +62,7 @@ describe('SearchableDescribedSelect keyboard', () => {
   it('Esc closes without a choice and focus returns to the trigger', () => {
     const { onChange, trigger } = setup();
     fireEvent.click(trigger);
-    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(trigger).toHaveFocus();
