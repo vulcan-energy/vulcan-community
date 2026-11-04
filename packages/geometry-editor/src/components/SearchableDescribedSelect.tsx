@@ -57,6 +57,10 @@ interface SearchableDescribedSelectProps {
   'aria-label'?: string;
 }
 
+const focusOnMount = (node: HTMLElement | null) => node?.focus();
+const scrollActiveOptionIntoView = (node: HTMLElement | null) =>
+  node?.scrollIntoView?.({ block: 'nearest' });
+
 export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps> = ({
   id,
   value,
@@ -81,8 +85,12 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   'aria-label': ariaLabel,
 }) => {
   const selectedValueId = useId();
+  const listboxId = useId();
+  const optionIdPrefix = useId();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  /** null until the keyboard or pointer moves: the current answer, else the first match. */
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [expandedSectionIndices, setExpandedSectionIndices] = useState<Set<number>>(() => new Set());
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -158,10 +166,63 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
     [expandedSectionIndices, filteredSections, normalizedNeedle],
   );
 
+  /** The options the arrow keys move through, in display order. */
+  const navigableOptions = useMemo(
+    () =>
+      displaySections.flatMap((section, sectionIdx) =>
+        !(collapsibleSections && section.title) || visibleExpandedSectionIndices.has(sectionIdx)
+          ? section.options
+          : [],
+      ),
+    [collapsibleSections, displaySections, visibleExpandedSectionIndices],
+  );
+  const navigableIndex = useMemo(
+    () => new Map(navigableOptions.map((option, index) => [option, index])),
+    [navigableOptions],
+  );
+  const activeIndexInRange =
+    activeIndex === null
+      ? Math.max(navigableOptions.findIndex((option) => option.value === value), 0)
+      : Math.min(activeIndex, navigableOptions.length - 1);
+  const activeOption = navigableOptions[activeIndexInRange];
+  // By index: a value can hold spaces, and an id reference cannot.
+  const activeOptionId = activeOption ? `${optionIdPrefix}-${activeIndexInRange}` : undefined;
+
   const closeMenu = useCallback(() => {
     setIsOpen(false);
     setSearchQuery('');
   }, []);
+
+  /** Closes after a choice or Esc: the keyboard user carries on from the trigger. */
+  const closeMenuToTrigger = useCallback(() => {
+    closeMenu();
+    triggerRef.current?.focus();
+  }, [closeMenu]);
+
+  const openMenu = () => {
+    setSearchQuery('');
+    setExpandedSectionIndices(selectedSectionIndices);
+    setActiveIndex(null);
+    setIsPositioned(false);
+    setIsOpen(true);
+  };
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (navigableOptions.length === 0) return;
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      setActiveIndex((activeIndexInRange + step + navigableOptions.length) % navigableOptions.length);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      if (!activeOption) return;
+      onChange(activeOption.value);
+      closeMenuToTrigger();
+    } else if (event.key === 'Tab' && !menuFooter && !collapsibleSections) {
+      // Nothing else in the menu takes focus: Tab moves on from the trigger.
+      closeMenuToTrigger();
+    }
+  };
 
   useEffect(() => {
     if (closeMenuSignal === undefined) return;
@@ -188,13 +249,13 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeMenu();
+      if (event.key === 'Escape') closeMenuToTrigger();
     };
     if (isOpen) {
       document.addEventListener('keydown', handleEscape);
       return () => document.removeEventListener('keydown', handleEscape);
     }
-  }, [closeMenu, isOpen]);
+  }, [closeMenuToTrigger, isOpen]);
 
   const updatePosition = () => {
     if (!triggerRef.current) return;
@@ -265,13 +326,17 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
             closeMenu();
             return;
           }
-          setSearchQuery('');
-          setExpandedSectionIndices(selectedSectionIndices);
-          setIsPositioned(false);
-          setIsOpen(true);
+          openMenu();
+        }}
+        onKeyDown={(event) => {
+          if (!isOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+            event.preventDefault();
+            openMenu();
+          }
         }}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
+        aria-controls={isOpen ? listboxId : undefined}
         /* A button's role ignores aria-invalid (confirmed by react-doctor's
          * role-supports-aria-props check: screen readers get no help from
          * it here). The linked live description supplies the error to
@@ -352,7 +417,6 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
       {isOpen && !disabled && ReactDOM.createPortal(
         <div
           ref={menuRef}
-          role="listbox"
           style={{
             position: 'fixed',
             left: isPositioned ? menuPosition.x : -9999,
@@ -381,9 +445,15 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                   const nextQuery = e.target.value;
                   if (!nextQuery.trim()) setExpandedSectionIndices(selectedSectionIndices);
                   setSearchQuery(nextQuery);
+                  setActiveIndex(null);
                 }}
+                onKeyDown={handleMenuKeyDown}
                 placeholder={searchPlaceholder}
                 autoFocus
+                aria-label={searchPlaceholder}
+                aria-controls={listboxId}
+                aria-autocomplete="list"
+                aria-activedescendant={activeOptionId}
                 className="standard-input standard-input-sm standard-input-ghost"
                 style={{ width: '100%' }}
               />
@@ -396,7 +466,17 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
             </div>
           )}
 
-          <div style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
+          <div
+            ref={searchable ? undefined : focusOnMount}
+            id={listboxId}
+            role="listbox"
+            tabIndex={searchable ? undefined : -1}
+            aria-label={ariaLabel}
+            aria-labelledby={ariaLabel ? undefined : ariaLabelledBy}
+            aria-activedescendant={searchable ? undefined : activeOptionId}
+            onKeyDown={searchable ? undefined : handleMenuKeyDown}
+            style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}
+          >
             {showEmpty ? (
               <div style={{ padding: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
                 No options match your search.
@@ -406,7 +486,12 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                 const useCollapsibleHeader = Boolean(collapsibleSections && section.title);
                 const sectionExpanded = !useCollapsibleHeader || visibleExpandedSectionIndices.has(sectionIdx);
                 return (
-                  <div key={sectionIdx} style={{ padding: '8px 0' }}>
+                  <div
+                    key={sectionIdx}
+                    role={section.title ? 'group' : undefined}
+                    aria-label={section.title}
+                    style={{ padding: '8px 0' }}
+                  >
                     {section.title && !useCollapsibleHeader && (
                       <div
                         style={{
@@ -470,35 +555,37 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                     {sectionExpanded &&
                       section.options.map((opt) => {
                         const isSelected = opt.value === value;
+                        const isActive = opt === activeOption;
                         return (
                           <button
                             key={opt.value}
+                            id={`${optionIdPrefix}-${navigableIndex.get(opt)}`}
+                            ref={isActive && isPositioned ? scrollActiveOptionIntoView : undefined}
                             type="button"
                             role="option"
+                            tabIndex={-1}
                             aria-selected={isSelected}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onMouseMove={() => {
+                              if (!isActive) setActiveIndex(navigableIndex.get(opt) ?? 0);
+                            }}
                             onClick={() => {
                               onChange(opt.value);
-                              closeMenu();
+                              closeMenuToTrigger();
                             }}
                             style={{
                               width: '100%',
                               textAlign: 'left',
                               padding: '10px 12px',
                               paddingLeft: useCollapsibleHeader ? 34 : 12,
-                              background: isSelected ? 'var(--selected-bg)' : 'transparent',
+                              background: isActive ? 'var(--hover-bg)' : isSelected ? 'var(--selected-bg)' : 'transparent',
                               border: 'none',
-                              borderLeft: isSelected ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                              borderLeft: isSelected || isActive ? '2px solid var(--accent-primary)' : '2px solid transparent',
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'flex-start',
                               justifyContent: 'space-between',
                               gap: 10,
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!isSelected) e.currentTarget.style.background = 'var(--hover-bg)';
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!isSelected) e.currentTarget.style.background = 'transparent';
                             }}
                           >
                             <div style={{ minWidth: 0 }}>

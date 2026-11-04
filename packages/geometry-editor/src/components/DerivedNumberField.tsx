@@ -19,6 +19,7 @@ export type DerivedNumberFieldProps = {
   labelAccessory?: React.ReactNode;
   placeholderWhenUnavailable?: string;
   helperTextWhenDerived?: React.ReactNode;
+  'aria-describedby'?: string;
   helperTextWhenUnavailable?: React.ReactNode;
   resetTitle: string;
   resetAriaLabel: string;
@@ -64,6 +65,7 @@ export function DerivedNumberField({
   unit,
   matchTolerance = 1e-4,
   autoTagMarginLeft,
+  'aria-describedby': ariaDescribedBy,
 }: DerivedNumberFieldProps) {
   const hasDerived = derivedValue > 0;
   const isManual = manualValue !== undefined;
@@ -87,6 +89,7 @@ export function DerivedNumberField({
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--spacing-xs)' }}>
       <StandardInput
         type="number"
+        aria-describedby={ariaDescribedBy}
         label={
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
             {label}
