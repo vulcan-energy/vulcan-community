@@ -560,7 +560,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                           <button
                             key={opt.value}
                             id={`${optionIdPrefix}-${navigableIndex.get(opt)}`}
-                            ref={isActive ? scrollActiveOptionIntoView : undefined}
+                            ref={isActive && isPositioned ? scrollActiveOptionIntoView : undefined}
                             type="button"
                             role="option"
                             tabIndex={-1}
