@@ -85,7 +85,8 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   const optionIdPrefix = useId();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeIndex, setActiveIndex] = useState(0);
+  /** null until the keyboard or pointer moves: the current answer, else the first match. */
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [expandedSectionIndices, setExpandedSectionIndices] = useState<Set<number>>(() => new Set());
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -176,7 +177,10 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
     () => new Map(navigableOptions.map((option, index) => [option, index])),
     [navigableOptions],
   );
-  const activeIndexInRange = Math.min(activeIndex, navigableOptions.length - 1);
+  const activeIndexInRange =
+    activeIndex === null
+      ? Math.max(navigableOptions.findIndex((option) => option.value === value), 0)
+      : Math.min(activeIndex, navigableOptions.length - 1);
   const activeOption = navigableOptions[activeIndexInRange];
   // By index: a value can hold spaces, and an id reference cannot.
   const activeOptionId = activeOption ? `${optionIdPrefix}-${activeIndexInRange}` : undefined;
@@ -195,18 +199,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   const openMenu = () => {
     setSearchQuery('');
     setExpandedSectionIndices(selectedSectionIndices);
-    setActiveIndex(
-      Math.max(
-        sections
-          .flatMap((section, index) =>
-            !(collapsibleSections && section.title) || selectedSectionIndices.has(index)
-              ? section.options
-              : [],
-          )
-          .findIndex((option) => option.value === value),
-        0,
-      ),
-    );
+    setActiveIndex(null);
     setIsPositioned(false);
     setIsOpen(true);
   };
@@ -458,7 +451,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                   const nextQuery = e.target.value;
                   if (!nextQuery.trim()) setExpandedSectionIndices(selectedSectionIndices);
                   setSearchQuery(nextQuery);
-                  setActiveIndex(0);
+                  setActiveIndex(null);
                 }}
                 onKeyDown={handleMenuKeyDown}
                 placeholder={searchPlaceholder}
