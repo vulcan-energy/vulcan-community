@@ -66,7 +66,7 @@ describe('SearchableDescribedSelect positioning', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Choose…' }));
     act(() => vi.advanceTimersByTime(20));
 
-    const menu = screen.getByRole('listbox');
+    const menu = screen.getByRole('listbox').parentElement!;
     expect(menu).toHaveStyle({
       left: '628px',
       bottom: '108px',
@@ -112,7 +112,7 @@ describe('SearchableDescribedSelect positioning', () => {
     fireEvent.click(trigger);
     act(() => vi.advanceTimersByTime(20));
 
-    const menu = screen.getByRole('listbox');
+    const menu = screen.getByRole('listbox').parentElement!;
     expect(menu).toHaveStyle({ left: '20px', top: '148px', width: '360px' });
     expect(menu.style.bottom).toBe('');
   });

@@ -743,7 +743,7 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     await user.click(trigger);
     expect(screen.getByRole('option', { name: /200mm test board/ })).toBeInTheDocument();
     const searchInput = screen.getByPlaceholderText('Search assemblies…');
-    await waitFor(() => expect(screen.getByRole('listbox')).toHaveStyle({ pointerEvents: 'auto' }));
+    await waitFor(() => expect(screen.getByRole('listbox').parentElement).toHaveStyle({ pointerEvents: 'auto' }));
     await user.type(searchInput, '100mm');
     expect(screen.queryByRole('option', { name: /200mm test board/ })).not.toBeInTheDocument();
     const option = await screen.findByRole('option', { name: /100mm test board/ });
