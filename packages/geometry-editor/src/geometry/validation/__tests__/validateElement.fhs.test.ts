@@ -143,6 +143,14 @@ describe('electric storage heater output tables', () => {
   });
 });
 
+it('blocks a drawn window with no host wall or roof', () => {
+  const element = window(1);
+  expect(validateElementCore(element, baseContext(element)).issues).toContainEqual(expect.objectContaining({
+    fieldKey: 'parent_element',
+    message: expect.stringContaining('Link wall/roof parent'),
+  }));
+});
+
 describe('FHS window base-height validation', () => {
   it('emits a critical FHS issue when a window is below an explicit ventilation zone base', () => {
     const element = window(0.5);

@@ -2250,11 +2250,16 @@ export const validateElementCore = (
       }
     }
 
-    // Warning 1: Windows/doors without parents
+    // Windows, rooflights and doors without parents. A drawn opening with no host adds its area
+    // without removing it from any wall or roof, so the engine input is wrong: block it.
     if (element.type === 'BuildingElementTransparent' ||
         (element.type === 'BuildingElementOpaque' && (element as BuildingElementOpaque).is_external_door)) {
       if (!element.parent_element || element.parent_element.trim() === '') {
-        warnings.push(geo('Link wall/roof parent', 'parent_element'));
+        if (element.coordinates?.length) {
+          issues.push(geo('Link wall/roof parent: a drawn opening with no host is not deducted from any wall or roof area', 'parent_element'));
+        } else {
+          warnings.push(geo('Link wall/roof parent', 'parent_element'));
+        }
       }
     }
 

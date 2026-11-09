@@ -991,6 +991,21 @@ export const shouldSnapToParent = (element: Element): boolean => {
   return false; // All other elements (regular walls, etc.) don't snap to parent
 };
 
+/** Gap between a duplicated hosted opening and its source, in metres. */
+const DUPLICATE_OPENING_GAP = 0.25;
+
+/**
+ * Plan offset for the copy of a window, rooflight or external door that keeps its host: along the
+ * opening's first edge, which lies along the host wall or roof, by its own length plus a gap.
+ */
+const duplicateOpeningOffset = (coordinates: ElementCoordinate[] | undefined): { dx: number; dy: number } => {
+  const [a, b] = coordinates ?? [];
+  const length = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+  if (!length) return { dx: 0, dy: 0 };
+  const step = length + DUPLICATE_OPENING_GAP;
+  return { dx: ((b.x - a.x) / length) * step, dy: ((b.y - a.y) / length) * step };
+};
+
 const shouldDeriveTransparentFromOpaquePolygonHost = (
   opening: Element | undefined,
   parent: Element | undefined,
@@ -7034,8 +7049,10 @@ const createGeometryState = (
     );
     existingNames.add(newName);
 
-    // World-space offset (meters)
-    const dx = 0.5, dy = 0.5;
+    // World-space offset (meters). A hosted opening moves along its host and keeps it.
+    const { dx, dy } = shouldSnapToParent(src) && src.parent_element
+      ? duplicateOpeningOffset(src.coordinates)
+      : { dx: 0.5, dy: 0.5 };
 
     const newId = generateId();
     const translatedCoords = (src.coordinates || []).map(c => ({ x: c.x + dx, y: c.y + dy, z: c.z }));
@@ -7044,7 +7061,6 @@ const createGeometryState = (
       id: newId,
       name: newName,
       coordinates: translatedCoords,
-      parent_element: shouldSnapToParent(src) ? null : src.parent_element,
       _nameAutoSync: newNameAutoSync,
       _v: (src._v ?? 0) + 1,
     };
@@ -7136,18 +7152,26 @@ const createGeometryState = (
       workingById[nid] = { ...(el as Element), id: nid, name: unique } as Element;
     }
 
-    // World-space offset
-    const dx = 0.5, dy = 0.5;
+    // World-space offset. The group moves together; a hosted opening whose host stays behind moves
+    // along that host, and its shading follows it.
+    const offsetOf = (src: Element): { dx: number; dy: number } => {
+      const parentEl = src.parent_element ? resolveParent(src) : undefined;
+      const parentInGroup = !!parentEl && sourceIdSet.has(parentEl.id);
+      if (src.parent_element && !parentInGroup && shouldSnapToParent(src)) return duplicateOpeningOffset(src.coordinates);
+      if (parentInGroup && src.type === 'WindowShading') return offsetOf(parentEl);
+      return { dx: 0.5, dy: 0.5 };
+    };
 
     // Second pass: clone with translated coords and remap parent if inside group
     const cloned: Element[] = sourceEls.map(src => {
       const newId = oldToNewId.get(src.id)!;
       const newName = oldIdToNewName.get(src.id)!;
+      const { dx, dy } = offsetOf(src);
       const translated = (src.coordinates || []).map(c => ({ x: c.x + dx, y: c.y + dy, z: c.z }));
-      let parent = shouldSnapToParent(src) ? null : ((src as any).parent_element ?? null as any);
+      let parent = (src as any).parent_element ?? null as any;
       if (parent && typeof parent === 'string') {
         // parent may be stored by name in older data; try remap by id first, else leave as-is
-        const parentEl = state.elementsById[parent] ?? createParentElementLookup(Object.values(state.elementsById))(src);
+        const parentEl = state.elementsById[parent] ?? resolveParent(src);
         if (parentEl && oldToNewId.has(parentEl.id)) {
           parent = oldIdToNewName.get(parentEl.id) || parent; // keep by name if that’s what UI expects
         }
