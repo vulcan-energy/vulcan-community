@@ -19,6 +19,7 @@ import {
   useGeometrySourceComparisonPort,
 } from "../../../geometry-editor-host/src/editorServicePorts";
 import type { GeometrySchemaPort } from "../../../geometry-editor-host/src/schemaPort";
+import { targetFieldAvailability } from "../lib/schemaCache";
 import type { AssemblyExample } from "../lib/assemblyTypes";
 import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingFootprintDimensions";
 
@@ -487,6 +488,9 @@ export function GlobalSettingsModal({
   focusFieldKey,
 }: GlobalSettingsModalProps) {
   const schemaPort = useGeometrySchemaPort();
+  const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema("fhs") : null;
+  const showStoreyOfDwelling = targetFieldAvailability(targetRoot, ["General", "storey_of_dwelling"]) !== "absent";
+  const showSanitaryAccommodations = targetFieldAvailability(targetRoot, ["NumberOfSanitaryAccommodations"]) !== "absent";
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -1004,6 +1008,7 @@ export function GlobalSettingsModal({
       }
       if (effectiveBuildType === "flat") {
         if (
+          showStoreyOfDwelling &&
           !(
             typeof effectiveStoreyOfDwelling === "number" &&
             Number.isFinite(effectiveStoreyOfDwelling)
@@ -1074,7 +1079,7 @@ export function GlobalSettingsModal({
           "Number of bathrooms is required when strict checks are on."
         );
       }
-      if (complianceSettings.NumberOfSanitaryAccommodations === undefined) {
+      if (showSanitaryAccommodations && complianceSettings.NumberOfSanitaryAccommodations === undefined) {
         issues.push(
           "Number of sanitary accommodations is required when strict checks are on."
         );
@@ -1097,6 +1102,8 @@ export function GlobalSettingsModal({
     effectiveComplianceValidationEnabled,
     effectiveStoreyOfDwelling,
     effectiveStoreysInDwelling,
+    showSanitaryAccommodations,
+    showStoreyOfDwelling,
   ]);
 
   const comparisonGlobalSections = useMemo(() => ({
@@ -2203,6 +2210,7 @@ export function GlobalSettingsModal({
 
                         {effectiveBuildType === "flat" && (
                           <>
+                            {showStoreyOfDwelling && (
                             <div
                               style={{
                                 display: "flex",
@@ -2292,6 +2300,7 @@ export function GlobalSettingsModal({
                                   />
                                 )}
                             </div>
+                            )}
 
                             <StandardInput
                               type="number"
@@ -2440,7 +2449,7 @@ export function GlobalSettingsModal({
                           </div>
                         ) : null}
 
-                        {ROOM_COUNT_COMPLIANCE_ROWS.map((row) => {
+                        {ROOM_COUNT_COMPLIANCE_ROWS.filter((row) => showSanitaryAccommodations || row.field !== "NumberOfSanitaryAccommodations").map((row) => {
                           const comparisonMessages = row.comparisonFieldKey
                             ? comparisonGlobalFieldIndicators[row.comparisonFieldKey]
                             : undefined;

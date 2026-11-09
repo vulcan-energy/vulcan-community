@@ -6,6 +6,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { GeometryWorkspaceResourcePort } from "../../../../geometry-editor-host/src/index";
 import { GlobalSettingsModal } from "../../components/GlobalSettingsModal";
+import { GeometryEditorServicePortsProvider } from "../../../../geometry-editor-host/src/index";
+import { canonicalGeometrySchemaPort } from "../../lib/geometrySchemaPort";
+import { targetFieldAvailability } from "../../lib/schemaCache";
 import {
   createGeometryStore,
   GeometryStoreProvider,
@@ -31,6 +34,48 @@ function createResources(
     ...overrides,
   };
 }
+
+const generalFlat = (extra: Record<string, unknown>) => ({
+  type: "object",
+  properties: { build_type: { enum: ["flat", "house"] } },
+  if: { properties: { build_type: { const: "flat" } } },
+  then: { required: Object.keys(extra), properties: extra },
+});
+
+describe("GlobalSettingsModal target rules", () => {
+  const a7Root = { properties: { NumberOfSanitaryAccommodations: { type: "integer" }, General: generalFlat({ storey_of_dwelling: { type: "integer" } }) } };
+  const a9Root = { properties: { General: generalFlat({ storeys_in_building: { type: "integer" } }) } };
+
+  it("classifies fields as available, absent or unknown", () => {
+    expect(targetFieldAvailability(a7Root, ["General", "storey_of_dwelling"])).toBe("available");
+    expect(targetFieldAvailability(a9Root, ["General", "storey_of_dwelling"])).toBe("absent");
+    expect(targetFieldAvailability(null, ["General", "storey_of_dwelling"])).toBe("unknown");
+    expect(targetFieldAvailability({ properties: {} }, ["General", "storey_of_dwelling"])).toBe("unknown");
+    expect(targetFieldAvailability({ properties: { General: {}, x: false } }, ["x"])).toBe("absent");
+  });
+
+  it.each([
+    ["a7", a7Root, true],
+    ["a9", a9Root, false],
+    ["no schema", null, true],
+  ])("shows target-only global fields on %s", async (_name, root, visible) => {
+    const store = createGeometryStore();
+    store.setState({ complianceSettings: { ...store.getState().complianceSettings, build_type: "flat" } });
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={{ ...canonicalGeometrySchemaPort, getRootSchema: () => root }}
+        workspaceResourcePort={createResources()}
+      >
+        <GeometryStoreProvider store={store}>
+          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="Postcode" />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    await screen.findByLabelText("Property postcode");
+    expect(screen.queryAllByText(/Storey of dwelling/i).length > 0).toBe(visible);
+    expect(screen.queryAllByText(/Number of sanitary accommodations/i).length > 0).toBe(visible);
+  });
+});
 
 describe("GlobalSettingsModal", () => {
   it("uses one public modal for defaults and every core global-values section", async () => {
