@@ -103,8 +103,14 @@ function deriveWindowMaxOpenArea(
   );
 }
 
-function shouldPreserveAutomaticValue(currentValue: number | null, previousDerivedValue: number): boolean {
-  return currentValue == null || currentValue <= 0 || Math.abs(currentValue - previousDerivedValue) <= DERIVED_VALUE_EPSILON;
+function shouldPreserveAutomaticValue(
+  currentValue: number | null,
+  previousDerivedValue: number,
+  zeroIsAuthored: boolean,
+): boolean {
+  return currentValue == null
+    || (!zeroIsAuthored && currentValue <= 0)
+    || Math.abs(currentValue - previousDerivedValue) <= DERIVED_VALUE_EPSILON;
 }
 
 export function deriveTransparentOpeningDerivedValues(
@@ -122,9 +128,10 @@ export function deriveTransparentOpeningDerivedValues(
 export function buildTransparentOpeningNumericPatch(
   element: BuildingElementTransparent,
   directPatch: TransparentOpeningNumericPatch,
-  context: { effectiveFloors?: Floor[] } = {},
+  context: { effectiveFloors?: Floor[]; zeroIsAuthored?: boolean } = {},
 ): TransparentOpeningNumericPatch {
   const patch: TransparentOpeningNumericPatch = { ...directPatch };
+  const zeroIsAuthored = context.zeroIsAuthored === true;
   const effectiveFloors = context.effectiveFloors ?? [];
   const previousDerived = deriveTransparentOpeningDerivedValues(element, {}, { effectiveFloors });
   const nextDerived = deriveTransparentOpeningDerivedValues(element, patch, { effectiveFloors });
@@ -134,7 +141,7 @@ export function buildTransparentOpeningNumericPatch(
     const currentMidHeight = finiteNumberOrNull(element.mid_height);
     if (
       nextDerived.midHeight > 0 &&
-      shouldPreserveAutomaticValue(currentMidHeight, previousDerived.midHeight) &&
+      shouldPreserveAutomaticValue(currentMidHeight, previousDerived.midHeight, zeroIsAuthored) &&
       (currentMidHeight == null || Math.abs(currentMidHeight - nextDerived.midHeight) > DERIVED_VALUE_EPSILON)
     ) {
       patch.mid_height = nextDerived.midHeight;
@@ -150,7 +157,7 @@ export function buildTransparentOpeningNumericPatch(
   if (maxOpenInputsChanged && !hasOwn(directPatch, 'max_window_open_area') && finiteNumberOrNull(freeAreaHeight) !== null) {
     const currentMaxOpenArea = finiteNumberOrNull(element.max_window_open_area);
     if (
-      shouldPreserveAutomaticValue(currentMaxOpenArea, previousDerived.maxWindowOpenArea) &&
+      shouldPreserveAutomaticValue(currentMaxOpenArea, previousDerived.maxWindowOpenArea, zeroIsAuthored) &&
       (currentMaxOpenArea == null || Math.abs(currentMaxOpenArea - nextDerived.maxWindowOpenArea) > DERIVED_VALUE_EPSILON)
     ) {
       patch.max_window_open_area = nextDerived.maxWindowOpenArea;

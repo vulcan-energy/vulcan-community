@@ -44,6 +44,10 @@ const REPAIR_MESSAGES = {
   unsupported_list: 'The window part list has entries this HEM version cannot use.',
 } as const;
 
+/** a8/a9 add Control_WindowOpenable to every window, and core rejects that on an empty list. */
+export const WINDOW_NO_OPENING_MESSAGE =
+  'HEM a8 and a9 cannot run a window with no openings. Enter an opening for this window.';
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -218,9 +222,11 @@ export function buildWindowOpeningFieldPatch(
   const patch: WindowOpeningPatch = { [field]: value };
 
   if (Array.isArray(parts) && parts.length === 1 && isPhysicalPart(parts[0]) && hasOnlyPartFields(parts[0])) {
+    const opening = { ...partRow(parts[0]), [field]: edited };
     return {
-      ...buildSingleOpeningPatch(row, { ...partRow(parts[0]), [field]: edited }),
+      ...buildSingleOpeningPatch(row, opening),
       ...patch,
+      extra_json: extraJsonWithHeight(row, opening.mid_height),
     };
   }
   if (isConsistentLegacy(parts)) {
@@ -250,7 +256,12 @@ export function buildAddWindowOpeningPatch(row: WindowOpeningSource): WindowOpen
       ...buildSingleOpeningPatch(row, {}),
     };
   }
-  const first = openings.kind === 'rows' ? openings.rows[0] : openings.kind === 'needs_input' ? openings.row : {};
+  const parts = sourceField(row, 'window_part_list');
+  const first = openings.kind === 'rows'
+    ? openings.rows[0]
+    : openings.kind === 'needs_input'
+      ? openings.row
+      : Array.isArray(parts) && parts.length === 1 && hasOnlyPartFields(parts[0]) ? partRow(parts[0]) : {};
   return {
     extra_json: {
       ...(isRecord(row.extra_json) ? row.extra_json : {}),
@@ -270,6 +281,44 @@ export function syncWindowPartListToMidHeight(
   return {
     ...(row.extra_json as Record<string, unknown>),
     window_part_list: parts.map(() => ({ [LEGACY_KEY]: nextMidHeight })),
+  };
+}
+
+/** Windows a bulk column edit cannot safely reach. On a7 only physical parts stop it. */
+export function windowOpeningBulkEditBlocked(row: WindowOpeningSource, physical: boolean | null): boolean {
+  const openings = classifyWindowOpenings(row);
+  if (openings.kind === 'rows' && openings.source === 'parts') return true;
+  if (physical !== true) return false;
+  const parts = sourceField(row, 'window_part_list');
+  return openings.kind === 'repair' || (Array.isArray(parts) && parts.length === 0);
+}
+
+/** A window whose parts this target cannot run, or that needs input or repair, has nothing to copy. */
+export function windowPartsCopyBlocked(row: WindowOpeningSource, physical: boolean | null): boolean {
+  const openings = classifyWindowOpenings(row);
+  if (physical === true) return openings.kind !== 'rows';
+  if (openings.kind === 'repair') return openings.reason !== 'conflicting_heights';
+  return physical === false && openings.kind === 'rows' && openings.source === 'parts';
+}
+
+/** The values a copied a8/a9 single opening runs with. Blocked sources have none. */
+export function windowPartsCopyColumns(row: WindowOpeningSource): WindowOpeningRow {
+  const openings = classifyWindowOpenings(row);
+  return openings.kind === 'rows' ? openings.rows[0] : {};
+}
+
+/** Moves every physical part with its window. A list the update already moved must not reach here. */
+export function shiftPhysicalPartsWithBaseHeight(
+  row: WindowOpeningSource,
+  delta: number,
+): Record<string, unknown> | null {
+  const parts = sourceField(row, 'window_part_list');
+  if (!Array.isArray(parts) || !parts.some((part) => isRecord(part) && finite(part.mid_height) !== undefined)) {
+    return null;
+  }
+  return {
+    ...(row.extra_json as Record<string, unknown>),
+    window_part_list: parts.map((part) => (isRecord(part) ? shiftPhysicalPartHeight(part, delta) : part)),
   };
 }
 

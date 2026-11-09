@@ -25,6 +25,7 @@ import {
   classifyWindowOpenings,
   windowOpeningRepairMessages,
   windowOpeningsUseTable,
+  WINDOW_NO_OPENING_MESSAGE,
   type WindowOpeningPatch,
   type WindowOpeningRow,
   type WindowOpeningSource,
@@ -560,7 +561,7 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
   }
 
   const status = openings.kind === 'closed'
-    ? 'No opening. This window stays closed.'
+    ? WINDOW_NO_OPENING_MESSAGE
     : openings.kind === 'needs_input'
       ? 'One opening. Complete the free area height, mid height and max open area in the main form.'
       : 'One opening. Edit it in the main form.';

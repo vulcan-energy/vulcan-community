@@ -3,11 +3,16 @@
 
 import { describe, expect, it } from 'vitest';
 import { calculateBaseHeightPatchForFloorMove } from '../zoneDerivation';
+import { buildGeometry3DPrimitives } from '../geometry3dMapper';
 import { convertGroundRelativeWindowExtraJsonForCsv, parseCsvToGeometry } from '../../geometry/io/parseCsvToGeometry';
 import type { Element, Floor } from '../../geometry/types';
 import { createGeometryStore } from '../../stores/geometryStore';
 import { unavailableGeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import {
+  buildAddWindowOpeningPatch,
+  windowOpeningBulkEditBlocked,
+  windowPartsCopyBlocked,
+  windowPartsCopyColumns,
   buildConvertToSingleOpeningPatch,
   buildSingleOpeningPatch,
   buildWindowOpeningFieldPatch,
@@ -221,5 +226,118 @@ describe('store keeps a following list in step on a8/a9 only', () => {
       mid_height: 2.5,
       extra_json: { window_part_list: [{ mid_height_air_flow_path: 1.5 }] },
     });
+  });
+});
+
+describe('review findings: write-path faults', () => {
+  it('clearing mid height on a single physical part takes effect', () => {
+    const row = { ...columns, mid_height: 2, extra_json: { window_part_list: [part(1.2)] } };
+    const patch = buildWindowOpeningFieldPatch(row, 'mid_height', '');
+    expect(patch.mid_height).toBe('');
+    expect(patch.extra_json).toEqual({});
+    expect(classifyWindowOpenings({ ...row, ...patch })).toMatchObject({ kind: 'needs_input', missing: ['mid_height'] });
+  });
+
+  it('keeps a partial single part when adding an opening', () => {
+    expect(buildAddWindowOpeningPatch({ extra_json: { window_part_list: [{ free_area_height: 0.5 }] } })).toEqual({
+      extra_json: { window_part_list: [{ free_area_height: 0.5 }, {}] },
+    });
+  });
+});
+
+describe('review findings: bulk edit and copy on a8/a9', () => {
+  it.each([
+    ['table after Add opening', withList([part(1), {}])],
+    ['empty list with stale columns', withList([])],
+    ['malformed list', withList('x')],
+    ['incomplete single part', withList([{ free_area_height: 1 }])],
+    ['conflicting legacy list', withList([legacy(1.3), legacy(2)])],
+    ['one physical part', withList([part(1)])],
+  ])('skips %s', (_name, row) => {
+    expect(windowOpeningBulkEditBlocked(row, true)).toBe(true);
+  });
+
+  it.each([
+    ['no list', columns],
+    ['consistent legacy list', withList([legacy(1.65)])],
+    ['zero area with columns', { ...columns, max_window_open_area: 0 }],
+  ])('edits %s', (_name, row) => {
+    expect(windowOpeningBulkEditBlocked(row, true)).toBe(false);
+  });
+
+  it('leaves a7 bulk edits alone apart from physical parts', () => {
+    expect(windowOpeningBulkEditBlocked(withList([]), false)).toBe(false);
+    expect(windowOpeningBulkEditBlocked(withList([legacy(1.3), legacy(2)]), false)).toBe(false);
+    expect(windowOpeningBulkEditBlocked(withList([part(1)]), false)).toBe(true);
+  });
+
+  it('blocks copying a source that cannot run on a8/a9', () => {
+    expect(windowPartsCopyBlocked({ free_area_height: 0.5 }, true)).toBe(true);
+    expect(windowPartsCopyBlocked(withList([]), true)).toBe(true);
+    expect(windowPartsCopyBlocked(columns, true)).toBe(false);
+    expect(windowPartsCopyBlocked({ free_area_height: 0.5 }, false)).toBe(false);
+  });
+
+  it('copies the run values and never undefined', () => {
+    const row = { free_area_height: 0.5, max_window_open_area: 0.4, extra_json: { window_part_list: [legacy(1.2)] } };
+    expect(windowPartsCopyColumns(row)).toEqual({ free_area_height: 0.5, mid_height: 1.2, max_window_open_area: 0.4 });
+  });
+});
+
+describe('review findings: base-height edits on a8/a9', () => {
+  const physicalPort = {
+    ...unavailableGeometrySchemaPort,
+    availability: 'available' as const,
+    getElementSubschema: () => ({ properties: { window_part_list: { type: 'array', items: { properties: { mid_height: {} } } } } }),
+    getRootSchema: () => ({}),
+    getSchemaSubtypeForElementData: () => undefined,
+    getStrictestIntegerKeysForElementType: () => new Set<string>(),
+  };
+  const twoParts = {
+    id: 'w', name: 'W', type: 'BuildingElementTransparent', zoneId: 'z', floorId: '0', parent_element: null,
+    coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }],
+    width: 1, height: 1, area: 1, pitch: 90, base_height: 1, mid_height: 1.5,
+    extra_json: { window_part_list: [part(1.2), { free_area_height: 0.5, mid_height: 1.8 }] },
+  } as unknown as Element;
+  const update = (updates: Partial<Element>, schemaPort?: typeof physicalPort) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort });
+    store.setState({ elementsById: { w: twoParts }, elementIds: ['w'] });
+    store.getState().updateElement('w', updates);
+    return (store.getState().elementsById.w as Element & { extra_json: { window_part_list: Array<{ mid_height: number }> } }).extra_json.window_part_list.map((row) => row.mid_height);
+  };
+
+  it('moves every physical part by the same delta, once', () => {
+    expect(update({ base_height: 1.5 } as Partial<Element>, physicalPort)).toEqual([1.7, 2.3]);
+  });
+
+  it('does not move parts on a7', () => {
+    expect(update({ base_height: 1.5 } as Partial<Element>)).toEqual([1.2, 1.8]);
+  });
+
+  it('leaves a list the update already moved', () => {
+    expect(update({
+      base_height: 1.5,
+      extra_json: { window_part_list: [part(5), part(6)] },
+    } as Partial<Element>, physicalPort)).toEqual([5, 6]);
+  });
+});
+
+describe('3D window overlay', () => {
+  it('draws the part a single-part window runs, not its stale columns', () => {
+    const element = {
+      id: 'w', name: 'W', type: 'BuildingElementTransparent', zoneId: 'z', parent_element: null,
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }],
+      width: 1, height: 1, area: 1, pitch: 90, base_height: 1,
+      free_area_height: 0.9, max_window_open_area: 0.9,
+      extra_json: { window_part_list: [part(1.2)] },
+    } as unknown as Element;
+    const floors: Floor[] = [{ id: '0', name: 'G', zIndex: 0, height: 2.4, isRoofSpace: false }];
+    const [primitive] = buildGeometry3DPrimitives({
+      elementsById: { w: element },
+      elementIds: ['w'],
+      floors,
+      currentFloorZ: 0,
+    }) as unknown as Array<{ windowVentilation?: unknown }>;
+    expect(primitive.windowVentilation).toMatchObject({ free_area_height: 0.5, max_window_open_area: 0.4 });
   });
 });

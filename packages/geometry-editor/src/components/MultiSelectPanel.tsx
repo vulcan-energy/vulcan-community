@@ -70,7 +70,10 @@ import { projectWindowShadingPointToSegment } from './elementForms/windowShading
 import {
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
+  windowOpeningBulkEditBlocked,
   windowPartsArePhysical,
+  windowPartsCopyBlocked,
+  windowPartsCopyColumns,
   type WindowOpeningField,
   type WindowOpeningSource,
 } from '../lib/windowOpenings';
@@ -440,19 +443,6 @@ const hasPhysicalWindowParts = (el: Element): boolean => {
   return openings.kind === 'rows' && openings.source === 'parts';
 };
 
-/** A window whose parts this target cannot run, or that needs repair, has nothing to copy. */
-function windowPartsCopyBlocked(el: BuildingElementTransparent, windowPartsPhysical: boolean | null): boolean {
-  const openings = classifyWindowOpenings(openingSource(el));
-  if (openings.kind === 'repair') return openings.reason !== 'conflicting_heights' || windowPartsPhysical === true;
-  return windowPartsPhysical === false && openings.kind === 'rows' && openings.source === 'parts';
-}
-
-const openingColumnsForCopy = (el: BuildingElementTransparent) => ({
-  free_area_height: el.free_area_height,
-  mid_height: el.mid_height,
-  max_window_open_area: el.max_window_open_area,
-});
-
 function buildWindowDetailCopyExtraJson(
   source: BuildingElementTransparent,
   target: BuildingElementTransparent,
@@ -477,6 +467,27 @@ function buildWindowDetailCopyExtraJson(
     nextExtra[key] = cloneExtraJsonValue(sourceExtra[key]);
   }
   return nextExtra;
+}
+
+function countBulkEditBlockedWindows(elements: Element[], windowPartsPhysical: boolean | null): number {
+  return elements.filter((el) => isTransparent(el) && windowOpeningBulkEditBlocked(openingSource(el), windowPartsPhysical)).length;
+}
+
+function buildWindowDetailCopyPatches(
+  source: BuildingElementTransparent,
+  targets: BuildingElementTransparent[],
+  detailKey: WindowDetailVisibleKey,
+  windowPartsPhysical: boolean | null,
+): Array<{ target: BuildingElementTransparent; patch: Partial<Element> }> {
+  // On a8/a9 a single opening lives in the columns as well as the list, so both travel.
+  const copyColumns = detailKey === 'window_part_list' && windowPartsPhysical === true && !hasPhysicalWindowParts(source);
+  const columns = copyColumns ? windowPartsCopyColumns(openingSource(source)) : {};
+  return targets.flatMap((target) => {
+    const extra_json = buildWindowDetailCopyExtraJson(source, target, detailKey);
+    const unchanged = extraJsonValuesEqual(extraJsonRecord(target), extra_json)
+      && Object.entries(columns).every(([key, value]) => (target as unknown as Record<string, unknown>)[key] === value);
+    return unchanged ? [] : [{ target, patch: { ...columns, extra_json } as Partial<Element> }];
+  });
 }
 
 function windowShadingProjectionPatch(
@@ -2013,12 +2024,12 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   }, []);
 
   const buildOpeningLivePatch = (el: Element, field: WindowOpeningField, value: number): Partial<Element> | null => {
-    if (!isTransparent(el) || hasPhysicalWindowParts(el)) return null;
+    if (!isTransparent(el) || windowOpeningBulkEditBlocked(openingSource(el), windowPartsPhysical)) return null;
     return windowPartsPhysical === true
       ? buildWindowOpeningFieldPatch(openingSource(el), field, value) as Partial<Element>
       : { [field]: value } as Partial<Element>;
   };
-  const skippedPhysicalWindowCount = activeWindowSurfaceElements.filter(hasPhysicalWindowParts).length;
+  const skippedOpeningWindowCount = countBulkEditBlockedWindows(activeWindowSurfaceElements, windowPartsPhysical);
 
   /**
    * Shared props for the panel's live-editing number inputs. The three variants differ only in
@@ -2778,26 +2789,11 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       copyWindowShadingDetails(sourceId, targetWindows.map((target) => target.id));
       return;
     }
-    // On a8/a9 a single opening lives in the columns as well as the list, so both travel.
-    const copyColumns = detailKey === 'window_part_list' && windowPartsPhysical === true && !hasPhysicalWindowParts(source);
-    const columns = copyColumns ? openingColumnsForCopy(source) : {};
-    const patches = targetWindows
-      .map((target) => ({
-        target,
-        extra_json: buildWindowDetailCopyExtraJson(source, target, detailKey),
-      }))
-      .filter(({ target, extra_json }) => (
-        !extraJsonValuesEqual(extraJsonRecord(target), extra_json)
-        || Object.entries(columns).some(([key, value]) => (target as unknown as Record<string, unknown>)[key] !== value)
-      ));
-    patches.forEach(({ target, extra_json }, index) => {
-      updateElement(
-        target.id,
-        { ...columns, extra_json } as Partial<Element>,
-        index < patches.length - 1,
-      );
+    const patches = buildWindowDetailCopyPatches(source, targetWindows, detailKey, windowPartsArePhysical(schemaPort, windowSchemaMode));
+    patches.forEach(({ target, patch }, index) => {
+      updateElement(target.id, patch, index < patches.length - 1);
     });
-  }, [activeWindowSurfaceIds, copyWindowShadingDetails, elementsById, updateElement, windowPartsPhysical]);
+  }, [activeWindowSurfaceIds, copyWindowShadingDetails, elementsById, schemaPort, updateElement, windowSchemaMode]);
 
   const handleEditWindowDetails = useCallback((sourceId: string, detailKey: WindowDetailVisibleKey) => {
     const source = elementsById[sourceId];
@@ -3196,9 +3192,9 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           undefined,
           activeWindowSurfaceIds,
         )}
-        {skippedPhysicalWindowCount > 0 && (
+        {skippedOpeningWindowCount > 0 && (
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            {countLabel(skippedPhysicalWindowCount, 'window')} with separate openings not changed. Edit each one in Advanced Fields.
+            {countLabel(skippedOpeningWindowCount, 'window')} not changed. Select each one to edit its openings.
           </div>
         )}
         {renderNumberRow(
@@ -3246,7 +3242,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
                     {WINDOW_DETAIL_VISIBLE_KEYS.map((key) => {
                       const label = WINDOW_DETAIL_COPY_LABELS[key];
                       const summary = windowDetailSummary(windowElement, key, attachedShading);
-                      const copyBlocked = key === 'window_part_list' && windowPartsCopyBlocked(windowElement, windowPartsPhysical);
+                      const copyBlocked = key === 'window_part_list' && windowPartsCopyBlocked(openingSource(windowElement), windowPartsPhysical);
                       const copyDisabled = targetCount === 0 || copyBlocked;
                       const copyTitle = copyBlocked
                         ? `Cannot copy window parts from ${windowLabel}. Check its window parts first.`

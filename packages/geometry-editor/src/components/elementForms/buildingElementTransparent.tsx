@@ -189,6 +189,7 @@ import {
   windowOpeningRepairMessages,
   windowOpeningsUseTable,
   windowPartsArePhysical,
+  WINDOW_NO_OPENING_MESSAGE,
   type WindowOpeningField,
   type WindowOpeningRow,
   type WindowOpeningSource,
@@ -359,15 +360,30 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     const nextMid = derivedWindowMidHeight;
     const prevMid = prevDerivedWindowMidHeightRef.current;
     const currentMid = typeof midHeightInput.value === 'number' ? midHeightInput.value : null;
+    // a8/a9: selecting or finishing an edit never rewrites an authored window. Only a geometry
+    // change moves a value, and only when it writes what the converter reads.
+    const authoredWindow = windowPartsPhysical && isExistingElementSelection();
+    const openingState = authoredWindow && selectedWindow?.type === 'BuildingElementTransparent'
+      ? classifyWindowOpenings(selectedWindow as unknown as WindowOpeningSource)
+      : null;
+    const columnsAreRead = openingState?.kind === 'needs_input'
+      || (openingState?.kind === 'rows' && openingState.source !== 'parts');
+    const movedWithGeometry = (current: number | null, previous: number | null, next: number) =>
+      columnsAreRead
+      && previous != null
+      && Math.abs(next - previous) > 0.005
+      && (current == null || Math.abs(current - previous) <= 0.005);
     const shouldSyncMid =
       !midHeightInput.isEditing &&
-      (currentMid == null || currentMid <= 0 || prevMid == null || Math.abs(currentMid - prevMid) <= 0.005);
+      (authoredWindow
+        ? movedWithGeometry(currentMid, prevMid, nextMid)
+        : (currentMid == null || currentMid <= 0 || prevMid == null || Math.abs(currentMid - prevMid) <= 0.005));
     if (nextMid > 0 && shouldSyncMid && (currentMid == null || Math.abs(currentMid - nextMid) > 0.005)) {
       midHeightInputSetValueRef.current(nextMid);
       // Repair legacy/stale saved values when the editor first opens. Normal edits are already
       // canonicalized in the store, so this branch is otherwise a no-op for existing elements.
       if (isExistingElementSelection()) {
-        ctx.commitExistingElementDraft({ mid_height: nextMid });
+        commitOpeningField('mid_height')(nextMid);
       }
     }
     prevDerivedWindowMidHeightRef.current = nextMid;
@@ -379,19 +395,21 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     const shouldSyncOpenArea =
       !maxWindowOpenAreaInput.isEditing &&
       freeAreaHeightInput.value !== '' &&
-      (
-        currentOpenArea == null ||
-        (nextOpenArea > 0 && currentOpenArea <= 0) ||
-        prevOpenArea == null ||
-        Math.abs(currentOpenArea - prevOpenArea) <= 0.005
-      );
+      (authoredWindow
+        ? movedWithGeometry(currentOpenArea, prevOpenArea, nextOpenArea)
+        : (
+            currentOpenArea == null ||
+            (nextOpenArea > 0 && currentOpenArea <= 0) ||
+            prevOpenArea == null ||
+            Math.abs(currentOpenArea - prevOpenArea) <= 0.005
+          ));
     if (
       shouldSyncOpenArea &&
       (currentOpenArea == null || Math.abs(currentOpenArea - nextOpenArea) > 0.005)
     ) {
       maxWindowOpenAreaInputSetValueRef.current(nextOpenArea);
       if (isExistingElementSelection()) {
-        ctx.commitExistingElementDraft({ max_window_open_area: nextOpenArea });
+        commitOpeningField('max_window_open_area')(nextOpenArea);
       }
     }
     prevDerivedWindowMaxOpenAreaRef.current = nextOpenArea;
@@ -570,9 +588,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
     const openingNote = openingsInTable
       ? 'This window has separate openings. Edit them in Advanced Fields.'
       : openings?.kind === 'closed'
-        ? 'No opening. This window stays closed.'
+        ? WINDOW_NO_OPENING_MESSAGE
         : openings?.kind === 'repair'
-          ? windowOpeningRepairMessages(openings).join('. ')
+          ? `${windowOpeningRepairMessages(openings).join('. ')}${openings.reason === 'conflicting_heights' ? ' Entering a Mid Height replaces the parts with one opening.' : ''}`
           : null;
 
     return (

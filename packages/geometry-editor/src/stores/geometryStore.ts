@@ -186,6 +186,7 @@ import {
   type TransparentOpeningNumericPatch,
 } from '../lib/transparentOpeningDerivedFields';
 import {
+  shiftPhysicalPartsWithBaseHeight,
   syncWindowPartListToMidHeight,
   windowPartsArePhysical,
   type WindowOpeningSource,
@@ -2319,6 +2320,21 @@ const applyTransparentOpeningAutomaticFields = (
     nextElement.type !== 'BuildingElementTransparent'
   ) return;
   const updateRecord = normalizedUpdates as Record<string, unknown>;
+  // A floor cascade writes its own list. a7 lists follow the sill in WindowPartListControl.
+  const updateOwnsWindowParts = Object.prototype.hasOwnProperty.call(readJsonRecord(updateRecord.extra_json) ?? {}, 'window_part_list');
+  if (
+    windowPartsPhysical &&
+    !updateOwnsWindowParts &&
+    typeof prevElement.base_height === 'number' &&
+    typeof nextElement.base_height === 'number' &&
+    prevElement.base_height !== nextElement.base_height
+  ) {
+    const shiftedExtraJson = shiftPhysicalPartsWithBaseHeight(
+      nextElement as unknown as WindowOpeningSource,
+      nextElement.base_height - prevElement.base_height,
+    );
+    if (shiftedExtraJson) nextElement.extra_json = shiftedExtraJson as typeof nextElement.extra_json;
+  }
   const hasInvalidDriver = TRANSPARENT_OPENING_DERIVATION_DRIVERS.some(
     (field) => Object.prototype.hasOwnProperty.call(updateRecord, field) &&
       (typeof updateRecord[field] !== 'number' || !Number.isFinite(updateRecord[field])),
@@ -2359,7 +2375,7 @@ const applyTransparentOpeningAutomaticFields = (
   const canonicalPatch = buildTransparentOpeningNumericPatch(
     prevElement,
     directNumericPatch,
-    { effectiveFloors },
+    { effectiveFloors, zeroIsAuthored: windowPartsPhysical },
   );
   if (
     !Object.prototype.hasOwnProperty.call(updateRecord, 'mid_height') &&
@@ -2371,7 +2387,7 @@ const applyTransparentOpeningAutomaticFields = (
     if (
       windowPartsPhysical &&
       typeof prevElement.mid_height === 'number' &&
-      !Object.prototype.hasOwnProperty.call(readJsonRecord(updateRecord.extra_json) ?? {}, 'window_part_list')
+      !updateOwnsWindowParts
     ) {
       const syncedExtraJson = syncWindowPartListToMidHeight(
         nextElement as unknown as WindowOpeningSource,

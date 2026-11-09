@@ -1427,7 +1427,10 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     const previousBaseHeightM = prevBaseHeightRef.current;
     if (Math.abs(previousBaseHeightM - baseHeightM) <= 1e-6) return;
     // Rebuilding from legacy rows would drop the physical parts.
-    if (physicalParts.length > 0) return;
+    if (physicalParts.length > 0) {
+      prevBaseHeightRef.current = baseHeightM;
+      return;
+    }
 
     const preservedRelRows = rows.map((row) => round2(
       row.mid_height_air_flow_path - previousBaseHeightM,

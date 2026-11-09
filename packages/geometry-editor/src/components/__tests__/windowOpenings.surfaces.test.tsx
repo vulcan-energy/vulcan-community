@@ -165,13 +165,50 @@ describe('window_part_list on a7 with physical parts', () => {
   });
 });
 
+describe('WindowPartListControl with physical parts present', () => {
+  it('does not apply a stale base-height delta after Convert', () => {
+    const element = windowElement({ window_part_list: [part(1.2)] });
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    act(() => store.setState({
+      selection: { type: 'element', id: 'window-1' },
+      elementsById: { 'window-1': element },
+      elementIds: ['window-1'],
+    }));
+    const handleChange = vi.fn();
+    const ui = (data: unknown) => (
+      <GeometryEditorServicePortsProvider schemaPort={port(legacyItems)} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
+        <GeometryStoreProvider store={store}>
+          <WindowPartListControl
+            data={data}
+            handleChange={handleChange}
+            path="window_part_list"
+            propKey="window_part_list"
+            label="Window Part List"
+            schema={{ type: 'array', items: legacyItems }}
+            uischema={{ type: 'Control', scope: '#/properties/window_part_list' }}
+            config={{ elementType: 'BuildingElementTransparent', schemaPort: port(legacyItems) }}
+            enabled
+            errors=""
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    const { rerender } = render(ui([part(1.2)]));
+    act(() => store.getState().updateElement('window-1', { base_height: 2 } as Partial<Element>));
+    rerender(ui([part(1.2)]));
+    fireEvent.click(screen.getByRole('button', { name: 'Convert to a single opening' }));
+    rerender(ui((stored(store).extra_json as Record<string, unknown>).window_part_list));
+    expect(handleChange).not.toHaveBeenCalled();
+  });
+});
+
 describe('validateElement window rules', () => {
   const messages = (element: BuildingElementTransparent, schemaPort: GeometrySchemaPort) =>
     validateElementCore(element, {
       schemaPort,
       elementsById: { [element.id]: element },
       complianceValidationEnabled: true,
-    }).issues.filter((issue) => /Height|Open Area|part/i.test(issue.message)).map((issue) => issue.message.replace('Window (BuildingElementTransparent): ', ''));
+    }).issues.filter((issue) => /Height|Open Area|part|openings/i.test(issue.message)).map((issue) => issue.message.replace('Window (BuildingElementTransparent): ', ''));
   const blankColumns = { free_area_height: undefined, mid_height: undefined, max_window_open_area: undefined };
 
   it('accepts new-style parts with blank columns on a8/a9', () => {
@@ -193,13 +230,52 @@ describe('validateElement window rules', () => {
     expect(messages(windowElement(divisions), port(physicalItems))[0]).toContain('different heights');
   });
 
-  it('accepts a window with a free height and zero open area as closed', () => {
-    expect(messages(windowElement(undefined, { max_window_open_area: 0 }), port(physicalItems))).toEqual([]);
+  const noOpeningIssue = 'HEM a8 and a9 cannot run a window with no openings. Enter an opening for this window.';
+
+  it.each([
+    ['zero open area', undefined, { max_window_open_area: 0 }],
+    ['an empty list', { window_part_list: [] }, {}],
+  ])('blocks a closed window on a8/a9: %s', (_name, extra, overrides) => {
+    expect(messages(windowElement(extra, overrides), port(physicalItems))).toContain(noOpeningIssue);
   });
 
-  it('reports parts whose open area exceeds the window', () => {
-    const large = { free_area_height: 1, mid_height: 1.2, max_window_open_area: 0.8 };
-    expect(messages(windowElement({ window_part_list: [large, large] }), port(physicalItems))[0]).toContain('greater than the window area');
+  it('keeps a7 required-value errors on a closed or zero window', () => {
+    expect(messages(windowElement(undefined, { free_area_height: 0, mid_height: 0, max_window_open_area: 0 }), port(legacyItems))).toEqual([
+      'Free Area Height should not be 0',
+      'Mid Height should not be 0',
+      'Max Window Open Area should not be 0',
+    ]);
+    expect(messages(windowElement({ window_part_list: [] }, { free_area_height: 0, mid_height: 1, max_window_open_area: 0.4 }), port(legacyItems)))
+      .toEqual(['Free Area Height should not be 0']);
+  });
+
+  it('keeps zero free height flagged on a7 and accepted on a8/a9', () => {
+    const zeroFree = { free_area_height: 0, mid_height: 1, max_window_open_area: 0.4 };
+    expect(messages(windowElement(undefined, zeroFree), port(legacyItems))).toEqual(['Free Area Height should not be 0']);
+    expect(messages(windowElement(undefined, { ...zeroFree, mid_height: 1.5 }), port(physicalItems))).toEqual([]);
+  });
+
+  describe('a9 checks made before the run', () => {
+    const opening = (values: Record<string, number>) => ({ free_area_height: 0.5, mid_height: 1.5, max_window_open_area: 0.4, ...values });
+
+    it('compares summed open area with height x width, not the stored area', () => {
+      expect(messages(windowElement(undefined, { area: 9, ...opening({ max_window_open_area: 1.2 }) }), port(physicalItems))[0]).toContain('greater than the window area');
+      expect(messages(windowElement({ window_part_list: [opening({ max_window_open_area: 0.5 }), opening({ max_window_open_area: 0.5 })] }), port(physicalItems))).toEqual([]);
+      expect(messages(windowElement({ window_part_list: [opening({ max_window_open_area: 0.6 }), opening({ max_window_open_area: 0.6 })] }), port(physicalItems))[0]).toContain('greater than the window area');
+    });
+
+    it('rejects a free height above the window height', () => {
+      expect(messages(windowElement(undefined, opening({ free_area_height: 1.1 })), port(physicalItems))[0]).toContain('Free Area Height');
+      expect(messages(windowElement({ window_part_list: [opening({}), opening({ free_area_height: 1.1 })] }), port(physicalItems))[0]).toContain('Part 2');
+      expect(messages(windowElement(undefined, opening({ free_area_height: 1 })), port(physicalItems))).toEqual([]);
+    });
+
+    it('rejects a mid height outside the glazed span, ground-relative in the editor', () => {
+      expect(messages(windowElement(undefined, opening({ mid_height: 2.1 })), port(physicalItems))[0]).toContain('Mid Height');
+      expect(messages(windowElement({ window_part_list: [opening({ mid_height: 0.9 })] }), port(physicalItems))[0]).toContain('Mid Height');
+      expect(messages(windowElement(undefined, opening({ mid_height: 1 })), port(physicalItems))).toEqual([]);
+      expect(messages(windowElement(undefined, opening({ mid_height: 2 })), port(physicalItems))).toEqual([]);
+    });
   });
 });
 
@@ -251,6 +327,51 @@ describe('main-form window opening inputs', () => {
     renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }));
     expect(screen.queryByText(/^Free Area Height/)).toBeNull();
     expect(screen.getByText(/This window has separate openings/)).toBeInTheDocument();
+  });
+
+  const inputFor = (label: RegExp) => {
+    let node: HTMLElement | null = screen.getByText(label);
+    while (node && !node.nextElementSibling?.classList.contains('element-input')) node = node.parentElement;
+    return node!.nextElementSibling!.querySelector('input') as HTMLInputElement;
+  };
+
+  it('does not change a window when it is selected', async () => {
+    const element = windowElement(undefined, { free_area_height: 0.5, mid_height: undefined, max_window_open_area: 0 } as never);
+    const store = renderForm(element);
+    await act(async () => {});
+    expect(stored(store).max_window_open_area).toBe(0);
+    expect(stored(store).mid_height).toBeUndefined();
+  });
+
+  it('keeps an explicit zero area when free height changes', () => {
+    const store = renderForm(windowElement(undefined, { free_area_height: 0.5, max_window_open_area: 0 }));
+    act(() => store.getState().updateElement('window-1', { free_area_height: 0.6 } as Partial<Element>));
+    expect(stored(store).max_window_open_area).toBe(0);
+  });
+
+  it('still fills an automatic zero when the free height is first entered', () => {
+    const store = renderForm(windowElement(undefined, { free_area_height: undefined, max_window_open_area: 0 } as never));
+    act(() => store.getState().updateElement('window-1', { free_area_height: 0.6 } as Partial<Element>));
+    expect(stored(store).max_window_open_area).toBe(0.6);
+  });
+
+  it('shows the run value and does not sync over a single physical part', async () => {
+    renderForm(windowElement({ window_part_list: [{ free_area_height: 0.5, mid_height: 1.5, max_window_open_area: 0.5 }] }, { free_area_height: 0.5, mid_height: 1.5, max_window_open_area: 0.5 }));
+    await act(async () => {});
+    fireEvent.change(inputFor(/^Height/), { target: { value: '1.4' } });
+    await act(async () => {});
+    expect(inputFor(/^Mid Height/).value).toBe('1.5');
+  });
+
+  it('says that entering a mid height collapses conflicting legacy parts', () => {
+    renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.3 }, { mid_height_air_flow_path: 2 }] }));
+    expect(screen.getByText(/replaces the parts with one opening/)).toBeInTheDocument();
+  });
+
+  it('replaces the closed note on a8/a9', () => {
+    renderForm(windowElement({ window_part_list: [] }));
+    expect(screen.getAllByText(/HEM a8 and a9 cannot run a window with no openings/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/stays closed/)).toBeNull();
   });
 
   it('does not derive open area while free height is blank', () => {

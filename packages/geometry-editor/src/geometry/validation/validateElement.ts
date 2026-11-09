@@ -14,9 +14,10 @@ import {
   classifyWindowOpenings,
   windowOpeningRepairMessages,
   windowPartsArePhysical,
+  WINDOW_NO_OPENING_MESSAGE,
   type WindowOpeningField,
+  type WindowOpeningRow,
   type WindowOpeningSource,
-  type WindowOpenings,
 } from '../../lib/windowOpenings';
 import { classifyOpaqueFabricVariantFromElement } from '../../lib/opaqueFabricVariant';
 import type {
@@ -227,44 +228,84 @@ const WINDOW_OPENING_FIELD_ISSUES: Record<WindowOpeningField, string> = {
   max_window_open_area: 'Max Window Open Area should not be 0',
 };
 
+/** Python's math.isclose with the arguments a9 uses (default rel_tol, abs_tol=1e-10). */
+const closeEnough = (a: number, b: number): boolean =>
+  Math.abs(a - b) <= Math.max(1e-9 * Math.max(Math.abs(a), Math.abs(b)), 1e-10);
+const strictlyAbove = (a: number, limit: number): boolean => a > limit && !closeEnough(a, limit);
+
 /**
- * Follows the converter. `physical` is null when no schema is loaded: a7-style checks stay in force.
- * Divisions with different heights run on a7, so only a8/a9 report them.
+ * a9 core (`input.py`) and wrapper (`window_validation.py`) checks, made before the run.
+ * Heights are ground-relative here, so the sill needs no shift to match the wrapper's zone frame.
  */
-function validateWindowOpenings(el: BuildingElementTransparent, physical: boolean | null): ValidationIssue[] {
-  const source = el as unknown as WindowOpeningSource;
-  const openings = classifyWindowOpenings(source);
-  const columnIssues = (state: WindowOpenings) =>
-    state.kind === 'needs_input'
-      ? state.missing.map((field) => geoIssue(WINDOW_OPENING_FIELD_ISSUES[field], field))
-      : [];
+function physicalOpeningLimitIssues(
+  rows: readonly WindowOpeningRow[],
+  geometry: { width: number; height: number; baseHeight: number },
+): ValidationIssue[] {
+  const { width, height, baseHeight } = geometry;
+  if (!(width > 0) || !(height > 0)) return [];
+  const issues: ValidationIssue[] = [];
+  const several = rows.length > 1;
+  const totalOpenArea = rows.reduce((sum, row) => sum + (row.max_window_open_area ?? 0), 0);
+  if (strictlyAbove(totalOpenArea, height * width)) {
+    issues.push(geoIssue(
+      'The max open area is greater than the window area (height x width).',
+      several ? 'window_part_list' : 'max_window_open_area',
+    ));
+  }
+  const head = baseHeight + height;
+  rows.forEach((row, index) => {
+    const name = (field: string, single: string) => several ? `Part ${index + 1} ${field}` : single;
+    if (row.free_area_height !== undefined && strictlyAbove(row.free_area_height, height)) {
+      issues.push(geoIssue(
+        `${name('free height', 'Free Area Height')} (${formatNumberForIssue(row.free_area_height)} m) is greater than the window height (${formatNumberForIssue(height)} m).`,
+        several ? 'window_part_list' : 'free_area_height',
+      ));
+    }
+    const mid = row.mid_height;
+    if (mid !== undefined && (strictlyAbove(baseHeight, mid) || strictlyAbove(mid, head))) {
+      issues.push(geoIssue(
+        `${name('mid height', 'Mid Height')} (${formatNumberForIssue(mid)} m) is outside the window (${formatNumberForIssue(baseHeight)} m to ${formatNumberForIssue(head)} m above ground).`,
+        several ? 'window_part_list' : 'mid_height',
+      ));
+    }
+  });
+  return issues;
+}
+
+/**
+ * Follows the converter on a8/a9. On a7, or when no schema can say (`physical` null), the
+ * blank and zero column checks stay in force, and divisions with different heights can run.
+ */
+function validateWindowOpenings(
+  el: BuildingElementTransparent,
+  physical: boolean | null,
+  getGeometry: () => { width: number; height: number; baseHeight: number },
+): ValidationIssue[] {
+  const openings = classifyWindowOpenings(el as unknown as WindowOpeningSource);
+  if (physical !== true) {
+    const issues: ValidationIssue[] = [];
+    for (const field of Object.keys(WINDOW_OPENING_FIELD_ISSUES) as WindowOpeningField[]) {
+      if (!isPositiveFiniteNumber(el[field])) issues.push(geoIssue(WINDOW_OPENING_FIELD_ISSUES[field], field));
+    }
+    if (openings.kind === 'rows' && openings.source === 'parts' && physical === false) {
+      issues.unshift(geoIssue(
+        'This HEM version cannot use window parts with their own free height and max open area. Use "Convert to a single opening" in Advanced Fields.',
+        'window_part_list',
+      ));
+    }
+    if (openings.kind === 'repair' && openings.reason !== 'conflicting_heights') {
+      issues.push(...windowOpeningRepairMessages(openings).map((message) => geoIssue(message, 'window_part_list')));
+    }
+    return issues;
+  }
   switch (openings.kind) {
     case 'closed':
-      return [];
+      return [geoIssue(WINDOW_NO_OPENING_MESSAGE, 'max_window_open_area')];
     case 'needs_input':
-      return columnIssues(openings);
-    case 'rows': {
-      if (openings.source === 'parts' && physical === false) {
-        return [geoIssue(
-          'This HEM version cannot use window parts with their own free height and max open area. Use "Convert to a single opening" in Advanced Fields.',
-          'window_part_list',
-        )];
-      }
-      if (openings.source === 'parts' && physical === true && isPositiveFiniteNumber(el.area)) {
-        const totalOpenArea = openings.rows.reduce((sum, row) => sum + (row.max_window_open_area ?? 0), 0);
-        if (totalOpenArea > el.area + 1e-6) {
-          return [geoIssue('The max open area of the window parts is greater than the window area.', 'window_part_list')];
-        }
-      }
-      if (openings.source === 'legacy' && physical !== true && !isPositiveFiniteNumber(el.mid_height)) {
-        return [geoIssue(WINDOW_OPENING_FIELD_ISSUES.mid_height, 'mid_height')];
-      }
-      return [];
-    }
+      return openings.missing.map((field) => geoIssue(WINDOW_OPENING_FIELD_ISSUES[field], field));
+    case 'rows':
+      return physicalOpeningLimitIssues(openings.rows, getGeometry());
     case 'repair':
-      if (openings.reason === 'conflicting_heights' && physical !== true) {
-        return columnIssues(classifyWindowOpenings({ ...source, extra_json: undefined }));
-      }
       return windowOpeningRepairMessages(openings).map((message) => geoIssue(message, 'window_part_list'));
   }
 }
@@ -1018,7 +1059,11 @@ export const validateElementCore = (
       if (!isPositiveFiniteNumber(el.frame_area_fraction)) {
         issues.push(geo('Frame Area Fraction is required and must be greater than 0', 'frame_area_fraction'));
       }
-      issues.push(...validateWindowOpenings(el, windowPartsArePhysical(schemaPort, complianceValidationEnabled ? 'fhs' : 'core')));
+      issues.push(...validateWindowOpenings(
+        el,
+        windowPartsArePhysical(schemaPort, complianceValidationEnabled ? 'fhs' : 'core'),
+        () => getAreaBasedElementExportGeometry(el, context.globalOrientationOffset),
+      ));
       if (complianceValidationEnabled && context.complianceSettings) {
         const ventilationZoneBaseHeight = resolveEffectiveVentilationZoneBaseHeight({
           elements: allElements,
