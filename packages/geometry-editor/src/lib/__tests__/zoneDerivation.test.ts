@@ -478,3 +478,38 @@ describe('storey base changes: each source and each storey rule', () => {
     }
   });
 });
+
+describe('calculateDerivedHeight area weighting', () => {
+  const square = (id: string, side: number, z: number) => ({
+    id, name: id, type: 'BuildingElementGround', zoneId: 'z',
+    coordinates: [{ x: 0, y: 0, z }, { x: side, y: 0, z }, { x: side, y: side, z }, { x: 0, y: side, z }],
+  }) as unknown as Element;
+  const deck = (id: string, width: number, depth: number, z: number) => ({
+    id, name: id, type: 'BuildingElementOpaque', zoneId: 'z', pitch: 180,
+    coordinates: [{ x: 0, y: 0, z }, { x: width, y: 0, z }, { x: width, y: depth, z }, { x: 0, y: depth, z }],
+  }) as unknown as Element;
+  const wall = (id: string, height: number, z: number) => ({
+    id, name: id, type: 'BuildingElementOpaque', zoneId: 'z', pitch: 90, height, width: 4,
+    coordinates: [{ x: 0, y: 0, z }, { x: 4, y: 0, z }],
+  }) as unknown as Element;
+
+  it('weights each storey by its treated floor area', () => {
+    const elements = [square('g', 10, 0), deck('f', 10, 5, 1), wall('w0', 3, 0), wall('w1', 2.4, 1)];
+    expect(calculateDerivedHeight('z', elements)).toBe(2.8);
+  });
+
+  it('ignores a level with walls but no treated floor', () => {
+    const elements = [square('g', 10, 0), deck('f', 10, 5, 1), wall('w0', 3, 0), wall('w1', 2.4, 1), wall('gable', 1, 2)];
+    expect(calculateDerivedHeight('z', elements)).toBe(2.8);
+  });
+
+  it('does not count overlapping floors twice in the weight', () => {
+    const elements = [square('g', 10, 0), deck('f', 10, 10, 1), deck('f2', 10, 10, 1), wall('w0', 3, 0), wall('w1', 2.4, 1)];
+    expect(calculateDerivedHeight('z', elements)).toBe(2.7);
+  });
+
+  it('falls back to the storey mean when no treated floor is modelled', () => {
+    expect(calculateDerivedHeight('z', [wall('w0', 3, 0), wall('w1', 2.4, 1)])).toBe(2.7);
+  });
+});
+
