@@ -704,6 +704,11 @@ const migrateElementsToNormalized = (
  * partition saved as both faces at twice a legacy single-face area keeps its meaning, so it is not
  * listed.
  */
+/** A metadata row is written only with a value: a present row with a blank value is an error (E066). */
+const hasMetadataValue = (value: unknown): boolean =>
+  value !== undefined && value !== null && value !== '' && !(typeof value === 'number' && !Number.isFinite(value));
+
+const NOT_REPLACEABLE_COLUMNS = new Set(['Name', 'Zone', 'Type', 'coords', 'extra_json']);
 const replacedValuesNotice = (authoredCsv: string, loadedCsv: string): string[] => {
   const rows = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
     .filter((row) => row.data.Name)
@@ -713,11 +718,11 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string): string[] 
   for (const [key, authored] of rows(authoredCsv)) {
     const saved = loaded.get(key);
     if (!saved) continue;
-    const bothFaces = (saved.extra_json ?? '').includes('both_faces');
+    const bothFaces = /both_faces/.test(saved.extra_json ?? '');
     for (const [column, raw] of Object.entries(authored)) {
       const before = raw.trim();
       const after = saved[column]?.trim();
-      if (!before || after === undefined || ['Name', 'Zone', 'Type', 'coords', 'extra_json'].includes(column)) continue;
+      if (!before || after === undefined || NOT_REPLACEABLE_COLUMNS.has(column)) continue;
       const a = Number(before), b = Number(after);
       // The writer leaves a non-positive dimension blank; a 0 placeholder carries no value.
       if (a === 0 && after === '') continue;
@@ -964,16 +969,16 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       floors: state.floors,
     });
 
-    if (compliance.PartO_active_cooling_required !== undefined) {
+    if (hasMetadataValue(compliance.PartO_active_cooling_required)) {
       lines.push(`PartO_active_cooling_required,${compliance.PartO_active_cooling_required ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
     }
-    if (effectiveBedrooms !== undefined) {
+    if (hasMetadataValue(effectiveBedrooms)) {
       lines.push(`NumberOfBedrooms,${Math.round(effectiveBedrooms)},,,,,,,,,,,,,`);
     }
-    if (effectiveWetRooms !== undefined) {
+    if (hasMetadataValue(effectiveWetRooms)) {
       lines.push(`NumberOfWetRooms,${Math.round(effectiveWetRooms)},,,,,,,,,,,,,`);
     }
-    if (compliance.GroundFloorArea !== undefined) {
+    if (hasMetadataValue(compliance.GroundFloorArea)) {
       lines.push(`GroundFloorArea,${compliance.GroundFloorArea},,,,,,,,,,,,,`);
     } else if (derivedGFA > 0) {
       lines.push(`GroundFloorArea,${derivedGFA},,,,,,,,,,,,,`);
@@ -981,22 +986,22 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     if (compliance.HeatingControlType) {
       lines.push(`HeatingControlType,${compliance.HeatingControlType},,,,,,,,,,,,,`);
     }
-    if (compliance.PartGcompliance !== undefined) {
+    if (hasMetadataValue(compliance.PartGcompliance)) {
       lines.push(`PartGcompliance,${compliance.PartGcompliance ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
     }
     if (compliance.ColdWaterSource) {
       lines.push(`ColdWaterSource,${compliance.ColdWaterSource},,,,,,,,,,,,,`);
     }
-    if (compliance.complianceValidationEnabled !== undefined) {
+    if (hasMetadataValue(compliance.complianceValidationEnabled)) {
       lines.push(`ComplianceValidationEnabled,${compliance.complianceValidationEnabled ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
     }
-    if (compliance.scenariosBaseModelEnabled !== undefined) {
+    if (hasMetadataValue(compliance.scenariosBaseModelEnabled)) {
       lines.push(`ScenariosBaseModelEnabled,${compliance.scenariosBaseModelEnabled ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
     }
-    if (compliance.AirPermeability_test_pressure !== undefined) {
+    if (hasMetadataValue(compliance.AirPermeability_test_pressure)) {
       lines.push(`AirPermeability_test_pressure,${compliance.AirPermeability_test_pressure},,,,,,,,,,,,,`);
     }
-    if (compliance.AirPermeability_test_result !== undefined) {
+    if (hasMetadataValue(compliance.AirPermeability_test_result)) {
       lines.push(`AirPermeability_test_result,${compliance.AirPermeability_test_result},,,,,,,,,,,,,`);
     }
     const derivedVentHeight = calculateSuggestedVentilationHeight(allElementsForExport, state.floors);
@@ -1005,7 +1010,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Ventilation zone height: same export-on-derived-or-override pattern.
     // Without this, the geometry-derived suggestion (sum of per-floor wall heights)
     // is UI-only and is replaced on JSON merge by the defaults file's value.
-    if (effectiveVentHeight !== undefined) {
+    if (hasMetadataValue(effectiveVentHeight)) {
       lines.push(`AirPermeability_ventilation_zone_height,${effectiveVentHeight},,,,,,,,,,,,,`);
     }
     if (compliance.Ventilation_shield_class) {
@@ -1014,11 +1019,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     if (compliance.Ventilation_terrain_class) {
       lines.push(`Ventilation_terrain_class,${compliance.Ventilation_terrain_class},,,,,,,,,,,,,`);
     }
-    if (compliance.Ventilation_altitude !== undefined) {
+    if (hasMetadataValue(compliance.Ventilation_altitude)) {
       lines.push(`Ventilation_altitude,${compliance.Ventilation_altitude},,,,,,,,,,,,,`);
     }
     lines.push(`Ventilation_ventilation_zone_base_height,${effectiveVentBaseHeight},,,,,,,,,,,,,`);
-    if (compliance.Ventilation_noise_nuisance !== undefined) {
+    if (hasMetadataValue(compliance.Ventilation_noise_nuisance)) {
       lines.push(`Ventilation_noise_nuisance,${compliance.Ventilation_noise_nuisance ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
     }
     // BuildingLength/Width also flow through the unified resolver above. The legacy
@@ -1026,28 +1031,28 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // inside the resolver (Number.isFinite + > 0 semantics on a positive measurement).
     const effectiveBuildingLength = dd.buildingLengthM;
     const effectiveBuildingWidth = dd.buildingWidthM;
-    if (effectiveBuildingLength !== undefined) {
+    if (hasMetadataValue(effectiveBuildingLength)) {
       lines.push(`BuildingLength,${effectiveBuildingLength},,,,,,,,,,,,,`);
     }
-    if (effectiveBuildingWidth !== undefined) {
+    if (hasMetadataValue(effectiveBuildingWidth)) {
       lines.push(`BuildingWidth,${effectiveBuildingWidth},,,,,,,,,,,,,`);
     }
-    if (effectiveHabitableRooms !== undefined) {
+    if (hasMetadataValue(effectiveHabitableRooms)) {
       lines.push(`NumberOfHabitableRooms,${Math.round(effectiveHabitableRooms)},,,,,,,,,,,,,`);
     }
-    if (effectiveHotTappedRooms !== undefined) {
+    if (hasMetadataValue(effectiveHotTappedRooms)) {
       lines.push(`NumberOfHotTappedRooms,${Math.round(effectiveHotTappedRooms)},,,,,,,,,,,,,`);
     }
-    if (effectiveUtilityRooms !== undefined) {
+    if (hasMetadataValue(effectiveUtilityRooms)) {
       lines.push(`NumberOfUtilityRooms,${Math.round(effectiveUtilityRooms)},,,,,,,,,,,,,`);
     }
-    if (effectiveBathrooms !== undefined) {
+    if (hasMetadataValue(effectiveBathrooms)) {
       lines.push(`NumberOfBathrooms,${Math.round(effectiveBathrooms)},,,,,,,,,,,,,`);
     }
-    if (effectiveSanitaryAccommodations !== undefined) {
+    if (hasMetadataValue(effectiveSanitaryAccommodations)) {
       lines.push(`NumberOfSanitaryAccommodations,${Math.round(effectiveSanitaryAccommodations)},,,,,,,,,,,,,`);
     }
-    if (compliance.KitchenExtractorHoodExternal !== undefined) {
+    if (hasMetadataValue(compliance.KitchenExtractorHoodExternal)) {
       lines.push(
         `KitchenExtractorHoodExternal,${compliance.KitchenExtractorHoodExternal ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`,
       );
@@ -1056,21 +1061,21 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // geometry-derived suggestion. This makes CSV round-trips stable —
     // re-importing the same CSV preserves the values shown in the UI rather
     // than reverting to the defaults file's hardcoded `storeys_in_dwelling: 1`.
-    if (effectiveBuildType !== undefined) {
+    if (hasMetadataValue(effectiveBuildType)) {
       lines.push(`General_build_type,${effectiveBuildType},,,,,,,,,,,,,`);
     }
     // SAP built form is calculation-authoritative metadata. Unlike FHS build
     // type/storeys, it must never be inferred from geometry or defaulted.
-    if (compliance.built_form !== undefined) {
+    if (hasMetadataValue(compliance.built_form)) {
       lines.push(`General_built_form,${compliance.built_form},,,,,,,,,,,,,`);
     }
-    if (effectiveStoreysInDwelling !== undefined) {
+    if (hasMetadataValue(effectiveStoreysInDwelling)) {
       lines.push(`General_storeys_in_dwelling,${Math.round(effectiveStoreysInDwelling)},,,,,,,,,,,,,`);
     }
-    if (effectiveBuildType === 'flat' && effectiveStoreyOfDwelling !== undefined) {
+    if (effectiveBuildType === 'flat' && hasMetadataValue(effectiveStoreyOfDwelling)) {
       lines.push(`General_storey_of_dwelling,${Math.round(effectiveStoreyOfDwelling)},,,,,,,,,,,,,`);
     }
-    if (effectiveBuildType === 'flat' && compliance.storeys_in_building !== undefined) {
+    if (effectiveBuildType === 'flat' && hasMetadataValue(compliance.storeys_in_building)) {
       lines.push(`General_storeys_in_building,${compliance.storeys_in_building},,,,,,,,,,,,,`);
     }
 

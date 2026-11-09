@@ -482,7 +482,8 @@ function requiredSchemaFieldHasValue(
 /**
  * Values the saved row still yields when the element field is unset: what the save derives from the
  * geometry (area, width, height, base height, pitch), and the converter's area (width x height),
- * window mid height (base height + height / 2) and vertical pitch for a two-point base line.
+ * window mid height (base height + height / 2), vertical pitch for a two-point base line and PV
+ * panel size from its polygon.
  */
 function derivedFromOwnColumns(element: Element, field: string, globalOrientationOffset: number | undefined): boolean {
   const row = element as unknown as Record<string, unknown>;
@@ -495,6 +496,10 @@ function derivedFromOwnColumns(element: Element, field: string, globalOrientatio
       || (isPositiveFiniteNumber(row.width) && isPositiveFiniteNumber(row.height));
   }
   if (field === 'mid_height' && element.type === 'BuildingElementTransparent') return isPositiveFiniteNumber(row.height);
+  // The converter derives PV panel width and height from a polygon (derive_pv_dimensions_from_coords).
+  if (element.type === 'OnSiteGeneration' && (field === 'width' || field === 'height')) {
+    return Array.isArray(element.coordinates) && element.coordinates.length >= 3;
+  }
   if ((element.type === 'BuildingElementOpaque' || element.type === 'BuildingElementTransparent')
     && (field === 'width' || field === 'height' || field === 'base_height')) {
     const { width, height } = getAreaBasedElementExportGeometry(element, globalOrientationOffset);
@@ -2039,6 +2044,7 @@ export const validateElementCore = (
         schemaSubtype,
       );
       const allRequiredFields = [...new Set([...requiredFields, ...conditionalRequiredFields])];
+      const reportedFields = new Set(issues.map((issue) => issue.fieldKey));
 
       for (const field of allRequiredFields) {
         // a8/a9: the converter always sets this value, and no form offers it.
@@ -2072,7 +2078,7 @@ export const validateElementCore = (
           const ownColumn = isElementCsvColumn(element.type, field);
           if (ownColumn && derivedFromOwnColumns(element, field, context.globalOrientationOffset)) continue;
           // A field-specific check above already reports it.
-          if (issues.some((issue) => issue.fieldKey === field)) continue;
+          if (reportedFields.has(field)) continue;
           // While defaults are still loading, assume template defaults exist to
           // avoid showing false "required" errors that disappear once defaults arrive.
           if (defaultsLoading && !ownColumn) continue;

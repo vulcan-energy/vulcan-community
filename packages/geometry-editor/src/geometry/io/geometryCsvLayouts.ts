@@ -274,8 +274,11 @@ const ELEMENT_CSV_SECTION: Partial<Record<ElementType, string>> = {
   ThermalBridgeLinear: 'Thermal Bridging Elements',
   ThermalBridgePoint: 'Thermal Bridging Elements',
   MechanicalVentilation: 'Ventilation Systems',
+  MechanicalVentilationDuctwork: 'Ventilation Systems',
   Vents: 'Ventilation Systems',
+  CombustionAppliances: 'Combustion Appliances',
   WaterPipework: 'Water Pipework',
+  OnSiteGeneration: 'On-Site Generation',
 };
 
 /**
@@ -284,8 +287,10 @@ const ELEMENT_CSV_SECTION: Partial<Record<ElementType, string>> = {
  */
 export function isElementCsvColumn(type: ElementType, field: string): boolean {
   const section = ELEMENT_CSV_SECTION[type];
-  return !!section && EXPECTED_SECTION_HEADERS[section].includes(field);
+  return !!section && SECTION_COLUMNS.get(section)!.has(field);
 }
+
+const SECTION_COLUMNS = new Map(Object.entries(EXPECTED_SECTION_HEADERS).map(([section, columns]) => [section, new Set(columns)]));
 
 const SKIP_VALIDATION = new Set(['Test Section']);
 
