@@ -5388,6 +5388,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     size="md"
                     placeholder="Auto-calculated from floor area × effective height"
                   />
+                  <div style={INLINE_FIELD_NOTE_STYLE}>Floor area × height. To reach a specific volume, change Height.</div>
                 </div>
                 <div className="element-label">
                   Simplified Thermal Bridging

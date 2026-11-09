@@ -17,6 +17,8 @@ import {
   isMaterialTreatedAreaDifference,
 } from '../../lib/spaceLabelGeometry';
 import type { Element } from '../types';
+import { calculatePolygonArea } from '../../lib/polygonSync';
+import { elementFloorIndex, getTreatedFloorElements } from '../../lib/zoneDerivation';
 
 export type SpaceLabelValidationContext = {
   zones: Zone[];
@@ -26,6 +28,9 @@ export type SpaceLabelValidationContext = {
 };
 
 const ADJACENCY_EPS_M = 0.03;
+/** Stairs and partition thickness leave a few percent unlabelled; a forgotten room leaves more. */
+const UNLABELLED_FLOOR_WARNING_MIN_M2 = 1;
+const UNLABELLED_FLOOR_WARNING_RATIO = 0.05;
 const MIN_SHARED_EDGE_M = 0.1;
 
 type Point2 = { x: number; y: number };
@@ -222,6 +227,25 @@ export function validateSpaceLabels(
       undefined,
       [...coverage.outsideLabelIds],
     ));
+  }
+
+  if (primaryZone && primaryLabels.some((label) => (label.room_type?.trim() ?? '') !== '')) {
+    const floorM2ByLevel = new Map<number, number>();
+    for (const floor of getTreatedFloorElements(elements.filter((el) => el.zoneId === primaryZone.id))) {
+      const level = elementFloorIndex(floor);
+      if (level !== null) floorM2ByLevel.set(level, (floorM2ByLevel.get(level) ?? 0) + calculatePolygonArea(floor.coordinates));
+    }
+    for (const [level, floorM2] of floorM2ByLevel) {
+      const labelledM2 = primaryLabels
+        .filter((label) => Math.floor(label.coordinates[0]?.z ?? Number.NaN) === level)
+        .reduce((sum, label) => sum + (geometryAnalysis.effectiveAreasByLabelId[label.id] ?? 0), 0);
+      const unlabelledM2 = floorM2 - labelledM2;
+      if (unlabelledM2 > UNLABELLED_FLOOR_WARNING_MIN_M2 && unlabelledM2 / floorM2 > UNLABELLED_FLOOR_WARNING_RATIO) {
+        warnings.push(warn(
+          `Z=${level}: ${unlabelledM2.toFixed(1)} m² of floor has no space label, so it is not in the treated floor area. Label it, or ignore this if it is meant to be left out.`,
+        ));
+      }
+    }
   }
 
   if (context.complianceValidationEnabled && primaryZone) {

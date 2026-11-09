@@ -13,6 +13,7 @@ import { detectMissingElements } from '../../../packages/geometry-editor/src/geo
 import { findLinearThermalBridgeIssues } from '../../../packages/geometry-editor/src/geometry/thermalBridge/findLinearThermalBridgeIssues';
 import { selectPartFData } from '../../../packages/geometry-editor/src/geometry/validation/partF/index';
 import { validateElementCore } from '../../../packages/geometry-editor/src/geometry/validation/validateElement';
+import { validateSpaceLabels } from '../../../packages/geometry-editor/src/geometry/validation/validateSpaceLabels';
 import { validateZone } from '../../../packages/geometry-editor/src/geometry/validation/validateZone';
 import type { MissingElement, ValidationIssue } from '../../../packages/geometry-editor/src/geometry/validation/types';
 import { collectGlobalSettingsWarnings } from '../../../packages/geometry-editor/src/lib/globalSettingsValidation';
@@ -165,6 +166,15 @@ export function checkGeometryCsv(csvArg: string) {
     pushRowsForIssues(rows, result.issues, base, 'critical');
     pushRowsForIssues(rows, result.warnings, base, 'warning');
   }
+
+  const spaceLabelResult = validateSpaceLabels(
+    spaceLabelsById(parsed.spaceLabels),
+    parsed.spaceLabels.map((label) => label.id),
+    { zones: parsed.zones, elementsById: byId, complianceValidationEnabled },
+  );
+  const spaceLabelBase = { subject: 'zone' as const, name: 'Space labels', type: 'SpaceLabel' };
+  pushRowsForIssues(rows, spaceLabelResult.issues, spaceLabelBase, 'critical');
+  pushRowsForIssues(rows, spaceLabelResult.warnings, spaceLabelBase, 'warning');
 
   for (const message of collectGlobalSettingsWarnings({
     elements,

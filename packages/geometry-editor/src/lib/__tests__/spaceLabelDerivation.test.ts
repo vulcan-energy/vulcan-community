@@ -366,6 +366,13 @@ describe('treated floor area from floors and space labels', () => {
     expect(analysis.effectiveAreasByLabelId.a! + analysis.effectiveAreasByLabelId.b!).toBeCloseTo(100, 6);
   });
 
+  it('warns when a storey has materially more floor than labels', () => {
+    const missingRoom = validate([label('a', 0, rect(0, 0, 10, 5))], [ground]);
+    expect(missingRoom.issues).toHaveLength(0);
+    expect(missingRoom.warnings[0]!.message).toContain('Z=0: 50.0 m² of floor has no space label');
+    expect(validate([label('a', 0, rect(0, 0, 10, 9.8))], [ground]).warnings).toHaveLength(0);
+  });
+
   it('raises one error per storey for a material area loss and none for rounding', () => {
     const lost = validate([label('a', 0, rect(0, 0, 10, 10)), label('b', 1, rect(0, 0, 10, 10, 1))], [ground, upperWall,
       element('deck', 'BuildingElementOpaque', rect(0, 0, 2, 2, 1), { pitch: 180 })]);
