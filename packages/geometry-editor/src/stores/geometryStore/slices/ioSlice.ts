@@ -699,22 +699,37 @@ const migrateElementsToNormalized = (
 };
 
 /**
- * Every element `area` cell that the loaded document will save differently, named for the user.
- * An internal partition saved as both faces at twice a legacy single-face area keeps its meaning,
- * so it is not one.
+ * One load notice listing every authored cell of a zone or element row that the loaded document
+ * saves with a different value, such as a plan area or a labelled living-room area. An internal
+ * partition saved as both faces at twice a legacy single-face area keeps its meaning, so it is not
+ * listed.
  */
-const changedAreaWarnings = (authoredCsv: string, loadedCsv: string): string[] => {
-  const areas = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
-    .filter((row) => row.data.Name && row.data.area?.trim())
-    .map((row) => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, { area: Number(row.data.area), bothFaces: (row.data.extra_json ?? '').includes('both_faces') }] as const)));
-  const loaded = areas(loadedCsv);
-  return [...areas(authoredCsv)].flatMap(([key, authored]) => {
+const replacedValuesNotice = (authoredCsv: string, loadedCsv: string): string[] => {
+  const rows = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
+    .filter((row) => row.data.Name)
+    .map((row) => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, row.data] as const)));
+  const loaded = rows(loadedCsv);
+  const replaced: string[] = [];
+  for (const [key, authored] of rows(authoredCsv)) {
     const saved = loaded.get(key);
-    const same = (factor: number) => Math.abs(saved!.area - factor * authored.area) < 0.015;
-    if (!saved || same(1) || (saved.bothFaces && same(2))) return [];
-    const [, zone, name] = key.split('|');
-    return [`${name}${zone ? ` (${zone})` : ''}: area ${authored.area} m² in the file is ${saved.area} m² as loaded from its geometry; saving writes the new value.`];
-  });
+    if (!saved) continue;
+    const bothFaces = (saved.extra_json ?? '').includes('both_faces');
+    for (const [column, raw] of Object.entries(authored)) {
+      const before = raw.trim();
+      const after = saved[column]?.trim();
+      if (!before || after === undefined || ['Name', 'Zone', 'Type', 'coords', 'extra_json'].includes(column)) continue;
+      const a = Number(before), b = Number(after);
+      // The writer leaves a non-positive dimension blank; a 0 placeholder carries no value.
+      if (a === 0 && after === '') continue;
+      const same = Number.isFinite(a) && Number.isFinite(b) && after !== ''
+        ? Math.abs(b - a) < 0.015 || (column === 'area' && bothFaces && Math.abs(b - 2 * a) < 0.015)
+        : before.toLowerCase() === after.toLowerCase();
+      if (!same) replaced.push(`${authored.Name} ${column} ${before} → ${after || 'blank'}`);
+    }
+  }
+  return replaced.length
+    ? [`Loading replaced ${replaced.length} value(s) in the file; saving writes the new value(s): ${replaced.join('; ')}.`]
+    : [];
 };
 
 export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
@@ -2373,7 +2388,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...changedAreaWarnings(csvContent, loadedCsvBaseline)], upgraded };
+    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline)], upgraded };
   }
 
   return slice;
