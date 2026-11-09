@@ -231,14 +231,21 @@ export function validateSpaceLabels(
 
   if (primaryZone && primaryLabels.some((label) => (label.room_type?.trim() ?? '') !== '')) {
     const floorM2ByLevel = new Map<number, number>();
+    const levelsWithDirectFloor = new Set<number>();
     for (const floor of getTreatedFloorElements(elements.filter((el) => el.zoneId === primaryZone.id))) {
       const level = elementFloorIndex(floor);
-      if (level !== null) floorM2ByLevel.set(level, (floorM2ByLevel.get(level) ?? 0) + calculatePolygonArea(floor.coordinates));
+      if (level === null) continue;
+      floorM2ByLevel.set(level, (floorM2ByLevel.get(level) ?? 0) + calculatePolygonArea(floor.coordinates));
+      if (floor.type === 'BuildingElementGround' || (floor as { pitch?: number }).pitch === 180) levelsWithDirectFloor.add(level);
     }
     for (const [level, floorM2] of floorM2ByLevel) {
-      const labelledM2 = primaryLabels
-        .filter((label) => Math.floor(label.coordinates[0]?.z ?? Number.NaN) === level)
-        .reduce((sum, label) => sum + (geometryAnalysis.effectiveAreasByLabelId[label.id] ?? 0), 0);
+      const levelLabels = primaryLabels.filter((label) => Math.floor(label.coordinates[0]?.z ?? Number.NaN) === level);
+      // A pitch-0 partition alone, with no labels above it, may be a ceiling rather than a missed storey.
+      if (levelLabels.length === 0 && !levelsWithDirectFloor.has(level)) continue;
+      const labelledM2 = levelLabels.reduce(
+        (sum, label) => sum + (geometryAnalysis.effectiveAreasByLabelId[label.id] ?? 0),
+        0,
+      );
       const unlabelledM2 = floorM2 - labelledM2;
       if (unlabelledM2 > UNLABELLED_FLOOR_WARNING_MIN_M2 && unlabelledM2 / floorM2 > UNLABELLED_FLOOR_WARNING_RATIO) {
         warnings.push(warn(

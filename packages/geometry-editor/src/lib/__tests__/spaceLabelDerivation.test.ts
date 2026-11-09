@@ -371,6 +371,8 @@ describe('treated floor area from floors and space labels', () => {
     expect(missingRoom.issues).toHaveLength(0);
     expect(missingRoom.warnings[0]!.message).toContain('Z=0: 50.0 m² of floor has no space label');
     expect(validate([label('a', 0, rect(0, 0, 10, 9.8))], [ground]).warnings).toHaveLength(0);
+    const unlabelledCeiling = element('top', 'BuildingElementAdjacentConditionedSpace', rect(0, 0, 10, 10, 1), { pitch: 0 });
+    expect(validate([label('a', 0, rect(0, 0, 10, 10))], [ground, unlabelledCeiling]).warnings).toHaveLength(0);
   });
 
   it('raises one error per storey for a material area loss and none for rounding', () => {
