@@ -75,13 +75,6 @@ const NAMED_UI_ONLY_EXTRA_JSON_KEYS: &[&str] = &[
     "thermal_bridge_solver",
 ];
 
-const PV_INVERTER_FIELDS: [&str; 4] = [
-    "inverter_peak_power_dc",
-    "inverter_peak_power_ac",
-    "inverter_is_inside",
-    "inverter_type",
-];
-
 /// Supplies a model may reference by name without authoring one.
 fn builtin_energy_supply(name: &str) -> Option<Value> {
     match name {
@@ -5262,17 +5255,6 @@ impl JSONBuilder {
                 if !pv_system.contains_key("shading") {
                     pv_system.insert("shading".to_string(), Value::Array(vec![]));
                 }
-                for key in PV_INVERTER_FIELDS {
-                    if !pv_system.contains_key(key) {
-                        self.push_non_fatal(
-                            "E063",
-                            &crate::json_pointer(&["OnSiteGeneration", element_name, key]),
-                            &format!(
-                                "PV system '{element_name}' needs {key}. No inverter is assumed."
-                            ),
-                        );
-                    }
-                }
 
                 // Width / height precedence: explicit CSV column (applied above) >
                 // extra_json > existing template value > slope-corrected derivation
@@ -7516,16 +7498,8 @@ impl JSONBuilder {
                         .entry((effective_zone_name, subcategory.to_string()))
                         .or_default()
                         .push(emitter_row.clone());
-                }
-            }
-
-            if linked_system_emitters.is_empty() && !saw_space_heat_system_link_column {
-                zone_type_emitters = unlinked_zone_type_emitters;
-                zones_with_csv_emitters.extend(unlinked_zones_with_csv_emitters);
-            } else if linked_system_emitters.is_empty() {
-                // A link column with every cell blank (a re-saved legacy CSV) links nothing, so
-                // no wet system would remain. Never remove heating for a blank link silently.
-                for emitter_row in section_data {
+                } else {
+                    // A blank link heats nothing: never drop the emitter silently.
                     let name = emitter_row
                         .get("Name")
                         .and_then(Value::as_str)
@@ -7536,6 +7510,11 @@ impl JSONBuilder {
                         &format!("Wet Emitter '{name}' has no space_heat_system, so no wet system heats it. Link it to a wet space heating system."),
                     );
                 }
+            }
+
+            if linked_system_emitters.is_empty() && !saw_space_heat_system_link_column {
+                zone_type_emitters = unlinked_zone_type_emitters;
+                zones_with_csv_emitters.extend(unlinked_zones_with_csv_emitters);
             }
 
             let defaults_wet_distribution_template = result
@@ -11843,12 +11822,10 @@ OnSiteGeneration,OnSiteGeneration,PhotovoltaicSystem,30,180.53,10,12,"-1.620,2.5
         assert_eq!(default_pv["type"], "PhotovoltaicSystem");
         assert_eq!(default_pv["ventilation_strategy"], "moderately_ventilated");
         assert_eq!(default_pv["EnergySupply"], "mains elec");
-        for key in PV_INVERTER_FIELDS {
-            assert!(
-                default_pv.get(key).is_none(),
-                "no inverter is invented: {key}"
-            );
-        }
+        assert!(
+            !default_pv.keys().any(|key| key.starts_with("inverter_")),
+            "no inverter is invented: {default_pv:?}"
+        );
     }
 
     #[test]
