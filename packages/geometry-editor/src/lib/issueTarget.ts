@@ -36,7 +36,8 @@ export function resolveIssueTarget(
     return {
       section: s[0],
       elementId: matches.length === 1 ? matches[0]!.id : undefined,
-      fieldKey: matches.length === 1 ? s[3] : undefined,
+      // Deeper paths and `ductwork` have no control on the fan: its ducts are separate elements.
+      fieldKey: matches.length === 1 && s.length === 4 && s[3] !== 'ductwork' ? s[3] : undefined,
       ownerKey: JSON.stringify(s.slice(0, 3)),
     };
   }

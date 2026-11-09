@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { forbiddenFieldKeys } from '../lib/systemSchemaFlatten';
+import { forbiddenFieldKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Pencil, X as XIcon, type IconNode } from 'lucide';
 import {
@@ -3442,7 +3442,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               CROSS_SECTION_OPTIONS,
               (value) => applyExtraJsonChoice((el) => {
                 if (!isDuctwork(el)) return null;
-                const forbidden = forbiddenFieldKeys(ductSubschema, { ...extraJsonRecord(el), cross_section_shape: value }, ductRoot);
+                const forbidden = newlyForbiddenFieldKeys(ductSubschema, extraJsonRecord(el), { ...extraJsonRecord(el), cross_section_shape: value }, ductRoot);
                 return { cross_section_shape: value, ...Object.fromEntries(forbidden.map((key) => [key, undefined])) };
               }),
             )}

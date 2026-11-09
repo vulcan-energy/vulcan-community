@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { flattenIfThenAllOfProperties, jsonSchemaIfMatches } from '../systemSchemaFlatten';
+import { flattenIfThenAllOfProperties, forbiddenPlantKeys, jsonSchemaIfMatches, newlyForbiddenFieldKeys } from '../systemSchemaFlatten';
+import { mergeSystemExtraJsonAfterJsonForms } from '../systemAdvancedSchemaExpand';
 
 describe('jsonSchemaIfMatches', () => {
   it('treats an absent discriminator as not matched', () => {
@@ -40,5 +41,41 @@ describe('flattenIfThenAllOfProperties', () => {
     }, { y: 1 }) as { properties: Record<string, unknown>; required?: string[] };
     expect(Object.keys(flat.properties).sort()).toEqual(['a']);
     expect(flat.required).toEqual([]);
+  });
+});
+
+describe('jsonSchemaIfMatches and booleans', () => {
+  it('lets an absent boolean satisfy const false, not const true', () => {
+    expect(jsonSchemaIfMatches({ properties: { integral: { const: false } } }, {})).toBe(true);
+    expect(jsonSchemaIfMatches({ properties: { integral: { const: true } } }, {})).toBe(false);
+  });
+});
+
+describe('forbidden values', () => {
+  const plant = {
+    properties: { heat: {}, area: { type: 'number' } },
+    allOf: [{ if: { required: ['heat'] }, then: { properties: { area: { not: {} } } } }],
+  };
+  const schema = { properties: { HotWaterSource: { properties: { tank: plant } } } };
+  const forbidden = (name: string, value: unknown) => forbiddenPlantKeys(schema, 'HotWaterSource', name, value, {});
+
+  it('strips only a key this plant edit newly forbids', () => {
+    const edited = mergeSystemExtraJsonAfterJsonForms(
+      { HotWaterSource: { tank: { area: 2 } } }, { HotWaterSource: { tank: { area: 2, heat: {} } } }, 'HotWaterSource', forbidden,
+    ) as { HotWaterSource: { tank: Record<string, unknown> } };
+    expect(edited.HotWaterSource.tank).toEqual({ heat: {} });
+  });
+
+  it('keeps a value forbidden before this edit', () => {
+    const edited = mergeSystemExtraJsonAfterJsonForms(
+      { HotWaterSource: { tank: { area: 2, heat: {} } } }, { HotWaterSource: { tank: { area: 2, heat: { a: 1 } } } }, 'HotWaterSource', forbidden,
+    ) as { HotWaterSource: { tank: Record<string, unknown> } };
+    expect(edited.HotWaterSource.tank.area).toBe(2);
+  });
+
+  it('compares a duct before and after an edit', () => {
+    const duct = { properties: { shape: {}, d: { type: 'number' } }, allOf: [{ if: { properties: { shape: { const: 'r' } } }, then: { properties: { d: false } } }] };
+    expect(newlyForbiddenFieldKeys(duct, { shape: 'c', d: 1 }, { shape: 'r', d: 1 })).toEqual(['d']);
+    expect(newlyForbiddenFieldKeys(duct, { shape: 'r', d: 1 }, { shape: 'r', d: 2 })).toEqual([]);
   });
 });

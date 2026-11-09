@@ -11,6 +11,9 @@ import { dereferenceSchemaNodeInRoot } from './subschemaCache';
 import { isRecord, readRecord } from './jsonTypes';
 import { isForbiddenSchemaNode, unwrapNullableSchema } from './schemaShape';
 
+/** Marks the keys a flatten removed as forbidden, so edits can tell forbidden from not applicable. */
+const FORBIDDEN_KEYS = 'x-vulcan-forbidden-keys';
+
 function cloneForFlatten<T>(obj: T): T {
   try {
     if (typeof structuredClone === 'function') return structuredClone(obj);
@@ -42,7 +45,8 @@ export function jsonSchemaIfMatches(ifSchema: unknown, data: unknown, root?: unk
 
 function dataMatchesPropertiesKeyword(data: unknown, props: Record<string, unknown>, root?: unknown): boolean {
   if (!isRecord(data)) return false;
-  return Object.entries(props).every(([key, sub]) => key in data && valueMatchesSchemaKeyword(data[key], sub, root));
+  // An absent boolean is false: a9 `tank_is_integral` defaults that way, and its condition says so.
+  return Object.entries(props).every(([key, sub]) => (key in data ? valueMatchesSchemaKeyword(data[key], sub, root) : isRecord(sub) && sub.const === false));
 }
 
 function valueMatchesSchemaKeyword(value: unknown, sub: unknown, root?: unknown): boolean {
@@ -55,10 +59,23 @@ function valueMatchesSchemaKeyword(value: unknown, sub: unknown, root?: unknown)
   return jsonSchemaIfMatches(sub, value, root);
 }
 
-/** Keys of `subschema.properties` that a branch matching `data` forbids. */
+/** Keys a branch matching `data` forbids, whether or not the base `properties` declares them. */
 export function forbiddenFieldKeys(subschema: unknown, data: unknown, root?: unknown): string[] {
-  const kept = readRecord(readRecord(flattenIfThenAllOfProperties(subschema, data, root)).properties);
-  return Object.keys(readRecord(readRecord(subschema).properties)).filter((key) => !(key in kept));
+  const forbidden = readRecord(flattenIfThenAllOfProperties(subschema, data, root))[FORBIDDEN_KEYS];
+  return Array.isArray(forbidden) ? forbidden as string[] : [];
+}
+
+/** Keys this edit forbids that were allowed before it. A value forbidden from the start stays. */
+export function newlyForbiddenFieldKeys(subschema: unknown, before: unknown, after: unknown, root?: unknown): string[] {
+  const was = new Set(forbiddenFieldKeys(subschema, before, root));
+  return forbiddenFieldKeys(subschema, after, root).filter((key) => !was.has(key));
+}
+
+/** {@link forbiddenFieldKeys} for one plant of an expanded System subtype map. */
+export function forbiddenPlantKeys(subschema: unknown, subtype: string, plantName: string, plant: unknown, root?: unknown): string[] {
+  const node = readRecord(readRecord(readRecord(readRecord(subschema).properties)[subtype]).properties)[plantName];
+  const instance = plantInstanceForFlatten(subtype, plant);
+  return forbiddenFieldKeys(plantVariantForFlatten(node, plant, instance), instance, root);
 }
 
 function isOptionalNestedObjectSchema(sch: unknown): boolean {
@@ -243,12 +260,12 @@ export function flattenIfThenAllOfProperties(
   out.properties = { ...baseProps, ...merged };
   // A branch forbids a key with `false` or `{not: {}}`: it is absent for this instance, not a control.
   const properties = out.properties as Record<string, unknown>;
-  for (const key of Object.keys(properties)) {
-    if (isForbiddenSchemaNode(properties[key])) {
-      delete properties[key];
-      required.delete(key);
-    }
+  const forbidden = Object.keys(properties).filter((key) => isForbiddenSchemaNode(properties[key]));
+  for (const key of forbidden) {
+    delete properties[key];
+    required.delete(key);
   }
+  if (forbidden.length) out[FORBIDDEN_KEYS] = forbidden;
   if (required.size || Array.isArray(n.required)) out.required = [...required];
   delete out.unevaluatedProperties;
 
@@ -297,6 +314,15 @@ function normalizeHeatSourceWetPlantInstanceForFlatten(plant: unknown): unknown 
   return { ...p, is_heat_network: false };
 }
 
+function plantInstanceForFlatten(subtype: string, plant: unknown): unknown {
+  return subtype === 'HeatSourceWet' ? normalizeHeatSourceWetPlantInstanceForFlatten(plant) : plant;
+}
+
+function plantVariantForFlatten(node: unknown, plant: unknown, instance: unknown): unknown {
+  const plantType = readRecord(plant).type;
+  return plantType === 'StorageTank' || plantType === 'HeatPump' ? selectPlantVariant(node, instance) : node;
+}
+
 function selectPlantVariant(node: unknown, instanceData: unknown): unknown {
   if (!isRecord(node)) return node;
   let n = node as Record<string, unknown>;
@@ -330,10 +356,8 @@ export function flattenSystemSubtypePlantSchemas(
       plantDataMap && typeof plantDataMap === 'object' && !Array.isArray(plantDataMap)
         ? plantDataMap[k]
         : undefined;
-    const plantInstance =
-      subtype === 'HeatSourceWet' ? normalizeHeatSourceWetPlantInstanceForFlatten(raw) : raw;
-    const plantType = readRecord(raw).type;
-    const selected = plantType === 'StorageTank' || plantType === 'HeatPump' ? selectPlantVariant(v, plantInstance) : v;
+    const plantInstance = plantInstanceForFlatten(subtype, raw);
+    const selected = plantVariantForFlatten(v, raw, plantInstance);
     let flat = flattenIfThenAllOfProperties(cloneForFlatten(selected), plantInstance, fullRoot) as Record<string, unknown>;
     if (plantInstance && typeof plantInstance === 'object' && !Array.isArray(plantInstance)) {
       flat = omitAbsentOptionalObjectPropertiesFromSchema(flat, plantInstance) as Record<string, unknown>;

@@ -13,7 +13,7 @@ import {
   mergeSystemExtraJsonAfterJsonForms,
 } from '../lib/systemAdvancedSchemaExpand';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
-import { flattenSystemSubtypePlantSchemas, forbiddenFieldKeys } from '../lib/systemSchemaFlatten';
+import { flattenSystemSubtypePlantSchemas, forbiddenFieldKeys, forbiddenPlantKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import { buildSystemAdvancedUischema, type AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
   collectHeatSourceWetNameLabelsFromProject,
@@ -1895,7 +1895,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       }
     }
     if (elementType === 'MechanicalVentilationDuctwork') {
-      const forbidden = forbiddenFieldKeys(getActiveElementSubschema(elementType, subtype), nextExtra, getActiveRootSchema());
+      const forbidden = newlyForbiddenFieldKeys(getActiveElementSubschema(elementType, subtype), advancedFieldsData, nextExtra, getActiveRootSchema());
       if (forbidden.some((key) => key in nextExtra)) {
         nextExtra = { ...nextExtra };
         forbidden.forEach((key) => delete nextExtra[key]);
@@ -1994,10 +1994,19 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       typeof nextExtra === 'object' &&
       !Array.isArray(nextExtra)
     ) {
+      const systemRoot = getActiveRootSchema();
+      const systemSubschema = getActiveElementSubschema(elementType, subtype);
+      const plantSchemas = systemRoot && systemSubschema
+        ? dereferenceSchemaNodeInRoot(
+          expandSystemMergeMapSchemaForJsonForms(systemSubschema as Record<string, unknown>, subtype, (nextExtra as Record<string, unknown>)[subtype]),
+          systemRoot,
+        )
+        : null;
       nextExtra = mergeSystemExtraJsonAfterJsonForms(
         advancedFieldsData as Record<string, unknown>,
         nextExtra as Record<string, unknown>,
         subtype,
+        plantSchemas ? (name, plant) => forbiddenPlantKeys(plantSchemas, subtype, name, plant, systemRoot) : undefined,
       );
       if (subtype === 'SpaceHeatSystem') {
         nextExtra = pruneSpaceHeatSystemUnusedWeatherCompensationValues(
