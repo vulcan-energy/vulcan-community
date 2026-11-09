@@ -151,6 +151,36 @@ it('blocks a drawn window with no host wall or roof', () => {
   }));
 });
 
+it('blocks a required value with its own CSV column even when the defaults template has one', () => {
+  const ground = {
+    id: 'floor', name: 'Floor', zoneId: 'zone-1', type: 'BuildingElementGround', width: 5, height: 5, area: 25,
+    total_area: 25, perimeter: 20, floor_type: 'Slab_no_edge_insulation', parent_element: null, coordinates: [],
+  } as unknown as Element;
+  const subschema = { required: ['thickness_walls', 'u_value'], properties: { thickness_walls: { type: 'number' }, u_value: { type: 'number' } } };
+  const schemaPort = {
+    ...unavailableGeometrySchemaPort,
+    availability: 'available',
+    getRootSchema: () => null,
+    getSchemaSubtypeForElementData: () => undefined,
+    getElementSubschema: () => subschema,
+    getConditionalRequiredFields: () => [],
+    validateProperty: () => ({ valid: true }),
+  } as never;
+  const issues = validateElementCore(ground, {
+    ...baseContext(ground), schemaPort, defaultsLookup: { hasDefaultValue: () => true } as never,
+  }).issues.map((issue) => issue.fieldKey);
+  expect(issues).toContain('thickness_walls');
+  expect(issues).not.toContain('u_value');
+});
+
+it('blocks a linear thermal bridge with no psi', () => {
+  const bridge = {
+    id: 'tb', name: 'E1', zoneId: 'zone-1', type: 'ThermalBridgeLinear', length: 4,
+    coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+  } as unknown as Element;
+  expect(validateElementCore(bridge, baseContext(bridge)).issues.map((issue) => issue.fieldKey)).toContain('linear_thermal_transmittance');
+});
+
 describe('FHS window base-height validation', () => {
   it('emits a critical FHS issue when a window is below an explicit ventilation zone base', () => {
     const element = window(0.5);

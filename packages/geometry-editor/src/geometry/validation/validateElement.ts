@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { csvMigrationIssues } from '../io/csvSemanticMigration';
+import { isElementCsvColumn } from '../io/geometryCsvLayouts';
+import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
@@ -69,6 +71,7 @@ import { deriveFromHostRoof, isPanelFullyOnRoof } from '../../lib/pvHostDerivati
 import {
   getAreaBasedElementExportGeometry,
   getElementEffectiveArea,
+  getElementGrossArea,
 } from '../../lib/elementArea';
 import { inferPsiSourceFromValue } from '../../lib/simplifiedFabricMap';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
@@ -474,6 +477,30 @@ function requiredSchemaFieldHasValue(
     return fieldValue === true || fieldValue === false || !hasField;
   }
   return hasField && fieldValue !== null && fieldValue !== undefined;
+}
+
+/**
+ * Values the saved row still yields when the element field is unset: what the save derives from the
+ * geometry (area, width, height, base height, pitch), and the converter's area (width x height),
+ * window mid height (base height + height / 2) and vertical pitch for a two-point base line.
+ */
+function derivedFromOwnColumns(element: Element, field: string, globalOrientationOffset: number | undefined): boolean {
+  const row = element as unknown as Record<string, unknown>;
+  if (field === 'pitch') {
+    return resolveBuildingElementPitch(element as Parameters<typeof resolveBuildingElementPitch>[0]) !== undefined
+      || (Array.isArray(element.coordinates) && element.coordinates.length === 2);
+  }
+  if (field === 'area') {
+    return getElementGrossArea(element, globalOrientationOffset) > 0
+      || (isPositiveFiniteNumber(row.width) && isPositiveFiniteNumber(row.height));
+  }
+  if (field === 'mid_height' && element.type === 'BuildingElementTransparent') return isPositiveFiniteNumber(row.height);
+  if ((element.type === 'BuildingElementOpaque' || element.type === 'BuildingElementTransparent')
+    && (field === 'width' || field === 'height' || field === 'base_height')) {
+    const { width, height } = getAreaBasedElementExportGeometry(element, globalOrientationOffset);
+    return field === 'base_height' ? width > 0 || height > 0 : (field === 'width' ? width : height) > 0;
+  }
+  return false;
 }
 
 const readRecord = (value: unknown): Record<string, unknown> =>
@@ -1278,6 +1305,9 @@ export const validateElementCore = (
       if (!thermalBridgeLinearHasPositiveRun(linearElement)) {
         issues.push(geo('Length cannot be 0', 'length'));
       }
+      if (typeof linearElement.linear_thermal_transmittance !== 'number' || !Number.isFinite(linearElement.linear_thermal_transmittance)) {
+        issues.push(geo('Linear Thermal Transmittance (psi) is required', 'linear_thermal_transmittance'));
+      }
       {
         const junctionType = linearElement.extra_json?.junction_type;
         const psi = linearElement.linear_thermal_transmittance;
@@ -2038,14 +2068,19 @@ export const validateElementCore = (
         );
 
         if (!hasValue) {
+          // A blank cell in the element's own CSV column takes nothing from the defaults template.
+          const ownColumn = isElementCsvColumn(element.type, field);
+          if (ownColumn && derivedFromOwnColumns(element, field, context.globalOrientationOffset)) continue;
+          // A field-specific check above already reports it.
+          if (issues.some((issue) => issue.fieldKey === field)) continue;
           // While defaults are still loading, assume template defaults exist to
           // avoid showing false "required" errors that disappear once defaults arrive.
-          if (defaultsLoading) continue;
+          if (defaultsLoading && !ownColumn) continue;
 
           // Check if field has a default value (from defaults template or schema)
           // If a default exists, don't add a validation issue (defaults will be applied)
           // For MechanicalVentilation, pass vent_type as subtype to filter defaults correctly
-          const hasDefault = (context.defaultsLookup?.hasDefaultValue ?? hasDefaultValue)(
+          const hasDefault = !ownColumn && (context.defaultsLookup?.hasDefaultValue ?? hasDefaultValue)(
             field,
             element.type,
             activeSubschema as unknown as {

@@ -263,6 +263,30 @@ export const EXPECTED_SECTION_HEADERS: Record<string, readonly string[]> = {
   'Space Labels': ['Name', 'Zone', 'storey', 'room_type', 'coords', 'height_override', 'extra_json'],
 };
 
+/** The tabular section that carries each element type whose columns the converter reads per element. */
+const ELEMENT_CSV_SECTION: Partial<Record<ElementType, string>> = {
+  BuildingElementOpaque: 'Exposed Elements',
+  BuildingElementTransparent: 'Window Elements',
+  BuildingElementGround: 'Ground Elements',
+  BuildingElementAdjacentConditionedSpace: 'Non-Exposed Elements',
+  BuildingElementAdjacentUnconditionedSpace_Simple: 'Non-Exposed Elements',
+  BuildingElementPartyWall: 'Non-Exposed Elements',
+  ThermalBridgeLinear: 'Thermal Bridging Elements',
+  ThermalBridgePoint: 'Thermal Bridging Elements',
+  MechanicalVentilation: 'Ventilation Systems',
+  Vents: 'Ventilation Systems',
+  WaterPipework: 'Water Pipework',
+};
+
+/**
+ * True when `field` has its own column in the element's CSV row. A blank cell there is not filled
+ * from the defaults template, so a required value must come from the element itself.
+ */
+export function isElementCsvColumn(type: ElementType, field: string): boolean {
+  const section = ELEMENT_CSV_SECTION[type];
+  return !!section && EXPECTED_SECTION_HEADERS[section].includes(field);
+}
+
 const SKIP_VALIDATION = new Set(['Test Section']);
 
 /**
