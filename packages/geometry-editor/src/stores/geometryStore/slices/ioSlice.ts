@@ -27,6 +27,7 @@ import {
   parseCsvToGeometry,
   VULCAN_CSV_VERSION_METADATA_KEY,
 } from '../../../geometry/io/parseCsvToGeometry';
+import { parseCsvSections } from '../../../geometry/io/csvSectionRows';
 import {
   encodeGuideOverlayMetadataValue,
   encodeGuideOverlaySourceMetadataValue,
@@ -695,6 +696,25 @@ const migrateElementsToNormalized = (
   });
 
   return { elementsById, elementIds };
+};
+
+/**
+ * Every element `area` cell that the loaded document will save differently, named for the user.
+ * An internal partition saved as both faces at twice a legacy single-face area keeps its meaning,
+ * so it is not one.
+ */
+const changedAreaWarnings = (authoredCsv: string, loadedCsv: string): string[] => {
+  const areas = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
+    .filter((row) => row.data.Name && row.data.area?.trim())
+    .map((row) => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, { area: Number(row.data.area), bothFaces: (row.data.extra_json ?? '').includes('both_faces') }] as const)));
+  const loaded = areas(loadedCsv);
+  return [...areas(authoredCsv)].flatMap(([key, authored]) => {
+    const saved = loaded.get(key);
+    const same = (factor: number) => Math.abs(saved!.area - factor * authored.area) < 0.015;
+    if (!saved || same(1) || (saved.bothFaces && same(2))) return [];
+    const [, zone, name] = key.split('|');
+    return [`${name}${zone ? ` (${zone})` : ''}: area ${authored.area} m² in the file is ${saved.area} m² as loaded from its geometry; saving writes the new value.`];
+  });
 };
 
 export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
@@ -2353,7 +2373,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded };
+    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...changedAreaWarnings(csvContent, loadedCsvBaseline)], upgraded };
   }
 
   return slice;
