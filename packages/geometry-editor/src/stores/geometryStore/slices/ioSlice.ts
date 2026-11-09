@@ -84,6 +84,7 @@ import {
   normalizeDefaultsPathForMetadata,
 } from '../../../lib/workspacePaths';
 import { FLOOR_AREA_MATCH_EPSILON_M2, applySpaceLabelsToZonesAndCompliance } from '../../../lib/spaceLabelDerivation';
+import { analyzeZoneSpaceLabels } from '../../../lib/spaceLabelGeometry';
 import { normalizeDevelopmentContextShadingExtraJsonForCsv } from '../../../lib/developmentContextShading';
 import {
   getMechanicalVentilationCsvFlatPositionValues,
@@ -2238,7 +2239,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     let complianceFromLabels: Partial<GeometryState['complianceSettings']> = {};
     if (labelList.length > 0) {
       const cv = get().complianceSettings.complianceValidationEnabled === true;
-      const applied = applySpaceLabelsToZonesAndCompliance(zonesForStore, labelList, cv, undefined, {
+      const primaryForLabels = zonesForStore.find((zone) => !zone.isPlaceholder);
+      const geometryAnalysis = primaryForLabels
+        ? analyzeZoneSpaceLabels(primaryForLabels.id, labelList, allElements)
+        : undefined;
+      const applied = applySpaceLabelsToZonesAndCompliance(zonesForStore, labelList, cv, geometryAnalysis, {
         preserveManualFloorAreaOverride: true,
       });
       zonesForStore = applied.zones;

@@ -141,3 +141,16 @@ describe('extractInteriorFaceRings (intricate layouts)', () => {
     for (const a of areas) expect(a).toBeCloseTo(8, 3);
   });
 });
+
+describe('inferred ring coordinates', () => {
+  it('keeps real wall coordinates when walls are not on the snapping grid', () => {
+    const wall = (ax: number, ay: number, bx: number, by: number) => ({ a: { x: ax, y: ay }, b: { x: bx, y: by }, wallZIndex: 0 });
+    const rings = extractInteriorFaceRings(
+      [wall(0.012, 0.034, 4.021, 0.034), wall(4.021, 0.034, 4.021, 3.047), wall(4.021, 3.047, 0.012, 3.047), wall(0.012, 3.047, 0.012, 0.034)],
+      1e-4,
+      { nodingEpsilonM: 0.1, keepWallCoordinates: true },
+    );
+    expect(rings).toHaveLength(1);
+    expect(Math.abs(signedShoelaceArea2(rings[0]!))).toBeCloseTo(4.009 * 3.013, 6);
+  });
+});

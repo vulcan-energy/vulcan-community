@@ -158,6 +158,17 @@ export const HORIZONTAL_POLYGON_PITCH_OPTIONS: { value: string; label: string }[
   { value: '0', label: 'Facing up (0°)' },
   { value: '180', label: 'Facing down (180°)' },
 ];
+/** Opaque and transparent fabric: the other side of the surface is outside. */
+export const EXPOSED_SURFACE_PITCH_OPTIONS: { value: string; label: string }[] = [
+  { value: '180', label: 'Floor: outside is below (180°)' },
+  { value: '0', label: 'Roof or ceiling: outside is above (0°)' },
+];
+/** Party and unheated fabric: the other side is another space. */
+export const ADJACENT_SURFACE_PITCH_OPTIONS: { value: string; label: string }[] = [
+  { value: '180', label: 'Floor: other side is below (180°)' },
+  { value: '0', label: 'Ceiling: other side is above (0°)' },
+];
+export const SURFACE_PITCH_PLACEHOLDER = 'Select a surface';
 /** 90° must not use the same <select> value as 0° — wall-style defaults are 90
  * (vertical); only 0/180 are valid here. */
 export const HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER = 'Select 0° (up) or 180° (down)';

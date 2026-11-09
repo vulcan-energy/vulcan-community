@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { isAdjacentConditionedInternalFloorDoubled } from '../lib/polygonSync';
 import { forbiddenFieldKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Pencil, X as XIcon, type IconNode } from 'lucide';
@@ -280,8 +281,8 @@ const LIVE_NUMBER_BOUNDS: Record<string, LiveNumberBounds> = {
 };
 
 const HORIZONTAL_POLYGON_PITCH_OPTIONS: { value: string; label: string }[] = [
-  { value: '0', label: 'Facing up (0°)' },
-  { value: '180', label: 'Facing down (180°)' },
+  { value: '180', label: 'Floor (180°)' },
+  { value: '0', label: 'Roof or ceiling (0°)' },
 ];
 
 const isTransparent = (el: Element): el is BuildingElementTransparent => el.type === 'BuildingElementTransparent';
@@ -325,7 +326,7 @@ const isVariablePitchWallLike = (el: Element): el is WallLikeElement => {
 };
 
 const isHorizontalPolygonPitchWallLike = (el: Element): el is WallLikeElement =>
-  isWallLike(el) && getElementShape(el) === 'polygon';
+  isWallLike(el) && getElementShape(el) === 'polygon' && !isAdjacentConditionedInternalFloorDoubled(el);
 
 const isVariablePitchTransparent = (el: Element): el is BuildingElementTransparent => {
   if (!isTransparent(el)) return false;
@@ -2452,11 +2453,11 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           : 'Set value...';
     return (
       <div className="batch-row multi-select-row">
-        {renderTooltipRowLabel('pitch', 'Surface facing', enabled, undefined, targetIds)}
+        {renderTooltipRowLabel('pitch', 'Surface', enabled, undefined, targetIds)}
         <div className="multi-select-row__control">
           <select
             className="standard-input-ghost multi-select-field-select"
-            aria-label="Surface facing"
+            aria-label="Surface"
             value={currentOption?.value ?? '__placeholder__'}
             disabled={!enabled}
             onChange={(e) => {

@@ -34,7 +34,7 @@ type HalfEdge = {
   next: number;
 };
 
-function buildHalfEdges(segs: RawSeg[], eps: number): { verts: PlanarPoint2[]; hes: HalfEdge[] } {
+function buildHalfEdges(segs: RawSeg[], eps: number, keepWallCoordinates: boolean): { verts: PlanarPoint2[]; hes: HalfEdge[] } {
   const keyToIndex = new Map<string, number>();
   const verts: PlanarPoint2[] = [];
 
@@ -44,7 +44,7 @@ function buildHalfEdges(segs: RawSeg[], eps: number): { verts: PlanarPoint2[]; h
     let i = keyToIndex.get(k);
     if (i === undefined) {
       i = verts.length;
-      verts.push(q);
+      verts.push(keepWallCoordinates ? { x: p.x, y: p.y } : q);
       keyToIndex.set(k, i);
     }
     return i;
@@ -155,11 +155,12 @@ export function extractInteriorFacesGraphWalker(
   segments: WallSegment2D[],
   eps: number,
   minArea: number,
+  keepWallCoordinates = false,
 ): InferredPlanarFace[] {
   const refined = refineWallSegments(segments, eps);
   if (!refined.length) return [];
 
-  const { verts, hes } = buildHalfEdges(refined, eps);
+  const { verts, hes } = buildHalfEdges(refined, eps, keepWallCoordinates);
   if (!hes.length) return [];
 
   const rings = keepInteriorOrientationFaces(enumerateFaces(hes, verts));

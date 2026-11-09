@@ -95,6 +95,7 @@ import {
 } from '../geometry/parameterLibraryCatalog';
 import {
   calculateDerivedFloorArea,
+  partyElementPitchKeepingSurface,
   calculateDerivedHeight,
   calculateDerivedBaseHeight,
   calculateBaseHeightPatchForFloorMove,
@@ -488,7 +489,8 @@ import { FieldValidationIndicator, ValidationIndicator, ValidationPill } from '.
 import { StandardCard } from './StandardCard';
 import { StandardInput } from './StandardInput';
 import { ResetFieldButton } from './ResetFieldButton';
-import { aggregateSpaceLabelsForZone } from '../lib/spaceLabelDerivation';
+import { formatTreatedFloorAreaMismatch, getTreatedFloorAreaLabelMismatch } from '../lib/spaceLabelDerivation';
+import { analyzeZoneSpaceLabels } from '../lib/spaceLabelGeometry';
 import { StandardDropdown } from './StandardDropdown';
 import { ElementTypePicker } from './ElementTypePicker';
 import { PresetDropdown } from './PresetDropdown';
@@ -999,6 +1001,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const convertThermalBridgeLineMode = useGeometryStore((s) => s.convertThermalBridgeLineMode);
   const getElementById = useGeometryStore((s) => s.getElementById);
   const getZoneById = useGeometryStore((s) => s.getZoneById);
+  const syncDerivedValuesFromSpaceLabels = useGeometryStore((s) => s.syncDerivedValuesFromSpaceLabels);
   const spaceLabelIds = useGeometryStore((s) => s.spaceLabelIds);
   const spaceLabelsById = useGeometryStore((s) => s.spaceLabelsById);
   const removePlaceholder = useGeometryStore((s) => s.removePlaceholder);
@@ -1263,13 +1266,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     !!complianceSettings.complianceValidationEnabled
     && selection?.type === 'zone'
     && !isPrimaryFhsZoneSelection;
-  const fhsSpaceLabelAggregate = useMemo(() => {
+  const treatedAreaLabelMismatch = useMemo(() => {
     if (selection?.type !== 'zone' || !showFhsAreaSplit) return null;
+    const zone = getZoneById(selection.id);
+    if (!zone) return null;
     const list = spaceLabelIds
       .map((id) => spaceLabelsById[id])
       .filter((sl): sl is SpaceLabel => !!sl && sl.zoneId === selection.id);
-    return aggregateSpaceLabelsForZone(list, selection.id);
-  }, [selection, showFhsAreaSplit, spaceLabelIds, spaceLabelsById]);
+    const elements = Object.values(elementsById) as import('../geometry/types').Element[];
+    return getTreatedFloorAreaLabelMismatch(zone, list, analyzeZoneSpaceLabels(zone.id, list, elements));
+  }, [selection, showFhsAreaSplit, getZoneById, spaceLabelIds, spaceLabelsById, elementsById]);
 
   const isExistingZoneSelection = useCallback((target: Selection = selection): target is NonNullable<Selection> & { type: 'zone' } => {
     return !!target && target.type === 'zone' && !target.isPlaceholder;
@@ -5031,11 +5037,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 ) : null}
                 {showFhsAreaSplit ? (
                   (() => {
-                    const a = fhsSpaceLabelAggregate;
-                    const t = a?.totalFloorAreaM2 ?? 0;
-                    const liv = a?.livingAreaM2 ?? 0;
-                    const rest = a?.restAreaM2 ?? 0;
-                    const hasSplit = t > 0.005;
+                    const zone = selection?.type === 'zone' ? getZoneById(selection.id) : undefined;
+                    const t = zone?.floorArea ?? 0;
+                    const liv = zone?.livingroom_area ?? 0;
+                    const rest = zone?.restofdwelling_area ?? 0;
+                    const hasSplit = zone?.livingroom_area != null && zone?.restofdwelling_area != null;
                     return (
                   <>
                 <div className="element-label">Treated Floor split</div>
@@ -5081,6 +5087,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                             onClick={() => onOpenSpaceLabeller(selection.id)}
                           />
                         ) : null}
+                      </div>
+                    ) : null}
+                    {treatedAreaLabelMismatch ? (
+                      <div className="element-editor-inline-actions">
+                        <div style={{ fontSize: 11, color: 'var(--error-text, var(--error-text))' }}>
+                          {formatTreatedFloorAreaMismatch(treatedAreaLabelMismatch)}
+                        </div>
+                        <button
+                          type="button"
+                          className="btn editor-action-btn editor-action-btn--secondary"
+                          onClick={syncDerivedValuesFromSpaceLabels}
+                        >
+                          Use space labels
+                        </button>
                       </div>
                     ) : null}
                     {(() => {
@@ -5250,11 +5270,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           </div>
                         ) : derivedValue <= 0 ? (
                           <div style={{ ...INLINE_FIELD_NOTE_STYLE, width: '100%' }}>
-                            No floor geometry for TFA: add{' '}
-                            <strong>BuildingElementGround</strong> or a horizontal floor polygon (opaque /
-                            transparent / adjacent) with <strong>pitch 180°</strong> (facing down). Pitch{' '}
-                            <strong>0°</strong> (facing up) is treated as a roof/ceiling surface, not treated floor
-                            area.
+                            No floor geometry for treated floor area: add a ground floor, a horizontal element
+                            with Surface set to Floor, or an internal floor on an upper storey.
                           </div>
                         ) : null}
                         </div>
@@ -5371,6 +5388,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     size="md"
                     placeholder="Auto-calculated from floor area × effective height"
                   />
+                  <div style={INLINE_FIELD_NOTE_STYLE}>Floor area × height. To reach a specific volume, change Height.</div>
                 </div>
                 <div className="element-label">
                   Simplified Thermal Bridging
@@ -5494,7 +5512,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                               // Fabric U/R/areal are halved by element type, not by this flag;
                               // the flag drives area (x2 internal surfaces) and junction codes.
                               // Recomputing here only restamped `appliedAt`.
-                              commitExistingElementDraft({ extra_json: next });
+                              // A party element's surface comes from pitch, so keep the one it showed.
+                              const allElements = (Object.values(elementsById) as import('../geometry/types').Element[])
+                                .filter((element) => element.zoneId === selectedElement?.zoneId);
+                              commitExistingElementDraft(nextChecked && selectedElement
+                                ? { extra_json: next, pitch: partyElementPitchKeepingSurface(selectedElement, allElements) }
+                                : { extra_json: next });
                             }}
                           />
                           <span>

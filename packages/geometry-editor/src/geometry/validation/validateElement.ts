@@ -47,7 +47,8 @@ import {
   type PartFDetectionContext,
 } from './detectMissingElements';
 import { partFInputFromContext, type PartFFinding } from './partF/rules';
-import type { Floor } from '../types';
+import type { Floor, SpaceLabel } from '../types';
+import { validateSpaceLabels } from './validateSpaceLabels';
 import {
   calculateDerivedBaseHeight,
   getCumulativeBaseHeightsByFloorId,
@@ -2368,6 +2369,7 @@ export const collectGeometryValidation = (
   options: {
     schemaPort: GeometrySchemaPort;
     floors?: Floor[];
+    spaceLabels?: SpaceLabel[];
     complianceValidationEnabled?: boolean;
     partOActiveCoolingRequired?: boolean;
     partFContext?: PartFDetectionContext;
@@ -2424,6 +2426,16 @@ export const collectGeometryValidation = (
     warnings.push(...validation.warnings.map(w => w.message));
     criticalIssues.push(...validation.issues.map(i => i.message));
   });
+
+  if (options.spaceLabels) {
+    const spaceLabelValidation = validateSpaceLabels(
+      Object.fromEntries(options.spaceLabels.map((label) => [label.id, label])),
+      options.spaceLabels.map((label) => label.id),
+      { zones, elementsById, complianceValidationEnabled: options.complianceValidationEnabled },
+    );
+    warnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
+    criticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));
+  }
 
   const missingElements = detectMissingElements(
     zones,

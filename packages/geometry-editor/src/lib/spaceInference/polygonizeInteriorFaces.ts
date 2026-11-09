@@ -7,6 +7,8 @@ import type { InferredPlanarFace, PlanarPoint2, WallSegment2D } from './types';
 export type ExtractInteriorFacesOptions = {
   /** ε for {@link refineWallSegments} before graph walk. Default 0.1. */
   nodingEpsilonM?: number;
+  /** Rings use real wall ends; the grid then only decides which ends join. Default: grid points. */
+  keepWallCoordinates?: boolean;
 };
 
 /**
@@ -18,7 +20,7 @@ export function extractInteriorFaces(
   options?: ExtractInteriorFacesOptions,
 ): InferredPlanarFace[] {
   const eps = options?.nodingEpsilonM ?? 0.1;
-  return extractInteriorFacesGraphWalker(segments, eps, minArea);
+  return extractInteriorFacesGraphWalker(segments, eps, minArea, options?.keepWallCoordinates);
 }
 
 /** Exterior rings only — convenience wrapper used by tests / debugging. */

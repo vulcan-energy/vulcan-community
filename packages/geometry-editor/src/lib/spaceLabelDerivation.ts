@@ -4,7 +4,8 @@
 import { calculatePolygonArea } from './polygonSync';
 import { roundToTwoDecimals } from '../geometry/constants';
 import type { SpaceLabel, Zone } from '../geometry/types';
-import { analyzeSpaceLabelGeometry, type SpaceLabelGeometryAnalysis } from './spaceLabelGeometry';
+import { analyzeSpaceLabelGeometry,
+  isMaterialTreatedAreaDifference, type SpaceLabelGeometryAnalysis } from './spaceLabelGeometry';
 
 export type LivingBucket = 'living' | 'rest' | 'none';
 
@@ -312,6 +313,22 @@ export function aggregateSpaceLabelsForZone(
   const restAreaM2 = roundToTwoDecimals(totalFloorAreaM2 - livingAreaM2);
 
   return { totalFloorAreaM2, livingAreaM2, restAreaM2, dwellingCounts, geometryAnalysis: analysis };
+}
+
+/** Stored FHS area vs the area the zone's labels give, when they differ materially. */
+export function getTreatedFloorAreaLabelMismatch(
+  zone: Zone,
+  labels: SpaceLabel[],
+  geometryAnalysis: SpaceLabelGeometryAnalysis,
+): { storedM2: number; labelsM2: number } | null {
+  const labelsM2 = aggregateSpaceLabelsForZone(labels, zone.id, DEFAULT_SPACE_LABEL_ROOM_REGISTRY, geometryAnalysis).totalFloorAreaM2;
+  if (labelsM2 <= 0) return null;
+  const difference = Math.abs((zone.floorArea || 0) - labelsM2);
+  return isMaterialTreatedAreaDifference(difference, labelsM2) ? { storedM2: zone.floorArea || 0, labelsM2 } : null;
+}
+
+export function formatTreatedFloorAreaMismatch(mismatch: { storedM2: number; labelsM2: number }): string {
+  return `The model uses a treated floor area of ${mismatch.storedM2.toFixed(1)} m², but the space labels give ${mismatch.labelsM2.toFixed(1)} m². Select "Use space labels" on the zone to update it.`;
 }
 
 export type ComplianceSettingsShape = Partial<{

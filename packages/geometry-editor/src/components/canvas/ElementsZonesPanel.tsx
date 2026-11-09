@@ -696,8 +696,8 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
       const spaceValidation = validateSpaceLabels(spaceLabelsById, zoneSpaceLabelIds, {
         zones,
         elementsById,
-        floors,
         spaceInferenceWallPrintByZone,
+        complianceValidationEnabled: complianceSettings.complianceValidationEnabled === true,
       });
       validations.set(zone.id, withTargetIssues({
         hasIssues: zoneValidation.hasIssues || spaceValidation.hasIssues,
@@ -711,7 +711,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   }, [
     complianceSettings.complianceValidationEnabled,
     elementsById,
-    floors,
     primaryFhsZoneId,
     spaceInferenceWallPrintByZone,
     spaceLabelIds,
@@ -960,7 +959,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                       key={zone.id}
                       className={`zone-pill ${selection?.type === 'zone' && selection.id === zone.id ? 'selected' : ''}`}
                       onClick={() => setSelection({ type: 'zone', id: zone.id })}
-                      title={getVolumeCalculationBreakdown(zone, Object.values(elementsById))}
+                      title={getVolumeCalculationBreakdown(zone)}
                     >
                       <div className="zone-pill-content">
                         <div className="zone-name">

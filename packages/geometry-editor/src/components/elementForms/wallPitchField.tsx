@@ -73,11 +73,13 @@
 // this same helper with their own opts.
 
 import type { ReactNode } from 'react';
+import { isInternalFloorElement } from '../../lib/zoneDerivation';
 import { StandardDropdown } from '../StandardDropdown';
 import { StandardInput } from '../StandardInput';
 import {
-  HORIZONTAL_POLYGON_PITCH_OPTIONS,
-  HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER,
+  ADJACENT_SURFACE_PITCH_OPTIONS,
+  EXPOSED_SURFACE_PITCH_OPTIONS,
+  SURFACE_PITCH_PLACEHOLDER,
   horizontalPolygonSurfaceSelectValue,
   INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
@@ -122,18 +124,27 @@ export function renderWallPitchField(
     fieldUnit,
     renderFieldLabel,
     selectedShape,
+    selectedElement,
+    elementsById,
     horizontalPolygonControlPitch,
   } = ctx;
 
   return (
     <>
-      {renderFieldLabel(selectedShape === 'polygon' ? 'Surface facing:' : 'Pitch (degrees):', elementType, 'pitch')}
+      {renderFieldLabel(selectedShape === 'polygon' ? 'Surface:' : 'Pitch (degrees):', elementType, 'pitch')}
       <div
         className="element-input"
         style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
         ref={opts.refRegistrar('pitch')}
       >
-        {selectedShape === 'polygon' ? (
+        {selectedShape === 'polygon' && selectedElement && isInternalFloorElement(
+          selectedElement,
+          Object.values(elementsById).filter((element) => element.zoneId === selectedElement.zoneId),
+        ) ? (
+          <div style={INLINE_FIELD_NOTE_STYLE}>
+            Internal floor. Counts as treated floor area.
+          </div>
+        ) : selectedShape === 'polygon' ? (
           <StandardDropdown
             value={horizontalPolygonSurfaceSelectValue(horizontalPolygonControlPitch)}
             unit={fieldUnit('pitch')}
@@ -145,8 +156,10 @@ export function renderWallPitchField(
                 updateElement(selection.id, { pitch: next });
               }
             }}
-            options={HORIZONTAL_POLYGON_PITCH_OPTIONS}
-            placeholder={HORIZONTAL_POLYGON_SURFACE_PLACEHOLDER}
+            options={elementType === 'BuildingElementOpaque' || elementType === 'BuildingElementTransparent'
+              ? EXPOSED_SURFACE_PITCH_OPTIONS
+              : ADJACENT_SURFACE_PITCH_OPTIONS}
+            placeholder={SURFACE_PITCH_PLACEHOLDER}
             variant="ghost"
             size="md"
             disabled={opts.disabledWhenParented ? !!parentElement : undefined}

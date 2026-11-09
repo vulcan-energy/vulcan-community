@@ -194,7 +194,8 @@ export function resolveEffectiveDwellingDetails(
 
     isKitchenVentExternal: cs.KitchenExtractorHoodExternal,
 
-    totalFloorAreaM2: labelAgg?.totalFloorAreaM2 ?? 0,
+    // The zone's stored area, so Part F uses the same number as the model.
+    totalFloorAreaM2: labelAgg ? (primaryZone?.floorArea ?? 0) : 0,
     livingAreaM2: labelAgg?.livingAreaM2 ?? 0,
     restAreaM2: labelAgg?.restAreaM2 ?? 0,
 
