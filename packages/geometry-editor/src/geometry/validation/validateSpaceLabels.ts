@@ -18,7 +18,7 @@ import {
 } from '../../lib/spaceLabelGeometry';
 import type { Element } from '../types';
 import { calculatePolygonArea } from '../../lib/polygonSync';
-import { elementFloorIndex, getTreatedFloorElements } from '../../lib/zoneDerivation';
+import { elementFloorIndex, getTreatedFloorElements, isVerticalLineWall } from '../../lib/zoneDerivation';
 
 export type SpaceLabelValidationContext = {
   zones: Zone[];
@@ -231,17 +231,20 @@ export function validateSpaceLabels(
 
   if (primaryZone && primaryLabels.some((label) => (label.room_type?.trim() ?? '') !== '')) {
     const floorM2ByLevel = new Map<number, number>();
-    const levelsWithDirectFloor = new Set<number>();
-    for (const floor of getTreatedFloorElements(elements.filter((el) => el.zoneId === primaryZone.id))) {
+    const zoneElements = elements.filter((el) => el.zoneId === primaryZone.id);
+    const levelsThatAreStoreys = new Set(
+      zoneElements.filter(isVerticalLineWall).map(elementFloorIndex).filter((level): level is number => level !== null),
+    );
+    for (const floor of getTreatedFloorElements(zoneElements)) {
       const level = elementFloorIndex(floor);
       if (level === null) continue;
       floorM2ByLevel.set(level, (floorM2ByLevel.get(level) ?? 0) + calculatePolygonArea(floor.coordinates));
-      if (floor.type === 'BuildingElementGround' || (floor as { pitch?: number }).pitch === 180) levelsWithDirectFloor.add(level);
+      if (floor.type === 'BuildingElementGround' || (floor as { pitch?: number }).pitch === 180) levelsThatAreStoreys.add(level);
     }
     for (const [level, floorM2] of floorM2ByLevel) {
       const levelLabels = primaryLabels.filter((label) => Math.floor(label.coordinates[0]?.z ?? Number.NaN) === level);
-      // A pitch-0 partition alone, with no labels above it, may be a ceiling rather than a missed storey.
-      if (levelLabels.length === 0 && !levelsWithDirectFloor.has(level)) continue;
+      // A pitch-0 partition alone, with no walls or labels on its level, is a ceiling and not a missed storey.
+      if (levelLabels.length === 0 && !levelsThatAreStoreys.has(level)) continue;
       const labelledM2 = levelLabels.reduce(
         (sum, label) => sum + (geometryAnalysis.effectiveAreasByLabelId[label.id] ?? 0),
         0,
