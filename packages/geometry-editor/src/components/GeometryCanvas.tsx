@@ -228,6 +228,8 @@ import {
   resolveCanvasPanelContributions,
   resetCanvasPanelPosition,
   setCanvasPanelPosition,
+  type CanvasDecorationContext,
+  type CanvasDecorationContribution,
   type CanvasPanelPosition,
   type CanvasPanelPositions,
   type GeometryEditorContributions,
@@ -1995,6 +1997,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     elementName: null,
     isMultiDelete: false
   });
+  const [selectedCanvasDecoration, setSelectedCanvasDecoration] = useState<{
+    contributionId: string;
+    id: string;
+    floorZ: number;
+    scope: string;
+    confirmDeleteRequested: boolean;
+  } | null>(null);
 
   // Get store state and functions (data via shallow selector, functions individually)
   const {
@@ -3474,6 +3483,98 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     [canvasPanelAvailabilityContext, editorContributions],
   );
 
+  const canvasDecorationContributions = useMemo(
+    () => (editorContributions.canvasDecorations ?? []).filter(item => item.isAvailable?.() !== false),
+    [editorContributions.canvasDecorations],
+  );
+  const canInteractWithCanvasDecorations = viewMode === '2d'
+    && !zenMode
+    && drawMode === 'none'
+    && !isCanvasPanning
+    && !overlayMoveMode
+    && !overlayCalibrateMode
+    && !spaceLabellerOpen
+    && !showAutoTbPreview
+    && !showShortcuts
+    && !zoneDeleteModal.isOpen
+    && !elementDeleteModal.isOpen
+    && !thermalBridgePreview.active;
+  const selectedCanvasDecorationContribution = selectedCanvasDecoration
+    ? canvasDecorationContributions.find(item => item.id === selectedCanvasDecoration.contributionId)
+    : undefined;
+  const activeCanvasDecoration = selectedCanvasDecoration
+    && canInteractWithCanvasDecorations
+    && selectedCanvasDecorationContribution !== undefined
+    && selectedCanvasDecorationContribution?.isAvailable?.() !== false
+    && selectedCanvasDecoration.scope === (selectedCanvasDecorationContribution?.selectionScope?.() ?? '')
+    ? selectedCanvasDecoration : null;
+  const selectCanvasDecoration = useCallback((contributionId: string, id: string) => {
+    if (!canInteractWithCanvasDecorations) return;
+    const contribution = canvasDecorationContributions.find(item => item.id === contributionId);
+    if (contribution?.isAvailable?.() === false) return;
+    clearElementSelection();
+    setSelectedElementIds([]);
+    setSelection(null);
+    setSelectedCanvasDecoration({ contributionId, id, floorZ: currentFloorZ,
+      scope: contribution?.selectionScope?.() ?? '', confirmDeleteRequested: false });
+    setActivePanel('details');
+  }, [canInteractWithCanvasDecorations, canvasDecorationContributions, clearElementSelection, currentFloorZ, setActivePanel, setSelectedElementIds, setSelection]);
+
+  const replaceCanvasDecorationSelection = useCallback((contributionId: string, id: string) => {
+    const contribution = canvasDecorationContributions.find(item => item.id === contributionId);
+    setSelectedCanvasDecoration({ contributionId, id, floorZ: currentFloorZ,
+      scope: contribution?.selectionScope?.() ?? '', confirmDeleteRequested: false });
+  }, [canvasDecorationContributions, currentFloorZ]);
+
+  const canvasDecorationContext = useCallback((contributionId: string): CanvasDecorationContext => {
+    const contribution = canvasDecorationContributions.find(item => item.id === contributionId);
+    return {
+      worldToCanvas: (point) => worldToCanvas(point, scale, panOffset, canvasCenter),
+      currentFloorZ,
+      scale,
+      colors: {
+        stroke: drawingCanvasPalette.guide,
+        selected: canvasInteractionPalette.snap,
+        warning: canvasInteractionPalette.warningGuide,
+        label: drawingCanvasPalette.tooltipText,
+        labelBackground: drawingCanvasPalette.tooltipBg,
+      },
+      canSelect: canInteractWithCanvasDecorations,
+      selectedId: activeCanvasDecoration?.contributionId === contributionId ? activeCanvasDecoration.id : null,
+      selectionScope: contribution?.selectionScope?.() ?? '',
+      select: (id) => selectCanvasDecoration(contributionId, id),
+      clearSelection: () => setSelectedCanvasDecoration(null),
+    };
+  }, [canvasCenter, canvasDecorationContributions, canInteractWithCanvasDecorations, canvasInteractionPalette, currentFloorZ,
+    activeCanvasDecoration, drawingCanvasPalette, panOffset, scale, selectCanvasDecoration]);
+
+  const requestSelectedCanvasDecorationDelete = useCallback(() => {
+    if (!activeCanvasDecoration) return false;
+    setSelectedCanvasDecoration((previous) => previous
+      ? { ...previous, confirmDeleteRequested: true }
+      : previous);
+    return true;
+  }, [activeCanvasDecoration]);
+
+  useEffect(() => {
+    if (!selectedCanvasDecoration) return;
+    let previousFloorZ = geometryStore.getState().currentFloorZ;
+    let previousElementsById = geometryStore.getState().elementsById;
+    return geometryStore.subscribe(state => {
+      const floorChanged = state.currentFloorZ !== previousFloorZ;
+      previousFloorZ = state.currentFloorZ;
+      const modelChanged = state.elementsById !== previousElementsById;
+      previousElementsById = state.elementsById;
+      if (state.selection !== null || state.selectedElementIds.length > 0 || modelChanged) {
+        setSelectedCanvasDecoration(null);
+        return;
+      }
+      if (floorChanged) {
+        setSelectedCanvasDecoration(null);
+      }
+    });
+  }, [geometryStore, selectedCanvasDecoration]);
+
   const contributedCanvasPanelComposition = useMemo(
     () => projectCanvasPanelComposition(
       availableContributedCanvasPanels,
@@ -3736,6 +3837,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setZenMode: setZenModeWithPanelCleanup,
     setElementDeleteModal,
     tryPopLastDrawPoint,
+    tryDeleteVirtualSelection: requestSelectedCanvasDecorationDelete,
     fabricDrawShortcutsDisabled: spaceLabellerOpen,
     geometryEditingSuspended: thermalBridgePreview.active,
   });
@@ -5212,6 +5314,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   // Handle element click - optimized with batched state updates
   const handleElementClick = useCallback((elementId: string, e: any) => {
     e?.evt?.stopPropagation();
+    setSelectedCanvasDecoration(null);
 
     // When overlay Move/Calibrate mode is enabled, block element selection to avoid accidental geometry edits.
     if (overlayMoveMode || overlayCalibrateMode) return;
@@ -5254,7 +5357,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       setSelection(getSelectionForElementId(interactionOwnerId, elementsById));
     }
 
-  }, [setSelection, setOverlapBadgeMenu, elementsById, findElementByName, currentFloorZ, floors, selectedElementIds, setSelectedElementIds, clearElementSelection, overlayMoveMode, overlayCalibrateMode]);
+  }, [setSelection, setOverlapBadgeMenu, elementsById, findElementByName, currentFloorZ, floors, selectedElementIds, setSelectedElementIds, clearElementSelection, overlayMoveMode, overlayCalibrateMode, setSelectedCanvasDecoration]);
 
   // RAF-throttled stage mousemove wrapper (defined after both handlers to ensure init order)
   const latestMouseEventRef = useRef<any>(null);
@@ -6240,6 +6343,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
     // Non-draw behavior: only clear selection when clicking empty stage
     if (e.target === stage) {
+      setSelectedCanvasDecoration(null);
       // De-focus floating panels when clicking empty canvas
       setActivePanel(null);
       // Clear both single and multi-select
@@ -6883,6 +6987,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               : undefined,
         }}
       >
+        {canvasDecorationContributions.some((item) => item.renderAccessibility) && (
+          <div className="canvas-decoration-accessibility" aria-label="Canvas annotations">
+            {canvasDecorationContributions.map((item) => item.renderAccessibility
+              ? <React.Fragment key={item.id}>{item.renderAccessibility(canvasDecorationContext(item.id))}</React.Fragment>
+              : null)}
+          </div>
+        )}
         <div
           ref={staticPreviewSurfaceRef}
           className="geometry-static-preview-surface"
@@ -8014,6 +8125,14 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             })()}
 
           </Layer>
+
+          {canvasDecorationContributions.length > 0 && (
+            <Layer name="host-canvas-decorations" listening={canInteractWithCanvasDecorations}>
+              {canvasDecorationContributions.map((contribution: CanvasDecorationContribution) => {
+                return <React.Fragment key={contribution.id}>{contribution.render(canvasDecorationContext(contribution.id))}</React.Fragment>;
+              })}
+            </Layer>
+          )}
 
           <RemotePresenceLayer
             selections={remoteSelections}
@@ -9326,8 +9445,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         const showSingle =
           (selection?.type === 'element' || selection?.type === 'global' || selection?.type === 'zone' || selection?.type === 'dormer') &&
           (selectedElementIds.length <= 1 || selectionRepresentsSingleDormer);
+        const showCanvasDecoration = Boolean(activeCanvasDecoration && canInteractWithCanvasDecorations && selectedCanvasDecorationContribution?.renderDetails);
         const showMulti = selectedElementIds.length > 1 && !selectionRepresentsSingleDormer;
-        const show = showSingle || showMulti || (!!spaceLabellerOpen && !!spaceLabellerZoneId);
+        const show = showSingle || showMulti || showCanvasDecoration || (!!spaceLabellerOpen && !!spaceLabellerZoneId);
         if (!show) return null;
 
         const editorSelection =
@@ -9340,7 +9460,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           setDetailsRect(getDetailsDefaultRect());
         };
 
-        const zIndex = activePanel === 'details' ? 2100 : 1900;
+        // A host annotation's inspector must stay above the host's compact task
+        // panel while editing; task settings and modal layers retain precedence.
+        const zIndex = activePanel === 'details' ? (showCanvasDecoration ? 2300 : 2100) : 1900;
 
         return (
           <Rnd
@@ -9405,6 +9527,21 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                       onCancelDrawFootprint={handleCancelDrawSpaceLabelFootprint}
                       isDrawingFootprint={drawMode === 'space-label-polygon'}
                     />,
+                  )
+                ) : showCanvasDecoration && activeCanvasDecoration ? (
+                  profileGeometryCanvasNode(
+                    `GeometryCanvas.details.decoration.${activeCanvasDecoration.contributionId}`,
+                    selectedCanvasDecorationContribution!.renderDetails!({
+                      id: activeCanvasDecoration.id,
+                      replaceSelection: (id) => replaceCanvasDecorationSelection(
+                        activeCanvasDecoration.contributionId, id,
+                      ),
+                      confirmDeleteRequested: activeCanvasDecoration.confirmDeleteRequested,
+                      clearDeleteRequest: () => setSelectedCanvasDecoration((previous) => previous
+                        ? { ...previous, confirmDeleteRequested: false }
+                        : previous),
+                      requestDelete: requestSelectedCanvasDecorationDelete,
+                    }),
                   )
                 ) : showSingle ? (
                   profileGeometryCanvasNode(

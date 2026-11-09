@@ -49,6 +49,28 @@ const press = (key: string) =>
   window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
 
 describe('useKeyboardShortcuts global element selection', () => {
+  it('routes virtual selection deletion before physical elements and respects modal/input guards', () => {
+    const tryDeleteVirtualSelection = vi.fn(() => true);
+    const deps = buildDeps({ tryDeleteVirtualSelection,
+      selection: { type: 'element', id: 'wall' },
+      elementsById: { wall: { id: 'wall', name: 'Wall', type: 'BuildingElementOpaque', coordinates: [] } as unknown as Element },
+    });
+    renderHook(() => useKeyboardShortcuts(deps));
+    press('Delete');
+    expect(tryDeleteVirtualSelection).toHaveBeenCalledOnce();
+    expect(deps.setElementDeleteModal).not.toHaveBeenCalled();
+    const modal = document.createElement('div');
+    modal.dataset.suppressCanvasKeyboard = '';
+    document.body.append(modal);
+    press('Backspace');
+    expect(tryDeleteVirtualSelection).toHaveBeenCalledOnce();
+    modal.remove();
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+    expect(tryDeleteVirtualSelection).toHaveBeenCalledOnce();
+    input.remove();
+  });
   it.each([
     'WaterPipework',
     'Appliance',

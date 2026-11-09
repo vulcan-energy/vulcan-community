@@ -10262,6 +10262,20 @@ FrontWallGround,Living,BuildingElementOpaque,10,90,4,2.5,0,0,FALSE,FALSE,,"0.000
     }
 
     #[test]
+    fn strips_private_internal_opening_metadata_before_hem_merge() {
+        let result = build_non_exposed_row(
+            r#"Internal,Living,BuildingElementAdjacentConditionedSpace,7.25,90,1.29,2.8,"0,0,0|0,1.29,0","{""_vulcan_overheating_internal_openings"":{""version"":1,""records"":[{""id"":""opening-1""}]},""thermal_resistance_construction"":0.6}""#,
+        )
+        .unwrap();
+        let wall = &result["Zone"]["Living"]["BuildingElement"]["Internal"];
+        assert!(
+            wall.get("_vulcan_overheating_internal_openings").is_none(),
+            "private editor metadata must not enter HEM input: {wall:?}"
+        );
+        assert_eq!(wall["thermal_resistance_construction"], json!(0.6));
+    }
+
+    #[test]
     fn blank_pitch_without_determining_geometry_fails_loudly() {
         let err = build_non_exposed_row(
             r#"Internal,Living,BuildingElementAdjacentConditionedSpace,7.25,,1.29,2.8,,"{}""#,

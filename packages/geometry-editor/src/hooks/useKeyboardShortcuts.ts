@@ -187,6 +187,8 @@ export interface UseKeyboardShortcutsDeps {
 
   /** Pops the last point while drawing (e.g. polygon path or room wall). Return true if handled. */
   tryPopLastDrawPoint?: () => boolean;
+  /** Handles a selected host-owned virtual canvas annotation before physical deletion. */
+  tryDeleteVirtualSelection?: () => boolean;
   /** When true, L/P/O/… do not start fabric draw (e.g. Space Labeller is open). */
   fabricDrawShortcutsDisabled?: boolean;
   /** A temporary canvas preview owns editing, while undo/redo and navigation stay available. */
@@ -287,6 +289,7 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
     setSelectedVertex,
     updateSpaceLabel,
     tryPopLastDrawPoint,
+    tryDeleteVirtualSelection,
   } = deps;
 
   useEffect(() => {
@@ -413,6 +416,9 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
             if (drawMode !== 'none') {
               break;
             }
+            if (tryDeleteVirtualSelection?.()) {
+              break;
+            }
             if (selectedVertex) {
               const element = elementsById[selectedVertex.elementId];
               if (element && canDeleteVertexFromElement(element)) {
@@ -521,6 +527,7 @@ export function useKeyboardShortcuts(deps: UseKeyboardShortcutsDeps): void {
     setSpaceLabelHoverPoint,
     updateSpaceLabel,
     tryPopLastDrawPoint,
+    tryDeleteVirtualSelection,
     fabricDrawShortcutsDisabled,
     geometryEditingSuspended,
   ]);
