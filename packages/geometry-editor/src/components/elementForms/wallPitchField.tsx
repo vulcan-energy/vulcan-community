@@ -159,8 +159,6 @@ export function renderWallPitchField(
             unit={fieldUnit('pitch')}
             onChange={pitchDraftInput.handleInputChange}
             onBlur={pitchDraftInput.handleBlur}
-            min="0"
-            max="180"
             readOnly={opts.disabledWhenParented ? !!parentElement : undefined}
             variant="ghost"
             size="md"
