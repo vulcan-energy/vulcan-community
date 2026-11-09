@@ -99,3 +99,8 @@ export function isPrimitiveOrEnumSchemaNode(node: unknown): boolean {
   if (isNonEmptyEnumLike(resolved)) return true;
   return schemaTypeList(resolved).some((type) => PRIMITIVE_SCHEMA_TYPES.has(type));
 }
+
+/** True for a property a branch forbids: `false` or `{not: {}}`. Such a key is absent, not a field. */
+export function isForbiddenSchemaNode(node: unknown): boolean {
+  return node === false || (isRecord(node) && isRecord(node.not) && Object.keys(node.not).length === 0);
+}
