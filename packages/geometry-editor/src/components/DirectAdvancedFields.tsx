@@ -18,6 +18,19 @@ import { validateValueAgainstPropertyNode } from '../lib/schemaCache';
 import { ResetFieldButton } from './ResetFieldButton';
 import { StatusPill } from './StatusPill';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
+import {
+  buildAddWindowOpeningPatch,
+  buildConvertToSingleOpeningPatch,
+  buildSingleOpeningPatch,
+  classifyWindowOpenings,
+  windowOpeningRepairMessages,
+  windowOpeningsUseTable,
+  type WindowOpeningPatch,
+  type WindowOpeningRow,
+  type WindowOpeningSource,
+} from '../lib/windowOpenings';
+import { useGeometryStore } from '../stores/geometryStore';
+import type { Element } from '../geometry/types';
 import { resolveSchemaPointer } from '../lib/schemaRefResolver';
 import {
   getAtPath,
@@ -438,7 +451,33 @@ function labelForProperty(
  * as a function and returning the real control elements (EnumControl, NumberControl,
  * …) keeps their identity stable across renders instead.
  */
-function SystemPerformanceTable({ args }: { args: Parameters<typeof renderControlForProperty>[0] }) {
+const TEST_POINT_TABLE_COPY = {
+  hint: 'Scroll horizontally to see all test fields.',
+  invalid: 'Test data must be an array of test-point objects. Correct the saved data before editing test points.',
+  caption: 'test points',
+  rowHeader: 'Point',
+  rowLabel: 'Point',
+  removeLabel: 'test point',
+  empty: 'Add the product’s test points before calculating.',
+  addLabel: 'Add test point',
+};
+
+const WINDOW_PART_TABLE_COPY = {
+  hint: 'Each row is one opening. Heights are above ground level.',
+  invalid: 'Window parts must be an array of objects. Correct the saved data before editing them.',
+  caption: 'window parts',
+  rowHeader: 'Part',
+  rowLabel: 'Part',
+  removeLabel: 'window part',
+  empty: 'Add the window’s openings before calculating.',
+  addLabel: 'Add opening',
+};
+
+function SystemPerformanceTable({ args, copy = TEST_POINT_TABLE_COPY, issues }: {
+  args: Parameters<typeof renderControlForProperty>[0];
+  copy?: typeof TEST_POINT_TABLE_COPY;
+  issues?: readonly string[];
+}) {
   const { resolved, schema, value, config, segments, label, scope, applyChange } = args;
   const item = readRecord(dereferenceSchemaNodeInRoot(resolved.items, schema));
   const columns = Object.entries(readRecord(item.properties));
@@ -449,31 +488,86 @@ function SystemPerformanceTable({ args }: { args: Parameters<typeof renderContro
   const baseline = getAtPath(readRecord(config.systemSampleBaselineExtraJson), segments);
   const changed = JSON.stringify(value) !== JSON.stringify(baseline);
   return <GroupAccordion label={label} count={rows.length} openInitially={rows.length <= 3}>
-    <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 0 }}>Scroll horizontally to see all test fields.</p>
+    <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 0 }}>{copy.hint}</p>
     {config.systemSampleMode === true && <div style={{ marginBottom: 8 }}>
       <StatusPill type={changed ? 'custom' : 'default-used'} labelOverride={changed ? 'Custom' : 'Preset'} />
       {changed && Array.isArray(baseline) && <ResetFieldButton align="inline" label="Reset test data" onClick={() => applyChange(segments, structuredClone(baseline))} />}
     </div>}
-    {((!Array.isArray(value) && value != null) || rows.some((row) => !isRecord(row))) ? <p role="alert">Test data must be an array of test-point objects. Correct the saved data before editing test points.</p> : <>
+    {((!Array.isArray(value) && value != null) || rows.some((row) => !isRecord(row))) ? <p role="alert">{copy.invalid}</p> : <>
       <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%' }} aria-label={`${label} test points`}>
-          <thead><tr><th scope="col">Point</th>{columns.map(([key, field]) => <th key={key} scope="col" style={{ textAlign: 'left', padding: 4 }}>{labelForProperty(key, readRecord(field), undefined)}</th>)}<th scope="col">Actions</th></tr></thead>
+        <table style={{ borderCollapse: 'collapse', width: '100%' }} aria-label={`${label} ${copy.caption}`}>
+          <thead><tr><th scope="col">{copy.rowHeader}</th>{columns.map(([key, field]) => <th key={key} scope="col" style={{ textAlign: 'left', padding: 4 }}>{labelForProperty(key, readRecord(field), undefined)}</th>)}<th scope="col">Actions</th></tr></thead>
           <tbody>{rows.map((row, index) => <tr key={rowKeys[index]}>
             <th scope="row">{index + 1}</th>
             {columns.map(([key, field]) => <td key={key} style={{ minWidth: 112, padding: 4, verticalAlign: 'top' }}>
-              {renderControlForProperty({ ...args, config: { ...config, tableCell: true, compact: true }, segments: [...segments, String(index), key], resolved: unwrapNullableSchema(readRecord(field)), value: readRecord(row)[key], label: `Point ${index + 1} · ${labelForProperty(key, readRecord(field), undefined)}`, scope: `${scope}/items/properties/${key}`, required: Array.isArray(item.required) && item.required.includes(key), applyChange: (_cellSegments, nextValue) => {
+              {renderControlForProperty({ ...args, config: { ...config, tableCell: true, compact: true }, segments: [...segments, String(index), key], resolved: unwrapNullableSchema(readRecord(field)), value: readRecord(row)[key], label: `${copy.rowLabel} ${index + 1} · ${labelForProperty(key, readRecord(field), undefined)}`, scope: `${scope}/items/properties/${key}`, required: Array.isArray(item.required) && item.required.includes(key), applyChange: (_cellSegments, nextValue) => {
                 const next = rows.map((entry, i) => i === index ? setAtPath(readRecord(entry), [key], nextValue) : entry);
                 applyChange(segments, next);
               } })}
             </td>)}
-            <td style={{ verticalAlign: 'top', padding: 4 }}><button type="button" className="btn btn-nav btn-small" aria-label={`Remove test point ${index + 1}`} onClick={() => applyChange(segments, rows.filter((_, i) => i !== index))}>Remove</button></td>
+            <td style={{ verticalAlign: 'top', padding: 4 }}><button type="button" className="btn btn-nav btn-small" aria-label={`Remove ${copy.removeLabel} ${index + 1}`} onClick={() => applyChange(segments, rows.filter((_, i) => i !== index))}>Remove</button></td>
           </tr>)}</tbody>
         </table>
       </div>
-      {!rows.length && <p role="alert">Add the product’s test points before calculating.</p>}
-      <button type="button" className="btn btn-nav btn-small" onClick={() => applyChange(segments, [...rows, {}])}>Add test point</button>
+      {issues?.map((issue) => <p key={issue} role="alert">{issue}</p>)}
+      {!rows.length && <p role="alert">{copy.empty}</p>}
+      <button type="button" className="btn btn-nav btn-small" onClick={() => applyChange(segments, [...rows, {}])}>{copy.addLabel}</button>
     </>}
   </GroupAccordion>;
+}
+
+/** a8/a9 window parts: the main form owns one opening; the table owns two or more. */
+function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderControlForProperty>[0] }) {
+  const selected = useGeometryStore((state) => (
+    state.selection?.type === 'element' ? state.getElementById(state.selection.id) : undefined
+  ));
+  const updateElement = useGeometryStore((state) => state.updateElement);
+  const element = selected?.type === 'BuildingElementTransparent' ? selected : undefined;
+  const source: WindowOpeningSource = element
+    ? element as unknown as WindowOpeningSource
+    : { extra_json: { window_part_list: args.value } };
+  const openings = classifyWindowOpenings(source);
+  const commit = (patch: WindowOpeningPatch) => {
+    if (element) updateElement(element.id, patch as Partial<Element>);
+    else args.applyChange(args.segments, patch.extra_json?.window_part_list);
+  };
+
+  if (windowOpeningsUseTable(source)) {
+    return <SystemPerformanceTable
+      args={{
+        ...args,
+        applyChange: (segments, next) => {
+          if (Array.isArray(next) && next.length === 1 && isRecord(next[0])) {
+            commit(buildSingleOpeningPatch(source, next[0] as WindowOpeningRow));
+          } else {
+            args.applyChange(segments, next);
+          }
+        },
+      }}
+      copy={WINDOW_PART_TABLE_COPY}
+      issues={openings.kind === 'repair' ? openings.partIssues : undefined}
+    />;
+  }
+
+  if (openings.kind === 'repair' && openings.reason !== 'incomplete_parts') {
+    return <div style={{ fontSize: 12 }}>
+      <p role="alert" style={{ marginTop: 0 }}>{windowOpeningRepairMessages(openings).join(' ')}</p>
+      {element && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildConvertToSingleOpeningPatch(source))}>
+        Convert to a single opening
+      </button>}
+      {element && <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>This removes the current window part list. The window keeps one opening.</p>}
+    </div>;
+  }
+
+  const status = openings.kind === 'closed'
+    ? 'No opening. This window stays closed.'
+    : openings.kind === 'needs_input'
+      ? 'One opening. Complete the free area height, mid height and max open area in the main form.'
+      : 'One opening. Edit it in the main form.';
+  return <div style={{ fontSize: 12 }}>
+    <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>{args.label}: {status}</p>
+    {element && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildAddWindowOpeningPatch(source))}>Add opening</button>}
+  </div>;
 }
 
 function renderControlForProperty(args: {
@@ -592,6 +686,10 @@ function renderControlForProperty(args: {
   // the R4.5 deletion note above `schemaHasIntegerType` there); this file has owned
   // the check outright since R4.3, and GenericControl no longer exists to mirror.
   if (leafKey === 'window_part_list') {
+    const partItem = readRecord(dereferenceSchemaNodeInRoot(resolved.items, schema));
+    if (isRecord(partItem.properties) && !('mid_height_air_flow_path' in partItem.properties)) {
+      return <PhysicalWindowPartsField key={path} args={args} />;
+    }
     return (
       <WindowPartListControl key={path} {...baseProps} errors="" />
     );

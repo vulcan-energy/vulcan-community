@@ -29,6 +29,11 @@ import { usesGroundThermalTransmWallsAutofill } from '../lib/groundFloorSubtype'
 import { errorMessageFromUnknown, isRecord, readRecord, type JsonRecord } from '../lib/jsonTypes';
 import { schemaAlternatives, schemaTypeList } from '../lib/schemaShape';
 import type { Element, Floor } from '../geometry/types';
+import {
+  buildConvertToSingleOpeningPatch,
+  isPhysicalPart,
+  type WindowOpeningSource,
+} from '../lib/windowOpenings';
 import type { SchemaNode } from '../lib/schemaTypes';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import type { GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
@@ -1360,6 +1365,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
 
   const selection = useGeometryStore((state) => state.selection);
   const getElementById = useGeometryStore((state) => state.getElementById);
+  const updateElement = useGeometryStore((state) => state.updateElement);
   const ventilationZoneBaseHeightM = useGeometryStore((state) =>
     resolveEffectiveVentilationBaseHeight({
       zones: state.zones,
@@ -1377,6 +1383,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
   const baseHeightM = toFiniteNumber(currentElementRecord.base_height) ?? 0;
   const windowHeightM = toFiniteNumber(currentElementRecord.height) ?? 0;
 
+  const physicalParts = Array.isArray(data) ? data.filter(isPhysicalPart) as Record<string, unknown>[] : [];
   const rows = readWindowPartRows(data);
   const relRows = rows.map((r) => round2(r.mid_height_air_flow_path - baseHeightM));
   const relRowsKey = relRows.map((relM) => String(relM)).join('|');
@@ -1419,6 +1426,8 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
 
     const previousBaseHeightM = prevBaseHeightRef.current;
     if (Math.abs(previousBaseHeightM - baseHeightM) <= 1e-6) return;
+    // Rebuilding from legacy rows would drop the physical parts.
+    if (physicalParts.length > 0) return;
 
     const preservedRelRows = rows.map((row) => round2(
       row.mid_height_air_flow_path - previousBaseHeightM,
@@ -1429,7 +1438,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     if (!windowPartRowsEqual(rows, nextRows)) {
       handleChange(path, nextRows);
     }
-  }, [baseHeightM, handleChange, path, rows, selection]);
+  }, [baseHeightM, handleChange, path, physicalParts.length, rows, selection]);
 
   const [showPresets, setShowPresets] = React.useState(false);
 
@@ -1519,6 +1528,50 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
   const outOfRangeRows = relRows
     .map((relM, idx) => ({ relM, idx }))
     .filter(({ relM }) => windowHeightM > 0 && relM > windowHeightM + 1e-6);
+
+  if (physicalParts.length > 0) {
+    const physicalPartCount = Array.isArray(data) ? data.length : physicalParts.length;
+    return renderAdvancedFieldRow(
+      propKey,
+      isCompact,
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, fontSize: 12 }}>
+        <div style={{ whiteSpace: 'pre-line' }}>
+          {physicalParts.map((part, idx) => (
+            `Part ${idx + 1}: free height ${String(part.free_area_height ?? 'blank')} m, mid height ${String(part.mid_height ?? 'blank')} m, max open area ${String(part.max_window_open_area ?? 'blank')} m²`
+          )).join('\n')}
+        </div>
+        <div role="alert">This HEM version cannot use window parts with their own free height and max open area.</div>
+        {selection?.type === 'element' && currentElement ? (
+          <div>
+            <button
+              type="button"
+              className="btn btn-nav btn-small"
+              onClick={() => updateElement(
+                selection.id,
+                buildConvertToSingleOpeningPatch(currentElement as unknown as WindowOpeningSource) as Partial<Element>,
+              )}
+            >
+              Convert to a single opening
+            </button>
+            <div style={{ color: 'var(--text-secondary)', marginTop: 4 }}>
+              Part 1 becomes the whole window opening.{physicalPartCount > 1 ? ` ${physicalPartCount - 1} other ${physicalPartCount === 2 ? 'part is' : 'parts are'} removed.` : ''}
+            </div>
+          </div>
+        ) : null}
+      </div>,
+      [],
+      'flex-start',
+      0,
+      renderAdvancedFieldLabelRow(
+        indicatorMessages,
+        hasEvidence,
+        'default-used',
+        undefined,
+        cfg.useFHSSchemaForValidation,
+        fieldPresentation,
+      ),
+    );
+  }
 
   return renderAdvancedFieldRow(
     propKey,

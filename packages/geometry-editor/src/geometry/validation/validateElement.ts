@@ -10,6 +10,14 @@ import type {
   GeometrySchemaPort,
 } from '../../../../geometry-editor-host/src/schemaPort';
 import { hasDefaultValue, type DefaultsLookup } from '../../lib/defaultsCache';
+import {
+  classifyWindowOpenings,
+  windowOpeningRepairMessages,
+  windowPartsArePhysical,
+  type WindowOpeningField,
+  type WindowOpeningSource,
+  type WindowOpenings,
+} from '../../lib/windowOpenings';
 import { classifyOpaqueFabricVariantFromElement } from '../../lib/opaqueFabricVariant';
 import type {
   Element,
@@ -211,6 +219,54 @@ export function getFloorStackWarningElementIds(elements: Element[], floors: Floo
 function formatNumberForIssue(value: number): string {
   const rounded = roundToTwoDecimals(value);
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
+}
+
+const WINDOW_OPENING_FIELD_ISSUES: Record<WindowOpeningField, string> = {
+  free_area_height: 'Free Area Height should not be 0',
+  mid_height: 'Mid Height should not be 0',
+  max_window_open_area: 'Max Window Open Area should not be 0',
+};
+
+/**
+ * Follows the converter. `physical` is null when no schema is loaded: a7-style checks stay in force.
+ * Divisions with different heights run on a7, so only a8/a9 report them.
+ */
+function validateWindowOpenings(el: BuildingElementTransparent, physical: boolean | null): ValidationIssue[] {
+  const source = el as unknown as WindowOpeningSource;
+  const openings = classifyWindowOpenings(source);
+  const columnIssues = (state: WindowOpenings) =>
+    state.kind === 'needs_input'
+      ? state.missing.map((field) => geoIssue(WINDOW_OPENING_FIELD_ISSUES[field], field))
+      : [];
+  switch (openings.kind) {
+    case 'closed':
+      return [];
+    case 'needs_input':
+      return columnIssues(openings);
+    case 'rows': {
+      if (openings.source === 'parts' && physical === false) {
+        return [geoIssue(
+          'This HEM version cannot use window parts with their own free height and max open area. Use "Convert to a single opening" in Advanced Fields.',
+          'window_part_list',
+        )];
+      }
+      if (openings.source === 'parts' && physical === true && isPositiveFiniteNumber(el.area)) {
+        const totalOpenArea = openings.rows.reduce((sum, row) => sum + (row.max_window_open_area ?? 0), 0);
+        if (totalOpenArea > el.area + 1e-6) {
+          return [geoIssue('The max open area of the window parts is greater than the window area.', 'window_part_list')];
+        }
+      }
+      if (openings.source === 'legacy' && physical !== true && !isPositiveFiniteNumber(el.mid_height)) {
+        return [geoIssue(WINDOW_OPENING_FIELD_ISSUES.mid_height, 'mid_height')];
+      }
+      return [];
+    }
+    case 'repair':
+      if (openings.reason === 'conflicting_heights' && physical !== true) {
+        return columnIssues(classifyWindowOpenings({ ...source, extra_json: undefined }));
+      }
+      return windowOpeningRepairMessages(openings).map((message) => geoIssue(message, 'window_part_list'));
+  }
 }
 
 function isPositiveFiniteNumber(value: unknown): value is number {
@@ -962,15 +1018,7 @@ export const validateElementCore = (
       if (!isPositiveFiniteNumber(el.frame_area_fraction)) {
         issues.push(geo('Frame Area Fraction is required and must be greater than 0', 'frame_area_fraction'));
       }
-      if (!isPositiveFiniteNumber(el.free_area_height)) {
-        issues.push(geo('Free Area Height should not be 0', 'free_area_height'));
-      }
-      if (!isPositiveFiniteNumber(el.mid_height)) {
-        issues.push(geo('Mid Height should not be 0', 'mid_height'));
-      }
-      if (!isPositiveFiniteNumber(el.max_window_open_area)) {
-        issues.push(geo('Max Window Open Area should not be 0', 'max_window_open_area'));
-      }
+      issues.push(...validateWindowOpenings(el, windowPartsArePhysical(schemaPort, complianceValidationEnabled ? 'fhs' : 'core')));
       if (complianceValidationEnabled && context.complianceSettings) {
         const ventilationZoneBaseHeight = resolveEffectiveVentilationZoneBaseHeight({
           elements: allElements,
