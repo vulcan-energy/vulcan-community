@@ -711,7 +711,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   }, [
     complianceSettings.complianceValidationEnabled,
     elementsById,
-    floors,
     primaryFhsZoneId,
     spaceInferenceWallPrintByZone,
     spaceLabelIds,
