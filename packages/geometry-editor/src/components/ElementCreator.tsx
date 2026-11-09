@@ -23,6 +23,7 @@ import {
   type ElementFormRenderCtx,
 } from './elementForms/types';
 import { electricBatteryFormModule } from './elementForms/electricBattery';
+import { thermalBridgingAcceptsTotal } from '../lib/schemaCache';
 import { thermalBridgeLinearFormModule } from './elementForms/thermalBridgeLinear';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
 import { buildLightingPatch, lightingFormModule } from './elementForms/lighting';
@@ -1252,6 +1253,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     { floorArea: false, height: false },
   );
   const [simplifiedThermalBridging, setSimplifiedThermalBridging] = useState<boolean>(false);
+  const zoneSchemaRoot = schemaPort.availability === 'available' ? schemaPort.getRootSchema(useFHSSchema ? 'fhs' : 'core') : null;
+  const targetAcceptsThermalBridgingTotal = !schemaPort.requiresDetailedThermalBridges?.() && thermalBridgingAcceptsTotal(zoneSchemaRoot);
   const zoneVolume = useMemo(
     () => calculateZoneVolume(zoneFloorArea, zoneHeight),
     [zoneFloorArea, zoneHeight],
@@ -5390,6 +5393,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   />
                   <div style={INLINE_FIELD_NOTE_STYLE}>Floor area × height. To reach a specific volume, change Height.</div>
                 </div>
+                {(targetAcceptsThermalBridgingTotal || simplifiedThermalBridging) && <>
                 <div className="element-label">
                   Simplified Thermal Bridging
                 </div>
@@ -5420,6 +5424,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     variant="warning"
                   />
                 </div>
+                </>}
                 {isExistingZoneSelection() && onOpenSpaceLabeller && !showFhsAreaSplit ? (
                   <div
                     className="element-editor-full-row element-editor-inline-actions"

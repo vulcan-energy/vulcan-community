@@ -113,6 +113,21 @@ function validationContext(elements: Element[]) {
   };
 }
 
+describe('electric storage heater output tables', () => {
+  const heater = (rows: unknown) => ({
+    id: 'sys', name: 'Heater', zoneId: 'zone-1', floorId: 'floor-0', type: 'System', subcategory: 'SpaceHeatSystem', system_preset: 'heater',
+    coordinates: [{ x: 0, y: 0, z: 0 }], isPlaceholder: false,
+    extra_json: { SpaceHeatSystem: { h: { type: 'ElecStorageHeater', dry_core_min_output: rows, dry_core_max_output: [[0, 0.4], [1, 2.2]] } } },
+  } as unknown as Element);
+  const issues = (rows: unknown) => validateElementCore(heater(rows), { schemaPort: unavailableGeometrySchemaPort } as never).issues.map((issue) => issue.message);
+  it('reports a row that is not a charge and power pair', () => {
+    expect(issues([[1.2]])).toEqual([expect.stringContaining('dry_core_min_output')]);
+  });
+  it('accepts pairs', () => {
+    expect(issues([[0, 0.1], [1, 0.3]]).filter((message) => message.includes('dry_core'))).toEqual([]);
+  });
+});
+
 describe('FHS window base-height validation', () => {
   it('emits a critical FHS issue when a window is below an explicit ventilation zone base', () => {
     const element = window(0.5);

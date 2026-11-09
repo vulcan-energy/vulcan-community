@@ -5,7 +5,12 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { checkGeometryCsv } from '../check';
+import { convertCsv } from '../convert';
 import { autoThermalBridges, validateThermalBridges } from '../thermalBridges';
 import { versionInfo, versionText } from '../version';
 
@@ -25,6 +30,12 @@ describe('vulcan-community commands', () => {
     expect(Array.isArray(result.criticalIssues)).toBe(true);
     expect(Array.isArray(result.warnings)).toBe(true);
     expect(Array.isArray(result.missingElements)).toBe(true);
+  });
+
+  it('convert refuses a CSV pinned to a HEM version instead of converting it with the bundled schema', async () => {
+    const csv = join(mkdtempSync(join(tmpdir(), 'vulcan-cli-')), 'pinned.csv');
+    writeFileSync(csv, 'Metadata,,\nVulcanCsvVersion,3,\nTargetBundleId,python-fhs-a9-918addad-b9b90138-v1,\n');
+    await expect(convertCsv(csv, {})).rejects.toThrow("CSV pins TargetBundleId 'python-fhs-a9-918addad-b9b90138-v1'");
   });
 
   it('thermal-bridges proposes and validates', () => {

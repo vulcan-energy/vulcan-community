@@ -39,6 +39,8 @@ export interface GeometrySchemaPort {
   /** Notify mounted editors when the selected schema is cleared or becomes ready. */
   subscribe?(listener: () => void): () => void;
   getRevision?(): number;
+  /** The selected target needs thermal-bridge records even where its schema accepts a total. */
+  requiresDetailedThermalBridges?(): boolean;
   preload(mode: GeometrySchemaMode): Promise<void>;
   getRootSchema(mode: GeometrySchemaMode): GeometrySchemaNode | null;
   getElementSubschema(

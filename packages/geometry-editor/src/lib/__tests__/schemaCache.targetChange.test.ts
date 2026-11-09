@@ -2,11 +2,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode } from '../schemaCache';
+import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode, thermalBridgingAcceptsTotal } from '../schemaCache';
 import { ensureRootSchema, getAjvInstance, resetGeometrySchemaValidators } from '../ajvCache';
 
 const schema = (minimum: number) => ({ type: 'object', properties: { value: { type: 'number', minimum } } });
 afterEach(() => { resetGeometrySchemaAssetsForTests(); resetGeometrySchemaValidators(); });
+
+describe('thermalBridgingAcceptsTotal', () => {
+  const root = (bridging: unknown) => ({ properties: { Zone: { additionalProperties: { properties: { ThermalBridging: bridging } } } } });
+  it('follows the zone schema', () => {
+    expect(thermalBridgingAcceptsTotal(root({ type: ['object', 'number'] }))).toBe(true);
+    expect(thermalBridgingAcceptsTotal(root({ anyOf: [{ type: 'object' }, { type: 'number' }] }))).toBe(true);
+    expect(thermalBridgingAcceptsTotal(root({ type: 'object' }))).toBe(false);
+  });
+  it('says nothing without a schema or the field', () => {
+    expect(thermalBridgingAcceptsTotal(null)).toBe(true);
+    expect(thermalBridgingAcceptsTotal({ properties: {} })).toBe(true);
+  });
+});
 
 describe('target-scoped schema caches', () => {
   it.each(['Clothes_washing|Fridge-Freezer|Kettle', '^(Clothes_washing|Fridge-Freezer|Kettle)$'])(

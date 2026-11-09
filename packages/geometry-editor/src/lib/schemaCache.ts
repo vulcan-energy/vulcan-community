@@ -2284,6 +2284,22 @@ export function getStrictestIntegerKeysForElementType(elementType: string, subty
 
 export type TargetFieldAvailability = 'available' | 'absent' | 'unknown';
 
+function schemaNodeAcceptsNumber(node: unknown, root: unknown): boolean {
+  if (!isRecord(node)) return false;
+  const resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
+  if ([resolved.type].flat().some((type) => type === 'number' || type === 'integer')) return true;
+  return [resolved.anyOf, resolved.oneOf].some((list) => Array.isArray(list) && list.some((branch) => schemaNodeAcceptsNumber(branch, root)));
+}
+
+/** False when the target's zone schema takes `ThermalBridging` only as records. No schema says nothing, so true. */
+export function thermalBridgingAcceptsTotal(root: unknown): boolean {
+  if (!isRecord(root)) return true;
+  const zones = findFieldInSchemaBranches(root, 'Zone', root);
+  const zone = isRecord(zones) ? dereferenceSchemaNodeInRoot(zones, root) as Record<string, unknown> : undefined;
+  const field = zone ? findFieldInSchemaBranches(zone.additionalProperties, 'ThermalBridging', root) : undefined;
+  return field === undefined || schemaNodeAcceptsNumber(field, root);
+}
+
 function findFieldInSchemaBranches(node: unknown, key: string, root: unknown): unknown {
   if (!isRecord(node)) return undefined;
   const resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;

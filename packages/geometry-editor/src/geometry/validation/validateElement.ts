@@ -1891,6 +1891,17 @@ export const validateElementCore = (
         !Array.isArray((extraJson as Record<string, unknown>)._pcdb);
       const isSpaceHeatSystem = sysElement.subcategory === 'SpaceHeatSystem';
       const hasSpaceHeatSystemPayload = systemElementProvidesSpaceHeatSystem(sysElement);
+      if (isSpaceHeatSystem && extraJson && typeof extraJson === 'object' && !Array.isArray(extraJson)) {
+        // Core needs [charge, output] pairs; no schema states the inner length, so it fails only at run.
+        for (const heater of Object.values((extraJson as Record<string, unknown>).SpaceHeatSystem ?? {})) {
+          for (const field of ['dry_core_min_output', 'dry_core_max_output']) {
+            const rows = (heater as Record<string, unknown> | null)?.[field];
+            if (Array.isArray(rows) && rows.some((row) => !Array.isArray(row) || row.length !== 2)) {
+              issues.push(geo(`${field}: each row needs two values, charge level and power`, 'system_preset'));
+            }
+          }
+        }
+      }
       if (!sysElement.isPlaceholder && isSpaceHeatSystem && !hasSpaceHeatSystemPayload) {
         issues.push(
           geo(
