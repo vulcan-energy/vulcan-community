@@ -43,6 +43,7 @@ import type {
 } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import {
+  csvMetadataValue,
   parseCsvLine,
   parseCsvSections,
   stripLegacyBuildingServicesBlocks,
@@ -287,7 +288,7 @@ export const parseCsvToGeometry = (
   let detectedProvenanceMarkersVersion: number | undefined;
   let detectedVulcanCsvVersion: string | undefined;
   let detectedDefaultsPath: string | undefined;
-  let targetBundleId: string | undefined;
+  const targetBundleId = csvMetadataValue(csvContent, 'TargetBundleId') || undefined;
   let detectedModelId: string | undefined;
   let detectedModelVersion: number | undefined;
   let detectedSchemaProfile: ModelSchemaProfile | undefined;
@@ -332,7 +333,6 @@ export const parseCsvToGeometry = (
       }
       continue;
     }
-    if (hostMetadataKey === 'TargetBundleId') { targetBundleId = metadataFields[1]?.trim() || undefined; }
     if (hostMetadataKey === 'ModelId') {
       detectedModelId = metadataFields[1]?.trim() || undefined;
       continue;

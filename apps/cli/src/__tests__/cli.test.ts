@@ -34,7 +34,7 @@ describe('vulcan-community commands', () => {
 
   it('convert refuses a CSV pinned to a HEM version instead of converting it with the bundled schema', async () => {
     const csv = join(mkdtempSync(join(tmpdir(), 'vulcan-cli-')), 'pinned.csv');
-    writeFileSync(csv, 'Metadata,,\nVulcanCsvVersion,3,\nTargetBundleId,python-fhs-a9-918addad-b9b90138-v1,\n');
+    writeFileSync(csv, 'Metadata,,\nVulcanCsvVersion,3,\n#TargetBundleId,python-fhs-a9-918addad-b9b90138-v1,\n');
     await expect(convertCsv(csv, {})).rejects.toThrow("CSV pins TargetBundleId 'python-fhs-a9-918addad-b9b90138-v1'");
   });
 
