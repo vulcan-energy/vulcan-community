@@ -582,8 +582,16 @@ const reconstructSlopedDimensionOverrideFlags = (
     };
 
     const csvWidth = typeof record.width === 'number' && Number.isFinite(record.width) ? record.width : undefined;
+    const csvHeightValue = typeof record.height === 'number' && Number.isFinite(record.height) ? record.height : undefined;
+    // An override is an authored rectangle. Columns whose product is not the row's own area are
+    // not one, so the polygon (and with it the authored area) governs.
+    const csvArea = (element as { area?: unknown }).area;
+    const authoredRectangle = typeof csvArea !== 'number' || !Number.isFinite(csvArea)
+      || csvWidth === undefined || csvHeightValue === undefined
+      || Math.abs(csvWidth * csvHeightValue - csvArea) <= Math.max(0.05, 0.01 * csvArea);
     if (
       csvWidth
+      && authoredRectangle
       && !isOverrideDescriptorAuthoritative(
         SLOPED_WIDTH_OVERRIDE_DESCRIPTOR,
         provenanceMarkersVersion,
@@ -602,6 +610,7 @@ const reconstructSlopedDimensionOverrideFlags = (
     const csvHeight = typeof record.height === 'number' && Number.isFinite(record.height) ? record.height : undefined;
     if (
       csvHeight
+      && authoredRectangle
       && !isOverrideDescriptorAuthoritative(
         SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR,
         provenanceMarkersVersion,
@@ -1534,7 +1543,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // 12. Wet Emitters section
     const wetEmitterElements = getElementsOfType(exportElements, 'WetEmitter');
     if (wetEmitterElements.length > 0) {
-      const emittersHeader = [...EXPECTED_SECTION_HEADERS['Wet Emitters']];
+      // A legacy table has no link column, and the converter then builds the zone's wet system.
+      // Writing the column blank would mean "linked to nothing" and delete that system.
+      const writesLinks = wetEmitterElements.some(element => element.space_heat_system);
+      const emittersHeader = EXPECTED_SECTION_HEADERS['Wet Emitters'].filter(column => writesLinks || column !== 'space_heat_system');
       const emittersColumnCount = emittersHeader.length;
 
       lines.push('Wet Emitters,,,,,,,,,');
@@ -1549,7 +1561,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(element.subcategory || ''),
             escapeCSV(formatOptionalFiniteNumberForCsv(element.area)),
             escapeCSV(formatOptionalFiniteNumberForCsv(element.unit_number)),
-            escapeCSV(element.space_heat_system || ''),
+            ...(writesLinks ? [escapeCSV(element.space_heat_system || '')] : []),
             escapeCSV(formatViewerBaseHeightForCsv(element)),
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
@@ -2162,7 +2174,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         opening.coordinates = aligned;
       }
       const derived = deriveFromHostRoof(opening, roof, effectiveFloorsForHostedTransparent, metadata.globalOrientationOffset);
-      Object.assign(opening, buildTransparentHostDerivedPatch(opening, derived));
+      // Pitch and orientation follow the aligned coordinates. An authored base height survives
+      // the load, since it depends on storey heights that may have changed since the save; the
+      // next edit re-derives it from the host.
+      const patch = buildTransparentHostDerivedPatch(opening, derived);
+      if (typeof opening.base_height === 'number' && Number.isFinite(opening.base_height)) delete patch.base_height;
+      Object.assign(opening, patch);
     }
 
     const { elementsById, elementIds } = migrateElementsToNormalized(newElements);

@@ -10,6 +10,8 @@ export type ZoneValidationContext = {
   elementsById?: Record<string, Element>;
   complianceValidationEnabled?: boolean;
   primaryFhsZoneId?: string;
+  /** False where the target takes thermal-bridge records only (see `simplifiedThermalBridgingOffered`). */
+  simplifiedThermalBridgingOffered?: boolean;
 };
 
 export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): ValidationResult => {
@@ -117,7 +119,10 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
     ? zoneHasDetailedThermalBridging(zone.id, context.elementsById)
     : false;
 
-  if (zone.simplifiedThermalBridging && hasDetailedThermalBridging) {
+  const offered = context.simplifiedThermalBridgingOffered !== false;
+  if (zone.simplifiedThermalBridging && !offered) {
+    issues.push(issue('This HEM version needs thermal-bridge records. Untick Simplified ψ and add thermal bridges', 'simplifiedThermalBridging'));
+  } else if (zone.simplifiedThermalBridging && hasDetailedThermalBridging) {
     warnings.push(warn(
       'Simplified ψ + detailed TB — simplified ψ wins',
       'simplifiedThermalBridging'
@@ -130,7 +135,9 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
     && !hasDetailedThermalBridging
   ) {
     warnings.push(warn(
-      'No thermal bridging — junction heat loss is 0; tick Simplified ψ or add thermal bridges',
+      offered
+        ? 'No thermal bridging — junction heat loss is 0; tick Simplified ψ or add thermal bridges'
+        : 'No thermal bridging — junction heat loss is 0; add thermal bridges',
       'simplifiedThermalBridging'
     ));
   }
@@ -141,7 +148,7 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
     && !hasDetailedThermalBridging
   ) {
     issues.push(fhsIssue(
-      'FHS: Simplified ψ or TB elements required',
+      offered ? 'FHS: Simplified ψ or TB elements required' : 'FHS: thermal bridge elements required',
       'simplifiedThermalBridging'
     ));
   }

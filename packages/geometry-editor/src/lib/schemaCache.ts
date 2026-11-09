@@ -8,7 +8,7 @@ import { resolveRefChain, resolveRefNode } from './schemaRefResolver';
 import { flattenIfThenAllOfProperties } from './systemSchemaFlatten';
 import { isForbiddenSchemaNode } from './schemaShape';
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
-import type { GeometrySchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 
 export type GeometrySchemaAssetSource = Readonly<{
   loadText(mode: GeometrySchemaMode): Promise<string>;
@@ -2289,6 +2289,12 @@ function schemaNodeAcceptsNumber(node: unknown, root: unknown): boolean {
   const resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
   if ([resolved.type].flat().some((type) => type === 'number' || type === 'integer')) return true;
   return [resolved.anyOf, resolved.oneOf].some((list) => Array.isArray(list) && list.some((branch) => schemaNodeAcceptsNumber(branch, root)));
+}
+
+/** Whether to offer a single simplified ψ total: the schema accepts one and the host declares no stricter contract. */
+export function simplifiedThermalBridgingOffered(port: GeometrySchemaPort, mode: GeometrySchemaMode): boolean {
+  if (port.availability !== 'available') return true;
+  return !port.requiresDetailedThermalBridges?.() && thermalBridgingAcceptsTotal(port.getRootSchema(mode));
 }
 
 /** False when the target's zone schema takes `ThermalBridging` only as records. No schema says nothing, so true. */

@@ -12,6 +12,7 @@ import {
 import { useStore } from 'zustand';
 import { createStore, type StateCreator, type StoreApi } from 'zustand/vanilla';
 import { geometryPerf } from '../lib/geometryPerf';
+import { simplifiedThermalBridgingOffered } from '../lib/schemaCache';
 import {
   convertShapeCoordinates,
   getElementShape,
@@ -7630,6 +7631,7 @@ const createGeometryState = (
         elementsById: state.elementsById,
         complianceValidationEnabled: state.complianceSettings.complianceValidationEnabled || false,
         primaryFhsZoneId,
+        simplifiedThermalBridgingOffered: simplifiedThermalBridgingOffered(schemaPort, state.complianceSettings.complianceValidationEnabled ? 'fhs' : 'core'),
       });
       allWarnings.push(...validation.warnings.map(w => w.message));
       allCriticalIssues.push(...validation.issues.map(i => i.message));

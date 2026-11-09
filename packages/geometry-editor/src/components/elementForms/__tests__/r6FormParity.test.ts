@@ -8,6 +8,7 @@ import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../../lib/overrideProv
 import { buildingElementGroundFormModule } from '../buildingElementGround';
 import { lightingFormModule } from '../lighting';
 import { thermalBridgePointFormModule } from '../thermalBridgePoint';
+import { windowShadingFormModule } from '../windowShading';
 
 const lighting = (fields: Record<string, unknown> = {}): Element => ({
   id: 'light', type: 'Lighting', name: 'light', coordinates: [{ x: 0, y: 0, z: 0 }], ...fields,
@@ -129,4 +130,15 @@ describe('R6 single-element field semantics', () => {
       [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: true,
     });
   });
+});
+
+it('keeps a zero window-shading distance instead of dropping it', () => {
+  const input = (value: number | '') => ({ value });
+  const data = windowShadingFormModule.buildElementData({
+    linkedWindow: 'Window', shadingType: 'overhang', depthInput: input(0.4), heightInput: input(''), distanceInput: input(0), transparencyInput: input(''),
+  } as never, { baseData: {} } as never);
+  expect(data).toMatchObject({ distance: 0, depth: 0.4 });
+  expect((windowShadingFormModule.buildElementData({
+    linkedWindow: 'Window', shadingType: 'overhang', depthInput: input(0.4), heightInput: input(''), distanceInput: input(''), transparencyInput: input(''),
+  } as never, { baseData: {} } as never) as { distance?: number }).distance).toBeUndefined();
 });

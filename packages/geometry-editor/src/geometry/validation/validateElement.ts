@@ -5,6 +5,7 @@ import { csvMigrationIssues } from '../io/csvSemanticMigration';
 import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
+import { simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
 import type {
   GeometrySchemaPort,
@@ -1344,8 +1345,8 @@ export const validateElementCore = (
         break;
       }
       if (shadingElement.shading_type === 'object') {
-        if (!shadingElement.distance || shadingElement.distance === 0) {
-          issues.push(geo('Distance cannot be 0', 'distance'));
+        if (typeof shadingElement.distance !== 'number' || !Number.isFinite(shadingElement.distance) || shadingElement.distance < 0) {
+          issues.push(geo('Distance is required and must be >= 0', 'distance'));
         }
         if (!shadingElement.height || shadingElement.height === 0) {
           issues.push(geo('Height cannot be 0', 'height'));
@@ -1354,9 +1355,9 @@ export const validateElementCore = (
           issues.push(geo('Transparency is required and must be >= 0', 'transparency'));
         }
       } else {
-        // For overhang/sidefin/reveal types, distance is user-input
-        if (!shadingElement.distance || shadingElement.distance === 0) {
-          issues.push(geo('Distance cannot be 0', 'distance'));
+        // For overhang/sidefin/reveal types, distance is user-input; the schema allows 0.
+        if (typeof shadingElement.distance !== 'number' || !Number.isFinite(shadingElement.distance) || shadingElement.distance < 0) {
+          issues.push(geo('Distance is required and must be >= 0', 'distance'));
         }
         if (!shadingElement.depth || shadingElement.depth === 0) {
           issues.push(geo('Depth cannot be 0', 'depth'));
@@ -2507,6 +2508,7 @@ export const collectGeometryValidation = (
   });
 
   const linearThermalBridgeIssues = findLinearThermalBridgeIssues(elements, options.floors ?? []);
+  const bridgingOffered = simplifiedThermalBridgingOffered(options.schemaPort, options.complianceValidationEnabled ? 'fhs' : 'core');
   const floorStackWarningElementIds = options.floors
     ? getFloorStackWarningElementIds(elements, options.floors)
     : new Set<string>();
@@ -2539,6 +2541,7 @@ export const collectGeometryValidation = (
       elementsById,
       complianceValidationEnabled: options.complianceValidationEnabled || false,
       primaryFhsZoneId,
+      simplifiedThermalBridgingOffered: bridgingOffered,
     });
     warnings.push(...validation.warnings.map(w => w.message));
     criticalIssues.push(...validation.issues.map(i => i.message));
@@ -2561,6 +2564,7 @@ export const collectGeometryValidation = (
     options.partOActiveCoolingRequired,
     options.partFContext,
     options.floors,
+    bridgingOffered,
   );
   if (options.complianceValidationEnabled) {
     const partFInput = options.partFContext

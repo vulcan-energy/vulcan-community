@@ -113,6 +113,21 @@ function validationContext(elements: Element[]) {
   };
 }
 
+describe('window shading distance', () => {
+  const shading = (distance: number | undefined) => ({
+    id: 'sh', name: 'Overhang', zoneId: 'zone-1', floorId: 'floor-0', type: 'WindowShading', shading_type: 'overhang',
+    depth: 0.4, distance, parent_element: 'Window', coordinates: [{ x: 0, y: 0, z: 0 }], isPlaceholder: false,
+  } as unknown as Element);
+  const distanceIssues = (distance: number | undefined) => validateElementCore(shading(distance), { schemaPort: unavailableGeometrySchemaPort } as never)
+    .issues.filter((issue) => issue.fieldKey === 'distance');
+  it('accepts a zero distance, as the schema does', () => {
+    expect(distanceIssues(0)).toEqual([]);
+  });
+  it('still requires a distance', () => {
+    expect(distanceIssues(undefined)).toHaveLength(1);
+  });
+});
+
 describe('electric storage heater output tables', () => {
   const heater = (rows: unknown) => ({
     id: 'sys', name: 'Heater', zoneId: 'zone-1', floorId: 'floor-0', type: 'System', subcategory: 'SpaceHeatSystem', system_preset: 'heater',

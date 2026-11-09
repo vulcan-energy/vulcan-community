@@ -40,3 +40,17 @@ describe('validateZone thermal bridging', () => {
     expect(tbWarnings(zone, { w1: wall }, true)).toEqual([]);
   });
 });
+
+describe('validateZone where the target takes thermal-bridge records only', () => {
+  const offered = { simplifiedThermalBridgingOffered: false };
+  it('asks for bridges, not simplified psi', () => {
+    const fhs = validateZone(zone, { elementsById: { w1: wall }, complianceValidationEnabled: true, ...offered });
+    expect(fhs.issues.map((i) => i.message)).toContain('FHS: thermal bridge elements required');
+    expect(validateZone(zone, { elementsById: { w1: wall }, ...offered }).warnings.map((w) => w.message))
+      .toContain('No thermal bridging — junction heat loss is 0; add thermal bridges');
+  });
+  it('reports a stale simplified tick as an issue', () => {
+    const result = validateZone({ ...zone, simplifiedThermalBridging: true }, { elementsById: { w1: wall }, ...offered });
+    expect(result.issues).toContainEqual(expect.objectContaining({ fieldKey: 'simplifiedThermalBridging', message: expect.stringContaining('Untick Simplified') }));
+  });
+});

@@ -115,7 +115,7 @@ export const windowShadingFormModule: ElementFormModule<WindowShadingFormState> 
       shading_type: state.shadingType || undefined,
       depth: state.depthInput.value || undefined,
       height: state.heightInput.value || undefined,
-      distance: state.distanceInput.value || undefined,
+      distance: state.distanceInput.value === '' ? undefined : state.distanceInput.value,
       transparency: state.transparencyInput.value || undefined,
     } as Partial<Element>;
   },
