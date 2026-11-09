@@ -311,6 +311,8 @@ fn project(
                 let mut locally_declared = false;
                 if let Some(property) = node.get("properties").and_then(|p| p.get(&key)) {
                     locally_declared = true;
+                    // A branch that sets a key to `false` forbids it for this instance.
+                    local_forbidden |= property == &Value::Bool(false);
                     children.push(property);
                 }
                 if let Some(patterns) = node.get("patternProperties").and_then(Value::as_object) {
@@ -379,6 +381,22 @@ fn project(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_property_a_matching_branch_sets_to_false_is_omitted() {
+        let schema = json!({"properties":{"shape":{},"diameter":{"type":"number"},"perimeter":{"type":"number"}},"allOf":[
+            {"if":{"properties":{"shape":{"const":"circular"}}},"then":{"properties":{"perimeter":false}}},
+            {"if":{"properties":{"shape":{"const":"rectangular"}}},"then":{"properties":{"diameter":false}}}]});
+        let output = finalize_model(
+            &json!({"shape":"rectangular","diameter":200,"perimeter":400}),
+            &schema,
+        )
+        .unwrap();
+        assert_eq!(output.model, json!({"shape":"rectangular","perimeter":400}));
+        assert_eq!(output.omissions[0].path, "/diameter");
+        let circular = json!({"shape":"circular","diameter":200});
+        assert_eq!(finalize_model(&circular, &schema).unwrap().model, circular);
+    }
+
     #[test]
     fn conditional_invalid_declared_data_survives_and_obsolete_fields_are_reported() {
         let schema = json!({"type":"object","properties":{"type":{"type":"string"}},"allOf":[{"if":{"properties":{"type":{"const":"window"}}},"then":{"properties":{"parts":{"type":"array"},"width":{"type":"number"}}}}],"unevaluatedProperties":false});

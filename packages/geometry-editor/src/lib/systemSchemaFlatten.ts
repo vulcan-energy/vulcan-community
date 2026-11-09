@@ -9,7 +9,10 @@
 
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
 import { isRecord, readRecord } from './jsonTypes';
-import { unwrapNullableSchema } from './schemaShape';
+import { isForbiddenSchemaNode, unwrapNullableSchema } from './schemaShape';
+
+/** Marks the keys a flatten removed as forbidden, so edits can tell forbidden from not applicable. */
+const FORBIDDEN_KEYS = 'x-vulcan-forbidden-keys';
 
 function cloneForFlatten<T>(obj: T): T {
   try {
@@ -20,42 +23,59 @@ function cloneForFlatten<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj)) as T;
 }
 
-/** Match JSON Schema `if` (draft 2019-09 / 2020-12 style) against instance data — subset used in FHS. */
-export function jsonSchemaIfMatches(ifSchema: unknown, data: unknown): boolean {
-  if (ifSchema == null || typeof ifSchema !== 'object' || Array.isArray(ifSchema)) return true;
-  const s = ifSchema as Record<string, unknown>;
-  if ('not' in s) return !jsonSchemaIfMatches(s.not, data);
-  if (Array.isArray(s.allOf)) return s.allOf.every((x) => jsonSchemaIfMatches(x, data));
-  if (Array.isArray(s.anyOf)) return s.anyOf.some((x) => jsonSchemaIfMatches(x, data));
-  if (Array.isArray(s.oneOf)) return s.oneOf.some((x) => jsonSchemaIfMatches(x, data));
-  if (s.properties && typeof s.properties === 'object' && !Array.isArray(s.properties)) {
-    return dataMatchesPropertiesKeyword(data, s.properties as Record<string, unknown>);
-  }
+/**
+ * Match JSON Schema `if` against instance data, for the subset FHS uses. Every keyword must hold.
+ * An absent discriminator means not matched, unlike JSON Schema where `properties` passes vacuously.
+ */
+export function jsonSchemaIfMatches(ifSchema: unknown, data: unknown, root?: unknown): boolean {
+  if (!isRecord(ifSchema)) return true;
+  const s = root && typeof ifSchema.$ref === 'string' ? readRecord(dereferenceSchemaNodeInRoot(ifSchema, root)) : ifSchema;
+  if (Array.isArray(s.required)
+    && !(isRecord(data) && s.required.every((key) => typeof key === 'string' && data[key] != null))) return false;
+  if ('not' in s && jsonSchemaIfMatches(s.not, data, root)) return false;
+  if (Array.isArray(s.allOf) && !s.allOf.every((x) => jsonSchemaIfMatches(x, data, root))) return false;
+  if (Array.isArray(s.anyOf) && !s.anyOf.some((x) => jsonSchemaIfMatches(x, data, root))) return false;
+  if (Array.isArray(s.oneOf) && !s.oneOf.some((x) => jsonSchemaIfMatches(x, data, root))) return false;
+  if (isRecord(s.contains) && !(Array.isArray(data) && data.some((item) => jsonSchemaIfMatches(s.contains, item, root)))) return false;
+  if (isRecord(s.additionalProperties) && isRecord(data)
+    && !Object.values(data).every((value) => jsonSchemaIfMatches(s.additionalProperties, value, root))) return false;
+  if (isRecord(s.properties) && !dataMatchesPropertiesKeyword(data, s.properties, root)) return false;
   return true;
 }
 
-function dataMatchesPropertiesKeyword(data: unknown, props: Record<string, unknown>): boolean {
-  if (data == null || typeof data !== 'object' || Array.isArray(data)) return false;
-  const d = data as Record<string, unknown>;
-  for (const [key, sub] of Object.entries(props)) {
-    if (!(key in d)) return false;
-    if (!valueMatchesSchemaKeyword(d[key], sub)) return false;
-  }
-  return true;
+function dataMatchesPropertiesKeyword(data: unknown, props: Record<string, unknown>, root?: unknown): boolean {
+  if (!isRecord(data)) return false;
+  // An absent boolean is false: a9 `tank_is_integral` defaults that way, and its condition says so.
+  return Object.entries(props).every(([key, sub]) => (key in data ? valueMatchesSchemaKeyword(data[key], sub, root) : isRecord(sub) && sub.const === false));
 }
 
-function valueMatchesSchemaKeyword(value: unknown, sub: unknown): boolean {
-  if (sub == null || typeof sub !== 'object' || Array.isArray(sub)) return true;
-  const s = sub as Record<string, unknown>;
-  if ('const' in s) return value === s.const;
-  if (Array.isArray(s.enum)) return s.enum.includes(value);
-  if (s.type === 'boolean') return typeof value === 'boolean';
-  if (s.type === 'number' || s.type === 'integer') return typeof value === 'number';
-  if (s.type === 'string') return typeof value === 'string';
-  if (s.properties && typeof s.properties === 'object' && !Array.isArray(s.properties)) {
-    return dataMatchesPropertiesKeyword(value, s.properties as Record<string, unknown>);
-  }
-  return true;
+function valueMatchesSchemaKeyword(value: unknown, sub: unknown, root?: unknown): boolean {
+  if (!isRecord(sub)) return true;
+  if ('const' in sub) return value === sub.const;
+  if (Array.isArray(sub.enum)) return sub.enum.includes(value);
+  if (sub.type === 'boolean') return typeof value === 'boolean';
+  if (sub.type === 'number' || sub.type === 'integer') return typeof value === 'number';
+  if (sub.type === 'string') return typeof value === 'string';
+  return jsonSchemaIfMatches(sub, value, root);
+}
+
+/** Keys a branch matching `data` forbids, whether or not the base `properties` declares them. */
+export function forbiddenFieldKeys(subschema: unknown, data: unknown, root?: unknown): string[] {
+  const forbidden = readRecord(flattenIfThenAllOfProperties(subschema, data, root))[FORBIDDEN_KEYS];
+  return Array.isArray(forbidden) ? forbidden as string[] : [];
+}
+
+/** Keys this edit forbids that were allowed before it. A value forbidden from the start stays. */
+export function newlyForbiddenFieldKeys(subschema: unknown, before: unknown, after: unknown, root?: unknown): string[] {
+  const was = new Set(forbiddenFieldKeys(subschema, before, root));
+  return forbiddenFieldKeys(subschema, after, root).filter((key) => !was.has(key));
+}
+
+/** {@link forbiddenFieldKeys} for one plant of an expanded System subtype map. */
+export function forbiddenPlantKeys(subschema: unknown, subtype: string, plantName: string, plant: unknown, root?: unknown): string[] {
+  const node = readRecord(readRecord(readRecord(readRecord(subschema).properties)[subtype]).properties)[plantName];
+  const instance = plantInstanceForFlatten(subtype, plant);
+  return forbiddenFieldKeys(plantVariantForFlatten(node, plant, instance), instance, root);
 }
 
 function isOptionalNestedObjectSchema(sch: unknown): boolean {
@@ -117,7 +137,7 @@ function mergeAllOfListIntoMerged(
     const b = branch as Record<string, unknown>;
     if (b.if && (b.then || b.else)) {
       if (instanceData === undefined) continue;
-      const match = jsonSchemaIfMatches(b.if, instanceData);
+      const match = jsonSchemaIfMatches(b.if, instanceData, fullRoot);
       if (match && b.then && typeof b.then === 'object' && !Array.isArray(b.then)) {
         mergeThenSchemaInto(merged, b.then as Record<string, unknown>, instanceData, fullRoot, required);
       } else if (!match && b.else && typeof b.else === 'object' && !Array.isArray(b.else)) {
@@ -222,7 +242,7 @@ export function flattenIfThenAllOfProperties(
   const topElse = out.else as Record<string, unknown> | undefined;
   if (topIf && (topThen || topElse)) {
     const useThen =
-      instanceData !== undefined && jsonSchemaIfMatches(topIf, instanceData) ? true : false;
+      instanceData !== undefined && jsonSchemaIfMatches(topIf, instanceData, fullRoot) ? true : false;
     const branch = useThen ? topThen : topElse;
     if (branch) mergeThenSchemaInto(merged, branch as Record<string, unknown>, instanceData, fullRoot, required);
     delete out.if;
@@ -238,7 +258,15 @@ export function flattenIfThenAllOfProperties(
 
   // Conditional `allOf` / `then` keys must win over any overlapping base `properties` from expansion.
   out.properties = { ...baseProps, ...merged };
-  if (required.size) out.required = [...required];
+  // A branch forbids a key with `false` or `{not: {}}`: it is absent for this instance, not a control.
+  const properties = out.properties as Record<string, unknown>;
+  const forbidden = Object.keys(properties).filter((key) => isForbiddenSchemaNode(properties[key]));
+  for (const key of forbidden) {
+    delete properties[key];
+    required.delete(key);
+  }
+  if (forbidden.length) out[FORBIDDEN_KEYS] = forbidden;
+  if (required.size || Array.isArray(n.required)) out.required = [...required];
   delete out.unevaluatedProperties;
 
   if (out.properties && typeof out.properties === 'object' && !Array.isArray(out.properties)) {
@@ -286,6 +314,15 @@ function normalizeHeatSourceWetPlantInstanceForFlatten(plant: unknown): unknown 
   return { ...p, is_heat_network: false };
 }
 
+function plantInstanceForFlatten(subtype: string, plant: unknown): unknown {
+  return subtype === 'HeatSourceWet' ? normalizeHeatSourceWetPlantInstanceForFlatten(plant) : plant;
+}
+
+function plantVariantForFlatten(node: unknown, plant: unknown, instance: unknown): unknown {
+  const plantType = readRecord(plant).type;
+  return plantType === 'StorageTank' || plantType === 'HeatPump' ? selectPlantVariant(node, instance) : node;
+}
+
 function selectPlantVariant(node: unknown, instanceData: unknown): unknown {
   if (!isRecord(node)) return node;
   let n = node as Record<string, unknown>;
@@ -319,10 +356,8 @@ export function flattenSystemSubtypePlantSchemas(
       plantDataMap && typeof plantDataMap === 'object' && !Array.isArray(plantDataMap)
         ? plantDataMap[k]
         : undefined;
-    const plantInstance =
-      subtype === 'HeatSourceWet' ? normalizeHeatSourceWetPlantInstanceForFlatten(raw) : raw;
-    const plantType = readRecord(raw).type;
-    const selected = plantType === 'StorageTank' || plantType === 'HeatPump' ? selectPlantVariant(v, plantInstance) : v;
+    const plantInstance = plantInstanceForFlatten(subtype, raw);
+    const selected = plantVariantForFlatten(v, raw, plantInstance);
     let flat = flattenIfThenAllOfProperties(cloneForFlatten(selected), plantInstance, fullRoot) as Record<string, unknown>;
     if (plantInstance && typeof plantInstance === 'object' && !Array.isArray(plantInstance)) {
       flat = omitAbsentOptionalObjectPropertiesFromSchema(flat, plantInstance) as Record<string, unknown>;

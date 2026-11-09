@@ -601,7 +601,13 @@ function renderControlForProperty(args: {
     return <SystemPerformanceTable key={path} args={args} />;
   }
 
-  const control = pickDirectControl(resolved);
+  // A schema `const` allows one value: offer only that value, and lock it once it is set.
+  if (Object.prototype.hasOwnProperty.call(resolved, 'const')) {
+    baseProps.schema = { ...resolved, enum: [resolved.const] };
+    if (value === resolved.const) baseProps.uischema = { type: 'Control', scope, options: { readOnly: true } };
+  }
+
+  const control = pickDirectControl(baseProps.schema as Record<string, unknown>);
   const validation = validateAdvancedFieldPrimitive(
     baseProps.config,
     elementType,

@@ -159,6 +159,8 @@ export function mergeSystemExtraJsonAfterJsonForms(
   existing: Record<string, unknown>,
   incoming: Record<string, unknown>,
   subtype: string,
+  /** Forbidden keys for a plant; a key this edit newly forbids is removed from the merged plant. */
+  forbiddenKeys?: (plantName: string, plant: unknown) => readonly string[],
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...incoming };
   const prevMap = existing[subtype];
@@ -182,7 +184,15 @@ export function mergeSystemExtraJsonAfterJsonForms(
       } else if (b === undefined) {
         mergedPlants[name] = f;
       } else {
-        mergedPlants[name] = mergePresetWithJsonFormsOutput(b, f);
+        const merged = mergePresetWithJsonFormsOutput(b, f);
+        if (forbiddenKeys && merged && typeof merged === 'object' && !Array.isArray(merged)) {
+          const was = new Set(forbiddenKeys(name, b));
+          const plant = { ...(merged as Record<string, unknown>) };
+          for (const key of forbiddenKeys(name, merged)) if (!was.has(key)) delete plant[key];
+          mergedPlants[name] = plant;
+        } else {
+          mergedPlants[name] = merged;
+        }
       }
     }
     out[subtype] = mergedPlants;

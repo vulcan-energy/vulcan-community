@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { readRecord } from './jsonTypes';
+import { dereferenceSchemaNodeInRoot } from './subschemaCache';
+
 /**
  * HEM Table 3.6.b — solar transmittance reduction factors for curtains/blinds.
  * Maps to `WindowTreatment.trans_red` with `delta_r` and `controls` from the form.
@@ -11,6 +14,18 @@ export type WindowTreatmentControl =
   | 'combined_light_blind_HVAC'
   | 'manual'
   | 'manual_motorised';
+
+/** `controls` values the active schema accepts, or `null` when no schema declares them. */
+export function allowedWindowTreatmentControls(
+  subschema: Readonly<Record<string, unknown>> | null | undefined,
+  root: unknown,
+): readonly string[] | null {
+  const treatment = readRecord(subschema?.properties).treatment;
+  if (!treatment || !root) return null;
+  const resolved = readRecord(dereferenceSchemaNodeInRoot(treatment, root));
+  const controls = readRecord(readRecord(readRecord(resolved.items).properties).controls);
+  return Array.isArray(controls.enum) ? controls.enum.filter((value): value is string => typeof value === 'string') : null;
+}
 
 export type TreatmentCategory = 'white_venetian' | 'white_curtains' | 'coloured' | 'aluminium';
 

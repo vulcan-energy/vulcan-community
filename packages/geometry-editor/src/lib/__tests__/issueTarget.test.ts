@@ -15,6 +15,20 @@ const model = {
 };
 
 describe('resolveIssueTarget', () => {
+  it('lands a mechanical ventilation issue on the named fan', () => {
+    const fans = { zones: [], elements: [{ id: 'fan', name: 'Main fan' }] };
+    expect(resolveIssueTarget('/InfiltrationVentilation/MechanicalVentilation/Main fan/orientation360', fans))
+      .toMatchObject({ elementId: 'fan', fieldKey: 'orientation360' });
+  });
+
+  it('does not land a ductwork issue on a field Advanced deletes', () => {
+    const fans = { zones: [], elements: [{ id: 'fan', name: 'Main fan' }] };
+    const target = resolveIssueTarget('/InfiltrationVentilation/MechanicalVentilation/Main fan/ductwork/0/internal_diameter_mm', fans);
+    expect(target).toMatchObject({ elementId: 'fan' });
+    expect(target.fieldKey).toBeUndefined();
+    expect(resolveIssueTarget('/InfiltrationVentilation/MechanicalVentilation/Main fan/ductwork', fans).fieldKey).toBeUndefined();
+  });
+
   it('matches the exact element within its zone, with or without a leading slash', () => {
     expect(resolveIssueTarget('/Zone/Zone 1/BuildingElement/Window 1/mid_height', model))
       .toMatchObject({ zoneId: 'z1', elementId: 'w1', fieldKey: 'mid_height' });
