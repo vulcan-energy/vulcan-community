@@ -10,6 +10,15 @@ import type {
   GeometrySchemaPort,
 } from '../../../../geometry-editor-host/src/schemaPort';
 import { hasDefaultValue, type DefaultsLookup } from '../../lib/defaultsCache';
+import {
+  classifyWindowOpenings,
+  windowOpeningRepairMessages,
+  windowPartsArePhysical,
+  WINDOW_NO_OPENING_MESSAGE,
+  type WindowOpeningField,
+  type WindowOpeningRow,
+  type WindowOpeningSource,
+} from '../../lib/windowOpenings';
 import { classifyOpaqueFabricVariantFromElement } from '../../lib/opaqueFabricVariant';
 import type {
   Element,
@@ -211,6 +220,107 @@ export function getFloorStackWarningElementIds(elements: Element[], floors: Floo
 function formatNumberForIssue(value: number): string {
   const rounded = roundToTwoDecimals(value);
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
+}
+
+const WINDOW_OPENING_FIELD_ISSUES: Record<WindowOpeningField, string> = {
+  free_area_height: 'Free Area Height should not be 0',
+  mid_height: 'Mid Height should not be 0',
+  max_window_open_area: 'Max Window Open Area should not be 0',
+};
+
+const WINDOW_OPENING_FIELD_REQUIRED: Record<WindowOpeningField, string> = {
+  free_area_height: 'Free Area Height is required',
+  mid_height: 'Mid Height is required',
+  max_window_open_area: 'Max Window Open Area is required',
+};
+
+/** A zero and a blank field need different wording. */
+const windowOpeningFieldIssue = (el: BuildingElementTransparent, field: WindowOpeningField): ValidationIssue =>
+  geoIssue(
+    typeof el[field] === 'number' ? WINDOW_OPENING_FIELD_ISSUES[field] : WINDOW_OPENING_FIELD_REQUIRED[field],
+    field,
+  );
+
+/** Python's math.isclose with the arguments a9 uses (default rel_tol, abs_tol=1e-10). */
+const closeEnough = (a: number, b: number): boolean =>
+  Math.abs(a - b) <= Math.max(1e-9 * Math.max(Math.abs(a), Math.abs(b)), 1e-10);
+const strictlyAbove = (a: number, limit: number): boolean => a > limit && !closeEnough(a, limit);
+
+/**
+ * a9 core (`input.py`) and wrapper (`window_validation.py`) checks, made before the run.
+ * Heights are ground-relative here, so the sill needs no shift to match the wrapper's zone frame.
+ */
+function physicalOpeningLimitIssues(
+  rows: readonly WindowOpeningRow[],
+  geometry: { width: number; height: number; baseHeight: number },
+): ValidationIssue[] {
+  const { width, height, baseHeight } = geometry;
+  if (!(width > 0) || !(height > 0)) return [];
+  const issues: ValidationIssue[] = [];
+  const several = rows.length > 1;
+  const totalOpenArea = rows.reduce((sum, row) => sum + (row.max_window_open_area ?? 0), 0);
+  if (strictlyAbove(totalOpenArea, height * width)) {
+    issues.push(geoIssue(
+      'The max open area is greater than the window area (height x width).',
+      several ? 'window_part_list' : 'max_window_open_area',
+    ));
+  }
+  const head = baseHeight + height;
+  rows.forEach((row, index) => {
+    const name = (field: string, single: string) => several ? `Part ${index + 1} ${field}` : single;
+    if (row.free_area_height !== undefined && strictlyAbove(row.free_area_height, height)) {
+      issues.push(geoIssue(
+        `${name('free height', 'Free Area Height')} (${formatNumberForIssue(row.free_area_height)} m) is greater than the window height (${formatNumberForIssue(height)} m).`,
+        several ? 'window_part_list' : 'free_area_height',
+      ));
+    }
+    const mid = row.mid_height;
+    if (mid !== undefined && (strictlyAbove(baseHeight, mid) || strictlyAbove(mid, head))) {
+      issues.push(geoIssue(
+        `${name('mid height', 'Mid Height')} (${formatNumberForIssue(mid)} m) is outside the window (${formatNumberForIssue(baseHeight)} m to ${formatNumberForIssue(head)} m above ground).`,
+        several ? 'window_part_list' : 'mid_height',
+      ));
+    }
+  });
+  return issues;
+}
+
+/**
+ * Follows the converter on a8/a9. On a7, or when no schema can say (`physical` null), the
+ * blank and zero column checks stay in force, and divisions with different heights can run.
+ */
+function validateWindowOpenings(
+  el: BuildingElementTransparent,
+  physical: boolean | null,
+  getGeometry: () => { width: number; height: number; baseHeight: number },
+): ValidationIssue[] {
+  const openings = classifyWindowOpenings(el as unknown as WindowOpeningSource);
+  if (physical !== true) {
+    const issues: ValidationIssue[] = [];
+    for (const field of Object.keys(WINDOW_OPENING_FIELD_ISSUES) as WindowOpeningField[]) {
+      if (!isPositiveFiniteNumber(el[field])) issues.push(windowOpeningFieldIssue(el, field));
+    }
+    if (openings.kind === 'rows' && openings.source === 'parts' && physical === false) {
+      issues.unshift(geoIssue(
+        'This HEM version cannot use window parts with their own free height and max open area. Use "Convert to a single opening" in Advanced Fields.',
+        'window_part_list',
+      ));
+    }
+    if (openings.kind === 'repair' && openings.reason !== 'conflicting_heights') {
+      issues.push(...windowOpeningRepairMessages(openings).map((message) => geoIssue(message, 'window_part_list')));
+    }
+    return issues;
+  }
+  switch (openings.kind) {
+    case 'closed':
+      return [geoIssue(WINDOW_NO_OPENING_MESSAGE, 'max_window_open_area')];
+    case 'needs_input':
+      return openings.missing.map((field) => windowOpeningFieldIssue(el, field));
+    case 'rows':
+      return physicalOpeningLimitIssues(openings.rows, getGeometry());
+    case 'repair':
+      return windowOpeningRepairMessages(openings).map((message) => geoIssue(message, 'window_part_list'));
+  }
 }
 
 function isPositiveFiniteNumber(value: unknown): value is number {
@@ -962,15 +1072,11 @@ export const validateElementCore = (
       if (!isPositiveFiniteNumber(el.frame_area_fraction)) {
         issues.push(geo('Frame Area Fraction is required and must be greater than 0', 'frame_area_fraction'));
       }
-      if (!isPositiveFiniteNumber(el.free_area_height)) {
-        issues.push(geo('Free Area Height should not be 0', 'free_area_height'));
-      }
-      if (!isPositiveFiniteNumber(el.mid_height)) {
-        issues.push(geo('Mid Height should not be 0', 'mid_height'));
-      }
-      if (!isPositiveFiniteNumber(el.max_window_open_area)) {
-        issues.push(geo('Max Window Open Area should not be 0', 'max_window_open_area'));
-      }
+      issues.push(...validateWindowOpenings(
+        el,
+        windowPartsArePhysical(schemaPort, complianceValidationEnabled ? 'fhs' : 'core'),
+        () => getAreaBasedElementExportGeometry(el, context.globalOrientationOffset),
+      ));
       if (complianceValidationEnabled && context.complianceSettings) {
         const ventilationZoneBaseHeight = resolveEffectiveVentilationZoneBaseHeight({
           elements: allElements,

@@ -40,6 +40,7 @@ import type {
   ThermalBridgeVerticalLinePrimitive,
   WallSegmentPrimitive,
 } from './geometry3dPrimitivesTypes';
+import { classifyWindowOpenings, type WindowOpeningSource } from './windowOpenings';
 
 export type {
   Geometry3DPrimitive,
@@ -89,8 +90,13 @@ function pickWindowVentilation3D(element: Element): WindowVentilation3D | undefi
   if (element.type !== 'BuildingElementTransparent') return undefined;
   const t = element as BuildingElementTransparent;
   const out: WindowVentilation3D = {};
-  if (isFiniteNumber(t.max_window_open_area)) out.max_window_open_area = t.max_window_open_area;
-  if (isFiniteNumber(t.free_area_height)) out.free_area_height = t.free_area_height;
+  // One opening draws what the run uses. Several parts have no single rectangle, so stay on the columns.
+  const openings = classifyWindowOpenings(t as unknown as WindowOpeningSource);
+  const opening = openings.kind === 'rows' && openings.rows.length === 1 ? openings.rows[0] : undefined;
+  const maxOpenArea = opening?.max_window_open_area ?? t.max_window_open_area;
+  const freeAreaHeight = opening?.free_area_height ?? t.free_area_height;
+  if (isFiniteNumber(maxOpenArea)) out.max_window_open_area = maxOpenArea;
+  if (isFiniteNumber(freeAreaHeight)) out.free_area_height = freeAreaHeight;
   if (isFiniteNumber(t.frame_area_fraction)) out.frame_area_fraction = t.frame_area_fraction;
   return Object.keys(out).length > 0 ? out : undefined;
 }

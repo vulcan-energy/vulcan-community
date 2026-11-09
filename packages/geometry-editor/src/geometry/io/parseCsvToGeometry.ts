@@ -51,6 +51,7 @@ import {
 import { ingestGeometryTabularSections } from './ingestGeometryTabularSections';
 import { normalizeCsvConstructionProvenance } from './csvSemanticMigration';
 import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
+import { shiftPhysicalPartHeight } from '../../lib/windowOpenings';
 
 export const VULCAN_CSV_VERSION_METADATA_KEY = 'VulcanCsvVersion';
 export const LEGACY_VULCAN_CSV_VERSION = 1;
@@ -58,7 +59,11 @@ export const CURRENT_VULCAN_CSV_VERSION = 3;
 
 type WindowPart = { mid_height_air_flow_path?: unknown } & Record<string, unknown>;
 
-function convertWindowPartListToGround(extraJson: BuildingElementTransparent['extra_json'], baseHeight: number) {
+function convertWindowPartListToGround(
+  extraJson: BuildingElementTransparent['extra_json'],
+  baseHeight: number,
+  convertLegacyParts = true,
+) {
   if (!extraJson || typeof extraJson !== 'object' || Array.isArray(extraJson)) return extraJson;
   const partList = (extraJson as Record<string, unknown>).window_part_list;
   if (!Array.isArray(partList)) return extraJson;
@@ -67,9 +72,9 @@ function convertWindowPartListToGround(extraJson: BuildingElementTransparent['ex
     ...extraJson,
     window_part_list: partList.map((entry) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-      const part = entry as WindowPart;
+      const part = shiftPhysicalPartHeight(entry as WindowPart, baseHeight);
       const midpoint = part.mid_height_air_flow_path;
-      if (typeof midpoint !== 'number' || !Number.isFinite(midpoint)) return entry;
+      if (!convertLegacyParts || typeof midpoint !== 'number' || !Number.isFinite(midpoint)) return part;
       return {
         ...part,
         mid_height_air_flow_path: roundToTwoDecimals(midpoint + baseHeight),
@@ -82,6 +87,7 @@ function convertWindowPartListToGround(extraJson: BuildingElementTransparent['ex
 export function convertGroundRelativeWindowExtraJsonForCsv(
   extraJson: BuildingElementTransparent['extra_json'],
   ventilationZoneBaseHeight: number,
+  physicalPartOffset = ventilationZoneBaseHeight,
 ): BuildingElementTransparent['extra_json'] {
   if (!extraJson || typeof extraJson !== 'object' || Array.isArray(extraJson)) return extraJson;
   const partList = (extraJson as Record<string, unknown>).window_part_list;
@@ -91,9 +97,9 @@ export function convertGroundRelativeWindowExtraJsonForCsv(
     ...extraJson,
     window_part_list: partList.map((entry) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-      const part = entry as WindowPart;
+      const part = shiftPhysicalPartHeight(entry as WindowPart, -physicalPartOffset);
       const midpoint = part.mid_height_air_flow_path;
-      if (typeof midpoint !== 'number' || !Number.isFinite(midpoint)) return entry;
+      if (typeof midpoint !== 'number' || !Number.isFinite(midpoint)) return part;
       return {
         ...part,
         mid_height_air_flow_path: roundToTwoDecimals(midpoint - ventilationZoneBaseHeight),
@@ -108,8 +114,7 @@ function migrateVulcanCsvElementsForEditor(
   csvVersion: number,
   ventilationZoneBaseHeight: number,
 ): Element[] {
-  if (csvVersion === LEGACY_VULCAN_CSV_VERSION) return elements;
-  if (csvVersion < 2 || csvVersion > CURRENT_VULCAN_CSV_VERSION) {
+  if (csvVersion !== LEGACY_VULCAN_CSV_VERSION && (csvVersion < 2 || csvVersion > CURRENT_VULCAN_CSV_VERSION)) {
     throw new Error(`Unsupported ${VULCAN_CSV_VERSION_METADATA_KEY}: ${csvVersion}.`);
   }
   if (!Number.isFinite(ventilationZoneBaseHeight) || Math.abs(ventilationZoneBaseHeight) <= 1e-12) {
@@ -118,6 +123,13 @@ function migrateVulcanCsvElementsForEditor(
 
   return elements.map((element) => {
     if (element.type !== 'BuildingElementTransparent') return element;
+    if (csvVersion === LEGACY_VULCAN_CSV_VERSION) {
+      // v1 columns and legacy parts are already ground-relative; the builder reads new-style parts as zone-relative.
+      return {
+        ...element,
+        extra_json: convertWindowPartListToGround(element.extra_json, ventilationZoneBaseHeight, false),
+      };
+    }
     const midpoint = element.mid_height;
     return {
       ...element,

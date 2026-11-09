@@ -67,6 +67,16 @@ import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/exte
 import { useKeyedState } from '../hooks/useKeyedState';
 import { buildLightingPatch, getLightingFieldValue } from './elementForms/lighting';
 import { projectWindowShadingPointToSegment } from './elementForms/windowShading';
+import {
+  buildWindowOpeningFieldPatch,
+  classifyWindowOpenings,
+  windowOpeningBulkEditBlocked,
+  windowPartsArePhysical,
+  windowPartsCopyBlocked,
+  windowPartsCopyColumns,
+  type WindowOpeningField,
+  type WindowOpeningSource,
+} from '../lib/windowOpenings';
 
 const loadAssemblyCalculatorModal = () => import('./AssemblyCalculatorModal');
 
@@ -424,6 +434,15 @@ function hasOwnExtraJsonKey(record: Record<string, unknown>, key: WindowDetailCo
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
+const openingSource = (el: BuildingElementTransparent) => el as unknown as WindowOpeningSource;
+
+/** Physical-opening windows have their own rows, so a bulk column write would not reach the run. */
+const hasPhysicalWindowParts = (el: Element): boolean => {
+  if (!isTransparent(el)) return false;
+  const openings = classifyWindowOpenings(openingSource(el));
+  return openings.kind === 'rows' && openings.source === 'parts';
+};
+
 function buildWindowDetailCopyExtraJson(
   source: BuildingElementTransparent,
   target: BuildingElementTransparent,
@@ -448,6 +467,27 @@ function buildWindowDetailCopyExtraJson(
     nextExtra[key] = cloneExtraJsonValue(sourceExtra[key]);
   }
   return nextExtra;
+}
+
+function countBulkEditBlockedWindows(elements: Element[], windowPartsPhysical: boolean | null): number {
+  return elements.filter((el) => isTransparent(el) && windowOpeningBulkEditBlocked(openingSource(el), windowPartsPhysical)).length;
+}
+
+function buildWindowDetailCopyPatches(
+  source: BuildingElementTransparent,
+  targets: BuildingElementTransparent[],
+  detailKey: WindowDetailVisibleKey,
+  windowPartsPhysical: boolean | null,
+): Array<{ target: BuildingElementTransparent; patch: Partial<Element> }> {
+  // On a8/a9 a single opening lives in the columns as well as the list, so both travel.
+  const copyColumns = detailKey === 'window_part_list' && windowPartsPhysical === true && !hasPhysicalWindowParts(source);
+  const columns = copyColumns ? windowPartsCopyColumns(openingSource(source)) : {};
+  return targets.flatMap((target) => {
+    const extra_json = buildWindowDetailCopyExtraJson(source, target, detailKey);
+    const unchanged = extraJsonValuesEqual(extraJsonRecord(target), extra_json)
+      && Object.entries(columns).every(([key, value]) => (target as unknown as Record<string, unknown>)[key] === value);
+    return unchanged ? [] : [{ target, patch: { ...columns, extra_json } as Partial<Element> }];
+  });
 }
 
 function windowShadingProjectionPatch(
@@ -482,33 +522,42 @@ function detailTypeLabel(value: unknown): string | null {
   return trimmed.replace(/[_-]+/g, ' ');
 }
 
+/** Midpoints of what the window runs: stored parts, or its one opening when there is no list. */
+function windowPartMidHeights(el: BuildingElementTransparent): (number | undefined)[] {
+  const openings = classifyWindowOpenings(openingSource(el));
+  if (openings.kind === 'rows') return openings.rows.map((row) => row.mid_height);
+  const value = extraJsonRecord(el).window_part_list;
+  return Array.isArray(value)
+    ? value.map((entry) => (isRecordValue(entry) ? finiteNumber(entry.mid_height_air_flow_path) : undefined))
+    : [];
+}
+
 function windowPartCountSummary(el: BuildingElementTransparent): string {
-  const extra = extraJsonRecord(el);
-  const value = extra.window_part_list;
-  if (!hasOwnExtraJsonKey(extra, 'window_part_list') || value == null) return 'No parts';
-  if (!Array.isArray(value)) return '1 part';
-  if (value.length === 0) return 'No parts';
-  return countLabel(value.length, 'part');
+  const openings = classifyWindowOpenings(openingSource(el));
+  if (openings.kind === 'closed') return 'No parts';
+  if (openings.kind === 'needs_input') return 'Needs input';
+  if (openings.kind === 'repair' && openings.reason !== 'conflicting_heights') return 'Needs repair';
+  const count = windowPartMidHeights(el).length;
+  return count === 0 ? 'No parts' : countLabel(count, 'part');
 }
 
 function windowPartDetailSummary(el: BuildingElementTransparent): string {
-  const extra = extraJsonRecord(el);
-  const value = extra.window_part_list;
-  if (!hasOwnExtraJsonKey(extra, 'window_part_list') || value == null) return 'none';
-  if (!Array.isArray(value)) return 'custom';
-  if (value.length === 0) return 'none';
+  const openings = classifyWindowOpenings(openingSource(el));
+  if (openings.kind === 'closed') return 'none';
+  if (openings.kind === 'needs_input') return 'needs input';
+  if (openings.kind === 'repair' && openings.reason !== 'conflicting_heights') return 'needs repair';
+  const midpoints = windowPartMidHeights(el);
   const baseHeight = finiteNumber(el.base_height) ?? 0;
-  const relMidpoints = value
-    .map((entry) => (isRecordValue(entry) ? finiteNumber(entry.mid_height_air_flow_path) : undefined))
+  const relMidpoints = midpoints
     .filter((midpoint): midpoint is number => midpoint !== undefined)
     .map((midpoint) => Math.max(0, midpoint - baseHeight));
-  if (relMidpoints.length === 0) return countLabel(value.length, 'part');
+  if (relMidpoints.length === 0) return countLabel(midpoints.length, 'part');
   const preview = relMidpoints
     .slice(0, 2)
     .map((midpoint) => `${formatValueLabel(midpoint)}m`)
     .join(', ');
   const more = relMidpoints.length > 2 ? ` +${relMidpoints.length - 2}` : '';
-  return `${countLabel(value.length, 'part')} @ ${preview}${more}`;
+  return `${countLabel(midpoints.length, 'part')} @ ${preview}${more}`;
 }
 
 function windowTreatmentDetailSummary(el: BuildingElementTransparent): string {
@@ -1047,9 +1096,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     (s) => !!s.complianceSettings?.complianceValidationEnabled,
   );
   const windowSchemaMode = complianceValidationEnabled ? 'fhs' : 'core';
-  const windowSchemaProperties = schemaPort.availability === 'available'
-    ? schemaPort.getElementSubschema(windowSchemaMode, 'BuildingElementTransparent')?.properties as Record<string, unknown> | undefined : undefined;
-  const supportsWindowField = (key: string) => windowSchemaProperties?.[key] != null && windowSchemaProperties[key] !== false;
+  const windowPartsPhysical = windowPartsArePhysical(schemaPort, windowSchemaMode);
   const defaultsLookup = useGeometryStore((s) => s.getDefaultsLookup());
   const partyWallCavityFields = getPartyWallCavityFields(schemaPort, complianceValidationEnabled ? 'fhs' : 'core');
 
@@ -1976,6 +2023,14 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     return directPatch as Partial<Element>;
   }, []);
 
+  const buildOpeningLivePatch = (el: Element, field: WindowOpeningField, value: number): Partial<Element> | null => {
+    if (!isTransparent(el) || windowOpeningBulkEditBlocked(openingSource(el), windowPartsPhysical)) return null;
+    return windowPartsPhysical === true
+      ? buildWindowOpeningFieldPatch(openingSource(el), field, value) as Partial<Element>
+      : { [field]: value } as Partial<Element>;
+  };
+  const skippedOpeningWindowCount = countBulkEditBlockedWindows(activeWindowSurfaceElements, windowPartsPhysical);
+
   /**
    * Shared props for the panel's live-editing number inputs. The three variants differ only in
    * where the committed value lands (element field, extra_json, or manual-scope extra_json).
@@ -2734,20 +2789,11 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       copyWindowShadingDetails(sourceId, targetWindows.map((target) => target.id));
       return;
     }
-    const patches = targetWindows
-      .map((target) => ({
-        target,
-        extra_json: buildWindowDetailCopyExtraJson(source, target, detailKey),
-      }))
-      .filter(({ target, extra_json }) => !extraJsonValuesEqual(extraJsonRecord(target), extra_json));
-    patches.forEach(({ target, extra_json }, index) => {
-      updateElement(
-        target.id,
-        { extra_json } as Partial<Element>,
-        index < patches.length - 1,
-      );
+    const patches = buildWindowDetailCopyPatches(source, targetWindows, detailKey, windowPartsArePhysical(schemaPort, windowSchemaMode));
+    patches.forEach(({ target, patch }, index) => {
+      updateElement(target.id, patch, index < patches.length - 1);
     });
-  }, [activeWindowSurfaceIds, copyWindowShadingDetails, elementsById, updateElement]);
+  }, [activeWindowSurfaceIds, copyWindowShadingDetails, elementsById, schemaPort, updateElement, windowSchemaMode]);
 
   const handleEditWindowDetails = useCallback((sourceId: string, detailKey: WindowDetailVisibleKey) => {
     const source = elementsById[sourceId];
@@ -3113,38 +3159,43 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             activeWindowSurfaceIds,
           )
         )}
-        {supportsWindowField('free_area_height') && renderNumberRow(
+        {renderNumberRow(
           'freeAreaHeight',
           'Free Area Height (m)',
           freeAreaHeightSummary,
           activeWindowSurfaceIds.length > 0,
           'e.g. 0.40',
-          (el, value) => buildTransparentLivePatch(el, { free_area_height: value }),
+          (el, value) => buildOpeningLivePatch(el, 'free_area_height', value),
           undefined,
           undefined,
           activeWindowSurfaceIds,
         )}
-        {supportsWindowField('mid_height') && renderNumberRow(
+        {renderNumberRow(
           'midHeight',
           'Mid Height (m)',
           midHeightSummary,
           activeWindowSurfaceIds.length > 0,
           'e.g. 1.20',
-          (el, value) => buildTransparentLivePatch(el, { mid_height: value }),
+          (el, value) => buildOpeningLivePatch(el, 'mid_height', value),
           undefined,
           undefined,
           activeWindowSurfaceIds,
         )}
-        {supportsWindowField('max_window_open_area') && renderNumberRow(
+        {renderNumberRow(
           'maxOpenArea',
           'Max Window Open Area (m²)',
           maxOpenAreaSummary,
           activeWindowSurfaceIds.length > 0,
           'e.g. 0.50',
-          (el, value) => buildTransparentLivePatch(el, { max_window_open_area: value }),
+          (el, value) => buildOpeningLivePatch(el, 'max_window_open_area', value),
           undefined,
           undefined,
           activeWindowSurfaceIds,
+        )}
+        {skippedOpeningWindowCount > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            {countLabel(skippedOpeningWindowCount, 'window')} not changed. Select each one to edit its openings.
+          </div>
         )}
         {renderNumberRow(
           'frameAreaFraction',
@@ -3191,8 +3242,11 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
                     {WINDOW_DETAIL_VISIBLE_KEYS.map((key) => {
                       const label = WINDOW_DETAIL_COPY_LABELS[key];
                       const summary = windowDetailSummary(windowElement, key, attachedShading);
-                      const copyDisabled = targetCount === 0;
-                      const copyTitle = `Copy ${label} from ${windowLabel} to ${targetLabel}`;
+                      const copyBlocked = key === 'window_part_list' && windowPartsCopyBlocked(openingSource(windowElement), windowPartsPhysical);
+                      const copyDisabled = targetCount === 0 || copyBlocked;
+                      const copyTitle = copyBlocked
+                        ? `Cannot copy window parts from ${windowLabel}. Check its window parts first.`
+                        : `Copy ${label} from ${windowLabel} to ${targetLabel}`;
                       return (
                         <div key={key} className="multi-select-window-copy__field">
                           <button

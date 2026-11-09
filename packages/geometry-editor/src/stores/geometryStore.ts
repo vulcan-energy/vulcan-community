@@ -183,8 +183,15 @@ import { getElementTypeBaseName } from '../lib/displayNames';
 import { syncWindowSecurityRiskForStorey } from '../lib/windowSecurityRisk';
 import {
   buildTransparentOpeningNumericPatch,
+  resolveWindowBaseHeight,
   type TransparentOpeningNumericPatch,
 } from '../lib/transparentOpeningDerivedFields';
+import {
+  shiftPhysicalPartsWithBaseHeight,
+  syncWindowPartListToMidHeight,
+  windowPartsArePhysical,
+  type WindowOpeningSource,
+} from '../lib/windowOpenings';
 import {
   applyGroundThicknessWallsManualTracking,
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
@@ -2307,12 +2314,22 @@ const applyTransparentOpeningAutomaticFields = (
   nextElement: Element,
   normalizedUpdates: Partial<Element>,
   effectiveFloors: Floor[],
+  windowPartsPhysical: boolean,
 ): void => {
   if (
     prevElement.type !== 'BuildingElementTransparent' ||
     nextElement.type !== 'BuildingElementTransparent'
   ) return;
   const updateRecord = normalizedUpdates as Record<string, unknown>;
+  // A floor cascade writes its own list. a7 lists follow the sill in WindowPartListControl.
+  const updateOwnsWindowParts = Object.prototype.hasOwnProperty.call(readJsonRecord(updateRecord.extra_json) ?? {}, 'window_part_list');
+  if (windowPartsPhysical && !updateOwnsWindowParts) {
+    const baseDelta = resolveWindowBaseHeight(nextElement, effectiveFloors) - resolveWindowBaseHeight(prevElement, effectiveFloors);
+    const shiftedExtraJson = baseDelta === 0
+      ? null
+      : shiftPhysicalPartsWithBaseHeight(nextElement as unknown as WindowOpeningSource, baseDelta);
+    if (shiftedExtraJson) nextElement.extra_json = shiftedExtraJson as typeof nextElement.extra_json;
+  }
   const hasInvalidDriver = TRANSPARENT_OPENING_DERIVATION_DRIVERS.some(
     (field) => Object.prototype.hasOwnProperty.call(updateRecord, field) &&
       (typeof updateRecord[field] !== 'number' || !Number.isFinite(updateRecord[field])),
@@ -2353,13 +2370,27 @@ const applyTransparentOpeningAutomaticFields = (
   const canonicalPatch = buildTransparentOpeningNumericPatch(
     prevElement,
     directNumericPatch,
-    { effectiveFloors },
+    { effectiveFloors, zeroIsAuthored: windowPartsPhysical },
   );
   if (
     !Object.prototype.hasOwnProperty.call(updateRecord, 'mid_height') &&
     typeof canonicalPatch.mid_height === 'number'
   ) {
     nextElement.mid_height = canonicalPatch.mid_height;
+    // a8/a9 keeps its one opening's height in the list. The a7 list follows the sill in
+    // WindowPartListControl instead, so shifting it here as well would move it twice.
+    if (
+      windowPartsPhysical &&
+      typeof prevElement.mid_height === 'number' &&
+      !updateOwnsWindowParts
+    ) {
+      const syncedExtraJson = syncWindowPartListToMidHeight(
+        nextElement as unknown as WindowOpeningSource,
+        prevElement.mid_height,
+        canonicalPatch.mid_height,
+      );
+      if (syncedExtraJson) nextElement.extra_json = syncedExtraJson as typeof nextElement.extra_json;
+    }
   }
   if (
     !Object.prototype.hasOwnProperty.call(updateRecord, 'max_window_open_area') &&
@@ -6013,6 +6044,8 @@ const createGeometryState = (
           nextElement,
           normalizedUpdates,
           withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById)),
+          nextElement.type === 'BuildingElementTransparent'
+            && windowPartsArePhysical(schemaPort, state.complianceSettings?.complianceValidationEnabled ? 'fhs' : 'core') === true,
         );
       } catch { /* swallow: best-effort */ }
 

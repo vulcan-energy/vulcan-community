@@ -183,6 +183,16 @@ import {
 import { hydrateWallSharedFields } from './wallShared';
 import { renderWallPitchField } from './wallPitchField';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
+import {
+  buildWindowOpeningFieldPatch,
+  classifyWindowOpenings,
+  windowOpeningRepairMessages,
+  windowOpeningsUseTable,
+  windowPartsArePhysical,
+  type WindowOpeningField,
+  type WindowOpeningRow,
+  type WindowOpeningSource,
+} from '../../lib/windowOpenings';
 import type {
   ElementFormModule,
   ElementFormStateCtx,
@@ -193,7 +203,9 @@ import type {
 // see that file's own comment.
 
 export interface BuildingElementTransparentFormState {
-  supportedOpeningFields: readonly string[];
+  /** The active schema's window parts are physical openings (a8/a9). */
+  windowPartsPhysical: boolean;
+  commitOpeningField: (field: WindowOpeningField) => (value: number | '') => void;
   /** Shared with the wall family — see module header comment. */
   widthInput: NumericDraftInputBinding;
   heightInput: NumericDraftInputBinding;
@@ -233,15 +245,27 @@ export interface BuildingElementTransparentFormState {
   prevDerivedWindowMaxOpenAreaRef: MutableRefObject<number | null>;
 }
 
+/** One opening on a8/a9 reads from the row the converter will use; otherwise the stored columns. */
+function displayedOpeningValues(
+  element: Extract<Element, { type: 'BuildingElementTransparent' }>,
+  windowPartsPhysical: boolean,
+): Record<WindowOpeningField, number | ''> {
+  const openings = windowPartsPhysical ? classifyWindowOpenings(element as unknown as WindowOpeningSource) : null;
+  const opening: WindowOpeningRow | undefined =
+    openings?.kind === 'rows' && openings.rows.length === 1 ? openings.rows[0] : undefined;
+  const display = (key: WindowOpeningField): number | '' => {
+    const value = opening?.[key] ?? element[key];
+    return typeof value === 'number' ? roundToTwoDecimals(value) : (value ?? '');
+  };
+  return {
+    free_area_height: display('free_area_height'),
+    mid_height: display('mid_height'),
+    max_window_open_area: display('max_window_open_area'),
+  };
+}
+
 function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormState {
-  const { schemaPort } = ctx;
-  const mode = ctx.schemaMode;
-  const properties = schemaPort.availability === 'available'
-    ? schemaPort.getElementSubschema(mode, 'BuildingElementTransparent')?.properties as Record<string, unknown> | undefined : undefined;
-  const supportedOpeningFields = ['free_area_height', 'mid_height', 'max_window_open_area']
-    .filter(key => properties?.[key] != null && properties[key] !== false);
-  const supportsMidHeight = supportedOpeningFields.includes('mid_height');
-  const supportsMaxOpenArea = supportedOpeningFields.includes('max_window_open_area');
+  const windowPartsPhysical = windowPartsArePhysical(ctx.schemaPort, ctx.schemaMode) === true;
   const isExistingElementSelection = (): boolean =>
     !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
 
@@ -257,9 +281,37 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     { commitOnChange: false, formatOnBlur: 'preserve' },
   );
 
-  const freeAreaHeightInput = useDecimalInput('', ctx.commitElementNumericField('free_area_height'), { commitOnChange: true });
-  const midHeightInput = useDecimalInput('', ctx.commitElementNumericField('mid_height'), { commitOnChange: true });
-  const maxWindowOpenAreaInput = useDecimalInput('', ctx.commitElementNumericField('max_window_open_area'), { commitOnChange: true });
+  const selectedWindow = ctx.selection ? ctx.getElementById(ctx.selection.id) : undefined;
+  const commitOpeningField = (field: WindowOpeningField) => (value: number | '') => {
+    if (!windowPartsPhysical || selectedWindow?.type !== 'BuildingElementTransparent') {
+      ctx.commitElementNumericField(field)(value);
+      return;
+    }
+    ctx.commitExistingElementDraft(
+      buildWindowOpeningFieldPatch(selectedWindow as unknown as WindowOpeningSource, field, value) as Partial<Element>,
+    );
+  };
+  const freeAreaHeightInput = useDecimalInput('', commitOpeningField('free_area_height'), { commitOnChange: true });
+  const midHeightInput = useDecimalInput('', commitOpeningField('mid_height'), { commitOnChange: true });
+  const maxWindowOpenAreaInput = useDecimalInput('', commitOpeningField('max_window_open_area'), { commitOnChange: true });
+
+  // Table edits and "Convert to a single opening" write the store outside these inputs.
+  const storedOpening = windowPartsPhysical && selectedWindow?.type === 'BuildingElementTransparent'
+    ? displayedOpeningValues(selectedWindow, true)
+    : null;
+  const syncFreeAreaHeight = freeAreaHeightInput.syncValue;
+  const syncMidHeight = midHeightInput.syncValue;
+  const syncMaxOpenArea = maxWindowOpenAreaInput.syncValue;
+  useEffect(() => {
+    if (!storedOpening) return;
+    // react-doctor-disable-next-line react-doctor/no-pass-data-to-parent -- local draft-input state setter, not a parent callback.
+    syncFreeAreaHeight(storedOpening.free_area_height);
+    // react-doctor-disable-next-line react-doctor/no-pass-data-to-parent -- local draft-input state setter, not a parent callback.
+    syncMidHeight(storedOpening.mid_height);
+    // react-doctor-disable-next-line react-doctor/no-pass-data-to-parent -- local draft-input state setter, not a parent callback.
+    syncMaxOpenArea(storedOpening.max_window_open_area);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the sync callbacks change identity every render; only the stored values should trigger a re-read.
+  }, [storedOpening?.free_area_height, storedOpening?.mid_height, storedOpening?.max_window_open_area]);
 
   const midHeightInputSetValueRef = useRef(midHeightInput.syncValue);
   const maxWindowOpenAreaInputSetValueRef = useRef(maxWindowOpenAreaInput.syncValue);
@@ -307,15 +359,30 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     const nextMid = derivedWindowMidHeight;
     const prevMid = prevDerivedWindowMidHeightRef.current;
     const currentMid = typeof midHeightInput.value === 'number' ? midHeightInput.value : null;
+    // a8/a9: selecting or finishing an edit never rewrites an authored window. Only a geometry
+    // change moves a value, and only when it writes what the converter reads.
+    const authoredWindow = windowPartsPhysical && isExistingElementSelection();
+    const openingState = authoredWindow && selectedWindow?.type === 'BuildingElementTransparent'
+      ? classifyWindowOpenings(selectedWindow as unknown as WindowOpeningSource)
+      : null;
+    const columnsAreRead = openingState?.kind === 'needs_input'
+      || (openingState?.kind === 'rows' && openingState.source !== 'parts');
+    const movedWithGeometry = (current: number | null, previous: number | null, next: number) =>
+      columnsAreRead
+      && previous != null
+      && Math.abs(next - previous) > 0.005
+      && (current == null || Math.abs(current - previous) <= 0.005);
     const shouldSyncMid =
       !midHeightInput.isEditing &&
-      (currentMid == null || currentMid <= 0 || prevMid == null || Math.abs(currentMid - prevMid) <= 0.005);
-    if (supportsMidHeight && nextMid > 0 && shouldSyncMid && (currentMid == null || Math.abs(currentMid - nextMid) > 0.005)) {
+      (authoredWindow
+        ? movedWithGeometry(currentMid, prevMid, nextMid)
+        : (currentMid == null || currentMid <= 0 || prevMid == null || Math.abs(currentMid - prevMid) <= 0.005));
+    if (nextMid > 0 && shouldSyncMid && (currentMid == null || Math.abs(currentMid - nextMid) > 0.005)) {
       midHeightInputSetValueRef.current(nextMid);
       // Repair legacy/stale saved values when the editor first opens. Normal edits are already
       // canonicalized in the store, so this branch is otherwise a no-op for existing elements.
       if (isExistingElementSelection()) {
-        ctx.commitExistingElementDraft({ mid_height: nextMid });
+        commitOpeningField('mid_height')(nextMid);
       }
     }
     prevDerivedWindowMidHeightRef.current = nextMid;
@@ -326,37 +393,40 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
       typeof maxWindowOpenAreaInput.value === 'number' ? maxWindowOpenAreaInput.value : null;
     const shouldSyncOpenArea =
       !maxWindowOpenAreaInput.isEditing &&
-      (
-        currentOpenArea == null ||
-        (nextOpenArea > 0 && currentOpenArea <= 0) ||
-        prevOpenArea == null ||
-        Math.abs(currentOpenArea - prevOpenArea) <= 0.005
-      );
+      freeAreaHeightInput.value !== '' &&
+      (authoredWindow
+        ? movedWithGeometry(currentOpenArea, prevOpenArea, nextOpenArea)
+        : (
+            currentOpenArea == null ||
+            (nextOpenArea > 0 && currentOpenArea <= 0) ||
+            prevOpenArea == null ||
+            Math.abs(currentOpenArea - prevOpenArea) <= 0.005
+          ));
     if (
-      supportsMaxOpenArea && shouldSyncOpenArea &&
+      shouldSyncOpenArea &&
       (currentOpenArea == null || Math.abs(currentOpenArea - nextOpenArea) > 0.005)
     ) {
       maxWindowOpenAreaInputSetValueRef.current(nextOpenArea);
       if (isExistingElementSelection()) {
-        ctx.commitExistingElementDraft({ max_window_open_area: nextOpenArea });
+        commitOpeningField('max_window_open_area')(nextOpenArea);
       }
     }
     prevDerivedWindowMaxOpenAreaRef.current = nextOpenArea;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ctx is a fresh object literal every render (see ElementCreator.tsx's elementFormStateCtx); depending on the whole object would defeat memoization for no benefit (same idiom as system.tsx/thermalBridgeLinear.tsx's ctx.* dep arrays). The legacy dep array also listed isExistingElementSelection (a useCallback); dropping it is inert because hydrate() writes the two listed input deps on every selection change, so the effect already re-runs whenever selection observably changes — the only skipped case is a redundant repair-write when consecutive selections share identical derived values.
   }, [
     ctx.elementType,
-    supportsMidHeight,
-    supportsMaxOpenArea,
     derivedWindowMidHeight,
     derivedWindowMaxOpenArea,
     midHeightInput.value,
     maxWindowOpenAreaInput.value,
     midHeightInput.isEditing,
     maxWindowOpenAreaInput.isEditing,
+    freeAreaHeightInput.value,
   ]);
 
   return {
-    supportedOpeningFields,
+    windowPartsPhysical,
+    commitOpeningField,
     widthInput: ctx.shared.widthInput,
     heightInput: ctx.shared.heightInput,
     areaInput: ctx.shared.areaInput,
@@ -396,19 +466,23 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
     // Window-specific fields.
     const frameAreaFraction = 'frame_area_fraction' in element && typeof element.frame_area_fraction === 'number'
       ? roundToTwoDecimals(element.frame_area_fraction) : (element.frame_area_fraction ?? '');
-    const freeAreaHeight = 'free_area_height' in element && typeof element.free_area_height === 'number'
-      ? roundToTwoDecimals(element.free_area_height) : (element.free_area_height ?? '');
-    const midHeight = 'mid_height' in element && typeof element.mid_height === 'number'
-      ? roundToTwoDecimals(element.mid_height) : (element.mid_height ?? '');
-    const maxWindowOpenArea = 'max_window_open_area' in element && typeof element.max_window_open_area === 'number'
-      ? roundToTwoDecimals(element.max_window_open_area) : (element.max_window_open_area ?? '');
+    const opening = displayedOpeningValues(element, state.windowPartsPhysical);
 
     state.freeAreaFractionInput.setValue(frameAreaFraction);
-    state.freeAreaHeightInput.setValue(freeAreaHeight);
-    state.midHeightInput.setValue(midHeight);
-    state.maxWindowOpenAreaInput.setValue(maxWindowOpenArea);
+    state.freeAreaHeightInput.setValue(opening.free_area_height);
+    state.midHeightInput.setValue(opening.mid_height);
+    state.maxWindowOpenAreaInput.setValue(opening.max_window_open_area);
 
-    const transparentDerived = state.getTransparentOpeningDerivedValues(element);
+    // On a8/a9 the baseline must match the rounded inputs, or rounding reads as a geometry edit.
+    const transparentDerived = state.getTransparentOpeningDerivedValues(state.windowPartsPhysical
+      ? {
+          ...element,
+          width: typeof element.width === 'number' ? roundToTwoDecimals(element.width) : element.width,
+          height: typeof element.height === 'number' ? roundToTwoDecimals(element.height) : element.height,
+          base_height: typeof element.base_height === 'number' ? roundToTwoDecimals(element.base_height) : element.base_height,
+          free_area_height: opening.free_area_height === '' ? undefined : opening.free_area_height,
+        } as typeof element
+      : element);
     state.prevDerivedWindowMidHeightRef.current = transparentDerived.midHeight;
     state.prevDerivedWindowMaxOpenAreaRef.current = transparentDerived.maxWindowOpenArea;
   },
@@ -433,9 +507,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       base_height: state.baseHeightInput.value === '' ? undefined : state.baseHeightInput.value,
       parent_element: state.parentElement,
       frame_area_fraction: state.freeAreaFractionInput.value === '' ? undefined : state.freeAreaFractionInput.value,
-      ...(state.supportedOpeningFields.includes('free_area_height') ? { free_area_height: state.freeAreaHeightInput.value } : {}),
-      ...(state.supportedOpeningFields.includes('mid_height') ? { mid_height: state.midHeightInput.value } : {}),
-      ...(state.supportedOpeningFields.includes('max_window_open_area') ? { max_window_open_area: state.maxWindowOpenAreaInput.value } : {}),
+      free_area_height: state.freeAreaHeightInput.value,
+      mid_height: state.midHeightInput.value,
+      max_window_open_area: state.maxWindowOpenAreaInput.value,
     } as Partial<Element>;
   },
 
@@ -514,6 +588,17 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       commitExistingElementDraft(patch);
     };
 
+    const windowSource = selectedElement?.type === 'BuildingElementTransparent'
+      ? selectedElement as unknown as WindowOpeningSource
+      : null;
+    const openingsInTable = state.windowPartsPhysical && !!windowSource && windowOpeningsUseTable(windowSource);
+    const openings = state.windowPartsPhysical && windowSource ? classifyWindowOpenings(windowSource) : null;
+    const openingNote = openingsInTable
+      ? 'This window has separate openings. Edit them in Advanced Fields.'
+      : openings?.kind === 'repair'
+        ? `${windowOpeningRepairMessages(openings).join('. ')}${openings.reason === 'conflicting_heights' ? ' Entering a Mid Height replaces the parts with one opening.' : ''}`
+        : null;
+
     return (
       <>
         {renderFieldLabel('Linked Wall:', elementType)}
@@ -557,7 +642,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             size="md"
           />
         </div>
-        {state.supportedOpeningFields.includes('free_area_height') && <>
+        {!openingsInTable && <>
         {renderFieldLabel('Free Area Height (m):', elementType)}
         <div
           className="element-input"
@@ -575,8 +660,6 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value)} issue={getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value) || undefined} />
         </div>
-        </>}
-        {state.supportedOpeningFields.includes('mid_height') && <>
         {renderFieldLabel('Mid Height (m):', elementType)}
         <div
           className="element-input"
@@ -611,7 +694,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
               <ResetFieldButton
                 onClick={() => {
                   state.midHeightInput.setValue(state.derivedWindowMidHeight);
-                  commitExistingElementDraft({ mid_height: state.derivedWindowMidHeight });
+                  state.commitOpeningField('mid_height')(state.derivedWindowMidHeight);
                 }}
                 align="inline"
                 title={`Reset to ${state.derivedWindowMidHeight} m (base + height/2)`}
@@ -630,8 +713,6 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             </div>
           ) : null}
         </div>
-        </>}
-        {state.supportedOpeningFields.includes('max_window_open_area') && <>
         {renderFieldLabel('Max Window Open Area (m²):', elementType)}
         <div
           className="element-input"
@@ -648,12 +729,13 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             className="flex-1"
           />
           {typeof state.maxWindowOpenAreaInput.value === 'number' &&
+          state.freeAreaHeightInput.value !== '' &&
           Math.abs(state.maxWindowOpenAreaInput.value - state.derivedWindowMaxOpenArea) > 0.005 ? (
             <button
               type="button"
               onClick={() => {
                 state.maxWindowOpenAreaInput.setValue(state.derivedWindowMaxOpenArea);
-                commitExistingElementDraft({ max_window_open_area: state.derivedWindowMaxOpenArea });
+                state.commitOpeningField('max_window_open_area')(state.derivedWindowMaxOpenArea);
               }}
               className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"
               title={`Use suggested ${state.derivedWindowMaxOpenArea} m²`}
@@ -668,6 +750,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           Suggested from width x free area height (capped by total window area).
         </div>
         </>}
+        {openingNote ? <div style={INLINE_FIELD_NOTE_STYLE}>{openingNote}</div> : null}
         {renderFieldLabel('Frame Area Fraction:', elementType)}
         <div className="element-input" ref={registerBaseFieldRef('frame_area_fraction')}>
           <StandardInput
