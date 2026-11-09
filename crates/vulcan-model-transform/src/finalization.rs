@@ -386,7 +386,11 @@ mod tests {
         let schema = json!({"properties":{"shape":{},"diameter":{"type":"number"},"perimeter":{"type":"number"}},"allOf":[
             {"if":{"properties":{"shape":{"const":"circular"}}},"then":{"properties":{"perimeter":false}}},
             {"if":{"properties":{"shape":{"const":"rectangular"}}},"then":{"properties":{"diameter":false}}}]});
-        let output = finalize_model(&json!({"shape":"rectangular","diameter":200,"perimeter":400}), &schema).unwrap();
+        let output = finalize_model(
+            &json!({"shape":"rectangular","diameter":200,"perimeter":400}),
+            &schema,
+        )
+        .unwrap();
         assert_eq!(output.model, json!({"shape":"rectangular","perimeter":400}));
         assert_eq!(output.omissions[0].path, "/diameter");
         let circular = json!({"shape":"circular","diameter":200});
