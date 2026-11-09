@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import type { SpaceLabel, Zone } from '../../geometry/types';
+import type { Element, SpaceLabel, Zone } from '../../geometry/types';
+import { validateSpaceLabels } from '../../geometry/validation/validateSpaceLabels';
+import { analyzeSpaceLabelGeometry, analyzeZoneSpaceLabels, getTreatedFloorBoundaryPolygonsForZone } from '../spaceLabelGeometry';
+import { calculateDerivedFloorArea, getVolumeCalculationBreakdown, partyElementPitchKeepingSurface } from '../zoneDerivation';
 import {
   aggregateSpaceLabelsForZone,
   applySpaceLabelsToZonesAndCompliance,
@@ -267,5 +270,121 @@ describe('spaceLabelDerivation', () => {
     expect(msgs[0]).toContain('Bedrooms');
     expect(msgs[0]).toContain('entered 2');
     expect(msgs[0]).toContain('space labels 1');
+  });
+});
+
+describe('treated floor area from floors and space labels', () => {
+  const zone: Zone = { id: 'z', name: 'Z', floorArea: 100, height: 2.5, volume: 250, simplifiedThermalBridging: false };
+  const element = (id: string, type: string, coordinates: unknown, extra: Record<string, unknown> = {}) =>
+    ({ id, name: id, type, zoneId: 'z', coordinates, ...extra }) as unknown as Element;
+  const ground = element('ground', 'BuildingElementGround', rect(0, 0, 10, 10));
+  const upperWall = element(
+    'wall',
+    'BuildingElementOpaque',
+    [{ x: 0, y: 0, z: 1 }, { x: 10, y: 0, z: 1 }],
+    { pitch: 90, height: 2.5, base_height: 2.5 },
+  );
+  const internal = (id: string, pitch: number, base_height: number) =>
+    element(id, 'BuildingElementAdjacentConditionedSpace', rect(0, 0, 10, 10, 1), { pitch, base_height });
+  const label = (id: string, storey: number, coordinates: SpaceLabel['coordinates']): SpaceLabel => ({
+    id,
+    name: id,
+    zoneId: 'z',
+    storey,
+    room_type: 'bedroom',
+    coordinates,
+  });
+  const validate = (labels: SpaceLabel[], elements: Element[], complianceValidationEnabled = false, target = zone) =>
+    validateSpaceLabels(Object.fromEntries(labels.map((l) => [l.id, l])), labels.map((l) => l.id), {
+      zones: [target],
+      elementsById: Object.fromEntries(elements.map((e) => [e.id, e])),
+      complianceValidationEnabled,
+    });
+
+  it('counts an internal floor at its storey base at either pitch', () => {
+    for (const pitch of [0, 180]) {
+      const elements = [ground, upperWall, internal('floor', pitch, 2.5)];
+      expect(calculateDerivedFloorArea('z', elements).floorArea).toBe(200);
+      expect(getTreatedFloorBoundaryPolygonsForZone('z', elements, 1)).toHaveLength(1);
+    }
+  });
+
+  it('does not count a partition on the lowest storey, or a roof', () => {
+    const ceiling = element('ceiling', 'BuildingElementAdjacentConditionedSpace', rect(0, 0, 10, 10), { pitch: 0 });
+    const roof = element('roof', 'BuildingElementOpaque', rect(0, 0, 10, 10, 1), { pitch: 0, base_height: 5 });
+    expect(calculateDerivedFloorArea('z', [ground, ceiling, upperWall, roof]).floorArea).toBe(100);
+  });
+
+  it('does not double-count pitch-0 and pitch-180 internal elements at the same level', () => {
+    const elements = [ground, upperWall, internal('floor', 180, 2.5), internal('ceiling-face', 0, 2.5)];
+    expect(calculateDerivedFloorArea('z', elements).floorArea).toBe(200);
+  });
+
+  it('finds a label\'s floors from its plan level, whatever its storey index', () => {
+    const elements = [ground, upperWall, element('deck', 'BuildingElementOpaque', rect(0, 0, 5, 10, 1), { pitch: 180 })];
+    const analysis = analyzeZoneSpaceLabels('z', [label('a', 3, rect(0, 0, 10, 10, 1))], elements);
+    expect(analysis.effectiveAreasByLabelId.a).toBeCloseTo(50, 6);
+  });
+
+  it('does not let a small pitch-0 partition stand in for a storey floor', () => {
+    const partition = element('ceiling', 'BuildingElementAdjacentConditionedSpace', rect(0, 0, 2, 2, 1), { pitch: 0 });
+    const analysis = analyzeZoneSpaceLabels('z', [label('a', 1, rect(0, 0, 10, 10, 1))], [ground, upperWall, partition]);
+    expect(analysis.effectiveAreasByLabelId.a).toBeCloseTo(100, 6);
+  });
+
+  it('keeps an element\'s surface when it becomes party', () => {
+    const partition = (z: number, pitch: number) =>
+      element('p', 'BuildingElementAdjacentConditionedSpace', rect(0, 0, 10, 10, z), { pitch });
+    expect(partyElementPitchKeepingSurface(partition(0, 180), [partition(0, 180)])).toBe(180);
+    expect(partyElementPitchKeepingSurface(partition(0, 0), [ground])).toBe(0);
+    expect(partyElementPitchKeepingSurface(partition(1, 0), [ground])).toBe(180);
+  });
+
+  it('keeps room area when a thin bent strip runs around the label', () => {
+    const labels = [label('room', 0, rect(0.02, 0, 9.98, 9.98))];
+    const analysis = analyzeSpaceLabelGeometry(labels, new Map([[0, [rect(0, 0, 10, 10)]]]));
+    expect(analysis.effectiveAreasByLabelId.room).toBeCloseTo(9.96 * 9.98, 3);
+    expect(analysis.storeyCoverage.get(0)?.outsideM2 ?? 0).toBeCloseTo(0, 6);
+  });
+
+  it('accounts for all labelled area as counted, overlapping or outside', () => {
+    const labels = [label('a', 0, rect(0, 0, 6, 10)), label('b', 0, rect(5, 0, 12, 10))];
+    const analysis = analyzeSpaceLabelGeometry(labels, new Map([[0, [rect(0, 0, 10, 10)]]]));
+    const counted = analysis.effectiveAreasByLabelId.a! + analysis.effectiveAreasByLabelId.b!;
+    const coverage = analysis.storeyCoverage.get(0)!;
+    expect(coverage.labelledM2).toBeCloseTo(120, 6);
+    const overlap = analysis.issues.reduce((sum, issue) => sum + issue.areaM2, 0);
+    expect(overlap).toBeCloseTo(10, 6);
+    expect(counted + overlap + coverage.outsideM2).toBeCloseTo(coverage.labelledM2, 6);
+    expect(coverage.outsideM2).toBeCloseTo(20, 6);
+  });
+
+  it('counts an overlap that is only drawing tolerance once, without a warning', () => {
+    const labels = [label('a', 0, rect(0, 0, 5.005, 10)), label('b', 0, rect(5, 0, 10, 10))];
+    expect(validate(labels, [ground]).warnings).toHaveLength(0);
+    const analysis = analyzeSpaceLabelGeometry(labels, new Map([[0, [rect(0, 0, 10, 10)]]]));
+    expect(analysis.effectiveAreasByLabelId.a! + analysis.effectiveAreasByLabelId.b!).toBeCloseTo(100, 6);
+  });
+
+  it('raises one error per storey for a material area loss and none for rounding', () => {
+    const lost = validate([label('a', 0, rect(0, 0, 10, 10)), label('b', 1, rect(0, 0, 10, 10, 1))], [ground, upperWall,
+      element('deck', 'BuildingElementOpaque', rect(0, 0, 2, 2, 1), { pitch: 180 })]);
+    expect(lost.issues).toHaveLength(1);
+    expect(lost.issues[0]!.message).toContain('Z=1: 96.0 m²');
+    expect(validate([label('a', 0, rect(0, 0, 10.04, 10))], [ground]).issues).toHaveLength(0);
+    expect(validate([label('a', 0, rect(0, 0, 10.04, 10))], [ground]).warnings).toHaveLength(0);
+  });
+
+  it('flags a stored FHS area that differs materially from the space labels', () => {
+    const stale = { ...zone, floorArea: 60 };
+    const labels = [label('a', 0, rect(0, 0, 10, 10))];
+    expect(validate(labels, [ground], true, stale).issues[0]!.message).toContain('60.0 m²');
+    expect(validate(labels, [ground], false, stale).issues).toHaveLength(0);
+    expect(validate(labels, [ground], true).issues).toHaveLength(0);
+  });
+
+  it('shows the values the zone actually uses in the volume tooltip', () => {
+    expect(getVolumeCalculationBreakdown({ ...zone, floorArea: 95.93, height: 2.46, volume: 235.99 }))
+      .toBe('95.93 m² × 2.46 m = 235.99 m³');
   });
 });

@@ -72,7 +72,8 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
     }
   }
 
-  if (zone._floorAreaUserOverride && zone._derivedFloorArea && zone._derivedFloorArea > 0) {
+  // In FHS mode the labels own this value, and validateSpaceLabels compares against them.
+  if (!context.complianceValidationEnabled && zone._floorAreaUserOverride && zone._derivedFloorArea && zone._derivedFloorArea > 0) {
     const diff = Math.abs(zone.floorArea - zone._derivedFloorArea);
     if (diff > 0.005) {
       warnings.push(warn(
@@ -106,7 +107,7 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
     if (missingTfaZ.length > 0) {
       const zLabel = missingTfaZ.map((z) => `Z=${z}`).join(', ');
       warnings.push(warn(
-        `${zLabel}: no treated floor — add ground or 180° floor polygon`,
+        `${zLabel}: no treated floor — add a ground floor, a floor element or an internal floor`,
         'floorArea',
       ));
     }

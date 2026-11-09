@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, Floor, Zone } from '../geometry/types';
-import { calculatePolygonArea } from './polygonSync';
+import polygonClipping, { type Pair, type Ring } from 'polygon-clipping';
+import { calculatePolygonArea, isAdjacentConditionedInternalFloorDoubled } from './polygonSync';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { canvasFloorToFhsStorey, fhsStoreyToCanvasFloor } from './storeySemantics';
 import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, physicalZUsesFloorId } from './elementCanvasFloor';
@@ -63,6 +64,60 @@ export function isWalkableFloorHorizontalPolygon(el: Element): boolean {
   return true;
 }
 
+function polygonOverlapArea(a: Element, b: Element): number {
+  const isFinitePlan = (el: Element): boolean => el.coordinates.every((c) => Number.isFinite(c.x) && Number.isFinite(c.y));
+  if (!isFinitePlan(a) || !isFinitePlan(b)) return 0;
+  const ring = (el: Element): Ring => el.coordinates.map((c) => [c.x, c.y] as Pair);
+  const shoelace = (points: Ring): number =>
+    calculatePolygonArea(points.map(([x, y]) => ({ x, y, z: 0 })));
+  return polygonClipping.intersection([ring(a)], [ring(b)]).reduce(
+    (sum, polygon) => sum + polygon.reduce(
+      (area, points, index) => area + (index === 0 ? shoelace(points) : -shoelace(points)),
+      0,
+    ),
+    0,
+  );
+}
+
+/**
+ * A non-party horizontal partition with a storey of the same dwelling below it. Pitch cannot
+ * identify one: it faces conditioned space on both sides, so either value is valid. On a flat's
+ * lowest storey the same element can only be a ceiling.
+ */
+export function isInternalFloorElement(el: Element, elements: Element[]): boolean {
+  if (!isAdjacentConditionedInternalFloorDoubled(el)) return false;
+  const storey = elementFloorIndex(el);
+  if (storey === null) return false;
+  return elements.some((other) => {
+    if (other.type !== 'BuildingElementGround' && !isVerticalLineWall(other)) return false;
+    const otherStorey = elementFloorIndex(other);
+    return otherStorey !== null && otherStorey < storey;
+  });
+}
+
+/** Pitch for an internal element becoming party, where pitch decides floor or ceiling: keeps what it was. */
+export function partyElementPitchKeepingSurface(el: Element, elements: Element[]): 0 | 180 {
+  return (el as { pitch?: number }).pitch === 180 || isInternalFloorElement(el, elements) ? 180 : 0;
+}
+
+/** Elements whose plan polygons make up treated floor area: ground, pitch-180 and internal floors. */
+export function getTreatedFloorElements(elements: Element[]): Element[] {
+  const isDirectFloor = (el: Element): boolean =>
+    (el.type === 'BuildingElementGround' && (el.coordinates?.length ?? 0) >= 3)
+    || isWalkableFloorHorizontalPolygon(el);
+  const counted = elements.filter(isDirectFloor);
+  for (const el of elements) {
+    if (isDirectFloor(el) || !isInternalFloorElement(el, elements)) continue;
+    const storey = elementFloorIndex(el);
+    const area = calculatePolygonArea(el.coordinates);
+    // ponytail: an element mostly over a counted floor is skipped whole; a partial overlap still counts in full.
+    const duplicatesFloor = counted.some((floor) =>
+      elementFloorIndex(floor) === storey && polygonOverlapArea(el, floor) > area / 2);
+    if (!duplicatesFloor) counted.push(el);
+  }
+  return counted;
+}
+
 function pushContribution(
   out: FloorAreaContribution[],
   element: Element,
@@ -97,12 +152,8 @@ export function elementFloorIndex(el: Element): number | null {
 /**
  * Calculate the geometry-derived **treated floor area** for a zone, ignoring any user override.
  *
- * Strategy:
- * 1. Sum **BuildingElementGround** polygons (all storeys; no pitch filter).
- * 2. Sum **walkable horizontal floor polygons**: opaque / transparent / adjacent with **pitch 180°**
- *    (excludes pitch 0° roof-ceiling surfaces). Not roof-marked.
- * Both steps apply — upper storeys can use pitch-180 decks even when ground exists on lower storeys.
- * No roof name/area fallback — roofs are not TFA; users must model floors explicitly.
+ * Sums {@link getTreatedFloorElements}. No roof name/area fallback — roofs are not TFA; users must
+ * model floors explicitly.
  *
  * Returns contributing elements for UI navigation.
  */
@@ -113,19 +164,7 @@ export function calculateDerivedFloorArea(
   const zoneElements = elements.filter((el) => (el as any).zoneId === zoneId);
   const contributingElements: FloorAreaContribution[] = [];
 
-  const groundElements = zoneElements.filter((el) => el.type === 'BuildingElementGround');
-  for (const element of groundElements) {
-    if (element.coordinates && element.coordinates.length >= 3) {
-      const area = calculatePolygonArea(element.coordinates);
-      if (area > 0) {
-        pushContribution(contributingElements, element, area);
-      }
-    }
-  }
-
-  const horizontalFloors = zoneElements.filter(isWalkableFloorHorizontalPolygon);
-  for (const element of horizontalFloors) {
-    if (!element.coordinates || element.coordinates.length < 3) continue;
+  for (const element of getTreatedFloorElements(zoneElements)) {
     const area = calculatePolygonArea(element.coordinates);
     if (area > 0) {
       pushContribution(contributingElements, element, area);
@@ -145,20 +184,13 @@ export function calculateDerivedFloorArea(
  * Suggest FHS `General` dwelling details from explicit floor/deck geometry.
  *
  * Counts distinct storey levels with a real floor contributor:
- * - `BuildingElementGround`
- * - walkable horizontal floor polygons (`pitch === 180`, not roof-marked)
- *
- * Roof/ceiling-only polygons (`pitch === 0`) and line walls are intentionally excluded.
+ * {@link getTreatedFloorElements}. Roof and ceiling polygons and line walls are excluded.
  */
 export function calculateDwellingDetailsSuggestion(elements: Element[]): DwellingDetailsSuggestion {
   const contributingFloorLevels = new Set<number>();
   let hasGroundElement = false;
 
-  for (const element of elements) {
-    const contributes =
-      element.type === 'BuildingElementGround' || isWalkableFloorHorizontalPolygon(element);
-    if (!contributes) continue;
-
+  for (const element of getTreatedFloorElements(elements)) {
     const floorIndex = elementFloorIndex(element);
     if (floorIndex === null) continue;
 
@@ -187,7 +219,7 @@ export function calculateDwellingDetailsSuggestion(elements: Element[]): Dwellin
           hasGroundElement
             ? 'A ground-contact floor was found, so house is suggested.'
             : 'No ground-contact floor was found, so flat is suggested.',
-          'Pitch-0 roof/ceiling surfaces and line walls are not counted.',
+          'Roof and ceiling surfaces and line walls are not counted.',
         ].join(' ')
       : undefined;
 
@@ -1099,7 +1131,6 @@ export function calculateDerivedHeight(zoneId: string, elements: Element[]): num
  *
  * Returns updates object with derived metadata.
  * Auto-updates `floorArea` and `height` from geometry unless the respective user-override flag is set.
- * Note: Per-floor height breakdown is available for display via getVolumeCalculationBreakdown()
  */
 export function deriveZoneProperties(zone: Zone, elements: Element[]): Partial<Zone> {
   const updates: Partial<Zone> = {};
@@ -1158,52 +1189,7 @@ export function deriveZoneProperties(zone: Zone, elements: Element[]): Partial<Z
   return updates;
 }
 
-/**
- * Generate volume calculation breakdown for tooltip display
- * Includes information about which method was used to calculate floor area
- */
-export function getVolumeCalculationBreakdown(zone: Zone, elements: Element[]): string {
-  const derived = calculateDerivedFloorArea(zone.id, elements);
-  let floorArea = derived.floorArea;
-  const areaSource: string | undefined = derived.areaSource ?? zone._areaSource;
-
-  if (floorArea === 0 && zone.floorArea) {
-    floorArea = zone.floorArea;
-  }
-
-  // Match calculateDerivedHeight: only line-segment walls (2 coords). Polygon “walls” are excluded.
-  const perFloorHeights = getPerFloorLineWallAverageHeights(zone.id, elements);
-  const meanZoneHeightFromElements =
-    perFloorHeights.size === 0
-      ? 0
-      : [...perFloorHeights.values()].reduce((a, b) => a + b, 0) / perFloorHeights.size;
-
-  const breakdown: string[] = [];
-  const sortedFloors = [...perFloorHeights.entries()].sort((a, b) => a[0] - b[0]);
-  for (const [floorZ, avgM] of sortedFloors) {
-    breakdown.push(`  Z=${floorZ}: ${avgM.toFixed(2)} m (line-wall average)`);
-  }
-
-  // Use zone's height directly (matching Rust logic)
-  const zoneHeight = zone.height || 0;
-  const volume = floorArea * zoneHeight;
-
-  let result = `${zone.name} Volume Calculation:\n`;
-  result += `${floorArea.toFixed(1)}m² × ${zoneHeight.toFixed(2)}m = ${volume.toFixed(1)}m³\n`;
-
-  // Show area source if available
-  if (areaSource) {
-    result += `\nFloor area source: ${areaSource}`;
-  }
-
-  result += `\n`;
-
-  // Show per-floor breakdown as informational (calculated from elements, but not used for volume)
-  if (breakdown.length > 0) {
-    result += `Per-storey line-wall heights (same basis as derived zone height; polygon walls excluded):\n`;
-    result += `Mean ≈ ${meanZoneHeightFromElements.toFixed(2)} m · volume uses zone height (${zoneHeight.toFixed(2)} m)\n`;
-    result += breakdown.join('\n');
-  }
-
-  return result;
+/** The zone's stored area, height and volume, exactly as the model uses them. */
+export function getVolumeCalculationBreakdown(zone: Zone): string {
+  return `${(zone.floorArea ?? 0).toFixed(2)} m² × ${(zone.height ?? 0).toFixed(2)} m = ${(zone.volume ?? 0).toFixed(2)} m³`;
 }

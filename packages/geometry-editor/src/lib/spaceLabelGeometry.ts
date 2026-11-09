@@ -2,31 +2,37 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { SpaceLabel, Element } from '../geometry/types';
-import { isWalkableFloorHorizontalPolygon } from './zoneDerivation';
+import { getTreatedFloorElements } from './zoneDerivation';
 import { signedShoelaceArea2 } from './spaceInference/signedArea';
 import { refineWallSegments, type RawSeg } from './spaceInference/refineWallSegments';
 import type { PlanarPoint2, WallSegment2D } from './spaceInference/types';
 
 const EPS = 0.001;
 const MIN_FACE_AREA_M2 = 0.0001;
-export const SPACE_LABEL_WARNING_AREA_TOLERANCE_M2 = 0.02;
-export const SPACE_LABEL_WARNING_RATIO_TOLERANCE = 0.001;
+/** Below this, an overlap is drawing tolerance and counts once. Above it, the area is excluded and warned. */
+const SPACE_LABEL_OVERLAP_WARNING_M2 = 0.1;
 
-export type SpaceLabelGeometryIssue =
-  | {
-      kind: 'overlap';
-      labelIds: string[];
-      areaM2: number;
-    }
-  | {
-      kind: 'outside_floor';
-      labelId: string;
-      areaM2: number;
-    };
+/** A treated-area difference this large is an error; smaller ones are label rounding. */
+export function isMaterialTreatedAreaDifference(differenceM2: number, referenceM2: number): boolean {
+  return differenceM2 > 1 && differenceM2 / referenceM2 > 0.01;
+}
+
+export type SpaceLabelGeometryIssue = {
+  kind: 'overlap';
+  labelIds: string[];
+  areaM2: number;
+};
+
+export type SpaceLabelStoreyCoverage = {
+  labelledM2: number;
+  outsideM2: number;
+  outsideLabelIds: Set<string>;
+};
 
 export type SpaceLabelGeometryAnalysis = {
   effectiveAreasByLabelId: Record<string, number>;
   issues: SpaceLabelGeometryIssue[];
+  storeyCoverage: Map<number, SpaceLabelStoreyCoverage>;
 };
 
 type HalfEdge = {
@@ -188,6 +194,18 @@ function polygonSegments(ring: Array<{ x: number; y: number }>, wallZIndex: numb
   return out;
 }
 
+/**
+ * True only for a disconnected island inside `parent`. Adjacent faces never qualify: a bent strip's
+ * vertex average can land inside its neighbour, so every vertex must be strictly inside.
+ */
+function isNestedFace(candidate: Face, parent: Face): boolean {
+  if (candidate.area >= parent.area) return false;
+  const parentVertices = new Set(parent.ring.map((vertex) => vertexKey(vertex, EPS)));
+  return candidate.ring.every(
+    (vertex) => !parentVertices.has(vertexKey(vertex, EPS)) && pointInPolygon(vertex, parent.ring),
+  );
+}
+
 function buildFaces(segments: WallSegment2D[]): Face[] {
   const refined = refineWallSegments(segments, EPS);
   const { verts, hes } = buildHalfEdges(refined, EPS);
@@ -196,12 +214,9 @@ function buildFaces(segments: WallSegment2D[]): Face[] {
 
   for (let i = 0; i < faces.length; i++) {
     const parent = faces[i]!;
-    const children = faces.filter((candidate, j) => {
-      if (i === j || candidate.area >= parent.area) return false;
-      return pointInPolygon(centroid(candidate.ring), parent.ring);
-    });
+    const children = faces.filter((candidate, j) => i !== j && isNestedFace(candidate, parent));
     const immediateChildren = children.filter(
-      (child) => !children.some((other) => other !== child && other.area < child.area && pointInPolygon(centroid(other.ring), child.ring)),
+      (child) => !children.some((other) => other !== child && isNestedFace(child, other)),
     );
     parent.netArea = Math.max(0, parent.area - immediateChildren.reduce((s, child) => s + child.area, 0));
     parent.sample = findSamplePoint(parent.ring, immediateChildren.map((child) => child.ring));
@@ -210,23 +225,20 @@ function buildFaces(segments: WallSegment2D[]): Face[] {
   return faces.filter((face) => face.netArea >= MIN_FACE_AREA_M2);
 }
 
+function treatedFloorElementsAtLevel(zoneId: string, elements: Element[], storeyZ: number): Element[] {
+  return getTreatedFloorElements(elements.filter((el) => el.zoneId === zoneId))
+    .filter((el) => Math.abs(Math.min(...el.coordinates.map((c) => c.z)) - storeyZ) < 0.05);
+}
+
+const planRing = (coordinates: ReadonlyArray<{ x: number; y: number }>): PlanarPoint2[] =>
+  coordinates.map((c) => ({ x: c.x, y: c.y }));
+
 export function getTreatedFloorBoundaryPolygonsForZone(
   zoneId: string,
   elements: Element[],
   storeyZ: number,
 ): PlanarPoint2[][] {
-  return elements
-    .filter((el) => el.zoneId === zoneId)
-    .filter((el) => el.type === 'BuildingElementGround' || isWalkableFloorHorizontalPolygon(el))
-    .filter((el) => el.coordinates?.length >= 3)
-    .filter((el) => Math.abs(Math.min(...el.coordinates.map((c) => c.z)) - storeyZ) < 0.05)
-    .map((el) => el.coordinates.map((c) => ({ x: c.x, y: c.y })));
-}
-
-function issueAreaIsMaterial(area: number, relatedAreas: number[]): boolean {
-  if (area >= SPACE_LABEL_WARNING_AREA_TOLERANCE_M2) return true;
-  const smallest = Math.min(...relatedAreas.filter((a) => a > 0));
-  return smallest > 0 && area / smallest >= SPACE_LABEL_WARNING_RATIO_TOLERANCE;
+  return treatedFloorElementsAtLevel(zoneId, elements, storeyZ).map((el) => planRing(el.coordinates));
 }
 
 export function analyzeSpaceLabelGeometry(
@@ -235,6 +247,7 @@ export function analyzeSpaceLabelGeometry(
 ): SpaceLabelGeometryAnalysis {
   const effectiveAreasByLabelId: Record<string, number> = {};
   const issues: SpaceLabelGeometryIssue[] = [];
+  const storeyCoverage = new Map<number, SpaceLabelStoreyCoverage>();
   for (const label of labels) effectiveAreasByLabelId[label.id] = 0;
 
   const storeys = new Set(labels.map((label) => label.storey));
@@ -258,34 +271,64 @@ export function analyzeSpaceLabelGeometry(
         floorBoundaries.length === 0 ||
         floorBoundaries.some((boundary) => pointInPolygon(face.sample, boundary));
       const typedContainingLabels = containingLabels.filter((label) => String(label.room_type || '').trim() !== '');
-      const relatedAreas = containingLabels.map((label) => ringArea(label.coordinates.map((c) => ({ x: c.x, y: c.y }))));
 
-      if (!inFloor) {
-        for (const label of containingLabels) {
-          if (issueAreaIsMaterial(face.netArea, relatedAreas)) {
-            issues.push({ kind: 'outside_floor', labelId: label.id, areaM2: face.netArea });
-          }
+      if (typedContainingLabels.length > 0) {
+        const coverage = storeyCoverage.get(storey) ?? { labelledM2: 0, outsideM2: 0, outsideLabelIds: new Set<string>() };
+        storeyCoverage.set(storey, coverage);
+        coverage.labelledM2 += face.netArea;
+        if (!inFloor) {
+          coverage.outsideM2 += face.netArea;
+          typedContainingLabels.forEach((label) => coverage.outsideLabelIds.add(label.id));
         }
+      }
+
+      if (!inFloor) continue;
+
+      if (typedContainingLabels.length > 1 && face.netArea >= SPACE_LABEL_OVERLAP_WARNING_M2) {
+        issues.push({
+          kind: 'overlap',
+          labelIds: typedContainingLabels.map((label) => label.id),
+          areaM2: face.netArea,
+        });
         continue;
       }
 
-      if (typedContainingLabels.length > 1) {
-        if (issueAreaIsMaterial(face.netArea, relatedAreas)) {
-          issues.push({
-            kind: 'overlap',
-            labelIds: typedContainingLabels.map((label) => label.id),
-            areaM2: face.netArea,
-          });
-        }
-        continue;
-      }
-
-      if (typedContainingLabels.length === 1) {
-        const label = typedContainingLabels[0]!;
-        effectiveAreasByLabelId[label.id] = (effectiveAreasByLabelId[label.id] ?? 0) + face.netArea;
+      const countingLabel = typedContainingLabels[0];
+      if (countingLabel) {
+        effectiveAreasByLabelId[countingLabel.id] = (effectiveAreasByLabelId[countingLabel.id] ?? 0) + face.netArea;
       }
     }
   }
 
-  return { effectiveAreasByLabelId, issues };
+  return { effectiveAreasByLabelId, issues, storeyCoverage };
+}
+
+/**
+ * The one analysis behind every treated-area figure. Each label's own plan level finds its floors:
+ * `label.storey` is only an index, and the editor and a parsed CSV can hold different floor lists.
+ */
+export function analyzeZoneSpaceLabels(
+  zoneId: string,
+  labels: SpaceLabel[],
+  elements: Element[],
+): SpaceLabelGeometryAnalysis {
+  const zoneLabels = labels.filter((label) => label.zoneId === zoneId);
+  const floorBoundariesByStorey = new Map<number, PlanarPoint2[][]>();
+  for (const storey of new Set(zoneLabels.map((label) => label.storey))) {
+    const storeyLabels = zoneLabels.filter((label) => label.storey === storey && label.coordinates.length >= 3);
+    const level = storeyLabels[0]?.coordinates[0]?.z;
+    if (level === undefined) continue;
+    const floors = treatedFloorElementsAtLevel(zoneId, elements, level);
+    const rings = floors.map((el) => planRing(el.coordinates));
+    // ponytail: size test. A pitch-0 partition covering under half the labels reads as a ceiling, so the storey stays unclipped.
+    const onlyPitchZeroPartitions = floors.every(
+      (el) => el.type !== 'BuildingElementGround' && (el as { pitch?: number }).pitch !== 180,
+    );
+    const floorArea = rings.reduce((sum, ring) => sum + ringArea(ring), 0);
+    const labelledArea = storeyLabels.reduce((sum, label) => sum + ringArea(planRing(label.coordinates)), 0);
+    if (rings.length > 0 && !(onlyPitchZeroPartitions && floorArea < labelledArea / 2)) {
+      floorBoundariesByStorey.set(storey, rings);
+    }
+  }
+  return analyzeSpaceLabelGeometry(zoneLabels, floorBoundariesByStorey);
 }

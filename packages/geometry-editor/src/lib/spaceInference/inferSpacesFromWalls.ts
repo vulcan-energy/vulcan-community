@@ -24,6 +24,7 @@ export function inferSpaceFootprintsForZone(options: InferSpaceFootprintsOptions
     const segs = collectInferenceWallSegmentsForStorey(options.elements, options.zoneId, wallZ);
     const faces = extractInteriorFaces(segs, minArea, {
       nodingEpsilonM: nodingEps,
+      keepWallCoordinates: options.keepWallCoordinates,
     });
     for (const f of faces) {
       out.push({

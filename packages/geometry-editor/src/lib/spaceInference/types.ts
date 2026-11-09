@@ -36,6 +36,8 @@ export type InferSpaceFootprintsOptions = {
    * and quantisation grid for {@link fingerprintInferenceWallSet}. Default 0.1 m.
    */
   snapEpsilonM?: number;
+  /** Rings use real wall ends rather than grid points, so room labels match the drawn fabric. */
+  keepWallCoordinates?: boolean;
   /** Drop faces smaller than this area (m^2). */
   minFaceAreaM2?: number;
 };

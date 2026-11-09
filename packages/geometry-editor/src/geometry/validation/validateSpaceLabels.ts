@@ -4,6 +4,8 @@
 import type { SpaceLabel, Zone } from '../types';
 import type { ValidationIssue, ValidationResult } from './types';
 import {
+  formatTreatedFloorAreaMismatch,
+  getTreatedFloorAreaLabelMismatch,
   isLivingRoomSpaceLabel,
   isSpaceLabelOpenToLivingRoom,
   resolveRoomTypeRule,
@@ -11,15 +13,16 @@ import {
 } from '../../lib/spaceLabelDerivation';
 import {
   analyzeSpaceLabelGeometry,
-  getTreatedFloorBoundaryPolygonsForZone,
+  analyzeZoneSpaceLabels,
+  isMaterialTreatedAreaDifference,
 } from '../../lib/spaceLabelGeometry';
-import type { Element, Floor } from '../types';
+import type { Element } from '../types';
 
 export type SpaceLabelValidationContext = {
   zones: Zone[];
   elementsById?: Record<string, Element>;
-  floors?: Floor[];
   spaceInferenceWallPrintByZone?: Record<string, string>;
+  complianceValidationEnabled?: boolean;
 };
 
 const ADJACENCY_EPS_M = 0.03;
@@ -100,7 +103,7 @@ export function getOpenToLivingRoomAdjacencyWarning(label: SpaceLabel, labels: S
 }
 
 /**
- * Warnings-only for Space labels (PRD: unassigned type warn in-zone).
+ * Warnings for Space labels, plus errors when treated floor area is materially wrong.
  */
 export function validateSpaceLabels(
   spaceLabelsById: Record<string, SpaceLabel>,
@@ -122,22 +125,16 @@ export function validateSpaceLabels(
 
   const primaryZoneId = context.zones.find((z) => !z.isPlaceholder)?.id;
   const primaryZone = context.zones.find((z) => !z.isPlaceholder);
-  const floorBoundariesByStorey = new Map<number, Array<Array<{ x: number; y: number }>>>();
   const elements = Object.values(context.elementsById ?? {}).filter(Boolean);
-  if (primaryZone && context.floors) {
-    for (let storey = 0; storey < context.floors.length; storey++) {
-      const floor = context.floors[storey]!;
-      const boundaries = getTreatedFloorBoundaryPolygonsForZone(primaryZone.id, elements, floor.zIndex);
-      if (boundaries.length > 0) floorBoundariesByStorey.set(storey, boundaries);
-    }
-  }
   const primaryLabels = spaceLabelIds
     .map((id) => spaceLabelsById[id])
     .filter((label): label is SpaceLabel => !!label && (!primaryZoneId || label.zoneId === primaryZoneId));
   const allLabels = spaceLabelIds
     .map((id) => spaceLabelsById[id])
     .filter((label): label is SpaceLabel => !!label);
-  const geometryAnalysis = analyzeSpaceLabelGeometry(primaryLabels, floorBoundariesByStorey);
+  const geometryAnalysis = primaryZone
+    ? analyzeZoneSpaceLabels(primaryZone.id, primaryLabels, elements)
+    : analyzeSpaceLabelGeometry(primaryLabels);
 
   for (const id of spaceLabelIds) {
     const label = spaceLabelsById[id];
@@ -205,23 +202,31 @@ export function validateSpaceLabels(
   }
 
   for (const issue of geometryAnalysis.issues) {
-    if (issue.kind === 'overlap') {
-      const names = issue.labelIds
-        .map((id) => spaceLabelsById[id]?.name)
-        .filter(Boolean)
-        .join(' / ');
-      warnings.push(warn(
-        `Space labels overlap (${names}): ${issue.areaM2.toFixed(2)} m² is excluded from derived room metrics.`,
-        undefined,
-        issue.labelIds,
-      ));
-    } else {
-      const name = spaceLabelsById[issue.labelId]?.name ?? issue.labelId;
-      warnings.push(warn(
-        `Space label "${name}" extends ${issue.areaM2.toFixed(2)} m² outside the floor area; that area is excluded from derived room metrics.`,
-        issue.labelId,
-      ));
-    }
+    const names = issue.labelIds
+      .map((id) => spaceLabelsById[id]?.name)
+      .filter(Boolean)
+      .join(' / ');
+    warnings.push(warn(
+      `Space labels overlap (${names}): ${issue.areaM2.toFixed(2)} m² is excluded from derived room metrics.`,
+      undefined,
+      issue.labelIds,
+    ));
+  }
+
+  for (const [storey, coverage] of geometryAnalysis.storeyCoverage) {
+    if (!isMaterialTreatedAreaDifference(coverage.outsideM2, coverage.labelledM2)) continue;
+    const firstLabelId = coverage.outsideLabelIds.values().next().value;
+    const z = (firstLabelId ? spaceLabelsById[firstLabelId]?.coordinates[0]?.z : undefined) ?? storey;
+    issues.push(warn(
+      `Z=${z}: ${coverage.outsideM2.toFixed(1)} m² of space labels are not over a treated floor, so that area is missing from the treated floor area. Add the missing floor element or correct the labels.`,
+      undefined,
+      [...coverage.outsideLabelIds],
+    ));
+  }
+
+  if (context.complianceValidationEnabled && primaryZone) {
+    const mismatch = getTreatedFloorAreaLabelMismatch(primaryZone, primaryLabels, geometryAnalysis);
+    if (mismatch) issues.push(warn(formatTreatedFloorAreaMismatch(mismatch)));
   }
 
   return {
