@@ -1893,6 +1893,8 @@ export const validateElementCore = (
       const allRequiredFields = [...new Set([...requiredFields, ...conditionalRequiredFields])];
 
       for (const field of allRequiredFields) {
+        // a8/a9: the converter always sets this value, and no form offers it.
+        if (field === 'is_adjacent_space_within_dwelling') continue;
         // Check if field exists in element directly or in extra_json
         // Also check for null/undefined values (they count as missing)
         // NOTE: OnSiteGeneration has a naming collision:

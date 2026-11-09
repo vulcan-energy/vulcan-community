@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { isAdjacentConditionedInternalFloorDoubled } from '../lib/polygonSync';
+import { forbiddenFieldKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Pencil, X as XIcon, type IconNode } from 'lucide';
 import {
@@ -2551,6 +2552,16 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   const ductCrossSectionSummary = describeDistribution(
     computeScalarDistribution(activeElements, isDuctwork, (el) => extraJsonRecord(el).cross_section_shape),
   );
+  const ductSchemaMode = complianceValidationEnabled ? 'fhs' : 'core';
+  const ductSubschema = schemaPort.availability === 'available' ? schemaPort.getElementSubschema(ductSchemaMode, 'MechanicalVentilationDuctwork') : null;
+  const ductRoot = schemaPort.availability === 'available' ? schemaPort.getRootSchema(ductSchemaMode) : null;
+  const supportsDuctPerimeter = (ductSubschema?.properties as Record<string, unknown> | undefined)?.duct_perimeter_mm != null;
+  // a8/a9 forbid diameters on rectangular ducts and perimeter on circular ones.
+  const ductSizePatch = (el: Element, key: string, value: number) =>
+    isDuctwork(el) && !forbiddenFieldKeys(ductSubschema, extraJsonRecord(el), ductRoot).includes(key) ? { [key]: value } : null;
+  const ductPerimeterSummary = describeDistribution(
+    computeDistribution(activeElements, isDuctwork, (el) => finiteNumber(extraJsonRecord(el).duct_perimeter_mm)),
+  );
   const ductInternalDiameterSummary = describeDistribution(
     computeDistribution(activeElements, isDuctwork, (el) => finiteNumber(extraJsonRecord(el).internal_diameter_mm)),
   );
@@ -3430,10 +3441,15 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               ductCrossSectionSummary,
               true,
               CROSS_SECTION_OPTIONS,
-              (value) => applyExtraJsonChoice((el) => (isDuctwork(el) ? { cross_section_shape: value } : null)),
+              (value) => applyExtraJsonChoice((el) => {
+                if (!isDuctwork(el)) return null;
+                const forbidden = newlyForbiddenFieldKeys(ductSubschema, extraJsonRecord(el), { ...extraJsonRecord(el), cross_section_shape: value }, ductRoot);
+                return { cross_section_shape: value, ...Object.fromEntries(forbidden.map((key) => [key, undefined])) };
+              }),
             )}
-            {renderExtraJsonNumberRow('ductInternalDiameter', 'Internal Diameter (mm)', ductInternalDiameterSummary, true, 'e.g. 125', (el, value) => isDuctwork(el) ? { internal_diameter_mm: value } : null, undefined, LIVE_NUMBER_BOUNDS.ductDiameter)}
-            {renderExtraJsonNumberRow('ductExternalDiameter', 'External Diameter (mm)', ductExternalDiameterSummary, true, 'e.g. 150', (el, value) => isDuctwork(el) ? { external_diameter_mm: value } : null, undefined, LIVE_NUMBER_BOUNDS.ductDiameter)}
+            {renderExtraJsonNumberRow('ductInternalDiameter', 'Internal Diameter (mm)', ductInternalDiameterSummary, true, 'e.g. 125', (el, value) => ductSizePatch(el, 'internal_diameter_mm', value), undefined, LIVE_NUMBER_BOUNDS.ductDiameter)}
+            {renderExtraJsonNumberRow('ductExternalDiameter', 'External Diameter (mm)', ductExternalDiameterSummary, true, 'e.g. 150', (el, value) => ductSizePatch(el, 'external_diameter_mm', value), undefined, LIVE_NUMBER_BOUNDS.ductDiameter)}
+            {supportsDuctPerimeter && renderExtraJsonNumberRow('ductPerimeter', 'Duct Perimeter (mm)', ductPerimeterSummary, true, 'e.g. 400', (el, value) => ductSizePatch(el, 'duct_perimeter_mm', value))}
             {renderExtraJsonNumberRow('ductInsulationConductivity', 'Insulation Conductivity', ductInsulationConductivitySummary, true, 'e.g. 0.04', (el, value) => isDuctwork(el) ? { insulation_thermal_conductivity: value } : null, undefined, LIVE_NUMBER_BOUNDS.ductInsulationConductivity)}
             {renderExtraJsonNumberRow('ductInsulationThickness', 'Insulation Thickness (mm)', ductInsulationThicknessSummary, true, 'e.g. 25', (el, value) => isDuctwork(el) ? { insulation_thickness_mm: value } : null, undefined, LIVE_NUMBER_BOUNDS.ductInsulationThickness)}
             {renderSelectRow(

@@ -6,6 +6,8 @@ import { errorMessageFromUnknown, isRecord } from './jsonTypes';
 import { asSchemaNode, isSchemaNode, type SchemaNode } from './schemaTypes';
 import { resolveRefChain, resolveRefNode } from './schemaRefResolver';
 import { flattenIfThenAllOfProperties } from './systemSchemaFlatten';
+import { isForbiddenSchemaNode } from './schemaShape';
+import { dereferenceSchemaNodeInRoot } from './subschemaCache';
 import type { GeometrySchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 
 export type GeometrySchemaAssetSource = Readonly<{
@@ -2278,4 +2280,34 @@ export function getStrictestIntegerKeysForElementType(elementType: string, subty
 
   strictestIntegerKeysCache.set(cacheKey, out);
   return out;
+}
+
+export type TargetFieldAvailability = 'available' | 'absent' | 'unknown';
+
+function findFieldInSchemaBranches(node: unknown, key: string, root: unknown): unknown {
+  if (!isRecord(node)) return undefined;
+  const resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
+  const properties = isRecord(resolved.properties) ? resolved.properties : {};
+  if (properties[key] !== undefined && !isForbiddenSchemaNode(properties[key])) return properties[key];
+  const branches = [resolved.then, resolved.else, ...[resolved.allOf, resolved.anyOf, resolved.oneOf].flatMap((list) => (Array.isArray(list) ? list : []))];
+  for (const branch of branches) {
+    const found = findFieldInSchemaBranches(branch, key, root);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Whether a root-path field can exist on the selected target, with no element data. A field is
+ * `absent` only when an FHS-profile schema is loaded and lacks it; no schema or a Core schema
+ * is `unknown`, so callers keep their existing behaviour.
+ */
+export function targetFieldAvailability(root: unknown, path: readonly string[]): TargetFieldAvailability {
+  if (!isRecord(root) || !isRecord(root.properties) || !isRecord(root.properties.General)) return 'unknown';
+  let node: unknown = root;
+  for (const key of path) {
+    node = findFieldInSchemaBranches(node, key, root);
+    if (node === undefined) return 'absent';
+  }
+  return 'available';
 }

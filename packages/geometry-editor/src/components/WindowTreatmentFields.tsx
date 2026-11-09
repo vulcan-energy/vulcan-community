@@ -16,6 +16,7 @@ import {
   WINDOW_DETAIL_ROW_MARGIN,
 } from './WindowDetailControls';
 import {
+  allowedWindowTreatmentControls,
   extraJsonToWindowTreatmentForm,
   mountingOutsideAllowed,
   TREATMENT_UI_KEY,
@@ -110,6 +111,17 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
     [onPatch, setForm],
   );
 
+  const schemaMode = useFHSSchema ? 'fhs' : 'core';
+  const allowedControls = schemaPort.availability === 'available'
+    ? allowedWindowTreatmentControls(
+      schemaPort.getElementSubschema(schemaMode, 'BuildingElementTransparent'),
+      schemaPort.getRootSchema(schemaMode),
+    )
+    : null;
+  const controlOptions = allowedControls
+    ? CONTROL_OPTIONS.filter(({ value }) => allowedControls.includes(value) || value === form.controls)
+    : CONTROL_OPTIONS;
+  const controlRejected = !!allowedControls && !allowedControls.includes(form.controls);
   const compact = Boolean(flat);
   const cat = form.category || 'white_venetian';
   const showColoured = cat === 'coloured';
@@ -318,7 +330,8 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
                   controls: v as WindowTreatmentControl,
                 })
               }
-              options={CONTROL_OPTIONS}
+              options={controlOptions}
+              error={controlRejected ? 'This HEM version does not accept this control. Select a different control.' : undefined}
               placeholder=""
               size="md"
               variant="ghost"

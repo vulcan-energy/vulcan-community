@@ -2349,6 +2349,11 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     }));
   }
 
+  // A saved value the options do not list (a numeric a8/a9 areal capacity) stays visible.
+  if (valueString !== '' && options.length > 0 && !options.some((o) => o.value === valueString)) {
+    options = [...options, { value: valueString, label: valueString }];
+  }
+
   const isReadOnly = uiOptions(uischema).readOnly === true || enabled === false;
   const selectedLabel = options.find((o) => o.value === valueString)?.label ?? valueString;
   const selectedOptionDescription = optionDescriptions.get(valueString);
