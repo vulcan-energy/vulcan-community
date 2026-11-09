@@ -6,6 +6,7 @@ import {
   deriveZoneProperties,
   calculateDerivedFloorArea,
   calculateDerivedHeight,
+  calculateLegacyMeanZoneHeight,
   calculateGroundFloorArea,
   calculateDwellingDetailsSuggestion,
   calculateSuggestedVentilationBaseHeight,
@@ -2222,7 +2223,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         )
       ) {
         const derivedH = calculateDerivedHeight(zone.id, allElements);
-        if (derivedH > 0 && Math.abs(csvHeight - derivedH) > ZONE_OVERRIDE_EPSILON) {
+        const matchesLegacyDerivation = Math.abs(csvHeight - calculateLegacyMeanZoneHeight(zone.id, allElements)) <= ZONE_OVERRIDE_EPSILON;
+        if (derivedH > 0 && !matchesLegacyDerivation && Math.abs(csvHeight - derivedH) > ZONE_OVERRIDE_EPSILON) {
           flags._heightUserOverride = true;
         }
       }

@@ -478,3 +478,60 @@ describe('storey base changes: each source and each storey rule', () => {
     }
   });
 });
+
+describe('calculateDerivedHeight area weighting', () => {
+  const square = (id: string, side: number, z: number) => ({
+    id, name: id, type: 'BuildingElementGround', zoneId: 'z',
+    coordinates: [{ x: 0, y: 0, z }, { x: side, y: 0, z }, { x: side, y: side, z }, { x: 0, y: side, z }],
+  }) as unknown as Element;
+  const deck = (id: string, width: number, depth: number, z: number) => ({
+    id, name: id, type: 'BuildingElementOpaque', zoneId: 'z', pitch: 180,
+    coordinates: [{ x: 0, y: 0, z }, { x: width, y: 0, z }, { x: width, y: depth, z }, { x: 0, y: depth, z }],
+  }) as unknown as Element;
+  const wall = (id: string, height: number, z: number) => ({
+    id, name: id, type: 'BuildingElementOpaque', zoneId: 'z', pitch: 90, height, width: 4,
+    coordinates: [{ x: 0, y: 0, z }, { x: 4, y: 0, z }],
+  }) as unknown as Element;
+
+  it('weights each storey by its treated floor area', () => {
+    const elements = [square('g', 10, 0), deck('f', 10, 5, 1), wall('w0', 3, 0), wall('w1', 2.4, 1)];
+    expect(calculateDerivedHeight('z', elements)).toBe(2.8);
+  });
+
+  it('ignores a level with walls but no treated floor', () => {
+    const elements = [square('g', 10, 0), deck('f', 10, 5, 1), wall('w0', 3, 0), wall('w1', 2.4, 1), wall('gable', 1, 2)];
+    expect(calculateDerivedHeight('z', elements)).toBe(2.8);
+  });
+
+  it('does not count overlapping floors twice in the weight', () => {
+    const elements = [square('g', 10, 0), deck('f', 10, 10, 1), deck('f2', 10, 10, 1), wall('w0', 3, 0), wall('w1', 2.4, 1)];
+    expect(calculateDerivedHeight('z', elements)).toBe(2.7);
+  });
+
+  it('does not read the old mean height in an older saved file as a typed height', () => {
+    const csv = [
+      'Zone,,,,,,,,,,,,,',
+      'Name,Type,volume,floor_area,height,simplified thermal bridging',
+      'Z,Zone,92.5,50,1.85,FALSE',
+      '',
+      'Exposed Elements,,,,,,,,,,,,,',
+      'Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json',
+      'W0,Z,BuildingElementOpaque,10,90,4,2.5,0,0,FALSE,FALSE,,"0,0,0|4,0,0",',
+      'Gable,Z,BuildingElementOpaque,4.8,90,4,1.2,0,2.5,FALSE,FALSE,,"0,0,1|4,0,1",',
+      '',
+      'Ground Elements,,,,,,,,,,,,,',
+      'Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,base_height,parent_element,coords,extra_json',
+      'Ground Floor,Z,BuildingElementGround,50,5,10,30,Slab_no_edge_insulation,,,0,,"0,0,0|5,0,0|5,10,0|0,10,0",',
+    ].join('\n');
+    const store = createGeometryStore();
+    store.getState().loadFromCSV(csv);
+    const zone = store.getState().zones.find((candidate) => !candidate.isPlaceholder)!;
+    expect(zone._heightUserOverride).toBeFalsy();
+    expect(zone.height).toBe(2.5);
+    expect(zone.volume).toBe(125);
+  });
+
+  it('falls back to the storey mean when no treated floor is modelled', () => {
+    expect(calculateDerivedHeight('z', [wall('w0', 3, 0), wall('w1', 2.4, 1)])).toBe(2.7);
+  });
+});

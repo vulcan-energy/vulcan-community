@@ -107,7 +107,7 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
     if (missingTfaZ.length > 0) {
       const zLabel = missingTfaZ.map((z) => `Z=${z}`).join(', ');
       warnings.push(warn(
-        `${zLabel}: no treated floor — add a ground floor, a floor element or an internal floor`,
+        `${zLabel}: no treated floor — if this is a storey, add a ground floor, a floor element or an internal floor`,
         'floorArea',
       ));
     }

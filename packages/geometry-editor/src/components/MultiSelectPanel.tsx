@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { isAdjacentConditionedInternalFloorDoubled } from '../lib/polygonSync';
+import { isInternalFloorElement } from '../lib/zoneDerivation';
 import { forbiddenFieldKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Pencil, X as XIcon, type IconNode } from 'lucide';
@@ -336,7 +336,7 @@ const isVariablePitchWallLike = (el: Element): el is WallLikeElement => {
 };
 
 const isHorizontalPolygonPitchWallLike = (el: Element): el is WallLikeElement =>
-  isWallLike(el) && getElementShape(el) === 'polygon' && !isAdjacentConditionedInternalFloorDoubled(el);
+  isWallLike(el) && getElementShape(el) === 'polygon';
 
 const isVariablePitchTransparent = (el: Element): el is BuildingElementTransparent => {
   if (!isTransparent(el)) return false;
@@ -1539,9 +1539,15 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     () => activeOpaqueVariablePitchIds.map((id) => elementsById[id]).filter(isWallLike),
     [activeOpaqueVariablePitchIds, elementsById],
   );
+  // An upper-storey internal floor has no floor/ceiling choice: its storey decides.
+  const canChooseSurface = useCallback((el: Element): boolean => {
+    if (!isHorizontalPolygonPitchWallLike(el)) return false;
+    const zoneElements = Object.values(elementsById).filter((candidate) => candidate.zoneId === el.zoneId);
+    return !isInternalFloorElement(el, zoneElements);
+  }, [elementsById]);
   const activeOpaqueSurfaceFacingIds = useMemo(
-    () => activeOpaqueSurfaceElements.filter(isHorizontalPolygonPitchWallLike).map((el) => el.id),
-    [activeOpaqueSurfaceElements],
+    () => activeOpaqueSurfaceElements.filter(canChooseSurface).map((el) => el.id),
+    [canChooseSurface, activeOpaqueSurfaceElements],
   );
   const activeOpaqueSurfaceFacingElements = useMemo(
     () => activeOpaqueSurfaceFacingIds.map((id) => elementsById[id]).filter(isWallLike),
@@ -1588,8 +1594,8 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     [elementsById, nonOpaqueVariablePitchIds],
   );
   const nonOpaqueSurfaceFacingIds = useMemo(
-    () => nonOpaqueWallDimensionElements.filter(isHorizontalPolygonPitchWallLike).map((el) => el.id),
-    [nonOpaqueWallDimensionElements],
+    () => nonOpaqueWallDimensionElements.filter(canChooseSurface).map((el) => el.id),
+    [canChooseSurface, nonOpaqueWallDimensionElements],
   );
   const nonOpaqueSurfaceFacingElements = useMemo(
     () => nonOpaqueSurfaceFacingIds.map((id) => elementsById[id]).filter(isWallLike),
@@ -2493,7 +2499,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   const renderSurfaceFacingRow = (
     summary: ReturnType<typeof describeDistribution>,
     targetIds: string[],
-    isEligible: (el: Element) => boolean = isHorizontalPolygonPitchWallLike,
+    isEligible: (el: Element) => boolean = canChooseSurface,
   ) => {
     const enabled = targetIds.length > 0;
     const currentOption =

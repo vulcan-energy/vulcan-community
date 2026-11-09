@@ -373,6 +373,8 @@ describe('treated floor area from floors and space labels', () => {
     expect(validate([label('a', 0, rect(0, 0, 10, 9.8))], [ground]).warnings).toHaveLength(0);
     const unlabelledCeiling = element('top', 'BuildingElementAdjacentConditionedSpace', rect(0, 0, 10, 10, 1), { pitch: 0 });
     expect(validate([label('a', 0, rect(0, 0, 10, 10))], [ground, unlabelledCeiling]).warnings).toHaveLength(0);
+    const overlapping = element('dup', 'BuildingElementGround', rect(0, 0, 10, 10));
+    expect(validate([label('a', 0, rect(0, 0, 10, 10))], [ground, overlapping]).warnings).toHaveLength(0);
     const forgottenStorey = validate([label('a', 0, rect(0, 0, 10, 10))], [ground, unlabelledCeiling, upperWall]);
     expect(forgottenStorey.warnings[0]!.message).toContain('Z=1: 100.0 m² of floor has no space label');
   });

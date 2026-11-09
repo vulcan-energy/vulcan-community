@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element, Floor, Zone } from '../geometry/types';
-import polygonClipping, { type Pair, type Ring } from 'polygon-clipping';
+import polygonClipping, { type MultiPolygon, type Pair, type Ring } from 'polygon-clipping';
 import { calculatePolygonArea, isAdjacentConditionedInternalFloorDoubled } from './polygonSync';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { canvasFloorToFhsStorey, fhsStoreyToCanvasFloor } from './storeySemantics';
@@ -65,19 +65,39 @@ export function isWalkableFloorHorizontalPolygon(el: Element): boolean {
   return true;
 }
 
-function polygonOverlapArea(a: Element, b: Element): number {
-  const isFinitePlan = (el: Element): boolean => el.coordinates.every((c) => Number.isFinite(c.x) && Number.isFinite(c.y));
-  if (!isFinitePlan(a) || !isFinitePlan(b)) return 0;
-  const ring = (el: Element): Ring => el.coordinates.map((c) => [c.x, c.y] as Pair);
+const roundToMillimetres = (value: number): number => Math.round(value * 1000) / 1000;
+const isFinitePlan = (el: Element): boolean => el.coordinates.every((c) => Number.isFinite(c.x) && Number.isFinite(c.y));
+// Saved precision: full-precision shared edges can make polygon-clipping fail to close a ring.
+const planRing = (el: Element): Ring => el.coordinates.map((c) => [roundToMillimetres(c.x), roundToMillimetres(c.y)] as Pair);
+function multiPolygonArea(polygons: MultiPolygon): number {
   const shoelace = (points: Ring): number =>
     calculatePolygonArea(points.map(([x, y]) => ({ x, y, z: 0 })));
-  return polygonClipping.intersection([ring(a)], [ring(b)]).reduce(
+  return polygons.reduce(
     (sum, polygon) => sum + polygon.reduce(
       (area, points, index) => area + (index === 0 ? shoelace(points) : -shoelace(points)),
       0,
     ),
     0,
   );
+}
+
+function polygonOverlapArea(a: Element, b: Element): number {
+  if (!isFinitePlan(a) || !isFinitePlan(b)) return 0;
+  return multiPolygonArea(polygonClipping.intersection([planRing(a)], [planRing(b)]));
+}
+
+/** Treated floor area on each storey level, with overlapping floors counted once. */
+export function treatedFloorAreaByLevel(elements: Element[]): Map<number, number> {
+  const ringsByLevel = new Map<number, Ring[]>();
+  for (const floor of getTreatedFloorElements(elements)) {
+    const level = elementFloorIndex(floor);
+    if (level === null || !isFinitePlan(floor)) continue;
+    ringsByLevel.set(level, [...(ringsByLevel.get(level) ?? []), planRing(floor)]);
+  }
+  return new Map([...ringsByLevel].map(([level, rings]) => {
+    const [first, ...rest] = rings as [Ring, ...Ring[]];
+    return [level, multiPolygonArea(polygonClipping.union([first], ...rest.map((ring) => [ring])))];
+  }));
 }
 
 /**
@@ -1109,8 +1129,9 @@ export function calculateDerivedWindowMidHeight(baseHeightM: number, openingHeig
  * Only considers line walls (coordinates.length === 2) since polygon wall
  * heights are synthetic (sqrt(area)) and not physically meaningful.
  *
- * For single-storey zones: weighted average of wall heights (weighted by width).
- * For multi-storey zones: **mean** of each storey’s weighted-average wall height (typical storey height).
+ * Each storey's height is its walls' average weighted by width. Storeys combine weighted by treated
+ * floor area, so a level with walls but no treated floor, such as a gable, does not lower the result.
+ * With no treated floor modelled on any walled storey, the storeys combine as a plain mean.
  *
  * Only vertical line walls (pitch unset or 90°) contribute. Horizontal and
  * pitched surfaces, polygon walls, windows, and external doors are excluded.
@@ -1120,8 +1141,19 @@ export function calculateDerivedWindowMidHeight(baseHeightM: number, openingHeig
 export function calculateDerivedHeight(zoneId: string, elements: Element[]): number {
   const perFloor = getPerFloorLineWallAverageHeights(zoneId, elements);
   if (perFloor.size === 0) return 0;
-  const values = [...perFloor.values()];
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const floorAreas = treatedFloorAreaByLevel(elements.filter((el) => (el as { zoneId?: string }).zoneId === zoneId));
+  const weighted = [...perFloor].map(([level, height]) => ({ height, area: floorAreas.get(level) ?? 0 }));
+  const totalArea = weighted.reduce((sum, storey) => sum + storey.area, 0);
+  if (totalArea <= 0) return calculateLegacyMeanZoneHeight(zoneId, elements);
+  const height = weighted.reduce((sum, storey) => sum + storey.height * storey.area, 0) / totalArea;
+  return height > 0 ? roundToTwoDecimals(height) : 0;
+}
+
+/** The plain storey mean. Older saved files hold this value, so import must not read it as typed. */
+export function calculateLegacyMeanZoneHeight(zoneId: string, elements: Element[]): number {
+  const heights = [...getPerFloorLineWallAverageHeights(zoneId, elements).values()];
+  if (heights.length === 0) return 0;
+  const mean = heights.reduce((sum, height) => sum + height, 0) / heights.length;
   return mean > 0 ? roundToTwoDecimals(mean) : 0;
 }
 
@@ -1129,8 +1161,8 @@ export function calculateDerivedHeight(zoneId: string, elements: Element[]): num
  * Derive zone properties from its child elements
  * - Floor area (TFA-oriented): sum of **all** qualifying storey floors — BuildingElementGround polygons
  *   **plus** walkable horizontal polygons (opaque / transparent / adjacent, **pitch 180°** only; not pitch 0°).
- * - Height: mean of each storey’s weighted-average **line-segment** wall height (2-point walls only)
- * - Volume: floor area × height (convention: total zone TFA × typical storey height — not a storey-by-storey integral)
+ * - Height: storey wall heights (2-point walls only) weighted by treated floor area; see calculateDerivedHeight
+ * - Volume: floor area × height
  *
  * Returns updates object with derived metadata.
  * Auto-updates `floorArea` and `height` from geometry unless the respective user-override flag is set.
