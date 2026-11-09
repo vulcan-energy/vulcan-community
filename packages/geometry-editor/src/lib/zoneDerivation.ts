@@ -65,8 +65,10 @@ export function isWalkableFloorHorizontalPolygon(el: Element): boolean {
   return true;
 }
 
+const roundToMillimetres = (value: number): number => Math.round(value * 1000) / 1000;
 const isFinitePlan = (el: Element): boolean => el.coordinates.every((c) => Number.isFinite(c.x) && Number.isFinite(c.y));
-const planRing = (el: Element): Ring => el.coordinates.map((c) => [c.x, c.y] as Pair);
+// Saved precision: full-precision shared edges can make polygon-clipping fail to close a ring.
+const planRing = (el: Element): Ring => el.coordinates.map((c) => [roundToMillimetres(c.x), roundToMillimetres(c.y)] as Pair);
 function multiPolygonArea(polygons: MultiPolygon): number {
   const shoelace = (points: Ring): number =>
     calculatePolygonArea(points.map(([x, y]) => ({ x, y, z: 0 })));
@@ -1142,10 +1144,17 @@ export function calculateDerivedHeight(zoneId: string, elements: Element[]): num
   const floorAreas = treatedFloorAreaByLevel(elements.filter((el) => (el as { zoneId?: string }).zoneId === zoneId));
   const weighted = [...perFloor].map(([level, height]) => ({ height, area: floorAreas.get(level) ?? 0 }));
   const totalArea = weighted.reduce((sum, storey) => sum + storey.area, 0);
-  const height = totalArea > 0
-    ? weighted.reduce((sum, storey) => sum + storey.height * storey.area, 0) / totalArea
-    : weighted.reduce((sum, storey) => sum + storey.height, 0) / weighted.length;
+  if (totalArea <= 0) return calculateLegacyMeanZoneHeight(zoneId, elements);
+  const height = weighted.reduce((sum, storey) => sum + storey.height * storey.area, 0) / totalArea;
   return height > 0 ? roundToTwoDecimals(height) : 0;
+}
+
+/** The plain storey mean. Older saved files hold this value, so import must not read it as typed. */
+export function calculateLegacyMeanZoneHeight(zoneId: string, elements: Element[]): number {
+  const heights = [...getPerFloorLineWallAverageHeights(zoneId, elements).values()];
+  if (heights.length === 0) return 0;
+  const mean = heights.reduce((sum, height) => sum + height, 0) / heights.length;
+  return mean > 0 ? roundToTwoDecimals(mean) : 0;
 }
 
 /**
