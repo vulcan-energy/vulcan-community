@@ -75,6 +75,13 @@ const NAMED_UI_ONLY_EXTRA_JSON_KEYS: &[&str] = &[
     "thermal_bridge_solver",
 ];
 
+const PV_INVERTER_FIELDS: [&str; 4] = [
+    "inverter_peak_power_dc",
+    "inverter_peak_power_ac",
+    "inverter_is_inside",
+    "inverter_type",
+];
+
 /// Supplies a model may reference by name without authoring one.
 fn builtin_energy_supply(name: &str) -> Option<Value> {
     match name {
@@ -128,6 +135,38 @@ pub fn add_builtin_energy_supplies(model: &mut Value) {
             }
         }
     }
+}
+
+/// Every zone's bulbs survive consolidation into one FHS zone; colliding bulb names take the zone.
+fn merge_zone_lighting(
+    into: Option<Value>,
+    other: &Value,
+    other_zone: &str,
+) -> Result<Value, BuildError> {
+    let Some(mut into) = into else {
+        return Ok(other.clone());
+    };
+    match (into.get_mut("bulbs"), other.get("bulbs")) {
+        (Some(Value::Array(bulbs)), Some(Value::Array(more))) => bulbs.extend(more.iter().cloned()),
+        (Some(Value::Object(bulbs)), Some(Value::Object(more))) => {
+            for (name, bulb) in more {
+                let name = if bulbs.contains_key(name) {
+                    format!("{name} ({other_zone})")
+                } else {
+                    name.clone()
+                };
+                bulbs.insert(name, bulb.clone());
+            }
+        }
+        (_, None) => {}
+        _ => {
+            return Err(BuildError::new(
+                "E064",
+                &format!("Zone '{other_zone}' lighting cannot be combined with the first zone's: their bulb lists differ in shape."),
+            ))
+        }
+    }
+    Ok(into)
 }
 
 fn is_ui_only_extra_json_key(key: &str) -> bool {
@@ -2758,12 +2797,14 @@ impl JSONBuilder {
                 }
                 // Start with a default template for this bridge type
                 let mut bridge_obj = self.get_default_thermal_bridge(bridge_type)?;
-                // junction_type is semantically per-bridge: never inherit it from the
-                // defaults template. Missing junction_type on a linear bridge surfaces
-                // as a loud schema-validation error (the FHS schema requires it).
+                // A linear bridge's junction, length and psi describe that bridge only: never
+                // inherit them from the defaults template. A blank one surfaces as a loud
+                // schema-validation error (both schemas require them).
                 if bridge_type == "ThermalBridgeLinear" {
                     if let Some(obj) = bridge_obj.as_object_mut() {
-                        obj.remove("junction_type");
+                        for key in ["junction_type", "length", "linear_thermal_transmittance"] {
+                            obj.remove(key);
+                        }
                     }
                 }
 
@@ -3575,10 +3616,11 @@ impl JSONBuilder {
                         // Check if this is a wraparound case
                         let is_wraparound = normalized_end < normalized_start;
 
-                        // Check if shading object overlaps with this segment
-                        let mut overlaps = false;
+                        // A full circle (0 to 360) normalises to an empty arc; it shades every segment.
+                        let mut overlaps = (end - start).abs() >= 360.0;
 
-                        if is_wraparound {
+                        if overlaps {
+                        } else if is_wraparound {
                             // For wraparound cases, check if segment overlaps with either:
                             // 1. The range from start_angle to 360°
                             // 2. The range from 0° to end_angle
@@ -4998,6 +5040,11 @@ impl JSONBuilder {
                     serde_json::Map::new()
                 };
 
+                // The inverter belongs to this installation: never take it from a template.
+                for key in PV_INVERTER_FIELDS {
+                    pv_system.remove(key);
+                }
+
                 // Ensure type is set
                 pv_system.insert(
                     "type".to_string(),
@@ -5079,26 +5126,16 @@ impl JSONBuilder {
                 if !pv_system.contains_key("shading") {
                     pv_system.insert("shading".to_string(), Value::Array(vec![]));
                 }
-                if !pv_system.contains_key("inverter_peak_power_dc") {
-                    pv_system.insert(
-                        "inverter_peak_power_dc".to_string(),
-                        Value::Number(serde_json::Number::from_f64(1.0).unwrap()),
-                    );
-                }
-                if !pv_system.contains_key("inverter_peak_power_ac") {
-                    pv_system.insert(
-                        "inverter_peak_power_ac".to_string(),
-                        Value::Number(serde_json::Number::from_f64(1.0).unwrap()),
-                    );
-                }
-                if !pv_system.contains_key("inverter_is_inside") {
-                    pv_system.insert("inverter_is_inside".to_string(), Value::Bool(true));
-                }
-                if !pv_system.contains_key("inverter_type") {
-                    pv_system.insert(
-                        "inverter_type".to_string(),
-                        Value::String("string_inverter".to_string()),
-                    );
+                for key in PV_INVERTER_FIELDS {
+                    if !pv_system.contains_key(key) {
+                        self.push_non_fatal(
+                            "E063",
+                            &crate::json_pointer(&["OnSiteGeneration", element_name, key]),
+                            &format!(
+                                "PV system '{element_name}' needs {key}. No inverter is assumed."
+                            ),
+                        );
+                    }
                 }
 
                 // Width / height precedence: explicit CSV column (applied above) >
@@ -5617,8 +5654,7 @@ impl JSONBuilder {
             .unwrap_or_else(serde_json::Map::new);
 
         let mut consolidated_thermal_bridging = first_zone_data.get("ThermalBridging").cloned();
-        let first_zone_has_lighting = first_zone_data.contains_key("Lighting");
-        let mut other_lighting: Option<Value> = None;
+        let mut consolidated_lighting = first_zone_data.get("Lighting").cloned();
 
         // Collect data from other zones
         for other_zone_name in &other_zone_names {
@@ -5716,13 +5752,12 @@ impl JSONBuilder {
                 }
             }
 
-            // Collect Lighting from other zones (use first one found if first zone has none)
-            if !first_zone_has_lighting {
-                if let Some(lighting) = other_zone_obj.get("Lighting") {
-                    if lighting.is_object() {
-                        other_lighting = Some(lighting.clone());
-                    }
-                }
+            if let Some(lighting) = other_zone_obj.get("Lighting") {
+                consolidated_lighting = Some(merge_zone_lighting(
+                    consolidated_lighting,
+                    lighting,
+                    other_zone_name,
+                )?);
             }
         }
 
@@ -5792,10 +5827,8 @@ impl JSONBuilder {
         if let Some(tb) = consolidated_thermal_bridging {
             first_zone.insert("ThermalBridging".to_string(), tb);
         }
-        if !first_zone_has_lighting {
-            if let Some(lighting) = other_lighting {
-                first_zone.insert("Lighting".to_string(), lighting);
-            }
+        if let Some(lighting) = consolidated_lighting {
+            first_zone.insert("Lighting".to_string(), lighting);
         }
 
         // Remove all other zones
@@ -7340,6 +7373,20 @@ impl JSONBuilder {
             if linked_system_emitters.is_empty() && !saw_space_heat_system_link_column {
                 zone_type_emitters = unlinked_zone_type_emitters;
                 zones_with_csv_emitters.extend(unlinked_zones_with_csv_emitters);
+            } else if linked_system_emitters.is_empty() {
+                // A link column with every cell blank (a re-saved legacy CSV) links nothing, so
+                // no wet system would remain. Never remove heating for a blank link silently.
+                for emitter_row in section_data {
+                    let name = emitter_row
+                        .get("Name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    self.push_non_fatal(
+                        "E059",
+                        &crate::json_pointer(&["Wet Emitters", name, "space_heat_system"]),
+                        &format!("Wet Emitter '{name}' has no space_heat_system, so no wet system heats it. Link it to a wet space heating system."),
+                    );
+                }
             }
 
             let defaults_wet_distribution_template = result
@@ -10962,7 +11009,7 @@ Unlinked UFH,Living,WetEmitter,ufh,8,,,"{""emitter_floor_area"":8,""frac_convect
     }
 
     #[test]
-    fn csv_authored_policy_drops_unlinked_template_wet_distribution_silently() {
+    fn csv_authored_policy_reports_blank_links_instead_of_dropping_heating() {
         let csv = r#"Zone
 Name,Type,volume,floor_area
 Living,Zone,100,50
@@ -10990,10 +11037,13 @@ Unlinked UFH,Living,WetEmitter,ufh,8,,,"{""emitter_floor_area"":8,""frac_convect
             json["Zone"]["Living"].get("SpaceHeatSystem").is_none(),
             "zone should not reference generated systems when current CSV links are blank"
         );
-        assert!(
-            errors.iter().all(|error| error.code != "E059"),
-            "template-only cleanup should stay silent: {errors:?}"
-        );
+        for name in ["Unlinked Radiator", "Unlinked UFH"] {
+            assert!(
+                errors.iter().any(|error| error.code == "E059"
+                    && error.path == format!("/Wet Emitters/{name}/space_heat_system")),
+                "a blank link must not remove heating silently: {errors:?}"
+            );
+        }
     }
 
     #[test]
@@ -11098,7 +11148,7 @@ Radiator,Living,WetEmitter,radiator,1,
         let errors = builder.take_non_fatal_errors();
         let error = errors
             .iter()
-            .find(|error| error.code == "E059")
+            .find(|error| error.code == "E059" && error.path == "/SpaceHeatSystem/Living circuit")
             .expect("unlinked authored WetDistribution should produce E059");
         assert!(error.message.contains("Living circuit"));
         assert!(error.message.contains("space_heat_system"));
@@ -11650,24 +11700,12 @@ OnSiteGeneration,OnSiteGeneration,PhotovoltaicSystem,30,180.53,10,12,"-1.620,2.5
         assert_eq!(default_pv["type"], "PhotovoltaicSystem");
         assert_eq!(default_pv["ventilation_strategy"], "moderately_ventilated");
         assert_eq!(default_pv["EnergySupply"], "mains elec");
-        assert_eq!(
-            default_pv["inverter_peak_power_dc"].as_f64().unwrap(),
-            1.0,
-            "Default inverter_peak_power_dc should be preserved"
-        );
-        assert_eq!(
-            default_pv["inverter_peak_power_ac"].as_f64().unwrap(),
-            1.0,
-            "Default inverter_peak_power_ac should be preserved"
-        );
-        assert!(
-            default_pv["inverter_is_inside"].as_bool().unwrap(),
-            "Default inverter_is_inside should be preserved"
-        );
-        assert_eq!(
-            default_pv["inverter_type"], "string_inverter",
-            "Default inverter_type should be preserved"
-        );
+        for key in PV_INVERTER_FIELDS {
+            assert!(
+                default_pv.get(key).is_none(),
+                "no inverter is invented: {key}"
+            );
+        }
     }
 
     #[test]
