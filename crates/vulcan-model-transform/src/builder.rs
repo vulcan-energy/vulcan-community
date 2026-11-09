@@ -6154,11 +6154,14 @@ impl JSONBuilder {
 
                 for row in section_data {
                     // Get system type – try new column layout first ("Type"), then legacy ("system_type")
-                    let system_type = row
-                        .get("Type")
-                        .and_then(|v| v.as_str())
-                        .or_else(|| row.get("system_type").and_then(|v| v.as_str()))
-                        .or_else(|| row.get("subcategory").and_then(|v| v.as_str()))
+                    let routing = |key: &str| {
+                        row.get(key)
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.trim().is_empty())
+                    };
+                    let system_type = routing("Type")
+                        .or_else(|| routing("system_type"))
+                        .or_else(|| routing("subcategory"))
                         .ok_or_else(|| {
                             BuildError::new(
                                 "E035",
@@ -6499,11 +6502,19 @@ impl JSONBuilder {
                                     );
                                 }
                             }
-                            _ => {
-                                // Unknown System subcategory - skip with warning
-                                eprintln!("[merge_systems] Warning: Unknown System subcategory '{subcategory}' for element '{element_name}' – skipping");
-                            }
+                            _ => self.push_non_fatal(
+                                "E065",
+                                "Systems",
+                                &format!("Systems row '{element_name}' has unknown subcategory '{subcategory}', so it is not in the model. Correct the subcategory."),
+                            ),
                         }
+                    } else {
+                        let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+                        self.push_non_fatal(
+                            "E065",
+                            "Systems",
+                            &format!("Systems row '{name}' has unknown Type '{system_type}', so it is not in the model. Correct the Type."),
+                        );
                     }
                 }
                 // After every row, so a service row that precedes its heat source's
