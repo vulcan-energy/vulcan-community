@@ -3,6 +3,7 @@
 
 //! Explicit Python FHS a8/a9 projections from authored CSV rows. These run before
 //! schema finalization, with source identity and UI provenance still available.
+use crate::parser::PARTY_ELEMENT_MARKER;
 use crate::ValidationError;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -72,7 +73,8 @@ pub(crate) fn map_physical_opening_full_partition_element(
     };
     match element.get("type").and_then(Value::as_str) {
         Some("BuildingElementTransparent") => {
-            map_window(row, element, path, ventilation_base_height, &mut errors)
+            map_window(row, element, path, ventilation_base_height, &mut errors);
+            check_opening_limits(row, element, path, ventilation_base_height, &mut errors);
         }
         Some("BuildingElementAdjacentConditionedSpace") => {
             map_partition(row, element, path, &mut errors)
@@ -96,6 +98,18 @@ pub(crate) fn map_divided_opening_half_partition_element(
     let Some(element) = model.as_object_mut() else {
         return errors;
     };
+    if element.get("type").and_then(Value::as_str) == Some("BuildingElementTransparent") {
+        // A window with no authored list ventilates at its own height, never the template's.
+        if field(row, "window_part_list").is_none() {
+            if let Some(mid_height) = field(row, "mid_height").filter(|v| v.is_number()) {
+                element.insert(
+                    "window_part_list".into(),
+                    json!([{ "mid_height_air_flow_path": mid_height }]),
+                );
+            }
+        }
+        return errors;
+    }
     let party = element.get("type").and_then(Value::as_str) == Some("BuildingElementPartyWall");
     let internal = element.get("type").and_then(Value::as_str)
         == Some("BuildingElementAdjacentConditionedSpace");
@@ -121,7 +135,7 @@ pub(crate) fn map_divided_opening_half_partition_element(
         }
     }
     let within = row.get("Type").and_then(Value::as_str) != Some("Party")
-        && field(row, "_vulcan_ui_party_element").and_then(Value::as_bool) != Some(true);
+        && field(row, PARTY_ELEMENT_MARKER).and_then(Value::as_bool) != Some(true);
     if internal
         && within
         && field(row, "internal_partition_area_basis").and_then(Value::as_str)
@@ -147,7 +161,7 @@ fn map_window(
     let parts = field(row, "window_part_list");
     if let Some(Value::Array(parts)) = parts {
         if parts.is_empty() {
-            element.insert("window_part_list".into(), json!([]));
+            insert_closed_opening(row, element, ventilation_base_height, path, errors);
             return;
         }
         if parts.iter().all(|p| {
@@ -193,7 +207,11 @@ fn map_window(
             _ => field(row, "mid_height").and_then(Value::as_f64),
         };
         let opens = field(row, "max_window_open_area").and_then(Value::as_f64) != Some(0.0);
-        if let Some(window_mid) = geometric.filter(|mid| opens && (mid - used).abs() > 0.005) {
+        // A height outside the glazed element is a blocking error in `check_opening_limits`.
+        let inside = !outside_window(row, used, ventilation_base_height);
+        if let Some(window_mid) =
+            geometric.filter(|mid| opens && inside && (mid - used).abs() > 0.005)
+        {
             let (used, window_mid) = (metres(used), metres(window_mid));
             errors.push(ValidationError {
                 code: TARGET_INPUT_WARNING.into(),
@@ -203,7 +221,14 @@ fn map_window(
                 keyword: None,
             });
         }
-        make_single_opening(row, element, midpoint, path, errors);
+        make_single_opening(
+            row,
+            element,
+            midpoint,
+            ventilation_base_height,
+            path,
+            errors,
+        );
     } else if let Some(parts) = parts {
         // Invalid declared values must survive to validation, never become fixed glazing.
         element.insert("window_part_list".into(), parts.clone());
@@ -212,6 +237,7 @@ fn map_window(
             row,
             element,
             field(row, "mid_height").and_then(Value::as_f64),
+            ventilation_base_height,
             path,
             errors,
         );
@@ -227,13 +253,14 @@ fn make_single_opening(
     row: &Row,
     element: &mut Map<String, Value>,
     midpoint: Option<f64>,
+    ventilation_base_height: f64,
     path: &str,
     errors: &mut Vec<ValidationError>,
 ) {
     let height = field(row, "free_area_height").and_then(Value::as_f64);
     let area = field(row, "max_window_open_area").and_then(Value::as_f64);
     if area == Some(0.0) {
-        element.insert("window_part_list".into(), json!([]));
+        insert_closed_opening(row, element, ventilation_base_height, path, errors);
     } else if let (Some(mid), Some(height), Some(area)) = (midpoint, height, area) {
         element.insert(
             "window_part_list".into(),
@@ -244,6 +271,109 @@ fn make_single_opening(
     }
 }
 
+/// Pinned a8/a9 reject an empty list: FHS sets Control_WindowOpenable on every window and core
+/// refuses a control on a window with no openings. One zero-area opening passes those checks and
+/// admits no air. Upstream defect; "Windows with no openings" in
+/// docs/development/HEM_Python_A9_Qualification.md gives the removal condition.
+fn insert_closed_opening(
+    row: &Row,
+    element: &mut Map<String, Value>,
+    ventilation_base_height: f64,
+    path: &str,
+    errors: &mut Vec<ValidationError>,
+) {
+    let Some((sill, head)) = sill_and_head(row, ventilation_base_height) else {
+        error(
+            errors,
+            path,
+            "window_part_list",
+            "A closed window needs base_height and height to place its zero-area opening.",
+        );
+        return;
+    };
+    element.insert(
+        "window_part_list".into(),
+        json!([{
+            "mid_height": (sill + head) / 2.0,
+            "free_area_height": head - sill,
+            "max_window_open_area": 0,
+        }]),
+    );
+}
+
+/// Python's `math.isclose` with the arguments a9 uses (rel_tol 1e-9, abs_tol 1e-10).
+fn strictly_above(value: f64, limit: f64) -> bool {
+    value > limit && (value - limit).abs() > (1e-9 * value.abs().max(limit.abs())).max(1e-10)
+}
+
+/// The window's sill and head, relative to the ventilation-zone base.
+fn sill_and_head(row: &Row, ventilation_base_height: f64) -> Option<(f64, f64)> {
+    let sill = field(row, "base_height").and_then(Value::as_f64)? - ventilation_base_height;
+    Some((sill, sill + field(row, "height").and_then(Value::as_f64)?))
+}
+
+fn outside_window(row: &Row, mid: f64, ventilation_base_height: f64) -> bool {
+    sill_and_head(row, ventilation_base_height)
+        .is_some_and(|(sill, head)| strictly_above(sill, mid) || strictly_above(mid, head))
+}
+
+/// Core `input.py` and wrapper `window_validation.py` rules, on the openings actually emitted.
+/// Mirrors `validateWindowOpenings` in validateElement.ts for routes that skip the editor.
+fn check_opening_limits(
+    row: &Row,
+    element: &Map<String, Value>,
+    path: &str,
+    ventilation_base_height: f64,
+    errors: &mut Vec<ValidationError>,
+) {
+    let Some(parts) = element.get("window_part_list").and_then(Value::as_array) else {
+        return;
+    };
+    let label = |several: String, single: &str| {
+        if parts.len() > 1 {
+            several
+        } else {
+            single.to_string()
+        }
+    };
+    let number = |part: &Value, key: &str| part.get(key).and_then(Value::as_f64);
+    let mut block = |message: String| error(errors, path, "window_part_list", &message);
+    let height = field(row, "height").and_then(Value::as_f64);
+    if let (Some(width), Some(height)) = (field(row, "width").and_then(Value::as_f64), height) {
+        let open_area: f64 = parts
+            .iter()
+            .filter_map(|part| number(part, "max_window_open_area"))
+            .sum();
+        if strictly_above(open_area, width * height) {
+            block("The max open area is greater than the window area (height x width).".into());
+        }
+    }
+    let limits = sill_and_head(row, ventilation_base_height);
+    for (index, part) in parts.iter().enumerate() {
+        if let (Some(free), Some(height)) = (number(part, "free_area_height"), height) {
+            if strictly_above(free, height) {
+                let what = label(
+                    format!("Part {} free height", index + 1),
+                    "Free Area Height",
+                );
+                block(format!(
+                    "{what} ({free} m) is greater than the window height ({height} m)."
+                ));
+            }
+        }
+        if let (Some(mid), Some((sill, head))) = (number(part, "mid_height"), limits) {
+            if strictly_above(sill, mid) || strictly_above(mid, head) {
+                let what = label(format!("Part {} mid height", index + 1), "Mid Height");
+                block(format!(
+                    "{what} ({mid} m) is outside the window ({} m to {} m above the ventilation-zone base).",
+                    metres(sill),
+                    metres(head)
+                ));
+            }
+        }
+    }
+}
+
 fn map_partition(
     row: &Row,
     element: &mut Map<String, Value>,
@@ -251,7 +381,7 @@ fn map_partition(
     errors: &mut Vec<ValidationError>,
 ) {
     let source_type = row.get("Type").and_then(Value::as_str).unwrap_or("");
-    let party_floor = field(row, "_vulcan_ui_party_element").and_then(Value::as_bool) == Some(true);
+    let party_floor = field(row, PARTY_ELEMENT_MARKER).and_then(Value::as_bool) == Some(true);
     let within = source_type != "Party" && !party_floor;
     if party_floor
         && !element
@@ -657,7 +787,6 @@ mod tests {
     #[test]
     fn fixed_glazing_and_authored_physical_parts_remain_exact() {
         for parts in [
-            json!([]),
             json!([{"mid_height":1.5,"free_area_height":1,"max_window_open_area":0.4},{"mid_height":2.5,"free_area_height":0.5,"max_window_open_area":0.2}]),
         ] {
             let (v, e) = map(

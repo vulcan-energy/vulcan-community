@@ -75,6 +75,61 @@ const NAMED_UI_ONLY_EXTRA_JSON_KEYS: &[&str] = &[
     "thermal_bridge_solver",
 ];
 
+/// Supplies a model may reference by name without authoring one.
+fn builtin_energy_supply(name: &str) -> Option<Value> {
+    match name {
+        "mains elec" => Some(serde_json::json!({"fuel": "electricity", "is_export_capable": true})),
+        "mains gas" => Some(serde_json::json!({"fuel": "mains_gas"})),
+        _ => None,
+    }
+}
+
+fn collect_referenced_energy_supplies(value: &Value, referenced: &mut HashSet<String>) {
+    match value {
+        Value::Object(obj) => {
+            for (key, child) in obj {
+                if matches!(key.as_str(), "EnergySupply" | "EnergySupply_aux") {
+                    if let Some(name) = child.as_str() {
+                        referenced.insert(name.to_string());
+                    }
+                }
+                collect_referenced_energy_supplies(child, referenced);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_referenced_energy_supplies(item, referenced);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Add each referenced supply the model lacks and a built-in entry can provide, so a scenario
+/// that introduces a fuel gets the supply a Systems row would. Unknown names are left for
+/// validation to reject.
+pub fn add_builtin_energy_supplies(model: &mut Value) {
+    let mut referenced = HashSet::new();
+    collect_referenced_energy_supplies(model, &mut referenced);
+    for name in referenced {
+        if model
+            .pointer(&crate::json_pointer(&["EnergySupply", &name]))
+            .is_some()
+        {
+            continue;
+        }
+        if let (Some(entry), Some(root)) = (builtin_energy_supply(&name), model.as_object_mut()) {
+            if let Some(supplies) = root
+                .entry("EnergySupply")
+                .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                .as_object_mut()
+            {
+                supplies.insert(name, entry);
+            }
+        }
+    }
+}
+
 fn is_ui_only_extra_json_key(key: &str) -> bool {
     key.starts_with('_') || NAMED_UI_ONLY_EXTRA_JSON_KEYS.contains(&key)
 }
@@ -2973,46 +3028,12 @@ impl JSONBuilder {
         Ok(())
     }
 
-    fn collect_referenced_energy_supplies(value: &Value, referenced: &mut HashSet<String>) {
-        match value {
-            Value::Object(obj) => {
-                for (key, child) in obj {
-                    if matches!(key.as_str(), "EnergySupply" | "EnergySupply_aux") {
-                        if let Some(name) = child.as_str() {
-                            referenced.insert(name.to_string());
-                        }
-                    }
-                    Self::collect_referenced_energy_supplies(child, referenced);
-                }
-            }
-            Value::Array(items) => {
-                for item in items {
-                    Self::collect_referenced_energy_supplies(item, referenced);
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn energy_supply_template_for_reference(&self, name: &str) -> Option<Value> {
         self.defaults
             .get("EnergySupply")
             .and_then(|value| value.as_object())
             .and_then(|energy_supply| energy_supply.get(name).cloned())
-            .or_else(|| match name {
-                "mains elec" => {
-                    let mut entry = serde_json::Map::new();
-                    entry.insert("fuel".to_string(), Value::String("electricity".to_string()));
-                    entry.insert("is_export_capable".to_string(), Value::Bool(true));
-                    Some(Value::Object(entry))
-                }
-                "mains gas" => {
-                    let mut entry = serde_json::Map::new();
-                    entry.insert("fuel".to_string(), Value::String("mains_gas".to_string()));
-                    Some(Value::Object(entry))
-                }
-                _ => None,
-            })
+            .or_else(|| builtin_energy_supply(name))
     }
 
     fn clean_energy_supply_entry_for_fhs(entry: &mut serde_json::Map<String, Value>) {
@@ -3140,7 +3161,8 @@ impl JSONBuilder {
         }
 
         let mut referenced_energy_supplies = HashSet::new();
-        Self::collect_referenced_energy_supplies(result, &mut referenced_energy_supplies);
+        self.supply_fan_coil_systems(result);
+        collect_referenced_energy_supplies(result, &mut referenced_energy_supplies);
         self.ensure_referenced_energy_supplies(result, &referenced_energy_supplies)?;
 
         // Cleanup: keep ElectricBattery only when explicitly provided by CSV Systems rows.
@@ -6795,7 +6817,94 @@ impl JSONBuilder {
         false
     }
 
+    /// An authored wet system with no emitters runs as valid and delivers no heat.
+    fn report_authored_wet_systems_without_emitters(
+        &self,
+        result: &Value,
+        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+    ) {
+        let authored: std::collections::BTreeSet<String> =
+            Self::authored_space_heat_system_aliases_from_systems_csv(csv_data)
+                .into_values()
+                .collect();
+        for name in authored {
+            let Some(system) = result.get("SpaceHeatSystem").and_then(|s| s.get(&name)) else {
+                continue;
+            };
+            let has_emitters = system
+                .get("emitters")
+                .and_then(Value::as_array)
+                .is_some_and(|emitters| !emitters.is_empty());
+            if system.get("type").and_then(Value::as_str) == Some("WetDistribution")
+                && !has_emitters
+            {
+                self.push_non_fatal(
+                    "E059",
+                    &crate::json_pointer(&["SpaceHeatSystem", name.as_str()]),
+                    &format!(
+                        "SpaceHeatSystem '{name}' has no emitters, so it would deliver no heat. Add Wet Emitter rows linked to it, or remove the Systems row."
+                    ),
+                );
+            }
+        }
+    }
+
+    /// Give each fan-coil wet system an electricity supply when the target needs one: its heat
+    /// source's supply if that is electric, otherwise `mains elec`. Fans never burn gas.
+    fn supply_fan_coil_systems(&self, result: &mut Value) {
+        if !self.input_contract.fan_coil_needs_energy_supply {
+            return;
+        }
+        let is_electric = |name: &str| {
+            result
+                .get("EnergySupply")
+                .and_then(|supplies| supplies.get(name))
+                .cloned()
+                .or_else(|| self.energy_supply_template_for_reference(name))
+                .is_some_and(|supply| {
+                    supply.get("fuel").and_then(Value::as_str) == Some("electricity")
+                })
+        };
+        let assignments: Vec<(String, String)> = result
+            .get("SpaceHeatSystem")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter(|(_, system)| {
+                system.get("EnergySupply").is_none()
+                    && system
+                        .get("emitters")
+                        .and_then(Value::as_array)
+                        .is_some_and(|emitters| {
+                            emitters.iter().any(|emitter| {
+                                emitter.get("wet_emitter_type").and_then(Value::as_str)
+                                    == Some("fancoil")
+                            })
+                        })
+            })
+            .map(|(name, system)| {
+                let supply = system
+                    .pointer("/HeatSource/name")
+                    .and_then(Value::as_str)
+                    .and_then(|source| {
+                        result
+                            .get("HeatSourceWet")?
+                            .get(source)?
+                            .get("EnergySupply")
+                    })
+                    .and_then(Value::as_str)
+                    .filter(|supply| is_electric(supply))
+                    .unwrap_or("mains elec");
+                (name.clone(), supply.to_string())
+            })
+            .collect();
+        for (name, supply) in assignments {
+            result["SpaceHeatSystem"][name.as_str()]["EnergySupply"] = Value::String(supply);
+        }
+    }
+
     fn build_wet_emitter_object(
+        &self,
         subcategory: &str,
         emitter_row: &HashMap<String, Value>,
     ) -> Result<serde_json::Map<String, Value>, BuildError> {
@@ -6978,19 +7087,30 @@ impl JSONBuilder {
                     Value::Number(serde_json::Number::from(n_units)),
                 );
 
-                // User-supplied test data (extra_json) wins; the stub is only a
-                // schema-completeness fill when none was authored.
-                let fancoil_test_data = emitter_data
+                // Every target indexes the fan speed table, so no placeholder can stand in.
+                let test_data = emitter_data
                     .get("fancoil_test_data")
-                    .filter(|v| v.is_object())
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        serde_json::json!({
-                            "fan_power_W": [15],
-                            "fan_speed_data": []
-                        })
-                    });
-                emitter_obj.insert("fancoil_test_data".to_string(), fancoil_test_data);
+                    .filter(|v| v.is_object());
+                let has_fan_speeds = test_data
+                    .and_then(|v| v.get("fan_speed_data"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|rows| !rows.is_empty());
+                if !has_fan_speeds {
+                    let name = emitter_row
+                        .get("Name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    self.push_non_fatal(
+                        "E062",
+                        &crate::json_pointer(&["Wet Emitters", name, "fancoil_test_data"]),
+                        &format!(
+                            "Fancoil '{name}' needs manufacturer test data: fan_power_W and fan_speed_data."
+                        ),
+                    );
+                }
+                if let Some(test_data) = test_data {
+                    emitter_obj.insert("fancoil_test_data".to_string(), test_data.clone());
+                }
 
                 let frac_conv = emitter_data
                     .get("frac_convective")
@@ -7074,6 +7194,9 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
+        if csv_data.get("Wet Emitters").is_none_or(Vec::is_empty) {
+            self.report_authored_wet_systems_without_emitters(result, csv_data);
+        }
         if let Some(section_data) = csv_data.get("Wet Emitters") {
             if section_data.is_empty() {
                 // FHS: no emitter rows means CSV does not author wet distribution — drop
@@ -7084,10 +7207,16 @@ impl JSONBuilder {
                 // Core: keep defaults so `update_default_space_heat_systems` can rename/reconcile
                 // (e.g. multi-zone geometry CSV without a Wet Emitters section).
                 if self.is_fhs_schema {
+                    let authored: HashSet<String> =
+                        Self::authored_space_heat_system_aliases_from_systems_csv(csv_data)
+                            .into_values()
+                            .collect();
                     if let Some(space_heat_system) = result.get_mut("SpaceHeatSystem") {
                         if let Some(shs_obj) = space_heat_system.as_object_mut() {
-                            shs_obj.retain(|_, v| {
-                                v.get("type").and_then(|t| t.as_str()) != Some("WetDistribution")
+                            shs_obj.retain(|name, v| {
+                                authored.contains(name)
+                                    || v.get("type").and_then(|t| t.as_str())
+                                        != Some("WetDistribution")
                             });
                         }
                     }
@@ -7303,7 +7432,7 @@ impl JSONBuilder {
                 let mut emitters_array = Vec::new();
 
                 for emitter_row in emitters_data {
-                    let emitter_obj = Self::build_wet_emitter_object(&subcategory, &emitter_row)?;
+                    let emitter_obj = self.build_wet_emitter_object(&subcategory, &emitter_row)?;
                     emitters_array.push(Value::Object(emitter_obj));
                 }
 
@@ -7415,7 +7544,7 @@ impl JSONBuilder {
                             ));
                         };
                         let emitter_obj =
-                            Self::build_wet_emitter_object(subcategory, &emitter_row)?;
+                            self.build_wet_emitter_object(subcategory, &emitter_row)?;
                         if emitter_obj.get("wet_emitter_type").and_then(|v| v.as_str())
                             == Some("radiator")
                         {
@@ -11035,7 +11164,7 @@ Fancoil 2,Living,WetEmitter,fancoil,3
         let emitter1 = emitters[0].as_object().unwrap();
         assert_eq!(emitter1["wet_emitter_type"], "fancoil");
         assert_eq!(emitter1["n_units"], 2);
-        assert!(emitter1.get("fancoil_test_data").is_some());
+        assert!(emitter1.get("fancoil_test_data").is_none(), "never stubbed");
 
         // Check second fancoil
         let emitter2 = emitters[1].as_object().unwrap();

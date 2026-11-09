@@ -5,6 +5,10 @@ use crate::error::ParseError;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
+/// The one `_`-prefixed `extra_json` key the merge reads: it classifies a horizontal adjacent
+/// element as a party floor. The merge consumes it and never writes it to the model.
+pub const PARTY_ELEMENT_MARKER: &str = "_vulcan_ui_party_element";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserState {
     Initial,
@@ -298,7 +302,7 @@ impl CSVParser {
             // `_`-prefixed keys are Vulcan UI metadata (e.g. `_system_source`). They live
             // in the saved CSV only; the merged dwelling JSON must contain pure HEM input.
             if let Some(obj) = json_value.as_object_mut() {
-                obj.retain(|k, _| !k.starts_with('_'));
+                obj.retain(|k, _| !k.starts_with('_') || k == PARTY_ELEMENT_MARKER);
             }
             return Ok(json_value);
         }

@@ -429,7 +429,7 @@ describe('stripUiKeysFromCsv', () => {
     expect(result).toBe(csv);
   });
 
-  it('strips _vulcan_ui_party_element from non-exposed extra_json', () => {
+  it('keeps _vulcan_ui_party_element for the converter', () => {
     const extraJson = jsonCsvCell({ _vulcan_ui_party_element: true, u_value: 0.4 });
     const csv = [
       'Non-Exposed Elements,,,,,,,,,,,',
@@ -437,7 +437,7 @@ describe('stripUiKeysFromCsv', () => {
       `adj1,Living,BuildingElementAdjacentConditionedSpace,10,0,3,3,,"0,0,0|3,0,0",${extraJson}`,
     ].join('\n');
     const result = stripUiKeysFromCsv(csv);
-    expect(result).not.toContain('_vulcan_ui_party_element');
+    expect(result).toContain('_vulcan_ui_party_element');
     expect(result).toContain('u_value');
   });
 

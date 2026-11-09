@@ -18,6 +18,7 @@ pub mod finalization;
 pub mod preflight_diagnostics;
 mod schema_validation;
 mod target_mappings;
+pub use builder::add_builtin_energy_supplies;
 pub use target_mappings::map_target_unobstructed_shading;
 
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,9 @@ pub(crate) struct InputContract {
     pub requires_main_hot_water_source: bool,
     pub requires_detailed_thermal_bridges: bool,
     pub uses_exact_empty_shading_sectors: bool,
+    /// Pinned Python core meters fan-coil power through the wet system's own `EnergySupply` and
+    /// crashes when it is absent.
+    pub fan_coil_needs_energy_supply: bool,
 }
 
 impl ConversionProfile {
@@ -82,6 +86,7 @@ impl ConversionProfile {
             requires_main_hot_water_source: physical_openings,
             requires_detailed_thermal_bridges: detailed_bridges,
             uses_exact_empty_shading_sectors: physical_openings,
+            fan_coil_needs_energy_supply: physical_openings,
         }
     }
 }

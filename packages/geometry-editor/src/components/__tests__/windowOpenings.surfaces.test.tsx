@@ -119,9 +119,8 @@ describe('window_part_list on physical-opening targets', () => {
     expect(result.extra_json).toMatchObject({ window_part_list: [{ mid_height_air_flow_path: 2 }] });
   });
 
-  it('offers Add opening without repeating the closed message', () => {
+  it('offers Add opening on a closed window', () => {
     mount(windowElement({ window_part_list: [] }), physicalItems);
-    expect(screen.queryByText(/HEM a8 and a9 cannot run/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Add opening' })).toBeInTheDocument();
   });
 
@@ -236,13 +235,11 @@ describe('validateElement window rules', () => {
     expect(messages(windowElement(divisions), port(physicalItems))[0]).toContain('different heights');
   });
 
-  const noOpeningIssue = 'HEM a8 and a9 cannot run a window with no openings. Enter an opening for this window.';
-
   it.each([
     ['zero open area', undefined, { max_window_open_area: 0 }],
     ['an empty list', { window_part_list: [] }, {}],
-  ])('blocks a closed window on a8/a9: %s', (_name, extra, overrides) => {
-    expect(messages(windowElement(extra, overrides), port(physicalItems))).toContain(noOpeningIssue);
+  ])('allows a closed window on a8/a9: %s', (_name, extra, overrides) => {
+    expect(messages(windowElement(extra, overrides), port(physicalItems))).toEqual([]);
   });
 
   it('calls a blank free height required, not zero, beside an old automatic zero area', () => {
@@ -388,9 +385,9 @@ describe('main-form window opening inputs', () => {
     expect(screen.getByText(/replaces the parts with one opening/)).toBeInTheDocument();
   });
 
-  it('leaves the closed message to the validation pill on a8/a9', () => {
+  it('shows no blocking message for a closed window on a8/a9', () => {
     renderForm(windowElement({ window_part_list: [] }));
-    expect(screen.getAllByText(/HEM a8 and a9 cannot run a window with no openings/)).toHaveLength(1);
+    expect(screen.queryByText(/cannot run/)).toBeNull();
     expect(screen.queryByText(/stays closed/)).toBeNull();
   });
 
