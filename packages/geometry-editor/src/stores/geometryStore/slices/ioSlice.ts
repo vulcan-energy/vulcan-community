@@ -1237,7 +1237,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(formatOptionalFiniteNumberForCsv(element.max_window_open_area)),
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(
-              convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, windowHeightOffset),
+              convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, windowHeightOffset, effectiveVentBaseHeight),
             ) : '')
           ];
           lines.push(ensureColumnCount(windowRow, windowColumnCount));

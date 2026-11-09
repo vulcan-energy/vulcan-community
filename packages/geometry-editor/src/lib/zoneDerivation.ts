@@ -6,6 +6,7 @@ import polygonClipping, { type Pair, type Ring } from 'polygon-clipping';
 import { calculatePolygonArea, isAdjacentConditionedInternalFloorDoubled } from './polygonSync';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { canvasFloorToFhsStorey, fhsStoreyToCanvasFloor } from './storeySemantics';
+import { shiftPhysicalPartHeight } from './windowOpenings';
 import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, physicalZUsesFloorId } from './elementCanvasFloor';
 
 // Lives beside the storey convention (elementCanvasFloor) so connectivity code can use it without
@@ -880,11 +881,13 @@ function buildTransparentBaseHeightDependentPatch(
   let changed = false;
   const nextWindowPartList = windowPartList.map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-    const mid = (entry as Record<string, unknown>).mid_height_air_flow_path;
-    if (typeof mid !== 'number' || !Number.isFinite(mid)) return entry;
+    const part = shiftPhysicalPartHeight(entry as Record<string, unknown>, delta);
+    if (part !== entry) changed = true;
+    const mid = part.mid_height_air_flow_path;
+    if (typeof mid !== 'number' || !Number.isFinite(mid)) return part;
     changed = true;
     return {
-      ...entry,
+      ...part,
       mid_height_air_flow_path: roundToTwoDecimals(mid + delta),
     };
   });

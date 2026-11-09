@@ -186,6 +186,11 @@ import {
   type TransparentOpeningNumericPatch,
 } from '../lib/transparentOpeningDerivedFields';
 import {
+  syncWindowPartListToMidHeight,
+  windowPartsArePhysical,
+  type WindowOpeningSource,
+} from '../lib/windowOpenings';
+import {
   applyGroundThicknessWallsManualTracking,
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
 } from '../lib/groundSuspendedFabricSync';
@@ -2307,6 +2312,7 @@ const applyTransparentOpeningAutomaticFields = (
   nextElement: Element,
   normalizedUpdates: Partial<Element>,
   effectiveFloors: Floor[],
+  windowPartsPhysical: boolean,
 ): void => {
   if (
     prevElement.type !== 'BuildingElementTransparent' ||
@@ -2360,6 +2366,20 @@ const applyTransparentOpeningAutomaticFields = (
     typeof canonicalPatch.mid_height === 'number'
   ) {
     nextElement.mid_height = canonicalPatch.mid_height;
+    // a8/a9 keeps its one opening's height in the list. The a7 list follows the sill in
+    // WindowPartListControl instead, so shifting it here as well would move it twice.
+    if (
+      windowPartsPhysical &&
+      typeof prevElement.mid_height === 'number' &&
+      !Object.prototype.hasOwnProperty.call(readJsonRecord(updateRecord.extra_json) ?? {}, 'window_part_list')
+    ) {
+      const syncedExtraJson = syncWindowPartListToMidHeight(
+        nextElement as unknown as WindowOpeningSource,
+        prevElement.mid_height,
+        canonicalPatch.mid_height,
+      );
+      if (syncedExtraJson) nextElement.extra_json = syncedExtraJson as typeof nextElement.extra_json;
+    }
   }
   if (
     !Object.prototype.hasOwnProperty.call(updateRecord, 'max_window_open_area') &&
@@ -6013,6 +6033,8 @@ const createGeometryState = (
           nextElement,
           normalizedUpdates,
           withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById)),
+          nextElement.type === 'BuildingElementTransparent'
+            && windowPartsArePhysical(schemaPort, state.complianceSettings?.complianceValidationEnabled ? 'fhs' : 'core') === true,
         );
       } catch { /* swallow: best-effort */ }
 

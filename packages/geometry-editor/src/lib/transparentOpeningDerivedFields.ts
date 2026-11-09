@@ -145,7 +145,9 @@ export function buildTransparentOpeningNumericPatch(
     hasOwn(directPatch, 'width') ||
     hasOwn(directPatch, 'height') ||
     hasOwn(directPatch, 'free_area_height');
-  if (maxOpenInputsChanged && !hasOwn(directPatch, 'max_window_open_area')) {
+  const freeAreaHeight = hasOwn(patch, 'free_area_height') ? patch.free_area_height : element.free_area_height;
+  // A blank free height is missing input, not a closed window: writing 0 here would hide it.
+  if (maxOpenInputsChanged && !hasOwn(directPatch, 'max_window_open_area') && finiteNumberOrNull(freeAreaHeight) !== null) {
     const currentMaxOpenArea = finiteNumberOrNull(element.max_window_open_area);
     if (
       shouldPreserveAutomaticValue(currentMaxOpenArea, previousDerived.maxWindowOpenArea) &&
