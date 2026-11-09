@@ -9016,8 +9016,19 @@ impl JSONBuilder {
         let mut env_area_sum = 0.0;
 
         for el in &all_elements {
+            // Partitions inside the dwelling are not envelope; a party element is, however it is
+            // spelled (`Type=Party` or the editor's party marker on an adjacent element).
             let element_type = el.get("Type").and_then(|v| v.as_str()).unwrap_or("");
-            if element_type == "BuildingElementAdjacentConditionedSpace" {
+            let party = element_type == "Party"
+                || el
+                    .get("extra_json")
+                    .and_then(|ej| ej.get(crate::parser::PARTY_ELEMENT_MARKER))
+                    .and_then(Value::as_bool)
+                    == Some(true);
+            if self.map_csv_type_to_schema_type(element_type)
+                == "BuildingElementAdjacentConditionedSpace"
+                && !party
+            {
                 continue;
             }
             if let Some(area) = el.get("area").and_then(|v| v.as_f64()) {
