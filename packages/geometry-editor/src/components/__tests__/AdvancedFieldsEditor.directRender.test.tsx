@@ -1729,6 +1729,25 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     );
   });
 
+  it('does not repeat the main-form position fields for a hosted fan', () => {
+    const { container } = assertDirectCharacterization(
+      {
+        elementType: 'MechanicalVentilation',
+        useFHSSchema: true,
+        currentDataExtra: { vent_type: 'Intermittent MEV' },
+        extraJson: { vent_type: 'Intermittent MEV', EnergySupply: 'mains elec', design_outdoor_air_flow_rate: 30 },
+      },
+      [
+        row('design_zone_cooling_covered_by_mech_vent', 'Design Zone Cooling Covered By Mech Vent', TEXT(null)),
+        row('design_zone_heating_covered_by_mech_vent', 'Design Zone Heating Covered By Mech Vent', TEXT(null)),
+        row('EnergySupply', 'Energy Supply', TEXT(null)),
+        row('design_outdoor_air_flow_rate', 'Design Outdoor Air Flow Rate', TEXT('0', '0')),
+        row('SFP_in_use_factor', 'SFP In Use Factor', TEXT('1')),
+      ],
+    );
+    expect(container.querySelector('[data-field-key="orientation360"]')).toBeNull();
+  });
+
   it('R4.5 review round 1 fix / R4.6a: MechanicalVentilation, Core: every nullable-wrapped property routes to a real control (mvhr_location EnumControl, the four numeric fields NumberControl with their schema minima)', () => {
     // REGRESSION, caught in adversarial review round 1: HEM's
     // `$defs/MechanicalVentilation.properties.mvhr_location` is
@@ -2830,6 +2849,23 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
     // The assertion the old `delete` semantics failed: a hole stringifies as `null`,
     // and `[null,20,30]` is what used to reach the exported HEM input.
     expect(JSON.stringify(next.sec.list)).toBe('[20,30]');
+  });
+});
+
+describe('schema const fields', () => {
+  const schema = { type: 'object', properties: { efficiency: { type: 'number', const: 1 } } };
+  const spec = { type: 'VerticalLayout', elements: [{ type: 'Control', scope: '#/properties/efficiency' }] } as DirectSpecNode;
+
+  it('locks a const field that holds its value', () => {
+    const { container } = renderDirectSpecFields({ schema, data: { efficiency: 1 }, spec });
+    expect(container.querySelector('select')).toBeNull();
+    expect(container.textContent).toContain('1');
+  });
+
+  it('offers only the const value when unset', () => {
+    const { container } = renderDirectSpecFields({ schema, data: {}, spec });
+    const values = Array.from(container.querySelectorAll('option')).map((option) => option.value).filter(Boolean);
+    expect(values).toEqual(['1']);
   });
 });
 

@@ -13,7 +13,7 @@ import {
   mergeSystemExtraJsonAfterJsonForms,
 } from '../lib/systemAdvancedSchemaExpand';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
-import { flattenSystemSubtypePlantSchemas } from '../lib/systemSchemaFlatten';
+import { flattenSystemSubtypePlantSchemas, forbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import { buildSystemAdvancedUischema, type AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
   collectHeatSourceWetNameLabelsFromProject,
@@ -74,6 +74,7 @@ import {
   WindowDetailSection,
 } from './WindowDetailControls';
 import {
+  canMechanicalVentilationInheritHostPlacement,
   MECHANICAL_VENTILATION_FAN_CHOICE_TYPES,
   MECHANICAL_VENTILATION_FLAT_POSITION_FIELDS,
   MECHANICAL_VENTILATION_MEASURED_FIELDS,
@@ -1069,6 +1070,29 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       delete advancedProperties[field];
     });
 
+    // Hosted MEV: the main form renders position, so Advanced must not repeat it.
+    if (elementType === 'MechanicalVentilation' && canMechanicalVentilationInheritHostPlacement(mechanicalVentilationVentType)) {
+      deleteProperties(advancedProperties as Record<string, unknown>, MECHANICAL_VENTILATION_FLAT_POSITION_FIELDS);
+    }
+
+    // Ductwork: a8/a9 forbid diameters or perimeter by shape, so show only the sizes this shape takes.
+    if (elementType === 'MechanicalVentilationDuctwork') {
+      forbiddenFieldKeys(fullSchema, advancedFieldsData, getActiveRootSchema()).forEach((key) => delete advancedProperties[key]);
+    }
+
+    // a8/a9 accept a class or a number; offer the classes. A saved number stays visible.
+    const arealClasses = advancedProperties.areal_heat_capacity?.anyOf?.find((branch) => Array.isArray(branch.enum));
+    if (arealClasses) {
+      const arealNode = { ...advancedProperties.areal_heat_capacity, enum: arealClasses.enum };
+      delete arealNode.anyOf;
+      advancedProperties.areal_heat_capacity = arealNode;
+    }
+
+    // a8/a9: the converter overwrites this value, so an input here has no effect.
+    if (advancedProperties.is_adjacent_space_within_dwelling) {
+      delete advancedProperties.is_adjacent_space_within_dwelling;
+    }
+
     // For ThermalBridgeLinear, remove junction_type from schema so we can render it manually
     if (elementType === 'ThermalBridgeLinear' && advancedProperties.junction_type) {
       // Remove it from properties so DirectAdvancedFields' flat walk doesn't render it
@@ -1868,6 +1892,13 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         deleteProperties(nextRecord, MECHANICAL_VENTILATION_FLAT_POSITION_FIELDS);
         nextRecord.EnergySupply = MVHR_FIXED_ENERGY_SUPPLY;
         nextExtra = nextRecord;
+      }
+    }
+    if (elementType === 'MechanicalVentilationDuctwork') {
+      const forbidden = forbiddenFieldKeys(getActiveElementSubschema(elementType, subtype), nextExtra, getActiveRootSchema());
+      if (forbidden.some((key) => key in nextExtra)) {
+        nextExtra = { ...nextExtra };
+        forbidden.forEach((key) => delete nextExtra[key]);
       }
     }
     if (

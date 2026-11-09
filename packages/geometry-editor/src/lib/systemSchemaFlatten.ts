@@ -55,6 +55,12 @@ function valueMatchesSchemaKeyword(value: unknown, sub: unknown, root?: unknown)
   return jsonSchemaIfMatches(sub, value, root);
 }
 
+/** Keys of `subschema.properties` that a branch matching `data` forbids. */
+export function forbiddenFieldKeys(subschema: unknown, data: unknown, root?: unknown): string[] {
+  const kept = readRecord(readRecord(flattenIfThenAllOfProperties(subschema, data, root)).properties);
+  return Object.keys(readRecord(readRecord(subschema).properties)).filter((key) => !(key in kept));
+}
+
 function isOptionalNestedObjectSchema(sch: unknown): boolean {
   if (!sch || typeof sch !== 'object' || Array.isArray(sch)) return false;
   const s = sch as Record<string, unknown>;

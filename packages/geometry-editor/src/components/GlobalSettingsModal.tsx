@@ -491,6 +491,9 @@ export function GlobalSettingsModal({
   const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema("fhs") : null;
   const showStoreyOfDwelling = targetFieldAvailability(targetRoot, ["General", "storey_of_dwelling"]) !== "absent";
   const showSanitaryAccommodations = targetFieldAvailability(targetRoot, ["NumberOfSanitaryAccommodations"]) !== "absent";
+  const roomCountRows = showSanitaryAccommodations
+    ? ROOM_COUNT_COMPLIANCE_ROWS
+    : ROOM_COUNT_COMPLIANCE_ROWS.filter((row) => row.field !== "NumberOfSanitaryAccommodations");
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -2449,7 +2452,7 @@ export function GlobalSettingsModal({
                           </div>
                         ) : null}
 
-                        {ROOM_COUNT_COMPLIANCE_ROWS.filter((row) => showSanitaryAccommodations || row.field !== "NumberOfSanitaryAccommodations").map((row) => {
+                        {roomCountRows.map((row) => {
                           const comparisonMessages = row.comparisonFieldKey
                             ? comparisonGlobalFieldIndicators[row.comparisonFieldKey]
                             : undefined;

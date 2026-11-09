@@ -31,6 +31,15 @@ export function resolveIssueTarget(
   },
 ): IssueTarget {
   const s = issuePathSegments(path);
+  if (s[0] === 'InfiltrationVentilation' && s[1] === 'MechanicalVentilation' && s[2]) {
+    const matches = [...model.elements].filter((element) => element?.name === s[2]);
+    return {
+      section: s[0],
+      elementId: matches.length === 1 ? matches[0]!.id : undefined,
+      fieldKey: matches.length === 1 ? s[3] : undefined,
+      ownerKey: JSON.stringify(s.slice(0, 3)),
+    };
+  }
   if (s[0] !== 'Zone' || !s[1]) {
     // Top-level entries that are editor elements (e.g. OnSiteGeneration panels) match a unique name.
     const matches = s[1] ? [...model.elements].filter((element) => element?.name === s[1]) : [];
