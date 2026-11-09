@@ -854,7 +854,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (!overlay || !overlay.path || overlay.path.trim() === '') continue;
       const payload = encodeGuideOverlayMetadataValue(overlay);
       if (payload) {
-        lines.push(`GuideOverlay,${floorIndex},${payload},,,,,,,,,,,,,`);
+        lines.push(`GuideOverlay,${floorIndex},${escapeCSV(payload)},,,,,,,,,,,,,`);
       }
     }
     const sourceFloorKeys = Object.keys(state.guideOverlaySourceByFloor)
@@ -866,7 +866,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (!source) continue;
       const payload = encodeGuideOverlaySourceMetadataValue(source);
       if (payload) {
-        lines.push(`GuideOverlaySource,${floorIndex},${payload},,,,,,,,,,,,,`);
+        lines.push(`GuideOverlaySource,${floorIndex},${escapeCSV(payload)},,,,,,,,,,,,,`);
       }
     }
     // Zone rows have no `extra_json` column, so their authored override markers live in Metadata
