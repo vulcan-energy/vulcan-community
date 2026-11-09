@@ -882,21 +882,109 @@ fn parse_csv_bool_cell(value: Option<&Value>, field: &str) -> Result<Option<bool
     }
 }
 
-/// Contract precedence for a sectioned CSV row: defaults-template seed ←
-/// extra_json ← CSV columns (highest), before shared schema finalization. Blank cells
-/// (null / empty string) leave the seed value in place. `skip_keys` are identity /
-/// geometry / UI columns that must never enter the merged object.
-/// Use this for any new sectioned merge so the precedence cannot be
-/// reimplemented inverted (see `contracts/geometry-csv` `merge_precedence`).
 fn csv_cell_is_set(v: &Value) -> bool {
     !(v.is_null() || v.as_str().is_some_and(|s| s.trim().is_empty()))
 }
 
+/// The model fields each section has a column for (`csv_columns` in the geometry CSV contract).
+/// The CSV owns them: a template never fills one.
+fn csv_owned_fields(section: &str) -> &'static [&'static str] {
+    match section {
+        "Exposed Elements" => &[
+            "area",
+            "pitch",
+            "width",
+            "height",
+            "orientation360",
+            "base_height",
+            "is_unheated_pitched_roof",
+            "is_external_door",
+        ],
+        "Window Elements" => &[
+            "area",
+            "pitch",
+            "width",
+            "height",
+            "orientation360",
+            "base_height",
+            "frame_area_fraction",
+            "free_area_height",
+            "mid_height",
+            "max_window_open_area",
+        ],
+        "Ground Elements" => &[
+            "area",
+            "total_area",
+            "width",
+            "height",
+            "perimeter",
+            "floor_type",
+            "depth_basement_floor",
+            "thickness_walls",
+            "base_height",
+        ],
+        "Non-Exposed Elements" => &["area", "pitch", "width", "height", "base_height"],
+        "Thermal Bridging Elements" => &[
+            "heat_transfer_coeff",
+            "length",
+            "linear_thermal_transmittance",
+        ],
+        "Ventilation Systems" => &[
+            "length",
+            "duct_type",
+            "mid_height_air_flow_path",
+            "area_cm2",
+            "orientation360",
+            "pitch",
+            "vent_type",
+        ],
+        "Combustion Appliances" => &[
+            "appliance_type",
+            "exhaust_situation",
+            "fuel_type",
+            "supply_situation",
+        ],
+        "Water Pipework" => &["length", "location"],
+        "On-Site Generation" => &[
+            "pitch",
+            "orientation360",
+            "base_height",
+            "peak_power",
+            "width",
+            "height",
+        ],
+        _ => &[],
+    }
+}
+
+/// Remove from a template seed every field the row's section has a column for, unless the row
+/// sets it. A blank cell, or a column missing from the file's header, is then derived where a
+/// derivation exists or reported missing by the target schema; it never keeps a sample-house value.
+fn clear_csv_owned_seed_fields(
+    seed: &mut serde_json::Map<String, Value>,
+    row: &HashMap<String, Value>,
+    section: &str,
+) {
+    for field in csv_owned_fields(section) {
+        if !row.get(*field).is_some_and(csv_cell_is_set) {
+            seed.remove(*field);
+        }
+    }
+}
+
+/// Contract precedence for a sectioned CSV row: defaults-template seed ←
+/// extra_json ← CSV columns (highest), before shared schema finalization. A blank cell never
+/// keeps a template value for a field its section owns (`clear_csv_owned_seed_fields`).
+/// `skip_keys` are identity / geometry / UI columns that must never enter the merged object.
+/// Use this for any new sectioned merge so the precedence cannot be
+/// reimplemented inverted (see `contracts/geometry-csv` `merge_precedence`).
 fn overlay_row_onto_seed(
     mut seed: serde_json::Map<String, Value>,
     row: &HashMap<String, Value>,
+    section: &str,
     skip_keys: &[&str],
 ) -> serde_json::Map<String, Value> {
+    clear_csv_owned_seed_fields(&mut seed, row, section);
     let mut csv_set_keys: HashSet<String> = HashSet::new();
     for (k, v) in row {
         if k == "extra_json" || skip_keys.contains(&k.as_str()) {
@@ -953,10 +1041,8 @@ fn overlay_row_onto_seed(
 /// TWO RULES, and they are deliberately not the same rule.
 ///
 /// 1. At the TOP LEVEL of the `extra_json` object: drop keys whose value is *blank* — `null`, or
-///    a string that is empty after trimming. This is the published merge-precedence contract
-///    ("Blank cells (null / empty string) leave the seed value in place", see the comment above
-///    [`csv_cell_is_set`], which this reuses so the two cannot drift). A top-level `extra_json`
-///    key is peer to a CSV column, so it gets the CSV column's blank handling.
+///    a string that is empty after trimming, using [`csv_cell_is_set`] so the two cannot drift.
+///    A top-level `extra_json` key is peer to a CSV column, so a blank one is not an input.
 ///
 /// 2. BELOW the top level: drop object keys whose value is EXACTLY `""`, with no trimming. This
 ///    is a different rule because it is enforcing a different thing — the browser's save
@@ -1100,6 +1186,38 @@ const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "NumberOfHabitableRooms",
     "KitchenExtractorHoodExternal",
     "ComplianceValidationEnabled",
+    "General_build_type",
+    "General_built_form",
+    "General_storeys_in_dwelling",
+    "General_storey_of_dwelling",
+    "General_storeys_in_building",
+];
+
+/// Metadata rows that set a model input. A present row with no value is E066: it must never
+/// leave the defaults template's value in place. An absent row keeps the template value.
+const METADATA_INPUT_FIELD_NAMES: &[&str] = &[
+    "NumberOfBedrooms",
+    "NumberOfWetRooms",
+    "GroundFloorArea",
+    "HeatingControlType",
+    "PartGcompliance",
+    "PartO_active_cooling_required",
+    "AirPermeability_test_pressure",
+    "AirPermeability_test_result",
+    "AirPermeability_ventilation_zone_height",
+    "Ventilation_shield_class",
+    "Ventilation_terrain_class",
+    "Ventilation_altitude",
+    "Ventilation_ventilation_zone_base_height",
+    "Ventilation_noise_nuisance",
+    "BuildingLength",
+    "BuildingWidth",
+    "NumberOfHotTappedRooms",
+    "NumberOfUtilityRooms",
+    "NumberOfBathrooms",
+    "NumberOfSanitaryAccommodations",
+    "NumberOfHabitableRooms",
+    "KitchenExtractorHoodExternal",
     "General_build_type",
     "General_built_form",
     "General_storeys_in_dwelling",
@@ -1813,6 +1931,19 @@ impl JSONBuilder {
         let csv_data = &sanitized_csv_data;
 
         self.parse_cold_water_source_from_metadata(csv_data);
+        for row in csv_data.get("Metadata").into_iter().flatten() {
+            if let (Some(name), None) = extract_metadata_field(row) {
+                if METADATA_INPUT_FIELD_NAMES.contains(&name.as_str()) {
+                    self.push_non_fatal(
+                        "E066",
+                        "Metadata",
+                        &format!(
+                            "Metadata row '{name}' has no value. Enter one or delete the row."
+                        ),
+                    );
+                }
+            }
+        }
 
         let mut result = self.defaults.clone();
         if self.is_fhs_schema {
@@ -2406,6 +2537,7 @@ impl JSONBuilder {
                     if let Some(obj) = element_obj.as_object_mut() {
                         // Pitch is geometry: only the row (or `derive_blank_csv_pitch`) sets it.
                         obj.remove("pitch");
+                        clear_csv_owned_seed_fields(obj, element_row, section_name);
                         if !allowed_building_element_props.is_empty() {
                             obj.retain(|k, _| allowed_building_element_props.contains(k));
                         } else {
@@ -2797,19 +2929,13 @@ impl JSONBuilder {
                 }
                 // Start with a default template for this bridge type
                 let mut bridge_obj = self.get_default_thermal_bridge(bridge_type)?;
-                // A linear bridge's junction, length and psi describe that bridge only: never
-                // inherit them from the defaults template. A blank one surfaces as a loud
-                // schema-validation error (both schemas require them).
-                if bridge_type == "ThermalBridgeLinear" {
-                    if let Some(obj) = bridge_obj.as_object_mut() {
-                        for key in ["junction_type", "length", "linear_thermal_transmittance"] {
-                            obj.remove(key);
-                        }
-                    }
+                // The junction describes this bridge only (it has no column, so the owned-column
+                // rule does not cover it): a missing one is a schema-validation error.
+                if let Some(obj) = bridge_obj.as_object_mut() {
+                    obj.remove("junction_type");
                 }
 
-                // Contract precedence: CSV columns > extra_json > defaults template.
-                // Blank cells leave the template value in place, as in other sections;
+                // Contract precedence: CSV columns > extra_json > defaults template;
                 // schema-invalid keys (UI-only metadata like floor_id) are dropped.
                 let seed = bridge_obj
                     .as_object()
@@ -2818,6 +2944,7 @@ impl JSONBuilder {
                 bridge_obj = Value::Object(overlay_row_onto_seed(
                     seed,
                     bridge_row,
+                    "Thermal Bridging Elements",
                     &["Name", "Zone", "Type", "coords", "parent_element"],
                 ));
                 // Add to zone's ThermalBridging section
@@ -3786,6 +3913,7 @@ impl JSONBuilder {
                             .and_then(|v| v.as_object())
                             .cloned()
                             .unwrap_or_else(serde_json::Map::new);
+                        clear_csv_owned_seed_fields(&mut vent_obj, vent_row, "Ventilation Systems");
                         let mut csv_set_keys = HashSet::new();
 
                         // Overlay: CSV columns (highest precedence), schema-allowed only, ignoring empties.
@@ -3875,6 +4003,7 @@ impl JSONBuilder {
                                 ),
                             )
                         })?;
+                        clear_csv_owned_seed_fields(&mut mv_obj, vent_row, "Ventilation Systems");
                         // Overlay: CSV columns (highest precedence), schema-allowed only, ignoring empties.
                         let mut csv_set_keys = std::collections::HashSet::new();
                         for (k, v) in vent_row {
@@ -4022,6 +4151,11 @@ impl JSONBuilder {
                                         o.insert("reflective".to_string(), Value::Bool(false));
                                         o
                                     });
+                                clear_csv_owned_seed_fields(
+                                    &mut duct_obj,
+                                    duct_row,
+                                    "Ventilation Systems",
+                                );
                                 let mut csv_set_keys = HashSet::new();
 
                                 // Overlay: CSV columns (highest precedence), schema-allowed only, ignoring empties.
@@ -4278,6 +4412,7 @@ impl JSONBuilder {
                         .clone()
                         .unwrap_or_else(serde_json::Map::new),
                     appliance_row,
+                    "Combustion Appliances",
                     &["Name", "Type", "coords"],
                 );
 
@@ -4349,6 +4484,7 @@ impl JSONBuilder {
                 let pipe_obj = overlay_row_onto_seed(
                     seed,
                     pipe_row,
+                    "Water Pipework",
                     &[
                         "Name",
                         "Type",
@@ -5041,9 +5177,9 @@ impl JSONBuilder {
                 };
 
                 // The inverter belongs to this installation: never take it from a template.
-                for key in PV_INVERTER_FIELDS {
-                    pv_system.remove(key);
-                }
+                // The target schema reports any inverter field the row does not author.
+                pv_system.retain(|key, _| !key.starts_with("inverter_"));
+                clear_csv_owned_seed_fields(&mut pv_system, row, "On-Site Generation");
 
                 // Ensure type is set
                 pv_system.insert(
@@ -5190,6 +5326,8 @@ impl JSONBuilder {
                         .get_mut("Default PV")
                         .and_then(|v| v.as_object_mut())
                     {
+                        existing_pv.retain(|key, _| !key.starts_with("inverter_"));
+                        clear_csv_owned_seed_fields(existing_pv, row, "On-Site Generation");
                         for (key, value) in pv_system {
                             existing_pv.insert(key, value);
                         }
@@ -9115,11 +9253,8 @@ pipe1,WaterPipework,primary,{extra_json_cell}
             Some(31.0),
             "cleared field must leave the template seed in place, got {pipe:?}"
         );
-        assert_eq!(
-            pipe.get("length").and_then(|v| v.as_f64()),
-            Some(3.0),
-            "cleared field must leave the template seed in place, got {pipe:?}"
-        );
+        // `length` has a Water Pipework column, so the template never fills it.
+        assert!(pipe.get("length").is_none(), "got {pipe:?}");
     }
 
     #[test]
@@ -9144,11 +9279,8 @@ pipe1,WaterPipework,primary,{extra_json_cell}
             Some(31.0),
             "cleared field must leave the template seed in place, got {pipe:?}"
         );
-        assert_eq!(
-            pipe.get("length").and_then(|v| v.as_f64()),
-            Some(3.0),
-            "cleared field must leave the template seed in place, got {pipe:?}"
-        );
+        // `length` has a Water Pipework column, so the template never fills it.
+        assert!(pipe.get("length").is_none(), "got {pipe:?}");
     }
 
     #[test]
@@ -12005,8 +12137,8 @@ Name,Type,volume,floor_area
 Living,Zone,100,40
 
 Ventilation Systems
-Name,Type,vent_type,extra_json
-fan,MechanicalVentilation,Intermittent MEV,"{""unsupported_authored_field"":42}"
+Name,Type,vent_type,mid_height_air_flow_path,orientation360,pitch,extra_json
+fan,MechanicalVentilation,Intermittent MEV,1.5,180,90,"{""unsupported_authored_field"":42}"
 "#;
         let data = CSVParser::new().parse_csv(csv).unwrap();
         let mut builder = JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).unwrap();
