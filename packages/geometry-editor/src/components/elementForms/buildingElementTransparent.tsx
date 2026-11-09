@@ -189,7 +189,6 @@ import {
   windowOpeningRepairMessages,
   windowOpeningsUseTable,
   windowPartsArePhysical,
-  WINDOW_NO_OPENING_MESSAGE,
   type WindowOpeningField,
   type WindowOpeningRow,
   type WindowOpeningSource,
@@ -474,7 +473,16 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
     state.midHeightInput.setValue(opening.mid_height);
     state.maxWindowOpenAreaInput.setValue(opening.max_window_open_area);
 
-    const transparentDerived = state.getTransparentOpeningDerivedValues(element);
+    // On a8/a9 the baseline must match the rounded inputs, or rounding reads as a geometry edit.
+    const transparentDerived = state.getTransparentOpeningDerivedValues(state.windowPartsPhysical
+      ? {
+          ...element,
+          width: typeof element.width === 'number' ? roundToTwoDecimals(element.width) : element.width,
+          height: typeof element.height === 'number' ? roundToTwoDecimals(element.height) : element.height,
+          base_height: typeof element.base_height === 'number' ? roundToTwoDecimals(element.base_height) : element.base_height,
+          free_area_height: opening.free_area_height === '' ? undefined : opening.free_area_height,
+        } as typeof element
+      : element);
     state.prevDerivedWindowMidHeightRef.current = transparentDerived.midHeight;
     state.prevDerivedWindowMaxOpenAreaRef.current = transparentDerived.maxWindowOpenArea;
   },
@@ -587,11 +595,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
     const openings = state.windowPartsPhysical && windowSource ? classifyWindowOpenings(windowSource) : null;
     const openingNote = openingsInTable
       ? 'This window has separate openings. Edit them in Advanced Fields.'
-      : openings?.kind === 'closed'
-        ? WINDOW_NO_OPENING_MESSAGE
-        : openings?.kind === 'repair'
-          ? `${windowOpeningRepairMessages(openings).join('. ')}${openings.reason === 'conflicting_heights' ? ' Entering a Mid Height replaces the parts with one opening.' : ''}`
-          : null;
+      : openings?.kind === 'repair'
+        ? `${windowOpeningRepairMessages(openings).join('. ')}${openings.reason === 'conflicting_heights' ? ' Entering a Mid Height replaces the parts with one opening.' : ''}`
+        : null;
 
     return (
       <>

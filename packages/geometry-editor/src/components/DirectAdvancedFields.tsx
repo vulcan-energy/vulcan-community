@@ -25,7 +25,6 @@ import {
   classifyWindowOpenings,
   windowOpeningRepairMessages,
   windowOpeningsUseTable,
-  WINDOW_NO_OPENING_MESSAGE,
   type WindowOpeningPatch,
   type WindowOpeningRow,
   type WindowOpeningSource,
@@ -560,13 +559,14 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
     </div>;
   }
 
+  // A closed window's message is the validation issue, which links to the field.
   const status = openings.kind === 'closed'
-    ? WINDOW_NO_OPENING_MESSAGE
+    ? null
     : openings.kind === 'needs_input'
       ? 'One opening. Complete the free area height, mid height and max open area in the main form.'
       : 'One opening. Edit it in the main form.';
   return <div style={{ fontSize: 12 }}>
-    <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>{args.label}: {status}</p>
+    {status && <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>{args.label}: {status}</p>}
     {element && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildAddWindowOpeningPatch(source))}>Add opening</button>}
   </div>;
 }

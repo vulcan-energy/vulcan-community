@@ -228,6 +228,19 @@ const WINDOW_OPENING_FIELD_ISSUES: Record<WindowOpeningField, string> = {
   max_window_open_area: 'Max Window Open Area should not be 0',
 };
 
+const WINDOW_OPENING_FIELD_REQUIRED: Record<WindowOpeningField, string> = {
+  free_area_height: 'Free Area Height is required',
+  mid_height: 'Mid Height is required',
+  max_window_open_area: 'Max Window Open Area is required',
+};
+
+/** A zero and a blank field need different wording. */
+const windowOpeningFieldIssue = (el: BuildingElementTransparent, field: WindowOpeningField): ValidationIssue =>
+  geoIssue(
+    typeof el[field] === 'number' ? WINDOW_OPENING_FIELD_ISSUES[field] : WINDOW_OPENING_FIELD_REQUIRED[field],
+    field,
+  );
+
 /** Python's math.isclose with the arguments a9 uses (default rel_tol, abs_tol=1e-10). */
 const closeEnough = (a: number, b: number): boolean =>
   Math.abs(a - b) <= Math.max(1e-9 * Math.max(Math.abs(a), Math.abs(b)), 1e-10);
@@ -285,7 +298,7 @@ function validateWindowOpenings(
   if (physical !== true) {
     const issues: ValidationIssue[] = [];
     for (const field of Object.keys(WINDOW_OPENING_FIELD_ISSUES) as WindowOpeningField[]) {
-      if (!isPositiveFiniteNumber(el[field])) issues.push(geoIssue(WINDOW_OPENING_FIELD_ISSUES[field], field));
+      if (!isPositiveFiniteNumber(el[field])) issues.push(windowOpeningFieldIssue(el, field));
     }
     if (openings.kind === 'rows' && openings.source === 'parts' && physical === false) {
       issues.unshift(geoIssue(
@@ -302,7 +315,7 @@ function validateWindowOpenings(
     case 'closed':
       return [geoIssue(WINDOW_NO_OPENING_MESSAGE, 'max_window_open_area')];
     case 'needs_input':
-      return openings.missing.map((field) => geoIssue(WINDOW_OPENING_FIELD_ISSUES[field], field));
+      return openings.missing.map((field) => windowOpeningFieldIssue(el, field));
     case 'rows':
       return physicalOpeningLimitIssues(openings.rows, getGeometry());
     case 'repair':

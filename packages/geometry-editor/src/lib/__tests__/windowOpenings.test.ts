@@ -314,6 +314,15 @@ describe('review findings: base-height edits on a8/a9', () => {
     expect(update({ base_height: 1.5 } as Partial<Element>)).toEqual([1.2, 1.8]);
   });
 
+  it('ends at the same height when the base is cleared and retyped', () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: physicalPort });
+    store.setState({ elementsById: { w: twoParts }, elementIds: ['w'], floors: [{ id: '0', name: 'G', zIndex: 0, height: 2.4, isRoofSpace: false }] });
+    store.getState().updateElement('w', { base_height: '' } as unknown as Partial<Element>);
+    store.getState().updateElement('w', { base_height: 3 } as Partial<Element>);
+    const parts = (store.getState().elementsById.w as Element & { extra_json: { window_part_list: Array<{ mid_height: number }> } }).extra_json.window_part_list;
+    expect(parts.map((row) => row.mid_height)).toEqual([3.2, 3.8]);
+  });
+
   it('leaves a list the update already moved', () => {
     expect(update({
       base_height: 1.5,

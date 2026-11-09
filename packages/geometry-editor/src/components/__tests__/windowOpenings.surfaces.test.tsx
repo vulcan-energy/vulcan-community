@@ -119,6 +119,12 @@ describe('window_part_list on physical-opening targets', () => {
     expect(result.extra_json).toMatchObject({ window_part_list: [{ mid_height_air_flow_path: 2 }] });
   });
 
+  it('offers Add opening without repeating the closed message', () => {
+    mount(windowElement({ window_part_list: [] }), physicalItems);
+    expect(screen.queryByText(/HEM a8 and a9 cannot run/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add opening' })).toBeInTheDocument();
+  });
+
   it('offers one explicit repair for a conflicting legacy list', () => {
     const store = mount(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.3 }, { mid_height_air_flow_path: 2 }] }), physicalItems);
     expect(screen.getByRole('alert')).toHaveTextContent('different heights');
@@ -217,9 +223,9 @@ describe('validateElement window rules', () => {
 
   it('keeps blank columns in force with no schema', () => {
     expect(messages(windowElement(undefined, blankColumns as never), unavailableGeometrySchemaPort)).toEqual([
-      'Free Area Height should not be 0',
-      'Mid Height should not be 0',
-      'Max Window Open Area should not be 0',
+      'Free Area Height is required',
+      'Mid Height is required',
+      'Max Window Open Area is required',
     ]);
   });
 
@@ -237,6 +243,11 @@ describe('validateElement window rules', () => {
     ['an empty list', { window_part_list: [] }, {}],
   ])('blocks a closed window on a8/a9: %s', (_name, extra, overrides) => {
     expect(messages(windowElement(extra, overrides), port(physicalItems))).toContain(noOpeningIssue);
+  });
+
+  it('calls a blank free height required, not zero, beside an old automatic zero area', () => {
+    expect(messages(windowElement(undefined, { free_area_height: undefined, max_window_open_area: 0 } as never), port(physicalItems)))
+      .toEqual(['Free Area Height is required']);
   });
 
   it('keeps a7 required-value errors on a closed or zero window', () => {
@@ -343,6 +354,15 @@ describe('main-form window opening inputs', () => {
     expect(stored(store).mid_height).toBeUndefined();
   });
 
+  it('does not read input rounding as a geometry change on selection', async () => {
+    const store = renderForm(windowElement(undefined, {
+      width: 3.004, height: 2.1, free_area_height: 2.004, max_window_open_area: 6.02, base_height: 1.004, mid_height: 2.054,
+    }));
+    await act(async () => {});
+    expect(stored(store).max_window_open_area).toBe(6.02);
+    expect(stored(store).mid_height).toBe(2.054);
+  });
+
   it('keeps an explicit zero area when free height changes', () => {
     const store = renderForm(windowElement(undefined, { free_area_height: 0.5, max_window_open_area: 0 }));
     act(() => store.getState().updateElement('window-1', { free_area_height: 0.6 } as Partial<Element>));
@@ -368,9 +388,9 @@ describe('main-form window opening inputs', () => {
     expect(screen.getByText(/replaces the parts with one opening/)).toBeInTheDocument();
   });
 
-  it('replaces the closed note on a8/a9', () => {
+  it('leaves the closed message to the validation pill on a8/a9', () => {
     renderForm(windowElement({ window_part_list: [] }));
-    expect(screen.getAllByText(/HEM a8 and a9 cannot run a window with no openings/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/HEM a8 and a9 cannot run a window with no openings/)).toHaveLength(1);
     expect(screen.queryByText(/stays closed/)).toBeNull();
   });
 

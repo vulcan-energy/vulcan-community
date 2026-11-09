@@ -81,6 +81,14 @@ function deriveBaseHeightForMidHeight(
   return calculateDerivedBaseHeight(elementZ, effectiveFloors);
 }
 
+/** A blank or zero base resolves to the storey base, so a cleared base stays one position. */
+export function resolveWindowBaseHeight(
+  element: BuildingElementTransparent,
+  effectiveFloors: Floor[],
+): number {
+  return deriveBaseHeightForMidHeight(element, {}, effectiveFloors);
+}
+
 function deriveWindowMidHeight(
   element: BuildingElementTransparent,
   patch: TransparentOpeningNumericPatch,
