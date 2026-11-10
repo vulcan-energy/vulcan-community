@@ -19,15 +19,15 @@ function Harness({ roof, onCommit }: { roof: { current: ProfilePoint[] | null };
       widthM={4}
       face={state.face}
       height={state.height}
-      heightField={<input aria-label="Height" readOnly value={state.height} />}
       roofModes
       fitRoof={fitRoof}
-      renderLabel={(label) => <div>{label}</div>}
       onCommit={(c) => {
         onCommit(c);
         setState((s) => ('face' in c ? { ...s, face: c.face } : { face: null, height: c.flatHeight }));
       }}
-    />
+    >
+      <input aria-label="Height" readOnly value={state.height} />
+    </WallShapeRows>
   );
 }
 

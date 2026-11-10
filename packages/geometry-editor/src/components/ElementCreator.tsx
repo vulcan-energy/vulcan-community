@@ -4277,12 +4277,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             face={selectedWallFace}
             height={(selectedElement as { height?: number }).height ?? 0}
             topRef={fieldRef('height')}
-            heightField={heightField}
             roofModes={selectedElement.type !== 'BuildingElementTransparent'}
             fitRoof={fitWallEdgeToRoofs}
-            renderLabel={(label) => renderFieldLabel(label, elementType)}
             onCommit={applyWallShape}
-          />
+          >
+            {heightField}
+          </WallShapeRows>
         ) : (
           <>
             {renderFieldLabel('Height (m):', elementType, 'height')}

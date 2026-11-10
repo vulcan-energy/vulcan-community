@@ -36,12 +36,11 @@ export type WallShapeRowsProps = {
   /** Stored `height`; the top of a plain wall. */
   height: number;
   /** The existing Height input, used as Top › Flat while the wall has no face. */
-  heightField: ReactNode;
+  children: ReactNode;
   /** False for windows: Top is Flat | Custom and there is no Bottom row. */
   roofModes: boolean;
   /** Fits an edge to the roofs over/under the wall; `limit` is the other edge. */
   fitRoof: (edge: Edge, limit: ProfilePoint[]) => WallRoofEdge | null;
-  renderLabel: (label: string) => ReactNode;
   /** Field ref for the Top row (validation scroll target for `height`). */
   topRef?: (node: HTMLDivElement | null) => void;
   onCommit: (next: WallShapeCommit) => void;
@@ -194,14 +193,48 @@ function Sketch({ profiles, widthM, roofLines, invalid, highlight }: {
   );
 }
 
+function EdgeRow({ edge, mode, roofModes, hasRoof, onPick, rowRef, children }: {
+  edge: Edge;
+  mode: EdgeMode;
+  roofModes: boolean;
+  hasRoof: boolean;
+  onPick: (edge: Edge, mode: EdgeMode) => void;
+  rowRef?: (node: HTMLDivElement | null) => void;
+  children: ReactNode;
+}) {
+  const options: Array<{ value: EdgeMode; label: string; disabled?: boolean; title?: string }> = [
+    { value: 'flat', label: 'Flat' },
+    ...(roofModes ? [{
+      value: 'roof' as const,
+      label: edge === 'top' ? 'Under roof' : 'On roof',
+      disabled: !hasRoof && mode !== 'roof',
+      title: hasRoof ? undefined : edge === 'top' ? 'No roof over this wall' : 'No roof under this wall',
+    }] : []),
+    { value: 'custom', label: 'Custom' },
+  ];
+  return (
+    <>
+      <div className="element-label">{edge === 'top' ? 'Top (m above base):' : 'Bottom (m above base):'}</div>
+      <div className="element-input wall-shape-edge" data-testid={`wall-shape-${edge}`} ref={rowRef}>
+        <CompactSegmentedControl
+          value={mode}
+          options={options}
+          onChange={(next) => onPick(edge, next)}
+          ariaLabel={edge === 'top' ? 'Top edge' : 'Bottom edge'}
+        />
+        {children}
+      </div>
+    </>
+  );
+}
+
 export function WallShapeRows({
   widthM,
   face,
   height,
-  heightField,
+  children: heightField,
   roofModes,
   fitRoof,
-  renderLabel,
   topRef,
   onCommit,
 }: WallShapeRowsProps) {
@@ -254,22 +287,11 @@ export function WallShapeRows({
     apply(next);
   };
 
-  const renderEdge = (edge: Edge) => {
+  const edgeBody = (edge: Edge): ReactNode => {
     const mode = modes[edge];
     const fresh = edge === 'top' ? freshTop : freshBottom;
-    const options: Array<{ value: EdgeMode; label: string; disabled?: boolean; title?: string }> = [
-      { value: 'flat', label: 'Flat' },
-      ...(roofModes ? [{
-        value: 'roof' as const,
-        label: edge === 'top' ? 'Under roof' : 'On roof',
-        disabled: !fresh && mode !== 'roof',
-        title: fresh ? undefined : edge === 'top' ? 'No roof over this wall' : 'No roof under this wall',
-      }] : []),
-      { value: 'custom', label: 'Custom' },
-    ];
-    let body: ReactNode = null;
     if (mode === 'custom') {
-      body = (
+      return (
         <PointsTable
           edge={edge}
           profile={draft[edge]}
@@ -278,37 +300,22 @@ export function WallShapeRows({
           onHover={(index) => setHighlight(index === null ? null : { edge, index })}
         />
       );
-    } else if (mode === 'roof') {
-      body = (
+    }
+    if (mode === 'roof') {
+      return (
         <span className="wall-shape-roof-name">
           <i aria-hidden="true" />
           {fresh?.roofNames.join(', ') ?? 'No roof'}
         </span>
       );
-    } else if (edge === 'top') {
-      body = face || pending ? (
-        <PointInput value={draft.top[0].h} onValue={(h) => apply({ ...draft, top: flat(round2(h)) })} label="Top height above base (m)" />
-      ) : heightField;
     }
-    return (
-      <>
-        {renderLabel(edge === 'top' ? 'Top (m above base):' : 'Bottom (m above base):')}
-        <div
-          className="element-input wall-shape-edge"
-          data-testid={`wall-shape-${edge}`}
-          ref={edge === 'top' ? topRef : undefined}
-        >
-          <CompactSegmentedControl
-            value={mode}
-            options={options}
-            onChange={(next) => pick(edge, next)}
-            ariaLabel={edge === 'top' ? 'Top edge' : 'Bottom edge'}
-          />
-          {body}
-        </div>
-      </>
-    );
+    if (edge === 'bottom') return null;
+    return face || pending ? (
+      <PointInput value={draft.top[0].h} onValue={(h) => apply({ ...draft, top: flat(round2(h)) })} label="Top height above base (m)" />
+    ) : heightField;
   };
+  const topBody = edgeBody('top');
+  const bottomBody = edgeBody('bottom');
 
   const roofLines = [freshTop, freshBottom].flatMap((fit) => (fit ? [fit.profile] : []));
   return (
@@ -321,8 +328,14 @@ export function WallShapeRows({
           {roofLines.length > 0 ? <span><i className="wall-shape-legend-roof" />Roof surface</span> : null}
         </div>
       </div>
-      {renderEdge('top')}
-      {roofModes ? renderEdge('bottom') : null}
+      <EdgeRow edge="top" mode={modes.top} roofModes={roofModes} hasRoof={!!freshTop} onPick={pick} rowRef={topRef}>
+        {topBody}
+      </EdgeRow>
+      {roofModes ? (
+        <EdgeRow edge="bottom" mode={modes.bottom} roofModes hasRoof={!!freshBottom} onPick={pick}>
+          {bottomBody}
+        </EdgeRow>
+      ) : null}
       {staleEdges.length > 0 ? (
         <div className="wall-shape-chip">
           Roof changed
