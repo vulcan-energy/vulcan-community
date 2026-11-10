@@ -10,6 +10,7 @@ import {
   calculateGroundFloorArea,
   calculateDwellingDetailsSuggestion,
   calculateSuggestedVentilationBaseHeight,
+  calculateLegacySuggestedVentilationHeight,
   calculateSuggestedVentilationHeight,
   withEffectiveStoreyHeights,
   ZONE_OVERRIDE_EPSILON,
@@ -99,6 +100,7 @@ import { isMvhrTerminalHost } from '../../../lib/mvhrDuctwork';
 import {
   applyFloorBaseHeightOverrides,
   applyFloorHeightOverrides,
+  deriveFloorsFromElements,
 } from '../../../lib/floorDerivation';
 import {
   FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
@@ -1920,13 +1922,17 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           importedSettings.GroundFloorArea = undefined;
         }
       }
-      // AirPermeability_ventilation_zone_height — uses floors as the fallback
-      // signal for height; at import time we don't yet have floors set up so
-      // pass none, but the line-walls path is enough to derive in most cases.
+      // AirPermeability_ventilation_zone_height. Floors are not built yet, so the storey heights
+      // typed in the file stand in for them. A value matching the earlier suggestion is derived too.
+      const derivedVent = calculateSuggestedVentilationHeight(
+        newElements,
+        applyFloorHeightOverrides(deriveFloorsFromElements(newElements), metadata.floorHeightOverrides),
+      );
       if (importedSettings.AirPermeability_ventilation_zone_height !== undefined) {
-        const derivedVent = calculateSuggestedVentilationHeight(newElements);
-        if (derivedVent > 0
-            && numericClose(importedSettings.AirPermeability_ventilation_zone_height, derivedVent)) {
+        const typedVent = importedSettings.AirPermeability_ventilation_zone_height;
+        const legacyVent = calculateLegacySuggestedVentilationHeight(newElements);
+        if ((derivedVent > 0 && numericClose(typedVent, derivedVent))
+            || (legacyVent > 0 && numericClose(typedVent, legacyVent))) {
           importedSettings.AirPermeability_ventilation_zone_height = undefined;
         }
       }
@@ -1976,9 +1982,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         importedSettings.storeys_in_building = undefined;
       }
       if (importedSettings.Ventilation_ventilation_zone_base_height !== undefined) {
-        const derivedVentForBase = calculateSuggestedVentilationHeight(newElements);
         const effectiveVentForBase = importedSettings.AirPermeability_ventilation_zone_height
-          ?? (derivedVentForBase > 0 ? derivedVentForBase : undefined);
+          ?? (derivedVent > 0 ? derivedVent : undefined);
         const derivedVentBase = calculateSuggestedVentilationBaseHeight(newElements, undefined, {
           buildType: importedSettings.build_type ?? dd.buildType,
           storeysInDwelling: importedSettings.storeys_in_dwelling ?? dd.storeysInDwelling,
