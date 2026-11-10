@@ -53,6 +53,7 @@ import { ingestGeometryTabularSections } from './ingestGeometryTabularSections';
 import { normalizeCsvConstructionProvenance } from './csvSemanticMigration';
 import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
 import { shiftPhysicalPartHeight } from '../../lib/windowOpenings';
+import { METADATA_INPUT_LABELS } from '../../lib/globalSettingsValidation';
 
 export const VULCAN_CSV_VERSION_METADATA_KEY = 'VulcanCsvVersion';
 export const LEGACY_VULCAN_CSV_VERSION = 1;
@@ -190,6 +191,8 @@ export type ComplianceSettings = {
   storeys_in_dwelling?: number;
   storey_of_dwelling?: number;
   storeys_in_building?: number;
+  /** Model-input rows the file has with a blank value (E066): never filled from the defaults. */
+  blankMetadataRows?: string[];
 };
 
 function parseAirPermeabilityTestPressure(
@@ -316,6 +319,9 @@ export const parseCsvToGeometry = (
     if (line.startsWith('Metadata,')) continue;
     const metadataFields = parseCsvLine(line);
     const hostMetadataKey = metadataFields[0]?.trim();
+    if (hostMetadataKey && hostMetadataKey in METADATA_INPUT_LABELS && !metadataFields[1]?.trim()) {
+      (complianceSettings.blankMetadataRows ??= []).push(hostMetadataKey);
+    }
     if (hostMetadataKey && hostDocumentMetadataKeys.has(hostMetadataKey)) {
       const value = metadataFields[1]?.trim();
       if (value) detectedHostDocumentMetadata[hostMetadataKey] = value;

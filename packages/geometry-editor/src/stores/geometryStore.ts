@@ -90,7 +90,7 @@ import {
   analyzeZoneSpaceLabels,
   pointInPolygon,
 } from '../lib/spaceLabelGeometry';
-import { collectGlobalSettingsWarnings, metadataRowValues, unsetMetadataInputIssues } from '../lib/globalSettingsValidation';
+import { collectGlobalSettingsWarnings, metadataRowValues, templateFilledMetadataSettings, unsetMetadataInputIssues } from '../lib/globalSettingsValidation';
 import {
   applyMechanicalVentilationCsvPositionColumns,
   canMechanicalVentilationInheritHostPlacement,
@@ -2916,9 +2916,20 @@ const withPrecomputedDefaultsLookup = (
   ) {
     const defaultsJson = (update as Partial<GeometryState>).defaultsJson;
     if (defaultsJson !== state.defaultsJson) {
+      // A metadata row the document lacks shows the value the converter will take from these
+      // defaults, and the save writes it.
+      const complianceSettings = (update as Partial<GeometryState>).complianceSettings ?? state.complianceSettings;
+      const filled = defaultsJson
+        ? templateFilledMetadataSettings(
+          metadataRowValues({ ...state, complianceSettings, elements: Object.values(state.elementsById) }),
+          complianceSettings,
+          defaultsJson,
+        )
+        : {};
       return {
         ...update,
         defaultsLookup: createDefaultsLookup(defaultsJson),
+        ...(Object.keys(filled).length ? { complianceSettings: { ...complianceSettings, ...filled } } : {}),
       } as Partial<GeometryState>;
     }
   }
@@ -7694,6 +7705,8 @@ const createGeometryState = (
       allCriticalIssues.push(...unsetMetadataInputIssues(
         metadataRowValues({ ...state, elements }),
         schemaPort.availability === 'available' ? schemaPort.getRootSchema('fhs') : null,
+        state.complianceSettings,
+        state.defaultsLoading ? undefined : state.defaultsJson,
       ));
     }
 

@@ -515,6 +515,7 @@ export function GlobalSettingsModal({
     junctionPsiDefaultsLoading,
     spaceLabelIds,
     spaceLabelsById,
+    defaultsJson,
     creationDefaultAssemblyIds,
     bundledAssemblyLibrary,
     bundledAssemblyLibraryLoading,
@@ -533,6 +534,7 @@ export function GlobalSettingsModal({
       junctionPsiDefaultsLoading: state.junctionPsiDefaultsLoading,
       spaceLabelIds: state.spaceLabelIds,
       spaceLabelsById: state.spaceLabelsById,
+      defaultsJson: state.defaultsLoading ? undefined : state.defaultsJson,
       creationDefaultAssemblyIds: state.creationDefaultAssemblyIds,
       bundledAssemblyLibrary: state.bundledAssemblyLibrary,
       bundledAssemblyLibraryLoading: state.bundledAssemblyLibraryLoading,
@@ -979,6 +981,8 @@ export function GlobalSettingsModal({
       issues.push(...unsetMetadataInputIssues(
         metadataRowValues({ zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) }),
         targetRoot,
+        complianceSettings,
+        defaultsJson,
       ));
       const bedroomCountIssue = fhsBedroomCountIssue(
         complianceSettings.NumberOfBedrooms
@@ -1022,6 +1026,7 @@ export function GlobalSettingsModal({
     spaceLabelIds,
     spaceLabelsById,
     targetRoot,
+    defaultsJson,
     zones,
   ]);
 

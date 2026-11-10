@@ -430,8 +430,8 @@ export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSect
 /**
  * Metadata rows that set a model input, with the label the Global Settings form shows. These are
  * the rows the converter reports as E066 when present with no value (`METADATA_INPUT_FIELD_NAMES`
- * in crates/vulcan-model-transform/src/builder.rs); an absent row takes the defaults template's
- * value there, so the editor never leaves one unset or blank.
+ * in crates/vulcan-model-transform/src/builder.rs). An absent row takes the defaults template's
+ * value there, so the editor shows and saves that value (see templateFilledMetadataSettings).
  */
 export const METADATA_INPUT_LABELS: Readonly<Record<string, string>> = {
   NumberOfBedrooms: 'Number of Bedrooms',
@@ -541,14 +541,68 @@ export function metadataRowValues(state: MetadataRowInputs): Array<[string, stri
   return rows;
 }
 
+/** The compliance setting a metadata row edits. */
+const metadataSettingKey = (key: string): string => (key.startsWith('General_') ? key.slice('General_'.length) : key);
+
+/** The value the converter takes from the defaults template when the file has no such row. */
+function templateMetadataValue(defaults: unknown, key: string): unknown {
+  let node: unknown = defaults;
+  for (const segment of metadataSchemaPath(key)) {
+    node = node && typeof node === 'object' && !Array.isArray(node) ? (node as Record<string, unknown>)[segment] : undefined;
+  }
+  return node === null ? undefined : node;
+}
+
+/**
+ * Settings for the rows the save would leave out, taken from the defaults template the converter
+ * reads for an absent row, so the form shows, the save writes and the run uses one value. A row
+ * the file has with a blank value is not filled: the user cleared it.
+ */
+export function templateFilledMetadataSettings(
+  rows: Array<[string, string | undefined]>,
+  settings: { blankMetadataRows?: string[] },
+  defaults: unknown,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  for (const [key, value] of rows) {
+    if (value !== undefined || !(key in METADATA_INPUT_LABELS) || settings.blankMetadataRows?.includes(key)) continue;
+    const template = templateMetadataValue(defaults, key);
+    if (template !== undefined) patch[metadataSettingKey(key)] = template;
+  }
+  return patch;
+}
+
+/** Whether the target's schema requires the value; with no schema, assume it does. */
+function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
+  const record = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
+  const defs = record(record(root)?.$defs);
+  let node = record(root);
+  if (!node) return true;
+  const path = metadataSchemaPath(key);
+  for (const segment of path.slice(0, -1)) {
+    node = record(record(node?.properties)?.[segment]);
+    const ref = typeof node?.$ref === 'string' ? node.$ref.split('/').pop() : undefined;
+    if (ref) node = record(defs?.[ref]);
+  }
+  return Array.isArray(node?.required) && node.required.includes(path[path.length - 1]);
+}
+
 /**
  * One issue per model-input metadata row the save would leave out although the target's schema
- * takes the value (or no schema says otherwise), so the converter would use the defaults
- * template's value instead.
+ * takes it (or no schema says otherwise): the file had the row blank, the user cleared a value, or
+ * no defaults value exists for a value the schema requires. `defaults` is undefined while the
+ * defaults are still loading, when only blank rows are known to be unset.
  */
-export function unsetMetadataInputIssues(rows: Array<[string, string | undefined]>, targetRoot: unknown): string[] {
+export function unsetMetadataInputIssues(
+  rows: Array<[string, string | undefined]>,
+  targetRoot: unknown,
+  settings: { blankMetadataRows?: string[] },
+  defaults: unknown,
+): string[] {
   return rows
     .filter(([key, value]) => value === undefined && key in METADATA_INPUT_LABELS
-      && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent')
+      && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
+      && (settings.blankMetadataRows?.includes(key) || (defaults !== undefined
+        && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key)))))
     .map(([key]) => `Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.`);
 }

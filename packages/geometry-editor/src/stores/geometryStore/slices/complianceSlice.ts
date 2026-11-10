@@ -50,6 +50,8 @@ export interface ComplianceSlice {
     storey_of_dwelling?: number;
     /** FHS General.storeys_in_building. Required by FHS when build_type is flat. */
     storeys_in_building?: number;
+    /** Model-input rows the loaded file has with a blank value: never filled from the defaults. */
+    blankMetadataRows?: string[];
   };
   setComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
   replaceComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;

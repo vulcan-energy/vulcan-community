@@ -25,7 +25,7 @@ import {
   VULCAN_CSV_VERSION_METADATA_KEY,
 } from '../../../geometry/io/parseCsvToGeometry';
 import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionRows';
-import { METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/globalSettingsValidation';
+import { METADATA_INPUT_LABELS, metadataRowValues, templateFilledMetadataSettings } from '../../../lib/globalSettingsValidation';
 import {
   encodeGuideOverlayMetadataValue,
   encodeGuideOverlaySourceMetadataValue,
@@ -738,9 +738,14 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string): string[] 
     .filter((fields) => fields[0] in METADATA_INPUT_LABELS)
     .map((fields) => [fields[0], fields[1]?.trim() ?? ''] as const));
   const savedMetadata = metadata(loadedCsv);
-  for (const [key, before] of metadata(authoredCsv)) {
+  const authoredMetadata = metadata(authoredCsv);
+  for (const [key, before] of authoredMetadata) {
     const after = savedMetadata.get(key);
     if (!before && after) replaced.push(`${key} blank → ${after}`);
+  }
+  // A model-input row the file lacks and the save adds, from the geometry or the defaults template.
+  for (const [key, after] of savedMetadata) {
+    if (after && !authoredMetadata.has(key)) replaced.push(`${key} absent → ${after}`);
   }
   return replaced.length
     ? [`Loading replaced ${replaced.length} value(s) in the file; saving writes the new value(s): ${replaced.join('; ')}.`]
@@ -2245,6 +2250,18 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         };
       });
       return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded: false };
+    }
+
+    // Defaults kept from before the load fill the rows this file lacks now; defaults read for the
+    // file fill them when they arrive (see withPrecomputedDefaultsLookup).
+    const loaded = get();
+    if (loaded.defaultsJson && !loaded.defaultsLoading) {
+      const filled = templateFilledMetadataSettings(
+        metadataRowValues({ ...loaded, elements: Object.values(loaded.elementsById) }),
+        loaded.complianceSettings,
+        loaded.defaultsJson,
+      );
+      if (Object.keys(filled).length) set({ complianceSettings: { ...loaded.complianceSettings, ...filled } });
     }
 
     // Round-trip through the canonical serializer after all synchronous load
