@@ -442,7 +442,10 @@ export function calculateSuggestedVentilationHeight(elements: Element[], floors:
   for (const floor of floors) {
     if (floor.heightUserOverride && floor.height > 0 && !heights.has(floor.zIndex)) heights.set(floor.zIndex, floor.height);
   }
-  const treatedLevels = [...treatedFloorAreaByLevel(elements)].filter(([, area]) => area > 0).map(([level]) => level);
+  const treatedLevels: number[] = [];
+  for (const [level, area] of treatedFloorAreaByLevel(elements)) {
+    if (area > 0) treatedLevels.push(level);
+  }
   const lowest = Math.min(...treatedLevels);
   const highest = Math.max(...treatedLevels);
   const counted = treatedLevels.length > 0
