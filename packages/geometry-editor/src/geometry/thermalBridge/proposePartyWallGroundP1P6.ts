@@ -13,6 +13,7 @@
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { isBasementGroundElement } from '../../lib/basementGeometry';
+import { lineFaceRunsAtHeight } from '../../lib/profileLineFace';
 import { nonBasementGroundSurfaceElevationM } from '../../lib/suspendedFloorGeometry';
 import type { Floor } from '../../geometry/types';
 import type { BuildingElementGround, BuildingElementPartyWall, Element } from '../types';
@@ -90,34 +91,34 @@ export function proposePartyWallGroundP1P6ThermalBridges(
           edgeIdx++;
           continue;
         }
-        const a = pointOnWallAtT(Pa, Pb, overlap.tLo, overlap.wallLen);
-        const b = pointOnWallAtT(Pa, Pb, overlap.tHi, overlap.wallLen);
-        const L = dist2XY(a, b);
-        if (L < MIN_PLAN_OVERLAP_M) {
-          edgeIdx++;
-          continue;
+        // Only where the party wall's bottom edge sits on the slab.
+        for (const [tLo, tHi] of lineFaceRunsAtHeight(pw, overlap.wallLen, overlap.tLo, overlap.tHi, slabZElev - pExt.foot, SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M)) {
+          const a = pointOnWallAtT(Pa, Pb, tLo, overlap.wallLen);
+          const b = pointOnWallAtT(Pa, Pb, tHi, overlap.wallLen);
+          const L = dist2XY(a, b);
+          if (L < MIN_PLAN_OVERLAP_M) continue;
+          const zSlab = roundToTwoDecimals(slabZElev);
+          const junctionCode = 'P1';
+          out.push({
+            proposalId: `p1:${pw.id}:${g.id}:e${edgeIdx}:${roundToTwoDecimals(tLo)}`,
+            openingId: g.id,
+            openingName: `${g.name ?? g.id} ↔ ${pw.name}`,
+            zoneId: pw.zoneId ?? g.zoneId,
+            edgeRole: 'party_wall_junction',
+            junctionCode,
+            suggestedLengthM: roundToTwoDecimals(L),
+            linearThermalTransmittance: psiTable37ForCode(junctionCode),
+            reason: `P1 party wall × ground floor: "${pw.name}" × BuildingElementGround "${g.name ?? g.id}" slab edge (plan ${roundToTwoDecimals(
+              tHi - tLo,
+            )} m at ${zSlab} m); use **P6** if inverted ground-floor junction`,
+            coordinates: [
+              { x: roundToTwoDecimals(a.x), y: roundToTwoDecimals(a.y), z: zSlab },
+              { x: roundToTwoDecimals(b.x), y: roundToTwoDecimals(b.y), z: zSlab },
+            ],
+            parentElementForTb: pw.name ?? pw.id,
+            hostElementIds: [pw.id, g.id],
+          });
         }
-        const zSlab = roundToTwoDecimals(slabZElev);
-        const junctionCode = 'P1';
-        out.push({
-          proposalId: `p1:${pw.id}:${g.id}:e${edgeIdx}:${roundToTwoDecimals(overlap.tLo)}`,
-          openingId: g.id,
-          openingName: `${g.name ?? g.id} ↔ ${pw.name}`,
-          zoneId: pw.zoneId ?? g.zoneId,
-          edgeRole: 'party_wall_junction',
-          junctionCode,
-          suggestedLengthM: roundToTwoDecimals(L),
-          linearThermalTransmittance: psiTable37ForCode(junctionCode),
-          reason: `P1 party wall × ground floor: "${pw.name}" × BuildingElementGround "${g.name ?? g.id}" slab edge (plan ${roundToTwoDecimals(
-            overlap.overlapLen,
-          )} m at ${zSlab} m); use **P6** if inverted ground-floor junction`,
-          coordinates: [
-            { x: roundToTwoDecimals(a.x), y: roundToTwoDecimals(a.y), z: zSlab },
-            { x: roundToTwoDecimals(b.x), y: roundToTwoDecimals(b.y), z: zSlab },
-	          ],
-	          parentElementForTb: pw.name ?? pw.id,
-	          hostElementIds: [pw.id, g.id],
-	        });
         edgeIdx++;
       }
     }

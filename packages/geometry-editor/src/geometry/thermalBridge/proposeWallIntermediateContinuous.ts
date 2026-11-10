@@ -30,6 +30,7 @@ import {
   SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M,
 } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
+import { lineFaceRunsAtHeight } from '../../lib/profileLineFace';
 import {
   footIntervalOnWallForRole,
   gapIntervalsAlongWall,
@@ -132,7 +133,9 @@ export function proposeWallIntermediateContinuous(
       if (iv) covered.push(iv);
     }
 
-    const gaps = gapIntervalsAlongWall(wallLen, covered);
+    // Only where the wall's bottom edge sits on the floor at its foot (not where it stands on a roof).
+    const gaps = gapIntervalsAlongWall(wallLen, covered).flatMap(([a, b]) =>
+      lineFaceRunsAtHeight(w, wallLen, a, b, 0, SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M));
     const zTargetM = useUnheatedBasementE6
       ? basementTargetM
       : effectiveFloors

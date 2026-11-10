@@ -22,9 +22,11 @@ import { roundToTwoDecimals } from '../constants';
 import { isExternalLineWall } from './proposeExternalCorners';
 import {
   horizontalConditionedFloorSlabPlanEdgesForPartyWallTb,
+  opaqueEnvelopeVerticalExtentM,
   planOverlapAdjacentOnWall,
   zonesCompatible,
 } from './proposeAdjacentWallJunction';
+import { lineFaceRunsAtHeight } from '../../lib/profileLineFace';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
@@ -44,23 +46,6 @@ export function isPartyHorizontalConditionedFloorSlabHost(
   if (el.type !== 'BuildingElementAdjacentConditionedSpace' || el.isPlaceholder) return false;
   if (!isVulcanUiPartyFloorElement(el)) return false;
   return horizontalConditionedFloorSlabPlanEdgesForPartyWallTb(el).length > 0;
-}
-
-function wallVerticalExtentM(
-  wall: BuildingElementOpaque,
-  floors: Floor[] | undefined,
-): { zLo: number; zHi: number } {
-  const h = typeof wall.height === 'number' && wall.height > 0 ? wall.height : 0;
-  if (floors && floors.length > 0) {
-    const zLo = elementBaseElevationMForTb(wall, floors);
-    return { zLo, zHi: zLo + h };
-  }
-  const c = wall.coordinates;
-  const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
-  const z1 = typeof c[1]?.z === 'number' && Number.isFinite(c[1].z) ? c[1].z : 0;
-  const bh = (wall as { base_height?: number }).base_height;
-  const zLo = typeof bh === 'number' && Number.isFinite(bh) && bh >= 0 ? bh : Math.min(z0, z1);
-  return { zLo, zHi: zLo + h };
 }
 
 function pointOnWallAtT(
@@ -93,7 +78,7 @@ export function proposeE7PartyFloorToExternalWallThermalBridges(
     if (!W || W.length < 2) continue;
     const Wa = W[0]!;
     const Wb = W[1]!;
-    const wExt = wallVerticalExtentM(wall, floors);
+    const wExt = opaqueEnvelopeVerticalExtentM(wall, floors);
 
     for (const adj of partyFloors) {
       if (!zonesCompatible(wall.zoneId, adj.zoneId)) continue;
@@ -120,37 +105,35 @@ export function proposeE7PartyFloorToExternalWallThermalBridges(
           continue;
         }
 
-        const tLo = overlap.tLo;
-        const tHi = overlap.tHi;
         const wlen = overlap.wallLen;
-        const a = pointOnWallAtT(Wa, Wb, tLo, wlen);
-        const b = pointOnWallAtT(Wa, Wb, tHi, wlen);
-        const L = dist2XY(a, b);
-        if (L < 0.05) {
-          edgeIdx++;
-          continue;
+        // Only where the slab level meets the wall face (a shaped wall may not reach it everywhere).
+        for (const [tLo, tHi] of lineFaceRunsAtHeight(wall, wlen, overlap.tLo, overlap.tHi, slabZ - wExt.foot, Z_BAND_EPS)) {
+          const a = pointOnWallAtT(Wa, Wb, tLo, wlen);
+          const b = pointOnWallAtT(Wa, Wb, tHi, wlen);
+          const L = dist2XY(a, b);
+          if (L < 0.05) continue;
+          const junctionCode = 'E7';
+          const zOut = roundToTwoDecimals(slabZ);
+          out.push({
+            proposalId: `e7:${wall.id}:${adj.id}:e${edgeIdx}:${roundToTwoDecimals((tLo + tHi) / 2)}`,
+            openingId: adj.id,
+            openingName: `${adj.name} ↔ ${wall.name}`,
+            zoneId: wall.zoneId ?? adj.zoneId,
+            edgeRole: 'e7_party_floor_external',
+            junctionCode,
+            suggestedLengthM: roundToTwoDecimals(L),
+            linearThermalTransmittance: psiTable37ForCode(junctionCode),
+            reason: `E7 (party floor or party ceiling between dwellings) at ${zOut} m along external wall "${wall.name}" and party slab "${adj.name}" (plan overlap ${roundToTwoDecimals(
+              tHi - tLo,
+            )} m; edge ${edgeIdx})`,
+            coordinates: [
+              { x: roundToTwoDecimals(a.x), y: roundToTwoDecimals(a.y), z: zOut },
+              { x: roundToTwoDecimals(b.x), y: roundToTwoDecimals(b.y), z: zOut },
+            ],
+            parentElementForTb: wall.name,
+            hostElementIds: [wall.id, adj.id],
+          });
         }
-        const junctionCode = 'E7';
-        const zOut = roundToTwoDecimals(slabZ);
-        out.push({
-          proposalId: `e7:${wall.id}:${adj.id}:e${edgeIdx}:${roundToTwoDecimals(overlap.tMid)}`,
-          openingId: adj.id,
-          openingName: `${adj.name} ↔ ${wall.name}`,
-          zoneId: wall.zoneId ?? adj.zoneId,
-          edgeRole: 'e7_party_floor_external',
-          junctionCode,
-          suggestedLengthM: roundToTwoDecimals(L),
-          linearThermalTransmittance: psiTable37ForCode(junctionCode),
-          reason: `E7 (party floor or party ceiling between dwellings) at ${zOut} m along external wall "${wall.name}" and party slab "${adj.name}" (plan overlap ${roundToTwoDecimals(
-            overlap.overlapLen,
-          )} m; edge ${edgeIdx})`,
-          coordinates: [
-            { x: roundToTwoDecimals(a.x), y: roundToTwoDecimals(a.y), z: zOut },
-            { x: roundToTwoDecimals(b.x), y: roundToTwoDecimals(b.y), z: zOut },
-          ],
-          parentElementForTb: wall.name,
-          hostElementIds: [wall.id, adj.id],
-        });
         edgeIdx++;
       }
     }

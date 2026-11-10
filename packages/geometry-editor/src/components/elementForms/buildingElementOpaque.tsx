@@ -42,10 +42,13 @@ import { useState } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { isExternalLineWall } from '../../geometry/thermalBridge/proposeExternalCorners';
 import {
+  getAreaBasedElementExportGeometry,
   getElementGrossArea,
   getOpaqueOpeningArea,
+  getRoofCover,
   isUnheatedPitchedRoofPlanAreaElement,
 } from '../../lib/elementArea';
+import { readProfiledLineFace } from '../../lib/profileLineFace';
 import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeometry';
 import { findSuspendedGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
 import { isDormerAnchorElement } from '../../lib/dormerGeometry';
@@ -255,6 +258,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       unheatedPitchedRoofCeilingElevationSuggestion,
       renderDormerBundleEditor,
       getGlobalOrientationOffset,
+      getFloors,
     } = ctx;
 
     // Decision 2's seam: same predicate the orchestrator's own
@@ -282,15 +286,24 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       const grossArea = selectedShape === 'polygon' || selectedShape === 'sloped-polygon'
         ? getElementGrossArea(draftElement, getGlobalOrientationOffset())
         : liveRectArea;
-      const subtractedArea = getOpaqueOpeningArea(selectedElement, elementsById, getGlobalOrientationOffset());
+      const subtractedArea = getOpaqueOpeningArea(selectedElement, elementsById, getFloors(), getGlobalOrientationOffset());
+      const cover = getRoofCover(selectedElement, elementsById, getFloors(), getGlobalOrientationOffset());
       const clampedNet = Math.max(0, grossArea - subtractedArea);
       return {
         grossArea: roundToTwoDecimals(grossArea),
         netArea: roundToTwoDecimals(clampedNet),
-        subtractedArea: roundToTwoDecimals(subtractedArea),
+        cover,
+        subtractedArea: roundToTwoDecimals(subtractedArea - (cover?.area ?? 0)),
         usesUnheatedPitchedRoofPlanArea: isUnheatedPitchedRoofPlanAreaElement(draftElement),
       };
     })();
+
+    // A wall whose bottom edge is not flat exports its lowest edge as HEM base_height; the
+    // Base Height field stays the wall foot.
+    const selectedFace = selectedElement ? readProfiledLineFace(selectedElement.extra_json) : null;
+    const lowestEdgeM = selectedElement?.type === 'BuildingElementOpaque' && selectedFace?.bottom_profile.some((p) => p.h !== 0)
+      ? getAreaBasedElementExportGeometry(selectedElement, getGlobalOrientationOffset()).baseHeight
+      : null;
 
     const canMarkUnheatedPitchedRoof = elementType === 'BuildingElementOpaque' && selectedShape === 'sloped-polygon';
     const canMarkExternalDoor = elementType === 'BuildingElementOpaque'
@@ -376,7 +389,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
           renderLinearDimensionsFields(registerBaseFieldRefs, {
             widthStep: '0.1',
             heightStep: '0.1',
-            includeProfileTop: true,
+            includeWallShape: true,
           })
         )}
         {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
@@ -393,9 +406,12 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
           {selectedOpaqueAreaSummary && (
             <div style={INLINE_FIELD_NOTE_STYLE}>
               Gross area: {formatToTwoDecimals(selectedOpaqueAreaSummary.grossArea)} m²
+              {selectedOpaqueAreaSummary.cover
+                ? ` · Covered by ${selectedOpaqueAreaSummary.cover.wallNames.join(', ')}: ${formatToTwoDecimals(selectedOpaqueAreaSummary.cover.area)} m² subtracted`
+                : ''}
               {selectedOpaqueAreaSummary.subtractedArea > 0
                 ? ` · Linked openings / cutouts subtracted: ${formatToTwoDecimals(selectedOpaqueAreaSummary.subtractedArea)} m²`
-                : ' · No linked openings or cutouts subtracted'}
+                : selectedOpaqueAreaSummary.cover ? '' : ' · No linked openings or cutouts subtracted'}
             </div>
           )}
           {selectedOpaqueAreaSummary?.usesUnheatedPitchedRoofPlanArea ? (
@@ -530,6 +546,9 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
               />
             )}
           </div>
+          {lowestEdgeM !== null ? (
+            <div style={INLINE_FIELD_NOTE_STYLE}>Lowest edge {formatToTwoDecimals(lowestEdgeM)} m</div>
+          ) : null}
           {baseHeightResetTarget ? (
             <div style={INLINE_FIELD_NOTE_STYLE}>
               {typeof state.baseHeightInput.value === 'number' && Math.abs(state.baseHeightInput.value - baseHeightResetTarget.value) > 0.01

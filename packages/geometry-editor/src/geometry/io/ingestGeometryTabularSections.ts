@@ -36,6 +36,7 @@ import type {
   SystemSubcategory,
 } from '../types';
 import type { CsvRow, CsvSection } from './csvSectionRows';
+import { wallFootFromExportedBaseHeight } from '../../lib/profileLineFace';
 import {
   decodePromotedExtraJsonFields,
   validateGeometrySectionHeaders,
@@ -106,6 +107,17 @@ function num(d: Record<string, string>, column: string, cell = V(d, column)): nu
     return undefined;
   }
   return roundToTwoDecimals(Number(cell));
+}
+
+/**
+ * base_height of an opaque or transparent row. For a profiled wall the cell is the lowest edge
+ * (see exportedBaseHeightForWallFace); the offset is removed from the exact cell before the
+ * usual 2 dp rounding, so the foot comes back as it was saved.
+ */
+function wallFootCell(d: Record<string, string>, extraJson: unknown): number | undefined {
+  const cell = V(d, 'base_height');
+  if (cell === '' || !NUMBER_CELL.test(cell)) return num(d, 'base_height');
+  return roundToTwoDecimals(wallFootFromExportedBaseHeight(Number(cell), extraJson)!);
 }
 
 function reqNum(d: Record<string, string>, column: string, cell?: string): number {
@@ -397,6 +409,7 @@ export function ingestGeometryTabularSections(
                 pitch: pitchOpt ?? null,
                 coordinates: opaqueCoords,
               });
+              const opaqueExtraJson = parseExtraJson(V(d, 'extra_json'), V(d, 'Name'));
               const opaqueElement: BuildingElementOpaque = {
                 ...baseElement,
                 type: 'BuildingElementOpaque',
@@ -405,13 +418,13 @@ export function ingestGeometryTabularSections(
                 area: reqNum(d, 'area'),
                 ...(opaquePitch !== undefined ? { pitch: opaquePitch } : {}),
                 orientation360: num(d, 'orientation360'),
-                base_height: num(d, 'base_height'),
+                base_height: wallFootCell(d, opaqueExtraJson),
                 // A blank cell stays unset: the target schema requires a choice for a roof, with no default.
                 is_unheated_pitched_roof: V(d, 'is_unheated_pitched_roof') ? V(d, 'is_unheated_pitched_roof') === 'TRUE' : undefined,
                 is_external_door: V(d, 'is_external_door') === 'TRUE',
                 parent_element: V(d, 'parent_element') ? V(d, 'parent_element') : null,
                 coordinates: opaqueCoords,
-                extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
+                extra_json: opaqueExtraJson,
               };
               newElements.push(opaqueElement);
               break;
@@ -424,6 +437,7 @@ export function ingestGeometryTabularSections(
                 pitch: pitchOptT ?? null,
                 coordinates: transparentCoords,
               });
+              const transparentExtraJson = parseExtraJson(V(d, 'extra_json'), V(d, 'Name'));
               const transparentElement: BuildingElementTransparent = {
                 ...baseElement,
                 type: 'BuildingElementTransparent',
@@ -432,14 +446,14 @@ export function ingestGeometryTabularSections(
                 area: reqNum(d, 'area'),
                 ...(transparentPitch !== undefined ? { pitch: transparentPitch } : {}),
                 orientation360: num(d, 'orientation360'),
-                base_height: num(d, 'base_height'),
+                base_height: wallFootCell(d, transparentExtraJson),
                 parent_element: V(d, 'linked_wall') ? V(d, 'linked_wall') : null,
                 frame_area_fraction: num(d, 'frame_area_fraction'),
                 free_area_height: num(d, 'free_area_height'),
                 mid_height: num(d, 'mid_height'),
                 max_window_open_area: num(d, 'max_window_open_area'),
                 coordinates: transparentCoords,
-                extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
+                extra_json: transparentExtraJson,
               };
               newElements.push(transparentElement);
               break;

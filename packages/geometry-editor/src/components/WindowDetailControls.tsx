@@ -125,7 +125,7 @@ export function CompactSegmentedControl<T extends string>({
   ariaLabel,
 }: {
   value: T;
-  options: Array<{ value: T; label: string; disabled?: boolean }>;
+  options: Array<{ value: T; label: string; disabled?: boolean; title?: string }>;
   onChange: (value: T) => void;
   ariaLabel: string;
 }) {
@@ -151,6 +151,7 @@ export function CompactSegmentedControl<T extends string>({
             onClick={() => onChange(option.value)}
             aria-pressed={active}
             disabled={option.disabled}
+            title={option.title}
             style={{
               border: 'none',
               borderLeft: option === options[0] ? 'none' : 'var(--border-width-thin) solid var(--border-subtle)',

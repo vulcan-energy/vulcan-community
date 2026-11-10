@@ -565,7 +565,7 @@ describe('dormerGeometry', () => {
       getElementEffectiveArea(host, {
         [host.id]: host,
         [anchorFrontWall.id]: anchorFrontWall,
-      }),
+      }, []),
     ).toBeCloseTo(9.77, 2);
   });
 
@@ -603,7 +603,7 @@ describe('dormerGeometry', () => {
       getElementEffectiveArea(host, {
         [host.id]: host,
         [anchorFrontWall.id]: anchorFrontWall,
-      }),
+      }, []),
     ).toBeCloseTo(9.77, 2);
   });
 

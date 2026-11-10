@@ -39,6 +39,7 @@ import {
   SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M,
 } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
+import { lineFaceRunsAtHeight } from '../../lib/profileLineFace';
 
 const MIN_SEGMENT_M = 0.05;
 /** Opening foot must lie within this perpendicular distance (m) of the wall’s infinite line to subtract. */
@@ -306,7 +307,9 @@ export function proposeWallGroundContinuous(
       if (iv) covered.push(iv);
     }
 
-    const gaps = gapIntervalsAlongWall(wallLen, covered);
+    // Only where the wall's bottom edge sits on the floor at its foot (not where it stands on a roof).
+    const gaps = gapIntervalsAlongWall(wallLen, covered).flatMap(([a, b]) =>
+      lineFaceRunsAtHeight(w, wallLen, a, b, 0, SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M));
     const targetZ = groundContactElevationTargetMForContinuousTb(w, elements, floors);
     const z = roundToTwoDecimals(
       targetZ ?? (floors && floors.length > 0 ? elementBaseElevationMForTb(w, floors) : opaqueWallBaseElevationM(w)),

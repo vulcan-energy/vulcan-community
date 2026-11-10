@@ -21,6 +21,7 @@
  */
 
 import { roundToTwoDecimals } from '../constants';
+import { normalizeProfilePoints, readProfiledLineFace, type ProfilePoint } from '../../lib/profileLineFace';
 import {
   elementBaseElevationMForTb,
   elementFloorZIndexForTb,
@@ -47,6 +48,9 @@ import {
 import { findLinkedBasementGroundForLineElement, isBasementGroundElement } from '../../lib/basementGeometry';
 
 import { DEFAULT_TB_DEDUPE_TOLERANCE_M } from './thermalBridgeTolerances';
+
+const last = <T,>(list: T[]): T => list[list.length - 1]!;
+
 /** Re-export for callers importing from facade openings. */
 export { DEFAULT_TB_DEDUPE_TOLERANCE_M };
 /** Re-export for callers importing from facade openings. */
@@ -353,6 +357,7 @@ export type VerticalFacadeOpeningHost = {
   width: number;
   height: number;
   base_height?: number;
+  extra_json?: Record<string, unknown>;
 };
 
 function hostWallForFacadeOpening(
@@ -512,11 +517,37 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
   const height = typeof t.height === 'number' && t.height > 0 ? t.height : 0;
 
   const zTop = zSill + height;
+  const horizontalLengthM = geomWidthM > 0 ? geomWidthM : width;
 
-  const sillA = { x: p0.x, y: p0.y, z: zSill };
-  const sillB = { x: p1.x, y: p1.y, z: zSill };
-  const headA = { x: p0.x, y: p0.y, z: zTop };
-  const headB = { x: p1.x, y: p1.y, z: zTop };
+  // A shaped opening (Custom top): lintel and sill follow its edges, each jamb is its height at
+  // that end. A flat opening keeps its width and stored height.
+  const face = readProfiledLineFace(t.extra_json);
+  const topEdge = face && normalizeProfilePoints(face.top_profile);
+  const bottomEdge = face && normalizeProfilePoints(face.bottom_profile);
+  const shaped = topEdge && bottomEdge ? { top: topEdge, bottom: bottomEdge } : null;
+  // A bridge is a straight run whose length the store derives from its two points, so a shaped
+  // edge is one run per straight part of it.
+  const edgeRuns = (edge: ProfilePoint[]) => {
+    const at = (p: ProfilePoint) => ({ x: p0.x + (p1.x - p0.x) * p.t, y: p0.y + (p1.y - p0.y) * p.t, z: zSill + p.h });
+    const runs: Array<{ coords: [ReturnType<typeof at>, ReturnType<typeof at>]; length: number }> = [];
+    // One run per straight part: drop points that lie on the line through their neighbours.
+    const bends = edge.filter((p, k) => {
+      if (k === 0 || k === edge.length - 1) return true;
+      const [a, b] = [edge[k - 1]!, edge[k + 1]!];
+      return Math.abs(a.h + ((b.h - a.h) * (p.t - a.t)) / (b.t - a.t) - p.h) > 1e-6;
+    });
+    for (let k = 1; k < bends.length; k += 1) {
+      const [a, b] = [at(bends[k - 1]!), at(bends[k]!)];
+      const length = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+      if (length > 1e-6) runs.push({ coords: [a, b], length });
+    }
+    return runs;
+  };
+
+  const sillA = { x: p0.x, y: p0.y, z: shaped ? zSill + shaped.bottom[0]!.h : zSill };
+  const sillB = { x: p1.x, y: p1.y, z: shaped ? zSill + last(shaped.bottom).h : zSill };
+  const headA = { x: p0.x, y: p0.y, z: shaped ? zSill + shaped.top[0]!.h : zTop };
+  const headB = { x: p1.x, y: p1.y, z: shaped ? zSill + last(shaped.top).h : zTop };
   const jambFirstBottom = sillA;
   const jambFirstTop = headA;
   const jambSecondBottom = sillB;
@@ -526,21 +557,28 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
     unheatedBasementWallFloorTargetM !== null &&
     Math.abs(zSill - unheatedBasementWallFloorTargetM) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
 
-  const horizontalLengthM = geomWidthM > 0 ? geomWidthM : width;
-
   const roles: Array<{
     role: FacadeOpeningEdgeRole;
+    /** Proposal id suffix when an edge has several runs; the role otherwise. */
+    id?: string;
     coords: [typeof sillA, typeof sillB];
     length: number;
     reason: string;
     parentElementForTb?: string | null;
   }> = [
-    {
-      role: 'lintel',
-      coords: [headA, headB],
-      length: horizontalLengthM,
-      reason: `Lintel run along top of opening "${t.name}" (segment length in plan)`,
-    },
+    ...(shaped
+      ? edgeRuns(shaped.top).map((run, k) => ({
+          role: 'lintel' as const,
+          id: `lintel:${k}`,
+          ...run,
+          reason: `Lintel run along part ${k + 1} of the shaped top of opening "${t.name}"`,
+        }))
+      : [{
+          role: 'lintel' as const,
+          coords: [headA, headB] as [typeof sillA, typeof sillB],
+          length: horizontalLengthM,
+          reason: `Lintel run along top of opening "${t.name}" (segment length in plan)`,
+        }]),
     ...(useIntermediateWallFloor
       ? [
           {
@@ -563,32 +601,41 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
               parentElementForTb: hostWall,
             },
           ]
-        : [
-            {
+        : shaped
+          ? edgeRuns(shaped.bottom).map((run, k) => ({
               role: 'sill' as const,
-              coords: [sillA, sillB] as [typeof sillA, typeof sillB],
-              length: horizontalLengthM,
-              reason: `Sill along bottom of opening "${t.name}"`,
-            },
-          ]),
+              id: `sill:${k}`,
+              ...run,
+              reason: `Sill along part ${k + 1} of the shaped bottom of opening "${t.name}"`,
+            }))
+          : [
+              {
+                role: 'sill' as const,
+                coords: [sillA, sillB] as [typeof sillA, typeof sillB],
+                length: horizontalLengthM,
+                reason: `Sill along bottom of opening "${t.name}"`,
+              },
+            ]),
     {
       role: 'jamb_first',
       coords: [jambFirstBottom, jambFirstTop],
-      length: height,
+      length: shaped ? headA.z - sillA.z : height,
       reason: jambReason(t.name, 'first', usedBaseHeight, z0, z1),
     },
     {
       role: 'jamb_second',
       coords: [jambSecondBottom, jambSecondTop],
-      length: height,
+      length: shaped ? headB.z - sillB.z : height,
       reason: jambReason(t.name, 'second', usedBaseHeight, z0, z1),
     },
   ];
 
   for (const row of roles) {
+    // A shaped opening whose top meets its bottom at an end (an apex window) has no jamb there.
+    if (shaped && row.length <= 1e-6) continue;
     const code = defaultJunctionCodeForEdge(row.role);
     const proposal: FacadeOpeningTbProposal = {
-      proposalId: `${t.id}:${row.role}`,
+      proposalId: `${t.id}:${row.id ?? row.role}`,
       openingId: t.id,
       openingName: t.name,
       zoneId: t.zoneId,
@@ -658,6 +705,9 @@ export function annotateProposalsWithDedupe(
     const roleOptions = new Set(junctionOptionsForFacadeEdgeRole(p.edgeRole));
     if (p.edgeRole === 'roof_window_sill') roleOptions.add('R11');
     const mid = midpoint3(p.coordinates[0], p.coordinates[1]);
+    // A flat-roof deck at base height 0/blank used to sit at 0 m and now sits at the top of its
+    // storey, so rows saved before then carry the old z: match these edges on plan position only.
+    const planOnly = p.edgeRole === 'flat_roof_edge' || p.edgeRole === 'party_wall_to_flat_roof';
 
     let matched: ThermalBridgeLinear | undefined;
     for (const tb of existing) {
@@ -666,7 +716,7 @@ export function annotateProposalsWithDedupe(
       const c = tb.coordinates;
       if (!c || c.length < 2) continue;
       const exMid = midpoint3(c[0], c[1]);
-      if (dist3(mid, exMid) <= toleranceM) {
+      if (dist3(mid, planOnly ? { ...exMid, z: mid.z } : exMid) <= toleranceM) {
         matched = tb;
         break;
       }

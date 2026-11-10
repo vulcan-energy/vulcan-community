@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { isInternalFloorElement } from '../lib/zoneDerivation';
+import { readProfiledLineFace } from '../lib/profileLineFace';
 import { forbiddenFieldKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Pencil, X as XIcon, type IconNode } from 'lucide';
@@ -1734,6 +1735,16 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     applyExtraJsonMergeBulk(patches);
   }, [applyExtraJsonMergeBulk, assemblyLibrary, computeAssemblyPatchForTargets]);
 
+  // A shaped wall or window takes its height from its shape (set in the element editor).
+  const SHAPED_HEIGHT_HINT = 'Some selected elements have a shape: set their height in the shape rows.';
+  const wallShapeSelected = useMemo(
+    () => wallDimensionElements.some((el) => readProfiledLineFace(el.extra_json) !== null),
+    [wallDimensionElements],
+  );
+  const windowShapeSelected = useMemo(
+    () => activeWindowSurfaceElements.some((el) => readProfiledLineFace(el.extra_json) !== null),
+    [activeWindowSurfaceElements],
+  );
   const wallHeightDistribution = useMemo(
     () => computeDistribution(wallDimensionElements, isWallLike, (el) => el.height),
     [wallDimensionElements]
@@ -3088,10 +3099,10 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             'wallHeight',
             'Height (m)',
             wallHeightSummary,
-            wallDimensionIds.length > 0,
+            wallDimensionIds.length > 0 && !wallShapeSelected,
             'e.g. 2.40',
             (el, value) => (isWallLike(el) ? { height: value } : null),
-            undefined,
+            wallShapeSelected ? SHAPED_HEIGHT_HINT : undefined,
             undefined,
             wallDimensionIds,
           )}
@@ -3137,10 +3148,10 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             'winHeight',
             'Height (m)',
             windowHeightSummary,
-            activeWindowSurfaceIds.length > 0,
+            activeWindowSurfaceIds.length > 0 && !windowShapeSelected,
             'e.g. 1.20',
             (el, value) => buildTransparentLivePatch(el, { height: value }),
-            undefined,
+            windowShapeSelected ? SHAPED_HEIGHT_HINT : undefined,
             undefined,
             activeWindowSurfaceIds,
           )

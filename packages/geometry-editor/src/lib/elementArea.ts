@@ -1,8 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { normalizeProfilePoints, interpolateProfileHeight } from './profileLineFace';
+import {
+  normalizeProfilePoints,
+  interpolateProfileHeight,
+  readProfiledLineFace,
+  wallFaceBreakpoints,
+  wallFaceProblem,
+  exportedBaseHeightForWallFace,
+} from './profileLineFace';
 import { roundToTwoDecimals } from '../geometry/constants';
+import { deriveRoofCutout, effectiveFloorsOf, elementsOf, modelMayHaveRoofCutouts } from './roofCutouts';
 import { calculatePolygonArea } from './polygonSync';
 import { isVulcanUiPartyFloorElement } from './assemblyMaterialFabric';
 import { getElementShape } from './shapeUtils';
@@ -13,6 +21,7 @@ import {
 import type {
   Element,
   ElementType,
+  Floor,
   BuildingElementOpaque,
   BuildingElementTransparent,
   BuildingElementAdjacentConditionedSpace,
@@ -206,22 +215,20 @@ const getProfiledLineFaceGeometry = (
   element: AreaBasedElement,
 ): FaceExportGeometry | null => {
   if (element.coordinates.length !== 2) return null;
+  const face = readProfiledLineFace(element.extra_json);
+  if (!face) return null;
 
-  const rawGeometry = element.extra_json?.geometry_face;
-  if (!rawGeometry || typeof rawGeometry !== 'object') return null;
-
-  const geometry = rawGeometry as Record<string, unknown>;
-  if (geometry.kind !== 'profiled-line-face') return null;
-
-  const topProfile = normalizeProfilePoints(geometry.top_profile);
-  const bottomProfile = normalizeProfilePoints(geometry.bottom_profile);
-  if (!topProfile || !bottomProfile) return null;
-
-  const breakpoints = Array.from(
-    new Set([...topProfile.map((point) => point.t), ...bottomProfile.map((point) => point.t)]),
-  ).sort((left, right) => left - right);
-
-  if (breakpoints.length < 2) return null;
+  const width = getLineWidth(element);
+  if (width < 1e-9) return null;
+  const foot = getAreaBasedBaseHeight(element);
+  // An invalid face has no area: report 0 (validation names the problem) rather than
+  // computing a folded polygon or falling back to width × height.
+  if (wallFaceProblem(face.top_profile, face.bottom_profile, width)) {
+    return { width: roundToTwoDecimals(width), grossArea: 0, equivalentHeight: 0, equivalentBaseHeight: roundToTwoDecimals(foot) };
+  }
+  const topProfile = normalizeProfilePoints(face.top_profile)!;
+  const bottomProfile = normalizeProfilePoints(face.bottom_profile)!;
+  const breakpoints = wallFaceBreakpoints(topProfile, bottomProfile);
 
   const topPolyline = breakpoints.map((t) => ({ t, h: interpolateProfileHeight(topProfile, t) }));
   const bottomPolyline = breakpoints.map((t) => ({ t, h: interpolateProfileHeight(bottomProfile, t) }));
@@ -233,25 +240,14 @@ const getProfiledLineFaceGeometry = (
     const next = polygon[(index + 1) % polygon.length];
     signedAreaTwice += current.t * next.h - next.t * current.h;
   }
-
-  const signedArea = signedAreaTwice / 2;
-  if (Math.abs(signedArea) < 1e-9) return null;
-
-  const averageHeight = Math.abs(signedArea);
-
-  const width = getLineWidth(element);
-  if (width < 1e-9) return null;
-
-  const grossArea = width * averageHeight;
-  // Scalar export height/area still come from the profile polygon; base_height stays the element foot
-  // (absolute bottom), not a centroid-adjusted fictitious bottom.
-  const equivalentBaseHeight = roundToTwoDecimals(getAreaBasedBaseHeight(element));
+  // t runs 0..1, so the polygon area in (t, h) is the average height.
+  const averageHeight = Math.abs(signedAreaTwice / 2);
 
   return {
     width: roundToTwoDecimals(width),
-    grossArea: roundToTwoDecimals(grossArea),
+    grossArea: roundToTwoDecimals(width * averageHeight),
     equivalentHeight: roundToTwoDecimals(averageHeight),
-    equivalentBaseHeight,
+    equivalentBaseHeight: exportedBaseHeightForWallFace(foot, face),
   };
 };
 
@@ -413,9 +409,36 @@ export const getElementGrossArea = (element: Element, globalOrientationOffset?: 
   return 0;
 };
 
+/**
+ * The part of a roof covered by walls standing on it (see roofCutouts.ts), as surface area in the
+ * roof's own measure: plan area for a flat roof or an unheated pitched roof exported as its
+ * ceiling, sloped area otherwise. That ceiling is the roof's plan outline (its gross area), which
+ * the cut-out is clipped to, so the cover never exceeds it. Null when no closed footprint covers
+ * the roof.
+ */
+export const getRoofCover = (
+  roof: Element,
+  elementsById: Record<string, Element>,
+  floors: Floor[],
+  globalOrientationOffset?: number,
+): { area: number; wallNames: string[] } | null => {
+  if (roof.type !== 'BuildingElementOpaque') return null;
+  const pitch = roof.pitch;
+  if (typeof pitch !== 'number' || !(pitch >= 0 && pitch < 90)) return null;
+  const elements = elementsOf(elementsById);
+  if (!modelMayHaveRoofCutouts(elements)) return null;
+  const cutout = deriveRoofCutout(roof, elements, effectiveFloorsOf(floors, elements), globalOrientationOffset);
+  if (!cutout || cutout.wallNames.length === 0) return null;
+  const area = isUnheatedPitchedRoofPlanAreaElement(roof)
+    ? cutout.planArea
+    : cutout.planArea / Math.cos((pitch * Math.PI) / 180);
+  return { area: roundToTwoDecimals(area), wallNames: cutout.wallNames };
+};
+
 export const getOpaqueOpeningArea = (
   element: BuildingElementOpaque,
   elementsById: Record<string, Element>,
+  floors: Floor[],
   globalOrientationOffset?: number,
 ): number => {
   const openingArea = Object.values(elementsById).reduce((sum, child) => {
@@ -438,18 +461,20 @@ export const getOpaqueOpeningArea = (
     return sum;
   }, 0);
 
-  return roundToTwoDecimals(openingArea);
+  const cover = getRoofCover(element, elementsById, floors, globalOrientationOffset)?.area ?? 0;
+  return roundToTwoDecimals(openingArea + cover);
 };
 
 export const getElementEffectiveArea = (
   element: Element,
   elementsById: Record<string, Element>,
+  floors: Floor[],
   globalOrientationOffset?: number,
 ): number => {
   const grossArea = getElementGrossArea(element, globalOrientationOffset);
 
   if (element.type === 'BuildingElementOpaque') {
-    return roundToTwoDecimals(Math.max(0, grossArea - getOpaqueOpeningArea(element, elementsById, globalOrientationOffset)));
+    return roundToTwoDecimals(Math.max(0, grossArea - getOpaqueOpeningArea(element, elementsById, floors, globalOrientationOffset)));
   }
 
   return grossArea;

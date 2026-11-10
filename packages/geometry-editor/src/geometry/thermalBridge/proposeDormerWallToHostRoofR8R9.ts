@@ -2,23 +2,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * **R8** / **R9** where a vertical **dormer** wall (cheek or front) bears on the **host** main sloped roof
- * surface. {@link proposeRoomInRoofRoofToWallR8R9ThermalBridges} only pairs roof **polygon boundary** edges
- * with walls; the cut line under a dormer usually lies **inside** the host roof plan, so it is added here
- * using `extra_json.dormer_bundle.host_element_name` to resolve the host opaque.
+ * **R8** / **R9** where a vertical wall bears on a sloped roof surface inside the roof's plan:
+ * - a **dormer** wall (cheek or front) on its **host** roof, resolved by
+ *   `extra_json.dormer_bundle.host_element_name`;
+ * - an external wall whose shaped bottom edge stands on a roof ("On roof" in the wall shape rows),
+ *   along each stretch of the bottom edge that lies on a roof plane.
+ * {@link proposeRoomInRoofRoofToWallR8R9ThermalBridges} only pairs roof **polygon boundary** edges
+ * with walls; these lines usually lie **inside** the roof plan, so they are added here.
  */
 import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
-import { inwardNormal2DForSlopedRoof, roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
+import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { roundToTwoDecimals } from '../constants';
 import { opaqueEnvelopeVerticalExtentM, zonesCompatible } from './proposeAdjacentWallJunction';
-import { isSlopedPitchedRoofElementForEavesGable } from './proposeSlopedRoofEavesGable';
-import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { type FacadeOpeningEdgeRole, type FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
+import { bottomEdgeRoofRuns, pitchedRoofsForWalls } from '../../lib/roofCutouts';
+import { isExternalLineWall } from './proposeExternalCorners';
 
 const MIN_WALL_PLAN_LEN_M = 0.05;
 const ROOF_WALL_Z_OVERLAP_PAD_M = 0.45;
@@ -70,50 +73,37 @@ export function proposeDormerWallToHostRoofR8R9ThermalBridges(
   globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   floors = withEffectiveStoreyHeights(floors, elements);
+  const roofs = pitchedRoofsForWalls(elements, globalOrientationOffset);
   const roofByName = new Map<string, BuildingElementOpaque>();
-  for (const e of elements) {
-    if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) continue;
-    const o = e as BuildingElementOpaque;
-    if (isOrientationPitchAxis(o) && !inwardNormal2DForSlopedRoof(o, globalOrientationOffset)) continue;
-    if (!isSlopedPitchedRoofElementForEavesGable(o)) continue;
+  for (const o of roofs) {
     const n = (o.name ?? '').trim();
     if (n) roofByName.set(n, o);
   }
 
   const out: FacadeOpeningTbProposal[] = [];
-
-  for (const el of elements) {
-    if (el.type !== 'BuildingElementOpaque' || el.isPlaceholder) continue;
-    const w = el as BuildingElementOpaque;
-    if (!isDormerVerticalWallForHostMeet(w)) continue;
-
-    const hostName = dormerBundleHostName(w);
-    if (!hostName) continue;
-
-    const roof = roofByName.get(hostName);
-    if (!roof || !zonesCompatible(w.zoneId, roof.zoneId)) continue;
-
-    const c = w.coordinates;
-    if (!c || c.length !== 2) continue;
-    const A = c[0]!;
-    const B = c[1]!;
-
+  const pushWallOnRoof = (
+    w: BuildingElementOpaque,
+    roof: BuildingElementOpaque,
+    A: { x: number; y: number },
+    B: { x: number; y: number },
+    run: string | null,
+  ): void => {
     const cold = !!(roof as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof;
     const coldBoundaryZM = cold ? coldPitchedRoofBoundaryZM(roof, elements, floors) : null;
     const z0 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, A.x, A.y, floors, globalOrientationOffset);
     const z1 = coldBoundaryZM ?? roofTopElevationAtPlanM(roof, B.x, B.y, floors, globalOrientationOffset);
-    if (z0 === null || z1 === null) continue;
+    if (z0 === null || z1 === null) return;
 
     const wExt = opaqueEnvelopeVerticalExtentM(w, floors);
     const rLo = Math.min(z0, z1) - ROOF_WALL_Z_OVERLAP_PAD_M;
     const rHi = Math.max(z0, z1) + ROOF_WALL_Z_OVERLAP_PAD_M;
-    if (wExt.zHi < rLo || wExt.zLo > rHi) continue;
+    if (wExt.zHi < rLo || wExt.zLo > rHi) return;
 
     const c0 = { x: A.x, y: A.y, z: z0 };
     const c1 = { x: B.x, y: B.y, z: z1 };
     const planLen = Math.hypot(B.x - A.x, B.y - A.y);
     const len = cold ? planLen : computeThermalBridgeLinearRunLengthM([c0, c1]);
-    if (len < MIN_WALL_PLAN_LEN_M) continue;
+    if (len < MIN_WALL_PLAN_LEN_M) return;
 
     const junctionCode = junctionR8OrR9ForRoof(roof);
     const ins = cold
@@ -122,20 +112,40 @@ export function proposeDormerWallToHostRoofR8R9ThermalBridges(
     const dz = Math.abs(z1 - z0);
 
     out.push({
-      proposalId: `dormerhostr89:${roof.id}:${w.id}:${roundToTwoDecimals(len)}`,
+      proposalId: run === null
+        ? `dormerhostr89:${roof.id}:${w.id}:${roundToTwoDecimals(len)}`
+        : `onroofr89:${roof.id}:${w.id}:${run}`,
       openingId: w.id,
-      openingName: `${roof.name} (host) ↔ ${w.name}`,
+      openingName: `${roof.name}${run === null ? ' (host)' : ''} ↔ ${w.name}`,
       zoneId: roof.zoneId ?? w.zoneId,
       edgeRole: EDGE_ROLE,
       junctionCode,
       suggestedLengthM: roundToTwoDecimals(len),
       linearThermalTransmittance: psiTable37ForCode(junctionCode),
-      reason: `Table 3.7 ${junctionCode} (${ins}): dormer wall "${w.name}" on **host** roof "${roof.name}" (${cold ? 'projected ceiling boundary' : 'footprint on roof plane'}; plan ${roundToTwoDecimals(planLen)} m; |Δz| ${roundToTwoDecimals(dz)} m; 3D length ${roundToTwoDecimals(len)} m)`,
+      reason: `Table 3.7 ${junctionCode} (${ins}): ${run === null ? 'dormer wall' : 'wall'} "${w.name}" on ${run === null ? '**host** roof' : 'roof'} "${roof.name}" (${cold ? 'projected ceiling boundary' : 'footprint on roof plane'}; plan ${roundToTwoDecimals(planLen)} m; |Δz| ${roundToTwoDecimals(dz)} m; 3D length ${roundToTwoDecimals(len)} m)`,
       coordinates: [c0, c1],
       parentElementForTb: roof.name,
       roofAdjacentPairIds: [roof.id, w.id],
     });
+  };
+
+  for (const el of elements) {
+    if (el.type !== 'BuildingElementOpaque' || el.isPlaceholder) continue;
+    const w = el as BuildingElementOpaque;
+    if (isDormerVerticalWallForHostMeet(w)) {
+      const hostName = dormerBundleHostName(w);
+      const roof = hostName ? roofByName.get(hostName) : undefined;
+      if (!roof || !zonesCompatible(w.zoneId, roof.zoneId)) continue;
+      pushWallOnRoof(w, roof, w.coordinates[0]!, w.coordinates[1]!, null);
+    } else if (isExternalLineWall(w)) {
+      const [A, B] = [w.coordinates[0]!, w.coordinates[1]!];
+      const at = (t: number) => ({ x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t });
+      for (const run of bottomEdgeRoofRuns(w, roofs, floors, globalOrientationOffset)) {
+        pushWallOnRoof(w, run.roof, at(run.t0), at(run.t1), `${roundToTwoDecimals(run.t0)}`);
+      }
+    }
   }
 
   return out;
+
 }

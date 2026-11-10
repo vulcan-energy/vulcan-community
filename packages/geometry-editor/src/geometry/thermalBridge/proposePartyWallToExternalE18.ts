@@ -11,15 +11,17 @@
 import { roundToTwoDecimals } from '../constants';
 import type { BuildingElementOpaque, BuildingElementPartyWall, Element } from '../types';
 import type { Floor } from '../../geometry/types';
-import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { distPointToSegmentXY } from './tbLinkage';
 import { isExternalLineWall } from './proposeExternalCorners';
 import {
   ADJACENT_WALL_COINCIDENT_PERP_TOL_M,
+  type LineVerticalExtentM,
+  opaqueEnvelopeVerticalExtentM,
   planOverlapAdjacentOnWall,
   zonesCompatible,
 } from './proposeAdjacentWallJunction';
+import { lineFaceEdgesAtPoint } from '../../lib/profileLineFace';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 
@@ -31,27 +33,22 @@ function dist2XY(a: { x: number; y: number }, b: { x: number; y: number }): numb
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function partyBaseLegacy(p: BuildingElementPartyWall): number {
-  const c = p.coordinates;
-  const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
-  const z1 = typeof c[1]?.z === 'number' && Number.isFinite(c[1].z) ? c[1].z : 0;
-  const bh = p.base_height;
-  if (typeof bh === 'number' && Number.isFinite(bh) && bh >= 0) return bh;
-  return Math.min(z0, z1);
-}
-
-/** Vertical span of a two-point party wall — reused by party-wall × roof TB proposers. */
+/** Vertical span of a two-point party wall — reused by party-wall × roof and floor TB proposers. */
 export function partyWallVerticalExtentM(
   p: BuildingElementPartyWall,
   floors: Floor[] | undefined,
+): LineVerticalExtentM {
+  return opaqueEnvelopeVerticalExtentM(p, floors);
+}
+
+/** Vertical span of a line at a plan point on it: its face there, above its foot. */
+function verticalExtentAtPointM(
+  el: BuildingElementOpaque | BuildingElementPartyWall,
+  ext: LineVerticalExtentM,
+  p: { x: number; y: number },
 ): { zLo: number; zHi: number } {
-  const h = typeof p.height === 'number' && p.height > 0 ? p.height : 0;
-  if (floors && floors.length > 0) {
-    const zLo = elementBaseElevationMForTb(p, floors);
-    return { zLo, zHi: zLo + h };
-  }
-  const zLo = partyBaseLegacy(p);
-  return { zLo, zHi: zLo + h };
+  const { bottom, top } = lineFaceEdgesAtPoint(el, p);
+  return { zLo: ext.foot + bottom, zHi: ext.foot + top };
 }
 
 /** Two-point vertical party wall (pitch unset or 90°), for TB pairing with an external wall. */
@@ -65,23 +62,6 @@ export function isPartyWallVerticalEnvelopeLine(el: Element): el is BuildingElem
   if (dist2XY(coords[0], coords[1]) < MIN_WALL) return false;
   if (typeof el.height !== 'number' || el.height < MIN_PLAN) return false;
   return true;
-}
-
-function wallVerticalExtentM(
-  wall: BuildingElementOpaque,
-  floors: Floor[] | undefined,
-): { zLo: number; zHi: number } {
-  const h = typeof wall.height === 'number' && wall.height > 0 ? wall.height : 0;
-  if (floors && floors.length > 0) {
-    const zLo = elementBaseElevationMForTb(wall, floors);
-    return { zLo, zHi: zLo + h };
-  }
-  const c = wall.coordinates;
-  const z0 = typeof c[0]?.z === 'number' && Number.isFinite(c[0].z) ? c[0].z : 0;
-  const z1 = typeof c[1]?.z === 'number' && Number.isFinite(c[1].z) ? c[1].z : 0;
-  const bh = wall.base_height;
-  const zLo = typeof bh === 'number' && Number.isFinite(bh) && bh >= 0 ? bh : Math.min(z0, z1);
-  return { zLo, zHi: zLo + h };
 }
 
 function pointOnWallAtT(
@@ -104,7 +84,7 @@ function appendPartyExternalCornerE18WhenNoColinearOverlap(
   Wa: { x: number; y: number },
   Wb: { x: number; y: number },
   wallLen: number,
-  wExt: { zLo: number; zHi: number },
+  wExt: LineVerticalExtentM,
   floors: Floor[] | undefined,
   cornerSeen: Set<string>,
   out: FacadeOpeningTbProposal[],
@@ -112,15 +92,18 @@ function appendPartyExternalCornerE18WhenNoColinearOverlap(
   const Pa = party.coordinates[0]!;
   const Pb = party.coordinates[1]!;
   const pExt = partyWallVerticalExtentM(party, floors);
-  const zLo = Math.max(wExt.zLo, pExt.zLo);
-  const zHi = Math.min(wExt.zHi, pExt.zHi);
-  if (zHi - zLo < MIN_VERT) return;
 
   const tol = ADJACENT_WALL_COINCIDENT_PERP_TOL_M;
   const junctionCode = 'E18';
-  const len = zHi - zLo;
 
   const tryEmit = (planX: number, planY: number, source: string) => {
+    // Both faces at the junction itself: a shaped wall's height varies along it.
+    const w = verticalExtentAtPointM(wall, wExt, { x: planX, y: planY });
+    const p = verticalExtentAtPointM(party, pExt, { x: planX, y: planY });
+    const zLo = Math.max(w.zLo, p.zLo);
+    const zHi = Math.min(w.zHi, p.zHi);
+    if (zHi - zLo < MIN_VERT) return;
+    const len = zHi - zLo;
     const sig = `${wall.id}:${party.id}:${roundToTwoDecimals(planX)}:${roundToTwoDecimals(planY)}`;
     if (cornerSeen.has(sig)) return;
     cornerSeen.add(sig);
@@ -187,18 +170,19 @@ export function proposePartyWallToExternalE18(
     const Wa = W[0];
     const Wb = W[1];
     const wallLen = dist2XY(Wa, Wb);
-    const wExt = wallVerticalExtentM(wall, floors);
+    const wExt = opaqueEnvelopeVerticalExtentM(wall, floors);
 
     for (const p of partyWalls) {
       if (!zonesCompatible(wall.zoneId, p.zoneId)) continue;
       const P = p.coordinates;
       const overlap = planOverlapAdjacentOnWall(Wa, Wb, P[0], P[1]);
       if (overlap) {
-        const pExt = partyWallVerticalExtentM(p, floors);
-        const zLo = Math.max(wExt.zLo, pExt.zLo);
-        const zHi = Math.min(wExt.zHi, pExt.zHi);
-        if (zHi - zLo < MIN_VERT) continue;
         const { x, y } = pointOnWallAtT(Wa, Wb, overlap.tMid, overlap.wallLen);
+        const wAt = verticalExtentAtPointM(wall, wExt, { x, y });
+        const pAt = verticalExtentAtPointM(p, partyWallVerticalExtentM(p, floors), { x, y });
+        const zLo = Math.max(wAt.zLo, pAt.zLo);
+        const zHi = Math.min(wAt.zHi, pAt.zHi);
+        if (zHi - zLo < MIN_VERT) continue;
         const len = zHi - zLo;
         const junctionCode = 'E18';
         out.push({

@@ -438,7 +438,7 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
           renderLinearDimensionsFields(registerBaseFieldRefs, {
             widthStep: '0.01',
             heightStep: '0.01',
-            includeProfileTop: true,
+            includeWallShape: true,
           })
         )}
         {renderFieldLabel('Base Height:', elementType, '_base_height')}

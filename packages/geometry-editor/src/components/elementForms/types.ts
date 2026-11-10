@@ -16,7 +16,7 @@ import type {
   GeometryProductCatalogueContribution,
   GeometryWorkspaceResourcePort,
 } from '../../../../geometry-editor-host/src';
-import type { BuildingElementTransparent, Element, ElementType } from '../../geometry/types';
+import type { BuildingElementTransparent, Element, ElementType, Floor } from '../../geometry/types';
 import type { CanvasShape } from '../../lib/shapeUtils';
 import type { SlopedElementDimensions } from '../../lib/slopedElementDimensions';
 import type { TransparentOpeningDerivedValues } from '../../lib/transparentOpeningDerivedFields';
@@ -255,6 +255,8 @@ export interface ElementFormRenderCtx {
    * it. Not assembly-calculator-specific; any module may use it to navigate. */
   setSelection: (selection: ElementFormSelection) => void;
   getGlobalOrientationOffset: () => number;
+  /** Storeys, for derived values that need elevations (a roof's covered area). */
+  getFloors: () => Floor[];
   /** Orchestrator-wide "Elevation above model ground" field (every family's
    * generic elevation control, see elementSupportsGenericElevationControl).
    * BuildingElementGround's panel clears its draft value when a newly-picked
@@ -330,11 +332,11 @@ export interface ElementFormRenderCtx {
    * Height input pair (with sloped-shape "Use shape calculated" resets and
    * validation). Orchestrator-owned because it closes over several
    * not-yet-extracted locals (getFieldValidationState,
-   * selectedSlopedDimensions, profileTopControl, etc.) — same render-bridge
+   * selectedSlopedDimensions, wallShapeToggle, etc.) — same render-bridge
    * precedent as renderMvhrDuctAndTerminalManager above. */
   renderLinearDimensionsFields: (
     fieldRef: (fieldKey: string) => (node: HTMLDivElement | null) => void,
-    options: { widthStep: string; heightStep: string; includeProfileTop?: boolean },
+    options: { widthStep: string; heightStep: string; includeWallShape?: boolean },
   ) => ReactNode;
   /** Sloped-polygon rectangle dimensions derived from the selected element's
    * coordinates + pitch (null when not a sloped-polygon or dimensions can't

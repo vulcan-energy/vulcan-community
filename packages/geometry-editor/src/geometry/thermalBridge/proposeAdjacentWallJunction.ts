@@ -23,11 +23,13 @@ import type {
   BuildingElementAdjacentConditionedSpace,
   BuildingElementAdjacentUnconditionedSpace_Simple,
   BuildingElementOpaque,
+  BuildingElementPartyWall,
   Element,
 } from '../types';
 import type { Floor } from '../../geometry/types';
 import { elementBaseElevationMForTb, elementFloorZIndexForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
+import { lineFaceEnvelope, lineFaceRunsAtHeight } from '../../lib/profileLineFace';
 import { isExternalLineWall } from './proposeExternalCorners';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
@@ -117,7 +119,7 @@ export function planOverlapAdjacentOnWall(
   };
 }
 
-function opaqueWallBaseElevationLegacy(w: BuildingElementOpaque): number {
+function opaqueWallBaseElevationLegacy(w: BuildingElementOpaque | BuildingElementPartyWall): number {
   const coords = w.coordinates;
   const z0 = typeof coords[0]?.z === 'number' && Number.isFinite(coords[0].z) ? coords[0].z : 0;
   const z1 = typeof coords[1]?.z === 'number' && Number.isFinite(coords[1].z) ? coords[1].z : 0;
@@ -135,38 +137,36 @@ function adjacentBaseElevationLegacy(
   return Math.min(z0, z1);
 }
 
-function wallVerticalExtentM(
-  wall: BuildingElementOpaque,
-  floors: Floor[] | undefined,
-): { zLo: number; zHi: number } {
-  const h = typeof wall.height === 'number' && wall.height > 0 ? wall.height : 0;
-  if (floors && floors.length > 0) {
-    const zLo = elementBaseElevationMForTb(wall, floors);
-    return { zLo, zHi: zLo + h };
-  }
-  const zLo = opaqueWallBaseElevationLegacy(wall);
-  return { zLo, zHi: zLo + h };
+/** Vertical span of a line element over its whole face, with the foot its face is measured from. */
+export type LineVerticalExtentM = { zLo: number; zHi: number; foot: number };
+
+function lineVerticalExtentM(el: Element, foot: number): LineVerticalExtentM {
+  const { bottom, top } = lineFaceEnvelope(el);
+  return { zLo: foot + bottom, zHi: foot + top, foot };
 }
 
 function adjacentVerticalExtentM(
   adj: BuildingElementAdjacentConditionedSpace | BuildingElementAdjacentUnconditionedSpace_Simple,
   floors: Floor[] | undefined,
-): { zLo: number; zHi: number } {
-  const h = typeof adj.height === 'number' && adj.height > 0 ? adj.height : 0;
-  if (floors && floors.length > 0) {
-    const zLo = elementBaseElevationMForTb(adj, floors);
-    return { zLo, zHi: zLo + h };
-  }
-  const zLo = adjacentBaseElevationLegacy(adj);
-  return { zLo, zHi: zLo + h };
+): LineVerticalExtentM {
+  return lineVerticalExtentM(
+    adj,
+    floors && floors.length > 0 ? elementBaseElevationMForTb(adj, floors) : adjacentBaseElevationLegacy(adj),
+  );
 }
 
-/** Vertical span for a 2-point opaque envelope line — shared with {@link proposeRoomInRoofRoofToWallR8R9ThermalBridges}. */
+/**
+ * Vertical span for a 2-point opaque or party line (lowest bottom to highest top of its face) —
+ * shared by the external-wall, party-wall and roof-to-wall passes.
+ */
 export function opaqueEnvelopeVerticalExtentM(
-  wall: BuildingElementOpaque,
+  wall: BuildingElementOpaque | BuildingElementPartyWall,
   floors: Floor[] | undefined,
-): { zLo: number; zHi: number } {
-  return wallVerticalExtentM(wall, floors);
+): LineVerticalExtentM {
+  return lineVerticalExtentM(
+    wall,
+    floors && floors.length > 0 ? elementBaseElevationMForTb(wall, floors) : opaqueWallBaseElevationLegacy(wall),
+  );
 }
 
 /** Vertical span for a vertical adjacent segment — shared with roof × adjacent R8/R9 pairing. */
@@ -312,7 +312,7 @@ export function proposeAdjacentWallJunctionThermalBridges(
     const W = wall.coordinates;
     const Wa = W[0]!;
     const Wb = W[1]!;
-    const wExt = wallVerticalExtentM(wall, floors);
+    const wExt = opaqueEnvelopeVerticalExtentM(wall, floors);
 
     for (const adj of unconditionedFloors) {
       if (!zonesCompatible(wall.zoneId, adj.zoneId)) continue;
@@ -328,7 +328,7 @@ export function proposeAdjacentWallJunctionThermalBridges(
       // whose extent merely straddles the elevation must not pair, or partially overlapping
       // stacked walls emit duplicate spans that under-overlap for global dedupe.
       const slabZ = elementBaseElevationMForTb(adj, floors);
-      if (Math.abs(slabZ - wExt.zLo) > Z_BAND_EPS_M) continue;
+      if (Math.abs(slabZ - wExt.foot) > Z_BAND_EPS_M) continue;
 
       const A = adj.coordinates;
       const overlap = planOverlapAdjacentOnWall(Wa, Wb, A[0]!, A[1]!);
@@ -339,32 +339,35 @@ export function proposeAdjacentWallJunctionThermalBridges(
       const zHi = Math.min(wExt.zHi, aExt.zHi);
       if (zHi - zLo < MIN_VERTICAL_OVERLAP_M) continue;
 
-      const a = pointOnWallAtT(Wa, Wb, overlap.tLo, overlap.wallLen);
-      const b = pointOnWallAtT(Wa, Wb, overlap.tHi, overlap.wallLen);
-      const L = dist2XY(a, b);
-      if (L < MIN_PLAN_OVERLAP_M) continue;
+      // Only where the wall's bottom edge sits on this floor.
+      for (const [tLo, tHi] of lineFaceRunsAtHeight(wall, overlap.wallLen, overlap.tLo, overlap.tHi, slabZ - wExt.foot, Z_BAND_EPS_M)) {
+        const a = pointOnWallAtT(Wa, Wb, tLo, overlap.wallLen);
+        const b = pointOnWallAtT(Wa, Wb, tHi, overlap.wallLen);
+        const L = dist2XY(a, b);
+        if (L < MIN_PLAN_OVERLAP_M) continue;
 
-      const z = roundToTwoDecimals(slabZ);
-      const junctionCode = 'E20';
-      out.push({
-        proposalId: `e20:${wall.id}:${adj.id}:${roundToTwoDecimals(overlap.tLo)}`,
-        openingId: adj.id,
-        openingName: `${adj.name} ↔ ${wall.name}`,
-        zoneId: wall.zoneId ?? adj.zoneId,
-        edgeRole: 'unheated_adjacent_wall_junction',
-        junctionCode,
-        suggestedLengthM: roundToTwoDecimals(L),
-        linearThermalTransmittance: psiTable37ForCode(junctionCode),
-        reason: `E20 exposed floor (normal) with external wall: unheated horizontal run "${adj.name}" × "${wall.name}" (plan ${roundToTwoDecimals(
-          overlap.overlapLen,
-        )} m at ${z} m); use E21 if inverted`,
-        coordinates: [
-          { x: roundToTwoDecimals(a.x), y: roundToTwoDecimals(a.y), z },
-          { x: roundToTwoDecimals(b.x), y: roundToTwoDecimals(b.y), z },
-	        ],
-	        parentElementForTb: wall.name,
-	        hostElementIds: [wall.id, adj.id],
-	      });
+        const z = roundToTwoDecimals(slabZ);
+        const junctionCode = 'E20';
+        out.push({
+          proposalId: `e20:${wall.id}:${adj.id}:${roundToTwoDecimals(tLo)}`,
+          openingId: adj.id,
+          openingName: `${adj.name} ↔ ${wall.name}`,
+          zoneId: wall.zoneId ?? adj.zoneId,
+          edgeRole: 'unheated_adjacent_wall_junction',
+          junctionCode,
+          suggestedLengthM: roundToTwoDecimals(L),
+          linearThermalTransmittance: psiTable37ForCode(junctionCode),
+          reason: `E20 exposed floor (normal) with external wall: unheated horizontal run "${adj.name}" × "${wall.name}" (plan ${roundToTwoDecimals(
+            tHi - tLo,
+          )} m at ${z} m); use E21 if inverted`,
+          coordinates: [
+            { x: roundToTwoDecimals(a.x), y: roundToTwoDecimals(a.y), z },
+            { x: roundToTwoDecimals(b.x), y: roundToTwoDecimals(b.y), z },
+          ],
+          parentElementForTb: wall.name,
+          hostElementIds: [wall.id, adj.id],
+        });
+      }
     }
   }
 

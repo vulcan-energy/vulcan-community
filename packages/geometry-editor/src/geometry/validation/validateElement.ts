@@ -76,6 +76,17 @@ import {
   getElementEffectiveArea,
   getElementGrossArea,
 } from '../../lib/elementArea';
+import { lineFaceEdgesAtPoint, readProfiledLineFace, wallFaceBreakpoints, wallFaceProblem } from '../../lib/profileLineFace';
+import { deriveWallEdgeFromRoofs, isRoofSnapshotStale } from '../../lib/wallEdgeFromRoofs';
+import {
+  deriveRoofCutout,
+  effectiveFloorsOf,
+  elementsOf,
+  isFootprintWall,
+  modelMayHaveRoofCutouts,
+  roofsWallsStandOn as roofsForCutouts,
+  roofFootprintIssueMessage,
+} from '../../lib/roofCutouts';
 import { inferPsiSourceFromValue } from '../../lib/simplifiedFabricMap';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
 import { getPApportionedLinearPsiForEditor } from '../thermalBridge/linearTbPsi';
@@ -893,6 +904,93 @@ function pushOpaqueSemanticFlagShapeIssuesIfNeeded(
 }
 
 // Validation utility function to check for missing or invalid data
+/** A profiled wall face that folds over or has points out of order: named, never repaired. */
+function profiledWallFaceIssue(element: Element): string | null {
+  const face = readProfiledLineFace((element as { extra_json?: unknown }).extra_json);
+  const coords = (element as { coordinates?: Array<{ x: number; y: number }> }).coordinates;
+  if (!face || coords?.length !== 2) return null;
+  const width = Math.hypot(coords[1].x - coords[0].x, coords[1].y - coords[0].y);
+  const problem = wallFaceProblem(face.top_profile, face.bottom_profile, width);
+  return problem ? `Wall shape: ${problem}` : null;
+}
+
+/** How far an opening may stand outside its shaped wall's face before it is named. */
+const OPENING_IN_FACE_TOL_M = 0.01;
+
+/**
+ * Names a wall opening that is not inside the shape of its host wall's profiled face. Both faces
+ * are straight between bends, so checking at the opening's ends and at every bend of either face
+ * between them covers the whole opening. Null when it fits or the wall has no profiled face.
+ */
+function openingOutsideWallFaceIssue(opening: Element, wall: Element, floors: Floor[]): string | null {
+  const wallFace = readProfiledLineFace(wall.extra_json);
+  if (!wallFace || opening.coordinates?.length !== 2 || wall.coordinates?.length !== 2) return null;
+  type Plan = { x: number; y: number };
+  const a = opening.coordinates[0]!;
+  const b = opening.coordinates[1]!;
+  const wa = wall.coordinates[0]!;
+  const wb = wall.coordinates[1]!;
+  const openingLen2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+  if (openingLen2 < 1e-12) return null;
+  const sOf = (p: { x: number; y: number }) => ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / openingLen2;
+  const openingFace = readProfiledLineFace(opening.extra_json);
+  const samples = [
+    0,
+    1,
+    ...wallFaceBreakpoints(wallFace.top_profile, wallFace.bottom_profile)
+      .map((t) => sOf({ x: wa.x + (wb.x - wa.x) * t, y: wa.y + (wb.y - wa.y) * t })),
+    ...(openingFace ? wallFaceBreakpoints(openingFace.top_profile, openingFace.bottom_profile) : []),
+  ].filter((sample) => sample >= 0 && sample <= 1);
+  const wallFoot = elementBaseElevationMForTb(wall, floors);
+  const openingFoot = elementBaseElevationMForTb(opening, floors);
+  const outside = samples.some((sample) => {
+    const p = { x: a.x + (b.x - a.x) * sample, y: a.y + (b.y - a.y) * sample };
+    const w = lineFaceEdgesAtPoint(wall as Element & { coordinates: Plan[] }, p);
+    const o = lineFaceEdgesAtPoint(opening as Element & { coordinates: Plan[] }, p);
+    return openingFoot + o.bottom < wallFoot + w.bottom - OPENING_IN_FACE_TOL_M
+      || openingFoot + o.top > wallFoot + w.top + OPENING_IN_FACE_TOL_M;
+  });
+  return outside ? `Opening is not inside the shape of wall "${wall.name}". Move it or change its size so it fits the wall.` : null;
+}
+
+/**
+ * "Roof changed" (as the wall shape rows show it) for a wall edge fitted to the roofs whose stored
+ * snapshot no longer matches a fresh fit. Messages are prefixed with the element's name.
+ */
+function staleRoofFitWarning(
+  element: Element,
+  elements: Element[],
+  floors: Floor[],
+  globalOrientationOffset: number | undefined,
+): string | null {
+  const face = readProfiledLineFace((element as { extra_json?: unknown }).extra_json);
+  if (!face) return null;
+  const stale = (['top', 'bottom'] as const).some((edge) => face[`${edge}_mode`] === 'roof' && isRoofSnapshotStale(
+    face[`${edge}_profile`],
+    deriveWallEdgeFromRoofs(element, elements, floors, globalOrientationOffset, edge,
+      edge === 'top' ? face.bottom_profile : face.top_profile)?.profile ?? null,
+  ));
+  return stale ? 'Roof changed; re-fit the wall shape' : null;
+}
+
+/**
+ * Footprints of walls standing on a roof that do not close or are not clear (roofCutouts.ts), named
+ * on the roof and on each wall involved, so the warning list takes the user to either.
+ */
+function roofFootprintIssueWarnings(
+  element: Element,
+  elements: Element[],
+  floors: Floor[],
+  globalOrientationOffset: number | undefined,
+): string[] {
+  if (element.type !== 'BuildingElementOpaque' && !isFootprintWall(element)) return [];
+  if (!modelMayHaveRoofCutouts(elements)) return [];
+  // Each roof's derivation is shared across the pass; a wall reads the issues that name it.
+  const roofs = isFootprintWall(element) ? roofsForCutouts(elements, globalOrientationOffset) : [element];
+  return roofs.flatMap((roof) => (deriveRoofCutout(roof, elements, floors, globalOrientationOffset)?.issues ?? [])
+    .flatMap((issue) => (roof.id === element.id || issue.wallNames.includes(element.name) ? [roofFootprintIssueMessage(roof.name, issue)] : [])));
+}
+
 export const validateElementCore = (
   element: Element,
   context: ValidationContext,
@@ -912,6 +1010,8 @@ export const validateElementCore = (
   const issues: ValidationIssue[] = ((context.sourceCsvVersion ?? 3) >= 3 || context.csvUpgradeRequested ? csvMigrationIssues([element], context.sourceCsvVersion) : []).map(issue => ({ source: 'geometry', fieldKey: 'u_value', message: `CSV_U_VALUE_MEANING_REQUIRED: ${issue.elementName} has legacy U-value ${issue.value}; choose its meaning in the migration review before saving.` }));
   // First, so it is the issue kept for its field.
   issues.push(...nonNumericCellIssues(element.nonNumericCells));
+  const wallFaceIssue = profiledWallFaceIssue(element);
+  if (wallFaceIssue) issues.push(geoIssue(wallFaceIssue, 'height'));
   const warnings: ValidationIssue[] = [];
   // Local aliases for the module-level helpers (geoIssue/schemaIssue/fhsIssue) so the long
   // switch below stays readable. Per-type validators in subsequent refactors call the
@@ -973,14 +1073,23 @@ export const validateElementCore = (
     }
   };
 
-  const allElements = elementsById ? Object.values(elementsById) : [];
-  // Effective storey heights, for MVHR units placed in metres; only duct and unit checks need them.
-  let effectiveFloorsMemo: Floor[] | undefined;
-  const effectiveFloors = (): Floor[] => (effectiveFloorsMemo ??= withEffectiveStoreyHeights(floors ?? [], allElements));
+  // Shared across a validation pass, so derivations keyed on them (roof cut-outs) run once.
+  const allElements = elementsById ? elementsOf(elementsById) : [];
+  const effectiveFloors = (): Floor[] => (floors ? effectiveFloorsOf(floors, allElements) : []);
   const floorStackWarnings = context.floorStackWarningElementIds
     ?? (floors ? getFloorStackWarningElementIds(allElements, floors) : new Set<string>());
   if (floorStackWarnings.has(element.id)) {
     warnings.push(geo(FLOOR_STACK_WARNING_MESSAGE, FLOOR_STACK_WARNING_FIELD_KEY));
+  }
+  const roofFitWarning = elementsById
+    ? staleRoofFitWarning(element, allElements, effectiveFloors(), context.globalOrientationOffset)
+    : null;
+  if (roofFitWarning) warnings.push(geo(roofFitWarning, 'height'));
+  if (elementsById) {
+    const isWall = isFootprintWall(element);
+    for (const message of roofFootprintIssueWarnings(element, allElements, effectiveFloors(), context.globalOrientationOffset)) {
+      warnings.push(geo(message, isWall ? 'height' : 'area'));
+    }
   }
   const findNamedElements = (
     name: string | null | undefined,
@@ -2095,7 +2204,7 @@ export const validateElementCore = (
           ? (elementData.generation_type ?? extraJson.generation_type ?? extraJson.type)
           : (
             element.type === 'BuildingElementOpaque' && field === 'area'
-                    ? (elementsById ? getElementEffectiveArea(element, elementsById, context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
+                    ? (elementsById ? getElementEffectiveArea(element, elementsById, effectiveFloors(), context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
               : (elementData[field] ?? extraJson[field])
           );
         const hasField = isOnSiteTypeCollision
@@ -2161,7 +2270,7 @@ export const validateElementCore = (
           ? (elementData.generation_type ?? extraJson.generation_type ?? extraJson.type)
           : (
             element.type === 'BuildingElementOpaque' && field === 'area'
-                  ? (elementsById ? getElementEffectiveArea(element, elementsById, context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
+                  ? (elementsById ? getElementEffectiveArea(element, elementsById, effectiveFloors(), context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
               : (elementData[field] ?? extraJson[field])
           );
         if (fieldValue === null || fieldValue === undefined) continue;
@@ -2348,8 +2457,13 @@ export const validateElementCore = (
       } else if (elementsById && element.coordinates?.length === 2) {
         // A wall opening must lie on its wall, as a rooflight must lie on its roof.
         const parent = Object.values(elementsById).find((candidate) => candidate.name === element.parent_element);
-        if (parent?.type === 'BuildingElementOpaque' && parent.coordinates?.length === 2 && !isOpeningWithinWallLine(element, parent)) {
-          issues.push(geo(`Opening extends beyond ${parent.name}`, 'coordinates'));
+        if (parent?.type === 'BuildingElementOpaque' && parent.coordinates?.length === 2) {
+          if (!isOpeningWithinWallLine(element, parent)) {
+            issues.push(geo(`Opening extends beyond ${parent.name}`, 'coordinates'));
+          } else {
+            const outsideFace = openingOutsideWallFaceIssue(element, parent, effectiveFloors());
+            if (outsideFace) issues.push(geo(outsideFace, 'base_height'));
+          }
         }
       }
     }

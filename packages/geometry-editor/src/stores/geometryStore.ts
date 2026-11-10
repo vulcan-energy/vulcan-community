@@ -20,6 +20,7 @@ import {
   lineIntersection,
   isColinear,
 } from '../lib/shapeUtils';
+import { readProfiledLineFace, reverseGeometryFaceInExtraJson } from '../lib/profileLineFace';
 import { syncPolygonElement, unionPolygons, calculatePolygonArea } from '../lib/polygonSync';
 import {
   buildSlopedPolygonRectangleDimensionPatch,
@@ -2279,6 +2280,21 @@ const applySlopedDimensionOverrideTracking = (
   }
 };
 
+/**
+ * A line element with a profiled face takes its height from the face, so a plain `height` edit
+ * (bulk edit, table, advanced fields) is an error: the bulk panel disables Height for these, and
+ * the shape rows change the face itself. An update that writes a new face is left alone.
+ */
+const rejectHeightEditOnProfiledFace = (prevElement: Element, updates: Partial<Element>): void => {
+  const height = (updates as { height?: unknown }).height;
+  if (height === undefined || height === (prevElement as { height?: unknown }).height) return;
+  const face = readProfiledLineFace(prevElement.extra_json);
+  if (!face) return;
+  if (Object.prototype.hasOwnProperty.call(updates, 'extra_json')
+    && JSON.stringify(readProfiledLineFace(updates.extra_json)) !== JSON.stringify(face)) return;
+  throw new Error(`"${prevElement.name}" has a shaped edge; change its height in the wall shape.`);
+};
+
 const TRANSPARENT_OPENING_DERIVATION_DRIVERS = [
   'base_height',
   'height',
@@ -2733,7 +2749,10 @@ function transformSelectedPlanGeometry(
     if (mirror) coordinates = mirroredCoordinateOrder(element, coordinates);
 
     const currentOrientation = (element as { orientation360?: unknown }).orientation360;
-    const extraJson = transformDormerBundlePlanPoint(element.extra_json, transformPoint);
+    const movedExtraJson = transformDormerBundlePlanPoint(element.extra_json, transformPoint);
+    const extraJson = mirror && getElementShape(element) === 'line'
+      ? reverseGeometryFaceInExtraJson(movedExtraJson)
+      : movedExtraJson;
     const nextElement = {
       ...element,
       coordinates,
@@ -5515,6 +5534,7 @@ const createGeometryState = (
 
       // Normalize parent_element only if explicitly provided on updates
       const normalizedUpdates: Partial<Element> = { ...updates };
+      rejectHeightEditOnProfiledFace(prevElement, updates);
       if (prevElement.nonNumericCells) normalizedUpdates.nonNumericCells = uneditedNonNumericCells(prevElement, updates);
       if (prevElement.type === 'BuildingElementTransparent' && Object.prototype.hasOwnProperty.call(updates, 'extra_json')) {
         // Advanced-field edits replace extra_json, including unchanged automatic values.
@@ -6616,6 +6636,7 @@ const createGeometryState = (
 
     get().updateElement(id, {
       coordinates: [{ ...end }, { ...start }],
+      ...(element.extra_json ? { extra_json: reverseGeometryFaceInExtraJson(element.extra_json) } : {}),
     } as Partial<Element>, true);
 
     for (const snapshot of hostedChildSnapshots) {
@@ -7424,7 +7445,7 @@ const createGeometryState = (
     const element = state.elementsById[elementId];
     if (!element) return 0;
 
-    return getElementEffectiveArea(element, state.elementsById, state.globalOrientationOffset);
+    return getElementEffectiveArea(element, state.elementsById, state.floors, state.globalOrientationOffset);
   },
 
   getAvailableParentElements: (childType: ElementType, zoneId: string, selfId = undefined) => {

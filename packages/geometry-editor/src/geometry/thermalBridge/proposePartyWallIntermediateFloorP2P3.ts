@@ -17,6 +17,7 @@
 import { isVulcanUiPartyFloorElement } from '../../lib/assemblyMaterialFabric';
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
+import { lineFaceRunsAtHeight } from '../../lib/profileLineFace';
 import type { Floor } from '../../geometry/types';
 import type { BuildingElementAdjacentConditionedSpace, BuildingElementPartyWall, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
@@ -103,39 +104,39 @@ export function proposePartyWallIntermediateFloorP2P3ThermalBridges(
           continue;
         }
 
-        const a = pointOnSegmentAtT(Pa, Pb, overlap.tLo, overlap.wallLen);
-        const b = pointOnSegmentAtT(Pa, Pb, overlap.tHi, overlap.wallLen);
-        const L = dist2XY(a, b);
-        if (L < MIN_PLAN_OVERLAP_M) {
-          edgeIdx += 1;
-          continue;
-        }
+        // Only where the slab level meets the party wall face (a shaped wall may not reach it everywhere).
+        for (const [tLo, tHi] of lineFaceRunsAtHeight(pw, overlap.wallLen, overlap.tLo, overlap.tHi, slabZ - pExt.foot, Z_BAND_EPS_M)) {
+          const a = pointOnSegmentAtT(Pa, Pb, tLo, overlap.wallLen);
+          const b = pointOnSegmentAtT(Pa, Pb, tHi, overlap.wallLen);
+          const L = dist2XY(a, b);
+          if (L < MIN_PLAN_OVERLAP_M) continue;
 
-        const z = roundToTwoDecimals(slabZ);
-        out.push({
-          proposalId: `${junctionCode.toLowerCase()}:pw:${pw.id}:${adj.id}:e${edgeIdx}:${roundToTwoDecimals(overlap.tLo)}`,
-          openingId: adj.id,
-          openingName: `${adj.name} ↔ ${pw.name}`,
-          zoneId: pw.zoneId ?? adj.zoneId,
-          edgeRole: 'party_wall_junction',
-          junctionCode,
-          suggestedLengthM: roundToTwoDecimals(L),
-          linearThermalTransmittance: psiTable37ForCode(junctionCode),
-          reason:
-            junctionCode === 'P3'
-              ? `P3 party wall × intermediate floor (party element): "${pw.name}" × conditioned floor "${adj.name}" (plan ${roundToTwoDecimals(
-                  overlap.overlapLen,
-                )} m at ${z} m)`
-              : `P2 party wall × intermediate floor: "${pw.name}" × conditioned floor "${adj.name}" (plan ${roundToTwoDecimals(
-                  overlap.overlapLen,
-                )} m at ${z} m)`,
-          coordinates: [
-            { x: roundToTwoDecimals(a.x), y: roundToTwoDecimals(a.y), z },
-            { x: roundToTwoDecimals(b.x), y: roundToTwoDecimals(b.y), z },
-	          ],
-	          parentElementForTb: pw.name ?? pw.id,
-	          hostElementIds: [pw.id, adj.id],
-	        });
+          const z = roundToTwoDecimals(slabZ);
+          out.push({
+            proposalId: `${junctionCode.toLowerCase()}:pw:${pw.id}:${adj.id}:e${edgeIdx}:${roundToTwoDecimals(tLo)}`,
+            openingId: adj.id,
+            openingName: `${adj.name} ↔ ${pw.name}`,
+            zoneId: pw.zoneId ?? adj.zoneId,
+            edgeRole: 'party_wall_junction',
+            junctionCode,
+            suggestedLengthM: roundToTwoDecimals(L),
+            linearThermalTransmittance: psiTable37ForCode(junctionCode),
+            reason:
+              junctionCode === 'P3'
+                ? `P3 party wall × intermediate floor (party element): "${pw.name}" × conditioned floor "${adj.name}" (plan ${roundToTwoDecimals(
+                    tHi - tLo,
+                  )} m at ${z} m)`
+                : `P2 party wall × intermediate floor: "${pw.name}" × conditioned floor "${adj.name}" (plan ${roundToTwoDecimals(
+                    tHi - tLo,
+                  )} m at ${z} m)`,
+            coordinates: [
+              { x: roundToTwoDecimals(a.x), y: roundToTwoDecimals(a.y), z },
+              { x: roundToTwoDecimals(b.x), y: roundToTwoDecimals(b.y), z },
+            ],
+            parentElementForTb: pw.name ?? pw.id,
+            hostElementIds: [pw.id, adj.id],
+          });
+        }
         edgeIdx += 1;
       }
     }
