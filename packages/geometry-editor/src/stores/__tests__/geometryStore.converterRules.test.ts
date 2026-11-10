@@ -193,6 +193,10 @@ const CASES: Case[] = [
   // Only a blank pitch is worked out from coords by the converter; a filled width is named.
   { name: 'a blank wall width filled from coords', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,6.65,90,4,', 'Wall (S),Zone 1,BuildingElementOpaque,6.65,90,,'),
     notice: 'Wall (S) width blank → 4' },
+  // The converter reads a thermal bridge table with no point-bridge, link or coords column.
+  { name: 'thermal bridges in the older layout', saves: { 'Thermal Bridging Elements|TB_E5|length': '8.9', 'Thermal Bridging Elements|TB_E5|linear_thermal_transmittance': '0.32' },
+    edit: (csv) => csv.replace(/Name,Zone,Type,heat_transfer_coeff,length,linear_thermal_transmittance,parent_element,coords,extra_json\n(?:Auto_TB[^\n]*\n)+/,
+      'Name,Zone,Type,length,linear_thermal_transmittance,extra_json\nTB_E5,Zone 1,ThermalBridgeLinear,8.9,0.32,"{""junction_type"":""E5""}"\n') },
   // A row the converter stops on (E008-E029) stops the load, naming the row.
   { name: 'element in an unknown zone', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', 'Wall (S),Zone 9,BuildingElementOpaque'), refuses: "names zone 'Zone 9'" },
   { name: 'element with no name', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', ',Zone 1,BuildingElementOpaque'), refuses: 'An Exposed Elements row has no Name' },
@@ -251,4 +255,25 @@ it.each(CASES)('$name', (c) => {
 it('opens a new document with no issues', () => {
   const state = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort }).getState();
   expect(state.collectAllGeometryWarnings().criticalIssues).toEqual([]);
+});
+
+// HEM a9 guards the party wall lining condition with `required: [party_wall_cavity_type]` beside
+// its `anyOf`. The converter asks for a lining only for the three listed cavity types.
+it('asks for a party wall lining only for the cavity types the target lists', () => {
+  const upstream = fixture('hem_fhs_upstream/schema/input_fhs.schema.json');
+  const from = '"if":{"anyOf":[{"properties":{"party_wall_cavity_type"';
+  const guarded = JSON.stringify(JSON.parse(upstream));
+  if (!guarded.includes(from)) throw new Error('schema text not found');
+  const schema = JSON.parse(guarded.replace(from, '"if":{"required":["party_wall_cavity_type"],"anyOf":[{"properties":{"party_wall_cavity_type"'));
+  __setFHSSchemaObjectForTests(schema);
+  __setSchemaObjectForTests(schema);
+  try {
+    expect(load({ name: 'solid', defaults: true, edit: (csv) => csv }).issues.has('Party Wall (E)|party_wall_lining_type')).toBe(false);
+    const sealed = load({ name: 'unfilled_sealed', defaults: true, edit: (csv) => csv.replace(/""party_wall_cavity_type"":""solid""/g, '""party_wall_cavity_type"":""unfilled_sealed""') });
+    expect(sealed.issues.has('Party Wall (E)|party_wall_lining_type')).toBe(true);
+  } finally {
+    const plain = JSON.parse(upstream);
+    __setFHSSchemaObjectForTests(plain);
+    __setSchemaObjectForTests(plain);
+  }
 });

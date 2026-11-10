@@ -310,6 +310,7 @@ const ADDITIVE_OPTIONAL_COLUMNS: Record<string, ReadonlySet<string>> = {
   'Hot Water Outlets': new Set(['allow_low_flowrate', 'base_height', 'coords', 'extra_json']),
   'Context Shading': new Set(['shading_type', 'start_angle', 'end_angle', 'parent_element', 'base_height', 'coords', 'extra_json']),
   'Water Pipework': new Set(['pipework_type']),
+  'Thermal Bridging Elements': new Set(['heat_transfer_coeff', 'parent_element', 'coords']),
   Systems: new Set(['Zone', 'Type', 'subcategory', 'system_preset', 'base_height', 'coords', 'extra_json']),
 };
 

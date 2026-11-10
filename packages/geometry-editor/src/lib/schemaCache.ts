@@ -1075,9 +1075,10 @@ export function getConditionalRequiredFieldsForMode(
     if (!condition) return false;
     // `if: { required: [...] }` (e.g. radiator per-metre branch keyed on `length`): the condition
     // holds when every listed field is present, matching JSON Schema `required` semantics.
+    // Beside other keywords (a9's party wall lining: `required` + `anyOf`) it only guards them.
     if (Array.isArray(condition.required)) {
       if (!condition.required.every(fieldHasValue)) return false;
-      if (!condition.properties) return true;
+      if (!condition.properties && !condition.not && !condition.anyOf && !condition.oneOf) return true;
     }
     if (condition.properties && typeof condition.properties === 'object') {
       for (const [propKey, propValue] of Object.entries(condition.properties)) {
