@@ -4939,6 +4939,47 @@ impl JSONBuilder {
 
         self.apply_fhs_implicit_false_root_booleans(result);
 
+        // A Metadata input with no row keeps the template value, or the FHS default above. Every
+        // other Metadata merge (ventilation, air permeability) only writes present rows, so the
+        // model already holds the value each absent setting will use.
+        let present: HashSet<String> = csv_data
+            .get("Metadata")
+            .into_iter()
+            .flatten()
+            .filter_map(|row| extract_metadata_field(row).0)
+            .collect();
+        let used: Vec<String> = METADATA_INPUT_FIELD_NAMES
+            .iter()
+            .filter(|name| !present.contains(**name))
+            .filter_map(|name| {
+                let pointer = if let Some(key) = name.strip_prefix("General_") {
+                    format!("/General/{key}")
+                } else if let Some(key) = name.strip_prefix("AirPermeability_") {
+                    format!("/InfiltrationVentilation/Leaks/{key}")
+                } else if let Some(key) = name.strip_prefix("Ventilation_") {
+                    format!("/InfiltrationVentilation/{key}")
+                } else {
+                    format!("/{name}")
+                };
+                Some(match result.pointer(&pointer)? {
+                    Value::String(text) => format!("{name} {text}"),
+                    value => format!("{name} {value}"),
+                })
+            })
+            .collect();
+        if !used.is_empty() {
+            self.schema_omissions
+                .borrow_mut()
+                .push(crate::finalization::SchemaOmission {
+                    code: "W_METADATA_ROW_ABSENT".to_string(),
+                    path: "/Metadata".to_string(),
+                    message: format!(
+                        "The Metadata section has no row for these settings, so the model uses these values: {}. Add the rows to state them.",
+                        used.join(", ")
+                    ),
+                });
+        }
+
         Ok(())
     }
 
@@ -13153,6 +13194,59 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
         assert_eq!(
             shading[0],
             serde_json::json!({"type": "overhang", "height": 7})
+        );
+    }
+
+    #[test]
+    fn absent_metadata_inputs_are_listed_with_the_value_used() {
+        let warnings = |metadata: &str| {
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\n{metadata}\n\nZone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n"
+            );
+            let data = CSVParser::new().parse_csv(&csv).unwrap();
+            let mut builder = JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).unwrap();
+            builder.build_json(&data).unwrap();
+            builder
+                .take_schema_omissions()
+                .into_iter()
+                .filter(|w| w.path == "/Metadata")
+                .collect::<Vec<_>>()
+        };
+        let all_rows = METADATA_INPUT_FIELD_NAMES
+            .iter()
+            .map(|name| match *name {
+                "Ventilation_shield_class" => format!("{name},Normal"),
+                "Ventilation_terrain_class" => format!("{name},Suburban"),
+                "HeatingControlType" => format!("{name},SeparateTempControl"),
+                "AirPermeability_test_pressure" => format!("{name},Standard"),
+                "General_build_type" => format!("{name},flat"),
+                "PartGcompliance"
+                | "PartO_active_cooling_required"
+                | "KitchenExtractorHoodExternal"
+                | "Ventilation_noise_nuisance" => format!("{name},FALSE"),
+                _ => format!("{name},1"),
+            })
+            .collect::<Vec<_>>();
+        let full = warnings(&all_rows.join("\n"));
+        assert!(full.is_empty(), "{full:?}");
+
+        let without = |names: &[&str]| {
+            all_rows
+                .iter()
+                .filter(|row| !names.iter().any(|n| row.starts_with(&format!("{n},"))))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let listed = warnings(&without(&[
+            "NumberOfBedrooms",
+            "KitchenExtractorHoodExternal",
+            "PartO_active_cooling_required",
+        ]));
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        assert_eq!(
+            listed[0].message,
+            "The Metadata section has no row for these settings, so the model uses these values: NumberOfBedrooms 1, PartO_active_cooling_required false, KitchenExtractorHoodExternal false. Add the rows to state them."
         );
     }
 
