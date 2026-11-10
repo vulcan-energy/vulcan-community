@@ -90,7 +90,8 @@ import {
   getUnheatedPitchedRoofCeilingElevationM,
   mergeUnheatedPitchedRoofCeilingElevationExtraJson,
 } from '../lib/unheatedPitchedRoofCeiling';
-import { buildProfileLineFaceFromTopHeights, extractTopHeightsFromExtraJson } from '../lib/profileLineFace';
+import { readProfiledLineFace, type ProfilePoint } from '../lib/profileLineFace';
+import { deriveWallEdgeFromRoofs } from '../lib/wallEdgeFromRoofs';
 import {
   listElementPresetOptions,
 } from '../geometry/parameterLibraryCatalog';
@@ -142,7 +143,7 @@ import {
   getParentControlledFloorZ,
   isElementFloorControlledByParent,
 } from '../lib/parentControlledFloor';
-import { ProfileHeightsPopover } from './ProfileHeightsPopover';
+import { WallShapeRows, type WallShapeCommit } from './WallShapeRows';
 import { useKeyedState } from '../hooks/useKeyedState';
 import {
   orientation360FromSegmentOutwardModelXY,
@@ -1544,7 +1545,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const [assemblyCalculatorOpen, setAssemblyCalculatorOpen] = useState(false);
   /** When set, assembly modal edits this dormer thermal part (see `assemblyInitialSnapshot` after dormer helpers). */
   const [dormerAssemblySection, setDormerAssemblySection] = useState<DormerThermalSectionKey | null>(null);
-  const [profileHeightsPopoverOpen, setProfileHeightsPopoverOpen] = useKeyedState(
+  const [wallShapeOpen, setWallShapeOpen] = useKeyedState(
     selection?.id ?? 'none',
     false,
   );
@@ -3834,7 +3835,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     );
   }, [selectedElement, wallShared.pitch, wallShared.baseHeightInput.value, allElements, floors]);
 
-  const canUseProfileTop = useMemo(() => {
+  const canUseWallShape = useMemo(() => {
     if (!selectedElement || selectedShape !== 'line') return false;
     const t = selectedElement.type;
     if (
@@ -3858,57 +3859,54 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return true;
   }, [selectedElement, selectedShape, selectedIsDormerAnchor]);
 
-  const profileInitialHeights = useMemo(() => {
-    const fromExtra = selectedElement ? extractTopHeightsFromExtraJson(selectedElement.extra_json) : null;
-    if (fromExtra && fromExtra.length >= 2) return fromExtra;
-    const h =
-      selectedElement && 'height' in selectedElement && typeof (selectedElement as { height?: number }).height === 'number'
-        ? (selectedElement as { height: number }).height
-        : typeof wallShared.heightInput.value === 'number'
-          ? wallShared.heightInput.value
-          : 0;
-    return [h, h];
-  }, [selectedElement, wallShared.heightInput.value]);
+  const selectedWallFace = useMemo(
+    () => (canUseWallShape && selectedElement ? readProfiledLineFace(selectedElement.extra_json) : null),
+    [canUseWallShape, selectedElement],
+  );
 
-  const applyLineProfileHeights = useCallback(
-    (heights: number[]) => {
+  const fitWallEdgeToRoofs = useCallback(
+    (edge: 'top' | 'bottom', limit: ProfilePoint[]) => (selectedElement
+      ? deriveWallEdgeFromRoofs(
+        selectedElement,
+        allElements,
+        withEffectiveStoreyHeights(floors, allElements),
+        geometryStore.getState().globalOrientationOffset,
+        edge,
+        limit,
+      )
+      : null),
+    [selectedElement, allElements, floors, geometryStore],
+  );
+
+  /** Commits a wall shape edit: a profiled face with its synced scalars, or a plain height. */
+  const applyWallShape = useCallback(
+    (next: WallShapeCommit) => {
       if (!isExistingElementSelection()) return;
       const el = getElementById(selection.id);
       if (!el) return;
-      const face = buildProfileLineFaceFromTopHeights(heights);
-      if (!face) return;
-      const prevEx =
+      const extra: Record<string, unknown> =
         el.extra_json && typeof el.extra_json === 'object' && !Array.isArray(el.extra_json)
           ? { ...(el.extra_json as Record<string, unknown>) }
           : {};
-      const mergedExtra = { ...prevEx, geometry_face: face };
-      const draft: Element = { ...el, extra_json: mergedExtra };
-      if (!isAreaBasedExportElement(draft)) {
-        return;
-      }
-      const exp = getAreaBasedElementExportGeometry(draft, geometryStore.getState().globalOrientationOffset);
+      if ('face' in next) extra.geometry_face = next.face;
+      else delete extra.geometry_face;
+      const draft = { ...el, extra_json: extra, ...('flatHeight' in next ? { height: next.flatHeight } : {}) } as Element;
+      if (!isAreaBasedExportElement(draft)) return;
       const globalOrientationOffset = geometryStore.getState().globalOrientationOffset;
-      const gross = getElementGrossArea(draft, globalOrientationOffset);
-      let patch: Partial<Element> = {
-        extra_json: mergedExtra,
+      const exp = getAreaBasedElementExportGeometry(draft, globalOrientationOffset);
+      const patch: Partial<Element> = {
+        extra_json: extra,
         width: exp.width,
         height: exp.height,
-        area: roundToTwoDecimals(gross),
+        area: roundToTwoDecimals(getElementGrossArea(draft, globalOrientationOffset)),
       };
-      if (draft.type === 'BuildingElementTransparent') {
-        patch = {
-          ...patch,
-          mid_height: getTransparentExportMidHeight(draft as BuildingElementTransparent, globalOrientationOffset),
-        };
-      }
-      commitExistingElementDraftRef.current(patch);
-      wallShared.widthInput.setValue(roundToTwoDecimals(exp.width));
-      wallShared.heightInput.setValue(roundToTwoDecimals(exp.height));
-      if (draft.type === 'BuildingElementTransparent') {
-        buildingElementTransparentFormState.midHeightInput.setValue(
-          roundToTwoDecimals(getTransparentExportMidHeight(draft as BuildingElementTransparent, globalOrientationOffset)),
-        );
-      }
+      const midHeight = draft.type === 'BuildingElementTransparent'
+        ? getTransparentExportMidHeight(draft as BuildingElementTransparent, globalOrientationOffset)
+        : undefined;
+      commitExistingElementDraftRef.current(midHeight === undefined ? patch : { ...patch, mid_height: midHeight } as Partial<Element>);
+      wallShared.widthInput.setValue(exp.width);
+      wallShared.heightInput.setValue(exp.height);
+      if (midHeight !== undefined) buildingElementTransparentFormState.midHeightInput.setValue(midHeight);
     },
     [
       selection,
@@ -3920,33 +3918,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       geometryStore,
     ],
   );
-
-  const clearLineProfile = useCallback(() => {
-    if (!isExistingElementSelection()) return;
-    const el = getElementById(selection.id);
-    if (!el || !el.extra_json || typeof el.extra_json !== 'object' || Array.isArray(el.extra_json)) return;
-    const ex = { ...(el.extra_json as Record<string, unknown>) };
-    if (!Object.prototype.hasOwnProperty.call(ex, 'geometry_face')) return;
-    delete ex.geometry_face;
-    const w = 'width' in el && typeof (el as { width?: number }).width === 'number' ? (el as { width: number }).width : 0;
-    const h = 'height' in el && typeof (el as { height?: number }).height === 'number' ? (el as { height: number }).height : 0;
-    const bh =
-      'base_height' in el && typeof (el as { base_height?: number }).base_height === 'number'
-        ? (el as { base_height: number }).base_height
-        : 0;
-    const patch: Partial<Element> = {
-      extra_json: ex,
-      area: roundToTwoDecimals(w * h),
-    };
-    if (el.type === 'BuildingElementTransparent') {
-      commitExistingElementDraftRef.current({
-        ...patch,
-        mid_height: roundToTwoDecimals(bh + h / 2),
-      } as Partial<Element>);
-    } else {
-      commitExistingElementDraftRef.current(patch);
-    }
-  }, [selection, isExistingElementSelection, getElementById]);
 
   const buildNewElementData = (): Partial<Element> => {
     const viewerElevationPatch =
@@ -4158,25 +4129,20 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     );
   };
 
-  const profileTopControl =
-    canUseProfileTop && isExistingElementSelection() ? (
-      <>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm element-editor-input-action"
-          onClick={() => setProfileHeightsPopoverOpen((open) => !open)}
-          style={{ whiteSpace: 'nowrap', alignSelf: 'center' }}
-        >
-          Profile top
-        </button>
-        <ProfileHeightsPopover
-          open={profileHeightsPopoverOpen}
-          onClose={() => setProfileHeightsPopoverOpen(false)}
-          initialHeights={profileInitialHeights}
-          onApply={applyLineProfileHeights}
-          onClear={clearLineProfile}
-        />
-      </>
+  const wallShapeAvailable = canUseWallShape && isExistingElementSelection();
+  // A wall with a stored face keeps the section open: collapsing it would hide its shape.
+  const wallShapeExpanded = wallShapeAvailable && (wallShapeOpen || !!selectedWallFace);
+  const wallShapeToggle =
+    wallShapeAvailable && !selectedWallFace ? (
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm element-editor-input-action"
+        onClick={() => setWallShapeOpen((open) => !open)}
+        aria-expanded={wallShapeExpanded}
+        style={{ whiteSpace: 'nowrap', alignSelf: 'center' }}
+      >
+        Shape
+      </button>
     ) : null;
 
   const applyHostedParentElement = useCallback(
@@ -4232,10 +4198,38 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   const renderLinearDimensionsFields = (
     fieldRef: (fieldKey: string) => (el: HTMLDivElement | null) => void,
-    options: { widthStep: string; heightStep: string; includeProfileTop?: boolean },
+    options: { widthStep: string; heightStep: string; includeWallShape?: boolean },
   ) => {
     const widthValidation = getFieldValidationState('width', liveWidthValue);
     const heightValidation = getFieldValidationState('height', liveHeightValue);
+    const heightField = (
+      <>
+        <StandardInput
+          {...decimalInputProps(wallShared.heightInput)}
+          unit={fieldUnit('height')}
+          step={options.heightStep}
+          min="0"
+          variant="ghost"
+          size="md"
+          className="flex-1"
+        />
+        {showSlopedHeightReset ? (
+          <ResetFieldButton
+            align="inline"
+            title={`Use shape-calculated sloped height (${selectedSlopedDimensions?.height ?? ''} m)`}
+            ariaLabel="Use shape calculated height"
+            label="Use shape calculated"
+            onClick={resetSlopedHeightToCanvas}
+          />
+        ) : null}
+        {options.includeWallShape ? wallShapeToggle : null}
+        <FieldValidationIndicator
+          hasIssue={!!heightValidation}
+          issue={heightValidation?.message}
+          variant={heightValidation?.variant}
+        />
+      </>
+    );
     return (
       <>
         {renderFieldLabel('Width (m):', elementType, 'width')}
@@ -4273,37 +4267,34 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             {selectedSlopedDimensionNotes.width}
           </div>
         ) : null}
-        {renderFieldLabel('Height (m):', elementType, 'height')}
-        <div
-          className="element-input"
-          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-          ref={fieldRef('height')}
-        >
-          <StandardInput
-            {...decimalInputProps(wallShared.heightInput)}
-            unit={fieldUnit('height')}
-            step={options.heightStep}
-            min="0"
-            variant="ghost"
-            size="md"
-            className="flex-1"
+        {options.includeWallShape && wallShapeExpanded && selectedElement ? (
+          <WallShapeRows
+            key={selectedElement.id}
+            widthM={Math.hypot(
+              selectedElement.coordinates[1].x - selectedElement.coordinates[0].x,
+              selectedElement.coordinates[1].y - selectedElement.coordinates[0].y,
+            )}
+            face={selectedWallFace}
+            height={(selectedElement as { height?: number }).height ?? 0}
+            topRef={fieldRef('height')}
+            heightField={heightField}
+            roofModes={selectedElement.type !== 'BuildingElementTransparent'}
+            fitRoof={fitWallEdgeToRoofs}
+            renderLabel={(label) => renderFieldLabel(label, elementType)}
+            onCommit={applyWallShape}
           />
-          {showSlopedHeightReset ? (
-            <ResetFieldButton
-              align="inline"
-              title={`Use shape-calculated sloped height (${selectedSlopedDimensions?.height ?? ''} m)`}
-              ariaLabel="Use shape calculated height"
-              label="Use shape calculated"
-              onClick={resetSlopedHeightToCanvas}
-            />
-          ) : null}
-          {options.includeProfileTop ? profileTopControl : null}
-          <FieldValidationIndicator
-            hasIssue={!!heightValidation}
-            issue={heightValidation?.message}
-            variant={heightValidation?.variant}
-          />
-        </div>
+        ) : (
+          <>
+            {renderFieldLabel('Height (m):', elementType, 'height')}
+            <div
+              className="element-input"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+              ref={fieldRef('height')}
+            >
+              {heightField}
+            </div>
+          </>
+        )}
         {selectedSlopedDimensionNotes?.height ? (
           <div style={INLINE_FIELD_NOTE_STYLE}>
             {selectedSlopedDimensionNotes.height}

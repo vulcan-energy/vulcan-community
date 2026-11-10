@@ -330,11 +330,11 @@ export interface ElementFormRenderCtx {
    * Height input pair (with sloped-shape "Use shape calculated" resets and
    * validation). Orchestrator-owned because it closes over several
    * not-yet-extracted locals (getFieldValidationState,
-   * selectedSlopedDimensions, profileTopControl, etc.) — same render-bridge
+   * selectedSlopedDimensions, wallShapeToggle, etc.) — same render-bridge
    * precedent as renderMvhrDuctAndTerminalManager above. */
   renderLinearDimensionsFields: (
     fieldRef: (fieldKey: string) => (node: HTMLDivElement | null) => void,
-    options: { widthStep: string; heightStep: string; includeProfileTop?: boolean },
+    options: { widthStep: string; heightStep: string; includeWallShape?: boolean },
   ) => ReactNode;
   /** Sloped-polygon rectangle dimensions derived from the selected element's
    * coordinates + pitch (null when not a sloped-polygon or dimensions can't

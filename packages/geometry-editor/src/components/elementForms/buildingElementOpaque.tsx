@@ -376,7 +376,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
           renderLinearDimensionsFields(registerBaseFieldRefs, {
             widthStep: '0.1',
             heightStep: '0.1',
-            includeProfileTop: true,
+            includeWallShape: true,
           })
         )}
         {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}

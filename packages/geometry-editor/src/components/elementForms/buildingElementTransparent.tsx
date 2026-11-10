@@ -616,7 +616,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           renderLinearDimensionsFields(registerBaseFieldRef, {
             widthStep: '0.01',
             heightStep: '0.01',
-            includeProfileTop: true,
+            includeWallShape: true,
           })
         )}
         {showSlopedTransparentRebuildOpening ? (
