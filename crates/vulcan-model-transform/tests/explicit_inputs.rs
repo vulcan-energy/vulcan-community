@@ -231,3 +231,51 @@ Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0
     assert_eq!(warning.code, "W_TARGET_INPUT");
     assert!(warning.message.starts_with("HEM 1.0.0a8: The opening height used for ventilation (1.5 m) differs from the window's mid-height (1.65 m), both above the ventilation-zone base."), "{}", warning.message);
 }
+
+#[test]
+fn window_heights_use_the_template_base_height_when_the_metadata_row_is_absent() {
+    let window = "
+Window Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,frame_area_fraction,free_area_height,mid_height,max_window_open_area
+Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0.8
+";
+    let convert = |metadata_row: &str, defaults_json: &str| {
+        transform_geometry_csv(TransformRequest {
+            csv: format!(
+                "{}{window}",
+                MINIMAL_CSV.replace(
+                    "Postcode,MK40 1AA",
+                    &format!("Postcode,MK40 1AA\n{metadata_row}")
+                )
+            ),
+            schema_json: MINIMAL_SCHEMA.into(),
+            defaults_json: defaults_json.into(),
+            profile: ModelProfile::Fhs,
+            conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
+            version_metadata: VersionMetadata {
+                hem_core_version: "1.0.0a8".into(),
+                fhs_wrapper_version: Some("1.0.0a8".into()),
+            },
+        })
+        .unwrap()
+        .model
+    };
+    let row = convert(
+        "Ventilation_ventilation_zone_base_height,1.0",
+        r#"{"Zone":{},"InfiltrationVentilation":{"ventilation_zone_base_height":0.0}}"#,
+    );
+    let template = convert(
+        "",
+        r#"{"Zone":{},"InfiltrationVentilation":{"ventilation_zone_base_height":1.0}}"#,
+    );
+    for path in [
+        "/InfiltrationVentilation/ventilation_zone_base_height",
+        "/Zone/Living/BuildingElement/Window/window_part_list",
+    ] {
+        assert_eq!(row.pointer(path), template.pointer(path), "{path}");
+    }
+    assert_eq!(
+        template.pointer("/Zone/Living/BuildingElement/Window/window_part_list/0/mid_height"),
+        Some(&serde_json::json!(0.65))
+    );
+}

@@ -1281,6 +1281,15 @@ fn metadata_f64(
     })
 }
 
+/// The model's ventilation zone base height. Every target requires it, so a model without one is
+/// already blocked by the schema and the 0 here never reaches an engine.
+fn ventilation_zone_base_height(model: &Value) -> f64 {
+    model
+        .pointer("/InfiltrationVentilation/ventilation_zone_base_height")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+}
+
 fn window_mid_height_to_hem_reference(value: f64, ventilation_base_height: f64) -> Value {
     let converted = ((value - ventilation_base_height) * 100.0).round() / 100.0;
     Value::Number(
@@ -1319,9 +1328,8 @@ fn vulcan_csv_version(
 
 fn migrate_v1_window_mid_height_reference(
     csv_data: &mut HashMap<String, Vec<HashMap<String, Value>>>,
+    ventilation_base_height: f64,
 ) {
-    let ventilation_base_height =
-        metadata_f64(csv_data, "Ventilation_ventilation_zone_base_height").unwrap_or(0.0);
     if ventilation_base_height.abs() <= f64::EPSILON {
         return;
     }
@@ -1365,10 +1373,11 @@ fn migrate_v1_window_mid_height_reference(
 /// schema merge. Add future migrations here in ascending version order.
 fn migrate_vulcan_csv_to_current(
     csv_data: &mut HashMap<String, Vec<HashMap<String, Value>>>,
+    ventilation_base_height: f64,
 ) -> Result<(), BuildError> {
     let version = vulcan_csv_version(csv_data)?;
     if version < 2 {
-        migrate_v1_window_mid_height_reference(csv_data);
+        migrate_v1_window_mid_height_reference(csv_data, ventilation_base_height);
     }
     {
         for row in csv_data.get("Non-Exposed Elements").into_iter().flatten() {
@@ -1920,7 +1929,14 @@ impl JSONBuilder {
         // merge entry point, so no downstream loop has to remember — and so the NESTED case is
         // covered, which no per-loop guard can reach. See `sanitize_csv_extra_json`.
         let mut sanitized_csv_data = sanitize_csv_extra_json(csv_data);
-        migrate_vulcan_csv_to_current(&mut sanitized_csv_data)?;
+        let mut result = self.defaults.clone();
+        // Window heights are measured from the model's ventilation zone base (the Metadata row,
+        // else the template), so it is merged first and read back from the model.
+        self.merge_ventilation_env_from_metadata(&mut result, &sanitized_csv_data)?;
+        migrate_vulcan_csv_to_current(
+            &mut sanitized_csv_data,
+            ventilation_zone_base_height(&result),
+        )?;
         let csv_data = &sanitized_csv_data;
 
         self.parse_cold_water_source_from_metadata(csv_data);
@@ -1936,7 +1952,6 @@ impl JSONBuilder {
             }
         }
 
-        let mut result = self.defaults.clone();
         if self.is_fhs_schema {
             if let Some(root) = result.as_object_mut() {
                 // FHS hot-water source must be explicitly authored through Systems.
@@ -2274,6 +2289,7 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
+        let ventilation_base_height = ventilation_zone_base_height(result);
         let building_element_sections = [
             "Exposed Elements",
             "Window Elements",
@@ -2725,8 +2741,7 @@ impl JSONBuilder {
                                 &mut element_obj,
                                 &target_path,
                                 contract.party_wall_requires_whole_u,
-                                metadata_f64(csv_data, "Ventilation_ventilation_zone_base_height")
-                                    .unwrap_or(0.0),
+                                ventilation_base_height,
                             )
                         }
                         crate::ElementInputConvention::DividedOpeningHalfPartition => {
@@ -3423,7 +3438,6 @@ impl JSONBuilder {
         // Merge air permeability settings from CSV metadata (after calculate_leaks_areas so CSV values override)
         // This is done here instead of in merge_compliance_settings to ensure it happens after calculate_leaks_areas
         self.merge_air_permeability_from_metadata(result, csv_data)?;
-        self.merge_ventilation_env_from_metadata(result, csv_data)?;
 
         if self.is_fhs_schema {
             self.merge_input_metadata(result)?;
@@ -13111,7 +13125,7 @@ Name,Type
                     ])],
                 ),
             ]);
-            migrate_vulcan_csv_to_current(&mut source).unwrap();
+            migrate_vulcan_csv_to_current(&mut source, 2.0).unwrap();
             let mut output = serde_json::json!({"type":"BuildingElementTransparent"});
             let errors = crate::target_mappings::map_physical_opening_full_partition_element(
                 &source["Window Elements"][0],
@@ -13145,11 +13159,11 @@ Name,Type
                 ])],
             ),
         ]);
-        assert!(migrate_vulcan_csv_to_current(&mut source).is_err());
+        assert!(migrate_vulcan_csv_to_current(&mut source, 0.0).is_err());
         source.get_mut("Non-Exposed Elements").unwrap()[0]
             .get_mut("extra_json")
             .unwrap()["u_value_interpretation"] = serde_json::json!("whole_wall");
-        assert!(migrate_vulcan_csv_to_current(&mut source).is_ok());
+        assert!(migrate_vulcan_csv_to_current(&mut source, 0.0).is_ok());
     }
 
     #[test]
@@ -13157,10 +13171,10 @@ Name,Type
         let mut parser = CSVParser::new();
         let csv = "Metadata\nVulcanCsvVersion,2\n\nZone\nName,Type,volume,floor_area\nZ,Zone,100,40\n\nNon-Exposed Elements\nName,Zone,Type,area,pitch,extra_json\nParty,Z,BuildingElementPartyWall,10,90,\"{\"\"u_value\"\":0.3,\"\"u_value_interpretation\"\":\"\"whole_wall\"\",\"\"u_value_interpreted_value\"\":0.2}\"\n";
         let mut data = parser.parse_csv(csv).unwrap();
-        assert!(migrate_vulcan_csv_to_current(&mut data).is_err());
+        assert!(migrate_vulcan_csv_to_current(&mut data, 0.0).is_err());
         data.get_mut("Non-Exposed Elements").unwrap()[0]
             .get_mut("extra_json")
             .unwrap()["u_value"] = serde_json::json!(0.2);
-        assert!(migrate_vulcan_csv_to_current(&mut data).is_ok());
+        assert!(migrate_vulcan_csv_to_current(&mut data, 0.0).is_ok());
     }
 }
