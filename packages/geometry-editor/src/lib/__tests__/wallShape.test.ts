@@ -81,6 +81,12 @@ describe('deriveWallEdgeFromRoofs', () => {
     expect(fit?.profile).toEqual([{ t: 0, h: 2 }, { t: 2 / 3, h: 0 }, { t: 1, h: 0 }]);
   });
 
+  it('steps down to the foot where the wall runs off a roof edge above the foot', () => {
+    // From y = 1 on the front slope out past the gable end (x = 8) to x = 10.
+    const fit = derive(wall([6, 1], [10, 1]), 'bottom');
+    expect(fit?.profile).toEqual([{ t: 0, h: 1 }, { t: 0.5, h: 1 }, { t: 0.50125, h: 0 }, { t: 1, h: 0 }]);
+  });
+
   it('returns null with no roof under the wall', () => {
     expect(derive(wall([20, 0], [20, 4]), 'bottom')).toBeNull();
   });

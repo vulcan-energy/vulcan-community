@@ -18,10 +18,13 @@ export type WallRoofEdge = { profile: ProfilePoint[]; roofNames: string[] };
 /** Stored roof snapshot and a fresh fit may differ by this much before the wall shows "Roof changed". */
 export const ROOF_FIT_TOLERANCE_M = 0.005;
 
-// A plan point this close to a roof outline counts as covered: a gable wall sits on the roof's
-// edge in plan, and drawn models put it a few centimetres either side (H482: 6.4 cm). Within a
-// wall thickness, so a roof this close is the one over or under the wall.
+// A plan point this close to a roof edge running alongside the wall counts as covered: a gable
+// wall sits on the roof's edge in plan, and drawn models put it a few centimetres either side
+// (H482: 6.4 cm). Within a wall thickness, so a roof this close is the one over or under the
+// wall. An edge the wall crosses does not stretch the roof: the wall leaves the roof there.
 const OUTLINE_TOL_M = 0.1;
+// Sine of the largest angle between the wall and a roof edge "alongside" it (about 6°).
+const ALONGSIDE_SIN = 0.1;
 // Containment is sampled this far either side of a roof edge; it is also the width of the
 // step drawn where the roof edge is not at the wall foot (an eaves the wall runs past).
 const SIDE_M = 0.005;
@@ -33,7 +36,12 @@ const isPitchedRoof = (el: Element, wallId: string): el is BuildingElementOpaque
   && (el.coordinates?.length ?? 0) >= 3
   && typeof el.pitch === 'number' && el.pitch > 0 && el.pitch < 90;
 
-function distanceToRing(p: { x: number; y: number }, ring: Array<{ x: number; y: number }>): number {
+/** Distance from `p` to the ring edges that run alongside direction `dir` (a unit vector). */
+function distanceToEdgesAlongside(
+  p: { x: number; y: number },
+  ring: Array<{ x: number; y: number }>,
+  dir: { x: number; y: number },
+): number {
   let best = Infinity;
   for (let i = 0; i < ring.length; i += 1) {
     const a = ring[i]!;
@@ -41,10 +49,23 @@ function distanceToRing(p: { x: number; y: number }, ring: Array<{ x: number; y:
     const ex = b.x - a.x;
     const ey = b.y - a.y;
     const len2 = ex * ex + ey * ey;
+    if (Math.abs(dir.x * ey - dir.y * ex) > ALONGSIDE_SIN * Math.sqrt(len2)) continue;
     const u = len2 < 1e-18 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * ex + (p.y - a.y) * ey) / len2));
     best = Math.min(best, Math.hypot(p.x - a.x - ex * u, p.y - a.y - ey * u));
   }
   return best;
+}
+
+/**
+ * True when a roof's plan outline covers `p` on a wall running in direction `dir` (unit vector),
+ * counting points within a wall thickness of a roof edge alongside the wall.
+ */
+export function roofCoversPlanPoint(
+  roof: BuildingElementOpaque,
+  p: { x: number; y: number },
+  dir: { x: number; y: number },
+): boolean {
+  return isPointInPolygon2D(p, roof.coordinates) || distanceToEdgesAlongside(p, roof.coordinates, dir) < OUTLINE_TOL_M;
 }
 
 /**
@@ -91,10 +112,8 @@ export function deriveWallEdgeFromRoofs(
     const z = roofTopElevationAtPlanM(roof, p.x, p.y, floors, globalOrientationOffset);
     return z === null ? null : z - foot;
   };
-  const covers = (roof: BuildingElementOpaque, t: number) => {
-    const p = at(t);
-    return isPointInPolygon2D(p, roof.coordinates) || distanceToRing(p, roof.coordinates) < OUTLINE_TOL_M;
-  };
+  const dir = { x: dx / length, y: dy / length };
+  const covers = (roof: BuildingElementOpaque, t: number) => roofCoversPlanPoint(roof, at(t), dir);
   const covering = (t: number) => roofs.filter((roof) => covers(roof, t));
 
   // Crossings of the wall line with each roof's plan edges, plus the bends of `limit`.
