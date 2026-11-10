@@ -165,6 +165,7 @@ it('blocks a required value with its own CSV column even when the defaults templ
     getElementSubschema: () => subschema,
     getConditionalRequiredFields: () => [],
     validateProperty: () => ({ valid: true }),
+    findParameter: () => null,
   } as never;
   const issues = validateElementCore(ground, {
     ...baseContext(ground), schemaPort, defaultsLookup: { hasDefaultValue: () => true } as never,

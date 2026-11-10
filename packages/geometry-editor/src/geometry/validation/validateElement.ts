@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { csvMigrationIssues } from '../io/csvSemanticMigration';
+import { fieldUnitForAdornment, resolveFieldPresentation } from '../../lib/fieldPresentation';
 import { isElementCsvColumn } from '../io/geometryCsvLayouts';
 import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
@@ -2103,10 +2104,15 @@ export const validateElementCore = (
 
           if (!hasDefault) {
             // Format field name for display (convert snake_case to Title Case)
-            const displayName = field
-              .split('_')
-              .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
-              .join(' ');
+            // Name the field as its form label shows it, unit included (e.g. "Thickness Walls (m)").
+            const presentation = resolveFieldPresentation({
+              mode: schemaMode,
+              propertyKey: field,
+              elementType: element.type,
+              label: field.split('_').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+            }, schemaPort);
+            const unit = fieldUnitForAdornment(presentation);
+            const displayName = unit ? `${presentation.label} (${unit})` : presentation.label;
             const message = complianceValidationEnabled
               ? `FHS: ${displayName} required`
               : `${displayName} required`;
