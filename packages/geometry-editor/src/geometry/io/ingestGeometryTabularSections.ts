@@ -136,8 +136,8 @@ function normalizeContextShadingShadingType(raw: string | undefined): 'obstacle'
 const BUILDING_ROW_KEYS = ['Name', 'Zone', 'Type'] as const;
 /**
  * Row cells without which the converter stops the whole conversion (E008-E029). The load stops too,
- * naming the section and row, so no row is dropped unseen. Space Labels is editor-only: a label
- * with no zone cannot be placed.
+ * naming the section and row, so no row is dropped unseen. The converter does not read Space Labels,
+ * so every label row loads and saves as it is.
  */
 const REQUIRED_ROW_KEYS: Readonly<Record<string, readonly ('Name' | 'Zone' | 'Type')[]>> = {
   'Exposed Elements': BUILDING_ROW_KEYS,
@@ -148,7 +148,6 @@ const REQUIRED_ROW_KEYS: Readonly<Record<string, readonly ('Name' | 'Zone' | 'Ty
   'Window Shading': ['Zone'],
   Lighting: ['Zone'],
   'Wet Emitters': ['Zone'],
-  'Space Labels': ['Zone'],
   'Hot Water Outlets': ['Name', 'Type'],
   'Ventilation Systems': ['Name', 'Type'],
   'On-Site Generation': ['Name'],
@@ -237,12 +236,9 @@ export function ingestGeometryTabularSections(
       for (const row of section.rows) {
         const d = row.data;
         const slName = V(d, 'Name');
-        if (slName === 'Name') continue;
-        assertRowKeys(section, d, zoneNameToId);
-        if (!slName) continue;
+        if (slName === 'Name' || Object.values(d).every((cell) => !cell?.trim())) continue;
         const zoneName = V(d, 'Zone');
-        const zoneId = zoneNameToId[zoneName];
-        if (!zoneId) continue;
+        const zoneId = zoneNameToId[zoneName] ?? '';
         const parsedStorey = parseOptionalNumberColumn(V(d, 'storey'));
         const storey = parsedStorey === undefined ? undefined : Math.max(0, Math.floor(parsedStorey));
         const room_type = V(d, 'room_type').trim();
@@ -261,6 +257,7 @@ export function ingestGeometryTabularSections(
           id: generateId(),
           name: slName,
           zoneId,
+          ...(zoneId ? {} : { zoneName }),
           storey: csvRequiredValue(storey),
           room_type,
           coordinates: coords,

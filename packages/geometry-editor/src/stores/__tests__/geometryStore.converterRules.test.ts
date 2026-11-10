@@ -38,6 +38,8 @@ type Case = {
   allows?: string[];
   /** `section|row name|column` (or `Metadata|key`) → saved cell; null means the row is not written. */
   saves?: Record<string, string | null>;
+  /** Text a load notice must contain. */
+  notice?: string;
 };
 
 const replace = (from: string, to: string) => (csv: string) => {
@@ -50,6 +52,11 @@ const ufh = (unit: string) => replace('Underfloor Heating,Zone 1,WetEmitter,ufh,
 const systemsVentilation = replace(
   'Name,Zone,Type,subcategory,system_preset,coords,extra_json\n',
   'Name,Zone,Type,subcategory,system_preset,coords,extra_json\nInfiltration,Zone 1,System,InfiltrationVentilation,,"0,0,0","{""InfiltrationVentilation"":{""shield_class"":""Shielded"",""altitude"":120}}"\n',
+);
+
+const kitchen = (zone: string, type: string, keepCoords = true) => (csv: string) => csv.replace(
+  /^Kitchen,Zone 1,0,kitchen,("[^"]*")/m,
+  (_row, coords: string) => `Kitchen,${zone},0,${type},${keepCoords ? coords : ''}`,
 );
 
 const CASES: Case[] = [
@@ -68,6 +75,12 @@ const CASES: Case[] = [
     saves: { 'Metadata|Ventilation_shield_class': 'Normal', 'Metadata|Ventilation_altitude': '30' } },
   { name: 'a Systems row supplies the absent rows', edit: systemsVentilation, defaults: true,
     allows: ['Shield Class', 'Altitude (m)'], saves: { 'Metadata|Ventilation_shield_class': null, 'Metadata|Ventilation_altitude': null } },
+  // The converter does not read Space Labels: every row loads and saves as it is, and none blocks.
+  { name: 'label with blank Zone', edit: kitchen('', 'kitchen'), notice: 'Kitchen',
+    saves: { 'Space Labels|Kitchen|Zone': '', 'Space Labels|Kitchen|room_type': 'kitchen' } },
+  { name: 'label with unknown Zone', edit: kitchen('Zone 9', 'kitchen'), notice: 'Kitchen', saves: { 'Space Labels|Kitchen|Zone': 'Zone 9' } },
+  { name: 'label with blank room_type', edit: kitchen('Zone 1', ''), notice: 'Kitchen', saves: { 'Space Labels|Kitchen|room_type': '' } },
+  { name: 'label with blank coords', edit: kitchen('Zone 1', 'kitchen', false), notice: 'Kitchen', saves: { 'Space Labels|Kitchen|coords': '' } },
 ];
 
 function load(c: Case) {
@@ -95,7 +108,8 @@ function load(c: Case) {
 }
 
 it.each(CASES)('$name', (c) => {
-  const { issues, all, cells } = load(c);
+  const { issues, all, cells, warnings } = load(c);
+  if (c.notice) expect(warnings.join(' ')).toContain(c.notice);
   const blocked = (key: string) => issues.has(key) || all.some((text) => text.includes(key));
   for (const key of c.blocks ?? []) expect(blocked(key), `blocks ${key}`).toBe(true);
   for (const key of c.allows ?? []) expect(blocked(key), `allows ${key}`).toBe(false);

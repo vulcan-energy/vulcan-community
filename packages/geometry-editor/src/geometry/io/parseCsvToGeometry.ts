@@ -696,6 +696,12 @@ export const parseCsvToGeometry = (
       detectedZoneOverrideMarkers[zone.name],
     );
   }
+  // The converter does not read Space Labels. In the editor a label adds area and room counts to its
+  // zone only with a zone, a room type and an outline, so name the rows that add nothing.
+  const idleLabels = newSpaceLabels.filter((label) => !label.zoneId || !label.room_type || label.coordinates.length < 3);
+  if (idleLabels.length > 0) {
+    warnings.push(`${idleLabels.length === 1 ? 'This Space Labels row adds' : 'These Space Labels rows add'} no area or room count to a zone: ${idleLabels.map((label) => label.name || '(no name)').join(', ')}. A label counts once it has a zone, a room type and an outline.`);
+  }
   for (const label of newSpaceLabels) {
     promoteOverrideMarkersOnImport(
       label as unknown as Record<string, unknown>,

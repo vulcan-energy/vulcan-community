@@ -1054,14 +1054,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       lines.push(ensureColumnCount(slHeader, slColumnCount));
       spaceLabelRows.forEach((sl) => {
         const zone = currentState.getZoneById(sl.zoneId);
-        if (!zone) return;
         const spaceLabelExtraJson = {
           ...(sl.extra_json ?? {}),
           ...(sl.source ? { space_label_source: sl.source } : {}),
         };
         const row = [
           escapeCSV(sl.name),
-          escapeCSV(zone.name),
+          escapeCSV(zone?.name ?? sl.zoneName ?? ''),
           escapeCSV(sl.storey),
           escapeCSV(sl.room_type),
           formatCoordsForCsv(sl.coordinates),
