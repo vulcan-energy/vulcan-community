@@ -34,6 +34,9 @@ export const NAME_AUTO_SYNC_EXTRA_JSON_KEY = ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR.k
  * after every JsonForms change, because JsonForms drops extra_json keys that are not in the element
  * schema. A key that is neither `_`-prefixed nor listed here does not survive an Advanced Fields edit.
  *
+ * Do **not** add `_vulcan_ui_party_element` here: the converter reads it to classify party floors
+ * and never writes it to the merged model. Advanced Fields keeps it through the `_` prefix rule.
+ *
  * Do **not** add `junction_preset_id` / `junction_preset_name` here — they must survive strip
  * for lodged evidence and model reload (same CSV column; `ioSlice` exports full `extra_json`).
  */
@@ -47,8 +50,6 @@ export const EXTRA_JSON_UI_KEYS = [
   'ru_calculator_state_v1',
   /** Window treatment simplified UI snapshot (paired with `treatment` in extra_json) */
   '_treatment_ui',
-  /** Adjacent conditioned “Party floor” UI toggle; not a HEM input field. */
-  '_vulcan_ui_party_element',
   /** P1–P3: id of the adjacent / party line for ψ apportion; not a HEM input field. */
   '_vulcan_ui_tb_adjacent_element_id',
   /** CSV form of the key above: the adjacent / party line's name, resolved back to its id on load. */

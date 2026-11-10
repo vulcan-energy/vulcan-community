@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { unavailableGeometrySchemaPort } from '../../../packages/geometry-editor-host/src/schemaPort';
+import { EXPECTED_SECTION_HEADERS } from '../../../packages/geometry-editor/src/geometry/io/geometryCsvLayouts';
 import { parseCsvToGeometry } from '../../../packages/geometry-editor/src/geometry/io/parseCsvToGeometry';
 import type { Element, Floor, ThermalBridgeLinear } from '../../../packages/geometry-editor/src/geometry/types';
 import { validateElementCore } from '../../../packages/geometry-editor/src/geometry/validation/validateElement';
@@ -85,34 +86,36 @@ export function autoThermalBridges(csvArg: string) {
 
 export function printAutoCsvSection({ proposals, elementsById, zones }: ReturnType<typeof autoThermalBridges>): void {
   const zoneNameById = new Map(zones.map((zone) => [zone.id, zone.name]));
-  console.log('Thermal Bridging Elements,,,,,,,,,,,');
-  console.log('Name,Zone,Type,linear_thermal_transmittance,length,junction_type,heat_transfer_coefficient,parent_element,coords,extra_json');
+  // The editor's own layout: it reads the junction type from extra_json, not from a column.
+  const header = EXPECTED_SECTION_HEADERS['Thermal Bridging Elements'];
+  console.log(`Thermal Bridging Elements${','.repeat(header.length)}`);
+  console.log(header.join(','));
   const resolveHostName = createElementNameLookup(Object.values(elementsById));
   let i = 0;
   for (const p of proposals) {
     i++;
-    const name = `Auto_TB_${i}`;
     const coords = p.coordinates
       .map((c) => `${c.x.toFixed(3)},${c.y.toFixed(3)},${c.z.toFixed(3)}`)
       .join('|');
     const src = thermalBridgeSourceExtraJsonForAutoProposal(p, elementsById);
-    const extraJson = src
-      ? `"${JSON.stringify(thermalBridgeExtraJsonForCsv({ thermal_bridge_source: src }, p.zoneId, elementsById, resolveHostName)).replace(/"/g, '""')}"`
-      : '';
-    console.log(
-      [
-        name,
-        zoneNameById.get(p.zoneId ?? '') ?? '',
-        'ThermalBridgeLinear',
-        p.linearThermalTransmittance.toFixed(4),
-        p.suggestedLengthM.toFixed(3),
-        p.junctionCode,
-        '',
-        p.parentElementForTb ?? '',
-        `"${coords}"`,
-        extraJson,
-      ].join(','),
+    const extra = thermalBridgeExtraJsonForCsv(
+      { junction_type: p.junctionCode, ...(src ? { thermal_bridge_source: src } : {}) },
+      p.zoneId,
+      elementsById,
+      resolveHostName,
     );
+    const values: Record<string, string> = {
+      Name: `Auto_TB_${i}`,
+      Zone: zoneNameById.get(p.zoneId ?? '') ?? '',
+      Type: 'ThermalBridgeLinear',
+      heat_transfer_coeff: '',
+      length: p.suggestedLengthM.toFixed(3),
+      linear_thermal_transmittance: p.linearThermalTransmittance.toFixed(4),
+      parent_element: p.parentElementForTb ?? '',
+      coords: `"${coords}"`,
+      extra_json: `"${JSON.stringify(extra).replace(/"/g, '""')}"`,
+    };
+    console.log(header.map((column) => values[column]).join(','));
   }
 }
 

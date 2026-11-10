@@ -5,6 +5,10 @@ use crate::error::ParseError;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
+/// The one `_`-prefixed `extra_json` key the merge reads: it classifies a horizontal adjacent
+/// element as a party floor. The merge consumes it and never writes it to the model.
+pub const PARTY_ELEMENT_MARKER: &str = "_vulcan_ui_party_element";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserState {
     Initial,
@@ -107,6 +111,12 @@ impl CSVParser {
                     });
                 }
 
+                // Metadata rows are (name, value) by position and have no header row.
+                if section_name == "Metadata" {
+                    self.section_headers
+                        .insert(section_name.clone(), vec!["Field".into(), "Value".into()]);
+                    section_column_counts.insert(section_name.clone(), 2);
+                }
                 self.current_section = Some(section_name.clone());
                 self.seen_sections.insert(section_name);
                 self.state = ParserState::InSection;
@@ -127,7 +137,7 @@ impl CSVParser {
             // Extract section name early to avoid borrowing conflicts
             let section_name = self.current_section.as_ref().unwrap().clone();
 
-            // First non-header row in section becomes the header
+            // First non-header row in any other section becomes the header
             if !self.section_headers.contains_key(&section_name) {
                 self.section_headers
                     .insert(section_name.clone(), columns.clone());
@@ -150,7 +160,9 @@ impl CSVParser {
                     let extra_data = adjusted_columns[*expected..]
                         .iter()
                         .any(|col| !col.trim().is_empty());
-                    if extra_data {
+                    // A Metadata row is (name, value); the editor keeps a third cell on its
+                    // GuideOverlay rows, and no reader uses cells after the second.
+                    if extra_data && section_name != "Metadata" {
                         return Err(ParseError {
                             code: "E004".to_string(),
                             message: format!(
@@ -298,7 +310,7 @@ impl CSVParser {
             // `_`-prefixed keys are Vulcan UI metadata (e.g. `_system_source`). They live
             // in the saved CSV only; the merged dwelling JSON must contain pure HEM input.
             if let Some(obj) = json_value.as_object_mut() {
-                obj.retain(|k, _| !k.starts_with('_'));
+                obj.retain(|k, _| !k.starts_with('_') || k == PARTY_ELEMENT_MARKER);
             }
             return Ok(json_value);
         }

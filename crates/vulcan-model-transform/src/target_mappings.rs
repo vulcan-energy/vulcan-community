@@ -3,14 +3,17 @@
 
 //! Explicit Python FHS a8/a9 projections from authored CSV rows. These run before
 //! schema finalization, with source identity and UI provenance still available.
+use crate::parser::PARTY_ELEMENT_MARKER;
 use crate::ValidationError;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
-/// Preserve the unobstructed sky while avoiding pinned Python a8/a9's rounded
-/// sum of 36 * (10/360) exceeding 1 before acos. Only the converter's exact empty
-/// sectors qualify: never discard objects, extra authored keys or invalid arcs.
-/// Eight 45-degree sectors cover the same sky with exactly representable eighths.
+/// Pinned Python a8/a9 sum each sector's `width / 360` for a flat element no obstacle reaches,
+/// then take acos of it: 36 * (10/360) rounds above 1 and fails. Only the converter's own
+/// 10-degree grid qualifies: never touch authored keys, empty authored lists or invalid arcs.
+/// An empty sky becomes eight exact 45-degree sectors. A shaded sky keeps every boundary where
+/// shading changes and merges the rest up to the 45-degree lines; merging sectors with the same
+/// shading leaves every per-sector result proportional, and these widths keep the sum at most 1.
 pub fn map_target_unobstructed_shading(model: &mut Value, profile: crate::ConversionProfile) {
     map_contract_unobstructed_shading(model, profile.input_contract());
 }
@@ -25,16 +28,59 @@ pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: cra
     else {
         return;
     };
-    if sectors.len() == 36
+    let on_grid = sectors.len() == 36
         && sectors.iter().enumerate().all(|(i, sector)| {
-            sector.as_object().is_some_and(|fields| fields.len() == 2)
+            let shading_ok = match sector.get("shading") {
+                None => true,
+                Some(Value::Array(objects)) => !objects.is_empty(),
+                Some(_) => false,
+            };
+            sector.as_object().is_some_and(|fields| {
+                fields
+                    .keys()
+                    .all(|key| matches!(key.as_str(), "start360" | "end360" | "shading"))
+            }) && shading_ok
                 && sector.get("start360").and_then(Value::as_u64) == Some((i * 10) as u64)
                 && sector.get("end360").and_then(Value::as_u64) == Some(((i + 1) * 10) as u64)
-        })
-    {
+        });
+    if !on_grid {
+        return;
+    }
+    if sectors.iter().all(|sector| sector.get("shading").is_none()) {
         *sectors = (0..8)
             .map(|i| json!({"start360":i*45,"end360":(i+1)*45}))
             .collect();
+        return;
+    }
+    let mut merged: Vec<Value> = Vec::new();
+    for sector in sectors.iter() {
+        let (start, end) = (
+            sector["start360"].as_u64().unwrap(),
+            sector["end360"].as_u64().unwrap(),
+        );
+        // A 45-degree line inside this sector splits it; the halves share its shading.
+        let pieces = match (start / 45 + 1) * 45 {
+            line if line < end => vec![(start, line), (line, end)],
+            _ => vec![(start, end)],
+        };
+        for (from, to) in pieces {
+            match merged.last_mut() {
+                Some(last) if from % 45 != 0 && last.get("shading") == sector.get("shading") => {
+                    last["end360"] = json!(to);
+                }
+                _ => {
+                    let mut piece = sector.clone();
+                    piece["start360"] = json!(from);
+                    piece["end360"] = json!(to);
+                    merged.push(piece);
+                }
+            }
+        }
+    }
+    // ponytail: shading that changes at nearly every 10 degrees needs more than the schema's 36
+    // sectors here; the grid is kept and the Python run fails loudly for a flat element.
+    if merged.len() <= 36 {
+        *sectors = merged;
     }
 }
 
@@ -72,7 +118,8 @@ pub(crate) fn map_physical_opening_full_partition_element(
     };
     match element.get("type").and_then(Value::as_str) {
         Some("BuildingElementTransparent") => {
-            map_window(row, element, path, ventilation_base_height, &mut errors)
+            map_window(row, element, path, ventilation_base_height, &mut errors);
+            check_opening_limits(row, element, path, ventilation_base_height, &mut errors);
         }
         Some("BuildingElementAdjacentConditionedSpace") => {
             map_partition(row, element, path, &mut errors)
@@ -86,7 +133,8 @@ pub(crate) fn map_physical_opening_full_partition_element(
 }
 
 /// The original Rust contract remains the default. Only explicit new source
-/// meanings need projection; unversioned legacy rows retain their old behavior.
+/// meanings need projection; unversioned legacy rows retain their old behavior,
+/// except a partition area, which every contract reads through `partition_area_basis`.
 pub(crate) fn map_divided_opening_half_partition_element(
     row: &Row,
     model: &mut Value,
@@ -96,6 +144,18 @@ pub(crate) fn map_divided_opening_half_partition_element(
     let Some(element) = model.as_object_mut() else {
         return errors;
     };
+    if element.get("type").and_then(Value::as_str) == Some("BuildingElementTransparent") {
+        // A window with no authored list ventilates at its own height, never the template's.
+        if field(row, "window_part_list").is_none() {
+            if let Some(mid_height) = field(row, "mid_height").filter(|v| v.is_number()) {
+                element.insert(
+                    "window_part_list".into(),
+                    json!([{ "mid_height_air_flow_path": mid_height }]),
+                );
+            }
+        }
+        return errors;
+    }
     let party = element.get("type").and_then(Value::as_str) == Some("BuildingElementPartyWall");
     let internal = element.get("type").and_then(Value::as_str)
         == Some("BuildingElementAdjacentConditionedSpace");
@@ -121,17 +181,69 @@ pub(crate) fn map_divided_opening_half_partition_element(
         }
     }
     let within = row.get("Type").and_then(Value::as_str) != Some("Party")
-        && field(row, "_vulcan_ui_party_element").and_then(Value::as_bool) != Some(true);
-    if internal
-        && within
-        && field(row, "internal_partition_area_basis").and_then(Value::as_str)
-            == Some("single_face")
-    {
-        if let Some(area) = element.get("area").and_then(Value::as_f64) {
-            element.insert("area".into(), json!(area * 2.0));
-        }
+        && field(row, PARTY_ELEMENT_MARKER).and_then(Value::as_bool) != Some(true);
+    if internal {
+        map_partition_area(row, element, within, 2.0, path, &mut errors);
     }
     errors
+}
+
+/// Writes a partition's area in the faces the contract counts for a partition within the
+/// dwelling (`within_faces`: 2 on the original Rust contract, 1 on a8/a9). A party element has
+/// one face in the dwelling on every contract.
+fn map_partition_area(
+    row: &Row,
+    element: &mut Map<String, Value>,
+    within: bool,
+    within_faces: f64,
+    path: &str,
+    errors: &mut Vec<ValidationError>,
+) {
+    let area = element.get("area").and_then(Value::as_f64);
+    let source_faces = match partition_area_basis(row, area, within) {
+        Ok("single_face") => 1.0,
+        Ok("both_faces") if within => 2.0,
+        Ok("both_faces") => {
+            return error(
+                errors,
+                path,
+                "area",
+                "A party element must use single-face area.",
+            )
+        }
+        Ok(_) => {
+            return error(
+                errors,
+                path,
+                "internal_partition_area_basis",
+                "Use single_face or both_faces for internal partition area.",
+            )
+        }
+        Err(message) => return error(errors, path, "area", message),
+    };
+    let target_faces = if within { within_faces } else { 1.0 };
+    if let Some(area) = area.filter(|_| source_faces != target_faces) {
+        element.insert("area".into(), json!(area * target_faces / source_faces));
+    }
+}
+
+/// The faces a partition's source area covers: the explicit key, else what the row's geometry
+/// shows. Every contract reads a legacy area through this, so it means the same physical thing
+/// on each. `Err` carries the reason geometry cannot decide.
+fn partition_area_basis(row: &Row, area: Option<f64>, within: bool) -> Result<&str, &'static str> {
+    if let Some(basis) = field(row, "internal_partition_area_basis").filter(|v| !v.is_null()) {
+        // A value that is not text is no basis name; the caller reports it.
+        return Ok(basis.as_str().unwrap_or(""));
+    }
+    match (area, physical_face_area(row).filter(|a| *a > 0.0)) {
+        (Some(area), Some(physical)) if (area - physical).abs() < 0.03 => Ok("single_face"),
+        (Some(area), Some(physical)) if within && (area - physical * 2.0).abs() < 0.03 => {
+            Ok("both_faces")
+        }
+        (Some(_), Some(_)) => Err("Partition area disagrees with its physical width and height; correct geometry before preparing target input."),
+        _ if within => Err("Partition needs physical width/height or an explicit source area basis before target preparation."),
+        _ => Ok("single_face"),
+    }
 }
 
 fn map_window(
@@ -147,7 +259,7 @@ fn map_window(
     let parts = field(row, "window_part_list");
     if let Some(Value::Array(parts)) = parts {
         if parts.is_empty() {
-            element.insert("window_part_list".into(), json!([]));
+            insert_closed_opening(row, element, ventilation_base_height, path, errors);
             return;
         }
         if parts.iter().all(|p| {
@@ -193,7 +305,11 @@ fn map_window(
             _ => field(row, "mid_height").and_then(Value::as_f64),
         };
         let opens = field(row, "max_window_open_area").and_then(Value::as_f64) != Some(0.0);
-        if let Some(window_mid) = geometric.filter(|mid| opens && (mid - used).abs() > 0.005) {
+        // A height outside the glazed element is a blocking error in `check_opening_limits`.
+        let inside = !outside_window(row, used, ventilation_base_height);
+        if let Some(window_mid) =
+            geometric.filter(|mid| opens && inside && (mid - used).abs() > 0.005)
+        {
             let (used, window_mid) = (metres(used), metres(window_mid));
             errors.push(ValidationError {
                 code: TARGET_INPUT_WARNING.into(),
@@ -203,7 +319,14 @@ fn map_window(
                 keyword: None,
             });
         }
-        make_single_opening(row, element, midpoint, path, errors);
+        make_single_opening(
+            row,
+            element,
+            midpoint,
+            ventilation_base_height,
+            path,
+            errors,
+        );
     } else if let Some(parts) = parts {
         // Invalid declared values must survive to validation, never become fixed glazing.
         element.insert("window_part_list".into(), parts.clone());
@@ -212,6 +335,7 @@ fn map_window(
             row,
             element,
             field(row, "mid_height").and_then(Value::as_f64),
+            ventilation_base_height,
             path,
             errors,
         );
@@ -227,13 +351,14 @@ fn make_single_opening(
     row: &Row,
     element: &mut Map<String, Value>,
     midpoint: Option<f64>,
+    ventilation_base_height: f64,
     path: &str,
     errors: &mut Vec<ValidationError>,
 ) {
     let height = field(row, "free_area_height").and_then(Value::as_f64);
     let area = field(row, "max_window_open_area").and_then(Value::as_f64);
     if area == Some(0.0) {
-        element.insert("window_part_list".into(), json!([]));
+        insert_closed_opening(row, element, ventilation_base_height, path, errors);
     } else if let (Some(mid), Some(height), Some(area)) = (midpoint, height, area) {
         element.insert(
             "window_part_list".into(),
@@ -244,6 +369,109 @@ fn make_single_opening(
     }
 }
 
+/// Pinned a8/a9 reject an empty list: FHS sets Control_WindowOpenable on every window and core
+/// refuses a control on a window with no openings. One zero-area opening passes those checks and
+/// admits no air. Upstream defect; "Windows with no openings" in
+/// docs/development/HEM_Python_A9_Qualification.md gives the removal condition.
+fn insert_closed_opening(
+    row: &Row,
+    element: &mut Map<String, Value>,
+    ventilation_base_height: f64,
+    path: &str,
+    errors: &mut Vec<ValidationError>,
+) {
+    let Some((sill, head)) = sill_and_head(row, ventilation_base_height) else {
+        error(
+            errors,
+            path,
+            "window_part_list",
+            "A closed window needs base_height and height to place its zero-area opening.",
+        );
+        return;
+    };
+    element.insert(
+        "window_part_list".into(),
+        json!([{
+            "mid_height": (sill + head) / 2.0,
+            "free_area_height": head - sill,
+            "max_window_open_area": 0,
+        }]),
+    );
+}
+
+/// Python's `math.isclose` with the arguments a9 uses (rel_tol 1e-9, abs_tol 1e-10).
+fn strictly_above(value: f64, limit: f64) -> bool {
+    value > limit && (value - limit).abs() > (1e-9 * value.abs().max(limit.abs())).max(1e-10)
+}
+
+/// The window's sill and head, relative to the ventilation-zone base.
+fn sill_and_head(row: &Row, ventilation_base_height: f64) -> Option<(f64, f64)> {
+    let sill = field(row, "base_height").and_then(Value::as_f64)? - ventilation_base_height;
+    Some((sill, sill + field(row, "height").and_then(Value::as_f64)?))
+}
+
+fn outside_window(row: &Row, mid: f64, ventilation_base_height: f64) -> bool {
+    sill_and_head(row, ventilation_base_height)
+        .is_some_and(|(sill, head)| strictly_above(sill, mid) || strictly_above(mid, head))
+}
+
+/// Core `input.py` and wrapper `window_validation.py` rules, on the openings actually emitted.
+/// Mirrors `validateWindowOpenings` in validateElement.ts for routes that skip the editor.
+fn check_opening_limits(
+    row: &Row,
+    element: &Map<String, Value>,
+    path: &str,
+    ventilation_base_height: f64,
+    errors: &mut Vec<ValidationError>,
+) {
+    let Some(parts) = element.get("window_part_list").and_then(Value::as_array) else {
+        return;
+    };
+    let label = |several: String, single: &str| {
+        if parts.len() > 1 {
+            several
+        } else {
+            single.to_string()
+        }
+    };
+    let number = |part: &Value, key: &str| part.get(key).and_then(Value::as_f64);
+    let mut block = |message: String| error(errors, path, "window_part_list", &message);
+    let height = field(row, "height").and_then(Value::as_f64);
+    if let (Some(width), Some(height)) = (field(row, "width").and_then(Value::as_f64), height) {
+        let open_area: f64 = parts
+            .iter()
+            .filter_map(|part| number(part, "max_window_open_area"))
+            .sum();
+        if strictly_above(open_area, width * height) {
+            block("The max open area is greater than the window area (height x width).".into());
+        }
+    }
+    let limits = sill_and_head(row, ventilation_base_height);
+    for (index, part) in parts.iter().enumerate() {
+        if let (Some(free), Some(height)) = (number(part, "free_area_height"), height) {
+            if strictly_above(free, height) {
+                let what = label(
+                    format!("Part {} free height", index + 1),
+                    "Free Area Height",
+                );
+                block(format!(
+                    "{what} ({free} m) is greater than the window height ({height} m)."
+                ));
+            }
+        }
+        if let (Some(mid), Some((sill, head))) = (number(part, "mid_height"), limits) {
+            if strictly_above(sill, mid) || strictly_above(mid, head) {
+                let what = label(format!("Part {} mid height", index + 1), "Mid Height");
+                block(format!(
+                    "{what} ({mid} m) is outside the window ({} m to {} m above the ventilation-zone base).",
+                    metres(sill),
+                    metres(head)
+                ));
+            }
+        }
+    }
+}
+
 fn map_partition(
     row: &Row,
     element: &mut Map<String, Value>,
@@ -251,7 +479,7 @@ fn map_partition(
     errors: &mut Vec<ValidationError>,
 ) {
     let source_type = row.get("Type").and_then(Value::as_str).unwrap_or("");
-    let party_floor = field(row, "_vulcan_ui_party_element").and_then(Value::as_bool) == Some(true);
+    let party_floor = field(row, PARTY_ELEMENT_MARKER).and_then(Value::as_bool) == Some(true);
     let within = source_type != "Party" && !party_floor;
     if party_floor
         && !element
@@ -267,45 +495,7 @@ fn map_partition(
         );
     }
     element.insert("is_adjacent_space_within_dwelling".into(), json!(within));
-    match field(row, "internal_partition_area_basis").and_then(Value::as_str) {
-        Some("both_faces") if within => {
-            if let Some(area) = element.get("area").and_then(Value::as_f64) {
-                element.insert("area".into(), json!(area / 2.0));
-            }
-        }
-        Some("single_face") => {}
-        Some("both_faces") => error(
-            errors,
-            path,
-            "area",
-            "A party element must use single-face area.",
-        ),
-        Some(_) => error(
-            errors,
-            path,
-            "internal_partition_area_basis",
-            "Use single_face or both_faces for internal partition area.",
-        ),
-        None => {
-            // Legacy geometry is evidence of the physical face; compare rather
-            // than unconditionally halving older single-face imported areas.
-            let physical_area = physical_face_area(row);
-            if let (Some(area), Some(physical)) = (
-                element.get("area").and_then(Value::as_f64),
-                physical_area.filter(|a| *a > 0.0),
-            ) {
-                if (area - physical).abs() < 0.03 {
-                    // Retain authored rounding and any established single-face convention.
-                } else if within && (area - physical * 2.0).abs() < 0.03 {
-                    element.insert("area".into(), json!(area / 2.0));
-                } else {
-                    error(errors,path,"area","Partition area disagrees with its physical width and height; correct geometry before preparing target input.");
-                }
-            } else if within {
-                error(errors,path,"area","Partition needs physical width/height or an explicit source area basis before target preparation.");
-            }
-        }
-    }
+    map_partition_area(row, element, within, 1.0, path, errors);
     let authored_half = [
         "thermal_resistance_construction",
         "u_value",
@@ -531,7 +721,6 @@ mod tests {
             map_target_unobstructed_shading(&mut model, profile);
             assert_eq!(model, once);
             for mutation in [
-                "obstacle",
                 "unknown",
                 "empty_authored_shading",
                 "gap",
@@ -544,10 +733,6 @@ mod tests {
                     .as_array_mut()
                     .unwrap();
                 match mutation {
-                    "obstacle" => {
-                        sectors[0]["shading"] =
-                            json!([{"type":"obstacle","height":5,"distance":10}])
-                    }
                     "unknown" => sectors[0]["note"] = json!("authored"),
                     "empty_authored_shading" => sectors[0]["shading"] = json!([]),
                     "gap" => sectors[0]["end360"] = json!(9),
@@ -566,6 +751,47 @@ mod tests {
         let mut rust = source.clone();
         map_target_unobstructed_shading(&mut rust, ConversionProfile::CurrentRustFhs);
         assert_eq!(rust, source);
+    }
+    /// The flat-element sum Python a8/a9 take acos of, for every obstacle window and every pair
+    /// of windows on the converter's 10-degree grid.
+    #[test]
+    fn shaded_sector_widths_never_sum_above_one() {
+        let windows: Vec<(usize, usize)> = (0..36)
+            .flat_map(|a| (a + 1..=36).map(move |b| (a, b)))
+            .collect();
+        let obstacle = json!([{"type":"obstacle","height":1,"distance":10}]);
+        let other = json!([{"type":"obstacle","height":2,"distance":10}]);
+        let contract = crate::ConversionProfile::PythonFhsA9.input_contract();
+        for (i, first) in windows.iter().enumerate() {
+            for second in windows.iter().skip(i).step_by(7).chain([first]) {
+                let sectors: Vec<Value> = (0..36)
+                    .map(|k| {
+                        let mut s = json!({"start360": k * 10, "end360": (k + 1) * 10});
+                        if (first.0..first.1).contains(&k) {
+                            s["shading"] = obstacle.clone();
+                        } else if (second.0..second.1).contains(&k) {
+                            s["shading"] = other.clone();
+                        }
+                        s
+                    })
+                    .collect();
+                let mut model = json!({"ExternalConditions":{"shading_segments": sectors}});
+                map_contract_unobstructed_shading(&mut model, contract);
+                let out = model["ExternalConditions"]["shading_segments"]
+                    .as_array()
+                    .unwrap();
+                let mut total = 0.0;
+                let mut at = 0;
+                for s in out {
+                    assert_eq!(s["start360"].as_u64(), Some(at));
+                    at = s["end360"].as_u64().unwrap();
+                    total += 1.0 * ((at - s["start360"].as_u64().unwrap()) as f64 / 360.0);
+                }
+                assert_eq!(at, 360);
+                assert!((8..=36).contains(&out.len()));
+                assert!(total <= 1.0, "{first:?} {second:?}: {total}");
+            }
+        }
     }
     use super::*;
     fn map(source: Value, output: Value) -> (Value, Vec<ValidationError>) {
@@ -656,17 +882,13 @@ mod tests {
     }
     #[test]
     fn fixed_glazing_and_authored_physical_parts_remain_exact() {
-        for parts in [
-            json!([]),
-            json!([{"mid_height":1.5,"free_area_height":1,"max_window_open_area":0.4},{"mid_height":2.5,"free_area_height":0.5,"max_window_open_area":0.2}]),
-        ] {
-            let (v, e) = map(
-                json!({"extra_json":{"window_part_list":parts}}),
-                json!({"type":"BuildingElementTransparent"}),
-            );
-            assert!(e.is_empty());
-            assert_eq!(v["window_part_list"], parts);
-        }
+        let parts = json!([{"mid_height":1.5,"free_area_height":1,"max_window_open_area":0.4},{"mid_height":2.5,"free_area_height":0.5,"max_window_open_area":0.2}]);
+        let (v, e) = map(
+            json!({"extra_json":{"window_part_list":parts}}),
+            json!({"type":"BuildingElementTransparent"}),
+        );
+        assert!(e.is_empty());
+        assert_eq!(v["window_part_list"], parts);
     }
     #[test]
     fn full_partition_recovery_is_exactly_once_and_does_not_double_qualitative_capacity() {
@@ -741,6 +963,40 @@ mod tests {
         assert_eq!(v["area"], 8.0);
         assert_eq!(v["thermal_resistance_construction"], 1.4);
         assert_eq!(v["areal_heat_capacity"], 240000.0);
+    }
+    #[test]
+    fn legacy_partition_area_means_the_same_faces_on_every_contract() {
+        // One face is 5 x 2. A legacy single-face area and the editor's both_faces save of it
+        // must reach a7 as both faces and a9 as one face. An area that is neither one face nor
+        // two, and a basis that is neither name, block on a7 as they do on a9.
+        let a7 = |source_type: &str, extra: Value, area: f64| {
+            let row = serde_json::from_value(
+                json!({"Type":source_type,"width":5,"height":2,"extra_json":extra}),
+            )
+            .unwrap();
+            let mut v = json!({"type":"BuildingElementAdjacentConditionedSpace","area":area});
+            let errors = map_divided_opening_half_partition_element(&row, &mut v, "p");
+            (v["area"].as_f64().unwrap(), errors.len())
+        };
+        let both = json!({"internal_partition_area_basis":"both_faces"});
+        assert_eq!(a7("Internal", json!({}), 10.0), (20.0, 0));
+        assert_eq!(a7("Internal", both.clone(), 20.0), (20.0, 0));
+        assert_eq!(a7("Internal", json!({}), 20.0), (20.0, 0));
+        assert_eq!(a7("Internal", json!({}), 13.0), (13.0, 1));
+        for basis in [json!("single"), json!(true)] {
+            let extra = json!({"internal_partition_area_basis":basis});
+            assert_eq!(a7("Internal", extra, 10.0), (10.0, 1));
+        }
+        // A party element has one face in the dwelling on every contract.
+        assert_eq!(a7("Party", json!({}), 10.0), (10.0, 0));
+        assert_eq!(a7("Party", json!({}), 20.0), (20.0, 1));
+        assert_eq!(a7("Party", both, 20.0), (20.0, 1));
+        let (v, e) = map(
+            json!({"Type":"Internal","width":5,"height":2,"extra_json":{}}),
+            json!({"type":"BuildingElementAdjacentConditionedSpace","area":10,"pitch":90}),
+        );
+        assert!(e.is_empty());
+        assert_eq!(v["area"], 10);
     }
     #[test]
     fn incomplete_window_never_invents_area_from_width_times_height() {

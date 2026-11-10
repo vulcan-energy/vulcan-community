@@ -44,10 +44,6 @@ const REPAIR_MESSAGES = {
   unsupported_list: 'The window part list has entries this HEM version cannot use.',
 } as const;
 
-/** a8/a9 add Control_WindowOpenable to every window, and core rejects that on an empty list. */
-export const WINDOW_NO_OPENING_MESSAGE =
-  'HEM a8 and a9 cannot run a window with no openings. Enter an opening for this window.';
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 

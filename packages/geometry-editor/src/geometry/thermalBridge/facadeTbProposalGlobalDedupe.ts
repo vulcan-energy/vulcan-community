@@ -30,7 +30,7 @@
  * | 1 | E20, E21 | Discrete exposed-floor × external-wall segments beat continuous wall–floor strips. |
  * | 2 | P2, P3 | Party wall × intermediate floor before generic roof overlaps. |
  * | 3 | E10, E11 | Eaves lines. |
- * | 4 | E12, E13 | Gable / roof-plane edges beat **R8/R9** only when known host identities match. |
+ * | 4 | E12, E13 | Gable / roof-plane edges beat **R8/R9** when one row's known hosts contain the other's and both rows run the same line. |
  * | 5 | R4, R5 | Ridge (after gable tier so gable wins if same line — rare). |
  * | 6 | R8, R9, R10 | Roof ↔ vertical wall / dormer cuts — loses to gable when coincident. |
  * | 7 | E5, E19, E6 | Continuous wall–floor lines — beat mislabelled **P1** / legacy party codes when coincident. |
@@ -104,8 +104,7 @@ function proposalHostIds(p: FacadeOpeningTbProposal, byId: Record<string, Elemen
   return knownHostElementIdsForAutoTbProposal(p, byId);
 }
 
-function setsEqual(a: Set<string>, b: Set<string>): boolean {
-  if (a.size !== b.size) return false;
+function isSubset(a: Set<string>, b: Set<string>): boolean {
   for (const id of a) {
     if (!b.has(id)) return false;
   }
@@ -121,7 +120,15 @@ function proposalsCanDedupeByHostIdentity(
   const aIds = proposalHostIds(a, byId);
   const bIds = proposalHostIds(b, byId);
   if (aIds.size === 0 || bIds.size === 0) return true;
-  return setsEqual(aIds, bIds);
+  if (aIds.size === bIds.size) return isSubset(aIds, bIds);
+  // Eaves/gable rows know only their roof; R8/R9 rows know the roof and the wall under it. Same roof
+  // along the whole edge is one junction, so one host set inside the other dedupes. A wall that meets
+  // only part of the edge (a dormer front wall on the eaves) keeps its own row: BR 497 does not say
+  // which junction that is.
+  if (!isSubset(aIds, bIds) && !isSubset(bIds, aIds)) return false;
+  const overlap = overlapLengthBetweenSegmentElements({ coordinates: a.coordinates }, { coordinates: b.coordinates });
+  const longer = Math.max(segmentLength3d(a.coordinates), segmentLength3d(b.coordinates));
+  return overlap >= FACADE_PROPOSAL_SUBSTANTIAL_OVERLAP_FRAC * longer;
 }
 
 function proposalFloorZIndexForSort(

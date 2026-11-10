@@ -6,7 +6,7 @@ use crate::{schema_validation::normalized_schema_document, ModelProfile, Version
 use jsonschema::validator_for;
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 #[cfg(test)]
 use std::{fs, path::Path};
 
@@ -74,6 +74,93 @@ const NAMED_UI_ONLY_EXTRA_JSON_KEYS: &[&str] = &[
     #[cfg(feature = "tb-solver-ui-key")]
     "thermal_bridge_solver",
 ];
+
+/// Supplies a model may reference by name without authoring one.
+fn builtin_energy_supply(name: &str) -> Option<Value> {
+    match name {
+        "mains elec" => Some(serde_json::json!({"fuel": "electricity", "is_export_capable": true})),
+        "mains gas" => Some(serde_json::json!({"fuel": "mains_gas"})),
+        _ => None,
+    }
+}
+
+fn collect_referenced_energy_supplies(value: &Value, referenced: &mut BTreeSet<String>) {
+    match value {
+        Value::Object(obj) => {
+            for (key, child) in obj {
+                if matches!(key.as_str(), "EnergySupply" | "EnergySupply_aux") {
+                    if let Some(name) = child.as_str() {
+                        referenced.insert(name.to_string());
+                    }
+                }
+                collect_referenced_energy_supplies(child, referenced);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_referenced_energy_supplies(item, referenced);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Add each referenced supply the model lacks and a built-in entry can provide, so a scenario
+/// that introduces a fuel gets the supply a Systems row would. Unknown names are left for
+/// validation to reject.
+pub fn add_builtin_energy_supplies(model: &mut Value) {
+    let mut referenced = BTreeSet::new();
+    collect_referenced_energy_supplies(model, &mut referenced);
+    for name in referenced {
+        if model
+            .pointer(&crate::json_pointer(&["EnergySupply", &name]))
+            .is_some()
+        {
+            continue;
+        }
+        if let (Some(entry), Some(root)) = (builtin_energy_supply(&name), model.as_object_mut()) {
+            if let Some(supplies) = root
+                .entry("EnergySupply")
+                .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                .as_object_mut()
+            {
+                supplies.insert(name, entry);
+            }
+        }
+    }
+}
+
+/// Every zone's bulbs survive consolidation into one FHS zone; colliding bulb names take the zone.
+fn merge_zone_lighting(
+    into: Option<Value>,
+    other: &Value,
+    other_zone: &str,
+) -> Result<Value, BuildError> {
+    let Some(mut into) = into else {
+        return Ok(other.clone());
+    };
+    match (into.get_mut("bulbs"), other.get("bulbs")) {
+        (Some(Value::Array(bulbs)), Some(Value::Array(more))) => bulbs.extend(more.iter().cloned()),
+        (Some(Value::Object(bulbs)), Some(Value::Object(more))) => {
+            for (name, bulb) in more {
+                let name = if bulbs.contains_key(name) {
+                    format!("{name} ({other_zone})")
+                } else {
+                    name.clone()
+                };
+                bulbs.insert(name, bulb.clone());
+            }
+        }
+        (_, None) => {}
+        _ => {
+            return Err(BuildError::new(
+                "E064",
+                &format!("Zone '{other_zone}' lighting cannot be combined with the first zone's: their bulb lists differ in shape."),
+            ))
+        }
+    }
+    Ok(into)
+}
 
 fn is_ui_only_extra_json_key(key: &str) -> bool {
     key.starts_with('_') || NAMED_UI_ONLY_EXTRA_JSON_KEYS.contains(&key)
@@ -573,6 +660,14 @@ fn orientation360_from_first_segment(points: &[CsvPoint3]) -> Option<f64> {
     ))
 }
 
+/// A CSV row's cells in column-name order. Rows are hash maps, so anything built by iterating
+/// one must go through here or its key order changes between calls.
+fn sorted_cells(row: &HashMap<String, Value>) -> Vec<(&String, &Value)> {
+    let mut cells: Vec<_> = row.iter().collect();
+    cells.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    cells
+}
+
 fn csv_string_cell<'a>(row: &'a HashMap<String, Value>, key: &str) -> Option<&'a str> {
     row.get(key)
         .and_then(|v| v.as_str())
@@ -788,23 +883,111 @@ fn parse_csv_bool_cell(value: Option<&Value>, field: &str) -> Result<Option<bool
     }
 }
 
-/// Contract precedence for a sectioned CSV row: defaults-template seed ←
-/// extra_json ← CSV columns (highest), before shared schema finalization. Blank cells
-/// (null / empty string) leave the seed value in place. `skip_keys` are identity /
-/// geometry / UI columns that must never enter the merged object.
-/// Use this for any new sectioned merge so the precedence cannot be
-/// reimplemented inverted (see `contracts/geometry-csv` `merge_precedence`).
 fn csv_cell_is_set(v: &Value) -> bool {
     !(v.is_null() || v.as_str().is_some_and(|s| s.trim().is_empty()))
 }
 
+/// The model fields each section has a column for (`csv_columns` in the geometry CSV contract).
+/// The CSV owns them: a template never fills one.
+fn csv_owned_fields(section: &str) -> &'static [&'static str] {
+    match section {
+        "Exposed Elements" => &[
+            "area",
+            "pitch",
+            "width",
+            "height",
+            "orientation360",
+            "base_height",
+            "is_unheated_pitched_roof",
+            "is_external_door",
+        ],
+        "Window Elements" => &[
+            "area",
+            "pitch",
+            "width",
+            "height",
+            "orientation360",
+            "base_height",
+            "frame_area_fraction",
+            "free_area_height",
+            "mid_height",
+            "max_window_open_area",
+        ],
+        "Ground Elements" => &[
+            "area",
+            "total_area",
+            "width",
+            "height",
+            "perimeter",
+            "floor_type",
+            "depth_basement_floor",
+            "thickness_walls",
+            "base_height",
+        ],
+        "Non-Exposed Elements" => &["area", "pitch", "width", "height", "base_height"],
+        "Thermal Bridging Elements" => &[
+            "heat_transfer_coeff",
+            "length",
+            "linear_thermal_transmittance",
+        ],
+        "Ventilation Systems" => &[
+            "length",
+            "duct_type",
+            "mid_height_air_flow_path",
+            "area_cm2",
+            "orientation360",
+            "pitch",
+            "vent_type",
+        ],
+        "Combustion Appliances" => &[
+            "appliance_type",
+            "exhaust_situation",
+            "fuel_type",
+            "supply_situation",
+        ],
+        "Water Pipework" => &["length", "location"],
+        "On-Site Generation" => &[
+            "pitch",
+            "orientation360",
+            "base_height",
+            "peak_power",
+            "width",
+            "height",
+        ],
+        _ => &[],
+    }
+}
+
+/// Remove from a template seed every field the row's section has a column for, unless the row
+/// sets it. A blank cell, or a column missing from the file's header, is then derived where a
+/// derivation exists or reported missing by the target schema; it never keeps a sample-house value.
+fn clear_csv_owned_seed_fields(
+    seed: &mut serde_json::Map<String, Value>,
+    row: &HashMap<String, Value>,
+    section: &str,
+) {
+    for field in csv_owned_fields(section) {
+        if !row.get(*field).is_some_and(csv_cell_is_set) {
+            seed.remove(*field);
+        }
+    }
+}
+
+/// Contract precedence for a sectioned CSV row: defaults-template seed ←
+/// extra_json ← CSV columns (highest), before shared schema finalization. A blank cell never
+/// keeps a template value for a field its section owns (`clear_csv_owned_seed_fields`).
+/// `skip_keys` are identity / geometry / UI columns that must never enter the merged object.
+/// Use this for any new sectioned merge so the precedence cannot be
+/// reimplemented inverted (see `contracts/geometry-csv` `merge_precedence`).
 fn overlay_row_onto_seed(
     mut seed: serde_json::Map<String, Value>,
     row: &HashMap<String, Value>,
+    section: &str,
     skip_keys: &[&str],
 ) -> serde_json::Map<String, Value> {
+    clear_csv_owned_seed_fields(&mut seed, row, section);
     let mut csv_set_keys: HashSet<String> = HashSet::new();
-    for (k, v) in row {
+    for (k, v) in sorted_cells(row) {
         if k == "extra_json" || skip_keys.contains(&k.as_str()) {
             continue;
         }
@@ -859,10 +1042,8 @@ fn overlay_row_onto_seed(
 /// TWO RULES, and they are deliberately not the same rule.
 ///
 /// 1. At the TOP LEVEL of the `extra_json` object: drop keys whose value is *blank* — `null`, or
-///    a string that is empty after trimming. This is the published merge-precedence contract
-///    ("Blank cells (null / empty string) leave the seed value in place", see the comment above
-///    [`csv_cell_is_set`], which this reuses so the two cannot drift). A top-level `extra_json`
-///    key is peer to a CSV column, so it gets the CSV column's blank handling.
+///    a string that is empty after trimming, using [`csv_cell_is_set`] so the two cannot drift.
+///    A top-level `extra_json` key is peer to a CSV column, so a blank one is not an input.
 ///
 /// 2. BELOW the top level: drop object keys whose value is EXACTLY `""`, with no trimming. This
 ///    is a different rule because it is enforcing a different thing — the browser's save
@@ -1013,35 +1194,60 @@ const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "General_storeys_in_building",
 ];
 
+/// Metadata rows that set a model input. A present row with no value is E066: it must never
+/// leave the defaults template's value in place. An absent row keeps the template value.
+const METADATA_INPUT_FIELD_NAMES: &[&str] = &[
+    "NumberOfBedrooms",
+    "NumberOfWetRooms",
+    "GroundFloorArea",
+    "HeatingControlType",
+    "PartGcompliance",
+    "PartO_active_cooling_required",
+    "AirPermeability_test_pressure",
+    "AirPermeability_test_result",
+    "AirPermeability_ventilation_zone_height",
+    "Ventilation_shield_class",
+    "Ventilation_terrain_class",
+    "Ventilation_altitude",
+    "Ventilation_ventilation_zone_base_height",
+    "Ventilation_noise_nuisance",
+    "BuildingLength",
+    "BuildingWidth",
+    "NumberOfHotTappedRooms",
+    "NumberOfUtilityRooms",
+    "NumberOfBathrooms",
+    "NumberOfSanitaryAccommodations",
+    "NumberOfHabitableRooms",
+    "KitchenExtractorHoodExternal",
+    "General_build_type",
+    "General_built_form",
+    "General_storeys_in_dwelling",
+    "General_storey_of_dwelling",
+    "General_storeys_in_building",
+];
+
 const COLD_WATER_SOURCE_MAINS: &str = "mains water";
 const COLD_WATER_SOURCE_HEADER_TANK: &str = "header tank";
 const COLD_WATER_SOURCE_DEFAULT: &str = COLD_WATER_SOURCE_MAINS;
 
-/// Identify the (field name, field value) pair in a parsed Metadata row.
-///
-/// The CSV parser treats the first Metadata row as headers, so a row like
-/// `PartGcompliance,TRUE` arrives as arbitrary header→cell pairs; the field
-/// name is whichever cell matches a known metadata name and the value is the
-/// first other non-empty cell.
+/// A Systems row routed `System` / `InfiltrationVentilation` (`merge_systems` checks the rest).
+fn is_infiltration_ventilation_row(row: &HashMap<String, Value>) -> bool {
+    ["Type", "system_type", "subcategory"]
+        .into_iter()
+        .find_map(|key| row.get(key)?.as_str())
+        == Some("System")
+        && row.get("subcategory").and_then(Value::as_str) == Some("InfiltrationVentilation")
+}
+
+/// The (field name, field value) pair of a parsed Metadata row: the codec keys the first cell
+/// `Field` and the second `Value`. A name that is not a known Metadata field is ignored.
 fn extract_metadata_field(row: &HashMap<String, Value>) -> (Option<String>, Option<Value>) {
-    let mut field_name: Option<String> = None;
-    let mut field_value: Option<Value> = None;
-    for value in row.values() {
-        if let Some(value_str) = value.as_str() {
-            if !value_str.is_empty() {
-                if KNOWN_METADATA_FIELD_NAMES.contains(&value_str) {
-                    if field_name.is_none() {
-                        field_name = Some(value_str.to_string());
-                    }
-                } else if field_value.is_none() {
-                    field_value = Some(value.clone());
-                }
-            }
-        } else if !value.is_null() && field_value.is_none() {
-            field_value = Some(value.clone());
-        }
-    }
-    (field_name, field_value)
+    let name = row
+        .get("Field")
+        .and_then(Value::as_str)
+        .filter(|name| KNOWN_METADATA_FIELD_NAMES.contains(name));
+    let value = row.get("Value").filter(|value| !value.is_null());
+    (name.map(str::to_string), value.cloned())
 }
 
 const VULCAN_CSV_VERSION: &str = "VulcanCsvVersion";
@@ -1060,20 +1266,13 @@ fn metadata_field_value(
     })
 }
 
-fn metadata_f64(
-    csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
-    target: &str,
-) -> Option<f64> {
-    metadata_field_value(csv_data, target).and_then(|value| {
-        value
-            .as_f64()
-            .or_else(|| {
-                value
-                    .as_str()
-                    .and_then(|raw| raw.trim().parse::<f64>().ok())
-            })
-            .filter(|number| number.is_finite())
-    })
+/// The model's ventilation zone base height. Every target requires it, so a model without one is
+/// already blocked by the schema and the 0 here never reaches an engine.
+fn ventilation_zone_base_height(model: &Value) -> f64 {
+    model
+        .pointer("/InfiltrationVentilation/ventilation_zone_base_height")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
 }
 
 fn window_mid_height_to_hem_reference(value: f64, ventilation_base_height: f64) -> Value {
@@ -1114,9 +1313,8 @@ fn vulcan_csv_version(
 
 fn migrate_v1_window_mid_height_reference(
     csv_data: &mut HashMap<String, Vec<HashMap<String, Value>>>,
+    ventilation_base_height: f64,
 ) {
-    let ventilation_base_height =
-        metadata_f64(csv_data, "Ventilation_ventilation_zone_base_height").unwrap_or(0.0);
     if ventilation_base_height.abs() <= f64::EPSILON {
         return;
     }
@@ -1160,10 +1358,11 @@ fn migrate_v1_window_mid_height_reference(
 /// schema merge. Add future migrations here in ascending version order.
 fn migrate_vulcan_csv_to_current(
     csv_data: &mut HashMap<String, Vec<HashMap<String, Value>>>,
+    ventilation_base_height: f64,
 ) -> Result<(), BuildError> {
     let version = vulcan_csv_version(csv_data)?;
     if version < 2 {
-        migrate_v1_window_mid_height_reference(csv_data);
+        migrate_v1_window_mid_height_reference(csv_data, ventilation_base_height);
     }
     {
         for row in csv_data.get("Non-Exposed Elements").into_iter().flatten() {
@@ -1296,6 +1495,9 @@ pub struct JSONBuilder {
     /// problems surface in the save's `ValidationResult` for the UI to show.
     /// RefCell because most merge passes take `&self`.
     non_fatal_errors: RefCell<Vec<ValidationError>>,
+    /// Model path of each built wet emitter and PV system and the CSV row it came from, so
+    /// schema errors on it name the row.
+    csv_rows: RefCell<Vec<(String, String)>>,
     /// Exact upstream core version supplied by the host for FHS input metadata.
     hem_core_version: String,
 }
@@ -1346,6 +1548,7 @@ impl JSONBuilder {
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
+            csv_rows: RefCell::new(Vec::new()),
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
         };
 
@@ -1382,6 +1585,7 @@ impl JSONBuilder {
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
+            csv_rows: RefCell::new(Vec::new()),
             hem_core_version: version_metadata.hem_core_version.clone(),
         };
         builder.index_templates();
@@ -1400,6 +1604,25 @@ impl JSONBuilder {
             schema_path: None,
             keyword: None,
         });
+    }
+
+    /// Prefix each error on a built wet emitter or PV system with the CSV row it came from.
+    pub fn name_csv_rows(&self, errors: &mut [ValidationError]) {
+        for error in errors {
+            if let Some((_, row)) = self.csv_rows.borrow().iter().find(|(path, _)| {
+                error.path == *path || error.path.starts_with(&format!("{path}/"))
+            }) {
+                error.message = format!("{row}: {}", error.message);
+            }
+        }
+    }
+
+    fn note_emitter_row(&self, system: &str, index: usize, row: &HashMap<String, Value>) {
+        let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+        self.csv_rows.borrow_mut().push((
+            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
+            format!("Wet Emitters row '{name}' (system '{system}')"),
+        ));
     }
 
     /// Drain the non-fatal merge problems collected during `build_json`.
@@ -1715,12 +1938,33 @@ impl JSONBuilder {
         // merge entry point, so no downstream loop has to remember — and so the NESTED case is
         // covered, which no per-loop guard can reach. See `sanitize_csv_extra_json`.
         let mut sanitized_csv_data = sanitize_csv_extra_json(csv_data);
-        migrate_vulcan_csv_to_current(&mut sanitized_csv_data)?;
+        let mut result = self.defaults.clone();
+        // Window heights are measured from the ventilation zone base the final model carries, so
+        // every InfiltrationVentilation input merges first, in precedence order: the sections,
+        // then Systems rows, then Metadata rows. Nothing later writes these fields.
+        self.merge_ventilation_systems(&mut result, &sanitized_csv_data)?;
+        self.merge_combustion_appliances(&mut result, &sanitized_csv_data)?;
+        Self::merge_systems_infiltration_ventilation_rows(&mut result, &sanitized_csv_data)?;
+        self.merge_ventilation_env_from_metadata(&mut result, &sanitized_csv_data)?;
+        migrate_vulcan_csv_to_current(
+            &mut sanitized_csv_data,
+            ventilation_zone_base_height(&result),
+        )?;
         let csv_data = &sanitized_csv_data;
 
         self.parse_cold_water_source_from_metadata(csv_data);
+        for row in csv_data.get("Metadata").into_iter().flatten() {
+            if let (Some(name), None) = extract_metadata_field(row) {
+                if METADATA_INPUT_FIELD_NAMES.contains(&name.as_str()) {
+                    self.push_non_fatal(
+                        "E066",
+                        "Metadata",
+                        &format!("Metadata row '{name}' has no value. Enter the value."),
+                    );
+                }
+            }
+        }
 
-        let mut result = self.defaults.clone();
         if self.is_fhs_schema {
             if let Some(root) = result.as_object_mut() {
                 // FHS hot-water source must be explicitly authored through Systems.
@@ -2058,6 +2302,7 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
+        let ventilation_base_height = ventilation_zone_base_height(result);
         let building_element_sections = [
             "Exposed Elements",
             "Window Elements",
@@ -2312,6 +2557,16 @@ impl JSONBuilder {
                     if let Some(obj) = element_obj.as_object_mut() {
                         // Pitch is geometry: only the row (or `derive_blank_csv_pitch`) sets it.
                         obj.remove("pitch");
+                        // Clear by element, not section: a window placed in Exposed Elements
+                        // still owns every field the Window Elements columns cover.
+                        for section in [
+                            "Exposed Elements",
+                            "Window Elements",
+                            "Ground Elements",
+                            "Non-Exposed Elements",
+                        ] {
+                            clear_csv_owned_seed_fields(obj, element_row, section);
+                        }
                         if !allowed_building_element_props.is_empty() {
                             obj.retain(|k, _| allowed_building_element_props.contains(k));
                         } else {
@@ -2329,7 +2584,7 @@ impl JSONBuilder {
                     );
 
                     // Override with CSV data, but only include valid properties and non-null values
-                    for (key, value) in element_row {
+                    for (key, value) in sorted_cells(element_row) {
                         if key == "Name" || key == "Zone" || key == "Type" || key == "position_xyz"
                         {
                             continue;
@@ -2499,8 +2754,7 @@ impl JSONBuilder {
                                 &mut element_obj,
                                 &target_path,
                                 contract.party_wall_requires_whole_u,
-                                metadata_f64(csv_data, "Ventilation_ventilation_zone_base_height")
-                                    .unwrap_or(0.0),
+                                ventilation_base_height,
                             )
                         }
                         crate::ElementInputConvention::DividedOpeningHalfPartition => {
@@ -2703,17 +2957,13 @@ impl JSONBuilder {
                 }
                 // Start with a default template for this bridge type
                 let mut bridge_obj = self.get_default_thermal_bridge(bridge_type)?;
-                // junction_type is semantically per-bridge: never inherit it from the
-                // defaults template. Missing junction_type on a linear bridge surfaces
-                // as a loud schema-validation error (the FHS schema requires it).
-                if bridge_type == "ThermalBridgeLinear" {
-                    if let Some(obj) = bridge_obj.as_object_mut() {
-                        obj.remove("junction_type");
-                    }
+                // The junction describes this bridge only (it has no column, so the owned-column
+                // rule does not cover it): a missing one is a schema-validation error.
+                if let Some(obj) = bridge_obj.as_object_mut() {
+                    obj.remove("junction_type");
                 }
 
-                // Contract precedence: CSV columns > extra_json > defaults template.
-                // Blank cells leave the template value in place, as in other sections;
+                // Contract precedence: CSV columns > extra_json > defaults template;
                 // schema-invalid keys (UI-only metadata like floor_id) are dropped.
                 let seed = bridge_obj
                     .as_object()
@@ -2722,6 +2972,7 @@ impl JSONBuilder {
                 bridge_obj = Value::Object(overlay_row_onto_seed(
                     seed,
                     bridge_row,
+                    "Thermal Bridging Elements",
                     &["Name", "Zone", "Type", "coords", "parent_element"],
                 ));
                 // Add to zone's ThermalBridging section
@@ -2891,6 +3142,10 @@ impl JSONBuilder {
     ) -> Result<(), BuildError> {
         if let Some(section_data) = csv_data.get("Lighting") {
             for lighting_row in section_data {
+                let row_name = lighting_row
+                    .get("Name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let zone_name = lighting_row
                     .get("Zone")
                     .and_then(|v| v.as_str())
@@ -2911,7 +3166,7 @@ impl JSONBuilder {
                 } else {
                     return Err(BuildError::new(
                         "E027",
-                        "Lighting missing required 'efficacy' field",
+                        &format!("Lighting row '{row_name}' missing required 'efficacy' field"),
                     ));
                 };
 
@@ -2921,7 +3176,7 @@ impl JSONBuilder {
                     .ok_or_else(|| {
                         BuildError::new(
                             "E027",
-                            "Lighting missing required 'count' field (explicit bulb objects are required)",
+                            &format!("Lighting row '{row_name}' missing required 'count' field (explicit bulb objects are required)"),
                         )
                     })?;
                 let power = lighting_row
@@ -2930,7 +3185,7 @@ impl JSONBuilder {
                     .ok_or_else(|| {
                         BuildError::new(
                             "E027",
-                            "Lighting missing required 'power' field (explicit bulb objects are required)",
+                            &format!("Lighting row '{row_name}' missing required 'power' field (explicit bulb objects are required)"),
                         )
                     })?;
 
@@ -2973,46 +3228,12 @@ impl JSONBuilder {
         Ok(())
     }
 
-    fn collect_referenced_energy_supplies(value: &Value, referenced: &mut HashSet<String>) {
-        match value {
-            Value::Object(obj) => {
-                for (key, child) in obj {
-                    if matches!(key.as_str(), "EnergySupply" | "EnergySupply_aux") {
-                        if let Some(name) = child.as_str() {
-                            referenced.insert(name.to_string());
-                        }
-                    }
-                    Self::collect_referenced_energy_supplies(child, referenced);
-                }
-            }
-            Value::Array(items) => {
-                for item in items {
-                    Self::collect_referenced_energy_supplies(item, referenced);
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn energy_supply_template_for_reference(&self, name: &str) -> Option<Value> {
         self.defaults
             .get("EnergySupply")
             .and_then(|value| value.as_object())
             .and_then(|energy_supply| energy_supply.get(name).cloned())
-            .or_else(|| match name {
-                "mains elec" => {
-                    let mut entry = serde_json::Map::new();
-                    entry.insert("fuel".to_string(), Value::String("electricity".to_string()));
-                    entry.insert("is_export_capable".to_string(), Value::Bool(true));
-                    Some(Value::Object(entry))
-                }
-                "mains gas" => {
-                    let mut entry = serde_json::Map::new();
-                    entry.insert("fuel".to_string(), Value::String("mains_gas".to_string()));
-                    Some(Value::Object(entry))
-                }
-                _ => None,
-            })
+            .or_else(|| builtin_energy_supply(name))
     }
 
     fn clean_energy_supply_entry_for_fhs(entry: &mut serde_json::Map<String, Value>) {
@@ -3024,7 +3245,7 @@ impl JSONBuilder {
     fn ensure_referenced_energy_supplies(
         &self,
         result: &mut Value,
-        referenced: &HashSet<String>,
+        referenced: &BTreeSet<String>,
     ) -> Result<(), BuildError> {
         if referenced.is_empty() {
             return Ok(());
@@ -3082,12 +3303,6 @@ impl JSONBuilder {
         // Process Context Shading
         self.build_context_shading(result, csv_data)?;
 
-        // Process Ventilation Systems (merge into InfiltrationVentilation)
-        self.merge_ventilation_systems(result, csv_data)?;
-
-        // Process Combustion Appliances (merge into InfiltrationVentilation)
-        self.merge_combustion_appliances(result, csv_data)?;
-
         // Process Systems before pipework so explicit HotWaterSource rows exist before primary pipework attaches.
         self.merge_systems(result, csv_data)?;
 
@@ -3139,8 +3354,9 @@ impl JSONBuilder {
             }
         }
 
-        let mut referenced_energy_supplies = HashSet::new();
-        Self::collect_referenced_energy_supplies(result, &mut referenced_energy_supplies);
+        let mut referenced_energy_supplies = BTreeSet::new();
+        self.supply_fan_coil_systems(result);
+        collect_referenced_energy_supplies(result, &mut referenced_energy_supplies);
         self.ensure_referenced_energy_supplies(result, &referenced_energy_supplies)?;
 
         // Cleanup: keep ElectricBattery only when explicitly provided by CSV Systems rows.
@@ -3229,7 +3445,6 @@ impl JSONBuilder {
         // Merge air permeability settings from CSV metadata (after calculate_leaks_areas so CSV values override)
         // This is done here instead of in merge_compliance_settings to ensure it happens after calculate_leaks_areas
         self.merge_air_permeability_from_metadata(result, csv_data)?;
-        self.merge_ventilation_env_from_metadata(result, csv_data)?;
 
         if self.is_fhs_schema {
             self.merge_input_metadata(result)?;
@@ -3368,22 +3583,15 @@ impl JSONBuilder {
                         if let Some(flowrate) = outlet_row.get("flowrate") {
                             outlet_obj.insert("flowrate".to_string(), flowrate.clone());
                         }
-                        let allow_low_flowrate = outlet_row
+                        if let Some(allow_low_flowrate) = outlet_row
                             .get("allow_low_flowrate")
-                            .and_then(|v| match v {
-                                Value::Bool(b) => Some(*b),
-                                Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
-                                    "true" => Some(true),
-                                    "false" => Some(false),
-                                    _ => None,
-                                },
-                                _ => None,
-                            })
-                            .unwrap_or(false);
-                        outlet_obj.insert(
-                            "allow_low_flowrate".to_string(),
-                            Value::Bool(allow_low_flowrate),
-                        );
+                            .and_then(Value::as_bool)
+                        {
+                            outlet_obj.insert(
+                                "allow_low_flowrate".to_string(),
+                                Value::Bool(allow_low_flowrate),
+                            );
+                        }
                         outlet_obj.insert(
                             "ColdWaterSource".to_string(),
                             Value::String(self.effective_cold_water_source().to_string()),
@@ -3401,15 +3609,15 @@ impl JSONBuilder {
                         }
                     }
                     "InstantElecShower" => {
-                        let rated_power =
-                            outlet_row.get("rated_power").cloned().unwrap_or_else(|| {
-                                Value::Number(serde_json::Number::from_f64(9.0).unwrap())
-                            });
                         outlet_obj.insert(
                             "type".to_string(),
                             Value::String("InstantElecShower".to_string()),
                         );
-                        outlet_obj.insert("rated_power".to_string(), rated_power);
+                        if let Some(rated_power) =
+                            outlet_row.get("rated_power").filter(|v| csv_cell_is_set(v))
+                        {
+                            outlet_obj.insert("rated_power".to_string(), rated_power.clone());
+                        }
                         outlet_obj.insert(
                             "ColdWaterSource".to_string(),
                             Value::String(self.effective_cold_water_source().to_string()),
@@ -3506,6 +3714,33 @@ impl JSONBuilder {
                 "Found Context Shading section with {} rows",
                 section_data.len()
             );
+            // A row without both angles and a known type cannot place an obstacle: report it by
+            // row and column instead of leaving the sky open.
+            let mut obstacles = Vec::new();
+            for row in section_data {
+                let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+                let start = Self::read_context_shading_angle(row, &["start angle", "start_angle"]);
+                let end = Self::read_context_shading_angle(row, &["end angle", "end_angle"]);
+                let (type_column, shading_type) = Self::read_context_shading_type(row);
+                for (column, given, accepted) in [
+                    ("start_angle", start.is_some(), "an angle in degrees"),
+                    ("end_angle", end.is_some(), "an angle in degrees"),
+                    (type_column, shading_type.is_some(), "obstacle or overhang"),
+                ] {
+                    if !given {
+                        self.push_non_fatal(
+                            "E027",
+                            &crate::json_pointer(&["Context Shading", name, column]),
+                            &format!(
+                                "Context Shading row '{name}' has no valid {column}, so its shading is not in the model. Enter {accepted} in {column}."
+                            ),
+                        );
+                    }
+                }
+                if let (Some(start), Some(end), Some(shading_type)) = (start, end, shading_type) {
+                    obstacles.push((row, start, end, shading_type));
+                }
+            }
             let mut shading_segments = Vec::new();
 
             // Create 36 segments (0-360 degrees)
@@ -3525,14 +3760,8 @@ impl JSONBuilder {
 
                 // Check if any shading objects fall within this segment
                 let mut shading_objects = Vec::new();
-                for shading_row in section_data {
-                    if let (Some(start), Some(end)) = (
-                        Self::read_context_shading_angle(
-                            shading_row,
-                            &["start angle", "start_angle"],
-                        ),
-                        Self::read_context_shading_angle(shading_row, &["end angle", "end_angle"]),
-                    ) {
+                for &(shading_row, start, end, shading_type) in &obstacles {
+                    {
                         // FHS schema expects integer angles (start360/end360). Round early so overlap logic
                         // is stable even if CSV contains fractional degrees.
                         let start = start.round();
@@ -3553,10 +3782,11 @@ impl JSONBuilder {
                         // Check if this is a wraparound case
                         let is_wraparound = normalized_end < normalized_start;
 
-                        // Check if shading object overlaps with this segment
-                        let mut overlaps = false;
+                        // A full circle (0 to 360) normalises to an empty arc; it shades every segment.
+                        let mut overlaps = (end - start).abs() >= 360.0;
 
-                        if is_wraparound {
+                        if overlaps {
+                        } else if is_wraparound {
                             // For wraparound cases, check if segment overlaps with either:
                             // 1. The range from start_angle to 360°
                             // 2. The range from 0° to end_angle
@@ -3577,17 +3807,17 @@ impl JSONBuilder {
 
                         if overlaps {
                             let mut shading_obj = serde_json::Map::new();
-                            let shading_type = Self::read_context_shading_type(shading_row);
                             shading_obj.insert(
                                 "type".to_string(),
                                 Value::String(shading_type.to_string()),
                             );
 
-                            if let Some(height) = shading_row.get("height") {
-                                shading_obj.insert("height".to_string(), height.clone());
-                            }
-                            if let Some(distance) = shading_row.get("distance") {
-                                shading_obj.insert("distance".to_string(), distance.clone());
+                            for key in ["height", "distance"] {
+                                if let Some(value) =
+                                    shading_row.get(key).filter(|v| csv_cell_is_set(v))
+                                {
+                                    shading_obj.insert(key.to_string(), value.clone());
+                                }
                             }
 
                             shading_objects.push(Value::Object(shading_obj));
@@ -3650,19 +3880,24 @@ impl JSONBuilder {
             })
     }
 
-    fn read_context_shading_type(shading_row: &HashMap<String, Value>) -> &'static str {
-        let raw_type = shading_row
-            .get("shading_type")
-            .or_else(|| shading_row.get("Type"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("obstacle")
-            .trim();
-
-        match raw_type {
-            "overhang" => "overhang",
-            "obstacle" | "ContextShading" | "" => "obstacle",
-            _ => "obstacle",
-        }
+    /// `shading_type`; `Type` only in files written before that column existed, which stored the
+    /// shading type there. Anything but a HEM shading type (blank, the element type
+    /// `ContextShading`, a typo) is `None`: the caller reports it rather than guessing.
+    /// Returns the column read and the type.
+    fn read_context_shading_type(
+        shading_row: &HashMap<String, Value>,
+    ) -> (&'static str, Option<&'static str>) {
+        let column = if shading_row.contains_key("shading_type") {
+            "shading_type"
+        } else {
+            "Type"
+        };
+        let shading_type = match csv_string_cell(shading_row, column) {
+            Some("overhang") => Some("overhang"),
+            Some("obstacle") => Some("obstacle"),
+            _ => None,
+        };
+        (column, shading_type)
     }
 
     fn merge_ventilation_systems(
@@ -3722,6 +3957,7 @@ impl JSONBuilder {
                             .and_then(|v| v.as_object())
                             .cloned()
                             .unwrap_or_else(serde_json::Map::new);
+                        clear_csv_owned_seed_fields(&mut vent_obj, vent_row, "Ventilation Systems");
                         let mut csv_set_keys = HashSet::new();
 
                         // Overlay: CSV columns (highest precedence), schema-allowed only, ignoring empties.
@@ -3811,6 +4047,7 @@ impl JSONBuilder {
                                 ),
                             )
                         })?;
+                        clear_csv_owned_seed_fields(&mut mv_obj, vent_row, "Ventilation Systems");
                         // Overlay: CSV columns (highest precedence), schema-allowed only, ignoring empties.
                         let mut csv_set_keys = std::collections::HashSet::new();
                         for (k, v) in vent_row {
@@ -3908,6 +4145,24 @@ impl JSONBuilder {
                             }
                         }
 
+                        // Name the exhaust position columns the schema's `oneOf` would only hint at.
+                        if vt != "MVHR" && !mv_obj.contains_key("position_exhaust") {
+                            let missing: Vec<&str> = flat_position_keys
+                                .into_iter()
+                                .filter(|key| !mv_obj.contains_key(*key))
+                                .collect();
+                            if !missing.is_empty() {
+                                self.push_non_fatal(
+                                    "E027",
+                                    &crate::json_pointer(&["Ventilation Systems", vent_name]),
+                                    &format!(
+                                        "MechanicalVentilation row '{vent_name}' has no {}. Enter the exhaust position in those columns.",
+                                        missing.join(", ")
+                                    ),
+                                );
+                            }
+                        }
+
                         // Validate base required fields from input_fhs.schema.json MechanicalVentilation.additionalProperties.required
                         // (Engine may accept extra keys with serde defaults; those are not listed as required in the FHS schema.)
                         let required_fields =
@@ -3932,32 +4187,19 @@ impl JSONBuilder {
                             if duct_type == Some("MechanicalVentilationDuctwork")
                                 && parent_element == Some(vent_name)
                             {
-                                // Seed ductwork defaults from the selected MV template (if present), else fallback defaults.
+                                // Seed from the selected MV template's ductwork when it has one; no constant fills a gap.
                                 let mut duct_obj: serde_json::Map<String, Value> = mv_obj
                                     .get("ductwork")
                                     .and_then(|v| v.as_array())
                                     .and_then(|arr| arr.first())
                                     .and_then(|v| v.as_object())
                                     .cloned()
-                                    .unwrap_or_else(|| {
-                                        let mut o = serde_json::Map::new();
-                                        o.insert(
-                                            "cross_section_shape".to_string(),
-                                            Value::String("circular".to_string()),
-                                        );
-                                        o.insert(
-                                            "insulation_thermal_conductivity".to_string(),
-                                            Value::Number(
-                                                serde_json::Number::from_f64(0.035).unwrap(),
-                                            ),
-                                        );
-                                        o.insert(
-                                            "insulation_thickness_mm".to_string(),
-                                            Value::Number(serde_json::Number::from(25)),
-                                        );
-                                        o.insert("reflective".to_string(), Value::Bool(false));
-                                        o
-                                    });
+                                    .unwrap_or_default();
+                                clear_csv_owned_seed_fields(
+                                    &mut duct_obj,
+                                    duct_row,
+                                    "Ventilation Systems",
+                                );
                                 let mut csv_set_keys = HashSet::new();
 
                                 // Overlay: CSV columns (highest precedence), schema-allowed only, ignoring empties.
@@ -4214,6 +4456,7 @@ impl JSONBuilder {
                         .clone()
                         .unwrap_or_else(serde_json::Map::new),
                     appliance_row,
+                    "Combustion Appliances",
                     &["Name", "Type", "coords"],
                 );
 
@@ -4272,19 +4515,35 @@ impl JSONBuilder {
                 let pipework_type = pipe_row
                     .get("pipework_type")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("primary")
+                    .unwrap_or_default()
                     .to_lowercase();
                 let seed = match pipework_type.as_str() {
                     "primary" => default_primary_pipe
                         .clone()
                         .unwrap_or_else(serde_json::Map::new),
-                    _ => default_distribution_pipe
+                    "distribution" => default_distribution_pipe
                         .clone()
                         .unwrap_or_else(serde_json::Map::new),
+                    // Primary and distribution pipework are different inputs: never guess.
+                    _ => {
+                        let name = pipe_row
+                            .get("Name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        self.push_non_fatal(
+                            "E027",
+                            &crate::json_pointer(&["Water Pipework", name, "pipework_type"]),
+                            &format!(
+                                "Water Pipework row '{name}' has pipework_type '{pipework_type}', so it is not in the model. Enter primary or distribution."
+                            ),
+                        );
+                        continue;
+                    }
                 };
                 let pipe_obj = overlay_row_onto_seed(
                     seed,
                     pipe_row,
+                    "Water Pipework",
                     &[
                         "Name",
                         "Type",
@@ -4457,10 +4716,6 @@ impl JSONBuilder {
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         // Compliance settings are stored in the Metadata section
-        // The parser treats metadata rows as table rows, so the first row becomes headers
-        // For metadata like "GlobalOrientationOffset,0", the headers would be ["GlobalOrientationOffset", "0", ...]
-        // And subsequent rows would be parsed with those headers
-        // So we need to access the first column of each row as the field name
         if let Some(metadata_rows) = csv_data.get("Metadata") {
             let result_obj = result
                 .as_object_mut()
@@ -4681,6 +4936,64 @@ impl JSONBuilder {
 
         self.apply_fhs_implicit_false_root_booleans(result);
 
+        // A Metadata input with no row keeps the template value, or the FHS default above. Every
+        // other Metadata merge (ventilation, air permeability) only writes present rows, so the
+        // model already holds the value each absent setting will use.
+        let present: HashSet<String> = csv_data
+            .get("Metadata")
+            .into_iter()
+            .flatten()
+            .filter_map(|row| extract_metadata_field(row).0)
+            .collect();
+        // A Systems InfiltrationVentilation fragment is wrapped in its root key, so a model
+        // pointer finds the setting in it. The merge takes only that key from the fragment.
+        let systems_fragments: Vec<&Value> = csv_data
+            .get("Systems")
+            .into_iter()
+            .flatten()
+            .filter(|row| is_infiltration_ventilation_row(row))
+            .filter_map(|row| row.get("extra_json"))
+            .collect();
+        let used: Vec<String> = METADATA_INPUT_FIELD_NAMES
+            .iter()
+            .filter(|name| !present.contains(**name))
+            .filter_map(|name| {
+                let pointer = if let Some(key) = name.strip_prefix("General_") {
+                    format!("/General/{key}")
+                } else if let Some(key) = name.strip_prefix("AirPermeability_") {
+                    format!("/InfiltrationVentilation/Leaks/{key}")
+                } else if let Some(key) = name.strip_prefix("Ventilation_") {
+                    format!("/InfiltrationVentilation/{key}")
+                } else {
+                    format!("/{name}")
+                };
+                // A Systems row that states the setting is its source.
+                if pointer.starts_with("/InfiltrationVentilation/")
+                    && systems_fragments
+                        .iter()
+                        .any(|fragment| fragment.pointer(&pointer).is_some_and(|v| !v.is_null()))
+                {
+                    return None;
+                }
+                Some(match result.pointer(&pointer)? {
+                    Value::String(text) => format!("{name} {text}"),
+                    value => format!("{name} {value}"),
+                })
+            })
+            .collect();
+        if !used.is_empty() {
+            self.schema_omissions
+                .borrow_mut()
+                .push(crate::finalization::SchemaOmission {
+                    code: crate::target_mappings::TARGET_INPUT_WARNING.to_string(),
+                    path: "/Metadata".to_string(),
+                    message: format!(
+                        "The Metadata section has no row for these settings, so the model uses these values: {}. Add the rows to state them.",
+                        used.join(", ")
+                    ),
+                });
+        }
+
         Ok(())
     }
 
@@ -4694,6 +5007,10 @@ impl JSONBuilder {
         if self.compliance_validation_enabled == Some(false) {
             return;
         }
+        // The documented default for an ABSENT Metadata row (see the Geometry CSV contract); a
+        // blank row is E066. It stays in code, not the template: pinned preparation requires the
+        // workspace template to match the published bundle byte for byte, and edited workspace
+        // templates are never updated, so a template key would not reach existing workspaces.
         let Some(root) = result.as_object_mut() else {
             return;
         };
@@ -4976,6 +5293,11 @@ impl JSONBuilder {
                     serde_json::Map::new()
                 };
 
+                // The inverter belongs to this installation: never take it from a template.
+                // The target schema reports any inverter field the row does not author.
+                pv_system.retain(|key, _| !key.starts_with("inverter_"));
+                clear_csv_owned_seed_fields(&mut pv_system, row, "On-Site Generation");
+
                 // Ensure type is set
                 pv_system.insert(
                     "type".to_string(),
@@ -5040,14 +5362,8 @@ impl JSONBuilder {
                     }
                 }
 
-                // Ensure required fields have defaults if missing (fallback only if not in template)
-                // Precedence: CSV columns > extra_json > defaults template > fallback defaults
-                if !pv_system.contains_key("ventilation_strategy") {
-                    pv_system.insert(
-                        "ventilation_strategy".to_string(),
-                        Value::String("moderately_ventilated".to_string()),
-                    );
-                }
+                // The only energy supply the converter builds, and no obstacles. Every other PV
+                // input comes from the row or the template; the schema reports a missing one.
                 if !pv_system.contains_key("EnergySupply") {
                     pv_system.insert(
                         "EnergySupply".to_string(),
@@ -5056,27 +5372,6 @@ impl JSONBuilder {
                 }
                 if !pv_system.contains_key("shading") {
                     pv_system.insert("shading".to_string(), Value::Array(vec![]));
-                }
-                if !pv_system.contains_key("inverter_peak_power_dc") {
-                    pv_system.insert(
-                        "inverter_peak_power_dc".to_string(),
-                        Value::Number(serde_json::Number::from_f64(1.0).unwrap()),
-                    );
-                }
-                if !pv_system.contains_key("inverter_peak_power_ac") {
-                    pv_system.insert(
-                        "inverter_peak_power_ac".to_string(),
-                        Value::Number(serde_json::Number::from_f64(1.0).unwrap()),
-                    );
-                }
-                if !pv_system.contains_key("inverter_is_inside") {
-                    pv_system.insert("inverter_is_inside".to_string(), Value::Bool(true));
-                }
-                if !pv_system.contains_key("inverter_type") {
-                    pv_system.insert(
-                        "inverter_type".to_string(),
-                        Value::String("string_inverter".to_string()),
-                    );
                 }
 
                 // Width / height precedence: explicit CSV column (applied above) >
@@ -5094,11 +5389,9 @@ impl JSONBuilder {
                     .map(|h| h <= 0.0)
                     .unwrap_or(true);
 
-                if needs_width || needs_height {
-                    let pitch_deg = pv_system
-                        .get("pitch")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.0);
+                // The slope correction needs the row's pitch: without it nothing is derived.
+                let pitch_deg = pv_system.get("pitch").and_then(Value::as_f64);
+                if let (true, Some(pitch_deg)) = (needs_width || needs_height, pitch_deg) {
                     if let Some(coords_str) = row.get("coords").and_then(|v| v.as_str()) {
                         if let Some((derived_w, derived_h)) =
                             derive_pv_dimensions_from_coords(coords_str, pitch_deg)
@@ -5125,16 +5418,19 @@ impl JSONBuilder {
                 let should_merge_into_default = on_site_gen.contains_key("Default PV")
                     && (element_name == "OnSiteGeneration" || element_name == "Default PV");
 
+                let model_name = if should_merge_into_default {
+                    "Default PV"
+                } else {
+                    element_name
+                };
+                self.csv_rows.borrow_mut().push((
+                    crate::json_pointer(&["OnSiteGeneration", model_name]),
+                    format!("On-Site Generation row '{element_name}'"),
+                ));
                 if should_merge_into_default {
-                    // Merge CSV properties into existing "Default PV" entry (CSV takes precedence)
-                    if let Some(existing_pv) = on_site_gen
-                        .get_mut("Default PV")
-                        .and_then(|v| v.as_object_mut())
-                    {
-                        for (key, value) in pv_system {
-                            existing_pv.insert(key, value);
-                        }
-                    }
+                    // The row replaces the template entry: `pv_system` was seeded from the same
+                    // template and has already dropped what the row owns.
+                    on_site_gen.insert("Default PV".to_string(), Value::Object(pv_system));
                 } else {
                     // Insert new entry with CSV name
                     on_site_gen.insert(element_name.to_string(), Value::Object(pv_system));
@@ -5595,8 +5891,7 @@ impl JSONBuilder {
             .unwrap_or_else(serde_json::Map::new);
 
         let mut consolidated_thermal_bridging = first_zone_data.get("ThermalBridging").cloned();
-        let first_zone_has_lighting = first_zone_data.contains_key("Lighting");
-        let mut other_lighting: Option<Value> = None;
+        let mut consolidated_lighting = first_zone_data.get("Lighting").cloned();
 
         // Collect data from other zones
         for other_zone_name in &other_zone_names {
@@ -5694,13 +5989,12 @@ impl JSONBuilder {
                 }
             }
 
-            // Collect Lighting from other zones (use first one found if first zone has none)
-            if !first_zone_has_lighting {
-                if let Some(lighting) = other_zone_obj.get("Lighting") {
-                    if lighting.is_object() {
-                        other_lighting = Some(lighting.clone());
-                    }
-                }
+            if let Some(lighting) = other_zone_obj.get("Lighting") {
+                consolidated_lighting = Some(merge_zone_lighting(
+                    consolidated_lighting,
+                    lighting,
+                    other_zone_name,
+                )?);
             }
         }
 
@@ -5770,10 +6064,8 @@ impl JSONBuilder {
         if let Some(tb) = consolidated_thermal_bridging {
             first_zone.insert("ThermalBridging".to_string(), tb);
         }
-        if !first_zone_has_lighting {
-            if let Some(lighting) = other_lighting {
-                first_zone.insert("Lighting".to_string(), lighting);
-            }
+        if let Some(lighting) = consolidated_lighting {
+            first_zone.insert("Lighting".to_string(), lighting);
         }
 
         // Remove all other zones
@@ -5961,11 +6253,10 @@ impl JSONBuilder {
 
                 for row in section_data {
                     // Get system type – try new column layout first ("Type"), then legacy ("system_type")
-                    let system_type = row
-                        .get("Type")
-                        .and_then(|v| v.as_str())
-                        .or_else(|| row.get("system_type").and_then(|v| v.as_str()))
-                        .or_else(|| row.get("subcategory").and_then(|v| v.as_str()))
+                    // The parser turns a blank cell into null, so the first string routes.
+                    let (route_column, system_type) = ["Type", "system_type", "subcategory"]
+                        .into_iter()
+                        .find_map(|key| Some((key, row.get(key)?.as_str()?)))
                         .ok_or_else(|| {
                             BuildError::new(
                                 "E035",
@@ -6233,17 +6524,8 @@ impl JSONBuilder {
                                     )?;
                                 }
                             }
-                            "InfiltrationVentilation" => {
-                                if let Some(extra_json) =
-                                    row.get("extra_json").and_then(|v| v.as_object())
-                                {
-                                    Self::merge_wrapped_system_fragment(
-                                        result_obj,
-                                        extra_json,
-                                        "InfiltrationVentilation",
-                                    );
-                                }
-                            }
+                            // Merged before the zones; see `build_json`.
+                            "InfiltrationVentilation" => {}
                             "HotWaterDemand" => {
                                 if let Some(extra_json) =
                                     row.get("extra_json").and_then(|v| v.as_object())
@@ -6306,11 +6588,23 @@ impl JSONBuilder {
                                     );
                                 }
                             }
-                            _ => {
-                                // Unknown System subcategory - skip with warning
-                                eprintln!("[merge_systems] Warning: Unknown System subcategory '{subcategory}' for element '{element_name}' – skipping");
-                            }
+                            _ => self.push_non_fatal(
+                                "E065",
+                                "Systems",
+                                &format!("Systems row '{element_name}' has unknown subcategory '{subcategory}', so it is not in the model. Correct the subcategory."),
+                            ),
                         }
+                    } else {
+                        let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+                        self.push_non_fatal(
+                            "E065",
+                            "Systems",
+                            &if route_column == "Type" {
+                                format!("Systems row '{name}' has unknown Type '{system_type}', so it is not in the model. Correct the Type.")
+                            } else {
+                                format!("Systems row '{name}' has a blank Type, and its {route_column} '{system_type}' cannot route it, so it is not in the model. Enter the Type.")
+                            },
+                        );
                     }
                 }
                 // After every row, so a service row that precedes its heat source's
@@ -6447,6 +6741,29 @@ impl JSONBuilder {
                 *target_slot = patch_value.clone();
             }
         }
+    }
+
+    /// Merges the fragment of each `is_infiltration_ventilation_row`.
+    fn merge_systems_infiltration_ventilation_rows(
+        result: &mut Value,
+        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+    ) -> Result<(), BuildError> {
+        let result_obj = result
+            .as_object_mut()
+            .ok_or_else(|| BuildError::new("E034", "Result JSON is not an object"))?;
+        for row in csv_data.get("Systems").into_iter().flatten() {
+            if !is_infiltration_ventilation_row(row) {
+                continue;
+            }
+            if let Some(extra_json) = row.get("extra_json").and_then(Value::as_object) {
+                Self::merge_wrapped_system_fragment(
+                    result_obj,
+                    extra_json,
+                    "InfiltrationVentilation",
+                );
+            }
+        }
+        Ok(())
     }
 
     fn merge_wrapped_system_fragment(
@@ -6795,7 +7112,94 @@ impl JSONBuilder {
         false
     }
 
+    /// An authored wet system with no emitters runs as valid and delivers no heat.
+    fn report_authored_wet_systems_without_emitters(
+        &self,
+        result: &Value,
+        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+    ) {
+        let authored: std::collections::BTreeSet<String> =
+            Self::authored_space_heat_system_aliases_from_systems_csv(csv_data)
+                .into_values()
+                .collect();
+        for name in authored {
+            let Some(system) = result.get("SpaceHeatSystem").and_then(|s| s.get(&name)) else {
+                continue;
+            };
+            let has_emitters = system
+                .get("emitters")
+                .and_then(Value::as_array)
+                .is_some_and(|emitters| !emitters.is_empty());
+            if system.get("type").and_then(Value::as_str) == Some("WetDistribution")
+                && !has_emitters
+            {
+                self.push_non_fatal(
+                    "E059",
+                    &crate::json_pointer(&["SpaceHeatSystem", name.as_str()]),
+                    &format!(
+                        "SpaceHeatSystem '{name}' has no emitters, so it would deliver no heat. Add Wet Emitter rows linked to it, or remove the Systems row."
+                    ),
+                );
+            }
+        }
+    }
+
+    /// Give each fan-coil wet system an electricity supply when the target needs one: its heat
+    /// source's supply if that is electric, otherwise `mains elec`. Fans never burn gas.
+    fn supply_fan_coil_systems(&self, result: &mut Value) {
+        if !self.input_contract.fan_coil_needs_energy_supply {
+            return;
+        }
+        let is_electric = |name: &str| {
+            result
+                .get("EnergySupply")
+                .and_then(|supplies| supplies.get(name))
+                .cloned()
+                .or_else(|| self.energy_supply_template_for_reference(name))
+                .is_some_and(|supply| {
+                    supply.get("fuel").and_then(Value::as_str) == Some("electricity")
+                })
+        };
+        let assignments: Vec<(String, String)> = result
+            .get("SpaceHeatSystem")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter(|(_, system)| {
+                system.get("EnergySupply").is_none()
+                    && system
+                        .get("emitters")
+                        .and_then(Value::as_array)
+                        .is_some_and(|emitters| {
+                            emitters.iter().any(|emitter| {
+                                emitter.get("wet_emitter_type").and_then(Value::as_str)
+                                    == Some("fancoil")
+                            })
+                        })
+            })
+            .map(|(name, system)| {
+                let supply = system
+                    .pointer("/HeatSource/name")
+                    .and_then(Value::as_str)
+                    .and_then(|source| {
+                        result
+                            .get("HeatSourceWet")?
+                            .get(source)?
+                            .get("EnergySupply")
+                    })
+                    .and_then(Value::as_str)
+                    .filter(|supply| is_electric(supply))
+                    .unwrap_or("mains elec");
+                (name.clone(), supply.to_string())
+            })
+            .collect();
+        for (name, supply) in assignments {
+            result["SpaceHeatSystem"][name.as_str()]["EnergySupply"] = Value::String(supply);
+        }
+    }
+
     fn build_wet_emitter_object(
+        &self,
         subcategory: &str,
         emitter_row: &HashMap<String, Value>,
     ) -> Result<serde_json::Map<String, Value>, BuildError> {
@@ -6825,14 +7229,45 @@ impl JSONBuilder {
             Value::String(subcategory.to_string()),
         );
 
+        // Each value comes from the row (CSV column, then extra_json); a value the row does not
+        // give is left out so the target schema reports it. No constant stands in for it.
+        let number = |key: &str| emitter_data.get(key).and_then(Value::as_f64);
+        let put = |obj: &mut serde_json::Map<String, Value>, key: &str, value: Option<f64>| {
+            if let Some(value) = value {
+                obj.insert(
+                    key.to_string(),
+                    Value::Number(serde_json::Number::from_f64(value).unwrap()),
+                );
+            }
+        };
+        // unit_number counts identical units: a whole number of 1 or more, or blank.
+        let unit_number = match parse_csv_number_cell(
+            emitter_data.get("unit_number"),
+            "unit_number",
+        ) {
+            Ok(Some(n)) if n >= 1.0 && n.fract() == 0.0 => Some(n),
+            Ok(None) => None,
+            _ => {
+                let name = emitter_row
+                    .get("Name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let value = &emitter_data["unit_number"];
+                return Err(BuildError::new(
+                    "E055",
+                    &format!("Wet Emitters row '{name}': unit_number ({value}) must be a whole number of 1 or more, or blank for one unit."),
+                ));
+            }
+        };
         match subcategory {
             "radiator" => {
-                let unit_number = emitter_data
-                    .get("unit_number")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0);
-                let length = emitter_data.get("length").and_then(|v| v.as_f64());
-                let effective_length = length.map(|value| value * unit_number);
+                // A blank unit_number is one unit: the multiplier, not a HEM input.
+                let unit_number = unit_number.unwrap_or(1.0);
+                let length = number("length");
+                // N identical units give the engine N times one unit: the length of a per-metre
+                // radiator, or the output constant and thermal mass of a lumped one.
+                let times_units = |value: f64| value * unit_number;
+                let effective_length = length.map(times_units);
 
                 // Per-metre vs lumped is a single coherent mode, mirroring the upstream
                 // FHS schema which branches the whole emitter on `length`. The c
@@ -6841,119 +7276,48 @@ impl JSONBuilder {
                 // mode, so only the active branch's fields are emitted and a stray field
                 // from the other branch (which the engine would silently ignore) is
                 // dropped rather than written into the merged JSON.
-                let is_per_metre = emitter_data
-                    .get("c_per_m")
-                    .and_then(|v| v.as_f64())
-                    .is_some()
-                    || length.is_some();
+                let is_per_metre = number("c_per_m").is_some() || length.is_some();
 
                 if is_per_metre {
-                    let c_per_m = emitter_data
-                        .get("c_per_m")
-                        .and_then(|v| v.as_f64())
-                        .ok_or_else(|| {
-                            BuildError::new(
-                                "E047",
-                                "Per-metre radiator emitters (with 'length') require 'c_per_m'",
-                            )
-                        })?;
+                    let c_per_m = number("c_per_m").ok_or_else(|| {
+                        BuildError::new(
+                            "E047",
+                            "Per-metre radiator emitters (with 'length') require 'c_per_m'",
+                        )
+                    })?;
                     let effective_length = effective_length.ok_or_else(|| {
                         BuildError::new("E047", "Radiator emitters with 'c_per_m' require 'length'")
                     })?;
-                    emitter_obj.insert(
-                        "c_per_m".to_string(),
-                        Value::Number(serde_json::Number::from_f64(c_per_m).unwrap()),
-                    );
-                    emitter_obj.insert(
-                        "length".to_string(),
-                        Value::Number(serde_json::Number::from_f64(effective_length).unwrap()),
-                    );
+                    put(&mut emitter_obj, "c_per_m", Some(c_per_m));
+                    put(&mut emitter_obj, "length", Some(effective_length));
                 } else {
-                    let c_value = emitter_data
-                        .get("c")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.08 * unit_number);
-                    emitter_obj.insert(
-                        "c".to_string(),
-                        Value::Number(serde_json::Number::from_f64(c_value).unwrap()),
-                    );
+                    put(&mut emitter_obj, "c", number("c").map(times_units));
                 }
-
-                let n_value = emitter_data
-                    .get("n")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.2);
-                emitter_obj.insert(
-                    "n".to_string(),
-                    Value::Number(serde_json::Number::from_f64(n_value).unwrap()),
-                );
-
-                let frac_conv = emitter_data
-                    .get("frac_convective")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.4);
-                emitter_obj.insert(
-                    "frac_convective".to_string(),
-                    Value::Number(serde_json::Number::from_f64(frac_conv).unwrap()),
-                );
+                put(&mut emitter_obj, "n", number("n"));
 
                 if is_per_metre {
-                    if let Some(thermal_mass_per_m) = emitter_data
-                        .get("thermal_mass_per_m")
-                        .and_then(|v| v.as_f64())
-                    {
-                        emitter_obj.insert(
-                            "thermal_mass_per_m".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(thermal_mass_per_m).unwrap(),
-                            ),
-                        );
-                    }
-                } else if let Some(thermal_mass) =
-                    emitter_data.get("thermal_mass").and_then(|v| v.as_f64())
-                {
-                    emitter_obj.insert(
-                        "thermal_mass".to_string(),
-                        Value::Number(serde_json::Number::from_f64(thermal_mass).unwrap()),
+                    put(
+                        &mut emitter_obj,
+                        "thermal_mass_per_m",
+                        number("thermal_mass_per_m"),
+                    );
+                } else {
+                    put(
+                        &mut emitter_obj,
+                        "thermal_mass",
+                        number("thermal_mass").map(times_units),
                     );
                 }
             }
             "ufh" => {
-                let area = emitter_data
-                    .get("area")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(80.0);
-                emitter_obj.insert(
-                    "emitter_floor_area".to_string(),
-                    Value::Number(serde_json::Number::from_f64(area).unwrap()),
-                );
-
-                let thermal_mass = emitter_data
-                    .get("equivalent_specific_thermal_mass")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(80.0);
-                emitter_obj.insert(
-                    "equivalent_specific_thermal_mass".to_string(),
-                    Value::Number(serde_json::Number::from_f64(thermal_mass).unwrap()),
-                );
-
-                let perf_factor = emitter_data
-                    .get("system_performance_factor")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(5.0);
-                emitter_obj.insert(
-                    "system_performance_factor".to_string(),
-                    Value::Number(serde_json::Number::from_f64(perf_factor).unwrap()),
-                );
-
-                let frac_conv = emitter_data
-                    .get("frac_convective")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.43);
-                emitter_obj.insert(
-                    "frac_convective".to_string(),
-                    Value::Number(serde_json::Number::from_f64(frac_conv).unwrap()),
-                );
+                let area = number("area").or_else(|| number("emitter_floor_area"));
+                put(&mut emitter_obj, "emitter_floor_area", area);
+                for key in [
+                    "equivalent_specific_thermal_mass",
+                    "system_performance_factor",
+                ] {
+                    put(&mut emitter_obj, key, number(key));
+                }
             }
             "fancoil" => {
                 let to_i64_rounded = |v: &Value| -> Option<i64> {
@@ -6968,7 +7332,7 @@ impl JSONBuilder {
                 let n_units = emitter_data
                     .get("n_units")
                     .and_then(to_i64_rounded)
-                    .or_else(|| emitter_data.get("unit_number").and_then(to_i64_rounded))
+                    .or(unit_number.map(|n| n as i64))
                     .ok_or_else(|| BuildError::new(
                         "E026",
                         "Fancoil emitters require 'n_units' field (from extra_json or unit_number column)",
@@ -6978,40 +7342,38 @@ impl JSONBuilder {
                     Value::Number(serde_json::Number::from(n_units)),
                 );
 
-                // User-supplied test data (extra_json) wins; the stub is only a
-                // schema-completeness fill when none was authored.
-                let fancoil_test_data = emitter_data
+                // Every target indexes the fan speed table, so no placeholder can stand in.
+                let test_data = emitter_data
                     .get("fancoil_test_data")
-                    .filter(|v| v.is_object())
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        serde_json::json!({
-                            "fan_power_W": [15],
-                            "fan_speed_data": []
-                        })
-                    });
-                emitter_obj.insert("fancoil_test_data".to_string(), fancoil_test_data);
-
-                let frac_conv = emitter_data
-                    .get("frac_convective")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0);
-                emitter_obj.insert(
-                    "frac_convective".to_string(),
-                    Value::Number(serde_json::Number::from_f64(frac_conv).unwrap()),
-                );
+                    .filter(|v| v.is_object());
+                let has_fan_speeds = test_data
+                    .and_then(|v| v.get("fan_speed_data"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|rows| !rows.is_empty());
+                if !has_fan_speeds {
+                    let name = emitter_row
+                        .get("Name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    self.push_non_fatal(
+                        "E062",
+                        &crate::json_pointer(&["Wet Emitters", name, "fancoil_test_data"]),
+                        &format!(
+                            "Fancoil '{name}' needs manufacturer test data: fan_power_W and fan_speed_data."
+                        ),
+                    );
+                }
+                if let Some(test_data) = test_data {
+                    emitter_obj.insert("fancoil_test_data".to_string(), test_data.clone());
+                }
             }
-            _ => {
-                let frac_conv = emitter_data
-                    .get("frac_convective")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.5);
-                emitter_obj.insert(
-                    "frac_convective".to_string(),
-                    Value::Number(serde_json::Number::from_f64(frac_conv).unwrap()),
-                );
-            }
+            _ => {}
         }
+        put(
+            &mut emitter_obj,
+            "frac_convective",
+            number("frac_convective"),
+        );
 
         Ok(emitter_obj)
     }
@@ -7074,6 +7436,9 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
+        if csv_data.get("Wet Emitters").is_none_or(Vec::is_empty) {
+            self.report_authored_wet_systems_without_emitters(result, csv_data);
+        }
         if let Some(section_data) = csv_data.get("Wet Emitters") {
             if section_data.is_empty() {
                 // FHS: no emitter rows means CSV does not author wet distribution — drop
@@ -7084,10 +7449,16 @@ impl JSONBuilder {
                 // Core: keep defaults so `update_default_space_heat_systems` can rename/reconcile
                 // (e.g. multi-zone geometry CSV without a Wet Emitters section).
                 if self.is_fhs_schema {
+                    let authored: HashSet<String> =
+                        Self::authored_space_heat_system_aliases_from_systems_csv(csv_data)
+                            .into_values()
+                            .collect();
                     if let Some(space_heat_system) = result.get_mut("SpaceHeatSystem") {
                         if let Some(shs_obj) = space_heat_system.as_object_mut() {
-                            shs_obj.retain(|_, v| {
-                                v.get("type").and_then(|t| t.as_str()) != Some("WetDistribution")
+                            shs_obj.retain(|name, v| {
+                                authored.contains(name)
+                                    || v.get("type").and_then(|t| t.as_str())
+                                        != Some("WetDistribution")
                             });
                         }
                     }
@@ -7142,16 +7513,16 @@ impl JSONBuilder {
             // generated `<zone> <subcategory>` grouping. Rows with a blank link in the current CSV
             // format are treated as unassigned geometry and are not silently merged into generated
             // fallback systems.
-            let mut zone_type_emitters: HashMap<(String, String), Vec<HashMap<String, Value>>> =
-                HashMap::new();
-            let mut unlinked_zone_type_emitters: HashMap<
+            let mut zone_type_emitters: BTreeMap<(String, String), Vec<HashMap<String, Value>>> =
+                BTreeMap::new();
+            let mut unlinked_zone_type_emitters: BTreeMap<
                 (String, String),
                 Vec<HashMap<String, Value>>,
-            > = HashMap::new();
+            > = BTreeMap::new();
             let mut unlinked_zones_with_csv_emitters: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
-            let mut linked_system_emitters: HashMap<String, Vec<HashMap<String, Value>>> =
-                HashMap::new();
+            let mut linked_system_emitters: BTreeMap<String, Vec<HashMap<String, Value>>> =
+                BTreeMap::new();
             let mut linked_system_zones: HashMap<String, HashSet<String>> = HashMap::new();
             let mut zones_with_csv_emitters: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
@@ -7205,6 +7576,17 @@ impl JSONBuilder {
                         .entry((effective_zone_name, subcategory.to_string()))
                         .or_default()
                         .push(emitter_row.clone());
+                } else {
+                    // A blank link heats nothing: never drop the emitter silently.
+                    let name = emitter_row
+                        .get("Name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    self.push_non_fatal(
+                        "E059",
+                        &crate::json_pointer(&["Wet Emitters", name, "space_heat_system"]),
+                        &format!("Wet Emitter '{name}' has no space_heat_system, so no wet system heats it. Link it to a wet space heating system."),
+                    );
                 }
             }
 
@@ -7303,7 +7685,8 @@ impl JSONBuilder {
                 let mut emitters_array = Vec::new();
 
                 for emitter_row in emitters_data {
-                    let emitter_obj = Self::build_wet_emitter_object(&subcategory, &emitter_row)?;
+                    let emitter_obj = self.build_wet_emitter_object(&subcategory, &emitter_row)?;
+                    self.note_emitter_row(&system_name, emitters_array.len(), &emitter_row);
                     emitters_array.push(Value::Object(emitter_obj));
                 }
 
@@ -7415,12 +7798,13 @@ impl JSONBuilder {
                             ));
                         };
                         let emitter_obj =
-                            Self::build_wet_emitter_object(subcategory, &emitter_row)?;
+                            self.build_wet_emitter_object(subcategory, &emitter_row)?;
                         if emitter_obj.get("wet_emitter_type").and_then(|v| v.as_str())
                             == Some("radiator")
                         {
                             has_radiator_emitters = true;
                         }
+                        self.note_emitter_row(&system_name, emitters_array.len(), &emitter_row);
                         emitters_array.push(Value::Object(emitter_obj));
                     }
                     if has_radiator_emitters {
@@ -8712,13 +9096,29 @@ impl JSONBuilder {
         let mut env_area_sum = 0.0;
 
         for el in &all_elements {
+            // Partitions inside the dwelling are not envelope; a party element is, however it is
+            // spelled (`Type=Party` or the editor's party marker on an adjacent element).
             let element_type = el.get("Type").and_then(|v| v.as_str()).unwrap_or("");
-            if element_type == "BuildingElementAdjacentConditionedSpace" {
+            let party = element_type == "Party"
+                || el
+                    .get("extra_json")
+                    .and_then(|ej| ej.get(crate::parser::PARTY_ELEMENT_MARKER))
+                    .and_then(Value::as_bool)
+                    == Some(true);
+            if self.map_csv_type_to_schema_type(element_type)
+                == "BuildingElementAdjacentConditionedSpace"
+                && !party
+            {
                 continue;
             }
-            if let Some(area) = el.get("area").and_then(|v| v.as_f64()) {
-                env_area_sum += area;
-            }
+            // The area the element is built with: the row's area (CSV, then extra_json), else
+            // width x height, as `build_json` derives it.
+            let row = overlay_row_onto_seed(serde_json::Map::new(), el, "", &[]);
+            let number = |key: &str| row.get(key).and_then(Value::as_f64);
+            let area = number("area")
+                .filter(|area| *area > 0.0)
+                .or_else(|| Some(number("width")? * number("height")?));
+            env_area_sum += area.unwrap_or_default();
         }
 
         Ok(env_area_sum)
@@ -8939,11 +9339,8 @@ pipe1,WaterPipework,primary,{extra_json_cell}
             Some(31.0),
             "cleared field must leave the template seed in place, got {pipe:?}"
         );
-        assert_eq!(
-            pipe.get("length").and_then(|v| v.as_f64()),
-            Some(3.0),
-            "cleared field must leave the template seed in place, got {pipe:?}"
-        );
+        // `length` has a Water Pipework column, so the template never fills it.
+        assert!(pipe.get("length").is_none(), "got {pipe:?}");
     }
 
     #[test]
@@ -8968,11 +9365,8 @@ pipe1,WaterPipework,primary,{extra_json_cell}
             Some(31.0),
             "cleared field must leave the template seed in place, got {pipe:?}"
         );
-        assert_eq!(
-            pipe.get("length").and_then(|v| v.as_f64()),
-            Some(3.0),
-            "cleared field must leave the template seed in place, got {pipe:?}"
-        );
+        // `length` has a Water Pipework column, so the template never fills it.
+        assert!(pipe.get("length").is_none(), "got {pipe:?}");
     }
 
     #[test]
@@ -10399,22 +10793,41 @@ Radiator 2,Living,WetEmitter,radiator,2.0
         let emitters = system["emitters"].as_array().unwrap();
         assert_eq!(emitters.len(), 2, "Should have 2 emitter objects");
 
-        // Check first radiator (c = 0.08 * 1.0 = 0.08)
-        let emitter1 = emitters[0].as_object().unwrap();
-        assert_eq!(emitter1["wet_emitter_type"], "radiator");
-        assert_eq!(emitter1["c"], 0.08);
-        assert_eq!(emitter1["n"], 1.2);
-        assert_eq!(emitter1["frac_convective"], 0.4);
-
-        // Check second radiator (c = 0.08 * 2.0 = 0.16)
-        let emitter2 = emitters[1].as_object().unwrap();
-        assert_eq!(emitter2["wet_emitter_type"], "radiator");
-        assert_eq!(emitter2["c"], 0.16);
-        assert_eq!(emitter2["n"], 1.2);
-        assert_eq!(emitter2["frac_convective"], 0.4);
+        // The rows give no c, n or frac_convective: no constant stands in for them.
+        for emitter in emitters {
+            assert_eq!(emitter["wet_emitter_type"], "radiator");
+            for field in ["c", "n", "frac_convective"] {
+                assert!(emitter.get(field).is_none(), "{field}: {emitter}");
+            }
+        }
 
         // Zone should reference the system
         assert_eq!(json["Zone"]["Living"]["SpaceHeatSystem"], "Living radiator");
+    }
+
+    #[test]
+    fn schema_errors_on_an_emitter_name_its_csv_row() {
+        let csv = "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n\nWet Emitters\nName,Zone,Type,subcategory,unit_number\nHall,Living,WetEmitter,radiator,1\nLounge,Living,WetEmitter,radiator,1\n";
+        let data = parse_csv(csv);
+        let mut builder =
+            JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder.build_zone_structure(&mut result, &data).unwrap();
+        builder
+            .process_root_level_sections(&mut result, &data)
+            .unwrap();
+        let mut errors = vec![ValidationError {
+            code: "E026".into(),
+            path: "/SpaceHeatSystem/Living radiator/emitters/1".into(),
+            message: "\"n\" is a required property".into(),
+            schema_path: None,
+            keyword: Some("required".into()),
+        }];
+        builder.name_csv_rows(&mut errors);
+        assert_eq!(
+            errors[0].message,
+            "Wet Emitters row 'Lounge' (system 'Living radiator'): \"n\" is a required property"
+        );
     }
 
     #[test]
@@ -10511,7 +10924,7 @@ Living,Zone,100,50
 
 Wet Emitters
 Name,Zone,Type,subcategory,unit_number,extra_json
-Radiator 1,Living,WetEmitter,radiator,1,"{""c"":0.1,""thermal_mass"":2,""thermal_mass_per_m"":0.5}"
+Radiator 1,Living,WetEmitter,radiator,3,"{""c"":0.1,""thermal_mass"":2,""thermal_mass_per_m"":0.5}"
 "#;
 
         let json = build_partial_json(csv, DEFAULTS_PATH);
@@ -10520,14 +10933,41 @@ Radiator 1,Living,WetEmitter,radiator,1,"{""c"":0.1,""thermal_mass"":2,""thermal
             .unwrap();
         let emitter = emitters[0].as_object().unwrap();
 
-        assert_eq!(emitter["c"], 0.1);
-        assert_eq!(emitter["thermal_mass"], 2.0);
+        // Three identical units: three times the output constant and the thermal mass.
+        assert!(
+            (emitter["c"].as_f64().unwrap() - 0.3).abs() < 1e-12,
+            "{emitter:?}"
+        );
+        assert_eq!(emitter["thermal_mass"], 6.0);
         assert!(
             emitter.get("thermal_mass_per_m").is_none(),
             "per-metre thermal_mass_per_m must be dropped in lumped mode"
         );
         assert!(emitter.get("length").is_none());
         assert!(emitter.get("c_per_m").is_none());
+    }
+
+    #[test]
+    fn an_emitter_unit_number_must_be_a_whole_number_of_one_or_more() {
+        for (subcategory, unit_number) in [
+            ("radiator", "two"),
+            ("radiator", "0"),
+            ("radiator", "-2"),
+            ("radiator", "2.5"),
+            ("fancoil", "two"),
+        ] {
+            let csv = format!("Zone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n\nWet Emitters\nName,Zone,Type,subcategory,unit_number,extra_json\nRad A,Living,WetEmitter,{subcategory},{unit_number},\"{{\"\"c\"\":0.1,\"\"n\"\":1.3,\"\"thermal_mass\"\":0.5}}\"\n");
+            let data = CSVParser::new().parse_csv(&csv).unwrap();
+            let mut builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).unwrap();
+            let error = builder.build_json(&data).unwrap_err();
+            assert!(
+                error
+                    .message
+                    .starts_with("Wet Emitters row 'Rad A': unit_number ("),
+                "{subcategory} {unit_number}: {}",
+                error.message
+            );
+        }
     }
 
     #[test]
@@ -10556,14 +10996,13 @@ UFH 2,Living,WetEmitter,ufh,30.0
         let emitter1 = emitters[0].as_object().unwrap();
         assert_eq!(emitter1["wet_emitter_type"], "ufh");
         assert_eq!(emitter1["emitter_floor_area"], 20.0);
-        assert_eq!(
-            emitter1["equivalent_specific_thermal_mass"]
-                .as_f64()
-                .unwrap(),
-            80.0
-        );
-        assert_eq!(emitter1["system_performance_factor"].as_f64().unwrap(), 5.0);
-        assert_eq!(emitter1["frac_convective"], 0.43);
+        for field in [
+            "equivalent_specific_thermal_mass",
+            "system_performance_factor",
+            "frac_convective",
+        ] {
+            assert!(emitter1.get(field).is_none(), "{field}");
+        }
 
         // Check second UFH
         let emitter2 = emitters[1].as_object().unwrap();
@@ -10779,7 +11218,7 @@ Radiator,Living,WetEmitter,radiator,2,Living circuit,"{""n"":1.3,""frac_convecti
         let emitters = system["emitters"].as_array().unwrap();
         assert_eq!(emitters.len(), 1);
         assert_eq!(emitters[0]["wet_emitter_type"], "radiator");
-        assert_eq!(emitters[0]["c"], 0.16);
+        assert!(emitters[0].get("c").is_none());
         assert_eq!(emitters[0]["n"], 1.3);
         assert_eq!(emitters[0]["frac_convective"], 0.45);
         assert_eq!(json["Zone"]["Living"]["SpaceHeatSystem"], "Living circuit");
@@ -10833,7 +11272,7 @@ Unlinked UFH,Living,WetEmitter,ufh,8,,,"{""emitter_floor_area"":8,""frac_convect
     }
 
     #[test]
-    fn csv_authored_policy_drops_unlinked_template_wet_distribution_silently() {
+    fn csv_authored_policy_reports_blank_links_instead_of_dropping_heating() {
         let csv = r#"Zone
 Name,Type,volume,floor_area
 Living,Zone,100,50
@@ -10861,10 +11300,13 @@ Unlinked UFH,Living,WetEmitter,ufh,8,,,"{""emitter_floor_area"":8,""frac_convect
             json["Zone"]["Living"].get("SpaceHeatSystem").is_none(),
             "zone should not reference generated systems when current CSV links are blank"
         );
-        assert!(
-            errors.iter().all(|error| error.code != "E059"),
-            "template-only cleanup should stay silent: {errors:?}"
-        );
+        for name in ["Unlinked Radiator", "Unlinked UFH"] {
+            assert!(
+                errors.iter().any(|error| error.code == "E059"
+                    && error.path == format!("/Wet Emitters/{name}/space_heat_system")),
+                "a blank link must not remove heating silently: {errors:?}"
+            );
+        }
     }
 
     #[test]
@@ -10969,7 +11411,7 @@ Radiator,Living,WetEmitter,radiator,1,
         let errors = builder.take_non_fatal_errors();
         let error = errors
             .iter()
-            .find(|error| error.code == "E059")
+            .find(|error| error.code == "E059" && error.path == "/SpaceHeatSystem/Living circuit")
             .expect("unlinked authored WetDistribution should produce E059");
         assert!(error.message.contains("Living circuit"));
         assert!(error.message.contains("space_heat_system"));
@@ -11035,7 +11477,7 @@ Fancoil 2,Living,WetEmitter,fancoil,3
         let emitter1 = emitters[0].as_object().unwrap();
         assert_eq!(emitter1["wet_emitter_type"], "fancoil");
         assert_eq!(emitter1["n_units"], 2);
-        assert!(emitter1.get("fancoil_test_data").is_some());
+        assert!(emitter1.get("fancoil_test_data").is_none(), "never stubbed");
 
         // Check second fancoil
         let emitter2 = emitters[1].as_object().unwrap();
@@ -11264,24 +11706,10 @@ radiator 2,Bedroom,WetEmitter,radiator,1.5
             "Bedroom emitter should be a radiator"
         );
 
-        // Radiators have c, n, and frac_convective fields
-        // Both should have valid radiator properties (the exact c value depends on defaults/calculation)
-        assert!(
-            living_emitters[0].get("c").is_some(),
-            "Living radiator should have c field"
-        );
-        assert!(
-            bedroom_emitters[0].get("c").is_some(),
-            "Bedroom radiator should have c field"
-        );
-        assert!(
-            living_emitters[0].get("n").is_some(),
-            "Living radiator should have n field"
-        );
-        assert!(
-            bedroom_emitters[0].get("n").is_some(),
-            "Bedroom radiator should have n field"
-        );
+        // The rows give no c or n, so neither is invented.
+        for emitter in [&living_emitters[0], &bedroom_emitters[0]] {
+            assert!(emitter.get("c").is_none() && emitter.get("n").is_none());
+        }
     }
 }
 
@@ -11431,6 +11859,15 @@ Flat PV,OnSiteGeneration,PhotovoltaicSystem,0,0,5,1.5,"-6.460,-4.940,0.000|-4.30
         let pv_system = json["OnSiteGeneration"]["Flat PV"].as_object().unwrap();
         assert_eq!(pv_system["pitch"].as_f64().unwrap(), 0.0);
         assert_eq!(pv_system["ventilation_strategy"], "unventilated");
+        assert!(pv_system.get("width").is_some() && pv_system.get("height").is_some());
+
+        // A blank pitch is not a flat panel: nothing is derived from the coords.
+        let json =
+            build_partial_json(&csv.replace("PhotovoltaicSystem,0,0,", "PhotovoltaicSystem,,0,"));
+        let pv_system = json["OnSiteGeneration"]["Flat PV"].as_object().unwrap();
+        for key in ["pitch", "width", "height"] {
+            assert!(pv_system.get(key).is_none(), "{key}: {pv_system:?}");
+        }
     }
 
     #[test]
@@ -11521,23 +11958,9 @@ OnSiteGeneration,OnSiteGeneration,PhotovoltaicSystem,30,180.53,10,12,"-1.620,2.5
         assert_eq!(default_pv["type"], "PhotovoltaicSystem");
         assert_eq!(default_pv["ventilation_strategy"], "moderately_ventilated");
         assert_eq!(default_pv["EnergySupply"], "mains elec");
-        assert_eq!(
-            default_pv["inverter_peak_power_dc"].as_f64().unwrap(),
-            1.0,
-            "Default inverter_peak_power_dc should be preserved"
-        );
-        assert_eq!(
-            default_pv["inverter_peak_power_ac"].as_f64().unwrap(),
-            1.0,
-            "Default inverter_peak_power_ac should be preserved"
-        );
         assert!(
-            default_pv["inverter_is_inside"].as_bool().unwrap(),
-            "Default inverter_is_inside should be preserved"
-        );
-        assert_eq!(
-            default_pv["inverter_type"], "string_inverter",
-            "Default inverter_type should be preserved"
+            !default_pv.keys().any(|key| key.starts_with("inverter_")),
+            "no inverter is invented: {default_pv:?}"
         );
     }
 
@@ -11838,8 +12261,8 @@ Name,Type,volume,floor_area
 Living,Zone,100,40
 
 Ventilation Systems
-Name,Type,vent_type,extra_json
-fan,MechanicalVentilation,Intermittent MEV,"{""unsupported_authored_field"":42}"
+Name,Type,vent_type,mid_height_air_flow_path,orientation360,pitch,extra_json
+fan,MechanicalVentilation,Intermittent MEV,1.5,180,90,"{""unsupported_authored_field"":42}"
 "#;
         let data = CSVParser::new().parse_csv(csv).unwrap();
         let mut builder = JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).unwrap();
@@ -11893,13 +12316,7 @@ vent1,MechanicalVentilation,Intermittent MEV,"{}"
         let data = parser.parse_csv(csv).expect("CSV should parse");
         let mut builder =
             JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
-        let mut result = builder.defaults.clone();
-        builder
-            .build_zone_structure(&mut result, &data)
-            .expect("Zone structure should build");
-        builder
-            .process_root_level_sections(&mut result, &data)
-            .expect("Root sections should process");
+        let result = builder.build_json(&data).expect("CSV should build");
 
         let mv = result["InfiltrationVentilation"]["MechanicalVentilation"]["vent1"]
             .as_object()
@@ -12076,6 +12493,38 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
         assert!(position_intake.get("parent_element").is_none());
         assert!(position_intake.get("host_element").is_none());
         assert!(position_intake.get("terminal_type").is_none());
+    }
+
+    #[test]
+    fn ductwork_without_a_template_duct_takes_no_constants() {
+        // With no template duct to seed from, a duct holds only what its row gives.
+        let csv = mvhr_terminal_csv(true);
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(&csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        for mv in builder.defaults["InfiltrationVentilation"]["MechanicalVentilation"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            mv.as_object_mut().unwrap().remove("ductwork");
+        }
+        let result = builder.build_json(&data).expect("CSV should merge");
+        let ductwork = result["InfiltrationVentilation"]["MechanicalVentilation"]["mvhr_1"]
+            ["ductwork"]
+            .as_array()
+            .expect("linked duct rows should produce ductwork array");
+        for duct in ductwork {
+            for key in [
+                "cross_section_shape",
+                "insulation_thermal_conductivity",
+                "insulation_thickness_mm",
+                "reflective",
+            ] {
+                assert!(duct.get(key).is_none(), "{key}: {duct}");
+            }
+        }
     }
 
     #[test]
@@ -12259,13 +12708,24 @@ Light,Living,80
             .build_zone_structure(&mut result, &data)
             .expect_err("Missing count/power should error");
         assert!(
-            err.message
-                .contains("Lighting missing required 'count' field")
-                || err
-                    .message
-                    .contains("Lighting missing required 'power' field"),
+            err.message.contains("missing required 'count' field")
+                || err.message.contains("missing required 'power' field"),
             "Unexpected error: {}",
             err.message
+        );
+
+        let data = parser
+            .parse_csv(&csv.replace(
+                "Name,Zone,efficacy\nLight,Living,80",
+                "Name,Zone,count,power\nLight,Living,6,8",
+            ))
+            .expect("CSV should parse");
+        let err = builder
+            .build_zone_structure(&mut builder.defaults.clone(), &data)
+            .expect_err("Missing efficacy should error");
+        assert_eq!(
+            err.message,
+            "Lighting row 'Light' missing required 'efficacy' field"
         );
     }
 
@@ -12713,7 +13173,7 @@ Living,Zone,100,50
 
 Context Shading
 Name,Type,shading_type,start_angle,end_angle,distance,height,parent_element,coords
-Shade 1,ContextShading,overhang,10,20,5,7,,"0,0,0"
+Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
 "#;
 
         let mut parser = CSVParser::new();
@@ -12739,42 +13199,157 @@ Shade 1,ContextShading,overhang,10,20,5,7,,"0,0,0"
             .as_array()
             .expect("shading should be an array");
         assert_eq!(shading[0]["type"], "overhang");
+        // A blank distance is left out for the schema to report, never written as a blank.
+        assert_eq!(
+            shading[0],
+            serde_json::json!({"type": "overhang", "height": 7})
+        );
     }
 
     #[test]
-    fn context_shading_treats_contextshading_type_as_obstacle() {
-        let csv = r#"Zone
-Name,Type,volume,floor_area
-Living,Zone,100,50
+    fn the_first_metadata_row_is_an_input_row() {
+        let csv = "Metadata\nNumberOfBedrooms,3\n\nZone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n";
+        let data = CSVParser::new().parse_csv(csv).unwrap();
+        let mut builder = JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).unwrap();
+        let model = builder.build_json(&data).unwrap();
+        assert_eq!(model["NumberOfBedrooms"], 3);
+    }
 
-Context Shading
-Name,Type,start angle,end angle,distance,height,parent_element,coords
-Shade 1,ContextShading,10,20,5,7,,"0,0,0"
-"#;
-
-        let mut parser = CSVParser::new();
-        let data = parser.parse_csv(csv).expect("CSV should parse");
-        let mut builder =
-            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
-        let mut result = builder.defaults.clone();
-        builder
-            .build_zone_structure(&mut result, &data)
-            .expect("Zone structure should build");
-        builder
-            .process_root_level_sections(&mut result, &data)
-            .expect("Root sections should process");
-
-        let segments = result["ExternalConditions"]["shading_segments"]
-            .as_array()
-            .expect("shading_segments should be an array");
-        let first_shaded_segment = segments
+    #[test]
+    fn absent_metadata_inputs_are_listed_with_the_value_used() {
+        let warnings = |metadata: &str| {
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\n{metadata}\n\nZone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n"
+            );
+            let data = CSVParser::new().parse_csv(&csv).unwrap();
+            let mut builder = JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).unwrap();
+            builder.build_json(&data).unwrap();
+            builder
+                .take_schema_omissions()
+                .into_iter()
+                .filter(|w| w.path == "/Metadata")
+                .collect::<Vec<_>>()
+        };
+        let all_rows = METADATA_INPUT_FIELD_NAMES
             .iter()
-            .find(|seg| seg.get("shading").is_some())
-            .expect("expected at least one shaded segment");
-        let shading = first_shaded_segment["shading"]
-            .as_array()
-            .expect("shading should be an array");
-        assert_eq!(shading[0]["type"], "obstacle");
+            .map(|name| match *name {
+                "Ventilation_shield_class" => format!("{name},Normal"),
+                "Ventilation_terrain_class" => format!("{name},Suburban"),
+                "HeatingControlType" => format!("{name},SeparateTempControl"),
+                "AirPermeability_test_pressure" => format!("{name},Standard"),
+                "General_build_type" => format!("{name},flat"),
+                "PartGcompliance"
+                | "PartO_active_cooling_required"
+                | "KitchenExtractorHoodExternal"
+                | "Ventilation_noise_nuisance" => format!("{name},FALSE"),
+                _ => format!("{name},1"),
+            })
+            .collect::<Vec<_>>();
+        let full = warnings(&all_rows.join("\n"));
+        assert!(full.is_empty(), "{full:?}");
+
+        let without = |names: &[&str]| {
+            all_rows
+                .iter()
+                .filter(|row| !names.iter().any(|n| row.starts_with(&format!("{n},"))))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let listed = warnings(&without(&[
+            "NumberOfBedrooms",
+            "KitchenExtractorHoodExternal",
+            "PartO_active_cooling_required",
+        ]));
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        assert_eq!(listed[0].code, crate::target_mappings::TARGET_INPUT_WARNING);
+        assert_eq!(
+            listed[0].message,
+            "The Metadata section has no row for these settings, so the model uses these values: NumberOfBedrooms 1, PartO_active_cooling_required false, KitchenExtractorHoodExternal false. Add the rows to state them."
+        );
+
+        // A setting that a Systems row supplies has a source, so it is not listed.
+        let systems = "\n\nSystems\nName,Zone,Type,subcategory,extra_json\nInfiltration,,System,InfiltrationVentilation,\"{\"\"InfiltrationVentilation\"\":{\"\"shield_class\"\":\"\"Shielded\"\",\"\"altitude\"\":120,\"\"Leaks\"\":{\"\"test_result\"\":4}},\"\"NumberOfBedrooms\"\":4}\"";
+        let listed = warnings(&format!(
+            "{}{systems}",
+            without(&[
+                "NumberOfBedrooms",
+                "Ventilation_shield_class",
+                "Ventilation_altitude",
+                "AirPermeability_test_result",
+            ])
+        ));
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        assert_eq!(
+            listed[0].message,
+            "The Metadata section has no row for these settings, so the model uses these values: NumberOfBedrooms 1. Add the rows to state them."
+        );
+    }
+
+    #[test]
+    fn context_shading_type_comes_only_from_a_real_shading_type() {
+        // A legacy file with no shading_type column stored the type in Type. The element type
+        // ContextShading is not a shading type, so a blank shading_type blocks.
+        for (header, row, expected) in [
+            (
+                "Name,Type,start angle,end angle,distance,height",
+                "Shade 1,obstacle,10,20,5,7",
+                Ok("obstacle"),
+            ),
+            (
+                "Name,Type,start angle,end angle,distance,height",
+                "Shade 1,ContextShading,10,20,5,7",
+                Err("Type"),
+            ),
+            (
+                "Name,Type,shading_type,start angle,end angle,distance,height",
+                "Shade 1,ContextShading,,10,20,5,7",
+                Err("shading_type"),
+            ),
+            (
+                "Name,Type,shading_type,start angle,end angle,distance,height",
+                "Shade 1,obstacle,,10,20,5,7",
+                Err("shading_type"),
+            ),
+        ] {
+            let csv = format!(
+                "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n\nContext Shading\n{header}\n{row}\n"
+            );
+            let mut parser = CSVParser::new();
+            let data = parser.parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let mut result = builder.defaults.clone();
+            builder
+                .build_zone_structure(&mut result, &data)
+                .expect("Zone structure should build");
+            builder
+                .process_root_level_sections(&mut result, &data)
+                .expect("Root sections should process");
+
+            let types: Vec<_> = result["ExternalConditions"]["shading_segments"]
+                .as_array()
+                .expect("shading_segments should be an array")
+                .iter()
+                .filter_map(|seg| seg.pointer("/shading/0/type"))
+                .collect();
+            let errors = builder.take_non_fatal_errors();
+            match expected {
+                Ok(kind) => {
+                    assert_eq!(types, vec![kind], "{row}");
+                    assert!(errors.is_empty(), "{row}: {errors:?}");
+                }
+                Err(column) => {
+                    assert!(types.is_empty(), "{row}: {types:?}");
+                    assert!(
+                        errors.iter().any(|e| e.code == "E027"
+                            && e.path == format!("/Context Shading/Shade 1/{column}")
+                            && e.message == format!("Context Shading row 'Shade 1' has no valid {column}, so its shading is not in the model. Enter obstacle or overhang in {column}.")),
+                        "{row}: {errors:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -12791,13 +13366,7 @@ Name,Type
         let data = parser.parse_csv(csv).expect("CSV should parse");
         let mut builder =
             JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
-        let mut result = builder.defaults.clone();
-        builder
-            .build_zone_structure(&mut result, &data)
-            .expect("Zone structure should build");
-        builder
-            .process_root_level_sections(&mut result, &data)
-            .expect("Root sections should process");
+        let result = builder.build_json(&data).expect("CSV should build");
 
         let vents = result["InfiltrationVentilation"]["Vents"]
             .as_object()
@@ -12846,7 +13415,7 @@ Name,Type
                     ])],
                 ),
             ]);
-            migrate_vulcan_csv_to_current(&mut source).unwrap();
+            migrate_vulcan_csv_to_current(&mut source, 2.0).unwrap();
             let mut output = serde_json::json!({"type":"BuildingElementTransparent"});
             let errors = crate::target_mappings::map_physical_opening_full_partition_element(
                 &source["Window Elements"][0],
@@ -12880,11 +13449,11 @@ Name,Type
                 ])],
             ),
         ]);
-        assert!(migrate_vulcan_csv_to_current(&mut source).is_err());
+        assert!(migrate_vulcan_csv_to_current(&mut source, 0.0).is_err());
         source.get_mut("Non-Exposed Elements").unwrap()[0]
             .get_mut("extra_json")
             .unwrap()["u_value_interpretation"] = serde_json::json!("whole_wall");
-        assert!(migrate_vulcan_csv_to_current(&mut source).is_ok());
+        assert!(migrate_vulcan_csv_to_current(&mut source, 0.0).is_ok());
     }
 
     #[test]
@@ -12892,10 +13461,10 @@ Name,Type
         let mut parser = CSVParser::new();
         let csv = "Metadata\nVulcanCsvVersion,2\n\nZone\nName,Type,volume,floor_area\nZ,Zone,100,40\n\nNon-Exposed Elements\nName,Zone,Type,area,pitch,extra_json\nParty,Z,BuildingElementPartyWall,10,90,\"{\"\"u_value\"\":0.3,\"\"u_value_interpretation\"\":\"\"whole_wall\"\",\"\"u_value_interpreted_value\"\":0.2}\"\n";
         let mut data = parser.parse_csv(csv).unwrap();
-        assert!(migrate_vulcan_csv_to_current(&mut data).is_err());
+        assert!(migrate_vulcan_csv_to_current(&mut data, 0.0).is_err());
         data.get_mut("Non-Exposed Elements").unwrap()[0]
             .get_mut("extra_json")
             .unwrap()["u_value"] = serde_json::json!(0.2);
-        assert!(migrate_vulcan_csv_to_current(&mut data).is_ok());
+        assert!(migrate_vulcan_csv_to_current(&mut data, 0.0).is_ok());
     }
 }

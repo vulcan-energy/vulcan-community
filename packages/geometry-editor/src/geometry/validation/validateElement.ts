@@ -14,7 +14,6 @@ import {
   classifyWindowOpenings,
   windowOpeningRepairMessages,
   windowPartsArePhysical,
-  WINDOW_NO_OPENING_MESSAGE,
   type WindowOpeningField,
   type WindowOpeningRow,
   type WindowOpeningSource,
@@ -313,7 +312,8 @@ function validateWindowOpenings(
   }
   switch (openings.kind) {
     case 'closed':
-      return [geoIssue(WINDOW_NO_OPENING_MESSAGE, 'max_window_open_area')];
+      // The converter writes one zero-area opening for a closed window on these targets.
+      return [];
     case 'needs_input':
       return openings.missing.map((field) => windowOpeningFieldIssue(el, field));
     case 'rows':

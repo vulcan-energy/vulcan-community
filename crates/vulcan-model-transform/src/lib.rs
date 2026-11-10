@@ -18,6 +18,7 @@ pub mod finalization;
 pub mod preflight_diagnostics;
 mod schema_validation;
 mod target_mappings;
+pub use builder::add_builtin_energy_supplies;
 pub use target_mappings::map_target_unobstructed_shading;
 
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,9 @@ pub(crate) struct InputContract {
     pub requires_main_hot_water_source: bool,
     pub requires_detailed_thermal_bridges: bool,
     pub uses_exact_empty_shading_sectors: bool,
+    /// Pinned Python core meters fan-coil power through the wet system's own `EnergySupply` and
+    /// crashes when it is absent.
+    pub fan_coil_needs_energy_supply: bool,
 }
 
 impl ConversionProfile {
@@ -82,6 +86,7 @@ impl ConversionProfile {
             requires_main_hot_water_source: physical_openings,
             requires_detailed_thermal_bridges: detailed_bridges,
             uses_exact_empty_shading_sectors: physical_openings,
+            fan_coil_needs_energy_supply: physical_openings,
         }
     }
 }
@@ -131,7 +136,8 @@ pub struct ValidationResult {
 
 #[derive(thiserror::Error, Debug)]
 pub enum TransformError {
-    #[error("Invalid transform request: {0}")]
+    // Each message is a full sentence for the user, so it carries no outer frame.
+    #[error("{0}")]
     InvalidRequest(String),
     #[error("CSV parsing failed: {0}")]
     Csv(String),
@@ -186,7 +192,9 @@ pub fn transform_geometry_csv(
     let model = finalized.model;
     let mut errors = builder.take_non_fatal_errors();
     let validation_model = clone_for_hem_validation(&model);
-    errors.extend(finalized.validation.errors);
+    let mut schema_errors = finalized.validation.errors;
+    builder.name_csv_rows(&mut schema_errors);
+    errors.extend(schema_errors);
     errors.extend(validate_target_input(
         &model,
         request.conversion_profile,
@@ -265,7 +273,7 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
         && request.profile != ModelProfile::Fhs
     {
         return Err(TransformError::InvalidRequest(
-            "Physical-opening/full-partition conversion requires the FHS profile".into(),
+            "Physical-opening/full-partition conversion requires the FHS profile.".into(),
         ));
     }
     let required_python_version = match request.conversion_profile {
@@ -280,7 +288,7 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
         if request.version_metadata.hem_core_version != version
             || request.version_metadata.fhs_wrapper_version.as_deref() != Some(version)
         {
-            return Err(TransformError::InvalidRequest(format!("The selected Python conversion profile requires matching core and FHS wrapper {version} metadata")));
+            return Err(TransformError::InvalidRequest(format!("The selected Python conversion profile requires matching core and FHS wrapper {version} metadata.")));
         }
     }
     let mut missing = Vec::new();
@@ -310,7 +318,7 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
         Ok(())
     } else {
         Err(TransformError::InvalidRequest(format!(
-            "missing {}",
+            "The transform request has no {}.",
             missing.join(", ")
         )))
     }
