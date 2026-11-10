@@ -606,9 +606,9 @@ export function lateMetadataFillNotice(
 ): string | undefined {
   const absent = new Set(absentRows);
   const fromDefaults = new Set(absentRows.filter((key) => metadataSettingKey(key) in filled));
-  const added = metadataRowValues(state)
-    .filter(([key, value]) => value !== undefined && absent.has(key))
-    .map(([key, value]) => `${key} absent → ${value} (${addedMetadataRowSource(key, fromDefaults)})`);
+  const added = metadataRowValues(state).flatMap(([key, value]) => (value !== undefined && absent.has(key)
+    ? [`${key} absent → ${value} (${addedMetadataRowSource(key, fromDefaults)})`]
+    : []));
   return added.length
     ? `Loading added ${added.length} value(s) the file lacks; saving writes them: ${added.join('; ')}.`
     : undefined;

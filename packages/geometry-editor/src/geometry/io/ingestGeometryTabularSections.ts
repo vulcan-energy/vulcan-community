@@ -493,7 +493,7 @@ export function ingestGeometryTabularSections(
         case 'Context Shading': {
           // As the converter: Type gives the shading kind only in a file with no shading_type column
           // (older files stored obstacle or overhang there). A blank stays blank and blocks.
-          const shadingTypeRaw = section.columnHeaders.includes('shading_type') ? V(d, 'shading_type') : V(d, 'Type');
+          const shadingTypeRaw = 'shading_type' in d ? V(d, 'shading_type') : V(d, 'Type');
           const shading_type = normalizeContextShadingShadingType(shadingTypeRaw) as ContextShading['shading_type'];
           const startAngleCell = V(d, 'start_angle') || V(d, 'start angle');
           const endAngleCell = V(d, 'end_angle') || V(d, 'end angle');
