@@ -3720,18 +3720,18 @@ impl JSONBuilder {
                 let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
                 let start = Self::read_context_shading_angle(row, &["start angle", "start_angle"]);
                 let end = Self::read_context_shading_angle(row, &["end angle", "end_angle"]);
-                let shading_type = Self::read_context_shading_type(row);
-                for (column, given) in [
-                    ("start_angle", start.is_some()),
-                    ("end_angle", end.is_some()),
-                    ("shading_type", shading_type.is_some()),
+                let (type_column, shading_type) = Self::read_context_shading_type(row);
+                for (column, given, accepted) in [
+                    ("start_angle", start.is_some(), "an angle in degrees"),
+                    ("end_angle", end.is_some(), "an angle in degrees"),
+                    (type_column, shading_type.is_some(), "obstacle or overhang"),
                 ] {
                     if !given {
                         self.push_non_fatal(
                             "E027",
                             &crate::json_pointer(&["Context Shading", name, column]),
                             &format!(
-                                "Context Shading row '{name}' has no valid {column}, so the obstacle is not in the model. Enter the {column}."
+                                "Context Shading row '{name}' has no valid {column}, so its shading is not in the model. Enter {accepted} in {column}."
                             ),
                         );
                     }
@@ -3882,17 +3882,21 @@ impl JSONBuilder {
     /// `shading_type`; `Type` only in files written before that column existed, which stored the
     /// shading type there. Anything but a HEM shading type (blank, the element type
     /// `ContextShading`, a typo) is `None`: the caller reports it rather than guessing.
-    fn read_context_shading_type(shading_row: &HashMap<String, Value>) -> Option<&'static str> {
+    /// Returns the column read and the type.
+    fn read_context_shading_type(
+        shading_row: &HashMap<String, Value>,
+    ) -> (&'static str, Option<&'static str>) {
         let column = if shading_row.contains_key("shading_type") {
             "shading_type"
         } else {
             "Type"
         };
-        match csv_string_cell(shading_row, column)? {
-            "overhang" => Some("overhang"),
-            "obstacle" => Some("obstacle"),
+        let shading_type = match csv_string_cell(shading_row, column) {
+            Some("overhang") => Some("overhang"),
+            Some("obstacle") => Some("obstacle"),
             _ => None,
-        }
+        };
+        (column, shading_type)
     }
 
     fn merge_ventilation_systems(
@@ -13151,22 +13155,22 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
             (
                 "Name,Type,start angle,end angle,distance,height",
                 "Shade 1,obstacle,10,20,5,7",
-                Some("obstacle"),
+                Ok("obstacle"),
             ),
             (
                 "Name,Type,start angle,end angle,distance,height",
                 "Shade 1,ContextShading,10,20,5,7",
-                None,
+                Err("Type"),
             ),
             (
                 "Name,Type,shading_type,start angle,end angle,distance,height",
                 "Shade 1,ContextShading,,10,20,5,7",
-                None,
+                Err("shading_type"),
             ),
             (
                 "Name,Type,shading_type,start angle,end angle,distance,height",
                 "Shade 1,obstacle,,10,20,5,7",
-                None,
+                Err("shading_type"),
             ),
         ] {
             let csv = format!(
@@ -13192,15 +13196,16 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
                 .collect();
             let errors = builder.take_non_fatal_errors();
             match expected {
-                Some(kind) => {
+                Ok(kind) => {
                     assert_eq!(types, vec![kind], "{row}");
                     assert!(errors.is_empty(), "{row}: {errors:?}");
                 }
-                None => {
+                Err(column) => {
                     assert!(types.is_empty(), "{row}: {types:?}");
                     assert!(
                         errors.iter().any(|e| e.code == "E027"
-                            && e.path == "/Context Shading/Shade 1/shading_type"),
+                            && e.path == format!("/Context Shading/Shade 1/{column}")
+                            && e.message == format!("Context Shading row 'Shade 1' has no valid {column}, so its shading is not in the model. Enter obstacle or overhang in {column}.")),
                         "{row}: {errors:?}"
                     );
                 }
