@@ -85,11 +85,6 @@ export const ZONE_HEADERS_FHS = [
   'restofdwelling_area',
 ] as const;
 
-/** Zone table headers as emitted by `generateCSV` (FHS area split vs base). */
-export function zoneExportHeaders(complianceValidationEnabled: boolean): readonly string[] {
-  return complianceValidationEnabled ? ZONE_HEADERS_FHS : ZONE_HEADERS_BASE;
-}
-
 export const EXPECTED_SECTION_HEADERS: Record<string, readonly string[]> = {
   'Exposed Elements': [
     'Name',

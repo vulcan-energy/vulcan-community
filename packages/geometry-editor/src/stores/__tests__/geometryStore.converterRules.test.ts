@@ -147,6 +147,9 @@ const CASES: Case[] = [
   { name: 'compliance validation off still blocks', defaults: true,
     edit: (csv) => replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,')(csv).replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
     blocks: ['Kitchen cooker hood extracts to outside is not set'], saves: { 'Metadata|KitchenExtractorHoodExternal': null } },
+  // The converter reads the zone's living-room split whatever the switch says; the switch is saved as it was.
+  { name: 'compliance validation off keeps the zone split', edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,'),
+    saves: { 'Zone|Zone 1|livingroom_area': '28.91', 'Zone|Zone 1|restofdwelling_area': '42.29', 'Metadata|ComplianceValidationEnabled': 'FALSE' } },
   { name: 'absent KitchenExtractorHoodExternal takes false', defaults: true, edit: (csv) => csv.replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
     saves: { 'Metadata|KitchenExtractorHoodExternal': 'FALSE' } },
   // The section implies the row type: a blank Type keeps the row (the converter reads it too).

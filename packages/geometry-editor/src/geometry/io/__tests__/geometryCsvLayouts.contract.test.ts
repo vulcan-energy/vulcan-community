@@ -11,15 +11,12 @@ import {
   ZONE_HEADERS_BASE,
   ZONE_HEADERS_FHS,
   validateGeometrySectionHeaders,
-  zoneExportHeaders,
 } from '../geometryCsvLayouts';
 
 describe('geometryCsvLayouts — export/import contract', () => {
-  it('zoneExportHeaders matches validation for Zone sections', () => {
+  it('Zone headers pass validation for Zone sections', () => {
     validateGeometrySectionHeaders('Zone', [...ZONE_HEADERS_BASE]);
     validateGeometrySectionHeaders('Zone', [...ZONE_HEADERS_FHS]);
-    expect(zoneExportHeaders(false)).toEqual(ZONE_HEADERS_BASE);
-    expect(zoneExportHeaders(true)).toEqual(ZONE_HEADERS_FHS);
   });
 
   it('allows extra legacy columns when every canonical column is present', () => {

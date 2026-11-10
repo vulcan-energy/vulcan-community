@@ -733,15 +733,6 @@ export function GlobalSettingsModal({
       ? true
       : !!complianceSettings.complianceValidationEnabled;
 
-  useEffect(() => {
-    if (
-      COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED &&
-      complianceSettings.complianceValidationEnabled !== true
-    ) {
-      setComplianceSettings({ complianceValidationEnabled: true });
-    }
-  }, [complianceSettings.complianceValidationEnabled, setComplianceSettings]);
-
   const suggestedVentHeight = useMemo(
     () =>
       calculateSuggestedVentilationHeight(Object.values(elementsById), floors),

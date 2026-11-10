@@ -78,7 +78,7 @@ import { thermalBridgeExtraJsonForCsv } from '../../../geometry/thermalBridge/no
 import {
   encodePromotedExtraJsonFields,
   EXPECTED_SECTION_HEADERS,
-  zoneExportHeaders,
+  ZONE_HEADERS_FHS,
 } from '../../../geometry/io/geometryCsvLayouts';
 import {
   defaultsReadPathAttempts,
@@ -1008,9 +1008,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     const exportZones = currentState.zones;
     if (exportZones.length > 0) {
-      const exportFhsAreaSplit = compliance.complianceValidationEnabled === true;
+      // The converter reads the living-room split whatever ComplianceValidationEnabled says.
       const primaryZoneId = exportZones[0]?.id;
-      const zoneHeader = [...zoneExportHeaders(exportFhsAreaSplit)];
+      const zoneHeader = [...ZONE_HEADERS_FHS];
       const zoneColumnCount = zoneHeader.length;
 
       lines.push('Zone,,,,,,,,,,,,,');
@@ -1026,7 +1026,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
                 ? zone.floorArea * zone.height
                 : undefined
             );
-        const isPrimaryFhsZone = exportFhsAreaSplit && zone.id === primaryZoneId;
+        const isPrimaryFhsZone = zone.id === primaryZoneId;
         const livingroomArea = isPrimaryFhsZone
           ? zone.livingroom_area
           : undefined;
@@ -1040,13 +1040,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(formatOptionalFiniteNumberForCsv(typeof zone.floorArea === 'number' ? roundToTwoDecimals(zone.floorArea) : undefined)),
           escapeCSV(formatOptionalFiniteNumberForCsv(typeof zone.height === 'number' ? roundToTwoDecimals(zone.height) : undefined)),
           zone.simplifiedThermalBridging ? 'TRUE' : 'FALSE',
+          livingroomArea === undefined ? '' : escapeCSV(roundToTwoDecimals(livingroomArea)),
+          restOfDwellingArea === undefined ? '' : escapeCSV(roundToTwoDecimals(restOfDwellingArea)),
         ];
-        if (exportFhsAreaSplit) {
-          zoneRow.push(
-            livingroomArea === undefined ? '' : escapeCSV(roundToTwoDecimals(livingroomArea)),
-            restOfDwellingArea === undefined ? '' : escapeCSV(roundToTwoDecimals(restOfDwellingArea)),
-          );
-        }
         lines.push(ensureColumnCount(zoneRow, zoneColumnCount, zoneHeader, zone.nonNumericCells));
       });
       lines.push('');
