@@ -193,6 +193,8 @@ export type ComplianceSettings = {
   storeys_in_building?: number;
   /** Model-input rows the file has with a blank value (E066): never filled from the defaults. */
   blankMetadataRows?: string[];
+  /** Model-input rows the file lacks: they take the value the converter uses for an absent row. */
+  absentMetadataRows?: string[];
 };
 
 function parseAirPermeabilityTestPressure(
@@ -314,11 +316,13 @@ export const parseCsvToGeometry = (
   let detectedDetailedBridgePsiProfileId: string | undefined;
   let detectedDetailedBridgePsiProfileLabel: string | undefined;
   const complianceSettings: ComplianceSettings = {};
+  const metadataRowsInFile = new Set<string>();
 
   for (const line of metadataLines) {
     if (line.startsWith('Metadata,')) continue;
     const metadataFields = parseCsvLine(line);
     const hostMetadataKey = metadataFields[0]?.trim();
+    if (hostMetadataKey) metadataRowsInFile.add(hostMetadataKey);
     if (hostMetadataKey && hostMetadataKey in METADATA_INPUT_LABELS && !metadataFields[1]?.trim()) {
       (complianceSettings.blankMetadataRows ??= []).push(hostMetadataKey);
     }
@@ -647,6 +651,7 @@ export const parseCsvToGeometry = (
       continue;
     }
   }
+  complianceSettings.absentMetadataRows = Object.keys(METADATA_INPUT_LABELS).filter((key) => !metadataRowsInFile.has(key));
 
   const warnings: string[] = [];
   const parseExtraJson = (jsonString: string, elementName?: string): Record<string, unknown> | undefined => {

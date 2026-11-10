@@ -498,6 +498,12 @@ function derivedFromOwnColumns(element: Element, field: string, globalOrientatio
       || (isPositiveFiniteNumber(row.width) && isPositiveFiniteNumber(row.height));
   }
   if (field === 'mid_height' && element.type === 'BuildingElementTransparent') return isPositiveFiniteNumber(row.height);
+  // The converter writes these emitter inputs from the row's subcategory, area and unit_number columns.
+  if (element.type === 'WetEmitter') {
+    if (field === 'wet_emitter_type') return !!row.subcategory;
+    if (field === 'emitter_floor_area') return isPositiveFiniteNumber(row.area);
+    if (field === 'n_units') return isPositiveFiniteNumber(row.unit_number);
+  }
   // The converter derives PV panel width and height from a polygon (derive_pv_dimensions_from_coords).
   if (element.type === 'OnSiteGeneration' && (field === 'width' || field === 'height')) {
     return Array.isArray(element.coordinates) && element.coordinates.length >= 3;
@@ -625,6 +631,8 @@ const heatSourceWetReferenceMap = (elements: Element[]): Map<string, Record<stri
 // rows are compared, except at levels whose keys are user-chosen names. Paths are relative to one
 // named entry. Keep in step with the merge, or the E060 warning below lies.
 const MERGE_UI_ONLY_KEYS = new Set(['psi_source', 'vulcan_assembly_v1', 'ru_calculator_state_v1', 'thermal_bridge_solver']);
+/** Element types the converter builds from the row alone: a value the row lacks is never taken from the defaults template. */
+const ROW_ONLY_ELEMENT_TYPES = new Set<string>(['ThermalBridgeLinear', 'ThermalBridgePoint', 'WetEmitter']);
 const MERGE_SECTION_LABELS: Record<string, string> = {
   HeatSourceWet: 'heat source',
   HotWaterSource: 'hot water source',
@@ -1553,13 +1561,14 @@ export const validateElementCore = (
       if (!emitterElement.subcategory) {
         issues.push(geo('Emitter Type is required', 'subcategory'));
       }
-      if (emitterElement.subcategory === 'radiator' || emitterElement.subcategory === 'fancoil') {
-        if (!emitterElement.unit_number || emitterElement.unit_number === 0) {
-          issues.push(geo('Unit Number cannot be 0', 'unit_number'));
-        }
+      // A blank unit_number is one unit in the converter; a fancoil then needs n_units (schema check below).
+      if ((emitterElement.subcategory === 'radiator' || emitterElement.subcategory === 'fancoil')
+        && emitterElement.unit_number !== undefined && !(emitterElement.unit_number > 0)) {
+        issues.push(geo('Unit Number must be at least 1', 'unit_number'));
       }
-      if (emitterElement.subcategory === 'ufh' && (!emitterElement.area || emitterElement.area === 0)) {
-        issues.push(geo('Area cannot be 0', 'area'));
+      // A blank area takes extra_json's emitter_floor_area in the converter (schema check below).
+      if (emitterElement.subcategory === 'ufh' && emitterElement.area !== undefined && !(emitterElement.area > 0)) {
+        issues.push(geo('Area must be greater than 0', 'area'));
       }
       const linkedSpaceHeatSystemName =
         typeof emitterElement.space_heat_system === 'string'
@@ -1585,9 +1594,8 @@ export const validateElementCore = (
       if (!pipeworkElement.location) {
         issues.push(geo('Location is required', 'location'));
       }
-      const pipeworkType = pipeworkElement.pipework_type ?? 'primary';
-      if (pipeworkType !== 'primary' && pipeworkType !== 'distribution') {
-        issues.push(geo('Pipework Type must be primary or distribution', 'pipework_type'));
+      if (pipeworkElement.pipework_type !== 'primary' && pipeworkElement.pipework_type !== 'distribution') {
+        issues.push(geo('Pipework Type is required: choose primary or distribution', 'pipework_type'));
       }
       if (!pipeworkElement.length || pipeworkElement.length === 0) {
         issues.push(geo('Length cannot be 0', 'length'));
@@ -1655,6 +1663,9 @@ export const validateElementCore = (
       ) {
         issues.push(geo('Flowrate cannot be 0', 'flowrate'));
       }
+      if (hotWaterElement.subcategory === 'MixerShower' && typeof hotWaterElement.allow_low_flowrate !== 'boolean') {
+        issues.push(geo('Air Pressure Shower? is not set: choose Yes or No', 'allow_low_flowrate'));
+      }
       if (hotWaterElement.subcategory === 'InstantElecShower' && (!hotWaterElement.rated_power || hotWaterElement.rated_power === 0)) {
         issues.push(geo('Rated Power cannot be 0', 'rated_power'));
       }
@@ -1695,6 +1706,10 @@ export const validateElementCore = (
       }
       if (typeof contextElement.height !== 'number' || !Number.isFinite(contextElement.height) || contextElement.height <= 0) {
         issues.push(geo('Height must be greater than 0', 'height'));
+      }
+      // The converter leaves out a row with a blank angle or distance (E027).
+      for (const [field, label] of [['start_angle', 'Start Angle'], ['end_angle', 'End Angle'], ['distance', 'Distance']] as const) {
+        if (!Number.isFinite(contextElement[field])) issues.push(geo(`${label} is required`, field));
       }
       // Distance is derived from geometry - calculate it rather than checking stored value
       if (contextElement.parent_element && elementsById) {
@@ -2089,15 +2104,15 @@ export const validateElementCore = (
         );
 
         if (!hasValue) {
-          // A blank cell in the element's own CSV column takes nothing from the defaults template.
-          const ownColumn = isOnSiteTypeCollision || isElementCsvColumn(element.type, field);
-          if (ownColumn && derivedFromOwnColumns(element, field, context.globalOrientationOffset)) continue;
+          // A blank cell in the element's own CSV column takes nothing from the defaults template,
+          // and nor does any field of a row the converter builds alone (ROW_ONLY_ELEMENT_TYPES).
+          const fromRow = isOnSiteTypeCollision || isElementCsvColumn(element.type, field) || ROW_ONLY_ELEMENT_TYPES.has(element.type);
+          if (fromRow && derivedFromOwnColumns(element, field, context.globalOrientationOffset)) continue;
           // A field-specific check above already reports it.
           if (reportedFields.has(field)) continue;
           // While defaults are still loading, assume template defaults exist to
           // avoid showing false "required" errors that disappear once defaults arrive.
-          // The converter builds each thermal bridge from its own row; no template value reaches it.
-          const fromTemplate = !ownColumn && element.type !== 'ThermalBridgeLinear' && element.type !== 'ThermalBridgePoint';
+          const fromTemplate = !fromRow;
           if (defaultsLoading && fromTemplate) continue;
 
           // Check if field has a default value (from defaults template or schema)

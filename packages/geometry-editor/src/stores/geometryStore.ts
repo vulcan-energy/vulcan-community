@@ -91,7 +91,7 @@ import {
   analyzeZoneSpaceLabels,
   pointInPolygon,
 } from '../lib/spaceLabelGeometry';
-import { collectGlobalSettingsWarnings, metadataRowValues, templateFilledMetadataSettings, unsetMetadataInputIssues } from '../lib/globalSettingsValidation';
+import { collectGlobalSettingsWarnings, lateMetadataFillNotice, metadataRowValues, templateFilledMetadataSettings, unsetMetadataInputIssues } from '../lib/globalSettingsValidation';
 import {
   applyMechanicalVentilationCsvPositionColumns,
   canMechanicalVentilationInheritHostPlacement,
@@ -2934,10 +2934,19 @@ const withPrecomputedDefaultsLookup = (
           defaultsJson,
         )
         : {};
+      // A load that ended before these defaults arrived lists the rows they fill.
+      const lateNotice = defaultsJson && state.loadAwaitsDefaults
+        ? lateMetadataFillNotice(
+          { ...state, complianceSettings: { ...complianceSettings, ...filled }, elements: Object.values(state.elementsById) },
+          complianceSettings.absentMetadataRows ?? [],
+          filled,
+        )
+        : undefined;
       return {
         ...update,
         defaultsLookup: createDefaultsLookup(defaultsJson),
         ...(Object.keys(filled).length ? { complianceSettings: { ...complianceSettings, ...filled } } : {}),
+        ...(defaultsJson && state.loadAwaitsDefaults ? { loadAwaitsDefaults: false, lateLoadNotice: lateNotice ?? null } : {}),
       } as Partial<GeometryState>;
     }
   }
@@ -3789,7 +3798,7 @@ const createGeometryState = (
 	          type: 'WaterPipework',
 	          simplified_pipework: false,
 	          location: undefined as any,
-	          pipework_type: 'primary',
+	          pipework_type: undefined as any,
 	          length: undefined as any,
           isPlaceholder: true,
           parent_element: parentElementName || null

@@ -24,8 +24,9 @@ type HotWaterSubcategory = '' | 'MixerShower' | 'Bath' | 'InstantElecShower' | '
 export interface HotWaterDemandFormState {
   hotWaterSubcategory: HotWaterSubcategory;
   setHotWaterSubcategory: (value: HotWaterSubcategory) => void;
-  allowLowFlowrate: boolean;
-  setAllowLowFlowrate: (value: boolean) => void;
+  /** Blank until the user answers; the converter takes no default. */
+  allowLowFlowrate: boolean | undefined;
+  setAllowLowFlowrate: (value: boolean | undefined) => void;
   sizeInput: ReturnType<typeof useDecimalInput>;
   flowrateInput: ReturnType<typeof useDecimalInput>;
   ratedPowerInput: ReturnType<typeof useDecimalInput>;
@@ -33,7 +34,7 @@ export interface HotWaterDemandFormState {
 
 function useFormState(ctx: ElementFormStateCtx): HotWaterDemandFormState {
   const [hotWaterSubcategory, setHotWaterSubcategory] = useState<HotWaterSubcategory>('');
-  const [allowLowFlowrate, setAllowLowFlowrate] = useState<boolean>(false);
+  const [allowLowFlowrate, setAllowLowFlowrate] = useState<boolean | undefined>(undefined);
   const sizeInput = useDecimalInput('', ctx.commitElementNumericField('size'), { commitOnChange: true });
   const flowrateInput = useDecimalInput('', ctx.commitElementNumericField('flowrate'), { commitOnChange: true });
   const ratedPowerInput = useDecimalInput('', ctx.commitElementNumericField('rated_power'), { commitOnChange: true });
@@ -55,7 +56,7 @@ export const hotWaterDemandFormModule: ElementFormModule<HotWaterDemandFormState
   hydrate(state, element) {
     if (element.type !== 'HotWaterDemand') return;
     state.setHotWaterSubcategory('subcategory' in element ? element.subcategory ?? '' : '');
-    state.setAllowLowFlowrate('allow_low_flowrate' in element ? !!element.allow_low_flowrate : false);
+    state.setAllowLowFlowrate('allow_low_flowrate' in element ? element.allow_low_flowrate : undefined);
     state.sizeInput.setValue('size' in element ? element.size ?? '' : '');
     state.flowrateInput.setValue('flowrate' in element ? element.flowrate ?? '' : '');
     state.ratedPowerInput.setValue('rated_power' in element ? element.rated_power ?? '' : '');
@@ -63,7 +64,7 @@ export const hotWaterDemandFormModule: ElementFormModule<HotWaterDemandFormState
 
   reset(state) {
     state.setHotWaterSubcategory('');
-    state.setAllowLowFlowrate(false);
+    state.setAllowLowFlowrate(undefined);
     state.sizeInput.setValue('');
     state.flowrateInput.setValue('');
     state.ratedPowerInput.setValue('');

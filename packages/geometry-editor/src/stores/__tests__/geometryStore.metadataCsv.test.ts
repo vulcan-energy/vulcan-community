@@ -19,6 +19,6 @@ it('reads the pin from the Metadata rows only, and identical repeats are not a c
     return store.getState().targetBundleId;
   };
   expect(pinOf(`Metadata,,\nTargetBundleId,${id},\nTargetBundleId,${id},\n`)).toBe(id);
-  expect(pinOf('Metadata,,\nVulcanCsvVersion,3\n\nLighting,,\nName,Zone,efficacy,count,power,base_height,coords,extra_json\nTargetBundleId,Zone 1,,,,,,\n')).toBeUndefined();
+  expect(pinOf('Metadata,,\nVulcanCsvVersion,3\n\nZone,,\nName,Type,volume,floor_area,height,simplified thermal bridging\nZone 1,Zone,10,4,2.5,FALSE\n\nLighting,,\nName,Zone,efficacy,count,power,base_height,coords,extra_json\nTargetBundleId,Zone 1,,,,,,\n')).toBeUndefined();
   expect(() => pinOf(`Metadata,,\nTargetBundleId,${id},\nTargetBundleId,other,\n`)).toThrow('conflicting TargetBundleId');
 });

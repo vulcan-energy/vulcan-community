@@ -122,10 +122,45 @@ function groundViewerBaseHeightPatch(d: Record<string, string>): { _base_height?
 }
 
 function normalizeContextShadingShadingType(raw: string | undefined): 'obstacle' | 'overhang' | undefined {
-  const normalized = String(raw ?? '').trim().toLowerCase();
-  if (normalized === 'overhang' || normalized === 'obstacle') return normalized;
-  if (normalized === 'contextshading' || normalized === 'context shading') return 'obstacle';
-  return undefined;
+  // The converter reads these two exact values; anything else stays blank and blocks.
+  const value = String(raw ?? '').trim();
+  return value === 'overhang' || value === 'obstacle' ? value : undefined;
+}
+
+const BUILDING_ROW_KEYS = ['Name', 'Zone', 'Type'] as const;
+/**
+ * Row cells without which the converter stops the whole conversion (E008-E029). The load stops too,
+ * naming the section and row, so no row is dropped unseen. Space Labels is editor-only: a label
+ * with no zone cannot be placed.
+ */
+const REQUIRED_ROW_KEYS: Readonly<Record<string, readonly ('Name' | 'Zone' | 'Type')[]>> = {
+  'Exposed Elements': BUILDING_ROW_KEYS,
+  'Window Elements': BUILDING_ROW_KEYS,
+  'Ground Elements': BUILDING_ROW_KEYS,
+  'Non-Exposed Elements': BUILDING_ROW_KEYS,
+  'Thermal Bridging Elements': BUILDING_ROW_KEYS,
+  'Window Shading': ['Zone'],
+  Lighting: ['Zone'],
+  'Wet Emitters': ['Zone'],
+  'Space Labels': ['Zone'],
+  'Hot Water Outlets': ['Name', 'Type'],
+  'Ventilation Systems': ['Name', 'Type'],
+  'On-Site Generation': ['Name'],
+  Systems: ['Name'],
+};
+
+function assertRowKeys(section: CsvSection, d: CsvRow['data'], zoneNames: Readonly<Record<string, string>>): void {
+  // A row of empty cells is a spacer, not a row.
+  if (Object.values(d).every((cell) => !cell?.trim())) return;
+  const name = V(d, 'Name');
+  const row = name ? `${section.name} row '${name}'` : `A ${section.name} row`;
+  for (const key of REQUIRED_ROW_KEYS[section.name] ?? []) {
+    if (!V(d, key)) throw new Error(`${row} has no ${key}. Enter the ${key} in the file and open it again.`);
+  }
+  const zone = V(d, 'Zone');
+  if (zone && section.columnHeaders.includes('Zone') && !(zone in zoneNames)) {
+    throw new Error(`${row} names zone '${zone}', which is not in the Zone section. Correct the zone in the file and open it again.`);
+  }
 }
 
 function findOverflowCoordsCell(
@@ -196,7 +231,9 @@ export function ingestGeometryTabularSections(
       for (const row of section.rows) {
         const d = row.data;
         const slName = V(d, 'Name');
-        if (!slName || slName === 'Name') continue;
+        if (slName === 'Name') continue;
+        assertRowKeys(section, d, zoneNameToId);
+        if (!slName) continue;
         const zoneName = V(d, 'Zone');
         const zoneId = zoneNameToId[zoneName];
         if (!zoneId) continue;
@@ -234,7 +271,9 @@ export function ingestGeometryTabularSections(
     for (const row of section.rows) {
       const d = row.data;
       const name = V(d, 'Name');
-      if (!name || name === 'Name') continue;
+      if (name === 'Name') continue;
+      assertRowKeys(section, d, zoneNameToId);
+      if (!name) continue;
 
       switch (section.name) {
         case 'Exposed Elements':
@@ -452,7 +491,9 @@ export function ingestGeometryTabularSections(
           break;
         }
         case 'Context Shading': {
-          const shadingTypeRaw = V(d, 'shading_type') || V(d, 'Type');
+          // As the converter: Type gives the shading kind only in a file with no shading_type column
+          // (older files stored obstacle or overhang there). A blank stays blank and blocks.
+          const shadingTypeRaw = section.columnHeaders.includes('shading_type') ? V(d, 'shading_type') : V(d, 'Type');
           const shading_type = normalizeContextShadingShadingType(shadingTypeRaw) as ContextShading['shading_type'];
           const startAngleCell = V(d, 'start_angle') || V(d, 'start angle');
           const endAngleCell = V(d, 'end_angle') || V(d, 'end angle');
@@ -724,7 +765,8 @@ export function ingestGeometryTabularSections(
           break;
         }
         case 'Water Pipework': {
-          if (V(d, 'Type') === 'WaterPipework') {
+          // The section implies the type; the converter reads a blank Type as WaterPipework too.
+          if (V(d, 'Type') === 'WaterPipework' || !V(d, 'Type')) {
             newElements.push({
               id: generateId(),
               name,
@@ -732,7 +774,7 @@ export function ingestGeometryTabularSections(
               simplified_pipework: false,
               length: parseRequiredNumberColumn(V(d, 'length')),
               location: parseRequiredEnumColumn<WaterPipework['location']>(V(d, 'location'), ['internal', 'external']),
-              pipework_type: parseOptionalEnumColumn<WaterPipework['pipework_type']>(V(d, 'pipework_type'), ['primary', 'distribution']) ?? 'primary',
+              pipework_type: parseRequiredEnumColumn<WaterPipework['pipework_type']>(V(d, 'pipework_type'), ['primary', 'distribution']),
               parent_element: null,
               coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
               extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
@@ -784,7 +826,8 @@ export function ingestGeometryTabularSections(
           const zoneName = V(d, 'Zone');
           const elementType = V(d, 'Type') as ElementType;
           const zoneId = zoneNameToId[zoneName];
-          if (elementType === 'WetEmitter' && zoneId) {
+          // The section implies the type; the converter reads a blank Type as WetEmitter too.
+          if ((elementType === 'WetEmitter' || !elementType) && zoneId) {
             newElements.push({
               id: generateId(),
               name,

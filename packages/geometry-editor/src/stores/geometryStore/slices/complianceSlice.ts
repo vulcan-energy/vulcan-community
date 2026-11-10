@@ -52,6 +52,8 @@ export interface ComplianceSlice {
     storeys_in_building?: number;
     /** Model-input rows the loaded file has with a blank value: never filled from the defaults. */
     blankMetadataRows?: string[];
+    /** Model-input rows the loaded file lacks and the defaults have not yet filled. */
+    absentMetadataRows?: string[];
   };
   setComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
   replaceComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;

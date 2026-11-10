@@ -544,33 +544,74 @@ export function metadataRowValues(state: MetadataRowInputs): Array<[string, stri
 /** The compliance setting a metadata row edits. */
 const metadataSettingKey = (key: string): string => (key.startsWith('General_') ? key.slice('General_'.length) : key);
 
-/** The value the converter takes from the defaults template when the file has no such row. */
+/**
+ * What FHS conversion writes for these rows when the file lacks them and the defaults template has
+ * no value: the Geometry CSV contract (0.3.5) documents false, and builder.rs
+ * `apply_fhs_implicit_false_root_booleans` writes it.
+ */
+const ABSENT_ROW_DEFAULTS: Readonly<Record<string, boolean>> = {
+  KitchenExtractorHoodExternal: false,
+  PartO_active_cooling_required: false,
+};
+
+/** The value the converter uses when the file has no such row: the defaults template's, else ABSENT_ROW_DEFAULTS. */
 function templateMetadataValue(defaults: unknown, key: string): unknown {
   let node: unknown = defaults;
   for (const segment of metadataSchemaPath(key)) {
     node = node && typeof node === 'object' && !Array.isArray(node) ? (node as Record<string, unknown>)[segment] : undefined;
   }
-  return node === null ? undefined : node;
+  return node ?? ABSENT_ROW_DEFAULTS[key];
 }
 
 /**
- * Settings for the rows the save would leave out, taken from the defaults template the converter
- * reads for an absent row, so the form shows, the save writes and the run uses one value. A row
- * the file has with a blank value is not filled: the user cleared it.
+ * Settings taken from the value the converter uses for an absent row (templateMetadataValue), so
+ * the form shows, the save writes and the run use one value: for each row the loaded file lacks,
+ * even where the geometry or space labels give another value, and for each row the save would
+ * otherwise leave out. A row the file has blank is not filled: the user cleared it. Filled rows
+ * leave `absentMetadataRows`, so later defaults never replace a value the user has since edited.
  */
 export function templateFilledMetadataSettings(
   rows: Array<[string, string | undefined]>,
-  settings: { blankMetadataRows?: string[] },
+  settings: { blankMetadataRows?: string[]; absentMetadataRows?: string[] },
   defaults: unknown,
 ): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
   const blank = new Set(settings.blankMetadataRows);
+  const absent = new Set(settings.absentMetadataRows);
   for (const [key, value] of rows) {
-    if (value !== undefined || !(key in METADATA_INPUT_LABELS) || blank.has(key)) continue;
+    if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)) continue;
     const template = templateMetadataValue(defaults, key);
-    if (template !== undefined) patch[metadataSettingKey(key)] = template;
+    if (template === undefined) continue;
+    patch[metadataSettingKey(key)] = template;
+    absent.delete(key);
   }
+  if (Object.keys(patch).length && settings.absentMetadataRows) patch.absentMetadataRows = [...absent];
   return patch;
+}
+
+/** Where an added metadata row's saved value comes from, for the load notice. */
+export function addedMetadataRowSource(key: string, filledFromDefaults: ReadonlySet<string>): string {
+  if (filledFromDefaults.has(key)) return 'from the defaults';
+  return key.startsWith('NumberOf') ? 'from space labels' : 'from the geometry';
+}
+
+/**
+ * The load notice for the rows a file lacks, once defaults that arrive after the load have filled
+ * what they can (`filled`), or undefined when the save adds none.
+ */
+export function lateMetadataFillNotice(
+  state: MetadataRowInputs,
+  absentRows: readonly string[],
+  filled: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const absent = new Set(absentRows);
+  const fromDefaults = new Set(absentRows.filter((key) => metadataSettingKey(key) in filled));
+  const added = metadataRowValues(state)
+    .filter(([key, value]) => value !== undefined && absent.has(key))
+    .map(([key, value]) => `${key} absent → ${value} (${addedMetadataRowSource(key, fromDefaults)})`);
+  return added.length
+    ? `Loading added ${added.length} value(s) the file lacks; saving writes them: ${added.join('; ')}.`
+    : undefined;
 }
 
 /** Whether the target's schema requires the value; with no schema, assume it does. */

@@ -443,3 +443,12 @@ describe('duplicate Systems definitions (merge E060)', () => {
       .toContainEqual(expect.objectContaining({ message: 'Warm air (System): WarmAir SpaceHeatSystem "wa" must link a heat pump heat source with sink_type "Air"' }));
   });
 });
+
+it('blocks a context shading row with a blank angle or distance, which the converter leaves out', () => {
+  const context = {
+    id: 'ctx', name: 'Context', type: 'ContextShading', shading_type: 'obstacle', height: 5, parent_element: null,
+    start_angle: undefined, end_angle: 30, distance: undefined, coordinates: [],
+  } as unknown as Element;
+  expect(validateElementCore(context, baseContext(context)).issues.map((issue) => issue.fieldKey))
+    .toEqual(expect.arrayContaining(['start_angle', 'distance']));
+});
