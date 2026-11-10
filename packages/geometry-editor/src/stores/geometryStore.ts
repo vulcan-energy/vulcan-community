@@ -20,7 +20,7 @@ import {
   lineIntersection,
   isColinear,
 } from '../lib/shapeUtils';
-import { reverseGeometryFaceInExtraJson } from '../lib/profileLineFace';
+import { isFlatProfile, readProfiledLineFace, reverseGeometryFaceInExtraJson } from '../lib/profileLineFace';
 import { syncPolygonElement, unionPolygons, calculatePolygonArea } from '../lib/polygonSync';
 import {
   buildSlopedPolygonRectangleDimensionPatch,
@@ -181,7 +181,7 @@ import {
   resolveThermalBridgeHostFloorId,
   resolveThermalBridgeLinearFloorIdAfterHostsReady,
 } from '../lib/thermalBridgeFloorIngest';
-import { getElementEffectiveArea } from '../lib/elementArea';
+import { getAreaBasedElementExportGeometry, getElementEffectiveArea } from '../lib/elementArea';
 import { getElementTypeBaseName } from '../lib/displayNames';
 import { syncWindowSecurityRiskForStorey } from '../lib/windowSecurityRisk';
 import {
@@ -2278,6 +2278,41 @@ const applySlopedDimensionOverrideTracking = (
   ) {
     updateRecord._heightUserOverride = slopedDimensionDiffers(updateRecord.height, derived.height);
   }
+};
+
+/**
+ * The one path that changes the `height` of a line element with a profiled face (bulk edit,
+ * table, advanced fields). Its height is derived from the face, so a Flat top takes the new value
+ * (as the shape rows' Top field does) and the height is re-derived from the face; a Custom or
+ * Under-roof top keeps its shape and the height edit is dropped. An update that writes a new face
+ * itself (the shape rows) already carries its derived height and is left alone.
+ */
+const applyHeightEditToProfiledFace = (
+  prevElement: Element,
+  normalizedUpdates: Partial<Element>,
+  globalOrientationOffset: number,
+): void => {
+  const updateRecord = normalizedUpdates as Record<string, unknown>;
+  const height = updateRecord.height;
+  if (typeof height !== 'number' || !Number.isFinite(height) || height === (prevElement as { height?: unknown }).height) return;
+  const face = readProfiledLineFace(prevElement.extra_json);
+  if (!face) return;
+  const nextExtra = (Object.prototype.hasOwnProperty.call(updateRecord, 'extra_json')
+    ? updateRecord.extra_json
+    : prevElement.extra_json) as Record<string, unknown>;
+  if (JSON.stringify(readProfiledLineFace(nextExtra)) !== JSON.stringify(face)) return;
+  if (face.top_mode === 'roof' || !isFlatProfile(face.top_profile)) {
+    delete updateRecord.height;
+    return;
+  }
+  const extra_json = {
+    ...nextExtra,
+    geometry_face: { ...(nextExtra.geometry_face as object), top_profile: [{ t: 0, h: height }, { t: 1, h: height }] },
+  };
+  // Only line walls, windows and adjacent/party lines carry a profiled face.
+  const draft = { ...prevElement, ...normalizedUpdates, extra_json } as Parameters<typeof getAreaBasedElementExportGeometry>[0];
+  updateRecord.extra_json = extra_json;
+  updateRecord.height = getAreaBasedElementExportGeometry(draft, globalOrientationOffset).height;
 };
 
 const TRANSPARENT_OPENING_DERIVATION_DRIVERS = [
@@ -5519,6 +5554,7 @@ const createGeometryState = (
 
       // Normalize parent_element only if explicitly provided on updates
       const normalizedUpdates: Partial<Element> = { ...updates };
+      applyHeightEditToProfiledFace(prevElement, normalizedUpdates, state.globalOrientationOffset);
       if (prevElement.nonNumericCells) normalizedUpdates.nonNumericCells = uneditedNonNumericCells(prevElement, updates);
       if (prevElement.type === 'BuildingElementTransparent' && Object.prototype.hasOwnProperty.call(updates, 'extra_json')) {
         // Advanced-field edits replace extra_json, including unchanged automatic values.
