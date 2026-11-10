@@ -8958,9 +8958,14 @@ impl JSONBuilder {
             {
                 continue;
             }
-            if let Some(area) = el.get("area").and_then(|v| v.as_f64()) {
-                env_area_sum += area;
-            }
+            // The area the element is built with: the row's area (CSV, then extra_json), else
+            // width x height, as `build_json` derives it.
+            let row = overlay_row_onto_seed(serde_json::Map::new(), el, "", &[]);
+            let number = |key: &str| row.get(key).and_then(Value::as_f64);
+            let area = number("area")
+                .filter(|area| *area > 0.0)
+                .or_else(|| Some(number("width")? * number("height")?));
+            env_area_sum += area.unwrap_or_default();
         }
 
         Ok(env_area_sum)
