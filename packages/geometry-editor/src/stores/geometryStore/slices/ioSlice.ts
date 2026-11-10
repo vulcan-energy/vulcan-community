@@ -705,7 +705,7 @@ const migrateElementsToNormalized = (
  * listed.
  */
 /** A metadata row is written only with a value: a present row with a blank value is an error (E066). */
-const hasMetadataValue = (value: unknown): boolean =>
+const hasMetadataValue = <T>(value: T): value is NonNullable<T> =>
   value !== undefined && value !== null && value !== '' && !(typeof value === 'number' && !Number.isFinite(value));
 
 const NOT_REPLACEABLE_COLUMNS = new Set(['Name', 'Zone', 'Type', 'coords', 'extra_json']);
