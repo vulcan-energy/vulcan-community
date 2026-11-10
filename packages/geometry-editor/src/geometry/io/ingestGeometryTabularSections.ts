@@ -158,31 +158,71 @@ const REQUIRED_ROW_KEYS: Readonly<Record<string, readonly ('Zone' | 'Type')[]>> 
   'Ventilation Systems': ['Type'],
 };
 
-const BUILDING_ROW_TYPES = [
-  'BuildingElementOpaque',
-  'BuildingElementTransparent',
-  'BuildingElementGround',
-  'BuildingElementAdjacentConditionedSpace',
-  'BuildingElementAdjacentUnconditionedSpace_Simple',
-  'BuildingElementPartyWall',
-];
 /**
- * The row types the editor reads, where the converter routes the row by its Type and rejects or
- * leaves out any other (E056, E028, E065, or a Ventilation Systems row it skips). The load stops
- * on another Type, naming the row, so no row is dropped unseen. The converter's older aliases
- * (Wall, Roof, Door and so on) stop the load too. Sections not listed (Wet Emitters, Water
- * Pipework, Combustion Appliances, Hot Water Outlets) are read whatever their Type says, as the
- * converter reads them.
+ * The row Types the editor loads, by section. The Rust test editor_row_types_match_the_converter
+ * (crates/vulcan-model-transform/src/builder.rs) reads the JSON between the markers and runs every
+ * Type through the converter, so this table cannot drift from the Types the converter accepts.
+ * Aliases load as their type, which gives the converter the same model. Unkept Types are ones the
+ * converter accepts that no editor element reproduces; the load stops with the message given.
+ */
+// csv-row-types:begin
+const CSV_ROW_TYPES = {
+  "buildingTypes": [
+    "BuildingElementOpaque",
+    "BuildingElementTransparent",
+    "BuildingElementGround",
+    "BuildingElementAdjacentConditionedSpace",
+    "BuildingElementAdjacentUnconditionedSpace_Simple",
+    "BuildingElementPartyWall"
+  ],
+  "buildingAliases": {
+    "Wall": "BuildingElementOpaque",
+    "Roof": "BuildingElementOpaque",
+    "Door": "BuildingElementOpaque",
+    "Window": "BuildingElementTransparent",
+    "Floor": "BuildingElementGround",
+    "Internal": "BuildingElementAdjacentConditionedSpace",
+    "Basement": "BuildingElementGround"
+  },
+  "rowTypes": {
+    "Thermal Bridging Elements": ["ThermalBridgeLinear", "ThermalBridgePoint"],
+    "Systems": ["System", "ElectricBattery", "SpaceHeatSystem"],
+    "Ventilation Systems": ["MechanicalVentilation", "Vents", "MechanicalVentilationDuctwork", "MechanicalVentilationTerminal"]
+  },
+  "unkeptTypes": {
+    "Building": {
+      "Party":
+        "which the converter reads as a party element of any pitch; the editor marks only a party floor that way. Enter BuildingElementAdjacentConditionedSpace or BuildingElementPartyWall"
+    },
+    "Systems": {
+      "WetDistribution":
+        "which the converter builds from the defaults' wet distribution template; the editor has no such row. Enter Type System with subcategory SpaceHeatSystem and the system in extra_json under SpaceHeatSystem"
+    }
+  }
+};
+// csv-row-types:end
+const BUILDING_SECTIONS = new Set(['Exposed Elements', 'Window Elements', 'Ground Elements', 'Non-Exposed Elements']);
+export const BUILDING_ALIASES: Readonly<Record<string, string>> = CSV_ROW_TYPES.buildingAliases;
+const UNKEPT_TYPES: Readonly<Record<string, Readonly<Record<string, string>>>> = CSV_ROW_TYPES.unkeptTypes;
+/**
+ * The row types the editor reads (CSV_ROW_TYPES), where the converter routes the row by its Type
+ * and rejects or leaves out any other (E056, E028, E065). The load stops on another Type, naming the
+ * row, so no row is dropped unseen. Sections not listed (Wet Emitters, Water Pipework, Combustion
+ * Appliances, Hot Water Outlets) are read whatever their Type says, as the converter reads them.
  */
 const ROW_TYPES: Readonly<Record<string, readonly string[]>> = {
-  'Exposed Elements': BUILDING_ROW_TYPES,
-  'Window Elements': BUILDING_ROW_TYPES,
-  'Ground Elements': BUILDING_ROW_TYPES,
-  'Non-Exposed Elements': BUILDING_ROW_TYPES,
-  'Thermal Bridging Elements': ['ThermalBridgeLinear', 'ThermalBridgePoint'],
-  Systems: ['System', 'ElectricBattery'],
-  'Ventilation Systems': ['MechanicalVentilation', 'Vents', 'MechanicalVentilationDuctwork', 'MechanicalVentilationTerminal'],
+  ...Object.fromEntries([...BUILDING_SECTIONS].map((name) => [name, [...CSV_ROW_TYPES.buildingTypes, ...Object.keys(BUILDING_ALIASES)]])),
+  ...CSV_ROW_TYPES.rowTypes,
 };
+
+/** Whether a SpaceHeatSystem row's extra_json has the key that makes the converter read it as a System row does. */
+function extraJsonHasSpaceHeatSystem(cell: string): boolean {
+  try {
+    return 'SpaceHeatSystem' in JSON.parse(cell);
+  } catch {
+    return false;
+  }
+}
 
 /** A Systems row's type, as the converter reads it: the first of these cells that is not blank. */
 const systemsRowType = (d: Record<string, string>) => V(d, 'Type') || V(d, 'system_type') || V(d, 'subcategory');
@@ -197,6 +237,12 @@ function assertRowKeys(section: CsvSection, d: CsvRow['data'], zoneNames: Readon
   }
   const types = ROW_TYPES[section.name];
   const type = section.name === 'Systems' ? systemsRowType(d) : V(d, 'Type');
+  const unkept = UNKEPT_TYPES[BUILDING_SECTIONS.has(section.name) ? 'Building' : section.name]?.[type];
+  if (unkept) throw new Error(`${row} has Type '${type}', ${unkept} in the file and open it again.`);
+  // Only with its system in extra_json does the converter read a SpaceHeatSystem row as a System row.
+  if (section.name === 'Systems' && type === 'SpaceHeatSystem' && !extraJsonHasSpaceHeatSystem(V(d, 'extra_json'))) {
+    throw new Error(`${row} has Type 'SpaceHeatSystem' with no SpaceHeatSystem key in extra_json, which the converter builds from the defaults' wet distribution template; the editor has no such row. Enter the system in extra_json under SpaceHeatSystem in the file and open it again.`);
+  }
   if (types && !types.includes(type)) {
     throw new Error(`${row} ${type ? `has Type '${type}', which is not a ${section.name} type` : 'has no Type'}. Enter one of ${types.join(', ')} in the file and open it again.`);
   }
@@ -329,7 +375,8 @@ export function ingestGeometryTabularSections(
         case 'Non-Exposed Elements':
         case 'Thermal Bridging Elements': {
           const zoneName = V(d, 'Zone');
-          const elementType = V(d, 'Type') as ElementType;
+          // The converter's older aliases (Wall, Roof and so on) give it the same model as their type.
+          const elementType = (BUILDING_ALIASES[V(d, 'Type')] ?? V(d, 'Type')) as ElementType;
           const zoneId = zoneNameToId[zoneName];
           if (!zoneId) continue;
 
@@ -613,8 +660,8 @@ export function ingestGeometryTabularSections(
         case 'Systems': {
           const zoneName = V(d, 'Zone');
           const rowType = systemsRowType(d);
-          if (rowType === 'System') {
-            const subcategory = parseOptionalEnumColumn<SystemSubcategory>(V(d, 'subcategory'), [
+          if (rowType === 'System' || rowType === 'SpaceHeatSystem') {
+            const subcategory = rowType === 'SpaceHeatSystem' ? 'SpaceHeatSystem' : parseOptionalEnumColumn<SystemSubcategory>(V(d, 'subcategory'), [
               'HeatSourceWet',
               'HotWaterSource',
               'HotWaterDemand',

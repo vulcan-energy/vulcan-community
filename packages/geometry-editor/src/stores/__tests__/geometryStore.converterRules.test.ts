@@ -213,11 +213,26 @@ const CASES: Case[] = [
   { name: 'ventilation row with an unknown Type', edit: replace('Background Vent 1,Vents,', 'Background Vent 1,Vent,'),
     refuses: "Ventilation Systems row 'Background Vent 1' has Type 'Vent'" },
   { name: 'a row with no Name', edit: replace('Light,Zone 1,80,', ',Zone 1,80,'), refuses: 'A Lighting row has no Name' },
-  // The converter reads these sections whatever the Type cell says: the row is kept and the new Type named.
+  // The converter reads these sections whatever the Type cell says: the row is kept, and the new Type
+  // is not named because the model does not change.
   { name: 'emitter with another Type', edit: replace('Underfloor Heating,Zone 1,WetEmitter,', 'Underfloor Heating,Zone 1,Radiator,'),
-    notice: 'Underfloor Heating Type Radiator → WetEmitter', saves: { 'Wet Emitters|Underfloor Heating|area': '8.89' } },
+    noNotice: 'Underfloor Heating Type', saves: { 'Wet Emitters|Underfloor Heating|area': '8.89' } },
   { name: 'pipework with another Type', edit: replace('Pipe,WaterPipework,', 'Pipe,Pipework,'),
-    notice: 'Pipe Type Pipework → WaterPipework', saves: { 'Water Pipework|Pipe|length': '5.08' } },
+    noNotice: 'Pipe Type', saves: { 'Water Pipework|Pipe|length': '5.08' } },
+  // The converter routes a Systems row by its first non-blank Type, system_type or subcategory cell.
+  { name: 'a Systems row typed in the legacy system_type column', noNotice: 'Type blank',
+    edit: (csv) => csv.replace('Name,Zone,Type,subcategory,system_preset,', 'Name,Zone,system_type,subcategory,system_preset,'),
+    saves: { 'Systems|Zone 1 circuit|Type': 'System' } },
+  // Files saved by older editors carry a numeric areal heat capacity, which the converter rejects:
+  // the load snaps it to its band and names the change.
+  { name: 'a numeric areal heat capacity', edit: replace('"{}"\nWall (N),', '"{""areal_heat_capacity"":123456}"\nWall (N),'),
+    notice: 'Wall (S) areal_heat_capacity 123456 → Medium', saves: { 'Exposed Elements|Wall (S)|extra_json': '{"areal_heat_capacity":"Medium"}' } },
+  // The converter's older aliases and a SpaceHeatSystem row with its system in extra_json give it the
+  // model their editor type gives, so they load as that type, unnamed.
+  { name: 'a legacy Wall alias', edit: replace('Wall (N),Zone 1,BuildingElementOpaque,', 'Wall (N),Zone 1,Wall,'),
+    noNotice: 'Type Wall', saves: { 'Exposed Elements|Wall (N)|Type': 'BuildingElementOpaque' } },
+  { name: 'a Systems row of Type SpaceHeatSystem', edit: replace('Zone 1 circuit,Zone 1,System,', 'Zone 1 circuit,Zone 1,SpaceHeatSystem,'),
+    noNotice: 'Type SpaceHeatSystem', saves: { 'Systems|Zone 1 circuit|Type': 'System', 'Systems|Zone 1 circuit|subcategory': 'SpaceHeatSystem' } },
   { name: 'combustion appliance with another Type', saves: { 'Combustion Appliances|Fire|fuel_type': 'wood' },
     edit: appendSection('Combustion Appliances,,,,,,,,\nName,Type,appliance_type,exhaust_situation,fuel_type,supply_situation,base_height,coords,extra_json\nFire,Appliance,open_fireplace,into_room,wood,room_air,,"0,0,0",') },
   // A row the save leaves out is named.

@@ -10777,6 +10777,127 @@ mod wet_emitter_tests {
         parser.parse_csv(csv).expect("CSV should parse")
     }
 
+    /// The editor's row Types (`CSV_ROW_TYPES`, between the csv-row-types markers in
+    /// packages/geometry-editor/src/geometry/io/ingestGeometryTabularSections.ts) are the Types the
+    /// converter routes: every Type the editor loads or names as unkept converts, and every other
+    /// candidate Type is rejected.
+    // ponytail: the candidates are the Types either side names; a new Type the converter routes is
+    // caught once it is added to the candidate list or the alias list below.
+    #[test]
+    fn editor_row_types_match_the_converter() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/geometry-editor/src/geometry/io/ingestGeometryTabularSections.ts"
+        ));
+        let table = source
+            .split("// csv-row-types:begin")
+            .nth(1)
+            .and_then(|rest| rest.split("// csv-row-types:end").next())
+            .and_then(|block| Some(&block[block.find('{')?..=block.rfind('}')?]))
+            .expect("CSV_ROW_TYPES between its markers");
+        let editor: Value = serde_json::from_str(table).expect("CSV_ROW_TYPES is JSON");
+        let names = |v: &Value| -> Vec<String> {
+            match v {
+                Value::Array(items) => items
+                    .iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect(),
+                Value::Object(map) => map.keys().cloned().collect(),
+                _ => Vec::new(),
+            }
+        };
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut building = names(&editor["buildingTypes"]);
+        building.extend(names(&editor["buildingAliases"]));
+        let mut sections = vec![("Exposed Elements", building, "Building")];
+        for (section, types) in editor["rowTypes"].as_object().expect("rowTypes") {
+            sections.push((section.as_str(), names(types), section.as_str()));
+        }
+        // The Types the Systems, Ventilation Systems and bridge routing in this file names.
+        let mut candidates: Vec<String> = [
+            "Unknown",
+            "System",
+            "ElectricBattery",
+            "SpaceHeatSystem",
+            "WetDistribution",
+            "MechanicalVentilation",
+            "Vents",
+            "MechanicalVentilationDuctwork",
+            "MechanicalVentilationTerminal",
+            "ThermalBridgeLinear",
+            "ThermalBridgePoint",
+        ]
+        .map(String::from)
+        .to_vec();
+        candidates.extend(
+            [
+                "Wall", "Roof", "Door", "Window", "Floor", "Party", "Basement", "Internal",
+            ]
+            .iter()
+            .filter(|alias| builder.map_csv_type_to_schema_type(alias) != **alias)
+            .map(|alias| alias.to_string()),
+        );
+        for (_, types, unkept) in &sections {
+            candidates.extend(types.iter().cloned());
+            candidates.extend(names(&editor["unkeptTypes"][unkept]));
+        }
+        candidates.sort();
+        candidates.dedup();
+        let extra_json = r#""{""SpaceHeatSystem"":{""R1"":{""type"":""InstantElecHeater""}}}""#;
+        for (section, types, unkept) in &sections {
+            let editor_types: Vec<String> = types
+                .iter()
+                .cloned()
+                .chain(names(&editor["unkeptTypes"][unkept]))
+                .collect();
+            // A bridge row takes any Type with a defaults template and leaves it to schema validation,
+            // so only its own Types and an unknown one are tried there.
+            let pool = if *section == "Thermal Bridging Elements" {
+                editor_types
+                    .iter()
+                    .cloned()
+                    .chain(["Unknown".to_string()])
+                    .collect()
+            } else {
+                candidates.clone()
+            };
+            for candidate in &pool {
+                let row = match *section {
+                    "Exposed Elements" => format!("Name,Zone,Type,area,pitch,width,height,floor_type,perimeter,total_area\nR1,Living,{candidate},10,90,4,2.5,Slab_no_edge_insulation,13,10"),
+                    "Thermal Bridging Elements" => format!("Name,Zone,Type,length,linear_thermal_transmittance\nR1,Living,{candidate},4,0.1"),
+                    "Systems" => format!("Name,Zone,Type,subcategory,extra_json\nR1,Living,{candidate},SpaceHeatSystem,{extra_json}"),
+                    _ => format!("Name,Type,vent_type,mid_height_air_flow_path,area_cm2,orientation360,pitch\nR1,{candidate},MVHR,1.5,225,180,90"),
+                };
+                let csv = format!(
+                    "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,40\n\n{section}\n{row}\n"
+                );
+                let mut builder =
+                    JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+                let fatal = builder
+                    .build_json(&parse_csv(&csv))
+                    .err()
+                    .into_iter()
+                    .map(|e| (e.code.clone(), e.message.clone()));
+                let rejected = fatal
+                    .chain(
+                        builder
+                            .take_non_fatal_errors()
+                            .into_iter()
+                            .map(|e| (e.code, e.message)),
+                    )
+                    .any(|(code, message)| {
+                        ["E028", "E056", "E065"].contains(&code.as_str())
+                            && message.contains(candidate.as_str())
+                    });
+                assert_eq!(
+                    !rejected,
+                    editor_types.contains(candidate),
+                    "{section} Type '{candidate}'"
+                );
+            }
+        }
+    }
+
     #[test]
     fn ventilation_row_with_an_unknown_type_is_reported() {
         let csv = r#"Zone

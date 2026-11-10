@@ -26,6 +26,7 @@ import {
 } from '../../../geometry/io/parseCsvToGeometry';
 import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionRows';
 import { derivePvDimensionsFromCoords } from '../../../lib/pvPanelFootprint';
+import { BUILDING_ALIASES } from '../../../geometry/io/ingestGeometryTabularSections';
 import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/globalSettingsValidation';
 import {
   encodeGuideOverlayMetadataValue,
@@ -711,6 +712,29 @@ const migrateElementsToNormalized = (
 };
 
 const NOT_REPLACEABLE_COLUMNS = new Set(['Name', 'Zone', 'coords', 'extra_json']);
+/**
+ * How the converter reads a row's Type (and, in Systems, the cells that route the row): rows that
+ * read the same give it the same model. It does not read the Type of these four sections' rows.
+ */
+const convertedType = (section: string, row: Record<string, string>): string | undefined => {
+  if (['Wet Emitters', 'Water Pipework', 'Combustion Appliances', 'Hot Water Outlets'].includes(section)) return '';
+  const type = row.Type?.trim() ?? '';
+  if (section.endsWith(' Elements')) return BUILDING_ALIASES[type] ?? type;
+  if (section !== 'Systems') return undefined;
+  const route = type || row.system_type?.trim() || row.subcategory?.trim() || '';
+  // A SpaceHeatSystem row loads only with its system in extra_json, which the converter reads as a System row's.
+  return route === 'SpaceHeatSystem' || route === 'System' ? `System ${route === 'System' ? row.subcategory?.trim() : route}` : route;
+};
+const TYPE_COLUMNS: Readonly<Record<string, readonly string[]>> = { Systems: ['Type', 'system_type', 'subcategory'] };
+/** A top-level extra_json value as text, or undefined when the cell has none. */
+const extraJsonField = (cell: string, field: string): string | undefined => {
+  try {
+    const value = (JSON.parse(cell) as Record<string, unknown>)?.[field];
+    return value === undefined ? undefined : String(value);
+  } catch {
+    return undefined;
+  }
+};
 const LEGACY_COLUMN: Readonly<Record<string, string>> = { shading_type: 'Type', start_angle: 'start angle', end_angle: 'end angle' };
 /**
  * One load notice listing every cell of a zone or element row, a column the file lacks included,
@@ -735,12 +759,26 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
       continue;
     }
     const bothFaces = /both_faces/.test(saved.extra_json ?? '');
+    const section = key.split('|')[0];
+    const type = convertedType(section, authored);
+    // Cells that only route the row, when the converter reads the row's Type as before.
+    const routingColumns = new Set(type !== undefined && type === convertedType(section, saved) ? TYPE_COLUMNS[section] ?? ['Type'] : []);
     // A column the file lacks is read as blank, as the converter reads it, or from the older column
     // that held it (Context Shading).
     for (const column of new Set([...Object.keys(authored), ...Object.keys(saved)])) {
       const before = (authored[column] ?? authored[LEGACY_COLUMN[column]] ?? '').trim();
       const after = saved[column]?.trim();
+      if (column === 'extra_json' && after !== undefined) {
+        // The load snaps a numeric areal_heat_capacity to its band and a legacy mass_distribution_class
+        // code to its label (parseCsvToGeometry), values the converter rejects as they were.
+        for (const field of ['areal_heat_capacity', 'mass_distribution_class']) {
+          const was = extraJsonField(before, field);
+          const now = extraJsonField(after, field);
+          if (was !== undefined && now !== undefined && was !== now) replaced.push(`${authored.Name} ${field} ${was} → ${now}`);
+        }
+      }
       if (after === undefined || NOT_REPLACEABLE_COLUMNS.has(column)) continue;
+      if (routingColumns.has(column)) continue;
       // A file without a newer column kept that value in the older one (Context Shading Type).
       if (Object.entries(LEGACY_COLUMN).some(([newer, older]) => older === column && !(newer in authored) && newer in saved)) continue;
       if (!before) {
