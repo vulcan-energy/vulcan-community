@@ -471,6 +471,19 @@ const metadataSchemaPath = (key: string): string[] => {
   return [key];
 };
 
+const asRecord = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
+const valueAt = (root: unknown, path: string[]): unknown => path.reduce<unknown>((node, segment) => asRecord(node)?.[segment], root);
+
+/**
+ * Whether a Systems InfiltrationVentilation row sets this metadata row's setting. The converter
+ * merges those rows before the Metadata rows, so with no Metadata row the model takes their value.
+ */
+function systemsRowSetsMetadataInput(elements: readonly Element[], key: string): boolean {
+  const path = metadataSchemaPath(key);
+  return path[0] === 'InfiltrationVentilation' && elements.some((element) => element.type === 'System'
+    && element.subcategory === 'InfiltrationVentilation' && valueAt(element.extra_json, path) !== undefined);
+}
+
 const bool = (value: boolean | undefined) => (value === undefined ? undefined : value ? 'TRUE' : 'FALSE');
 const count = (value: number | undefined) => (finiteNumber(value) === undefined ? undefined : String(Math.round(value!)));
 const num = (value: number | undefined) => (finiteNumber(value) === undefined ? undefined : String(value));
@@ -538,7 +551,10 @@ export function metadataRowValues(state: MetadataRowInputs): Array<[string, stri
   if (dd.buildType === 'flat') {
     rows.push(['General_storey_of_dwelling', count(dd.storeyOfDwelling)], ['General_storeys_in_building', num(compliance.storeys_in_building)]);
   }
-  return rows;
+  // A setting a Systems row sets is written only when the user enters it here: a derived value
+  // would override that row in the converter.
+  const entered = compliance as Record<string, unknown>;
+  return rows.map(([key, value]) => [key, entered[key] === undefined && systemsRowSetsMetadataInput(state.elements, key) ? undefined : value]);
 }
 
 /** The compliance setting a metadata row edits. */
@@ -556,11 +572,7 @@ const ABSENT_ROW_DEFAULTS: Readonly<Record<string, boolean>> = {
 
 /** The value the converter uses when the file has no such row: the defaults template's, else ABSENT_ROW_DEFAULTS. */
 function templateMetadataValue(defaults: unknown, key: string): unknown {
-  let node: unknown = defaults;
-  for (const segment of metadataSchemaPath(key)) {
-    node = node && typeof node === 'object' && !Array.isArray(node) ? (node as Record<string, unknown>)[segment] : undefined;
-  }
-  return node ?? ABSENT_ROW_DEFAULTS[key];
+  return valueAt(defaults, metadataSchemaPath(key)) ?? ABSENT_ROW_DEFAULTS[key];
 }
 
 /**
@@ -570,16 +582,14 @@ function templateMetadataValue(defaults: unknown, key: string): unknown {
  * otherwise leave out. A row the file has blank is not filled: the user cleared it. Filled rows
  * leave `absentMetadataRows`, so later defaults never replace a value the user has since edited.
  */
-export function templateFilledMetadataSettings(
-  rows: Array<[string, string | undefined]>,
-  settings: { blankMetadataRows?: string[]; absentMetadataRows?: string[] },
-  defaults: unknown,
-): Record<string, unknown> {
+export function templateFilledMetadataSettings(state: MetadataRowInputs, defaults: unknown): Record<string, unknown> {
+  const settings = state.complianceSettings;
   const patch: Record<string, unknown> = {};
   const blank = new Set(settings.blankMetadataRows);
   const absent = new Set(settings.absentMetadataRows);
-  for (const [key, value] of rows) {
-    if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)) continue;
+  for (const [key, value] of metadataRowValues(state)) {
+    if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
+      || systemsRowSetsMetadataInput(state.elements, key)) continue;
     const template = templateMetadataValue(defaults, key);
     if (template === undefined) continue;
     patch[metadataSettingKey(key)] = template;
@@ -635,14 +645,10 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
  * no defaults value exists for a value the schema requires. `defaults` is undefined while the
  * defaults are still loading, when only blank rows are known to be unset.
  */
-export function unsetMetadataInputIssues(
-  rows: Array<[string, string | undefined]>,
-  targetRoot: unknown,
-  settings: { blankMetadataRows?: string[] },
-  defaults: unknown,
-): string[] {
-  const blank = new Set(settings.blankMetadataRows);
-  return rows.flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS
+export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: unknown, defaults: unknown): string[] {
+  const blank = new Set(state.complianceSettings.blankMetadataRows);
+  return metadataRowValues(state).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS
+      && !systemsRowSetsMetadataInput(state.elements, key)
       && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
       && (blank.has(key) || (defaults !== undefined
         && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))

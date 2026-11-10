@@ -2282,11 +2282,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     let templateKeys: Set<string> | null = null;
     set({ loadAwaitsDefaults: !loaded.defaultsJson || loaded.defaultsLoading, lateLoadNotice: null });
     if (loaded.defaultsJson && !loaded.defaultsLoading) {
-      const filled = templateFilledMetadataSettings(
-        metadataRowValues({ ...loaded, elements: Object.values(loaded.elementsById) }),
-        loaded.complianceSettings,
-        loaded.defaultsJson,
-      );
+      const filled = templateFilledMetadataSettings({ ...loaded, elements: Object.values(loaded.elementsById) }, loaded.defaultsJson);
       if (Object.keys(filled).length) set({ complianceSettings: { ...loaded.complianceSettings, ...filled } });
       templateKeys = new Set(Object.keys(METADATA_INPUT_LABELS).filter((key) => (key.startsWith('General_') ? key.slice(8) : key) in filled));
     }

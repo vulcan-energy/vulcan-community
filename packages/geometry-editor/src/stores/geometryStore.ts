@@ -2928,11 +2928,7 @@ const withPrecomputedDefaultsLookup = (
       // defaults, and the save writes it.
       const complianceSettings = (update as Partial<GeometryState>).complianceSettings ?? state.complianceSettings;
       const filled = defaultsJson
-        ? templateFilledMetadataSettings(
-          metadataRowValues({ ...state, complianceSettings, elements: Object.values(state.elementsById) }),
-          complianceSettings,
-          defaultsJson,
-        )
+        ? templateFilledMetadataSettings({ ...state, complianceSettings, elements: Object.values(state.elementsById) }, defaultsJson)
         : {};
       // A load that ended before these defaults arrived lists the rows they fill.
       const lateNotice = defaultsJson && state.loadAwaitsDefaults
@@ -7720,9 +7716,8 @@ const createGeometryState = (
     const elements = Object.values(state.elementsById);
     if (complianceOn && elements.some((element) => !element.isPlaceholder)) {
       allCriticalIssues.push(...unsetMetadataInputIssues(
-        metadataRowValues({ ...state, elements }),
+        { ...state, elements },
         schemaPort.availability === 'available' ? schemaPort.getRootSchema('fhs') : null,
-        state.complianceSettings,
         state.defaultsLoading ? undefined : state.defaultsJson,
       ));
     }

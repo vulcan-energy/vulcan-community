@@ -30,8 +30,8 @@ afterAll(() => {
 type Case = {
   name: string;
   edit: (csv: string) => string;
-  /** Defaults that arrive before the load ('first') or after it ('late'); none when omitted. */
-  defaults?: 'first' | 'late';
+  /** Defaults that arrive after the load, as the file's defaults read does. */
+  defaults?: boolean;
   /** `element|field` or `Global Settings` text the editor must block on. */
   blocks?: string[];
   /** Must not block on these. */
@@ -47,6 +47,11 @@ const replace = (from: string, to: string) => (csv: string) => {
 const radiator = (unit: string) => replace('Radiator,Zone 1,WetEmitter,radiator,,1,', `Radiator,Zone 1,WetEmitter,radiator,,${unit},`);
 const ufh = (unit: string) => replace('Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,,', `Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,${unit},`);
 
+const systemsVentilation = replace(
+  'Name,Zone,Type,subcategory,system_preset,coords,extra_json\n',
+  'Name,Zone,Type,subcategory,system_preset,coords,extra_json\nInfiltration,Zone 1,System,InfiltrationVentilation,,"0,0,0","{""InfiltrationVentilation"":{""shield_class"":""Shielded"",""altitude"":120}}"\n',
+);
+
 const CASES: Case[] = [
   // Converter: unit_number is a whole number of 1 or more, or blank (E055 otherwise), on every emitter.
   { name: 'radiator unit_number 0.5', edit: radiator('0.5'), blocks: ['Radiator|unit_number'], saves: { 'Wet Emitters|Radiator|unit_number': '0.5' } },
@@ -57,13 +62,18 @@ const CASES: Case[] = [
   { name: 'ufh unit_number 0', edit: ufh('0'), blocks: ['Underfloor Heating|unit_number'], saves: { 'Wet Emitters|Underfloor Heating|unit_number': '0' } },
   { name: 'ufh unit_number 1.5', edit: ufh('1.5'), blocks: ['Underfloor Heating|unit_number'] },
   { name: 'ufh area 0', edit: replace('Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,', 'Underfloor Heating,Zone 1,WetEmitter,ufh,0,'), blocks: ['Underfloor Heating|area'] },
+  // An absent Metadata row takes the converter's value: a Systems InfiltrationVentilation row
+  // first, then the defaults template (which a load always reads after the file).
+  { name: 'absent rows take the defaults', edit: (csv) => csv, defaults: true,
+    saves: { 'Metadata|Ventilation_shield_class': 'Normal', 'Metadata|Ventilation_altitude': '30' } },
+  { name: 'a Systems row supplies the absent rows', edit: systemsVentilation, defaults: true,
+    allows: ['Shield Class', 'Altitude (m)'], saves: { 'Metadata|Ventilation_shield_class': null, 'Metadata|Ventilation_altitude': null } },
 ];
 
 function load(c: Case) {
   const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
-  if (c.defaults === 'first') store.setState({ defaultsJson: defaults, defaultsLoading: false } as never);
   const { warnings } = store.getState().loadFromCSV(c.edit(sample));
-  if (c.defaults === 'late') store.setState({ defaultsJson: defaults, defaultsLoading: false } as never);
+  if (c.defaults) store.setState({ defaultsJson: defaults, defaultsLoading: false } as never);
   const state = store.getState();
   const issues = new Set<string>();
   for (const element of Object.values(state.elementsById)) {

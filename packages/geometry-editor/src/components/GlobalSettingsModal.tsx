@@ -979,9 +979,8 @@ export function GlobalSettingsModal({
     if (effectiveComplianceValidationEnabled) {
       // Every model-input row the save would leave out: the same check that blocks the model.
       issues.push(...unsetMetadataInputIssues(
-        metadataRowValues({ zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) }),
+        { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
         targetRoot,
-        complianceSettings,
         defaultsJson,
       ));
       const bedroomCountIssue = fhsBedroomCountIssue(
