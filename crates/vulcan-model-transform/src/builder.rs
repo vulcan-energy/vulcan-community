@@ -7177,10 +7177,29 @@ impl JSONBuilder {
                 );
             }
         };
+        // unit_number counts identical units: a whole number of 1 or more, or blank.
+        let unit_number = match parse_csv_number_cell(
+            emitter_data.get("unit_number"),
+            "unit_number",
+        ) {
+            Ok(Some(n)) if n >= 1.0 && n.fract() == 0.0 => Some(n),
+            Ok(None) => None,
+            _ => {
+                let name = emitter_row
+                    .get("Name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let value = &emitter_data["unit_number"];
+                return Err(BuildError::new(
+                    "E055",
+                    &format!("Wet Emitters row '{name}': unit_number ({value}) must be a whole number of 1 or more, or blank for one unit."),
+                ));
+            }
+        };
         match subcategory {
             "radiator" => {
                 // A blank unit_number is one unit: the multiplier, not a HEM input.
-                let unit_number = number("unit_number").unwrap_or(1.0);
+                let unit_number = unit_number.unwrap_or(1.0);
                 let length = number("length");
                 // N identical units give the engine N times one unit: the length of a per-metre
                 // radiator, or the output constant and thermal mass of a lumped one.
@@ -7250,7 +7269,7 @@ impl JSONBuilder {
                 let n_units = emitter_data
                     .get("n_units")
                     .and_then(to_i64_rounded)
-                    .or_else(|| emitter_data.get("unit_number").and_then(to_i64_rounded))
+                    .or(unit_number.map(|n| n as i64))
                     .ok_or_else(|| BuildError::new(
                         "E026",
                         "Fancoil emitters require 'n_units' field (from extra_json or unit_number column)",
@@ -10863,6 +10882,29 @@ Radiator 1,Living,WetEmitter,radiator,3,"{""c"":0.1,""thermal_mass"":2,""thermal
         );
         assert!(emitter.get("length").is_none());
         assert!(emitter.get("c_per_m").is_none());
+    }
+
+    #[test]
+    fn an_emitter_unit_number_must_be_a_whole_number_of_one_or_more() {
+        for (subcategory, unit_number) in [
+            ("radiator", "two"),
+            ("radiator", "0"),
+            ("radiator", "-2"),
+            ("radiator", "2.5"),
+            ("fancoil", "two"),
+        ] {
+            let csv = format!("Zone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n\nWet Emitters\nName,Zone,Type,subcategory,unit_number,extra_json\nRad A,Living,WetEmitter,{subcategory},{unit_number},\"{{\"\"c\"\":0.1,\"\"n\"\":1.3,\"\"thermal_mass\"\":0.5}}\"\n");
+            let data = CSVParser::new().parse_csv(&csv).unwrap();
+            let mut builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).unwrap();
+            let error = builder.build_json(&data).unwrap_err();
+            assert!(
+                error
+                    .message
+                    .starts_with("Wet Emitters row 'Rad A': unit_number ("),
+                "{subcategory} {unit_number}: {}",
+                error.message
+            );
+        }
     }
 
     #[test]
