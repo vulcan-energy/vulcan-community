@@ -54,10 +54,11 @@ const replace = (from: string, to: string) => (csv: string) => {
 const radiator = (unit: string) => replace('Radiator,Zone 1,WetEmitter,radiator,,1,', `Radiator,Zone 1,WetEmitter,radiator,,${unit},`);
 const ufh = (unit: string) => replace('Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,,', `Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,${unit},`);
 
+const withoutShieldAndAltitude = (csv: string) => csv.replace(/^Ventilation_(shield_class|altitude),.*\n/gm, '');
 const systemsVentilation = (csv: string) => replace(
-  'Name,Zone,Type,subcategory,system_preset,coords,extra_json\n',
-  'Name,Zone,Type,subcategory,system_preset,coords,extra_json\nInfiltration,Zone 1,System,InfiltrationVentilation,,"0,0,0","{""InfiltrationVentilation"":{""shield_class"":""Shielded"",""altitude"":120,""ventilation_zone_base_height"":1.5}}"\n',
-)(replace('Ventilation_ventilation_zone_base_height,0,,,,,,,,,,,,,\n', '')(csv));
+  'Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json\n',
+  'Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json\nInfiltration,Zone 1,System,InfiltrationVentilation,,,"0,0,0","{""InfiltrationVentilation"":{""shield_class"":""Shielded"",""altitude"":120,""ventilation_zone_base_height"":1.5}}"\n',
+)(replace('Ventilation_ventilation_zone_base_height,0,,,,,,,,,,,,,\n', '')(withoutShieldAndAltitude(csv)));
 
 const kitchen = (zone: string, type: string, keepCoords = true) => (csv: string) => csv.replace(
   /^Kitchen,Zone 1,0,kitchen,("[^"]*")/m,
@@ -77,15 +78,15 @@ const CASES: Case[] = [
   { name: 'ufh unit_number 0', edit: ufh('0'), blocks: ['Underfloor Heating|unit_number'], saves: { 'Wet Emitters|Underfloor Heating|unit_number': '0' } },
   { name: 'ufh unit_number 1.5', edit: ufh('1.5'), blocks: ['Underfloor Heating|unit_number'] },
   // Text in a numeric cell is E055 or a schema type error in the converter: it stays as typed and blocks.
-  { name: 'text in a required wall width', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,6.65,90,4,', 'Wall (S),Zone 1,BuildingElementOpaque,6.65,90,four,'),
+  { name: 'text in a required wall width', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,7.38,90,4,', 'Wall (S),Zone 1,BuildingElementOpaque,7.38,90,four,'),
     blocks: ["Wall (S) (BuildingElementOpaque): Width is 'four', which is not a number"], saves: { 'Exposed Elements|Wall (S)|width': 'four' } },
-  { name: 'text in a wall area is not filled', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,6.65,', 'Wall (S),Zone 1,BuildingElementOpaque,tbc,'),
+  { name: 'text in a wall area is not filled', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,7.38,', 'Wall (S),Zone 1,BuildingElementOpaque,tbc,'),
     blocks: ['Wall (S)|area'], noNotice: 'Wall (S) area', saves: { 'Exposed Elements|Wall (S)|area': 'tbc' } },
   { name: 'text in an optional window cell', edit: replace('Wall (S),0.25,0.95,1.65,', 'Wall (S),n/a,0.95,1.65,'),
     blocks: ['Window|frame_area_fraction'], saves: { 'Window Elements|Window|frame_area_fraction': 'n/a' } },
   { name: 'a number followed by text', edit: replace('Light,Zone 1,80,', 'Light,Zone 1,80lm,'),
     blocks: ['Light|efficacy'], saves: { 'Lighting|Light|efficacy': '80lm' } },
-  { name: 'text in a zone cell', edit: replace('Zone 1,Zone,199.36,', 'Zone 1,Zone,big,'),
+  { name: 'text in a zone cell', edit: replace('Zone 1,Zone,198.77,', 'Zone 1,Zone,big,'),
     blocks: ["Volume is 'big', which is not a number"], saves: { 'Zone|Zone 1|volume': 'big' } },
   { name: 'text in a ventilation unit position', edit: replace(',,2.7,,0,180,Centralised', ',,2.7,,north,180,Centralised'),
     blocks: ['Centralised Continuous MEV|orientation360'], saves: { 'Ventilation Systems|Centralised Continuous MEV|orientation360': 'north' } },
@@ -119,7 +120,7 @@ const CASES: Case[] = [
   { name: 'ufh area 0', edit: replace('Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,', 'Underfloor Heating,Zone 1,WetEmitter,ufh,0,'), blocks: ['Underfloor Heating|area'] },
   // An absent Metadata row takes the converter's value: a Systems InfiltrationVentilation row
   // first, then the defaults template (which a load always reads after the file).
-  { name: 'absent rows take the defaults', edit: (csv) => csv, defaults: true, notice: 'Shield Class Normal (from the defaults file)',
+  { name: 'absent rows take the defaults', edit: withoutShieldAndAltitude, defaults: true, notice: 'Shield Class Normal (from the defaults file)',
     saves: { 'Metadata|Ventilation_shield_class': 'Normal', 'Metadata|Ventilation_altitude': '30' } },
   // With no Systems row and no defaults value, the converter has nothing: the row stays absent and
   // blocks where the target requires it, with what the labels or geometry show as a hint.
@@ -149,17 +150,17 @@ const CASES: Case[] = [
     blocks: ['Kitchen cooker hood extracts to outside is not set'], saves: { 'Metadata|KitchenExtractorHoodExternal': null } },
   // The converter reads the zone's living-room split whatever the switch says; the switch is saved as it was.
   { name: 'compliance validation off keeps the zone split', edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,'),
-    saves: { 'Zone|Zone 1|livingroom_area': '28.91', 'Zone|Zone 1|restofdwelling_area': '42.29', 'Metadata|ComplianceValidationEnabled': 'FALSE' } },
+    saves: { 'Zone|Zone 1|livingroom_area': '12.78', 'Zone|Zone 1|restofdwelling_area': '58.21', 'Metadata|ComplianceValidationEnabled': 'FALSE' } },
   // A second zone's rest-of-dwelling area is its floor area: the converter adds a blank as 0, so the notice names it.
   { name: 'a second zone with no split takes its floor area',
-    edit: replace('simplified thermal bridging,livingroom_area,restofdwelling_area\nZone 1,Zone,199.36,71.2,2.8,TRUE,28.91,42.29\n',
-      'simplified thermal bridging\nZone 1,Zone,199.36,71.2,2.8,TRUE\nZone 2,Zone,10,4,2.5,FALSE\n'),
+    edit: replace('simplified thermal bridging,livingroom_area,restofdwelling_area\nZone 1,Zone,198.77,70.99,2.8,FALSE,12.78,58.21\n',
+      'simplified thermal bridging\nZone 1,Zone,198.77,70.99,2.8,FALSE\nZone 2,Zone,10,4,2.5,FALSE\n'),
     notice: 'Zone 2 restofdwelling_area blank → 4', saves: { 'Zone|Zone 2|restofdwelling_area': '4' } },
   { name: 'absent KitchenExtractorHoodExternal takes false', defaults: true, edit: (csv) => csv.replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
     saves: { 'Metadata|KitchenExtractorHoodExternal': 'FALSE' } },
   // A blank link in a table with the column is "linked to nothing" (E059); a table with no such
   // column lets the converter build the zone's wet system. The save keeps the table's form.
-  { name: 'emitters with blank space_heat_system', edit: (csv) => csv.replace(/,Zone 1 circuit,"/g, ',,"'),
+  { name: 'emitters with blank space_heat_system', edit: (csv) => csv.replace(/,Zone 1 circuit,,"/g, ',,,"'),
     blocks: ['Radiator|space_heat_system'], saves: { 'Wet Emitters|Radiator|space_heat_system': '' } },
   // The section implies the row type: a blank Type keeps the row (the converter reads it too).
   { name: 'pipework with blank Type', edit: replace('Pipe,WaterPipework,5.08,', 'Pipe,,5.08,'), saves: { 'Water Pipework|Pipe|length': '5.08' } },
@@ -170,14 +171,14 @@ const CASES: Case[] = [
   { name: 'context shading kind from Type', allows: ['Tree|shading_type'],
     edit: appendSection('Context Shading,,,,,,\nName,Type,start_angle,end_angle,distance,height,coords\nTree,obstacle,0,30,10,5,"0,0,0"') },
   // The converter takes a blank wall area as width × height; the editor saves the net area and says so.
-  { name: 'blank wall area', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,6.65,', 'Wall (S),Zone 1,BuildingElementOpaque,,'), notice: 'Wall (S) area blank →' },
+  { name: 'blank wall area', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,7.38,', 'Wall (S),Zone 1,BuildingElementOpaque,,'), notice: 'Wall (S) area blank →' },
   // A Metadata value the file gives is saved as given, whatever the geometry suggests.
   { name: 'build type house with no ground outline', saves: { 'Metadata|General_build_type': 'house' },
-    edit: replace('Slab_no_edge_insulation,,,,"-29.700,-6.470,0.000|-25.700,-6.470,0.000|-25.700,2.430,0.000|-29.700,2.430,0.000"', 'Slab_no_edge_insulation,,,,""') },
+    edit: replace('Slab_no_edge_insulation,,0.2,,,"-29.700,-6.470,0.000|-25.700,-6.470,0.000|-25.700,2.430,0.000|-29.700,2.430,0.000"', 'Slab_no_edge_insulation,,0.2,,,""') },
   // A Systems row with a blank extra_json adds nothing: the converter keeps the defaults' heat
   // source. Any object there, editor markers only included, becomes an entry named after the row.
   { name: 'heat source row with blank extra_json', saves: { 'Systems|Heat Pump|extra_json': '' },
-    edit: (csv) => csv.replace(/^(Heat Pump,Zone 1,System,HeatSourceWet,hp_large,"[^"]*"),.*$/m, '$1,') },
+    edit: (csv) => csv.replace(/^(Heat Pump,Zone 1,System,HeatSourceWet,hp_large,,"[^"]*"),.*$/m, '$1,') },
   // A blank window mid_height stays blank: the converter then takes the air-flow height from the
   // window's extra_json or the defaults, not from the opening's centre.
   { name: 'window with blank mid_height', edit: replace('Wall (S),0.25,0.95,1.65,0.8,', 'Wall (S),0.25,0.95,,0.8,'),
@@ -191,7 +192,7 @@ const CASES: Case[] = [
   { name: 'a 0 width saved blank', edit: replace('Party Wall (E),Zone 1,BuildingElementPartyWall,24.92,90,8.9,', 'Party Wall (E),Zone 1,BuildingElementPartyWall,24.92,90,0,'),
     notice: 'Party Wall (E) width 0 → blank' },
   // Only a blank pitch is worked out from coords by the converter; a filled width is named.
-  { name: 'a blank wall width filled from coords', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,6.65,90,4,', 'Wall (S),Zone 1,BuildingElementOpaque,6.65,90,,'),
+  { name: 'a blank wall width filled from coords', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,7.38,90,4,', 'Wall (S),Zone 1,BuildingElementOpaque,7.38,90,,'),
     notice: 'Wall (S) width blank → 4' },
   // The converter reads a thermal bridge table with no point-bridge, link or coords column.
   { name: 'thermal bridges in the older layout', saves: { 'Thermal Bridging Elements|TB_E5|length': '8.9', 'Thermal Bridging Elements|TB_E5|linear_thermal_transmittance': '0.32' },
