@@ -3859,14 +3859,18 @@ impl JSONBuilder {
             })
     }
 
-    /// `shading_type`, else `Type` (where `ContextShading` means an obstacle). A blank or
-    /// unknown value is `None`: the caller reports it rather than guessing.
+    /// `shading_type`; `Type` only in files written before that column existed, which stored the
+    /// shading type there. Anything but a HEM shading type (blank, the element type
+    /// `ContextShading`, a typo) is `None`: the caller reports it rather than guessing.
     fn read_context_shading_type(shading_row: &HashMap<String, Value>) -> Option<&'static str> {
-        let raw_type = csv_string_cell(shading_row, "shading_type")
-            .or_else(|| csv_string_cell(shading_row, "Type"))?;
-        match raw_type {
+        let column = if shading_row.contains_key("shading_type") {
+            "shading_type"
+        } else {
+            "Type"
+        };
+        match csv_string_cell(shading_row, column)? {
             "overhang" => Some("overhang"),
-            "obstacle" | "ContextShading" => Some("obstacle"),
+            "obstacle" => Some("obstacle"),
             _ => None,
         }
     }
@@ -12960,39 +12964,68 @@ Shade 1,ContextShading,overhang,10,20,5,7,,"0,0,0"
     }
 
     #[test]
-    fn context_shading_treats_contextshading_type_as_obstacle() {
-        let csv = r#"Zone
-Name,Type,volume,floor_area
-Living,Zone,100,50
+    fn context_shading_type_comes_only_from_a_real_shading_type() {
+        // A legacy file with no shading_type column stored the type in Type. The element type
+        // ContextShading is not a shading type, so a blank shading_type blocks.
+        for (header, row, expected) in [
+            (
+                "Name,Type,start angle,end angle,distance,height",
+                "Shade 1,obstacle,10,20,5,7",
+                Some("obstacle"),
+            ),
+            (
+                "Name,Type,start angle,end angle,distance,height",
+                "Shade 1,ContextShading,10,20,5,7",
+                None,
+            ),
+            (
+                "Name,Type,shading_type,start angle,end angle,distance,height",
+                "Shade 1,ContextShading,,10,20,5,7",
+                None,
+            ),
+            (
+                "Name,Type,shading_type,start angle,end angle,distance,height",
+                "Shade 1,obstacle,,10,20,5,7",
+                None,
+            ),
+        ] {
+            let csv = format!(
+                "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n\nContext Shading\n{header}\n{row}\n"
+            );
+            let mut parser = CSVParser::new();
+            let data = parser.parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let mut result = builder.defaults.clone();
+            builder
+                .build_zone_structure(&mut result, &data)
+                .expect("Zone structure should build");
+            builder
+                .process_root_level_sections(&mut result, &data)
+                .expect("Root sections should process");
 
-Context Shading
-Name,Type,start angle,end angle,distance,height,parent_element,coords
-Shade 1,ContextShading,10,20,5,7,,"0,0,0"
-"#;
-
-        let mut parser = CSVParser::new();
-        let data = parser.parse_csv(csv).expect("CSV should parse");
-        let mut builder =
-            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
-        let mut result = builder.defaults.clone();
-        builder
-            .build_zone_structure(&mut result, &data)
-            .expect("Zone structure should build");
-        builder
-            .process_root_level_sections(&mut result, &data)
-            .expect("Root sections should process");
-
-        let segments = result["ExternalConditions"]["shading_segments"]
-            .as_array()
-            .expect("shading_segments should be an array");
-        let first_shaded_segment = segments
-            .iter()
-            .find(|seg| seg.get("shading").is_some())
-            .expect("expected at least one shaded segment");
-        let shading = first_shaded_segment["shading"]
-            .as_array()
-            .expect("shading should be an array");
-        assert_eq!(shading[0]["type"], "obstacle");
+            let types: Vec<_> = result["ExternalConditions"]["shading_segments"]
+                .as_array()
+                .expect("shading_segments should be an array")
+                .iter()
+                .filter_map(|seg| seg.pointer("/shading/0/type"))
+                .collect();
+            let errors = builder.take_non_fatal_errors();
+            match expected {
+                Some(kind) => {
+                    assert_eq!(types, vec![kind], "{row}");
+                    assert!(errors.is_empty(), "{row}: {errors:?}");
+                }
+                None => {
+                    assert!(types.is_empty(), "{row}: {types:?}");
+                    assert!(
+                        errors.iter().any(|e| e.code == "E027"
+                            && e.path == "/Context Shading/Shade 1/shading_type"),
+                        "{row}: {errors:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
