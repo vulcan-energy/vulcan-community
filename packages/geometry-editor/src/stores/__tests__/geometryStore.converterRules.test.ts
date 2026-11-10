@@ -229,8 +229,13 @@ const CASES: Case[] = [
   { name: 'blank ComplianceValidationEnabled is on', defaults: true,
     edit: (csv) => replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,,')(csv).replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
     allows: ['Kitchen cooker hood extracts to outside'], saves: { 'Metadata|ComplianceValidationEnabled': '', 'Metadata|KitchenExtractorHoodExternal': 'FALSE' } },
+  // The editor's checks stay on whatever the switch says; the last non-blank row is saved, as the converter reads it.
+  { name: 'ComplianceValidationEnabled FALSE then blank', edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,\nComplianceValidationEnabled,,'),
+    then: (store) => expect(store.getState().complianceSettings.complianceValidationEnabled).toBe(true),
+    saves: { 'Metadata|ComplianceValidationEnabled': 'FALSE' } },
+  // The converter ignores ScenariosBaseModelEnabled.
   { name: 'ScenariosBaseModelEnabled that is not TRUE or FALSE', edit: replace('ScenariosBaseModelEnabled,TRUE,', 'ScenariosBaseModelEnabled,yes,'),
-    blocks: ["ScenariosBaseModelEnabled is 'yes'"], saves: { 'Metadata|ScenariosBaseModelEnabled': 'yes' } },
+    allows: ["ScenariosBaseModelEnabled is 'yes'"], saves: { 'Metadata|ScenariosBaseModelEnabled': 'yes' } },
   // The converter keeps distribution pipework whatever ComplianceValidationEnabled says.
   { name: 'distribution pipework is saved', edit: replace('Pipe,WaterPipework,5.08,internal,primary,', 'Pipe,WaterPipework,5.08,internal,distribution,'),
     saves: { 'Water Pipework|Pipe|pipework_type': 'distribution' } },

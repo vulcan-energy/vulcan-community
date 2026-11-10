@@ -520,7 +520,7 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs): Array<[string, str
     ['HeatingControlType', text(compliance.HeatingControlType)],
     ['PartGcompliance', bool(compliance.PartGcompliance)],
     ['ColdWaterSource', text(compliance.ColdWaterSource)],
-    ['ComplianceValidationEnabled', bool(compliance.complianceValidationEnabled)],
+    ['ComplianceValidationEnabled', compliance.complianceValidationCell],
     ['ScenariosBaseModelEnabled', bool(compliance.scenariosBaseModelEnabled)],
     ['AirPermeability_test_pressure', text(compliance.AirPermeability_test_pressure)],
     ['AirPermeability_test_result', num(compliance.AirPermeability_test_result)],
@@ -587,7 +587,7 @@ const ABSENT_ROW_DEFAULTS: Readonly<Record<string, boolean>> = {
  */
 function templateMetadataValue(state: MetadataRowInputs, defaults: unknown, key: string): unknown {
   return valueAt(defaults, metadataSchemaPath(key))
-    ?? (state.complianceSettings.complianceValidationEnabled === false ? undefined : ABSENT_ROW_DEFAULTS[key]);
+    ?? (/^FALSE$/i.test(state.complianceSettings.complianceValidationCell ?? '') ? undefined : ABSENT_ROW_DEFAULTS[key]);
 }
 
 /**
@@ -651,8 +651,8 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
  * One issue per model-input metadata row the save would leave out although the target's schema
  * takes it (or no schema says otherwise): the file had the row blank, the user cleared a value, or
  * no defaults value exists for a value the schema requires. `defaults` is undefined while the
- * defaults are still loading, when only blank rows are known to be unset. Also one issue per
- * workflow switch (ComplianceValidationEnabled, ScenariosBaseModelEnabled) holding text.
+ * defaults are still loading, when only blank rows are known to be unset. Also one issue when
+ * ComplianceValidationEnabled holds text.
  */
 export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: unknown, defaults: unknown): string[] {
   const unread = state.complianceSettings.unreadMetadataRows ?? {};
@@ -664,9 +664,9 @@ export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: u
     if (value === undefined) return '';
     return key.startsWith('NumberOf') ? ` Space labels show ${value}.` : ` The geometry gives ${value}.`;
   };
-  return metadataRowValues(state).flatMap(([key, value]) => value === undefined && !(key in METADATA_INPUT_LABELS) && unread[key]
-    // A workflow switch holding text, which the converter stops on for ComplianceValidationEnabled (E055).
-    ? [`Metadata: ${key} is '${unread[key]}', which is not TRUE or FALSE. Enter TRUE or FALSE in the file.`]
+  return metadataRowValues(state).flatMap(([key, value]) => key === 'ComplianceValidationEnabled' && value && !/^(TRUE|FALSE)$/i.test(value)
+    // Text the converter stops on (E055).
+    ? [`Metadata: ${key} is '${value}', which is not TRUE or FALSE. Enter TRUE or FALSE in the file.`]
     : (value === undefined && key in METADATA_INPUT_LABELS
       && !systemsRowSetsMetadataInput(state.elements, key)
       && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'

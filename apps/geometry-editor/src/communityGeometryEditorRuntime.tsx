@@ -84,8 +84,9 @@ export function createCommunityGeometryEditorRuntime(
     session: options.session,
     workspaceResourcePort: workspaceResources.port,
     getDefaultsPath: () => options.store.getState().defaultsPath,
-    getProfile: () => options.store.getState().complianceSettings
-      .complianceValidationEnabled === true ? 'fhs' : 'core',
+    // The file's ComplianceValidationEnabled as the converter reads it: only FALSE switches it off.
+    getProfile: () => (/^FALSE$/i.test(options.store.getState().complianceSettings
+      .complianceValidationCell ?? '') ? 'core' : 'fhs'),
     loadSchemaText: loadCommunitySchemaText,
     builder: options.modelBuilder ?? createCommunityModelWorkerBuilder(),
   });

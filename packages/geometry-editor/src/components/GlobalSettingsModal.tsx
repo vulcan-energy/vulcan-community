@@ -1759,7 +1759,7 @@ export function GlobalSettingsModal({
                         >
                           <input
                             type="checkbox"
-                            // The file's row as the converter reads it: a blank or absent row is on.
+                            // The editor applies the FHS checks to every file; the file's row is only saved.
                             checked={complianceSettings.complianceValidationEnabled !== false}
                             onChange={(e) =>
                               setComplianceSettings({

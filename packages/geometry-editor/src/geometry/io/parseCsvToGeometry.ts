@@ -166,7 +166,10 @@ export type ComplianceSettings = {
   HeatingControlType?: 'SeparateTempControl' | 'SeparateTimeAndTempControl';
   PartGcompliance?: boolean;
   ColdWaterSource?: 'mains water' | 'header tank';
+  /** The file's ComplianceValidationEnabled row as the converter reads it (TRUE or FALSE in any case); the editor store keeps it on. */
   complianceValidationEnabled?: boolean;
+  /** The file's ComplianceValidationEnabled cell as typed: the last non-blank row, or blank when every row is blank. */
+  complianceValidationCell?: string;
   /** When false, this model is hidden from the Scenarios base-model picker (CSV row `ScenariosBaseModelEnabled`). */
   scenariosBaseModelEnabled?: boolean;
   AirPermeability_test_pressure?: 'Standard' | 'Pulse test only';
@@ -193,8 +196,7 @@ export type ComplianceSettings = {
   storeys_in_building?: number;
   /**
    * Model-input rows the file has with a value the editor cannot read, by row: blank (E066) or not a
-   * value the converter accepts (E055, E026), and workflow switches that are blank or not TRUE or
-   * FALSE. Never filled; the save writes the cell back as it was.
+   * value the converter accepts (E055, E026), and ScenariosBaseModelEnabled when not TRUE or FALSE. Never filled; the save writes the cell back as it was.
    */
   unreadMetadataRows?: Record<string, string>;
   /** Model-input rows the file lacks: they take the value the converter uses for an absent row. */
@@ -321,9 +323,7 @@ export const parseCsvToGeometry = (
   const metadataRowsInFile = new Set<string>();
   const modelInputCells: Record<string, string> = {};
   // A finite number as the converter reads a cell; anything else leaves the setting unread.
-  // A workflow switch: TRUE or FALSE in any case, as the converter reads ComplianceValidationEnabled.
-  // A blank is the converter's absent row (switched on) and other text is E055 there; either stays
-  // unset and saves as typed, and text blocks (unsetMetadataInputIssues).
+  // ScenariosBaseModelEnabled: TRUE or FALSE in any case; other text stays unset and saves as typed.
   const workflowFlag = (key: string, raw: string | undefined): boolean | undefined => {
     const cell = raw?.trim() ?? '';
     if (/^(TRUE|FALSE)$/i.test(cell)) return cell.toUpperCase() === 'TRUE';
@@ -543,8 +543,12 @@ export const parseCsvToGeometry = (
       continue;
     }
     if (line.startsWith('ComplianceValidationEnabled,')) {
-      const value = workflowFlag('ComplianceValidationEnabled', metadataFields[1]);
-      if (value !== undefined) complianceSettings.complianceValidationEnabled = value;
+      // As the converter reads it (apply_fhs_implicit_false_root_booleans): the last non-blank row
+      // wins, a blank or absent row is on, and other text blocks (unsetMetadataInputIssues).
+      const cell = metadataFields[1]?.trim() ?? '';
+      if (cell === '' && complianceSettings.complianceValidationCell !== undefined) continue;
+      complianceSettings.complianceValidationCell = cell;
+      complianceSettings.complianceValidationEnabled = /^(TRUE|FALSE)$/i.test(cell) ? cell.toUpperCase() === 'TRUE' : undefined;
       continue;
     }
     if (line.startsWith('ScenariosBaseModelEnabled,')) {

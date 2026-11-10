@@ -14,7 +14,13 @@ export interface ComplianceSlice {
     HeatingControlType?: 'SeparateTempControl' | 'SeparateTimeAndTempControl';
     PartGcompliance?: boolean;
     ColdWaterSource?: 'mains water' | 'header tank';
+    /** Always true: the editor applies the FHS checks to every file, as the converter validates every file against an FHS target. */
     complianceValidationEnabled?: boolean;
+    /**
+     * The file's `ComplianceValidationEnabled` cell as typed, read as the converter reads it: the
+     * last non-blank row, or blank when every row is blank. Saved as is; only the converter acts on it.
+     */
+    complianceValidationCell?: string;
     /**
      * Optional; from CSV `ScenariosBaseModelEnabled`. When `false`, the Scenarios tab hides the base model.
      * (Worker sets on merge from strict FHS/ECaaS results.)
@@ -71,24 +77,11 @@ const FHS_COMPLIANCE_DEFAULTS: Partial<GeometryState['complianceSettings']> = {
   HeatingControlType: 'SeparateTempControl',
 };
 
-export const createInitialComplianceSettings = (): GeometryState['complianceSettings'] => {
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const saved = localStorage.getItem('geometry-compliance-validation-enabled');
-      if (saved !== null) {
-        const enabled = saved === 'true';
-        return enabled
-          ? { complianceValidationEnabled: true, ...FHS_COMPLIANCE_DEFAULTS }
-          : { complianceValidationEnabled: false };
-      }
-    }
-  } catch {
-    // Ignore localStorage errors
-  }
-  // First-time user: default to FHS compliance enabled with required fields
-  // pre-populated so the model is immediately in a saveable/valid state.
-  return { complianceValidationEnabled: true, ...FHS_COMPLIANCE_DEFAULTS };
-};
+export const createInitialComplianceSettings = (): GeometryState['complianceSettings'] => ({
+  complianceValidationEnabled: true,
+  complianceValidationCell: 'TRUE',
+  ...FHS_COMPLIANCE_DEFAULTS,
+});
 
 function applyFhsComplianceDefaultsIfEnabled(settings: Record<string, unknown>): void {
   if (!settings.complianceValidationEnabled) return;
@@ -137,17 +130,6 @@ export const createComplianceSlice: GeometryStoreSlice = (set) => ({
       removeHouseOnlyFlatFields(newSettings);
 
       if ('complianceValidationEnabled' in settings) {
-        try {
-          if (typeof window !== 'undefined' && window.localStorage) {
-            localStorage.setItem(
-              'geometry-compliance-validation-enabled',
-              String(settings.complianceValidationEnabled || false)
-            );
-          }
-        } catch {
-          // Ignore localStorage errors
-        }
-
         // When compliance validation is being enabled, auto-populate any
         // required FHS fields that haven't been set yet so the user starts
         // from a valid (saveable) state rather than seeing immediate errors.
@@ -161,7 +143,8 @@ export const createComplianceSlice: GeometryStoreSlice = (set) => ({
     const nextSettings: Record<string, unknown> = { ...settings };
     deleteExplicitUndefined(nextSettings, settings);
     removeHouseOnlyFlatFields(nextSettings);
-    // A loaded file keeps exactly what it says: a value it lacks stays unset and is reported.
-    set({ complianceSettings: nextSettings as GeometryState['complianceSettings'] });
+    // A loaded file keeps exactly what it says: a value it lacks stays unset and is reported. Its
+    // ComplianceValidationEnabled cell is only saved (complianceValidationCell); the editor's checks stay on.
+    set({ complianceSettings: { ...nextSettings, complianceValidationEnabled: true } as GeometryState['complianceSettings'] });
   },
 });
