@@ -68,6 +68,51 @@ export function roofCoversPlanPoint(
   return isPointInPolygon2D(p, roof.coordinates) || distanceToEdgesAlongside(p, roof.coordinates, dir) < OUTLINE_TOL_M;
 }
 
+/** t (0..1 along a→b, away from the ends) where the line a→b crosses a roof's plan edge. */
+function roofEdgeCrossings(a: { x: number; y: number }, b: { x: number; y: number }, roofs: BuildingElementOpaque[], sideT: number): number[] {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const ts: number[] = [];
+  for (const roof of roofs) {
+    const ring = roof.coordinates;
+    for (let i = 0; i < ring.length; i += 1) {
+      const p = ring[i]!;
+      const q = ring[(i + 1) % ring.length]!;
+      const ex = q.x - p.x;
+      const ey = q.y - p.y;
+      const den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-12) continue;
+      const t = ((p.x - a.x) * ey - (p.y - a.y) * ex) / den;
+      const u = ((p.x - a.x) * dy - (p.y - a.y) * dx) / den;
+      if (t > sideT && t < 1 - sideT && u >= 0 && u <= 1) ts.push(t);
+    }
+  }
+  return ts;
+}
+
+/**
+ * Distance (m from the wall's first point) where the wall line first runs out from under every
+ * pitched roof, for the greyed "Under roof" choice; null when roofs cover the whole line.
+ */
+export function wallLeavesRoofsAtM(wall: Element, elements: Element[]): number | null {
+  const c = wall.coordinates;
+  if (!c || c.length !== 2) return null;
+  const a = c[0]!;
+  const b = c[1]!;
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  if (length < 1e-9) return null;
+  const roofs = elements.filter((el) => isPitchedRoof(el, wall.id));
+  const dir = { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
+  const covered = (t: number) => roofs.some((roof) =>
+    roofCoversPlanPoint(roof, { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, dir));
+  const ts = [0, 1, ...roofEdgeCrossings(a, b, roofs, 0)].sort((x, y) => x - y);
+  for (let i = 0; i < ts.length; i += 1) {
+    if (!covered(ts[i]!)) return roundToTwoDecimals(ts[i]! * length);
+    if (i < ts.length - 1 && !covered((ts[i]! + ts[i + 1]!) / 2)) return roundToTwoDecimals(ts[i]! * length);
+  }
+  return null;
+}
+
 /**
  * Fits one edge of a line wall to the pitched roofs whose plan outline covers the wall line.
  *
@@ -117,21 +162,7 @@ export function deriveWallEdgeFromRoofs(
   const covering = (t: number) => roofs.filter((roof) => covers(roof, t));
 
   // Crossings of the wall line with each roof's plan edges, plus the bends of `limit`.
-  const ts = new Set([0, 1, ...(limit ?? []).map((p) => p.t)]);
-  for (const roof of roofs) {
-    const ring = roof.coordinates;
-    for (let i = 0; i < ring.length; i += 1) {
-      const p = ring[i]!;
-      const q = ring[(i + 1) % ring.length]!;
-      const ex = q.x - p.x;
-      const ey = q.y - p.y;
-      const den = dx * ey - dy * ex;
-      if (Math.abs(den) < 1e-12) continue;
-      const t = ((p.x - a.x) * ey - (p.y - a.y) * ex) / den;
-      const u = ((p.x - a.x) * dy - (p.y - a.y) * dx) / den;
-      if (t > sideT && t < 1 - sideT && u >= 0 && u <= 1) ts.add(t);
-    }
-  }
+  const ts = new Set([0, 1, ...(limit ?? []).map((p) => p.t), ...roofEdgeCrossings(a, b, roofs, sideT)]);
 
   // Inside each span the same roofs cover the wall and each roof, the foot and `limit` are
   // straight lines in t, so the chosen roof can only change where two of those lines cross.

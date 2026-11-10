@@ -36,7 +36,7 @@ export function proposeAutoThermalBridgesWithRaw(
 ): AutoThermalBridgePipelineResult {
   const openings = proposeFacadeOpeningThermalBridges(elements, floors);
   const roofOpenings = proposeRoofOpeningThermalBridges(elements, floors, globalOrientationOffset);
-  const flatRoofEdges = proposeFlatRoofEdgeThermalBridges(elements, floors);
+  const flatRoofEdges = proposeFlatRoofEdgeThermalBridges(elements, floors, globalOrientationOffset);
   const slopedEavesGable = proposeSlopedRoofEavesGableThermalBridges(elements, floors, globalOrientationOffset);
   const groundContinuous = proposeWallGroundContinuous(elements, openings, floors);
   const intermediateContinuous = proposeWallIntermediateContinuous(elements, openings, floors);

@@ -33,6 +33,8 @@ import {
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { CATEGORY_GHOST_OPACITY_FACTOR } from '../../lib/elementCategoryVisibility';
 import { getDormerBundleInfo } from '../../lib/dormerGeometry';
+import { deriveRoofCutout } from '../../lib/roofCutouts';
+import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { isElementOnActiveCanvasFloor } from '../../lib/elementCanvasFloor';
 import { isDevelopmentContextGeneratedShading } from '../../lib/developmentContextShading';
 import {
@@ -629,20 +631,29 @@ function getDormerCutoutPolygonsForHost(
   hostElement: Element,
   elementsById: Record<string, Element>,
   selection: { type: 'zone' | 'element' | 'global' | 'dormer'; id: string; isPlaceholder?: boolean } | null | undefined,
+  floors: Floor[],
+  globalOrientationOffset: number | undefined,
 ): Array<Array<{ x: number; y: number; z: number }>> {
   if (hostElement.type !== 'BuildingElementOpaque' || !selection) return [];
   const showAllHostCutouts = selection.type === 'element' && selection.id === hostElement.id;
   const selectedDormerBundleId = selection.type === 'dormer' ? selection.id : null;
   if (!showAllHostCutouts && !selectedDormerBundleId) return [];
 
-  return Object.values(elementsById).flatMap((candidate) => {
+  // The part of the roof covered by walls standing on it (derived, like area).
+  const elements = Object.values(elementsById);
+  const covered = showAllHostCutouts
+    ? (deriveRoofCutout(hostElement, elements, withEffectiveStoreyHeights(floors, elements), globalOrientationOffset)?.polygons ?? [])
+      .flat()
+      .map((ring) => ring.map(([x, y]) => ({ x, y, z: 0 })))
+    : [];
+  return [...covered, ...elements.flatMap((candidate) => {
     const bundleInfo = getDormerBundleInfo(candidate);
     if (!bundleInfo || bundleInfo.role !== 'front-wall-anchor') return [];
     if (bundleInfo.host_element_name !== hostElement.name) return [];
     if (selectedDormerBundleId && bundleInfo.bundle_id !== selectedDormerBundleId) return [];
     if (bundleInfo.cutout_polygon.length < 3) return [];
     return [bundleInfo.cutout_polygon];
-  });
+  })];
 }
 
 // Render element based on its coordinates - converted to component for React.memo optimization
@@ -1371,10 +1382,10 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   const showDirectSelectionHandles = isSelected && !isDormerBundleMember;
   // Memo: dormer cutouts iterate all elements; reproject only when geometry or view changes.
   const dormerCutoutCanvasPolygons = useMemo(
-    () => getDormerCutoutPolygonsForHost(element, elementsById, selection).map((polygon) =>
+    () => getDormerCutoutPolygonsForHost(element, elementsById, selection, floors ?? [], resolvedGlobalOrientationOffset).map((polygon) =>
       polygon.map((point) => worldToCanvas(point, scale, panOffset, canvasCenter)),
     ),
-    [element, elementsById, selection, scale, panOffset, canvasCenter],
+    [element, elementsById, selection, floors, resolvedGlobalOrientationOffset, scale, panOffset, canvasCenter],
   );
 
   if (coordinates.length === 0) {

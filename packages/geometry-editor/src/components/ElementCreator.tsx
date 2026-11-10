@@ -91,7 +91,7 @@ import {
   mergeUnheatedPitchedRoofCeilingElevationExtraJson,
 } from '../lib/unheatedPitchedRoofCeiling';
 import { readProfiledLineFace, type ProfilePoint } from '../lib/profileLineFace';
-import { deriveWallEdgeFromRoofs } from '../lib/wallEdgeFromRoofs';
+import { deriveWallEdgeFromRoofs, wallLeavesRoofsAtM } from '../lib/wallEdgeFromRoofs';
 import {
   listElementPresetOptions,
 } from '../geometry/parameterLibraryCatalog';
@@ -4279,6 +4279,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             topRef={fieldRef('height')}
             roofModes={selectedElement.type !== 'BuildingElementTransparent'}
             fitRoof={fitWallEdgeToRoofs}
+            roofEndsAtM={wallLeavesRoofsAtM(selectedElement, allElements)}
             onCommit={applyWallShape}
           >
             {heightField}

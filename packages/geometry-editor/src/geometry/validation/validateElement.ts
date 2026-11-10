@@ -81,9 +81,10 @@ import { deriveWallEdgeFromRoofs, isRoofSnapshotStale } from '../../lib/wallEdge
 import {
   bottomEdgeRoofRuns,
   deriveRoofCutout,
-  modelHasRaisedWallBottoms,
-  pitchedRoofsForWalls,
-  roofFootprintGapMessage,
+  isFootprintWall,
+  modelMayHaveRoofCutouts,
+  roofsWallsStandOn as roofsForCutouts,
+  roofFootprintIssueMessage,
 } from '../../lib/roofCutouts';
 import { inferPsiSourceFromValue } from '../../lib/simplifiedFabricMap';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
@@ -972,21 +973,22 @@ function staleRoofFitWarning(
 }
 
 /**
- * Open footprints of walls standing on a roof (roofCutouts.ts), named on the roof and on each wall
- * in the open chain, so the warning list takes the user to either.
+ * Footprints of walls standing on a roof that do not close or are not clear (roofCutouts.ts), named
+ * on the roof and on each wall involved, so the warning list takes the user to either.
  */
-function roofFootprintGapWarnings(
+function roofFootprintIssueWarnings(
   element: Element,
   elements: Element[],
   floors: Floor[],
   globalOrientationOffset: number | undefined,
 ): string[] {
-  if (element.type !== 'BuildingElementOpaque' || !modelHasRaisedWallBottoms(elements)) return [];
-  const roofs = readProfiledLineFace(element.extra_json)
-    ? [...new Set(bottomEdgeRoofRuns(element, pitchedRoofsForWalls(elements, globalOrientationOffset), floors, globalOrientationOffset).map((run) => run.roof))]
+  if (element.type !== 'BuildingElementOpaque' && !isFootprintWall(element)) return [];
+  if (!modelMayHaveRoofCutouts(elements)) return [];
+  const roofs = isFootprintWall(element)
+    ? [...new Set(bottomEdgeRoofRuns(element, roofsForCutouts(elements, globalOrientationOffset), floors, globalOrientationOffset).map((run) => run.roof))]
     : [element];
-  return roofs.flatMap((roof) => (deriveRoofCutout(roof, elements, floors, globalOrientationOffset)?.gaps ?? [])
-    .flatMap((gap) => (roof.id === element.id || gap.wallNames.includes(element.name) ? [roofFootprintGapMessage(roof.name, gap)] : [])));
+  return roofs.flatMap((roof) => (deriveRoofCutout(roof, elements, floors, globalOrientationOffset)?.issues ?? [])
+    .flatMap((issue) => (roof.id === element.id || issue.wallNames.includes(element.name) ? [roofFootprintIssueMessage(roof.name, issue)] : [])));
 }
 
 export const validateElementCore = (
@@ -1085,8 +1087,8 @@ export const validateElementCore = (
     : null;
   if (roofFitWarning) warnings.push(geo(roofFitWarning, 'height'));
   if (elementsById) {
-    const isWall = !!readProfiledLineFace(element.extra_json);
-    for (const message of roofFootprintGapWarnings(element, allElements, effectiveFloors(), context.globalOrientationOffset)) {
+    const isWall = isFootprintWall(element);
+    for (const message of roofFootprintIssueWarnings(element, allElements, effectiveFloors(), context.globalOrientationOffset)) {
       warnings.push(geo(message, isWall ? 'height' : 'area'));
     }
   }

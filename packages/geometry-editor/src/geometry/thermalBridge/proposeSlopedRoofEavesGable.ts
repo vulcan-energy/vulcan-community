@@ -34,7 +34,7 @@ import { zonesCompatible } from './proposeAdjacentWallJunction';
 import { overlapEndpointsOnRoofPlanEdgeForPartyWall } from './partyWallRoofOverlap';
 import { isPartyWallVerticalEnvelopeLine } from './proposePartyWallToExternalE18';
 import type { MultiPolygon } from 'polygon-clipping';
-import { deriveRoofCutout, modelHasRaisedWallBottoms } from '../../lib/roofCutouts';
+import { deriveRoofCutout, modelMayHaveRoofCutouts } from '../../lib/roofCutouts';
 import { isPointInPolygon2D } from '../../lib/pointInPolygon';
 import { FACADE_PROPOSAL_SUBSTANTIAL_OVERLAP_FRAC } from './thermalBridgeTolerances';
 
@@ -392,17 +392,18 @@ function pushEavesGableProposals(
 }
 
 /**
- * Drops the parts of eaves, verge and ridge lines that lie inside the part of their roof covered by
- * walls standing on it (roofCutouts.ts): that edge is inside the dwelling. A line on the footprint
- * boundary counts as inside, since the wall standing there has its own R8/R9 junction.
+ * Drops the parts of eaves, verge, ridge and flat-roof edge lines that lie inside the part of their
+ * roof covered by walls standing on it (roofCutouts.ts): that edge is inside the dwelling. A line on
+ * the footprint boundary counts as inside, since the wall standing there has its own junction (R8/R9
+ * on a pitched roof, E6 on a flat roof deck).
  */
-function trimRoofEdgesInsideCutouts(
+export function trimRoofEdgesInsideCutouts(
   proposals: FacadeOpeningTbProposal[],
   elements: Element[],
   floors: Floor[],
   globalOrientationOffset: number | undefined,
 ): FacadeOpeningTbProposal[] {
-  if (!modelHasRaisedWallBottoms(elements)) return proposals;
+  if (!modelMayHaveRoofCutouts(elements)) return proposals;
   const cutouts = new Map<string, MultiPolygon>();
   const cutoutFor = (roofId: string) => {
     if (!cutouts.has(roofId)) {
@@ -411,7 +412,9 @@ function trimRoofEdgesInsideCutouts(
     }
     return cutouts.get(roofId)!;
   };
+  const roofEdgeRoles = new Set(['sloped_roof_eaves', 'sloped_roof_gable', 'sloped_roof_ridge', 'flat_roof_edge']);
   return proposals.flatMap((p) => {
+    if (!roofEdgeRoles.has(p.edgeRole)) return [p];
     const polygons = cutoutFor(p.openingId);
     if (polygons.length === 0) return [p];
     const [a, b] = p.coordinates as [{ x: number; y: number; z: number }, { x: number; y: number; z: number }];

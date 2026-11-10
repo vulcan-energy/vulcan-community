@@ -42,6 +42,8 @@ export type WallShapeRowsProps = {
   roofModes: boolean;
   /** Fits an edge to the roofs over/under the wall; `limit` is the other edge. */
   fitRoof: (edge: Edge, limit: ProfilePoint[]) => WallRoofEdge | null;
+  /** Where the wall line runs out from under every roof (m along the wall), or null: says why Under roof is greyed. */
+  roofEndsAtM?: number | null;
   /** Field ref for the Top row (validation scroll target for `height`). */
   topRef?: (node: HTMLDivElement | null) => void;
   onCommit: (next: WallShapeCommit) => void;
@@ -206,11 +208,12 @@ function Sketch({ profiles, widthM, roofLines, invalid, highlight }: {
   );
 }
 
-function EdgeRow({ edge, mode, roofModes, hasRoof, onPick, rowRef, children }: {
+function EdgeRow({ edge, mode, roofModes, hasRoof, roofEndsAtM, onPick, rowRef, children }: {
   edge: Edge;
   mode: EdgeMode;
   roofModes: boolean;
   hasRoof: boolean;
+  roofEndsAtM?: number | null;
   onPick: (edge: Edge, mode: EdgeMode) => void;
   rowRef?: (node: HTMLDivElement | null) => void;
   children: ReactNode;
@@ -222,7 +225,9 @@ function EdgeRow({ edge, mode, roofModes, hasRoof, onPick, rowRef, children }: {
       label: edge === 'top' ? 'Under roof' : 'On roof',
       disabled: !hasRoof && mode !== 'roof',
       title: hasRoof ? undefined : edge === 'top'
-        ? 'No roof covers the whole length of this wall. Make the wall end at the roof edge, or pick Custom.'
+        ? (typeof roofEndsAtM === 'number'
+          ? `No roof covers the whole wall: it runs past the roof edge at ${roofEndsAtM.toFixed(2)} m along the wall. Make the wall end at the roof edge, or pick Custom.`
+          : 'No roof over this wall is above its bottom edge along the whole wall. Pick Custom to set the top by hand.')
         : 'No pitched roof is under this wall between its base and its top. Pick Custom to set the bottom by hand.',
     }] : []),
     { value: 'custom', label: 'Custom' },
@@ -250,6 +255,7 @@ export function WallShapeRows({
   children: heightField,
   roofModes,
   fitRoof,
+  roofEndsAtM,
   topRef,
   onCommit,
 }: WallShapeRowsProps) {
@@ -356,7 +362,7 @@ export function WallShapeRows({
           {roofLines.length > 0 ? <span><i className="wall-shape-legend-roof" />Roof surface</span> : null}
         </div>
       </div>
-      <EdgeRow edge="top" mode={modes.top} roofModes={roofModes} hasRoof={!!freshTop} onPick={pick} rowRef={topRef}>
+      <EdgeRow edge="top" mode={modes.top} roofModes={roofModes} hasRoof={!!freshTop} roofEndsAtM={roofEndsAtM} onPick={pick} rowRef={topRef}>
         {topBody}
       </EdgeRow>
       {roofModes ? (

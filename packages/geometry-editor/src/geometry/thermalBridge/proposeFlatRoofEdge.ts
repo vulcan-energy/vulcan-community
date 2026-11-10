@@ -6,48 +6,21 @@
  * (`pitch === 0°`). Roofs may be a **2-point edge** or a **plan polygon** (≥3 vertices); each polygon
  * boundary edge gets one proposal. Default **E14**; **E15** (parapet) is a user choice in the suggest modal.
  */
-import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
-import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
+import { deriveRoofCutout, flatRoofDeckElevationMForTb, isFlatRoofDeckLineForTb } from '../../lib/roofCutouts';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
+import { trimRoofEdgesInsideCutouts } from './proposeSlopedRoofEavesGable';
+
+export { flatRoofDeckElevationMForTb, isFlatRoofDeckLineForTb };
 
 const MIN_EDGE_LEN_XY_M = 0.05;
 
 function dist2XY(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-/**
- * True for a **horizontal flat roof** line: roof-like, pitch exactly 0, and we can tell it is a roof
- * (name or HEM unheated-pitched flag), not an arbitrary pitch-0 opaque.
- */
-export function isFlatRoofDeckLineForTb(o: BuildingElementOpaque): boolean {
-  if (o.isPlaceholder) return false;
-  if (!isRoofLikeOpaqueElement(o)) return false;
-  if (o.pitch !== 0) return false;
-  if ((o as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof) return true;
-  const n = (o.name ?? '').trim().toLowerCase();
-  return n === 'roof' || n.includes('roof');
-}
-
-/** Deck elevation (m) for flat roof TB geometry — shared with party-wall × flat-roof P4 proposals. */
-export function flatRoofDeckElevationMForTb(o: BuildingElementOpaque, floors: Floor[] | undefined): number {
-  if (floors && floors.length > 0) {
-    return elementBaseElevationMForTb(o, floors);
-  }
-  const c = o.coordinates;
-  const bh = o.base_height;
-  if (typeof bh === 'number' && Number.isFinite(bh) && bh >= 0) return bh;
-  let maxZ = -Infinity;
-  for (const p of c ?? []) {
-    if (typeof p?.z === 'number' && Number.isFinite(p.z)) maxZ = Math.max(maxZ, p.z);
-  }
-  if (maxZ !== -Infinity) return maxZ;
-  return 0;
 }
 
 /** Drop repeated closing vertex when first ≈ last (common closed rings). */
@@ -62,6 +35,7 @@ export function flatRoofDeckEffectivePolygonVertexCount(c: Array<{ x: number; y:
 export function proposeFlatRoofEdgeThermalBridges(
   elements: Element[],
   floors?: Floor[],
+  globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   floors = withEffectiveStoreyHeights(floors, elements);
   const out: FacadeOpeningTbProposal[] = [];
@@ -120,5 +94,31 @@ export function proposeFlatRoofEdgeThermalBridges(
       });
     }
   }
-  return out;
+  // Under a room built on the deck the deck is a floor inside the dwelling: no roof edge there,
+  // and each wall standing on it meets that floor (E6, a floor with heated space above and below).
+  for (const el of elements) {
+    if (el.type !== 'BuildingElementOpaque' || !isFlatRoofDeckLineForTb(el) || (el.coordinates?.length ?? 0) < 3) continue;
+    const cutout = deriveRoofCutout(el, elements, floors ?? [], globalOrientationOffset);
+    const z = flatRoofDeckElevationMForTb(el, floors);
+    for (const { wall, t0, t1 } of cutout?.standing ?? []) {
+      const [A, B] = [wall.coordinates[0]!, wall.coordinates[1]!];
+      const at = (t: number) => ({ x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t, z });
+      const lenM = dist2XY(A, B) * (t1 - t0);
+      if (lenM < MIN_EDGE_LEN_XY_M) continue;
+      out.push({
+        proposalId: `${el.id}:wall_on_deck:${wall.id}:${roundToTwoDecimals(t0)}`,
+        openingId: wall.id,
+        openingName: `${el.name} ↔ ${wall.name}`,
+        zoneId: wall.zoneId ?? el.zoneId,
+        edgeRole: 'wall_intermediate_continuous',
+        junctionCode: 'E6',
+        suggestedLengthM: roundToTwoDecimals(lenM),
+        linearThermalTransmittance: psiTable37ForCode('E6'),
+        reason: `E6: wall "${wall.name}" stands on the flat roof "${el.name}", which is a floor inside the dwelling under the room the walls enclose`,
+        coordinates: [at(t0), at(t1)],
+        parentElementForTb: wall.name,
+      });
+    }
+  }
+  return trimRoofEdgesInsideCutouts(out, elements, floors ?? [], globalOrientationOffset);
 }

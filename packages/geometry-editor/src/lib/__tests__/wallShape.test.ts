@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { wallFaceProblem, wallFootFromExportedBaseHeight, type ProfilePoint } from '../profileLineFace';
-import { deriveWallEdgeFromRoofs, isRoofSnapshotStale } from '../wallEdgeFromRoofs';
+import { deriveWallEdgeFromRoofs, isRoofSnapshotStale, wallLeavesRoofsAtM } from '../wallEdgeFromRoofs';
 import { getAreaBasedElementExportGeometry, getElementGrossArea } from '../elementArea';
 import type { BuildingElementOpaque, Element } from '../../geometry/types';
 
@@ -60,6 +60,14 @@ const wall = (a: [number, number], b: [number, number], extra?: Record<string, u
 }) as BuildingElementOpaque;
 const derive = (w: Element, edge: 'top' | 'bottom', elements: Element[] = [front, rear]) =>
   deriveWallEdgeFromRoofs(w, elements, [], 0, edge);
+
+describe('wallLeavesRoofsAtM', () => {
+  it('says where a wall runs out from under the roofs', () => {
+    // From y = 4 out past the rear eaves (y = 6) to y = 7.
+    expect(wallLeavesRoofsAtM(wall([2, 4], [2, 7]), [front, rear])).toBe(2);
+    expect(wallLeavesRoofsAtM(wall([2, 1], [2, 5]), [front, rear])).toBeNull();
+  });
+});
 
 describe('deriveWallEdgeFromRoofs', () => {
   it('fits a bottom edge to a single slope', () => {
