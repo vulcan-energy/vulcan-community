@@ -1376,19 +1376,9 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                   {
                                     coordinates: [{ x: centerWorld.x, y: centerWorld.y, z }],
                                     ...(missingSystemSubtype ? { subcategory: missingSystemSubtype } : {}),
-                                    ...(missingHotWaterOther
-                                      ? {
-                                          subcategory: 'OtherWaterUseDetails',
-                                          flowrate: 8,
-                                        }
-                                      : {}),
-                                    ...(missingHotWaterShowerOrBath || missingHotWaterShower
-                                      ? {
-                                          subcategory: 'MixerShower',
-                                          flowrate: 8,
-                                          allow_low_flowrate: false,
-                                        }
-                                      : {}),
+                                    // The outlet's values stay blank and block until the user enters them, as in the create form.
+                                    ...(missingHotWaterOther ? { subcategory: 'OtherWaterUseDetails' } : {}),
+                                    ...(missingHotWaterShowerOrBath || missingHotWaterShower ? { subcategory: 'MixerShower' } : {}),
                                     ...(missingRefrigerationAppliance
                                       ? { appliancekey: 'Fridge' }
                                       : {}),
