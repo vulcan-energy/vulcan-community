@@ -1265,22 +1265,6 @@ fn metadata_field_value(
     })
 }
 
-fn metadata_f64(
-    csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
-    target: &str,
-) -> Option<f64> {
-    metadata_field_value(csv_data, target).and_then(|value| {
-        value
-            .as_f64()
-            .or_else(|| {
-                value
-                    .as_str()
-                    .and_then(|raw| raw.trim().parse::<f64>().ok())
-            })
-            .filter(|number| number.is_finite())
-    })
-}
-
 /// The model's ventilation zone base height. Every target requires it, so a model without one is
 /// already blocked by the schema and the 0 here never reaches an engine.
 fn ventilation_zone_base_height(model: &Value) -> f64 {
@@ -1510,6 +1494,9 @@ pub struct JSONBuilder {
     /// problems surface in the save's `ValidationResult` for the UI to show.
     /// RefCell because most merge passes take `&self`.
     non_fatal_errors: RefCell<Vec<ValidationError>>,
+    /// Model path of each built wet emitter and the CSV row it came from, so schema errors on
+    /// the emitter name the row.
+    emitter_rows: RefCell<Vec<(String, String)>>,
     /// Exact upstream core version supplied by the host for FHS input metadata.
     hem_core_version: String,
 }
@@ -1560,6 +1547,7 @@ impl JSONBuilder {
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
+            emitter_rows: RefCell::new(Vec::new()),
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
         };
 
@@ -1596,6 +1584,7 @@ impl JSONBuilder {
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
+            emitter_rows: RefCell::new(Vec::new()),
             hem_core_version: version_metadata.hem_core_version.clone(),
         };
         builder.index_templates();
@@ -1614,6 +1603,25 @@ impl JSONBuilder {
             schema_path: None,
             keyword: None,
         });
+    }
+
+    /// Prefix each error on a built wet emitter with the CSV row it came from.
+    pub fn name_emitter_rows(&self, errors: &mut [ValidationError]) {
+        for error in errors {
+            if let Some((_, row)) = self.emitter_rows.borrow().iter().find(|(path, _)| {
+                error.path == *path || error.path.starts_with(&format!("{path}/"))
+            }) {
+                error.message = format!("{row}: {}", error.message);
+            }
+        }
+    }
+
+    fn note_emitter_row(&self, system: &str, index: usize, row: &HashMap<String, Value>) {
+        let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+        self.emitter_rows.borrow_mut().push((
+            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
+            format!("Wet Emitters row '{name}' (system '{system}')"),
+        ));
     }
 
     /// Drain the non-fatal merge problems collected during `build_json`.
@@ -4942,6 +4950,10 @@ impl JSONBuilder {
         if self.compliance_validation_enabled == Some(false) {
             return;
         }
+        // The documented default for an ABSENT Metadata row (see the Geometry CSV contract); a
+        // blank row is E066. It stays in code, not the template: pinned preparation requires the
+        // workspace template to match the published bundle byte for byte, and edited workspace
+        // templates are never updated, so a template key would not reach existing workspaces.
         let Some(root) = result.as_object_mut() else {
             return;
         };
@@ -7575,6 +7587,7 @@ impl JSONBuilder {
 
                 for emitter_row in emitters_data {
                     let emitter_obj = self.build_wet_emitter_object(&subcategory, &emitter_row)?;
+                    self.note_emitter_row(&system_name, emitters_array.len(), &emitter_row);
                     emitters_array.push(Value::Object(emitter_obj));
                 }
 
@@ -7692,6 +7705,7 @@ impl JSONBuilder {
                         {
                             has_radiator_emitters = true;
                         }
+                        self.note_emitter_row(&system_name, emitters_array.len(), &emitter_row);
                         emitters_array.push(Value::Object(emitter_obj));
                     }
                     if has_radiator_emitters {
@@ -10690,6 +10704,31 @@ Radiator 2,Living,WetEmitter,radiator,2.0
 
         // Zone should reference the system
         assert_eq!(json["Zone"]["Living"]["SpaceHeatSystem"], "Living radiator");
+    }
+
+    #[test]
+    fn schema_errors_on_an_emitter_name_its_csv_row() {
+        let csv = "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n\nWet Emitters\nName,Zone,Type,subcategory,unit_number\nHall,Living,WetEmitter,radiator,1\nLounge,Living,WetEmitter,radiator,1\n";
+        let data = parse_csv(csv);
+        let mut builder =
+            JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder.build_zone_structure(&mut result, &data).unwrap();
+        builder
+            .process_root_level_sections(&mut result, &data)
+            .unwrap();
+        let mut errors = vec![ValidationError {
+            code: "E026".into(),
+            path: "/SpaceHeatSystem/Living radiator/emitters/1".into(),
+            message: "\"n\" is a required property".into(),
+            schema_path: None,
+            keyword: Some("required".into()),
+        }];
+        builder.name_emitter_rows(&mut errors);
+        assert_eq!(
+            errors[0].message,
+            "Wet Emitters row 'Lounge' (system 'Living radiator'): \"n\" is a required property"
+        );
     }
 
     #[test]
