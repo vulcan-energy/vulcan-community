@@ -277,13 +277,15 @@ impl CSVParser {
             return Ok(Value::Null);
         }
 
-        // Try to parse as number first
+        // Try to parse as number first. `NaN` and `inf` parse as f64 but are not JSON
+        // numbers: they stay text, so the converter reports the field.
         if let Ok(num) = trimmed.parse::<f64>() {
-            // Check if it's actually an integer
-            if num.fract() == 0.0 {
+            // An f64 holds every integer exactly up to 2^53; beyond that `as i64` saturates.
+            if num.fract() == 0.0 && num.abs() <= 9_007_199_254_740_992.0 {
                 return Ok(Value::Number(serde_json::Number::from(num as i64)));
-            } else {
-                return Ok(Value::Number(serde_json::Number::from_f64(num).unwrap()));
+            }
+            if let Some(number) = serde_json::Number::from_f64(num) {
+                return Ok(Value::Number(number));
             }
         }
 

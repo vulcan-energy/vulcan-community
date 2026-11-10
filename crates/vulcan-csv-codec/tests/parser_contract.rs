@@ -44,3 +44,15 @@ Wall,Missing,BuildingElementOpaque
         .expect_err("undefined zone must fail loudly");
     assert_eq!(error.code, "E008");
 }
+
+#[test]
+fn non_finite_and_out_of_range_numbers_are_not_coerced() {
+    let parsed = CSVParser::new()
+        .parse_csv("Metadata,,\nName,Value\nA,NaN\nB,-inf\nC,Infinity\nD,1e300\n")
+        .expect("CSV should parse");
+    let values: Vec<_> = parsed["Metadata"].iter().map(|row| &row["Value"]).collect();
+    assert_eq!(values[1], "NaN");
+    assert_eq!(values[2], "-inf");
+    assert_eq!(values[3], "Infinity");
+    assert_eq!(values[4], 1e300);
+}
