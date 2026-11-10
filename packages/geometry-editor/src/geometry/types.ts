@@ -302,7 +302,8 @@ export interface WetEmitter extends BaseElement {
   // area only required if subcategory is 'ufh'
   // unit_number only required if subcategory is 'radiator' or 'fancoil'
   area?: number;
-  unit_number?: number;
+  /** As typed: a cell that is not a whole number of 1 or more stays as it is and blocks. */
+  unit_number?: number | string;
   space_heat_system?: string;
 }
 

@@ -1498,7 +1498,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(element.type),
             escapeCSV(element.subcategory || ''),
             escapeCSV(formatOptionalFiniteNumberForCsv(element.area)),
-            escapeCSV(formatOptionalFiniteNumberForCsv(element.unit_number)),
+            escapeCSV(element.unit_number ?? ''),
             ...(writesLinks ? [escapeCSV(element.space_heat_system || '')] : []),
             escapeCSV(formatViewerBaseHeightForCsv(element)),
             formatElementCoordsForCsv(element),

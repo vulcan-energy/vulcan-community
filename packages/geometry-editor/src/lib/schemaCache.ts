@@ -2252,7 +2252,6 @@ function fallbackIntegerKeys(elementType: string): Set<string> {
     ContextShading: ['start_angle', 'end_angle'],
     OnSiteGeneration: ['orientation360'],
     Lighting: ['count'],
-    WetEmitter: ['unit_number'],
     Vents: ['orientation360'],
   };
   return new Set<string>(map[elementType] || []);

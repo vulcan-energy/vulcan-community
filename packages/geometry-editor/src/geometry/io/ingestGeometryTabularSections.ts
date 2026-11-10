@@ -62,6 +62,12 @@ function parseOptionalNumberColumn(raw: string | undefined): number | undefined 
   return roundToTwoDecimals(n);
 }
 
+/** Kept exactly as typed, text included, so it round-trips; validation blocks what the converter rejects. */
+function parseUnitNumberColumn(raw: string): number | string | undefined {
+  if (raw === '') return undefined;
+  return Number.isFinite(Number(raw)) ? Number(raw) : raw;
+}
+
 function parseOptionalCoordsColumn(raw: string | undefined): Array<{ x: number; y: number; z: number }> {
   const trimmed = String(raw ?? '').trim();
   if (!trimmed) return [];
@@ -835,7 +841,7 @@ export function ingestGeometryTabularSections(
               type: 'WetEmitter',
               subcategory: parseRequiredEnumColumn<WetEmitter['subcategory']>(V(d, 'subcategory'), ['radiator', 'ufh', 'fancoil']),
               area: parseOptionalNumberColumn(V(d, 'area')),
-              unit_number: parseOptionalNumberColumn(V(d, 'unit_number')),
+              unit_number: parseUnitNumberColumn(V(d, 'unit_number')),
               space_heat_system: V(d, 'space_heat_system') || undefined,
               parent_element: null,
               coordinates: parseOptionalCoordsColumn(V(d, 'coords')),

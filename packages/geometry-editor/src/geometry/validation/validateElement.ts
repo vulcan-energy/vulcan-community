@@ -333,6 +333,9 @@ function isPositiveFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
+/** An emitter unit count the converter accepts: a whole number of 1 or more. */
+const isWholeUnitCount = (value: unknown): boolean => typeof value === 'number' && Number.isInteger(value) && value >= 1;
+
 const FHS_STANDARD_FILL_L = 73;
 const FHS_STANDARD_BATH_SIZE_L = 180;
 const FHS_TWO_BED_OCCUPANCY = 2.2472;
@@ -502,7 +505,7 @@ function derivedFromOwnColumns(element: Element, field: string, globalOrientatio
   if (element.type === 'WetEmitter') {
     if (field === 'wet_emitter_type') return !!row.subcategory;
     if (field === 'emitter_floor_area') return isPositiveFiniteNumber(row.area);
-    if (field === 'n_units') return isPositiveFiniteNumber(row.unit_number);
+    if (field === 'n_units') return isWholeUnitCount(row.unit_number);
   }
   // The converter derives PV panel width and height from a polygon (derive_pv_dimensions_from_coords).
   if (element.type === 'OnSiteGeneration' && (field === 'width' || field === 'height')) {
@@ -1559,10 +1562,9 @@ export const validateElementCore = (
       if (!emitterElement.subcategory) {
         issues.push(geo('Emitter Type is required', 'subcategory'));
       }
-      // A blank unit_number is one unit in the converter; a fancoil then needs n_units (schema check below).
-      if ((emitterElement.subcategory === 'radiator' || emitterElement.subcategory === 'fancoil')
-        && emitterElement.unit_number !== undefined && !(emitterElement.unit_number > 0)) {
-        issues.push(geo('Unit Number must be at least 1', 'unit_number'));
+      // The converter stops on any other unit_number (E055); blank is one unit, and a fancoil then needs n_units.
+      if (emitterElement.unit_number !== undefined && !isWholeUnitCount(emitterElement.unit_number)) {
+        issues.push(geo('Unit Number must be a whole number of 1 or more, or blank for one unit', 'unit_number'));
       }
       // A blank area takes extra_json's emitter_floor_area in the converter (schema check below).
       if (emitterElement.subcategory === 'ufh' && emitterElement.area !== undefined && !(emitterElement.area > 0)) {
