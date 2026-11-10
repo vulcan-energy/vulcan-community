@@ -2284,7 +2284,7 @@ const applySlopedDimensionOverrideTracking = (
  * The one path that changes the `height` of a line element with a profiled face (bulk edit,
  * table, advanced fields). Its height is derived from the face, so a Flat top takes the new value
  * (as the shape rows' Top field does) and the height is re-derived from the face; a Custom or
- * Under-roof top keeps its shape and the height edit is dropped. An update that writes a new face
+ * Under-roof top has no single height, so editing it is an error (the bulk panel disables it). An update that writes a new face
  * itself (the shape rows) already carries its derived height and is left alone.
  */
 const applyHeightEditToProfiledFace = (
@@ -2302,8 +2302,7 @@ const applyHeightEditToProfiledFace = (
     : prevElement.extra_json) as Record<string, unknown>;
   if (JSON.stringify(readProfiledLineFace(nextExtra)) !== JSON.stringify(face)) return;
   if (face.top_mode === 'roof' || !isFlatProfile(face.top_profile)) {
-    delete updateRecord.height;
-    return;
+    throw new Error(`"${prevElement.name}" has a shaped top; edit its height in the wall shape.`);
   }
   const extra_json = {
     ...nextExtra,

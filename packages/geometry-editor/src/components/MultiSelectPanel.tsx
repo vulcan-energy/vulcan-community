@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { isInternalFloorElement } from '../lib/zoneDerivation';
+import { isFlatProfile, readProfiledLineFace } from '../lib/profileLineFace';
 import { forbiddenFieldKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Pencil, X as XIcon, type IconNode } from 'lucide';
@@ -1734,6 +1735,14 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     applyExtraJsonMergeBulk(patches);
   }, [applyExtraJsonMergeBulk, assemblyLibrary, computeAssemblyPatchForTargets]);
 
+  // A Custom or Under-roof top has no single height; it is set in the wall shape.
+  const wallShapedTopSelected = useMemo(
+    () => wallDimensionElements.some((el) => {
+      const face = readProfiledLineFace(el.extra_json);
+      return !!face && (face.top_mode === 'roof' || !isFlatProfile(face.top_profile));
+    }),
+    [wallDimensionElements],
+  );
   const wallHeightDistribution = useMemo(
     () => computeDistribution(wallDimensionElements, isWallLike, (el) => el.height),
     [wallDimensionElements]
@@ -3088,10 +3097,10 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             'wallHeight',
             'Height (m)',
             wallHeightSummary,
-            wallDimensionIds.length > 0,
+            wallDimensionIds.length > 0 && !wallShapedTopSelected,
             'e.g. 2.40',
             (el, value) => (isWallLike(el) ? { height: value } : null),
-            undefined,
+            wallShapedTopSelected ? 'Some walls have a shaped top: set their height in the wall shape.' : undefined,
             undefined,
             wallDimensionIds,
           )}

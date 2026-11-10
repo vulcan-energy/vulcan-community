@@ -46,13 +46,10 @@ describe('height edits on a shaped wall', () => {
     expect(wall().area).toBe(14);
   });
 
-  it('keeps a Custom top and its derived height', () => {
-    const top = [{ t: 0, h: 3 }, { t: 0.5, h: 4 }, { t: 1, h: 3 }];
-    const { store, id, wall, face } = setup(top);
-    const before = wall().height;
-    store.getState().updateElementsBulk({ [id]: { height: 6 } as Partial<Element> });
-    expect(wall().extra_json?.geometry_face).toEqual(face);
-    expect(wall().height).toBe(before);
+  it('refuses a height edit on a Custom top', () => {
+    const { store, id } = setup([{ t: 0, h: 3 }, { t: 0.5, h: 4 }, { t: 1, h: 3 }]);
+    expect(() => store.getState().updateElementsBulk({ [id]: { height: 6 } as Partial<Element> }))
+      .toThrow('"Shaped wall" has a shaped top; edit its height in the wall shape.');
   });
 
   it('moves the whole face with the foot', () => {
