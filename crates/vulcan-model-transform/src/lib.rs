@@ -136,7 +136,8 @@ pub struct ValidationResult {
 
 #[derive(thiserror::Error, Debug)]
 pub enum TransformError {
-    #[error("Invalid transform request: {0}")]
+    // Each message is a full sentence for the user, so it carries no outer frame.
+    #[error("{0}")]
     InvalidRequest(String),
     #[error("CSV parsing failed: {0}")]
     Csv(String),
@@ -272,7 +273,7 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
         && request.profile != ModelProfile::Fhs
     {
         return Err(TransformError::InvalidRequest(
-            "Physical-opening/full-partition conversion requires the FHS profile".into(),
+            "Physical-opening/full-partition conversion requires the FHS profile.".into(),
         ));
     }
     let required_python_version = match request.conversion_profile {
@@ -287,7 +288,7 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
         if request.version_metadata.hem_core_version != version
             || request.version_metadata.fhs_wrapper_version.as_deref() != Some(version)
         {
-            return Err(TransformError::InvalidRequest(format!("The selected Python conversion profile requires matching core and FHS wrapper {version} metadata")));
+            return Err(TransformError::InvalidRequest(format!("The selected Python conversion profile requires matching core and FHS wrapper {version} metadata.")));
         }
     }
     let mut missing = Vec::new();
@@ -317,7 +318,7 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
         Ok(())
     } else {
         Err(TransformError::InvalidRequest(format!(
-            "missing {}",
+            "The transform request has no {}.",
             missing.join(", ")
         )))
     }
