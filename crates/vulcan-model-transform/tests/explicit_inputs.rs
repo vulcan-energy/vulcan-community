@@ -336,3 +336,93 @@ IV,Living,System,InfiltrationVentilation,\"{\"\"InfiltrationVentilation\"\":{\"\
     assert_eq!(metadata.pointer(part_mid), Some(&serde_json::json!(1.15)));
     assert_eq!(metadata.pointer(closed_mid), Some(&serde_json::json!(1.15)));
 }
+
+#[test]
+fn non_finite_number_cells_are_reported_like_any_other_text() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let read = |path: &str| std::fs::read_to_string(format!("{dir}/../../data/{path}")).unwrap();
+    let convert = |u_value: &str, pitch: &str| {
+        transform_geometry_csv(TransformRequest {
+            csv: format!(
+                "{MINIMAL_CSV}
+Exposed Elements
+Name,Zone,Type,area,pitch,orientation360,u_value,height,width,base_height
+Wall,Living,BuildingElementOpaque,10,{pitch},180,{u_value},2.5,4,0
+"
+            ),
+            schema_json: read("schemas/input_fhs.schema.json"),
+            defaults_json: read("defaults/defaults_template.json"),
+            profile: ModelProfile::Fhs,
+            conversion_profile: Default::default(),
+            version_metadata: VersionMetadata {
+                hem_core_version: "1.0.0a7".into(),
+                fhs_wrapper_version: Some("1.0.0a7".into()),
+            },
+        })
+    };
+    for bad in ["abc", "NaN", "-inf"] {
+        let output = convert(bad, "90").unwrap();
+        let path = "/Zone/Living/BuildingElement/Wall/u_value";
+        assert_eq!(output.model.pointer(path), Some(&serde_json::json!(bad)));
+        assert!(
+            output.validation.errors.iter().any(|e| e.path == path),
+            "{bad}: {:?}",
+            output.validation.errors
+        );
+        let error = convert("0.2", bad).unwrap_err().to_string();
+        assert!(error.contains("[E055] 'pitch'"), "{bad}: {error}");
+    }
+}
+
+#[test]
+fn derived_numbers_that_overflow_fail_with_e055_instead_of_panicking() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let read = |path: &str| std::fs::read_to_string(format!("{dir}/../../data/{path}")).unwrap();
+    let convert = |csv: String, fhs: bool| {
+        let (schema, profile, wrapper) = if fhs {
+            ("input_fhs", ModelProfile::Fhs, Some("1.0.0a7".into()))
+        } else {
+            ("core-input", ModelProfile::Core, None)
+        };
+        transform_geometry_csv(TransformRequest {
+            csv,
+            schema_json: read(&format!("schemas/{schema}.schema.json")),
+            defaults_json: read("defaults/defaults_template.json"),
+            profile,
+            conversion_profile: Default::default(),
+            version_metadata: VersionMetadata {
+                hem_core_version: "1.0.0a7".into(),
+                fhs_wrapper_version: wrapper,
+            },
+        })
+    };
+    let zone = "Zone\nName,Type,volume,floor_area,height,simplified thermal bridging\nLiving,Zone,100,40,2.5,FALSE\n";
+    let walls = "Exposed Elements\nName,Zone,Type,area,pitch,orientation360,u_value,height,width,base_height,coords\n";
+    let wall = |name: &str, zone: &str, area: &str, rest: &str| {
+        format!("{name},{zone},BuildingElementOpaque,{area},90,180,0.2,{rest}\n")
+    };
+    let cases = [
+        (false, "Zone Living volume", "Zone\nName,Type,volume,floor_area,height\nLiving,Zone,,1e200,1e200\n".to_string()),
+        (false, "Wall area", format!("{zone}{walls}{}", wall("Wall", "Living", "", "1e200,1e200,0,"))),
+        (false, "Zone Living ThermalBridging", format!("{}{walls}{}{}", zone.replace("FALSE", "TRUE"), wall("A", "Living", "1e308", "2.5,4,0,"), wall("B", "Living", "1e308", "2.5,4,0,"))),
+        (false, "env_area", format!("{zone}{walls}{}{}", wall("A", "Living", "1e308", "2.5,4,0,"), wall("B", "Living", "1e308", "2.5,4,0,"))),
+        (false, "length", format!("{zone}Wet Emitters\nName,Zone,Type,subcategory,unit_number,extra_json\nR,Living,WetEmitter,radiator,10,\"{{\"\"length\"\":1e308,\"\"c_per_m\"\":0.04}}\"\n")),
+        (false, "mid_height", format!("Metadata\nVentilation_ventilation_zone_base_height,2.4\n\n{zone}Window Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height\nwin,Living,BuildingElementTransparent,1.2,90,1,1.2,90,3.2,1e307\n")),
+        (false, "Zone Living area", format!("Zone\nName,Type,volume,floor_area,height\nLiving,Zone,,,2.5\n{walls}Roof,Living,BuildingElementOpaque,10,0,0,0.2,,,0,\"0,0,0|1e200,0,0|1e200,1e200,0|0,1e200,0\"\n")),
+        (false, "Zone Living volume", format!("Zone\nName,Type,volume,floor_area,height\nLiving,Zone,,,1e200\n{walls}Roof,Living,BuildingElementOpaque,1e200,0,0,0.2,,,0,\n")),
+        (false, "height (from coords)", format!("{zone}On-Site Generation\nName,Type,generation_type,pitch,orientation360,base_height,peak_power,width,height,coords\nPV,OnSiteGeneration,PhotovoltaicSystem,30,180,1,3.5,0,0,\"0,0,0|1e-300,0,0|1e5,1e5,0|0,1e5,0\"\n")),
+        (true, "volume (sum of zones)", "Zone\nName,Type,volume,floor_area\nA,Zone,1e308,40\nB,Zone,1e308,40\n".to_string()),
+        (true, "ThermalBridging (sum of zones)", {
+            let zones: String = (0..6).map(|i| format!("Z{i},Zone,100,40,2.5,TRUE\n")).collect();
+            let elements: String = (0..6).map(|i| wall(&format!("W{i}"), &format!("Z{i}"), "1.7e308", "2.5,4,0,")).collect();
+            format!("Zone\nName,Type,volume,floor_area,height,simplified thermal bridging\n{zones}{walls}{elements}")
+        }),
+    ];
+    for (fhs, field, csv) in cases {
+        let error = convert(csv, fhs).unwrap_err().to_string();
+        assert!(
+            error.contains(&format!("[E055] '{field}")),
+            "{field}: {error}"
+        );
+    }
+}

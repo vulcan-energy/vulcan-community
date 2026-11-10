@@ -533,6 +533,11 @@ fn derive_blank_csv_pitch(
     ))
 }
 
+/// Parse text as a finite f64. Rust also parses `NaN` and `inf`; those are text, not numbers.
+fn parse_finite(text: &str) -> Option<f64> {
+    text.parse::<f64>().ok().filter(|n| n.is_finite())
+}
+
 /// Parse an optional CSV cell as a finite f64, failing loudly on garbage.
 /// Empty / absent → Ok(None); a non-empty unparseable value → E055 (a silently
 /// skipped value would let the defaults profile win over what the user typed).
@@ -546,7 +551,7 @@ fn parse_csv_number_cell(value: Option<&Value>, field: &str) -> Result<Option<f6
             if trimmed.is_empty() {
                 return Ok(None);
             }
-            trimmed.parse::<f64>().map(Some).map_err(|_| {
+            parse_finite(trimmed).map(Some).ok_or_else(|| {
                 BuildError::new(
                     "E055",
                     &format!(
@@ -1275,12 +1280,12 @@ fn ventilation_zone_base_height(model: &Value) -> f64 {
         .unwrap_or(0.0)
 }
 
-fn window_mid_height_to_hem_reference(value: f64, ventilation_base_height: f64) -> Value {
+fn window_mid_height_to_hem_reference(
+    value: f64,
+    ventilation_base_height: f64,
+) -> Result<Value, BuildError> {
     let converted = ((value - ventilation_base_height) * 100.0).round() / 100.0;
-    Value::Number(
-        serde_json::Number::from_f64(converted)
-            .expect("finite window midpoint conversion must remain finite"),
-    )
+    json_number(converted, "mid_height")
 }
 
 fn vulcan_csv_version(
@@ -1314,9 +1319,9 @@ fn vulcan_csv_version(
 fn migrate_v1_window_mid_height_reference(
     csv_data: &mut HashMap<String, Vec<HashMap<String, Value>>>,
     ventilation_base_height: f64,
-) {
+) -> Result<(), BuildError> {
     if ventilation_base_height.abs() <= f64::EPSILON {
-        return;
+        return Ok(());
     }
 
     if let Some(windows) = csv_data.get_mut("Window Elements") {
@@ -1324,7 +1329,7 @@ fn migrate_v1_window_mid_height_reference(
             if let Some(mid_height) = window.get("mid_height").and_then(Value::as_f64) {
                 window.insert(
                     "mid_height".to_string(),
-                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height),
+                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height)?,
                 );
             }
             let Some(part_list) = window
@@ -1347,11 +1352,12 @@ fn migrate_v1_window_mid_height_reference(
                 };
                 part_object.insert(
                     "mid_height_air_flow_path".to_string(),
-                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height),
+                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height)?,
                 );
             }
         }
     }
+    Ok(())
 }
 
 /// Upgrade every supported Vulcan CSV version to the current persisted semantics before the
@@ -1362,7 +1368,7 @@ fn migrate_vulcan_csv_to_current(
 ) -> Result<(), BuildError> {
     let version = vulcan_csv_version(csv_data)?;
     if version < 2 {
-        migrate_v1_window_mid_height_reference(csv_data, ventilation_base_height);
+        migrate_v1_window_mid_height_reference(csv_data, ventilation_base_height)?;
     }
     {
         for row in csv_data.get("Non-Exposed Elements").into_iter().flatten() {
@@ -1634,16 +1640,7 @@ impl JSONBuilder {
     /// records E055 and returns None (defaults win, the user is told).
     fn csv_number_non_fatal(&self, value: Option<&Value>, field: &str, path: &str) -> Option<f64> {
         match parse_csv_number_cell(value, field) {
-            Ok(Some(n)) if n.is_finite() => Some(n),
-            Ok(Some(n)) => {
-                self.push_non_fatal(
-                    "E055",
-                    path,
-                    &format!("'{field}' is not a finite number ({n})"),
-                );
-                None
-            }
-            Ok(None) => None,
+            Ok(n) => n,
             Err(e) => {
                 self.push_non_fatal(&e.code, path, &e.message);
                 None
@@ -1844,7 +1841,7 @@ impl JSONBuilder {
         if let Some(i) = value.as_i64() {
             return Some(i as f64);
         }
-        value.as_str()?.trim().parse::<f64>().ok()
+        parse_finite(value.as_str()?.trim())
     }
 
     fn json_truthy_external_door(value: Option<&Value>) -> bool {
@@ -2200,11 +2197,10 @@ impl JSONBuilder {
                                     .or_else(|| zone_obj.get("area").and_then(|v| v.as_f64()));
                                 if let Some(area) = area_for_volume {
                                     if area > 0.0 {
-                                        let calculated_volume = area * h;
-                                        zone_obj["volume"] = Value::Number(
-                                            serde_json::Number::from_f64(calculated_volume)
-                                                .unwrap(),
-                                        );
+                                        zone_obj["volume"] = json_number(
+                                            area * h,
+                                            &format!("Zone {zone_name} volume (area x height)"),
+                                        )?;
                                     }
                                 }
                             }
@@ -2240,9 +2236,10 @@ impl JSONBuilder {
                         }
                     }
                     // Set ThermalBridging to 0.2 * total_area (as a number, not object)
-                    zone_obj["ThermalBridging"] = serde_json::Value::Number(
-                        serde_json::Number::from_f64(0.2 * total_area).unwrap(),
-                    );
+                    zone_obj["ThermalBridging"] = json_number(
+                        0.2 * total_area,
+                        &format!("Zone {zone_name} ThermalBridging (0.2 x exposed area)"),
+                    )?;
                 }
 
                 // Insert the zone into the zones map
@@ -2678,13 +2675,12 @@ impl JSONBuilder {
                                 element_obj_map.get("height").and_then(|v| v.as_f64()),
                             ) {
                                 if width > 0.0 && height > 0.0 {
-                                    let calculated_area = width * height;
                                     element_obj_map.insert(
                                         "area".to_string(),
-                                        Value::Number(
-                                            serde_json::Number::from_f64(calculated_area)
-                                                .expect("Area should be a valid number"),
-                                        ),
+                                        json_number(
+                                            width * height,
+                                            &format!("{element_name} area (width x height)"),
+                                        )?,
                                     );
                                 }
                             }
@@ -3433,9 +3429,7 @@ impl JSONBuilder {
                     if calculated_env_area > 0.0 {
                         leaks_obj.insert(
                             "env_area".to_string(),
-                            serde_json::Value::Number(
-                                serde_json::Number::from_f64(calculated_env_area).unwrap(),
-                            ),
+                            json_number(calculated_env_area, "env_area (sum of element areas)")?,
                         );
                     }
                 }
@@ -3873,11 +3867,7 @@ impl JSONBuilder {
         candidate_keys
             .iter()
             .find_map(|key| shading_row.get(*key))
-            .and_then(|value| {
-                value
-                    .as_f64()
-                    .or_else(|| value.as_str()?.parse::<f64>().ok())
-            })
+            .and_then(|value| value.as_f64().or_else(|| parse_finite(value.as_str()?)))
     }
 
     /// `shading_type`; `Type` only in files written before that column existed, which stored the
@@ -5402,13 +5392,13 @@ impl JSONBuilder {
                             if needs_width {
                                 pv_system.insert(
                                     "width".to_string(),
-                                    Value::Number(serde_json::Number::from_f64(derived_w).unwrap()),
+                                    json_number(derived_w, "width (from coords)")?,
                                 );
                             }
                             if needs_height {
                                 pv_system.insert(
                                     "height".to_string(),
-                                    Value::Number(serde_json::Number::from_f64(derived_h).unwrap()),
+                                    json_number(derived_h, "height (from coords)")?,
                                 );
                             }
                         }
@@ -5957,9 +5947,10 @@ impl JSONBuilder {
                         // Both are numbers - sum them
                         let a_val = a.as_f64().unwrap_or(0.0);
                         let b_val = b.as_f64().unwrap_or(0.0);
-                        consolidated_thermal_bridging = Some(Value::Number(
-                            serde_json::Number::from_f64(a_val + b_val).unwrap(),
-                        ));
+                        consolidated_thermal_bridging = Some(json_number(
+                            a_val + b_val,
+                            "ThermalBridging (sum of zones)",
+                        )?);
                     }
                     (Some(Value::Object(a_obj)), Value::Object(b_obj)) => {
                         // Both are objects - merge them, disambiguating colliding
@@ -6026,14 +6017,14 @@ impl JSONBuilder {
         }
         first_zone.insert(
             "volume".to_string(),
-            Value::Number(serde_json::Number::from_f64(total_volume).unwrap()),
+            json_number(total_volume, "volume (sum of zones)")?,
         );
         for (key, total) in [
             ("livingroom_area", total_livingroom_area),
             ("restofdwelling_area", total_restofdwelling_area),
         ] {
             match total {
-                Some(total) => first_zone.insert(key.to_string(), serde_json::json!(total)),
+                Some(total) => first_zone.insert(key.to_string(), json_number(total, key)?),
                 None => first_zone.remove(key),
             };
         }
@@ -7233,13 +7224,14 @@ impl JSONBuilder {
         // Each value comes from the row (CSV column, then extra_json); a value the row does not
         // give is left out so the target schema reports it. No constant stands in for it.
         let number = |key: &str| emitter_data.get(key).and_then(Value::as_f64);
-        let put = |obj: &mut serde_json::Map<String, Value>, key: &str, value: Option<f64>| {
+        let put = |obj: &mut serde_json::Map<String, Value>,
+                   key: &str,
+                   value: Option<f64>|
+         -> Result<(), BuildError> {
             if let Some(value) = value {
-                obj.insert(
-                    key.to_string(),
-                    Value::Number(serde_json::Number::from_f64(value).unwrap()),
-                );
+                obj.insert(key.to_string(), json_number(value, key)?);
             }
+            Ok(())
         };
         // unit_number counts identical units: a whole number of 1 or more, or blank.
         let unit_number = match parse_csv_number_cell(
@@ -7289,35 +7281,35 @@ impl JSONBuilder {
                     let effective_length = effective_length.ok_or_else(|| {
                         BuildError::new("E047", "Radiator emitters with 'c_per_m' require 'length'")
                     })?;
-                    put(&mut emitter_obj, "c_per_m", Some(c_per_m));
-                    put(&mut emitter_obj, "length", Some(effective_length));
+                    put(&mut emitter_obj, "c_per_m", Some(c_per_m))?;
+                    put(&mut emitter_obj, "length", Some(effective_length))?;
                 } else {
-                    put(&mut emitter_obj, "c", number("c").map(times_units));
+                    put(&mut emitter_obj, "c", number("c").map(times_units))?;
                 }
-                put(&mut emitter_obj, "n", number("n"));
+                put(&mut emitter_obj, "n", number("n"))?;
 
                 if is_per_metre {
                     put(
                         &mut emitter_obj,
                         "thermal_mass_per_m",
                         number("thermal_mass_per_m"),
-                    );
+                    )?;
                 } else {
                     put(
                         &mut emitter_obj,
                         "thermal_mass",
                         number("thermal_mass").map(times_units),
-                    );
+                    )?;
                 }
             }
             "ufh" => {
                 let area = number("area").or_else(|| number("emitter_floor_area"));
-                put(&mut emitter_obj, "emitter_floor_area", area);
+                put(&mut emitter_obj, "emitter_floor_area", area)?;
                 for key in [
                     "equivalent_specific_thermal_mass",
                     "system_performance_factor",
                 ] {
-                    put(&mut emitter_obj, key, number(key));
+                    put(&mut emitter_obj, key, number(key))?;
                 }
             }
             "fancoil" => {
@@ -7326,7 +7318,7 @@ impl JSONBuilder {
                         .or_else(|| v.as_f64().map(|f| f.round() as i64))
                         .or_else(|| {
                             v.as_str()
-                                .and_then(|s| s.parse::<f64>().ok().map(|f| f.round() as i64))
+                                .and_then(|s| parse_finite(s).map(|f| f.round() as i64))
                         })
                 };
 
@@ -7374,7 +7366,7 @@ impl JSONBuilder {
             &mut emitter_obj,
             "frac_convective",
             number("frac_convective"),
-        );
+        )?;
 
         Ok(emitter_obj)
     }
@@ -8149,7 +8141,7 @@ impl JSONBuilder {
                 return Value::Number(serde_json::Number::from(f.round() as i64));
             }
             if let Some(s) = value.as_str() {
-                if let Ok(num) = s.parse::<f64>() {
+                if let Some(num) = parse_finite(s) {
                     return Value::Number(serde_json::Number::from(num.round() as i64));
                 }
             }
@@ -8157,13 +8149,12 @@ impl JSONBuilder {
         }
         if let Some(s) = value.as_str() {
             if self.is_property_numeric_type(key, schema_element_type, floor_type) {
-                if let Ok(num) = s.parse::<f64>() {
+                if let Some(num) = parse_finite(s) {
                     return if num.fract() == 0.0 {
                         Value::Number(serde_json::Number::from(num as i64))
                     } else {
                         Value::Number(
-                            serde_json::Number::from_f64(num)
-                                .unwrap_or_else(|| serde_json::Number::from(0)),
+                            serde_json::Number::from_f64(num).expect("parse_finite is finite"),
                         )
                     };
                 }
@@ -9042,23 +9033,22 @@ impl JSONBuilder {
                         if !self.is_fhs_schema {
                             zone_obj.insert(
                                 "area".to_string(),
-                                Value::Number(
-                                    serde_json::Number::from_f64(calculated_area)
-                                        .expect("Area should be a valid number"),
-                                ),
+                                json_number(
+                                    calculated_area,
+                                    &format!("Zone {zone_name} area (from geometry)"),
+                                )?,
                             );
                         }
 
                         // Also update volume if height is available
                         if let Some(height) = zone_obj.get("height").and_then(|v| v.as_f64()) {
                             if height > 0.0 {
-                                let calculated_volume = calculated_area * height;
                                 zone_obj.insert(
                                     "volume".to_string(),
-                                    Value::Number(
-                                        serde_json::Number::from_f64(calculated_volume)
-                                            .expect("Volume should be a valid number"),
-                                    ),
+                                    json_number(
+                                        calculated_area * height,
+                                        &format!("Zone {zone_name} volume (area x height)"),
+                                    )?,
                                 );
                             }
                         }
