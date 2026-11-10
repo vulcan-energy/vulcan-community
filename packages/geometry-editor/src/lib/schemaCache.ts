@@ -1118,6 +1118,11 @@ export function getConditionalRequiredFieldsForMode(
       conditionalRequired.push(...block.required);
     }
 
+    // A nested `if`/`then` beside `required` (e.g. a window's orientation360 unless it is level).
+    if (block.if) {
+      applyBlock(conditionMatches(block.if) ? block.then : block.else);
+    }
+
     if (Array.isArray(block.allOf)) {
       for (const nested of block.allOf) {
         if (!nested?.if) {

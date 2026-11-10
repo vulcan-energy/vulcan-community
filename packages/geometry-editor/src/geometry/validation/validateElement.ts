@@ -503,7 +503,10 @@ function derivedFromOwnColumns(element: Element, field: string, globalOrientatio
   if ((element.type === 'BuildingElementOpaque' || element.type === 'BuildingElementTransparent')
     && (field === 'width' || field === 'height' || field === 'base_height')) {
     const { width, height } = getAreaBasedElementExportGeometry(element, globalOrientationOffset);
-    return field === 'base_height' ? width > 0 || height > 0 : (field === 'width' ? width : height) > 0;
+    if (field !== 'base_height') return (field === 'width' ? width : height) > 0;
+    // A window's plan line lies on the floor and does not give its height above it.
+    const placed = element.type === 'BuildingElementOpaque' || (element.coordinates?.length ?? 0) >= 3;
+    return placed && (width > 0 || height > 0);
   }
   return false;
 }
@@ -2081,12 +2084,14 @@ export const validateElementCore = (
           if (reportedFields.has(field)) continue;
           // While defaults are still loading, assume template defaults exist to
           // avoid showing false "required" errors that disappear once defaults arrive.
-          if (defaultsLoading && !ownColumn) continue;
+          // The converter builds each thermal bridge from its own row; no template value reaches it.
+          const fromTemplate = !ownColumn && element.type !== 'ThermalBridgeLinear' && element.type !== 'ThermalBridgePoint';
+          if (defaultsLoading && fromTemplate) continue;
 
           // Check if field has a default value (from defaults template or schema)
           // If a default exists, don't add a validation issue (defaults will be applied)
           // For MechanicalVentilation, pass vent_type as subtype to filter defaults correctly
-          const hasDefault = !ownColumn && (context.defaultsLookup?.hasDefaultValue ?? hasDefaultValue)(
+          const hasDefault = fromTemplate && (context.defaultsLookup?.hasDefaultValue ?? hasDefaultValue)(
             field,
             element.type,
             activeSubschema as unknown as {

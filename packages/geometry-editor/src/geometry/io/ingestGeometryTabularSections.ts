@@ -509,7 +509,8 @@ export function ingestGeometryTabularSections(
             }
             // Backward-compat: if CSV pre-dates the width/height columns, derive
             // slope-corrected dimensions from coords + pitch (mirrored in Rust merger).
-            if (onSiteElement.width === undefined || onSiteElement.height === undefined) {
+            // Without a pitch the slope length is unknown: a host roof may supply the pitch later.
+            if ((onSiteElement.width === undefined || onSiteElement.height === undefined) && onSiteElement.pitch !== undefined) {
               const derived = derivePvDimensionsFromCoords(
                 onSiteElement.coordinates,
                 onSiteElement.pitch,

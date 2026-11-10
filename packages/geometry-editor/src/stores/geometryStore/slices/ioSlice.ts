@@ -25,6 +25,7 @@ import {
   VULCAN_CSV_VERSION_METADATA_KEY,
 } from '../../../geometry/io/parseCsvToGeometry';
 import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionRows';
+import { derivePvDimensionsFromCoords } from '../../../lib/pvPanelFootprint';
 import { METADATA_INPUT_LABELS, metadataRowValues, templateFilledMetadataSettings } from '../../../lib/globalSettingsValidation';
 import {
   encodeGuideOverlayMetadataValue,
@@ -674,6 +675,14 @@ const reconstructPvHostLinkAndOverrideFlags = (
     );
     Object.assign(panel, inferPvHostOverrideFlags(panel, derived));
     Object.assign(panel, buildHostDerivedPatch(panel, derived));
+    // A legacy row without size columns or pitch takes its slope size from the host's pitch.
+    if ((panel.width === undefined || panel.height === undefined) && panel.pitch !== undefined) {
+      const size = derivePvDimensionsFromCoords(panel.coordinates, panel.pitch);
+      if (size) {
+        panel.width ??= roundToTwoDecimals(size.width);
+        panel.height ??= roundToTwoDecimals(size.height);
+      }
+    }
   }
 };
 
@@ -704,7 +713,7 @@ const COORDS_DETERMINED_COLUMNS = new Set(['area', 'total_area', 'width', 'heigh
  * partition saved as both faces at twice a legacy single-face area keeps its meaning, so it is not
  * listed.
  */
-const replacedValuesNotice = (authoredCsv: string, loadedCsv: string): string[] => {
+const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, templateKeys: readonly string[]): string[] => {
   const rows = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
     .filter((row) => row.data.Name)
     .map((row) => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, row.data] as const)));
@@ -743,9 +752,9 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string): string[] 
     const after = savedMetadata.get(key);
     if (!before && after) replaced.push(`${key} blank → ${after}`);
   }
-  // A model-input row the file lacks and the save adds, from the geometry or the defaults template.
+  // A model-input row the file lacks that the save adds from the defaults template.
   for (const [key, after] of savedMetadata) {
-    if (after && !authoredMetadata.has(key)) replaced.push(`${key} absent → ${after}`);
+    if (after && !authoredMetadata.has(key) && templateKeys.includes(key)) replaced.push(`${key} absent → ${after}`);
   }
   return replaced.length
     ? [`Loading replaced ${replaced.length} value(s) in the file; saving writes the new value(s): ${replaced.join('; ')}.`]
@@ -1106,10 +1115,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           const exportedArea = getElementGrossArea(element, state.globalOrientationOffset);
           const exportedWidth = exportedGeometry.width > 0 ? exportedGeometry.width : undefined;
           const exportedHeight = exportedGeometry.height > 0 ? exportedGeometry.height : undefined;
+          // A plan line lies on the floor, so it does not say how high the opening sits.
+          const authoredBaseHeight = typeof element.base_height === 'number' && Number.isFinite(element.base_height);
           const exportedBaseHeight =
-            exportedHeight !== undefined ||
-            exportedWidth !== undefined ||
-            (typeof element.base_height === 'number' && Number.isFinite(element.base_height))
+            authoredBaseHeight || ((exportedHeight !== undefined || exportedWidth !== undefined) && (element.coordinates?.length ?? 0) >= 3)
               ? exportedGeometry.baseHeight
               : undefined;
           // mid_height has no dedicated override flag (unlike sloped width/height): the editor
@@ -1139,8 +1148,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           const exportedMidHeight = midHeightIsCustom
             ? roundToTwoDecimals((element.mid_height as number) - windowHeightOffset)
             : (
-                exportedHeight !== undefined
-                  ? roundToTwoDecimals((exportedBaseHeight ?? 0) - windowHeightOffset + exportedHeight / 2)
+                exportedHeight !== undefined && exportedBaseHeight !== undefined
+                  ? roundToTwoDecimals(exportedBaseHeight - windowHeightOffset + exportedHeight / 2)
                   : (
                       typeof element.mid_height === 'number' && Number.isFinite(element.mid_height)
                         ? roundToTwoDecimals(element.mid_height - windowHeightOffset)
@@ -2255,6 +2264,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Defaults kept from before the load fill the rows this file lacks now; defaults read for the
     // file fill them when they arrive (see withPrecomputedDefaultsLookup).
     const loaded = get();
+    let templateKeys: string[] = [];
     if (loaded.defaultsJson && !loaded.defaultsLoading) {
       const filled = templateFilledMetadataSettings(
         metadataRowValues({ ...loaded, elements: Object.values(loaded.elementsById) }),
@@ -2262,6 +2272,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         loaded.defaultsJson,
       );
       if (Object.keys(filled).length) set({ complianceSettings: { ...loaded.complianceSettings, ...filled } });
+      templateKeys = Object.keys(METADATA_INPUT_LABELS).filter((key) => (key.startsWith('General_') ? key.slice(8) : key) in filled);
     }
 
     // Round-trip through the canonical serializer after all synchronous load
@@ -2282,7 +2293,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline)], upgraded };
+    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, templateKeys)], upgraded };
   }
 
   return slice;
