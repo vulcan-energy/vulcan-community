@@ -2868,6 +2868,26 @@ const validateElementForState = (
 };
 
 export const validateZone = validateZoneCore;
+
+/**
+ * The load text of numeric cells (`nonNumericCells`) whose field this update leaves as it was. A
+ * ventilation unit's position columns live in its extra_json.
+ */
+function uneditedNonNumericCells(
+  prev: { nonNumericCells?: Record<string, string>; type?: string; extra_json?: unknown },
+  updates: object,
+): Record<string, string> | undefined {
+  const before = prev as Record<string, unknown>;
+  const after = updates as Record<string, unknown>;
+  const edited = (column: string): boolean => {
+    const field = column === 'floor_area' ? 'floorArea' : column;
+    if (Object.prototype.hasOwnProperty.call(after, field)) return after[field] !== before[field];
+    return prev.type === 'MechanicalVentilation' && Object.prototype.hasOwnProperty.call(after, 'extra_json')
+      && JSON.stringify(after.extra_json) !== JSON.stringify(prev.extra_json);
+  };
+  const kept = Object.entries(prev.nonNumericCells ?? {}).filter(([column]) => !edited(column));
+  return kept.length > 0 ? Object.fromEntries(kept) : undefined;
+}
 export const detectMissingElements = detectMissingElementsCore;
 
 export interface CreateGeometryStoreOptions {
@@ -4857,6 +4877,7 @@ const createGeometryState = (
       }
 
       const normalizedUpdates: Partial<Zone> = { ...updates };
+      if (prevZone.nonNumericCells) normalizedUpdates.nonNumericCells = uneditedNonNumericCells(prevZone, updates);
       if (typeof normalizedUpdates.name === 'string') {
         normalizedUpdates.name = normalizedUpdates.name.trim();
       }
@@ -5495,6 +5516,7 @@ const createGeometryState = (
 
       // Normalize parent_element only if explicitly provided on updates
       const normalizedUpdates: Partial<Element> = { ...updates };
+      if (prevElement.nonNumericCells) normalizedUpdates.nonNumericCells = uneditedNonNumericCells(prevElement, updates);
       if (prevElement.type === 'BuildingElementTransparent' && Object.prototype.hasOwnProperty.call(updates, 'extra_json')) {
         // Advanced-field edits replace extra_json, including unchanged automatic values.
         // Only a changed value or removal records new security-risk intent.

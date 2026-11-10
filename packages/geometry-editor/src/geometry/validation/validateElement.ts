@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { csvMigrationIssues } from '../io/csvSemanticMigration';
+import { nonNumericCellIssues } from './validateZone';
 import { fieldUnitForAdornment, resolveFieldPresentation } from '../../lib/fieldPresentation';
 import { isElementCsvColumn, ROW_ONLY_ELEMENT_TYPES } from '../io/geometryCsvLayouts';
 import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
@@ -909,6 +910,8 @@ export const validateElementCore = (
   const t0 = dbg ? performance.now() : 0;
 
   const issues: ValidationIssue[] = ((context.sourceCsvVersion ?? 3) >= 3 || context.csvUpgradeRequested ? csvMigrationIssues([element], context.sourceCsvVersion) : []).map(issue => ({ source: 'geometry', fieldKey: 'u_value', message: `CSV_U_VALUE_MEANING_REQUIRED: ${issue.elementName} has legacy U-value ${issue.value}; choose its meaning in the migration review before saving.` }));
+  // First, so it is the issue kept for its field.
+  issues.push(...nonNumericCellIssues(element.nonNumericCells));
   const warnings: ValidationIssue[] = [];
   // Local aliases for the module-level helpers (geoIssue/schemaIssue/fhsIssue) so the long
   // switch below stays readable. Per-type validators in subsequent refactors call the

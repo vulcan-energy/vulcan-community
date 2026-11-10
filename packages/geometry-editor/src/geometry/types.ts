@@ -61,6 +61,8 @@ export interface Zone {
   _heightUserOverride?: boolean; // When true, height is user-set and won't auto-update from wall heights
   // Metadata for multi-floor ground element validation
   _groundFloorLevels?: number[]; // Distinct Z-levels of BuildingElementGround elements in this zone
+  /** Numeric CSV cells that held text on load, by column: saved back as typed, and blocking until the field is edited. */
+  nonNumericCells?: Record<string, string>;
 }
 
 // Element types as specified in BATCH_MODEL_TODO.md
@@ -153,6 +155,8 @@ export interface BaseElement {
 
   // Version tracking for freshness verification
   _v?: number;
+  /** Numeric CSV cells that held text on load, by column: saved back as typed, and blocking until the field is edited. */
+  nonNumericCells?: Record<string, string>;
 
 }
 
@@ -305,8 +309,7 @@ export interface WetEmitter extends BaseElement {
   // area only required if subcategory is 'ufh'
   // unit_number only required if subcategory is 'radiator' or 'fancoil'
   area?: number;
-  /** As typed: a cell that is not a whole number of 1 or more stays as it is and blocks. */
-  unit_number?: number | string;
+  unit_number?: number;
   space_heat_system?: string;
 }
 

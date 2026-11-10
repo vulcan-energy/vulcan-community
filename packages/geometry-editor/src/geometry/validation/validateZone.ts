@@ -14,8 +14,20 @@ export type ZoneValidationContext = {
   simplifiedThermalBridgingOffered?: boolean;
 };
 
+/** A numeric cell that held text on load blocks, as in the converter (E055 or a schema type error). */
+export const nonNumericCellIssues = (
+  cells: Record<string, string> | undefined,
+  fieldKey: (column: string) => string = (column) => column,
+): ValidationIssue[] => Object.entries(cells ?? {}).map(([column, text]) => ({
+  source: 'geometry',
+  fieldKey: fieldKey(column),
+  message: `${column.split('_').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')} is '${text}', which is not a number. Enter a number.`,
+}));
+
+const ZONE_FIELD_BY_COLUMN: Readonly<Record<string, string>> = { floor_area: 'floorArea' };
+
 export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): ValidationResult => {
-  const issues: ValidationIssue[] = [];
+  const issues: ValidationIssue[] = nonNumericCellIssues(zone.nonNumericCells, (column) => ZONE_FIELD_BY_COLUMN[column] ?? column);
   const warnings: ValidationIssue[] = [];
   const primaryFhsZoneId = context.primaryFhsZoneId;
   const isPrimaryFhsZone =

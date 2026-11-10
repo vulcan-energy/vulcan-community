@@ -833,7 +833,16 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const exportElements = elementsInLoadOrder(state);
     const lines: string[] = [];
 
-    const ensureColumnCount = (row: string[], expectedCount: number): string => {
+    // `header` and `textCells` write back, as typed, the text a numeric cell held on load (see `nonNumericCells`).
+    const ensureColumnCount = (
+      cells: string[],
+      expectedCount: number,
+      header?: readonly string[],
+      textCells?: Record<string, string>,
+    ): string => {
+      const row = textCells && header
+        ? cells.map((cell, index) => (Object.prototype.hasOwnProperty.call(textCells, header[index]) ? escapeCSV(textCells[header[index]]) : cell))
+        : cells;
       const currentCount = row.length;
       if (currentCount < expectedCount) {
         return row.join(',') + ','.repeat(expectedCount - currentCount);
@@ -960,11 +969,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const compliance = state.complianceSettings;
 
     // Every compliance row is written with its value (see metadataRowValues). A row the file had
-    // blank stays blank, which the converter blocks; leaving it out would let the converter take
-    // the defaults template's value instead.
-    const blankRows = new Set(compliance.blankMetadataRows);
+    // blank or unreadable is written as it was, which the converter blocks; leaving it out would let
+    // the converter take the defaults template's value instead.
+    const unreadRows = compliance.unreadMetadataRows ?? {};
     for (const [key, value] of metadataRowValues({ ...state, elements: exportElements })) {
-      if (value !== undefined || blankRows.has(key)) lines.push(`${key},${escapeCSV(value ?? '')},,,,,,,,,,,,,`);
+      const cell = value ?? unreadRows[key];
+      if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
     const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
       zones: state.zones,
@@ -1037,7 +1047,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             restOfDwellingArea === undefined ? '' : escapeCSV(roundToTwoDecimals(restOfDwellingArea)),
           );
         }
-        lines.push(ensureColumnCount(zoneRow, zoneColumnCount));
+        lines.push(ensureColumnCount(zoneRow, zoneColumnCount, zoneHeader, zone.nonNumericCells));
       });
       lines.push('');
     }
@@ -1104,7 +1114,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(exposedRow, exposedColumnCount));
+          lines.push(ensureColumnCount(exposedRow, exposedColumnCount, exposedHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1185,7 +1195,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
               convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, windowHeightOffset, effectiveVentBaseHeight),
             ) : '')
           ];
-          lines.push(ensureColumnCount(windowRow, windowColumnCount));
+          lines.push(ensureColumnCount(windowRow, windowColumnCount, windowHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1224,7 +1234,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementFirstCoordForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(shadingRow, shadingColumnCount));
+          lines.push(ensureColumnCount(shadingRow, shadingColumnCount, shadingHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1256,7 +1266,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(lightingRow, lightingColumnCount));
+          lines.push(ensureColumnCount(lightingRow, lightingColumnCount, lightingHeader, element.nonNumericCells));
         }
       });
 
@@ -1293,7 +1303,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(groundRow, groundColumnCount));
+          lines.push(ensureColumnCount(groundRow, groundColumnCount, groundHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1333,7 +1343,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
               } : {}),
             }))
           ];
-          lines.push(ensureColumnCount(nonExposedRow, nonExposedColumnCount));
+          lines.push(ensureColumnCount(nonExposedRow, nonExposedColumnCount, nonExposedHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1365,7 +1375,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementCoordsForCsv(element),
             escapeCSVJson(extraJson ? JSON.stringify(extraJson) : '')
           ];
-          lines.push(ensureColumnCount(bridgeRow, bridgeColumnCount));
+          lines.push(ensureColumnCount(bridgeRow, bridgeColumnCount, bridgeHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1419,7 +1429,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(extraJsonForCsv ? JSON.stringify(extraJsonForCsv) : '')
         ];
-        lines.push(ensureColumnCount(ventilationRow, ventilationColumnCount));
+        lines.push(ensureColumnCount(ventilationRow, ventilationColumnCount, ventilationHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1444,7 +1454,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(combustionRow, combustionColumnCount));
+        lines.push(ensureColumnCount(combustionRow, combustionColumnCount, combustionHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1470,7 +1480,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(pipeworkRow, pipeworkColumnCount));
+        lines.push(ensureColumnCount(pipeworkRow, pipeworkColumnCount, pipeworkHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1501,7 +1511,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(emittersRow, emittersColumnCount));
+          lines.push(ensureColumnCount(emittersRow, emittersColumnCount, emittersHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1524,7 +1534,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(appliancesRow, appliancesColumnCount));
+        lines.push(ensureColumnCount(appliancesRow, appliancesColumnCount, appliancesHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1557,7 +1567,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(hotWaterRow, hotWaterColumnCount));
+        lines.push(ensureColumnCount(hotWaterRow, hotWaterColumnCount, hotWaterHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1585,7 +1595,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(extraJson ? JSON.stringify(extraJson) : '')
         ];
-        lines.push(ensureColumnCount(contextRow, contextColumnCount));
+        lines.push(ensureColumnCount(contextRow, contextColumnCount, contextHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1618,7 +1628,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(onSiteRow, onSiteColumnCount));
+        lines.push(ensureColumnCount(onSiteRow, onSiteColumnCount, onSiteHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1653,7 +1663,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(JSON.stringify(extraJson))
         ];
-        lines.push(ensureColumnCount(systemsRow, systemsColumnCount));
+        lines.push(ensureColumnCount(systemsRow, systemsColumnCount, systemsHeader, element.nonNumericCells));
       });
 
       // System rows (PCDB MVP)
@@ -1674,7 +1684,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(extraJsonForCsv ? JSON.stringify(extraJsonForCsv) : '')
         ];
-        lines.push(ensureColumnCount(systemsRow, systemsColumnCount));
+        lines.push(ensureColumnCount(systemsRow, systemsColumnCount, systemsHeader, element.nonNumericCells));
       });
 
       lines.push('');

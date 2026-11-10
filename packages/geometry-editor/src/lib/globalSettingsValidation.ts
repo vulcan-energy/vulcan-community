@@ -472,7 +472,7 @@ const metadataSchemaPath = (key: string): string[] => {
 };
 
 /** The compliance setting a metadata row edits. */
-const metadataSettingKey = (key: string): string => (key.startsWith('General_') ? key.slice('General_'.length) : key);
+export const metadataSettingKey = (key: string): string => (key.startsWith('General_') ? key.slice('General_'.length) : key);
 
 const asRecord = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
 const valueAt = (root: unknown, path: string[]): unknown => path.reduce<unknown>((node, segment) => asRecord(node)?.[segment], root);
@@ -564,7 +564,7 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs): Array<[string, str
  */
 export function metadataRowValues(state: MetadataRowInputs): Array<[string, string | undefined]> {
   const entered = state.complianceSettings as Record<string, unknown>;
-  const fileDecides = new Set([...(state.complianceSettings.blankMetadataRows ?? []), ...(state.complianceSettings.absentMetadataRows ?? [])]);
+  const fileDecides = new Set([...Object.keys(state.complianceSettings.unreadMetadataRows ?? {}), ...(state.complianceSettings.absentMetadataRows ?? [])]);
   return enteredOrDerivedRowValues(state).map(([key, value]) => [key,
     entered[metadataSettingKey(key)] === undefined && (fileDecides.has(key) || systemsRowSetsMetadataInput(state.elements, key)) ? undefined : value]);
 }
@@ -605,7 +605,7 @@ export function absentMetadataRowFill(state: MetadataRowInputs, defaults: unknow
   const settings = state.complianceSettings;
   const patch: Record<string, unknown> = {};
   const sources = new Map<string, string>();
-  const blank = new Set(settings.blankMetadataRows);
+  const blank = new Set(Object.keys(settings.unreadMetadataRows ?? {}));
   const absent = new Set(settings.absentMetadataRows);
   for (const [key, value] of metadataRowValues(state)) {
     if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
@@ -654,7 +654,8 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
  * defaults are still loading, when only blank rows are known to be unset.
  */
 export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: unknown, defaults: unknown): string[] {
-  const blank = new Set(state.complianceSettings.blankMetadataRows);
+  const unread = state.complianceSettings.unreadMetadataRows ?? {};
+  const blank = new Set(Object.keys(unread));
   const derived = new Map(enteredOrDerivedRowValues(state));
   // The value the editor can work out, as a hint; the user enters it so the save writes it.
   const hint = (key: string) => {
@@ -667,6 +668,8 @@ export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: u
       && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
       && (blank.has(key) || (defaults !== undefined
         && (templateMetadataValue(state, defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))
-    ? [`Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.${hint(key)}`]
+    ? [unread[key]
+      ? `Global Settings: ${METADATA_INPUT_LABELS[key]} is '${unread[key]}', which the target does not accept. Enter it in Global Settings.${hint(key)}`
+      : `Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.${hint(key)}`]
     : []));
 }
