@@ -290,6 +290,9 @@ export function isElementCsvColumn(type: ElementType, field: string): boolean {
   return !!section && SECTION_COLUMNS.get(section)!.has(field);
 }
 
+/** Element types the converter builds from the row alone: no field takes a defaults template value. */
+export const ROW_ONLY_ELEMENT_TYPES: ReadonlySet<string> = new Set(['ThermalBridgeLinear', 'ThermalBridgePoint', 'WetEmitter']);
+
 const SECTION_COLUMNS = new Map(Object.entries(EXPECTED_SECTION_HEADERS).map(([section, columns]) => [section, new Set(columns)]));
 
 const SKIP_VALIDATION = new Set(['Test Section']);

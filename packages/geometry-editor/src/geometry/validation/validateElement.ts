@@ -3,7 +3,7 @@
 
 import { csvMigrationIssues } from '../io/csvSemanticMigration';
 import { fieldUnitForAdornment, resolveFieldPresentation } from '../../lib/fieldPresentation';
-import { isElementCsvColumn } from '../io/geometryCsvLayouts';
+import { isElementCsvColumn, ROW_ONLY_ELEMENT_TYPES } from '../io/geometryCsvLayouts';
 import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
 import { getElementShape } from '../../lib/shapeUtils';
@@ -631,8 +631,6 @@ const heatSourceWetReferenceMap = (elements: Element[]): Map<string, Record<stri
 // rows are compared, except at levels whose keys are user-chosen names. Paths are relative to one
 // named entry. Keep in step with the merge, or the E060 warning below lies.
 const MERGE_UI_ONLY_KEYS = new Set(['psi_source', 'vulcan_assembly_v1', 'ru_calculator_state_v1', 'thermal_bridge_solver']);
-/** Element types the converter builds from the row alone: a value the row lacks is never taken from the defaults template. */
-const ROW_ONLY_ELEMENT_TYPES = new Set<string>(['ThermalBridgeLinear', 'ThermalBridgePoint', 'WetEmitter']);
 const MERGE_SECTION_LABELS: Record<string, string> = {
   HeatSourceWet: 'heat source',
   HotWaterSource: 'hot water source',
