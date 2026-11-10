@@ -24,8 +24,9 @@ import type { AssemblyExample } from "../lib/assemblyTypes";
 import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingFootprintDimensions";
 
 import { resolveFieldPresentation } from "../lib/fieldPresentation";
-import { metadataRowValues, unsetMetadataInputIssues } from "../lib/metadataInputRows";
 import {
+  metadataRowValues,
+  unsetMetadataInputIssues,
   collectGlobalSettingsWarnings,
   fhsBedroomCountIssue,
   globalSettingsFieldSection,

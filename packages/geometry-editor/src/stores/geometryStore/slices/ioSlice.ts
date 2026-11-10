@@ -25,7 +25,7 @@ import {
   VULCAN_CSV_VERSION_METADATA_KEY,
 } from '../../../geometry/io/parseCsvToGeometry';
 import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionRows';
-import { METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/metadataInputRows';
+import { METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/globalSettingsValidation';
 import {
   encodeGuideOverlayMetadataValue,
   encodeGuideOverlaySourceMetadataValue,

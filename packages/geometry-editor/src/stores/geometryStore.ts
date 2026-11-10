@@ -90,8 +90,7 @@ import {
   analyzeZoneSpaceLabels,
   pointInPolygon,
 } from '../lib/spaceLabelGeometry';
-import { collectGlobalSettingsWarnings } from '../lib/globalSettingsValidation';
-import { metadataRowValues, unsetMetadataInputIssues } from '../lib/metadataInputRows';
+import { collectGlobalSettingsWarnings, metadataRowValues, unsetMetadataInputIssues } from '../lib/globalSettingsValidation';
 import {
   applyMechanicalVentilationCsvPositionColumns,
   canMechanicalVentilationInheritHostPlacement,
