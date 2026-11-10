@@ -17,6 +17,7 @@ import { hasDefaultValue, type DefaultsLookup } from '../../lib/defaultsCache';
 import {
   classifyWindowOpenings,
   windowOpeningRepairMessages,
+  allowedWindowShadingTypes,
   windowPartsArePhysical,
   type WindowOpeningField,
   type WindowOpeningRow,
@@ -1383,6 +1384,14 @@ export const validateElementCore = (
       if (!shadingElement.parent_element?.trim()) issues.push(geo('Linked Window is not set', 'parent_element'));
       if (!shadingElement.shading_type) {
         issues.push(geo('Shading Type is required', 'shading_type'));
+        break;
+      }
+      const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, complianceValidationEnabled ? 'fhs' : 'core');
+      if (allowedShadingTypes && !allowedShadingTypes.includes(shadingElement.shading_type)) {
+        const windowName = shadingElement.parent_element?.trim();
+        issues.push(geo(shadingElement.shading_type === 'reveal'
+          ? `Reveal shading${windowName ? ` on window ${windowName}` : ''} does not run on this HEM version. Enter an overhang and two side fins.`
+          : `Shading Type ${shadingElement.shading_type} does not run on this HEM version. Choose another type.`, 'shading_type'));
         break;
       }
       if (shadingElement.shading_type === 'object') {

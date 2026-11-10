@@ -1478,6 +1478,7 @@ export const isWindowShading = (obj: any): obj is WindowShading => {
 };
 
 // Const assertions for CSV values
+/** Every Window Shading type the CSV can hold; forms offer only those the target accepts (allowedWindowShadingTypes). */
 export const SHADING_TYPES = ['object', 'overhang', 'sidefinright', 'sidefinleft', 'reveal'] as const;
 export const DUCT_TYPES = ['supply', 'extract', 'intake', 'exhaust'] as const;
 export const APPLIANCE_KEYS = [
