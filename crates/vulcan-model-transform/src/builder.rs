@@ -7139,7 +7139,10 @@ impl JSONBuilder {
                 // A blank unit_number is one unit: the multiplier, not a HEM input.
                 let unit_number = number("unit_number").unwrap_or(1.0);
                 let length = number("length");
-                let effective_length = length.map(|value| value * unit_number);
+                // N identical units give the engine N times one unit: the length of a per-metre
+                // radiator, or the output constant and thermal mass of a lumped one.
+                let times_units = |value: f64| value * unit_number;
+                let effective_length = length.map(times_units);
 
                 // Per-metre vs lumped is a single coherent mode, mirroring the upstream
                 // FHS schema which branches the whole emitter on `length`. The c
@@ -7163,16 +7166,23 @@ impl JSONBuilder {
                     put(&mut emitter_obj, "c_per_m", Some(c_per_m));
                     put(&mut emitter_obj, "length", Some(effective_length));
                 } else {
-                    put(&mut emitter_obj, "c", number("c"));
+                    put(&mut emitter_obj, "c", number("c").map(times_units));
                 }
                 put(&mut emitter_obj, "n", number("n"));
 
-                let thermal_mass = if is_per_metre {
-                    "thermal_mass_per_m"
+                if is_per_metre {
+                    put(
+                        &mut emitter_obj,
+                        "thermal_mass_per_m",
+                        number("thermal_mass_per_m"),
+                    );
                 } else {
-                    "thermal_mass"
-                };
-                put(&mut emitter_obj, thermal_mass, number(thermal_mass));
+                    put(
+                        &mut emitter_obj,
+                        "thermal_mass",
+                        number("thermal_mass").map(times_units),
+                    );
+                }
             }
             "ufh" => {
                 let area = number("area").or_else(|| number("emitter_floor_area"));
@@ -10762,7 +10772,7 @@ Living,Zone,100,50
 
 Wet Emitters
 Name,Zone,Type,subcategory,unit_number,extra_json
-Radiator 1,Living,WetEmitter,radiator,1,"{""c"":0.1,""thermal_mass"":2,""thermal_mass_per_m"":0.5}"
+Radiator 1,Living,WetEmitter,radiator,3,"{""c"":0.1,""thermal_mass"":2,""thermal_mass_per_m"":0.5}"
 "#;
 
         let json = build_partial_json(csv, DEFAULTS_PATH);
@@ -10771,8 +10781,12 @@ Radiator 1,Living,WetEmitter,radiator,1,"{""c"":0.1,""thermal_mass"":2,""thermal
             .unwrap();
         let emitter = emitters[0].as_object().unwrap();
 
-        assert_eq!(emitter["c"], 0.1);
-        assert_eq!(emitter["thermal_mass"], 2.0);
+        // Three identical units: three times the output constant and the thermal mass.
+        assert!(
+            (emitter["c"].as_f64().unwrap() - 0.3).abs() < 1e-12,
+            "{emitter:?}"
+        );
+        assert_eq!(emitter["thermal_mass"], 6.0);
         assert!(
             emitter.get("thermal_mass_per_m").is_none(),
             "per-metre thermal_mass_per_m must be dropped in lumped mode"
