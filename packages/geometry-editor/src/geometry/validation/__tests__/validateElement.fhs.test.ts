@@ -304,7 +304,6 @@ describe('collectGeometryValidation Part F coverage', () => {
   it('reports that Part F sufficiency was not checked when room counts are unavailable', () => {
     const result = collectGeometryValidation([], [refrigerationAppliance()], {
       schemaPort: unavailableGeometrySchemaPort,
-      complianceValidationEnabled: true,
     });
 
     expect(result.warnings).toContain(
@@ -312,10 +311,15 @@ describe('collectGeometryValidation Part F coverage', () => {
     );
   });
 
+  it('reports missing elements whatever the file says about compliance validation', () => {
+    // The lodge checks pass a file whose ComplianceValidationEnabled is FALSE; the converter still needs a heat source.
+    const result = collectGeometryValidation([], [refrigerationAppliance()], { schemaPort: unavailableGeometrySchemaPort });
+    expect(result.missingElements.length).toBeGreaterThan(0);
+  });
+
   it('does not report a skipped check when a complete Part F context is supplied', () => {
     const result = collectGeometryValidation([], [refrigerationAppliance()], {
       schemaPort: unavailableGeometrySchemaPort,
-      complianceValidationEnabled: true,
       partFContext: {
         spaceLabels: [],
         totalFloorAreaM2: 100,

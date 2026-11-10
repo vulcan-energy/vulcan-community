@@ -85,7 +85,6 @@ describe('canonical floor-stack validation', () => {
     const result = collectGeometryValidation([], elements, {
       schemaPort: unavailableGeometrySchemaPort,
       floors,
-      complianceValidationEnabled: true,
     });
 
     expect(result.warnings).toContainEqual(

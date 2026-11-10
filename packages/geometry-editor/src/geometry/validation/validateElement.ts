@@ -1384,7 +1384,9 @@ export const validateElementCore = (
 
     case 'ThermalBridgePoint': {
       const pointElement = element as ThermalBridgePoint;
-      if (typeof pointElement.heat_transfer_coeff !== 'number' || !Number.isFinite(pointElement.heat_transfer_coeff)) {
+      // A blank column leaves the converter the row's extra_json value.
+      const coeff = pointElement.heat_transfer_coeff ?? pointElement.extra_json?.heat_transfer_coeff;
+      if (typeof coeff !== 'number' || !Number.isFinite(coeff)) {
         issues.push(geo('Heat Transfer Coefficient is required', 'heat_transfer_coeff'));
       }
       break;
@@ -2582,7 +2584,6 @@ export const collectGeometryValidation = (
     schemaPort: GeometrySchemaPort;
     floors?: Floor[];
     spaceLabels?: SpaceLabel[];
-    complianceValidationEnabled?: boolean;
     partOActiveCoolingRequired?: boolean;
     partFContext?: PartFDetectionContext;
     calculateContextShadingDistance?: (contextElement: ContextShading, parent: Element) => number;
@@ -2592,6 +2593,8 @@ export const collectGeometryValidation = (
     globalOrientationOffset?: number;
   },
 ): GeometryValidationSummary => {
+  // The converter checks every file against the FHS target, whatever its ComplianceValidationEnabled row says.
+  const complianceValidationEnabled = true;
   const warnings: string[] = [];
   const criticalIssues: string[] = [];
   const elementsById: Record<string, Element> = {};
@@ -2602,7 +2605,7 @@ export const collectGeometryValidation = (
   });
 
   const linearThermalBridgeIssues = findLinearThermalBridgeIssues(elements, options.floors ?? []);
-  const bridgingOffered = simplifiedThermalBridgingOffered(options.schemaPort, options.complianceValidationEnabled ? 'fhs' : 'core');
+  const bridgingOffered = simplifiedThermalBridgingOffered(options.schemaPort, 'fhs');
   const floorStackWarningElementIds = options.floors
     ? getFloorStackWarningElementIds(elements, options.floors)
     : new Set<string>();
@@ -2615,7 +2618,7 @@ export const collectGeometryValidation = (
       zones,
       floors: options.floors,
       globalOrientationOffset: options.globalOrientationOffset,
-      complianceValidationEnabled: options.complianceValidationEnabled || false,
+      complianceValidationEnabled,
       complianceSettings: options.complianceSettings,
       numberOfBedrooms: options.complianceSettings?.NumberOfBedrooms,
       calculateContextShadingDistance: options.calculateContextShadingDistance,
@@ -2633,7 +2636,7 @@ export const collectGeometryValidation = (
     if (zone.isPlaceholder) return;
     const validation = validateZone(zone, {
       elementsById,
-      complianceValidationEnabled: options.complianceValidationEnabled || false,
+      complianceValidationEnabled,
       primaryFhsZoneId,
       simplifiedThermalBridgingOffered: bridgingOffered,
     });
@@ -2645,7 +2648,7 @@ export const collectGeometryValidation = (
     const spaceLabelValidation = validateSpaceLabels(
       Object.fromEntries(options.spaceLabels.map((label) => [label.id, label])),
       options.spaceLabels.map((label) => label.id),
-      { zones, elementsById, complianceValidationEnabled: options.complianceValidationEnabled },
+      { zones, elementsById, complianceValidationEnabled },
     );
     warnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     criticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));
@@ -2654,21 +2657,19 @@ export const collectGeometryValidation = (
   const missingElements = detectMissingElements(
     zones,
     elementsById,
-    options.complianceValidationEnabled || false,
+    complianceValidationEnabled,
     options.partOActiveCoolingRequired,
     options.partFContext,
     options.floors,
     bridgingOffered,
   );
-  if (options.complianceValidationEnabled) {
-    const partFInput = options.partFContext
-      ? partFInputFromContext(options.partFContext, elements)
-      : null;
-    if (!partFInput) {
-      warnings.push(
-        'Part F ventilation sufficiency was not checked (dwelling room counts missing).',
-      );
-    }
+  const partFInput = options.partFContext
+    ? partFInputFromContext(options.partFContext, elements)
+    : null;
+  if (!partFInput) {
+    warnings.push(
+      'Part F ventilation sufficiency was not checked (dwelling room counts missing).',
+    );
   }
   if (options.complianceSettings) {
     warnings.push(
@@ -2676,7 +2677,7 @@ export const collectGeometryValidation = (
         elements,
         floors: options.floors,
         zones,
-        complianceValidationEnabled: options.complianceValidationEnabled,
+        complianceValidationEnabled,
         complianceSettings: options.complianceSettings,
         globalOrientationOffset: options.globalOrientationOffset,
       }),

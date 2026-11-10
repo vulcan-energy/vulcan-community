@@ -1759,7 +1759,8 @@ export function GlobalSettingsModal({
                         >
                           <input
                             type="checkbox"
-                            checked={effectiveComplianceValidationEnabled}
+                            // The file's row as the converter reads it: a blank or absent row is on.
+                            checked={complianceSettings.complianceValidationEnabled !== false}
                             onChange={(e) =>
                               setComplianceSettings({
                                 complianceValidationEnabled: e.target.checked,

@@ -137,13 +137,15 @@ function normalizeContextShadingShadingType(raw: string | undefined): 'obstacle'
   return value === 'overhang' || value === 'obstacle' ? value : undefined;
 }
 
-const BUILDING_ROW_KEYS = ['Name', 'Zone', 'Type'] as const;
+const BUILDING_ROW_KEYS = ['Zone', 'Type'] as const;
 /**
- * Row cells without which the converter stops the whole conversion (E008-E029). The load stops too,
- * naming the section and row, so no row is dropped unseen. The converter does not read Space Labels,
- * so every label row loads and saves as it is.
+ * Row cells without which the load stops, naming the section and row, so no row is dropped unseen.
+ * Every row needs a Name: the editor cannot hold a row without one, and the converter stops on most
+ * sections without one. These sections also need the cells listed, without which the converter
+ * stops the whole conversion (E008-E029). The converter does not read Space Labels, so every label
+ * row loads and saves as it is.
  */
-const REQUIRED_ROW_KEYS: Readonly<Record<string, readonly ('Name' | 'Zone' | 'Type')[]>> = {
+const REQUIRED_ROW_KEYS: Readonly<Record<string, readonly ('Zone' | 'Type')[]>> = {
   'Exposed Elements': BUILDING_ROW_KEYS,
   'Window Elements': BUILDING_ROW_KEYS,
   'Ground Elements': BUILDING_ROW_KEYS,
@@ -152,19 +154,51 @@ const REQUIRED_ROW_KEYS: Readonly<Record<string, readonly ('Name' | 'Zone' | 'Ty
   'Window Shading': ['Zone'],
   Lighting: ['Zone'],
   'Wet Emitters': ['Zone'],
-  'Hot Water Outlets': ['Name', 'Type'],
-  'Ventilation Systems': ['Name', 'Type'],
-  'On-Site Generation': ['Name'],
-  Systems: ['Name'],
+  'Hot Water Outlets': ['Type'],
+  'Ventilation Systems': ['Type'],
 };
+
+const BUILDING_ROW_TYPES = [
+  'BuildingElementOpaque',
+  'BuildingElementTransparent',
+  'BuildingElementGround',
+  'BuildingElementAdjacentConditionedSpace',
+  'BuildingElementAdjacentUnconditionedSpace_Simple',
+  'BuildingElementPartyWall',
+];
+/**
+ * The row types the editor reads, where the converter routes the row by its Type and rejects or
+ * leaves out any other (E056, E028, E065, or a Ventilation Systems row it skips). The load stops
+ * on another Type, naming the row, so no row is dropped unseen. The converter's older aliases
+ * (Wall, Roof, Door and so on) stop the load too. Sections not listed (Wet Emitters, Water
+ * Pipework, Combustion Appliances, Hot Water Outlets) are read whatever their Type says, as the
+ * converter reads them.
+ */
+const ROW_TYPES: Readonly<Record<string, readonly string[]>> = {
+  'Exposed Elements': BUILDING_ROW_TYPES,
+  'Window Elements': BUILDING_ROW_TYPES,
+  'Ground Elements': BUILDING_ROW_TYPES,
+  'Non-Exposed Elements': BUILDING_ROW_TYPES,
+  'Thermal Bridging Elements': ['ThermalBridgeLinear', 'ThermalBridgePoint'],
+  Systems: ['System', 'ElectricBattery'],
+  'Ventilation Systems': ['MechanicalVentilation', 'Vents', 'MechanicalVentilationDuctwork', 'MechanicalVentilationTerminal'],
+};
+
+/** A Systems row's type, as the converter reads it: the first of these cells that is not blank. */
+const systemsRowType = (d: Record<string, string>) => V(d, 'Type') || V(d, 'system_type') || V(d, 'subcategory');
 
 function assertRowKeys(section: CsvSection, d: CsvRow['data'], zoneNames: Readonly<Record<string, string>>): void {
   // A row of empty cells is a spacer, not a row.
   if (Object.values(d).every((cell) => !cell?.trim())) return;
   const name = V(d, 'Name');
   const row = name ? `${section.name} row '${name}'` : `${/^[AEIOU]/.test(section.name) ? 'An' : 'A'} ${section.name} row`;
-  for (const key of REQUIRED_ROW_KEYS[section.name] ?? []) {
+  for (const key of ['Name', ...(REQUIRED_ROW_KEYS[section.name] ?? [])]) {
     if (!V(d, key)) throw new Error(`${row} has no ${key}. Enter the ${key} in the file and open it again.`);
+  }
+  const types = ROW_TYPES[section.name];
+  const type = section.name === 'Systems' ? systemsRowType(d) : V(d, 'Type');
+  if (types && !types.includes(type)) {
+    throw new Error(`${row} ${type ? `has Type '${type}', which is not a ${section.name} type` : 'has no Type'}. Enter one of ${types.join(', ')} in the file and open it again.`);
   }
   const zone = V(d, 'Zone');
   if (zone && section.columnHeaders.includes('Zone') && !(zone in zoneNames)) {
@@ -201,7 +235,9 @@ export function ingestGeometryTabularSections(
       for (const row of section.rows) {
         const d = row.data;
         const zoneName = V(d, 'Name');
-        if (!zoneName || zoneName === 'Name') continue;
+        if (zoneName === 'Name') continue;
+        assertRowKeys(section, d, zoneNameToId);
+        if (!zoneName) continue;
         rowText = {};
         const floorArea = num(d, 'floor_area');
         const volume = num(d, 'volume');
@@ -576,7 +612,7 @@ export function ingestGeometryTabularSections(
         }
         case 'Systems': {
           const zoneName = V(d, 'Zone');
-          const rowType = V(d, 'Type') || V(d, 'system_type') || V(d, 'subcategory');
+          const rowType = systemsRowType(d);
           if (rowType === 'System') {
             const subcategory = parseOptionalEnumColumn<SystemSubcategory>(V(d, 'subcategory'), [
               'HeatSourceWet',
@@ -730,50 +766,46 @@ export function ingestGeometryTabularSections(
           break;
         }
         case 'Combustion Appliances': {
-          if (V(d, 'Type') === 'CombustionAppliances') {
-            newElements.push({
-              id: generateId(),
-              name,
-              type: 'CombustionAppliances',
-              appliance_type: parseRequiredEnumColumn<CombustionAppliances['appliance_type']>(V(d, 'appliance_type'), [
-                'open_fireplace',
-                'closed_with_fan',
-                'open_gas_flue_balancer',
-                'open_gas_kitchen_stove',
-                'open_gas_fire',
-                'closed_fire',
-              ]),
-              exhaust_situation: parseRequiredEnumColumn<CombustionAppliances['exhaust_situation']>(V(d, 'exhaust_situation'), [
-                'into_room',
-                'into_separate_duct',
-                'into_mech_vent',
-              ]),
-              fuel_type: parseRequiredEnumColumn<CombustionAppliances['fuel_type']>(V(d, 'fuel_type'), ['wood', 'gas', 'oil', 'coal']),
-              supply_situation: parseRequiredEnumColumn<CombustionAppliances['supply_situation']>(V(d, 'supply_situation'), ['room_air', 'outside']),
-              parent_element: null,
-              coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
-              ...viewerBaseHeightPatch(d),
-              extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
-            });
-          }
+          newElements.push({
+            id: generateId(),
+            name,
+            type: 'CombustionAppliances',
+            appliance_type: parseRequiredEnumColumn<CombustionAppliances['appliance_type']>(V(d, 'appliance_type'), [
+              'open_fireplace',
+              'closed_with_fan',
+              'open_gas_flue_balancer',
+              'open_gas_kitchen_stove',
+              'open_gas_fire',
+              'closed_fire',
+            ]),
+            exhaust_situation: parseRequiredEnumColumn<CombustionAppliances['exhaust_situation']>(V(d, 'exhaust_situation'), [
+              'into_room',
+              'into_separate_duct',
+              'into_mech_vent',
+            ]),
+            fuel_type: parseRequiredEnumColumn<CombustionAppliances['fuel_type']>(V(d, 'fuel_type'), ['wood', 'gas', 'oil', 'coal']),
+            supply_situation: parseRequiredEnumColumn<CombustionAppliances['supply_situation']>(V(d, 'supply_situation'), ['room_air', 'outside']),
+            parent_element: null,
+            coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
+            ...viewerBaseHeightPatch(d),
+            extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
+          });
           break;
         }
         case 'Water Pipework': {
-          // The section implies the type; the converter reads a blank Type as WaterPipework too.
-          if (V(d, 'Type') === 'WaterPipework' || !V(d, 'Type')) {
-            newElements.push({
-              id: generateId(),
-              name,
-              type: 'WaterPipework',
-              simplified_pipework: false,
-              length: reqNum(d, 'length'),
-              location: parseRequiredEnumColumn<WaterPipework['location']>(V(d, 'location'), ['internal', 'external']),
-              pipework_type: parseRequiredEnumColumn<WaterPipework['pipework_type']>(V(d, 'pipework_type'), ['primary', 'distribution']),
-              parent_element: null,
-              coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
-              extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
-            });
-          }
+          // The converter reads every row of this section as pipework, whatever its Type says.
+          newElements.push({
+            id: generateId(),
+            name,
+            type: 'WaterPipework',
+            simplified_pipework: false,
+            length: reqNum(d, 'length'),
+            location: parseRequiredEnumColumn<WaterPipework['location']>(V(d, 'location'), ['internal', 'external']),
+            pipework_type: parseRequiredEnumColumn<WaterPipework['pipework_type']>(V(d, 'pipework_type'), ['primary', 'distribution']),
+            parent_element: null,
+            coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
+            extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
+          });
           break;
         }
         case 'Appliances': {
@@ -818,27 +850,25 @@ export function ingestGeometryTabularSections(
         }
         case 'Wet Emitters': {
           const zoneName = V(d, 'Zone');
-          const elementType = V(d, 'Type') as ElementType;
+          // assertRowKeys has checked the zone. The converter reads every row of this section as an
+          // emitter, whatever its Type says.
           const zoneId = zoneNameToId[zoneName];
-          // The section implies the type; the converter reads a blank Type as WetEmitter too.
-          if ((elementType === 'WetEmitter' || !elementType) && zoneId) {
-            newElements.push({
-              id: generateId(),
-              name,
-              zoneId,
-              type: 'WetEmitter',
-              subcategory: parseRequiredEnumColumn<WetEmitter['subcategory']>(V(d, 'subcategory'), ['radiator', 'ufh', 'fancoil']),
-              area: num(d, 'area'),
-              // Not rounded: the converter stops on a unit count that is not a whole number.
-              unit_number: num(d, 'unit_number') === undefined ? undefined : Number(V(d, 'unit_number')),
-              // '' when the table has the column blank (linked to nothing); undefined when it has no such column.
-              space_heat_system: 'space_heat_system' in d ? V(d, 'space_heat_system') : undefined,
-              parent_element: null,
-              coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
-              ...viewerBaseHeightPatch(d),
-              extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
-            });
-          }
+          newElements.push({
+            id: generateId(),
+            name,
+            zoneId,
+            type: 'WetEmitter',
+            subcategory: parseRequiredEnumColumn<WetEmitter['subcategory']>(V(d, 'subcategory'), ['radiator', 'ufh', 'fancoil']),
+            area: num(d, 'area'),
+            // Not rounded: the converter stops on a unit count that is not a whole number.
+            unit_number: num(d, 'unit_number') === undefined ? undefined : Number(V(d, 'unit_number')),
+            // '' when the table has the column blank (linked to nothing); undefined when it has no such column.
+            space_heat_system: 'space_heat_system' in d ? V(d, 'space_heat_system') : undefined,
+            parent_element: null,
+            coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
+            ...viewerBaseHeightPatch(d),
+            extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
+          });
           break;
         }
         default:

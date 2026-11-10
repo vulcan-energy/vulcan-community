@@ -193,7 +193,8 @@ export type ComplianceSettings = {
   storeys_in_building?: number;
   /**
    * Model-input rows the file has with a value the editor cannot read, by row: blank (E066) or not a
-   * value the converter accepts (E055, E026). Never filled; the save writes the cell back as it was.
+   * value the converter accepts (E055, E026), and workflow switches that are blank or not TRUE or
+   * FALSE. Never filled; the save writes the cell back as it was.
    */
   unreadMetadataRows?: Record<string, string>;
   /** Model-input rows the file lacks: they take the value the converter uses for an absent row. */
@@ -320,6 +321,15 @@ export const parseCsvToGeometry = (
   const metadataRowsInFile = new Set<string>();
   const modelInputCells: Record<string, string> = {};
   // A finite number as the converter reads a cell; anything else leaves the setting unread.
+  // A workflow switch: TRUE or FALSE in any case, as the converter reads ComplianceValidationEnabled.
+  // A blank is the converter's absent row (switched on) and other text is E055 there; either stays
+  // unset and saves as typed, and text blocks (unsetMetadataInputIssues).
+  const workflowFlag = (key: string, raw: string | undefined): boolean | undefined => {
+    const cell = raw?.trim() ?? '';
+    if (/^(TRUE|FALSE)$/i.test(cell)) return cell.toUpperCase() === 'TRUE';
+    (complianceSettings.unreadMetadataRows ??= {})[key] = cell;
+    return undefined;
+  };
   const metadataNumber = (line: string): number => {
     const cell = (line.split(',')[1] ?? '').trim();
     return NUMBER_CELL.test(cell) ? Number(cell) : NaN;
@@ -533,13 +543,13 @@ export const parseCsvToGeometry = (
       continue;
     }
     if (line.startsWith('ComplianceValidationEnabled,')) {
-      const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.complianceValidationEnabled = value === 'TRUE';
+      const value = workflowFlag('ComplianceValidationEnabled', metadataFields[1]);
+      if (value !== undefined) complianceSettings.complianceValidationEnabled = value;
       continue;
     }
     if (line.startsWith('ScenariosBaseModelEnabled,')) {
-      const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.scenariosBaseModelEnabled = value === 'TRUE';
+      const value = workflowFlag('ScenariosBaseModelEnabled', metadataFields[1]);
+      if (value !== undefined) complianceSettings.scenariosBaseModelEnabled = value;
       continue;
     }
     if (line.startsWith('AirPermeability_test_pressure,')) {

@@ -710,12 +710,13 @@ const migrateElementsToNormalized = (
   return { elementsById, elementIds };
 };
 
-const NOT_REPLACEABLE_COLUMNS = new Set(['Name', 'Zone', 'Type', 'coords', 'extra_json']);
+const NOT_REPLACEABLE_COLUMNS = new Set(['Name', 'Zone', 'coords', 'extra_json']);
 const LEGACY_COLUMN: Readonly<Record<string, string>> = { shading_type: 'Type', start_angle: 'start angle', end_angle: 'end angle' };
 /**
  * One load notice listing every cell of a zone or element row, a column the file lacks included,
- * that the loaded document saves with a different value, such as a plan area or a labelled
- * living-room area, and every name the load brings up to date. An internal partition saved as both
+ * that the loaded document saves with a different value, such as a plan area, a labelled
+ * living-room area or a Type the converter does not read, every row the save leaves out, and every
+ * name the load brings up to date. An internal partition saved as both
  * faces at twice a legacy single-face area keeps its meaning, so it is not listed. The converter
  * works out only a blank pitch from the row's coords, so that is the one filled blank not listed.
  */
@@ -729,7 +730,10 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
   for (const [key, authored] of rows(authoredCsv)) {
     const newName = renamed.get(authored.Name);
     const saved = loaded.get(newName ? `${key.slice(0, -authored.Name.length)}${newName}` : key);
-    if (!saved) continue;
+    if (!saved) {
+      replaced.push(`${authored.Name} row in ${key.split('|')[0]} → left out`);
+      continue;
+    }
     const bothFaces = /both_faces/.test(saved.extra_json ?? '');
     // A column the file lacks is read as blank, as the converter reads it, or from the older column
     // that held it (Context Shading).
@@ -737,6 +741,8 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
       const before = (authored[column] ?? authored[LEGACY_COLUMN[column]] ?? '').trim();
       const after = saved[column]?.trim();
       if (after === undefined || NOT_REPLACEABLE_COLUMNS.has(column)) continue;
+      // A file without a newer column kept that value in the older one (Context Shading Type).
+      if (Object.entries(LEGACY_COLUMN).some(([newer, older]) => older === column && !(newer in authored) && newer in saved)) continue;
       if (!before) {
         // A PV panel's pitch comes from its host roof, not its own coords.
         const coordsPitch = column === 'pitch' && !key.startsWith('On-Site Generation|') && authored.coords?.trim();
@@ -1452,10 +1458,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
 
     // 11. Water Pipework section
-    const pipeworkElements = exportElements.filter((e): e is ElementByType<'WaterPipework'> =>
-      e.type === 'WaterPipework' &&
-      (!compliance.complianceValidationEnabled || e.pipework_type !== 'distribution')
-    );
+    const pipeworkElements = exportElements.filter((e): e is ElementByType<'WaterPipework'> => e.type === 'WaterPipework');
     if (pipeworkElements.length > 0) {
       const pipeworkHeader = [...EXPECTED_SECTION_HEADERS['Water Pipework']];
       const pipeworkColumnCount = pipeworkHeader.length;
@@ -2190,12 +2193,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const labelList = spaceLabelIds.map((id) => spaceLabelsById[id]).filter(Boolean);
     let zonesForStore = zonesWithDerivedProperties;
     if (labelList.length > 0) {
-      const cv = get().complianceSettings.complianceValidationEnabled === true;
       const primaryForLabels = zonesForStore.find((zone) => !zone.isPlaceholder);
       const geometryAnalysis = primaryForLabels
         ? analyzeZoneSpaceLabels(primaryForLabels.id, labelList, allElements)
         : undefined;
-      const applied = applySpaceLabelsToZonesAndCompliance(zonesForStore, labelList, cv, geometryAnalysis, {
+      const applied = applySpaceLabelsToZonesAndCompliance(zonesForStore, labelList, geometryAnalysis, {
         preserveManualFloorAreaOverride: true,
       });
       zonesForStore = applied.zones;

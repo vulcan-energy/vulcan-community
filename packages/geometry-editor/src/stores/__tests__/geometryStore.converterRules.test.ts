@@ -203,6 +203,44 @@ const CASES: Case[] = [
   { name: 'element with no name', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', ',Zone 1,BuildingElementOpaque'), refuses: 'An Exposed Elements row has no Name' },
   { name: 'hot water outlet with no Type', edit: replace('Tap,HotWaterDemand,', 'Tap,,'), refuses: "Hot Water Outlets row 'Tap' has no Type" },
   { name: 'Systems row with no Name', edit: replace('Heat Pump,Zone 1,System,', ',Zone 1,System,'), refuses: 'A Systems row has no Name' },
+  // The converter rejects or leaves out a row whose Type it does not route (E056, E028, E065): the
+  // load stops, naming the row and its Type, rather than dropping the row.
+  { name: 'thermal bridge with an unknown Type', edit: replace('Auto_TB_1,Zone 1,ThermalBridgeLinear,', 'Auto_TB_1,Zone 1,ThermalBridgeLiner,'),
+    refuses: "Thermal Bridging Elements row 'Auto_TB_1' has Type 'ThermalBridgeLiner'" },
+  { name: 'floor with an unknown Type', edit: replace('Floor,Zone 1,BuildingElementGround,', 'Floor,Zone 1,BuildingElementGrnd,'),
+    refuses: "Ground Elements row 'Floor' has Type 'BuildingElementGrnd'" },
+  { name: 'Systems row with an unknown Type', edit: replace('Heat Pump,Zone 1,System,', 'Heat Pump,Zone 1,Systm,'), refuses: "Systems row 'Heat Pump' has Type 'Systm'" },
+  { name: 'ventilation row with an unknown Type', edit: replace('Background Vent 1,Vents,', 'Background Vent 1,Vent,'),
+    refuses: "Ventilation Systems row 'Background Vent 1' has Type 'Vent'" },
+  { name: 'a row with no Name', edit: replace('Light,Zone 1,80,', ',Zone 1,80,'), refuses: 'A Lighting row has no Name' },
+  // The converter reads these sections whatever the Type cell says: the row is kept and the new Type named.
+  { name: 'emitter with another Type', edit: replace('Underfloor Heating,Zone 1,WetEmitter,', 'Underfloor Heating,Zone 1,Radiator,'),
+    notice: 'Underfloor Heating Type Radiator → WetEmitter', saves: { 'Wet Emitters|Underfloor Heating|area': '8.89' } },
+  { name: 'pipework with another Type', edit: replace('Pipe,WaterPipework,', 'Pipe,Pipework,'),
+    notice: 'Pipe Type Pipework → WaterPipework', saves: { 'Water Pipework|Pipe|length': '5.08' } },
+  { name: 'combustion appliance with another Type', saves: { 'Combustion Appliances|Fire|fuel_type': 'wood' },
+    edit: appendSection('Combustion Appliances,,,,,,,,\nName,Type,appliance_type,exhaust_situation,fuel_type,supply_situation,base_height,coords,extra_json\nFire,Appliance,open_fireplace,into_room,wood,room_air,,"0,0,0",') },
+  // A row the save leaves out is named.
+  { name: 'a row the editor does not keep', edit: appendSection('Test Section,\nName,Value\nProbe,1'), notice: 'Probe row in Test Section → left out' },
+  // ComplianceValidationEnabled reads as the converter reads it: TRUE or FALSE in any case; a blank is
+  // the absent row (on); other text is E055. The cell saves as typed.
+  { name: 'ComplianceValidationEnabled that is not TRUE or FALSE', edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,yes,'),
+    blocks: ["ComplianceValidationEnabled is 'yes'"], saves: { 'Metadata|ComplianceValidationEnabled': 'yes' } },
+  { name: 'blank ComplianceValidationEnabled is on', defaults: true,
+    edit: (csv) => replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,,')(csv).replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
+    allows: ['Kitchen cooker hood extracts to outside'], saves: { 'Metadata|ComplianceValidationEnabled': '', 'Metadata|KitchenExtractorHoodExternal': 'FALSE' } },
+  { name: 'ScenariosBaseModelEnabled that is not TRUE or FALSE', edit: replace('ScenariosBaseModelEnabled,TRUE,', 'ScenariosBaseModelEnabled,yes,'),
+    blocks: ["ScenariosBaseModelEnabled is 'yes'"], saves: { 'Metadata|ScenariosBaseModelEnabled': 'yes' } },
+  // The converter keeps distribution pipework whatever ComplianceValidationEnabled says.
+  { name: 'distribution pipework is saved', edit: replace('Pipe,WaterPipework,5.08,internal,primary,', 'Pipe,WaterPipework,5.08,internal,distribution,'),
+    saves: { 'Water Pipework|Pipe|pipework_type': 'distribution' } },
+  // The load takes the living-room split from the labels whatever the switch says, and names the change.
+  { name: 'compliance validation off still takes the split from the labels',
+    edit: (csv) => replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,')(replace('FALSE,12.78,58.21', 'FALSE,20,50.99')(csv)),
+    notice: 'Zone 1 livingroom_area 20 → 12.78', saves: { 'Zone|Zone 1|livingroom_area': '12.78' } },
+  // A point bridge's coefficient may sit in extra_json alone: the converter reads it there.
+  { name: 'point bridge coefficient in extra_json', allows: ['PB1|heat_transfer_coeff'],
+    edit: replace('linear_thermal_transmittance,parent_element,coords,extra_json\n', 'linear_thermal_transmittance,parent_element,coords,extra_json\nPB1,Zone 1,ThermalBridgePoint,,,,,"0,0,0","{""heat_transfer_coeff"":0.5}"\n') },
   // A value filled from the defaults and then edited is the user's: new defaults leave it.
   { name: 'an edited filled value survives new defaults', edit: (csv) => csv, defaults: true,
     then: (store) => {

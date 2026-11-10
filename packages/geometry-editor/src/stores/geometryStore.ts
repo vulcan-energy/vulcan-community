@@ -3944,7 +3944,7 @@ const createGeometryState = (
     newElement = applyCreationDefaultAssemblyToElement(newElement, {
       library: get().bundledAssemblyLibrary,
       ids: get().creationDefaultAssemblyIds,
-      fhsComplianceSnapArealHeat: !!get().complianceSettings?.complianceValidationEnabled,
+      fhsComplianceSnapArealHeat: true,
     }) as Element;
     newElement = { ...newElement, _nameAutoSync: true };
 
@@ -5136,12 +5136,11 @@ const createGeometryState = (
   syncDerivedValuesFromSpaceLabels: () => {
     const state = get();
     const labels = state.spaceLabelIds.map((lid) => state.spaceLabelsById[lid]).filter(Boolean);
-    const cv = state.complianceSettings?.complianceValidationEnabled === true;
     const primary = state.zones.find((z) => !z.isPlaceholder);
     const geometryAnalysis = primary
       ? analyzeZoneSpaceLabels(primary.id, labels, Object.values(state.elementsById).filter(Boolean))
       : undefined;
-    const { zones: nextZones } = applySpaceLabelsToZonesAndCompliance(state.zones, labels, cv, geometryAnalysis);
+    const { zones: nextZones } = applySpaceLabelsToZonesAndCompliance(state.zones, labels, geometryAnalysis);
     set({ zones: nextZones });
 
     if (labels.length > 0) {
@@ -6102,7 +6101,7 @@ const createGeometryState = (
           normalizedUpdates,
           withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById)),
           nextElement.type === 'BuildingElementTransparent'
-            && windowPartsArePhysical(schemaPort, state.complianceSettings?.complianceValidationEnabled ? 'fhs' : 'core') === true,
+            && windowPartsArePhysical(schemaPort, 'fhs') === true,
         );
       } catch { /* swallow: best-effort */ }
 

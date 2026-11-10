@@ -651,7 +651,8 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
  * One issue per model-input metadata row the save would leave out although the target's schema
  * takes it (or no schema says otherwise): the file had the row blank, the user cleared a value, or
  * no defaults value exists for a value the schema requires. `defaults` is undefined while the
- * defaults are still loading, when only blank rows are known to be unset.
+ * defaults are still loading, when only blank rows are known to be unset. Also one issue per
+ * workflow switch (ComplianceValidationEnabled, ScenariosBaseModelEnabled) holding text.
  */
 export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: unknown, defaults: unknown): string[] {
   const unread = state.complianceSettings.unreadMetadataRows ?? {};
@@ -663,7 +664,10 @@ export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: u
     if (value === undefined) return '';
     return key.startsWith('NumberOf') ? ` Space labels show ${value}.` : ` The geometry gives ${value}.`;
   };
-  return metadataRowValues(state).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS
+  return metadataRowValues(state).flatMap(([key, value]) => value === undefined && !(key in METADATA_INPUT_LABELS) && unread[key]
+    // A workflow switch holding text, which the converter stops on for ComplianceValidationEnabled (E055).
+    ? [`Metadata: ${key} is '${unread[key]}', which is not TRUE or FALSE. Enter TRUE or FALSE in the file.`]
+    : (value === undefined && key in METADATA_INPUT_LABELS
       && !systemsRowSetsMetadataInput(state.elements, key)
       && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
       && (blank.has(key) || (defaults !== undefined
