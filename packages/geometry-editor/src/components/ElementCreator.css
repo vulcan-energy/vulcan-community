@@ -225,6 +225,7 @@
   stroke-linejoin: round;
 }
 .wall-shape-sketch-wall.is-invalid { stroke: var(--validation-warning); }
+.wall-shape-sketch-overlap { fill: var(--validation-warning); opacity: 0.25; }
 .wall-shape-sketch-roof { fill: none; stroke: var(--validation-info-text); stroke-width: 2; stroke-dasharray: 5 3; }
 .wall-shape-sketch-point { fill: var(--text-primary); stroke: var(--bg-primary); stroke-width: 1; }
 .wall-shape-sketch-label { font-size: 10px; fill: var(--text-muted); }

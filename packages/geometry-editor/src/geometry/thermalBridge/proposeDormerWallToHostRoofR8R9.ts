@@ -13,24 +13,18 @@
 import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
 import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
-import { inwardNormal2DForSlopedRoof, roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
+import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import { roundToTwoDecimals } from '../constants';
 import { opaqueEnvelopeVerticalExtentM, zonesCompatible } from './proposeAdjacentWallJunction';
-import { isSlopedPitchedRoofElementForEavesGable } from './proposeSlopedRoofEavesGable';
-import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { type FacadeOpeningEdgeRole, type FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
-import { interpolateProfileHeight, normalizeProfilePoints, readProfiledLineFace } from '../../lib/profileLineFace';
-import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
-import { roofCoversPlanPoint } from '../../lib/wallEdgeFromRoofs';
+import { bottomEdgeRoofRuns, pitchedRoofsForWalls } from '../../lib/roofCutouts';
 import { isExternalLineWall } from './proposeExternalCorners';
 
 const MIN_WALL_PLAN_LEN_M = 0.05;
 const ROOF_WALL_Z_OVERLAP_PAD_M = 0.45;
-/** A bottom edge this far above the foot is off the floor; this close to a roof plane it is on that roof. */
-const ON_ROOF_TOL_M = 0.05;
 
 const EDGE_ROLE: FacadeOpeningEdgeRole = 'sloped_roof_to_adjacent_wall_r8_r9';
 
@@ -73,61 +67,15 @@ function coldPitchedRoofBoundaryZM(
   return getUnheatedPitchedRoofCeilingElevationM(roof, elements, floors).value;
 }
 
-/**
- * Stretches (t ranges, 0..1) of an external wall's bottom edge that stand on a pitched roof, with
- * that roof. Between bottom-edge points the edge is straight and lies on one roof plane, so each
- * stretch is matched at its midpoint; neighbouring stretches on the same roof are joined.
- */
-function bottomEdgeRoofRuns(
-  w: BuildingElementOpaque,
-  roofs: BuildingElementOpaque[],
-  floors: Floor[] | undefined,
-  globalOrientationOffset: number | undefined,
-): Array<{ roof: BuildingElementOpaque; t0: number; t1: number }> {
-  const bottom = normalizeProfilePoints(readProfiledLineFace(w.extra_json)?.bottom_profile);
-  if (!bottom) return [];
-  const [A, B] = [w.coordinates[0]!, w.coordinates[1]!];
-  const foot = elementBaseElevationMForTb(w, floors ?? []);
-  const len = Math.hypot(B.x - A.x, B.y - A.y);
-  const dir = { x: (B.x - A.x) / len, y: (B.y - A.y) / len };
-  // The roof whose plane passes through elevation z at plan point p.
-  const roofAt = (p: { x: number; y: number }, z: number) => roofs.find((r) => {
-    if (!zonesCompatible(w.zoneId, r.zoneId) || !roofCoversPlanPoint(r, p, dir)) return false;
-    const roofZ = roofTopElevationAtPlanM(r, p.x, p.y, floors, globalOrientationOffset);
-    return roofZ !== null && Math.abs(roofZ - z) <= ON_ROOF_TOL_M;
-  });
-  const runs: Array<{ roof: BuildingElementOpaque; t0: number; t1: number }> = [];
-  for (let i = 0; i < bottom.length - 1; i += 1) {
-    const t0 = bottom[i]!.t;
-    const t1 = bottom[i + 1]!.t;
-    const tm = (t0 + t1) / 2;
-    const h = interpolateProfileHeight(bottom, tm);
-    if (h <= ON_ROOF_TOL_M) continue;
-    const p = { x: A.x + (B.x - A.x) * tm, y: A.y + (B.y - A.y) * tm };
-    const roof = roofAt(p, foot + h);
-    // A bottom edge on no roof is a stale fit: validation says "re-fit its shape".
-    if (!roof) continue;
-    const last = runs[runs.length - 1];
-    if (last && last.roof === roof && last.t1 === t0) last.t1 = t1;
-    else runs.push({ roof, t0, t1 });
-  }
-  return runs;
-}
-
 export function proposeDormerWallToHostRoofR8R9ThermalBridges(
   elements: Element[],
   floors?: Floor[],
   globalOrientationOffset?: number,
 ): FacadeOpeningTbProposal[] {
   floors = withEffectiveStoreyHeights(floors, elements);
+  const roofs = pitchedRoofsForWalls(elements, globalOrientationOffset);
   const roofByName = new Map<string, BuildingElementOpaque>();
-  const roofs: BuildingElementOpaque[] = [];
-  for (const e of elements) {
-    if (e.type !== 'BuildingElementOpaque' || e.isPlaceholder) continue;
-    const o = e as BuildingElementOpaque;
-    if (isOrientationPitchAxis(o) && !inwardNormal2DForSlopedRoof(o, globalOrientationOffset)) continue;
-    if (!isSlopedPitchedRoofElementForEavesGable(o)) continue;
-    roofs.push(o);
+  for (const o of roofs) {
     const n = (o.name ?? '').trim();
     if (n) roofByName.set(n, o);
   }

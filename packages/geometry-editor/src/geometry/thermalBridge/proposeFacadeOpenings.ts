@@ -21,6 +21,7 @@
  */
 
 import { roundToTwoDecimals } from '../constants';
+import { normalizeProfilePoints, readProfiledLineFace, type ProfilePoint } from '../../lib/profileLineFace';
 import {
   elementBaseElevationMForTb,
   elementFloorZIndexForTb,
@@ -47,6 +48,9 @@ import {
 import { findLinkedBasementGroundForLineElement, isBasementGroundElement } from '../../lib/basementGeometry';
 
 import { DEFAULT_TB_DEDUPE_TOLERANCE_M } from './thermalBridgeTolerances';
+
+const last = <T,>(list: T[]): T => list[list.length - 1]!;
+
 /** Re-export for callers importing from facade openings. */
 export { DEFAULT_TB_DEDUPE_TOLERANCE_M };
 /** Re-export for callers importing from facade openings. */
@@ -353,6 +357,7 @@ export type VerticalFacadeOpeningHost = {
   width: number;
   height: number;
   base_height?: number;
+  extra_json?: Record<string, unknown>;
 };
 
 function hostWallForFacadeOpening(
@@ -512,11 +517,23 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
   const height = typeof t.height === 'number' && t.height > 0 ? t.height : 0;
 
   const zTop = zSill + height;
+  const horizontalLengthM = geomWidthM > 0 ? geomWidthM : width;
 
-  const sillA = { x: p0.x, y: p0.y, z: zSill };
-  const sillB = { x: p1.x, y: p1.y, z: zSill };
-  const headA = { x: p0.x, y: p0.y, z: zTop };
-  const headB = { x: p1.x, y: p1.y, z: zTop };
+  // A shaped opening (Custom top): lintel and sill follow its edges, each jamb is its height at
+  // that end. A flat opening keeps its width and stored height.
+  const face = readProfiledLineFace(t.extra_json);
+  const topEdge = face && normalizeProfilePoints(face.top_profile);
+  const bottomEdge = face && normalizeProfilePoints(face.bottom_profile);
+  const shaped = topEdge && bottomEdge ? { top: topEdge, bottom: bottomEdge } : null;
+  const alongEdge = (edge: ProfilePoint[]) => edge.slice(1).reduce(
+    (sum, p, i) => sum + Math.hypot((p.t - edge[i]!.t) * horizontalLengthM, p.h - edge[i]!.h), 0);
+
+  const sillA = { x: p0.x, y: p0.y, z: shaped ? zSill + shaped.bottom[0]!.h : zSill };
+  const sillB = { x: p1.x, y: p1.y, z: shaped ? zSill + last(shaped.bottom).h : zSill };
+  const headA = { x: p0.x, y: p0.y, z: shaped ? zSill + shaped.top[0]!.h : zTop };
+  const headB = { x: p1.x, y: p1.y, z: shaped ? zSill + last(shaped.top).h : zTop };
+  const lintelLengthM = shaped ? alongEdge(shaped.top) : horizontalLengthM;
+  const sillLengthM = shaped ? alongEdge(shaped.bottom) : horizontalLengthM;
   const jambFirstBottom = sillA;
   const jambFirstTop = headA;
   const jambSecondBottom = sillB;
@@ -525,8 +542,6 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
     useIntermediateWallFloor &&
     unheatedBasementWallFloorTargetM !== null &&
     Math.abs(zSill - unheatedBasementWallFloorTargetM) <= SKIP_SILL_THERMAL_BRIDGE_BELOW_Z_M;
-
-  const horizontalLengthM = geomWidthM > 0 ? geomWidthM : width;
 
   const roles: Array<{
     role: FacadeOpeningEdgeRole;
@@ -538,8 +553,10 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
     {
       role: 'lintel',
       coords: [headA, headB],
-      length: horizontalLengthM,
-      reason: `Lintel run along top of opening "${t.name}" (segment length in plan)`,
+      length: lintelLengthM,
+      reason: shaped
+        ? `Lintel run along the shaped top of opening "${t.name}" (sloped parts measured along their slope)`
+        : `Lintel run along top of opening "${t.name}" (segment length in plan)`,
     },
     ...(useIntermediateWallFloor
       ? [
@@ -567,20 +584,20 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
             {
               role: 'sill' as const,
               coords: [sillA, sillB] as [typeof sillA, typeof sillB],
-              length: horizontalLengthM,
+              length: sillLengthM,
               reason: `Sill along bottom of opening "${t.name}"`,
             },
           ]),
     {
       role: 'jamb_first',
       coords: [jambFirstBottom, jambFirstTop],
-      length: height,
+      length: shaped ? headA.z - sillA.z : height,
       reason: jambReason(t.name, 'first', usedBaseHeight, z0, z1),
     },
     {
       role: 'jamb_second',
       coords: [jambSecondBottom, jambSecondTop],
-      length: height,
+      length: shaped ? headB.z - sillB.z : height,
       reason: jambReason(t.name, 'second', usedBaseHeight, z0, z1),
     },
   ];

@@ -45,6 +45,7 @@ import {
   getAreaBasedElementExportGeometry,
   getElementGrossArea,
   getOpaqueOpeningArea,
+  getRoofCover,
   isUnheatedPitchedRoofPlanAreaElement,
 } from '../../lib/elementArea';
 import { readProfiledLineFace } from '../../lib/profileLineFace';
@@ -257,6 +258,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       unheatedPitchedRoofCeilingElevationSuggestion,
       renderDormerBundleEditor,
       getGlobalOrientationOffset,
+      getFloors,
     } = ctx;
 
     // Decision 2's seam: same predicate the orchestrator's own
@@ -284,12 +286,14 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       const grossArea = selectedShape === 'polygon' || selectedShape === 'sloped-polygon'
         ? getElementGrossArea(draftElement, getGlobalOrientationOffset())
         : liveRectArea;
-      const subtractedArea = getOpaqueOpeningArea(selectedElement, elementsById, getGlobalOrientationOffset());
+      const subtractedArea = getOpaqueOpeningArea(selectedElement, elementsById, getFloors(), getGlobalOrientationOffset());
+      const cover = getRoofCover(selectedElement, elementsById, getFloors(), getGlobalOrientationOffset());
       const clampedNet = Math.max(0, grossArea - subtractedArea);
       return {
         grossArea: roundToTwoDecimals(grossArea),
         netArea: roundToTwoDecimals(clampedNet),
-        subtractedArea: roundToTwoDecimals(subtractedArea),
+        cover,
+        subtractedArea: roundToTwoDecimals(subtractedArea - (cover?.area ?? 0)),
         usesUnheatedPitchedRoofPlanArea: isUnheatedPitchedRoofPlanAreaElement(draftElement),
       };
     })();
@@ -402,9 +406,12 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
           {selectedOpaqueAreaSummary && (
             <div style={INLINE_FIELD_NOTE_STYLE}>
               Gross area: {formatToTwoDecimals(selectedOpaqueAreaSummary.grossArea)} m²
+              {selectedOpaqueAreaSummary.cover
+                ? ` · Covered by ${selectedOpaqueAreaSummary.cover.wallNames.join(', ')}: ${formatToTwoDecimals(selectedOpaqueAreaSummary.cover.area)} m² subtracted`
+                : ''}
               {selectedOpaqueAreaSummary.subtractedArea > 0
                 ? ` · Linked openings / cutouts subtracted: ${formatToTwoDecimals(selectedOpaqueAreaSummary.subtractedArea)} m²`
-                : ' · No linked openings or cutouts subtracted'}
+                : selectedOpaqueAreaSummary.cover ? '' : ' · No linked openings or cutouts subtracted'}
             </div>
           )}
           {selectedOpaqueAreaSummary?.usesUnheatedPitchedRoofPlanArea ? (

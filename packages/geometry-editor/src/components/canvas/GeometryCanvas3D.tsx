@@ -39,6 +39,8 @@ import { modelXYToThreeXZ, modelSegmentToThreeYaw, modelXYToExtrudeShapeXY } fro
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { frameInsetFromFrameAreaFraction, rectSizeForMaxOpenArea } from '../../lib/geometryVentilationOverlay';
 import { deriveDormerHostBasis, getDormerBundleInfo, getDormerHostBaseElevationM } from '../../lib/dormerGeometry';
+import { bottomEdgeRoofRuns, deriveRoofCutout, modelHasRaisedWallBottoms, pitchedRoofsForWalls } from '../../lib/roofCutouts';
+import { readProfiledLineFace } from '../../lib/profileLineFace';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import {
   floorDimmedMeshColor,
@@ -344,6 +346,20 @@ function collectDormerCutoutOverlays(
   if (selection.type === 'element') {
     const selectedElement = elementsById[selection.id];
     if (selectedElement?.type !== 'BuildingElementOpaque') return overlays;
+
+    // The part of a roof covered by walls standing on it, for the roof or one of those walls.
+    const elements = Object.values(elementsById);
+    if (modelHasRaisedWallBottoms(elements)) {
+      const roofs = readProfiledLineFace(selectedElement.extra_json)
+        ? new Set(bottomEdgeRoofRuns(selectedElement, pitchedRoofsForWalls(elements, globalOrientationOffset), effectiveFloors, globalOrientationOffset).map((run) => run.roof))
+        : new Set([selectedElement]);
+      for (const roof of roofs) {
+        for (const ring of (deriveRoofCutout(roof, elements, effectiveFloors, globalOrientationOffset)?.polygons ?? []).flat()) {
+          const points = getDormerCutoutOutlinePoints(roof, ring.map(([x, y]) => ({ x, y, z: 0 })), effectiveFloors, globalOrientationOffset);
+          if (points.length >= 3) overlays.push({ hostElementId: roof.id, points });
+        }
+      }
+    }
 
     Object.values(elementsById).forEach((element) => {
       const bundleInfo = getDormerBundleInfo(element);

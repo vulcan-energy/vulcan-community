@@ -16,6 +16,7 @@ import {
   interpolateProfileHeight,
   isFlatProfile,
   wallFaceBreakpoints,
+  wallFaceOverlap,
   wallFaceProblem,
   type ProfileLineFace,
   type ProfilePoint,
@@ -163,6 +164,7 @@ function Sketch({ profiles, widthM, roofLines, invalid, highlight }: {
   profiles: Profiles;
   widthM: number;
   roofLines: ProfilePoint[][];
+  /** Shows the stretch where the top is not above the bottom. */
   invalid: boolean;
   highlight: { edge: Edge; index: number } | null;
 }) {
@@ -179,10 +181,21 @@ function Sketch({ profiles, widthM, roofLines, invalid, highlight }: {
   const sy = (h: number) => 8 + (1 - h / maxH) * (H - 26);
   const pts = (list: number[][]) => list.map(([t, h]) => `${sx(t)},${sy(h)}`).join(' ');
   const marked = highlight ? profiles[highlight.edge][highlight.index] : undefined;
+  const overlap = invalid ? wallFaceOverlap(profiles.top, profiles.bottom) : null;
   return (
     <svg className="wall-shape-sketch" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Wall seen face-on">
       <line x1={4} x2={W - 4} y1={sy(0)} y2={sy(0)} className="wall-shape-sketch-base" />
       <polygon points={pts(outline)} className={invalid ? 'wall-shape-sketch-wall is-invalid' : 'wall-shape-sketch-wall'} />
+      {overlap ? (
+        <rect
+          className="wall-shape-sketch-overlap"
+          data-testid="wall-shape-overlap"
+          x={Math.min(sx(overlap[0]), sx(overlap[1]) - 4)}
+          width={Math.max(4, sx(overlap[1]) - sx(overlap[0]))}
+          y={4}
+          height={sy(0) - 4}
+        />
+      ) : null}
       {roofLines.map((line, i) => (
         <polyline key={i} points={pts(line.map((p) => [p.t, p.h]))} className="wall-shape-sketch-roof" />
       ))}
@@ -208,7 +221,9 @@ function EdgeRow({ edge, mode, roofModes, hasRoof, onPick, rowRef, children }: {
       value: 'roof' as const,
       label: edge === 'top' ? 'Under roof' : 'On roof',
       disabled: !hasRoof && mode !== 'roof',
-      title: hasRoof ? undefined : edge === 'top' ? 'No roof over this wall' : 'No roof under this wall',
+      title: hasRoof ? undefined : edge === 'top'
+        ? 'No roof covers the whole length of this wall. Make the wall end at the roof edge, or pick Custom.'
+        : 'No pitched roof is under this wall between its base and its top. Pick Custom to set the bottom by hand.',
     }] : []),
     { value: 'custom', label: 'Custom' },
   ];

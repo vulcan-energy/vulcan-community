@@ -4207,6 +4207,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/lib/__tests__/roofCutouts.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/roofCutouts.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/__tests__/roofHostedOpeningPlacement.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/roofHostedOpeningPlacement.test.ts",
       "license": "AGPL-3.0-only",
@@ -5209,6 +5217,14 @@
     {
       "path": "packages/geometry-editor/src/lib/resolveTargetZoneForNewElement.ts",
       "source_path": "packages/geometry-editor/src/lib/resolveTargetZoneForNewElement.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/roofCutouts.ts",
+      "source_path": "packages/geometry-editor/src/lib/roofCutouts.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

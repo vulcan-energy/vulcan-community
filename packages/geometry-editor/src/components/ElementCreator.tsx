@@ -4483,6 +4483,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       updateElement,
       setSelection,
       getGlobalOrientationOffset: () => geometryStore.getState().globalOrientationOffset,
+      getFloors: () => geometryStore.getState().floors,
       elementElevationInput,
       onSiteHostDerivation,
       selectedPvDimensionNotes,

@@ -58,7 +58,7 @@ describe('openings on a shaped wall', () => {
     // At x = 1 the gable is 3 m tall; a window from 2.5 m to 3.5 m sticks out of it.
     const win = gableWindow(1, 2, 2.5);
     expect(messages(validate(win, [gable, win]).issues))
-      .toContain('Gable window (BuildingElementTransparent): Opening is not inside the shape of wall "Gable wall"');
+      .toContain('Gable window (BuildingElementTransparent): Opening is not inside the shape of wall "Gable wall". Move it or change its size so it fits the wall.');
   });
 
   it('accepts an opening inside the wall shape', () => {

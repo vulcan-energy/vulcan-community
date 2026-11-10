@@ -33,6 +33,9 @@ import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
 import { zonesCompatible } from './proposeAdjacentWallJunction';
 import { overlapEndpointsOnRoofPlanEdgeForPartyWall } from './partyWallRoofOverlap';
 import { isPartyWallVerticalEnvelopeLine } from './proposePartyWallToExternalE18';
+import type { MultiPolygon } from 'polygon-clipping';
+import { deriveRoofCutout, modelHasRaisedWallBottoms } from '../../lib/roofCutouts';
+import { isPointInPolygon2D } from '../../lib/pointInPolygon';
 import { FACADE_PROPOSAL_SUBSTANTIAL_OVERLAP_FRAC } from './thermalBridgeTolerances';
 
 const MIN_LEN_M = 0.05;
@@ -388,6 +391,98 @@ function pushEavesGableProposals(
   }
 }
 
+/**
+ * Drops the parts of eaves, verge and ridge lines that lie inside the part of their roof covered by
+ * walls standing on it (roofCutouts.ts): that edge is inside the dwelling. A line on the footprint
+ * boundary counts as inside, since the wall standing there has its own R8/R9 junction.
+ */
+function trimRoofEdgesInsideCutouts(
+  proposals: FacadeOpeningTbProposal[],
+  elements: Element[],
+  floors: Floor[],
+  globalOrientationOffset: number | undefined,
+): FacadeOpeningTbProposal[] {
+  if (!modelHasRaisedWallBottoms(elements)) return proposals;
+  const cutouts = new Map<string, MultiPolygon>();
+  const cutoutFor = (roofId: string) => {
+    if (!cutouts.has(roofId)) {
+      const roof = elements.find((e) => e.id === roofId);
+      cutouts.set(roofId, (roof && deriveRoofCutout(roof, elements, floors, globalOrientationOffset)?.polygons) || []);
+    }
+    return cutouts.get(roofId)!;
+  };
+  return proposals.flatMap((p) => {
+    const polygons = cutoutFor(p.openingId);
+    if (polygons.length === 0) return [p];
+    const [a, b] = p.coordinates as [{ x: number; y: number; z: number }, { x: number; y: number; z: number }];
+    const pieces = segmentPartsOutsidePolygons(a, b, polygons);
+    if (pieces.length === 1 && pieces[0]![0] === 0 && pieces[0]![1] === 1) return [p];
+    const at = (u: number) => ({ x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, z: roundToTwoDecimals(a.z + (b.z - a.z) * u) });
+    return pieces.flatMap(([u0, u1], k) => ((u1 - u0) * dist2XY(a, b) < MIN_LEN_M ? [] : [{
+      ...p,
+      proposalId: `${p.proposalId}:cut${k}`,
+      suggestedLengthM: roundToTwoDecimals(p.suggestedLengthM * (u1 - u0)),
+      reason: `${p.reason}; part outside the walls standing on the roof`,
+      coordinates: [at(u0), at(u1)],
+    }]));
+  });
+}
+
+/** Parameter ranges (0..1) of segment a→b outside the polygons in plan; a point on a boundary is inside. */
+function segmentPartsOutsidePolygons(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  polygons: MultiPolygon,
+): Array<[number, number]> {
+  const TOL = 0.1;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-18) return [];
+  const us = new Set([0, 1]);
+  const rings = polygons.flat();
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length - 1; i += 1) {
+      const [px, py] = ring[i]!;
+      const [qx, qy] = ring[i + 1]!;
+      // A vertex projection bounds any stretch that runs along a boundary edge.
+      const u = ((px - a.x) * dx + (py - a.y) * dy) / len2;
+      if (u > 0 && u < 1) us.add(u);
+      const ex = qx - px;
+      const ey = qy - py;
+      const den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-12) continue;
+      const t = ((px - a.x) * ey - (py - a.y) * ex) / den;
+      const v = ((px - a.x) * dy - (py - a.y) * dx) / den;
+      if (t > 0 && t < 1 && v >= 0 && v <= 1) us.add(t);
+    }
+  }
+  const covered = (p: { x: number; y: number }) => polygons.some((polygon) => {
+    const ringPts = (r: Array<[number, number]>) => r.map(([x, y]) => ({ x, y }));
+    const onBoundary = polygon.some((r) => r.some(([px, py], i) => {
+      if (i === r.length - 1) return false;
+      const [qx, qy] = r[i + 1]!;
+      const ex = qx - px;
+      const ey = qy - py;
+      const l2 = ex * ex + ey * ey;
+      const w = l2 < 1e-18 ? 0 : Math.max(0, Math.min(1, ((p.x - px) * ex + (p.y - py) * ey) / l2));
+      return Math.hypot(p.x - px - ex * w, p.y - py - ey * w) <= TOL;
+    }));
+    return onBoundary || (isPointInPolygon2D(p, ringPts(polygon[0]!)) && !polygon.slice(1).some((hole) => isPointInPolygon2D(p, ringPts(hole))));
+  });
+  const sorted = [...us].sort((m, n) => m - n);
+  const parts: Array<[number, number]> = [];
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    const u0 = sorted[i]!;
+    const u1 = sorted[i + 1]!;
+    if (covered({ x: a.x + dx * ((u0 + u1) / 2), y: a.y + dy * ((u0 + u1) / 2) })) continue;
+    const prev = parts[parts.length - 1];
+    if (prev && prev[1] === u0) prev[1] = u1;
+    else parts.push([u0, u1]);
+  }
+  return parts;
+}
+
 export function proposeSlopedRoofEavesGableThermalBridges(
   elements: Element[],
   floors?: Floor[],
@@ -405,7 +500,7 @@ export function proposeSlopedRoofEavesGableThermalBridges(
   // ponytail: drops the whole edge when party walls cover most of it; trim the remainder if a
   // party wall ever covers only part of a gable.
   const partyWalls = elements.filter(isPartyWallVerticalEnvelopeLine);
-  return out.filter((p) => {
+  return trimRoofEdgesInsideCutouts(out, elements, floors ?? [], globalOrientationOffset).filter((p) => {
     const [a, b] = p.coordinates;
     const spans = partyWalls
       .flatMap((pw) => {

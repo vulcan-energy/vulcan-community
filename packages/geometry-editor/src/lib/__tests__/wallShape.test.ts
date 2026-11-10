@@ -14,14 +14,14 @@ describe('wallFaceProblem', () => {
     const w = 2.3;
     const top = [{ t: 0, h: 2.9 }, { t: 0.8 / w, h: 1.0 }, { t: 2.0 / w, h: 1.2 }, { t: 1, h: 2.9 }];
     const bottom = [{ t: 0, h: 0.9 }, { t: 1, h: 2.0 }];
-    expect(wallFaceProblem(top, bottom, w)).toBe('Top must be above bottom (from 0.80 m to 2.00 m).');
+    expect(wallFaceProblem(top, bottom, w)).toBe('Top must be above bottom (from 0.80 m to 2.00 m). Raise the top or lower the bottom there.');
   });
 
   it('rejects points out of order and negative heights', () => {
     expect(wallFaceProblem([{ t: 0, h: 2 }, { t: 0.6, h: 2 }, { t: 0.4, h: 2 }, { t: 1, h: 2 }], flat(0), 4))
-      .toBe('Top points must run in order along the wall.');
+      .toBe('Top points must run in order along the wall. Make each distance larger than the one before it.');
     expect(wallFaceProblem(flat(2), [{ t: 0, h: -0.1 }, { t: 1, h: 0 }], 4))
-      .toBe('Bottom heights cannot be below the base.');
+      .toBe('Bottom heights cannot be below the base. Set them to 0 or more.');
   });
 
   it('accepts a valid face, including a gable triangle that meets the foot at its ends', () => {
@@ -144,7 +144,7 @@ describe('deriveWallEdgeFromRoofs on a loft slope', () => {
     const through = (11.35 + 1.9 / tan - 12.0) / 2.6; // where the roof reaches the 2.6 m top
     expect(bottom.map((p) => p.h)).toEqual([1.25, 2.6, 3.43]);
     expect(bottom[1]!.t).toBeCloseTo(through, 6);
-    expect(wallFaceProblem(flat(2.6), bottom, 2.6)).toBe('Top must be above bottom (from 1.61 m to 2.60 m).');
+    expect(wallFaceProblem(flat(2.6), bottom, 2.6)).toBe('Top must be above bottom (from 1.61 m to 2.60 m). Raise the top or lower the bottom there.');
   });
 
   it('fits a loft cheek wall that stays under the top', () => {

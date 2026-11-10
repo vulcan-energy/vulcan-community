@@ -100,9 +100,22 @@ export function wallFaceBreakpoints(top: ProfilePoint[], bottom: ProfilePoint[])
 }
 
 /**
- * The one check for a wall face. Both edges are straight between points, so checking the gap
- * at every bend of either edge proves it everywhere. Heights may not be negative (below the
- * foot). Returns the message to show, or null.
+ * Where the top edge is not above the bottom edge: the first and last t (0..1) where they are
+ * closer than {@link MIN_WALL_FACE_GAP_M} (they may meet at the wall ends, as a gable triangle
+ * whose eaves sit on the foot does). Null when they are apart everywhere. Both edges are straight
+ * between points, so checking every bend of either edge proves it everywhere.
+ */
+export function wallFaceOverlap(top: ProfilePoint[], bottom: ProfilePoint[]): [number, number] | null {
+  const low = wallFaceBreakpoints(top, bottom).filter((t) => {
+    const gap = interpolateProfileHeight(top, t) - interpolateProfileHeight(bottom, t);
+    return gap < (t === 0 || t === 1 ? 0 : MIN_WALL_FACE_GAP_M) - 1e-9;
+  });
+  return low.length === 0 ? null : [low[0]!, low[low.length - 1]!];
+}
+
+/**
+ * The one check for a wall face. Heights may not be negative (below the foot). Returns the
+ * message to show, saying what to change, or null.
  */
 export function wallFaceProblem(
   top: ProfilePoint[],
@@ -113,20 +126,15 @@ export function wallFaceProblem(
     const ordered = profile.length >= 2 && profile.every((p, i) =>
       Number.isFinite(p.t) && Number.isFinite(p.h) && p.t >= 0 && p.t <= 1
       && (i === 0 || p.t > profile[i - 1].t));
-    if (!ordered) return `${label} points must run in order along the wall.`;
-    if (profile.some((p) => p.h < 0)) return `${label} heights cannot be below the base.`;
+    if (!ordered) return `${label} points must run in order along the wall. Make each distance larger than the one before it.`;
+    if (profile.some((p) => p.h < 0)) return `${label} heights cannot be below the base. Set them to 0 or more.`;
   }
-  // The edges may meet at the wall ends (a gable triangle whose eaves sit on the foot); between
-  // the ends they must stay MIN_WALL_FACE_GAP_M apart.
-  const low = wallFaceBreakpoints(top, bottom).filter((t) => {
-    const gap = interpolateProfileHeight(top, t) - interpolateProfileHeight(bottom, t);
-    return gap < (t === 0 || t === 1 ? 0 : MIN_WALL_FACE_GAP_M) - 1e-9;
-  });
-  if (low.length === 0) return null;
+  const overlap = wallFaceOverlap(top, bottom);
+  if (!overlap) return null;
   const at = (t: number) => `${(t * widthM).toFixed(2)} m`;
-  return low.length === 1
-    ? `Top must be above bottom (at ${at(low[0])}).`
-    : `Top must be above bottom (from ${at(low[0])} to ${at(low[low.length - 1])}).`;
+  return overlap[0] === overlap[1]
+    ? `Top must be above bottom (at ${at(overlap[0])}). Raise the top or lower the bottom there.`
+    : `Top must be above bottom (from ${at(overlap[0])} to ${at(overlap[1])}). Raise the top or lower the bottom there.`;
 }
 
 /** Two points at the same height: the shape a Flat edge stores. */

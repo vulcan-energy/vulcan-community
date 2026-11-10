@@ -88,9 +88,14 @@ describe('WallShapeRows', () => {
     render(<Harness roof={{ current: [{ t: 0, h: 1.25 }, { t: 0.62, h: 2.6 }, { t: 1, h: 3.43 }] }} onCommit={onCommit} />);
     fireEvent.click(edge('bottom').getByRole('button', { name: 'On roof' }));
 
-    expect(screen.getByRole('alert').textContent).toBe('Top must be above bottom (from 2.48 m to 4.00 m).');
+    expect(screen.getByRole('alert').textContent).toBe('Top must be above bottom (from 2.48 m to 4.00 m). Raise the top or lower the bottom there.');
     expect(onCommit).not.toHaveBeenCalled();
     expect(document.querySelector('.wall-shape-sketch-wall.is-invalid')).not.toBeNull();
+    // The sketch marks the stretch the message names: 2.48 m to 4.00 m of the 4 m wall.
+    const band = screen.getByTestId('wall-shape-overlap');
+    const sx = (m: number) => 20 + (m / 4) * 260;
+    expect(Number(band.getAttribute('x'))).toBeCloseTo(sx(2.48), 0);
+    expect(Number(band.getAttribute('width'))).toBeCloseTo(sx(4) - sx(2.48), 0);
   });
 
   it('shows an invalid edit and does not commit it', () => {
@@ -99,9 +104,9 @@ describe('WallShapeRows', () => {
     fireEvent.click(edge('bottom').getByRole('button', { name: 'Custom' }));
     fireEvent.change(screen.getByLabelText('Bottom point 2 height above base (m)'), { target: { value: '3' } });
 
-    expect(screen.getByRole('alert').textContent).toBe('Top must be above bottom (at 4.00 m).');
+    expect(screen.getByRole('alert').textContent).toBe('Top must be above bottom (at 4.00 m). Raise the top or lower the bottom there.');
     expect(onCommit).not.toHaveBeenCalled();
-    expect(edge('bottom').getByRole('button', { name: 'On roof' })).toHaveProperty('title', 'No roof under this wall');
+    expect(edge('bottom').getByRole('button', { name: 'On roof' })).toHaveProperty('title', 'No pitched roof is under this wall between its base and its top. Pick Custom to set the bottom by hand.');
   });
 
   it('follows a face replaced outside the rows (undo), never writing a stale Under roof', () => {

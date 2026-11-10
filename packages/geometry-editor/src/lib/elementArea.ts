@@ -10,6 +10,8 @@ import {
   exportedBaseHeightForWallFace,
 } from './profileLineFace';
 import { roundToTwoDecimals } from '../geometry/constants';
+import { deriveRoofCutout, modelHasRaisedWallBottoms } from './roofCutouts';
+import { withEffectiveStoreyHeights } from './zoneDerivation';
 import { calculatePolygonArea } from './polygonSync';
 import { isVulcanUiPartyFloorElement } from './assemblyMaterialFabric';
 import { getElementShape } from './shapeUtils';
@@ -20,6 +22,7 @@ import {
 import type {
   Element,
   ElementType,
+  Floor,
   BuildingElementOpaque,
   BuildingElementTransparent,
   BuildingElementAdjacentConditionedSpace,
@@ -407,9 +410,34 @@ export const getElementGrossArea = (element: Element, globalOrientationOffset?: 
   return 0;
 };
 
+/**
+ * The part of a pitched roof covered by walls standing on it (see roofCutouts.ts), as surface
+ * area in the roof's own measure: plan area for an unheated pitched roof exported as its ceiling,
+ * sloped area otherwise. Null when no closed footprint covers the roof.
+ */
+export const getRoofCover = (
+  roof: Element,
+  elementsById: Record<string, Element>,
+  floors: Floor[],
+  globalOrientationOffset?: number,
+): { area: number; wallNames: string[] } | null => {
+  if (roof.type !== 'BuildingElementOpaque') return null;
+  const pitch = roof.pitch;
+  if (typeof pitch !== 'number' || !(pitch > 0 && pitch < 90)) return null;
+  const elements = Object.values(elementsById);
+  if (!modelHasRaisedWallBottoms(elements)) return null;
+  const cutout = deriveRoofCutout(roof, elements, withEffectiveStoreyHeights(floors, elements), globalOrientationOffset);
+  if (!cutout || cutout.wallNames.length === 0) return null;
+  const area = isUnheatedPitchedRoofPlanAreaElement(roof)
+    ? cutout.planArea
+    : cutout.planArea / Math.cos((pitch * Math.PI) / 180);
+  return { area: roundToTwoDecimals(area), wallNames: cutout.wallNames };
+};
+
 export const getOpaqueOpeningArea = (
   element: BuildingElementOpaque,
   elementsById: Record<string, Element>,
+  floors: Floor[],
   globalOrientationOffset?: number,
 ): number => {
   const openingArea = Object.values(elementsById).reduce((sum, child) => {
@@ -432,18 +460,20 @@ export const getOpaqueOpeningArea = (
     return sum;
   }, 0);
 
-  return roundToTwoDecimals(openingArea);
+  const cover = getRoofCover(element, elementsById, floors, globalOrientationOffset)?.area ?? 0;
+  return roundToTwoDecimals(openingArea + cover);
 };
 
 export const getElementEffectiveArea = (
   element: Element,
   elementsById: Record<string, Element>,
+  floors: Floor[],
   globalOrientationOffset?: number,
 ): number => {
   const grossArea = getElementGrossArea(element, globalOrientationOffset);
 
   if (element.type === 'BuildingElementOpaque') {
-    return roundToTwoDecimals(Math.max(0, grossArea - getOpaqueOpeningArea(element, elementsById, globalOrientationOffset)));
+    return roundToTwoDecimals(Math.max(0, grossArea - getOpaqueOpeningArea(element, elementsById, floors, globalOrientationOffset)));
   }
 
   return grossArea;

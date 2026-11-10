@@ -6,11 +6,12 @@
  * and a gable wall. Flat walls are covered by each proposer's own tests.
  */
 import { describe, expect, it } from 'vitest';
-import type { BuildingElementGround, BuildingElementOpaque, Element, Floor } from '../../types';
+import type { BuildingElementGround, BuildingElementOpaque, BuildingElementTransparent, Element, Floor } from '../../types';
 import { deriveWallEdgeFromRoofs } from '../../../lib/wallEdgeFromRoofs';
 import { proposeWallGroundContinuous } from '../proposeWallGroundContinuous';
 import { proposeDormerWallToHostRoofR8R9ThermalBridges } from '../proposeDormerWallToHostRoofR8R9';
 import { proposeExternalCornerThermalBridges } from '../proposeExternalCorners';
+import { proposeFacadeOpeningThermalBridges } from '../proposeFacadeOpenings';
 
 const floors: Floor[] = [{ id: 'f0', name: 'Ground', zIndex: 0, height: 5, isRoofSpace: false } as Floor];
 
@@ -113,5 +114,34 @@ describe('gable wall corner', () => {
     const corners = proposeExternalCornerThermalBridges([gable, side]);
     expect(corners).toHaveLength(1);
     expect(corners[0]!.suggestedLengthM).toBe(1);
+  });
+});
+
+describe('shaped window', () => {
+  const window = (extra?: Record<string, unknown>) => ({
+    type: 'BuildingElementTransparent',
+    id: 'win',
+    name: 'Window',
+    zoneId: 'z1',
+    parent_element: null,
+    coordinates: [{ x: 0, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }],
+    width: 2,
+    height: 1.5,
+    base_height: 1,
+    pitch: 90,
+    isPlaceholder: false,
+    ...(extra ? { extra_json: extra } : {}),
+  }) as BuildingElementTransparent;
+  const lengths = (w: BuildingElementTransparent) => Object.fromEntries(
+    proposeFacadeOpeningThermalBridges([w], floors).map((p) => [p.edgeRole, p.suggestedLengthM]));
+
+  it('runs the lintel along a sloped top and each jamb to the top at its end', () => {
+    // Top rises from 1 m to 2 m above the sill across the 2 m width.
+    const shaped = window({
+      geometry_face: { kind: 'profiled-line-face', top_profile: [{ t: 0, h: 1 }, { t: 1, h: 2 }], bottom_profile: [{ t: 0, h: 0 }, { t: 1, h: 0 }] },
+    });
+    expect(lengths(shaped)).toEqual({ lintel: 2.24, sill: 2, jamb_first: 1, jamb_second: 2 });
+    // A flat window keeps width and stored height.
+    expect(lengths(window())).toEqual({ lintel: 2, sill: 2, jamb_first: 1.5, jamb_second: 1.5 });
   });
 });

@@ -78,6 +78,13 @@ import {
 } from '../../lib/elementArea';
 import { lineFaceEdgesAtPoint, readProfiledLineFace, wallFaceBreakpoints, wallFaceProblem } from '../../lib/profileLineFace';
 import { deriveWallEdgeFromRoofs, isRoofSnapshotStale } from '../../lib/wallEdgeFromRoofs';
+import {
+  bottomEdgeRoofRuns,
+  deriveRoofCutout,
+  modelHasRaisedWallBottoms,
+  pitchedRoofsForWalls,
+  roofFootprintGapMessage,
+} from '../../lib/roofCutouts';
 import { inferPsiSourceFromValue } from '../../lib/simplifiedFabricMap';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
 import { getPApportionedLinearPsiForEditor } from '../thermalBridge/linearTbPsi';
@@ -902,7 +909,7 @@ function profiledWallFaceIssue(element: Element): string | null {
   if (!face || coords?.length !== 2) return null;
   const width = Math.hypot(coords[1].x - coords[0].x, coords[1].y - coords[0].y);
   const problem = wallFaceProblem(face.top_profile, face.bottom_profile, width);
-  return problem ? `Wall shape (extra_json.geometry_face) is invalid: ${problem}` : null;
+  return problem ? `Wall shape: ${problem}` : null;
 }
 
 /** How far an opening may stand outside its shaped wall's face before it is named. */
@@ -941,7 +948,7 @@ function openingOutsideWallFaceIssue(opening: Element, wall: Element, floors: Fl
     return openingFoot + o.bottom < wallFoot + w.bottom - OPENING_IN_FACE_TOL_M
       || openingFoot + o.top > wallFoot + w.top + OPENING_IN_FACE_TOL_M;
   });
-  return outside ? `Opening is not inside the shape of wall "${wall.name}"` : null;
+  return outside ? `Opening is not inside the shape of wall "${wall.name}". Move it or change its size so it fits the wall.` : null;
 }
 
 /**
@@ -962,6 +969,24 @@ function staleRoofFitWarning(
       edge === 'top' ? face.bottom_profile : face.top_profile)?.profile ?? null,
   ));
   return stale ? 'Roof changed; re-fit the wall shape' : null;
+}
+
+/**
+ * Open footprints of walls standing on a roof (roofCutouts.ts), named on the roof and on each wall
+ * in the open chain, so the warning list takes the user to either.
+ */
+function roofFootprintGapWarnings(
+  element: Element,
+  elements: Element[],
+  floors: Floor[],
+  globalOrientationOffset: number | undefined,
+): string[] {
+  if (element.type !== 'BuildingElementOpaque' || !modelHasRaisedWallBottoms(elements)) return [];
+  const roofs = readProfiledLineFace(element.extra_json)
+    ? [...new Set(bottomEdgeRoofRuns(element, pitchedRoofsForWalls(elements, globalOrientationOffset), floors, globalOrientationOffset).map((run) => run.roof))]
+    : [element];
+  return roofs.flatMap((roof) => (deriveRoofCutout(roof, elements, floors, globalOrientationOffset)?.gaps ?? [])
+    .flatMap((gap) => (roof.id === element.id || gap.wallNames.includes(element.name) ? [roofFootprintGapMessage(roof.name, gap)] : [])));
 }
 
 export const validateElementCore = (
@@ -1059,6 +1084,12 @@ export const validateElementCore = (
     ? staleRoofFitWarning(element, allElements, effectiveFloors(), context.globalOrientationOffset)
     : null;
   if (roofFitWarning) warnings.push(geo(roofFitWarning, 'height'));
+  if (elementsById) {
+    const isWall = !!readProfiledLineFace(element.extra_json);
+    for (const message of roofFootprintGapWarnings(element, allElements, effectiveFloors(), context.globalOrientationOffset)) {
+      warnings.push(geo(message, isWall ? 'height' : 'area'));
+    }
+  }
   const findNamedElements = (
     name: string | null | undefined,
     candidates: Element[] = allElements,
@@ -2172,7 +2203,7 @@ export const validateElementCore = (
           ? (elementData.generation_type ?? extraJson.generation_type ?? extraJson.type)
           : (
             element.type === 'BuildingElementOpaque' && field === 'area'
-                    ? (elementsById ? getElementEffectiveArea(element, elementsById, context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
+                    ? (elementsById ? getElementEffectiveArea(element, elementsById, effectiveFloors(), context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
               : (elementData[field] ?? extraJson[field])
           );
         const hasField = isOnSiteTypeCollision
@@ -2238,7 +2269,7 @@ export const validateElementCore = (
           ? (elementData.generation_type ?? extraJson.generation_type ?? extraJson.type)
           : (
             element.type === 'BuildingElementOpaque' && field === 'area'
-                  ? (elementsById ? getElementEffectiveArea(element, elementsById, context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
+                  ? (elementsById ? getElementEffectiveArea(element, elementsById, effectiveFloors(), context.globalOrientationOffset) : elementData[field] ?? extraJson[field])
               : (elementData[field] ?? extraJson[field])
           );
         if (fieldValue === null || fieldValue === undefined) continue;

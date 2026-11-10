@@ -7445,7 +7445,7 @@ const createGeometryState = (
     const element = state.elementsById[elementId];
     if (!element) return 0;
 
-    return getElementEffectiveArea(element, state.elementsById, state.globalOrientationOffset);
+    return getElementEffectiveArea(element, state.elementsById, state.floors, state.globalOrientationOffset);
   },
 
   getAvailableParentElements: (childType: ElementType, zoneId: string, selfId = undefined) => {

@@ -301,7 +301,7 @@ describe('getElementEffectiveArea external door netting', () => {
       [wall.id]: wall,
       [lineDoor.id]: lineDoor,
       [polygonDoor.id]: polygonDoor,
-    })).toBe(6);
+    }, [])).toBe(6);
   });
 });
 
