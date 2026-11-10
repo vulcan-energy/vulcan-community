@@ -182,36 +182,58 @@ pub(crate) fn map_divided_opening_half_partition_element(
     }
     let within = row.get("Type").and_then(Value::as_str) != Some("Party")
         && field(row, PARTY_ELEMENT_MARKER).and_then(Value::as_bool) != Some(true);
-    if internal && within {
-        let area = element.get("area").and_then(Value::as_f64);
-        match partition_area_basis(row, area, within) {
-            Ok("single_face") => {
-                if let Some(area) = area {
-                    element.insert("area".into(), json!(area * 2.0));
-                }
-            }
-            Ok("both_faces") => {}
-            Ok(_) => error(
-                &mut errors,
-                path,
-                "internal_partition_area_basis",
-                PARTITION_AREA_BASIS_MESSAGE,
-            ),
-            Err(message) => error(&mut errors, path, "area", message),
-        }
+    if internal {
+        map_partition_area(row, element, within, 2.0, path, &mut errors);
     }
     errors
 }
 
-const PARTITION_AREA_BASIS_MESSAGE: &str =
-    "Use single_face or both_faces for internal partition area.";
+/// Writes a partition's area in the faces the contract counts for a partition within the
+/// dwelling (`within_faces`: 2 on the original Rust contract, 1 on a8/a9). A party element has
+/// one face in the dwelling on every contract.
+fn map_partition_area(
+    row: &Row,
+    element: &mut Map<String, Value>,
+    within: bool,
+    within_faces: f64,
+    path: &str,
+    errors: &mut Vec<ValidationError>,
+) {
+    let area = element.get("area").and_then(Value::as_f64);
+    let source_faces = match partition_area_basis(row, area, within) {
+        Ok("single_face") => 1.0,
+        Ok("both_faces") if within => 2.0,
+        Ok("both_faces") => {
+            return error(
+                errors,
+                path,
+                "area",
+                "A party element must use single-face area.",
+            )
+        }
+        Ok(_) => {
+            return error(
+                errors,
+                path,
+                "internal_partition_area_basis",
+                "Use single_face or both_faces for internal partition area.",
+            )
+        }
+        Err(message) => return error(errors, path, "area", message),
+    };
+    let target_faces = if within { within_faces } else { 1.0 };
+    if let Some(area) = area.filter(|_| source_faces != target_faces) {
+        element.insert("area".into(), json!(area * target_faces / source_faces));
+    }
+}
 
 /// The faces a partition's source area covers: the explicit key, else what the row's geometry
 /// shows. Every contract reads a legacy area through this, so it means the same physical thing
 /// on each. `Err` carries the reason geometry cannot decide.
 fn partition_area_basis(row: &Row, area: Option<f64>, within: bool) -> Result<&str, &'static str> {
-    if let Some(basis) = field(row, "internal_partition_area_basis").and_then(Value::as_str) {
-        return Ok(basis);
+    if let Some(basis) = field(row, "internal_partition_area_basis").filter(|v| !v.is_null()) {
+        // A value that is not text is no basis name; the caller reports it.
+        return Ok(basis.as_str().unwrap_or(""));
     }
     match (area, physical_face_area(row).filter(|a| *a > 0.0)) {
         (Some(area), Some(physical)) if (area - physical).abs() < 0.03 => Ok("single_face"),
@@ -473,28 +495,7 @@ fn map_partition(
         );
     }
     element.insert("is_adjacent_space_within_dwelling".into(), json!(within));
-    let area = element.get("area").and_then(Value::as_f64);
-    match partition_area_basis(row, area, within) {
-        Ok("both_faces") if within => {
-            if let Some(area) = area {
-                element.insert("area".into(), json!(area / 2.0));
-            }
-        }
-        Ok("single_face") => {}
-        Ok("both_faces") => error(
-            errors,
-            path,
-            "area",
-            "A party element must use single-face area.",
-        ),
-        Ok(_) => error(
-            errors,
-            path,
-            "internal_partition_area_basis",
-            PARTITION_AREA_BASIS_MESSAGE,
-        ),
-        Err(message) => error(errors, path, "area", message),
-    }
+    map_partition_area(row, element, within, 1.0, path, errors);
     let authored_half = [
         "thermal_resistance_construction",
         "u_value",
@@ -971,26 +972,28 @@ mod tests {
         // One face is 5 x 2. A legacy single-face area and the editor's both_faces save of it
         // must reach a7 as both faces and a9 as one face. An area that is neither one face nor
         // two, and a basis that is neither name, block on a7 as they do on a9.
-        let a7 = |extra: Value, area: f64| {
+        let a7 = |source_type: &str, extra: Value, area: f64| {
             let row = serde_json::from_value(
-                json!({"Type":"Internal","width":5,"height":2,"extra_json":extra}),
+                json!({"Type":source_type,"width":5,"height":2,"extra_json":extra}),
             )
             .unwrap();
             let mut v = json!({"type":"BuildingElementAdjacentConditionedSpace","area":area});
             let errors = map_divided_opening_half_partition_element(&row, &mut v, "p");
             (v["area"].as_f64().unwrap(), errors.len())
         };
-        assert_eq!(a7(json!({}), 10.0), (20.0, 0));
-        assert_eq!(
-            a7(json!({"internal_partition_area_basis":"both_faces"}), 20.0),
-            (20.0, 0)
-        );
-        assert_eq!(a7(json!({}), 20.0), (20.0, 0));
-        assert_eq!(a7(json!({}), 13.0), (13.0, 1));
-        assert_eq!(
-            a7(json!({"internal_partition_area_basis":"single"}), 10.0),
-            (10.0, 1)
-        );
+        let both = json!({"internal_partition_area_basis":"both_faces"});
+        assert_eq!(a7("Internal", json!({}), 10.0), (20.0, 0));
+        assert_eq!(a7("Internal", both.clone(), 20.0), (20.0, 0));
+        assert_eq!(a7("Internal", json!({}), 20.0), (20.0, 0));
+        assert_eq!(a7("Internal", json!({}), 13.0), (13.0, 1));
+        for basis in [json!("single"), json!(true)] {
+            let extra = json!({"internal_partition_area_basis":basis});
+            assert_eq!(a7("Internal", extra, 10.0), (10.0, 1));
+        }
+        // A party element has one face in the dwelling on every contract.
+        assert_eq!(a7("Party", json!({}), 10.0), (10.0, 0));
+        assert_eq!(a7("Party", json!({}), 20.0), (20.0, 1));
+        assert_eq!(a7("Party", both, 20.0), (20.0, 1));
         let (v, e) = map(
             json!({"Type":"Internal","width":5,"height":2,"extra_json":{}}),
             json!({"type":"BuildingElementAdjacentConditionedSpace","area":10,"pitch":90}),
