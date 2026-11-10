@@ -4959,7 +4959,7 @@ impl JSONBuilder {
             self.schema_omissions
                 .borrow_mut()
                 .push(crate::finalization::SchemaOmission {
-                    code: "W_METADATA_ROW_ABSENT".to_string(),
+                    code: crate::target_mappings::TARGET_INPUT_WARNING.to_string(),
                     path: "/Metadata".to_string(),
                     message: format!(
                         "The Metadata section has no row for these settings, so the model uses these values: {}. Add the rows to state them.",
@@ -13241,6 +13241,7 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
             "PartO_active_cooling_required",
         ]));
         assert_eq!(listed.len(), 1, "{listed:?}");
+        assert_eq!(listed[0].code, crate::target_mappings::TARGET_INPUT_WARNING);
         assert_eq!(
             listed[0].message,
             "The Metadata section has no row for these settings, so the model uses these values: NumberOfBedrooms 1, PartO_active_cooling_required false, KitchenExtractorHoodExternal false. Add the rows to state them."
