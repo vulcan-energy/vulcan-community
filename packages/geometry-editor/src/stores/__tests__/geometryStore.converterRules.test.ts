@@ -81,6 +81,13 @@ const CASES: Case[] = [
   { name: 'label with unknown Zone', edit: kitchen('Zone 9', 'kitchen'), notice: 'Kitchen', saves: { 'Space Labels|Kitchen|Zone': 'Zone 9' } },
   { name: 'label with blank room_type', edit: kitchen('Zone 1', ''), notice: 'Kitchen', saves: { 'Space Labels|Kitchen|room_type': '' } },
   { name: 'label with blank coords', edit: kitchen('Zone 1', 'kitchen', false), notice: 'Kitchen', saves: { 'Space Labels|Kitchen|coords': '' } },
+  // A present Metadata row with no value is E066 in the converter: it stays blank and blocks.
+  { name: 'blank NumberOfBathrooms row', edit: replace('NumberOfBathrooms,1,', 'NumberOfBathrooms,,'),
+    blocks: ['Number of bathrooms is not set. Enter it in Global Settings. Space labels show 1.'], saves: { 'Metadata|NumberOfBathrooms': '' } },
+  { name: 'blank BuildingLength row', edit: replace('BuildingLength,8.9,', 'BuildingLength,,'),
+    blocks: ['Building length (m) is not set. Enter it in Global Settings. The geometry gives'], saves: { 'Metadata|BuildingLength': '' } },
+  { name: 'blank HeatingControlType row', edit: replace('HeatingControlType,SeparateTempControl,', 'HeatingControlType,,'), defaults: true,
+    blocks: ['Heating Control Type is not set'], saves: { 'Metadata|HeatingControlType': '' } },
 ];
 
 function load(c: Case) {

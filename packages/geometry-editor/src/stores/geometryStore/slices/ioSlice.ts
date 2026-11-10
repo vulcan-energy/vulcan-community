@@ -962,11 +962,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     const compliance = state.complianceSettings;
 
-    // Every compliance row is written with the user's value or the value the geometry and space
-    // labels determine (see metadataRowValues); a row with neither is left out and the editor
-    // reports it, so the converter never fills it from the defaults template unseen.
+    // Every compliance row is written with its value (see metadataRowValues). A row the file had
+    // blank stays blank, which the converter blocks; leaving it out would let the converter take
+    // the defaults template's value instead.
+    const blankRows = new Set(compliance.blankMetadataRows);
     for (const [key, value] of metadataRowValues({ ...state, elements: exportElements })) {
-      if (value !== undefined) lines.push(`${key},${escapeCSV(value)},,,,,,,,,,,,,`);
+      if (value !== undefined || blankRows.has(key)) lines.push(`${key},${escapeCSV(value ?? '')},,,,,,,,,,,,,`);
     }
     const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
       zones: state.zones,

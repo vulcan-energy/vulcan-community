@@ -471,6 +471,9 @@ const metadataSchemaPath = (key: string): string[] => {
   return [key];
 };
 
+/** The compliance setting a metadata row edits. */
+const metadataSettingKey = (key: string): string => (key.startsWith('General_') ? key.slice('General_'.length) : key);
+
 const asRecord = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
 const valueAt = (root: unknown, path: string[]): unknown => path.reduce<unknown>((node, segment) => asRecord(node)?.[segment], root);
 
@@ -495,11 +498,10 @@ export type MetadataRowInputs = Pick<GeometryState, 'zones' | 'elementsById' | '
 };
 
 /**
- * The value each compliance metadata row is saved with, in file order: the user's value, or the
- * value the geometry or space labels determine. `undefined` means the row is not written. Rows that
- * do not apply (flat-only rows on a house) are left out.
+ * Each compliance metadata row in file order with the user's value, or else the value the geometry
+ * or space labels give. Rows that do not apply (flat-only rows on a house) are left out.
  */
-export function metadataRowValues(state: MetadataRowInputs): Array<[string, string | undefined]> {
+function enteredOrDerivedRowValues(state: MetadataRowInputs): Array<[string, string | undefined]> {
   const compliance = state.complianceSettings;
   const dd = resolveEffectiveDwellingDetails({
     zones: state.zones as Zone[],
@@ -551,14 +553,22 @@ export function metadataRowValues(state: MetadataRowInputs): Array<[string, stri
   if (dd.buildType === 'flat') {
     rows.push(['General_storey_of_dwelling', count(dd.storeyOfDwelling)], ['General_storeys_in_building', num(compliance.storeys_in_building)]);
   }
-  // A setting a Systems row sets is written only when the user enters it here: a derived value
-  // would override that row in the converter.
-  const entered = compliance as Record<string, unknown>;
-  return rows.map(([key, value]) => [key, entered[key] === undefined && systemsRowSetsMetadataInput(state.elements, key) ? undefined : value]);
+  return rows;
 }
 
-/** The compliance setting a metadata row edits. */
-const metadataSettingKey = (key: string): string => (key.startsWith('General_') ? key.slice('General_'.length) : key);
+/**
+ * The value each compliance metadata row is saved with, in file order; `undefined` means the row is
+ * not written. A derived value is written only where the converter would not read another one: a
+ * row the file has blank stays blank and blocks (E066), and a setting a Systems row sets is left to
+ * that row, which the converter reads when the Metadata row is absent.
+ */
+export function metadataRowValues(state: MetadataRowInputs): Array<[string, string | undefined]> {
+  const entered = state.complianceSettings as Record<string, unknown>;
+  const blank = new Set(state.complianceSettings.blankMetadataRows);
+  return enteredOrDerivedRowValues(state).map(([key, value]) => [key,
+    entered[metadataSettingKey(key)] === undefined && (blank.has(key) || systemsRowSetsMetadataInput(state.elements, key)) ? undefined : value]);
+}
+
 
 /**
  * What FHS conversion writes for these rows when the file lacks them and the defaults template has
@@ -647,11 +657,18 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
  */
 export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: unknown, defaults: unknown): string[] {
   const blank = new Set(state.complianceSettings.blankMetadataRows);
+  const derived = new Map(enteredOrDerivedRowValues(state));
+  // The value the editor can work out, as a hint; the user enters it so the save writes it.
+  const hint = (key: string) => {
+    const value = derived.get(key);
+    if (value === undefined) return '';
+    return key.startsWith('NumberOf') ? ` Space labels show ${value}.` : ` The geometry gives ${value}.`;
+  };
   return metadataRowValues(state).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS
       && !systemsRowSetsMetadataInput(state.elements, key)
       && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
       && (blank.has(key) || (defaults !== undefined
         && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))
-    ? [`Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.`]
+    ? [`Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.${hint(key)}`]
     : []));
 }
