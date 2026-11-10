@@ -150,8 +150,17 @@ const CASES: Case[] = [
   // The converter reads the zone's living-room split whatever the switch says; the switch is saved as it was.
   { name: 'compliance validation off keeps the zone split', edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,'),
     saves: { 'Zone|Zone 1|livingroom_area': '28.91', 'Zone|Zone 1|restofdwelling_area': '42.29', 'Metadata|ComplianceValidationEnabled': 'FALSE' } },
+  // A second zone's rest-of-dwelling area is its floor area: the converter adds a blank as 0, so the notice names it.
+  { name: 'a second zone with no split takes its floor area',
+    edit: replace('simplified thermal bridging,livingroom_area,restofdwelling_area\nZone 1,Zone,199.36,71.2,2.8,TRUE,28.91,42.29\n',
+      'simplified thermal bridging\nZone 1,Zone,199.36,71.2,2.8,TRUE\nZone 2,Zone,10,4,2.5,FALSE\n'),
+    notice: 'Zone 2 restofdwelling_area blank → 4', saves: { 'Zone|Zone 2|restofdwelling_area': '4' } },
   { name: 'absent KitchenExtractorHoodExternal takes false', defaults: true, edit: (csv) => csv.replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
     saves: { 'Metadata|KitchenExtractorHoodExternal': 'FALSE' } },
+  // A blank link in a table with the column is "linked to nothing" (E059); a table with no such
+  // column lets the converter build the zone's wet system. The save keeps the table's form.
+  { name: 'emitters with blank space_heat_system', edit: (csv) => csv.replace(/,Zone 1 circuit,"/g, ',,"'),
+    blocks: ['Radiator|space_heat_system'], saves: { 'Wet Emitters|Radiator|space_heat_system': '' } },
   // The section implies the row type: a blank Type keeps the row (the converter reads it too).
   { name: 'pipework with blank Type', edit: replace('Pipe,WaterPipework,5.08,', 'Pipe,,5.08,'), saves: { 'Water Pipework|Pipe|length': '5.08' } },
   { name: 'emitter with blank Type', edit: replace('Radiator,Zone 1,WetEmitter,radiator,,1,', 'Radiator,Zone 1,,radiator,,1,'), saves: { 'Wet Emitters|Radiator|unit_number': '1' } },
@@ -176,6 +185,14 @@ const CASES: Case[] = [
   // A file with no elements still converts against the target, which requires these rows.
   { name: 'metadata-only file', defaults: true, edit: (csv) => replace('BuildingLength,8.9,,,,,,,,,,,,,\n', '')(csv.slice(0, csv.indexOf('Zone,,'))),
     blocks: ['Building length (m) is not set'] },
+  // Element names are keys in the engine input: a name the load brings up to date is named.
+  { name: 'an older auto name brought up to date', edit: (csv) => csv.replace(/Wall \(S\) 1,Zone 1,/, 'Wall 1,Zone 1,'), notice: 'Wall 1 name → Wall (S) 1' },
+  // A 0 the save writes blank reaches the converter as blank, so it is named.
+  { name: 'a 0 width saved blank', edit: replace('Party Wall (E),Zone 1,BuildingElementPartyWall,24.92,90,8.9,', 'Party Wall (E),Zone 1,BuildingElementPartyWall,24.92,90,0,'),
+    notice: 'Party Wall (E) width 0 → blank' },
+  // Only a blank pitch is worked out from coords by the converter; a filled width is named.
+  { name: 'a blank wall width filled from coords', edit: replace('Wall (S),Zone 1,BuildingElementOpaque,6.65,90,4,', 'Wall (S),Zone 1,BuildingElementOpaque,6.65,90,,'),
+    notice: 'Wall (S) width blank → 4' },
   // A row the converter stops on (E008-E029) stops the load, naming the row.
   { name: 'element in an unknown zone', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', 'Wall (S),Zone 9,BuildingElementOpaque'), refuses: "names zone 'Zone 9'" },
   { name: 'element with no name', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', ',Zone 1,BuildingElementOpaque'), refuses: 'An Exposed Elements row has no Name' },

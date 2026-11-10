@@ -711,41 +711,41 @@ const migrateElementsToNormalized = (
 };
 
 const NOT_REPLACEABLE_COLUMNS = new Set(['Name', 'Zone', 'Type', 'coords', 'extra_json']);
-// Not `area`: the converter takes a blank area as width × height, which for a wall with openings is
-// not the area the editor saves, so a filled area is listed.
-const COORDS_DETERMINED_COLUMNS = new Set(['total_area', 'width', 'height', 'pitch', 'orientation360', 'base_height', 'perimeter', 'length']);
+const LEGACY_COLUMN: Readonly<Record<string, string>> = { shading_type: 'Type', start_angle: 'start angle', end_angle: 'end angle' };
 /**
- * One load notice listing every authored cell of a zone or element row that the loaded document
- * saves with a different value, such as a plan area or a labelled living-room area. An internal
- * partition saved as both faces at twice a legacy single-face area keeps its meaning, so it is not
- * listed.
+ * One load notice listing every cell of a zone or element row, a column the file lacks included,
+ * that the loaded document saves with a different value, such as a plan area or a labelled
+ * living-room area, and every name the load brings up to date. An internal partition saved as both
+ * faces at twice a legacy single-face area keeps its meaning, so it is not listed. The converter
+ * works out only a blank pitch from the row's coords, so that is the one filled blank not listed.
  */
-const replacedValuesNotice = (authoredCsv: string, loadedCsv: string): string[] => {
+const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: ReadonlyMap<string, string>): string[] => {
   const rows = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
     .filter((row) => row.data.Name)
-    .map((row) => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, row.data] as const)));
+    .map((row): [string, Record<string, string>] => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, row.data])));
   const loaded = rows(loadedCsv);
-  const replaced: string[] = [];
+  // An auto-generated name the load brings up to date is a new key in the engine input.
+  const replaced = [...renamed].map(([before, after]) => `${before} name → ${after}`);
   for (const [key, authored] of rows(authoredCsv)) {
-    const saved = loaded.get(key);
+    const newName = renamed.get(authored.Name);
+    const saved = loaded.get(newName ? `${key.slice(0, -authored.Name.length)}${newName}` : key);
     if (!saved) continue;
     const bothFaces = /both_faces/.test(saved.extra_json ?? '');
-    for (const [column, raw] of Object.entries(authored)) {
-      const before = raw.trim();
+    // A column the file lacks is read as blank, as the converter reads it, or from the older column
+    // that held it (Context Shading).
+    for (const column of new Set([...Object.keys(authored), ...Object.keys(saved)])) {
+      const before = (authored[column] ?? authored[LEGACY_COLUMN[column]] ?? '').trim();
       const after = saved[column]?.trim();
       if (after === undefined || NOT_REPLACEABLE_COLUMNS.has(column)) continue;
       if (!before) {
-        // A value the save writes into a blank cell is listed unless the row's coords determine it.
-        // A PV panel's pitch and orientation come from its host roof, not its own coords.
-        const hostDerived = key.startsWith('On-Site Generation|') && (column === 'pitch' || column === 'orientation360');
-        if (after !== '' && (hostDerived || !(COORDS_DETERMINED_COLUMNS.has(column) && authored.coords?.trim()))) {
+        // A PV panel's pitch comes from its host roof, not its own coords.
+        const coordsPitch = column === 'pitch' && !key.startsWith('On-Site Generation|') && authored.coords?.trim();
+        if (after !== '' && !coordsPitch) {
           replaced.push(`${authored.Name} ${column} blank → ${after}`);
         }
         continue;
       }
       const a = Number(before), b = Number(after);
-      // The writer leaves a non-positive dimension blank; a 0 placeholder carries no value.
-      if (a === 0 && after === '') continue;
       const same = Number.isFinite(a) && Number.isFinite(b) && after !== ''
         ? Math.abs(b - a) < 0.015 || (column === 'area' && bothFaces && Math.abs(b - 2 * a) < 0.015)
         : before.toLowerCase() === after.toLowerCase();
@@ -1481,8 +1481,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const wetEmitterElements = getElementsOfType(exportElements, 'WetEmitter');
     if (wetEmitterElements.length > 0) {
       // A legacy table has no link column, and the converter then builds the zone's wet system.
-      // Writing the column blank would mean "linked to nothing" and delete that system.
-      const writesLinks = wetEmitterElements.some(element => element.space_heat_system);
+      // Writing the column blank would mean "linked to nothing" and delete that system; a file that
+      // has the column blank ('') keeps it.
+      const writesLinks = wetEmitterElements.some(element => element.space_heat_system !== undefined);
       const emittersHeader = EXPECTED_SECTION_HEADERS['Wet Emitters'].filter(column => writesLinks || column !== 'space_heat_system');
       const emittersColumnCount = emittersHeader.length;
 
@@ -2247,7 +2248,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (firstFloor) get().setCurrentFloor(firstFloor.id);
       else set({ currentFloorId: null, currentFloorZ: 0 });
     }
+    const namesBeforeSync = new Map(get().elementIds.map((id) => [id, get().elementsById[id]?.name]));
     void get().syncAutoGeneratedElementNames();
+    const renamed = new Map(get().elementIds.flatMap((id) => {
+      const before = namesBeforeSync.get(id);
+      const after = get().elementsById[id]?.name;
+      return before && after && before !== after ? [[before, after] as const] : [];
+    }));
     if (replace) {
       // Selection survives by id: reuseKnownIds kept the ids of surviving elements and zones.
       set((current) => {
@@ -2294,7 +2301,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline)], upgraded };
+    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed)], upgraded };
   }
 
   return slice;

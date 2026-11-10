@@ -831,7 +831,8 @@ export function ingestGeometryTabularSections(
               area: num(d, 'area'),
               // Not rounded: the converter stops on a unit count that is not a whole number.
               unit_number: num(d, 'unit_number') === undefined ? undefined : Number(V(d, 'unit_number')),
-              space_heat_system: V(d, 'space_heat_system') || undefined,
+              // '' when the table has the column blank (linked to nothing); undefined when it has no such column.
+              space_heat_system: 'space_heat_system' in d ? V(d, 'space_heat_system') : undefined,
               parent_element: null,
               coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
               ...viewerBaseHeightPatch(d),
