@@ -882,16 +882,13 @@ mod tests {
     }
     #[test]
     fn fixed_glazing_and_authored_physical_parts_remain_exact() {
-        for parts in [
-            json!([{"mid_height":1.5,"free_area_height":1,"max_window_open_area":0.4},{"mid_height":2.5,"free_area_height":0.5,"max_window_open_area":0.2}]),
-        ] {
-            let (v, e) = map(
-                json!({"extra_json":{"window_part_list":parts}}),
-                json!({"type":"BuildingElementTransparent"}),
-            );
-            assert!(e.is_empty());
-            assert_eq!(v["window_part_list"], parts);
-        }
+        let parts = json!([{"mid_height":1.5,"free_area_height":1,"max_window_open_area":0.4},{"mid_height":2.5,"free_area_height":0.5,"max_window_open_area":0.2}]);
+        let (v, e) = map(
+            json!({"extra_json":{"window_part_list":parts}}),
+            json!({"type":"BuildingElementTransparent"}),
+        );
+        assert!(e.is_empty());
+        assert_eq!(v["window_part_list"], parts);
     }
     #[test]
     fn full_partition_recovery_is_exactly_once_and_does_not_double_qualitative_capacity() {
