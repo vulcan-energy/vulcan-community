@@ -91,6 +91,7 @@ import {
   pointInPolygon,
 } from '../lib/spaceLabelGeometry';
 import { collectGlobalSettingsWarnings } from '../lib/globalSettingsValidation';
+import { metadataRowValues, unsetMetadataInputIssues } from '../lib/metadataInputRows';
 import {
   applyMechanicalVentilationCsvPositionColumns,
   canMechanicalVentilationInheritHostPlacement,
@@ -7688,6 +7689,14 @@ const createGeometryState = (
         globalOrientationOffset: state.globalOrientationOffset,
       }),
     );
+
+    const elements = Object.values(state.elementsById);
+    if (complianceOn && elements.some((element) => !element.isPlaceholder)) {
+      allCriticalIssues.push(...unsetMetadataInputIssues(
+        metadataRowValues({ ...state, elements }),
+        schemaPort.availability === 'available' ? schemaPort.getRootSchema('fhs') : null,
+      ));
+    }
 
     return {
       warnings: allWarnings,

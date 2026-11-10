@@ -320,7 +320,7 @@ describe("GlobalSettingsModal", () => {
       expect(indicator?.variant).toBe("error");
       expect(indicator?.issues[0]).toBe("No defaults file is selected.");
       expect(indicator?.issues).toContain(
-        "Number of hot-tapped rooms is required when strict checks are on."
+        "Global Settings: Number of hot-tapped rooms is not set. Enter it in Global Settings."
       );
     });
   });

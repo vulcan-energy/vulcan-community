@@ -157,7 +157,7 @@ export const createComplianceSlice: GeometryStoreSlice = (set) => ({
     const nextSettings: Record<string, unknown> = { ...settings };
     deleteExplicitUndefined(nextSettings, settings);
     removeHouseOnlyFlatFields(nextSettings);
-    applyFhsComplianceDefaultsIfEnabled(nextSettings);
+    // A loaded file keeps exactly what it says: a value it lacks stays unset and is reported.
     set({ complianceSettings: nextSettings as GeometryState['complianceSettings'] });
   },
 });
