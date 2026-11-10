@@ -3116,6 +3116,10 @@ impl JSONBuilder {
     ) -> Result<(), BuildError> {
         if let Some(section_data) = csv_data.get("Lighting") {
             for lighting_row in section_data {
+                let row_name = lighting_row
+                    .get("Name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let zone_name = lighting_row
                     .get("Zone")
                     .and_then(|v| v.as_str())
@@ -3136,7 +3140,7 @@ impl JSONBuilder {
                 } else {
                     return Err(BuildError::new(
                         "E027",
-                        "Lighting missing required 'efficacy' field",
+                        &format!("Lighting row '{row_name}' missing required 'efficacy' field"),
                     ));
                 };
 
@@ -3146,7 +3150,7 @@ impl JSONBuilder {
                     .ok_or_else(|| {
                         BuildError::new(
                             "E027",
-                            "Lighting missing required 'count' field (explicit bulb objects are required)",
+                            &format!("Lighting row '{row_name}' missing required 'count' field (explicit bulb objects are required)"),
                         )
                     })?;
                 let power = lighting_row
@@ -3155,7 +3159,7 @@ impl JSONBuilder {
                     .ok_or_else(|| {
                         BuildError::new(
                             "E027",
-                            "Lighting missing required 'power' field (explicit bulb objects are required)",
+                            &format!("Lighting row '{row_name}' missing required 'power' field (explicit bulb objects are required)"),
                         )
                     })?;
 
@@ -4111,6 +4115,24 @@ impl JSONBuilder {
                                 } else if measured_explicit {
                                     mv_obj.remove("SFP");
                                 }
+                            }
+                        }
+
+                        // Name the exhaust position columns the schema's `oneOf` would only hint at.
+                        if vt != "MVHR" && !mv_obj.contains_key("position_exhaust") {
+                            let missing: Vec<&str> = flat_position_keys
+                                .into_iter()
+                                .filter(|key| !mv_obj.contains_key(*key))
+                                .collect();
+                            if !missing.is_empty() {
+                                self.push_non_fatal(
+                                    "E027",
+                                    &crate::json_pointer(&["Ventilation Systems", vent_name]),
+                                    &format!(
+                                        "MechanicalVentilation row '{vent_name}' has no {}. Enter the exhaust position in those columns.",
+                                        missing.join(", ")
+                                    ),
+                                );
                             }
                         }
 
@@ -6145,14 +6167,10 @@ impl JSONBuilder {
 
                 for row in section_data {
                     // Get system type – try new column layout first ("Type"), then legacy ("system_type")
-                    let routing = |key: &str| {
-                        row.get(key)
-                            .and_then(|v| v.as_str())
-                            .filter(|s| !s.trim().is_empty())
-                    };
-                    let system_type = routing("Type")
-                        .or_else(|| routing("system_type"))
-                        .or_else(|| routing("subcategory"))
+                    // The parser turns a blank cell into null, so the first string routes.
+                    let (route_column, system_type) = ["Type", "system_type", "subcategory"]
+                        .into_iter()
+                        .find_map(|key| Some((key, row.get(key)?.as_str()?)))
                         .ok_or_else(|| {
                             BuildError::new(
                                 "E035",
@@ -6504,7 +6522,11 @@ impl JSONBuilder {
                         self.push_non_fatal(
                             "E065",
                             "Systems",
-                            &format!("Systems row '{name}' has unknown Type '{system_type}', so it is not in the model. Correct the Type."),
+                            &if route_column == "Type" {
+                                format!("Systems row '{name}' has unknown Type '{system_type}', so it is not in the model. Correct the Type.")
+                            } else {
+                                format!("Systems row '{name}' has a blank Type, and its {route_column} '{system_type}' cannot route it, so it is not in the model. Enter the Type.")
+                            },
                         );
                     }
                 }
@@ -12468,11 +12490,8 @@ Light,Living,80
             .build_zone_structure(&mut result, &data)
             .expect_err("Missing count/power should error");
         assert!(
-            err.message
-                .contains("Lighting missing required 'count' field")
-                || err
-                    .message
-                    .contains("Lighting missing required 'power' field"),
+            err.message.contains("missing required 'count' field")
+                || err.message.contains("missing required 'power' field"),
             "Unexpected error: {}",
             err.message
         );
