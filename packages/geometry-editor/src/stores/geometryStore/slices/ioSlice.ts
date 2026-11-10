@@ -1674,6 +1674,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           element.subcategory === 'SpaceHeatSystem'
             ? syncSpaceHeatSystemZoneNameInExtraJson(element.extra_json, zoneName) ?? element.extra_json
             : element.extra_json;
+        // The converter reads any extra_json object as the row's own entries, named after the row
+        // (a blank cell keeps the defaults'), so a row holding only editor markers is written blank.
+        const writesExtraJson = Object.keys(extraJsonForCsv ?? {}).some((key) => !key.startsWith('_'));
         const systemsRow = [
           escapeCSV(element.name),
           escapeCSV(zoneName),
@@ -1682,7 +1685,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(element.system_preset || ''),
           escapeCSV(formatViewerBaseHeightForCsv(element)),
           formatElementCoordsForCsv(element),
-          escapeCSVJson(extraJsonForCsv ? JSON.stringify(extraJsonForCsv) : '')
+          escapeCSVJson(writesExtraJson ? JSON.stringify(extraJsonForCsv) : '')
         ];
         lines.push(ensureColumnCount(systemsRow, systemsColumnCount, systemsHeader, element.nonNumericCells));
       });

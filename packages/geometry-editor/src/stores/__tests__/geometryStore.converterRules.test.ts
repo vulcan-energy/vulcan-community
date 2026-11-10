@@ -162,6 +162,10 @@ const CASES: Case[] = [
   // A Metadata value the file gives is saved as given, whatever the geometry suggests.
   { name: 'build type house with no ground outline', saves: { 'Metadata|General_build_type': 'house' },
     edit: replace('Slab_no_edge_insulation,,,,"-29.700,-6.470,0.000|-25.700,-6.470,0.000|-25.700,2.430,0.000|-29.700,2.430,0.000"', 'Slab_no_edge_insulation,,,,""') },
+  // A Systems row with a blank extra_json adds nothing: the converter keeps the defaults' heat
+  // source. Any object there, editor markers only included, becomes an entry named after the row.
+  { name: 'heat source row with blank extra_json', saves: { 'Systems|Heat Pump|extra_json': '' },
+    edit: (csv) => csv.replace(/^(Heat Pump,Zone 1,System,HeatSourceWet,hp_large,"[^"]*"),.*$/m, '$1,') },
   // A row the converter stops on (E008-E029) stops the load, naming the row.
   { name: 'element in an unknown zone', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', 'Wall (S),Zone 9,BuildingElementOpaque'), refuses: "names zone 'Zone 9'" },
   { name: 'element with no name', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', ',Zone 1,BuildingElementOpaque'), refuses: 'An Exposed Elements row has no Name' },
