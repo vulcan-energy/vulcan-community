@@ -530,8 +530,14 @@ function appendFacadeOpeningThermalBridgeProposalsForHost(
   const edgeRuns = (edge: ProfilePoint[]) => {
     const at = (p: ProfilePoint) => ({ x: p0.x + (p1.x - p0.x) * p.t, y: p0.y + (p1.y - p0.y) * p.t, z: zSill + p.h });
     const runs: Array<{ coords: [ReturnType<typeof at>, ReturnType<typeof at>]; length: number }> = [];
-    for (let k = 1; k < edge.length; k += 1) {
-      const [a, b] = [at(edge[k - 1]!), at(edge[k]!)];
+    // One run per straight part: drop points that lie on the line through their neighbours.
+    const bends = edge.filter((p, k) => {
+      if (k === 0 || k === edge.length - 1) return true;
+      const [a, b] = [edge[k - 1]!, edge[k + 1]!];
+      return Math.abs(a.h + ((b.h - a.h) * (p.t - a.t)) / (b.t - a.t) - p.h) > 1e-6;
+    });
+    for (let k = 1; k < bends.length; k += 1) {
+      const [a, b] = [at(bends[k - 1]!), at(bends[k]!)];
       const length = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
       if (length > 1e-6) runs.push({ coords: [a, b], length });
     }
@@ -699,6 +705,9 @@ export function annotateProposalsWithDedupe(
     const roleOptions = new Set(junctionOptionsForFacadeEdgeRole(p.edgeRole));
     if (p.edgeRole === 'roof_window_sill') roleOptions.add('R11');
     const mid = midpoint3(p.coordinates[0], p.coordinates[1]);
+    // A flat-roof deck at base height 0/blank used to sit at 0 m and now sits at the top of its
+    // storey, so rows saved before then carry the old z: match these edges on plan position only.
+    const planOnly = p.edgeRole === 'flat_roof_edge' || p.edgeRole === 'party_wall_to_flat_roof';
 
     let matched: ThermalBridgeLinear | undefined;
     for (const tb of existing) {
@@ -707,7 +716,7 @@ export function annotateProposalsWithDedupe(
       const c = tb.coordinates;
       if (!c || c.length < 2) continue;
       const exMid = midpoint3(c[0], c[1]);
-      if (dist3(mid, exMid) <= toleranceM) {
+      if (dist3(mid, planOnly ? { ...exMid, z: mid.z } : exMid) <= toleranceM) {
         matched = tb;
         break;
       }
