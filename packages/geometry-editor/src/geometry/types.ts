@@ -57,8 +57,8 @@ export interface Zone {
   _areaSource?: string; // Human-readable description of where the floor area came from
   _floorAreaUserOverride?: boolean; // When true, floorArea is user-set and won't auto-update from geometry
   // Metadata for derived height (used for reset-to-default UI)
-  _derivedHeight?: number; // Always-calculated geometry-derived height (weighted avg of line-wall heights)
-  _heightUserOverride?: boolean; // When true, height is user-set and won't auto-update from wall heights
+  _derivedHeight?: number; // Always-calculated height: storey heights weighted by treated floor area
+  _heightUserOverride?: boolean; // When true, height is user-set and won't auto-update from storey heights
   // Metadata for multi-floor ground element validation
   _groundFloorLevels?: number[]; // Distinct Z-levels of BuildingElementGround elements in this zone
   /** Numeric CSV cells that held text on load, by column: saved back as typed, and blocking until the field is edited. */

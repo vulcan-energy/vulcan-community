@@ -89,11 +89,15 @@ export const createFloorSlice: GeometryStoreSlice = (set, get) => ({
       const oldBases = getCumulativeBaseHeightsByFloorId(state.floors, elements);
       const newBases = getCumulativeBaseHeightsByFloorId(nextFloors, elements);
       const baseChanged = state.floors.some((floor) => oldBases.get(floor.id) !== newBases.get(floor.id));
-      if (!effectiveChanged && !baseChanged) return { floors: nextFloors };
+      // Zone heights use each zone's own walls, so a storey height edit can change a zone even
+      // when the storey's effective height (over every zone) does not.
+      const storeyHeightEdited = 'height' in updates || 'heightUserOverride' in updates;
+      const deriveZones = (els: typeof elements) => (storeyHeightEdited
+        ? state.zones.map((zone) => ({ ...zone, ...deriveZoneProperties(zone, els, nextFloors) }))
+        : state.zones);
+      if (!effectiveChanged && !baseChanged) return { floors: nextFloors, zones: deriveZones(elements) };
 
       const patches = cascadeFloorStackChange(oldEff, newEff, elements);
-      if (patches.length === 0) return { floors: nextFloors };
-
       const nextElementsById = { ...state.elementsById };
       for (const { elementId, patch } of patches) {
         const el = nextElementsById[elementId];
@@ -104,7 +108,7 @@ export const createFloorSlice: GeometryStoreSlice = (set, get) => ({
           _v: (el._v ?? 0) + 1,
         } as typeof el;
       }
-      return { floors: nextFloors, elementsById: nextElementsById };
+      return { floors: nextFloors, elementsById: nextElementsById, zones: deriveZones(Object.values(nextElementsById)) };
     });
     // History captures both `floors` and `elementsById` in one snapshot, so a single
     // saveToHistory call gives atomic undo for the Floor.height edit + element cascade.
@@ -166,7 +170,7 @@ export const createFloorSlice: GeometryStoreSlice = (set, get) => ({
       const updatedZones =
         affectedZoneIds.size > 0
           ? state.zones.map((zone) =>
-              affectedZoneIds.has(zone.id) ? { ...zone, ...deriveZoneProperties(zone, remainingElements) } : zone,
+              affectedZoneIds.has(zone.id) ? { ...zone, ...deriveZoneProperties(zone, remainingElements, updatedFloors) } : zone,
             )
           : state.zones;
 

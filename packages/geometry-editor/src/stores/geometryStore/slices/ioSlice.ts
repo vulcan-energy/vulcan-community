@@ -2214,7 +2214,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           metadata.provenanceMarkersVersion,
         )
       ) {
-        const derivedH = calculateDerivedHeight(zone.id, allElements);
+        const derivedH = calculateDerivedHeight(zone.id, allElements, get().floors);
         const matchesLegacyDerivation = Math.abs(csvHeight - calculateLegacyMeanZoneHeight(zone.id, allElements)) <= ZONE_OVERRIDE_EPSILON;
         if (derivedH > 0 && !matchesLegacyDerivation && Math.abs(csvHeight - derivedH) > ZONE_OVERRIDE_EPSILON) {
           flags._heightUserOverride = true;
@@ -2224,7 +2224,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     });
 
     const zonesWithDerivedProperties = zonesWithOverrideFlags.map(zone => {
-      const zoneUpdates = deriveZoneProperties(zone, allElements);
+      const zoneUpdates = deriveZoneProperties(zone, allElements, get().floors);
       return Object.keys(zoneUpdates).length > 0 ? { ...zone, ...zoneUpdates } : zone;
     });
 

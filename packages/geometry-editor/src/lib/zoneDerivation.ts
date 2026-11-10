@@ -271,8 +271,8 @@ export function isVerticalLineWall(element: Element): boolean {
 }
 
 /**
- * Per-floor weighted-average line-wall height (m) for each Z-level that has contributing walls.
- * Same wall filtering as {@link calculateDerivedHeight}.
+ * Per-floor weighted-average line-wall height (m). Only {@link calculateLegacyMeanZoneHeight} uses
+ * it, to recognise the zone height that older files saved.
  */
 export function getPerFloorLineWallAverageHeights(zoneId: string, elements: Element[]): Map<number, number> {
   const lineWalls = elements.filter((el) => {
@@ -312,12 +312,34 @@ export function getPerFloorLineWallAverageHeights(zoneId: string, elements: Elem
 }
 
 /**
+ * The storey height of each level where the zone has line walls: the height typed in the floor
+ * picker, else the zone's tallest wall on that level (as {@link getStrictStoreyHeight}). Short
+ * walls such as a parapet or dormer cheek therefore do not lower it.
+ */
+export function getZoneStoreyHeights(zoneId: string, elements: Element[], floors: Floor[]): Map<number, number> {
+  const zoneElements = elements.filter((el) => (el as { zoneId?: string }).zoneId === zoneId);
+  const levels = new Set<number>();
+  for (const el of zoneElements) {
+    if (isVerticalLineWall(el)) levels.add(Math.floor(el.coordinates[0]?.z ?? 0));
+  }
+  const out = new Map<number, number>();
+  for (const level of levels) {
+    const floor = floors.find((candidate) => candidate.zIndex === level);
+    const height = floor
+      ? getStrictStoreyHeight(floor, zoneElements)
+      : roundToTwoDecimals(getMaxLineWallHeightOnFloor(level, zoneElements));
+    if (height > 0) out.set(level, height);
+  }
+  return out;
+}
+
+/**
  * Z-levels that have line walls contributing to zone height, but no TFA element attributed to that floor.
- * Only considers floors with positive per-storey wall height (see {@link getPerFloorLineWallAverageHeights}).
  * Floors with only roof/ceiling polygons and no line walls are not listed.
  */
 export function getZoneFloorLevelsMissingTfa(zoneId: string, elements: Element[]): number[] {
-  const perFloorHeights = getPerFloorLineWallAverageHeights(zoneId, elements);
+  // Only which levels have walls matters here, so typed storey heights are not needed.
+  const perFloorHeights = getZoneStoreyHeights(zoneId, elements, []);
   const { contributingElements } = calculateDerivedFloorArea(zoneId, elements);
   const tfaZs = new Set<number>();
   for (const c of contributingElements) {
@@ -1125,28 +1147,25 @@ export function calculateDerivedWindowMidHeight(baseHeightM: number, openingHeig
 }
 
 /**
- * Calculate a suggested zone height from line-drawn wall heights.
- * Only considers line walls (coordinates.length === 2) since polygon wall
- * heights are synthetic (sqrt(area)) and not physically meaningful.
+ * The zone height: each storey's height ({@link getZoneStoreyHeights}) weighted by that storey's
+ * treated floor area, so a level with walls but no treated floor, such as a gable, does not count.
+ * With no treated floor on any walled storey, the storeys combine as a plain mean.
  *
- * Each storey's height is its walls' average weighted by width. Storeys combine weighted by treated
- * floor area, so a level with walls but no treated floor, such as a gable, does not lower the result.
- * With no treated floor modelled on any walled storey, the storeys combine as a plain mean.
- *
- * Only vertical line walls (pitch unset or 90°) contribute. Horizontal and
- * pitched surfaces, polygon walls, windows, and external doors are excluded.
- *
- * Returns 0 when no suitable wall data is available.
+ * Returns 0 when the zone has no vertical line walls.
  */
-export function calculateDerivedHeight(zoneId: string, elements: Element[]): number {
-  const perFloor = getPerFloorLineWallAverageHeights(zoneId, elements);
+export function calculateDerivedHeight(zoneId: string, elements: Element[], floors: Floor[]): number {
+  const perFloor = getZoneStoreyHeights(zoneId, elements, floors);
   if (perFloor.size === 0) return 0;
   const floorAreas = treatedFloorAreaByLevel(elements.filter((el) => (el as { zoneId?: string }).zoneId === zoneId));
-  const weighted = [...perFloor].map(([level, height]) => ({ height, area: floorAreas.get(level) ?? 0 }));
-  const totalArea = weighted.reduce((sum, storey) => sum + storey.area, 0);
-  if (totalArea <= 0) return calculateLegacyMeanZoneHeight(zoneId, elements);
-  const height = weighted.reduce((sum, storey) => sum + storey.height * storey.area, 0) / totalArea;
-  return height > 0 ? roundToTwoDecimals(height) : 0;
+  const anyTreated = [...perFloor.keys()].some((level) => (floorAreas.get(level) ?? 0) > 0);
+  let weightedSum = 0;
+  let totalWeight = 0;
+  for (const [level, height] of perFloor) {
+    const weight = anyTreated ? floorAreas.get(level) ?? 0 : 1;
+    weightedSum += height * weight;
+    totalWeight += weight;
+  }
+  return roundToTwoDecimals(weightedSum / totalWeight);
 }
 
 /** The plain storey mean. Older saved files hold this value, so import must not read it as typed. */
@@ -1161,13 +1180,13 @@ export function calculateLegacyMeanZoneHeight(zoneId: string, elements: Element[
  * Derive zone properties from its child elements
  * - Floor area (TFA-oriented): sum of **all** qualifying storey floors — BuildingElementGround polygons
  *   **plus** walkable horizontal polygons (opaque / transparent / adjacent, **pitch 180°** only; not pitch 0°).
- * - Height: storey wall heights (2-point walls only) weighted by treated floor area; see calculateDerivedHeight
+ * - Height: storey heights weighted by treated floor area; see calculateDerivedHeight
  * - Volume: floor area × height
  *
  * Returns updates object with derived metadata.
  * Auto-updates `floorArea` and `height` from geometry unless the respective user-override flag is set.
  */
-export function deriveZoneProperties(zone: Zone, elements: Element[]): Partial<Zone> {
+export function deriveZoneProperties(zone: Zone, elements: Element[], floors: Floor[]): Partial<Zone> {
   const updates: Partial<Zone> = {};
 
   const { floorArea, areaSource } = calculateDerivedFloorArea(zone.id, elements);
@@ -1199,7 +1218,7 @@ export function deriveZoneProperties(zone: Zone, elements: Element[]): Partial<Z
   }
 
   // --- Height derivation (same pattern as floor area) ---
-  const derivedHeight = calculateDerivedHeight(zone.id, elements);
+  const derivedHeight = calculateDerivedHeight(zone.id, elements, floors);
   const currentHeight = zone.height || 0;
 
   // Always store the derived height so the UI can offer a reset button

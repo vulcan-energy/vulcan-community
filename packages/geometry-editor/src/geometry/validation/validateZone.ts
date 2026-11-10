@@ -101,7 +101,7 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
     const heightDiff = Math.abs(zone.height - zone._derivedHeight);
     if (heightDiff > 0.005) {
       warnings.push(warn(
-        `Height ${zone.height} m ≠ walls ${zone._derivedHeight} m`,
+        `Height ${zone.height} m ≠ storeys ${zone._derivedHeight} m`,
         'height'
       ));
     }

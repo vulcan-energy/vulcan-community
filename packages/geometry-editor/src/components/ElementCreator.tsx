@@ -5307,7 +5307,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   {(() => {
                     const allElementsH = Object.values(elementsById) as import('../geometry/types').Element[];
                     const derivedH = selection?.type === 'zone'
-                      ? calculateDerivedHeight(selection.id, allElementsH)
+                      ? calculateDerivedHeight(selection.id, allElementsH, floors)
                       : 0;
                     const currentH = Number(zoneHeight) || 0;
                     const isCustomH = derivedH > 0 && Math.abs(currentH - derivedH) > 0.005;
@@ -5361,7 +5361,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                                 }
                               }}
                               align="inline"
-                              title={`Reset to ${derivedH} m (from wall heights)`}
+                              title={`Reset to ${derivedH} m (from storey heights)`}
                               ariaLabel="Reset Zone Height"
                               label="Reset"
                             />
@@ -5370,8 +5370,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                         {derivedH > 0 ? (
                           <div style={INLINE_FIELD_NOTE_STYLE}>
                             {isCustomH
-                              ? `Default: ${derivedH} m · from wall heights`
-                              : 'From wall heights'}
+                              ? `Default: ${derivedH} m · from storey heights`
+                              : 'From storey heights'}
                           </div>
                         ) : null}
                         <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('height', zoneHeight)} issue={getFieldValidationIssue('height', zoneHeight) || undefined} />

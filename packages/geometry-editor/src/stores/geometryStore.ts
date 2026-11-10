@@ -4911,7 +4911,7 @@ const createGeometryState = (
       }
 
       if (heightProvided && !Object.prototype.hasOwnProperty.call(normalizedUpdates, '_heightUserOverride')) {
-        const derivedHeight = calculateDerivedHeight(id, zoneElements);
+        const derivedHeight = calculateDerivedHeight(id, zoneElements, state.floors);
         const submittedHeight = typeof nextZone.height === 'number' ? nextZone.height : 0;
         nextZone._heightUserOverride = derivedHeight > 0
           && submittedHeight > 0
@@ -4924,7 +4924,7 @@ const createGeometryState = (
 
       nextZone = {
         ...nextZone,
-        ...deriveZoneProperties(nextZone, zoneElements),
+        ...deriveZoneProperties(nextZone, zoneElements, state.floors),
       };
 
       const updatedZones = state.zones.map(zone =>
@@ -6501,7 +6501,7 @@ const createGeometryState = (
       let updatedZones = state.zones;
       for (const [index, zone] of state.zones.entries()) {
         if (zone.id !== prevElement.zoneId && zone.id !== nextElementWithSecurityRisk.zoneId) continue;
-        const zoneUpdates = deriveZoneProperties(zone, Object.values(newElementsById));
+        const zoneUpdates = deriveZoneProperties(zone, Object.values(newElementsById), get().floors);
         if (Object.keys(zoneUpdates).length === 0) continue;
         if (updatedZones === state.zones) updatedZones = [...state.zones];
         updatedZones[index] = { ...zone, ...zoneUpdates };
@@ -7049,7 +7049,7 @@ const createGeometryState = (
       if (removedElement.zoneId) {
         const zone = state.zones.find(z => z.id === removedElement.zoneId);
         if (zone) {
-          const zoneUpdates = deriveZoneProperties(zone, Object.values(remainingElementsById));
+          const zoneUpdates = deriveZoneProperties(zone, Object.values(remainingElementsById), state.floors);
           if (Object.keys(zoneUpdates).length > 0) {
             updates.zones = state.zones.map(z =>
               z.id === removedElement.zoneId ? { ...z, ...zoneUpdates } : z
