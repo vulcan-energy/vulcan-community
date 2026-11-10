@@ -426,7 +426,7 @@ describe('generic inspector element fields contribution', () => {
       onPatchExtraJson: (update: (current: Record<string, unknown>) => Record<string, unknown>) => void;
     }) => {
       const selected = element as Element;
-      return <button type="button" onClick={() => onPatchExtraJson((current) => ({ ...current, marker: 'set' }))}>
+      return <button type="button" onClick={() => onPatchExtraJson((current) => ({ ...current, _host_marker: 'set' }))}>
         Set generic field for {selected.name}
       </button>;
     });
@@ -465,7 +465,7 @@ describe('generic inspector element fields contribution', () => {
     expect(store.getState().elementsById.window?.extra_json).toEqual({
       retained: { source: 'csv' },
       security_risk: true,
-      marker: 'set',
+      _host_marker: 'set',
     });
     const csv = store.getState().generateCSV();
     const reloadedStore = createGeometryStore({ defaultDefaultsPath: null });
@@ -475,7 +475,7 @@ describe('generic inspector element fields contribution', () => {
     expect(roundTripped?.extra_json).toEqual({
       retained: { source: 'csv' },
       security_risk: true,
-      marker: 'set',
+      _host_marker: 'set',
     });
   });
 
