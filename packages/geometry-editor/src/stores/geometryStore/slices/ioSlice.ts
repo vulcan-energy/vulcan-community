@@ -711,7 +711,9 @@ const migrateElementsToNormalized = (
 };
 
 const NOT_REPLACEABLE_COLUMNS = new Set(['Name', 'Zone', 'Type', 'coords', 'extra_json']);
-const COORDS_DETERMINED_COLUMNS = new Set(['area', 'total_area', 'width', 'height', 'pitch', 'orientation360', 'base_height', 'perimeter', 'length']);
+// Not `area`: the converter takes a blank area as width × height, which for a wall with openings is
+// not the area the editor saves, so a filled area is listed.
+const COORDS_DETERMINED_COLUMNS = new Set(['total_area', 'width', 'height', 'pitch', 'orientation360', 'base_height', 'perimeter', 'length']);
 /**
  * One load notice listing every authored cell of a zone or element row that the loaded document
  * saves with a different value, such as a plan area or a labelled living-room area. An internal
