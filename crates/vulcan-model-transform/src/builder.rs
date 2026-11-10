@@ -4372,10 +4372,13 @@ impl JSONBuilder {
                         // Shared finalization projects and reports unsupported fields.
                         mechanical_ventilation.insert(vent_name.to_string(), Value::Object(mv_obj));
                     }
-                    _ => {
-                        // Skip other types for now
-                        continue;
-                    }
+                    // Read with the MechanicalVentilation row they name as parent_element.
+                    "MechanicalVentilationDuctwork" | "MechanicalVentilationTerminal" => {}
+                    other => self.push_non_fatal(
+                        "E065",
+                        "Ventilation Systems",
+                        &format!("Ventilation Systems row '{vent_name}' has unknown Type '{other}', so it is not in the model. Correct the Type."),
+                    ),
                 }
             }
             // Merge into InfiltrationVentilation with CSV-authoritative behavior:
@@ -10767,6 +10770,30 @@ mod wet_emitter_tests {
     fn parse_csv(csv: &str) -> HashMap<String, Vec<HashMap<String, Value>>> {
         let mut parser = CSVParser::new();
         parser.parse_csv(csv).expect("CSV should parse")
+    }
+
+    #[test]
+    fn ventilation_row_with_an_unknown_type_is_reported() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Ventilation Systems
+Name,Type,mid_height_air_flow_path,area_cm2,orientation360,pitch
+Vent 1,Vent,1.5,225,180,90
+"#;
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder
+            .merge_ventilation_systems(&mut result, &parse_csv(csv))
+            .expect("Ventilation Systems should merge");
+        let errors = builder.take_non_fatal_errors();
+        assert!(
+            errors.iter().any(|e| e.code == "E065"
+                && e.message
+                    .contains("Ventilation Systems row 'Vent 1' has unknown Type 'Vent'")),
+            "{errors:?}"
+        );
     }
 
     #[test]
