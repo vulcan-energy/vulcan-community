@@ -2188,7 +2188,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     const labelList = spaceLabelIds.map((id) => spaceLabelsById[id]).filter(Boolean);
     let zonesForStore = zonesWithDerivedProperties;
-    let complianceFromLabels: Partial<GeometryState['complianceSettings']> = {};
     if (labelList.length > 0) {
       const cv = get().complianceSettings.complianceValidationEnabled === true;
       const primaryForLabels = zonesForStore.find((zone) => !zone.isPlaceholder);
@@ -2199,7 +2198,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         preserveManualFloorAreaOverride: true,
       });
       zonesForStore = applied.zones;
-      complianceFromLabels = applied.compliancePatch;
     }
 
     set({
@@ -2229,12 +2227,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       return changed ? { elementsById: nextElementsById } : state;
     });
 
-    // Label counts fill only rows the file lacks; a count the file gives is the user's value.
-    const absentRows = new Set(get().complianceSettings.absentMetadataRows);
-    const countsForAbsentRows = Object.fromEntries(Object.entries(complianceFromLabels).filter(([key]) => absentRows.has(key)));
-    if (Object.keys(countsForAbsentRows).length > 0) {
-      get().setComplianceSettings(countsForAbsentRows);
-    }
+    // Label counts fill no Metadata row: a count the file gives is the user's, and a row the file
+    // lacks takes the converter's value (absentMetadataRowFill).
 
     const state = get();
     const floorsWithElements = state.floors.filter(floor =>

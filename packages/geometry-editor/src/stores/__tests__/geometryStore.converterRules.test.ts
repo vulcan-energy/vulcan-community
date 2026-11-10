@@ -87,6 +87,12 @@ const CASES: Case[] = [
   // first, then the defaults template (which a load always reads after the file).
   { name: 'absent rows take the defaults', edit: (csv) => csv, defaults: true, notice: 'Shield Class Normal (from the defaults file)',
     saves: { 'Metadata|Ventilation_shield_class': 'Normal', 'Metadata|Ventilation_altitude': '30' } },
+  // With no Systems row and no defaults value, the converter has nothing: the row stays absent and
+  // blocks where the target requires it, with what the labels or geometry show as a hint.
+  { name: 'absent base height with no defaults value', defaults: true, edit: replace('Ventilation_ventilation_zone_base_height,0,,,,,,,,,,,,,\n', ''),
+    blocks: ['Ventilation Zone Base Height (m) is not set. Enter it in Global Settings. The geometry gives 0.'], saves: { 'Metadata|Ventilation_ventilation_zone_base_height': null } },
+  { name: 'absent bathroom count with no defaults value', defaults: true, edit: replace('NumberOfBathrooms,1,,,,,,,,,,,,,\n', ''),
+    blocks: ['Number of bathrooms is not set. Enter it in Global Settings. Space labels show 1.'], saves: { 'Metadata|NumberOfBathrooms': null } },
   { name: 'a Systems row supplies the absent rows', edit: systemsVentilation, defaults: true, noNotice: 'Shield Class',
     allows: ['Shield Class', 'Altitude (m)'], saves: { 'Metadata|Ventilation_shield_class': null, 'Metadata|Ventilation_altitude': null, 'Metadata|Ventilation_ventilation_zone_base_height': null } },
   // The converter does not read Space Labels: every row loads and saves as it is, and none blocks.

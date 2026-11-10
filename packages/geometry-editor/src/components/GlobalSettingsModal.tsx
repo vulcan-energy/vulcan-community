@@ -25,7 +25,6 @@ import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingF
 
 import { resolveFieldPresentation } from "../lib/fieldPresentation";
 import {
-  metadataRowValues,
   unsetMetadataInputIssues,
   collectGlobalSettingsWarnings,
   fhsBedroomCountIssue,

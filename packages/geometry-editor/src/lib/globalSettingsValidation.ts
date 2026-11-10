@@ -558,15 +558,15 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs): Array<[string, str
 
 /**
  * The value each compliance metadata row is saved with, in file order; `undefined` means the row is
- * not written. A derived value is written only where the converter would not read another one: a
- * row the file has blank stays blank and blocks (E066), and a setting a Systems row sets is left to
- * that row, which the converter reads when the Metadata row is absent.
+ * not written. A derived value is written only for a row the loaded file does not decide: a row
+ * the file has blank stays blank and blocks (E066), a row the file lacks takes the converter's
+ * value or none (absentMetadataRowFill), and a setting a Systems row sets is left to that row.
  */
 export function metadataRowValues(state: MetadataRowInputs): Array<[string, string | undefined]> {
   const entered = state.complianceSettings as Record<string, unknown>;
-  const blank = new Set(state.complianceSettings.blankMetadataRows);
+  const fileDecides = new Set([...(state.complianceSettings.blankMetadataRows ?? []), ...(state.complianceSettings.absentMetadataRows ?? [])]);
   return enteredOrDerivedRowValues(state).map(([key, value]) => [key,
-    entered[metadataSettingKey(key)] === undefined && (blank.has(key) || systemsRowSetsMetadataInput(state.elements, key)) ? undefined : value]);
+    entered[metadataSettingKey(key)] === undefined && (fileDecides.has(key) || systemsRowSetsMetadataInput(state.elements, key)) ? undefined : value]);
 }
 
 
@@ -618,9 +618,9 @@ export function absentMetadataRowFill(state: MetadataRowInputs, defaults: unknow
       : 'from the defaults file');
   }
   const added = metadataRowValues({ ...state, complianceSettings: { ...settings, ...patch } })
-    .filter(([key, value]) => value !== undefined && absent.has(key))
-    .map(([key, value]) => `${METADATA_INPUT_LABELS[key] ?? key} ${value} (${sources.get(key)
-      ?? (key.startsWith('NumberOf') ? 'from space labels' : 'from the geometry')})`);
+    .flatMap(([key, value]) => (value !== undefined && absent.has(key)
+      ? [`${METADATA_INPUT_LABELS[key] ?? key} ${value} (${sources.get(key) ?? (key.startsWith('NumberOf') ? 'from space labels' : 'from the geometry')})`]
+      : []));
   for (const key of sources.keys()) absent.delete(key);
   if (sources.size && settings.absentMetadataRows) patch.absentMetadataRows = [...absent];
   const one = added.length === 1;
