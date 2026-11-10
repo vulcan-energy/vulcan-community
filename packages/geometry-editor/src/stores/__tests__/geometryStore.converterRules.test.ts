@@ -173,6 +173,9 @@ const CASES: Case[] = [
   // window's extra_json or the defaults, not from the opening's centre.
   { name: 'window with blank mid_height', edit: replace('Wall (S),0.25,0.95,1.65,0.8,', 'Wall (S),0.25,0.95,,0.8,'),
     noNotice: 'Window mid_height', saves: { 'Window Elements|Window|mid_height': '' } },
+  // A file with no elements still converts against the target, which requires these rows.
+  { name: 'metadata-only file', defaults: true, edit: (csv) => replace('BuildingLength,8.9,,,,,,,,,,,,,\n', '')(csv.slice(0, csv.indexOf('Zone,,'))),
+    blocks: ['Building length (m) is not set'] },
   // A row the converter stops on (E008-E029) stops the load, naming the row.
   { name: 'element in an unknown zone', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', 'Wall (S),Zone 9,BuildingElementOpaque'), refuses: "names zone 'Zone 9'" },
   { name: 'element with no name', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', ',Zone 1,BuildingElementOpaque'), refuses: 'An Exposed Elements row has no Name' },
@@ -226,4 +229,9 @@ it.each(CASES)('$name', (c) => {
   for (const key of c.blocks ?? []) expect(blocked(key), `blocks ${key}`).toBe(true);
   for (const key of c.allows ?? []) expect(blocked(key), `allows ${key}`).toBe(false);
   for (const [key, value] of Object.entries(c.saves ?? {})) expect(cells.get(key) ?? null, key).toBe(value);
+});
+
+it('opens a new document with no issues', () => {
+  const state = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort }).getState();
+  expect(state.collectAllGeometryWarnings().criticalIssues).toEqual([]);
 });

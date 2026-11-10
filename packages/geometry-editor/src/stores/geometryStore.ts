@@ -7733,7 +7733,9 @@ const createGeometryState = (
     );
 
     const elements = Object.values(state.elementsById);
-    if (complianceOn && elements.some((element) => !element.isPlaceholder)) {
+    // A loaded file (absentMetadataRows is set) converts against the target even with no elements;
+    // a new document stays quiet until something is drawn.
+    if (complianceOn && (elements.some((element) => !element.isPlaceholder) || state.complianceSettings.absentMetadataRows)) {
       allCriticalIssues.push(...unsetMetadataInputIssues(
         { ...state, elements },
         schemaPort.availability === 'available' ? schemaPort.getRootSchema('fhs') : null,
