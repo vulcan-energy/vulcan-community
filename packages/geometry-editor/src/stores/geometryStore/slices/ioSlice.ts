@@ -1164,17 +1164,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           // transparentOpeningDerivedFields.ts, while this export check uses
           // slopedDimensionDiffers' 0.01 default for the same auto-vs-manual decision.
           const windowHeightOffset = exportVersion >= 2 ? effectiveVentBaseHeight : 0;
-          const exportedMidHeight = midHeightIsCustom
-            ? roundToTwoDecimals((element.mid_height as number) - windowHeightOffset)
-            : (
-                exportedHeight !== undefined && exportedBaseHeight !== undefined
-                  ? roundToTwoDecimals(exportedBaseHeight - windowHeightOffset + exportedHeight / 2)
-                  : (
-                      typeof element.mid_height === 'number' && Number.isFinite(element.mid_height)
-                        ? roundToTwoDecimals(element.mid_height - windowHeightOffset)
-                        : undefined
-                    )
-              );
+          // A blank mid_height stays blank: the converter then takes the window's air-flow height
+          // from its extra_json or the defaults, not from the opening's centre.
+          const exportedMidHeight = typeof element.mid_height !== 'number' || !Number.isFinite(element.mid_height)
+            ? undefined
+            : !midHeightIsCustom && exportedHeight !== undefined && exportedBaseHeight !== undefined
+              ? roundToTwoDecimals(exportedBaseHeight - windowHeightOffset + exportedHeight / 2)
+              : roundToTwoDecimals(element.mid_height - windowHeightOffset);
           const windowRow = [
             escapeCSV(element.name),
             escapeCSV(zone.name),

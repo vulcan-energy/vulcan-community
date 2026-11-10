@@ -166,6 +166,10 @@ const CASES: Case[] = [
   // source. Any object there, editor markers only included, becomes an entry named after the row.
   { name: 'heat source row with blank extra_json', saves: { 'Systems|Heat Pump|extra_json': '' },
     edit: (csv) => csv.replace(/^(Heat Pump,Zone 1,System,HeatSourceWet,hp_large,"[^"]*"),.*$/m, '$1,') },
+  // A blank window mid_height stays blank: the converter then takes the air-flow height from the
+  // window's extra_json or the defaults, not from the opening's centre.
+  { name: 'window with blank mid_height', edit: replace('Wall (S),0.25,0.95,1.65,0.8,', 'Wall (S),0.25,0.95,,0.8,'),
+    noNotice: 'Window mid_height', saves: { 'Window Elements|Window|mid_height': '' } },
   // A row the converter stops on (E008-E029) stops the load, naming the row.
   { name: 'element in an unknown zone', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', 'Wall (S),Zone 9,BuildingElementOpaque'), refuses: "names zone 'Zone 9'" },
   { name: 'element with no name', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', ',Zone 1,BuildingElementOpaque'), refuses: 'An Exposed Elements row has no Name' },
