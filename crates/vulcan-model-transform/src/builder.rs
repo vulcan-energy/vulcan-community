@@ -11737,6 +11737,15 @@ Flat PV,OnSiteGeneration,PhotovoltaicSystem,0,0,5,1.5,"-6.460,-4.940,0.000|-4.30
         let pv_system = json["OnSiteGeneration"]["Flat PV"].as_object().unwrap();
         assert_eq!(pv_system["pitch"].as_f64().unwrap(), 0.0);
         assert_eq!(pv_system["ventilation_strategy"], "unventilated");
+        assert!(pv_system.get("width").is_some() && pv_system.get("height").is_some());
+
+        // A blank pitch is not a flat panel: nothing is derived from the coords.
+        let json =
+            build_partial_json(&csv.replace("PhotovoltaicSystem,0,0,", "PhotovoltaicSystem,,0,"));
+        let pv_system = json["OnSiteGeneration"]["Flat PV"].as_object().unwrap();
+        for key in ["pitch", "width", "height"] {
+            assert!(pv_system.get(key).is_none(), "{key}: {pv_system:?}");
+        }
     }
 
     #[test]
@@ -12371,6 +12380,38 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
     }
 
     #[test]
+    fn ductwork_without_a_template_duct_takes_no_constants() {
+        // With no template duct to seed from, a duct holds only what its row gives.
+        let csv = mvhr_terminal_csv(true);
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(&csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        for mv in builder.defaults["InfiltrationVentilation"]["MechanicalVentilation"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            mv.as_object_mut().unwrap().remove("ductwork");
+        }
+        let result = builder.build_json(&data).expect("CSV should merge");
+        let ductwork = result["InfiltrationVentilation"]["MechanicalVentilation"]["mvhr_1"]
+            ["ductwork"]
+            .as_array()
+            .expect("linked duct rows should produce ductwork array");
+        for duct in ductwork {
+            for key in [
+                "cross_section_shape",
+                "insulation_thermal_conductivity",
+                "insulation_thickness_mm",
+                "reflective",
+            ] {
+                assert!(duct.get(key).is_none(), "{key}: {duct}");
+            }
+        }
+    }
+
+    #[test]
     fn mvhr_manual_terminal_rows_generate_positions_without_hosts() {
         let csv = mvhr_terminal_csv(true)
             .replace(
@@ -12555,6 +12596,20 @@ Light,Living,80
                 || err.message.contains("missing required 'power' field"),
             "Unexpected error: {}",
             err.message
+        );
+
+        let data = parser
+            .parse_csv(&csv.replace(
+                "Name,Zone,efficacy\nLight,Living,80",
+                "Name,Zone,count,power\nLight,Living,6,8",
+            ))
+            .expect("CSV should parse");
+        let err = builder
+            .build_zone_structure(&mut builder.defaults.clone(), &data)
+            .expect_err("Missing efficacy should error");
+        assert_eq!(
+            err.message,
+            "Lighting row 'Light' missing required 'efficacy' field"
         );
     }
 
@@ -13002,7 +13057,7 @@ Living,Zone,100,50
 
 Context Shading
 Name,Type,shading_type,start_angle,end_angle,distance,height,parent_element,coords
-Shade 1,ContextShading,overhang,10,20,5,7,,"0,0,0"
+Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
 "#;
 
         let mut parser = CSVParser::new();
@@ -13028,6 +13083,11 @@ Shade 1,ContextShading,overhang,10,20,5,7,,"0,0,0"
             .as_array()
             .expect("shading should be an array");
         assert_eq!(shading[0]["type"], "overhang");
+        // A blank distance is left out for the schema to report, never written as a blank.
+        assert_eq!(
+            shading[0],
+            serde_json::json!({"type": "overhang", "height": 7})
+        );
     }
 
     #[test]
