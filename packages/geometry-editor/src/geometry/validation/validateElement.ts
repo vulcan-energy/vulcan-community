@@ -67,7 +67,7 @@ import {
   isVerticalLineWall,
   withEffectiveStoreyHeights,
 } from '../../lib/zoneDerivation';
-import { deriveFromHostRoof, isPanelFullyOnRoof } from '../../lib/pvHostDerivation';
+import { deriveFromHostRoof, isOpeningWithinWallLine, isPanelFullyOnRoof } from '../../lib/pvHostDerivation';
 import {
   getAreaBasedElementExportGeometry,
   getElementEffectiveArea,
@@ -2305,6 +2305,12 @@ export const validateElementCore = (
           issues.push(geo('Link wall/roof parent: a drawn opening with no host is not deducted from any wall or roof area', 'parent_element'));
         } else {
           warnings.push(geo('Link wall/roof parent', 'parent_element'));
+        }
+      } else if (elementsById && element.coordinates?.length === 2) {
+        // A wall opening must lie on its wall, as a rooflight must lie on its roof.
+        const parent = Object.values(elementsById).find((candidate) => candidate.name === element.parent_element);
+        if (parent?.type === 'BuildingElementOpaque' && parent.coordinates?.length === 2 && !isOpeningWithinWallLine(element, parent)) {
+          issues.push(geo(`Opening extends beyond ${parent.name}`, 'coordinates'));
         }
       }
     }

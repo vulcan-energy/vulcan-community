@@ -49,6 +49,7 @@ import {
   deriveFromHostRoof,
   findHostRoofId,
   inferPvHostOverrideFlags,
+  isOpeningWithinWallLine,
 } from '../lib/pvHostDerivation';
 import {
   calculateDerivedFloorArea,
@@ -998,12 +999,18 @@ const DUPLICATE_OPENING_GAP = 0.25;
  * Plan offset for the copy of a window, rooflight or external door that keeps its host: along the
  * opening's first edge, which lies along the host wall or roof, by its own length plus a gap.
  */
-const duplicateOpeningOffset = (coordinates: ElementCoordinate[] | undefined): { dx: number; dy: number } => {
+const duplicateOpeningOffset = (coordinates: ElementCoordinate[] | undefined, host?: Element): { dx: number; dy: number } => {
   const [a, b] = coordinates ?? [];
   const length = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
   if (!length) return { dx: 0, dy: 0 };
   const step = length + DUPLICATE_OPENING_GAP;
-  return { dx: ((b.x - a.x) / length) * step, dy: ((b.y - a.y) / length) * step };
+  const forward = { dx: ((b.x - a.x) / length) * step, dy: ((b.y - a.y) / length) * step };
+  // On a wall, the copy goes to whichever side still lies on the wall.
+  if (host?.coordinates?.length !== 2 || coordinates?.length !== 2) return forward;
+  const fits = ({ dx, dy }: { dx: number; dy: number }) =>
+    isOpeningWithinWallLine({ coordinates: coordinates.map((c) => ({ x: c.x + dx, y: c.y + dy })) }, host);
+  const backward = { dx: -forward.dx, dy: -forward.dy };
+  return fits(forward) || !fits(backward) ? forward : backward;
 };
 
 const shouldDeriveTransparentFromOpaquePolygonHost = (
@@ -7062,7 +7069,7 @@ const createGeometryState = (
 
     // World-space offset (meters). A hosted opening moves along its host and keeps it.
     const { dx, dy } = shouldSnapToParent(src) && src.parent_element
-      ? duplicateOpeningOffset(src.coordinates)
+      ? duplicateOpeningOffset(src.coordinates, createParentElementLookup(Object.values(state.elementsById))(src))
       : { dx: 0.5, dy: 0.5 };
 
     const newId = generateId();
@@ -7168,7 +7175,7 @@ const createGeometryState = (
     const offsetOf = (src: Element): { dx: number; dy: number } => {
       const parentEl = src.parent_element ? resolveParent(src) : undefined;
       const parentInGroup = !!parentEl && sourceIdSet.has(parentEl.id);
-      if (src.parent_element && !parentInGroup && shouldSnapToParent(src)) return duplicateOpeningOffset(src.coordinates);
+      if (src.parent_element && !parentInGroup && shouldSnapToParent(src)) return duplicateOpeningOffset(src.coordinates, parentEl);
       if (parentInGroup && src.type === 'WindowShading') return offsetOf(parentEl);
       return { dx: 0.5, dy: 0.5 };
     };
