@@ -49,10 +49,11 @@ function distanceToRing(p: { x: number; y: number }, ring: Array<{ x: number; y:
 /**
  * Fits one edge of a line wall to the pitched roofs whose plan outline covers the wall line.
  *
- * - `bottom` ("On roof"): the roofs the wall stands on. A roof qualifies where it is above the
- *   foot and, when `limit` (the top edge) is given, below the top, so a roof over the wall is not
- *   mistaken for the one under it. h(t) = max(0, highest qualifying roof − foot). Null when no
- *   roof is above the foot anywhere along the wall.
+ * - `bottom` ("On roof"): the roofs the wall stands on: those above the foot and below `limit`
+ *   (the top edge) at one or more points, so a roof wholly over the wall is not mistaken for the
+ *   one under it. h(t) = max(0, highest such roof − foot), following the roof even where it rises
+ *   through the top (the face is then invalid and says where). Null when no roof is above the
+ *   foot anywhere along the wall.
  * - `top` ("Under roof"): the roofs over the wall. A roof qualifies where it is at or above
  *   `limit` (the bottom edge; the foot when omitted). h(t) = lowest qualifying roof − foot.
  *   Null unless a roof qualifies along the whole wall line. A gable wall under a dual-pitch roof
@@ -89,11 +90,11 @@ export function deriveWallEdgeFromRoofs(
     const z = roofTopElevationAtPlanM(roof, p.x, p.y, floors, globalOrientationOffset);
     return z === null ? null : z - foot;
   };
-  const covering = (t: number) => {
+  const covers = (roof: BuildingElementOpaque, t: number) => {
     const p = at(t);
-    return roofs.filter((roof) => isPointInPolygon2D(p, roof.coordinates)
-      || distanceToRing(p, roof.coordinates) < OUTLINE_TOL_M);
+    return isPointInPolygon2D(p, roof.coordinates) || distanceToRing(p, roof.coordinates) < OUTLINE_TOL_M;
   };
+  const covering = (t: number) => roofs.filter((roof) => covers(roof, t));
 
   // Crossings of the wall line with each roof's plan edges, plus the bends of `limit`.
   const ts = new Set([0, 1, ...(limit ?? []).map((p) => p.t)]);
@@ -134,9 +135,21 @@ export function deriveWallEdgeFromRoofs(
     }
   }
 
+  const sorted = [...ts].sort((x, y) => x - y);
+  // A roof is under the wall if, somewhere it covers the wall line, it is above the foot and
+  // below the top. It then counts along everything it covers, even where it rises through the
+  // top: the fitted edge follows the roof and wallFaceProblem names the stretch where the wall
+  // passes through it. Roofs entirely above the top are over the wall, never its bottom. Every
+  // quantity is linear between breakpoints, so breakpoints and span midpoints are enough.
+  const samples = sorted.flatMap((t, i) => (i === 0 ? [t] : [(sorted[i - 1]! + t) / 2, t]));
+  const under = new Set(roofs.filter((roof) => samples.some((t) => {
+    const h = covers(roof, t) ? above(roof, t) : null;
+    return h !== null && h > 1e-9 && h < limitAt(t) - 1e-9;
+  })));
+
   const names = new Set<string>();
-  // Height at t, with roof coverage sampled at `side` (just before or after a roof edge).
-  // Undefined for the top edge where no roof covers the wall.
+  // Height at t; the roofs are chosen by coverage at `side` (just before or after a roof edge)
+  // but always evaluated at t. Undefined for the top edge where no roof covers the wall.
   const heightAt = (t: number, side: number): number | undefined => {
     const lim = limitAt(t);
     let best: number | undefined = edge === 'bottom' ? 0 : undefined;
@@ -145,7 +158,7 @@ export function deriveWallEdgeFromRoofs(
       const h = above(roof, t);
       if (h === null) continue;
       const better = edge === 'bottom'
-        ? h > 1e-9 && h < lim - 1e-9 && h > best! + 1e-9
+        ? under.has(roof) && h > best! + 1e-9
         : h >= lim - 1e-6 && (best === undefined || h < best - 1e-9);
       if (better) {
         best = h;
@@ -156,7 +169,7 @@ export function deriveWallEdgeFromRoofs(
     return best;
   };
   const profile: ProfilePoint[] = [];
-  for (const t of [...ts].sort((x, y) => x - y)) {
+  for (const t of sorted) {
     const before = heightAt(t, Math.max(0, t - sideT));
     const after = heightAt(t, Math.min(1, t + sideT));
     if (before === undefined || after === undefined) return null;

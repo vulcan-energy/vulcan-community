@@ -83,6 +83,16 @@ describe('WallShapeRows', () => {
     expect((screen.getByLabelText('Bottom point 2 height above base (m)') as HTMLInputElement).value).toBe('1.4');
   });
 
+  it('shows a roof fit that runs through the top in the sketch, with its error, and does not commit it', () => {
+    const onCommit = vi.fn();
+    render(<Harness roof={{ current: [{ t: 0, h: 1.25 }, { t: 0.62, h: 2.6 }, { t: 1, h: 3.43 }] }} onCommit={onCommit} />);
+    fireEvent.click(edge('bottom').getByRole('button', { name: 'On roof' }));
+
+    expect(screen.getByRole('alert').textContent).toBe('Top must be above bottom (from 2.48 m to 4.00 m).');
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(document.querySelector('.wall-shape-sketch-wall.is-invalid')).not.toBeNull();
+  });
+
   it('shows an invalid edit and does not commit it', () => {
     const onCommit = vi.fn();
     render(<Harness roof={{ current: null }} onCommit={onCommit} />);

@@ -119,6 +119,34 @@ describe('deriveWallEdgeFromRoofs', () => {
   });
 });
 
+// A loft on one slope: roof eaves at y = 11.35, 0.7 m above the loft floor (roof base 6.3 m,
+// wall foot 5.6 m), rising at 40° towards y = 15.22. Walls are 2.6 m tall with a flat top.
+describe('deriveWallEdgeFromRoofs on a loft slope', () => {
+  const slope = { ...roof('Pitched Roof (S) 1', [[-29.7, 11.35], [-25, 11.35], [-25, 15.22], [-29.7, 15.22]]), pitch: 40, base_height: 6.3 };
+  const tan = Math.tan((40 * Math.PI) / 180);
+  const loftWall = (y0: number, y1: number) => ({ ...wall([-26.2, y0], [-26.2, y1]), base_height: 5.6, height: 2.6 });
+  const fit = (y0: number, y1: number) =>
+    deriveWallEdgeFromRoofs(loftWall(y0, y1), [slope], [], 0, 'bottom', flat(2.6));
+
+  it('follows the roof through the top of a wall running up the slope, and says where', () => {
+    const bottom = fit(12.0, 14.6)!.profile;
+    const through = (11.35 + 1.9 / tan - 12.0) / 2.6; // where the roof reaches the 2.6 m top
+    expect(bottom.map((p) => p.h)).toEqual([1.25, 2.6, 3.43]);
+    expect(bottom[1]!.t).toBeCloseTo(through, 6);
+    expect(wallFaceProblem(flat(2.6), bottom, 2.6)).toBe('Top must be above bottom (from 1.61 m to 2.60 m).');
+  });
+
+  it('fits a loft cheek wall that stays under the top', () => {
+    const bottom = fit(11.6, 13.0)!.profile;
+    expect(bottom).toEqual([
+      { t: 0, h: Math.round((0.7 + 0.25 * tan) * 100) / 100 },
+      { t: 1, h: Math.round((0.7 + 1.65 * tan) * 100) / 100 },
+    ]);
+    expect(bottom.map((p) => p.h)).toEqual([0.91, 2.08]);
+    expect(wallFaceProblem(flat(2.6), bottom, 1.4)).toBeNull();
+  });
+});
+
 describe('profiled wall export scalars', () => {
   const profiled = (top: ProfilePoint[], bottom: ProfilePoint[]) =>
     wall([0, 0], [4, 0], { geometry_face: { kind: 'profiled-line-face', top_profile: top, bottom_profile: bottom } });
