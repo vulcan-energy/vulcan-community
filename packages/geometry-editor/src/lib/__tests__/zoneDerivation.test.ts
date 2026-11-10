@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createGeometryStore } from '../../stores/geometryStore';
 import { networkPoint3 } from '../elementCanvasFloor';
-import type { Element } from '../../geometry/types';
+import type { Element, Floor } from '../../geometry/types';
 import {
   calculateDerivedHeight,
   calculateBaseHeightPatchForFloorStackChange,
@@ -50,7 +50,7 @@ describe('calculateDerivedHeight wall filtering', () => {
       },
     ] as unknown as Element[];
 
-    expect(calculateDerivedHeight('zone-door-filter', elements)).toBe(2.85);
+    expect(calculateDerivedHeight('zone-door-filter', elements, [])).toBe(2.85);
   });
 
   it.each(LINE_WALL_TYPES)('excludes non-vertical two-point %s elements', (type) => {
@@ -79,7 +79,7 @@ describe('calculateDerivedHeight wall filtering', () => {
       },
     ] as unknown as Element[];
 
-    expect(calculateDerivedHeight('zone-pitch-filter', elements)).toBe(2.85);
+    expect(calculateDerivedHeight('zone-pitch-filter', elements, [])).toBe(2.85);
   });
 });
 
@@ -495,17 +495,17 @@ describe('calculateDerivedHeight area weighting', () => {
 
   it('weights each storey by its treated floor area', () => {
     const elements = [square('g', 10, 0), deck('f', 10, 5, 1), wall('w0', 3, 0), wall('w1', 2.4, 1)];
-    expect(calculateDerivedHeight('z', elements)).toBe(2.8);
+    expect(calculateDerivedHeight('z', elements, [])).toBe(2.8);
   });
 
   it('ignores a level with walls but no treated floor', () => {
     const elements = [square('g', 10, 0), deck('f', 10, 5, 1), wall('w0', 3, 0), wall('w1', 2.4, 1), wall('gable', 1, 2)];
-    expect(calculateDerivedHeight('z', elements)).toBe(2.8);
+    expect(calculateDerivedHeight('z', elements, [])).toBe(2.8);
   });
 
   it('does not count overlapping floors twice in the weight', () => {
     const elements = [square('g', 10, 0), deck('f', 10, 10, 1), deck('f2', 10, 10, 1), wall('w0', 3, 0), wall('w1', 2.4, 1)];
-    expect(calculateDerivedHeight('z', elements)).toBe(2.7);
+    expect(calculateDerivedHeight('z', elements, [])).toBe(2.7);
   });
 
   it('does not read the old mean height in an older saved file as a typed height', () => {
@@ -532,6 +532,40 @@ describe('calculateDerivedHeight area weighting', () => {
   });
 
   it('falls back to the storey mean when no treated floor is modelled', () => {
-    expect(calculateDerivedHeight('z', [wall('w0', 3, 0), wall('w1', 2.4, 1)])).toBe(2.7);
+    expect(calculateDerivedHeight('z', [wall('w0', 3, 0), wall('w1', 2.4, 1)], [])).toBe(2.7);
+  });
+
+  it('uses the storey height, so a short floating wall does not lower it', () => {
+    const elements = [square('g', 10, 0), wall('w0', 2.4, 0), wall('upstand', 0.3, 0)];
+    expect(calculateDerivedHeight('z', elements, [])).toBe(2.4);
+  });
+
+  it('uses a storey height typed in the floor picker', () => {
+    const elements = [square('g', 10, 0), wall('w0', 2.4, 0)];
+    const floors = [{ id: 'f0', name: 'Ground', zIndex: 0, height: 2.6, heightUserOverride: true }] as Floor[];
+    expect(calculateDerivedHeight('z', elements, floors)).toBe(2.6);
+  });
+
+  it('updates the zone height when a storey height is typed', () => {
+    const csv = [
+      'Zone,,,,,,,,,,,,,',
+      'Name,Type,volume,floor_area,height,simplified thermal bridging',
+      'Z,Zone,125,50,2.5,FALSE',
+      '',
+      'Exposed Elements,,,,,,,,,,,,,',
+      'Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json',
+      'W0,Z,BuildingElementOpaque,10,90,4,2.5,0,0,FALSE,FALSE,,"0,0,0|4,0,0",',
+      '',
+      'Ground Elements,,,,,,,,,,,,,',
+      'Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,base_height,parent_element,coords,extra_json',
+      'Ground Floor,Z,BuildingElementGround,50,5,10,30,Slab_no_edge_insulation,,,0,,"0,0,0|5,0,0|5,10,0|0,10,0",',
+    ].join('\n');
+    const store = createGeometryStore();
+    store.getState().loadFromCSV(csv);
+    const ground = store.getState().floors.find((floor) => floor.zIndex === 0)!;
+    store.getState().updateFloor(ground.id, { height: 2.8, heightUserOverride: true });
+    const zone = store.getState().zones.find((candidate) => !candidate.isPlaceholder)!;
+    expect(zone.height).toBe(2.8);
+    expect(zone.volume).toBe(140);
   });
 });
