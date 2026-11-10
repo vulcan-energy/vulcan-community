@@ -431,7 +431,7 @@ export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSect
  * Metadata rows that set a model input, with the label the Global Settings form shows. These are
  * the rows the converter reports as E066 when present with no value (`METADATA_INPUT_FIELD_NAMES`
  * in crates/vulcan-model-transform/src/builder.rs). An absent row takes the defaults template's
- * value there, so the editor shows and saves that value (see templateFilledMetadataSettings).
+ * value there, so the editor shows and saves that value (see absentMetadataRowFill).
  */
 export const METADATA_INPUT_LABELS: Readonly<Record<string, string>> = {
   NumberOfBedrooms: 'Number of Bedrooms',
@@ -591,15 +591,20 @@ function templateMetadataValue(state: MetadataRowInputs, defaults: unknown, key:
 }
 
 /**
- * Settings taken from the value the converter uses for an absent row (templateMetadataValue), so
- * the form shows, the save writes and the run use one value: for each row the loaded file lacks,
- * even where the geometry or space labels give another value, and for each row the save would
- * otherwise leave out. A row the file has blank is not filled: the user cleared it. Filled rows
- * leave `absentMetadataRows`, so later defaults never replace a value the user has since edited.
+ * Fills the settings of the rows the loaded file lacks with the value the converter uses for them
+ * (templateMetadataValue), so the form shows, the save writes and the run use one value, and gives
+ * the load notice listing every row the save adds. This is the one path for defaults at hand at the
+ * load and for defaults that arrive later, so the saved file does not depend on when they arrive.
+ *
+ * A row the file lacks takes that value even where the geometry or space labels give another, and
+ * so does a row the save would otherwise leave out. A blank row is not filled (the converter blocks
+ * it), nor a row a Systems row sets. Filled rows leave `absentMetadataRows`, so later defaults never
+ * replace a value the user has since edited. `notice` is undefined when the save adds no row.
  */
-export function templateFilledMetadataSettings(state: MetadataRowInputs, defaults: unknown): Record<string, unknown> {
+export function absentMetadataRowFill(state: MetadataRowInputs, defaults: unknown): { patch: Record<string, unknown>; notice?: string } {
   const settings = state.complianceSettings;
   const patch: Record<string, unknown> = {};
+  const sources = new Map<string, string>();
   const blank = new Set(settings.blankMetadataRows);
   const absent = new Set(settings.absentMetadataRows);
   for (const [key, value] of metadataRowValues(state)) {
@@ -608,35 +613,23 @@ export function templateFilledMetadataSettings(state: MetadataRowInputs, default
     const template = templateMetadataValue(state, defaults, key);
     if (template === undefined) continue;
     patch[metadataSettingKey(key)] = template;
-    absent.delete(key);
+    sources.set(key, valueAt(defaults, metadataSchemaPath(key)) === undefined
+      ? 'the converter\'s value for a missing row'
+      : 'from the defaults file');
   }
-  if (Object.keys(patch).length && settings.absentMetadataRows) patch.absentMetadataRows = [...absent];
-  return patch;
-}
-
-/** Where an added metadata row's saved value comes from, for the load notice. */
-export function addedMetadataRowSource(key: string, filledFromDefaults: ReadonlySet<string>): string {
-  if (filledFromDefaults.has(key)) return 'from the defaults';
-  return key.startsWith('NumberOf') ? 'from space labels' : 'from the geometry';
-}
-
-/**
- * The load notice for the rows a file lacks, once defaults that arrive after the load have filled
- * what they can (`filled`), or undefined when the save adds none.
- */
-export function lateMetadataFillNotice(
-  state: MetadataRowInputs,
-  absentRows: readonly string[],
-  filled: Readonly<Record<string, unknown>>,
-): string | undefined {
-  const absent = new Set(absentRows);
-  const fromDefaults = new Set(absentRows.filter((key) => metadataSettingKey(key) in filled));
-  const added = metadataRowValues(state).flatMap(([key, value]) => (value !== undefined && absent.has(key)
-    ? [`${key} absent → ${value} (${addedMetadataRowSource(key, fromDefaults)})`]
-    : []));
-  return added.length
-    ? `Loading added ${added.length} value(s) the file lacks; saving writes them: ${added.join('; ')}.`
-    : undefined;
+  const added = metadataRowValues({ ...state, complianceSettings: { ...settings, ...patch } })
+    .filter(([key, value]) => value !== undefined && absent.has(key))
+    .map(([key, value]) => `${METADATA_INPUT_LABELS[key] ?? key} ${value} (${sources.get(key)
+      ?? (key.startsWith('NumberOf') ? 'from space labels' : 'from the geometry')})`);
+  for (const key of sources.keys()) absent.delete(key);
+  if (sources.size && settings.absentMetadataRows) patch.absentMetadataRows = [...absent];
+  const one = added.length === 1;
+  return {
+    patch,
+    notice: added.length
+      ? `The file has no row for ${one ? 'this setting' : `these ${added.length} settings`}, so the editor shows and saves ${one ? 'this value' : 'these values'}: ${added.join('; ')}.`
+      : undefined,
+  };
 }
 
 /** Whether the target's schema requires the value; with no schema, assume it does. */

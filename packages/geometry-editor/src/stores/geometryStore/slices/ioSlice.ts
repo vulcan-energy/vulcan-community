@@ -26,7 +26,7 @@ import {
 } from '../../../geometry/io/parseCsvToGeometry';
 import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionRows';
 import { derivePvDimensionsFromCoords } from '../../../lib/pvPanelFootprint';
-import { addedMetadataRowSource, METADATA_INPUT_LABELS, metadataRowValues, templateFilledMetadataSettings } from '../../../lib/globalSettingsValidation';
+import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/globalSettingsValidation';
 import {
   encodeGuideOverlayMetadataValue,
   encodeGuideOverlaySourceMetadataValue,
@@ -154,7 +154,7 @@ export interface IoSlice {
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => void;
   /** True from a load that ended before its defaults arrived until they arrive. */
   loadAwaitsDefaults: boolean;
-  /** Metadata rows the late defaults filled for the last load; load UIs show it like a load warning. */
+  /** The rows the last loaded file lacks that the defaults filled (absentMetadataRowFill); load UIs show it as a notice. */
   lateLoadNotice: string | null;
 }
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], IoSlice>;
@@ -718,7 +718,7 @@ const COORDS_DETERMINED_COLUMNS = new Set(['area', 'total_area', 'width', 'heigh
  * partition saved as both faces at twice a legacy single-face area keeps its meaning, so it is not
  * listed.
  */
-const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, templateKeys: ReadonlySet<string> | null): string[] => {
+const replacedValuesNotice = (authoredCsv: string, loadedCsv: string): string[] => {
   const rows = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
     .filter((row) => row.data.Name)
     .map((row) => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, row.data] as const)));
@@ -757,17 +757,12 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, templateKe
   const authoredMetadata = metadata(authoredCsv);
   for (const [key, before] of authoredMetadata) {
     const after = savedMetadata.get(key);
-    if (!before && after) replaced.push(`${key} blank → ${after}`);
+    if (!before && after) replaced.push(`${METADATA_INPUT_LABELS[key]} blank → ${after}`);
   }
-  // A model-input row the file lacks that the save adds, named with where its value comes from.
-  // With the defaults still to come (templateKeys null), lateLoadNotice lists these rows instead.
-  if (templateKeys) {
-    for (const [key, after] of savedMetadata) {
-      if (after && !authoredMetadata.has(key)) replaced.push(`${key} absent → ${after} (${addedMetadataRowSource(key, templateKeys)})`);
-    }
-  }
+  // A row the file lacks is listed by lateLoadNotice (absentMetadataRowFill).
+  const one = replaced.length === 1;
   return replaced.length
-    ? [`Loading replaced ${replaced.length} value(s) in the file; saving writes the new value(s): ${replaced.join('; ')}.`]
+    ? [`Loading replaced ${one ? '1 value' : `${replaced.length} values`} in the file; saving writes the new ${one ? 'value' : 'values'}: ${replaced.join('; ')}.`]
     : [];
 };
 
@@ -2276,15 +2271,15 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded: false };
     }
 
-    // Defaults kept from before the load fill the rows this file lacks now; defaults read for the
-    // file fill them when they arrive (see withPrecomputedDefaultsLookup).
+    // Defaults kept from before the load (keepUnchangedDefaults) fill the rows this file lacks now;
+    // defaults read for the file fill them when they arrive (withPrecomputedDefaultsLookup). Both
+    // use absentMetadataRowFill and give the notice as lateLoadNotice.
     const loaded = get();
-    let templateKeys: Set<string> | null = null;
-    set({ loadAwaitsDefaults: !loaded.defaultsJson || loaded.defaultsLoading, lateLoadNotice: null });
     if (loaded.defaultsJson && !loaded.defaultsLoading) {
-      const filled = templateFilledMetadataSettings({ ...loaded, elements: Object.values(loaded.elementsById) }, loaded.defaultsJson);
-      if (Object.keys(filled).length) set({ complianceSettings: { ...loaded.complianceSettings, ...filled } });
-      templateKeys = new Set(Object.keys(METADATA_INPUT_LABELS).filter((key) => (key.startsWith('General_') ? key.slice(8) : key) in filled));
+      const { patch, notice } = absentMetadataRowFill({ ...loaded, elements: Object.values(loaded.elementsById) }, loaded.defaultsJson);
+      set({ complianceSettings: { ...loaded.complianceSettings, ...patch }, loadAwaitsDefaults: false, lateLoadNotice: notice ?? null });
+    } else {
+      set({ loadAwaitsDefaults: true, lateLoadNotice: null });
     }
 
     // Round-trip through the canonical serializer after all synchronous load
@@ -2305,7 +2300,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, templateKeys)], upgraded };
+    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline)], upgraded };
   }
 
   return slice;

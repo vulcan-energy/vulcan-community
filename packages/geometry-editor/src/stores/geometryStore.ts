@@ -91,7 +91,7 @@ import {
   analyzeZoneSpaceLabels,
   pointInPolygon,
 } from '../lib/spaceLabelGeometry';
-import { collectGlobalSettingsWarnings, lateMetadataFillNotice, metadataRowValues, templateFilledMetadataSettings, unsetMetadataInputIssues } from '../lib/globalSettingsValidation';
+import { absentMetadataRowFill, collectGlobalSettingsWarnings, unsetMetadataInputIssues } from '../lib/globalSettingsValidation';
 import {
   applyMechanicalVentilationCsvPositionColumns,
   canMechanicalVentilationInheritHostPlacement,
@@ -2929,22 +2929,15 @@ const withPrecomputedDefaultsLookup = (
       // A metadata row the document lacks shows the value the converter will take from these
       // defaults, and the save writes it.
       const complianceSettings = (update as Partial<GeometryState>).complianceSettings ?? state.complianceSettings;
-      const filled = defaultsJson
-        ? templateFilledMetadataSettings({ ...state, complianceSettings, elements: Object.values(state.elementsById) }, defaultsJson)
-        : {};
-      // A load that ended before these defaults arrived lists the rows they fill.
-      const lateNotice = defaultsJson && state.loadAwaitsDefaults
-        ? lateMetadataFillNotice(
-          { ...state, complianceSettings: { ...complianceSettings, ...filled }, elements: Object.values(state.elementsById) },
-          complianceSettings.absentMetadataRows ?? [],
-          filled,
-        )
-        : undefined;
+      const { patch, notice } = defaultsJson
+        ? absentMetadataRowFill({ ...state, complianceSettings, elements: Object.values(state.elementsById) }, defaultsJson)
+        : { patch: {} };
       return {
         ...update,
         defaultsLookup: createDefaultsLookup(defaultsJson),
-        ...(Object.keys(filled).length ? { complianceSettings: { ...complianceSettings, ...filled } } : {}),
-        ...(defaultsJson && state.loadAwaitsDefaults ? { loadAwaitsDefaults: false, lateLoadNotice: lateNotice ?? null } : {}),
+        ...(Object.keys(patch).length ? { complianceSettings: { ...complianceSettings, ...patch } } : {}),
+        // A load that ended before these defaults arrived lists the rows they fill.
+        ...(defaultsJson && state.loadAwaitsDefaults ? { loadAwaitsDefaults: false, lateLoadNotice: notice ?? null } : {}),
       } as Partial<GeometryState>;
     }
   }

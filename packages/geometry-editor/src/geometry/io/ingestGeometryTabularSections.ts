@@ -158,7 +158,7 @@ function assertRowKeys(section: CsvSection, d: CsvRow['data'], zoneNames: Readon
   // A row of empty cells is a spacer, not a row.
   if (Object.values(d).every((cell) => !cell?.trim())) return;
   const name = V(d, 'Name');
-  const row = name ? `${section.name} row '${name}'` : `A ${section.name} row`;
+  const row = name ? `${section.name} row '${name}'` : `${/^[AEIOU]/.test(section.name) ? 'An' : 'A'} ${section.name} row`;
   for (const key of REQUIRED_ROW_KEYS[section.name] ?? []) {
     if (!V(d, key)) throw new Error(`${row} has no ${key}. Enter the ${key} in the file and open it again.`);
   }

@@ -400,6 +400,8 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     return rows.sort((a, b) => locationOrder.get(a.location)! - locationOrder.get(b.location)!);
   }, [buildErrorItems, resolveTarget]);
   const displayedBuildErrorCount = displayBuildErrorRows.length;
+  // Non-blocking items only (severity 'warning'), such as a load notice: the chip says so.
+  const onlyNotices = buildErrorItems.length > 0 && buildErrorItems.every((item) => item.severity === 'warning');
   const goToIssueTarget = useCallback((target: IssueTarget) => {
     if (target.elementId) {
       const z = elementsById[target.elementId]?.coordinates?.[0]?.z;
@@ -772,7 +774,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           <button
             ref={buildErrorChipRef}
             type="button"
-            className={`status-chip ${showLastSaveValidationFailure ? 'status-chip--warning' : 'status-chip--error'}`}
+            className={`status-chip ${showLastSaveValidationFailure || onlyNotices ? 'status-chip--warning' : 'status-chip--error'}`}
             onClick={() => {
               openSaveErrorDropdown(buildErrorChipRef.current);
             }}
@@ -782,7 +784,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           >
             {showLastSaveValidationFailure
               ? 'Not validated'
-              : `Build Error${displayedBuildErrorCount > 0 ? ` (${displayedBuildErrorCount})` : ''}`}
+              : `${onlyNotices ? 'Notice' : 'Build Error'}${displayedBuildErrorCount > 0 ? ` (${displayedBuildErrorCount})` : ''}`}
           </button>
         ) : null}
       </div>

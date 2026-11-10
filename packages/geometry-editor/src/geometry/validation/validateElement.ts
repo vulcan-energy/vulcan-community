@@ -1664,7 +1664,7 @@ export const validateElementCore = (
         issues.push(geo('Flowrate cannot be 0', 'flowrate'));
       }
       if (hotWaterElement.subcategory === 'MixerShower' && typeof hotWaterElement.allow_low_flowrate !== 'boolean') {
-        issues.push(geo('Air Pressure Shower? is not set: choose Yes or No', 'allow_low_flowrate'));
+        issues.push(geo('Choose Yes or No for Air Pressure Shower', 'allow_low_flowrate'));
       }
       if (hotWaterElement.subcategory === 'InstantElecShower' && (!hotWaterElement.rated_power || hotWaterElement.rated_power === 0)) {
         issues.push(geo('Rated Power cannot be 0', 'rated_power'));

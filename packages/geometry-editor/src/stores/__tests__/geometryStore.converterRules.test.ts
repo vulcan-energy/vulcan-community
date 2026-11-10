@@ -38,8 +38,9 @@ type Case = {
   allows?: string[];
   /** `section|row name|column` (or `Metadata|key`) → saved cell; null means the row is not written. */
   saves?: Record<string, string | null>;
-  /** Text a load notice must contain. */
+  /** Text the load notices must contain, or must not contain. */
   notice?: string;
+  noNotice?: string;
 };
 
 const replace = (from: string, to: string) => (csv: string) => {
@@ -71,9 +72,9 @@ const CASES: Case[] = [
   { name: 'ufh area 0', edit: replace('Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,', 'Underfloor Heating,Zone 1,WetEmitter,ufh,0,'), blocks: ['Underfloor Heating|area'] },
   // An absent Metadata row takes the converter's value: a Systems InfiltrationVentilation row
   // first, then the defaults template (which a load always reads after the file).
-  { name: 'absent rows take the defaults', edit: (csv) => csv, defaults: true,
+  { name: 'absent rows take the defaults', edit: (csv) => csv, defaults: true, notice: 'Shield Class Normal (from the defaults file)',
     saves: { 'Metadata|Ventilation_shield_class': 'Normal', 'Metadata|Ventilation_altitude': '30' } },
-  { name: 'a Systems row supplies the absent rows', edit: systemsVentilation, defaults: true,
+  { name: 'a Systems row supplies the absent rows', edit: systemsVentilation, defaults: true, noNotice: 'Shield Class',
     allows: ['Shield Class', 'Altitude (m)'], saves: { 'Metadata|Ventilation_shield_class': null, 'Metadata|Ventilation_altitude': null } },
   // The converter does not read Space Labels: every row loads and saves as it is, and none blocks.
   { name: 'label with blank Zone', edit: kitchen('', 'kitchen'), notice: 'Kitchen',
@@ -118,12 +119,13 @@ function load(c: Case) {
     const [key, value] = line.split(',');
     if (key && value !== undefined && !cells.has(`Metadata|${key}`)) cells.set(`Metadata|${key}`, value);
   }
-  return { issues, all, cells, warnings, state };
+  return { issues, all, cells, notices: [...warnings, state.lateLoadNotice ?? ''].join(' '), state };
 }
 
 it.each(CASES)('$name', (c) => {
-  const { issues, all, cells, warnings } = load(c);
-  if (c.notice) expect(warnings.join(' ')).toContain(c.notice);
+  const { issues, all, cells, notices } = load(c);
+  if (c.notice) expect(notices).toContain(c.notice);
+  if (c.noNotice) expect(notices).not.toContain(c.noNotice);
   const blocked = (key: string) => issues.has(key) || all.some((text) => text.includes(key));
   for (const key of c.blocks ?? []) expect(blocked(key), `blocks ${key}`).toBe(true);
   for (const key of c.allows ?? []) expect(blocked(key), `allows ${key}`).toBe(false);
