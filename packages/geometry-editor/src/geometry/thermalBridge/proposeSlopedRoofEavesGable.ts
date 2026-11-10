@@ -401,16 +401,25 @@ export function proposeSlopedRoofEavesGableThermalBridges(
     pushEavesGableProposals(o, floors, elements, out, globalOrientationOffset);
   }
   // A roof edge on a party wall is P4/P5 (BR 497 §4.1.3/§4.1.6), not an eaves or gable to outside.
-  // ponytail: drops the whole edge when a party wall covers most of it; trim the remainder if a
+  // Party walls may be split along the edge, so measure the plan length they cover together.
+  // ponytail: drops the whole edge when party walls cover most of it; trim the remainder if a
   // party wall ever covers only part of a gable.
   const partyWalls = elements.filter(isPartyWallVerticalEnvelopeLine);
   return out.filter((p) => {
     const [a, b] = p.coordinates;
-    const planLen = dist2XY(a!, b!);
-    return !partyWalls.some((pw) => {
-      if (!zonesCompatible(p.zoneId, pw.zoneId)) return false;
-      const hit = overlapEndpointsOnRoofPlanEdgeForPartyWall(a!, b!, pw);
-      return !!hit && hit.lenM >= FACADE_PROPOSAL_SUBSTANTIAL_OVERLAP_FRAC * planLen;
-    });
+    const spans = partyWalls
+      .flatMap((pw) => {
+        if (!zonesCompatible(p.zoneId, pw.zoneId)) return [];
+        const hit = overlapEndpointsOnRoofPlanEdgeForPartyWall(a!, b!, pw);
+        return hit ? [hit.ovl] : [];
+      })
+      .sort((m, n) => m.tLo - n.tLo);
+    let covered = 0;
+    let end = -Infinity;
+    for (const { tLo, tHi } of spans) {
+      covered += Math.max(0, tHi - Math.max(tLo, end));
+      end = Math.max(end, tHi);
+    }
+    return covered < FACADE_PROPOSAL_SUBSTANTIAL_OVERLAP_FRAC * dist2XY(a!, b!);
   });
 }

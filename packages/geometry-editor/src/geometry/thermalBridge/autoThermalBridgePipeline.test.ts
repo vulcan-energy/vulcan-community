@@ -22,6 +22,26 @@ describe('auto thermal bridges on the shipped sample roof', () => {
 
     expect(roofCodes).toEqual(['E10', 'E10', 'E12', 'E12', 'P4', 'P4']);
   });
+
+  // The split sits off the ridge, so two party walls share one roof's gable edge.
+  it('drops the party gable when the party wall is split in two', () => {
+    const { elements, floors } = editorFloorsAndElementsForParsedCsv(parseSemiDetachedSample());
+    const split = elements.flatMap((e) => {
+      if (e.type !== 'BuildingElementPartyWall') return [e];
+      const [p0, p1] = e.coordinates;
+      const mid = { x: p0!.x + (p1!.x - p0!.x) / 4, y: p0!.y + (p1!.y - p0!.y) / 4, z: p0!.z };
+      return [
+        { ...e, id: `${e.id}-a`, name: `${e.name} a`, coordinates: [p0!, mid] },
+        { ...e, id: `${e.id}-b`, name: `${e.name} b`, coordinates: [mid, p1!] },
+      ];
+    });
+    const roofCodes = proposeAutoThermalBridges(split, floors)
+      .filter((p) => p.parentElementForTb?.startsWith('Pitched Roof'))
+      .map((p) => p.junctionCode)
+      .sort();
+
+    expect(roofCodes).toEqual(['E10', 'E10', 'E12', 'E12', 'P4', 'P4', 'P4']);
+  });
 });
 
 function row(junctionCode: string, x0: number, x1: number, hosts: FacadeOpeningTbProposal['hostElementIds']) {
