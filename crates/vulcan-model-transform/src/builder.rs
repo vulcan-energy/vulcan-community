@@ -6,7 +6,7 @@ use crate::{schema_validation::normalized_schema_document, ModelProfile, Version
 use jsonschema::validator_for;
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 #[cfg(test)]
 use std::{fs, path::Path};
 
@@ -84,7 +84,7 @@ fn builtin_energy_supply(name: &str) -> Option<Value> {
     }
 }
 
-fn collect_referenced_energy_supplies(value: &Value, referenced: &mut HashSet<String>) {
+fn collect_referenced_energy_supplies(value: &Value, referenced: &mut BTreeSet<String>) {
     match value {
         Value::Object(obj) => {
             for (key, child) in obj {
@@ -109,7 +109,7 @@ fn collect_referenced_energy_supplies(value: &Value, referenced: &mut HashSet<St
 /// that introduces a fuel gets the supply a Systems row would. Unknown names are left for
 /// validation to reject.
 pub fn add_builtin_energy_supplies(model: &mut Value) {
-    let mut referenced = HashSet::new();
+    let mut referenced = BTreeSet::new();
     collect_referenced_energy_supplies(model, &mut referenced);
     for name in referenced {
         if model
@@ -660,6 +660,14 @@ fn orientation360_from_first_segment(points: &[CsvPoint3]) -> Option<f64> {
     ))
 }
 
+/// A CSV row's cells in column-name order. Rows are hash maps, so anything built by iterating
+/// one must go through here or its key order changes between calls.
+fn sorted_cells(row: &HashMap<String, Value>) -> Vec<(&String, &Value)> {
+    let mut cells: Vec<_> = row.iter().collect();
+    cells.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    cells
+}
+
 fn csv_string_cell<'a>(row: &'a HashMap<String, Value>, key: &str) -> Option<&'a str> {
     row.get(key)
         .and_then(|v| v.as_str())
@@ -979,7 +987,7 @@ fn overlay_row_onto_seed(
 ) -> serde_json::Map<String, Value> {
     clear_csv_owned_seed_fields(&mut seed, row, section);
     let mut csv_set_keys: HashSet<String> = HashSet::new();
-    for (k, v) in row {
+    for (k, v) in sorted_cells(row) {
         if k == "extra_json" || skip_keys.contains(&k.as_str()) {
             continue;
         }
@@ -2583,7 +2591,7 @@ impl JSONBuilder {
                     );
 
                     // Override with CSV data, but only include valid properties and non-null values
-                    for (key, value) in element_row {
+                    for (key, value) in sorted_cells(element_row) {
                         if key == "Name" || key == "Zone" || key == "Type" || key == "position_xyz"
                         {
                             continue;
@@ -3244,7 +3252,7 @@ impl JSONBuilder {
     fn ensure_referenced_energy_supplies(
         &self,
         result: &mut Value,
-        referenced: &HashSet<String>,
+        referenced: &BTreeSet<String>,
     ) -> Result<(), BuildError> {
         if referenced.is_empty() {
             return Ok(());
@@ -3353,7 +3361,7 @@ impl JSONBuilder {
             }
         }
 
-        let mut referenced_energy_supplies = HashSet::new();
+        let mut referenced_energy_supplies = BTreeSet::new();
         self.supply_fan_coil_systems(result);
         collect_referenced_energy_supplies(result, &mut referenced_energy_supplies);
         self.ensure_referenced_energy_supplies(result, &referenced_energy_supplies)?;
@@ -7504,16 +7512,16 @@ impl JSONBuilder {
             // generated `<zone> <subcategory>` grouping. Rows with a blank link in the current CSV
             // format are treated as unassigned geometry and are not silently merged into generated
             // fallback systems.
-            let mut zone_type_emitters: HashMap<(String, String), Vec<HashMap<String, Value>>> =
-                HashMap::new();
-            let mut unlinked_zone_type_emitters: HashMap<
+            let mut zone_type_emitters: BTreeMap<(String, String), Vec<HashMap<String, Value>>> =
+                BTreeMap::new();
+            let mut unlinked_zone_type_emitters: BTreeMap<
                 (String, String),
                 Vec<HashMap<String, Value>>,
-            > = HashMap::new();
+            > = BTreeMap::new();
             let mut unlinked_zones_with_csv_emitters: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
-            let mut linked_system_emitters: HashMap<String, Vec<HashMap<String, Value>>> =
-                HashMap::new();
+            let mut linked_system_emitters: BTreeMap<String, Vec<HashMap<String, Value>>> =
+                BTreeMap::new();
             let mut linked_system_zones: HashMap<String, HashSet<String>> = HashMap::new();
             let mut zones_with_csv_emitters: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
