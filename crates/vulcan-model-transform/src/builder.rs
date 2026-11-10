@@ -1230,6 +1230,15 @@ const COLD_WATER_SOURCE_MAINS: &str = "mains water";
 const COLD_WATER_SOURCE_HEADER_TANK: &str = "header tank";
 const COLD_WATER_SOURCE_DEFAULT: &str = COLD_WATER_SOURCE_MAINS;
 
+/// A Systems row routed `System` / `InfiltrationVentilation` (`merge_systems` checks the rest).
+fn is_infiltration_ventilation_row(row: &HashMap<String, Value>) -> bool {
+    ["Type", "system_type", "subcategory"]
+        .into_iter()
+        .find_map(|key| row.get(key)?.as_str())
+        == Some("System")
+        && row.get("subcategory").and_then(Value::as_str) == Some("InfiltrationVentilation")
+}
+
 /// The (field name, field value) pair of a parsed Metadata row: the codec keys the first cell
 /// `Field` and the second `Value`. A name that is not a known Metadata field is ignored.
 fn extract_metadata_field(row: &HashMap<String, Value>) -> (Option<String>, Option<Value>) {
@@ -4936,6 +4945,15 @@ impl JSONBuilder {
             .flatten()
             .filter_map(|row| extract_metadata_field(row).0)
             .collect();
+        // A Systems InfiltrationVentilation fragment is wrapped in its root key, so a model
+        // pointer finds the setting in it.
+        let systems_fragments: Vec<&Value> = csv_data
+            .get("Systems")
+            .into_iter()
+            .flatten()
+            .filter(|row| is_infiltration_ventilation_row(row))
+            .filter_map(|row| row.get("extra_json"))
+            .collect();
         let used: Vec<String> = METADATA_INPUT_FIELD_NAMES
             .iter()
             .filter(|name| !present.contains(**name))
@@ -4949,6 +4967,13 @@ impl JSONBuilder {
                 } else {
                     format!("/{name}")
                 };
+                // A Systems row that states the setting is its source.
+                if systems_fragments
+                    .iter()
+                    .any(|fragment| fragment.pointer(&pointer).is_some_and(|v| !v.is_null()))
+                {
+                    return None;
+                }
                 Some(match result.pointer(&pointer)? {
                     Value::String(text) => format!("{name} {text}"),
                     value => format!("{name} {value}"),
@@ -6717,7 +6742,7 @@ impl JSONBuilder {
         }
     }
 
-    /// Systems rows routed `System` / `InfiltrationVentilation` (`merge_systems` checks the rest).
+    /// Merges the fragment of each `is_infiltration_ventilation_row`.
     fn merge_systems_infiltration_ventilation_rows(
         result: &mut Value,
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
@@ -6726,12 +6751,7 @@ impl JSONBuilder {
             .as_object_mut()
             .ok_or_else(|| BuildError::new("E034", "Result JSON is not an object"))?;
         for row in csv_data.get("Systems").into_iter().flatten() {
-            let route = ["Type", "system_type", "subcategory"]
-                .into_iter()
-                .find_map(|key| row.get(key)?.as_str());
-            if route != Some("System")
-                || row.get("subcategory").and_then(Value::as_str) != Some("InfiltrationVentilation")
-            {
+            if !is_infiltration_ventilation_row(row) {
                 continue;
             }
             if let Some(extra_json) = row.get("extra_json").and_then(Value::as_object) {
@@ -13245,6 +13265,23 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
         assert_eq!(
             listed[0].message,
             "The Metadata section has no row for these settings, so the model uses these values: NumberOfBedrooms 1, PartO_active_cooling_required false, KitchenExtractorHoodExternal false. Add the rows to state them."
+        );
+
+        // A setting that a Systems row supplies has a source, so it is not listed.
+        let systems = "\n\nSystems\nName,Zone,Type,subcategory,extra_json\nInfiltration,,System,InfiltrationVentilation,\"{\"\"InfiltrationVentilation\"\":{\"\"shield_class\"\":\"\"Shielded\"\",\"\"altitude\"\":120,\"\"Leaks\"\":{\"\"test_result\"\":4}}}\"";
+        let listed = warnings(&format!(
+            "{}{systems}",
+            without(&[
+                "NumberOfBedrooms",
+                "Ventilation_shield_class",
+                "Ventilation_altitude",
+                "AirPermeability_test_result",
+            ])
+        ));
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        assert_eq!(
+            listed[0].message,
+            "The Metadata section has no row for these settings, so the model uses these values: NumberOfBedrooms 1. Add the rows to state them."
         );
     }
 
