@@ -40,6 +40,18 @@ const wall = (name: string, a: [number, number], b: [number, number], top: numbe
   };
 };
 
+// Flat roof of the extensions below, over their walls' 2.5 m tops (7.5 m).
+const extensionRoof = {
+  id: 'ext-roof',
+  name: 'Extension roof',
+  type: 'BuildingElementOpaque',
+  zoneId: 'z',
+  pitch: 0,
+  base_height: 7.5,
+  height: 1,
+  coordinates: [[2, -3], [5, -3], [5, 2.5], [2, 2.5]].map(([x, y]) => ({ x, y, z: 0 })),
+} as BuildingElementOpaque;
+
 const byId = (elements: Element[]) => Object.fromEntries(elements.map((e) => [e.id, e]));
 const edges = (elements: Element[], role: string) => proposeSlopedRoofEavesGableThermalBridges(elements, [], 0)
   .filter((p) => p.openingId === 'roof' && p.edgeRole === role)
@@ -49,7 +61,7 @@ const edges = (elements: Element[], role: string) => proposeSlopedRoofEavesGable
 describe('part of a roof inside walls standing on it', () => {
   it('a box dormer to the ridge: roof area drops by the footprint on the slope, no ridge inside', () => {
     // Front wall 1 m up the slope; cheeks from it to the ridge. Footprint 3 m × 2 m in plan.
-    const elements = [roof, wall('Dormer front', [2, 1], [5, 1], 4), wall('Cheek L', [2, 1], [2, 3], 4), wall('Cheek R', [5, 1], [5, 3], 4)];
+    const elements = [roof, wall('Dormer front', [2, 1], [5, 1], 4), wall('Cheek L', [2, 3], [2, 1], 4), wall('Cheek R', [5, 1], [5, 3], 4)];
     const covered = 6 / Math.cos(Math.PI / 4);
     expect(getElementEffectiveArea(roof, byId(elements), [], 0))
       .toBeCloseTo(getElementGrossArea(roof, 0) - covered, 1);
@@ -60,10 +72,12 @@ describe('part of a roof inside walls standing on it', () => {
 
   it('an extension running past the eaves into the roof: closed by its front wall, no eaves inside', () => {
     // Side walls stand on the floor past the eaves and on the roof inside it, ending where their
-    // 2.5 m top meets the slope (y = 2.5). The front wall at y = −3 stands on the floor.
+    // 2.5 m top meets the slope (y = 2.5) under the extension's flat roof, whose back edge closes
+    // the footprint. The front wall at y = −3 stands on the floor.
     const elements = [
       roof,
-      wall('Side L', [2, -3], [2, 2.5], 2.5),
+      extensionRoof,
+      wall('Side L', [2, 2.5], [2, -3], 2.5),
       wall('Side R', [5, -3], [5, 2.5], 2.5),
       wall('Extension front', [2, -3], [5, -3], 2.5, false),
     ];
@@ -98,7 +112,8 @@ describe('part of a roof inside walls standing on it', () => {
     // Side R starts 2 m behind the front: front wall and a short side wall on the floor join it.
     const elements = [
       roof,
-      wall('Side L', [2, -3], [2, 2.5], 2.5),
+      extensionRoof,
+      wall('Side L', [2, 2.5], [2, -3], 2.5),
       wall('Side R', [5, -1], [5, 2.5], 2.5),
       wall('Extension front', [2, -3], [5, -3], 2.5, false),
       wall('Extension side', [5, -3], [5, -1], 2.5, false),
@@ -106,6 +121,39 @@ describe('part of a roof inside walls standing on it', () => {
     const cutout = deriveRoofCutout(roof, elements, [], 0)!;
     expect(cutout.issues).toEqual([]);
     expect(cutout.planArea).toBeCloseTo(3 * 2.5, 2);
+  });
+
+  it('cuts the majority side but names a wall that faces into its footprint', () => {
+    const elements = [roof, wall('Dormer front', [2, 1], [5, 1], 4), wall('Cheek L', [2, 1], [2, 3], 4), wall('Cheek R', [5, 1], [5, 3], 4)];
+    const cutout = deriveRoofCutout(roof, elements, [], 0)!;
+    expect(cutout.planArea).toBeCloseTo(6, 2);
+    expect(cutout.issues.map((issue) => roofFootprintIssueMessage(roof.name, issue))).toEqual([
+      '"Cheek L" faces into the space it encloses on "Front roof". Flip the wall so it faces outward.',
+    ]);
+  });
+
+  it('closes a gable dormer along the valleys of its roof, not straight across', () => {
+    // Cheeks with a 2.5 m top meet the slope at y = 2.5; the dormer's two 11.3° roof planes rise
+    // from them to a ridge at x = 3.5 that meets the slope at y = 2.8. Footprint: 3 × 1.5 m plus
+    // the valley triangle 3 × 0.3 / 2.
+    const pitch = (Math.atan(0.2) * 180) / Math.PI;
+    const plane = (id: string, pts: Array<[number, number]>) => ({
+      id, name: id, type: 'BuildingElementOpaque', zoneId: 'z', pitch, base_height: 7.5,
+      coordinates: pts.map(([x, y]) => ({ x, y, z: 0 })),
+    }) as BuildingElementOpaque;
+    const elements = [
+      roof,
+      plane('Dormer roof L', [[2, 1], [2, 2.5], [3.5, 2.8], [3.5, 1]]),
+      plane('Dormer roof R', [[5, 2.5], [5, 1], [3.5, 1], [3.5, 2.8]]),
+      wall('Dormer front', [2, 1], [5, 1], 2.5),
+      wall('Cheek L', [2, 2.5], [2, 1], 2.5),
+      wall('Cheek R', [5, 1], [5, 2.5], 2.5),
+    ];
+    const cutout = deriveRoofCutout(roof, elements, [], 0)!;
+    expect(cutout.issues).toEqual([]);
+    expect(cutout.planArea).toBeCloseTo(4.5 + 0.45, 2);
+    expect(getElementGrossArea(roof, 0) - getElementEffectiveArea(roof, byId(elements), [], 0))
+      .toBeCloseTo(4.95 / Math.cos(Math.PI / 4), 1);
   });
 
   it('names three walls meeting at one point instead of choosing between them', () => {
