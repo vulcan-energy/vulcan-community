@@ -76,7 +76,8 @@ import {
   getElementEffectiveArea,
   getElementGrossArea,
 } from '../../lib/elementArea';
-import { readProfiledLineFace, wallFaceProblem } from '../../lib/profileLineFace';
+import { lineFaceEdgesAtPoint, readProfiledLineFace, wallFaceBreakpoints, wallFaceProblem } from '../../lib/profileLineFace';
+import { deriveWallEdgeFromRoofs, isRoofSnapshotStale } from '../../lib/wallEdgeFromRoofs';
 import { inferPsiSourceFromValue } from '../../lib/simplifiedFabricMap';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
 import { getPApportionedLinearPsiForEditor } from '../thermalBridge/linearTbPsi';
@@ -904,6 +905,65 @@ function profiledWallFaceIssue(element: Element): string | null {
   return problem ? `Wall shape (extra_json.geometry_face) is invalid: ${problem}` : null;
 }
 
+/** How far an opening may stand outside its shaped wall's face before it is named. */
+const OPENING_IN_FACE_TOL_M = 0.01;
+
+/**
+ * Names a wall opening that is not inside the shape of its host wall's profiled face. Both faces
+ * are straight between bends, so checking at the opening's ends and at every bend of either face
+ * between them covers the whole opening. Null when it fits or the wall has no profiled face.
+ */
+function openingOutsideWallFaceIssue(opening: Element, wall: Element, floors: Floor[]): string | null {
+  const wallFace = readProfiledLineFace(wall.extra_json);
+  if (!wallFace || opening.coordinates?.length !== 2 || wall.coordinates?.length !== 2) return null;
+  type Plan = { x: number; y: number };
+  const a = opening.coordinates[0]!;
+  const b = opening.coordinates[1]!;
+  const wa = wall.coordinates[0]!;
+  const wb = wall.coordinates[1]!;
+  const openingLen2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+  if (openingLen2 < 1e-12) return null;
+  const sOf = (p: { x: number; y: number }) => ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / openingLen2;
+  const openingFace = readProfiledLineFace(opening.extra_json);
+  const samples = [
+    0,
+    1,
+    ...wallFaceBreakpoints(wallFace.top_profile, wallFace.bottom_profile)
+      .map((t) => sOf({ x: wa.x + (wb.x - wa.x) * t, y: wa.y + (wb.y - wa.y) * t })),
+    ...(openingFace ? wallFaceBreakpoints(openingFace.top_profile, openingFace.bottom_profile) : []),
+  ].filter((sample) => sample >= 0 && sample <= 1);
+  const wallFoot = elementBaseElevationMForTb(wall, floors);
+  const openingFoot = elementBaseElevationMForTb(opening, floors);
+  const outside = samples.some((sample) => {
+    const p = { x: a.x + (b.x - a.x) * sample, y: a.y + (b.y - a.y) * sample };
+    const w = lineFaceEdgesAtPoint(wall as Element & { coordinates: Plan[] }, p);
+    const o = lineFaceEdgesAtPoint(opening as Element & { coordinates: Plan[] }, p);
+    return openingFoot + o.bottom < wallFoot + w.bottom - OPENING_IN_FACE_TOL_M
+      || openingFoot + o.top > wallFoot + w.top + OPENING_IN_FACE_TOL_M;
+  });
+  return outside ? `Opening is not inside the shape of wall "${wall.name}"` : null;
+}
+
+/**
+ * "Roof changed" (as the wall shape rows show it) for a wall edge fitted to the roofs whose stored
+ * snapshot no longer matches a fresh fit. Messages are prefixed with the element's name.
+ */
+function staleRoofFitWarning(
+  element: Element,
+  elements: Element[],
+  floors: Floor[],
+  globalOrientationOffset: number | undefined,
+): string | null {
+  const face = readProfiledLineFace((element as { extra_json?: unknown }).extra_json);
+  if (!face) return null;
+  const stale = (['top', 'bottom'] as const).some((edge) => face[`${edge}_mode`] === 'roof' && isRoofSnapshotStale(
+    face[`${edge}_profile`],
+    deriveWallEdgeFromRoofs(element, elements, floors, globalOrientationOffset, edge,
+      edge === 'top' ? face.bottom_profile : face.top_profile)?.profile ?? null,
+  ));
+  return stale ? 'Roof changed; re-fit the wall shape' : null;
+}
+
 export const validateElementCore = (
   element: Element,
   context: ValidationContext,
@@ -995,6 +1055,10 @@ export const validateElementCore = (
   if (floorStackWarnings.has(element.id)) {
     warnings.push(geo(FLOOR_STACK_WARNING_MESSAGE, FLOOR_STACK_WARNING_FIELD_KEY));
   }
+  const roofFitWarning = elementsById
+    ? staleRoofFitWarning(element, allElements, effectiveFloors(), context.globalOrientationOffset)
+    : null;
+  if (roofFitWarning) warnings.push(geo(roofFitWarning, 'height'));
   const findNamedElements = (
     name: string | null | undefined,
     candidates: Element[] = allElements,
@@ -2361,8 +2425,13 @@ export const validateElementCore = (
       } else if (elementsById && element.coordinates?.length === 2) {
         // A wall opening must lie on its wall, as a rooflight must lie on its roof.
         const parent = Object.values(elementsById).find((candidate) => candidate.name === element.parent_element);
-        if (parent?.type === 'BuildingElementOpaque' && parent.coordinates?.length === 2 && !isOpeningWithinWallLine(element, parent)) {
-          issues.push(geo(`Opening extends beyond ${parent.name}`, 'coordinates'));
+        if (parent?.type === 'BuildingElementOpaque' && parent.coordinates?.length === 2) {
+          if (!isOpeningWithinWallLine(element, parent)) {
+            issues.push(geo(`Opening extends beyond ${parent.name}`, 'coordinates'));
+          } else {
+            const outsideFace = openingOutsideWallFaceIssue(element, parent, effectiveFloors());
+            if (outsideFace) issues.push(geo(outsideFace, 'base_height'));
+          }
         }
       }
     }
