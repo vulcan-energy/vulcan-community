@@ -1379,6 +1379,8 @@ export const validateElementCore = (
 
     case 'WindowShading': {
       const shadingElement = element as WindowShading;
+      // The converter cannot place shading that names no window.
+      if (!shadingElement.parent_element?.trim()) issues.push(geo('Linked Window is not set', 'parent_element'));
       if (!shadingElement.shading_type) {
         issues.push(geo('Shading Type is required', 'shading_type'));
         break;
@@ -2079,7 +2081,7 @@ export const validateElementCore = (
 
         if (!hasValue) {
           // A blank cell in the element's own CSV column takes nothing from the defaults template.
-          const ownColumn = isElementCsvColumn(element.type, field);
+          const ownColumn = isOnSiteTypeCollision || isElementCsvColumn(element.type, field);
           if (ownColumn && derivedFromOwnColumns(element, field, context.globalOrientationOffset)) continue;
           // A field-specific check above already reports it.
           if (reportedFields.has(field)) continue;
