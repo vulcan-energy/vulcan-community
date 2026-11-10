@@ -1930,9 +1930,7 @@ impl JSONBuilder {
                     self.push_non_fatal(
                         "E066",
                         "Metadata",
-                        &format!(
-                            "Metadata row '{name}' has no value. Enter the value."
-                        ),
+                        &format!("Metadata row '{name}' has no value. Enter the value."),
                     );
                 }
             }
@@ -5334,17 +5332,9 @@ impl JSONBuilder {
                     && (element_name == "OnSiteGeneration" || element_name == "Default PV");
 
                 if should_merge_into_default {
-                    // Merge CSV properties into existing "Default PV" entry (CSV takes precedence)
-                    if let Some(existing_pv) = on_site_gen
-                        .get_mut("Default PV")
-                        .and_then(|v| v.as_object_mut())
-                    {
-                        existing_pv.retain(|key, _| !key.starts_with("inverter_"));
-                        clear_csv_owned_seed_fields(existing_pv, row, "On-Site Generation");
-                        for (key, value) in pv_system {
-                            existing_pv.insert(key, value);
-                        }
-                    }
+                    // The row replaces the template entry: `pv_system` was seeded from the same
+                    // template and has already dropped what the row owns.
+                    on_site_gen.insert("Default PV".to_string(), Value::Object(pv_system));
                 } else {
                     // Insert new entry with CSV name
                     on_site_gen.insert(element_name.to_string(), Value::Object(pv_system));
