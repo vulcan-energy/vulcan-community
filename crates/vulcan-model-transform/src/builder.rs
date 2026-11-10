@@ -1931,7 +1931,7 @@ impl JSONBuilder {
                         "E066",
                         "Metadata",
                         &format!(
-                            "Metadata row '{name}' has no value. Enter one or delete the row."
+                            "Metadata row '{name}' has no value. Enter the value."
                         ),
                     );
                 }
