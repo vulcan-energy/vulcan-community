@@ -11,6 +11,8 @@ import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { isOrientationPitchAxis, slopedPolygonPlaneBasis } from '../../lib/slopePitchAxis';
 import { getUnheatedPitchedRoofCeilingElevationM } from '../../lib/unheatedPitchedRoofCeiling';
+import { roofTopElevationAtPlanM } from '../../lib/roofTopElevationAtPlanM';
+import { computeThermalBridgeLinearRunLengthM } from '../../lib/thermalBridgeLinearGeometry';
 import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { Floor } from '../../geometry/types';
 import type { BuildingElementOpaque, Element } from '../types';
@@ -94,6 +96,14 @@ export function proposePartyWallToSlopedRoofP4P5ThermalBridges(
         const hit = overlapEndpointsOnRoofPlanEdgeForPartyWall(Ra, Rb, p);
         if (!hit) continue;
         const { a, b, lenM, ovl } = hit;
+        // P5 (insulation at rafters) runs along the roof plane, like E13 and R8; P4 stays on the flat ceiling line.
+        const za = cold ? zB : roofTopElevationAtPlanM(o, a.x, a.y, floors, globalOrientationOffset);
+        const zb = cold ? zB : roofTopElevationAtPlanM(o, b.x, b.y, floors, globalOrientationOffset);
+        if (za === null || zb === null) continue;
+        const coordinates: FacadeOpeningTbProposal['coordinates'] = [
+          { x: a.x, y: a.y, z: za },
+          { x: b.x, y: b.y, z: zb },
+        ];
         out.push({
           proposalId: `p45:${o.id}:${p.id}:e${i}:${roundToTwoDecimals(ovl.tMid)}`,
           openingId: p.id,
@@ -101,18 +111,20 @@ export function proposePartyWallToSlopedRoofP4P5ThermalBridges(
           zoneId: o.zoneId ?? p.zoneId,
           edgeRole: 'party_wall_to_sloped_roof',
           junctionCode,
-          suggestedLengthM: roundToTwoDecimals(lenM),
+          suggestedLengthM: roundToTwoDecimals(cold ? lenM : computeThermalBridgeLinearRunLengthM(coordinates)),
           linearThermalTransmittance: psiTable37ForCode(junctionCode),
           reason: `${junctionCode} (P4 = ceiling, P5 = rafter) along party line "${p.name}" coincident with roof edge ${i} of "${
             o.name
           }"`,
-          coordinates: [
-            { x: a.x, y: a.y, z: zB },
-            { x: b.x, y: b.y, z: zB },
-	          ],
-	          parentElementForTb: o.name,
-	          hostElementIds: [o.id, p.id],
-	        });
+          coordinates: cold
+            ? coordinates
+            : [
+                { ...coordinates[0], z: roundToTwoDecimals(za) },
+                { ...coordinates[1], z: roundToTwoDecimals(zb) },
+              ],
+          parentElementForTb: o.name,
+          hostElementIds: [o.id, p.id],
+        });
       }
     }
   }

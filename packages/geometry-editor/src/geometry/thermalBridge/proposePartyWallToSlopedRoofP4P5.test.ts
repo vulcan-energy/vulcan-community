@@ -50,6 +50,41 @@ describe('proposePartyWallToSlopedRoofP4P5ThermalBridges', () => {
     expect(p[0]!.hostElementIds).toEqual(['r2', 'pw']);
   });
 
+  it('runs a warm P5 along the roof slope and a cold P4 on the flat ceiling line', () => {
+    // Eaves (0,0)→(4,0); the party wall lies on the gable edge x = 0, which climbs 3 m in plan.
+    const roof = {
+      ...slopedFixed,
+      base_height: 5,
+      coordinates: [
+        { x: 0, y: 0, z: 5 },
+        { x: 4, y: 0, z: 5 },
+        { x: 4, y: 3, z: 5 },
+        { x: 0, y: 3, z: 5 },
+      ],
+    } as BuildingElementOpaque;
+    const gableParty = {
+      ...party,
+      coordinates: [
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 3, z: 0 },
+      ],
+    } as BuildingElementPartyWall;
+    const rise = 3 * Math.tan((40 * Math.PI) / 180);
+
+    const [warm] = proposePartyWallToSlopedRoofP4P5ThermalBridges([roof, gableParty] as Element[]);
+    expect(warm!.junctionCode).toBe('P5');
+    expect(warm!.suggestedLengthM).toBeCloseTo(3 / Math.cos((40 * Math.PI) / 180), 2);
+    expect(warm!.coordinates.map((p) => p.z).sort()).toEqual([5, Number((5 + rise).toFixed(2))]);
+
+    const [cold] = proposePartyWallToSlopedRoofP4P5ThermalBridges([
+      { ...roof, is_unheated_pitched_roof: true },
+      gableParty,
+    ] as Element[]);
+    expect(cold!.junctionCode).toBe('P4');
+    expect(cold!.suggestedLengthM).toBe(3);
+    expect(cold!.coordinates[0]!.z).toBe(cold!.coordinates[1]!.z);
+  });
+
   it('proposes against an Orientation-state roof only when its plane basis is available', () => {
     const roof = {
       ...slopedFixed,
