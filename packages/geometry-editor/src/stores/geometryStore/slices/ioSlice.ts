@@ -100,6 +100,7 @@ import { isMvhrTerminalHost } from '../../../lib/mvhrDuctwork';
 import {
   applyFloorBaseHeightOverrides,
   applyFloorHeightOverrides,
+  deriveFloorsFromElements,
 } from '../../../lib/floorDerivation';
 import {
   FLOOR_BASE_HEIGHT_OVERRIDE_DESCRIPTOR,
@@ -1923,11 +1924,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       }
       // AirPermeability_ventilation_zone_height. Floors are not built yet, so the storey heights
       // typed in the file stand in for them. A value matching the earlier suggestion is derived too.
-      const importFloors = metadata.floorHeightOverrides.map((row) => ({
-        id: `import-storey-${row.zIndex}`, name: '', zIndex: row.zIndex, height: row.height,
-        heightUserOverride: true, isRoofSpace: false,
-      }));
-      const derivedVent = calculateSuggestedVentilationHeight(newElements, importFloors);
+      const derivedVent = calculateSuggestedVentilationHeight(
+        newElements,
+        applyFloorHeightOverrides(deriveFloorsFromElements(newElements), metadata.floorHeightOverrides),
+      );
       if (importedSettings.AirPermeability_ventilation_zone_height !== undefined) {
         const typedVent = importedSettings.AirPermeability_ventilation_zone_height;
         const legacyVent = calculateLegacySuggestedVentilationHeight(newElements);

@@ -427,19 +427,27 @@ export function calculateSharedGroundElementArea(elements: Element[]): number {
 
 /**
  * The suggested ventilation_zone_height: the height of the heated part of the floor stack, the sum
- * of the storey heights ({@link storeyHeightsByLevel}) of the levels with treated floor. HEM places
- * the leak paths at 0.25, 0.75 and 1.0 of this height above ventilation_zone_base_height, which
- * the floor stack also sets. Levels with walls but no treated floor, such as an unheated loft's
- * gables, do not count; with no treated floor anywhere every walled level counts.
+ * of the storey heights ({@link storeyHeightsByLevel}, plus a height typed for a level without line
+ * walls) from the lowest to the highest level with treated floor. HEM places the leak paths at
+ * 0.25, 0.75 and 1.0 of this height above ventilation_zone_base_height, which the floor stack also
+ * sets. Levels above or below the treated ones, such as an unheated loft's gables, do not count; a
+ * storey between them counts even if its floor is not drawn. With no treated floor anywhere every
+ * level counts.
  *
  * Without `floors`, storey heights typed in the floor picker are unknown and the walls decide.
  * With no line walls, the stored floor heights are summed, as before.
  */
 export function calculateSuggestedVentilationHeight(elements: Element[], floors: Floor[] = []): number {
   const heights = storeyHeightsByLevel(elements, floors);
-  const treated = treatedFloorAreaByLevel(elements);
-  const heated = [...heights].filter(([level]) => (treated.get(level) ?? 0) > 0);
-  const counted = heated.length > 0 ? heated : [...heights];
+  for (const floor of floors) {
+    if (floor.heightUserOverride && floor.height > 0 && !heights.has(floor.zIndex)) heights.set(floor.zIndex, floor.height);
+  }
+  const treatedLevels = [...treatedFloorAreaByLevel(elements)].filter(([, area]) => area > 0).map(([level]) => level);
+  const lowest = Math.min(...treatedLevels);
+  const highest = Math.max(...treatedLevels);
+  const counted = treatedLevels.length > 0
+    ? [...heights].filter(([level]) => level >= lowest && level <= highest)
+    : [...heights];
   if (counted.length === 0) return roundToTwoDecimals(floors.reduce((sum, floor) => sum + (floor.height || 0), 0));
   return roundToTwoDecimals(counted.reduce((sum, [, height]) => sum + height, 0));
 }

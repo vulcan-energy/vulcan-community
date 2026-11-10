@@ -579,6 +579,17 @@ describe('calculateDerivedHeight area weighting', () => {
     expect(calculateSuggestedVentilationHeight(elements, floors)).toBe(5.2);
   });
 
+  it('counts a storey between heated storeys even when its floor is not drawn', () => {
+    const elements = [square('g', 10, 0), deck('f2', 10, 5, 2), wall('w0', 2.4, 0), wall('w1', 2.5, 1), wall('w2', 2.3, 2)];
+    expect(calculateSuggestedVentilationHeight(elements, [])).toBe(7.2);
+  });
+
+  it('counts a storey height typed for a heated level without line walls', () => {
+    const elements = [square('g', 10, 0), deck('f1', 10, 5, 1), wall('w0', 2.4, 0)];
+    const floors = [{ id: 'f1', name: 'Roof room', zIndex: 1, height: 2.2, heightUserOverride: true, isRoofSpace: false }] as Floor[];
+    expect(calculateSuggestedVentilationHeight(elements, floors)).toBe(4.6);
+  });
+
   it('reads a saved ventilation zone height from the earlier suggestion as derived', () => {
     const csv = (ventHeight: number) => [
       'Metadata,,,,,,,,,,,,,',
