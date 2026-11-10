@@ -90,6 +90,12 @@ function bottomEdgeRoofRuns(
   const foot = elementBaseElevationMForTb(w, floors ?? []);
   const len = Math.hypot(B.x - A.x, B.y - A.y);
   const dir = { x: (B.x - A.x) / len, y: (B.y - A.y) / len };
+  // The roof whose plane passes through elevation z at plan point p.
+  const roofAt = (p: { x: number; y: number }, z: number) => roofs.find((r) => {
+    if (!zonesCompatible(w.zoneId, r.zoneId) || !roofCoversPlanPoint(r, p, dir)) return false;
+    const roofZ = roofTopElevationAtPlanM(r, p.x, p.y, floors, globalOrientationOffset);
+    return roofZ !== null && Math.abs(roofZ - z) <= ON_ROOF_TOL_M;
+  });
   const runs: Array<{ roof: BuildingElementOpaque; t0: number; t1: number }> = [];
   for (let i = 0; i < bottom.length - 1; i += 1) {
     const t0 = bottom[i]!.t;
@@ -98,11 +104,7 @@ function bottomEdgeRoofRuns(
     const h = interpolateProfileHeight(bottom, tm);
     if (h <= ON_ROOF_TOL_M) continue;
     const p = { x: A.x + (B.x - A.x) * tm, y: A.y + (B.y - A.y) * tm };
-    const roof = roofs.find((r) => {
-      if (!zonesCompatible(w.zoneId, r.zoneId) || !roofCoversPlanPoint(r, p, dir)) return false;
-      const z = roofTopElevationAtPlanM(r, p.x, p.y, floors, globalOrientationOffset);
-      return z !== null && Math.abs(z - (foot + h)) <= ON_ROOF_TOL_M;
-    });
+    const roof = roofAt(p, foot + h);
     // A bottom edge on no roof is a stale fit: validation says "re-fit its shape".
     if (!roof) continue;
     const last = runs[runs.length - 1];
