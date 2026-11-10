@@ -104,6 +104,11 @@ describe('deriveWallEdgeFromRoofs', () => {
     expect(area).toBeCloseTo(6 * 2.5 + (6 * 3) / 2);
   });
 
+  it('fits a gable wall drawn a few centimetres outside the roof outline', () => {
+    expect(derive(wall([-0.064, 0], [-0.03, 6]), 'top')?.profile)
+      .toEqual([{ t: 0, h: 0 }, { t: 0.5, h: 3 }, { t: 1, h: 0 }]);
+  });
+
   it('gives no top fit when part of the wall line has no roof over it', () => {
     expect(derive(wall([0, 4], [0, 8]), 'top')).toBeNull();
   });

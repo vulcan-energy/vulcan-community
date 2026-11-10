@@ -18,9 +18,10 @@ export type WallRoofEdge = { profile: ProfilePoint[]; roofNames: string[] };
 /** Stored roof snapshot and a fresh fit may differ by this much before the wall shows "Roof changed". */
 export const ROOF_FIT_TOLERANCE_M = 0.005;
 
-// A plan point this close to a roof outline counts as covered: a gable wall sits exactly on
-// the roof's edge in plan.
-const OUTLINE_TOL_M = 0.001;
+// A plan point this close to a roof outline counts as covered: a gable wall sits on the roof's
+// edge in plan, and drawn models put it a few centimetres either side (H482: 6.4 cm). Within a
+// wall thickness, so a roof this close is the one over or under the wall.
+const OUTLINE_TOL_M = 0.1;
 // Containment is sampled this far either side of a roof edge; it is also the width of the
 // step drawn where the roof edge is not at the wall foot (an eaves the wall runs past).
 const SIDE_M = 0.005;
