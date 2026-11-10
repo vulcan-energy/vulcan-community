@@ -192,7 +192,7 @@ pub fn transform_geometry_csv(
     let mut errors = builder.take_non_fatal_errors();
     let validation_model = clone_for_hem_validation(&model);
     let mut schema_errors = finalized.validation.errors;
-    builder.name_emitter_rows(&mut schema_errors);
+    builder.name_csv_rows(&mut schema_errors);
     errors.extend(schema_errors);
     errors.extend(validate_target_input(
         &model,

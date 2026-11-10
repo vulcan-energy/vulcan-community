@@ -1494,9 +1494,9 @@ pub struct JSONBuilder {
     /// problems surface in the save's `ValidationResult` for the UI to show.
     /// RefCell because most merge passes take `&self`.
     non_fatal_errors: RefCell<Vec<ValidationError>>,
-    /// Model path of each built wet emitter and the CSV row it came from, so schema errors on
-    /// the emitter name the row.
-    emitter_rows: RefCell<Vec<(String, String)>>,
+    /// Model path of each built wet emitter and PV system and the CSV row it came from, so
+    /// schema errors on it name the row.
+    csv_rows: RefCell<Vec<(String, String)>>,
     /// Exact upstream core version supplied by the host for FHS input metadata.
     hem_core_version: String,
 }
@@ -1547,7 +1547,7 @@ impl JSONBuilder {
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
-            emitter_rows: RefCell::new(Vec::new()),
+            csv_rows: RefCell::new(Vec::new()),
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
         };
 
@@ -1584,7 +1584,7 @@ impl JSONBuilder {
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
-            emitter_rows: RefCell::new(Vec::new()),
+            csv_rows: RefCell::new(Vec::new()),
             hem_core_version: version_metadata.hem_core_version.clone(),
         };
         builder.index_templates();
@@ -1605,10 +1605,10 @@ impl JSONBuilder {
         });
     }
 
-    /// Prefix each error on a built wet emitter with the CSV row it came from.
-    pub fn name_emitter_rows(&self, errors: &mut [ValidationError]) {
+    /// Prefix each error on a built wet emitter or PV system with the CSV row it came from.
+    pub fn name_csv_rows(&self, errors: &mut [ValidationError]) {
         for error in errors {
-            if let Some((_, row)) = self.emitter_rows.borrow().iter().find(|(path, _)| {
+            if let Some((_, row)) = self.csv_rows.borrow().iter().find(|(path, _)| {
                 error.path == *path || error.path.starts_with(&format!("{path}/"))
             }) {
                 error.message = format!("{row}: {}", error.message);
@@ -1618,7 +1618,7 @@ impl JSONBuilder {
 
     fn note_emitter_row(&self, system: &str, index: usize, row: &HashMap<String, Value>) {
         let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
-        self.emitter_rows.borrow_mut().push((
+        self.csv_rows.borrow_mut().push((
             crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
             format!("Wet Emitters row '{name}' (system '{system}')"),
         ));
@@ -5363,6 +5363,15 @@ impl JSONBuilder {
                 let should_merge_into_default = on_site_gen.contains_key("Default PV")
                     && (element_name == "OnSiteGeneration" || element_name == "Default PV");
 
+                let model_name = if should_merge_into_default {
+                    "Default PV"
+                } else {
+                    element_name
+                };
+                self.csv_rows.borrow_mut().push((
+                    crate::json_pointer(&["OnSiteGeneration", model_name]),
+                    format!("On-Site Generation row '{element_name}'"),
+                ));
                 if should_merge_into_default {
                     // The row replaces the template entry: `pv_system` was seeded from the same
                     // template and has already dropped what the row owns.
@@ -10764,7 +10773,7 @@ Radiator 2,Living,WetEmitter,radiator,2.0
             schema_path: None,
             keyword: Some("required".into()),
         }];
-        builder.name_emitter_rows(&mut errors);
+        builder.name_csv_rows(&mut errors);
         assert_eq!(
             errors[0].message,
             "Wet Emitters row 'Lounge' (system 'Living radiator'): \"n\" is a required property"
