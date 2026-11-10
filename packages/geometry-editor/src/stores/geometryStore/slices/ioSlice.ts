@@ -713,7 +713,7 @@ const COORDS_DETERMINED_COLUMNS = new Set(['area', 'total_area', 'width', 'heigh
  * partition saved as both faces at twice a legacy single-face area keeps its meaning, so it is not
  * listed.
  */
-const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, templateKeys: readonly string[]): string[] => {
+const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, templateKeys: ReadonlySet<string>): string[] => {
   const rows = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
     .filter((row) => row.data.Name)
     .map((row) => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, row.data] as const)));
@@ -754,7 +754,7 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, templateKe
   }
   // A model-input row the file lacks that the save adds from the defaults template.
   for (const [key, after] of savedMetadata) {
-    if (after && !authoredMetadata.has(key) && templateKeys.includes(key)) replaced.push(`${key} absent → ${after}`);
+    if (after && !authoredMetadata.has(key) && templateKeys.has(key)) replaced.push(`${key} absent → ${after}`);
   }
   return replaced.length
     ? [`Loading replaced ${replaced.length} value(s) in the file; saving writes the new value(s): ${replaced.join('; ')}.`]
@@ -2264,7 +2264,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Defaults kept from before the load fill the rows this file lacks now; defaults read for the
     // file fill them when they arrive (see withPrecomputedDefaultsLookup).
     const loaded = get();
-    let templateKeys: string[] = [];
+    let templateKeys = new Set<string>();
     if (loaded.defaultsJson && !loaded.defaultsLoading) {
       const filled = templateFilledMetadataSettings(
         metadataRowValues({ ...loaded, elements: Object.values(loaded.elementsById) }),
@@ -2272,7 +2272,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         loaded.defaultsJson,
       );
       if (Object.keys(filled).length) set({ complianceSettings: { ...loaded.complianceSettings, ...filled } });
-      templateKeys = Object.keys(METADATA_INPUT_LABELS).filter((key) => (key.startsWith('General_') ? key.slice(8) : key) in filled);
+      templateKeys = new Set(Object.keys(METADATA_INPUT_LABELS).filter((key) => (key.startsWith('General_') ? key.slice(8) : key) in filled));
     }
 
     // Round-trip through the canonical serializer after all synchronous load

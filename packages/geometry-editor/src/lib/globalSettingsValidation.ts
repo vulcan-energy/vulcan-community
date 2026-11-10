@@ -564,8 +564,9 @@ export function templateFilledMetadataSettings(
   defaults: unknown,
 ): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
+  const blank = new Set(settings.blankMetadataRows);
   for (const [key, value] of rows) {
-    if (value !== undefined || !(key in METADATA_INPUT_LABELS) || settings.blankMetadataRows?.includes(key)) continue;
+    if (value !== undefined || !(key in METADATA_INPUT_LABELS) || blank.has(key)) continue;
     const template = templateMetadataValue(defaults, key);
     if (template !== undefined) patch[metadataSettingKey(key)] = template;
   }
@@ -599,10 +600,11 @@ export function unsetMetadataInputIssues(
   settings: { blankMetadataRows?: string[] },
   defaults: unknown,
 ): string[] {
-  return rows
-    .filter(([key, value]) => value === undefined && key in METADATA_INPUT_LABELS
+  const blank = new Set(settings.blankMetadataRows);
+  return rows.flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS
       && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
-      && (settings.blankMetadataRows?.includes(key) || (defaults !== undefined
-        && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key)))))
-    .map(([key]) => `Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.`);
+      && (blank.has(key) || (defaults !== undefined
+        && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))
+    ? [`Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.`]
+    : []));
 }
