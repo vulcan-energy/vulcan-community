@@ -3682,6 +3682,33 @@ impl JSONBuilder {
                 "Found Context Shading section with {} rows",
                 section_data.len()
             );
+            // A row without both angles and a known type cannot place an obstacle: report it by
+            // row and column instead of leaving the sky open.
+            let mut obstacles = Vec::new();
+            for row in section_data {
+                let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+                let start = Self::read_context_shading_angle(row, &["start angle", "start_angle"]);
+                let end = Self::read_context_shading_angle(row, &["end angle", "end_angle"]);
+                let shading_type = Self::read_context_shading_type(row);
+                for (column, given) in [
+                    ("start_angle", start.is_some()),
+                    ("end_angle", end.is_some()),
+                    ("shading_type", shading_type.is_some()),
+                ] {
+                    if !given {
+                        self.push_non_fatal(
+                            "E027",
+                            &crate::json_pointer(&["Context Shading", name, column]),
+                            &format!(
+                                "Context Shading row '{name}' has no valid {column}, so the obstacle is not in the model. Enter the {column}."
+                            ),
+                        );
+                    }
+                }
+                if let (Some(start), Some(end), Some(shading_type)) = (start, end, shading_type) {
+                    obstacles.push((row, start, end, shading_type));
+                }
+            }
             let mut shading_segments = Vec::new();
 
             // Create 36 segments (0-360 degrees)
@@ -3701,14 +3728,8 @@ impl JSONBuilder {
 
                 // Check if any shading objects fall within this segment
                 let mut shading_objects = Vec::new();
-                for shading_row in section_data {
-                    if let (Some(start), Some(end)) = (
-                        Self::read_context_shading_angle(
-                            shading_row,
-                            &["start angle", "start_angle"],
-                        ),
-                        Self::read_context_shading_angle(shading_row, &["end angle", "end_angle"]),
-                    ) {
+                for &(shading_row, start, end, shading_type) in &obstacles {
+                    {
                         // FHS schema expects integer angles (start360/end360). Round early so overlap logic
                         // is stable even if CSV contains fractional degrees.
                         let start = start.round();
@@ -3754,17 +3775,17 @@ impl JSONBuilder {
 
                         if overlaps {
                             let mut shading_obj = serde_json::Map::new();
-                            let shading_type = Self::read_context_shading_type(shading_row);
                             shading_obj.insert(
                                 "type".to_string(),
                                 Value::String(shading_type.to_string()),
                             );
 
-                            if let Some(height) = shading_row.get("height") {
-                                shading_obj.insert("height".to_string(), height.clone());
-                            }
-                            if let Some(distance) = shading_row.get("distance") {
-                                shading_obj.insert("distance".to_string(), distance.clone());
+                            for key in ["height", "distance"] {
+                                if let Some(value) =
+                                    shading_row.get(key).filter(|v| csv_cell_is_set(v))
+                                {
+                                    shading_obj.insert(key.to_string(), value.clone());
+                                }
                             }
 
                             shading_objects.push(Value::Object(shading_obj));
@@ -3827,18 +3848,15 @@ impl JSONBuilder {
             })
     }
 
-    fn read_context_shading_type(shading_row: &HashMap<String, Value>) -> &'static str {
-        let raw_type = shading_row
-            .get("shading_type")
-            .or_else(|| shading_row.get("Type"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("obstacle")
-            .trim();
-
+    /// `shading_type`, else `Type` (where `ContextShading` means an obstacle). A blank or
+    /// unknown value is `None`: the caller reports it rather than guessing.
+    fn read_context_shading_type(shading_row: &HashMap<String, Value>) -> Option<&'static str> {
+        let raw_type = csv_string_cell(shading_row, "shading_type")
+            .or_else(|| csv_string_cell(shading_row, "Type"))?;
         match raw_type {
-            "overhang" => "overhang",
-            "obstacle" | "ContextShading" | "" => "obstacle",
-            _ => "obstacle",
+            "overhang" => Some("overhang"),
+            "obstacle" | "ContextShading" => Some("obstacle"),
+            _ => None,
         }
     }
 
