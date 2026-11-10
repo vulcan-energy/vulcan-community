@@ -312,25 +312,29 @@ export function getPerFloorLineWallAverageHeights(zoneId: string, elements: Elem
 }
 
 /**
- * The storey height of each level where the zone has line walls: the height typed in the floor
- * picker, else the zone's tallest wall on that level (as {@link getStrictStoreyHeight}). Short
+ * The storey height of each level where `elements` have line walls: the height typed in the floor
+ * picker, else the tallest of those walls on that level (as {@link getStrictStoreyHeight}). Short
  * walls such as a parapet or dormer cheek therefore do not lower it.
  */
-export function getZoneStoreyHeights(zoneId: string, elements: Element[], floors: Floor[]): Map<number, number> {
-  const zoneElements = elements.filter((el) => (el as { zoneId?: string }).zoneId === zoneId);
+function storeyHeightsByLevel(elements: Element[], floors: Floor[]): Map<number, number> {
   const levels = new Set<number>();
-  for (const el of zoneElements) {
+  for (const el of elements) {
     if (isVerticalLineWall(el)) levels.add(Math.floor(el.coordinates[0]?.z ?? 0));
   }
   const out = new Map<number, number>();
   for (const level of levels) {
     const floor = floors.find((candidate) => candidate.zIndex === level);
     const height = floor
-      ? getStrictStoreyHeight(floor, zoneElements)
-      : roundToTwoDecimals(getMaxLineWallHeightOnFloor(level, zoneElements));
+      ? getStrictStoreyHeight(floor, elements)
+      : roundToTwoDecimals(getMaxLineWallHeightOnFloor(level, elements));
     if (height > 0) out.set(level, height);
   }
   return out;
+}
+
+/** {@link storeyHeightsByLevel} over one zone's own walls. */
+export function getZoneStoreyHeights(zoneId: string, elements: Element[], floors: Floor[]): Map<number, number> {
+  return storeyHeightsByLevel(elements.filter((el) => (el as { zoneId?: string }).zoneId === zoneId), floors);
 }
 
 /**
@@ -422,23 +426,29 @@ export function calculateSharedGroundElementArea(elements: Element[]): number {
 }
 
 /**
- * Calculate the total building height for ventilation_zone_height.
+ * The suggested ventilation_zone_height: the height of the heated part of the floor stack, the sum
+ * of the storey heights ({@link storeyHeightsByLevel}) of the levels with treated floor. HEM places
+ * the leak paths at 0.25, 0.75 and 1.0 of this height above ventilation_zone_base_height, which
+ * the floor stack also sets. Levels with walls but no treated floor, such as an unheated loft's
+ * gables, do not count; with no treated floor anywhere every walled level counts.
  *
- * HEM uses this as the full height of the building envelope — leak paths
- * are placed at 0.25×, 0.75×, and 1.0× this value (bottom walls, upper
- * walls, roof).  For a two-storey building with 2.5 m per floor, this
- * should be ~5.0 m, not 2.5 m.
- *
- * Approach: group ALL line-drawn wall elements by floor Z-level, calculate
- * the weighted-average wall height per floor, then SUM across floors.
- * Falls back to summing Floor object heights when no wall data exists.
- *
- * Returns 0 when no suitable data is available.
+ * Without `floors`, storey heights typed in the floor picker are unknown and the walls decide.
+ * With no line walls, the stored floor heights are summed, as before.
  */
-export function calculateSuggestedVentilationHeight(
-  elements: Element[],
-  floors?: Floor[],
-): number {
+export function calculateSuggestedVentilationHeight(elements: Element[], floors: Floor[] = []): number {
+  const heights = storeyHeightsByLevel(elements, floors);
+  const treated = treatedFloorAreaByLevel(elements);
+  const heated = [...heights].filter(([level]) => (treated.get(level) ?? 0) > 0);
+  const counted = heated.length > 0 ? heated : [...heights];
+  if (counted.length === 0) return roundToTwoDecimals(floors.reduce((sum, floor) => sum + (floor.height || 0), 0));
+  return roundToTwoDecimals(counted.reduce((sum, [, height]) => sum + height, 0));
+}
+
+/**
+ * The ventilation_zone_height that earlier versions suggested (each level's width-weighted average
+ * wall height, summed). Saved files hold it, so import must not read it as typed.
+ */
+export function calculateLegacySuggestedVentilationHeight(elements: Element[]): number {
   const wallTypes = [
     'BuildingElementOpaque',
     'BuildingElementAdjacentConditionedSpace',
@@ -488,13 +498,6 @@ export function calculateSuggestedVentilationHeight(
 
     if (totalHeight > 0) return roundToTwoDecimals(totalHeight);
   }
-
-  // Fallback: sum Floor object heights
-  if (floors && floors.length > 0) {
-    const total = floors.reduce((sum, f) => sum + (f.height || 0), 0);
-    if (total > 0) return roundToTwoDecimals(total);
-  }
-
   return 0;
 }
 

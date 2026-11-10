@@ -7,6 +7,7 @@ import { networkPoint3 } from '../elementCanvasFloor';
 import type { Element, Floor } from '../../geometry/types';
 import {
   calculateDerivedHeight,
+  calculateSuggestedVentilationHeight,
   calculateBaseHeightPatchForFloorStackChange,
   getCumulativeBaseHeightsByFloorId,
   getStrictStoreyHeight,
@@ -567,5 +568,42 @@ describe('calculateDerivedHeight area weighting', () => {
     const zone = store.getState().zones.find((candidate) => !candidate.isPlaceholder)!;
     expect(zone.height).toBe(2.8);
     expect(zone.volume).toBe(140);
+  });
+
+  it('suggests the ventilation zone height from heated storey heights', () => {
+    // A 0.3 m upstand does not lower the ground storey; the loft gable level has no treated floor.
+    const elements = [square('g', 10, 0), deck('f', 10, 5, 1), wall('w0', 2.4, 0), wall('upstand', 0.3, 0),
+      wall('w1', 2.5, 1), wall('gable', 1, 2)];
+    expect(calculateSuggestedVentilationHeight(elements, [])).toBe(4.9);
+    const floors = [{ id: 'f1', name: 'First', zIndex: 1, height: 2.8, heightUserOverride: true, isRoofSpace: false }] as Floor[];
+    expect(calculateSuggestedVentilationHeight(elements, floors)).toBe(5.2);
+  });
+
+  it('reads a saved ventilation zone height from the earlier suggestion as derived', () => {
+    const csv = (ventHeight: number) => [
+      'Metadata,,,,,,,,,,,,,',
+      `AirPermeability_ventilation_zone_height,${ventHeight},,,,,,,,,,,,,`,
+      '',
+      'Zone,,,,,,,,,,,,,',
+      'Name,Type,volume,floor_area,height,simplified thermal bridging',
+      'Z,Zone,120,50,2.4,FALSE',
+      '',
+      'Exposed Elements,,,,,,,,,,,,,',
+      'Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json',
+      'W0,Z,BuildingElementOpaque,9.6,90,4,2.4,0,0,FALSE,FALSE,,"0,0,0|4,0,0",',
+      'Upstand,Z,BuildingElementOpaque,1.2,90,4,0.3,0,2.1,FALSE,FALSE,,"0,5,0|4,5,0",',
+      '',
+      'Ground Elements,,,,,,,,,,,,,',
+      'Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,base_height,parent_element,coords,extra_json',
+      'Ground Floor,Z,BuildingElementGround,50,5,10,30,Slab_no_edge_insulation,,,0,,"0,0,0|5,0,0|5,10,0|0,10,0",',
+    ].join('\n');
+    const load = (ventHeight: number) => {
+      const store = createGeometryStore();
+      store.getState().loadFromCSV(csv(ventHeight));
+      return store.getState().complianceSettings.AirPermeability_ventilation_zone_height;
+    };
+    expect(load(1.35)).toBeUndefined(); // earlier suggestion: (2.4 + 0.3) / 2
+    expect(load(2.4)).toBeUndefined(); // current suggestion
+    expect(load(3)).toBe(3); // typed
   });
 });
