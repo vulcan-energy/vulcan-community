@@ -273,3 +273,19 @@ export function lineFaceEdgesAtPoint(
   const t = len2 < 1e-18 ? 0 : ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / len2;
   return lineFaceEdgesAt(el, Math.min(1, Math.max(0, t)));
 }
+
+/**
+ * A profiled face's outline as (t, h) points: the bottom edge from t = 0 to 1, then the top edge
+ * back, without repeating a point where the edges meet (a gable's ends). Null for a plain element
+ * or an invalid face (validation names the problem).
+ */
+export function lineFaceOutline(el: LineFaceHost): ProfilePoint[] | null {
+  const raw = readProfiledLineFace(el.extra_json);
+  const face = readFaceEdges(el);
+  if (!raw || !face || wallFaceProblem(raw.top_profile, raw.bottom_profile, 1)) return null;
+  const ring = [...face.bottom, ...[...face.top].reverse()];
+  return ring.filter((p, i) => {
+    const prev = ring[(i + ring.length - 1) % ring.length]!;
+    return p.t !== prev.t || p.h !== prev.h;
+  });
+}
