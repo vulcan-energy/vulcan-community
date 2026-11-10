@@ -67,38 +67,86 @@ export type ProfileLineFace = {
   kind: 'profiled-line-face';
   top_profile: ProfilePoint[];
   bottom_profile: ProfilePoint[];
+  /** Set when an edge was fitted to the roof (a snapshot, not a live link). */
+  top_mode?: 'roof';
+  bottom_mode?: 'roof';
 };
 
-export function buildProfileLineFaceFromTopHeights(heights: number[]): ProfileLineFace | null {
-  const clean = heights.map((h) => Number(h)).filter((h) => Number.isFinite(h) && h >= 0);
-  if (clean.length < 2) return null;
-  const n = clean.length;
-  const top_profile = clean.map((h, i) => ({
-    t: n === 1 ? 0 : i / (n - 1),
-    h,
-  }));
-  const bottom_profile = [
-    { t: 0, h: 0 },
-    { t: 1, h: 0 },
-  ];
-  return { kind: 'profiled-line-face', top_profile, bottom_profile };
+/** Smallest gap allowed between the top and bottom edge of a wall face. */
+export const MIN_WALL_FACE_GAP_M = 0.01;
+
+/**
+ * Reads `extra_json.geometry_face` as a profiled line face without sorting or repairing the
+ * points, so {@link wallFaceProblem} sees what is stored. Null when it is not a profiled face.
+ */
+export function readProfiledLineFace(extra: unknown): ProfileLineFace | null {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return null;
+  const gf = (extra as Record<string, unknown>).geometry_face as Record<string, unknown> | undefined;
+  if (!gf || typeof gf !== 'object' || gf.kind !== 'profiled-line-face') return null;
+  const points = (raw: unknown): ProfilePoint[] =>
+    (Array.isArray(raw) ? raw : []).map((p) => ({ t: Number(p?.t), h: Number(p?.h) }));
+  return {
+    kind: 'profiled-line-face',
+    top_profile: points(gf.top_profile),
+    bottom_profile: points(gf.bottom_profile),
+    ...(gf.top_mode === 'roof' ? { top_mode: 'roof' as const } : {}),
+    ...(gf.bottom_mode === 'roof' ? { bottom_mode: 'roof' as const } : {}),
+  };
 }
 
-export function extractTopHeightsFromExtraJson(extra: unknown): number[] | null {
-  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return null;
-  const gf = (extra as Record<string, unknown>).geometry_face;
-  if (!gf || typeof gf !== 'object' || Array.isArray(gf)) return null;
-  const kind = (gf as Record<string, unknown>).kind;
-  if (kind !== 'profiled-line-face') return null;
-  const raw = (gf as Record<string, unknown>).top_profile;
-  if (!Array.isArray(raw) || raw.length < 2) return null;
-  const pts = raw
-    .filter((p): p is { t: number; h: number } => {
-      if (!p || typeof p !== 'object' || Array.isArray(p)) return false;
-      const o = p as Record<string, unknown>;
-      return typeof o.t === 'number' && typeof o.h === 'number' && Number.isFinite(o.t) && Number.isFinite(o.h);
-    })
-    .sort((a, b) => a.t - b.t);
-  if (pts.length < 2) return null;
-  return pts.map((p) => p.h);
+/** Every t where either edge bends. */
+export function wallFaceBreakpoints(top: ProfilePoint[], bottom: ProfilePoint[]): number[] {
+  return Array.from(new Set([...top, ...bottom].map((p) => p.t))).sort((a, b) => a - b);
+}
+
+/**
+ * The one check for a wall face. Both edges are straight between points, so checking the gap
+ * at every bend of either edge proves it everywhere. Heights may not be negative (below the
+ * foot). Returns the message to show, or null.
+ */
+export function wallFaceProblem(
+  top: ProfilePoint[],
+  bottom: ProfilePoint[],
+  widthM: number,
+): string | null {
+  for (const [label, profile] of [['Top', top], ['Bottom', bottom]] as const) {
+    const ordered = profile.length >= 2 && profile.every((p, i) =>
+      Number.isFinite(p.t) && Number.isFinite(p.h) && p.t >= 0 && p.t <= 1
+      && (i === 0 || p.t > profile[i - 1].t));
+    if (!ordered) return `${label} points must run in order along the wall.`;
+    if (profile.some((p) => p.h < 0)) return `${label} heights cannot be below the base.`;
+  }
+  // The edges may meet at the wall ends (a gable triangle whose eaves sit on the foot); between
+  // the ends they must stay MIN_WALL_FACE_GAP_M apart.
+  const low = wallFaceBreakpoints(top, bottom).filter((t) => {
+    const gap = interpolateProfileHeight(top, t) - interpolateProfileHeight(bottom, t);
+    return gap < (t === 0 || t === 1 ? 0 : MIN_WALL_FACE_GAP_M) - 1e-9;
+  });
+  if (low.length === 0) return null;
+  const at = (t: number) => `${(t * widthM).toFixed(2)} m`;
+  return low.length === 1
+    ? `Top must be above bottom (at ${at(low[0])}).`
+    : `Top must be above bottom (from ${at(low[0])} to ${at(low[low.length - 1])}).`;
+}
+
+/** Two points at the same height: the shape a Flat edge stores. */
+export function isFlatProfile(profile: ProfilePoint[], h?: number): boolean {
+  return profile.length === 2 && profile[0].h === profile[1].h && (h === undefined || profile[0].h === h);
+}
+
+/**
+ * Export writes a profiled wall's base_height as its lowest edge (foot + lowest bottom point);
+ * the editor stores the foot. Import uses this to undo the offset so the foot round-trips.
+ * An invalid face is left alone: validation reports it.
+ */
+export function wallFootFromExportedBaseHeight(
+  baseHeight: number | undefined,
+  extra: unknown,
+): number | undefined {
+  const face = readProfiledLineFace(extra);
+  if (baseHeight === undefined || !face || wallFaceProblem(face.top_profile, face.bottom_profile, 1)) {
+    return baseHeight;
+  }
+  const lowest = Math.min(...face.bottom_profile.map((p) => p.h));
+  return lowest === 0 ? baseHeight : Math.round((baseHeight - lowest) * 1000) / 1000;
 }

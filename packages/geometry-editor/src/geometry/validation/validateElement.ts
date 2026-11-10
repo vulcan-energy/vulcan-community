@@ -76,6 +76,7 @@ import {
   getElementEffectiveArea,
   getElementGrossArea,
 } from '../../lib/elementArea';
+import { readProfiledLineFace, wallFaceProblem } from '../../lib/profileLineFace';
 import { inferPsiSourceFromValue } from '../../lib/simplifiedFabricMap';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
 import { getPApportionedLinearPsiForEditor } from '../thermalBridge/linearTbPsi';
@@ -893,6 +894,16 @@ function pushOpaqueSemanticFlagShapeIssuesIfNeeded(
 }
 
 // Validation utility function to check for missing or invalid data
+/** A profiled wall face that folds over or has points out of order: named, never repaired. */
+function profiledWallFaceIssue(element: Element): string | null {
+  const face = readProfiledLineFace((element as { extra_json?: unknown }).extra_json);
+  const coords = (element as { coordinates?: Array<{ x: number; y: number }> }).coordinates;
+  if (!face || coords?.length !== 2) return null;
+  const width = Math.hypot(coords[1].x - coords[0].x, coords[1].y - coords[0].y);
+  const problem = wallFaceProblem(face.top_profile, face.bottom_profile, width);
+  return problem ? `Wall shape (extra_json.geometry_face) is invalid: ${problem}` : null;
+}
+
 export const validateElementCore = (
   element: Element,
   context: ValidationContext,
@@ -912,6 +923,8 @@ export const validateElementCore = (
   const issues: ValidationIssue[] = ((context.sourceCsvVersion ?? 3) >= 3 || context.csvUpgradeRequested ? csvMigrationIssues([element], context.sourceCsvVersion) : []).map(issue => ({ source: 'geometry', fieldKey: 'u_value', message: `CSV_U_VALUE_MEANING_REQUIRED: ${issue.elementName} has legacy U-value ${issue.value}; choose its meaning in the migration review before saving.` }));
   // First, so it is the issue kept for its field.
   issues.push(...nonNumericCellIssues(element.nonNumericCells));
+  const wallFaceIssue = profiledWallFaceIssue(element);
+  if (wallFaceIssue) issues.push(geoIssue(wallFaceIssue, 'height'));
   const warnings: ValidationIssue[] = [];
   // Local aliases for the module-level helpers (geoIssue/schemaIssue/fhsIssue) so the long
   // switch below stays readable. Per-type validators in subsequent refactors call the
