@@ -35,6 +35,8 @@ type ElementOfType<T extends Element['type']> = Extract<Element, { type: T }>;
 export interface WaterPipeworkFormState {
   location: '' | 'internal' | 'external';
   setLocation: (value: '' | 'internal' | 'external') => void;
+  pipeworkType: '' | 'primary' | 'distribution';
+  setPipeworkType: (value: '' | 'primary' | 'distribution') => void;
   /** Shared with ThermalBridgeLinear/MechanicalVentilationDuctwork — see
    * module header comment. */
   serviceLine: ServiceLineFormGroup;
@@ -42,10 +44,13 @@ export interface WaterPipeworkFormState {
 
 function useFormState(ctx: ElementFormStateCtx): WaterPipeworkFormState {
   const [location, setLocation] = useState<'' | 'internal' | 'external'>('');
+  const [pipeworkType, setPipeworkType] = useState<'' | 'primary' | 'distribution'>('');
 
   return {
     location,
     setLocation,
+    pipeworkType,
+    setPipeworkType,
     serviceLine: ctx.serviceLine,
   };
 }
@@ -57,11 +62,13 @@ export const waterPipeworkFormModule: ElementFormModule<WaterPipeworkFormState> 
   hydrate(state, element) {
     if (element.type !== 'WaterPipework') return;
     state.setLocation('location' in element ? element.location ?? '' : '');
+    state.setPipeworkType('pipework_type' in element ? element.pipework_type ?? '' : '');
     hydrateServiceLineFromElement(state.serviceLine, element);
   },
 
   reset(state) {
     state.setLocation('');
+    state.setPipeworkType('');
     resetServiceLine(state.serviceLine);
   },
 
@@ -70,14 +77,14 @@ export const waterPipeworkFormModule: ElementFormModule<WaterPipeworkFormState> 
       ...ctx.baseData,
       simplified_pipework: false,
       location: state.location || undefined,
-      pipework_type: 'primary',
+      pipework_type: state.pipeworkType || undefined,
       length: state.serviceLine.lengthInput.value,
       zoneId: undefined, // Global object
     } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {
-    const { location, setLocation, serviceLine } = state;
+    const { location, setLocation, pipeworkType, setPipeworkType, serviceLine } = state;
     const { elementType, renderFieldLabel, registerBaseFieldRefs, commitExistingElementDraft } = ctx;
 
     return (
@@ -94,6 +101,24 @@ export const waterPipeworkFormModule: ElementFormModule<WaterPipeworkFormState> 
             options={[
               { value: 'internal', label: 'Internal' },
               { value: 'external', label: 'External' },
+            ]}
+            variant="ghost"
+            size="md"
+          />
+        </div>
+        {renderFieldLabel('Pipework Type:', elementType)}
+        <div className="element-input" ref={registerBaseFieldRefs('pipework_type')}>
+          <StandardDropdown
+            value={pipeworkType}
+            onChange={(value) => {
+              const nextValue = value as ElementOfType<'WaterPipework'>['pipework_type'];
+              setPipeworkType(nextValue);
+              commitExistingElementDraft({ pipework_type: nextValue });
+            }}
+            options={[
+              { value: '', label: 'Select pipework type' },
+              { value: 'primary', label: 'Primary' },
+              { value: 'distribution', label: 'Distribution' },
             ]}
             variant="ghost"
             size="md"

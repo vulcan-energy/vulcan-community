@@ -23,6 +23,7 @@ import {
   type ElementFormRenderCtx,
 } from './elementForms/types';
 import { electricBatteryFormModule } from './elementForms/electricBattery';
+import { simplifiedThermalBridgingOffered } from '../lib/schemaCache';
 import { thermalBridgeLinearFormModule } from './elementForms/thermalBridgeLinear';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
 import { buildLightingPatch, lightingFormModule } from './elementForms/lighting';
@@ -1055,6 +1056,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     [zones],
   );
 
+  const targetAcceptsThermalBridgingTotal = simplifiedThermalBridgingOffered(schemaPort, complianceSettings.complianceValidationEnabled ? 'fhs' : 'core');
   const selectedZoneValidation = useMemo(() => {
     if (selection?.type !== 'zone') return null;
     const zone = getZoneById(selection.id);
@@ -1063,6 +1065,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       elementsById,
       complianceValidationEnabled: complianceSettings.complianceValidationEnabled || false,
       primaryFhsZoneId,
+      simplifiedThermalBridgingOffered: targetAcceptsThermalBridgingTotal,
     });
   }, [
     selection,
@@ -1070,6 +1073,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     elementsById,
     complianceSettings.complianceValidationEnabled,
     primaryFhsZoneId,
+    targetAcceptsThermalBridgingTotal,
   ]);
 
   /** Space footprints in the selected zone with no `room_type` — shown next to Space labeller (critical chip). */
@@ -5390,6 +5394,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   />
                   <div style={INLINE_FIELD_NOTE_STYLE}>Floor area × height. To reach a specific volume, change Height.</div>
                 </div>
+                {(targetAcceptsThermalBridgingTotal || simplifiedThermalBridging) && <>
                 <div className="element-label">
                   Simplified Thermal Bridging
                 </div>
@@ -5420,6 +5425,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     variant="warning"
                   />
                 </div>
+                </>}
                 {isExistingZoneSelection() && onOpenSpaceLabeller && !showFhsAreaSplit ? (
                   <div
                     className="element-editor-full-row element-editor-inline-actions"

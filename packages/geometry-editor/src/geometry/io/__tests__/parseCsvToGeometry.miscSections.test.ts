@@ -349,7 +349,7 @@ Mixer Shower,HotWaterDemand,MixerShower,8.5,,,TRUE,"3.000,4.000,1.000","{""wwhrs
     expect(shower?.extra_json).toEqual({ wwhrs: 'system_a' });
   });
 
-  it('defaults Water Pipework rows without pipework_type to primary', () => {
+  it('leaves pipework_type blank for Water Pipework rows that do not give it', () => {
     const csv = `
 Metadata,,,,,,,,,,,,,
 GlobalOrientationOffset,0.0,,,,,,,,,,,,,
@@ -363,7 +363,7 @@ Pipe,WaterPipework,3.5,internal,"0.000,0.000,0.000|3.500,0.000,0.000","{}"
     const pipe = elements.find((e) => e.type === 'WaterPipework' && e.name === 'Pipe');
 
     expect(pipe).toBeDefined();
-    expect((pipe as any).pipework_type).toBe('primary');
+    expect((pipe as any).pipework_type).toBeUndefined();
   });
 
   it('maps additive object base_height columns to viewer-only elevation metadata outside ventilation', () => {
@@ -420,6 +420,10 @@ Basement,Living,BuildingElementGround,25,5,0.2,20,Heated_basement,2.8,,0.9,,"0,0
     const csv = `
 Metadata,,,,,,,,,,,,,
 GlobalOrientationOffset,0.0,,,,,,,,,,,,,
+
+Zone,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,50,20,2.5,FALSE
 
 Systems,,,,,,,,,,,,,
 Name,Zone,system_type,coords,extra_json

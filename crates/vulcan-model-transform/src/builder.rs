@@ -4372,10 +4372,13 @@ impl JSONBuilder {
                         // Shared finalization projects and reports unsupported fields.
                         mechanical_ventilation.insert(vent_name.to_string(), Value::Object(mv_obj));
                     }
-                    _ => {
-                        // Skip other types for now
-                        continue;
-                    }
+                    // Read with the MechanicalVentilation row they name as parent_element.
+                    "MechanicalVentilationDuctwork" | "MechanicalVentilationTerminal" => {}
+                    other => self.push_non_fatal(
+                        "E065",
+                        "Ventilation Systems",
+                        &format!("Ventilation Systems row '{vent_name}' has unknown Type '{other}', so it is not in the model. Correct the Type."),
+                    ),
                 }
             }
             // Merge into InfiltrationVentilation with CSV-authoritative behavior:
@@ -5869,14 +5872,23 @@ impl JSONBuilder {
             .get("volume")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
-        let mut total_livingroom_area = first_zone_data
+        // Every zone adds its rest-of-dwelling area; the living room is in the first zone, and a
+        // later zone without a living-room area has none. A zone without a rest-of-dwelling area,
+        // or a first zone without a living-room area, leaves that value out of the consolidated
+        // zone, so validation names it as it does for a single zone (E026); no 0.0 stands in for it.
+        let zone_values = |key: &'static str| {
+            sorted_zone_names.iter().map(move |name| {
+                zones_obj
+                    .get(name)
+                    .and_then(|zone| zone.get(key))
+                    .and_then(Value::as_f64)
+            })
+        };
+        let total_restofdwelling_area: Option<f64> = zone_values("restofdwelling_area").sum();
+        let total_livingroom_area = first_zone_data
             .get("livingroom_area")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        let mut total_restofdwelling_area = first_zone_data
-            .get("restofdwelling_area")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
+            .and_then(Value::as_f64)
+            .map(|_| zone_values("livingroom_area").flatten().sum::<f64>());
         let mut height_sum = first_zone_data
             .get("height")
             .and_then(|v| v.as_f64())
@@ -5914,18 +5926,6 @@ impl JSONBuilder {
             }
             if let Some(volume) = other_zone_obj.get("volume").and_then(|v| v.as_f64()) {
                 total_volume += volume;
-            }
-            if let Some(livingroom_area) = other_zone_obj
-                .get("livingroom_area")
-                .and_then(|v| v.as_f64())
-            {
-                total_livingroom_area += livingroom_area;
-            }
-            if let Some(restofdwelling_area) = other_zone_obj
-                .get("restofdwelling_area")
-                .and_then(|v| v.as_f64())
-            {
-                total_restofdwelling_area += restofdwelling_area;
             }
             if let Some(height) = other_zone_obj.get("height").and_then(|v| v.as_f64()) {
                 if height > 0.0 {
@@ -6028,14 +6028,15 @@ impl JSONBuilder {
             "volume".to_string(),
             Value::Number(serde_json::Number::from_f64(total_volume).unwrap()),
         );
-        first_zone.insert(
-            "livingroom_area".to_string(),
-            Value::Number(serde_json::Number::from_f64(total_livingroom_area).unwrap()),
-        );
-        first_zone.insert(
-            "restofdwelling_area".to_string(),
-            Value::Number(serde_json::Number::from_f64(total_restofdwelling_area).unwrap()),
-        );
+        for (key, total) in [
+            ("livingroom_area", total_livingroom_area),
+            ("restofdwelling_area", total_restofdwelling_area),
+        ] {
+            match total {
+                Some(total) => first_zone.insert(key.to_string(), serde_json::json!(total)),
+                None => first_zone.remove(key),
+            };
+        }
         // Set height if we have any height values (even if only one zone had height)
         // Skip inserting height for FHS schema (not allowed by FHS schema)
         // Note: This function only runs when is_fhs_schema is true, but we check anyway for safety
@@ -10769,6 +10770,151 @@ mod wet_emitter_tests {
         parser.parse_csv(csv).expect("CSV should parse")
     }
 
+    /// The editor's row Types (`CSV_ROW_TYPES`, between the csv-row-types markers in
+    /// packages/geometry-editor/src/geometry/io/ingestGeometryTabularSections.ts) are the Types the
+    /// converter routes: every Type the editor loads or names as unkept converts, and every other
+    /// candidate Type is rejected.
+    // ponytail: the candidates are the Types either side names; a new Type the converter routes is
+    // caught once it is added to the candidate list or the alias list below.
+    #[test]
+    fn editor_row_types_match_the_converter() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/geometry-editor/src/geometry/io/ingestGeometryTabularSections.ts"
+        ));
+        let table = source
+            .split("// csv-row-types:begin")
+            .nth(1)
+            .and_then(|rest| rest.split("// csv-row-types:end").next())
+            .and_then(|block| Some(&block[block.find('{')?..=block.rfind('}')?]))
+            .expect("CSV_ROW_TYPES between its markers");
+        let editor: Value = serde_json::from_str(table).expect("CSV_ROW_TYPES is JSON");
+        let names = |v: &Value| -> Vec<String> {
+            match v {
+                Value::Array(items) => items
+                    .iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect(),
+                Value::Object(map) => map.keys().cloned().collect(),
+                _ => Vec::new(),
+            }
+        };
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut building = names(&editor["buildingTypes"]);
+        building.extend(names(&editor["buildingAliases"]));
+        let mut sections = vec![("Exposed Elements", building, "Building")];
+        for (section, types) in editor["rowTypes"].as_object().expect("rowTypes") {
+            sections.push((section.as_str(), names(types), section.as_str()));
+        }
+        // The Types the Systems, Ventilation Systems and bridge routing in this file names.
+        let mut candidates: Vec<String> = [
+            "Unknown",
+            "System",
+            "ElectricBattery",
+            "SpaceHeatSystem",
+            "WetDistribution",
+            "MechanicalVentilation",
+            "Vents",
+            "MechanicalVentilationDuctwork",
+            "MechanicalVentilationTerminal",
+            "ThermalBridgeLinear",
+            "ThermalBridgePoint",
+        ]
+        .map(String::from)
+        .to_vec();
+        candidates.extend(
+            [
+                "Wall", "Roof", "Door", "Window", "Floor", "Party", "Basement", "Internal",
+            ]
+            .iter()
+            .filter(|alias| builder.map_csv_type_to_schema_type(alias) != **alias)
+            .map(|alias| alias.to_string()),
+        );
+        for (_, types, unkept) in &sections {
+            candidates.extend(types.iter().cloned());
+            candidates.extend(names(&editor["unkeptTypes"][unkept]));
+        }
+        candidates.sort();
+        candidates.dedup();
+        let extra_json = r#""{""SpaceHeatSystem"":{""R1"":{""type"":""InstantElecHeater""}}}""#;
+        for (section, types, unkept) in &sections {
+            let editor_types: Vec<String> = types
+                .iter()
+                .cloned()
+                .chain(names(&editor["unkeptTypes"][unkept]))
+                .collect();
+            // A bridge row takes any Type with a defaults template and leaves it to schema validation,
+            // so only its own Types and an unknown one are tried there.
+            let pool = if *section == "Thermal Bridging Elements" {
+                editor_types
+                    .iter()
+                    .cloned()
+                    .chain(["Unknown".to_string()])
+                    .collect()
+            } else {
+                candidates.clone()
+            };
+            for candidate in &pool {
+                let row = match *section {
+                    "Exposed Elements" => format!("Name,Zone,Type,area,pitch,width,height,floor_type,perimeter,total_area\nR1,Living,{candidate},10,90,4,2.5,Slab_no_edge_insulation,13,10"),
+                    "Thermal Bridging Elements" => format!("Name,Zone,Type,length,linear_thermal_transmittance\nR1,Living,{candidate},4,0.1"),
+                    "Systems" => format!("Name,Zone,Type,subcategory,extra_json\nR1,Living,{candidate},SpaceHeatSystem,{extra_json}"),
+                    _ => format!("Name,Type,vent_type,mid_height_air_flow_path,area_cm2,orientation360,pitch\nR1,{candidate},MVHR,1.5,225,180,90"),
+                };
+                let csv = format!(
+                    "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,40\n\n{section}\n{row}\n"
+                );
+                let mut builder =
+                    JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+                let fatal = builder
+                    .build_json(&parse_csv(&csv))
+                    .err()
+                    .into_iter()
+                    .map(|e| (e.code.clone(), e.message.clone()));
+                let rejected = fatal
+                    .chain(
+                        builder
+                            .take_non_fatal_errors()
+                            .into_iter()
+                            .map(|e| (e.code, e.message)),
+                    )
+                    .any(|(code, message)| {
+                        ["E028", "E056", "E065"].contains(&code.as_str())
+                            && message.contains(candidate.as_str())
+                    });
+                assert_eq!(
+                    !rejected,
+                    editor_types.contains(candidate),
+                    "{section} Type '{candidate}'"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ventilation_row_with_an_unknown_type_is_reported() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Ventilation Systems
+Name,Type,mid_height_air_flow_path,area_cm2,orientation360,pitch
+Vent 1,Vent,1.5,225,180,90
+"#;
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder
+            .merge_ventilation_systems(&mut result, &parse_csv(csv))
+            .expect("Ventilation Systems should merge");
+        let errors = builder.take_non_fatal_errors();
+        assert!(
+            errors.iter().any(|e| e.code == "E065"
+                && e.message
+                    .contains("Ventilation Systems row 'Vent 1' has unknown Type 'Vent'")),
+            "{errors:?}"
+        );
+    }
+
     #[test]
     fn multiple_radiators_aggregated_into_single_system() {
         // CSV has 2 radiator rows for the same zone
@@ -12889,6 +13035,58 @@ Zone 2,Zone,80,40,0,40
             zone.get("area").is_none(),
             "FHS consolidated zone should not retain legacy area field"
         );
+    }
+
+    #[test]
+    fn fhs_zone_consolidation_does_not_invent_a_missing_area_split() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Zone 1,Zone,100,50
+Zone 2,Zone,80,40
+"#;
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder
+            .build_zone_structure(&mut result, &data)
+            .expect("Zone structure should build");
+        builder
+            .consolidate_zones_for_fhs(&mut result)
+            .expect("FHS consolidation should succeed");
+        // Left out, as for a single zone, so validation blocks on it (E026).
+        let zone = result["Zone"]["Zone 1"].as_object().expect("Zone 1");
+        assert!(zone.get("livingroom_area").is_none(), "{zone:?}");
+        assert!(zone.get("restofdwelling_area").is_none(), "{zone:?}");
+    }
+
+    #[test]
+    fn fhs_zone_consolidation_leaves_out_a_rest_of_dwelling_area_a_later_zone_lacks() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area,livingroom_area,restofdwelling_area
+Zone 1,Zone,100,50,20,30
+Zone 2,Zone,80,40,,
+"#;
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder
+            .build_zone_structure(&mut result, &data)
+            .expect("Zone structure should build");
+        builder
+            .consolidate_zones_for_fhs(&mut result)
+            .expect("FHS consolidation should succeed");
+        // Zone 2 adds no 0.0; the living room's area is Zone 1's.
+        let zone = result["Zone"]["Zone 1"].as_object().expect("Zone 1");
+        assert_eq!(
+            zone.get("livingroom_area"),
+            Some(&serde_json::json!(20.0)),
+            "{zone:?}"
+        );
+        assert!(zone.get("restofdwelling_area").is_none(), "{zone:?}");
     }
 
     #[test]

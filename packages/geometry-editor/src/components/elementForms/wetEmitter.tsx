@@ -116,11 +116,7 @@ export const wetEmitterFormModule: ElementFormModule<WetEmitterFormState> = {
     state.setSubcategory('subcategory' in element ? element.subcategory ?? '' : '');
     state.setSpaceHeatSystem('space_heat_system' in element ? (element.space_heat_system ?? '') : '');
     state.areaInput.setValue('area' in element ? element.area ?? '' : '');
-    state.unitNumberInput.setValue(
-      'unit_number' in element
-        ? (typeof element.unit_number === 'number' ? Math.round(element.unit_number) : (element.unit_number ?? ''))
-        : ''
-    );
+    state.unitNumberInput.setValue('unit_number' in element ? element.unit_number ?? '' : '');
     try {
       const currentElement = element as any;
       const coords = currentElement.coordinates || [];

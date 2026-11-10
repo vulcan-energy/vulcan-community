@@ -43,15 +43,17 @@ import type {
 } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import {
+  csvMetadataValue,
   parseCsvLine,
   parseCsvSections,
   stripLegacyBuildingServicesBlocks,
   findTabularGeometryCsvStart,
 } from './csvSectionRows';
-import { ingestGeometryTabularSections } from './ingestGeometryTabularSections';
+import { ingestGeometryTabularSections, NUMBER_CELL } from './ingestGeometryTabularSections';
 import { normalizeCsvConstructionProvenance } from './csvSemanticMigration';
 import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
 import { shiftPhysicalPartHeight } from '../../lib/windowOpenings';
+import { METADATA_INPUT_LABELS, metadataSettingKey } from '../../lib/globalSettingsValidation';
 
 export const VULCAN_CSV_VERSION_METADATA_KEY = 'VulcanCsvVersion';
 export const LEGACY_VULCAN_CSV_VERSION = 1;
@@ -164,7 +166,10 @@ export type ComplianceSettings = {
   HeatingControlType?: 'SeparateTempControl' | 'SeparateTimeAndTempControl';
   PartGcompliance?: boolean;
   ColdWaterSource?: 'mains water' | 'header tank';
+  /** The file's ComplianceValidationEnabled row as the converter reads it (TRUE or FALSE in any case); the editor store keeps it on. */
   complianceValidationEnabled?: boolean;
+  /** The file's ComplianceValidationEnabled cell as typed: the last non-blank row, or blank when every row is blank. */
+  complianceValidationCell?: string;
   /** When false, this model is hidden from the Scenarios base-model picker (CSV row `ScenariosBaseModelEnabled`). */
   scenariosBaseModelEnabled?: boolean;
   AirPermeability_test_pressure?: 'Standard' | 'Pulse test only';
@@ -189,6 +194,13 @@ export type ComplianceSettings = {
   storeys_in_dwelling?: number;
   storey_of_dwelling?: number;
   storeys_in_building?: number;
+  /**
+   * Model-input rows the file has with a value the editor cannot read, by row: blank (E066) or not a
+   * value the converter accepts (E055, E026), and ScenariosBaseModelEnabled when not TRUE or FALSE. Never filled; the save writes the cell back as it was.
+   */
+  unreadMetadataRows?: Record<string, string>;
+  /** Model-input rows the file lacks: they take the value the converter uses for an absent row. */
+  absentMetadataRows?: string[];
 };
 
 function parseAirPermeabilityTestPressure(
@@ -198,8 +210,6 @@ function parseAirPermeabilityTestPressure(
   if (!value) return undefined;
   if (value === 'Pulse test only') return 'Pulse test only';
   if (value === 'Standard') return 'Standard';
-  const legacyNumeric = Number.parseFloat(value);
-  if (Number.isFinite(legacyNumeric)) return 'Standard';
   return undefined;
 }
 
@@ -287,7 +297,7 @@ export const parseCsvToGeometry = (
   let detectedProvenanceMarkersVersion: number | undefined;
   let detectedVulcanCsvVersion: string | undefined;
   let detectedDefaultsPath: string | undefined;
-  let targetBundleId: string | undefined;
+  const targetBundleId = csvMetadataValue(csvContent, 'TargetBundleId') || undefined;
   let detectedModelId: string | undefined;
   let detectedModelVersion: number | undefined;
   let detectedSchemaProfile: ModelSchemaProfile | undefined;
@@ -310,18 +320,34 @@ export const parseCsvToGeometry = (
   let detectedDetailedBridgePsiProfileId: string | undefined;
   let detectedDetailedBridgePsiProfileLabel: string | undefined;
   const complianceSettings: ComplianceSettings = {};
+  const metadataRowsInFile = new Set<string>();
+  const modelInputCells: Record<string, string> = {};
+  // A finite number as the converter reads a cell; anything else leaves the setting unread.
+  // ScenariosBaseModelEnabled: TRUE or FALSE in any case; other text stays unset and saves as typed.
+  const workflowFlag = (key: string, raw: string | undefined): boolean | undefined => {
+    const cell = raw?.trim() ?? '';
+    if (/^(TRUE|FALSE)$/i.test(cell)) return cell.toUpperCase() === 'TRUE';
+    (complianceSettings.unreadMetadataRows ??= {})[key] = cell;
+    return undefined;
+  };
+  const metadataNumber = (line: string): number => {
+    const cell = (line.split(',')[1] ?? '').trim();
+    return NUMBER_CELL.test(cell) ? Number(cell) : NaN;
+  };
 
   for (const line of metadataLines) {
     if (line.startsWith('Metadata,')) continue;
     const metadataFields = parseCsvLine(line);
     const hostMetadataKey = metadataFields[0]?.trim();
+    if (hostMetadataKey) metadataRowsInFile.add(hostMetadataKey);
+    if (hostMetadataKey && hostMetadataKey in METADATA_INPUT_LABELS) modelInputCells[hostMetadataKey] = metadataFields[1]?.trim() ?? '';
     if (hostMetadataKey && hostDocumentMetadataKeys.has(hostMetadataKey)) {
       const value = metadataFields[1]?.trim();
       if (value) detectedHostDocumentMetadata[hostMetadataKey] = value;
       continue;
     }
     if (line.startsWith('GlobalOrientationOffset,')) {
-      const offset = parseFloat(line.split(',')[1] ?? '');
+      const offset = metadataNumber(line);
       if (!isNaN(offset)) globalOffset = offset;
       continue;
     }
@@ -332,7 +358,6 @@ export const parseCsvToGeometry = (
       }
       continue;
     }
-    if (hostMetadataKey === 'TargetBundleId') { targetBundleId = metadataFields[1]?.trim() || undefined; }
     if (hostMetadataKey === 'ModelId') {
       detectedModelId = metadataFields[1]?.trim() || undefined;
       continue;
@@ -478,21 +503,22 @@ export const parseCsvToGeometry = (
     if (line.startsWith('DefaultThermalBridging,')) continue;
     if (line.startsWith('PartO_active_cooling_required,')) {
       const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.PartO_active_cooling_required = value === 'TRUE';
+      // Anything but TRUE or FALSE (blank included) stays unset and is reported; it is not \"no\".
+      if (value === 'TRUE' || value === 'FALSE') complianceSettings.PartO_active_cooling_required = value === 'TRUE';
       continue;
     }
     if (line.startsWith('NumberOfBedrooms,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.NumberOfBedrooms = Math.max(0, Math.floor(value));
+      const value = metadataNumber(line);
+      if (Number.isInteger(value) && value >= 0) complianceSettings.NumberOfBedrooms = value;
       continue;
     }
     if (line.startsWith('NumberOfWetRooms,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.NumberOfWetRooms = Math.max(0, Math.floor(value));
+      const value = metadataNumber(line);
+      if (Number.isInteger(value) && value >= 0) complianceSettings.NumberOfWetRooms = value;
       continue;
     }
     if (line.startsWith('GroundFloorArea,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
+      const value = metadataNumber(line);
       if (!isNaN(value) && value >= 0) complianceSettings.GroundFloorArea = value;
       continue;
     }
@@ -505,7 +531,8 @@ export const parseCsvToGeometry = (
     }
     if (line.startsWith('PartGcompliance,')) {
       const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.PartGcompliance = value === 'TRUE';
+      // Anything but TRUE or FALSE (blank included) stays unset and is reported; it is not \"no\".
+      if (value === 'TRUE' || value === 'FALSE') complianceSettings.PartGcompliance = value === 'TRUE';
       continue;
     }
     if (line.startsWith('ColdWaterSource,')) {
@@ -516,13 +543,17 @@ export const parseCsvToGeometry = (
       continue;
     }
     if (line.startsWith('ComplianceValidationEnabled,')) {
-      const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.complianceValidationEnabled = value === 'TRUE';
+      // As the converter reads it (apply_fhs_implicit_false_root_booleans): the last non-blank row
+      // wins, a blank or absent row is on, and other text blocks (unsetMetadataInputIssues).
+      const cell = metadataFields[1]?.trim() ?? '';
+      if (cell === '' && complianceSettings.complianceValidationCell !== undefined) continue;
+      complianceSettings.complianceValidationCell = cell;
+      complianceSettings.complianceValidationEnabled = /^(TRUE|FALSE)$/i.test(cell) ? cell.toUpperCase() === 'TRUE' : undefined;
       continue;
     }
     if (line.startsWith('ScenariosBaseModelEnabled,')) {
-      const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.scenariosBaseModelEnabled = value === 'TRUE';
+      const value = workflowFlag('ScenariosBaseModelEnabled', metadataFields[1]);
+      if (value !== undefined) complianceSettings.scenariosBaseModelEnabled = value;
       continue;
     }
     if (line.startsWith('AirPermeability_test_pressure,')) {
@@ -531,12 +562,12 @@ export const parseCsvToGeometry = (
       continue;
     }
     if (line.startsWith('AirPermeability_test_result,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
+      const value = metadataNumber(line);
       if (!isNaN(value)) complianceSettings.AirPermeability_test_result = value;
       continue;
     }
     if (line.startsWith('AirPermeability_ventilation_zone_height,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
+      const value = metadataNumber(line);
       if (!isNaN(value)) complianceSettings.AirPermeability_ventilation_zone_height = value;
       continue;
     }
@@ -555,58 +586,60 @@ export const parseCsvToGeometry = (
       continue;
     }
     if (line.startsWith('Ventilation_altitude,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
+      const value = metadataNumber(line);
       if (!isNaN(value)) complianceSettings.Ventilation_altitude = value;
       continue;
     }
     if (line.startsWith('Ventilation_ventilation_zone_base_height,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
+      const value = metadataNumber(line);
       if (!isNaN(value)) complianceSettings.Ventilation_ventilation_zone_base_height = value;
       continue;
     }
     if (line.startsWith('Ventilation_noise_nuisance,')) {
       const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.Ventilation_noise_nuisance = value === 'TRUE';
+      // Anything but TRUE or FALSE (blank included) stays unset and is reported; it is not \"no\".
+      if (value === 'TRUE' || value === 'FALSE') complianceSettings.Ventilation_noise_nuisance = value === 'TRUE';
       continue;
     }
     if (line.startsWith('BuildingLength,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
+      const value = metadataNumber(line);
       if (!isNaN(value)) complianceSettings.BuildingLength = value;
       continue;
     }
     if (line.startsWith('BuildingWidth,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
+      const value = metadataNumber(line);
       if (!isNaN(value)) complianceSettings.BuildingWidth = value;
       continue;
     }
     if (line.startsWith('NumberOfHabitableRooms,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.NumberOfHabitableRooms = Math.max(0, Math.floor(value));
+      const value = metadataNumber(line);
+      if (Number.isInteger(value) && value >= 0) complianceSettings.NumberOfHabitableRooms = value;
       continue;
     }
     if (line.startsWith('NumberOfHotTappedRooms,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.NumberOfHotTappedRooms = Math.max(0, Math.floor(value));
+      const value = metadataNumber(line);
+      if (Number.isInteger(value) && value >= 0) complianceSettings.NumberOfHotTappedRooms = value;
       continue;
     }
     if (line.startsWith('NumberOfUtilityRooms,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.NumberOfUtilityRooms = Math.max(0, Math.floor(value));
+      const value = metadataNumber(line);
+      if (Number.isInteger(value) && value >= 0) complianceSettings.NumberOfUtilityRooms = value;
       continue;
     }
     if (line.startsWith('NumberOfBathrooms,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.NumberOfBathrooms = Math.max(0, Math.floor(value));
+      const value = metadataNumber(line);
+      if (Number.isInteger(value) && value >= 0) complianceSettings.NumberOfBathrooms = value;
       continue;
     }
     if (line.startsWith('NumberOfSanitaryAccommodations,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.NumberOfSanitaryAccommodations = Math.max(0, Math.floor(value));
+      const value = metadataNumber(line);
+      if (Number.isInteger(value) && value >= 0) complianceSettings.NumberOfSanitaryAccommodations = value;
       continue;
     }
     if (line.startsWith('KitchenExtractorHoodExternal,')) {
       const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.KitchenExtractorHoodExternal = value === 'TRUE';
+      // Anything but TRUE or FALSE (blank included) stays unset and is reported; it is not \"no\".
+      if (value === 'TRUE' || value === 'FALSE') complianceSettings.KitchenExtractorHoodExternal = value === 'TRUE';
       continue;
     }
     if (line.startsWith('General_build_type,')) {
@@ -622,20 +655,25 @@ export const parseCsvToGeometry = (
       continue;
     }
     if (line.startsWith('General_storeys_in_dwelling,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.storeys_in_dwelling = Math.max(1, Math.floor(value));
+      const value = metadataNumber(line);
+      if (Number.isInteger(value) && value >= 1) complianceSettings.storeys_in_dwelling = value;
       continue;
     }
     if (line.startsWith('General_storey_of_dwelling,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.storey_of_dwelling = Math.floor(value);
+      const value = metadataNumber(line);
+      if (Number.isInteger(value)) complianceSettings.storey_of_dwelling = value;
       continue;
     }
     if (line.startsWith('General_storeys_in_building,')) {
-      const value = parseFloat(line.split(',')[1] ?? '');
-      if (!isNaN(value)) complianceSettings.storeys_in_building = Math.max(1, Math.floor(value));
+      const value = metadataNumber(line);
+      if (Number.isInteger(value) && value >= 1) complianceSettings.storeys_in_building = value;
       continue;
     }
+  }
+  complianceSettings.absentMetadataRows = Object.keys(METADATA_INPUT_LABELS).filter((key) => !metadataRowsInFile.has(key));
+  const settingValues = complianceSettings as Record<string, unknown>;
+  for (const [key, cell] of Object.entries(modelInputCells)) {
+    if (settingValues[metadataSettingKey(key)] === undefined) (complianceSettings.unreadMetadataRows ??= {})[key] = cell;
   }
 
   const warnings: string[] = [];
@@ -680,6 +718,12 @@ export const parseCsvToGeometry = (
       authorityVersion,
       detectedZoneOverrideMarkers[zone.name],
     );
+  }
+  // The converter does not read Space Labels. In the editor a label adds area and room counts to its
+  // zone only with a zone, a room type and an outline, so name the rows that add nothing.
+  const idleLabels = newSpaceLabels.filter((label) => !label.zoneId || !label.room_type || label.coordinates.length < 3);
+  if (idleLabels.length > 0) {
+    warnings.push(`${idleLabels.length === 1 ? 'This Space Labels row adds' : 'These Space Labels rows add'} no area or room count to a zone: ${idleLabels.map((label) => label.name || '(no name)').join(', ')}. A label counts once it has a zone, a room type and an outline.`);
   }
   for (const label of newSpaceLabels) {
     promoteOverrideMarkersOnImport(

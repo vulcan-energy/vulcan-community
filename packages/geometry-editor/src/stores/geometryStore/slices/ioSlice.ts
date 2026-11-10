@@ -16,10 +16,7 @@ import {
 } from '../../../lib/zoneDerivation';
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
-import {
-  resolveEffectiveDwellingDetails,
-  resolveEffectiveVentilationBaseHeight,
-} from '../../../lib/effectiveDwellingDetails';
+import { resolveEffectiveVentilationBaseHeight } from '../../../lib/effectiveDwellingDetails';
 import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoercion';
 import {
   CURRENT_VULCAN_CSV_VERSION,
@@ -27,6 +24,10 @@ import {
   parseCsvToGeometry,
   VULCAN_CSV_VERSION_METADATA_KEY,
 } from '../../../geometry/io/parseCsvToGeometry';
+import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionRows';
+import { derivePvDimensionsFromCoords } from '../../../lib/pvPanelFootprint';
+import { BUILDING_ALIASES } from '../../../geometry/io/ingestGeometryTabularSections';
+import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/globalSettingsValidation';
 import {
   encodeGuideOverlayMetadataValue,
   encodeGuideOverlaySourceMetadataValue,
@@ -78,7 +79,7 @@ import { thermalBridgeExtraJsonForCsv } from '../../../geometry/thermalBridge/no
 import {
   encodePromotedExtraJsonFields,
   EXPECTED_SECTION_HEADERS,
-  zoneExportHeaders,
+  ZONE_HEADERS_FHS,
 } from '../../../geometry/io/geometryCsvLayouts';
 import {
   defaultsReadPathAttempts,
@@ -152,6 +153,10 @@ export interface IoSlice {
   setLastSavedCsv: (csv: string | null) => void;
   /** Internal cancellation hook used by document-boundary reset actions. */
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => void;
+  /** True from a load that ended before its defaults arrived until they arrive. */
+  loadAwaitsDefaults: boolean;
+  /** The rows the last loaded file lacks that the defaults filled (absentMetadataRowFill); load UIs show it as a notice. */
+  lateLoadNotice: string | null;
 }
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], IoSlice>;
 export type IoSliceOptions = Readonly<{
@@ -582,8 +587,16 @@ const reconstructSlopedDimensionOverrideFlags = (
     };
 
     const csvWidth = typeof record.width === 'number' && Number.isFinite(record.width) ? record.width : undefined;
+    const csvHeightValue = typeof record.height === 'number' && Number.isFinite(record.height) ? record.height : undefined;
+    // An override is an authored rectangle. Columns whose product is not the row's own area are
+    // not one, so the polygon (and with it the authored area) governs.
+    const csvArea = (element as { area?: unknown }).area;
+    const authoredRectangle = typeof csvArea !== 'number' || !Number.isFinite(csvArea)
+      || csvWidth === undefined || csvHeightValue === undefined
+      || Math.abs(csvWidth * csvHeightValue - csvArea) <= Math.max(0.05, 0.01 * csvArea);
     if (
       csvWidth
+      && authoredRectangle
       && !isOverrideDescriptorAuthoritative(
         SLOPED_WIDTH_OVERRIDE_DESCRIPTOR,
         provenanceMarkersVersion,
@@ -602,6 +615,7 @@ const reconstructSlopedDimensionOverrideFlags = (
     const csvHeight = typeof record.height === 'number' && Number.isFinite(record.height) ? record.height : undefined;
     if (
       csvHeight
+      && authoredRectangle
       && !isOverrideDescriptorAuthoritative(
         SLOPED_HEIGHT_OVERRIDE_DESCRIPTOR,
         provenanceMarkersVersion,
@@ -665,7 +679,16 @@ const reconstructPvHostLinkAndOverrideFlags = (
       provenanceMarkersVersion,
     );
     Object.assign(panel, inferPvHostOverrideFlags(panel, derived));
-    Object.assign(panel, buildHostDerivedPatch(panel, derived));
+    // A blank base_height stays blank and blocks, as in the converter; the host gives no value on load.
+    Object.assign(panel, buildHostDerivedPatch(panel, panel.base_height === undefined ? { ...derived, base_height: undefined } : derived));
+    // A legacy row without size columns or pitch takes its slope size from the host's pitch.
+    if ((panel.width === undefined || panel.height === undefined) && panel.pitch !== undefined) {
+      const size = derivePvDimensionsFromCoords(panel.coordinates, panel.pitch);
+      if (size) {
+        panel.width ??= roundToTwoDecimals(size.width);
+        panel.height ??= roundToTwoDecimals(size.height);
+      }
+    }
   }
 };
 
@@ -688,6 +711,107 @@ const migrateElementsToNormalized = (
   return { elementsById, elementIds };
 };
 
+const NOT_REPLACEABLE_COLUMNS = new Set(['Name', 'Zone', 'coords', 'extra_json']);
+/**
+ * How the converter reads a row's Type (and, in Systems, the cells that route the row): rows that
+ * read the same give it the same model. It does not read the Type of these four sections' rows.
+ */
+const convertedType = (section: string, row: Record<string, string>): string | undefined => {
+  if (['Wet Emitters', 'Water Pipework', 'Combustion Appliances', 'Hot Water Outlets'].includes(section)) return '';
+  const type = row.Type?.trim() ?? '';
+  if (section.endsWith(' Elements')) return BUILDING_ALIASES[type] ?? type;
+  if (section !== 'Systems') return undefined;
+  const route = type || row.system_type?.trim() || row.subcategory?.trim() || '';
+  // A SpaceHeatSystem row loads only with its system in extra_json, which the converter reads as a System row's.
+  return route === 'SpaceHeatSystem' || route === 'System' ? `System ${route === 'System' ? row.subcategory?.trim() : route}` : route;
+};
+const TYPE_COLUMNS: Readonly<Record<string, readonly string[]>> = { Systems: ['Type', 'system_type', 'subcategory'] };
+/** A top-level extra_json value as text, or undefined when the cell has none. */
+const extraJsonField = (cell: string, field: string): string | undefined => {
+  try {
+    const value = (JSON.parse(cell) as Record<string, unknown>)?.[field];
+    return value === undefined ? undefined : String(value);
+  } catch {
+    return undefined;
+  }
+};
+const LEGACY_COLUMN: Readonly<Record<string, string>> = { shading_type: 'Type', start_angle: 'start angle', end_angle: 'end angle' };
+/**
+ * One load notice listing every cell of a zone or element row, a column the file lacks included,
+ * that the loaded document saves with a different value, such as a plan area, a labelled
+ * living-room area or a Type the converter does not read, every row the save leaves out, and every
+ * name the load brings up to date. An internal partition saved as both
+ * faces at twice a legacy single-face area keeps its meaning, so it is not listed. The converter
+ * works out only a blank pitch from the row's coords, so that is the one filled blank not listed.
+ */
+const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: ReadonlyMap<string, string>): string[] => {
+  const rows = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
+    .filter((row) => row.data.Name)
+    .map((row): [string, Record<string, string>] => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, row.data])));
+  const loaded = rows(loadedCsv);
+  // An auto-generated name the load brings up to date is a new key in the engine input.
+  const replaced = [...renamed].map(([before, after]) => `${before} name → ${after}`);
+  for (const [key, authored] of rows(authoredCsv)) {
+    const newName = renamed.get(authored.Name);
+    const saved = loaded.get(newName ? `${key.slice(0, -authored.Name.length)}${newName}` : key);
+    if (!saved) {
+      replaced.push(`${authored.Name} row in ${key.split('|')[0]} → left out`);
+      continue;
+    }
+    const bothFaces = /both_faces/.test(saved.extra_json ?? '');
+    const section = key.split('|')[0];
+    const type = convertedType(section, authored);
+    // Cells that only route the row, when the converter reads the row's Type as before.
+    const routingColumns = new Set(type !== undefined && type === convertedType(section, saved) ? TYPE_COLUMNS[section] ?? ['Type'] : []);
+    // A column the file lacks is read as blank, as the converter reads it, or from the older column
+    // that held it (Context Shading).
+    for (const column of new Set([...Object.keys(authored), ...Object.keys(saved)])) {
+      const before = (authored[column] ?? authored[LEGACY_COLUMN[column]] ?? '').trim();
+      const after = saved[column]?.trim();
+      if (column === 'extra_json' && after !== undefined) {
+        // The load snaps a numeric areal_heat_capacity to its band and a legacy mass_distribution_class
+        // code to its label (parseCsvToGeometry), values the converter rejects as they were.
+        for (const field of ['areal_heat_capacity', 'mass_distribution_class']) {
+          const was = extraJsonField(before, field);
+          const now = extraJsonField(after, field);
+          if (was !== undefined && now !== undefined && was !== now) replaced.push(`${authored.Name} ${field} ${was} → ${now}`);
+        }
+      }
+      if (after === undefined || NOT_REPLACEABLE_COLUMNS.has(column)) continue;
+      if (routingColumns.has(column)) continue;
+      // A file without a newer column kept that value in the older one (Context Shading Type).
+      if (Object.entries(LEGACY_COLUMN).some(([newer, older]) => older === column && !(newer in authored) && newer in saved)) continue;
+      if (!before) {
+        // A PV panel's pitch comes from its host roof, not its own coords.
+        const coordsPitch = column === 'pitch' && !key.startsWith('On-Site Generation|') && authored.coords?.trim();
+        if (after !== '' && !coordsPitch) {
+          replaced.push(`${authored.Name} ${column} blank → ${after}`);
+        }
+        continue;
+      }
+      const a = Number(before), b = Number(after);
+      const same = Number.isFinite(a) && Number.isFinite(b) && after !== ''
+        ? Math.abs(b - a) < 0.015 || (column === 'area' && bothFaces && Math.abs(b - 2 * a) < 0.015)
+        : before.toLowerCase() === after.toLowerCase();
+      if (!same) replaced.push(`${authored.Name} ${column} ${before} → ${after || 'blank'}`);
+    }
+  }
+  const metadata = (csv: string) => new Map(csv.split(/\r?\n/).map(parseCsvLine)
+    .filter((fields) => fields[0] in METADATA_INPUT_LABELS)
+    .map((fields) => [fields[0], fields[1]?.trim() ?? ''] as const));
+  const savedMetadata = metadata(loadedCsv);
+  const authoredMetadata = metadata(authoredCsv);
+  for (const [key, before] of authoredMetadata) {
+    const after = savedMetadata.get(key);
+    if (!before && after) replaced.push(`${METADATA_INPUT_LABELS[key]} blank → ${after}`);
+  }
+  // A row the file lacks is listed by lateLoadNotice (absentMetadataRowFill).
+  const one = replaced.length === 1;
+  return replaced.length
+    ? [`Loading replaced ${one ? '1 value' : `${replaced.length} values`} in the file; saving writes the new ${one ? 'value' : 'values'}: ${replaced.join('; ')}.`]
+    : [];
+};
+
 export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   // Scheduling belongs to this store instance. Separate editor stores must not
   // cancel or version one another's pending defaults reads.
@@ -702,6 +826,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   sourceCsvVersion: CURRENT_VULCAN_CSV_VERSION,
   sourceProvenanceMarkersVersion: undefined,
   csvUpgradeRequested: false,
+  loadAwaitsDefaults: false,
+  lateLoadNotice: null,
   requestCsvUpgrade: () => {
     if (get().sourceCsvVersion < CURRENT_VULCAN_CSV_VERSION) set({ csvUpgradeRequested: true });
   },
@@ -751,7 +877,16 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const exportElements = elementsInLoadOrder(state);
     const lines: string[] = [];
 
-    const ensureColumnCount = (row: string[], expectedCount: number): string => {
+    // `header` and `textCells` write back, as typed, the text a numeric cell held on load (see `nonNumericCells`).
+    const ensureColumnCount = (
+      cells: string[],
+      expectedCount: number,
+      header?: readonly string[],
+      textCells?: Record<string, string>,
+    ): string => {
+      const row = textCells && header
+        ? cells.map((cell, index) => (Object.prototype.hasOwnProperty.call(textCells, header[index]) ? escapeCSV(textCells[header[index]]) : cell))
+        : cells;
       const currentCount = row.length;
       if (currentCount < expectedCount) {
         return row.join(',') + ','.repeat(expectedCount - currentCount);
@@ -810,7 +945,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (!overlay || !overlay.path || overlay.path.trim() === '') continue;
       const payload = encodeGuideOverlayMetadataValue(overlay);
       if (payload) {
-        lines.push(`GuideOverlay,${floorIndex},${payload},,,,,,,,,,,,,`);
+        lines.push(`GuideOverlay,${floorIndex},${escapeCSV(payload)},,,,,,,,,,,,,`);
       }
     }
     const sourceFloorKeys = Object.keys(state.guideOverlaySourceByFloor)
@@ -822,7 +957,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (!source) continue;
       const payload = encodeGuideOverlaySourceMetadataValue(source);
       if (payload) {
-        lines.push(`GuideOverlaySource,${floorIndex},${payload},,,,,,,,,,,,,`);
+        lines.push(`GuideOverlaySource,${floorIndex},${escapeCSV(payload)},,,,,,,,,,,,,`);
       }
     }
     // Zone rows have no `extra_json` column, so their authored override markers live in Metadata
@@ -877,40 +1012,14 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     const compliance = state.complianceSettings;
 
-    // ----------------------------------------------------------------
-    // Compute every geometry-derived dwelling value once. The CSV export
-    // writes the manual override (`compliance.X`) when present, otherwise the
-    // current geometry-derived value. This keeps re-imports stable: a CSV
-    // round-trip preserves the values the user sees in the UI rather than
-    // letting them silently fall back to the defaults JSON's hardcoded values
-    // (e.g. `storeys_in_dwelling: 1`).
-    //
-    // The override → space-labels → derivation chain is centralised in
-    // `resolveEffectiveDwellingDetails` — same source of truth used by the UI
-    // editor (`GeometryBuilder.tsx`) and Part F validation
-    // (`partFEffectiveContext.ts`). When that resolver gains a new field, all
-    // three call sites pick it up.
-    // ----------------------------------------------------------------
-    const allElementsForExport = exportElements;
-    const dd = resolveEffectiveDwellingDetails({
-      zones: state.zones,
-      elementsById: state.elementsById,
-      spaceLabelsById: state.spaceLabelsById,
-      spaceLabelIds: state.spaceLabelIds,
-      complianceSettings: compliance,
-    });
-    const derivedGFA = calculateGroundFloorArea(allElementsForExport); // local, used elsewhere below
-
-    const effectiveBedrooms = dd.bedrooms;
-    const effectiveWetRooms = dd.wetRooms;
-    const effectiveHabitableRooms = dd.habitableRooms;
-    const effectiveHotTappedRooms = dd.hotTappedRooms;
-    const effectiveUtilityRooms = dd.utilityRooms;
-    const effectiveBathrooms = dd.bathrooms;
-    const effectiveSanitaryAccommodations = dd.sanitaryAccommodations;
-    const effectiveStoreysInDwelling = dd.storeysInDwelling;
-    const effectiveStoreyOfDwelling = dd.storeyOfDwelling;
-    const effectiveBuildType = dd.buildType;
+    // Every compliance row is written with its value (see metadataRowValues). A row the file had
+    // blank or unreadable is written as it was, which the converter blocks; leaving it out would let
+    // the converter take the defaults template's value instead.
+    const unreadRows = compliance.unreadMetadataRows ?? {};
+    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements })) {
+      const cell = value ?? unreadRows[key];
+      if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
+    }
     const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
       zones: state.zones,
       elementsById: state.elementsById,
@@ -919,116 +1028,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       complianceSettings: compliance,
       floors: state.floors,
     });
-
-    if (compliance.PartO_active_cooling_required !== undefined) {
-      lines.push(`PartO_active_cooling_required,${compliance.PartO_active_cooling_required ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
-    }
-    if (effectiveBedrooms !== undefined) {
-      lines.push(`NumberOfBedrooms,${Math.round(effectiveBedrooms)},,,,,,,,,,,,,`);
-    }
-    if (effectiveWetRooms !== undefined) {
-      lines.push(`NumberOfWetRooms,${Math.round(effectiveWetRooms)},,,,,,,,,,,,,`);
-    }
-    if (compliance.GroundFloorArea !== undefined) {
-      lines.push(`GroundFloorArea,${compliance.GroundFloorArea},,,,,,,,,,,,,`);
-    } else if (derivedGFA > 0) {
-      lines.push(`GroundFloorArea,${derivedGFA},,,,,,,,,,,,,`);
-    }
-    if (compliance.HeatingControlType) {
-      lines.push(`HeatingControlType,${compliance.HeatingControlType},,,,,,,,,,,,,`);
-    }
-    if (compliance.PartGcompliance !== undefined) {
-      lines.push(`PartGcompliance,${compliance.PartGcompliance ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
-    }
-    if (compliance.ColdWaterSource) {
-      lines.push(`ColdWaterSource,${compliance.ColdWaterSource},,,,,,,,,,,,,`);
-    }
-    if (compliance.complianceValidationEnabled !== undefined) {
-      lines.push(`ComplianceValidationEnabled,${compliance.complianceValidationEnabled ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
-    }
-    if (compliance.scenariosBaseModelEnabled !== undefined) {
-      lines.push(`ScenariosBaseModelEnabled,${compliance.scenariosBaseModelEnabled ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
-    }
-    if (compliance.AirPermeability_test_pressure !== undefined) {
-      lines.push(`AirPermeability_test_pressure,${compliance.AirPermeability_test_pressure},,,,,,,,,,,,,`);
-    }
-    if (compliance.AirPermeability_test_result !== undefined) {
-      lines.push(`AirPermeability_test_result,${compliance.AirPermeability_test_result},,,,,,,,,,,,,`);
-    }
-    const derivedVentHeight = calculateSuggestedVentilationHeight(allElementsForExport, state.floors);
-    const effectiveVentHeight = compliance.AirPermeability_ventilation_zone_height
-      ?? (derivedVentHeight > 0 ? derivedVentHeight : undefined);
-    // Ventilation zone height: same export-on-derived-or-override pattern.
-    // Without this, the geometry-derived suggestion (sum of per-floor wall heights)
-    // is UI-only and is replaced on JSON merge by the defaults file's value.
-    if (effectiveVentHeight !== undefined) {
-      lines.push(`AirPermeability_ventilation_zone_height,${effectiveVentHeight},,,,,,,,,,,,,`);
-    }
-    if (compliance.Ventilation_shield_class) {
-      lines.push(`Ventilation_shield_class,${compliance.Ventilation_shield_class},,,,,,,,,,,,,`);
-    }
-    if (compliance.Ventilation_terrain_class) {
-      lines.push(`Ventilation_terrain_class,${compliance.Ventilation_terrain_class},,,,,,,,,,,,,`);
-    }
-    if (compliance.Ventilation_altitude !== undefined) {
-      lines.push(`Ventilation_altitude,${compliance.Ventilation_altitude},,,,,,,,,,,,,`);
-    }
-    lines.push(`Ventilation_ventilation_zone_base_height,${effectiveVentBaseHeight},,,,,,,,,,,,,`);
-    if (compliance.Ventilation_noise_nuisance !== undefined) {
-      lines.push(`Ventilation_noise_nuisance,${compliance.Ventilation_noise_nuisance ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
-    }
-    // BuildingLength/Width also flow through the unified resolver above. The legacy
-    // `derivedLengthWidth.lengthM > 0 ? ... : undefined` guard is preserved by `pickNumber`
-    // inside the resolver (Number.isFinite + > 0 semantics on a positive measurement).
-    const effectiveBuildingLength = dd.buildingLengthM;
-    const effectiveBuildingWidth = dd.buildingWidthM;
-    if (effectiveBuildingLength !== undefined) {
-      lines.push(`BuildingLength,${effectiveBuildingLength},,,,,,,,,,,,,`);
-    }
-    if (effectiveBuildingWidth !== undefined) {
-      lines.push(`BuildingWidth,${effectiveBuildingWidth},,,,,,,,,,,,,`);
-    }
-    if (effectiveHabitableRooms !== undefined) {
-      lines.push(`NumberOfHabitableRooms,${Math.round(effectiveHabitableRooms)},,,,,,,,,,,,,`);
-    }
-    if (effectiveHotTappedRooms !== undefined) {
-      lines.push(`NumberOfHotTappedRooms,${Math.round(effectiveHotTappedRooms)},,,,,,,,,,,,,`);
-    }
-    if (effectiveUtilityRooms !== undefined) {
-      lines.push(`NumberOfUtilityRooms,${Math.round(effectiveUtilityRooms)},,,,,,,,,,,,,`);
-    }
-    if (effectiveBathrooms !== undefined) {
-      lines.push(`NumberOfBathrooms,${Math.round(effectiveBathrooms)},,,,,,,,,,,,,`);
-    }
-    if (effectiveSanitaryAccommodations !== undefined) {
-      lines.push(`NumberOfSanitaryAccommodations,${Math.round(effectiveSanitaryAccommodations)},,,,,,,,,,,,,`);
-    }
-    if (compliance.KitchenExtractorHoodExternal !== undefined) {
-      lines.push(
-        `KitchenExtractorHoodExternal,${compliance.KitchenExtractorHoodExternal ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`,
-      );
-    }
-    // Dwelling type / storeys: export the user override OR the
-    // geometry-derived suggestion. This makes CSV round-trips stable —
-    // re-importing the same CSV preserves the values shown in the UI rather
-    // than reverting to the defaults file's hardcoded `storeys_in_dwelling: 1`.
-    if (effectiveBuildType !== undefined) {
-      lines.push(`General_build_type,${effectiveBuildType},,,,,,,,,,,,,`);
-    }
-    // SAP built form is calculation-authoritative metadata. Unlike FHS build
-    // type/storeys, it must never be inferred from geometry or defaulted.
-    if (compliance.built_form !== undefined) {
-      lines.push(`General_built_form,${compliance.built_form},,,,,,,,,,,,,`);
-    }
-    if (effectiveStoreysInDwelling !== undefined) {
-      lines.push(`General_storeys_in_dwelling,${Math.round(effectiveStoreysInDwelling)},,,,,,,,,,,,,`);
-    }
-    if (effectiveBuildType === 'flat' && effectiveStoreyOfDwelling !== undefined) {
-      lines.push(`General_storey_of_dwelling,${Math.round(effectiveStoreyOfDwelling)},,,,,,,,,,,,,`);
-    }
-    if (effectiveBuildType === 'flat' && compliance.storeys_in_building !== undefined) {
-      lines.push(`General_storeys_in_building,${compliance.storeys_in_building},,,,,,,,,,,,,`);
-    }
 
     lines.push(',,,,,,,,,,,,');
 
@@ -1053,9 +1052,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     const exportZones = currentState.zones;
     if (exportZones.length > 0) {
-      const exportFhsAreaSplit = compliance.complianceValidationEnabled === true;
+      // The converter reads the living-room split whatever ComplianceValidationEnabled says.
       const primaryZoneId = exportZones[0]?.id;
-      const zoneHeader = [...zoneExportHeaders(exportFhsAreaSplit)];
+      const zoneHeader = [...ZONE_HEADERS_FHS];
       const zoneColumnCount = zoneHeader.length;
 
       lines.push('Zone,,,,,,,,,,,,,');
@@ -1071,7 +1070,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
                 ? zone.floorArea * zone.height
                 : undefined
             );
-        const isPrimaryFhsZone = exportFhsAreaSplit && zone.id === primaryZoneId;
+        const isPrimaryFhsZone = zone.id === primaryZoneId;
         const livingroomArea = isPrimaryFhsZone
           ? zone.livingroom_area
           : undefined;
@@ -1085,14 +1084,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(formatOptionalFiniteNumberForCsv(typeof zone.floorArea === 'number' ? roundToTwoDecimals(zone.floorArea) : undefined)),
           escapeCSV(formatOptionalFiniteNumberForCsv(typeof zone.height === 'number' ? roundToTwoDecimals(zone.height) : undefined)),
           zone.simplifiedThermalBridging ? 'TRUE' : 'FALSE',
+          livingroomArea === undefined ? '' : escapeCSV(roundToTwoDecimals(livingroomArea)),
+          restOfDwellingArea === undefined ? '' : escapeCSV(roundToTwoDecimals(restOfDwellingArea)),
         ];
-        if (exportFhsAreaSplit) {
-          zoneRow.push(
-            livingroomArea === undefined ? '' : escapeCSV(roundToTwoDecimals(livingroomArea)),
-            restOfDwellingArea === undefined ? '' : escapeCSV(roundToTwoDecimals(restOfDwellingArea)),
-          );
-        }
-        lines.push(ensureColumnCount(zoneRow, zoneColumnCount));
+        lines.push(ensureColumnCount(zoneRow, zoneColumnCount, zoneHeader, zone.nonNumericCells));
       });
       lines.push('');
     }
@@ -1107,14 +1102,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       lines.push(ensureColumnCount(slHeader, slColumnCount));
       spaceLabelRows.forEach((sl) => {
         const zone = currentState.getZoneById(sl.zoneId);
-        if (!zone) return;
         const spaceLabelExtraJson = {
           ...(sl.extra_json ?? {}),
           ...(sl.source ? { space_label_source: sl.source } : {}),
         };
         const row = [
           escapeCSV(sl.name),
-          escapeCSV(zone.name),
+          escapeCSV(zone?.name ?? sl.zoneName ?? ''),
           escapeCSV(sl.storey),
           escapeCSV(sl.room_type),
           formatCoordsForCsv(sl.coordinates),
@@ -1154,13 +1148,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
                 ? exportedGeometry.baseHeight
                 : undefined
             )),
-            element.is_unheated_pitched_roof ? 'TRUE' : 'FALSE',
+            element.is_unheated_pitched_roof === undefined ? '' : element.is_unheated_pitched_roof ? 'TRUE' : 'FALSE',
             element.is_external_door ? 'TRUE' : 'FALSE',
             escapeCSV(element.parent_element || ''),
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(exposedRow, exposedColumnCount));
+          lines.push(ensureColumnCount(exposedRow, exposedColumnCount, exposedHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1180,10 +1174,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           const exportedArea = getElementGrossArea(element, state.globalOrientationOffset);
           const exportedWidth = exportedGeometry.width > 0 ? exportedGeometry.width : undefined;
           const exportedHeight = exportedGeometry.height > 0 ? exportedGeometry.height : undefined;
+          // A plan line lies on the floor, so it does not say how high the opening sits.
+          const authoredBaseHeight = typeof element.base_height === 'number' && Number.isFinite(element.base_height);
           const exportedBaseHeight =
-            exportedHeight !== undefined ||
-            exportedWidth !== undefined ||
-            (typeof element.base_height === 'number' && Number.isFinite(element.base_height))
+            authoredBaseHeight || ((exportedHeight !== undefined || exportedWidth !== undefined) && (element.coordinates?.length ?? 0) >= 3)
               ? exportedGeometry.baseHeight
               : undefined;
           // mid_height has no dedicated override flag (unlike sloped width/height): the editor
@@ -1210,17 +1204,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           // transparentOpeningDerivedFields.ts, while this export check uses
           // slopedDimensionDiffers' 0.01 default for the same auto-vs-manual decision.
           const windowHeightOffset = exportVersion >= 2 ? effectiveVentBaseHeight : 0;
-          const exportedMidHeight = midHeightIsCustom
-            ? roundToTwoDecimals((element.mid_height as number) - windowHeightOffset)
-            : (
-                exportedHeight !== undefined
-                  ? roundToTwoDecimals((exportedBaseHeight ?? 0) - windowHeightOffset + exportedHeight / 2)
-                  : (
-                      typeof element.mid_height === 'number' && Number.isFinite(element.mid_height)
-                        ? roundToTwoDecimals(element.mid_height - windowHeightOffset)
-                        : undefined
-                    )
-              );
+          // A blank mid_height stays blank: the converter then takes the window's air-flow height
+          // from its extra_json or the defaults, not from the opening's centre.
+          const exportedMidHeight = typeof element.mid_height !== 'number' || !Number.isFinite(element.mid_height)
+            ? undefined
+            : !midHeightIsCustom && exportedHeight !== undefined && exportedBaseHeight !== undefined
+              ? roundToTwoDecimals(exportedBaseHeight - windowHeightOffset + exportedHeight / 2)
+              : roundToTwoDecimals(element.mid_height - windowHeightOffset);
           const windowRow = [
             escapeCSV(element.name),
             escapeCSV(zone.name),
@@ -1241,7 +1231,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
               convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, windowHeightOffset, effectiveVentBaseHeight),
             ) : '')
           ];
-          lines.push(ensureColumnCount(windowRow, windowColumnCount));
+          lines.push(ensureColumnCount(windowRow, windowColumnCount, windowHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1280,7 +1270,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementFirstCoordForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(shadingRow, shadingColumnCount));
+          lines.push(ensureColumnCount(shadingRow, shadingColumnCount, shadingHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1312,7 +1302,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(lightingRow, lightingColumnCount));
+          lines.push(ensureColumnCount(lightingRow, lightingColumnCount, lightingHeader, element.nonNumericCells));
         }
       });
 
@@ -1349,7 +1339,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(groundRow, groundColumnCount));
+          lines.push(ensureColumnCount(groundRow, groundColumnCount, groundHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1389,7 +1379,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
               } : {}),
             }))
           ];
-          lines.push(ensureColumnCount(nonExposedRow, nonExposedColumnCount));
+          lines.push(ensureColumnCount(nonExposedRow, nonExposedColumnCount, nonExposedHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1421,7 +1411,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             formatElementCoordsForCsv(element),
             escapeCSVJson(extraJson ? JSON.stringify(extraJson) : '')
           ];
-          lines.push(ensureColumnCount(bridgeRow, bridgeColumnCount));
+          lines.push(ensureColumnCount(bridgeRow, bridgeColumnCount, bridgeHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1475,7 +1465,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(extraJsonForCsv ? JSON.stringify(extraJsonForCsv) : '')
         ];
-        lines.push(ensureColumnCount(ventilationRow, ventilationColumnCount));
+        lines.push(ensureColumnCount(ventilationRow, ventilationColumnCount, ventilationHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1500,16 +1490,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(combustionRow, combustionColumnCount));
+        lines.push(ensureColumnCount(combustionRow, combustionColumnCount, combustionHeader, element.nonNumericCells));
       });
       lines.push('');
     }
 
     // 11. Water Pipework section
-    const pipeworkElements = exportElements.filter((e): e is ElementByType<'WaterPipework'> =>
-      e.type === 'WaterPipework' &&
-      (!compliance.complianceValidationEnabled || (e.pipework_type ?? 'primary') !== 'distribution')
-    );
+    const pipeworkElements = exportElements.filter((e): e is ElementByType<'WaterPipework'> => e.type === 'WaterPipework');
     if (pipeworkElements.length > 0) {
       const pipeworkHeader = [...EXPECTED_SECTION_HEADERS['Water Pipework']];
       const pipeworkColumnCount = pipeworkHeader.length;
@@ -1522,11 +1509,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(element.type),
           escapeCSV(element.length),
           escapeCSV(element.location),
-          escapeCSV(element.pipework_type ?? 'primary'),
+          escapeCSV(element.pipework_type ?? ''),
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(pipeworkRow, pipeworkColumnCount));
+        lines.push(ensureColumnCount(pipeworkRow, pipeworkColumnCount, pipeworkHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1534,7 +1521,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // 12. Wet Emitters section
     const wetEmitterElements = getElementsOfType(exportElements, 'WetEmitter');
     if (wetEmitterElements.length > 0) {
-      const emittersHeader = [...EXPECTED_SECTION_HEADERS['Wet Emitters']];
+      // A legacy table has no link column, and the converter then builds the zone's wet system.
+      // Writing the column blank would mean "linked to nothing" and delete that system; a file that
+      // has the column blank ('') keeps it.
+      const writesLinks = wetEmitterElements.some(element => element.space_heat_system !== undefined);
+      const emittersHeader = EXPECTED_SECTION_HEADERS['Wet Emitters'].filter(column => writesLinks || column !== 'space_heat_system');
       const emittersColumnCount = emittersHeader.length;
 
       lines.push('Wet Emitters,,,,,,,,,');
@@ -1548,13 +1539,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(element.type),
             escapeCSV(element.subcategory || ''),
             escapeCSV(formatOptionalFiniteNumberForCsv(element.area)),
-            escapeCSV(formatOptionalFiniteNumberForCsv(element.unit_number)),
-            escapeCSV(element.space_heat_system || ''),
+            escapeCSV(element.unit_number ?? ''),
+            ...(writesLinks ? [escapeCSV(element.space_heat_system || '')] : []),
             escapeCSV(formatViewerBaseHeightForCsv(element)),
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
           ];
-          lines.push(ensureColumnCount(emittersRow, emittersColumnCount));
+          lines.push(ensureColumnCount(emittersRow, emittersColumnCount, emittersHeader, element.nonNumericCells));
         }
       });
       lines.push('');
@@ -1577,7 +1568,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(appliancesRow, appliancesColumnCount));
+        lines.push(ensureColumnCount(appliancesRow, appliancesColumnCount, appliancesHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1610,7 +1601,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(hotWaterRow, hotWaterColumnCount));
+        lines.push(ensureColumnCount(hotWaterRow, hotWaterColumnCount, hotWaterHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1638,7 +1629,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(extraJson ? JSON.stringify(extraJson) : '')
         ];
-        lines.push(ensureColumnCount(contextRow, contextColumnCount));
+        lines.push(ensureColumnCount(contextRow, contextColumnCount, contextHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1671,7 +1662,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(element.extra_json ? JSON.stringify(element.extra_json) : '')
         ];
-        lines.push(ensureColumnCount(onSiteRow, onSiteColumnCount));
+        lines.push(ensureColumnCount(onSiteRow, onSiteColumnCount, onSiteHeader, element.nonNumericCells));
       });
       lines.push('');
     }
@@ -1706,7 +1697,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           formatElementCoordsForCsv(element),
           escapeCSVJson(JSON.stringify(extraJson))
         ];
-        lines.push(ensureColumnCount(systemsRow, systemsColumnCount));
+        lines.push(ensureColumnCount(systemsRow, systemsColumnCount, systemsHeader, element.nonNumericCells));
       });
 
       // System rows (PCDB MVP)
@@ -1717,6 +1708,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           element.subcategory === 'SpaceHeatSystem'
             ? syncSpaceHeatSystemZoneNameInExtraJson(element.extra_json, zoneName) ?? element.extra_json
             : element.extra_json;
+        // The converter reads any extra_json object as the row's own entries, named after the row
+        // (a blank cell keeps the defaults'), so a row holding only editor markers is written blank.
+        const writesExtraJson = Object.keys(extraJsonForCsv ?? {}).some((key) => !key.startsWith('_'));
         const systemsRow = [
           escapeCSV(element.name),
           escapeCSV(zoneName),
@@ -1725,9 +1719,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(element.system_preset || ''),
           escapeCSV(formatViewerBaseHeightForCsv(element)),
           formatElementCoordsForCsv(element),
-          escapeCSVJson(extraJsonForCsv ? JSON.stringify(extraJsonForCsv) : '')
+          escapeCSVJson(writesExtraJson ? JSON.stringify(extraJsonForCsv) : '')
         ];
-        lines.push(ensureColumnCount(systemsRow, systemsColumnCount));
+        lines.push(ensureColumnCount(systemsRow, systemsColumnCount, systemsHeader, element.nonNumericCells));
       });
 
       lines.push('');
@@ -1995,13 +1989,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           importedSettings.Ventilation_ventilation_zone_base_height = undefined;
         }
       }
-      if (
-        importedSettings.build_type === 'house' &&
-        importedSettings.storey_of_dwelling === undefined &&
-        importedSettings.storeys_in_building === undefined
-      ) {
-        importedSettings.build_type = undefined;
-      }
       // Space-label-derived room counts, aggregated across every non-placeholder
       // zone: counts describe the dwelling, not the primary zone.
       const dwellingWide = aggregateDwellingCounts(
@@ -2162,7 +2149,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         opening.coordinates = aligned;
       }
       const derived = deriveFromHostRoof(opening, roof, effectiveFloorsForHostedTransparent, metadata.globalOrientationOffset);
-      Object.assign(opening, buildTransparentHostDerivedPatch(opening, derived));
+      // Pitch and orientation follow the aligned coordinates. An authored base height survives
+      // the load, since it depends on storey heights that may have changed since the save; the
+      // next edit re-derives it from the host.
+      const patch = buildTransparentHostDerivedPatch(opening, derived);
+      if (typeof opening.base_height === 'number' && Number.isFinite(opening.base_height)) delete patch.base_height;
+      Object.assign(opening, patch);
     }
 
     const { elementsById, elementIds } = migrateElementsToNormalized(newElements);
@@ -2238,18 +2230,15 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     const labelList = spaceLabelIds.map((id) => spaceLabelsById[id]).filter(Boolean);
     let zonesForStore = zonesWithDerivedProperties;
-    let complianceFromLabels: Partial<GeometryState['complianceSettings']> = {};
     if (labelList.length > 0) {
-      const cv = get().complianceSettings.complianceValidationEnabled === true;
       const primaryForLabels = zonesForStore.find((zone) => !zone.isPlaceholder);
       const geometryAnalysis = primaryForLabels
         ? analyzeZoneSpaceLabels(primaryForLabels.id, labelList, allElements)
         : undefined;
-      const applied = applySpaceLabelsToZonesAndCompliance(zonesForStore, labelList, cv, geometryAnalysis, {
+      const applied = applySpaceLabelsToZonesAndCompliance(zonesForStore, labelList, geometryAnalysis, {
         preserveManualFloorAreaOverride: true,
       });
       zonesForStore = applied.zones;
-      complianceFromLabels = applied.compliancePatch;
     }
 
     set({
@@ -2279,9 +2268,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       return changed ? { elementsById: nextElementsById } : state;
     });
 
-    if (Object.keys(complianceFromLabels).length > 0) {
-      get().setComplianceSettings(complianceFromLabels);
-    }
+    // Label counts fill no Metadata row: a count the file gives is the user's, and a row the file
+    // lacks takes the converter's value (absentMetadataRowFill).
 
     const state = get();
     const floorsWithElements = state.floors.filter(floor =>
@@ -2300,7 +2288,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (firstFloor) get().setCurrentFloor(firstFloor.id);
       else set({ currentFloorId: null, currentFloorZ: 0 });
     }
+    const namesBeforeSync = new Map(get().elementIds.map((id) => [id, get().elementsById[id]?.name]));
     void get().syncAutoGeneratedElementNames();
+    const renamed = new Map(get().elementIds.flatMap((id) => {
+      const before = namesBeforeSync.get(id);
+      const after = get().elementsById[id]?.name;
+      return before && after && before !== after ? [[before, after] as const] : [];
+    }));
     if (replace) {
       // Selection survives by id: reuseKnownIds kept the ids of surviving elements and zones.
       set((current) => {
@@ -2316,6 +2310,17 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         };
       });
       return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded: false };
+    }
+
+    // Defaults kept from before the load (keepUnchangedDefaults) fill the rows this file lacks now;
+    // defaults read for the file fill them when they arrive (withPrecomputedDefaultsLookup). Both
+    // use absentMetadataRowFill and give the notice as lateLoadNotice.
+    const loaded = get();
+    if (loaded.defaultsJson && !loaded.defaultsLoading) {
+      const { patch, notice } = absentMetadataRowFill({ ...loaded, elements: Object.values(loaded.elementsById) }, loaded.defaultsJson);
+      set({ complianceSettings: { ...loaded.complianceSettings, ...patch }, loadAwaitsDefaults: false, lateLoadNotice: notice ?? null });
+    } else {
+      set({ loadAwaitsDefaults: true, lateLoadNotice: null });
     }
 
     // Round-trip through the canonical serializer after all synchronous load
@@ -2336,7 +2341,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded };
+    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed)], upgraded };
   }
 
   return slice;

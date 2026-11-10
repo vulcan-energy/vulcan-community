@@ -43,6 +43,7 @@ import {
   WindowDetailMiniButton,
 } from './WindowDetailControls';
 import { ResolvedFieldLabel } from './ResolvedFieldLabel';
+import { ROW_ONLY_ELEMENT_TYPES } from '../geometry/io/geometryCsvLayouts';
 import { resolveEffectiveVentilationBaseHeight } from '../lib/effectiveDwellingDetails';
 
 type SuspendedThermalTransmWallSource = {
@@ -374,7 +375,8 @@ function getDefaultValue(
   // `path` and recover the name as `path.split('.').pop()` — the same guess every control
   // was making separately, and the same one a '.'-bearing leaf key breaks. The caller has
   // the real key now (see `AdvancedControlProps.propKey`).
-  if (!defaults || !propertyName) {
+  // The converter never fills these rows from the defaults: showing a template value would mislead.
+  if (!defaults || !propertyName || (elementType && ROW_ONLY_ELEMENT_TYPES.has(elementType))) {
     return undefined;
   }
   const defaultsRecord = readRecord(defaults);

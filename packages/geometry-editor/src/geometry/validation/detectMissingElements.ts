@@ -258,6 +258,7 @@ export const detectMissingElements = (
   partOActiveCoolingRequired?: boolean,
   partFContext?: PartFDetectionContext,
   floors: Floor[] = [],
+  simplifiedThermalBridgingOffered = true,
 ): MissingElement[] => {
   if (!complianceValidationEnabled) return [];
 
@@ -476,7 +477,7 @@ export const detectMissingElements = (
         zoneId: zone.id,
         requiredBy: 'fhs',
         path: `/Zone/${zone.name}/ThermalBridging`,
-        message: 'FHS: TB or simplified ψ',
+        message: simplifiedThermalBridgingOffered ? 'FHS: TB or simplified ψ' : 'FHS: thermal bridges',
         pillQualifier: 'Thermal bridging',
         fieldKey: 'simplifiedThermalBridging',
       });

@@ -113,6 +113,75 @@ function validationContext(elements: Element[]) {
   };
 }
 
+describe('window shading distance', () => {
+  const shading = (distance: number | undefined) => ({
+    id: 'sh', name: 'Overhang', zoneId: 'zone-1', floorId: 'floor-0', type: 'WindowShading', shading_type: 'overhang',
+    depth: 0.4, distance, parent_element: 'Window', coordinates: [{ x: 0, y: 0, z: 0 }], isPlaceholder: false,
+  } as unknown as Element);
+  const distanceIssues = (distance: number | undefined) => validateElementCore(shading(distance), { schemaPort: unavailableGeometrySchemaPort } as never)
+    .issues.filter((issue) => issue.fieldKey === 'distance');
+  it('accepts a zero distance, as the schema does', () => {
+    expect(distanceIssues(0)).toEqual([]);
+  });
+  it('still requires a distance', () => {
+    expect(distanceIssues(undefined)).toHaveLength(1);
+  });
+});
+
+describe('electric storage heater output tables', () => {
+  const heater = (rows: unknown) => ({
+    id: 'sys', name: 'Heater', zoneId: 'zone-1', floorId: 'floor-0', type: 'System', subcategory: 'SpaceHeatSystem', system_preset: 'heater',
+    coordinates: [{ x: 0, y: 0, z: 0 }], isPlaceholder: false,
+    extra_json: { SpaceHeatSystem: { h: { type: 'ElecStorageHeater', dry_core_min_output: rows, dry_core_max_output: [[0, 0.4], [1, 2.2]] } } },
+  } as unknown as Element);
+  const issues = (rows: unknown) => validateElementCore(heater(rows), { schemaPort: unavailableGeometrySchemaPort } as never).issues.map((issue) => issue.message);
+  it('reports a row that is not a charge and power pair', () => {
+    expect(issues([[1.2]])).toEqual([expect.stringContaining('dry_core_min_output')]);
+  });
+  it('accepts pairs', () => {
+    expect(issues([[0, 0.1], [1, 0.3]]).filter((message) => message.includes('dry_core'))).toEqual([]);
+  });
+});
+
+it('blocks a drawn window with no host wall or roof', () => {
+  const element = window(1);
+  expect(validateElementCore(element, baseContext(element)).issues).toContainEqual(expect.objectContaining({
+    fieldKey: 'parent_element',
+    message: expect.stringContaining('Linked Wall is not set'),
+  }));
+});
+
+it('blocks a required value with its own CSV column even when the defaults template has one', () => {
+  const ground = {
+    id: 'floor', name: 'Floor', zoneId: 'zone-1', type: 'BuildingElementGround', width: 5, height: 5, area: 25,
+    total_area: 25, perimeter: 20, floor_type: 'Slab_no_edge_insulation', parent_element: null, coordinates: [],
+  } as unknown as Element;
+  const subschema = { required: ['thickness_walls', 'u_value'], properties: { thickness_walls: { type: 'number' }, u_value: { type: 'number' } } };
+  const schemaPort = {
+    ...unavailableGeometrySchemaPort,
+    availability: 'available',
+    getRootSchema: () => null,
+    getSchemaSubtypeForElementData: () => undefined,
+    getElementSubschema: () => subschema,
+    getConditionalRequiredFields: () => [],
+    validateProperty: () => ({ valid: true }),
+    findParameter: () => null,
+  } as never;
+  const issues = validateElementCore(ground, {
+    ...baseContext(ground), schemaPort, defaultsLookup: { hasDefaultValue: () => true } as never,
+  }).issues.map((issue) => issue.fieldKey);
+  expect(issues).toContain('thickness_walls');
+  expect(issues).not.toContain('u_value');
+});
+
+it('blocks a linear thermal bridge with no psi', () => {
+  const bridge = {
+    id: 'tb', name: 'E1', zoneId: 'zone-1', type: 'ThermalBridgeLinear', length: 4,
+    coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+  } as unknown as Element;
+  expect(validateElementCore(bridge, baseContext(bridge)).issues.map((issue) => issue.fieldKey)).toContain('linear_thermal_transmittance');
+});
+
 describe('FHS window base-height validation', () => {
   it('emits a critical FHS issue when a window is below an explicit ventilation zone base', () => {
     const element = window(0.5);
@@ -235,7 +304,6 @@ describe('collectGeometryValidation Part F coverage', () => {
   it('reports that Part F sufficiency was not checked when room counts are unavailable', () => {
     const result = collectGeometryValidation([], [refrigerationAppliance()], {
       schemaPort: unavailableGeometrySchemaPort,
-      complianceValidationEnabled: true,
     });
 
     expect(result.warnings).toContain(
@@ -243,10 +311,15 @@ describe('collectGeometryValidation Part F coverage', () => {
     );
   });
 
+  it('reports missing elements whatever the file says about compliance validation', () => {
+    // The lodge checks pass a file whose ComplianceValidationEnabled is FALSE; the converter still needs a heat source.
+    const result = collectGeometryValidation([], [refrigerationAppliance()], { schemaPort: unavailableGeometrySchemaPort });
+    expect(result.missingElements.length).toBeGreaterThan(0);
+  });
+
   it('does not report a skipped check when a complete Part F context is supplied', () => {
     const result = collectGeometryValidation([], [refrigerationAppliance()], {
       schemaPort: unavailableGeometrySchemaPort,
-      complianceValidationEnabled: true,
       partFContext: {
         spaceLabels: [],
         totalFloorAreaM2: 100,
@@ -373,4 +446,13 @@ describe('duplicate Systems definitions (merge E060)', () => {
     expect(validateElementCore(circuit, { ...validationContext([circuit, hp]), complianceValidationEnabled: true }).issues)
       .toContainEqual(expect.objectContaining({ message: 'Warm air (System): WarmAir SpaceHeatSystem "wa" must link a heat pump heat source with sink_type "Air"' }));
   });
+});
+
+it('blocks a context shading row with a blank angle or distance, which the converter leaves out', () => {
+  const context = {
+    id: 'ctx', name: 'Context', type: 'ContextShading', shading_type: 'obstacle', height: 5, parent_element: null,
+    start_angle: undefined, end_angle: 30, distance: undefined, coordinates: [],
+  } as unknown as Element;
+  expect(validateElementCore(context, baseContext(context)).issues.map((issue) => issue.fieldKey))
+    .toEqual(expect.arrayContaining(['start_angle', 'distance']));
 });

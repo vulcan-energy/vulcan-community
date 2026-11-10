@@ -2,9 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { csvMigrationIssues } from '../io/csvSemanticMigration';
+import { nonNumericCellIssues } from './validateZone';
+import { fieldUnitForAdornment, resolveFieldPresentation } from '../../lib/fieldPresentation';
+import { isElementCsvColumn, ROW_ONLY_ELEMENT_TYPES } from '../io/geometryCsvLayouts';
+import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
+import { simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
 import type {
   GeometrySchemaPort,
@@ -13,6 +18,7 @@ import { hasDefaultValue, type DefaultsLookup } from '../../lib/defaultsCache';
 import {
   classifyWindowOpenings,
   windowOpeningRepairMessages,
+  allowedWindowShadingTypes,
   windowPartsArePhysical,
   type WindowOpeningField,
   type WindowOpeningRow,
@@ -64,10 +70,11 @@ import {
   isVerticalLineWall,
   withEffectiveStoreyHeights,
 } from '../../lib/zoneDerivation';
-import { deriveFromHostRoof, isPanelFullyOnRoof } from '../../lib/pvHostDerivation';
+import { deriveFromHostRoof, isOpeningWithinWallLine, isPanelFullyOnRoof } from '../../lib/pvHostDerivation';
 import {
   getAreaBasedElementExportGeometry,
   getElementEffectiveArea,
+  getElementGrossArea,
 } from '../../lib/elementArea';
 import { inferPsiSourceFromValue } from '../../lib/simplifiedFabricMap';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
@@ -327,6 +334,9 @@ function isPositiveFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
+/** An emitter unit count the converter accepts: a whole number of 1 or more. */
+const isWholeUnitCount = (value: unknown): boolean => typeof value === 'number' && Number.isInteger(value) && value >= 1;
+
 const FHS_STANDARD_FILL_L = 73;
 const FHS_STANDARD_BATH_SIZE_L = 180;
 const FHS_TWO_BED_OCCUPANCY = 2.2472;
@@ -473,6 +483,44 @@ function requiredSchemaFieldHasValue(
     return fieldValue === true || fieldValue === false || !hasField;
   }
   return hasField && fieldValue !== null && fieldValue !== undefined;
+}
+
+/**
+ * Values the saved row still yields when the element field is unset: what the save derives from the
+ * geometry (area, width, height, base height, pitch), and the converter's area (width x height),
+ * window mid height (base height + height / 2), vertical pitch for a two-point base line and PV
+ * panel size from its polygon.
+ */
+function derivedFromOwnColumns(element: Element, field: string, globalOrientationOffset: number | undefined): boolean {
+  const row = element as unknown as Record<string, unknown>;
+  if (field === 'pitch') {
+    return resolveBuildingElementPitch(element as Parameters<typeof resolveBuildingElementPitch>[0]) !== undefined
+      || (Array.isArray(element.coordinates) && element.coordinates.length === 2);
+  }
+  if (field === 'area') {
+    return getElementGrossArea(element, globalOrientationOffset) > 0
+      || (isPositiveFiniteNumber(row.width) && isPositiveFiniteNumber(row.height));
+  }
+  if (field === 'mid_height' && element.type === 'BuildingElementTransparent') return isPositiveFiniteNumber(row.height);
+  // The converter writes these emitter inputs from the row's subcategory, area and unit_number columns.
+  if (element.type === 'WetEmitter') {
+    if (field === 'wet_emitter_type') return !!row.subcategory;
+    if (field === 'emitter_floor_area') return isPositiveFiniteNumber(row.area);
+    if (field === 'n_units') return isWholeUnitCount(row.unit_number);
+  }
+  // The converter derives PV panel width and height from a polygon (derive_pv_dimensions_from_coords).
+  if (element.type === 'OnSiteGeneration' && (field === 'width' || field === 'height')) {
+    return Array.isArray(element.coordinates) && element.coordinates.length >= 3;
+  }
+  if ((element.type === 'BuildingElementOpaque' || element.type === 'BuildingElementTransparent')
+    && (field === 'width' || field === 'height' || field === 'base_height')) {
+    const { width, height } = getAreaBasedElementExportGeometry(element, globalOrientationOffset);
+    if (field !== 'base_height') return (field === 'width' ? width : height) > 0;
+    // A window's plan line lies on the floor and does not give its height above it.
+    const placed = element.type === 'BuildingElementOpaque' || (element.coordinates?.length ?? 0) >= 3;
+    return placed && (width > 0 || height > 0);
+  }
+  return false;
 }
 
 const readRecord = (value: unknown): Record<string, unknown> =>
@@ -862,6 +910,8 @@ export const validateElementCore = (
   const t0 = dbg ? performance.now() : 0;
 
   const issues: ValidationIssue[] = ((context.sourceCsvVersion ?? 3) >= 3 || context.csvUpgradeRequested ? csvMigrationIssues([element], context.sourceCsvVersion) : []).map(issue => ({ source: 'geometry', fieldKey: 'u_value', message: `CSV_U_VALUE_MEANING_REQUIRED: ${issue.elementName} has legacy U-value ${issue.value}; choose its meaning in the migration review before saving.` }));
+  // First, so it is the issue kept for its field.
+  issues.push(...nonNumericCellIssues(element.nonNumericCells));
   const warnings: ValidationIssue[] = [];
   // Local aliases for the module-level helpers (geoIssue/schemaIssue/fhsIssue) so the long
   // switch below stays readable. Per-type validators in subsequent refactors call the
@@ -1277,6 +1327,9 @@ export const validateElementCore = (
       if (!thermalBridgeLinearHasPositiveRun(linearElement)) {
         issues.push(geo('Length cannot be 0', 'length'));
       }
+      if (typeof linearElement.linear_thermal_transmittance !== 'number' || !Number.isFinite(linearElement.linear_thermal_transmittance)) {
+        issues.push(geo('Linear Thermal Transmittance (psi) is required', 'linear_thermal_transmittance'));
+      }
       {
         const junctionType = linearElement.extra_json?.junction_type;
         const psi = linearElement.linear_thermal_transmittance;
@@ -1331,7 +1384,9 @@ export const validateElementCore = (
 
     case 'ThermalBridgePoint': {
       const pointElement = element as ThermalBridgePoint;
-      if (typeof pointElement.heat_transfer_coeff !== 'number' || !Number.isFinite(pointElement.heat_transfer_coeff)) {
+      // A blank column leaves the converter the row's extra_json value.
+      const coeff = pointElement.heat_transfer_coeff ?? pointElement.extra_json?.heat_transfer_coeff;
+      if (typeof coeff !== 'number' || !Number.isFinite(coeff)) {
         issues.push(geo('Heat Transfer Coefficient is required', 'heat_transfer_coeff'));
       }
       break;
@@ -1339,13 +1394,23 @@ export const validateElementCore = (
 
     case 'WindowShading': {
       const shadingElement = element as WindowShading;
+      // The converter cannot place shading that names no window.
+      if (!shadingElement.parent_element?.trim()) issues.push(geo('Linked Window is not set', 'parent_element'));
       if (!shadingElement.shading_type) {
         issues.push(geo('Shading Type is required', 'shading_type'));
         break;
       }
+      const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, complianceValidationEnabled ? 'fhs' : 'core');
+      if (allowedShadingTypes && !allowedShadingTypes.includes(shadingElement.shading_type)) {
+        const windowName = shadingElement.parent_element?.trim();
+        issues.push(geo(shadingElement.shading_type === 'reveal'
+          ? `Reveal shading${windowName ? ` on window ${windowName}` : ''} does not run on this HEM version. Enter an overhang and two side fins.`
+          : `Shading Type ${shadingElement.shading_type} does not run on this HEM version. Choose another type.`, 'shading_type'));
+        break;
+      }
       if (shadingElement.shading_type === 'object') {
-        if (!shadingElement.distance || shadingElement.distance === 0) {
-          issues.push(geo('Distance cannot be 0', 'distance'));
+        if (typeof shadingElement.distance !== 'number' || !Number.isFinite(shadingElement.distance) || shadingElement.distance < 0) {
+          issues.push(geo('Distance is required and must be >= 0', 'distance'));
         }
         if (!shadingElement.height || shadingElement.height === 0) {
           issues.push(geo('Height cannot be 0', 'height'));
@@ -1354,9 +1419,9 @@ export const validateElementCore = (
           issues.push(geo('Transparency is required and must be >= 0', 'transparency'));
         }
       } else {
-        // For overhang/sidefin/reveal types, distance is user-input
-        if (!shadingElement.distance || shadingElement.distance === 0) {
-          issues.push(geo('Distance cannot be 0', 'distance'));
+        // For overhang/sidefin/reveal types, distance is user-input; the schema allows 0.
+        if (typeof shadingElement.distance !== 'number' || !Number.isFinite(shadingElement.distance) || shadingElement.distance < 0) {
+          issues.push(geo('Distance is required and must be >= 0', 'distance'));
         }
         if (!shadingElement.depth || shadingElement.depth === 0) {
           issues.push(geo('Depth cannot be 0', 'depth'));
@@ -1502,13 +1567,13 @@ export const validateElementCore = (
       if (!emitterElement.subcategory) {
         issues.push(geo('Emitter Type is required', 'subcategory'));
       }
-      if (emitterElement.subcategory === 'radiator' || emitterElement.subcategory === 'fancoil') {
-        if (!emitterElement.unit_number || emitterElement.unit_number === 0) {
-          issues.push(geo('Unit Number cannot be 0', 'unit_number'));
-        }
+      // The converter stops on any other unit_number (E055); blank is one unit, and a fancoil then needs n_units.
+      if (emitterElement.unit_number !== undefined && !isWholeUnitCount(emitterElement.unit_number)) {
+        issues.push(geo('Unit Number must be a whole number of 1 or more, or blank for one unit', 'unit_number'));
       }
-      if (emitterElement.subcategory === 'ufh' && (!emitterElement.area || emitterElement.area === 0)) {
-        issues.push(geo('Area cannot be 0', 'area'));
+      // A blank area takes extra_json's emitter_floor_area in the converter (schema check below).
+      if (emitterElement.subcategory === 'ufh' && emitterElement.area !== undefined && !(emitterElement.area > 0)) {
+        issues.push(geo('Area must be greater than 0', 'area'));
       }
       const linkedSpaceHeatSystemName =
         typeof emitterElement.space_heat_system === 'string'
@@ -1534,9 +1599,8 @@ export const validateElementCore = (
       if (!pipeworkElement.location) {
         issues.push(geo('Location is required', 'location'));
       }
-      const pipeworkType = pipeworkElement.pipework_type ?? 'primary';
-      if (pipeworkType !== 'primary' && pipeworkType !== 'distribution') {
-        issues.push(geo('Pipework Type must be primary or distribution', 'pipework_type'));
+      if (pipeworkElement.pipework_type !== 'primary' && pipeworkElement.pipework_type !== 'distribution') {
+        issues.push(geo('Pipework Type is required: choose primary or distribution', 'pipework_type'));
       }
       if (!pipeworkElement.length || pipeworkElement.length === 0) {
         issues.push(geo('Length cannot be 0', 'length'));
@@ -1604,6 +1668,9 @@ export const validateElementCore = (
       ) {
         issues.push(geo('Flowrate cannot be 0', 'flowrate'));
       }
+      if (hotWaterElement.subcategory === 'MixerShower' && typeof hotWaterElement.allow_low_flowrate !== 'boolean') {
+        issues.push(geo('Choose Yes or No for Air Pressure Shower', 'allow_low_flowrate'));
+      }
       if (hotWaterElement.subcategory === 'InstantElecShower' && (!hotWaterElement.rated_power || hotWaterElement.rated_power === 0)) {
         issues.push(geo('Rated Power cannot be 0', 'rated_power'));
       }
@@ -1644,6 +1711,10 @@ export const validateElementCore = (
       }
       if (typeof contextElement.height !== 'number' || !Number.isFinite(contextElement.height) || contextElement.height <= 0) {
         issues.push(geo('Height must be greater than 0', 'height'));
+      }
+      // The converter leaves out a row with a blank angle or distance (E027).
+      for (const [field, label] of [['start_angle', 'Start Angle'], ['end_angle', 'End Angle'], ['distance', 'Distance']] as const) {
+        if (!Number.isFinite(contextElement[field])) issues.push(geo(`${label} is required`, field));
       }
       // Distance is derived from geometry - calculate it rather than checking stored value
       if (contextElement.parent_element && elementsById) {
@@ -1891,6 +1962,17 @@ export const validateElementCore = (
         !Array.isArray((extraJson as Record<string, unknown>)._pcdb);
       const isSpaceHeatSystem = sysElement.subcategory === 'SpaceHeatSystem';
       const hasSpaceHeatSystemPayload = systemElementProvidesSpaceHeatSystem(sysElement);
+      if (isSpaceHeatSystem && extraJson && typeof extraJson === 'object' && !Array.isArray(extraJson)) {
+        // Core needs [charge, output] pairs; no schema states the inner length, so it fails only at run.
+        for (const heater of Object.values((extraJson as Record<string, unknown>).SpaceHeatSystem ?? {})) {
+          for (const field of ['dry_core_min_output', 'dry_core_max_output']) {
+            const rows = (heater as Record<string, unknown> | null)?.[field];
+            if (Array.isArray(rows) && rows.some((row) => !Array.isArray(row) || row.length !== 2)) {
+              issues.push(geo(`${field}: each row needs two values, charge level and power`, 'system_preset'));
+            }
+          }
+        }
+      }
       if (!sysElement.isPlaceholder && isSpaceHeatSystem && !hasSpaceHeatSystemPayload) {
         issues.push(
           geo(
@@ -1997,6 +2079,7 @@ export const validateElementCore = (
         schemaSubtype,
       );
       const allRequiredFields = [...new Set([...requiredFields, ...conditionalRequiredFields])];
+      const reportedFields = new Set(issues.map((issue) => issue.fieldKey));
 
       for (const field of allRequiredFields) {
         // a8/a9: the converter always sets this value, and no form offers it.
@@ -2026,14 +2109,21 @@ export const validateElementCore = (
         );
 
         if (!hasValue) {
+          // A blank cell in the element's own CSV column takes nothing from the defaults template,
+          // and nor does any field of a row the converter builds alone (ROW_ONLY_ELEMENT_TYPES).
+          const fromRow = isOnSiteTypeCollision || isElementCsvColumn(element.type, field) || ROW_ONLY_ELEMENT_TYPES.has(element.type);
+          if (fromRow && derivedFromOwnColumns(element, field, context.globalOrientationOffset)) continue;
+          // A field-specific check above already reports it.
+          if (reportedFields.has(field)) continue;
           // While defaults are still loading, assume template defaults exist to
           // avoid showing false "required" errors that disappear once defaults arrive.
-          if (defaultsLoading) continue;
+          const fromTemplate = !fromRow;
+          if (defaultsLoading && fromTemplate) continue;
 
           // Check if field has a default value (from defaults template or schema)
           // If a default exists, don't add a validation issue (defaults will be applied)
           // For MechanicalVentilation, pass vent_type as subtype to filter defaults correctly
-          const hasDefault = (context.defaultsLookup?.hasDefaultValue ?? hasDefaultValue)(
+          const hasDefault = fromTemplate && (context.defaultsLookup?.hasDefaultValue ?? hasDefaultValue)(
             field,
             element.type,
             activeSubschema as unknown as {
@@ -2045,10 +2135,15 @@ export const validateElementCore = (
 
           if (!hasDefault) {
             // Format field name for display (convert snake_case to Title Case)
-            const displayName = field
-              .split('_')
-              .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
-              .join(' ');
+            // Name the field as its form label shows it, unit included (e.g. "Thickness Walls (m)").
+            const presentation = resolveFieldPresentation({
+              mode: schemaMode,
+              propertyKey: field,
+              elementType: element.type,
+              label: field.split('_').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+            }, schemaPort);
+            const unit = fieldUnitForAdornment(presentation);
+            const displayName = unit ? `${presentation.label} (${unit})` : presentation.label;
             const message = complianceValidationEnabled
               ? `FHS: ${displayName} required`
               : `${displayName} required`;
@@ -2238,11 +2333,24 @@ export const validateElementCore = (
       }
     }
 
-    // Warning 1: Windows/doors without parents
+    // Windows, rooflights and doors without parents. A drawn opening with no host adds its area
+    // without removing it from any wall or roof, so the engine input is wrong: block it.
     if (element.type === 'BuildingElementTransparent' ||
         (element.type === 'BuildingElementOpaque' && (element as BuildingElementOpaque).is_external_door)) {
       if (!element.parent_element || element.parent_element.trim() === '') {
-        warnings.push(geo('Link wall/roof parent', 'parent_element'));
+        if (element.coordinates?.length) {
+          // Named as the form labels the control that sets it.
+          const control = element.type === 'BuildingElementTransparent' ? 'Linked Wall' : 'Parent Element';
+          issues.push(geo(`${control} is not set: a drawn opening with no host is not deducted from any wall or roof area`, 'parent_element'));
+        } else {
+          warnings.push(geo('Link wall/roof parent', 'parent_element'));
+        }
+      } else if (elementsById && element.coordinates?.length === 2) {
+        // A wall opening must lie on its wall, as a rooflight must lie on its roof.
+        const parent = Object.values(elementsById).find((candidate) => candidate.name === element.parent_element);
+        if (parent?.type === 'BuildingElementOpaque' && parent.coordinates?.length === 2 && !isOpeningWithinWallLine(element, parent)) {
+          issues.push(geo(`Opening extends beyond ${parent.name}`, 'coordinates'));
+        }
       }
     }
 
@@ -2476,7 +2584,6 @@ export const collectGeometryValidation = (
     schemaPort: GeometrySchemaPort;
     floors?: Floor[];
     spaceLabels?: SpaceLabel[];
-    complianceValidationEnabled?: boolean;
     partOActiveCoolingRequired?: boolean;
     partFContext?: PartFDetectionContext;
     calculateContextShadingDistance?: (contextElement: ContextShading, parent: Element) => number;
@@ -2486,6 +2593,8 @@ export const collectGeometryValidation = (
     globalOrientationOffset?: number;
   },
 ): GeometryValidationSummary => {
+  // The converter checks every file against the FHS target, whatever its ComplianceValidationEnabled row says.
+  const complianceValidationEnabled = true;
   const warnings: string[] = [];
   const criticalIssues: string[] = [];
   const elementsById: Record<string, Element> = {};
@@ -2496,6 +2605,7 @@ export const collectGeometryValidation = (
   });
 
   const linearThermalBridgeIssues = findLinearThermalBridgeIssues(elements, options.floors ?? []);
+  const bridgingOffered = simplifiedThermalBridgingOffered(options.schemaPort, 'fhs');
   const floorStackWarningElementIds = options.floors
     ? getFloorStackWarningElementIds(elements, options.floors)
     : new Set<string>();
@@ -2508,7 +2618,7 @@ export const collectGeometryValidation = (
       zones,
       floors: options.floors,
       globalOrientationOffset: options.globalOrientationOffset,
-      complianceValidationEnabled: options.complianceValidationEnabled || false,
+      complianceValidationEnabled,
       complianceSettings: options.complianceSettings,
       numberOfBedrooms: options.complianceSettings?.NumberOfBedrooms,
       calculateContextShadingDistance: options.calculateContextShadingDistance,
@@ -2526,8 +2636,9 @@ export const collectGeometryValidation = (
     if (zone.isPlaceholder) return;
     const validation = validateZone(zone, {
       elementsById,
-      complianceValidationEnabled: options.complianceValidationEnabled || false,
+      complianceValidationEnabled,
       primaryFhsZoneId,
+      simplifiedThermalBridgingOffered: bridgingOffered,
     });
     warnings.push(...validation.warnings.map(w => w.message));
     criticalIssues.push(...validation.issues.map(i => i.message));
@@ -2537,7 +2648,7 @@ export const collectGeometryValidation = (
     const spaceLabelValidation = validateSpaceLabels(
       Object.fromEntries(options.spaceLabels.map((label) => [label.id, label])),
       options.spaceLabels.map((label) => label.id),
-      { zones, elementsById, complianceValidationEnabled: options.complianceValidationEnabled },
+      { zones, elementsById, complianceValidationEnabled },
     );
     warnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     criticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));
@@ -2546,20 +2657,19 @@ export const collectGeometryValidation = (
   const missingElements = detectMissingElements(
     zones,
     elementsById,
-    options.complianceValidationEnabled || false,
+    complianceValidationEnabled,
     options.partOActiveCoolingRequired,
     options.partFContext,
     options.floors,
+    bridgingOffered,
   );
-  if (options.complianceValidationEnabled) {
-    const partFInput = options.partFContext
-      ? partFInputFromContext(options.partFContext, elements)
-      : null;
-    if (!partFInput) {
-      warnings.push(
-        'Part F ventilation sufficiency was not checked (dwelling room counts missing).',
-      );
-    }
+  const partFInput = options.partFContext
+    ? partFInputFromContext(options.partFContext, elements)
+    : null;
+  if (!partFInput) {
+    warnings.push(
+      'Part F ventilation sufficiency was not checked (dwelling room counts missing).',
+    );
   }
   if (options.complianceSettings) {
     warnings.push(
@@ -2567,7 +2677,7 @@ export const collectGeometryValidation = (
         elements,
         floors: options.floors,
         zones,
-        complianceValidationEnabled: options.complianceValidationEnabled,
+        complianceValidationEnabled,
         complianceSettings: options.complianceSettings,
         globalOrientationOffset: options.globalOrientationOffset,
       }),

@@ -124,8 +124,9 @@ export interface BuildingElementOpaqueFormState {
   getCurrentOrientation: (element: Element) => number;
   setSlopePitchAxis: ElementFormStateCtx['setSlopePitchAxis'];
   /** Opaque-exclusive state (slice-6 brief decision 7). */
-  isUnheatedPitchedRoof: boolean;
-  setIsUnheatedPitchedRoof: (value: boolean) => void;
+  /** Undefined until the user chooses: a blank loaded cell is not "no". */
+  isUnheatedPitchedRoof: boolean | undefined;
+  setIsUnheatedPitchedRoof: (value: boolean | undefined) => void;
   isExternalDoor: boolean;
   setIsExternalDoor: (value: boolean) => void;
   unheatedPitchedRoofCeilingElevationInput: NumericDraftInputBinding;
@@ -150,7 +151,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementOpaqueFormState 
     { commitOnChange: true },
   );
 
-  const [isUnheatedPitchedRoof, setIsUnheatedPitchedRoof] = useState<boolean>(false);
+  const [isUnheatedPitchedRoof, setIsUnheatedPitchedRoof] = useState<boolean | undefined>(false);
   const [isExternalDoor, setIsExternalDoor] = useState<boolean>(false);
 
   return {
@@ -187,7 +188,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
     // seam" writeup.
     hydrateWallSharedFields(state, element, state.getCurrentOrientation);
 
-    state.setIsUnheatedPitchedRoof(!!element.is_unheated_pitched_roof);
+    state.setIsUnheatedPitchedRoof(element.is_unheated_pitched_roof);
     state.setIsExternalDoor(!!element.is_external_door);
     state.unheatedPitchedRoofCeilingElevationInput.setValue(
       readAuthoredUnheatedPitchedRoofCeilingElevationM(element) ?? '',
@@ -361,7 +362,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
     return (
       <>
         {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
-        <div className="element-input">
+        <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element'])}>
           <ParentElementDropdown
             value={state.parentElement}
             onChange={(value) => applyHostedParentElement(value, null)}

@@ -87,6 +87,23 @@ describe('FilenameBar validation readiness', () => {
     expect(screen.queryByRole('button', { name: 'Not validated' })).not.toBeInTheDocument();
   });
 
+  it('calls a chip that holds only notices a Notice, not a build error', () => {
+    render(
+      <GeometryStoreProvider store={createGeometryStore()}>
+        <FilenameBar
+          documentHost={documentHostHarness()}
+          saveStatus="idle"
+          saveError={null}
+          buildError="Loading changed the file"
+          buildErrorItems={[{ source: 'schema', severity: 'warning', path: '/', message: 'Loading replaced 1 value in the file.' }]}
+        />
+      </GeometryStoreProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Notice (1)' })).toHaveClass('status-chip--warning');
+    expect(screen.queryByRole('button', { name: /Build Error/ })).not.toBeInTheDocument();
+  });
+
   it.each([true, undefined])('renders no readiness chip for a %s verdict', (verdict) => {
     renderFilenameBar(verdict);
 

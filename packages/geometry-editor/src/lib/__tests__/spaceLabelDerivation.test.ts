@@ -204,7 +204,6 @@ describe('spaceLabelDerivation', () => {
     const { zones, compliancePatch } = applySpaceLabelsToZonesAndCompliance(
       [primaryZone],
       labels,
-      true,
     );
     expect(zones[0].floorArea).toBe(12);
     expect(zones[0].volume).toBe(30);

@@ -81,6 +81,22 @@ export function findHostRoofId(
   return bestId;
 }
 
+/** Whether a two-point opening lies on its two-point host wall, end to end (within 1 cm). */
+export function isOpeningWithinWallLine(
+  opening: { coordinates?: ReadonlyArray<{ x: number; y: number }> },
+  wall: { coordinates?: ReadonlyArray<{ x: number; y: number }> },
+): boolean {
+  const [a, b] = wall.coordinates ?? [];
+  const length = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+  if (!length) return false;
+  const ux = (b.x - a.x) / length, uy = (b.y - a.y) / length;
+  return (opening.coordinates ?? []).every((p) => {
+    const along = (p.x - a.x) * ux + (p.y - a.y) * uy;
+    const across = Math.abs((p.x - a.x) * uy - (p.y - a.y) * ux);
+    return along >= -0.01 && along <= length + 0.01 && across <= 0.05;
+  });
+}
+
 export function isPanelFullyOnRoof(
   panel: Pick<OnSiteGeneration | BuildingElementTransparent, 'coordinates'>,
   roof: Pick<BuildingElementOpaque, 'coordinates'>,

@@ -12,6 +12,7 @@ import {
 import { useStore } from 'zustand';
 import { createStore, type StateCreator, type StoreApi } from 'zustand/vanilla';
 import { geometryPerf } from '../lib/geometryPerf';
+import { simplifiedThermalBridgingOffered } from '../lib/schemaCache';
 import {
   convertShapeCoordinates,
   getElementShape,
@@ -48,6 +49,7 @@ import {
   deriveFromHostRoof,
   findHostRoofId,
   inferPvHostOverrideFlags,
+  isOpeningWithinWallLine,
 } from '../lib/pvHostDerivation';
 import {
   calculateDerivedFloorArea,
@@ -89,7 +91,7 @@ import {
   analyzeZoneSpaceLabels,
   pointInPolygon,
 } from '../lib/spaceLabelGeometry';
-import { collectGlobalSettingsWarnings } from '../lib/globalSettingsValidation';
+import { absentMetadataRowFill, collectGlobalSettingsWarnings, unsetMetadataInputIssues } from '../lib/globalSettingsValidation';
 import {
   applyMechanicalVentilationCsvPositionColumns,
   canMechanicalVentilationInheritHostPlacement,
@@ -990,6 +992,27 @@ export const shouldSnapToParent = (element: Element): boolean => {
   return false; // All other elements (regular walls, etc.) don't snap to parent
 };
 
+/** Gap between a duplicated hosted opening and its source, in metres. */
+const DUPLICATE_OPENING_GAP = 0.25;
+
+/**
+ * Plan offset for the copy of a window, rooflight or external door that keeps its host: along the
+ * opening's first edge, which lies along the host wall or roof, by its own length plus a gap.
+ */
+const duplicateOpeningOffset = (coordinates: ElementCoordinate[] | undefined, host?: Element): { dx: number; dy: number } => {
+  const [a, b] = coordinates ?? [];
+  const length = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+  if (!length) return { dx: 0, dy: 0 };
+  const step = length + DUPLICATE_OPENING_GAP;
+  const forward = { dx: ((b.x - a.x) / length) * step, dy: ((b.y - a.y) / length) * step };
+  // On a wall, the copy goes to whichever side still lies on the wall.
+  if (host?.coordinates?.length !== 2 || coordinates?.length !== 2) return forward;
+  const fits = ({ dx, dy }: { dx: number; dy: number }) =>
+    isOpeningWithinWallLine({ coordinates: coordinates.map((c) => ({ x: c.x + dx, y: c.y + dy })) }, host);
+  const backward = { dx: -forward.dx, dy: -forward.dy };
+  return fits(forward) || !fits(backward) ? forward : backward;
+};
+
 const shouldDeriveTransparentFromOpaquePolygonHost = (
   opening: Element | undefined,
   parent: Element | undefined,
@@ -1455,6 +1478,7 @@ export const isWindowShading = (obj: any): obj is WindowShading => {
 };
 
 // Const assertions for CSV values
+/** Every Window Shading type the CSV can hold; forms offer only those the target accepts (allowedWindowShadingTypes). */
 export const SHADING_TYPES = ['object', 'overhang', 'sidefinright', 'sidefinleft', 'reveal'] as const;
 export const DUCT_TYPES = ['supply', 'extract', 'intake', 'exhaust'] as const;
 export const APPLIANCE_KEYS = [
@@ -2804,7 +2828,9 @@ const validateElementForState = (
   const eb = elementsById ?? state.elementsById;
   const linearThermalBridgeIssues = findLinearThermalBridgeIssues(Object.values(eb), state.floors);
   const cs = state.complianceSettings;
-  const complianceOn = !!cs?.complianceValidationEnabled;
+  // Blocking checks follow the FHS rules whatever the file's ComplianceValidationEnabled row says:
+  // every target is an FHS target, and the converter validates every file against it.
+  const complianceOn = true;
   let partFFindings: PartFFinding[] | undefined;
   if (complianceOn) {
     partFFindings = selectPartFData({
@@ -2842,6 +2868,26 @@ const validateElementForState = (
 };
 
 export const validateZone = validateZoneCore;
+
+/**
+ * The load text of numeric cells (`nonNumericCells`) whose field this update leaves as it was. A
+ * ventilation unit's position columns live in its extra_json.
+ */
+function uneditedNonNumericCells(
+  prev: { nonNumericCells?: Record<string, string>; type?: string; extra_json?: unknown },
+  updates: object,
+): Record<string, string> | undefined {
+  const before = prev as Record<string, unknown>;
+  const after = updates as Record<string, unknown>;
+  const edited = (column: string): boolean => {
+    const field = column === 'floor_area' ? 'floorArea' : column;
+    if (Object.prototype.hasOwnProperty.call(after, field)) return after[field] !== before[field];
+    return prev.type === 'MechanicalVentilation' && Object.prototype.hasOwnProperty.call(after, 'extra_json')
+      && JSON.stringify(after.extra_json) !== JSON.stringify(prev.extra_json);
+  };
+  const kept = Object.entries(prev.nonNumericCells ?? {}).filter(([column]) => !edited(column));
+  return kept.length > 0 ? Object.fromEntries(kept) : undefined;
+}
 export const detectMissingElements = detectMissingElementsCore;
 
 export interface CreateGeometryStoreOptions {
@@ -2900,9 +2946,18 @@ const withPrecomputedDefaultsLookup = (
   ) {
     const defaultsJson = (update as Partial<GeometryState>).defaultsJson;
     if (defaultsJson !== state.defaultsJson) {
+      // A metadata row the document lacks shows the value the converter will take from these
+      // defaults, and the save writes it.
+      const complianceSettings = (update as Partial<GeometryState>).complianceSettings ?? state.complianceSettings;
+      const { patch, notice } = defaultsJson
+        ? absentMetadataRowFill({ ...state, complianceSettings, elements: Object.values(state.elementsById) }, defaultsJson)
+        : { patch: {} };
       return {
         ...update,
         defaultsLookup: createDefaultsLookup(defaultsJson),
+        ...(Object.keys(patch).length ? { complianceSettings: { ...complianceSettings, ...patch } } : {}),
+        // A load that ended before these defaults arrived lists the rows they fill.
+        ...(defaultsJson && state.loadAwaitsDefaults ? { loadAwaitsDefaults: false, lateLoadNotice: notice ?? null } : {}),
       } as Partial<GeometryState>;
     }
   }
@@ -3754,7 +3809,7 @@ const createGeometryState = (
 	          type: 'WaterPipework',
 	          simplified_pipework: false,
 	          location: undefined as any,
-	          pipework_type: 'primary',
+	          pipework_type: undefined as any,
 	          length: undefined as any,
           isPlaceholder: true,
           parent_element: parentElementName || null
@@ -3889,7 +3944,7 @@ const createGeometryState = (
     newElement = applyCreationDefaultAssemblyToElement(newElement, {
       library: get().bundledAssemblyLibrary,
       ids: get().creationDefaultAssemblyIds,
-      fhsComplianceSnapArealHeat: !!get().complianceSettings?.complianceValidationEnabled,
+      fhsComplianceSnapArealHeat: true,
     }) as Element;
     newElement = { ...newElement, _nameAutoSync: true };
 
@@ -4822,6 +4877,7 @@ const createGeometryState = (
       }
 
       const normalizedUpdates: Partial<Zone> = { ...updates };
+      if (prevZone.nonNumericCells) normalizedUpdates.nonNumericCells = uneditedNonNumericCells(prevZone, updates);
       if (typeof normalizedUpdates.name === 'string') {
         normalizedUpdates.name = normalizedUpdates.name.trim();
       }
@@ -5080,12 +5136,11 @@ const createGeometryState = (
   syncDerivedValuesFromSpaceLabels: () => {
     const state = get();
     const labels = state.spaceLabelIds.map((lid) => state.spaceLabelsById[lid]).filter(Boolean);
-    const cv = state.complianceSettings?.complianceValidationEnabled === true;
     const primary = state.zones.find((z) => !z.isPlaceholder);
     const geometryAnalysis = primary
       ? analyzeZoneSpaceLabels(primary.id, labels, Object.values(state.elementsById).filter(Boolean))
       : undefined;
-    const { zones: nextZones } = applySpaceLabelsToZonesAndCompliance(state.zones, labels, cv, geometryAnalysis);
+    const { zones: nextZones } = applySpaceLabelsToZonesAndCompliance(state.zones, labels, geometryAnalysis);
     set({ zones: nextZones });
 
     if (labels.length > 0) {
@@ -5460,6 +5515,7 @@ const createGeometryState = (
 
       // Normalize parent_element only if explicitly provided on updates
       const normalizedUpdates: Partial<Element> = { ...updates };
+      if (prevElement.nonNumericCells) normalizedUpdates.nonNumericCells = uneditedNonNumericCells(prevElement, updates);
       if (prevElement.type === 'BuildingElementTransparent' && Object.prototype.hasOwnProperty.call(updates, 'extra_json')) {
         // Advanced-field edits replace extra_json, including unchanged automatic values.
         // Only a changed value or removal records new security-risk intent.
@@ -6045,7 +6101,7 @@ const createGeometryState = (
           normalizedUpdates,
           withEffectiveStoreyHeights(state.floors, Object.values(state.elementsById)),
           nextElement.type === 'BuildingElementTransparent'
-            && windowPartsArePhysical(schemaPort, state.complianceSettings?.complianceValidationEnabled ? 'fhs' : 'core') === true,
+            && windowPartsArePhysical(schemaPort, 'fhs') === true,
         );
       } catch { /* swallow: best-effort */ }
 
@@ -7033,8 +7089,10 @@ const createGeometryState = (
     );
     existingNames.add(newName);
 
-    // World-space offset (meters)
-    const dx = 0.5, dy = 0.5;
+    // World-space offset (meters). A hosted opening moves along its host and keeps it.
+    const { dx, dy } = shouldSnapToParent(src) && src.parent_element
+      ? duplicateOpeningOffset(src.coordinates, createParentElementLookup(Object.values(state.elementsById))(src))
+      : { dx: 0.5, dy: 0.5 };
 
     const newId = generateId();
     const translatedCoords = (src.coordinates || []).map(c => ({ x: c.x + dx, y: c.y + dy, z: c.z }));
@@ -7043,7 +7101,6 @@ const createGeometryState = (
       id: newId,
       name: newName,
       coordinates: translatedCoords,
-      parent_element: shouldSnapToParent(src) ? null : src.parent_element,
       _nameAutoSync: newNameAutoSync,
       _v: (src._v ?? 0) + 1,
     };
@@ -7135,18 +7192,26 @@ const createGeometryState = (
       workingById[nid] = { ...(el as Element), id: nid, name: unique } as Element;
     }
 
-    // World-space offset
-    const dx = 0.5, dy = 0.5;
+    // World-space offset. The group moves together; a hosted opening whose host stays behind moves
+    // along that host, and its shading follows it.
+    const offsetOf = (src: Element): { dx: number; dy: number } => {
+      const parentEl = src.parent_element ? resolveParent(src) : undefined;
+      const parentInGroup = !!parentEl && sourceIdSet.has(parentEl.id);
+      if (src.parent_element && !parentInGroup && shouldSnapToParent(src)) return duplicateOpeningOffset(src.coordinates, parentEl);
+      if (parentInGroup && src.type === 'WindowShading') return offsetOf(parentEl);
+      return { dx: 0.5, dy: 0.5 };
+    };
 
     // Second pass: clone with translated coords and remap parent if inside group
     const cloned: Element[] = sourceEls.map(src => {
       const newId = oldToNewId.get(src.id)!;
       const newName = oldIdToNewName.get(src.id)!;
+      const { dx, dy } = offsetOf(src);
       const translated = (src.coordinates || []).map(c => ({ x: c.x + dx, y: c.y + dy, z: c.z }));
-      let parent = shouldSnapToParent(src) ? null : ((src as any).parent_element ?? null as any);
+      let parent = (src as any).parent_element ?? null as any;
       if (parent && typeof parent === 'string') {
         // parent may be stored by name in older data; try remap by id first, else leave as-is
-        const parentEl = state.elementsById[parent] ?? createParentElementLookup(Object.values(state.elementsById))(src);
+        const parentEl = state.elementsById[parent] ?? resolveParent(src);
         if (parentEl && oldToNewId.has(parentEl.id)) {
           parent = oldIdToNewName.get(parentEl.id) || parent; // keep by name if that’s what UI expects
         }
@@ -7568,7 +7633,9 @@ const createGeometryState = (
     // each `validateElement` call would re-resolve and re-evaluate them, giving O(N²) cost
     // on a model where the data is dwelling-wide and identical for every element.
     const cs = state.complianceSettings;
-    const complianceOn = !!cs?.complianceValidationEnabled;
+    // Blocking checks follow the FHS rules whatever the file's ComplianceValidationEnabled row says:
+    // every target is an FHS target, and the converter validates every file against it.
+    const complianceOn = true;
     const partFFindings = complianceOn
       ? selectPartFData({
           zones: state.zones,
@@ -7628,8 +7695,9 @@ const createGeometryState = (
 
       const validation = validateZone(zone, {
         elementsById: state.elementsById,
-        complianceValidationEnabled: state.complianceSettings.complianceValidationEnabled || false,
+        complianceValidationEnabled: complianceOn,
         primaryFhsZoneId,
+        simplifiedThermalBridgingOffered: simplifiedThermalBridgingOffered(schemaPort, 'fhs'),
       });
       allWarnings.push(...validation.warnings.map(w => w.message));
       allCriticalIssues.push(...validation.issues.map(i => i.message));
@@ -7639,7 +7707,7 @@ const createGeometryState = (
       zones: state.zones,
       elementsById: state.elementsById,
       spaceInferenceWallPrintByZone: state.spaceInferenceWallPrintByZone,
-      complianceValidationEnabled: state.complianceSettings.complianceValidationEnabled === true,
+      complianceValidationEnabled: complianceOn,
     });
     allWarnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     allCriticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));
@@ -7663,6 +7731,17 @@ const createGeometryState = (
       }),
     );
 
+    const elements = Object.values(state.elementsById);
+    // A loaded file (absentMetadataRows is set) converts against the target even with no elements;
+    // a new document stays quiet until something is drawn.
+    if (complianceOn && (elements.some((element) => !element.isPlaceholder) || state.complianceSettings.absentMetadataRows)) {
+      allCriticalIssues.push(...unsetMetadataInputIssues(
+        { ...state, elements },
+        schemaPort.availability === 'available' ? schemaPort.getRootSchema('fhs') : null,
+        state.defaultsLoading ? undefined : state.defaultsJson,
+      ));
+    }
+
     return {
       warnings: allWarnings,
       criticalIssues: allCriticalIssues
@@ -7671,7 +7750,9 @@ const createGeometryState = (
 
   detectMissingElements: () => {
     const state = get();
-    const complianceValidationEnabled = state.complianceSettings.complianceValidationEnabled || false;
+    // Missing-element checks follow the FHS rules whatever the file's ComplianceValidationEnabled row says:
+    // every target is an FHS target, and the converter validates every file against it.
+    const complianceValidationEnabled = true;
     return detectMissingElements(
       state.zones,
       state.elementsById,

@@ -42,22 +42,15 @@ const slopedRoofFractional = [
 ];
 
 describe('derivePitchFromGeometry', () => {
-  it('returns 0 for a horizontal opaque polygon (flat roof)', () => {
-    expect(derivePitchFromGeometry(horizontalSquare, 'BuildingElementOpaque')).toBe(0);
-  });
-
-  it('returns 0 for a horizontal transparent polygon (skylight)', () => {
-    expect(derivePitchFromGeometry(horizontalSquare, 'BuildingElementTransparent')).toBe(0);
+  it('leaves the pitch of a level roof, rooflight or ceiling outline to the user', () => {
+    // A plan outline of a sloped roof is level too, so it does not determine the slope.
+    for (const type of ['BuildingElementOpaque', 'BuildingElementTransparent', 'BuildingElementAdjacentConditionedSpace'] as const) {
+      expect(derivePitchFromGeometry(horizontalSquare, type)).toBeUndefined();
+    }
   });
 
   it('returns 180 for a horizontal ground polygon (floor)', () => {
     expect(derivePitchFromGeometry(horizontalSquare, 'BuildingElementGround')).toBe(180);
-  });
-
-  it('returns 0 for a horizontal adjacent polygon (interior divider)', () => {
-    expect(
-      derivePitchFromGeometry(horizontalSquare, 'BuildingElementAdjacentConditionedSpace'),
-    ).toBe(0);
   });
 
   it('returns 90 for a vertical wall polygon', () => {
@@ -117,9 +110,9 @@ describe('resolveBuildingElementPitch', () => {
     expect(
       resolveBuildingElementPitch({
         type: 'BuildingElementOpaque',
-        coordinates: horizontalSquare,
+        coordinates: slopedRoof30,
       }),
-    ).toBe(0);
+    ).toBe(30);
   });
 
   it('derives from geometry when pitch is null', () => {

@@ -48,19 +48,8 @@ import {
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
-function parseOptionalPitchColumn(raw: string | undefined): number | undefined {
-  if (raw === undefined || String(raw).trim() === '') return undefined;
-  const p = parseFloat(String(raw).trim());
-  if (!Number.isFinite(p)) return undefined;
-  return roundToTwoDecimals(p);
-}
-
-function parseOptionalNumberColumn(raw: string | undefined): number | undefined {
-  if (raw === undefined || String(raw).trim() === '') return undefined;
-  const n = parseFloat(String(raw).trim());
-  if (!Number.isFinite(n)) return undefined;
-  return roundToTwoDecimals(n);
-}
+/** A finite number as the converter parses a cell (Rust f64 syntax); any other text is E055 or a schema type error there. */
+export const NUMBER_CELL = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
 
 function parseOptionalCoordsColumn(raw: string | undefined): Array<{ x: number; y: number; z: number }> {
   const trimmed = String(raw ?? '').trim();
@@ -93,10 +82,6 @@ function csvRequiredValue<T>(value: T | undefined): T {
   return value as T;
 }
 
-function parseRequiredNumberColumn(raw: string | undefined): number {
-  return csvRequiredValue(parseOptionalNumberColumn(raw));
-}
-
 function parseRequiredEnumColumn<T extends string>(
   raw: string | undefined,
   allowed: readonly T[],
@@ -108,8 +93,33 @@ function V(d: Record<string, string>, k: string): string {
   return (d[k] ?? '').trim();
 }
 
+/**
+ * Numeric cells of the row being read that hold text, by column. The row's element keeps them in
+ * `nonNumericCells`: validation blocks them and the save writes them back as typed.
+ */
+let rowText: Record<string, string> = {};
+
+function num(d: Record<string, string>, column: string, cell = V(d, column)): number | undefined {
+  if (cell === '') return undefined;
+  if (!NUMBER_CELL.test(cell)) {
+    rowText[column] = cell;
+    return undefined;
+  }
+  return roundToTwoDecimals(Number(cell));
+}
+
+function reqNum(d: Record<string, string>, column: string, cell?: string): number {
+  return csvRequiredValue(num(d, column, cell));
+}
+
+function takeRowText(): Record<string, string> | undefined {
+  const cells = rowText;
+  rowText = {};
+  return Object.keys(cells).length > 0 ? cells : undefined;
+}
+
 function viewerBaseHeightPatch(d: Record<string, string>): { _base_height?: number } {
-  const value = parseOptionalNumberColumn(V(d, 'base_height'));
+  const value = num(d, 'base_height');
   return value === undefined ? {} : { _base_height: value };
 }
 
@@ -122,10 +132,124 @@ function groundViewerBaseHeightPatch(d: Record<string, string>): { _base_height?
 }
 
 function normalizeContextShadingShadingType(raw: string | undefined): 'obstacle' | 'overhang' | undefined {
-  const normalized = String(raw ?? '').trim().toLowerCase();
-  if (normalized === 'overhang' || normalized === 'obstacle') return normalized;
-  if (normalized === 'contextshading' || normalized === 'context shading') return 'obstacle';
-  return undefined;
+  // The converter reads these two exact values; anything else stays blank and blocks.
+  const value = String(raw ?? '').trim();
+  return value === 'overhang' || value === 'obstacle' ? value : undefined;
+}
+
+const BUILDING_ROW_KEYS = ['Zone', 'Type'] as const;
+/**
+ * Row cells without which the load stops, naming the section and row, so no row is dropped unseen.
+ * Every row needs a Name: the editor cannot hold a row without one, and the converter stops on most
+ * sections without one. These sections also need the cells listed, without which the converter
+ * stops the whole conversion (E008-E029). The converter does not read Space Labels, so every label
+ * row loads and saves as it is.
+ */
+const REQUIRED_ROW_KEYS: Readonly<Record<string, readonly ('Zone' | 'Type')[]>> = {
+  'Exposed Elements': BUILDING_ROW_KEYS,
+  'Window Elements': BUILDING_ROW_KEYS,
+  'Ground Elements': BUILDING_ROW_KEYS,
+  'Non-Exposed Elements': BUILDING_ROW_KEYS,
+  'Thermal Bridging Elements': BUILDING_ROW_KEYS,
+  'Window Shading': ['Zone'],
+  Lighting: ['Zone'],
+  'Wet Emitters': ['Zone'],
+  'Hot Water Outlets': ['Type'],
+  'Ventilation Systems': ['Type'],
+};
+
+/**
+ * The row Types the editor loads, by section. The Rust test editor_row_types_match_the_converter
+ * (crates/vulcan-model-transform/src/builder.rs) reads the JSON between the markers and runs every
+ * Type through the converter, so this table cannot drift from the Types the converter accepts.
+ * Aliases load as their type, which gives the converter the same model. Unkept Types are ones the
+ * converter accepts that no editor element reproduces; the load stops with the message given.
+ */
+// csv-row-types:begin
+const CSV_ROW_TYPES = {
+  "buildingTypes": [
+    "BuildingElementOpaque",
+    "BuildingElementTransparent",
+    "BuildingElementGround",
+    "BuildingElementAdjacentConditionedSpace",
+    "BuildingElementAdjacentUnconditionedSpace_Simple",
+    "BuildingElementPartyWall"
+  ],
+  "buildingAliases": {
+    "Wall": "BuildingElementOpaque",
+    "Roof": "BuildingElementOpaque",
+    "Door": "BuildingElementOpaque",
+    "Window": "BuildingElementTransparent",
+    "Floor": "BuildingElementGround",
+    "Internal": "BuildingElementAdjacentConditionedSpace",
+    "Basement": "BuildingElementGround"
+  },
+  "rowTypes": {
+    "Thermal Bridging Elements": ["ThermalBridgeLinear", "ThermalBridgePoint"],
+    "Systems": ["System", "ElectricBattery", "SpaceHeatSystem"],
+    "Ventilation Systems": ["MechanicalVentilation", "Vents", "MechanicalVentilationDuctwork", "MechanicalVentilationTerminal"]
+  },
+  "unkeptTypes": {
+    "Building": {
+      "Party":
+        "which the converter reads as a party element of any pitch; the editor marks only a party floor that way. Enter BuildingElementAdjacentConditionedSpace or BuildingElementPartyWall"
+    },
+    "Systems": {
+      "WetDistribution":
+        "which the converter builds from the defaults' wet distribution template; the editor has no such row. Enter Type System with subcategory SpaceHeatSystem and the system in extra_json under SpaceHeatSystem"
+    }
+  }
+};
+// csv-row-types:end
+const BUILDING_SECTIONS = new Set(['Exposed Elements', 'Window Elements', 'Ground Elements', 'Non-Exposed Elements']);
+export const BUILDING_ALIASES: Readonly<Record<string, string>> = CSV_ROW_TYPES.buildingAliases;
+const UNKEPT_TYPES: Readonly<Record<string, Readonly<Record<string, string>>>> = CSV_ROW_TYPES.unkeptTypes;
+/**
+ * The row types the editor reads (CSV_ROW_TYPES), where the converter routes the row by its Type
+ * and rejects or leaves out any other (E056, E028, E065). The load stops on another Type, naming the
+ * row, so no row is dropped unseen. Sections not listed (Wet Emitters, Water Pipework, Combustion
+ * Appliances, Hot Water Outlets) are read whatever their Type says, as the converter reads them.
+ */
+const ROW_TYPES: Readonly<Record<string, readonly string[]>> = {
+  ...Object.fromEntries([...BUILDING_SECTIONS].map((name) => [name, [...CSV_ROW_TYPES.buildingTypes, ...Object.keys(BUILDING_ALIASES)]])),
+  ...CSV_ROW_TYPES.rowTypes,
+};
+
+/** Whether a SpaceHeatSystem row's extra_json has the key that makes the converter read it as a System row does. */
+function extraJsonHasSpaceHeatSystem(cell: string): boolean {
+  try {
+    return 'SpaceHeatSystem' in JSON.parse(cell);
+  } catch {
+    return false;
+  }
+}
+
+/** A Systems row's type, as the converter reads it: the first of these cells that is not blank. */
+const systemsRowType = (d: Record<string, string>) => V(d, 'Type') || V(d, 'system_type') || V(d, 'subcategory');
+
+function assertRowKeys(section: CsvSection, d: CsvRow['data'], zoneNames: Readonly<Record<string, string>>): void {
+  // A row of empty cells is a spacer, not a row.
+  if (Object.values(d).every((cell) => !cell?.trim())) return;
+  const name = V(d, 'Name');
+  const row = name ? `${section.name} row '${name}'` : `${/^[AEIOU]/.test(section.name) ? 'An' : 'A'} ${section.name} row`;
+  for (const key of ['Name', ...(REQUIRED_ROW_KEYS[section.name] ?? [])]) {
+    if (!V(d, key)) throw new Error(`${row} has no ${key}. Enter the ${key} in the file and open it again.`);
+  }
+  const types = ROW_TYPES[section.name];
+  const type = section.name === 'Systems' ? systemsRowType(d) : V(d, 'Type');
+  const unkept = UNKEPT_TYPES[BUILDING_SECTIONS.has(section.name) ? 'Building' : section.name]?.[type];
+  if (unkept) throw new Error(`${row} has Type '${type}', ${unkept} in the file and open it again.`);
+  // Only with its system in extra_json does the converter read a SpaceHeatSystem row as a System row.
+  if (section.name === 'Systems' && type === 'SpaceHeatSystem' && !extraJsonHasSpaceHeatSystem(V(d, 'extra_json'))) {
+    throw new Error(`${row} has Type 'SpaceHeatSystem' with no SpaceHeatSystem key in extra_json, which the converter builds from the defaults' wet distribution template; the editor has no such row. Enter the system in extra_json under SpaceHeatSystem in the file and open it again.`);
+  }
+  if (types && !types.includes(type)) {
+    throw new Error(`${row} ${type ? `has Type '${type}', which is not a ${section.name} type` : 'has no Type'}. Enter one of ${types.join(', ')} in the file and open it again.`);
+  }
+  const zone = V(d, 'Zone');
+  if (zone && section.columnHeaders.includes('Zone') && !(zone in zoneNames)) {
+    throw new Error(`${row} names zone '${zone}', which is not in the Zone section. Correct the zone in the file and open it again.`);
+  }
 }
 
 function findOverflowCoordsCell(
@@ -157,16 +281,19 @@ export function ingestGeometryTabularSections(
       for (const row of section.rows) {
         const d = row.data;
         const zoneName = V(d, 'Name');
-        if (!zoneName || zoneName === 'Name') continue;
-        const floorArea = parseOptionalNumberColumn(V(d, 'floor_area'));
-        const volume = parseOptionalNumberColumn(V(d, 'volume'));
-        const height = parseOptionalNumberColumn(V(d, 'height'));
+        if (zoneName === 'Name') continue;
+        assertRowKeys(section, d, zoneNameToId);
+        if (!zoneName) continue;
+        rowText = {};
+        const floorArea = num(d, 'floor_area');
+        const volume = num(d, 'volume');
+        const height = num(d, 'height');
         const simplifiedThermalBridging = V(d, 'simplified thermal bridging') === 'TRUE';
         const livingroomArea =
-          V(d, 'livingroom_area') !== '' ? parseOptionalNumberColumn(V(d, 'livingroom_area')) : undefined;
+          V(d, 'livingroom_area') !== '' ? num(d, 'livingroom_area') : undefined;
         const restOfDwellingArea =
           V(d, 'restofdwelling_area') !== ''
-            ? parseOptionalNumberColumn(V(d, 'restofdwelling_area'))
+            ? num(d, 'restofdwelling_area')
             : undefined;
 
         const zoneId = generateId();
@@ -180,6 +307,7 @@ export function ingestGeometryTabularSections(
           simplifiedThermalBridging,
           livingroom_area: livingroomArea,
           restofdwelling_area: restOfDwellingArea,
+          nonNumericCells: takeRowText(),
         });
       }
     }
@@ -196,11 +324,10 @@ export function ingestGeometryTabularSections(
       for (const row of section.rows) {
         const d = row.data;
         const slName = V(d, 'Name');
-        if (!slName || slName === 'Name') continue;
+        if (slName === 'Name' || Object.values(d).every((cell) => !cell?.trim())) continue;
         const zoneName = V(d, 'Zone');
-        const zoneId = zoneNameToId[zoneName];
-        if (!zoneId) continue;
-        const parsedStorey = parseOptionalNumberColumn(V(d, 'storey'));
+        const zoneId = zoneNameToId[zoneName] ?? '';
+        const parsedStorey = num(d, 'storey');
         const storey = parsedStorey === undefined ? undefined : Math.max(0, Math.floor(parsedStorey));
         const room_type = V(d, 'room_type').trim();
         const coords = parseOptionalCoordsColumn(V(d, 'coords'));
@@ -218,6 +345,7 @@ export function ingestGeometryTabularSections(
           id: generateId(),
           name: slName,
           zoneId,
+          ...(zoneId ? {} : { zoneName }),
           storey: csvRequiredValue(storey),
           room_type,
           coordinates: coords,
@@ -234,7 +362,11 @@ export function ingestGeometryTabularSections(
     for (const row of section.rows) {
       const d = row.data;
       const name = V(d, 'Name');
-      if (!name || name === 'Name') continue;
+      if (name === 'Name') continue;
+      assertRowKeys(section, d, zoneNameToId);
+      if (!name) continue;
+      rowText = {};
+      const elementCount = newElements.length;
 
       switch (section.name) {
         case 'Exposed Elements':
@@ -243,7 +375,8 @@ export function ingestGeometryTabularSections(
         case 'Non-Exposed Elements':
         case 'Thermal Bridging Elements': {
           const zoneName = V(d, 'Zone');
-          const elementType = V(d, 'Type') as ElementType;
+          // The converter's older aliases (Wall, Roof and so on) give it the same model as their type.
+          const elementType = (BUILDING_ALIASES[V(d, 'Type')] ?? V(d, 'Type')) as ElementType;
           const zoneId = zoneNameToId[zoneName];
           if (!zoneId) continue;
 
@@ -257,7 +390,7 @@ export function ingestGeometryTabularSections(
 
           switch (elementType) {
             case 'BuildingElementOpaque': {
-              const pitchOpt = parseOptionalPitchColumn(V(d, 'pitch'));
+              const pitchOpt = num(d, 'pitch');
               const opaqueCoords = parseOptionalCoordsColumn(V(d, 'coords'));
               const opaquePitch = resolveBuildingElementPitch({
                 type: 'BuildingElementOpaque',
@@ -267,13 +400,14 @@ export function ingestGeometryTabularSections(
               const opaqueElement: BuildingElementOpaque = {
                 ...baseElement,
                 type: 'BuildingElementOpaque',
-                width: parseRequiredNumberColumn(V(d, 'width')),
-                height: parseRequiredNumberColumn(V(d, 'height')),
-                area: parseRequiredNumberColumn(V(d, 'area')),
+                width: reqNum(d, 'width'),
+                height: reqNum(d, 'height'),
+                area: reqNum(d, 'area'),
                 ...(opaquePitch !== undefined ? { pitch: opaquePitch } : {}),
-                orientation360: parseOptionalNumberColumn(V(d, 'orientation360')),
-                base_height: parseOptionalNumberColumn(V(d, 'base_height')),
-                is_unheated_pitched_roof: V(d, 'is_unheated_pitched_roof') === 'TRUE',
+                orientation360: num(d, 'orientation360'),
+                base_height: num(d, 'base_height'),
+                // A blank cell stays unset: the target schema requires a choice for a roof, with no default.
+                is_unheated_pitched_roof: V(d, 'is_unheated_pitched_roof') ? V(d, 'is_unheated_pitched_roof') === 'TRUE' : undefined,
                 is_external_door: V(d, 'is_external_door') === 'TRUE',
                 parent_element: V(d, 'parent_element') ? V(d, 'parent_element') : null,
                 coordinates: opaqueCoords,
@@ -283,7 +417,7 @@ export function ingestGeometryTabularSections(
               break;
             }
             case 'BuildingElementTransparent': {
-              const pitchOptT = parseOptionalPitchColumn(V(d, 'pitch'));
+              const pitchOptT = num(d, 'pitch');
               const transparentCoords = parseOptionalCoordsColumn(V(d, 'coords'));
               const transparentPitch = resolveBuildingElementPitch({
                 type: 'BuildingElementTransparent',
@@ -293,17 +427,17 @@ export function ingestGeometryTabularSections(
               const transparentElement: BuildingElementTransparent = {
                 ...baseElement,
                 type: 'BuildingElementTransparent',
-                width: parseRequiredNumberColumn(V(d, 'width')),
-                height: parseRequiredNumberColumn(V(d, 'height')),
-                area: parseRequiredNumberColumn(V(d, 'area')),
+                width: reqNum(d, 'width'),
+                height: reqNum(d, 'height'),
+                area: reqNum(d, 'area'),
                 ...(transparentPitch !== undefined ? { pitch: transparentPitch } : {}),
-                orientation360: parseOptionalNumberColumn(V(d, 'orientation360')),
-                base_height: parseOptionalNumberColumn(V(d, 'base_height')),
+                orientation360: num(d, 'orientation360'),
+                base_height: num(d, 'base_height'),
                 parent_element: V(d, 'linked_wall') ? V(d, 'linked_wall') : null,
-                frame_area_fraction: parseOptionalNumberColumn(V(d, 'frame_area_fraction')),
-                free_area_height: parseOptionalNumberColumn(V(d, 'free_area_height')),
-                mid_height: parseOptionalNumberColumn(V(d, 'mid_height')),
-                max_window_open_area: parseOptionalNumberColumn(V(d, 'max_window_open_area')),
+                frame_area_fraction: num(d, 'frame_area_fraction'),
+                free_area_height: num(d, 'free_area_height'),
+                mid_height: num(d, 'mid_height'),
+                max_window_open_area: num(d, 'max_window_open_area'),
                 coordinates: transparentCoords,
                 extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
               };
@@ -318,18 +452,18 @@ export function ingestGeometryTabularSections(
                 'Suspended_floor',
                 'Unheated_basement',
               ]);
-              const totalArea = parseOptionalNumberColumn(V(d, 'total_area'));
+              const totalArea = num(d, 'total_area');
               const groundElement: BuildingElementGround = {
                 ...baseElement,
                 type: 'BuildingElementGround',
-                area: parseRequiredNumberColumn(V(d, 'area')),
-                total_area: totalArea ?? parseRequiredNumberColumn(V(d, 'area')),
-                width: parseRequiredNumberColumn(V(d, 'width')),
-                height: parseRequiredNumberColumn(V(d, 'height')),
-                perimeter: parseRequiredNumberColumn(V(d, 'perimeter')),
+                area: reqNum(d, 'area'),
+                total_area: totalArea ?? reqNum(d, 'area'),
+                width: reqNum(d, 'width'),
+                height: reqNum(d, 'height'),
+                perimeter: reqNum(d, 'perimeter'),
                 floor_type: floorType,
-                depth_basement_floor: parseOptionalNumberColumn(V(d, 'depth_basement_floor')),
-                thickness_walls: parseOptionalNumberColumn(V(d, 'thickness_walls')),
+                depth_basement_floor: num(d, 'depth_basement_floor'),
+                thickness_walls: num(d, 'thickness_walls'),
                 parent_element: V(d, 'parent_element') ? V(d, 'parent_element') : null,
                 coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
                 ...groundViewerBaseHeightPatch(d),
@@ -341,8 +475,8 @@ export function ingestGeometryTabularSections(
             case 'BuildingElementAdjacentConditionedSpace':
             case 'BuildingElementAdjacentUnconditionedSpace_Simple':
             case 'BuildingElementPartyWall': {
-              const pitchAdj = parseOptionalPitchColumn(V(d, 'pitch'));
-              const viewerBaseHeight = parseOptionalNumberColumn(V(d, 'base_height'));
+              const pitchAdj = num(d, 'pitch');
+              const viewerBaseHeight = num(d, 'base_height');
               const adjacentCoords = parseOptionalCoordsColumn(V(d, 'coords'));
               const pitchForStore = resolveBuildingElementPitch({
                 type: elementType,
@@ -352,9 +486,9 @@ export function ingestGeometryTabularSections(
               const adjacentElement = {
                 ...baseElement,
                 type: elementType,
-                width: parseRequiredNumberColumn(V(d, 'width')),
-                height: parseRequiredNumberColumn(V(d, 'height')),
-                area: parseRequiredNumberColumn(V(d, 'area')),
+                width: reqNum(d, 'width'),
+                height: reqNum(d, 'height'),
+                area: reqNum(d, 'area'),
                 ...(pitchForStore !== undefined ? { pitch: pitchForStore } : {}),
                 parent_element: V(d, 'parent_element') ? V(d, 'parent_element') : null,
                 coordinates: adjacentCoords,
@@ -373,8 +507,8 @@ export function ingestGeometryTabularSections(
               const linearBridge: ThermalBridgeLinear = {
                 ...baseElement,
                 type: 'ThermalBridgeLinear',
-                length: parseRequiredNumberColumn(V(d, 'length')),
-                linear_thermal_transmittance: parseRequiredNumberColumn(V(d, 'linear_thermal_transmittance')),
+                length: reqNum(d, 'length'),
+                linear_thermal_transmittance: reqNum(d, 'linear_thermal_transmittance'),
                 parent_element: V(d, 'parent_element') ? V(d, 'parent_element') : null,
                 coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
                 extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
@@ -386,7 +520,7 @@ export function ingestGeometryTabularSections(
               const pointBridge: ThermalBridgePoint = {
                 ...baseElement,
                 type: 'ThermalBridgePoint',
-                heat_transfer_coeff: parseRequiredNumberColumn(V(d, 'heat_transfer_coeff')),
+                heat_transfer_coeff: reqNum(d, 'heat_transfer_coeff'),
                 parent_element: V(d, 'parent_element') ? V(d, 'parent_element') : null,
                 coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
                 extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
@@ -417,10 +551,10 @@ export function ingestGeometryTabularSections(
             zoneId,
             type: 'WindowShading',
             shading_type: csvRequiredValue(shadingType),
-            depth: parseOptionalNumberColumn(V(d, 'depth')),
-            height: parseOptionalNumberColumn(V(d, 'height')),
-            distance: parseOptionalNumberColumn(V(d, 'distance')),
-            transparency: parseOptionalNumberColumn(V(d, 'transparency')),
+            depth: num(d, 'depth'),
+            height: num(d, 'height'),
+            distance: num(d, 'distance'),
+            transparency: num(d, 'transparency'),
             parent_element: linkedWindow || null,
             coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
             ...viewerBaseHeightPatch(d),
@@ -439,9 +573,9 @@ export function ingestGeometryTabularSections(
             zoneId,
             type: 'Lighting',
             simplified_lighting: false,
-            efficacy: parseRequiredNumberColumn(V(d, 'efficacy')),
-            count: parseOptionalNumberColumn(V(d, 'count')),
-            power: parseOptionalNumberColumn(V(d, 'power')),
+            efficacy: reqNum(d, 'efficacy'),
+            count: num(d, 'count'),
+            power: num(d, 'power'),
             parent_element: null,
             coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
             ...viewerBaseHeightPatch(d),
@@ -451,7 +585,9 @@ export function ingestGeometryTabularSections(
           break;
         }
         case 'Context Shading': {
-          const shadingTypeRaw = V(d, 'shading_type') || V(d, 'Type');
+          // As the converter: Type gives the shading kind only in a file with no shading_type column
+          // (older files stored obstacle or overhang there). A blank stays blank and blocks.
+          const shadingTypeRaw = 'shading_type' in d ? V(d, 'shading_type') : V(d, 'Type');
           const shading_type = normalizeContextShadingShadingType(shadingTypeRaw) as ContextShading['shading_type'];
           const startAngleCell = V(d, 'start_angle') || V(d, 'start angle');
           const endAngleCell = V(d, 'end_angle') || V(d, 'end angle');
@@ -464,10 +600,10 @@ export function ingestGeometryTabularSections(
             name,
             type: 'ContextShading',
             shading_type,
-            start_angle: parseRequiredNumberColumn(startAngleCell),
-            end_angle: parseRequiredNumberColumn(endAngleCell),
-            distance: parseRequiredNumberColumn(V(d, 'distance')),
-            height: parseRequiredNumberColumn(V(d, 'height')),
+            start_angle: reqNum(d, 'start_angle', startAngleCell),
+            end_angle: reqNum(d, 'end_angle', endAngleCell),
+            distance: reqNum(d, 'distance'),
+            height: reqNum(d, 'height'),
             parent_element: V(d, 'parent_element') || null,
             coordinates: coords,
             ...viewerBaseHeightPatch(d),
@@ -477,29 +613,23 @@ export function ingestGeometryTabularSections(
           break;
         }
         case 'On-Site Generation': {
-          const csvWidth = V(d, 'width');
-          const csvHeight = V(d, 'height');
-          const explicitWidth = csvWidth !== '' ? parseFloat(csvWidth) : NaN;
-          const explicitHeight = csvHeight !== '' ? parseFloat(csvHeight) : NaN;
+          const explicitWidth = num(d, 'width') ?? NaN;
+          const explicitHeight = num(d, 'height') ?? NaN;
           const onSiteElement: OnSiteGeneration = {
             id: generateId(),
             name,
             type: 'OnSiteGeneration',
             generation_type: parseRequiredEnumColumn(V(d, 'generation_type'), ['PhotovoltaicSystem']),
-            pitch: parseOptionalNumberColumn(V(d, 'pitch')),
-            orientation360: parseOptionalNumberColumn(V(d, 'orientation360')),
-            base_height: parseOptionalNumberColumn(V(d, 'base_height')),
-            peak_power: parseOptionalNumberColumn(V(d, 'peak_power')),
+            pitch: num(d, 'pitch'),
+            orientation360: num(d, 'orientation360'),
+            base_height: num(d, 'base_height'),
+            peak_power: num(d, 'peak_power'),
             coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
             extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
             parent_element: null,
           };
-          if (Number.isFinite(explicitWidth) && explicitWidth > 0) {
-            onSiteElement.width = roundToTwoDecimals(explicitWidth);
-          }
-          if (Number.isFinite(explicitHeight) && explicitHeight > 0) {
-            onSiteElement.height = roundToTwoDecimals(explicitHeight);
-          }
+          if (explicitWidth > 0) onSiteElement.width = explicitWidth;
+          if (explicitHeight > 0) onSiteElement.height = explicitHeight;
           if (onSiteElement.coordinates && onSiteElement.coordinates.length >= 3) {
             try {
               onSiteElement.area = roundToTwoDecimals(calculatePolygonArea(onSiteElement.coordinates));
@@ -508,7 +638,8 @@ export function ingestGeometryTabularSections(
             }
             // Backward-compat: if CSV pre-dates the width/height columns, derive
             // slope-corrected dimensions from coords + pitch (mirrored in Rust merger).
-            if (onSiteElement.width === undefined || onSiteElement.height === undefined) {
+            // Without a pitch the slope length is unknown: a host roof may supply the pitch later.
+            if ((onSiteElement.width === undefined || onSiteElement.height === undefined) && onSiteElement.pitch !== undefined) {
               const derived = derivePvDimensionsFromCoords(
                 onSiteElement.coordinates,
                 onSiteElement.pitch,
@@ -528,9 +659,9 @@ export function ingestGeometryTabularSections(
         }
         case 'Systems': {
           const zoneName = V(d, 'Zone');
-          const rowType = V(d, 'Type') || V(d, 'system_type') || V(d, 'subcategory');
-          if (rowType === 'System') {
-            const subcategory = parseOptionalEnumColumn<SystemSubcategory>(V(d, 'subcategory'), [
+          const rowType = systemsRowType(d);
+          if (rowType === 'System' || rowType === 'SpaceHeatSystem') {
+            const subcategory = rowType === 'SpaceHeatSystem' ? 'SpaceHeatSystem' : parseOptionalEnumColumn<SystemSubcategory>(V(d, 'subcategory'), [
               'HeatSourceWet',
               'HotWaterSource',
               'HotWaterDemand',
@@ -608,21 +739,10 @@ export function ingestGeometryTabularSections(
             const ventType =
               csvVentType ??
               normalizeMechanicalVentilationVentType((parsedExtra as Record<string, unknown>).vent_type);
-            const mhCell = V(d, 'mid_height_air_flow_path');
-            const oriCell = V(d, 'orientation360');
-            const pitCell = V(d, 'pitch');
             const positionColumns: Partial<Record<'mid_height_air_flow_path' | 'orientation360' | 'pitch', unknown>> = {};
-            if (mhCell !== '') {
-              const parsed = parseOptionalNumberColumn(mhCell);
-              if (parsed !== undefined) positionColumns.mid_height_air_flow_path = parsed;
-            }
-            if (oriCell !== '') {
-              const parsed = parseOptionalNumberColumn(oriCell);
-              if (parsed !== undefined) positionColumns.orientation360 = parsed;
-            }
-            if (pitCell !== '') {
-              const parsed = parseOptionalNumberColumn(pitCell);
-              if (parsed !== undefined) positionColumns.pitch = parsed;
+            for (const column of ['mid_height_air_flow_path', 'orientation360', 'pitch'] as const) {
+              const parsed = num(d, column);
+              if (parsed !== undefined) positionColumns[column] = parsed;
             }
             const mergedExtra = Object.keys(positionColumns).length > 0
               ? applyMechanicalVentilationCsvPositionColumns(parsedExtra, ventType, positionColumns)
@@ -637,15 +757,15 @@ export function ingestGeometryTabularSections(
               extra_json: Object.keys(mergedExtra).length > 0 ? mergedExtra : undefined,
             });
           } else if (elementType === 'Vents') {
-            const midHeightAirFlowPath = parseOptionalNumberColumn(V(d, 'mid_height_air_flow_path'));
+            const midHeightAirFlowPath = num(d, 'mid_height_air_flow_path');
             newElements.push({
               id: generateId(),
               name,
               type: 'Vents',
               mid_height_air_flow_path: csvRequiredValue<Vents['mid_height_air_flow_path']>(midHeightAirFlowPath),
-              area_cm2: parseRequiredNumberColumn(V(d, 'area_cm2')),
-              orientation360: parseOptionalNumberColumn(V(d, 'orientation360')),
-              pitch: parseOptionalNumberColumn(V(d, 'pitch')),
+              area_cm2: reqNum(d, 'area_cm2'),
+              orientation360: num(d, 'orientation360'),
+              pitch: num(d, 'pitch'),
               parent_element: V(d, 'parent_element') || null,
               coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
               extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
@@ -662,7 +782,7 @@ export function ingestGeometryTabularSections(
               name,
               type: 'MechanicalVentilationDuctwork',
               duct_type: parseRequiredEnumColumn(V(d, 'duct_type'), ['supply', 'extract', 'intake', 'exhaust']),
-              length: parseRequiredNumberColumn(V(d, 'length')),
+              length: reqNum(d, 'length'),
               parent_element: parentElementName || null,
               coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
               extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
@@ -671,7 +791,7 @@ export function ingestGeometryTabularSections(
             newElements.push(ductworkElement);
           } else if (elementType === 'MechanicalVentilationTerminal') {
             const terminalCoords = parseOptionalCoordsColumn(V(d, 'coords'));
-            const csvMidHeight = parseOptionalNumberColumn(V(d, 'mid_height_air_flow_path'));
+            const csvMidHeight = num(d, 'mid_height_air_flow_path');
             const coordMidHeight = Number.isFinite(terminalCoords[0]?.z)
               ? roundToTwoDecimals(terminalCoords[0].z)
               : undefined;
@@ -683,8 +803,8 @@ export function ingestGeometryTabularSections(
               parent_element: V(d, 'parent_element') || null,
               host_element: V(d, 'host_element') || null,
               mid_height_air_flow_path: csvMidHeight ?? coordMidHeight,
-              orientation360: parseOptionalNumberColumn(V(d, 'orientation360')),
-              pitch: parseOptionalNumberColumn(V(d, 'pitch')),
+              orientation360: num(d, 'orientation360'),
+              pitch: num(d, 'pitch'),
               coordinates: terminalCoords,
               extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
             };
@@ -693,49 +813,46 @@ export function ingestGeometryTabularSections(
           break;
         }
         case 'Combustion Appliances': {
-          if (V(d, 'Type') === 'CombustionAppliances') {
-            newElements.push({
-              id: generateId(),
-              name,
-              type: 'CombustionAppliances',
-              appliance_type: parseRequiredEnumColumn<CombustionAppliances['appliance_type']>(V(d, 'appliance_type'), [
-                'open_fireplace',
-                'closed_with_fan',
-                'open_gas_flue_balancer',
-                'open_gas_kitchen_stove',
-                'open_gas_fire',
-                'closed_fire',
-              ]),
-              exhaust_situation: parseRequiredEnumColumn<CombustionAppliances['exhaust_situation']>(V(d, 'exhaust_situation'), [
-                'into_room',
-                'into_separate_duct',
-                'into_mech_vent',
-              ]),
-              fuel_type: parseRequiredEnumColumn<CombustionAppliances['fuel_type']>(V(d, 'fuel_type'), ['wood', 'gas', 'oil', 'coal']),
-              supply_situation: parseRequiredEnumColumn<CombustionAppliances['supply_situation']>(V(d, 'supply_situation'), ['room_air', 'outside']),
-              parent_element: null,
-              coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
-              ...viewerBaseHeightPatch(d),
-              extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
-            });
-          }
+          newElements.push({
+            id: generateId(),
+            name,
+            type: 'CombustionAppliances',
+            appliance_type: parseRequiredEnumColumn<CombustionAppliances['appliance_type']>(V(d, 'appliance_type'), [
+              'open_fireplace',
+              'closed_with_fan',
+              'open_gas_flue_balancer',
+              'open_gas_kitchen_stove',
+              'open_gas_fire',
+              'closed_fire',
+            ]),
+            exhaust_situation: parseRequiredEnumColumn<CombustionAppliances['exhaust_situation']>(V(d, 'exhaust_situation'), [
+              'into_room',
+              'into_separate_duct',
+              'into_mech_vent',
+            ]),
+            fuel_type: parseRequiredEnumColumn<CombustionAppliances['fuel_type']>(V(d, 'fuel_type'), ['wood', 'gas', 'oil', 'coal']),
+            supply_situation: parseRequiredEnumColumn<CombustionAppliances['supply_situation']>(V(d, 'supply_situation'), ['room_air', 'outside']),
+            parent_element: null,
+            coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
+            ...viewerBaseHeightPatch(d),
+            extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
+          });
           break;
         }
         case 'Water Pipework': {
-          if (V(d, 'Type') === 'WaterPipework') {
-            newElements.push({
-              id: generateId(),
-              name,
-              type: 'WaterPipework',
-              simplified_pipework: false,
-              length: parseRequiredNumberColumn(V(d, 'length')),
-              location: parseRequiredEnumColumn<WaterPipework['location']>(V(d, 'location'), ['internal', 'external']),
-              pipework_type: parseOptionalEnumColumn<WaterPipework['pipework_type']>(V(d, 'pipework_type'), ['primary', 'distribution']) ?? 'primary',
-              parent_element: null,
-              coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
-              extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
-            });
-          }
+          // The converter reads every row of this section as pipework, whatever its Type says.
+          newElements.push({
+            id: generateId(),
+            name,
+            type: 'WaterPipework',
+            simplified_pipework: false,
+            length: reqNum(d, 'length'),
+            location: parseRequiredEnumColumn<WaterPipework['location']>(V(d, 'location'), ['internal', 'external']),
+            pipework_type: parseRequiredEnumColumn<WaterPipework['pipework_type']>(V(d, 'pipework_type'), ['primary', 'distribution']),
+            parent_element: null,
+            coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
+            extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
+          });
           break;
         }
         case 'Appliances': {
@@ -767,9 +884,9 @@ export function ingestGeometryTabularSections(
             subcategory: csvRequiredValue(subcategory),
             allow_low_flowrate:
               hasAllowLowFlowrateValue && subcategory === 'MixerShower' ? boolColumn === 'TRUE' : undefined,
-            size: parseOptionalNumberColumn(V(d, 'size')),
-            flowrate: parseOptionalNumberColumn(V(d, 'flowrate')),
-            rated_power: parseOptionalNumberColumn(V(d, 'rated_power')),
+            size: num(d, 'size'),
+            flowrate: num(d, 'flowrate'),
+            rated_power: num(d, 'rated_power'),
             parent_element: null,
             coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
             ...viewerBaseHeightPatch(d),
@@ -780,29 +897,32 @@ export function ingestGeometryTabularSections(
         }
         case 'Wet Emitters': {
           const zoneName = V(d, 'Zone');
-          const elementType = V(d, 'Type') as ElementType;
+          // assertRowKeys has checked the zone. The converter reads every row of this section as an
+          // emitter, whatever its Type says.
           const zoneId = zoneNameToId[zoneName];
-          if (elementType === 'WetEmitter' && zoneId) {
-            newElements.push({
-              id: generateId(),
-              name,
-              zoneId,
-              type: 'WetEmitter',
-              subcategory: parseRequiredEnumColumn<WetEmitter['subcategory']>(V(d, 'subcategory'), ['radiator', 'ufh', 'fancoil']),
-              area: parseOptionalNumberColumn(V(d, 'area')),
-              unit_number: parseOptionalNumberColumn(V(d, 'unit_number')),
-              space_heat_system: V(d, 'space_heat_system') || undefined,
-              parent_element: null,
-              coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
-              ...viewerBaseHeightPatch(d),
-              extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
-            });
-          }
+          newElements.push({
+            id: generateId(),
+            name,
+            zoneId,
+            type: 'WetEmitter',
+            subcategory: parseRequiredEnumColumn<WetEmitter['subcategory']>(V(d, 'subcategory'), ['radiator', 'ufh', 'fancoil']),
+            area: num(d, 'area'),
+            // Not rounded: the converter stops on a unit count that is not a whole number.
+            unit_number: num(d, 'unit_number') === undefined ? undefined : Number(V(d, 'unit_number')),
+            // '' when the table has the column blank (linked to nothing); undefined when it has no such column.
+            space_heat_system: 'space_heat_system' in d ? V(d, 'space_heat_system') : undefined,
+            parent_element: null,
+            coordinates: parseOptionalCoordsColumn(V(d, 'coords')),
+            ...viewerBaseHeightPatch(d),
+            extra_json: parseExtraJson(V(d, 'extra_json'), V(d, 'Name')),
+          });
           break;
         }
         default:
           break;
       }
+      const nonNumericCells = takeRowText();
+      if (nonNumericCells && newElements.length > elementCount) newElements[newElements.length - 1].nonNumericCells = nonNumericCells;
     }
   }
 

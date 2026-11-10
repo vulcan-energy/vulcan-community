@@ -17,6 +17,7 @@
 import { useState } from 'react';
 import type { Element } from '../../geometry/types';
 import { SHADING_TYPES } from '../../stores/geometryStore';
+import { allowedWindowShadingTypes } from '../../lib/windowOpenings';
 import { useKeyedState } from '../../hooks/useKeyedState';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
@@ -44,6 +45,8 @@ export interface WindowShadingFormState {
   setLinkedWindow: (value: string) => void;
   shadingType: WindowShadingType;
   setShadingType: (value: WindowShadingType) => void;
+  /** The types the selected target's window shading accepts; null with no schema. */
+  allowedShadingTypes: readonly WindowShadingType[] | null;
   depthInput: ReturnType<typeof useDecimalInput>;
   transparencyInput: ReturnType<typeof useDecimalInput>;
   /** Shared with the wall family — passed through from ctx.shared so hydrate (which
@@ -78,6 +81,7 @@ function useFormState(ctx: ElementFormStateCtx): WindowShadingFormState {
     setLinkedWindow,
     shadingType,
     setShadingType,
+    allowedShadingTypes: allowedWindowShadingTypes(ctx.schemaPort, ctx.schemaMode),
     depthInput,
     transparencyInput,
     heightInput: ctx.shared.heightInput,
@@ -115,13 +119,13 @@ export const windowShadingFormModule: ElementFormModule<WindowShadingFormState> 
       shading_type: state.shadingType || undefined,
       depth: state.depthInput.value || undefined,
       height: state.heightInput.value || undefined,
-      distance: state.distanceInput.value || undefined,
+      distance: state.distanceInput.value === '' ? undefined : state.distanceInput.value,
       transparency: state.transparencyInput.value || undefined,
     } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {
-    const { linkedWindow, setLinkedWindow, shadingType, setShadingType, depthInput, distanceInput, heightInput, transparencyInput } = state;
+    const { linkedWindow, setLinkedWindow, shadingType, setShadingType, allowedShadingTypes, depthInput, distanceInput, heightInput, transparencyInput } = state;
     const {
       elementType,
       elementZoneId,
@@ -135,6 +139,11 @@ export const windowShadingFormModule: ElementFormModule<WindowShadingFormState> 
       getElementById,
       updateElement,
     } = ctx;
+    // A loaded value the target rejects stays visible; validation names it.
+    const offeredShadingTypes: readonly WindowShadingType[] = [
+      ...(allowedShadingTypes ?? SHADING_TYPES),
+      ...(shadingType && allowedShadingTypes && !allowedShadingTypes.includes(shadingType) ? [shadingType] : []),
+    ];
 
     return (
       <>
@@ -209,7 +218,7 @@ export const windowShadingFormModule: ElementFormModule<WindowShadingFormState> 
             }}
             options={[
               { value: '', label: 'Select shading type' },
-              ...SHADING_TYPES.map(type => ({ value: type, label: type })),
+              ...offeredShadingTypes.map(type => ({ value: type, label: type })),
             ]}
             variant="ghost"
             size="md"

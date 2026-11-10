@@ -116,3 +116,14 @@ describe('detectMissingElements FHS payload rules', () => {
     expect(row([tooClose, { ...cylinder('StorageTank'), id: 'b' }, ground, heatPump])?.message).toBe('FHS: Cylinder has no primary pipework');
   });
 });
+
+describe('detectMissingElements thermal bridging', () => {
+  const zone = { id: 'z1', name: 'Living', floorArea: 30, height: 2.4, volume: 72 };
+  const wall = { id: 'w', name: 'Wall', type: 'BuildingElementOpaque', zoneId: 'z1', parent_element: null, coordinates: [] } as unknown as Element;
+  const bridgingMessage = (offered?: boolean) => detectMissingElements([zone], byId([wall]), true, undefined, undefined, [], offered)
+    .find((finding) => finding.fieldKey === 'simplifiedThermalBridging')?.message;
+  it('mentions simplified psi only where the target offers it', () => {
+    expect(bridgingMessage()).toBe('FHS: TB or simplified ψ');
+    expect(bridgingMessage(false)).toBe('FHS: thermal bridges');
+  });
+});

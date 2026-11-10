@@ -354,7 +354,7 @@ export function fullDwellingCountsCompliancePatch(counts: SpaceLabelAggregate['d
 export const FLOOR_AREA_MATCH_EPSILON_M2 = 0.005;
 
 /**
- * Apply Space label metrics to the primary (first non-placeholder) zone and optionally FHS split.
+ * Apply Space label metrics to the primary (first non-placeholder) zone and its living-room split.
  * Sets floor area driven by labels so geometry derivation does not overwrite until user clears override behaviour.
  *
  * `preserveManualFloorAreaOverride`: import-only escape hatch (see stores/geometryStore/slices/ioSlice.ts
@@ -371,7 +371,6 @@ export const FLOOR_AREA_MATCH_EPSILON_M2 = 0.005;
 export function applySpaceLabelsToZonesAndCompliance(
   zones: Zone[],
   labels: SpaceLabel[],
-  complianceValidationEnabled: boolean,
   geometryAnalysis?: SpaceLabelGeometryAnalysis,
   options?: { preserveManualFloorAreaOverride?: boolean },
 ): { zones: Zone[]; compliancePatch: ComplianceSettingsShape } {
@@ -428,7 +427,7 @@ export function applySpaceLabelsToZonesAndCompliance(
     // living + rest to sum to floorArea, so rewriting the splits from the aggregate while
     // preserving a hand-typed floor area would manufacture a hard FHS issue at import and
     // discard CSV-carried split corrections.
-    ...(complianceValidationEnabled && hasFloor && !keepManualFloorAreaOverride
+    ...(hasFloor && !keepManualFloorAreaOverride
       ? {
           livingroom_area: agg.livingAreaM2,
           restofdwelling_area: agg.restAreaM2,

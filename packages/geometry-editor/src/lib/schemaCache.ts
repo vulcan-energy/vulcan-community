@@ -8,7 +8,7 @@ import { resolveRefChain, resolveRefNode } from './schemaRefResolver';
 import { flattenIfThenAllOfProperties } from './systemSchemaFlatten';
 import { isForbiddenSchemaNode } from './schemaShape';
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
-import type { GeometrySchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 
 export type GeometrySchemaAssetSource = Readonly<{
   loadText(mode: GeometrySchemaMode): Promise<string>;
@@ -1075,17 +1075,26 @@ export function getConditionalRequiredFieldsForMode(
     if (!condition) return false;
     // `if: { required: [...] }` (e.g. radiator per-metre branch keyed on `length`): the condition
     // holds when every listed field is present, matching JSON Schema `required` semantics.
+    // Beside other keywords (a9's party wall lining: `required` + `anyOf`) it only guards them.
     if (Array.isArray(condition.required)) {
       if (!condition.required.every(fieldHasValue)) return false;
-      if (!condition.properties) return true;
+      if (!condition.properties && !condition.not && !condition.anyOf && !condition.oneOf) return true;
     }
     if (condition.properties && typeof condition.properties === 'object') {
       for (const [propKey, propValue] of Object.entries(condition.properties)) {
         if (propValue && 'const' in propValue) {
           if (readConditionValue(propKey) === propValue.const) return true;
         }
+        // A numeric range (e.g. a roof's `pitch` up to 60) holds only for a value inside it.
+        if (propValue && ('minimum' in propValue || 'maximum' in propValue)) {
+          const value = readConditionValue(propKey);
+          if (typeof value === 'number'
+            && !(typeof propValue.minimum === 'number' && value < propValue.minimum)
+            && !(typeof propValue.maximum === 'number' && value > propValue.maximum)) return true;
+        }
       }
     }
+    if (condition.not) return !conditionMatches(condition.not as SchemaNode);
     if (Array.isArray(condition.anyOf)) {
       for (const option of condition.anyOf) {
         if (conditionMatches(option)) return true;
@@ -1108,6 +1117,11 @@ export function getConditionalRequiredFieldsForMode(
 
     if (Array.isArray(block.required)) {
       conditionalRequired.push(...block.required);
+    }
+
+    // A nested `if`/`then` beside `required` (e.g. a window's orientation360 unless it is level).
+    if (block.if) {
+      applyBlock(conditionMatches(block.if) ? block.then : block.else);
     }
 
     if (Array.isArray(block.allOf)) {
@@ -2239,7 +2253,6 @@ function fallbackIntegerKeys(elementType: string): Set<string> {
     ContextShading: ['start_angle', 'end_angle'],
     OnSiteGeneration: ['orientation360'],
     Lighting: ['count'],
-    WetEmitter: ['unit_number'],
     Vents: ['orientation360'],
   };
   return new Set<string>(map[elementType] || []);
@@ -2283,6 +2296,28 @@ export function getStrictestIntegerKeysForElementType(elementType: string, subty
 }
 
 export type TargetFieldAvailability = 'available' | 'absent' | 'unknown';
+
+function schemaNodeAcceptsNumber(node: unknown, root: unknown): boolean {
+  if (!isRecord(node)) return false;
+  const resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
+  if ([resolved.type].flat().some((type) => type === 'number' || type === 'integer')) return true;
+  return [resolved.anyOf, resolved.oneOf].some((list) => Array.isArray(list) && list.some((branch) => schemaNodeAcceptsNumber(branch, root)));
+}
+
+/** Whether to offer a single simplified ψ total: the schema accepts one and the host declares no stricter contract. */
+export function simplifiedThermalBridgingOffered(port: GeometrySchemaPort, mode: GeometrySchemaMode): boolean {
+  if (port.availability !== 'available') return true;
+  return !port.requiresDetailedThermalBridges?.() && thermalBridgingAcceptsTotal(port.getRootSchema(mode));
+}
+
+/** False when the target's zone schema takes `ThermalBridging` only as records. No schema says nothing, so true. */
+export function thermalBridgingAcceptsTotal(root: unknown): boolean {
+  if (!isRecord(root)) return true;
+  const zones = findFieldInSchemaBranches(root, 'Zone', root);
+  const zone = isRecord(zones) ? dereferenceSchemaNodeInRoot(zones, root) as Record<string, unknown> : undefined;
+  const field = zone ? findFieldInSchemaBranches(zone.additionalProperties, 'ThermalBridging', root) : undefined;
+  return field === undefined || schemaNodeAcceptsNumber(field, root);
+}
 
 function findFieldInSchemaBranches(node: unknown, key: string, root: unknown): unknown {
   if (!isRecord(node)) return undefined;

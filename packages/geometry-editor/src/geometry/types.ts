@@ -17,7 +17,10 @@ export type SapBuiltFormCode = 1 | 2 | 3 | 4 | 5 | 6;
 export interface SpaceLabel {
   id: string;
   name: string;
+  /** '' when the row's Zone cell names no zone: the label belongs to no zone and adds nothing. */
   zoneId: string;
+  /** The Zone cell as typed when it names no zone, so the row saves as it was. */
+  zoneName?: string;
   /** Authoring storey index (0 = ground), aligned with schedule / canvas floor Z bands. */
   storey: number;
   /** Registry key (e.g. bedroom, void); empty string = unassigned type. */
@@ -58,6 +61,8 @@ export interface Zone {
   _heightUserOverride?: boolean; // When true, height is user-set and won't auto-update from wall heights
   // Metadata for multi-floor ground element validation
   _groundFloorLevels?: number[]; // Distinct Z-levels of BuildingElementGround elements in this zone
+  /** Numeric CSV cells that held text on load, by column: saved back as typed, and blocking until the field is edited. */
+  nonNumericCells?: Record<string, string>;
 }
 
 // Element types as specified in BATCH_MODEL_TODO.md
@@ -150,6 +155,8 @@ export interface BaseElement {
 
   // Version tracking for freshness verification
   _v?: number;
+  /** Numeric CSV cells that held text on load, by column: saved back as typed, and blocking until the field is edited. */
+  nonNumericCells?: Record<string, string>;
 
 }
 

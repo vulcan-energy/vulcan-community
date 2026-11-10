@@ -975,8 +975,8 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
               }
             />
             {groundWallThicknessAutofill.valueM != null &&
-            liveThicknessWallsValue != null &&
-            Math.abs(liveThicknessWallsValue - groundWallThicknessAutofill.valueM) > 1e-5 ? (
+            (liveThicknessWallsValue == null ||
+              Math.abs(liveThicknessWallsValue - groundWallThicknessAutofill.valueM) > 1e-5) ? (
               <ResetFieldButton
                 align="inline"
                 title="Set thickness to the area-weighted assembly solid thickness from adjacent walls on this storey"

@@ -602,7 +602,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
     return (
       <>
         {renderFieldLabel('Linked Wall:', elementType)}
-        <div className="element-input">
+        <div className="element-input" ref={registerBaseFieldRef('parent_element')}>
           <ParentElementDropdown
             value={state.parentElement}
             onChange={(value) => applyHostedParentElement(value, '')}

@@ -33,6 +33,9 @@ function readDefaults(declared: string | undefined): string {
 export async function convertCsv(csvArg: string, options: ConvertOptions): Promise<ConvertResponse> {
   const csv = readFileSync(resolve(csvArg), 'utf8');
   const { metadata } = parseCsvToGeometry(csv);
+  if (metadata.targetBundleId) {
+    throw new Error(`CSV pins TargetBundleId '${metadata.targetBundleId}'. This CLI converts with its bundled schema and cannot apply that HEM version. Use Vulcan to prepare it, or remove the TargetBundleId line to convert with the bundled schema.`);
+  }
   const profile: CommunityModelProfile =
     metadata.complianceSettings.complianceValidationEnabled === true ? 'fhs' : 'core';
   if (metadata.schemaProfile === 'ecaas_input_fhs' && options.schema === undefined) {

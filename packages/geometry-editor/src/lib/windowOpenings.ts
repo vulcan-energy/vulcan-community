@@ -5,6 +5,7 @@ import type {
   GeometrySchemaMode,
   GeometrySchemaPort,
 } from '../../../geometry-editor-host/src/schemaPort';
+import type { WindowShading } from '../geometry/types';
 import { unwrapNullableSchema } from './schemaShape';
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
 
@@ -170,6 +171,25 @@ export function windowPartsArePhysical(
   const resolved = dereferenceSchemaNodeInRoot(list, schemaPort.getRootSchema(mode) ?? subschema);
   const items = isRecord(resolved) ? unwrapNullableSchema(resolved).items : undefined;
   return isRecord(items) && isRecord(items.properties) ? !(LEGACY_KEY in items.properties) : null;
+}
+
+/**
+ * Window Shading `Type` values the target's window `shading` accepts, in CSV spelling (the CSV
+ * writes the schema's `obstacle` as `object`), or `null` with no schema.
+ */
+export function allowedWindowShadingTypes(
+  schemaPort: GeometrySchemaPort,
+  mode: GeometrySchemaMode,
+): readonly WindowShading['shading_type'][] | null {
+  if (schemaPort.availability !== 'available') return null;
+  const subschema = schemaPort.getElementSubschema(mode, 'BuildingElementTransparent');
+  const shading = isRecord(subschema?.properties) ? subschema.properties.shading : undefined;
+  if (!isRecord(shading)) return null;
+  const resolved = dereferenceSchemaNodeInRoot(shading, schemaPort.getRootSchema(mode) ?? subschema);
+  const items = isRecord(resolved) ? unwrapNullableSchema(resolved).items : undefined;
+  const type = isRecord(items) && isRecord(items.properties) ? items.properties.type : undefined;
+  if (!isRecord(type) || !Array.isArray(type.enum)) return null;
+  return type.enum.map((value) => (value === 'obstacle' ? 'object' : value) as WindowShading['shading_type']);
 }
 
 /** True when part-level rows, not the three main-form inputs, are the place to edit the openings. */

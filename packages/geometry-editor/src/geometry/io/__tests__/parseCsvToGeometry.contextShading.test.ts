@@ -28,7 +28,7 @@ MyShade,ContextShading,obstacle,10,20,30,5.5,Wall1,"0,0,0|1,0,0|1,1,0|0,1,0","{"
     expect((cs as any).extra_json?.development_context_shading).toEqual({ version: 1 });
   });
 
-  it('parses rows with empty angle cells', () => {
+  it('parses rows with empty angle cells and leaves an element-type shading_type blank', () => {
     const csv = `
 Metadata,,,,,,,,,,,,,
 GlobalOrientationOffset,0.0,,,,,,,,,,,,,
@@ -40,7 +40,9 @@ X,ContextShading,ContextShading,,27,154,5.89,Floor,"0,0,0|1,0,0|1,1,0|0,1,0"
 
     const { elements } = parseCsvToGeometry(csv);
     const cs = elements.find((e) => e.type === 'ContextShading');
-    expect((cs as any).shading_type).toBe('obstacle');
+    // ContextShading is the element type, not a shading kind: it stays blank and blocks, as in the converter.
+    expect((cs as any).shading_type).toBeUndefined();
+    expect((cs as any).start_angle).toBeUndefined();
     expect((cs as any).end_angle).toBe(27);
     expect((cs as any).distance).toBe(154);
     expect((cs as any).height).toBe(5.89);

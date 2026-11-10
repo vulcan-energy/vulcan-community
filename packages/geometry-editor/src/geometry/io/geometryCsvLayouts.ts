@@ -85,11 +85,6 @@ export const ZONE_HEADERS_FHS = [
   'restofdwelling_area',
 ] as const;
 
-/** Zone table headers as emitted by `generateCSV` (FHS area split vs base). */
-export function zoneExportHeaders(complianceValidationEnabled: boolean): readonly string[] {
-  return complianceValidationEnabled ? ZONE_HEADERS_FHS : ZONE_HEADERS_BASE;
-}
-
 export const EXPECTED_SECTION_HEADERS: Record<string, readonly string[]> = {
   'Exposed Elements': [
     'Name',
@@ -263,6 +258,38 @@ export const EXPECTED_SECTION_HEADERS: Record<string, readonly string[]> = {
   'Space Labels': ['Name', 'Zone', 'storey', 'room_type', 'coords', 'height_override', 'extra_json'],
 };
 
+/** The tabular section that carries each element type whose columns the converter reads per element. */
+const ELEMENT_CSV_SECTION: Partial<Record<ElementType, string>> = {
+  BuildingElementOpaque: 'Exposed Elements',
+  BuildingElementTransparent: 'Window Elements',
+  BuildingElementGround: 'Ground Elements',
+  BuildingElementAdjacentConditionedSpace: 'Non-Exposed Elements',
+  BuildingElementAdjacentUnconditionedSpace_Simple: 'Non-Exposed Elements',
+  BuildingElementPartyWall: 'Non-Exposed Elements',
+  ThermalBridgeLinear: 'Thermal Bridging Elements',
+  ThermalBridgePoint: 'Thermal Bridging Elements',
+  MechanicalVentilation: 'Ventilation Systems',
+  MechanicalVentilationDuctwork: 'Ventilation Systems',
+  Vents: 'Ventilation Systems',
+  CombustionAppliances: 'Combustion Appliances',
+  WaterPipework: 'Water Pipework',
+  OnSiteGeneration: 'On-Site Generation',
+};
+
+/**
+ * True when `field` has its own column in the element's CSV row. A blank cell there is not filled
+ * from the defaults template, so a required value must come from the element itself.
+ */
+export function isElementCsvColumn(type: ElementType, field: string): boolean {
+  const section = ELEMENT_CSV_SECTION[type];
+  return !!section && SECTION_COLUMNS.get(section)!.has(field);
+}
+
+/** Element types the converter builds from the row alone: no field takes a defaults template value. */
+export const ROW_ONLY_ELEMENT_TYPES: ReadonlySet<string> = new Set(['ThermalBridgeLinear', 'ThermalBridgePoint', 'WetEmitter']);
+
+const SECTION_COLUMNS = new Map(Object.entries(EXPECTED_SECTION_HEADERS).map(([section, columns]) => [section, new Set(columns)]));
+
 const SKIP_VALIDATION = new Set(['Test Section']);
 
 /**
@@ -283,6 +310,7 @@ const ADDITIVE_OPTIONAL_COLUMNS: Record<string, ReadonlySet<string>> = {
   'Hot Water Outlets': new Set(['allow_low_flowrate', 'base_height', 'coords', 'extra_json']),
   'Context Shading': new Set(['shading_type', 'start_angle', 'end_angle', 'parent_element', 'base_height', 'coords', 'extra_json']),
   'Water Pipework': new Set(['pipework_type']),
+  'Thermal Bridging Elements': new Set(['heat_transfer_coeff', 'parent_element', 'coords']),
   Systems: new Set(['Zone', 'Type', 'subcategory', 'system_preset', 'base_height', 'coords', 'extra_json']),
 };
 

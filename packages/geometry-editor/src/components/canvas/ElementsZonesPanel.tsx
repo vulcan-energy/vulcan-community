@@ -32,6 +32,8 @@ import {
   type GeometryModelSchemaProfilePort,
 } from '../../../../geometry-editor-host/src/modelSchemaProfilePort';
 import type { GeometrySourceComparisonPort } from '../../../../geometry-editor-host/src/sourceComparisonPort';
+import { useGeometrySchemaPort } from '../../../../geometry-editor-host/src/editorServicePorts';
+import { simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import type { ElementCategoryGhostKey, ElementCategoryGhostState } from '../../lib/elementCategoryVisibility';
 import { HideElementsDropdown } from './HideElementsDropdown';
 import { HidePanelsDropdown, type HidePanelKey, type HidePanelOption } from './HidePanelsDropdown';
@@ -671,6 +673,8 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     }
     return counts;
   }, [elementsById]);
+  const schemaPort = useGeometrySchemaPort();
+  const bridgingOffered = simplifiedThermalBridgingOffered(schemaPort, complianceSettings.complianceValidationEnabled ? 'fhs' : 'core');
   const zoneValidationById = useMemo(() => {
     const validations = new Map<string, ValidationResult>();
     const spaceLabelIdsByZone = new Map<string, string[]>();
@@ -687,6 +691,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
         elementsById,
         complianceValidationEnabled: complianceSettings.complianceValidationEnabled || false,
         primaryFhsZoneId,
+        simplifiedThermalBridgingOffered: bridgingOffered,
       });
       const zoneSpaceLabelIds = spaceLabelIdsByZone.get(zone.id) ?? [];
       if (zoneSpaceLabelIds.length === 0) {
@@ -717,6 +722,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     spaceLabelsById,
     zoneTargetIssues,
     zones,
+    bridgingOffered,
   ]);
   const filteredZones = useMemo(() => {
     if (!validationFilter) return zones;
@@ -1370,19 +1376,9 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                   {
                                     coordinates: [{ x: centerWorld.x, y: centerWorld.y, z }],
                                     ...(missingSystemSubtype ? { subcategory: missingSystemSubtype } : {}),
-                                    ...(missingHotWaterOther
-                                      ? {
-                                          subcategory: 'OtherWaterUseDetails',
-                                          flowrate: 8,
-                                        }
-                                      : {}),
-                                    ...(missingHotWaterShowerOrBath || missingHotWaterShower
-                                      ? {
-                                          subcategory: 'MixerShower',
-                                          flowrate: 8,
-                                          allow_low_flowrate: false,
-                                        }
-                                      : {}),
+                                    // The outlet's values stay blank and block until the user enters them, as in the create form.
+                                    ...(missingHotWaterOther ? { subcategory: 'OtherWaterUseDetails' } : {}),
+                                    ...(missingHotWaterShowerOrBath || missingHotWaterShower ? { subcategory: 'MixerShower' } : {}),
                                     ...(missingRefrigerationAppliance
                                       ? { appliancekey: 'Fridge' }
                                       : {}),

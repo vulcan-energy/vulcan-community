@@ -140,6 +140,22 @@ describe("GlobalSettingsModal", () => {
     expect(screen.queryByText(/Fallback heat loss/)).not.toBeInTheDocument();
   });
 
+  it("shows the file's ComplianceValidationEnabled row as it is", async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ complianceValidationEnabled: false });
+    render(
+      <GeometryStoreProvider store={store}>
+        <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} />
+      </GeometryStoreProvider>
+    );
+
+    await user.click(screen.getByRole("tab", { name: /Global values/i }));
+    await user.click(screen.getByText("Dwelling Details"));
+    const box = document.querySelector<HTMLInputElement>('[data-field-key="ComplianceValidationEnabled"] input');
+    expect(box?.checked).toBe(false);
+  });
+
   it("duplicates defaults through the injected workspace without a private editor", async () => {
     const user = userEvent.setup();
     const store = createGeometryStore();
@@ -320,7 +336,7 @@ describe("GlobalSettingsModal", () => {
       expect(indicator?.variant).toBe("error");
       expect(indicator?.issues[0]).toBe("No defaults file is selected.");
       expect(indicator?.issues).toContain(
-        "Number of hot-tapped rooms is required when strict checks are on."
+        "Global Settings: Number of hot-tapped rooms is not set. Enter it in Global Settings."
       );
     });
   });

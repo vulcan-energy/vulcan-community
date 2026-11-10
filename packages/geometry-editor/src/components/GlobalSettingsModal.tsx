@@ -25,6 +25,7 @@ import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingF
 
 import { resolveFieldPresentation } from "../lib/fieldPresentation";
 import {
+  unsetMetadataInputIssues,
   collectGlobalSettingsWarnings,
   fhsBedroomCountIssue,
   globalSettingsFieldSection,
@@ -513,6 +514,7 @@ export function GlobalSettingsModal({
     junctionPsiDefaultsLoading,
     spaceLabelIds,
     spaceLabelsById,
+    defaultsJson,
     creationDefaultAssemblyIds,
     bundledAssemblyLibrary,
     bundledAssemblyLibraryLoading,
@@ -531,6 +533,7 @@ export function GlobalSettingsModal({
       junctionPsiDefaultsLoading: state.junctionPsiDefaultsLoading,
       spaceLabelIds: state.spaceLabelIds,
       spaceLabelsById: state.spaceLabelsById,
+      defaultsJson: state.defaultsLoading ? undefined : state.defaultsJson,
       creationDefaultAssemblyIds: state.creationDefaultAssemblyIds,
       bundledAssemblyLibrary: state.bundledAssemblyLibrary,
       bundledAssemblyLibraryLoading: state.bundledAssemblyLibraryLoading,
@@ -708,10 +711,6 @@ export function GlobalSettingsModal({
       ),
     [elementsById]
   );
-  const effectiveBuildingLength =
-    complianceSettings.BuildingLength ?? derivedLW.lengthM;
-  const effectiveBuildingWidth =
-    complianceSettings.BuildingWidth ?? derivedLW.widthM;
   const dwellingDetailsSuggestion = useMemo(
     () => calculateDwellingDetailsSuggestion(Object.values(elementsById)),
     [elementsById]
@@ -733,15 +732,6 @@ export function GlobalSettingsModal({
     COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED
       ? true
       : !!complianceSettings.complianceValidationEnabled;
-
-  useEffect(() => {
-    if (
-      COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED &&
-      complianceSettings.complianceValidationEnabled !== true
-    ) {
-      setComplianceSettings({ complianceValidationEnabled: true });
-    }
-  }, [complianceSettings.complianceValidationEnabled, setComplianceSettings]);
 
   const suggestedVentHeight = useMemo(
     () =>
@@ -977,60 +967,30 @@ export function GlobalSettingsModal({
   const fhsComplianceRequiredIssues = useMemo(() => {
     const issues: string[] = [];
     if (effectiveComplianceValidationEnabled) {
-      if (complianceSettings.PartGcompliance === undefined) {
-        issues.push(
-          "Part G water efficiency: set yes or no (needed for strict checks)."
-        );
-      }
-      if (complianceSettings.NumberOfBedrooms === undefined) {
-        issues.push(
-          "Number of bedrooms is required when strict checks are on."
-        );
-      }
+      // Every model-input row the save would leave out: the same check that blocks the model.
+      issues.push(...unsetMetadataInputIssues(
+        { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
+        targetRoot,
+        defaultsJson,
+      ));
       const bedroomCountIssue = fhsBedroomCountIssue(
         complianceSettings.NumberOfBedrooms
       );
       if (bedroomCountIssue) {
         issues.push(bedroomCountIssue);
       }
-      if (effectiveBuildType === undefined) {
-        issues.push(
-          "Build type is required when strict checks are on. Draw floor geometry or select house/flat manually."
-        );
+      if (
+        typeof effectiveStoreysInDwelling === "number" &&
+        effectiveStoreysInDwelling < 1
+      ) {
+        issues.push("Storeys in dwelling must be at least 1.");
       }
       if (
-        !(
-          typeof effectiveStoreysInDwelling === "number" &&
-          Number.isFinite(effectiveStoreysInDwelling) &&
-          effectiveStoreysInDwelling >= 1
-        )
+        effectiveBuildType === "flat" &&
+        typeof complianceSettings.storeys_in_building === "number"
       ) {
-        issues.push(
-          "Storeys in dwelling is required when strict checks are on. Draw floor geometry or enter a manual override."
-        );
-      }
-      if (effectiveBuildType === "flat") {
-        if (
-          showStoreyOfDwelling &&
-          !(
-            typeof effectiveStoreyOfDwelling === "number" &&
-            Number.isFinite(effectiveStoreyOfDwelling)
-          )
-        ) {
-          issues.push(
-            "Storey of dwelling is required for flats when strict checks are on."
-          );
-        }
-        if (
-          !(
-            typeof complianceSettings.storeys_in_building === "number" &&
-            Number.isFinite(complianceSettings.storeys_in_building) &&
-            complianceSettings.storeys_in_building >= 1
-          )
-        ) {
-          issues.push(
-            "Storeys in building is required for flats when strict checks are on."
-          );
+        if (complianceSettings.storeys_in_building < 1) {
+          issues.push("Storeys in building must be at least 1.");
         } else if (
           typeof effectiveStoreysInDwelling === "number" &&
           complianceSettings.storeys_in_building < effectiveStoreysInDwelling
@@ -1040,58 +1000,6 @@ export function GlobalSettingsModal({
           );
         }
       }
-      if (
-        !(
-          typeof effectiveBuildingLength === "number" &&
-          Number.isFinite(effectiveBuildingLength) &&
-          effectiveBuildingLength > 0
-        )
-      ) {
-        issues.push(
-          "Building length is required when strict checks are on. Draw usable ground floor geometry or enter a manual override."
-        );
-      }
-      if (
-        !(
-          typeof effectiveBuildingWidth === "number" &&
-          Number.isFinite(effectiveBuildingWidth) &&
-          effectiveBuildingWidth > 0
-        )
-      ) {
-        issues.push(
-          "Building width is required when strict checks are on. Draw usable ground floor geometry or enter a manual override."
-        );
-      }
-      if (complianceSettings.NumberOfHabitableRooms === undefined) {
-        issues.push(
-          "Number of habitable rooms is required when strict checks are on."
-        );
-      }
-      if (complianceSettings.NumberOfHotTappedRooms === undefined) {
-        issues.push(
-          "Number of hot-tapped rooms is required when strict checks are on."
-        );
-      }
-      if (complianceSettings.NumberOfUtilityRooms === undefined) {
-        issues.push(
-          "Number of utility rooms is required when strict checks are on."
-        );
-      }
-      if (complianceSettings.NumberOfBathrooms === undefined) {
-        issues.push(
-          "Number of bathrooms is required when strict checks are on."
-        );
-      }
-      if (showSanitaryAccommodations && complianceSettings.NumberOfSanitaryAccommodations === undefined) {
-        issues.push(
-          "Number of sanitary accommodations is required when strict checks are on."
-        );
-      }
-      if (complianceSettings.HeatingControlType === undefined) {
-        issues.push(
-          "Heating control type is required when strict checks are on."
-        );
-      }
       if (complianceSettings.ColdWaterSource === undefined) {
         issues.push("Cold water source is required when strict checks are on.");
       }
@@ -1099,14 +1007,16 @@ export function GlobalSettingsModal({
     return issues;
   }, [
     complianceSettings,
-    effectiveBuildingLength,
-    effectiveBuildingWidth,
     effectiveBuildType,
     effectiveComplianceValidationEnabled,
-    effectiveStoreyOfDwelling,
     effectiveStoreysInDwelling,
-    showSanitaryAccommodations,
-    showStoreyOfDwelling,
+    elementsById,
+    floors,
+    spaceLabelIds,
+    spaceLabelsById,
+    targetRoot,
+    defaultsJson,
+    zones,
   ]);
 
   const comparisonGlobalSections = useMemo(() => ({
@@ -1849,7 +1759,8 @@ export function GlobalSettingsModal({
                         >
                           <input
                             type="checkbox"
-                            checked={effectiveComplianceValidationEnabled}
+                            // The editor applies the FHS checks to every file; the file's row is only saved.
+                            checked={complianceSettings.complianceValidationEnabled !== false}
                             onChange={(e) =>
                               setComplianceSettings({
                                 complianceValidationEnabled: e.target.checked,

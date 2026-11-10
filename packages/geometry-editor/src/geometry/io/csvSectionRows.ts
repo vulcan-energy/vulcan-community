@@ -25,6 +25,21 @@ export const isSectionHeaderLine = isGeometryCsvSectionHeaderLine;
 export const isTabularSectionHeaderLine =
   isTabularGeometryCsvSectionHeaderLine;
 
+/**
+ * The value of a metadata row (`Key,value`, optionally commented as `#Key`) in the leading Metadata
+ * block, which ends at the first empty row; an element row with that name is not metadata.
+ * Pin detection for preparation, the editor and the CLI all read the target through this.
+ */
+export function csvMetadataValue(csv: string, key: string): string | undefined {
+  const rows = csv.replace(/^\uFEFF/, '').split(/\r?\n/).map(parseCsvLine);
+  const end = rows.findIndex((fields) => fields.every((field) => !field.trim()));
+  const values = new Set(rows.slice(0, end === -1 ? undefined : end)
+    .filter((fields) => fields[0]?.replace(/^#\s*/, '').trim() === key)
+    .map((fields) => fields[1]?.trim() ?? ''));
+  if (values.size > 1) throw new Error(`CSV contains conflicting ${key} metadata`);
+  return values.values().next().value;
+}
+
 /** Deprecated CSV section title (not listed in `KNOWN_GEOMETRY_CSV_SECTIONS`). */
 export function isLegacyBuildingServicesSectionTitle(fields: string[]): boolean {
   if (fields.length === 0) return false;

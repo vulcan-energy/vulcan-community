@@ -71,6 +71,7 @@ import {
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
   windowOpeningBulkEditBlocked,
+  allowedWindowShadingTypes,
   windowPartsArePhysical,
   windowPartsCopyBlocked,
   windowPartsCopyColumns,
@@ -1097,6 +1098,10 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   );
   const windowSchemaMode = complianceValidationEnabled ? 'fhs' : 'core';
   const windowPartsPhysical = windowPartsArePhysical(schemaPort, windowSchemaMode);
+  const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, windowSchemaMode);
+  const windowShadingTypeOptions = allowedShadingTypes
+    ? WINDOW_SHADING_TYPE_OPTIONS.filter(({ value }) => allowedShadingTypes.includes(value))
+    : WINDOW_SHADING_TYPE_OPTIONS;
   const defaultsLookup = useGeometryStore((s) => s.getDefaultsLookup());
   const partyWallCavityFields = getPartyWallCavityFields(schemaPort, complianceValidationEnabled ? 'fhs' : 'core');
 
@@ -3309,7 +3314,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               'Shading Type',
               windowShadingTypeSummary,
               activeWindowShadingIds.length > 0,
-              WINDOW_SHADING_TYPE_OPTIONS,
+              windowShadingTypeOptions,
               (value) => applyElementPatches((el) => {
                 if (!isWindowShading(el)) return null;
                 if (value === 'object') {
