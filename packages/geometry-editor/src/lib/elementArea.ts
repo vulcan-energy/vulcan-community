@@ -7,6 +7,7 @@ import {
   readProfiledLineFace,
   wallFaceBreakpoints,
   wallFaceProblem,
+  exportedBaseHeightForWallFace,
 } from './profileLineFace';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { calculatePolygonArea } from './polygonSync';
@@ -244,9 +245,7 @@ const getProfiledLineFaceGeometry = (
     width: roundToTwoDecimals(width),
     grossArea: roundToTwoDecimals(width * averageHeight),
     equivalentHeight: roundToTwoDecimals(averageHeight),
-    // HEM base_height is the lowest edge: the wall foot plus the lowest bottom point. CSV import
-    // subtracts the same offset back (wallFootFromExportedBaseHeight), so the foot round-trips.
-    equivalentBaseHeight: roundToTwoDecimals(foot + Math.min(...bottomProfile.map((p) => p.h))),
+    equivalentBaseHeight: exportedBaseHeightForWallFace(foot, face),
   };
 };
 

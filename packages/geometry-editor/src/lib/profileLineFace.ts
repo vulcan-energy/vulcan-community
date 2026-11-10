@@ -134,11 +134,23 @@ export function isFlatProfile(profile: ProfilePoint[], h?: number): boolean {
   return profile.length === 2 && profile[0].h === profile[1].h && (h === undefined || profile[0].h === h);
 }
 
+// Micrometre rounding only removes float noise, so foot and profile heights authored to any
+// practical precision survive export → import exactly (2 dp would drift the foot).
+const roundMicro = (v: number) => Math.round(v * 1e6) / 1e6;
+
+const lowestBottom = (face: ProfileLineFace) => Math.min(...face.bottom_profile.map((p) => p.h));
+
 /**
- * Export writes a profiled wall's base_height as its lowest edge (foot + lowest bottom point);
- * the editor stores the foot. Import uses this to undo the offset so the foot round-trips.
- * An invalid face is left alone: validation reports it.
+ * HEM base_height is the distance from the ground to the element's lowest edge. For a valid
+ * profiled wall that is the foot plus its lowest bottom point; the editor stores the foot.
+ * {@link wallFootFromExportedBaseHeight} is the inverse, used by the CSV reader.
  */
+export function exportedBaseHeightForWallFace(foot: number, face: ProfileLineFace): number {
+  const lowest = lowestBottom(face);
+  return lowest === 0 ? Math.round(foot * 100) / 100 : roundMicro(foot + lowest);
+}
+
+/** Inverse of {@link exportedBaseHeightForWallFace}. An invalid face is left alone: validation reports it. */
 export function wallFootFromExportedBaseHeight(
   baseHeight: number | undefined,
   extra: unknown,
@@ -147,6 +159,28 @@ export function wallFootFromExportedBaseHeight(
   if (baseHeight === undefined || !face || wallFaceProblem(face.top_profile, face.bottom_profile, 1)) {
     return baseHeight;
   }
-  const lowest = Math.min(...face.bottom_profile.map((p) => p.h));
-  return lowest === 0 ? baseHeight : Math.round((baseHeight - lowest) * 1000) / 1000;
+  const lowest = lowestBottom(face);
+  return lowest === 0 ? baseHeight : roundMicro(baseHeight - lowest);
+}
+
+// Rounded so flipping twice gives back the stored t exactly.
+const reverseT = (t: number) => Math.round((1 - t) * 1e12) / 1e12;
+
+/** The same face seen from a wall whose coordinates run the other way. */
+export function reverseProfiledLineFace<T extends ProfileLineFace>(face: T): T {
+  const reverse = (points: ProfilePoint[]) => points.map((p) => ({ ...p, t: reverseT(p.t) })).reverse();
+  return { ...face, top_profile: reverse(face.top_profile), bottom_profile: reverse(face.bottom_profile) };
+}
+
+/**
+ * For every path that reverses a line wall's coordinates (flip facing, plan mirror): returns
+ * extra_json with a profiled face reversed to match, or the same object when there is none.
+ */
+export function reverseGeometryFaceInExtraJson<T>(extra: T): T {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return extra;
+  const face = (extra as Record<string, unknown>).geometry_face as ProfileLineFace | undefined;
+  if (!face || face.kind !== 'profiled-line-face' || !Array.isArray(face.top_profile) || !Array.isArray(face.bottom_profile)) {
+    return extra;
+  }
+  return { ...extra, geometry_face: reverseProfiledLineFace(face) };
 }

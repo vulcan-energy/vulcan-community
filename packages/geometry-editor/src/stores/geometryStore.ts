@@ -20,6 +20,7 @@ import {
   lineIntersection,
   isColinear,
 } from '../lib/shapeUtils';
+import { reverseGeometryFaceInExtraJson } from '../lib/profileLineFace';
 import { syncPolygonElement, unionPolygons, calculatePolygonArea } from '../lib/polygonSync';
 import {
   buildSlopedPolygonRectangleDimensionPatch,
@@ -2733,7 +2734,10 @@ function transformSelectedPlanGeometry(
     if (mirror) coordinates = mirroredCoordinateOrder(element, coordinates);
 
     const currentOrientation = (element as { orientation360?: unknown }).orientation360;
-    const extraJson = transformDormerBundlePlanPoint(element.extra_json, transformPoint);
+    const movedExtraJson = transformDormerBundlePlanPoint(element.extra_json, transformPoint);
+    const extraJson = mirror && getElementShape(element) === 'line'
+      ? reverseGeometryFaceInExtraJson(movedExtraJson)
+      : movedExtraJson;
     const nextElement = {
       ...element,
       coordinates,
@@ -6616,6 +6620,7 @@ const createGeometryState = (
 
     get().updateElement(id, {
       coordinates: [{ ...end }, { ...start }],
+      ...(element.extra_json ? { extra_json: reverseGeometryFaceInExtraJson(element.extra_json) } : {}),
     } as Partial<Element>, true);
 
     for (const snapshot of hostedChildSnapshots) {

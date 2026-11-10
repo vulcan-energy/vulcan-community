@@ -1462,14 +1462,6 @@
       "classification": "public_community_test_suite"
     },
     {
-      "path": "packages/geometry-editor/src/components/__tests__/ProfileHeightsPopover.test.tsx",
-      "source_path": "packages/geometry-editor/src/components/__tests__/ProfileHeightsPopover.test.tsx",
-      "license": "AGPL-3.0-only",
-      "additional_terms": "Vulcan-Origin-Terms-1.0",
-      "rights_status": "approved",
-      "classification": "public_community_test_suite"
-    },
-    {
       "path": "packages/geometry-editor/src/components/__tests__/StandardInput.test.tsx",
       "source_path": "packages/geometry-editor/src/components/__tests__/StandardInput.test.tsx",
       "license": "AGPL-3.0-only",
@@ -1488,6 +1480,14 @@
     {
       "path": "packages/geometry-editor/src/components/__tests__/systemEditorUtils.test.ts",
       "source_path": "packages/geometry-editor/src/components/__tests__/systemEditorUtils.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/__tests__/WallShapeRows.test.tsx",
+      "source_path": "packages/geometry-editor/src/components/__tests__/WallShapeRows.test.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -2502,14 +2502,6 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
-      "path": "packages/geometry-editor/src/components/ProfileHeightsPopover.tsx",
-      "source_path": "packages/geometry-editor/src/components/ProfileHeightsPopover.tsx",
-      "license": "AGPL-3.0-only",
-      "additional_terms": "Vulcan-Origin-Terms-1.0",
-      "rights_status": "approved",
-      "classification": "public_canonical_editor_dependency"
-    },
-    {
       "path": "packages/geometry-editor/src/components/ResetFieldButton.tsx",
       "source_path": "packages/geometry-editor/src/components/ResetFieldButton.tsx",
       "license": "AGPL-3.0-only",
@@ -2664,6 +2656,14 @@
     {
       "path": "packages/geometry-editor/src/components/ValidationIndicator.tsx",
       "source_path": "packages/geometry-editor/src/components/ValidationIndicator.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/WallShapeRows.tsx",
+      "source_path": "packages/geometry-editor/src/components/WallShapeRows.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -4407,6 +4407,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/lib/__tests__/wallShape.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/wallShape.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/__tests__/windowOpenings.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/windowOpenings.test.ts",
       "license": "AGPL-3.0-only",
@@ -5617,6 +5625,14 @@
     {
       "path": "packages/geometry-editor/src/lib/vertexEditSnap.ts",
       "source_path": "packages/geometry-editor/src/lib/vertexEditSnap.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/wallEdgeFromRoofs.ts",
+      "source_path": "packages/geometry-editor/src/lib/wallEdgeFromRoofs.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

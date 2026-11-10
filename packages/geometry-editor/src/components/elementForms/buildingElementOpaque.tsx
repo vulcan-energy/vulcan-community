@@ -42,10 +42,12 @@ import { useState } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { isExternalLineWall } from '../../geometry/thermalBridge/proposeExternalCorners';
 import {
+  getAreaBasedElementExportGeometry,
   getElementGrossArea,
   getOpaqueOpeningArea,
   isUnheatedPitchedRoofPlanAreaElement,
 } from '../../lib/elementArea';
+import { readProfiledLineFace } from '../../lib/profileLineFace';
 import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeometry';
 import { findSuspendedGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
 import { isDormerAnchorElement } from '../../lib/dormerGeometry';
@@ -292,6 +294,13 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       };
     })();
 
+    // A wall whose bottom edge is not flat exports its lowest edge as HEM base_height; the
+    // Base Height field stays the wall foot.
+    const selectedFace = selectedElement ? readProfiledLineFace(selectedElement.extra_json) : null;
+    const lowestEdgeM = selectedElement?.type === 'BuildingElementOpaque' && selectedFace?.bottom_profile.some((p) => p.h !== 0)
+      ? getAreaBasedElementExportGeometry(selectedElement, getGlobalOrientationOffset()).baseHeight
+      : null;
+
     const canMarkUnheatedPitchedRoof = elementType === 'BuildingElementOpaque' && selectedShape === 'sloped-polygon';
     const canMarkExternalDoor = elementType === 'BuildingElementOpaque'
       && selectedShape === 'line'
@@ -530,6 +539,9 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
               />
             )}
           </div>
+          {lowestEdgeM !== null ? (
+            <div style={INLINE_FIELD_NOTE_STYLE}>Lowest edge {formatToTwoDecimals(lowestEdgeM)} m</div>
+          ) : null}
           {baseHeightResetTarget ? (
             <div style={INLINE_FIELD_NOTE_STYLE}>
               {typeof state.baseHeightInput.value === 'number' && Math.abs(state.baseHeightInput.value - baseHeightResetTarget.value) > 0.01

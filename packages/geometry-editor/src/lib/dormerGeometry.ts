@@ -10,6 +10,7 @@ import type {
 import { getOpaqueHostBaseElevationAlignedWith3D } from './geometry3dMapper';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
 import { calculatePolygonArea } from './polygonSync';
+import { reverseProfiledLineFace, type ProfileLineFace } from './profileLineFace';
 import {
   computeSlopedPolygonInwardNormal2D,
   elevationAtSlopedVertexM,
@@ -320,13 +321,7 @@ function calculatePlanarFaceArea3D(points: Array<{ x: number; y: number; z: numb
 
 type DormerLinePoint = { x: number; y: number; z: number };
 
-type ProfilePoint = { t: number; h: number };
-
-type ProfiledLineFaceGeometry = {
-  kind: 'profiled-line-face';
-  top_profile: ProfilePoint[];
-  bottom_profile: ProfilePoint[];
-};
+type ProfiledLineFaceGeometry = ProfileLineFace;
 
 type PlanarFace3DGeometry = {
   kind: 'planar-face-3d';
@@ -397,22 +392,6 @@ function deriveOrientationFromSegmentOutwardNormal(
   return roundToTwoDecimals(o ?? 0);
 }
 
-function reverseProfilePoints(points: ProfilePoint[]): ProfilePoint[] {
-  return points
-    .map((point) => ({ t: 1 - point.t, h: point.h }))
-    .reverse();
-}
-
-function reverseProfiledLineFaceGeometry(
-  geometry: ProfiledLineFaceGeometry,
-): ProfiledLineFaceGeometry {
-  return {
-    kind: 'profiled-line-face',
-    top_profile: reverseProfilePoints(geometry.top_profile),
-    bottom_profile: reverseProfilePoints(geometry.bottom_profile),
-  };
-}
-
 function canonicalizeDormerSegment(
   coordinates: [DormerLinePoint, DormerLinePoint],
   interiorPoint: DormerPlanPoint,
@@ -432,7 +411,7 @@ function canonicalizeDormerSegment(
     coordinates: nextCoordinates,
     orientation360: deriveOrientationFromLine(nextCoordinates, globalOrientationOffset),
     geometryFace: geometryFace
-      ? (shouldFlip ? reverseProfiledLineFaceGeometry(geometryFace) : geometryFace)
+      ? (shouldFlip ? reverseProfiledLineFace(geometryFace) : geometryFace)
       : undefined,
   };
 }
