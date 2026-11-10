@@ -5872,14 +5872,14 @@ impl JSONBuilder {
             .get("volume")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
+        // A first zone without the living-room split leaves it out of the consolidated zone, so
+        // validation names it as it does for a single zone (E026); no 0.0 stands in for it.
         let mut total_livingroom_area = first_zone_data
             .get("livingroom_area")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_f64());
         let mut total_restofdwelling_area = first_zone_data
             .get("restofdwelling_area")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
+            .and_then(|v| v.as_f64());
         let mut height_sum = first_zone_data
             .get("height")
             .and_then(|v| v.as_f64())
@@ -5922,13 +5922,14 @@ impl JSONBuilder {
                 .get("livingroom_area")
                 .and_then(|v| v.as_f64())
             {
-                total_livingroom_area += livingroom_area;
+                total_livingroom_area = total_livingroom_area.map(|total| total + livingroom_area);
             }
             if let Some(restofdwelling_area) = other_zone_obj
                 .get("restofdwelling_area")
                 .and_then(|v| v.as_f64())
             {
-                total_restofdwelling_area += restofdwelling_area;
+                total_restofdwelling_area =
+                    total_restofdwelling_area.map(|total| total + restofdwelling_area);
             }
             if let Some(height) = other_zone_obj.get("height").and_then(|v| v.as_f64()) {
                 if height > 0.0 {
@@ -6031,14 +6032,18 @@ impl JSONBuilder {
             "volume".to_string(),
             Value::Number(serde_json::Number::from_f64(total_volume).unwrap()),
         );
-        first_zone.insert(
-            "livingroom_area".to_string(),
-            Value::Number(serde_json::Number::from_f64(total_livingroom_area).unwrap()),
-        );
-        first_zone.insert(
-            "restofdwelling_area".to_string(),
-            Value::Number(serde_json::Number::from_f64(total_restofdwelling_area).unwrap()),
-        );
+        if let Some(total) = total_livingroom_area {
+            first_zone.insert(
+                "livingroom_area".to_string(),
+                Value::Number(serde_json::Number::from_f64(total).unwrap()),
+            );
+        }
+        if let Some(total) = total_restofdwelling_area {
+            first_zone.insert(
+                "restofdwelling_area".to_string(),
+                Value::Number(serde_json::Number::from_f64(total).unwrap()),
+            );
+        }
         // Set height if we have any height values (even if only one zone had height)
         // Skip inserting height for FHS schema (not allowed by FHS schema)
         // Note: This function only runs when is_fhs_schema is true, but we check anyway for safety
@@ -12916,6 +12921,30 @@ Zone 2,Zone,80,40,0,40
             zone.get("area").is_none(),
             "FHS consolidated zone should not retain legacy area field"
         );
+    }
+
+    #[test]
+    fn fhs_zone_consolidation_does_not_invent_a_missing_area_split() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Zone 1,Zone,100,50
+Zone 2,Zone,80,40
+"#;
+        let mut parser = CSVParser::new();
+        let data = parser.parse_csv(csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder
+            .build_zone_structure(&mut result, &data)
+            .expect("Zone structure should build");
+        builder
+            .consolidate_zones_for_fhs(&mut result)
+            .expect("FHS consolidation should succeed");
+        // Left out, as for a single zone, so validation blocks on it (E026).
+        let zone = result["Zone"]["Zone 1"].as_object().expect("Zone 1");
+        assert!(zone.get("livingroom_area").is_none(), "{zone:?}");
+        assert!(zone.get("restofdwelling_area").is_none(), "{zone:?}");
     }
 
     #[test]
