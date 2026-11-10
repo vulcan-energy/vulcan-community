@@ -2308,7 +2308,9 @@ export const validateElementCore = (
         (element.type === 'BuildingElementOpaque' && (element as BuildingElementOpaque).is_external_door)) {
       if (!element.parent_element || element.parent_element.trim() === '') {
         if (element.coordinates?.length) {
-          issues.push(geo('Link wall/roof parent: a drawn opening with no host is not deducted from any wall or roof area', 'parent_element'));
+          // Named as the form labels the control that sets it.
+          const control = element.type === 'BuildingElementTransparent' ? 'Linked Wall' : 'Parent Element';
+          issues.push(geo(`${control} is not set: a drawn opening with no host is not deducted from any wall or roof area`, 'parent_element'));
         } else {
           warnings.push(geo('Link wall/roof parent', 'parent_element'));
         }

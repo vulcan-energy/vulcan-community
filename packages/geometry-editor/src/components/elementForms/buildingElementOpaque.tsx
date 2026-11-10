@@ -362,7 +362,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
     return (
       <>
         {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
-        <div className="element-input">
+        <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element'])}>
           <ParentElementDropdown
             value={state.parentElement}
             onChange={(value) => applyHostedParentElement(value, null)}

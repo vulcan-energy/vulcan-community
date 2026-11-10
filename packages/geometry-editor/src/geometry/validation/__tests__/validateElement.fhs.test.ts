@@ -147,7 +147,7 @@ it('blocks a drawn window with no host wall or roof', () => {
   const element = window(1);
   expect(validateElementCore(element, baseContext(element)).issues).toContainEqual(expect.objectContaining({
     fieldKey: 'parent_element',
-    message: expect.stringContaining('Link wall/roof parent'),
+    message: expect.stringContaining('Linked Wall is not set'),
   }));
 });
 
