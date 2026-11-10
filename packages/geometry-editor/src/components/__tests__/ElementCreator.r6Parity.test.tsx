@@ -23,6 +23,7 @@ function renderElement(
   beforeRender?: (store: ReturnType<typeof createGeometryStore>) => void,
   selectionType: 'element' | 'global' = 'element',
   setSelection = vi.fn(),
+  inspectorContributions = emptyGeometryInspectorContributions,
 ) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   const elements = [...relatedElements, element];
@@ -42,6 +43,7 @@ function renderElement(
           selection={{ type: selectionType, id: element.id } as never}
           setSelection={setSelection}
           useCard={false}
+          inspectorContributions={inspectorContributions}
         />
       </GeometryStoreProvider>
     </GeometryEditorServicePortsProvider>,
@@ -410,6 +412,91 @@ describe('BuildingElementGround selection stability', () => {
   });
 });
 
+
+
+describe('generic inspector element fields contribution', () => {
+  it('renders for declared element types and patches extra_json through the store while preserving unrelated keys', () => {
+    const window = {
+      id: 'window', type: 'BuildingElementTransparent', name: 'Window', zoneId: 'zone',
+      coordinates: [{ x: 0, y: 0, z: 0 }], width: 1, height: 1, area: 1,
+      extra_json: { retained: { source: 'csv' } },
+    } as Element;
+    const renderContribution = vi.fn(({ element, onPatchExtraJson }: {
+      element: unknown;
+      onPatchExtraJson: (update: (current: Record<string, unknown>) => Record<string, unknown>) => void;
+    }) => {
+      const selected = element as Element;
+      return <button type="button" onClick={() => onPatchExtraJson((current) => ({ ...current, marker: 'set' }))}>
+        Set generic field for {selected.name}
+      </button>;
+    });
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.setState({
+      elementsById: { window }, elementIds: ['window'],
+      zones: [{ id: 'zone', name: 'Zone', floorArea: 1, height: 2 }], zoneIds: ['zone'],
+    });
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={unavailableGeometrySchemaPort}
+        workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
+      >
+        <GeometryStoreProvider store={store}>
+          <ElementCreator
+            selection={{ type: 'element', id: 'window' }}
+            setSelection={vi.fn()}
+            useCard={false}
+            inspectorContributions={{
+              ...emptyGeometryInspectorContributions,
+              elementFields: {
+                elementTypes: ['BuildingElementTransparent'],
+                render: renderContribution,
+              },
+            }}
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set generic field for Window' }));
+
+    expect(renderContribution).toHaveBeenLastCalledWith(expect.objectContaining({
+      element: expect.objectContaining({ id: 'window', name: 'Window' }),
+    }), undefined);
+    expect(store.getState().elementsById.window?.extra_json).toEqual({
+      retained: { source: 'csv' },
+      security_risk: true,
+      marker: 'set',
+    });
+    const csv = store.getState().generateCSV();
+    const reloadedStore = createGeometryStore({ defaultDefaultsPath: null });
+    reloadedStore.getState().loadFromCSV(csv);
+    const roundTripped = Object.values(reloadedStore.getState().elementsById)
+      .find((element) => element.name === 'Window');
+    expect(roundTripped?.extra_json).toEqual({
+      retained: { source: 'csv' },
+      security_risk: true,
+      marker: 'set',
+    });
+  });
+
+  it('does not render the host field contribution for undeclared element types', () => {
+    const opaque = {
+      id: 'wall', type: 'BuildingElementOpaque', name: 'Wall', zoneId: 'zone',
+      coordinates: [{ x: 0, y: 0, z: 0 }], width: 1, height: 1, area: 1,
+      extra_json: {},
+    } as Element;
+    const renderContribution = vi.fn(() => <button type="button">Host field</button>);
+    renderElement(opaque, [], undefined, 'element', vi.fn(), {
+      ...emptyGeometryInspectorContributions,
+      elementFields: {
+        elementTypes: ['BuildingElementTransparent'],
+        render: renderContribution,
+      },
+    });
+    expect(renderContribution).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Host field' })).not.toBeInTheDocument();
+  });
+});
 
 describe('SpaceHeatSystem heat source creation', () => {
   it.each(['WetDistribution', 'WarmAir'])('creates and links a source for %s through preset changes', async (type) => {

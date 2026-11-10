@@ -111,11 +111,27 @@ export type GeometryConstructionDetailsContribution = Readonly<{
   ): Record<string, unknown>;
 }>;
 
+export type GeometryInspectorElementFieldsContext = Readonly<{
+  /** The one element currently shown in the Details inspector. */
+  element: Readonly<Record<string, unknown>>;
+  /** Merge a host-owned field into the element's existing extra_json. */
+  onPatchExtraJson(
+    update: (current: Record<string, unknown>) => Record<string, unknown>,
+  ): void;
+}>;
+
+export type GeometryInspectorElementFieldsContribution = Readonly<{
+  /** Element types for which this host-provided Details field is relevant. */
+  elementTypes: readonly string[];
+  render: ComponentType<GeometryInspectorElementFieldsContext>;
+}>;
+
 export type GeometryInspectorContributions = Readonly<{
   evidence: GeometryInspectorEvidenceContribution | null;
   detailedJunctionSolver: GeometryDetailedJunctionSolverContribution | null;
   productCatalogue: GeometryProductCatalogueContribution | null;
   constructionDetails: GeometryConstructionDetailsContribution | null;
+  elementFields: GeometryInspectorElementFieldsContribution | null;
 }>;
 
 export function defineGeometryInspectorContributions(
@@ -126,6 +142,7 @@ export function defineGeometryInspectorContributions(
     detailedJunctionSolver: contributions.detailedJunctionSolver ?? null,
     productCatalogue: contributions.productCatalogue ?? null,
     constructionDetails: contributions.constructionDetails ?? null,
+    elementFields: contributions.elementFields ?? null,
   });
 }
 

@@ -50,6 +50,8 @@ export {
   unavailableGeometryInspectorEvidenceBridge,
   type GeometryConstructionDetailCandidate,
   type GeometryConstructionDetailsContribution,
+  type GeometryInspectorElementFieldsContext,
+  type GeometryInspectorElementFieldsContribution,
   type GeometryDetailedJunctionSolverContribution,
   type GeometryDetailedJunctionSolverProps,
   type GeometryInspectorContributions,

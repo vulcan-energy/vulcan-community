@@ -3321,6 +3321,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (!selection?.id) return null;
     return getElementById(selection.id) ?? null;
   }, [selection?.id, getElementById, selectedElementV]);
+  const ElementFieldsRenderer = inspectorContributions.elementFields?.render;
 
   const selectedDormerMetadata = getDormerBundleMetadata(selectedElement);
   const selectedIsDormerAnchor = isDormerAnchorElement(selectedElement);
@@ -5477,6 +5478,23 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   {renderAttributePanel()}
                   {renderElementElevationField()}
                 </div>
+
+                {selection.type === 'element' &&
+                  !selection.isPlaceholder &&
+                  selectedElement &&
+                  ElementFieldsRenderer &&
+                  inspectorContributions.elementFields?.elementTypes.includes(selectedElement.type) ? (
+                    <div className="element-editor-stack element-editor-section-spacer">
+                      <ElementFieldsRenderer
+                        element={selectedElement as unknown as Readonly<Record<string, unknown>>}
+                        onPatchExtraJson={(update) => {
+                          const currentElement = getElementById(selection.id);
+                          const currentExtra = readExtraJsonRecord(currentElement?.extra_json);
+                          commitExistingElementDraft({ extra_json: update({ ...currentExtra }) });
+                        }}
+                      />
+                    </div>
+                  ) : null}
 
                 {/* Advanced Fields Section - Outside grid for full width */}
                 {selection.type === 'element' || selection.type === 'global' ? (
