@@ -1230,31 +1230,15 @@ const COLD_WATER_SOURCE_MAINS: &str = "mains water";
 const COLD_WATER_SOURCE_HEADER_TANK: &str = "header tank";
 const COLD_WATER_SOURCE_DEFAULT: &str = COLD_WATER_SOURCE_MAINS;
 
-/// Identify the (field name, field value) pair in a parsed Metadata row.
-///
-/// The CSV parser treats the first Metadata row as headers, so a row like
-/// `PartGcompliance,TRUE` arrives as arbitrary header→cell pairs; the field
-/// name is whichever cell matches a known metadata name and the value is the
-/// first other non-empty cell.
+/// The (field name, field value) pair of a parsed Metadata row: the codec keys the first cell
+/// `Field` and the second `Value`. A name that is not a known Metadata field is ignored.
 fn extract_metadata_field(row: &HashMap<String, Value>) -> (Option<String>, Option<Value>) {
-    let mut field_name: Option<String> = None;
-    let mut field_value: Option<Value> = None;
-    for value in row.values() {
-        if let Some(value_str) = value.as_str() {
-            if !value_str.is_empty() {
-                if KNOWN_METADATA_FIELD_NAMES.contains(&value_str) {
-                    if field_name.is_none() {
-                        field_name = Some(value_str.to_string());
-                    }
-                } else if field_value.is_none() {
-                    field_value = Some(value.clone());
-                }
-            }
-        } else if !value.is_null() && field_value.is_none() {
-            field_value = Some(value.clone());
-        }
-    }
-    (field_name, field_value)
+    let name = row
+        .get("Field")
+        .and_then(Value::as_str)
+        .filter(|name| KNOWN_METADATA_FIELD_NAMES.contains(name));
+    let value = row.get("Value").filter(|value| !value.is_null());
+    (name.map(str::to_string), value.cloned())
 }
 
 const VULCAN_CSV_VERSION: &str = "VulcanCsvVersion";
@@ -4723,10 +4707,6 @@ impl JSONBuilder {
         csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         // Compliance settings are stored in the Metadata section
-        // The parser treats metadata rows as table rows, so the first row becomes headers
-        // For metadata like "GlobalOrientationOffset,0", the headers would be ["GlobalOrientationOffset", "0", ...]
-        // And subsequent rows would be parsed with those headers
-        // So we need to access the first column of each row as the field name
         if let Some(metadata_rows) = csv_data.get("Metadata") {
             let result_obj = result
                 .as_object_mut()
@@ -13203,6 +13183,15 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
             shading[0],
             serde_json::json!({"type": "overhang", "height": 7})
         );
+    }
+
+    #[test]
+    fn the_first_metadata_row_is_an_input_row() {
+        let csv = "Metadata\nNumberOfBedrooms,3\n\nZone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n";
+        let data = CSVParser::new().parse_csv(csv).unwrap();
+        let mut builder = JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).unwrap();
+        let model = builder.build_json(&data).unwrap();
+        assert_eq!(model["NumberOfBedrooms"], 3);
     }
 
     #[test]

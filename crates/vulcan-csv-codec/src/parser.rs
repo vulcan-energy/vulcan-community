@@ -111,6 +111,12 @@ impl CSVParser {
                     });
                 }
 
+                // Metadata rows are (name, value) by position and have no header row.
+                if section_name == "Metadata" {
+                    self.section_headers
+                        .insert(section_name.clone(), vec!["Field".into(), "Value".into()]);
+                    section_column_counts.insert(section_name.clone(), 2);
+                }
                 self.current_section = Some(section_name.clone());
                 self.seen_sections.insert(section_name);
                 self.state = ParserState::InSection;
@@ -131,7 +137,7 @@ impl CSVParser {
             // Extract section name early to avoid borrowing conflicts
             let section_name = self.current_section.as_ref().unwrap().clone();
 
-            // First non-header row in section becomes the header
+            // First non-header row in any other section becomes the header
             if !self.section_headers.contains_key(&section_name) {
                 self.section_headers
                     .insert(section_name.clone(), columns.clone());
@@ -154,7 +160,9 @@ impl CSVParser {
                     let extra_data = adjusted_columns[*expected..]
                         .iter()
                         .any(|col| !col.trim().is_empty());
-                    if extra_data {
+                    // A Metadata row is (name, value); the editor keeps a third cell on its
+                    // GuideOverlay rows, and no reader uses cells after the second.
+                    if extra_data && section_name != "Metadata" {
                         return Err(ParseError {
                             code: "E004".to_string(),
                             message: format!(

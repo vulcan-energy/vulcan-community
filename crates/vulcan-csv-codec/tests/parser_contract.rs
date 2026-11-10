@@ -19,6 +19,21 @@ Wall,Living,BuildingElementOpaque,"{""u_value"":0.18}"
 }
 
 #[test]
+fn every_metadata_row_is_a_field_value_pair() {
+    let parsed = CSVParser::new()
+        .parse_csv("Metadata,,\nNumberOfBedrooms,3,\nField,Value\nGuideOverlay,0,v1|a.png\n")
+        .expect("CSV should parse");
+    assert_eq!(
+        serde_json::to_value(&parsed["Metadata"]).unwrap(),
+        serde_json::json!([
+            {"Field": "NumberOfBedrooms", "Value": 3},
+            {"Field": "Field", "Value": "Value"},
+            {"Field": "GuideOverlay", "Value": 0}
+        ])
+    );
+}
+
+#[test]
 fn rejects_a_row_that_references_an_undefined_zone() {
     let csv = r#"Exposed Elements
 Name,Zone,Type
