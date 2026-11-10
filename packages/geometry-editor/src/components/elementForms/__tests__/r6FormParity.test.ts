@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /** R6 fence for the single-element paths that share Lighting/TB field semantics. */
+import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Element } from '../../../geometry/types';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../../lib/overrideProvenance';
@@ -9,6 +10,8 @@ import { buildingElementGroundFormModule } from '../buildingElementGround';
 import { lightingFormModule } from '../lighting';
 import { thermalBridgePointFormModule } from '../thermalBridgePoint';
 import { windowShadingFormModule } from '../windowShading';
+import { hotWaterDemandFormModule } from '../hotWaterDemand';
+import { waterPipeworkFormModule } from '../waterPipework';
 
 const lighting = (fields: Record<string, unknown> = {}): Element => ({
   id: 'light', type: 'Lighting', name: 'light', coordinates: [{ x: 0, y: 0, z: 0 }], ...fields,
@@ -141,4 +144,13 @@ it('keeps a zero window-shading distance instead of dropping it', () => {
   expect((windowShadingFormModule.buildElementData({
     linkedWindow: 'Window', shadingType: 'overhang', depthInput: input(0.4), heightInput: input(''), distanceInput: input(''), transparencyInput: input(''),
   } as never, { baseData: {} } as never) as { distance?: number }).distance).toBeUndefined();
+});
+
+it('creates a mixer shower and a pipe with their choices blank, so they block until chosen', () => {
+  const ctx = { commitElementNumericField: () => () => undefined, serviceLine: { lengthInput: { value: '' } } } as never;
+  const shower = renderHook(() => hotWaterDemandFormModule.useFormState(ctx));
+  act(() => shower.result.current.setHotWaterSubcategory('MixerShower'));
+  expect(hotWaterDemandFormModule.buildElementData(shower.result.current, { baseData: {} } as never)).toMatchObject({ allow_low_flowrate: undefined });
+  const pipe = renderHook(() => waterPipeworkFormModule.useFormState(ctx));
+  expect(waterPipeworkFormModule.buildElementData(pipe.result.current, { baseData: {} } as never)).toMatchObject({ pipework_type: undefined });
 });

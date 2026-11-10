@@ -32,12 +32,16 @@ type Case = {
   edit: (csv: string) => string;
   /** Defaults that arrive after the load, as the file's defaults read does. */
   defaults?: boolean;
-  /** `element|field` or `Global Settings` text the editor must block on. */
+  /** `element|field`, `|field` on any element, or issue text the editor must block on. */
   blocks?: string[];
   /** Must not block on these. */
   allows?: string[];
   /** `section|row name|column` (or `Metadata|key`) → saved cell; null means the row is not written. */
   saves?: Record<string, string | null>;
+  /** The load must stop with this message: the converter stops the whole conversion. */
+  refuses?: string;
+  /** Edits after the load (and the defaults), before the checks. */
+  then?: (store: ReturnType<typeof createGeometryStore>) => void;
   /** Text the load notices must contain, or must not contain. */
   notice?: string;
   noNotice?: string;
@@ -50,15 +54,18 @@ const replace = (from: string, to: string) => (csv: string) => {
 const radiator = (unit: string) => replace('Radiator,Zone 1,WetEmitter,radiator,,1,', `Radiator,Zone 1,WetEmitter,radiator,,${unit},`);
 const ufh = (unit: string) => replace('Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,,', `Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,${unit},`);
 
-const systemsVentilation = replace(
+const systemsVentilation = (csv: string) => replace(
   'Name,Zone,Type,subcategory,system_preset,coords,extra_json\n',
-  'Name,Zone,Type,subcategory,system_preset,coords,extra_json\nInfiltration,Zone 1,System,InfiltrationVentilation,,"0,0,0","{""InfiltrationVentilation"":{""shield_class"":""Shielded"",""altitude"":120}}"\n',
-);
+  'Name,Zone,Type,subcategory,system_preset,coords,extra_json\nInfiltration,Zone 1,System,InfiltrationVentilation,,"0,0,0","{""InfiltrationVentilation"":{""shield_class"":""Shielded"",""altitude"":120,""ventilation_zone_base_height"":1.5}}"\n',
+)(replace('Ventilation_ventilation_zone_base_height,0,,,,,,,,,,,,,\n', '')(csv));
 
 const kitchen = (zone: string, type: string, keepCoords = true) => (csv: string) => csv.replace(
   /^Kitchen,Zone 1,0,kitchen,("[^"]*")/m,
   (_row, coords: string) => `Kitchen,${zone},0,${type},${keepCoords ? coords : ''}`,
 );
+
+const appendSection = (text: string) => (csv: string) => `${csv.trimEnd()}\n\n${text}\n`;
+const noFloorAreaExtra = (csv: string) => csv.replace('""emitter_floor_area"":8.89,', '');
 
 const CASES: Case[] = [
   // Converter: unit_number is a whole number of 1 or more, or blank (E055 otherwise), on every emitter.
@@ -69,13 +76,19 @@ const CASES: Case[] = [
   { name: 'radiator unit_number 3', edit: radiator('3'), allows: ['Radiator|unit_number'], saves: { 'Wet Emitters|Radiator|unit_number': '3' } },
   { name: 'ufh unit_number 0', edit: ufh('0'), blocks: ['Underfloor Heating|unit_number'], saves: { 'Wet Emitters|Underfloor Heating|unit_number': '0' } },
   { name: 'ufh unit_number 1.5', edit: ufh('1.5'), blocks: ['Underfloor Heating|unit_number'] },
+  // The converter builds a fancoil's n_units and a UFH emitter's floor area from the row's columns.
+  { name: 'fancoil with no unit count', edit: replace('Radiator,Zone 1,WetEmitter,radiator,,1,', 'Radiator,Zone 1,WetEmitter,fancoil,,,'), blocks: ['|n_units'] },
+  { name: 'fancoil unit count gives n_units', edit: replace('Radiator,Zone 1,WetEmitter,radiator,,1,', 'Radiator,Zone 1,WetEmitter,fancoil,,2,'), allows: ['|n_units'] },
+  { name: 'ufh with no area', edit: (csv) => noFloorAreaExtra(replace('Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,', 'Underfloor Heating,Zone 1,WetEmitter,ufh,,')(csv)),
+    blocks: ['Underfloor Heating|emitter_floor_area'] },
+  { name: 'ufh area gives emitter_floor_area', edit: noFloorAreaExtra, allows: ['Underfloor Heating|emitter_floor_area'] },
   { name: 'ufh area 0', edit: replace('Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,', 'Underfloor Heating,Zone 1,WetEmitter,ufh,0,'), blocks: ['Underfloor Heating|area'] },
   // An absent Metadata row takes the converter's value: a Systems InfiltrationVentilation row
   // first, then the defaults template (which a load always reads after the file).
   { name: 'absent rows take the defaults', edit: (csv) => csv, defaults: true, notice: 'Shield Class Normal (from the defaults file)',
     saves: { 'Metadata|Ventilation_shield_class': 'Normal', 'Metadata|Ventilation_altitude': '30' } },
   { name: 'a Systems row supplies the absent rows', edit: systemsVentilation, defaults: true, noNotice: 'Shield Class',
-    allows: ['Shield Class', 'Altitude (m)'], saves: { 'Metadata|Ventilation_shield_class': null, 'Metadata|Ventilation_altitude': null } },
+    allows: ['Shield Class', 'Altitude (m)'], saves: { 'Metadata|Ventilation_shield_class': null, 'Metadata|Ventilation_altitude': null, 'Metadata|Ventilation_ventilation_zone_base_height': null } },
   // The converter does not read Space Labels: every row loads and saves as it is, and none blocks.
   { name: 'label with blank Zone', edit: kitchen('', 'kitchen'), notice: 'Kitchen',
     saves: { 'Space Labels|Kitchen|Zone': '', 'Space Labels|Kitchen|room_type': 'kitchen' } },
@@ -96,12 +109,33 @@ const CASES: Case[] = [
     blocks: ['Kitchen cooker hood extracts to outside is not set'], saves: { 'Metadata|KitchenExtractorHoodExternal': null } },
   { name: 'absent KitchenExtractorHoodExternal takes false', defaults: true, edit: (csv) => csv.replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
     saves: { 'Metadata|KitchenExtractorHoodExternal': 'FALSE' } },
+  // The section implies the row type: a blank Type keeps the row (the converter reads it too).
+  { name: 'pipework with blank Type', edit: replace('Pipe,WaterPipework,5.08,', 'Pipe,,5.08,'), saves: { 'Water Pipework|Pipe|length': '5.08' } },
+  { name: 'emitter with blank Type', edit: replace('Radiator,Zone 1,WetEmitter,radiator,,1,', 'Radiator,Zone 1,,radiator,,1,'), saves: { 'Wet Emitters|Radiator|unit_number': '1' } },
+  // Context Shading takes its kind from Type only in a file with no shading_type column.
+  { name: 'context shading blank shading_type', blocks: ['Tree|shading_type'],
+    edit: appendSection('Context Shading,,,,,,,\nName,Type,shading_type,start_angle,end_angle,distance,height,coords\nTree,obstacle,,0,30,10,5,"0,0,0"') },
+  { name: 'context shading kind from Type', allows: ['Tree|shading_type'],
+    edit: appendSection('Context Shading,,,,,,\nName,Type,start_angle,end_angle,distance,height,coords\nTree,obstacle,0,30,10,5,"0,0,0"') },
+  // A row the converter stops on (E008-E029) stops the load, naming the row.
+  { name: 'element in an unknown zone', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', 'Wall (S),Zone 9,BuildingElementOpaque'), refuses: "names zone 'Zone 9'" },
+  { name: 'element with no name', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', ',Zone 1,BuildingElementOpaque'), refuses: 'An Exposed Elements row has no Name' },
+  { name: 'hot water outlet with no Type', edit: replace('Tap,HotWaterDemand,', 'Tap,,'), refuses: "Hot Water Outlets row 'Tap' has no Type" },
+  { name: 'Systems row with no Name', edit: replace('Heat Pump,Zone 1,System,', ',Zone 1,System,'), refuses: 'A Systems row has no Name' },
+  // A value filled from the defaults and then edited is the user's: new defaults leave it.
+  { name: 'an edited filled value survives new defaults', edit: (csv) => csv, defaults: true,
+    then: (store) => {
+      store.getState().setComplianceSettings({ Ventilation_shield_class: 'Sheltered' } as never);
+      store.setState({ defaultsJson: { ...defaults } } as never);
+    },
+    saves: { 'Metadata|Ventilation_shield_class': 'Sheltered' } },
 ];
 
 function load(c: Case) {
   const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
   const { warnings } = store.getState().loadFromCSV(c.edit(sample));
   if (c.defaults) store.setState({ defaultsJson: defaults, defaultsLoading: false } as never);
+  c.then?.(store);
   const state = store.getState();
   const issues = new Set<string>();
   for (const element of Object.values(state.elementsById)) {
@@ -123,10 +157,16 @@ function load(c: Case) {
 }
 
 it.each(CASES)('$name', (c) => {
+  if (c.refuses) {
+    expect(() => load(c)).toThrow(c.refuses);
+    return;
+  }
   const { issues, all, cells, notices } = load(c);
   if (c.notice) expect(notices).toContain(c.notice);
   if (c.noNotice) expect(notices).not.toContain(c.noNotice);
-  const blocked = (key: string) => issues.has(key) || all.some((text) => text.includes(key));
+  // `|field` matches the field on any element (a type change can rename an auto-named element).
+  const blocked = (key: string) => issues.has(key) || all.some((text) => text.includes(key))
+    || (key.startsWith('|') && [...issues].some((issue) => issue.endsWith(key)));
   for (const key of c.blocks ?? []) expect(blocked(key), `blocks ${key}`).toBe(true);
   for (const key of c.allows ?? []) expect(blocked(key), `allows ${key}`).toBe(false);
   for (const [key, value] of Object.entries(c.saves ?? {})) expect(cells.get(key) ?? null, key).toBe(value);
