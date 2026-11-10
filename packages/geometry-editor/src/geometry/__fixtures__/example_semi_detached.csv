@@ -199,9 +199,9 @@ Wet Emitters,,,,,,,,,
 Name,Zone,Type,subcategory,area,unit_number,space_heat_system,coords,extra_json
 Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,,Zone 1 circuit,"-29.426,2.055,0.000|-29.426,-1.785,0.000|-27.546,-1.785,0.000|-27.545,-0.526,0.000|-26.505,-0.525,0.000|-26.505,1.455,0.000|-28.206,1.455,0.000|-28.206,2.075,0.000","{""emitter_floor_area"":8.89,""equivalent_specific_thermal_mass"":95,""system_performance_factor"":4.8,""frac_convective"":0.45}"
 Underfloor Heating 1,Zone 1,WetEmitter,ufh,7.62,,Zone 1 circuit,"-28.426,-2.485,0.000|-28.426,-4.745,0.000|-27.826,-4.746,0.000|-27.825,-6.046,0.000|-26.065,-6.046,0.000|-26.065,-2.485,0.000","{""emitter_floor_area"":7.62,""equivalent_specific_thermal_mass"":95,""system_performance_factor"":4.8,""frac_convective"":0.45}"
-Radiator,Zone 1,WetEmitter,radiator,,1,Zone 1 circuit,"-27.766,-6.205,1.000|-26.326,-6.205,1.000","{""c_per_m"":0.0112,""length"":1.44,""thermal_mass_per_m"":0.019,""frac_convective"":0.92}"
-Radiator 1,Zone 1,WetEmitter,radiator,,1,Zone 1 circuit,"-27.666,-0.746,1.000|-26.226,-0.746,1.000","{""c_per_m"":0.0112,""length"":1.44,""thermal_mass_per_m"":0.019,""frac_convective"":0.92}"
-Radiator 1 1,Zone 1,WetEmitter,radiator,,1,Zone 1 circuit,"-27.046,-1.406,1.000|-26.465,-1.406,1.000","{""c_per_m"":0.0112,""length"":0.58,""thermal_mass_per_m"":0.019,""frac_convective"":0.92}"
+Radiator,Zone 1,WetEmitter,radiator,,1,Zone 1 circuit,"-27.766,-6.205,1.000|-26.326,-6.205,1.000","{""c_per_m"":0.0112,""length"":1.44,""thermal_mass_per_m"":0.019,""frac_convective"":0.92,""n"":1.2}"
+Radiator 1,Zone 1,WetEmitter,radiator,,1,Zone 1 circuit,"-27.666,-0.746,1.000|-26.226,-0.746,1.000","{""c_per_m"":0.0112,""length"":1.44,""thermal_mass_per_m"":0.019,""frac_convective"":0.92,""n"":1.2}"
+Radiator 1 1,Zone 1,WetEmitter,radiator,,1,Zone 1 circuit,"-27.046,-1.406,1.000|-26.465,-1.406,1.000","{""c_per_m"":0.0112,""length"":0.58,""thermal_mass_per_m"":0.019,""frac_convective"":0.92,""n"":1.2}"
 
 Appliances,,,,
 Name,Type,appliancekey,coords
