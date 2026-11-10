@@ -239,27 +239,24 @@ export function WallShapeRows({
   onCommit,
 }: WallShapeRowsProps) {
   const stored: Profiles = { top: face?.top_profile ?? flat(height), bottom: face?.bottom_profile ?? flat(0) };
-  const [modes, setModes] = useState<Record<Edge, EdgeMode>>(() => ({
-    top: initialMode(face, 'top'),
-    bottom: initialMode(face, 'bottom'),
-  }));
-  const [pending, setPending] = useState<Profiles | null>(null);
-  // Undo/redo or an Advanced-fields edit can replace the stored face while the wall stays
-  // selected: follow it, so a stale "Under roof" is never written onto a custom edge. A Custom
-  // edge that is still flat stays Custom (the user picked it and has not edited it yet).
+  // Modes and an invalid draft belong to the stored face they were made against. Undo/redo or an
+  // Advanced-fields edit can replace that face while the wall stays selected: the rows then follow
+  // it, so a stale "Under roof" is never written onto a custom edge. A Custom edge that is still
+  // flat stays Custom (the user picked it and has not edited it yet).
   const faceKey = JSON.stringify(face);
-  const [syncedFaceKey, setSyncedFaceKey] = useState(faceKey);
-  if (faceKey !== syncedFaceKey) {
-    setSyncedFaceKey(faceKey);
-    setPending(null);
-    setModes((current) => {
-      const follow = (edge: Edge): EdgeMode => {
-        const next = initialMode(face, edge);
-        return next === 'flat' && current[edge] === 'custom' ? 'custom' : next;
-      };
-      return { top: follow('top'), bottom: follow('bottom') };
-    });
-  }
+  const [modeState, setModeState] = useState(() => ({
+    faceKey,
+    modes: { top: initialMode(face, 'top'), bottom: initialMode(face, 'bottom') } as Record<Edge, EdgeMode>,
+  }));
+  const follow = (edge: Edge): EdgeMode => {
+    const next = initialMode(face, edge);
+    return next === 'flat' && modeState.modes[edge] === 'custom' ? 'custom' : next;
+  };
+  const modes = modeState.faceKey === faceKey ? modeState.modes : { top: follow('top'), bottom: follow('bottom') };
+  const setModes = (next: Record<Edge, EdgeMode>) => setModeState({ faceKey, modes: next });
+  const [pendingState, setPendingState] = useState<{ faceKey: string; profiles: Profiles } | null>(null);
+  const pending = pendingState?.faceKey === faceKey ? pendingState.profiles : null;
+  const setPending = (profiles: Profiles | null) => setPendingState(profiles ? { faceKey, profiles } : null);
   const [highlight, setHighlight] = useState<{ edge: Edge; index: number } | null>(null);
   const draft = pending ?? stored;
   const problem = pending ? wallFaceProblem(pending.top, pending.bottom, widthM) : null;

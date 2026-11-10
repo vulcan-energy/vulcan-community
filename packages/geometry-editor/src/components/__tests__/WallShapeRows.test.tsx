@@ -116,7 +116,7 @@ describe('WallShapeRows', () => {
     const { rerender } = render(rows(roofTop));
     expect(edge('top').getByRole('button', { name: 'Under roof' }).getAttribute('aria-pressed')).toBe('true');
 
-    const { top_mode: _dropped, ...custom } = { ...roofTop, top_profile: [{ t: 0, h: 2 }, { t: 0.5, h: 2.8 }, { t: 1, h: 2 }] };
+    const custom: ProfileLineFace = { kind: 'profiled-line-face', top_profile: [{ t: 0, h: 2 }, { t: 0.5, h: 2.8 }, { t: 1, h: 2 }], bottom_profile: roofTop.bottom_profile };
     rerender(rows(custom));
     expect(edge('top').getByRole('button', { name: 'Custom' }).getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(edge('bottom').getByRole('button', { name: 'Custom' }));
