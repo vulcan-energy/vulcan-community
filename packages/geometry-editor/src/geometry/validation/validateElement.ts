@@ -79,8 +79,9 @@ import {
 import { lineFaceEdgesAtPoint, readProfiledLineFace, wallFaceBreakpoints, wallFaceProblem } from '../../lib/profileLineFace';
 import { deriveWallEdgeFromRoofs, isRoofSnapshotStale } from '../../lib/wallEdgeFromRoofs';
 import {
-  bottomEdgeRoofRuns,
   deriveRoofCutout,
+  effectiveFloorsOf,
+  elementsOf,
   isFootprintWall,
   modelMayHaveRoofCutouts,
   roofsWallsStandOn as roofsForCutouts,
@@ -984,9 +985,8 @@ function roofFootprintIssueWarnings(
 ): string[] {
   if (element.type !== 'BuildingElementOpaque' && !isFootprintWall(element)) return [];
   if (!modelMayHaveRoofCutouts(elements)) return [];
-  const roofs = isFootprintWall(element)
-    ? [...new Set(bottomEdgeRoofRuns(element, roofsForCutouts(elements, globalOrientationOffset), floors, globalOrientationOffset).map((run) => run.roof))]
-    : [element];
+  // Each roof's derivation is shared across the pass; a wall reads the issues that name it.
+  const roofs = isFootprintWall(element) ? roofsForCutouts(elements, globalOrientationOffset) : [element];
   return roofs.flatMap((roof) => (deriveRoofCutout(roof, elements, floors, globalOrientationOffset)?.issues ?? [])
     .flatMap((issue) => (roof.id === element.id || issue.wallNames.includes(element.name) ? [roofFootprintIssueMessage(roof.name, issue)] : [])));
 }
@@ -1073,10 +1073,9 @@ export const validateElementCore = (
     }
   };
 
-  const allElements = elementsById ? Object.values(elementsById) : [];
-  // Effective storey heights, for MVHR units placed in metres; only duct and unit checks need them.
-  let effectiveFloorsMemo: Floor[] | undefined;
-  const effectiveFloors = (): Floor[] => (effectiveFloorsMemo ??= withEffectiveStoreyHeights(floors ?? [], allElements));
+  // Shared across a validation pass, so derivations keyed on them (roof cut-outs) run once.
+  const allElements = elementsById ? elementsOf(elementsById) : [];
+  const effectiveFloors = (): Floor[] => (floors ? effectiveFloorsOf(floors, allElements) : []);
   const floorStackWarnings = context.floorStackWarningElementIds
     ?? (floors ? getFloorStackWarningElementIds(allElements, floors) : new Set<string>());
   if (floorStackWarnings.has(element.id)) {

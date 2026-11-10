@@ -12,6 +12,7 @@ import { proposeWallGroundContinuous } from '../proposeWallGroundContinuous';
 import { proposeDormerWallToHostRoofR8R9ThermalBridges } from '../proposeDormerWallToHostRoofR8R9';
 import { proposeExternalCornerThermalBridges } from '../proposeExternalCorners';
 import { proposeFacadeOpeningThermalBridges } from '../proposeFacadeOpenings';
+import { syncThermalBridgeLinearLengthFromCoordinates } from '../../../lib/thermalBridgeLinearGeometry';
 
 const floors: Floor[] = [{ id: 'f0', name: 'Ground', zIndex: 0, height: 5, isRoofSpace: false } as Floor];
 
@@ -143,5 +144,14 @@ describe('shaped window', () => {
     expect(lengths(shaped)).toEqual({ lintel: 2.24, sill: 2, jamb_first: 1, jamb_second: 2 });
     // A flat window keeps width and stored height.
     expect(lengths(window())).toEqual({ lintel: 2, sill: 2, jamb_first: 1.5, jamb_second: 1.5 });
+  });
+
+  it('runs an apex window lintel as one straight run per side, its points matching its length, and no jambs', () => {
+    const apex = window({
+      geometry_face: { kind: 'profiled-line-face', top_profile: [{ t: 0, h: 0 }, { t: 0.5, h: 1 }, { t: 1, h: 0 }], bottom_profile: [{ t: 0, h: 0 }, { t: 1, h: 0 }] },
+    });
+    const proposals = proposeFacadeOpeningThermalBridges([apex], floors);
+    expect(proposals.map((p) => [p.edgeRole, p.suggestedLengthM])).toEqual([['lintel', 1.41], ['lintel', 1.41], ['sill', 2]]);
+    for (const p of proposals) expect(syncThermalBridgeLinearLengthFromCoordinates(p)).toBe(p.suggestedLengthM);
   });
 });

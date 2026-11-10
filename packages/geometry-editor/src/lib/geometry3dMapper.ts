@@ -1191,6 +1191,15 @@ export function elementBaseElevationMForTb(element: Element, floors: Floor[]): n
   return getElementBaseElevation(element, floorElevations, floorZLookup);
 }
 
+/**
+ * Bottom elevation of an opaque polygon (a flat roof deck) as the 3D preview places it: a roof-like
+ * polygon with `base_height` 0 or unset sits at the top of its storey. `floors` must already carry
+ * effective storey heights.
+ */
+export function opaquePolygonBaseElevationMForTb(element: Element, floors: Floor[]): number {
+  return getOpaquePolygonBaseElevationM(element, getFloorElevations(floors), floors, isPlanarAtSingleZ(element), getFloorZLookup(floors));
+}
+
 /** Storey index (0 = ground) for TB classification. Doesn't need effective storey
  * heights since it only consults floor zIndex / id, not height.
  *

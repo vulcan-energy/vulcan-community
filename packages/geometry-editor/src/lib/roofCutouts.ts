@@ -14,8 +14,11 @@
  *    point direction, as everywhere in the editor.
  * 2. The standing walls are joined end to end. Where three or more walls meet, the footprint is
  *    not clear: it is reported, not guessed.
- * 3. Open chain ends are joined through other walls of the zone (an extension's front wall and a
- *    side wall that stand on the floor), shortest joins first.
+ * 3. Open chain ends are joined through other walls of the zone, shortest joins first: off the
+ *    roof any wall (an extension's front wall on the floor past the eaves); on the roof only a wall
+ *    that rises through its surface there (the house wall behind a room on an extension's deck,
+ *    not the extension's own walls below the deck), joined mid-span where a chain end meets it.
+ *    Internal partitions never stand or join; party walls and walls to unheated space do.
  * 4. A chain that is still open closes where both ends stop on the roof:
  *    - both at a wall end of no height (the wall meets the roof above it, as a dormer cheek does):
  *      along the plan outline of the roofs drawn above those ends, which meet this roof there (the
@@ -27,7 +30,7 @@
  * 5. The closed footprints are clipped to the roof's plan outline.
  */
 import polygonClipping, { type MultiPolygon, type Polygon } from 'polygon-clipping';
-import { elementBaseElevationMForTb } from './geometry3dMapper';
+import { elementBaseElevationMForTb, opaquePolygonBaseElevationMForTb } from './geometry3dMapper';
 import { isPointInPolygon2D } from './pointInPolygon';
 import { calculatePolygonArea } from './polygonSync';
 import { interpolateProfileHeight, lineFaceEdgesAt, normalizeProfilePoints, readProfiledLineFace } from './profileLineFace';
@@ -35,7 +38,7 @@ import { isRoofLikeOpaqueElement, isSlopedPitchedRoofElementForEavesGable } from
 import { inwardNormal2DForSlopedRoof, roofTopElevationAtPlanM } from './roofTopElevationAtPlanM';
 import { isOrientationPitchAxis } from './slopePitchAxis';
 import { roofCoversPlanPoint } from './wallEdgeFromRoofs';
-import { isVerticalLineWall } from './zoneDerivation';
+import { isVerticalLineWall, withEffectiveStoreyHeights } from './zoneDerivation';
 import type { BuildingElementOpaque, Element, Floor } from '../geometry/types';
 
 type P = { x: number; y: number };
@@ -73,33 +76,48 @@ export function isFlatRoofDeckLineForTb(o: BuildingElementOpaque): boolean {
   return n === 'roof' || n.includes('roof');
 }
 
-/** Deck elevation (m) for flat roof TB geometry — shared with party-wall × flat-roof P4 proposals. */
+/**
+ * Deck elevation (m) of a flat roof, shared with the flat-roof edge and party-wall P4 proposals. It
+ * is where the 3D preview draws the deck: `base_height` 0 or unset is the top of the roof's storey.
+ * `floors` must carry effective storey heights.
+ */
 export function flatRoofDeckElevationMForTb(o: BuildingElementOpaque, floors: Floor[] | undefined): number {
-  if (floors && floors.length > 0) {
-    return elementBaseElevationMForTb(o, floors);
-  }
-  const c = o.coordinates;
-  const bh = o.base_height;
-  if (typeof bh === 'number' && Number.isFinite(bh) && bh >= 0) return bh;
-  let maxZ = -Infinity;
-  for (const p of c ?? []) {
-    if (typeof p?.z === 'number' && Number.isFinite(p.z)) maxZ = Math.max(maxZ, p.z);
-  }
-  if (maxZ !== -Infinity) return maxZ;
-  return 0;
+  return opaquePolygonBaseElevationMForTb(o, floors ?? []);
 }
+
+const memos = new WeakMap<object, Map<string, unknown>>();
+/** `compute()` once per (owner object, key): the store replaces arrays and elements on change. */
+function memo<T>(owner: object, key: string, compute: () => T): T {
+  let byKey = memos.get(owner);
+  if (!byKey) memos.set(owner, (byKey = new Map()));
+  if (!byKey.has(key)) byKey.set(key, compute());
+  return byKey.get(key) as T;
+}
+
+/** `Object.values(elementsById)`, the same array for the same record, so derivations are shared. */
+export const elementsOf = (elementsById: Record<string, Element>): Element[] =>
+  memo(elementsById, 'values', () => Object.values(elementsById));
+
+/** `withEffectiveStoreyHeights(floors, elements)`, the same array for the same inputs. */
+export const effectiveFloorsOf = (floors: Floor[], elements: Element[]): Floor[] => {
+  const byFloors = memo(elements, 'floors', () => new WeakMap<Floor[], Floor[]>());
+  if (!byFloors.has(floors)) byFloors.set(floors, withEffectiveStoreyHeights(floors, elements));
+  return byFloors.get(floors)!;
+};
 
 /** Pitched roofs and flat roof decks drawn as plan polygons: the roofs a wall can stand on. */
 export function roofsWallsStandOn(elements: Element[], globalOrientationOffset: number | undefined): BuildingElementOpaque[] {
-  const flat = elements.filter((e): e is BuildingElementOpaque =>
-    e.type === 'BuildingElementOpaque' && (e.coordinates?.length ?? 0) >= 3 && isFlatRoofDeckLineForTb(e));
-  return [...pitchedRoofsForWalls(elements, globalOrientationOffset), ...flat];
+  return memo(elements, `roofs|${globalOrientationOffset}`, () => [
+    ...pitchedRoofsForWalls(elements, globalOrientationOffset),
+    ...elements.filter((e): e is BuildingElementOpaque =>
+      e.type === 'BuildingElementOpaque' && (e.coordinates?.length ?? 0) >= 3 && isFlatRoofDeckLineForTb(e)),
+  ]);
 }
 
 /** True when a cut-out could exist: some wall bottom is raised, or the model has a flat roof deck. */
 export function modelMayHaveRoofCutouts(elements: Element[]): boolean {
-  return elements.some((e) => (e.type === 'BuildingElementOpaque' && isFlatRoofDeckLineForTb(e))
-    || (readProfiledLineFace(e.extra_json)?.bottom_profile.some((p) => p.h > ON_ROOF_TOL_M) ?? false));
+  return memo(elements, 'mayHave', () => elements.some((e) => (e.type === 'BuildingElementOpaque' && isFlatRoofDeckLineForTb(e))
+    || (readProfiledLineFace(e.extra_json)?.bottom_profile.some((p) => p.h > ON_ROOF_TOL_M) ?? false)));
 }
 
 /**
@@ -232,12 +250,145 @@ function buildChains(segs: Seg[]): Chain[] {
   return chains;
 }
 
-/** Walls that can stand on a roof or join a footprint: vertical line walls, not internal, not doors. */
+/**
+ * Walls that can stand on a roof or join a footprint: vertical line walls of the dwelling's
+ * boundary (external, party, to unheated space), not internal partitions, not doors.
+ */
 export const isFootprintWall = (e: Element): boolean =>
   !e.isPlaceholder
   && isVerticalLineWall(e)
+  && e.type !== 'BuildingElementAdjacentConditionedSpace'
   && (e as { location?: string }).location !== 'internal'
   && !(e.type === 'BuildingElementOpaque' && isRoofLikeOpaqueElement(e));
+
+/** Distance from p to the segment a–b. */
+function distToSegment(p: P, a: P, b: P): number {
+  const ex = b.x - a.x;
+  const ey = b.y - a.y;
+  const len2 = ex * ex + ey * ey;
+  const u = len2 < 1e-18 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * ex + (p.y - a.y) * ey) / len2));
+  return Math.hypot(p.x - a.x - ex * u, p.y - a.y - ey * u);
+}
+
+/**
+ * Walls a chain end can be joined through: walls of the zone that rise through the roof surface
+ * where they are joined on the roof (an extension's own walls under a deck do not), never a wall
+ * under or on a standing wall. A wall is split at every chain end and wall end on its span, so a
+ * chain end mid-span joins there and how a wall is divided does not change the footprint.
+ */
+function linkSegments(
+  roof: BuildingElementOpaque,
+  elements: Element[],
+  segs: Seg[],
+  openEnds: P[],
+  floors: Floor[],
+  globalOrientationOffset: number | undefined,
+): Seg[] {
+  const ring = roof.coordinates;
+  const onRoofPlan = (p: P) => isPointInPolygon2D(p, ring) || ringPosition(p, ring).d <= JOIN_TOL_M;
+  // Off the roof's plan there is no surface to rise through; any wall of the zone joins there.
+  const joinsAt = (el: Element, foot: number, t: number, p: P) => {
+    if (!onRoofPlan(p)) return true;
+    const z = roofSurfaceZ(roof, p, floors, globalOrientationOffset);
+    if (z === null) return false;
+    const { bottom, top } = lineFaceEdgesAt(el, t);
+    return foot + bottom <= z + ON_ROOF_TOL_M && z < foot + top - ON_ROOF_TOL_M;
+  };
+  const standingEls = new Set(segs.map((s) => s.el));
+  const walls = elements.flatMap((el) => {
+    if (standingEls.has(el) || !isFootprintWall(el) || !segs.some((s) => zonesCompatible(s.el.zoneId, el.zoneId))) return [];
+    const a = el.coordinates[0]!;
+    const b = el.coordinates[1]!;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < JOIN_TOL_M) return [];
+    const foot = elementBaseElevationMForTb(el, floors);
+    // Cheap first cut: a wall that joins nowhere at its ends or at a chain end on it is no link.
+    const tOf = (p: P) => ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / (len * len);
+    const ends = openEnds.filter((p) => distToSegment(p, a, b) <= JOIN_TOL_M);
+    if (!joinsAt(el, foot, 0, a) && !joinsAt(el, foot, 1, b) && !ends.some((p) => joinsAt(el, foot, tOf(p), p))) return [];
+    return [{ el, a, b, len, foot, tOf }];
+  });
+  const cuts = [...openEnds, ...walls.flatMap((w) => [w.a, w.b])];
+  const links: Seg[] = [];
+  for (const w of walls) {
+    const ts = [0, 1, ...cuts.filter((p) => distToSegment(p, w.a, w.b) <= JOIN_TOL_M).map(w.tOf)]
+      .map((t) => Math.max(0, Math.min(1, t)))
+      .sort((x, y) => x - y)
+      .filter((t, k, list) => k === 0 || (t - list[k - 1]!) * w.len > JOIN_TOL_M);
+    ts[ts.length - 1] = 1;
+    for (let k = 0; k < ts.length - 1; k += 1) {
+      const at = (t: number): P => ({ x: w.a.x + (w.b.x - w.a.x) * t, y: w.a.y + (w.b.y - w.a.y) * t });
+      const [t0, t1] = [ts[k]!, ts[k + 1]!];
+      const s: Seg = { el: w.el, a: at(t0), b: at(t1), onRoof: false, probes: [] };
+      const mid = at((t0 + t1) / 2);
+      if (!joinsAt(w.el, w.foot, t0, s.a) || !joinsAt(w.el, w.foot, t1, s.b)) continue;
+      if (segs.some((st) => distToSegment(mid, st.a, st.b) <= JOIN_TOL_M)) continue;
+      // Walls stacked on one plan line (a ground and a first floor wall) are one join.
+      if (links.some((l) => (near(l.a, s.a) && near(l.b, s.b)) || (near(l.a, s.b) && near(l.b, s.a)))) continue;
+      links.push(s);
+    }
+  }
+  return links;
+}
+
+/**
+ * Shortest joins between open chain ends through link segments (Dijkstra over their end points),
+ * each pair once.
+ */
+function shortestJoins(openEnds: P[], links: Seg[]): Array<{ i: number; j: number; length: number; path: Seg[] }> {
+  // Plan points within JOIN_TOL_M are one node: bucket by a grid of that size.
+  const nodes: P[] = [];
+  const grid = new Map<string, number[]>();
+  const cell = (v: number) => Math.floor(v / JOIN_TOL_M);
+  const nodeOf = (p: P): number => {
+    const [cx, cy] = [cell(p.x), cell(p.y)];
+    const around = [-1, 0, 1].flatMap((dx) => [-1, 0, 1].flatMap((dy) => grid.get(`${cx + dx},${cy + dy}`) ?? []));
+    const hit = around.find((n) => near(nodes[n]!, p));
+    if (hit !== undefined) return hit;
+    nodes.push(p);
+    const key = `${cx},${cy}`;
+    grid.set(key, [...(grid.get(key) ?? []), nodes.length - 1]);
+    return nodes.length - 1;
+  };
+  const endNodes = openEnds.map(nodeOf);
+  const adjacent: Array<Array<{ to: number; link: Seg; length: number }>> = [];
+  for (const link of links) {
+    const [u, v] = [nodeOf(link.a), nodeOf(link.b)];
+    if (u === v) continue;
+    const length = Math.hypot(link.b.x - link.a.x, link.b.y - link.a.y);
+    (adjacent[u] ??= []).push({ to: v, link, length });
+    (adjacent[v] ??= []).push({ to: u, link, length });
+  }
+  const joins: Array<{ i: number; j: number; length: number; path: Seg[] }> = [];
+  endNodes.forEach((start, i) => {
+    const dist = new Map<number, number>([[start, 0]]);
+    const via = new Map<number, { from: number; link: Seg }>();
+    const done = new Set<number>();
+    // ponytail: linear scan for the nearest open node (O(V²) per end); a heap if link graphs grow large.
+    for (;;) {
+      let cur = -1;
+      for (const [n, d] of dist) if (!done.has(n) && (cur < 0 || d < dist.get(cur)!)) cur = n;
+      if (cur < 0) break;
+      done.add(cur);
+      if (cur !== start) {
+        endNodes.forEach((end, j) => {
+          if (j <= i || end !== cur) return;
+          const path: Seg[] = [];
+          for (let n = cur; n !== start; n = via.get(n)!.from) path.unshift(via.get(n)!.link);
+          joins.push({ i, j, length: dist.get(cur)!, path });
+        });
+      }
+      for (const { to, link, length } of adjacent[cur] ?? []) {
+        const d = dist.get(cur)! + length;
+        if (!done.has(to) && d < (dist.get(to) ?? Infinity)) {
+          dist.set(to, d);
+          via.set(to, { from: cur, link });
+        }
+      }
+    }
+  });
+  return joins;
+}
 
 /** Nearest point on a closed ring, as a position s = edge index + fraction along it. */
 function ringPosition(p: P, ring: ReadonlyArray<P>): { s: number; d: number } {
@@ -354,6 +505,18 @@ export function deriveRoofCutout(
   globalOrientationOffset: number | undefined,
 ): RoofCutout | null {
   if (roof.type !== 'BuildingElementOpaque' || !modelMayHaveRoofCutouts(elements)) return null;
+  // Elements are replaced, never changed in place, so one derivation serves every caller of a model.
+  const byRoof = memo(elements, `cutouts|${globalOrientationOffset}|${JSON.stringify(floors)}`, () => new WeakMap<Element, RoofCutout | null>());
+  if (!byRoof.has(roof)) byRoof.set(roof, computeRoofCutout(roof, elements, floors, globalOrientationOffset));
+  return byRoof.get(roof)!;
+}
+
+function computeRoofCutout(
+  roof: BuildingElementOpaque,
+  elements: Element[],
+  floors: Floor[],
+  globalOrientationOffset: number | undefined,
+): RoofCutout | null {
   const roofs = roofsWallsStandOn(elements, globalOrientationOffset);
   if (!roofs.some((r) => r.id === roof.id)) return null;
   const ring = roof.coordinates;
@@ -362,8 +525,16 @@ export function deriveRoofCutout(
   // 1. Walls standing on the roof that face over it somewhere.
   const standing: RoofCutout['standing'] = [];
   const segs: Seg[] = [];
+  // A wall can stand on a deck only with a bottom point at the deck; on a pitched roof only raised.
+  const deckZ = roof.pitch === 0 ? flatRoofDeckElevationMForTb(roof, floors) : null;
+  const mayStand = (el: Element) => {
+    const bottom = readProfiledLineFace(el.extra_json)?.bottom_profile.map((p) => p.h) ?? [0];
+    if (deckZ === null) return bottom.some((h) => h > ON_ROOF_TOL_M);
+    const foot = elementBaseElevationMForTb(el, floors);
+    return foot + Math.min(...bottom) <= deckZ + ON_ROOF_TOL_M && deckZ <= foot + Math.max(...bottom) + ON_ROOF_TOL_M;
+  };
   for (const el of elements) {
-    if (!isFootprintWall(el)) continue;
+    if (!isFootprintWall(el) || !mayStand(el)) continue;
     const runs = bottomEdgeRoofRuns(el, roofs, floors, globalOrientationOffset).filter((run) => run.roof.id === roof.id);
     if (runs.length === 0) continue;
     const a = el.coordinates[0]!;
@@ -389,38 +560,12 @@ export function deriveRoofCutout(
     return { polygons: [], planArea: 0, wallNames: [], standing: [], issues };
   }
 
-  // 3. Join open chain ends through other walls of the zone, shortest joins first.
+  // 3. Join open chain ends through walls of the zone that rise through the roof, shortest first.
   const firstChains = buildChains(segs);
   const openEnds = firstChains.flatMap((c) => (isClosed(c) ? [] : [c.pts[0]!, last(c.pts)]));
-  const links: Seg[] = [];
-  const onRoofSet = new Set(segs.map((s) => s.el));
-  for (const el of elements) {
-    if (onRoofSet.has(el) || !isFootprintWall(el) || !segs.some((s) => zonesCompatible(s.el.zoneId, el.zoneId))) continue;
-    const s: Seg = { el, a: el.coordinates[0]!, b: el.coordinates[1]!, onRoof: false, probes: [] };
-    // Walls stacked on one plan line (a ground and a first floor wall) are one join.
-    if (links.some((l) => (near(l.a, s.a) && near(l.b, s.b)) || (near(l.a, s.b) && near(l.b, s.a)))) continue;
-    links.push(s);
-  }
-  const joins: Array<{ i: number; j: number; length: number; path: Seg[] }> = [];
-  openEnds.forEach((start, i) => {
-    // Shortest paths from this end through the link walls (Dijkstra over their end points).
-    const best: Array<{ at: P; length: number; path: Seg[] }> = [{ at: start, length: 0, path: [] }];
-    const done: P[] = [];
-    while (best.length > 0) {
-      best.sort((x, y) => x.length - y.length);
-      const cur = best.shift()!;
-      if (done.some((p) => near(p, cur.at))) continue;
-      done.push(cur.at);
-      openEnds.forEach((end, j) => {
-        if (j > i && cur.path.length > 0 && near(end, cur.at)) joins.push({ i, j, length: cur.length, path: cur.path });
-      });
-      // A link back to a point already reached is dropped when it is taken off the queue.
-      for (const l of links) {
-        const next = near(l.a, cur.at) ? l.b : near(l.b, cur.at) ? l.a : null;
-        if (next) best.push({ at: next, length: cur.length + Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y), path: [...cur.path, l] });
-      }
-    }
-  });
+  const joins = openEnds.length === 0
+    ? []
+    : shortestJoins(openEnds, linkSegments(roof, elements, segs, openEnds, floors, globalOrientationOffset));
   const usedEnds = new Set<number>();
   const usedLinks = new Set<Seg>();
   for (const join of joins.sort((x, y) => x.length - y.length || x.i - y.i || x.j - y.j)) {

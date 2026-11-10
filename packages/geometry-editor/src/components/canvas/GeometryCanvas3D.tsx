@@ -31,7 +31,6 @@ import {
   type GeometrySnapCache,
 } from '../../lib/snapUtils';
 import { readRootCssVar } from '../../lib/cssVars';
-import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
 import type { WindowVentilation3D } from '../../lib/geometry3dPrimitivesTypes';
 import { computeElement3DFrameTarget } from '../../lib/geometry3dFrame';
 import { buildClosedPrismGeometry, buildSlopedPolygonBufferGeometry, elevationAtSlopedVertexM } from '../../lib/geometry3dSloped';
@@ -39,7 +38,7 @@ import { modelXYToThreeXZ, modelSegmentToThreeYaw, modelXYToExtrudeShapeXY } fro
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { frameInsetFromFrameAreaFraction, rectSizeForMaxOpenArea } from '../../lib/geometryVentilationOverlay';
 import { deriveDormerHostBasis, getDormerBundleInfo, getDormerHostBaseElevationM } from '../../lib/dormerGeometry';
-import { bottomEdgeRoofRuns, deriveRoofCutout, isFootprintWall, modelMayHaveRoofCutouts, roofsWallsStandOn } from '../../lib/roofCutouts';
+import { bottomEdgeRoofRuns, deriveRoofCutout, effectiveFloorsOf, elementsOf, isFootprintWall, modelMayHaveRoofCutouts, roofsWallsStandOn } from '../../lib/roofCutouts';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import {
   floorDimmedMeshColor,
@@ -307,7 +306,7 @@ function collectDormerCutoutOverlays(
   // Pre-compute effective storey heights so downstream getDormerHostBaseElevationM sees the
   // same slab elevations as the dropdown / cascade / 3D renderer.
   const effectiveFloors = floors.length > 0
-    ? withEffectiveStoreyHeights(floors, Object.values(elementsById))
+    ? effectiveFloorsOf(floors, elementsOf(elementsById))
     : floors;
 
   const maybeAddOverlay = (element: Element) => {
@@ -347,13 +346,14 @@ function collectDormerCutoutOverlays(
     if (selectedElement?.type !== 'BuildingElementOpaque') return overlays;
 
     // The part of a roof covered by walls standing on it, for the roof or one of those walls.
-    const elements = Object.values(elementsById);
+    const elements = elementsOf(elementsById);
     if (modelMayHaveRoofCutouts(elements)) {
       const roofs = isFootprintWall(selectedElement)
         ? new Set(bottomEdgeRoofRuns(selectedElement, roofsWallsStandOn(elements, globalOrientationOffset), effectiveFloors, globalOrientationOffset).map((run) => run.roof))
         : new Set([selectedElement]);
       for (const roof of roofs) {
-        for (const ring of (deriveRoofCutout(roof, elements, effectiveFloors, globalOrientationOffset)?.polygons ?? []).flat()) {
+        // Outer rings only: a hole in a cut-out is roof, not cut-out.
+        for (const [ring] of deriveRoofCutout(roof, elements, effectiveFloors, globalOrientationOffset)?.polygons ?? []) {
           const points = getDormerCutoutOutlinePoints(roof, ring.map(([x, y]) => ({ x, y, z: 0 })), effectiveFloors, globalOrientationOffset);
           if (points.length >= 3) overlays.push({ hostElementId: roof.id, points });
         }

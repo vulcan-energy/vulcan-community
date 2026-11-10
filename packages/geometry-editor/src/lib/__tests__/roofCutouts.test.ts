@@ -207,3 +207,76 @@ describe('part of a flat roof under a room built on it', () => {
     expect(proposals.filter((p) => p.edgeRole === 'wall_intermediate_continuous').every((p) => p.junctionCode === 'E6')).toBe(true);
   });
 });
+
+describe('walls on a flat roof: decks, links and partitions', () => {
+  const opaque = (name: string, a: [number, number], b: [number, number], base: number, z: number, type = 'BuildingElementOpaque') => ({
+    id: name, name, type, zoneId: 'z', pitch: 90, base_height: base, height: 2.6,
+    coordinates: [{ x: a[0], y: a[1], z }, { x: b[0], y: b[1], z }],
+  }) as unknown as Element;
+  const lengths = (proposals: ReturnType<typeof proposeFlatRoofEdgeThermalBridges>, code: string) =>
+    proposals.filter((p) => p.junctionCode === code).map((p) => p.suggestedLengthM).sort((m, n) => m - n);
+
+  it.each([['0', 0], ['blank', undefined]])('a bungalow roof with base_height %s is the top of its storey, not under its walls', (_label, base) => {
+    const roof = {
+      id: 'roof', name: 'Flat Roof', type: 'BuildingElementOpaque', zoneId: 'z', pitch: 0, base_height: base, height: 8,
+      coordinates: [[0, 0], [10, 0], [10, 8], [0, 8]].map(([x, y]) => ({ x, y, z: 0 })),
+    } as BuildingElementOpaque;
+    const elements = [
+      roof,
+      opaque('Wall S', [0, 0], [10, 0], 0, 0), opaque('Wall E', [10, 0], [10, 8], 0, 0),
+      opaque('Wall N', [10, 8], [0, 8], 0, 0), opaque('Wall W', [0, 8], [0, 0], 0, 0),
+    ];
+    const floors = [{ id: 'f0', name: 'Ground', zIndex: 0, height: 0 }];
+    expect(getElementEffectiveArea(roof, byId(elements), floors, 0)).toBe(80);
+    const proposals = proposeFlatRoofEdgeThermalBridges(elements, floors, 0);
+    expect(lengths(proposals, 'E14')).toEqual([8, 8, 10, 10]);
+    expect(lengths(proposals, 'E6')).toEqual([]);
+  });
+
+  // A house 10 × 8 m with a single-storey extension behind it (x 2..6, y 8..12). The extension's
+  // deck at 2.6 m is drawn 0.2 m into the house, so the room's chain ends are inside the deck and
+  // must join along the house's rear wall (both storeys, 0 to 5.2 m), which rises through the
+  // deck: mid-span when that wall is not split there. The extension's walls end at the deck.
+  const deck = {
+    id: 'deck', name: 'Flat Roof', type: 'BuildingElementOpaque', zoneId: 'z', pitch: 0, base_height: 2.6,
+    coordinates: [[2, 7.8], [6, 7.8], [6, 12], [2, 12]].map(([x, y]) => ({ x, y, z: 0 })),
+  } as BuildingElementOpaque;
+  const extension = [
+    opaque('Ext W', [2, 12], [2, 8], 0, 0), opaque('Ext N', [6, 12], [2, 12], 0, 0), opaque('Ext E', [6, 8], [6, 12], 0, 0),
+  ];
+  const tall = (e: Element) => ({ ...e, height: 5.2 }) as Element;
+  const houseWall: Record<string, Element[]> = {
+    unsplit: [tall(opaque('House N', [10, 8], [0, 8], 0, 0))],
+    split: [tall(opaque('House N', [10, 8], [4, 8], 0, 0)), tall(opaque('House N 1', [4, 8], [0, 8], 0, 0))],
+    party: [tall(opaque('Party N', [10, 8], [0, 8], 0, 0, 'BuildingElementPartyWall'))],
+  };
+  const room = (depth: number) => [
+    opaque('Room W', [2, 8 + depth], [2, 8], 2.6, 1),
+    opaque('Room N', [6, 8 + depth], [2, 8 + depth], 2.6, 1),
+    opaque('Room E', [6, 8], [6, 8 + depth], 2.6, 1),
+  ];
+
+  it.each(['unsplit', 'split', 'party'])('a room on the deck joins along the %s house wall, not the extension walls below', (house) => {
+    for (const [depth, cover] of [[3, 12], [4, 16]] as const) {
+      const cutout = deriveRoofCutout(deck, [deck, ...extension, ...houseWall[house]!, ...room(depth)], [], 0)!;
+      expect(cutout.issues).toEqual([]);
+      expect(cutout.planArea).toBeCloseTo(cover, 6);
+      expect(cutout.wallNames).toEqual(['Room E', 'Room N', 'Room W']);
+    }
+  });
+
+  it('an internal partition in a room on the deck neither opens nor blocks the footprint', () => {
+    const partition = opaque('Partition', [2, 10], [6, 10], 2.6, 1, 'BuildingElementAdjacentConditionedSpace');
+    // The room's side walls split where the partition meets them, and unsplit.
+    const split = [
+      opaque('Room W', [2, 11], [2, 10], 2.6, 1), opaque('Room W 1', [2, 10], [2, 8], 2.6, 1),
+      opaque('Room N', [6, 11], [2, 11], 2.6, 1),
+      opaque('Room E', [6, 8], [6, 10], 2.6, 1), opaque('Room E 1', [6, 10], [6, 11], 2.6, 1),
+    ];
+    for (const walls of [room(3), split]) {
+      const cutout = deriveRoofCutout(deck, [deck, ...extension, ...houseWall.unsplit!, ...walls, partition], [], 0)!;
+      expect(cutout.issues).toEqual([]);
+      expect(cutout.planArea).toBeCloseTo(12, 6);
+    }
+  });
+});

@@ -10,8 +10,7 @@ import {
   exportedBaseHeightForWallFace,
 } from './profileLineFace';
 import { roundToTwoDecimals } from '../geometry/constants';
-import { deriveRoofCutout, modelMayHaveRoofCutouts } from './roofCutouts';
-import { withEffectiveStoreyHeights } from './zoneDerivation';
+import { deriveRoofCutout, effectiveFloorsOf, elementsOf, modelMayHaveRoofCutouts } from './roofCutouts';
 import { calculatePolygonArea } from './polygonSync';
 import { isVulcanUiPartyFloorElement } from './assemblyMaterialFabric';
 import { getElementShape } from './shapeUtils';
@@ -413,7 +412,9 @@ export const getElementGrossArea = (element: Element, globalOrientationOffset?: 
 /**
  * The part of a roof covered by walls standing on it (see roofCutouts.ts), as surface area in the
  * roof's own measure: plan area for a flat roof or an unheated pitched roof exported as its
- * ceiling, sloped area otherwise. Null when no closed footprint covers the roof.
+ * ceiling, sloped area otherwise. That ceiling is the roof's plan outline (its gross area), which
+ * the cut-out is clipped to, so the cover never exceeds it. Null when no closed footprint covers
+ * the roof.
  */
 export const getRoofCover = (
   roof: Element,
@@ -424,9 +425,9 @@ export const getRoofCover = (
   if (roof.type !== 'BuildingElementOpaque') return null;
   const pitch = roof.pitch;
   if (typeof pitch !== 'number' || !(pitch >= 0 && pitch < 90)) return null;
-  const elements = Object.values(elementsById);
+  const elements = elementsOf(elementsById);
   if (!modelMayHaveRoofCutouts(elements)) return null;
-  const cutout = deriveRoofCutout(roof, elements, withEffectiveStoreyHeights(floors, elements), globalOrientationOffset);
+  const cutout = deriveRoofCutout(roof, elements, effectiveFloorsOf(floors, elements), globalOrientationOffset);
   if (!cutout || cutout.wallNames.length === 0) return null;
   const area = isUnheatedPitchedRoofPlanAreaElement(roof)
     ? cutout.planArea

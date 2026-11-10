@@ -33,8 +33,7 @@ import {
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { CATEGORY_GHOST_OPACITY_FACTOR } from '../../lib/elementCategoryVisibility';
 import { getDormerBundleInfo } from '../../lib/dormerGeometry';
-import { deriveRoofCutout } from '../../lib/roofCutouts';
-import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
+import { deriveRoofCutout, effectiveFloorsOf, elementsOf } from '../../lib/roofCutouts';
 import { isElementOnActiveCanvasFloor } from '../../lib/elementCanvasFloor';
 import { isDevelopmentContextGeneratedShading } from '../../lib/developmentContextShading';
 import {
@@ -640,11 +639,11 @@ function getDormerCutoutPolygonsForHost(
   if (!showAllHostCutouts && !selectedDormerBundleId) return [];
 
   // The part of the roof covered by walls standing on it (derived, like area).
-  const elements = Object.values(elementsById);
+  const elements = elementsOf(elementsById);
+  // Outer rings only: a hole in a cut-out is roof, not cut-out.
   const covered = showAllHostCutouts
-    ? (deriveRoofCutout(hostElement, elements, withEffectiveStoreyHeights(floors, elements), globalOrientationOffset)?.polygons ?? [])
-      .flat()
-      .map((ring) => ring.map(([x, y]) => ({ x, y, z: 0 })))
+    ? (deriveRoofCutout(hostElement, elements, effectiveFloorsOf(floors, elements), globalOrientationOffset)?.polygons ?? [])
+      .map(([outer]) => outer!.map(([x, y]) => ({ x, y, z: 0 })))
     : [];
   return [...covered, ...elements.flatMap((candidate) => {
     const bundleInfo = getDormerBundleInfo(candidate);
