@@ -2530,7 +2530,16 @@ impl JSONBuilder {
                     if let Some(obj) = element_obj.as_object_mut() {
                         // Pitch is geometry: only the row (or `derive_blank_csv_pitch`) sets it.
                         obj.remove("pitch");
-                        clear_csv_owned_seed_fields(obj, element_row, section_name);
+                        // Clear by element, not section: a window placed in Exposed Elements
+                        // still owns every field the Window Elements columns cover.
+                        for section in [
+                            "Exposed Elements",
+                            "Window Elements",
+                            "Ground Elements",
+                            "Non-Exposed Elements",
+                        ] {
+                            clear_csv_owned_seed_fields(obj, element_row, section);
+                        }
                         if !allowed_building_element_props.is_empty() {
                             obj.retain(|k, _| allowed_building_element_props.contains(k));
                         } else {
