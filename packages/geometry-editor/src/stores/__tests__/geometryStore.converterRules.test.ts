@@ -88,6 +88,13 @@ const CASES: Case[] = [
     blocks: ['Building length (m) is not set. Enter it in Global Settings. The geometry gives'], saves: { 'Metadata|BuildingLength': '' } },
   { name: 'blank HeatingControlType row', edit: replace('HeatingControlType,SeparateTempControl,', 'HeatingControlType,,'), defaults: true,
     blocks: ['Heating Control Type is not set'], saves: { 'Metadata|HeatingControlType': '' } },
+  // The converter validates every file against the FHS target, whatever ComplianceValidationEnabled
+  // says; switched off, it does not write false for an absent KitchenExtractorHoodExternal row.
+  { name: 'compliance validation off still blocks', defaults: true,
+    edit: (csv) => replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,')(csv).replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
+    blocks: ['Kitchen cooker hood extracts to outside is not set'], saves: { 'Metadata|KitchenExtractorHoodExternal': null } },
+  { name: 'absent KitchenExtractorHoodExternal takes false', defaults: true, edit: (csv) => csv.replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
+    saves: { 'Metadata|KitchenExtractorHoodExternal': 'FALSE' } },
 ];
 
 function load(c: Case) {

@@ -580,9 +580,14 @@ const ABSENT_ROW_DEFAULTS: Readonly<Record<string, boolean>> = {
   PartO_active_cooling_required: false,
 };
 
-/** The value the converter uses when the file has no such row: the defaults template's, else ABSENT_ROW_DEFAULTS. */
-function templateMetadataValue(defaults: unknown, key: string): unknown {
-  return valueAt(defaults, metadataSchemaPath(key)) ?? ABSENT_ROW_DEFAULTS[key];
+/**
+ * The value the converter uses when the file has no such row: the defaults template's, else
+ * ABSENT_ROW_DEFAULTS, which the converter writes only when the file does not switch compliance
+ * validation off.
+ */
+function templateMetadataValue(state: MetadataRowInputs, defaults: unknown, key: string): unknown {
+  return valueAt(defaults, metadataSchemaPath(key))
+    ?? (state.complianceSettings.complianceValidationEnabled === false ? undefined : ABSENT_ROW_DEFAULTS[key]);
 }
 
 /**
@@ -600,7 +605,7 @@ export function templateFilledMetadataSettings(state: MetadataRowInputs, default
   for (const [key, value] of metadataRowValues(state)) {
     if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
       || systemsRowSetsMetadataInput(state.elements, key)) continue;
-    const template = templateMetadataValue(defaults, key);
+    const template = templateMetadataValue(state, defaults, key);
     if (template === undefined) continue;
     patch[metadataSettingKey(key)] = template;
     absent.delete(key);
@@ -668,7 +673,7 @@ export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: u
       && !systemsRowSetsMetadataInput(state.elements, key)
       && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
       && (blank.has(key) || (defaults !== undefined
-        && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))
+        && (templateMetadataValue(state, defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))
     ? [`Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.${hint(key)}`]
     : []));
 }

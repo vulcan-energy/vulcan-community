@@ -2828,7 +2828,9 @@ const validateElementForState = (
   const eb = elementsById ?? state.elementsById;
   const linearThermalBridgeIssues = findLinearThermalBridgeIssues(Object.values(eb), state.floors);
   const cs = state.complianceSettings;
-  const complianceOn = !!cs?.complianceValidationEnabled;
+  // Blocking checks follow the FHS rules whatever the file's ComplianceValidationEnabled row says:
+  // every target is an FHS target, and the converter validates every file against it.
+  const complianceOn = true;
   let partFFindings: PartFFinding[] | undefined;
   if (complianceOn) {
     partFFindings = selectPartFData({
@@ -7617,7 +7619,9 @@ const createGeometryState = (
     // each `validateElement` call would re-resolve and re-evaluate them, giving O(N²) cost
     // on a model where the data is dwelling-wide and identical for every element.
     const cs = state.complianceSettings;
-    const complianceOn = !!cs?.complianceValidationEnabled;
+    // Blocking checks follow the FHS rules whatever the file's ComplianceValidationEnabled row says:
+    // every target is an FHS target, and the converter validates every file against it.
+    const complianceOn = true;
     const partFFindings = complianceOn
       ? selectPartFData({
           zones: state.zones,
@@ -7677,9 +7681,9 @@ const createGeometryState = (
 
       const validation = validateZone(zone, {
         elementsById: state.elementsById,
-        complianceValidationEnabled: state.complianceSettings.complianceValidationEnabled || false,
+        complianceValidationEnabled: complianceOn,
         primaryFhsZoneId,
-        simplifiedThermalBridgingOffered: simplifiedThermalBridgingOffered(schemaPort, state.complianceSettings.complianceValidationEnabled ? 'fhs' : 'core'),
+        simplifiedThermalBridgingOffered: simplifiedThermalBridgingOffered(schemaPort, 'fhs'),
       });
       allWarnings.push(...validation.warnings.map(w => w.message));
       allCriticalIssues.push(...validation.issues.map(i => i.message));
@@ -7689,7 +7693,7 @@ const createGeometryState = (
       zones: state.zones,
       elementsById: state.elementsById,
       spaceInferenceWallPrintByZone: state.spaceInferenceWallPrintByZone,
-      complianceValidationEnabled: state.complianceSettings.complianceValidationEnabled === true,
+      complianceValidationEnabled: complianceOn,
     });
     allWarnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     allCriticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));
@@ -7730,7 +7734,9 @@ const createGeometryState = (
 
   detectMissingElements: () => {
     const state = get();
-    const complianceValidationEnabled = state.complianceSettings.complianceValidationEnabled || false;
+    // Missing-element checks follow the FHS rules whatever the file's ComplianceValidationEnabled row says:
+    // every target is an FHS target, and the converter validates every file against it.
+    const complianceValidationEnabled = true;
     return detectMissingElements(
       state.zones,
       state.elementsById,
