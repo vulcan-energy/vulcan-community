@@ -273,7 +273,8 @@ export function ingestGeometryTabularSections(
                 ...(opaquePitch !== undefined ? { pitch: opaquePitch } : {}),
                 orientation360: parseOptionalNumberColumn(V(d, 'orientation360')),
                 base_height: parseOptionalNumberColumn(V(d, 'base_height')),
-                is_unheated_pitched_roof: V(d, 'is_unheated_pitched_roof') === 'TRUE',
+                // A blank cell stays unset: the target schema requires a choice for a roof, with no default.
+                is_unheated_pitched_roof: V(d, 'is_unheated_pitched_roof') ? V(d, 'is_unheated_pitched_roof') === 'TRUE' : undefined,
                 is_external_door: V(d, 'is_external_door') === 'TRUE',
                 parent_element: V(d, 'parent_element') ? V(d, 'parent_element') : null,
                 coordinates: opaqueCoords,

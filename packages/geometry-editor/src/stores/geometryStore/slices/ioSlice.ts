@@ -1075,7 +1075,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
                 ? exportedGeometry.baseHeight
                 : undefined
             )),
-            element.is_unheated_pitched_roof ? 'TRUE' : 'FALSE',
+            element.is_unheated_pitched_roof === undefined ? '' : element.is_unheated_pitched_roof ? 'TRUE' : 'FALSE',
             element.is_external_door ? 'TRUE' : 'FALSE',
             escapeCSV(element.parent_element || ''),
             formatElementCoordsForCsv(element),

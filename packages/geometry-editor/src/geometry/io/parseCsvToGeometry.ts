@@ -478,7 +478,8 @@ export const parseCsvToGeometry = (
     if (line.startsWith('DefaultThermalBridging,')) continue;
     if (line.startsWith('PartO_active_cooling_required,')) {
       const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.PartO_active_cooling_required = value === 'TRUE';
+      // A blank value stays unset and is reported; it is not "no".
+      if (value) complianceSettings.PartO_active_cooling_required = value === 'TRUE';
       continue;
     }
     if (line.startsWith('NumberOfBedrooms,')) {
@@ -505,7 +506,8 @@ export const parseCsvToGeometry = (
     }
     if (line.startsWith('PartGcompliance,')) {
       const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.PartGcompliance = value === 'TRUE';
+      // A blank value stays unset and is reported; it is not "no".
+      if (value) complianceSettings.PartGcompliance = value === 'TRUE';
       continue;
     }
     if (line.startsWith('ColdWaterSource,')) {
@@ -566,7 +568,8 @@ export const parseCsvToGeometry = (
     }
     if (line.startsWith('Ventilation_noise_nuisance,')) {
       const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.Ventilation_noise_nuisance = value === 'TRUE';
+      // A blank value stays unset and is reported; it is not "no".
+      if (value) complianceSettings.Ventilation_noise_nuisance = value === 'TRUE';
       continue;
     }
     if (line.startsWith('BuildingLength,')) {
@@ -606,7 +609,8 @@ export const parseCsvToGeometry = (
     }
     if (line.startsWith('KitchenExtractorHoodExternal,')) {
       const value = line.split(',')[1]?.trim().toUpperCase();
-      complianceSettings.KitchenExtractorHoodExternal = value === 'TRUE';
+      // A blank value stays unset and is reported; it is not "no".
+      if (value) complianceSettings.KitchenExtractorHoodExternal = value === 'TRUE';
       continue;
     }
     if (line.startsWith('General_build_type,')) {

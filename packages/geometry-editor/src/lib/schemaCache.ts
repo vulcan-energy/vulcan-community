@@ -1084,8 +1084,16 @@ export function getConditionalRequiredFieldsForMode(
         if (propValue && 'const' in propValue) {
           if (readConditionValue(propKey) === propValue.const) return true;
         }
+        // A numeric range (e.g. a roof's `pitch` up to 60) holds only for a value inside it.
+        if (propValue && ('minimum' in propValue || 'maximum' in propValue)) {
+          const value = readConditionValue(propKey);
+          if (typeof value === 'number'
+            && !(typeof propValue.minimum === 'number' && value < propValue.minimum)
+            && !(typeof propValue.maximum === 'number' && value > propValue.maximum)) return true;
+        }
       }
     }
+    if (condition.not) return !conditionMatches(condition.not as SchemaNode);
     if (Array.isArray(condition.anyOf)) {
       for (const option of condition.anyOf) {
         if (conditionMatches(option)) return true;
