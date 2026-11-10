@@ -1938,8 +1938,12 @@ impl JSONBuilder {
         // covered, which no per-loop guard can reach. See `sanitize_csv_extra_json`.
         let mut sanitized_csv_data = sanitize_csv_extra_json(csv_data);
         let mut result = self.defaults.clone();
-        // Window heights are measured from the model's ventilation zone base (the Metadata row,
-        // else the template), so it is merged first and read back from the model.
+        // Window heights are measured from the ventilation zone base the final model carries, so
+        // every InfiltrationVentilation input merges first, in precedence order: the sections,
+        // then Systems rows, then Metadata rows. Nothing later writes these fields.
+        self.merge_ventilation_systems(&mut result, &sanitized_csv_data)?;
+        self.merge_combustion_appliances(&mut result, &sanitized_csv_data)?;
+        Self::merge_systems_infiltration_ventilation_rows(&mut result, &sanitized_csv_data)?;
         self.merge_ventilation_env_from_metadata(&mut result, &sanitized_csv_data)?;
         migrate_vulcan_csv_to_current(
             &mut sanitized_csv_data,
@@ -3297,12 +3301,6 @@ impl JSONBuilder {
 
         // Process Context Shading
         self.build_context_shading(result, csv_data)?;
-
-        // Process Ventilation Systems (merge into InfiltrationVentilation)
-        self.merge_ventilation_systems(result, csv_data)?;
-
-        // Process Combustion Appliances (merge into InfiltrationVentilation)
-        self.merge_combustion_appliances(result, csv_data)?;
 
         // Process Systems before pipework so explicit HotWaterSource rows exist before primary pipework attaches.
         self.merge_systems(result, csv_data)?;
@@ -6458,17 +6456,8 @@ impl JSONBuilder {
                                     )?;
                                 }
                             }
-                            "InfiltrationVentilation" => {
-                                if let Some(extra_json) =
-                                    row.get("extra_json").and_then(|v| v.as_object())
-                                {
-                                    Self::merge_wrapped_system_fragment(
-                                        result_obj,
-                                        extra_json,
-                                        "InfiltrationVentilation",
-                                    );
-                                }
-                            }
+                            // Merged before the zones; see `build_json`.
+                            "InfiltrationVentilation" => {}
                             "HotWaterDemand" => {
                                 if let Some(extra_json) =
                                     row.get("extra_json").and_then(|v| v.as_object())
@@ -6684,6 +6673,34 @@ impl JSONBuilder {
                 *target_slot = patch_value.clone();
             }
         }
+    }
+
+    /// Systems rows routed `System` / `InfiltrationVentilation` (`merge_systems` checks the rest).
+    fn merge_systems_infiltration_ventilation_rows(
+        result: &mut Value,
+        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+    ) -> Result<(), BuildError> {
+        let result_obj = result
+            .as_object_mut()
+            .ok_or_else(|| BuildError::new("E034", "Result JSON is not an object"))?;
+        for row in csv_data.get("Systems").into_iter().flatten() {
+            let route = ["Type", "system_type", "subcategory"]
+                .into_iter()
+                .find_map(|key| row.get(key)?.as_str());
+            if route != Some("System")
+                || row.get("subcategory").and_then(Value::as_str) != Some("InfiltrationVentilation")
+            {
+                continue;
+            }
+            if let Some(extra_json) = row.get("extra_json").and_then(Value::as_object) {
+                Self::merge_wrapped_system_fragment(
+                    result_obj,
+                    extra_json,
+                    "InfiltrationVentilation",
+                );
+            }
+        }
+        Ok(())
     }
 
     fn merge_wrapped_system_fragment(
@@ -12194,13 +12211,7 @@ vent1,MechanicalVentilation,Intermittent MEV,"{}"
         let data = parser.parse_csv(csv).expect("CSV should parse");
         let mut builder =
             JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
-        let mut result = builder.defaults.clone();
-        builder
-            .build_zone_structure(&mut result, &data)
-            .expect("Zone structure should build");
-        builder
-            .process_root_level_sections(&mut result, &data)
-            .expect("Root sections should process");
+        let result = builder.build_json(&data).expect("CSV should build");
 
         let mv = result["InfiltrationVentilation"]["MechanicalVentilation"]["vent1"]
             .as_object()
@@ -13169,13 +13180,7 @@ Name,Type
         let data = parser.parse_csv(csv).expect("CSV should parse");
         let mut builder =
             JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
-        let mut result = builder.defaults.clone();
-        builder
-            .build_zone_structure(&mut result, &data)
-            .expect("Zone structure should build");
-        builder
-            .process_root_level_sections(&mut result, &data)
-            .expect("Root sections should process");
+        let result = builder.build_json(&data).expect("CSV should build");
 
         let vents = result["InfiltrationVentilation"]["Vents"]
             .as_object()

@@ -278,4 +278,61 @@ Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0
         template.pointer("/Zone/Living/BuildingElement/Window/window_part_list/0/mid_height"),
         Some(&serde_json::json!(0.65))
     );
+
+    // A Systems InfiltrationVentilation row overrides the template; Metadata rows override both,
+    // and window heights are measured from the base the model carries.
+    let defaults = r#"{"Zone":{},"InfiltrationVentilation":{"ventilation_zone_base_height":0.0}}"#;
+    let systems = "
+Systems
+Name,Zone,Type,subcategory,extra_json
+IV,Living,System,InfiltrationVentilation,\"{\"\"InfiltrationVentilation\"\":{\"\"altitude\"\":50,\"\"shield_class\"\":\"\"Shielded\"\",\"\"ventilation_zone_base_height\"\":1}}\"
+";
+    // A closed window's zero-area opening is placed from its sill and head.
+    let closed =
+        "Closed,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0\n";
+    let with_systems = |metadata_rows: &str| {
+        transform_geometry_csv(TransformRequest {
+            csv: format!(
+                "{}{window}{closed}{systems}",
+                MINIMAL_CSV.replace(
+                    "Postcode,MK40 1AA",
+                    &format!("Postcode,MK40 1AA\n{metadata_rows}")
+                )
+            ),
+            schema_json: MINIMAL_SCHEMA.into(),
+            defaults_json: defaults.into(),
+            profile: ModelProfile::Fhs,
+            conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
+            version_metadata: VersionMetadata {
+                hem_core_version: "1.0.0a8".into(),
+                fhs_wrapper_version: Some("1.0.0a8".into()),
+            },
+        })
+        .unwrap()
+        .model
+    };
+    let part_mid = "/Zone/Living/BuildingElement/Window/window_part_list/0/mid_height";
+    let closed_mid = "/Zone/Living/BuildingElement/Closed/window_part_list/0/mid_height";
+    let systems_only = with_systems("");
+    assert_eq!(
+        systems_only.pointer(closed_mid),
+        Some(&serde_json::json!(0.65))
+    );
+    assert_eq!(
+        systems_only.pointer("/InfiltrationVentilation/ventilation_zone_base_height"),
+        Some(&serde_json::json!(1))
+    );
+    assert_eq!(
+        systems_only.pointer(part_mid),
+        Some(&serde_json::json!(0.65))
+    );
+    let metadata = with_systems(
+        "Ventilation_ventilation_zone_base_height,0.5\nVentilation_altitude,10\nVentilation_shield_class,Normal",
+    );
+    let iv = &metadata["InfiltrationVentilation"];
+    assert_eq!(iv["ventilation_zone_base_height"], serde_json::json!(0.5));
+    assert_eq!(iv["altitude"], serde_json::json!(10.0));
+    assert_eq!(iv["shield_class"], serde_json::json!("Normal"));
+    assert_eq!(metadata.pointer(part_mid), Some(&serde_json::json!(1.15)));
+    assert_eq!(metadata.pointer(closed_mid), Some(&serde_json::json!(1.15)));
 }
