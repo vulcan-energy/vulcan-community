@@ -47,7 +47,7 @@ function computePolygonUnitNormal(
  * - 0° = horizontal facing up (flat roof, skylight)
  * - 90° = vertical (wall, window)
  * - 180° = horizontal facing down (floor) — only inferred for `BuildingElementGround`;
- *   other horizontal elements default to 0 since the orientation is otherwise ambiguous.
+ *   any other level polygon returns `undefined`, since it may be a plan outline of a slope.
  * - Sloped surfaces: angle between the surface and the horizontal, derived from the
  *   polygon normal's vertical component.
  *
@@ -68,9 +68,10 @@ export function derivePitchFromGeometry(
   const zs = coordinates.map((c) => c.z);
   const zSpan = Math.max(...zs) - Math.min(...zs);
 
+  // A level polygon fixes the pitch only for a floor. Any other level outline (a plan drawing of a
+  // roof, a ceiling) says nothing about its slope, so the pitch stays the user's to enter.
   if (zSpan <= HORIZONTAL_ADJACENT_POLYGON_Z_SPAN_M) {
-    if (elementType === 'BuildingElementGround') return 180;
-    return 0;
+    return elementType === 'BuildingElementGround' ? 180 : undefined;
   }
 
   const cosFromUp = Math.min(1, Math.max(-1, Math.abs(normal.z)));
