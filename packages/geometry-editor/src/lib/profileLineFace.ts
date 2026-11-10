@@ -184,3 +184,92 @@ export function reverseGeometryFaceInExtraJson<T>(extra: T): T {
   }
   return { ...extra, geometry_face: reverseProfiledLineFace(face) };
 }
+
+/** What the face readers below need from a line element. */
+type LineFaceHost = { height?: unknown; extra_json?: unknown };
+
+/** Sorted profiles of a stored profiled face, or null for a plain element (or a face too broken to read; validation names it). */
+function readFaceEdges(el: LineFaceHost): { top: ProfilePoint[]; bottom: ProfilePoint[] } | null {
+  const face = readProfiledLineFace(el.extra_json);
+  const top = face && normalizeProfilePoints(face.top_profile);
+  const bottom = face && normalizeProfilePoints(face.bottom_profile);
+  return top && bottom ? { top, bottom } : null;
+}
+
+/**
+ * Bottom and top edge of a line element at t (0..1 from coordinate 0 to 1), in metres above its
+ * foot (`base_height`). A plain element spans 0..height; a profiled face is read from its edges.
+ * The one place thermal-bridge and validation code reads a wall's vertical extent.
+ */
+export function lineFaceEdgesAt(el: LineFaceHost, t: number): { bottom: number; top: number } {
+  const face = readFaceEdges(el);
+  if (!face) return { bottom: 0, top: typeof el.height === 'number' && el.height > 0 ? el.height : 0 };
+  return { bottom: interpolateProfileHeight(face.bottom, t), top: interpolateProfileHeight(face.top, t) };
+}
+
+/** Lowest bottom and highest top over the whole element (its bounding band above the foot). */
+export function lineFaceEnvelope(el: LineFaceHost): { bottom: number; top: number } {
+  const face = readFaceEdges(el);
+  if (!face) return lineFaceEdgesAt(el, 0);
+  return { bottom: Math.min(...face.bottom.map((p) => p.h)), top: Math.max(...face.top.map((p) => p.h)) };
+}
+
+/**
+ * The parts of the run [loM, hiM] (metres along the line from coordinate 0; the line is `lengthM`
+ * long) where the face reaches height `h` above the foot, within `tol`: bottom − tol ≤ h ≤ top + tol.
+ * A floor at the foot is `h = 0`: a wall standing on a roof has no run there. A plain element
+ * returns the run unchanged; callers keep their own vertical test for it.
+ */
+export function lineFaceRunsAtHeight(
+  el: LineFaceHost,
+  lengthM: number,
+  loM: number,
+  hiM: number,
+  h: number,
+  tol: number,
+): Array<[number, number]> {
+  const face = readFaceEdges(el);
+  if (!face || lengthM <= 0) return [[loM, hiM]];
+  const lo = loM / lengthM;
+  const hi = hiM / lengthM;
+  const ts = [lo, ...wallFaceBreakpoints(face.top, face.bottom).filter((t) => t > lo && t < hi), hi];
+  // Both conditions are linear in t between breakpoints, so each piece keeps one interval.
+  const limits = [
+    (t: number) => interpolateProfileHeight(face.bottom, t) - tol - h,
+    (t: number) => h - interpolateProfileHeight(face.top, t) - tol,
+  ];
+  const toM = (t: number) => (t === lo ? loM : t === hi ? hiM : t * lengthM);
+  const runs: Array<[number, number]> = [];
+  for (let i = 0; i < ts.length - 1; i += 1) {
+    const a = ts[i]!;
+    const b = ts[i + 1]!;
+    let s = a;
+    let e = b;
+    for (const f of limits) {
+      const fa = f(a);
+      const fb = f(b);
+      if (fa <= 0 && fb <= 0) continue;
+      if (fa > 0 && fb > 0) { e = s - 1; break; }
+      const cross = a + ((b - a) * fa) / (fa - fb);
+      if (fa > 0) s = Math.max(s, cross);
+      else e = Math.min(e, cross);
+    }
+    if (e <= s) continue;
+    const last = runs[runs.length - 1];
+    if (last && Math.abs(last[1] - toM(s)) < 1e-9) last[1] = toM(e);
+    else runs.push([toM(s), toM(e)]);
+  }
+  return runs;
+}
+
+/** {@link lineFaceEdgesAt} at the plan point on the element's line nearest `p`. */
+export function lineFaceEdgesAtPoint(
+  el: LineFaceHost & { coordinates: ReadonlyArray<{ x: number; y: number }> },
+  p: { x: number; y: number },
+): { bottom: number; top: number } {
+  const a = el.coordinates[0]!;
+  const b = el.coordinates[1]!;
+  const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+  const t = len2 < 1e-18 ? 0 : ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / len2;
+  return lineFaceEdgesAt(el, Math.min(1, Math.max(0, t)));
+}

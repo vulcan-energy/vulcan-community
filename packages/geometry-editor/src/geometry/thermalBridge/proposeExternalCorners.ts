@@ -37,8 +37,9 @@
  * typically **E18**, not E16/E17 (assessor may add separately).
  *
  * **Vertical extent:** Each corner TB spans the **vertical overlap** of the two incident external
- * walls (`max(zBase)` → `min(zBase+height)`). Zone storey height is not used — differing wall heights
- * clip the line to the shared range.
+ * walls at the corner (`max(bottom)` → `min(top)`, read from each wall's face at that end, so a gable
+ * or a wall standing on a roof counts only its height there). Zone storey height is not used —
+ * differing wall heights clip the line to the shared range.
  */
 
 import { isRoofLikeOpaqueElement } from '../../lib/roofElement';
@@ -46,6 +47,7 @@ import type { BuildingElementOpaque, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import type { FacadeOpeningEdgeRole, FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
+import { lineFaceEdgesAt } from '../../lib/profileLineFace';
 
 function wallBaseElevationM(w: BuildingElementOpaque): number {
   const coords = w.coordinates;
@@ -70,14 +72,18 @@ function clusterKeyRaw(x: number, y: number): string {
 const MIN_WALL_LEN_XY_M = 0.05;
 const MIN_CORNER_VERTICAL_OVERLAP_M = 0.05;
 
+/** Vertical span of a wall at one end: base elevation and height there. */
+type EndSpan = { zBase: number; height: number };
+
 interface WallSeg {
   id: string;
   name: string;
   zoneId: string | undefined;
   k0: string;
   k1: string;
-  zBase: number;
-  height: number;
+  /** Span at k0 and at k1: a shaped wall (gable, wall on a roof) differs at each end. */
+  span0: EndSpan;
+  span1: EndSpan;
   orientation360?: number;
   pitch?: number;
 }
@@ -112,14 +118,19 @@ function collectWallSegments(elements: Element[]): WallSeg[] {
     if (h <= 0) continue;
     const ori = el.orientation360;
     const pi = el.pitch;
+    const foot = wallBaseElevationM(el);
+    const spanAt = (t: number): EndSpan => {
+      const { bottom, top } = lineFaceEdgesAt(el, t);
+      return { zBase: foot + bottom, height: top - bottom };
+    };
     out.push({
       id: el.id,
       name: el.name,
       zoneId: el.zoneId,
       k0,
       k1,
-      zBase: wallBaseElevationM(el),
-      height: h,
+      span0: spanAt(0),
+      span1: spanAt(1),
       orientation360: typeof ori === 'number' && Number.isFinite(ori) ? ori : undefined,
       pitch: typeof pi === 'number' && Number.isFinite(pi) ? pi : undefined,
     });
@@ -189,14 +200,15 @@ function dedupeParallelWallSegmentsInPlan(segments: WallSeg[]): WallSeg[] {
       map.set(key, { ...s });
       continue;
     }
-    const zTopPrev = prev.zBase + prev.height;
-    const zTopS = s.zBase + s.height;
-    const zBase = Math.min(prev.zBase, s.zBase);
-    const zTop = Math.max(zTopPrev, zTopS);
+    const union = (a: EndSpan, b: EndSpan): EndSpan => {
+      const zBase = Math.min(a.zBase, b.zBase);
+      const zTop = Math.max(a.zBase + a.height, b.zBase + b.height);
+      return { zBase, height: zTop - zBase };
+    };
     map.set(key, {
       ...prev,
-      zBase,
-      height: zTop - zBase,
+      span0: union(prev.span0, spanAtKey(s, prev.k0)),
+      span1: union(prev.span1, spanAtKey(s, prev.k1)),
       orientation360:
         typeof prev.orientation360 === 'number' && Number.isFinite(prev.orientation360)
           ? prev.orientation360
@@ -285,6 +297,11 @@ function geometricOutwardRightOfDirectedEdge(
   const len = Math.hypot(tx, ty);
   if (len < 1e-12) return { x: 0, y: 0 };
   return { x: ty / len, y: -tx / len };
+}
+
+/** The span of `s` at its end `k` (one of its two vertex keys). */
+function spanAtKey(s: WallSeg, k: string): EndSpan {
+  return k === s.k0 ? s.span0 : s.span1;
 }
 
 function segmentForKeys(comp: WallSeg[], ka: string, kb: string): WallSeg | undefined {
@@ -467,11 +484,13 @@ function polygonSignedAreaFromKeys(keys: string[]): number {
   return a / 2;
 }
 
-/** Vertical segment where both incident walls exist (plan corner line). */
-function verticalOverlapForCornerWallSegs(a: WallSeg, b: WallSeg): { z0: number; z1: number } | null {
-  const zTopA = a.zBase + a.height;
-  const zTopB = b.zBase + b.height;
-  const z0 = Math.max(a.zBase, b.zBase);
+/** Vertical segment where both incident walls exist at corner vertex `k` (plan corner line). */
+function verticalOverlapForCornerWallSegs(a: WallSeg, b: WallSeg, k: string): { z0: number; z1: number } | null {
+  const sa = spanAtKey(a, k);
+  const sb = spanAtKey(b, k);
+  const zTopA = sa.zBase + sa.height;
+  const zTopB = sb.zBase + sb.height;
+  const z0 = Math.max(sa.zBase, sb.zBase);
   const z1 = Math.min(zTopA, zTopB);
   if (!Number.isFinite(z0) || !Number.isFinite(z1) || z1 - z0 < MIN_CORNER_VERTICAL_OVERLAP_M) {
     return null;
@@ -504,7 +523,7 @@ function cornersFromOrderedPolyline(
     const segPk = segmentForKeys(sub, pk, k);
     const segKq = segmentForKeys(sub, k, qk);
     if (!segPk || !segKq) continue;
-    const overlap = verticalOverlapForCornerWallSegs(segPk, segKq);
+    const overlap = verticalOverlapForCornerWallSegs(segPk, segKq, k);
     if (!overlap) continue;
     const { z0, z1 } = overlap;
     const wallName = segPk.name ?? 'Wall';
@@ -613,7 +632,7 @@ export function proposeExternalCornerThermalBridges(elements: Element[]): Facade
           seenCorners.add(sig);
           const code = convex ? 'E16' : 'E17';
           const role: FacadeOpeningEdgeRole = convex ? 'external_corner_convex' : 'external_corner_reentrant';
-          const overlap = verticalOverlapForCornerWallSegs(s1, s2);
+          const overlap = verticalOverlapForCornerWallSegs(s1, s2, Vkey);
           if (!overlap) continue;
           const { z0, z1 } = overlap;
           proposals.push({
