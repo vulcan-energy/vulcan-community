@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/** Sections accepted by the canonical geometry CSV parser and editor export. */
+/**
+ * Sections accepted by the canonical geometry CSV parser and editor export. The one TypeScript
+ * list; __tests__/geometryCsvSections.test.ts checks it against the Rust parser's SECTIONS.
+ */
 export const KNOWN_GEOMETRY_CSV_SECTIONS: ReadonlySet<string> = new Set([
   'Metadata',
   'Exposed Elements',
