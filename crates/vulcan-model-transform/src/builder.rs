@@ -3551,22 +3551,15 @@ impl JSONBuilder {
                         if let Some(flowrate) = outlet_row.get("flowrate") {
                             outlet_obj.insert("flowrate".to_string(), flowrate.clone());
                         }
-                        let allow_low_flowrate = outlet_row
+                        if let Some(allow_low_flowrate) = outlet_row
                             .get("allow_low_flowrate")
-                            .and_then(|v| match v {
-                                Value::Bool(b) => Some(*b),
-                                Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
-                                    "true" => Some(true),
-                                    "false" => Some(false),
-                                    _ => None,
-                                },
-                                _ => None,
-                            })
-                            .unwrap_or(false);
-                        outlet_obj.insert(
-                            "allow_low_flowrate".to_string(),
-                            Value::Bool(allow_low_flowrate),
-                        );
+                            .and_then(Value::as_bool)
+                        {
+                            outlet_obj.insert(
+                                "allow_low_flowrate".to_string(),
+                                Value::Bool(allow_low_flowrate),
+                            );
+                        }
                         outlet_obj.insert(
                             "ColdWaterSource".to_string(),
                             Value::String(self.effective_cold_water_source().to_string()),
@@ -3584,15 +3577,15 @@ impl JSONBuilder {
                         }
                     }
                     "InstantElecShower" => {
-                        let rated_power =
-                            outlet_row.get("rated_power").cloned().unwrap_or_else(|| {
-                                Value::Number(serde_json::Number::from_f64(9.0).unwrap())
-                            });
                         outlet_obj.insert(
                             "type".to_string(),
                             Value::String("InstantElecShower".to_string()),
                         );
-                        outlet_obj.insert("rated_power".to_string(), rated_power);
+                        if let Some(rated_power) =
+                            outlet_row.get("rated_power").filter(|v| csv_cell_is_set(v))
+                        {
+                            outlet_obj.insert("rated_power".to_string(), rated_power.clone());
+                        }
                         outlet_obj.insert(
                             "ColdWaterSource".to_string(),
                             Value::String(self.effective_cold_water_source().to_string()),
@@ -4118,32 +4111,14 @@ impl JSONBuilder {
                             if duct_type == Some("MechanicalVentilationDuctwork")
                                 && parent_element == Some(vent_name)
                             {
-                                // Seed ductwork defaults from the selected MV template (if present), else fallback defaults.
+                                // Seed from the selected MV template's ductwork when it has one; no constant fills a gap.
                                 let mut duct_obj: serde_json::Map<String, Value> = mv_obj
                                     .get("ductwork")
                                     .and_then(|v| v.as_array())
                                     .and_then(|arr| arr.first())
                                     .and_then(|v| v.as_object())
                                     .cloned()
-                                    .unwrap_or_else(|| {
-                                        let mut o = serde_json::Map::new();
-                                        o.insert(
-                                            "cross_section_shape".to_string(),
-                                            Value::String("circular".to_string()),
-                                        );
-                                        o.insert(
-                                            "insulation_thermal_conductivity".to_string(),
-                                            Value::Number(
-                                                serde_json::Number::from_f64(0.035).unwrap(),
-                                            ),
-                                        );
-                                        o.insert(
-                                            "insulation_thickness_mm".to_string(),
-                                            Value::Number(serde_json::Number::from(25)),
-                                        );
-                                        o.insert("reflective".to_string(), Value::Bool(false));
-                                        o
-                                    });
+                                    .unwrap_or_default();
                                 clear_csv_owned_seed_fields(
                                     &mut duct_obj,
                                     duct_row,
@@ -4464,15 +4439,30 @@ impl JSONBuilder {
                 let pipework_type = pipe_row
                     .get("pipework_type")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("primary")
+                    .unwrap_or_default()
                     .to_lowercase();
                 let seed = match pipework_type.as_str() {
                     "primary" => default_primary_pipe
                         .clone()
                         .unwrap_or_else(serde_json::Map::new),
-                    _ => default_distribution_pipe
+                    "distribution" => default_distribution_pipe
                         .clone()
                         .unwrap_or_else(serde_json::Map::new),
+                    // Primary and distribution pipework are different inputs: never guess.
+                    _ => {
+                        let name = pipe_row
+                            .get("Name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        self.push_non_fatal(
+                            "E027",
+                            &crate::json_pointer(&["Water Pipework", name, "pipework_type"]),
+                            &format!(
+                                "Water Pipework row '{name}' has pipework_type '{pipework_type}', so it is not in the model. Enter primary or distribution."
+                            ),
+                        );
+                        continue;
+                    }
                 };
                 let pipe_obj = overlay_row_onto_seed(
                     seed,
@@ -5238,14 +5228,8 @@ impl JSONBuilder {
                     }
                 }
 
-                // Ensure required fields have defaults if missing (fallback only if not in template)
-                // Precedence: CSV columns > extra_json > defaults template > fallback defaults
-                if !pv_system.contains_key("ventilation_strategy") {
-                    pv_system.insert(
-                        "ventilation_strategy".to_string(),
-                        Value::String("moderately_ventilated".to_string()),
-                    );
-                }
+                // The only energy supply the converter builds, and no obstacles. Every other PV
+                // input comes from the row or the template; the schema reports a missing one.
                 if !pv_system.contains_key("EnergySupply") {
                     pv_system.insert(
                         "EnergySupply".to_string(),
@@ -5271,11 +5255,9 @@ impl JSONBuilder {
                     .map(|h| h <= 0.0)
                     .unwrap_or(true);
 
-                if needs_width || needs_height {
-                    let pitch_deg = pv_system
-                        .get("pitch")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.0);
+                // The slope correction needs the row's pitch: without it nothing is derived.
+                let pitch_deg = pv_system.get("pitch").and_then(Value::as_f64);
+                if let (true, Some(pitch_deg)) = (needs_width || needs_height, pitch_deg) {
                     if let Some(coords_str) = row.get("coords").and_then(|v| v.as_str()) {
                         if let Some((derived_w, derived_h)) =
                             derive_pv_dimensions_from_coords(coords_str, pitch_deg)
@@ -7098,13 +7080,22 @@ impl JSONBuilder {
             Value::String(subcategory.to_string()),
         );
 
+        // Each value comes from the row (CSV column, then extra_json); a value the row does not
+        // give is left out so the target schema reports it. No constant stands in for it.
+        let number = |key: &str| emitter_data.get(key).and_then(Value::as_f64);
+        let put = |obj: &mut serde_json::Map<String, Value>, key: &str, value: Option<f64>| {
+            if let Some(value) = value {
+                obj.insert(
+                    key.to_string(),
+                    Value::Number(serde_json::Number::from_f64(value).unwrap()),
+                );
+            }
+        };
         match subcategory {
             "radiator" => {
-                let unit_number = emitter_data
-                    .get("unit_number")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0);
-                let length = emitter_data.get("length").and_then(|v| v.as_f64());
+                // A blank unit_number is one unit: the multiplier, not a HEM input.
+                let unit_number = number("unit_number").unwrap_or(1.0);
+                let length = number("length");
                 let effective_length = length.map(|value| value * unit_number);
 
                 // Per-metre vs lumped is a single coherent mode, mirroring the upstream
@@ -7114,119 +7105,41 @@ impl JSONBuilder {
                 // mode, so only the active branch's fields are emitted and a stray field
                 // from the other branch (which the engine would silently ignore) is
                 // dropped rather than written into the merged JSON.
-                let is_per_metre = emitter_data
-                    .get("c_per_m")
-                    .and_then(|v| v.as_f64())
-                    .is_some()
-                    || length.is_some();
+                let is_per_metre = number("c_per_m").is_some() || length.is_some();
 
                 if is_per_metre {
-                    let c_per_m = emitter_data
-                        .get("c_per_m")
-                        .and_then(|v| v.as_f64())
-                        .ok_or_else(|| {
-                            BuildError::new(
-                                "E047",
-                                "Per-metre radiator emitters (with 'length') require 'c_per_m'",
-                            )
-                        })?;
+                    let c_per_m = number("c_per_m").ok_or_else(|| {
+                        BuildError::new(
+                            "E047",
+                            "Per-metre radiator emitters (with 'length') require 'c_per_m'",
+                        )
+                    })?;
                     let effective_length = effective_length.ok_or_else(|| {
                         BuildError::new("E047", "Radiator emitters with 'c_per_m' require 'length'")
                     })?;
-                    emitter_obj.insert(
-                        "c_per_m".to_string(),
-                        Value::Number(serde_json::Number::from_f64(c_per_m).unwrap()),
-                    );
-                    emitter_obj.insert(
-                        "length".to_string(),
-                        Value::Number(serde_json::Number::from_f64(effective_length).unwrap()),
-                    );
+                    put(&mut emitter_obj, "c_per_m", Some(c_per_m));
+                    put(&mut emitter_obj, "length", Some(effective_length));
                 } else {
-                    let c_value = emitter_data
-                        .get("c")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.08 * unit_number);
-                    emitter_obj.insert(
-                        "c".to_string(),
-                        Value::Number(serde_json::Number::from_f64(c_value).unwrap()),
-                    );
+                    put(&mut emitter_obj, "c", number("c"));
                 }
+                put(&mut emitter_obj, "n", number("n"));
 
-                let n_value = emitter_data
-                    .get("n")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.2);
-                emitter_obj.insert(
-                    "n".to_string(),
-                    Value::Number(serde_json::Number::from_f64(n_value).unwrap()),
-                );
-
-                let frac_conv = emitter_data
-                    .get("frac_convective")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.4);
-                emitter_obj.insert(
-                    "frac_convective".to_string(),
-                    Value::Number(serde_json::Number::from_f64(frac_conv).unwrap()),
-                );
-
-                if is_per_metre {
-                    if let Some(thermal_mass_per_m) = emitter_data
-                        .get("thermal_mass_per_m")
-                        .and_then(|v| v.as_f64())
-                    {
-                        emitter_obj.insert(
-                            "thermal_mass_per_m".to_string(),
-                            Value::Number(
-                                serde_json::Number::from_f64(thermal_mass_per_m).unwrap(),
-                            ),
-                        );
-                    }
-                } else if let Some(thermal_mass) =
-                    emitter_data.get("thermal_mass").and_then(|v| v.as_f64())
-                {
-                    emitter_obj.insert(
-                        "thermal_mass".to_string(),
-                        Value::Number(serde_json::Number::from_f64(thermal_mass).unwrap()),
-                    );
-                }
+                let thermal_mass = if is_per_metre {
+                    "thermal_mass_per_m"
+                } else {
+                    "thermal_mass"
+                };
+                put(&mut emitter_obj, thermal_mass, number(thermal_mass));
             }
             "ufh" => {
-                let area = emitter_data
-                    .get("area")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(80.0);
-                emitter_obj.insert(
-                    "emitter_floor_area".to_string(),
-                    Value::Number(serde_json::Number::from_f64(area).unwrap()),
-                );
-
-                let thermal_mass = emitter_data
-                    .get("equivalent_specific_thermal_mass")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(80.0);
-                emitter_obj.insert(
-                    "equivalent_specific_thermal_mass".to_string(),
-                    Value::Number(serde_json::Number::from_f64(thermal_mass).unwrap()),
-                );
-
-                let perf_factor = emitter_data
-                    .get("system_performance_factor")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(5.0);
-                emitter_obj.insert(
-                    "system_performance_factor".to_string(),
-                    Value::Number(serde_json::Number::from_f64(perf_factor).unwrap()),
-                );
-
-                let frac_conv = emitter_data
-                    .get("frac_convective")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.43);
-                emitter_obj.insert(
-                    "frac_convective".to_string(),
-                    Value::Number(serde_json::Number::from_f64(frac_conv).unwrap()),
-                );
+                let area = number("area").or_else(|| number("emitter_floor_area"));
+                put(&mut emitter_obj, "emitter_floor_area", area);
+                for key in [
+                    "equivalent_specific_thermal_mass",
+                    "system_performance_factor",
+                ] {
+                    put(&mut emitter_obj, key, number(key));
+                }
             }
             "fancoil" => {
                 let to_i64_rounded = |v: &Value| -> Option<i64> {
@@ -7275,27 +7188,14 @@ impl JSONBuilder {
                 if let Some(test_data) = test_data {
                     emitter_obj.insert("fancoil_test_data".to_string(), test_data.clone());
                 }
-
-                let frac_conv = emitter_data
-                    .get("frac_convective")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0);
-                emitter_obj.insert(
-                    "frac_convective".to_string(),
-                    Value::Number(serde_json::Number::from_f64(frac_conv).unwrap()),
-                );
             }
-            _ => {
-                let frac_conv = emitter_data
-                    .get("frac_convective")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.5);
-                emitter_obj.insert(
-                    "frac_convective".to_string(),
-                    Value::Number(serde_json::Number::from_f64(frac_conv).unwrap()),
-                );
-            }
+            _ => {}
         }
+        put(
+            &mut emitter_obj,
+            "frac_convective",
+            number("frac_convective"),
+        );
 
         Ok(emitter_obj)
     }
@@ -10708,19 +10608,13 @@ Radiator 2,Living,WetEmitter,radiator,2.0
         let emitters = system["emitters"].as_array().unwrap();
         assert_eq!(emitters.len(), 2, "Should have 2 emitter objects");
 
-        // Check first radiator (c = 0.08 * 1.0 = 0.08)
-        let emitter1 = emitters[0].as_object().unwrap();
-        assert_eq!(emitter1["wet_emitter_type"], "radiator");
-        assert_eq!(emitter1["c"], 0.08);
-        assert_eq!(emitter1["n"], 1.2);
-        assert_eq!(emitter1["frac_convective"], 0.4);
-
-        // Check second radiator (c = 0.08 * 2.0 = 0.16)
-        let emitter2 = emitters[1].as_object().unwrap();
-        assert_eq!(emitter2["wet_emitter_type"], "radiator");
-        assert_eq!(emitter2["c"], 0.16);
-        assert_eq!(emitter2["n"], 1.2);
-        assert_eq!(emitter2["frac_convective"], 0.4);
+        // The rows give no c, n or frac_convective: no constant stands in for them.
+        for emitter in emitters {
+            assert_eq!(emitter["wet_emitter_type"], "radiator");
+            for field in ["c", "n", "frac_convective"] {
+                assert!(emitter.get(field).is_none(), "{field}: {emitter}");
+            }
+        }
 
         // Zone should reference the system
         assert_eq!(json["Zone"]["Living"]["SpaceHeatSystem"], "Living radiator");
@@ -10865,14 +10759,13 @@ UFH 2,Living,WetEmitter,ufh,30.0
         let emitter1 = emitters[0].as_object().unwrap();
         assert_eq!(emitter1["wet_emitter_type"], "ufh");
         assert_eq!(emitter1["emitter_floor_area"], 20.0);
-        assert_eq!(
-            emitter1["equivalent_specific_thermal_mass"]
-                .as_f64()
-                .unwrap(),
-            80.0
-        );
-        assert_eq!(emitter1["system_performance_factor"].as_f64().unwrap(), 5.0);
-        assert_eq!(emitter1["frac_convective"], 0.43);
+        for field in [
+            "equivalent_specific_thermal_mass",
+            "system_performance_factor",
+            "frac_convective",
+        ] {
+            assert!(emitter1.get(field).is_none(), "{field}");
+        }
 
         // Check second UFH
         let emitter2 = emitters[1].as_object().unwrap();
@@ -11088,7 +10981,7 @@ Radiator,Living,WetEmitter,radiator,2,Living circuit,"{""n"":1.3,""frac_convecti
         let emitters = system["emitters"].as_array().unwrap();
         assert_eq!(emitters.len(), 1);
         assert_eq!(emitters[0]["wet_emitter_type"], "radiator");
-        assert_eq!(emitters[0]["c"], 0.16);
+        assert!(emitters[0].get("c").is_none());
         assert_eq!(emitters[0]["n"], 1.3);
         assert_eq!(emitters[0]["frac_convective"], 0.45);
         assert_eq!(json["Zone"]["Living"]["SpaceHeatSystem"], "Living circuit");
@@ -11576,24 +11469,10 @@ radiator 2,Bedroom,WetEmitter,radiator,1.5
             "Bedroom emitter should be a radiator"
         );
 
-        // Radiators have c, n, and frac_convective fields
-        // Both should have valid radiator properties (the exact c value depends on defaults/calculation)
-        assert!(
-            living_emitters[0].get("c").is_some(),
-            "Living radiator should have c field"
-        );
-        assert!(
-            bedroom_emitters[0].get("c").is_some(),
-            "Bedroom radiator should have c field"
-        );
-        assert!(
-            living_emitters[0].get("n").is_some(),
-            "Living radiator should have n field"
-        );
-        assert!(
-            bedroom_emitters[0].get("n").is_some(),
-            "Bedroom radiator should have n field"
-        );
+        // The rows give no c or n, so neither is invented.
+        for emitter in [&living_emitters[0], &bedroom_emitters[0]] {
+            assert!(emitter.get("c").is_none() && emitter.get("n").is_none());
+        }
     }
 }
 
