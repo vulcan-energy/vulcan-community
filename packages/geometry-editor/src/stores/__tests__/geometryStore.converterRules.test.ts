@@ -123,6 +123,9 @@ const CASES: Case[] = [
     edit: appendSection('Context Shading,,,,,,,\nName,Type,shading_type,start_angle,end_angle,distance,height,coords\nTree,obstacle,,0,30,10,5,"0,0,0"') },
   { name: 'context shading kind from Type', allows: ['Tree|shading_type'],
     edit: appendSection('Context Shading,,,,,,\nName,Type,start_angle,end_angle,distance,height,coords\nTree,obstacle,0,30,10,5,"0,0,0"') },
+  // A Metadata value the file gives is saved as given, whatever the geometry suggests.
+  { name: 'build type house with no ground outline', saves: { 'Metadata|General_build_type': 'house' },
+    edit: replace('Slab_no_edge_insulation,,,,"-29.700,-6.470,0.000|-25.700,-6.470,0.000|-25.700,2.430,0.000|-29.700,2.430,0.000"', 'Slab_no_edge_insulation,,,,""') },
   // A row the converter stops on (E008-E029) stops the load, naming the row.
   { name: 'element in an unknown zone', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', 'Wall (S),Zone 9,BuildingElementOpaque'), refuses: "names zone 'Zone 9'" },
   { name: 'element with no name', edit: replace('Wall (S),Zone 1,BuildingElementOpaque', ',Zone 1,BuildingElementOpaque'), refuses: 'An Exposed Elements row has no Name' },

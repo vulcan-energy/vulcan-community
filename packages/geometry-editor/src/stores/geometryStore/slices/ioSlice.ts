@@ -1940,13 +1940,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           importedSettings.Ventilation_ventilation_zone_base_height = undefined;
         }
       }
-      if (
-        importedSettings.build_type === 'house' &&
-        importedSettings.storey_of_dwelling === undefined &&
-        importedSettings.storeys_in_building === undefined
-      ) {
-        importedSettings.build_type = undefined;
-      }
       // Space-label-derived room counts, aggregated across every non-placeholder
       // zone: counts describe the dwelling, not the primary zone.
       const dwellingWide = aggregateDwellingCounts(
