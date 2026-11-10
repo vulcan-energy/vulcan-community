@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { isInternalFloorElement } from '../lib/zoneDerivation';
-import { isFlatProfile, readProfiledLineFace } from '../lib/profileLineFace';
+import { readProfiledLineFace } from '../lib/profileLineFace';
 import { forbiddenFieldKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Pencil, X as XIcon, type IconNode } from 'lucide';
@@ -1735,13 +1735,15 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     applyExtraJsonMergeBulk(patches);
   }, [applyExtraJsonMergeBulk, assemblyLibrary, computeAssemblyPatchForTargets]);
 
-  // A Custom or Under-roof top has no single height; it is set in the wall shape.
-  const wallShapedTopSelected = useMemo(
-    () => wallDimensionElements.some((el) => {
-      const face = readProfiledLineFace(el.extra_json);
-      return !!face && (face.top_mode === 'roof' || !isFlatProfile(face.top_profile));
-    }),
+  // A shaped wall or window takes its height from its shape (set in the element editor).
+  const SHAPED_HEIGHT_HINT = 'Some selected elements have a shape: set their height in the shape rows.';
+  const wallShapeSelected = useMemo(
+    () => wallDimensionElements.some((el) => readProfiledLineFace(el.extra_json) !== null),
     [wallDimensionElements],
+  );
+  const windowShapeSelected = useMemo(
+    () => activeWindowSurfaceElements.some((el) => readProfiledLineFace(el.extra_json) !== null),
+    [activeWindowSurfaceElements],
   );
   const wallHeightDistribution = useMemo(
     () => computeDistribution(wallDimensionElements, isWallLike, (el) => el.height),
@@ -3097,10 +3099,10 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             'wallHeight',
             'Height (m)',
             wallHeightSummary,
-            wallDimensionIds.length > 0 && !wallShapedTopSelected,
+            wallDimensionIds.length > 0 && !wallShapeSelected,
             'e.g. 2.40',
             (el, value) => (isWallLike(el) ? { height: value } : null),
-            wallShapedTopSelected ? 'Some walls have a shaped top: set their height in the wall shape.' : undefined,
+            wallShapeSelected ? SHAPED_HEIGHT_HINT : undefined,
             undefined,
             wallDimensionIds,
           )}
@@ -3146,10 +3148,10 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             'winHeight',
             'Height (m)',
             windowHeightSummary,
-            activeWindowSurfaceIds.length > 0,
+            activeWindowSurfaceIds.length > 0 && !windowShapeSelected,
             'e.g. 1.20',
             (el, value) => buildTransparentLivePatch(el, { height: value }),
-            undefined,
+            windowShapeSelected ? SHAPED_HEIGHT_HINT : undefined,
             undefined,
             activeWindowSurfaceIds,
           )

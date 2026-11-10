@@ -6,8 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { createGeometryStore } from '../geometryStore';
 import type { Element } from '../../geometry/types';
 
-// A shaped wall's height is derived from its face (its average height), so a plain height edit
-// (bulk edit, table) must go through the face.
+// A shaped wall's height is derived from its face, so a plain height edit is refused.
 describe('height edits on a shaped wall', () => {
   const setup = (topProfile: Array<{ t: number; h: number }>) => {
     const store = createGeometryStore();
@@ -37,19 +36,12 @@ describe('height edits on a shaped wall', () => {
     return { store, id, wall, face };
   };
 
-  it('moves a Flat top to the new height and re-derives the height and area from the face', () => {
-    const { store, id, wall } = setup([{ t: 0, h: 3 }, { t: 1, h: 3 }]);
-    store.getState().updateElementsBulk({ [id]: { height: 4 } as Partial<Element> });
-    expect((wall().extra_json?.geometry_face as { top_profile: unknown }).top_profile).toEqual([{ t: 0, h: 4 }, { t: 1, h: 4 }]);
-    // Average of top 4 minus the bottom's 0 → 1 → 0 ridge (average 0.5).
-    expect(wall().height).toBe(3.5);
-    expect(wall().area).toBe(14);
-  });
-
-  it('refuses a height edit on a Custom top', () => {
-    const { store, id } = setup([{ t: 0, h: 3 }, { t: 0.5, h: 4 }, { t: 1, h: 3 }]);
-    expect(() => store.getState().updateElementsBulk({ [id]: { height: 6 } as Partial<Element> }))
-      .toThrow('"Shaped wall" has a shaped top; edit its height in the wall shape.');
+  it('refuses a plain height edit, even on a Flat top', () => {
+    for (const top of [[{ t: 0, h: 3 }, { t: 1, h: 3 }], [{ t: 0, h: 3 }, { t: 0.5, h: 4 }, { t: 1, h: 3 }]]) {
+      const { store, id } = setup(top);
+      expect(() => store.getState().updateElementsBulk({ [id]: { height: 6 } as Partial<Element> }))
+        .toThrow('"Shaped wall" has a shaped edge; change its height in the wall shape.');
+    }
   });
 
   it('moves the whole face with the foot', () => {

@@ -244,6 +244,22 @@ export function WallShapeRows({
     bottom: initialMode(face, 'bottom'),
   }));
   const [pending, setPending] = useState<Profiles | null>(null);
+  // Undo/redo or an Advanced-fields edit can replace the stored face while the wall stays
+  // selected: follow it, so a stale "Under roof" is never written onto a custom edge. A Custom
+  // edge that is still flat stays Custom (the user picked it and has not edited it yet).
+  const faceKey = JSON.stringify(face);
+  const [syncedFaceKey, setSyncedFaceKey] = useState(faceKey);
+  if (faceKey !== syncedFaceKey) {
+    setSyncedFaceKey(faceKey);
+    setPending(null);
+    setModes((current) => {
+      const follow = (edge: Edge): EdgeMode => {
+        const next = initialMode(face, edge);
+        return next === 'flat' && current[edge] === 'custom' ? 'custom' : next;
+      };
+      return { top: follow('top'), bottom: follow('bottom') };
+    });
+  }
   const [highlight, setHighlight] = useState<{ edge: Edge; index: number } | null>(null);
   const draft = pending ?? stored;
   const problem = pending ? wallFaceProblem(pending.top, pending.bottom, widthM) : null;

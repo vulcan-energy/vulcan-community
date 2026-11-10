@@ -103,4 +103,25 @@ describe('WallShapeRows', () => {
     expect(onCommit).not.toHaveBeenCalled();
     expect(edge('bottom').getByRole('button', { name: 'On roof' })).toHaveProperty('title', 'No roof under this wall');
   });
+
+  it('follows a face replaced outside the rows (undo), never writing a stale Under roof', () => {
+    const onCommit = vi.fn();
+    const roofTop = { kind: 'profiled-line-face' as const, top_profile: [{ t: 0, h: 2 }, { t: 0.5, h: 3 }, { t: 1, h: 2 }], bottom_profile: [{ t: 0, h: 0 }, { t: 1, h: 0 }], top_mode: 'roof' as const };
+    const fitRoof = (e: 'top' | 'bottom'): WallRoofEdge | null => (e === 'top' ? { profile: roofTop.top_profile, roofNames: ['Roof'] } : null);
+    const rows = (face: ProfileLineFace) => (
+      <WallShapeRows widthM={4} face={face} height={2.5} roofModes fitRoof={fitRoof} onCommit={onCommit}>
+        <input aria-label="Height" readOnly value={2.5} />
+      </WallShapeRows>
+    );
+    const { rerender } = render(rows(roofTop));
+    expect(edge('top').getByRole('button', { name: 'Under roof' }).getAttribute('aria-pressed')).toBe('true');
+
+    const { top_mode: _dropped, ...custom } = { ...roofTop, top_profile: [{ t: 0, h: 2 }, { t: 0.5, h: 2.8 }, { t: 1, h: 2 }] };
+    rerender(rows(custom));
+    expect(edge('top').getByRole('button', { name: 'Custom' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(edge('bottom').getByRole('button', { name: 'Custom' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '+ Add point' }).at(-1)!);
+    expect(lastFace(onCommit).top_mode).toBeUndefined();
+    expect(lastFace(onCommit).top_profile).toEqual(custom.top_profile);
+  });
 });
