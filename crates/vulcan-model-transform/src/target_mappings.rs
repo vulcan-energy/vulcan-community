@@ -133,7 +133,8 @@ pub(crate) fn map_physical_opening_full_partition_element(
 }
 
 /// The original Rust contract remains the default. Only explicit new source
-/// meanings need projection; unversioned legacy rows retain their old behavior.
+/// meanings need projection; unversioned legacy rows retain their old behavior,
+/// except a partition area, which every contract reads through `partition_area_basis`.
 pub(crate) fn map_divided_opening_half_partition_element(
     row: &Row,
     model: &mut Value,
@@ -181,16 +182,32 @@ pub(crate) fn map_divided_opening_half_partition_element(
     }
     let within = row.get("Type").and_then(Value::as_str) != Some("Party")
         && field(row, PARTY_ELEMENT_MARKER).and_then(Value::as_bool) != Some(true);
-    if internal
-        && within
-        && field(row, "internal_partition_area_basis").and_then(Value::as_str)
-            == Some("single_face")
-    {
-        if let Some(area) = element.get("area").and_then(Value::as_f64) {
+    // Geometry that decides neither basis keeps this contract's old reading: both faces.
+    if let Some(area) = element.get("area").and_then(Value::as_f64) {
+        if internal && within && partition_area_basis(row, Some(area), within) == Ok("single_face")
+        {
             element.insert("area".into(), json!(area * 2.0));
         }
     }
     errors
+}
+
+/// The faces a partition's source area covers: the explicit key, else what the row's geometry
+/// shows. Every contract reads a legacy area through this, so it means the same physical thing
+/// on each. `Err` carries the reason geometry cannot decide.
+fn partition_area_basis(row: &Row, area: Option<f64>, within: bool) -> Result<&str, &'static str> {
+    if let Some(basis) = field(row, "internal_partition_area_basis").and_then(Value::as_str) {
+        return Ok(basis);
+    }
+    match (area, physical_face_area(row).filter(|a| *a > 0.0)) {
+        (Some(area), Some(physical)) if (area - physical).abs() < 0.03 => Ok("single_face"),
+        (Some(area), Some(physical)) if within && (area - physical * 2.0).abs() < 0.03 => {
+            Ok("both_faces")
+        }
+        (Some(_), Some(_)) => Err("Partition area disagrees with its physical width and height; correct geometry before preparing target input."),
+        _ if within => Err("Partition needs physical width/height or an explicit source area basis before target preparation."),
+        _ => Ok("single_face"),
+    }
 }
 
 fn map_window(
@@ -442,44 +459,27 @@ fn map_partition(
         );
     }
     element.insert("is_adjacent_space_within_dwelling".into(), json!(within));
-    match field(row, "internal_partition_area_basis").and_then(Value::as_str) {
-        Some("both_faces") if within => {
-            if let Some(area) = element.get("area").and_then(Value::as_f64) {
+    let area = element.get("area").and_then(Value::as_f64);
+    match partition_area_basis(row, area, within) {
+        Ok("both_faces") if within => {
+            if let Some(area) = area {
                 element.insert("area".into(), json!(area / 2.0));
             }
         }
-        Some("single_face") => {}
-        Some("both_faces") => error(
+        Ok("single_face") => {}
+        Ok("both_faces") => error(
             errors,
             path,
             "area",
             "A party element must use single-face area.",
         ),
-        Some(_) => error(
+        Ok(_) => error(
             errors,
             path,
             "internal_partition_area_basis",
             "Use single_face or both_faces for internal partition area.",
         ),
-        None => {
-            // Legacy geometry is evidence of the physical face; compare rather
-            // than unconditionally halving older single-face imported areas.
-            let physical_area = physical_face_area(row);
-            if let (Some(area), Some(physical)) = (
-                element.get("area").and_then(Value::as_f64),
-                physical_area.filter(|a| *a > 0.0),
-            ) {
-                if (area - physical).abs() < 0.03 {
-                    // Retain authored rounding and any established single-face convention.
-                } else if within && (area - physical * 2.0).abs() < 0.03 {
-                    element.insert("area".into(), json!(area / 2.0));
-                } else {
-                    error(errors,path,"area","Partition area disagrees with its physical width and height; correct geometry before preparing target input.");
-                }
-            } else if within {
-                error(errors,path,"area","Partition needs physical width/height or an explicit source area basis before target preparation.");
-            }
-        }
+        Err(message) => error(errors, path, "area", message),
     }
     let authored_half = [
         "thermal_resistance_construction",
@@ -951,6 +951,34 @@ mod tests {
         assert_eq!(v["area"], 8.0);
         assert_eq!(v["thermal_resistance_construction"], 1.4);
         assert_eq!(v["areal_heat_capacity"], 240000.0);
+    }
+    #[test]
+    fn legacy_partition_area_means_the_same_faces_on_every_contract() {
+        // One face is 5 x 2. A legacy single-face area and the editor's both_faces save of it
+        // must reach a7 as both faces and a9 as one face. Geometry that decides neither keeps
+        // each contract's old rule.
+        let a7 = |extra: Value, area: f64| {
+            let row = serde_json::from_value(
+                json!({"Type":"Internal","width":5,"height":2,"extra_json":extra}),
+            )
+            .unwrap();
+            let mut v = json!({"type":"BuildingElementAdjacentConditionedSpace","area":area});
+            assert!(map_divided_opening_half_partition_element(&row, &mut v, "p").is_empty());
+            v["area"].as_f64().unwrap()
+        };
+        assert_eq!(a7(json!({}), 10.0), 20.0);
+        assert_eq!(
+            a7(json!({"internal_partition_area_basis":"both_faces"}), 20.0),
+            20.0
+        );
+        assert_eq!(a7(json!({}), 20.0), 20.0);
+        assert_eq!(a7(json!({}), 13.0), 13.0);
+        let (v, e) = map(
+            json!({"Type":"Internal","width":5,"height":2,"extra_json":{}}),
+            json!({"type":"BuildingElementAdjacentConditionedSpace","area":10,"pitch":90}),
+        );
+        assert!(e.is_empty());
+        assert_eq!(v["area"], 10);
     }
     #[test]
     fn incomplete_window_never_invents_area_from_width_times_height() {
