@@ -30,6 +30,10 @@ import type { BuildingElementOpaque, Element } from '../types';
 import { roundToTwoDecimals } from '../constants';
 import type { FacadeOpeningTbProposal } from './proposeFacadeOpenings';
 import { psiTable37ForCode } from '../../lib/simplifiedFabricMap';
+import { zonesCompatible } from './proposeAdjacentWallJunction';
+import { overlapEndpointsOnRoofPlanEdgeForPartyWall } from './partyWallRoofOverlap';
+import { isPartyWallVerticalEnvelopeLine } from './proposePartyWallToExternalE18';
+import { FACADE_PROPOSAL_SUBSTANTIAL_OVERLAP_FRAC } from './thermalBridgeTolerances';
 
 const MIN_LEN_M = 0.05;
 const GABLE_PERP_COS = 0.2;
@@ -396,5 +400,17 @@ export function proposeSlopedRoofEavesGableThermalBridges(
     const o = el as BuildingElementOpaque;
     pushEavesGableProposals(o, floors, elements, out, globalOrientationOffset);
   }
-  return out;
+  // A roof edge on a party wall is P4/P5 (BR 497 §4.1.3/§4.1.6), not an eaves or gable to outside.
+  // ponytail: drops the whole edge when a party wall covers most of it; trim the remainder if a
+  // party wall ever covers only part of a gable.
+  const partyWalls = elements.filter(isPartyWallVerticalEnvelopeLine);
+  return out.filter((p) => {
+    const [a, b] = p.coordinates;
+    const planLen = dist2XY(a!, b!);
+    return !partyWalls.some((pw) => {
+      if (!zonesCompatible(p.zoneId, pw.zoneId)) return false;
+      const hit = overlapEndpointsOnRoofPlanEdgeForPartyWall(a!, b!, pw);
+      return !!hit && hit.lenM >= FACADE_PROPOSAL_SUBSTANTIAL_OVERLAP_FRAC * planLen;
+    });
+  });
 }
