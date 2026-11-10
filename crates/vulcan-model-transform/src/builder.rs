@@ -4946,7 +4946,7 @@ impl JSONBuilder {
             .filter_map(|row| extract_metadata_field(row).0)
             .collect();
         // A Systems InfiltrationVentilation fragment is wrapped in its root key, so a model
-        // pointer finds the setting in it.
+        // pointer finds the setting in it. The merge takes only that key from the fragment.
         let systems_fragments: Vec<&Value> = csv_data
             .get("Systems")
             .into_iter()
@@ -4968,9 +4968,10 @@ impl JSONBuilder {
                     format!("/{name}")
                 };
                 // A Systems row that states the setting is its source.
-                if systems_fragments
-                    .iter()
-                    .any(|fragment| fragment.pointer(&pointer).is_some_and(|v| !v.is_null()))
+                if pointer.starts_with("/InfiltrationVentilation/")
+                    && systems_fragments
+                        .iter()
+                        .any(|fragment| fragment.pointer(&pointer).is_some_and(|v| !v.is_null()))
                 {
                     return None;
                 }
@@ -13268,7 +13269,7 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
         );
 
         // A setting that a Systems row supplies has a source, so it is not listed.
-        let systems = "\n\nSystems\nName,Zone,Type,subcategory,extra_json\nInfiltration,,System,InfiltrationVentilation,\"{\"\"InfiltrationVentilation\"\":{\"\"shield_class\"\":\"\"Shielded\"\",\"\"altitude\"\":120,\"\"Leaks\"\":{\"\"test_result\"\":4}}}\"";
+        let systems = "\n\nSystems\nName,Zone,Type,subcategory,extra_json\nInfiltration,,System,InfiltrationVentilation,\"{\"\"InfiltrationVentilation\"\":{\"\"shield_class\"\":\"\"Shielded\"\",\"\"altitude\"\":120,\"\"Leaks\"\":{\"\"test_result\"\":4}},\"\"NumberOfBedrooms\"\":4}\"";
         let listed = warnings(&format!(
             "{}{systems}",
             without(&[

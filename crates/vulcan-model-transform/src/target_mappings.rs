@@ -182,15 +182,29 @@ pub(crate) fn map_divided_opening_half_partition_element(
     }
     let within = row.get("Type").and_then(Value::as_str) != Some("Party")
         && field(row, PARTY_ELEMENT_MARKER).and_then(Value::as_bool) != Some(true);
-    // Geometry that decides neither basis keeps this contract's old reading: both faces.
-    if let Some(area) = element.get("area").and_then(Value::as_f64) {
-        if internal && within && partition_area_basis(row, Some(area), within) == Ok("single_face")
-        {
-            element.insert("area".into(), json!(area * 2.0));
+    if internal && within {
+        let area = element.get("area").and_then(Value::as_f64);
+        match partition_area_basis(row, area, within) {
+            Ok("single_face") => {
+                if let Some(area) = area {
+                    element.insert("area".into(), json!(area * 2.0));
+                }
+            }
+            Ok("both_faces") => {}
+            Ok(_) => error(
+                &mut errors,
+                path,
+                "internal_partition_area_basis",
+                PARTITION_AREA_BASIS_MESSAGE,
+            ),
+            Err(message) => error(&mut errors, path, "area", message),
         }
     }
     errors
 }
+
+const PARTITION_AREA_BASIS_MESSAGE: &str =
+    "Use single_face or both_faces for internal partition area.";
 
 /// The faces a partition's source area covers: the explicit key, else what the row's geometry
 /// shows. Every contract reads a legacy area through this, so it means the same physical thing
@@ -477,7 +491,7 @@ fn map_partition(
             errors,
             path,
             "internal_partition_area_basis",
-            "Use single_face or both_faces for internal partition area.",
+            PARTITION_AREA_BASIS_MESSAGE,
         ),
         Err(message) => error(errors, path, "area", message),
     }
@@ -955,24 +969,28 @@ mod tests {
     #[test]
     fn legacy_partition_area_means_the_same_faces_on_every_contract() {
         // One face is 5 x 2. A legacy single-face area and the editor's both_faces save of it
-        // must reach a7 as both faces and a9 as one face. Geometry that decides neither keeps
-        // each contract's old rule.
+        // must reach a7 as both faces and a9 as one face. An area that is neither one face nor
+        // two, and a basis that is neither name, block on a7 as they do on a9.
         let a7 = |extra: Value, area: f64| {
             let row = serde_json::from_value(
                 json!({"Type":"Internal","width":5,"height":2,"extra_json":extra}),
             )
             .unwrap();
             let mut v = json!({"type":"BuildingElementAdjacentConditionedSpace","area":area});
-            assert!(map_divided_opening_half_partition_element(&row, &mut v, "p").is_empty());
-            v["area"].as_f64().unwrap()
+            let errors = map_divided_opening_half_partition_element(&row, &mut v, "p");
+            (v["area"].as_f64().unwrap(), errors.len())
         };
-        assert_eq!(a7(json!({}), 10.0), 20.0);
+        assert_eq!(a7(json!({}), 10.0), (20.0, 0));
         assert_eq!(
             a7(json!({"internal_partition_area_basis":"both_faces"}), 20.0),
-            20.0
+            (20.0, 0)
         );
-        assert_eq!(a7(json!({}), 20.0), 20.0);
-        assert_eq!(a7(json!({}), 13.0), 13.0);
+        assert_eq!(a7(json!({}), 20.0), (20.0, 0));
+        assert_eq!(a7(json!({}), 13.0), (13.0, 1));
+        assert_eq!(
+            a7(json!({"internal_partition_area_basis":"single"}), 10.0),
+            (10.0, 1)
+        );
         let (v, e) = map(
             json!({"Type":"Internal","width":5,"height":2,"extra_json":{}}),
             json!({"type":"BuildingElementAdjacentConditionedSpace","area":10,"pitch":90}),
