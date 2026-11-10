@@ -427,6 +427,8 @@ impl CSVParser {
         self.seen_names.clear();
     }
 
+    /// Must equal `KNOWN_GEOMETRY_CSV_SECTIONS` in packages/geometry-document; its
+    /// geometryCsvSections.test.ts compares the two.
     const SECTIONS: &'static [&'static str] = &[
         "Metadata",
         "Exposed Elements",
