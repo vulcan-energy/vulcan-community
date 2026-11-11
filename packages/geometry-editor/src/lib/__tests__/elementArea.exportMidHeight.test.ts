@@ -4,6 +4,7 @@
 import { interpolateProfileHeight, normalizeProfilePoints } from '../profileLineFace';
 import { describe, expect, it } from 'vitest';
 import { getAreaBasedElementExportGeometry, getElementEffectiveArea, getElementGrossArea, getTransparentExportMidHeight } from '../elementArea';
+import { deriveTransparentOpeningDerivedValues } from '../transparentOpeningDerivedFields';
 import type {
   BuildingElementAdjacentConditionedSpace,
   BuildingElementOpaque,
@@ -52,6 +53,50 @@ describe('getTransparentExportMidHeight', () => {
     } as BuildingElementTransparent;
     const exp = getAreaBasedElementExportGeometry(el);
     expect(getTransparentExportMidHeight(el)).toBeCloseTo(exp.baseHeight + exp.height / 2, 4);
+  });
+});
+
+describe('a window with a shaped bottom', () => {
+  // A stair window: 1 m wide, its bottom rising 0 → 1 m and its top parallel 1 m above it.
+  const stairWindow = {
+    type: 'BuildingElementTransparent',
+    coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }],
+    width: 1,
+    height: 1,
+    base_height: 1.5,
+    extra_json: {
+      geometry_face: {
+        kind: 'profiled-line-face',
+        top_profile: [{ t: 0, h: 1 }, { t: 1, h: 2 }],
+        bottom_profile: [{ t: 0, h: 0 }, { t: 1, h: 1 }],
+      },
+    },
+  } as BuildingElementTransparent;
+
+  // It goes to HEM as the equivalent rectangle (same area and width) from its lowest point, and
+  // the mid height is that rectangle's middle, so it always lies inside the window HEM checks.
+  it('exports the equivalent rectangle from its lowest point, with the mid height at its middle', () => {
+    expect(getElementGrossArea(stairWindow)).toBe(1);
+    expect(getAreaBasedElementExportGeometry(stairWindow)).toEqual({ width: 1, height: 1, baseHeight: 1.5 });
+    expect(getTransparentExportMidHeight(stairWindow)).toBe(2);
+    // The editor's auto-tracked mid height agrees, so moving the window keeps it in step.
+    expect(deriveTransparentOpeningDerivedValues(stairWindow).midHeight).toBe(2);
+  });
+
+  it('agrees with the editor when the whole bottom is raised above the foot', () => {
+    const raised = {
+      ...stairWindow,
+      base_height: 1,
+      extra_json: {
+        geometry_face: {
+          kind: 'profiled-line-face',
+          top_profile: [{ t: 0, h: 1.2 }, { t: 1, h: 1.4 }],
+          bottom_profile: [{ t: 0, h: 0.2 }, { t: 1, h: 0.4 }],
+        },
+      },
+    } as BuildingElementTransparent;
+    expect(getTransparentExportMidHeight(raised)).toBe(1.7);
+    expect(deriveTransparentOpeningDerivedValues(raised).midHeight).toBe(1.7);
   });
 });
 

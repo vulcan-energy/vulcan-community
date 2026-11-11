@@ -156,6 +156,37 @@ describe('part of a roof inside walls standing on it', () => {
       .toBeCloseTo(4.95 / Math.cos(Math.PI / 4), 1);
   });
 
+  it('closes under an overhanging dormer roof where it meets this roof, not round its eaves', () => {
+    // The gable dormer above with its roof 0.3 m past the cheeks and the front wall. Past the
+    // cheeks each plane drops 0.06 m, so it meets the slope at y = 2.44. Footprint unchanged.
+    const pitch = (Math.atan(0.2) * 180) / Math.PI;
+    const plane = (id: string, pts: Array<[number, number]>, base = 7.5) => ({
+      id, name: id, type: 'BuildingElementOpaque', zoneId: 'z', pitch, base_height: base,
+      coordinates: pts.map(([x, y]) => ({ x, y, z: 0 })),
+    }) as BuildingElementOpaque;
+    const walls = [wall('Dormer front', [2, 1], [5, 1], 2.5), wall('Cheek L', [2, 2.5], [2, 1], 2.5), wall('Cheek R', [5, 1], [5, 2.5], 2.5)];
+    const gable = deriveRoofCutout(roof, [
+      roof,
+      plane('Dormer roof L', [[1.7, 0.7], [1.7, 2.44], [3.5, 2.8], [3.5, 0.7]], 7.44),
+      plane('Dormer roof R', [[5.3, 2.44], [5.3, 0.7], [3.5, 0.7], [3.5, 2.8]], 7.44),
+      ...walls,
+    ], [], 0)!;
+    expect(gable.issues).toEqual([]);
+    expect(gable.planArea).toBeCloseTo(4.5 + 0.45, 2);
+    // A flat-roofed dormer: its deck at the cheek tops meets the slope along y = 2.5, whether the
+    // deck is drawn to there or on into the slope, and however far its eaves overhang.
+    const deck = (pts: Array<[number, number]>) => ({ ...plane('Dormer deck', pts), pitch: 0, name: 'Dormer roof' });
+    for (const outline of [
+      [[1.7, 0.7], [5.3, 0.7], [5.3, 2.5], [1.7, 2.5]],
+      [[1, 0], [6, 0], [6, 2.5], [1, 2.5]],
+      [[1.7, 0.7], [5.3, 0.7], [5.3, 3], [1.7, 3]],
+    ] as Array<Array<[number, number]>>) {
+      const flat = deriveRoofCutout(roof, [roof, deck(outline), ...walls], [], 0)!;
+      expect(flat.issues).toEqual([]);
+      expect(flat.planArea).toBeCloseTo(4.5, 2);
+    }
+  });
+
   it('names three walls meeting at one point instead of choosing between them', () => {
     const elements = [
       roof,

@@ -21,8 +21,9 @@
  *    Internal partitions never stand or join; party walls and walls to unheated space do.
  * 4. A chain that is still open closes where both ends stop on the roof:
  *    - both at a wall end of no height (the wall meets the roof above it, as a dormer cheek does):
- *      along the plan outline of the roofs drawn above those ends, which meet this roof there (the
- *      valleys of a gable or hipped dormer; the straight back edge of a flat-roofed one);
+ *      along the line where the roofs drawn above those ends meet this roof (the valleys of a
+ *      gable or hipped dormer; the straight back edge of a flat-roofed one), never round eaves
+ *      that overhang the walls;
  *    - both on or past the roof outline: along the outline, the way round that has more of the
  *      walls' inside within it (a tie is reported).
  *    Any other case is reported with the ends, never guessed. A wall that faces into the footprint
@@ -453,14 +454,33 @@ function roofSurfaceZ(roof: BuildingElementOpaque, p: P, floors: Floor[], global
     : roofTopElevationAtPlanM(roof, p.x, p.y, floors, globalOrientationOffset);
 }
 
+/** The part of a polygon where `f` (linear along each edge) is 0 or more (Sutherland–Hodgman). */
+function clipWhereNonNegative(ring: ReadonlyArray<P>, f: (p: P) => number): P[] {
+  const out: P[] = [];
+  ring.forEach((p, i) => {
+    const q = ring[(i + 1) % ring.length]!;
+    const [fp, fq] = [f(p), f(q)];
+    if (fp >= 0) out.push(p);
+    if ((fp >= 0) !== (fq >= 0)) {
+      const u = fp / (fp - fq);
+      out.push({ x: p.x + (q.x - p.x) * u, y: p.y + (q.y - p.y) * u });
+    }
+  });
+  return out;
+}
+
 /**
- * Closes a chain whose two ends have no height (the walls meet a roof above them) along the plan
- * outline of the roofs drawn above those ends: the way round that does not double back along the
- * walls (the larger footprint). Null when no roof is above an end or the roofs above the two ends
- * do not join.
+ * Closes a chain whose two ends have no height (the walls meet a roof above them) along the line
+ * where the roofs drawn above those ends meet `host`: the valleys of a gable or hipped dormer, the
+ * back edge of a flat-roofed one. Those roofs are cut back to where they are over `host`, so a
+ * roof drawn on into the slope still meets it there; of the two ways round their outline between
+ * the ends, the one on `host`'s surface is taken, never the way round eaves that overhang the
+ * walls. Null when no roof is above an end, the roofs above the two ends do not join, or not
+ * exactly one way round lies on `host`.
  */
 function closeUnderRoofsAbove(
   chain: Chain,
+  host: BuildingElementOpaque,
   roofs: BuildingElementOpaque[],
   floors: Floor[],
   globalOrientationOffset: number | undefined,
@@ -481,16 +501,36 @@ function closeUnderRoofsAbove(
   const overHead = above(chain.head, head);
   const overTail = above(chain.tail, tail);
   if (overHead.length === 0 || overTail.length === 0) return null;
-  const planes = [...new Set([...overHead, ...overTail])].map((r): Polygon => [r.coordinates.map((p) => [p.x, p.y] as [number, number])]);
+  const upper = [...new Set([...overHead, ...overTail])];
+  // Height of roof r over host at p: linear in p for planar roofs (a pitched roof is held flat
+  // below its eaves anchor, which a dormer's crossing line does not reach).
+  const over = (r: BuildingElementOpaque, p: P) =>
+    (roofSurfaceZ(r, p, floors, globalOrientationOffset) ?? NaN) - (roofSurfaceZ(host, p, floors, globalOrientationOffset) ?? NaN);
+  const clipped = upper.flatMap((r) => {
+    const ring = clipWhereNonNegative(r.coordinates, (p) => over(r, p));
+    return ring.length >= 3 ? [{ r, ring }] : [];
+  });
+  if (clipped.length === 0) return null;
+  const planes = clipped.map(({ ring }): Polygon => [ring.map((p) => [p.x, p.y] as [number, number])]);
   const outline = polygonClipping.union(...(planes as [Polygon, ...Polygon[]]))
     .map((polygon) => polygon[0]!.slice(0, -1).map(([x, y]) => ({ x, y })))
     .find((r) => [head, tail].every((p) => isPointInPolygon2D(p, r) || ringPosition(p, r).d <= JOIN_TOL_M));
   if (!outline) return null;
   const from = ringPosition(tail, outline).s;
   const to = ringPosition(head, outline).s;
-  const ways = ([1, -1] as const).map((dir) => [...chain.pts, ...ringVerticesBetween(outline, from, to, dir)]);
-  const area = (pts: P[]) => calculatePolygonArea(pts.map((p) => ({ ...p, z: 0 })));
-  return area(ways[0]!) >= area(ways[1]!) ? ways[0]! : ways[1]!;
+  // A way lies on host where the roof it runs along meets host, at the middle of each of its edges.
+  const onHost = (path: P[]) => {
+    for (let k = 1; k < path.length; k += 1) {
+      const m = { x: (path[k - 1]!.x + path[k]!.x) / 2, y: (path[k - 1]!.y + path[k]!.y) / 2 };
+      if (!clipped.some(({ r, ring }) => ringPosition(m, ring).d <= JOIN_TOL_M && Math.abs(over(r, m)) <= JOIN_TOL_M)) return false;
+    }
+    return true;
+  };
+  const ways = ([1, -1] as const).flatMap((dir) => {
+    const between = ringVerticesBetween(outline, from, to, dir);
+    return onHost([tail, ...between, head]) ? [between] : [];
+  });
+  return ways.length === 1 ? [...chain.pts, ...ways[0]!] : null;
 }
 
 /**
@@ -620,7 +660,7 @@ function computeRoofCutout(
       continue;
     }
     if (kinds[0] === 'zero') {
-      const closed = closeUnderRoofsAbove(chain, roofs.filter((r) => r.id !== roof.id), floors, globalOrientationOffset);
+      const closed = closeUnderRoofsAbove(chain, roof, roofs.filter((r) => r.id !== roof.id), floors, globalOrientationOffset);
       if (closed) accept(onRoof, closed);
       else issues.push({ kind: 'noRoofAbove', ends, wallNames: names(onRoof) });
       continue;

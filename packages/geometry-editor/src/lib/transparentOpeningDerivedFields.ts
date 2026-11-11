@@ -7,6 +7,7 @@ import {
   calculateDerivedBaseHeight,
   calculateDerivedWindowMidHeight,
 } from './zoneDerivation';
+import { lineFaceEnvelope } from './profileLineFace';
 
 const DERIVED_VALUE_EPSILON = 0.005;
 
@@ -95,7 +96,8 @@ function deriveWindowMidHeight(
   effectiveFloors: Floor[],
 ): number {
   return calculateDerivedWindowMidHeight(
-    deriveBaseHeightForMidHeight(element, patch, effectiveFloors),
+    // A shaped window's equivalent rectangle starts at its lowest bottom point (as export does).
+    deriveBaseHeightForMidHeight(element, patch, effectiveFloors) + lineFaceEnvelope(element).bottom,
     patchedNumber(element, patch, 'height'),
   );
 }

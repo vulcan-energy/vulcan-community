@@ -154,4 +154,21 @@ describe('shaped window', () => {
     expect(proposals.map((p) => [p.edgeRole, p.suggestedLengthM])).toEqual([['lintel', 1.41], ['lintel', 1.41], ['sill', 2]]);
     for (const p of proposals) expect(syncThermalBridgeLinearLengthFromCoordinates(p)).toBe(p.suggestedLengthM);
   });
+
+  it('runs the sill up a rising bottom: a stair window', () => {
+    // 1 m wide; its bottom rises 0 → 1 m and its top runs parallel 1 m above it.
+    const stair = {
+      ...window({
+        geometry_face: { kind: 'profiled-line-face', top_profile: [{ t: 0, h: 1 }, { t: 1, h: 2 }], bottom_profile: [{ t: 0, h: 0 }, { t: 1, h: 1 }] },
+      }),
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }],
+      width: 1,
+      height: 1,
+    } as BuildingElementTransparent;
+    const proposals = proposeFacadeOpeningThermalBridges([stair], floors);
+    expect(proposals.map((p) => [p.edgeRole, p.suggestedLengthM])).toEqual([['lintel', 1.41], ['sill', 1.41], ['jamb_first', 1], ['jamb_second', 1]]);
+    const sill = proposals.find((p) => p.edgeRole === 'sill')!;
+    expect(sill.coordinates.map((c) => c.z)).toEqual([1, 2]);
+    for (const p of proposals) expect(syncThermalBridgeLinearLengthFromCoordinates(p)).toBe(p.suggestedLengthM);
+  });
 });
