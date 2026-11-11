@@ -1481,10 +1481,6 @@ pub struct JSONBuilder {
     is_fhs_schema: bool,
     input_contract: crate::InputContract,
     schema_omissions: RefCell<Vec<crate::finalization::SchemaOmission>>,
-    /// Parsed from CSV Metadata `ComplianceValidationEnabled` (workflow flag). When `Some(false)`,
-    /// we skip injecting implicit `false` defaults for FHS-only root booleans used by validation.
-    /// When `None` or `Some(true)`, FHS merges apply those defaults when keys are absent.
-    compliance_validation_enabled: Option<bool>,
     /// FHS cold-water source selected from CSV Metadata `ColdWaterSource`.
     /// Core inputs keep their existing defaults shape; this only canonicalizes FHS-family output.
     cold_water_source: String,
@@ -1544,7 +1540,6 @@ impl JSONBuilder {
             opaque_template_roof: None,
             opaque_template_external_door: None,
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
-            compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
@@ -1581,7 +1576,6 @@ impl JSONBuilder {
             opaque_template_roof: None,
             opaque_template_external_door: None,
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
-            compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
             hem_core_version: version_metadata.hem_core_version.clone(),
@@ -4716,22 +4710,13 @@ impl JSONBuilder {
                         continue;
                     }
 
-                    // Skip known metadata fields that aren't compliance settings
+                    // Skip known metadata fields that aren't compliance settings. Every model is
+                    // converted for an FHS target, so the old ComplianceValidationEnabled row is ignored.
                     if name == "GlobalOrientationOffset"
                         || name == "DefaultsPath"
                         || name == VULCAN_CSV_VERSION
+                        || name == "ComplianceValidationEnabled"
                     {
-                        continue;
-                    }
-
-                    // Workflow-only flag: whether downstream FHS validation should run; controls implicit
-                    // defaults for required root booleans when absent from CSV/defaults.
-                    if name == "ComplianceValidationEnabled" {
-                        if let Some(b) =
-                            self.csv_bool_non_fatal(field_value.as_ref(), &name, "Metadata")
-                        {
-                            self.compliance_validation_enabled = Some(b);
-                        }
                         continue;
                     }
 
@@ -4982,14 +4967,10 @@ impl JSONBuilder {
         Ok(())
     }
 
-    /// When using the FHS schema and compliance validation is not explicitly disabled, ensure
-    /// required root booleans exist by inserting `false` when CSV metadata did not set them.
+    /// When using the FHS schema, ensure required root booleans exist by inserting `false` when
+    /// CSV metadata did not set them.
     fn apply_fhs_implicit_false_root_booleans(&self, result: &mut Value) {
         if !self.is_fhs_schema {
-            return;
-        }
-        // Absent flag means "validation on" for backward compatibility with CSV that omits the row.
-        if self.compliance_validation_enabled == Some(false) {
             return;
         }
         // The documented default for an ABSENT Metadata row (see the Geometry CSV contract); a
