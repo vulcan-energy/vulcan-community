@@ -502,7 +502,8 @@ function closeUnderRoofsAbove(
   const overTail = above(chain.tail, tail);
   if (overHead.length === 0 || overTail.length === 0) return null;
   const upper = [...new Set([...overHead, ...overTail])];
-  // Height of roof r over host at p; both are planes, so it is linear in p.
+  // Height of roof r over host at p: linear in p for planar roofs (a pitched roof is held flat
+  // below its eaves anchor, which a dormer's crossing line does not reach).
   const over = (r: BuildingElementOpaque, p: P) =>
     (roofSurfaceZ(r, p, floors, globalOrientationOffset) ?? NaN) - (roofSurfaceZ(host, p, floors, globalOrientationOffset) ?? NaN);
   const clipped = upper.flatMap((r) => {

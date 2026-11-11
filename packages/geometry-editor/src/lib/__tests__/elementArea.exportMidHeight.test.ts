@@ -73,12 +73,14 @@ describe('a window with a shaped bottom', () => {
     },
   } as BuildingElementTransparent;
 
-  it('exports its area, the base at its lowest point, and the mid height at its middle', () => {
+  // It goes to HEM as the equivalent rectangle (same area and width) from its lowest point, and
+  // the mid height is that rectangle's middle, so it always lies inside the window HEM checks.
+  it('exports the equivalent rectangle from its lowest point, with the mid height at its middle', () => {
     expect(getElementGrossArea(stairWindow)).toBe(1);
     expect(getAreaBasedElementExportGeometry(stairWindow)).toEqual({ width: 1, height: 1, baseHeight: 1.5 });
-    expect(getTransparentExportMidHeight(stairWindow)).toBe(2.5);
+    expect(getTransparentExportMidHeight(stairWindow)).toBe(2);
     // The editor's auto-tracked mid height agrees, so moving the window keeps it in step.
-    expect(deriveTransparentOpeningDerivedValues(stairWindow).midHeight).toBe(2.5);
+    expect(deriveTransparentOpeningDerivedValues(stairWindow).midHeight).toBe(2);
   });
 });
 

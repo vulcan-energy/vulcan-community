@@ -215,17 +215,6 @@ export function lineFaceEdgesAt(el: LineFaceHost, t: number): { bottom: number; 
   return { bottom: interpolateProfileHeight(face.bottom, t), top: interpolateProfileHeight(face.top, t) };
 }
 
-/**
- * How far a shaped bottom's mean is above its lowest point (0 for a plain element). A window's
- * base is its lowest point, so its middle is this much above base + height / 2.
- */
-export function bottomMeanAboveLowest(el: LineFaceHost): number {
-  const bottom = readFaceEdges(el)?.bottom;
-  if (!bottom) return 0;
-  const mean = bottom.slice(1).reduce((sum, p, k) => sum + ((p.t - bottom[k]!.t) * (p.h + bottom[k]!.h)) / 2, 0);
-  return mean - Math.min(...bottom.map((p) => p.h));
-}
-
 /** Lowest bottom and highest top over the whole element (its bounding band above the foot). */
 export function lineFaceEnvelope(el: LineFaceHost): { bottom: number; top: number } {
   const face = readFaceEdges(el);

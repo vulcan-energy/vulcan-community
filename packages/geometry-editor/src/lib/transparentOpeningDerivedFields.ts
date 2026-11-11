@@ -7,7 +7,6 @@ import {
   calculateDerivedBaseHeight,
   calculateDerivedWindowMidHeight,
 } from './zoneDerivation';
-import { bottomMeanAboveLowest } from './profileLineFace';
 
 const DERIVED_VALUE_EPSILON = 0.005;
 
@@ -96,7 +95,7 @@ function deriveWindowMidHeight(
   effectiveFloors: Floor[],
 ): number {
   return calculateDerivedWindowMidHeight(
-    deriveBaseHeightForMidHeight(element, patch, effectiveFloors) + bottomMeanAboveLowest(element),
+    deriveBaseHeightForMidHeight(element, patch, effectiveFloors),
     patchedNumber(element, patch, 'height'),
   );
 }

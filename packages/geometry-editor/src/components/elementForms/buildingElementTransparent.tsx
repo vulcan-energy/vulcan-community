@@ -163,7 +163,6 @@
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { calculateDerivedWindowMidHeight } from '../../lib/zoneDerivation';
-import { bottomMeanAboveLowest } from '../../lib/profileLineFace';
 import {
   buildSlopedPolygonRectangleDimensionPatch,
   slopedPolygonNeedsRectangleRebuild,
@@ -329,8 +328,8 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
       ctx.shared.baseHeightInput.value > 0
         ? ctx.shared.baseHeightInput.value
         : ctx.derivedBaseHeight;
-    return calculateDerivedWindowMidHeight(baseM + (selectedWindow ? bottomMeanAboveLowest(selectedWindow) : 0), h);
-  }, [ctx.derivedBaseHeight, ctx.shared.baseHeightInput.value, ctx.shared.heightInput.value, selectedWindow]);
+    return calculateDerivedWindowMidHeight(baseM, h);
+  }, [ctx.derivedBaseHeight, ctx.shared.baseHeightInput.value, ctx.shared.heightInput.value]);
 
   /** Max openable area from geometry: width x free-area height, capped by total window area. */
   const derivedWindowMaxOpenArea = useMemo(() => {

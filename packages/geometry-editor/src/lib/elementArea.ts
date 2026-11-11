@@ -8,7 +8,6 @@ import {
   wallFaceBreakpoints,
   wallFaceProblem,
   exportedBaseHeightForWallFace,
-  bottomMeanAboveLowest,
 } from './profileLineFace';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { deriveRoofCutout, effectiveFloorsOf, elementsOf, modelMayHaveRoofCutouts } from './roofCutouts';
@@ -353,7 +352,7 @@ export const getOpaqueElementExportGeometry = (
 /** Mid-height in Vulcan's editor coordinates: centre of the equivalent rectangle above ground. */
 export const getTransparentExportMidHeight = (element: BuildingElementTransparent, globalOrientationOffset?: number): number => {
   const { baseHeight, height } = getAreaBasedElementExportGeometry(element, globalOrientationOffset);
-  return roundToTwoDecimals(baseHeight + bottomMeanAboveLowest(element) + height / 2);
+  return roundToTwoDecimals(baseHeight + height / 2);
 };
 
 export const getElementGrossArea = (element: Element, globalOrientationOffset?: number): number => {
