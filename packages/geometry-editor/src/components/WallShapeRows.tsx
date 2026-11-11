@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * Inline wall shape editor for a line wall: a face-on sketch, a Top row and (for walls, not
- * windows) a Bottom row. Each edge is Flat, fitted to the roof, or Custom points. Heights are
+ * Inline wall shape editor for a line wall or window: a face-on sketch, a Top row and a Bottom
+ * row. Each edge is Flat, fitted to the roof (walls only), or Custom points. Heights are
  * metres above the wall base. A valid edit is committed at once (as other wall fields are); an
  * invalid one stays here with its message and is not committed.
  */
@@ -38,7 +38,7 @@ export type WallShapeRowsProps = {
   height: number;
   /** The existing Height input, used as Top › Flat while the wall has no face. */
   children: ReactNode;
-  /** False for windows: Top is Flat | Custom and there is no Bottom row. */
+  /** False for windows: Top and Bottom are Flat | Custom. */
   roofModes: boolean;
   /** Fits an edge to the roofs over/under the wall; `limit` is the other edge. */
   fitRoof: (edge: Edge, limit: ProfilePoint[]) => WallRoofEdge | null;
@@ -365,11 +365,9 @@ export function WallShapeRows({
       <EdgeRow edge="top" mode={modes.top} roofModes={roofModes} hasRoof={!!freshTop} roofEndsAtM={roofEndsAtM} onPick={pick} rowRef={topRef}>
         {topBody}
       </EdgeRow>
-      {roofModes ? (
-        <EdgeRow edge="bottom" mode={modes.bottom} roofModes hasRoof={!!freshBottom} onPick={pick}>
-          {bottomBody}
-        </EdgeRow>
-      ) : null}
+      <EdgeRow edge="bottom" mode={modes.bottom} roofModes={roofModes} hasRoof={!!freshBottom} onPick={pick}>
+        {bottomBody}
+      </EdgeRow>
       {staleEdges.length > 0 ? (
         <div className="wall-shape-chip">
           Roof changed

@@ -58,6 +58,7 @@ import {
   getElementGrossArea,
   getOpaqueElementExportGeometry,
 } from '../../../lib/elementArea';
+import { bottomMeanAboveLowest } from '../../../lib/profileLineFace';
 import {
   deriveLegacySlopedElementDimensions,
   deriveSlopedElementDimensions,
@@ -1194,7 +1195,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
               ? roundToTwoDecimals(
                   (typeof element.base_height === 'number' && Number.isFinite(element.base_height)
                     ? element.base_height
-                    : 0) + element.height / 2,
+                    : 0) + bottomMeanAboveLowest(element) + element.height / 2,
                 )
               : undefined;
           const midHeightIsCustom =
@@ -1211,7 +1212,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           const exportedMidHeight = typeof element.mid_height !== 'number' || !Number.isFinite(element.mid_height)
             ? undefined
             : !midHeightIsCustom && exportedHeight !== undefined && exportedBaseHeight !== undefined
-              ? roundToTwoDecimals(exportedBaseHeight - windowHeightOffset + exportedHeight / 2)
+              ? roundToTwoDecimals(exportedBaseHeight - windowHeightOffset + bottomMeanAboveLowest(element) + exportedHeight / 2)
               : roundToTwoDecimals(element.mid_height - windowHeightOffset);
           const windowRow = [
             escapeCSV(element.name),

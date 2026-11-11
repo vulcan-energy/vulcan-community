@@ -98,6 +98,19 @@ describe('WallShapeRows', () => {
     expect(Number(band.getAttribute('width'))).toBeCloseTo(sx(4) - sx(2.48), 0);
   });
 
+  it('gives a window a Bottom row of Flat or Custom, with no roof modes', () => {
+    const onCommit = vi.fn();
+    render(
+      <WallShapeRows widthM={1} face={null} height={1.2} roofModes={false} fitRoof={() => null} onCommit={onCommit}>
+        <input aria-label="Height" readOnly value={1.2} />
+      </WallShapeRows>,
+    );
+    expect(edge('bottom').getAllByRole('button').map((b) => b.textContent)).toEqual(['Flat', 'Custom']);
+    fireEvent.click(edge('bottom').getByRole('button', { name: 'Custom' }));
+    fireEvent.change(screen.getByLabelText('Bottom point 2 height above base (m)'), { target: { value: '1' } });
+    expect(lastFace(onCommit).bottom_profile).toEqual([{ t: 0, h: 0 }, { t: 1, h: 1 }]);
+  });
+
   it('shows an invalid edit and does not commit it', () => {
     const onCommit = vi.fn();
     render(<Harness roof={{ current: null }} onCommit={onCommit} />);
