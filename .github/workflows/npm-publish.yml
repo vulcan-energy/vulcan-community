@@ -53,8 +53,11 @@ jobs:
           mkdir -p pack
           (cd apps/cli && npm pack --pack-destination ../../pack)
           tarball="$(ls pack/*.tgz)"
+          # List once: `tar | grep -q` fails under pipefail when grep exits early and tar
+          # then cannot write to the closed pipe.
+          contents="$(tar -tzf "$tarball")"
           for file in package/dist/cli.js package/dist/THIRD_PARTY_NOTICES.md package/LICENSE package/NOTICE package/LICENSES/MIT-HEM-FHS-wrapper.txt; do
-            tar -tzf "$tarball" | grep -qx "$file"
+            grep -qx "$file" <<< "$contents"
           done
           install_dir="$(mktemp -d)"
           (cd "$install_dir" && echo '{"private":true}' > package.json && npm install --no-audit --no-fund "$GITHUB_WORKSPACE/$tarball")
