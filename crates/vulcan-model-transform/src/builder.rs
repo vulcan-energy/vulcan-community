@@ -405,7 +405,7 @@ fn pitch_csv_value_is_90(v: &Value) -> bool {
             .unwrap_or(false)
 }
 
-fn ground_floor_group_key(element_row: &HashMap<String, Value>) -> String {
+fn ground_floor_group_key(element_row: &BTreeMap<String, Value>) -> String {
     if let Some(floor_id) = element_row.get("floor_id").and_then(Value::as_str) {
         let floor_id = floor_id.trim();
         if !floor_id.is_empty() {
@@ -425,7 +425,7 @@ fn ground_floor_group_key(element_row: &HashMap<String, Value>) -> String {
     "z:0".to_string()
 }
 
-fn ground_row_key(element_row: &HashMap<String, Value>) -> String {
+fn ground_row_key(element_row: &BTreeMap<String, Value>) -> String {
     format!(
         "{}\0{}",
         element_row
@@ -442,7 +442,7 @@ fn ground_row_key(element_row: &HashMap<String, Value>) -> String {
 /// Wall-default pitch 90 is invalid for a coplanar horizontal 3+ vertex adjacent polygon; use 0°.
 fn should_coerce_horizontal_adjacent_pitch_90(
     schema_element_type: &str,
-    element_row: &HashMap<String, Value>,
+    element_row: &BTreeMap<String, Value>,
 ) -> bool {
     if !matches!(
         schema_element_type,
@@ -493,7 +493,7 @@ fn derive_blank_csv_pitch(
     section_name: &str,
     schema_element_type: &str,
     element_name: &str,
-    row: &HashMap<String, Value>,
+    row: &BTreeMap<String, Value>,
 ) -> Result<Option<i64>, BuildError> {
     if !matches!(
         schema_element_type,
@@ -657,15 +657,7 @@ fn orientation360_from_first_segment(points: &[CsvPoint3]) -> Option<f64> {
     ))
 }
 
-/// A CSV row's cells in column-name order. Rows are hash maps, so anything built by iterating
-/// one must go through here or its key order changes between calls.
-fn sorted_cells(row: &HashMap<String, Value>) -> Vec<(&String, &Value)> {
-    let mut cells: Vec<_> = row.iter().collect();
-    cells.sort_unstable_by(|a, b| a.0.cmp(b.0));
-    cells
-}
-
-fn csv_string_cell<'a>(row: &'a HashMap<String, Value>, key: &str) -> Option<&'a str> {
+fn csv_string_cell<'a>(row: &'a BTreeMap<String, Value>, key: &str) -> Option<&'a str> {
     row.get(key)
         .and_then(|v| v.as_str())
         .map(str::trim)
@@ -673,9 +665,9 @@ fn csv_string_cell<'a>(row: &'a HashMap<String, Value>, key: &str) -> Option<&'a
 }
 
 fn find_mvhr_terminal_host<'a>(
-    csv_data: &'a HashMap<String, Vec<HashMap<String, Value>>>,
+    csv_data: &'a BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     host_name: &str,
-) -> Option<(&'static str, &'a HashMap<String, Value>)> {
+) -> Option<(&'static str, &'a BTreeMap<String, Value>)> {
     for section in ["Exposed Elements", "Window Elements"] {
         if let Some(rows) = csv_data.get(section) {
             for row in rows {
@@ -689,7 +681,7 @@ fn find_mvhr_terminal_host<'a>(
 }
 
 fn mvhr_terminal_mid_height(
-    terminal_row: &HashMap<String, Value>,
+    terminal_row: &BTreeMap<String, Value>,
     terminal_name: &str,
 ) -> Result<f64, BuildError> {
     let mid_height = if let Some(value) = parse_csv_number_cell(
@@ -741,7 +733,7 @@ fn mvhr_terminal_position_object(
 }
 
 fn mvhr_terminal_manual_position_values(
-    terminal_row: &HashMap<String, Value>,
+    terminal_row: &BTreeMap<String, Value>,
     terminal_name: &str,
 ) -> Result<serde_json::Map<String, Value>, BuildError> {
     let mid_height = mvhr_terminal_mid_height(terminal_row, terminal_name)?;
@@ -777,8 +769,8 @@ fn mvhr_terminal_manual_position_values(
 
 fn mvhr_terminal_host_position_values(
     host_section: &str,
-    host_row: &HashMap<String, Value>,
-    terminal_row: &HashMap<String, Value>,
+    host_row: &BTreeMap<String, Value>,
+    terminal_row: &BTreeMap<String, Value>,
     terminal_name: &str,
 ) -> Result<serde_json::Map<String, Value>, BuildError> {
     let host_type = csv_string_cell(host_row, "Type").unwrap_or("");
@@ -960,7 +952,7 @@ fn csv_owned_fields(section: &str) -> &'static [&'static str] {
 /// derivation exists or reported missing by the target schema; it never keeps a sample-house value.
 fn clear_csv_owned_seed_fields(
     seed: &mut serde_json::Map<String, Value>,
-    row: &HashMap<String, Value>,
+    row: &BTreeMap<String, Value>,
     section: &str,
 ) {
     for field in csv_owned_fields(section) {
@@ -978,13 +970,13 @@ fn clear_csv_owned_seed_fields(
 /// reimplemented inverted (see `contracts/geometry-csv` `merge_precedence`).
 fn overlay_row_onto_seed(
     mut seed: serde_json::Map<String, Value>,
-    row: &HashMap<String, Value>,
+    row: &BTreeMap<String, Value>,
     section: &str,
     skip_keys: &[&str],
 ) -> serde_json::Map<String, Value> {
     clear_csv_owned_seed_fields(&mut seed, row, section);
     let mut csv_set_keys: HashSet<String> = HashSet::new();
-    for (k, v) in sorted_cells(row) {
+    for (k, v) in row {
         if k == "extra_json" || skip_keys.contains(&k.as_str()) {
             continue;
         }
@@ -1086,8 +1078,8 @@ fn overlay_row_onto_seed(
 /// `JSON.parse(...) as Record<string, unknown>` with no object check, so an externally authored
 /// one survives a round-trip intact.
 fn sanitize_csv_extra_json(
-    csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
-) -> HashMap<String, Vec<HashMap<String, Value>>> {
+    csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+) -> BTreeMap<String, Vec<BTreeMap<String, Value>>> {
     csv_data
         .iter()
         .map(|(section, rows)| {
@@ -1228,7 +1220,7 @@ const COLD_WATER_SOURCE_HEADER_TANK: &str = "header tank";
 const COLD_WATER_SOURCE_DEFAULT: &str = COLD_WATER_SOURCE_MAINS;
 
 /// A Systems row routed `System` / `InfiltrationVentilation` (`merge_systems` checks the rest).
-fn is_infiltration_ventilation_row(row: &HashMap<String, Value>) -> bool {
+fn is_infiltration_ventilation_row(row: &BTreeMap<String, Value>) -> bool {
     ["Type", "system_type", "subcategory"]
         .into_iter()
         .find_map(|key| row.get(key)?.as_str())
@@ -1238,7 +1230,7 @@ fn is_infiltration_ventilation_row(row: &HashMap<String, Value>) -> bool {
 
 /// The (field name, field value) pair of a parsed Metadata row: the codec keys the first cell
 /// `Field` and the second `Value`. A name that is not a known Metadata field is ignored.
-fn extract_metadata_field(row: &HashMap<String, Value>) -> (Option<String>, Option<Value>) {
+fn extract_metadata_field(row: &BTreeMap<String, Value>) -> (Option<String>, Option<Value>) {
     let name = row
         .get("Field")
         .and_then(Value::as_str)
@@ -1252,7 +1244,7 @@ const LEGACY_VULCAN_CSV_VERSION: u64 = 1;
 const CURRENT_VULCAN_CSV_VERSION: u64 = 3;
 
 fn metadata_field_value(
-    csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+    csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     target: &str,
 ) -> Option<Value> {
     csv_data.get("Metadata").and_then(|rows| {
@@ -1281,7 +1273,7 @@ fn window_mid_height_to_hem_reference(
 }
 
 fn vulcan_csv_version(
-    csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+    csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
 ) -> Result<u64, BuildError> {
     let Some(raw_version) = metadata_field_value(csv_data, VULCAN_CSV_VERSION) else {
         return Ok(LEGACY_VULCAN_CSV_VERSION);
@@ -1309,7 +1301,7 @@ fn vulcan_csv_version(
 }
 
 fn migrate_v1_window_mid_height_reference(
-    csv_data: &mut HashMap<String, Vec<HashMap<String, Value>>>,
+    csv_data: &mut BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ventilation_base_height: f64,
 ) -> Result<(), BuildError> {
     if ventilation_base_height.abs() <= f64::EPSILON {
@@ -1355,7 +1347,7 @@ fn migrate_v1_window_mid_height_reference(
 /// Upgrade every supported Vulcan CSV version to the current persisted semantics before the
 /// schema merge. Add future migrations here in ascending version order.
 fn migrate_vulcan_csv_to_current(
-    csv_data: &mut HashMap<String, Vec<HashMap<String, Value>>>,
+    csv_data: &mut BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ventilation_base_height: f64,
 ) -> Result<(), BuildError> {
     let version = vulcan_csv_version(csv_data)?;
@@ -1468,7 +1460,7 @@ pub struct JSONBuilder {
     defaults: Value,
     #[allow(dead_code)]
     seen_names: HashSet<String>,
-    pub type_templates: HashMap<String, Value>,
+    pub type_templates: BTreeMap<String, Value>,
     /// Indexed from defaults: last `BuildingElementOpaque` with vertical wall-like pitch (not door / not roof-band).
     opaque_template_wall: Option<Value>,
     /// Indexed from defaults: last opaque whose pitch falls in the roof sloped band (see [`Self::pitch_degrees_matches_roof_variant`]).
@@ -1535,7 +1527,7 @@ impl JSONBuilder {
             schema,
             defaults,
             seen_names: HashSet::new(),
-            type_templates: HashMap::new(),
+            type_templates: BTreeMap::new(),
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
@@ -1571,7 +1563,7 @@ impl JSONBuilder {
             schema,
             defaults,
             seen_names: HashSet::new(),
-            type_templates: HashMap::new(),
+            type_templates: BTreeMap::new(),
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
@@ -1609,7 +1601,7 @@ impl JSONBuilder {
         }
     }
 
-    fn note_emitter_row(&self, system: &str, index: usize, row: &HashMap<String, Value>) {
+    fn note_emitter_row(&self, system: &str, index: usize, row: &BTreeMap<String, Value>) {
         let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
         self.csv_rows.borrow_mut().push((
             crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
@@ -1842,7 +1834,7 @@ impl JSONBuilder {
     }
 
     /// CSV `is_external_door` column only (`extra_json` is not used for this flag).
-    fn row_external_door_flag(row: &HashMap<String, Value>) -> bool {
+    fn row_external_door_flag(row: &BTreeMap<String, Value>) -> bool {
         if row.contains_key("is_external_door") {
             return Self::json_truthy_external_door(row.get("is_external_door"));
         }
@@ -1851,7 +1843,7 @@ impl JSONBuilder {
 
     /// Opaque template pitch: CSV `pitch` column only (`extra_json` is not used).
     fn row_effective_pitch_degrees_for_opaque_template(
-        row: &HashMap<String, Value>,
+        row: &BTreeMap<String, Value>,
     ) -> Option<f64> {
         row.get("pitch").and_then(Self::value_as_pitch_degrees_f64)
     }
@@ -1915,7 +1907,7 @@ impl JSONBuilder {
 
     pub fn build_json(
         &mut self,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<Value, BuildError> {
         // Cleared Advanced Fields must not reach the merged HEM JSON. One pass at the single
         // merge entry point, so no downstream loop has to remember — and so the NESTED case is
@@ -2047,7 +2039,7 @@ impl JSONBuilder {
     fn build_zone_structure(
         &mut self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         // Process Zone section to create zone objects
         if let Some(zone_data) = csv_data.get("Zone") {
@@ -2283,7 +2275,7 @@ impl JSONBuilder {
     fn add_building_elements_to_zones(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         let ventilation_base_height = ventilation_zone_base_height(result);
         let building_element_sections = [
@@ -2567,7 +2559,7 @@ impl JSONBuilder {
                     );
 
                     // Override with CSV data, but only include valid properties and non-null values
-                    for (key, value) in sorted_cells(element_row) {
+                    for (key, value) in element_row {
                         if key == "Name" || key == "Zone" || key == "Type" || key == "position_xyz"
                         {
                             continue;
@@ -2876,7 +2868,7 @@ impl JSONBuilder {
     fn add_thermal_bridging_to_zones(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         // Determine which zones use simplified mode
         let mut simplified_zones = std::collections::HashSet::new();
@@ -3012,7 +3004,7 @@ impl JSONBuilder {
     fn add_window_shading_to_zones(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         if let Some(section_data) = csv_data.get("Window Shading") {
             for shading_row in section_data {
@@ -3120,7 +3112,7 @@ impl JSONBuilder {
     fn add_lighting_to_zones(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         if let Some(section_data) = csv_data.get("Lighting") {
             for lighting_row in section_data {
@@ -3274,7 +3266,7 @@ impl JSONBuilder {
     fn process_root_level_sections(
         &mut self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         // Process Appliances
         self.build_appliances(result, csv_data)?;
@@ -3454,7 +3446,7 @@ impl JSONBuilder {
     fn build_appliances(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         if let Some(section_data) = csv_data.get("Appliances") {
             let mut appliances = serde_json::Map::new();
@@ -3484,7 +3476,7 @@ impl JSONBuilder {
     fn build_hot_water_outlets(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         if let Some(section_data) = csv_data.get("Hot Water Outlets") {
             // Start with existing HotWaterDemand from defaults
@@ -3686,7 +3678,7 @@ impl JSONBuilder {
     fn build_context_shading(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         tracing::debug!("build_context_shading called");
         if let Some(section_data) = csv_data.get("Context Shading") {
@@ -3847,7 +3839,7 @@ impl JSONBuilder {
     }
 
     fn read_context_shading_angle(
-        shading_row: &HashMap<String, Value>,
+        shading_row: &BTreeMap<String, Value>,
         candidate_keys: &[&str],
     ) -> Option<f64> {
         candidate_keys
@@ -3861,7 +3853,7 @@ impl JSONBuilder {
     /// `ContextShading`, a typo) is `None`: the caller reports it rather than guessing.
     /// Returns the column read and the type.
     fn read_context_shading_type(
-        shading_row: &HashMap<String, Value>,
+        shading_row: &BTreeMap<String, Value>,
     ) -> (&'static str, Option<&'static str>) {
         let column = if shading_row.contains_key("shading_type") {
             "shading_type"
@@ -3879,7 +3871,7 @@ impl JSONBuilder {
     fn merge_ventilation_systems(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         tracing::debug!("merge_ventilation_systems called");
         if let Some(section_data) = csv_data.get("Ventilation Systems") {
@@ -4231,7 +4223,7 @@ impl JSONBuilder {
                             ));
                         }
 
-                        let linked_terminal_rows: Vec<&HashMap<String, Value>> = section_data
+                        let linked_terminal_rows: Vec<&BTreeMap<String, Value>> = section_data
                             .iter()
                             .filter(|terminal_row| {
                                 terminal_row.get("Type").and_then(|v| v.as_str())
@@ -4403,7 +4395,7 @@ impl JSONBuilder {
     fn merge_combustion_appliances(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         if let Some(section_data) = csv_data.get("Combustion Appliances") {
             let mut combustion_appliances = serde_json::Map::new();
@@ -4464,7 +4456,7 @@ impl JSONBuilder {
     fn merge_water_pipework(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         // Defaults seeds: take the first distribution / primary pipework entries if present.
         let default_distribution_pipe = self
@@ -4601,7 +4593,7 @@ impl JSONBuilder {
 
     fn parse_cold_water_source_from_metadata(
         &mut self,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) {
         if let Some(metadata_rows) = csv_data.get("Metadata") {
             for row in metadata_rows {
@@ -4692,7 +4684,7 @@ impl JSONBuilder {
     fn merge_compliance_settings(
         &mut self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         // Compliance settings are stored in the Metadata section
         if let Some(metadata_rows) = csv_data.get("Metadata") {
@@ -4997,7 +4989,7 @@ impl JSONBuilder {
     fn merge_air_permeability_from_metadata(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         // Air permeability settings are stored in the Metadata section with "AirPermeability_" prefix
         if let Some(metadata_rows) = csv_data.get("Metadata") {
@@ -5119,7 +5111,7 @@ impl JSONBuilder {
     fn merge_ventilation_env_from_metadata(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         if let Some(metadata_rows) = csv_data.get("Metadata") {
             let ventilation_fields: HashSet<&str> = [
@@ -5194,7 +5186,7 @@ impl JSONBuilder {
     fn merge_onsite_generation(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         let seed_default_pv = self
             .defaults
@@ -5419,7 +5411,7 @@ impl JSONBuilder {
     fn update_default_space_heat_systems(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         // Skip if CSV has wet emitters - merge_wet_emitters already cleared all systems
         // and created new ones from CSV. We only need to update defaults when CSV has no emitters.
@@ -6117,8 +6109,8 @@ impl JSONBuilder {
     fn merge_systems_space_heat_wet_distribution_row(
         &self,
         result_obj: &mut serde_json::Map<String, Value>,
-        row: &HashMap<String, Value>,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        row: &BTreeMap<String, Value>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         let system_name = row.get("Name").and_then(|v| v.as_str()).ok_or_else(|| {
             BuildError::new("E038", "SpaceHeatSystem missing required 'Name' field")
@@ -6199,7 +6191,7 @@ impl JSONBuilder {
     fn merge_systems(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         let mut zone_to_space_cool_systems: HashMap<String, Vec<String>> = HashMap::new();
         // Entry names authored by Systems rows so far, keyed by section.
@@ -6711,7 +6703,7 @@ impl JSONBuilder {
     /// Merges the fragment of each `is_infiltration_ventilation_row`.
     fn merge_systems_infiltration_ventilation_rows(
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         let result_obj = result
             .as_object_mut()
@@ -6908,7 +6900,7 @@ impl JSONBuilder {
     fn strip_default_wet_distribution_for_csv_dry_space_heat(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         if !self.is_fhs_schema {
             return Ok(());
@@ -6955,7 +6947,7 @@ impl JSONBuilder {
     }
 
     fn systems_csv_presets_dry_space_heat_only(
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> bool {
         let Some(rows) = csv_data.get("Systems") else {
             return false;
@@ -7010,7 +7002,7 @@ impl JSONBuilder {
     }
 
     fn systems_csv_authors_wet_space_heat(
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> bool {
         let Some(rows) = csv_data.get("Systems") else {
             return false;
@@ -7081,7 +7073,7 @@ impl JSONBuilder {
     fn report_authored_wet_systems_without_emitters(
         &self,
         result: &Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) {
         let authored: std::collections::BTreeSet<String> =
             Self::authored_space_heat_system_aliases_from_systems_csv(csv_data)
@@ -7166,7 +7158,7 @@ impl JSONBuilder {
     fn build_wet_emitter_object(
         &self,
         subcategory: &str,
-        emitter_row: &HashMap<String, Value>,
+        emitter_row: &BTreeMap<String, Value>,
     ) -> Result<serde_json::Map<String, Value>, BuildError> {
         let mut emitter_data = emitter_row.clone();
         if let Some(extra_json_obj) = emitter_row.get("extra_json").and_then(|v| v.as_object()) {
@@ -7345,7 +7337,7 @@ impl JSONBuilder {
     }
 
     fn authored_space_heat_system_aliases_from_systems_csv(
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> HashMap<String, String> {
         let mut aliases = HashMap::new();
         let Some(rows) = csv_data.get("Systems") else {
@@ -7400,7 +7392,7 @@ impl JSONBuilder {
     fn merge_wet_emitters(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         if csv_data.get("Wet Emitters").is_none_or(Vec::is_empty) {
             self.report_authored_wet_systems_without_emitters(result, csv_data);
@@ -7479,15 +7471,15 @@ impl JSONBuilder {
             // generated `<zone> <subcategory>` grouping. Rows with a blank link in the current CSV
             // format are treated as unassigned geometry and are not silently merged into generated
             // fallback systems.
-            let mut zone_type_emitters: BTreeMap<(String, String), Vec<HashMap<String, Value>>> =
+            let mut zone_type_emitters: BTreeMap<(String, String), Vec<BTreeMap<String, Value>>> =
                 BTreeMap::new();
             let mut unlinked_zone_type_emitters: BTreeMap<
                 (String, String),
-                Vec<HashMap<String, Value>>,
+                Vec<BTreeMap<String, Value>>,
             > = BTreeMap::new();
             let mut unlinked_zones_with_csv_emitters: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
-            let mut linked_system_emitters: BTreeMap<String, Vec<HashMap<String, Value>>> =
+            let mut linked_system_emitters: BTreeMap<String, Vec<BTreeMap<String, Value>>> =
                 BTreeMap::new();
             let mut linked_system_zones: HashMap<String, HashSet<String>> = HashMap::new();
             let mut zones_with_csv_emitters: std::collections::HashSet<String> =
@@ -8849,7 +8841,7 @@ impl JSONBuilder {
     fn calculate_zone_area_from_geometry(
         &self,
         result: &mut Value,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
         if let Some(zones) = result.get_mut("Zone").and_then(|z| z.as_object_mut()) {
             for (zone_name, zone_val) in zones.iter_mut() {
@@ -9042,7 +9034,7 @@ impl JSONBuilder {
     /// would double-count if added; they are excluded here.
     fn calculate_env_area(
         &self,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<f64, BuildError> {
         let mut all_elements = Vec::new();
 
@@ -9230,11 +9222,11 @@ mod extra_json_merge_tests {
         // is not the same as the cell being inert — `overlay_row_onto_seed`'s string branch can
         // still re-parse a string cell into mergeable data, which is why it sanitizes at its own
         // parse point. See `overlay_row_onto_seed_sanitizes_double_encoded_extra_json`.
-        let mut row: HashMap<String, Value> = HashMap::new();
+        let mut row: BTreeMap<String, Value> = BTreeMap::new();
         row.insert("Name".to_string(), Value::String("wall 0".to_string()));
         row.insert("extra_json".to_string(), Value::String("{bad".to_string()));
-        let csv_data: HashMap<String, Vec<HashMap<String, Value>>> =
-            HashMap::from([("Exposed Elements".to_string(), vec![row])]);
+        let csv_data: BTreeMap<String, Vec<BTreeMap<String, Value>>> =
+            BTreeMap::from([("Exposed Elements".to_string(), vec![row])]);
 
         let sanitized = sanitize_csv_extra_json(&csv_data);
 
@@ -10728,7 +10720,7 @@ mod wet_emitter_tests {
         build_partial_json_with_errors(csv, defaults_path).0
     }
 
-    fn parse_csv(csv: &str) -> HashMap<String, Vec<HashMap<String, Value>>> {
+    fn parse_csv(csv: &str) -> BTreeMap<String, Vec<BTreeMap<String, Value>>> {
         let mut parser = CSVParser::new();
         parser.parse_csv(csv).expect("CSV should parse")
     }
@@ -12558,6 +12550,36 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
         )
     }
 
+    /// Native hash maps take a new seed for each map, so a repeat build in one process sees the
+    /// row maps in a different order. The bytes must not change.
+    #[test]
+    fn same_csv_builds_the_same_bytes() {
+        let csv = format!(
+            "{}vent_1,Vents,,,,,,,1.5,30,180,90,,\"0,0,1\",\"{{}}\"\n",
+            mvhr_terminal_csv(true)
+        );
+        let build = || {
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            // No seed templates: every row cell is a new key, so map order reaches the output.
+            let inf_vent = &mut builder.defaults["InfiltrationVentilation"];
+            inf_vent.as_object_mut().unwrap().remove("Vents");
+            for mv in inf_vent["MechanicalVentilation"]
+                .as_object_mut()
+                .unwrap()
+                .values_mut()
+            {
+                mv.as_object_mut().unwrap().remove("ductwork");
+            }
+            serde_json::to_string(&builder.build_json(&data).expect("CSV should merge")).unwrap()
+        };
+        let first = build();
+        for _ in 0..10 {
+            assert_eq!(build(), first);
+        }
+    }
+
     #[test]
     fn mvhr_terminal_rows_generate_intake_and_exhaust_positions() {
         let csv = mvhr_terminal_csv(true);
@@ -13546,15 +13568,15 @@ Name,Type
     #[test]
     fn a9_window_mapping_composes_v1_coordinate_migration_once() {
         for (version, midpoint) in [(1, 3.4), (2, 1.4), (3, 1.4)] {
-            let mut source = HashMap::from([
+            let mut source = BTreeMap::from([
                 (
                     "Metadata".into(),
                     vec![
-                        HashMap::from([
+                        BTreeMap::from([
                             ("Field".into(), serde_json::json!("VulcanCsvVersion")),
                             ("Value".into(), serde_json::json!(version)),
                         ]),
-                        HashMap::from([
+                        BTreeMap::from([
                             (
                                 "Field".into(),
                                 serde_json::json!("Ventilation_ventilation_zone_base_height"),
@@ -13565,7 +13587,7 @@ Name,Type
                 ),
                 (
                     "Window Elements".into(),
-                    vec![HashMap::from([
+                    vec![BTreeMap::from([
                         ("mid_height".into(), serde_json::json!(midpoint)),
                         ("free_area_height".into(), serde_json::json!(1.0)),
                         ("max_window_open_area".into(), serde_json::json!(0.6)),
@@ -13593,17 +13615,17 @@ Name,Type
 
     #[test]
     fn v3_party_u_requires_explicit_meaning_even_if_numeric_value_unchanged() {
-        let mut source = HashMap::from([
+        let mut source = BTreeMap::from([
             (
                 "Metadata".into(),
-                vec![HashMap::from([
+                vec![BTreeMap::from([
                     ("Field".into(), serde_json::json!("VulcanCsvVersion")),
                     ("Value".into(), serde_json::json!(3)),
                 ])],
             ),
             (
                 "Non-Exposed Elements".into(),
-                vec![HashMap::from([
+                vec![BTreeMap::from([
                     ("Type".into(), serde_json::json!("BuildingElementPartyWall")),
                     ("Name".into(), serde_json::json!("Party wall")),
                     ("extra_json".into(), serde_json::json!({"u_value":0.25})),
