@@ -6,7 +6,7 @@ import { createGeometryStore } from '../geometryStore';
 
 it('never writes a model-input metadata row with a blank value', () => {
   const store = createGeometryStore({ defaultDefaultsPath: null });
-  store.getState().setComplianceSettings({ complianceValidationEnabled: true, GroundFloorArea: '', Ventilation_altitude: null, built_form: '' } as never);
+  store.getState().setComplianceSettings({ GroundFloorArea: '', Ventilation_altitude: null, built_form: '' } as never);
   const csv = store.getState().generateCSV({ allowUnresolvedMigration: true });
   expect(csv).not.toMatch(/^(GroundFloorArea|Ventilation_altitude|General_built_form),(null)?,/m);
 });

@@ -592,7 +592,7 @@ describe('detectMissingElements + Part F', () => {
 describe('detectMissingElements — MVHR ductwork row', () => {
   it('routes an MVHR with no ductwork in one history step, then the row is gone', () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
-    const { addFloor, addZone, addElement, addSpaceLabel, setComplianceSettings } = store.getState();
+    const { addFloor, addZone, addElement, addSpaceLabel } = store.getState();
     addFloor('Ground', 2.4);
     addZone({ name: 'Zone', floorArea: 20, height: 2.4, volume: 48 });
     const zoneId = store.getState().zones[0]!.id;
@@ -608,7 +608,6 @@ describe('detectMissingElements — MVHR ductwork row', () => {
       zoneId, storey: 0, room_type: 'kitchen',
       coordinates: [{ x: 4, y: 2, z: 0 }, { x: 6, y: 2, z: 0 }, { x: 6, y: 4, z: 0 }, { x: 4, y: 4, z: 0 }],
     });
-    setComplianceSettings({ complianceValidationEnabled: true });
 
     const row = store.getState().detectMissingElements().find((m) => m.type === 'MechanicalVentilationDuctwork');
     expect(row).toMatchObject({ requiredBy: 'fhs', pillQualifier: 'MVHR 1' });

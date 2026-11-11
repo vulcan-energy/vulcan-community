@@ -7,7 +7,7 @@ import { StandardInput } from './StandardInput';
 import { renderFieldLabelWithTooltip } from './jsonformsRenderers';
 import { ResolvedFieldLabel } from './ResolvedFieldLabel';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import { useGeometryStore } from '../stores/geometryStore';
+import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import { fieldUnitForAdornment, resolveFieldPresentation } from '../lib/fieldPresentation';
 import {
   CompactSegmentedControl,
@@ -89,7 +89,7 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
   flat = false,
 }) => {
   const schemaPort = useGeometrySchemaPort();
-  const useFHSSchema = useGeometryStore((state) => !!state.complianceSettings?.complianceValidationEnabled);
+  const schemaMode = targetSchemaMode(schemaPort);
   const key = useMemo(() => JSON.stringify({ treatment, treatmentUi }), [treatment, treatmentUi]);
   const [form, setForm] = useKeyedState<WindowTreatmentFormValues>(
     key,
@@ -111,7 +111,6 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
     [onPatch, setForm],
   );
 
-  const schemaMode = useFHSSchema ? 'fhs' : 'core';
   const allowedControls = schemaPort.availability === 'available'
     ? allowedWindowTreatmentControls(
       schemaPort.getElementSubschema(schemaMode, 'BuildingElementTransparent'),
@@ -128,13 +127,13 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
   const outsideOk = mountingOutsideAllowed(cat, form.colouredKind);
   const tableMode = form.source !== 'custom';
   const transmittancePresentation = resolveFieldPresentation({
-    mode: useFHSSchema ? 'fhs' : 'core',
+    mode: schemaMode,
     propertyKey: 'trans_red',
     elementType,
     label: 'Solar entering the room when closed',
   }, schemaPort);
   const deltaRPresentation = resolveFieldPresentation({
-    mode: useFHSSchema ? 'fhs' : 'core',
+    mode: schemaMode,
     propertyKey: 'delta_r',
     elementType,
     label: 'Thermal resistivity increase (m²·K/W)',
@@ -290,7 +289,7 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
               <div style={{ margin: ROW(compact) }}>
                 <StandardInput
                   label={inlineLabelRow(
-                    <ResolvedFieldLabel presentation={transmittancePresentation} useFHSSchema={useFHSSchema} />,
+                    <ResolvedFieldLabel presentation={transmittancePresentation} useFHSSchema={schemaMode === 'fhs'} />,
                     '0–1. Higher = more sun gets in.',
                   )}
                   title="Fraction of solar heat that still enters the zone when closed (0–1). HEM trans_red."
@@ -308,7 +307,7 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
 
           <div style={{ margin: ROW(compact) }}>
             <StandardInput
-              label={<ResolvedFieldLabel presentation={deltaRPresentation} useFHSSchema={useFHSSchema} />}
+              label={<ResolvedFieldLabel presentation={deltaRPresentation} useFHSSchema={schemaMode === 'fhs'} />}
               title="HEM delta_r: added thermal resistance (fabric and air gap), in m²·K/W."
               type="number"
               unit={fieldUnitForAdornment(deltaRPresentation)}

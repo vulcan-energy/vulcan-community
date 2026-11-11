@@ -64,6 +64,7 @@ import {
   type GeometryWorkspaceResourcePort,
 } from '../../../geometry-editor-host/src/workspaceResourcePort';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
+import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { buildLightingPatch, getLightingFieldValue } from './elementForms/lighting';
@@ -1065,6 +1066,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
 }) => {
   const geometryStore = useGeometryStoreApi();
   const schemaPort = useGeometrySchemaPort();
+  const schemaMode = targetSchemaMode(schemaPort);
 
 
   useEffect(() => {
@@ -1094,17 +1096,13 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     mirrorSelectedElements,
     rotateSelectedElements,
   } = useGeometryStore();
-  const complianceValidationEnabled = useGeometryStore(
-    (s) => !!s.complianceSettings?.complianceValidationEnabled,
-  );
-  const windowSchemaMode = complianceValidationEnabled ? 'fhs' : 'core';
-  const windowPartsPhysical = windowPartsArePhysical(schemaPort, windowSchemaMode);
-  const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, windowSchemaMode);
+  const windowPartsPhysical = windowPartsArePhysical(schemaPort, schemaMode);
+  const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, schemaMode);
   const windowShadingTypeOptions = allowedShadingTypes
     ? WINDOW_SHADING_TYPE_OPTIONS.filter(({ value }) => allowedShadingTypes.includes(value))
     : WINDOW_SHADING_TYPE_OPTIONS;
   const defaultsLookup = useGeometryStore((s) => s.getDefaultsLookup());
-  const partyWallCavityFields = getPartyWallCavityFields(schemaPort, complianceValidationEnabled ? 'fhs' : 'core');
+  const partyWallCavityFields = getPartyWallCavityFields(schemaPort, schemaMode);
 
   const selectedElements = useMemo(
     () => selectedElementIds.map(id => elementsById[id]).filter(Boolean) as Element[],
@@ -1166,7 +1164,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       ? classifyOpaqueFabricVariantFromElement(record)
       : undefined;
     const cacheKey = [
-      complianceValidationEnabled ? 'fhs' : 'core',
+      schemaMode,
       elementType ?? '',
       subtype ?? '',
       opaqueFabricVariant ?? '',
@@ -1176,7 +1174,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     const cached = rowPresentationCache.get(cacheKey);
     if (cached) return cached;
     const presentation = resolveFieldPresentation({
-      mode: complianceValidationEnabled ? 'fhs' : 'core',
+      mode: schemaMode,
       propertyKey: paramId,
       elementType,
       subtype,
@@ -1208,7 +1206,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       return (
         <Tooltip
           content={formatSchemaInfoForTooltip(presentation.tooltipInfo)}
-          useFHSSchema={complianceValidationEnabled}
+          useFHSSchema={schemaMode === 'fhs'}
           position="right"
           maxWidth={350}
         >
@@ -1674,7 +1672,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         mode,
         assemblyPitchDegForElement(el),
         {
-          fhsComplianceSnapArealHeat: complianceValidationEnabled,
+          fhsComplianceSnapArealHeat: targetSchemaMode(schemaPort) === 'fhs',
           groundFloorType: el.type === 'BuildingElementGround' ? el.floor_type : null,
         },
       );
@@ -1708,7 +1706,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         ].join(' · ');
 
     return { patches, appliedCount, skippedCount, description };
-  }, [assemblyLibrary, complianceValidationEnabled, constructionTargetElements, defaultsLookup]);
+  }, [assemblyLibrary, constructionTargetElements, defaultsLookup, schemaPort]);
 
   const assemblyOptions = useMemo<SearchableDescribedOption[]>(() => {
     if (!assemblyLibrary || constructionTargetElements.length === 0) return [];
@@ -2629,9 +2627,8 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   const ductCrossSectionSummary = describeDistribution(
     computeScalarDistribution(activeElements, isDuctwork, (el) => extraJsonRecord(el).cross_section_shape),
   );
-  const ductSchemaMode = complianceValidationEnabled ? 'fhs' : 'core';
-  const ductSubschema = schemaPort.availability === 'available' ? schemaPort.getElementSubschema(ductSchemaMode, 'MechanicalVentilationDuctwork') : null;
-  const ductRoot = schemaPort.availability === 'available' ? schemaPort.getRootSchema(ductSchemaMode) : null;
+  const ductSubschema = schemaPort.availability === 'available' ? schemaPort.getElementSubschema(schemaMode, 'MechanicalVentilationDuctwork') : null;
+  const ductRoot = schemaPort.availability === 'available' ? schemaPort.getRootSchema(schemaMode) : null;
   const supportsDuctPerimeter = (ductSubschema?.properties as Record<string, unknown> | undefined)?.duct_perimeter_mm != null;
   // a8/a9 forbid diameters on rectangular ducts and perimeter on circular ones.
   const ductSizePatch = (el: Element, key: string, value: number) =>
@@ -2811,11 +2808,11 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       copyWindowShadingDetails(sourceId, targetWindows.map((target) => target.id));
       return;
     }
-    const patches = buildWindowDetailCopyPatches(source, targetWindows, detailKey, windowPartsArePhysical(schemaPort, windowSchemaMode));
+    const patches = buildWindowDetailCopyPatches(source, targetWindows, detailKey, windowPartsArePhysical(schemaPort, targetSchemaMode(schemaPort)));
     patches.forEach(({ target, patch }, index) => {
       updateElement(target.id, patch, index < patches.length - 1);
     });
-  }, [activeWindowSurfaceIds, copyWindowShadingDetails, elementsById, schemaPort, updateElement, windowSchemaMode]);
+  }, [activeWindowSurfaceIds, copyWindowShadingDetails, elementsById, schemaPort, updateElement]);
 
   const handleEditWindowDetails = useCallback((sourceId: string, detailKey: WindowDetailVisibleKey) => {
     const source = elementsById[sourceId];
@@ -3807,7 +3804,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
                 )}
               </div>
             </div>
-            {activeType === 'BuildingElementPartyWall' ? getPartyWallFabricFields(schemaPort, complianceValidationEnabled ? 'fhs' : 'core').map((field) => (
+            {activeType === 'BuildingElementPartyWall' ? getPartyWallFabricFields(schemaPort, schemaMode).map((field) => (
               <React.Fragment key={field.key}>
                 {renderManualNumberRow(
                   constructionFieldScopeKey,
@@ -4048,7 +4045,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             elementPitchDeg={assemblyPitchDegForElement(libraryModalRepresentative)}
             initialAssemblySnapshot={initialAssemblySnapshotFromElement(libraryModalRepresentative)}
             appliedEnvelope={parseVulcanAssemblyV1FromExtraJson(libraryModalRepresentative.extra_json)}
-            complianceValidationEnabled={complianceValidationEnabled}
             groundFloorType={
               libraryModalRepresentative.type === 'BuildingElementGround'
                 ? ((libraryModalRepresentative as { floor_type?: GroundFloorType }).floor_type ?? null)

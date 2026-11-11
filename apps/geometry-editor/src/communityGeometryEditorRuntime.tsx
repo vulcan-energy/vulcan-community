@@ -17,6 +17,7 @@ import {
   type CommunityGeometryStoreDocumentBridge,
 } from './communityGeometryStoreDocumentBridge';
 import { createCommunityGeometryEditorContributions } from './editorContributions';
+import { csvModelProfile } from '../../../packages/geometry-editor/src/geometry/io/modelSchemaProfile';
 import type { GeometryStoreApi } from '../../../packages/geometry-editor/src/stores/geometryStore';
 import {
   createCommunityGeometryWorkspaceAccess,
@@ -84,9 +85,10 @@ export function createCommunityGeometryEditorRuntime(
     session: options.session,
     workspaceResourcePort: workspaceResources.port,
     getDefaultsPath: () => options.store.getState().defaultsPath,
-    // The file's ComplianceValidationEnabled as the converter reads it: only FALSE switches it off.
-    getProfile: () => (/^FALSE$/i.test(options.store.getState().complianceSettings
-      .complianceValidationCell ?? '') ? 'core' : 'fhs'),
+    getProfile: () => {
+      const state = options.store.getState();
+      return csvModelProfile(state.targetBundleId, state.complianceSettings.complianceValidationCell);
+    },
     loadSchemaText: loadCommunitySchemaText,
     builder: options.modelBuilder ?? createCommunityModelWorkerBuilder(),
   });

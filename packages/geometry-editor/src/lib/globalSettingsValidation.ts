@@ -405,7 +405,6 @@ export type GlobalSettingsFieldSection =
 
 const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
   "Postcode",
-  "ComplianceValidationEnabled",
   "PartO_active_cooling_required",
   "GroundFloorArea",
   "HeatingControlType",
@@ -520,7 +519,6 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs): Array<[string, str
     ['HeatingControlType', text(compliance.HeatingControlType)],
     ['PartGcompliance', bool(compliance.PartGcompliance)],
     ['ColdWaterSource', text(compliance.ColdWaterSource)],
-    ['ComplianceValidationEnabled', compliance.complianceValidationCell],
     ['ScenariosBaseModelEnabled', bool(compliance.scenariosBaseModelEnabled)],
     ['AirPermeability_test_pressure', text(compliance.AirPermeability_test_pressure)],
     ['AirPermeability_test_result', num(compliance.AirPermeability_test_result)],
@@ -580,14 +578,9 @@ const ABSENT_ROW_DEFAULTS: Readonly<Record<string, boolean>> = {
   PartO_active_cooling_required: false,
 };
 
-/**
- * The value the converter uses when the file has no such row: the defaults template's, else
- * ABSENT_ROW_DEFAULTS, which the converter writes only when the file does not switch compliance
- * validation off.
- */
-function templateMetadataValue(state: MetadataRowInputs, defaults: unknown, key: string): unknown {
-  return valueAt(defaults, metadataSchemaPath(key))
-    ?? (/^FALSE$/i.test(state.complianceSettings.complianceValidationCell ?? '') ? undefined : ABSENT_ROW_DEFAULTS[key]);
+/** The value the converter uses when the file has no such row: the defaults template's, else ABSENT_ROW_DEFAULTS. */
+function templateMetadataValue(defaults: unknown, key: string): unknown {
+  return valueAt(defaults, metadataSchemaPath(key)) ?? ABSENT_ROW_DEFAULTS[key];
 }
 
 /**
@@ -610,7 +603,7 @@ export function absentMetadataRowFill(state: MetadataRowInputs, defaults: unknow
   for (const [key, value] of metadataRowValues(state)) {
     if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
       || systemsRowSetsMetadataInput(state.elements, key)) continue;
-    const template = templateMetadataValue(state, defaults, key);
+    const template = templateMetadataValue(defaults, key);
     if (template === undefined) continue;
     patch[metadataSettingKey(key)] = template;
     sources.set(key, valueAt(defaults, metadataSchemaPath(key)) === undefined
@@ -651,8 +644,7 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
  * One issue per model-input metadata row the save would leave out although the target's schema
  * takes it (or no schema says otherwise): the file had the row blank, the user cleared a value, or
  * no defaults value exists for a value the schema requires. `defaults` is undefined while the
- * defaults are still loading, when only blank rows are known to be unset. Also one issue when
- * ComplianceValidationEnabled holds text.
+ * defaults are still loading, when only blank rows are known to be unset.
  */
 export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: unknown, defaults: unknown): string[] {
   const unread = state.complianceSettings.unreadMetadataRows ?? {};
@@ -664,14 +656,11 @@ export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: u
     if (value === undefined) return '';
     return key.startsWith('NumberOf') ? ` Space labels show ${value}.` : ` The geometry gives ${value}.`;
   };
-  return metadataRowValues(state).flatMap(([key, value]) => key === 'ComplianceValidationEnabled' && value && !/^(TRUE|FALSE)$/i.test(value)
-    // Text the converter stops on (E055).
-    ? [`Metadata: ${key} is '${value}', which is not TRUE or FALSE. Enter TRUE or FALSE in the file.`]
-    : (value === undefined && key in METADATA_INPUT_LABELS
+  return metadataRowValues(state).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS
       && !systemsRowSetsMetadataInput(state.elements, key)
       && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
       && (blank.has(key) || (defaults !== undefined
-        && (templateMetadataValue(state, defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))
+        && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))
     ? [unread[key]
       ? `Global Settings: ${METADATA_INPUT_LABELS[key]} is '${unread[key]}', which the target does not accept. Enter it in Global Settings.${hint(key)}`
       : `Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.${hint(key)}`]

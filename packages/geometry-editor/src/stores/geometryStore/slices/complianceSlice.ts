@@ -14,11 +14,10 @@ export interface ComplianceSlice {
     HeatingControlType?: 'SeparateTempControl' | 'SeparateTimeAndTempControl';
     PartGcompliance?: boolean;
     ColdWaterSource?: 'mains water' | 'header tank';
-    /** Always true: the editor applies the FHS checks to every file, as the converter validates every file against an FHS target. */
-    complianceValidationEnabled?: boolean;
     /**
-     * The file's `ComplianceValidationEnabled` cell as typed, read as the converter reads it: the
-     * last non-blank row, or blank when every row is blank. Saved as is; only the converter acts on it.
+     * The file's `ComplianceValidationEnabled` cell as typed: the last non-blank row, or blank when
+     * every row is blank. Vulcan and the converter ignore it; the save keeps only FALSE, the switch
+     * the community tools read as their core mode.
      */
     complianceValidationCell?: string;
     /**
@@ -66,9 +65,8 @@ export interface ComplianceSlice {
 }
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], ComplianceSlice>;
 
-/** Minimum FHS-compliant defaults for required compliance fields.
- *  Applied automatically when compliance validation is first enabled so that
- *  the model starts in a saveable state.  Users can still change every value. */
+/** Minimum FHS-compliant defaults for required compliance fields, so a new model starts in a
+ *  saveable state. Users can still change every value. */
 const FHS_COMPLIANCE_DEFAULTS: Partial<GeometryState['complianceSettings']> = {
   PartGcompliance: true,
   ColdWaterSource: 'mains water',
@@ -78,19 +76,8 @@ const FHS_COMPLIANCE_DEFAULTS: Partial<GeometryState['complianceSettings']> = {
 };
 
 export const createInitialComplianceSettings = (): GeometryState['complianceSettings'] => ({
-  complianceValidationEnabled: true,
-  complianceValidationCell: 'TRUE',
   ...FHS_COMPLIANCE_DEFAULTS,
 });
-
-function applyFhsComplianceDefaultsIfEnabled(settings: Record<string, unknown>): void {
-  if (!settings.complianceValidationEnabled) return;
-  for (const [key, value] of Object.entries(FHS_COMPLIANCE_DEFAULTS)) {
-    if (settings[key] === undefined) {
-      settings[key] = value;
-    }
-  }
-}
 
 function deleteExplicitUndefined(
   target: Record<string, unknown>,
@@ -129,13 +116,6 @@ export const createComplianceSlice: GeometryStoreSlice = (set) => ({
 
       removeHouseOnlyFlatFields(newSettings);
 
-      if ('complianceValidationEnabled' in settings) {
-        // When compliance validation is being enabled, auto-populate any
-        // required FHS fields that haven't been set yet so the user starts
-        // from a valid (saveable) state rather than seeing immediate errors.
-        applyFhsComplianceDefaultsIfEnabled(newSettings);
-      }
-
       return { complianceSettings: newSettings as GeometryState['complianceSettings'] };
     });
   },
@@ -143,8 +123,7 @@ export const createComplianceSlice: GeometryStoreSlice = (set) => ({
     const nextSettings: Record<string, unknown> = { ...settings };
     deleteExplicitUndefined(nextSettings, settings);
     removeHouseOnlyFlatFields(nextSettings);
-    // A loaded file keeps exactly what it says: a value it lacks stays unset and is reported. Its
-    // ComplianceValidationEnabled cell is only saved (complianceValidationCell); the editor's checks stay on.
-    set({ complianceSettings: { ...nextSettings, complianceValidationEnabled: true } as GeometryState['complianceSettings'] });
+    // A loaded file keeps exactly what it says: a value it lacks stays unset and is reported.
+    set({ complianceSettings: nextSettings as GeometryState['complianceSettings'] });
   },
 });

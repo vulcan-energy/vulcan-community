@@ -80,6 +80,7 @@ export {
 } from './canvasEvidenceContribution';
 
 export {
+  targetSchemaMode,
   unavailableGeometrySchemaPort,
   type GeometrySchemaMode,
   type GeometrySchemaNode,

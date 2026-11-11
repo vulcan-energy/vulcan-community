@@ -41,6 +41,8 @@ export interface GeometrySchemaPort {
   getRevision?(): number;
   /** The selected target needs thermal-bridge records even where its schema accepts a total. */
   requiresDetailedThermalBridges?(): boolean;
+  /** The selected target's model type; undefined when the host has no target catalogue. */
+  targetSchemaMode?(): GeometrySchemaMode | undefined;
   preload(mode: GeometrySchemaMode): Promise<void>;
   getRootSchema(mode: GeometrySchemaMode): GeometrySchemaNode | null;
   getElementSubschema(
@@ -77,6 +79,15 @@ export interface GeometrySchemaPort {
     elementType?: string,
     mode?: GeometrySchemaMode,
   ): GeometrySchemaParameterInfo | null;
+}
+
+/**
+ * The model type of the selected target. With no port, or a host with no target catalogue, it is
+ * the HEM 1.0.0a7 target an unpinned CSV converts as, and every pinned target, today: FHS. A new
+ * model type, such as EPC, comes from the host's target here.
+ */
+export function targetSchemaMode(port?: GeometrySchemaPort): GeometrySchemaMode {
+  return port?.targetSchemaMode?.() ?? 'fhs';
 }
 
 function unavailable(operation: string): never {

@@ -42,6 +42,8 @@ type Case = {
   refuses?: string;
   /** Edits after the load (and the defaults), before the checks. */
   then?: (store: ReturnType<typeof createGeometryStore>) => void;
+  /** Load in a host with a target catalogue, as Vulcan is. */
+  targetHost?: true;
   /** Text the load notices must contain, or must not contain. */
   notice?: string;
   noNotice?: string;
@@ -143,11 +145,11 @@ const CASES: Case[] = [
     blocks: ['Building length (m) is not set. Enter it in Global Settings. The geometry gives'], saves: { 'Metadata|BuildingLength': '' } },
   { name: 'blank HeatingControlType row', edit: replace('HeatingControlType,SeparateTempControl,', 'HeatingControlType,,'), defaults: true,
     blocks: ['Heating Control Type is not set'], saves: { 'Metadata|HeatingControlType': '' } },
-  // The converter validates every file against the FHS target, whatever ComplianceValidationEnabled
-  // says; switched off, it does not write false for an absent KitchenExtractorHoodExternal row.
-  { name: 'compliance validation off still blocks', defaults: true,
+  // The converter ignores ComplianceValidationEnabled: FALSE still takes false for an absent
+  // KitchenExtractorHoodExternal row. Only a host without targets saves FALSE, for the community core mode.
+  { name: 'compliance validation off changes nothing', defaults: true,
     edit: (csv) => replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,')(csv).replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
-    blocks: ['Kitchen cooker hood extracts to outside is not set'], saves: { 'Metadata|KitchenExtractorHoodExternal': null } },
+    allows: ['Kitchen cooker hood extracts to outside'], saves: { 'Metadata|KitchenExtractorHoodExternal': 'FALSE', 'Metadata|ComplianceValidationEnabled': 'FALSE' } },
   // The converter reads the zone's living-room split whatever the switch says; the switch is saved as it was.
   { name: 'compliance validation off keeps the zone split', edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,'),
     saves: { 'Zone|Zone 1|livingroom_area': '12.78', 'Zone|Zone 1|restofdwelling_area': '58.21', 'Metadata|ComplianceValidationEnabled': 'FALSE' } },
@@ -237,21 +239,19 @@ const CASES: Case[] = [
     edit: appendSection('Combustion Appliances,,,,,,,,\nName,Type,appliance_type,exhaust_situation,fuel_type,supply_situation,base_height,coords,extra_json\nFire,Appliance,open_fireplace,into_room,wood,room_air,,"0,0,0",') },
   // A row the save leaves out is named.
   { name: 'a row the editor does not keep', edit: appendSection('Test Section,\nName,Value\nProbe,1'), notice: 'Probe row in Test Section → left out' },
-  // ComplianceValidationEnabled reads as the converter reads it: TRUE or FALSE in any case; a blank is
-  // the absent row (on); other text is E055. The cell saves as typed.
+  { name: 'a host with targets does not save ComplianceValidationEnabled FALSE', targetHost: true,
+    edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,'), saves: { 'Metadata|ComplianceValidationEnabled': null } },
+  // Any other ComplianceValidationEnabled cell is ignored and left out of the save.
+  { name: 'ComplianceValidationEnabled TRUE is not saved', edit: (csv) => csv, saves: { 'Metadata|ComplianceValidationEnabled': null } },
   { name: 'ComplianceValidationEnabled that is not TRUE or FALSE', edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,yes,'),
-    blocks: ["ComplianceValidationEnabled is 'yes'"], saves: { 'Metadata|ComplianceValidationEnabled': 'yes' } },
-  { name: 'blank ComplianceValidationEnabled is on', defaults: true,
-    edit: (csv) => replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,,')(csv).replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
-    allows: ['Kitchen cooker hood extracts to outside'], saves: { 'Metadata|ComplianceValidationEnabled': '', 'Metadata|KitchenExtractorHoodExternal': 'FALSE' } },
-  // The editor's checks stay on whatever the switch says; the last non-blank row is saved, as the converter reads it.
+    allows: ["ComplianceValidationEnabled is 'yes'"], saves: { 'Metadata|ComplianceValidationEnabled': null } },
+  // The last non-blank row counts.
   { name: 'ComplianceValidationEnabled FALSE then blank', edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,\nComplianceValidationEnabled,,'),
-    then: (store) => expect(store.getState().complianceSettings.complianceValidationEnabled).toBe(true),
     saves: { 'Metadata|ComplianceValidationEnabled': 'FALSE' } },
   // The converter ignores ScenariosBaseModelEnabled.
   { name: 'ScenariosBaseModelEnabled that is not TRUE or FALSE', edit: replace('ScenariosBaseModelEnabled,TRUE,', 'ScenariosBaseModelEnabled,yes,'),
     allows: ["ScenariosBaseModelEnabled is 'yes'"], saves: { 'Metadata|ScenariosBaseModelEnabled': 'yes' } },
-  // The converter keeps distribution pipework whatever ComplianceValidationEnabled says.
+  // The converter keeps distribution pipework.
   { name: 'distribution pipework is saved', edit: replace('Pipe,WaterPipework,5.08,internal,primary,', 'Pipe,WaterPipework,5.08,internal,distribution,'),
     saves: { 'Water Pipework|Pipe|pipework_type': 'distribution' } },
   // The load takes the living-room split from the labels whatever the switch says, and names the change.
@@ -271,7 +271,8 @@ const CASES: Case[] = [
 ];
 
 function load(c: Case) {
-  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+  const schemaPort = c.targetHost ? { ...canonicalGeometrySchemaPort, targetSchemaMode: () => 'fhs' as const } : canonicalGeometrySchemaPort;
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort });
   const { warnings } = store.getState().loadFromCSV(c.edit(sample));
   if (c.defaults) store.setState({ defaultsJson: defaults, defaultsLoading: false } as never);
   c.then?.(store);

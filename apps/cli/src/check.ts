@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 
 import { unavailableGeometrySchemaPort } from '../../../packages/geometry-editor-host/src/schemaPort';
+import { csvModelProfile } from '../../../packages/geometry-editor/src/geometry/io/modelSchemaProfile';
 import { parseCsvToGeometry } from '../../../packages/geometry-editor/src/geometry/io/parseCsvToGeometry';
 import type { Element, SpaceLabel, Zone } from '../../../packages/geometry-editor/src/geometry/types';
 import { detectMissingElements } from '../../../packages/geometry-editor/src/geometry/validation/detectMissingElements';
@@ -114,7 +115,7 @@ export function checkGeometryCsv(csvArg: string) {
   const allElements = elements.filter((element) => !element.isPlaceholder);
   const byId = elementsById(elements);
   const complianceValidationEnabled =
-    parsed.metadata.complianceSettings.complianceValidationEnabled === true;
+    csvModelProfile(parsed.metadata.targetBundleId, parsed.metadata.complianceSettings.complianceValidationCell) === 'fhs';
 
   const partFData = complianceValidationEnabled
     ? selectPartFData({

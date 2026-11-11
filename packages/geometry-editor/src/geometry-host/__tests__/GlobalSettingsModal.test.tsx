@@ -140,22 +140,6 @@ describe("GlobalSettingsModal", () => {
     expect(screen.queryByText(/Fallback heat loss/)).not.toBeInTheDocument();
   });
 
-  it("shows the file's ComplianceValidationEnabled row as it is", async () => {
-    const user = userEvent.setup();
-    const store = createGeometryStore();
-    store.getState().setComplianceSettings({ complianceValidationEnabled: false });
-    render(
-      <GeometryStoreProvider store={store}>
-        <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} />
-      </GeometryStoreProvider>
-    );
-
-    await user.click(screen.getByRole("tab", { name: /Global values/i }));
-    await user.click(screen.getByText("Dwelling Details"));
-    const box = document.querySelector<HTMLInputElement>('[data-field-key="ComplianceValidationEnabled"] input');
-    expect(box?.checked).toBe(false);
-  });
-
   it("duplicates defaults through the injected workspace without a private editor", async () => {
     const user = userEvent.setup();
     const store = createGeometryStore();
@@ -312,7 +296,6 @@ describe("GlobalSettingsModal", () => {
 
   it("combines defaults errors with required global-value issues in the filename indicator", async () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
-    store.getState().setComplianceSettings({ complianceValidationEnabled: true });
     const onIndicatorChange = vi.fn();
     const resources = createResources({
       exists: vi.fn(async () => false),

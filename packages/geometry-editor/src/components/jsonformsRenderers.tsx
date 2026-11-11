@@ -20,7 +20,7 @@ import {
 import { JUNCTION_TYPE_DESCRIPTIONS } from '../lib/simplifiedFabricMap';
 import { WINDOW_SECURITY_RISK_HELPER } from '../lib/schemaDescriptionOverrides';
 import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M } from '../geometry/constants';
-import { useGeometryStore, useGeometryStoreApi } from '../stores/geometryStore';
+import { useGeometryStore } from '../stores/geometryStore';
 import { parseWindShieldLocation } from '../lib/groundUValueCalculator';
 import type { DefaultsLookup, OpaqueFabricVariant } from '../lib/defaultsCache';
 import { classifyOpaqueFabricVariant } from '../lib/opaqueFabricVariant';
@@ -36,7 +36,7 @@ import {
 } from '../lib/windowOpenings';
 import type { SchemaNode } from '../lib/schemaTypes';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import type { GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
+import { targetSchemaMode, type GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 import {
   WindowDetailChip,
   WindowDetailCollectionShell,
@@ -268,12 +268,11 @@ const ProviderFieldLabelWithTooltip: React.FC<{
   elementType?: string;
   useFHSSchema?: boolean;
 }> = ({ label, elementType, useFHSSchema }) => {
-  const geometryStore = useGeometryStoreApi();
   const schemaPort = useGeometrySchemaPort();
   return renderFieldLabelWithTooltipForMode(
     label,
     elementType,
-    useFHSSchema ?? !!geometryStore.getState().complianceSettings.complianceValidationEnabled,
+    useFHSSchema ?? targetSchemaMode(schemaPort) === 'fhs',
     schemaPort,
   );
 };

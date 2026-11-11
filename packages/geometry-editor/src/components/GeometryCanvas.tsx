@@ -42,6 +42,7 @@ import {
   type GeometryInspectorContributions,
 } from '../../../geometry-editor-host/src/inspectorContributions';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
+import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import { useGeometrySourceComparisonPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import {
   useGeometryStore,
@@ -485,7 +486,6 @@ function isSameStoreyOpaqueLineParentCandidate(
 
 export type GeometryCanvasPanelContext = Readonly<{
   documentName: string | null;
-  isProfileValidationEnabled: boolean;
   defaultPosition: CanvasPanelPosition;
   position: CanvasPanelPosition;
   beginDrag: (
@@ -2667,14 +2667,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return [...byKey.entries()];
   }, [linearGeometryIssues]);
   const sharedElementValidationContext = useMemo<ValidationContext>(() => {
-    const complianceOn = !!complianceSettings?.complianceValidationEnabled;
     return {
       schemaPort,
       elementsById,
       zones,
       floors,
       globalOrientationOffset,
-      complianceValidationEnabled: complianceOn,
+      complianceValidationEnabled: targetSchemaMode(schemaPort) === 'fhs',
       complianceSettings,
       numberOfBedrooms: complianceSettings?.NumberOfBedrooms,
       calculateContextShadingDistance,
@@ -2686,18 +2685,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           : undefined,
       linearThermalBridgeIssues: linearGeometryIssues,
       floorStackWarningElementIds: getFloorStackWarningElementIds(elementsForValidation, floors),
-      partFFindings: complianceOn
-        ? selectPartFData({
-            zones,
-            elementsById,
-            spaceLabelsById,
-            spaceLabelIds,
-            complianceSettings,
-            elements: elementsForValidation,
-            defaults: defaultsJson,
-            defaultsLookup,
-          }).findings
-        : undefined,
+      partFFindings: selectPartFData({
+        zones,
+        elementsById,
+        spaceLabelsById,
+        spaceLabelIds,
+        complianceSettings,
+        elements: elementsForValidation,
+        defaults: defaultsJson,
+        defaultsLookup,
+      }).findings,
     };
   }, [
     calculateContextShadingDistance,
@@ -3449,7 +3446,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const canvasPanelAvailabilityContext = useMemo<GeometryCanvasPanelContext>(
     () => ({
       documentName: documentFileName || null,
-      isProfileValidationEnabled: Boolean(complianceSettings?.complianceValidationEnabled),
       defaultPosition: contributedPanelDefaultPosition,
       position: contributedPanelDefaultPosition,
       beginDrag: () => {
@@ -3460,7 +3456,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       },
     }),
     [
-      complianceSettings?.complianceValidationEnabled,
       contributedPanelDefaultPosition,
       documentFileName,
     ],
@@ -3602,7 +3597,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     for (const panel of availableContributedCanvasPanels) {
       contexts.set(panel.id, {
         documentName: documentFileName || null,
-        isProfileValidationEnabled: Boolean(complianceSettings?.complianceValidationEnabled),
         defaultPosition: contributedPanelDefaultPosition,
         position: readCanvasPanelPosition(
           availableContributedPanelPositions,
@@ -3635,7 +3629,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     availableContributedPanelPositions,
     beginOverlayDrag,
     compassMinY,
-    complianceSettings?.complianceValidationEnabled,
     contributedPanelDefaultPosition,
     documentFileName,
     setContributedPanelPositions,
@@ -8858,7 +8851,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             viewMode={viewMode}
             setViewMode={handleViewModeChange}
             onPrefetch3DView={prefetchGeometryCanvas3D}
-            complianceValidationEnabled={!!complianceSettings?.complianceValidationEnabled}
             wrapperRef={drawToolbarRef}
             style={drawToolbarStyle}
             dragHandle={drawToolbarDragHandle}

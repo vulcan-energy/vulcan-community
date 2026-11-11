@@ -29,6 +29,7 @@ import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionR
 import { derivePvDimensionsFromCoords } from '../../../lib/pvPanelFootprint';
 import { BUILDING_ALIASES } from '../../../geometry/io/ingestGeometryTabularSections';
 import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/globalSettingsValidation';
+import { csvModelProfile } from '../../../geometry/io/modelSchemaProfile';
 import {
   encodeGuideOverlayMetadataValue,
   encodeGuideOverlaySourceMetadataValue,
@@ -1023,6 +1024,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
+    // Only a host with no target catalogue (the community editor) keeps the community CLI's core mode.
+    if (!options.schemaPort.targetSchemaMode && csvModelProfile(state.targetBundleId, compliance.complianceValidationCell) === 'core') {
+      lines.push('ComplianceValidationEnabled,FALSE,,,,,,,,,,,,,');
+    }
     const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
       zones: state.zones,
       elementsById: state.elementsById,
@@ -1055,7 +1060,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     const exportZones = currentState.zones;
     if (exportZones.length > 0) {
-      // The converter reads the living-room split whatever ComplianceValidationEnabled says.
+      // The converter reads the living-room split from the first zone.
       const primaryZoneId = exportZones[0]?.id;
       const zoneHeader = [...ZONE_HEADERS_FHS];
       const zoneColumnCount = zoneHeader.length;
