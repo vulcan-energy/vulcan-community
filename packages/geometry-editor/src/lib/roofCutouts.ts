@@ -505,9 +505,10 @@ function closeUnderRoofsAbove(
   // Height of roof r over host at p; both are planes, so it is linear in p.
   const over = (r: BuildingElementOpaque, p: P) =>
     (roofSurfaceZ(r, p, floors, globalOrientationOffset) ?? NaN) - (roofSurfaceZ(host, p, floors, globalOrientationOffset) ?? NaN);
-  const clipped = upper
-    .map((r) => ({ r, ring: clipWhereNonNegative(r.coordinates, (p) => over(r, p)) }))
-    .filter(({ ring }) => ring.length >= 3);
+  const clipped = upper.flatMap((r) => {
+    const ring = clipWhereNonNegative(r.coordinates, (p) => over(r, p));
+    return ring.length >= 3 ? [{ r, ring }] : [];
+  });
   if (clipped.length === 0) return null;
   const planes = clipped.map(({ ring }): Polygon => [ring.map((p) => [p.x, p.y] as [number, number])]);
   const outline = polygonClipping.union(...(planes as [Polygon, ...Polygon[]]))
@@ -517,13 +518,17 @@ function closeUnderRoofsAbove(
   const from = ringPosition(tail, outline).s;
   const to = ringPosition(head, outline).s;
   // A way lies on host where the roof it runs along meets host, at the middle of each of its edges.
-  const onHost = (path: P[]) => path.slice(1).every((q, k) => {
-    const m = { x: (path[k]!.x + q.x) / 2, y: (path[k]!.y + q.y) / 2 };
-    return clipped.some(({ r, ring }) => ringPosition(m, ring).d <= JOIN_TOL_M && Math.abs(over(r, m)) <= JOIN_TOL_M);
+  const onHost = (path: P[]) => {
+    for (let k = 1; k < path.length; k += 1) {
+      const m = { x: (path[k - 1]!.x + path[k]!.x) / 2, y: (path[k - 1]!.y + path[k]!.y) / 2 };
+      if (!clipped.some(({ r, ring }) => ringPosition(m, ring).d <= JOIN_TOL_M && Math.abs(over(r, m)) <= JOIN_TOL_M)) return false;
+    }
+    return true;
+  };
+  const ways = ([1, -1] as const).flatMap((dir) => {
+    const between = ringVerticesBetween(outline, from, to, dir);
+    return onHost([tail, ...between, head]) ? [between] : [];
   });
-  const ways = ([1, -1] as const)
-    .map((dir) => ringVerticesBetween(outline, from, to, dir))
-    .filter((between) => onHost([tail, ...between, head]));
   return ways.length === 1 ? [...chain.pts, ...ways[0]!] : null;
 }
 
