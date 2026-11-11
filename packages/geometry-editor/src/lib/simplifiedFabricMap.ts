@@ -6,7 +6,7 @@ import { isSchemaNode, type SchemaNode } from './schemaTypes';
 
 export type FabricSection = {
   label: string;
-  // Path inside the snippet (dot path; supports nested keys like ThermalBridging.TB_linear)
+  // Path inside the snippet (dot path)
   snippetPath: string;
   // JSON pointer inside input.schema.json that holds the base for the subschema
   schemaPointer: string;
@@ -28,21 +28,18 @@ export const SIMPLIFIED_FABRIC_SECTIONS: FabricSection[] = [
   { label: 'Roof', snippetPath: 'roof', schemaPointer: '#/$defs/BuildingElement', preferVariantTitle: 'BuildingElementOpaque' },
   { label: 'Ground', snippetPath: 'ground', schemaPointer: '#/$defs/BuildingElement', preferVariantTitle: 'BuildingElementGround' },
   { label: 'Party wall', snippetPath: 'party_wall', schemaPointer: '#/$defs/BuildingElement', preferVariantTitle: 'BuildingElementAdjacentConditionedSpace' },
-  // Thermal bridging subsections
-  { label: 'Thermal bridging (linear)', snippetPath: 'ThermalBridging.TB_linear', schemaPointer: '#/$defs/ThermalBridgingDetails', preferVariantTitle: 'ThermalBridgeLinear', allowlist: ['junction_type', 'length', 'linear_thermal_transmittance'] },
-  { label: 'Thermal bridging (point)', snippetPath: 'ThermalBridging.TB_point', schemaPointer: '#/$defs/ThermalBridgingDetails', preferVariantTitle: 'ThermalBridgePoint' },
 ];
 
 /**
- * Current HEM schemas do not define `#/$defs/BuildingElement` or `#/$defs/ThermalBridgingDetails`.
+ * Current HEM schemas do not define `#/$defs/BuildingElement`.
  * Fabric unions live under Zone. Core publishes Zone under `$defs.Zone`; FHS publishes it as
  * root `properties.Zone.additionalProperties`.
  *
  * For each zone key, `BuildingElement` is `type: object` with the real union under
  * `additionalProperties` (oneOf + discriminator). Pointers must end in
- * `.../BuildingElement/additionalProperties` so `selectVariant` sees a top-level oneOf — same idea
- * as TB. A bare `.../BuildingElement` leaves only the wrapper object schema and the Form renders
- * blank. Top-level `#/$defs/BuildingElement` (input.schema.json) is already a oneOf union.
+ * `.../BuildingElement/additionalProperties` so `selectVariant` sees a top-level oneOf. A bare
+ * `.../BuildingElement` leaves only the wrapper object schema and the Form renders blank.
+ * Top-level `#/$defs/BuildingElement` (input.schema.json) is already a oneOf union.
  */
 export function resolveFabricSchemaPointer(fullSchema: unknown, section: FabricSection): string {
   const legacy = section.schemaPointer;
@@ -87,35 +84,6 @@ export function resolveFabricSchemaPointer(fullSchema: unknown, section: FabricS
     }
     if (defs?.BuildingElement) {
       return '#/$defs/BuildingElement';
-    }
-  }
-
-  if (schema && (legacy === '#/$defs/ThermalBridgingDetails' || section.snippetPath.startsWith('ThermalBridging.'))) {
-    const rootZone = schema.properties?.Zone;
-    const rootZoneProperties = isSchemaNode(rootZone?.additionalProperties)
-      ? rootZone.additionalProperties.properties
-      : undefined;
-    const rootThermalBridging = rootZoneProperties?.ThermalBridging;
-    if (isSchemaNode(rootThermalBridging?.additionalProperties)) {
-      return '#/properties/Zone/additionalProperties/properties/ThermalBridging/additionalProperties';
-    }
-    if (isSchemaNode(rootThermalBridging?.anyOf?.[1]?.additionalProperties)) {
-      return '#/properties/Zone/additionalProperties/properties/ThermalBridging/anyOf/1/additionalProperties';
-    }
-    if (defs?.ZoneFHS?.properties?.ThermalBridging?.additionalProperties) {
-      return '#/$defs/ZoneFHS/properties/ThermalBridging/additionalProperties';
-    }
-    if (defs?.ZoneFHS?.properties?.ThermalBridging?.anyOf?.[1]?.additionalProperties) {
-      return '#/$defs/ZoneFHS/properties/ThermalBridging/anyOf/1/additionalProperties';
-    }
-    if (defs?.Zone?.properties?.ThermalBridging?.additionalProperties) {
-      return '#/$defs/Zone/properties/ThermalBridging/additionalProperties';
-    }
-    if (defs?.Zone?.properties?.ThermalBridging?.anyOf?.[1]?.additionalProperties) {
-      return '#/$defs/Zone/properties/ThermalBridging/anyOf/1/additionalProperties';
-    }
-    if (defs?.ThermalBridgingDetails) {
-      return '#/$defs/ThermalBridgingDetails';
     }
   }
 
@@ -191,17 +159,15 @@ export const JUNCTION_TYPE_TO_PSI_TABLE_37: Record<string, number> = {
   R1: 0.24, R2: 0.24, R3: 0.24, R4: 0.12, R5: 0.12, R6: 0.12, R7: 0.12, R8: 0.12, R9: 0.32, R10: 0.32, R11: 0.24,
 };
 
-export const JUNCTION_TYPE_TO_PSI: Record<string, number> = JUNCTION_TYPE_TO_PSI_TABLE_37;
-
 /** Default ψ (W/m·K) from built-in Table 3.7 for a junction type code. */
 export function psiTable37ForCode(code: string): number {
-  const v = JUNCTION_TYPE_TO_PSI[code];
+  const v = JUNCTION_TYPE_TO_PSI_TABLE_37[code];
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
 export function getPsiForJunctionType(junctionType: string | undefined): number | undefined {
   if (!junctionType) return undefined;
-  return JUNCTION_TYPE_TO_PSI[junctionType];
+  return JUNCTION_TYPE_TO_PSI_TABLE_37[junctionType];
 }
 
 export function inferPsiSourceFromValue(
