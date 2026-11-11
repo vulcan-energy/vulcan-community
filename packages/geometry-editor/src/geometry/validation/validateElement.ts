@@ -904,14 +904,14 @@ function pushOpaqueSemanticFlagShapeIssuesIfNeeded(
 }
 
 // Validation utility function to check for missing or invalid data
-/** A profiled wall face that folds over or has points out of order: named, never repaired. */
+/** A profiled wall or window face that folds over or has points out of order: named, never repaired. */
 function profiledWallFaceIssue(element: Element): string | null {
   const face = readProfiledLineFace((element as { extra_json?: unknown }).extra_json);
   const coords = (element as { coordinates?: Array<{ x: number; y: number }> }).coordinates;
   if (!face || coords?.length !== 2) return null;
   const width = Math.hypot(coords[1].x - coords[0].x, coords[1].y - coords[0].y);
   const problem = wallFaceProblem(face.top_profile, face.bottom_profile, width);
-  return problem ? `Wall shape: ${problem}` : null;
+  return problem ? `${element.type === 'BuildingElementTransparent' ? 'Window' : 'Wall'} shape: ${problem}` : null;
 }
 
 /** How far an opening may stand outside its shaped wall's face before it is named. */
