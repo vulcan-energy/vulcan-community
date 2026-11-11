@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: npm publish
+
+# Publishes @vulcan-energy/community-cli with npm trusted publishing (no token):
+# configure this repository and workflow as the package's trusted publisher on npmjs.com.
+# The CLI ships the Community model WASM so convert and preflight work from an install.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Pack and verify only
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # Third-party code is pinned to a full commit SHA rather than a mutable tag.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch; the toolchain input selects nightly
+        with:
+          toolchain: nightly
+          components: rust-src
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - name: Build the Community model WASM
+        run: ./scripts/build-model-wasm.sh
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Release licensing validation
+        run: node scripts/validate-licensing.mjs --release
+
+      - name: Build the CLI with the WASM
+        run: npm run build -w apps/cli
+
+      # The packed tarball, installed on its own, must run every command it documents.
+      - name: Install and exercise the packed CLI
+        run: |
+          set -euo pipefail
+          pack_dir="$(mktemp -d)"
+          (cd apps/cli && npm pack --pack-destination "$pack_dir")
+          install_dir="$(mktemp -d)"
+          (cd "$install_dir" && echo '{"private":true}' > package.json && npm install --no-audit --no-fund "$pack_dir"/*.tgz)
+          cli="$install_dir/node_modules/.bin/vulcan-community"
+          tar -tzf "$pack_dir"/*.tgz | grep -qx 'package/LICENSE'
+          tar -tzf "$pack_dir"/*.tgz | grep -q 'package/dist/vulcan_model_wasm_bg.wasm'
+          fixture=crates/vulcan-model-wasm/tests/fixtures/min_working.csv
+          defaults=data/defaults/defaults_template.json
+          "$cli" check "$fixture" --json --fail-on=none > /dev/null
+          "$cli" thermal-bridges "$fixture" --json > /dev/null
+          check='const r = JSON.parse(require("fs").readFileSync(0, "utf8")); process.exit(r[process.argv[1]].is_valid ? 0 : 1)'
+          "$cli" convert "$fixture" --defaults "$defaults" --json | node -e "$check" validation
+          "$cli" preflight "$fixture" --defaults "$defaults" --json | node -e "$check" preflight
+          "$cli" version
+
+      - name: Publish
+        if: ${{ !inputs.dry_run }}
+        run: npm publish -w apps/cli --provenance --access public
