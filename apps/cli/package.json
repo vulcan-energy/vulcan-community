@@ -1,6 +1,6 @@
 {
   "name": "@vulcan-energy/community-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vulcan Community command line: geometry CSV checks and automatic thermal bridges",
   "license": "AGPL-3.0-only",
   "repository": {
