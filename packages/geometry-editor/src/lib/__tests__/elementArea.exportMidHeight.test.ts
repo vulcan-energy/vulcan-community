@@ -82,6 +82,22 @@ describe('a window with a shaped bottom', () => {
     // The editor's auto-tracked mid height agrees, so moving the window keeps it in step.
     expect(deriveTransparentOpeningDerivedValues(stairWindow).midHeight).toBe(2);
   });
+
+  it('agrees with the editor when the whole bottom is raised above the foot', () => {
+    const raised = {
+      ...stairWindow,
+      base_height: 1,
+      extra_json: {
+        geometry_face: {
+          kind: 'profiled-line-face',
+          top_profile: [{ t: 0, h: 1.2 }, { t: 1, h: 1.4 }],
+          bottom_profile: [{ t: 0, h: 0.2 }, { t: 1, h: 0.4 }],
+        },
+      },
+    } as BuildingElementTransparent;
+    expect(getTransparentExportMidHeight(raised)).toBe(1.7);
+    expect(deriveTransparentOpeningDerivedValues(raised).midHeight).toBe(1.7);
+  });
 });
 
 describe('getAreaBasedElementExportGeometry sloped polygons', () => {

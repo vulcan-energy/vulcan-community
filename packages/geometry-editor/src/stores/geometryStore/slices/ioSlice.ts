@@ -122,6 +122,7 @@ import {
 export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
 import { internalAdjacentConditionedAreaMultiplier } from '../../../lib/elementArea';
+import { lineFaceEnvelope } from '../../../lib/profileLineFace';
 import { assertCsvMigrationResolved, csvMigrationIssues, liftStoreyIndexDuctsToMetres, resolveCsvUValueMeaning, upgradePcdbProductReferences, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
 
 export interface IoSlice {
@@ -1194,7 +1195,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
               ? roundToTwoDecimals(
                   (typeof element.base_height === 'number' && Number.isFinite(element.base_height)
                     ? element.base_height
-                    : 0) + element.height / 2,
+                    : 0) + lineFaceEnvelope(element).bottom + element.height / 2,
                 )
               : undefined;
           const midHeightIsCustom =
