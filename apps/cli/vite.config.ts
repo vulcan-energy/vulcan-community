@@ -35,6 +35,7 @@ function thirdPartyNotices(): Plugin {
       for (const output of Object.values(bundle)) {
         if (output.type !== 'chunk') continue;
         for (const id of Object.keys(output.modules)) {
+          if (id.startsWith('\0')) continue; // Rollup/plugin virtual helpers, not repo files
           const match = /^(.*\/node_modules\/((?:@[^/]+\/)?[^/]+))\//.exec(id.replace(/\\/g, '/'));
           if (match) {
             packages.set(match[2]!, match[1]!);
