@@ -276,6 +276,15 @@
       "rights_status": "approved"
     },
     {
+      "path": "LICENSES/MIT-HEM-FHS-wrapper.txt",
+      "source_path": "LICENSES/MIT-HEM-FHS-wrapper.txt",
+      "license": "MIT",
+      "rights_status": "approved",
+      "source": "https://github.com/communitiesuk/epb-hem-wrapper-fhs",
+      "source_revision": "dd5ba73a19674d631da59b4924bb7dc2833fbb3b",
+      "provenance": "Copy of the upstream LICENSE.md at source_revision (identical apart from a trailing newline) (added upstream after the pinned hem_fhs_upstream revision); reproduced for data/schemas/input_fhs.schema.json"
+    },
+    {
       "path": "LICENSES/OGL-UK-3.0.txt",
       "source_path": "LICENSES/OGL-UK-3.0.txt",
       "license": "OGL-UK-3.0",
@@ -375,6 +384,15 @@
     {
       "path": ".github/workflows/cla.yml",
       "source_path": ".github/workflows/cla.yml",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_ci_harness",
+      "shipped": false
+    },
+    {
+      "path": ".github/workflows/npm-publish.yml",
+      "source_path": ".github/workflows/npm-publish.yml",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

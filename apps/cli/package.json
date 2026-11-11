@@ -3,15 +3,47 @@
   "version": "0.1.0",
   "description": "Vulcan Community command line: geometry CSV checks and automatic thermal bridges",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vulcan-energy/vulcan-community.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/vulcan-energy/vulcan-community#readme",
+  "keywords": [
+    "home-energy-model",
+    "hem",
+    "future-homes-standard",
+    "fhs",
+    "thermal-bridges",
+    "geometry",
+    "building-energy",
+    "cli"
+  ],
   "type": "module",
   "bin": {
     "vulcan-community": "dist/cli.js"
   },
+  "files": [
+    "dist/cli.js",
+    "dist/THIRD_PARTY_NOTICES.md",
+    "README.md",
+    "LICENSE",
+    "LICENSES/",
+    "NOTICE",
+    "ATTRIBUTION.md",
+    "ADDITIONAL_TERMS.md",
+    "TRADEMARKS.md"
+  ],
   "engines": {
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "vite build"
+    "build": "vite build",
+    "prepack": "cp ../../LICENSE ../../NOTICE ../../ATTRIBUTION.md ../../ADDITIONAL_TERMS.md ../../TRADEMARKS.md . && rm -rf LICENSES && cp -R ../../LICENSES .",
+    "postpack": "rm -rf LICENSE NOTICE ATTRIBUTION.md ADDITIONAL_TERMS.md TRADEMARKS.md LICENSES"
+  },
+  "dependencies": {
+    "polygon-clipping": "0.15.7"
   },
   "devDependencies": {
     "vite": "7.0.6"

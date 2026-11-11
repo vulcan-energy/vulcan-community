@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: npm publish
+
+# Publishes @vulcan-energy/community-cli with npm trusted publishing (no token):
+# configure this repository and workflow as the package's trusted publisher on npmjs.com.
+# The package carries cli.js and its notices only; convert and preflight need the model
+# WASM, built from source.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Pack and verify only
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      # Third-party code is pinned to a full commit SHA rather than a mutable tag.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.19.0
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Release licensing validation
+        run: node scripts/validate-licensing.mjs --release
+
+      - name: Build the CLI
+        run: npm run build -w apps/cli
+
+      # The packed tarball, installed on its own on the oldest supported Node, must run the
+      # commands it ships and carry its notices.
+      - name: Pack, install and exercise the CLI
+        run: |
+          set -euo pipefail
+          mkdir -p pack
+          (cd apps/cli && npm pack --pack-destination ../../pack)
+          tarball="$(ls pack/*.tgz)"
+          for file in package/dist/cli.js package/dist/THIRD_PARTY_NOTICES.md package/LICENSE package/NOTICE package/LICENSES/MIT-HEM-FHS-wrapper.txt; do
+            tar -tzf "$tarball" | grep -qx "$file"
+          done
+          install_dir="$(mktemp -d)"
+          (cd "$install_dir" && echo '{"private":true}' > package.json && npm install --no-audit --no-fund "$GITHUB_WORKSPACE/$tarball")
+          cli="$install_dir/node_modules/.bin/vulcan-community"
+          fixture=crates/vulcan-model-wasm/tests/fixtures/min_working.csv
+          "$cli" check "$fixture" --json --fail-on=none > /dev/null
+          "$cli" thermal-bridges "$fixture" --json > /dev/null
+          "$cli" version
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: community-cli-tarball
+          path: pack/*.tgz
+          if-no-files-found: error
+
+  # Only this job can mint an npm token, only from main, and only when not a dry run.
+  publish:
+    needs: pack
+    if: ${{ !inputs.dry_run && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: community-cli-tarball
+
+      - name: Publish
+        run: npm publish ./*.tgz --access public
