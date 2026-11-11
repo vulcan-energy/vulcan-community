@@ -159,17 +159,15 @@ export const JUNCTION_TYPE_TO_PSI_TABLE_37: Record<string, number> = {
   R1: 0.24, R2: 0.24, R3: 0.24, R4: 0.12, R5: 0.12, R6: 0.12, R7: 0.12, R8: 0.12, R9: 0.32, R10: 0.32, R11: 0.24,
 };
 
-export const JUNCTION_TYPE_TO_PSI: Record<string, number> = JUNCTION_TYPE_TO_PSI_TABLE_37;
-
 /** Default ψ (W/m·K) from built-in Table 3.7 for a junction type code. */
 export function psiTable37ForCode(code: string): number {
-  const v = JUNCTION_TYPE_TO_PSI[code];
+  const v = JUNCTION_TYPE_TO_PSI_TABLE_37[code];
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
 export function getPsiForJunctionType(junctionType: string | undefined): number | undefined {
   if (!junctionType) return undefined;
-  return JUNCTION_TYPE_TO_PSI[junctionType];
+  return JUNCTION_TYPE_TO_PSI_TABLE_37[junctionType];
 }
 
 export function inferPsiSourceFromValue(
