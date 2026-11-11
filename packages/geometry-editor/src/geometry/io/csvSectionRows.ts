@@ -27,12 +27,13 @@ export const isTabularSectionHeaderLine =
 
 /**
  * The value of a metadata row (`Key,value`, optionally commented as `#Key`) in the leading Metadata
- * block, which ends at the first empty row; an element row with that name is not metadata.
+ * block, which ends at the first other section title; blank rows inside it are skipped, as the Rust
+ * parser does. An element row with that name is not metadata.
  * Pin detection for preparation, the editor and the CLI all read the target through this.
  */
 export function csvMetadataValue(csv: string, key: string): string | undefined {
   const rows = csv.replace(/^\uFEFF/, '').split(/\r?\n/).map(parseCsvLine);
-  const end = rows.findIndex((fields) => fields.every((field) => !field.trim()));
+  const end = rows.findIndex(isTabularSectionHeaderLine);
   const values = new Set(rows.slice(0, end === -1 ? undefined : end)
     .filter((fields) => fields[0]?.replace(/^#\s*/, '').trim() === key)
     .map((fields) => fields[1]?.trim() ?? ''));
