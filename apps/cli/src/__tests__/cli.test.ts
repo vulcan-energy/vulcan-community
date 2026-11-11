@@ -5,7 +5,7 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +30,15 @@ describe('vulcan-community commands', () => {
     expect(Array.isArray(result.criticalIssues)).toBe(true);
     expect(Array.isArray(result.warnings)).toBe(true);
     expect(Array.isArray(result.missingElements)).toBe(true);
+  });
+
+  // A CSV with no TargetBundleId is the a7 target, an FHS model; only FALSE selects core.
+  it('check reads a CSV without ComplianceValidationEnabled as FHS', () => {
+    const csv = join(mkdtempSync(join(tmpdir(), 'vulcan-cli-')), 'no-row.csv');
+    writeFileSync(csv, readFileSync(fixture, 'utf8').replace(/^ComplianceValidationEnabled,.*\n/m, ''));
+    expect(checkGeometryCsv(csv).complianceValidationEnabled).toBe(true);
+    writeFileSync(csv, readFileSync(fixture, 'utf8').replace(/^ComplianceValidationEnabled,TRUE/m, 'ComplianceValidationEnabled,FALSE'));
+    expect(checkGeometryCsv(csv).complianceValidationEnabled).toBe(false);
   });
 
   it('convert refuses a CSV pinned to a HEM version instead of converting it with the bundled schema', async () => {

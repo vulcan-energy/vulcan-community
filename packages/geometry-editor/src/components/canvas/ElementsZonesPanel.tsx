@@ -182,7 +182,8 @@ export interface ElementsZonesPanelProps {
   onDrawMissingElement: (type: ElementType, drawMode: 'line' | 'polygon', pending: PendingHostElementCreation) => void;
   updateElement: (id: string, patch: Partial<Element>, optional?: boolean) => void;
   setCurrentFloorZ: (z: number) => void;
-  complianceSettings: { complianceValidationEnabled?: boolean };
+  /** Missing elements are worked out again when it changes. */
+  complianceSettings: object;
   sourceComparisonPort: GeometrySourceComparisonPort;
   lookupByElement: ReadonlyMap<string, readonly unknown[]>;
   hasEvidenceDraft: boolean;
@@ -504,7 +505,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     }
   }, [sourceComparisonPort]);
 
-  const missingCategory = complianceSettings.complianceValidationEnabled ? 'critical' : 'warning';
   const floors = useGeometryStore((s) => s.floors);
   const spaceLabelsById = useGeometryStore((s) => s.spaceLabelsById);
   const spaceLabelIds = useGeometryStore((s) => s.spaceLabelIds);
@@ -674,7 +674,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     return counts;
   }, [elementsById]);
   const schemaPort = useGeometrySchemaPort();
-  const bridgingOffered = simplifiedThermalBridgingOffered(schemaPort, complianceSettings.complianceValidationEnabled ? 'fhs' : 'core');
+  const bridgingOffered = simplifiedThermalBridgingOffered(schemaPort, 'fhs');
   const zoneValidationById = useMemo(() => {
     const validations = new Map<string, ValidationResult>();
     const spaceLabelIdsByZone = new Map<string, string[]>();
@@ -689,7 +689,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     for (const zone of zones) {
       const zoneValidation = validateZone(zone, {
         elementsById,
-        complianceValidationEnabled: complianceSettings.complianceValidationEnabled || false,
+        complianceValidationEnabled: true,
         primaryFhsZoneId,
         simplifiedThermalBridgingOffered: bridgingOffered,
       });
@@ -702,7 +702,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
         zones,
         elementsById,
         spaceInferenceWallPrintByZone,
-        complianceValidationEnabled: complianceSettings.complianceValidationEnabled === true,
+        complianceValidationEnabled: true,
       });
       validations.set(zone.id, withTargetIssues({
         hasIssues: zoneValidation.hasIssues || spaceValidation.hasIssues,
@@ -714,7 +714,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
 
     return validations;
   }, [
-    complianceSettings.complianceValidationEnabled,
     elementsById,
     primaryFhsZoneId,
     spaceInferenceWallPrintByZone,
@@ -775,23 +774,20 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
       if (summary.hasComparisonInfo) infoCount++;
     }
     infoCount += sourceMissingItems.length;
-    const missingCount = panelMissingElements.length;
-    const criticalMissing = missingCategory === 'critical' ? missingCount : 0;
-    const warningMissing = missingCategory === 'warning' ? missingCount : 0;
+    // A missing element is always critical.
+    const criticalMissing = panelMissingElements.length;
     criticalCount += criticalMissing;
-    warningCount += warningMissing;
     return {
       criticalCount,
       warningCount,
       infoCount,
       criticalMissing,
-      warningMissing,
     };
-  }, [elementEntrySummaries, sourceMissingItems.length, missingCategory, panelMissingElements.length]);
+  }, [elementEntrySummaries, sourceMissingItems.length, panelMissingElements.length]);
   const filteredPanelMissingElements = useMemo(() => {
     if (validationFilter !== 'warning' && validationFilter !== 'critical') return panelMissingElements;
-    return panelMissingElements.filter(() => validationFilter === missingCategory);
-  }, [missingCategory, panelMissingElements, validationFilter]);
+    return validationFilter === 'critical' ? panelMissingElements : [];
+  }, [panelMissingElements, validationFilter]);
 
   if (validationFilter) {
     const matchingCount = elementIds.filter((id) => {
@@ -813,10 +809,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     if (validationFilter === 'info') {
       if (matchingCount === 0 && sourceMissingItems.length === 0) setValidationFilter(null);
     } else if (validationFilter === 'warning' || validationFilter === 'critical') {
-      const missingInCategory = panelMissingElements.filter(() => {
-        const category = complianceSettings.complianceValidationEnabled ? 'critical' : 'warning';
-        return category === validationFilter;
-      }).length;
+      const missingInCategory = validationFilter === 'critical' ? panelMissingElements.length : 0;
       if (matchingCount === 0 && missingInCategory === 0) setValidationFilter(null);
     } else if (matchingCount === 0) {
       setValidationFilter(null);
@@ -1023,22 +1016,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                   ECaaS-Only x{ecaasOnlySystems.length}
                 </button>
               ) : null}
-              {!complianceSettings.complianceValidationEnabled && (
-                <button
-                  className="add-button"
-                  onClick={() => {
-                    try {
-                      const zoneId = createPlaceholderZone();
-                      setSelection({ type: 'zone', id: zoneId, isPlaceholder: true });
-                    } catch (error) {
-                      alert(error instanceof Error ? error.message : 'Failed to create zone');
-                    }
-                  }}
-                  title="Add Zone"
-                >
-                  + Zone
-                </button>
-              )}
               <div className="elements-panel__tools">
                 <div className="hide-control">
                   <div className="hide-control__label">Hide</div>
@@ -1086,7 +1063,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                   warningCount,
                   infoCount,
                   criticalMissing,
-                  warningMissing,
                 } = elementStatusCounts;
                 if (criticalCount === 0 && warningCount === 0 && infoCount === 0) return null;
                 return (
@@ -1104,7 +1080,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                     {warningCount > 0 && (
                       <button
                         type="button"
-                        title={`${warningCount} warning${warningCount !== 1 ? 's' : ''}${warningMissing ? ` (${warningMissing} missing element${warningMissing !== 1 ? 's' : ''})` : ''}. Click to filter.`}
+                        title={`${warningCount} warning${warningCount !== 1 ? 's' : ''}. Click to filter.`}
                         onClick={() => setValidationFilter(validationFilter === 'warning' ? null : 'warning')}
                         className={`elements-panel__status-chip elements-panel__status-chip--warning ${validationFilter === 'warning' ? 'elements-panel__status-chip--active' : ''}`}
                       >

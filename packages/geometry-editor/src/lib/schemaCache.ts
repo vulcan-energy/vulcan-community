@@ -2181,7 +2181,7 @@ export function validatePropertyValueForMode(
 
 // FHS-aware per-field validation. This mirrors validatePropertyValue() but uses
 // the FHS schema cache + FHS subschema resolution (so min/max constraints match
-// what the save worker enforces when ComplianceValidationEnabled=TRUE).
+// what the converter enforces for an FHS target).
 export function validatePropertyValueFHS(
   elementType: string,
   subtype: string | undefined,

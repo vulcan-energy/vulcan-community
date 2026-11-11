@@ -166,9 +166,7 @@ export type ComplianceSettings = {
   HeatingControlType?: 'SeparateTempControl' | 'SeparateTimeAndTempControl';
   PartGcompliance?: boolean;
   ColdWaterSource?: 'mains water' | 'header tank';
-  /** The file's ComplianceValidationEnabled row as the converter reads it (TRUE or FALSE in any case); the editor store keeps it on. */
-  complianceValidationEnabled?: boolean;
-  /** The file's ComplianceValidationEnabled cell as typed: the last non-blank row, or blank when every row is blank. */
+  /** The file's ComplianceValidationEnabled cell as typed: the last non-blank row, or blank when every row is blank. Only the community tools read it: FALSE is their core mode. */
   complianceValidationCell?: string;
   /** When false, this model is hidden from the Scenarios base-model picker (CSV row `ScenariosBaseModelEnabled`). */
   scenariosBaseModelEnabled?: boolean;
@@ -543,12 +541,10 @@ export const parseCsvToGeometry = (
       continue;
     }
     if (line.startsWith('ComplianceValidationEnabled,')) {
-      // As the converter reads it (apply_fhs_implicit_false_root_booleans): the last non-blank row
-      // wins, a blank or absent row is on, and other text blocks (unsetMetadataInputIssues).
+      // The last non-blank row wins.
       const cell = metadataFields[1]?.trim() ?? '';
       if (cell === '' && complianceSettings.complianceValidationCell !== undefined) continue;
       complianceSettings.complianceValidationCell = cell;
-      complianceSettings.complianceValidationEnabled = /^(TRUE|FALSE)$/i.test(cell) ? cell.toUpperCase() === 'TRUE' : undefined;
       continue;
     }
     if (line.startsWith('ScenariosBaseModelEnabled,')) {

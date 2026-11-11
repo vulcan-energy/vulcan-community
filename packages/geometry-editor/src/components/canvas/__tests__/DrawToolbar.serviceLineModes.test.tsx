@@ -10,7 +10,6 @@ import type { ElementType } from '../../../geometry/types';
 
 function renderToolbar(
   drawElementType: ElementType,
-  complianceValidationEnabled = true,
   overrides: Partial<React.ComponentProps<typeof DrawToolbar>> = {},
 ) {
   return render(
@@ -44,7 +43,6 @@ function renderToolbar(
       setDrawMvhrTerminalRole={vi.fn()}
       viewMode="2d"
       setViewMode={vi.fn()}
-      complianceValidationEnabled={complianceValidationEnabled}
       {...overrides}
     />,
   );
@@ -60,7 +58,7 @@ describe('DrawToolbar shape dropdown and internal draw modes', () => {
     // literal "<value> (not in list)" entry, so feeding the raw mode through would
     // surface the internal token to the user -- the toolbar must map any mode it
     // does not offer to the placeholder instead.
-    const { container } = renderToolbar('BuildingElementOpaque', true, {
+    const { container } = renderToolbar('BuildingElementOpaque', {
       drawMode: 'space-label-polygon' as DrawMode,
     });
 
@@ -77,7 +75,7 @@ describe('DrawToolbar service-line modes', () => {
   afterEach(cleanup);
 
   it('keeps WaterPipework available in FHS draw type selector', () => {
-    renderToolbar('BuildingElementOpaque', true);
+    renderToolbar('BuildingElementOpaque');
 
     fireEvent.click(screen.getByRole('button', { name: 'Element type for new drawings' }));
     fireEvent.click(screen.getByRole('button', { name: /Heating & Hot Water/i }));
@@ -86,7 +84,7 @@ describe('DrawToolbar service-line modes', () => {
   });
 
   it('shows one element type section at a time', () => {
-    renderToolbar('BuildingElementOpaque', true);
+    renderToolbar('BuildingElementOpaque');
 
     fireEvent.click(screen.getByRole('button', { name: 'Element type for new drawings' }));
     expect(screen.getByRole('option', { name: /External surface/i })).toBeInTheDocument();
@@ -100,7 +98,7 @@ describe('DrawToolbar service-line modes', () => {
   it.each(['WaterPipework', 'MechanicalVentilationDuctwork'] as const)(
     'shows plan, vertical, and slope line modes for %s',
     (elementType) => {
-      renderToolbar(elementType, true);
+      renderToolbar(elementType);
 
       const shapeSelect = screen.getByDisplayValue('— Plan Line [L]') as HTMLSelectElement;
       const optionLabels = Array.from(shapeSelect.options).map((option) => option.textContent);
@@ -112,7 +110,7 @@ describe('DrawToolbar service-line modes', () => {
 
   it('shows a duct role selector for MVHR ductwork drawing', () => {
     const setDrawMvhrDuctRole = vi.fn();
-    renderToolbar('MechanicalVentilationDuctwork', true, { setDrawMvhrDuctRole });
+    renderToolbar('MechanicalVentilationDuctwork', { setDrawMvhrDuctRole });
 
     const roleSelect = screen.getByDisplayValue('supply') as HTMLSelectElement;
     fireEvent.change(roleSelect, { target: { value: 'exhaust' } });
@@ -124,7 +122,7 @@ describe('DrawToolbar service-line modes', () => {
     const setDrawElementType = vi.fn();
     const setDrawMode = vi.fn();
     const setDrawMvhrTerminalRole = vi.fn();
-    renderToolbar('BuildingElementOpaque', true, {
+    renderToolbar('BuildingElementOpaque', {
       drawMode: 'none',
       setDrawElementType,
       setDrawMode,
@@ -139,7 +137,7 @@ describe('DrawToolbar service-line modes', () => {
     expect(setDrawMode).toHaveBeenCalledWith('point');
 
     cleanup();
-    renderToolbar('MechanicalVentilationTerminal', true, { setDrawMvhrTerminalRole });
+    renderToolbar('MechanicalVentilationTerminal', { setDrawMvhrTerminalRole });
     const roleSelect = screen.getByDisplayValue('intake') as HTMLSelectElement;
     fireEvent.change(roleSelect, { target: { value: 'exhaust' } });
 
@@ -150,7 +148,7 @@ describe('DrawToolbar service-line modes', () => {
     const setDrawElementType = vi.fn();
     const setDrawMode = vi.fn();
     const setDrawPoints = vi.fn();
-    renderToolbar('BuildingElementOpaque', true, {
+    renderToolbar('BuildingElementOpaque', {
       drawMode: 'none',
       setDrawElementType,
       setDrawMode,

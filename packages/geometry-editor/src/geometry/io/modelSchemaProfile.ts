@@ -19,3 +19,13 @@ export function modelSchemaProfileMetadataValue(
 ): string {
   return profile;
 }
+
+/**
+ * The model type of a parsed CSV for the tools that have no target catalogue: the community CLI and
+ * editor, and support validation. A CSV with no TargetBundleId is the HEM 1.0.0a7 target, an FHS
+ * model, and every pinned target is an FHS target today. A ComplianceValidationEnabled row of FALSE
+ * is the community core mode. A new model type, such as EPC, is decided here.
+ */
+export function csvModelProfile(complianceValidationCell: string | undefined): 'core' | 'fhs' {
+  return /^FALSE$/i.test(complianceValidationCell ?? '') ? 'core' : 'fhs';
+}

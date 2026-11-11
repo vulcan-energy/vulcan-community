@@ -23,6 +23,7 @@ vi.mock('../../lib/assemblyLibrary', () => ({
 }));
 
 import { AssemblyCalculatorModal } from '../AssemblyCalculatorModal';
+import { arealHeatCapacityBandFromJPerM2K } from '../../lib/assemblyCalculator';
 import type { AssemblyExample, RepeatingBridgeDefinition } from '../../lib/assemblyTypes';
 
 const workspacePort = {
@@ -131,7 +132,7 @@ describe('AssemblyCalculatorModal resource ports', () => {
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
       u_value: 0.28,
       thermal_resistance_construction: 3.45,
-      areal_heat_capacity: 36720,
+      areal_heat_capacity: arealHeatCapacityBandFromJPerM2K(36720),
       vulcan_assembly_v1: expect.objectContaining({
         assemblySnapshot: expect.objectContaining({ layers: assembly.layers }),
         arealHeatCapacity_J_m2K: 36720,

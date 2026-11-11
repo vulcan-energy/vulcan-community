@@ -6,7 +6,7 @@ import ReactDOM from 'react-dom';
 import './FilesDropdownPrimitives.css';
 import './ElementCreator.css';
 import { useShallow } from 'zustand/react/shallow';
-import { ZONE_NAME_SUGGESTIONS, roundToTwoDecimals } from '../geometry/constants';
+import { roundToTwoDecimals } from '../geometry/constants';
 import { normalizeHorizontalAdjacentPlanPitch } from '../geometry/adjacentPlanPitch';
 import { calculatePolygonArea } from '../lib/polygonSync';
 import {
@@ -983,13 +983,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   }, []);
 
   // Geometry store: data via shallow selector, stable function refs individually
-  const { zones, elementsById, elementIds, floors, complianceSettings, bundledAssemblyLibrary } = useGeometryStore(
+  const { zones, elementsById, elementIds, floors, bundledAssemblyLibrary } = useGeometryStore(
     useShallow((s) => ({
       zones: s.zones,
       elementsById: s.elementsById,
       elementIds: s.elementIds,
       floors: s.floors,
-      complianceSettings: s.complianceSettings,
       bundledAssemblyLibrary: s.bundledAssemblyLibrary,
     }))
   );
@@ -1057,14 +1056,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     [zones],
   );
 
-  const targetAcceptsThermalBridgingTotal = simplifiedThermalBridgingOffered(schemaPort, complianceSettings.complianceValidationEnabled ? 'fhs' : 'core');
+  const targetAcceptsThermalBridgingTotal = simplifiedThermalBridgingOffered(schemaPort, 'fhs');
   const selectedZoneValidation = useMemo(() => {
     if (selection?.type !== 'zone') return null;
     const zone = getZoneById(selection.id);
     if (!zone) return null;
     return validateZone(zone, {
       elementsById,
-      complianceValidationEnabled: complianceSettings.complianceValidationEnabled || false,
+      complianceValidationEnabled: true,
       primaryFhsZoneId,
       simplifiedThermalBridgingOffered: targetAcceptsThermalBridgingTotal,
     });
@@ -1072,7 +1071,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     selection,
     getZoneById,
     elementsById,
-    complianceSettings.complianceValidationEnabled,
     primaryFhsZoneId,
     targetAcceptsThermalBridgingTotal,
   ]);
@@ -1099,17 +1097,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return selection?.id ? getElementById(selection.id)?.name || '' : '';
   }, [selection?.id, selection?.type, getElementById, selectedElementV]);
 
-  // When FHS validation is enabled, use the FHS schema consistently for tooltip
-  // and advanced-field resolution instead of the blended default schema.
-  const useFHSSchema = !!complianceSettings.complianceValidationEnabled;
+  // Every target is an FHS target: tooltips and advanced fields resolve against the FHS schema.
+  const useFHSSchema = true;
   const applianceKeyOptions = useMemo(() => {
     const schemaKeys = schemaPort.availability === 'available'
-      ? schemaPort.getApplianceKeys(useFHSSchema ? 'fhs' : 'core')
+      ? schemaPort.getApplianceKeys('fhs')
       : [];
     if (schemaKeys.length > 0) return schemaKeys;
     // The canonical base vocabulary remains available before an injected schema is loaded.
     return [...(APPLIANCE_KEYS as readonly string[])];
-  }, [schemaPort, useFHSSchema]);
+  }, [schemaPort]);
 
   const zoneComparisonInfoPillItems = useMemo(
     () => {
@@ -1266,11 +1263,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     && (
       (primaryFhsZoneId ? selection.id === primaryFhsZoneId : zones.every((zone) => zone.isPlaceholder))
     );
-  const showFhsAreaSplit = !!complianceSettings.complianceValidationEnabled && isPrimaryFhsZoneSelection;
-  const showFhsPrimaryZoneNote =
-    !!complianceSettings.complianceValidationEnabled
-    && selection?.type === 'zone'
-    && !isPrimaryFhsZoneSelection;
+  const showFhsAreaSplit = isPrimaryFhsZoneSelection;
+  const showFhsPrimaryZoneNote = selection?.type === 'zone' && !isPrimaryFhsZoneSelection;
   const treatedAreaLabelMismatch = useMemo(() => {
     if (selection?.type !== 'zone' || !showFhsAreaSplit) return null;
     const zone = getZoneById(selection.id);
@@ -1753,7 +1747,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   const elementFormStateCtx = {
     schemaPort,
-    schemaMode: useFHSSchema ? ('fhs' as const) : ('core' as const),
+    schemaMode: 'fhs' as const,
     elementType,
     commitElementNumericField,
     commitExistingElementDraft,
@@ -1922,7 +1916,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // memo-partition writeup. isSystemElementType stays here (below) since
   // handleAdvancedFieldsChange (orchestrator-retained) still needs it.
   const elementFieldPresentation = createElementCreatorFieldPresentationResolver({
-    mode: useFHSSchema ? 'fhs' : 'core',
+    mode: 'fhs',
     schemaPort,
     elementType,
     floorType: buildingElementGroundFormState.floorType || undefined,
@@ -4728,7 +4722,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     }
                   }}
                   options={ELEMENT_TYPES.filter((type) => {
-                      if (!useFHSSchema) return true;
                       // Keep legacy FHS-excluded types editable when selected, but prevent selecting them for new additions.
                       const excludedInFHS: ElementType[] = ['CombustionAppliances'];
                       return !excludedInFHS.includes(type) || elementType === type;
@@ -5011,28 +5004,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 );
               })()}
               <div className="element-form-grid">
-                {!complianceSettings.complianceValidationEnabled ? (
-                  <>
-                    <div className="element-label">
-                      Zone Name:
-                    </div>
-                    <div className="element-input" ref={registerBaseFieldRefs('name')}>
-                      <StandardDropdown
-                        value={zoneName}
-                        onChange={(value) => {
-                          setZoneName(value);
-                          if (isExistingZoneSelection()) {
-                            updateZone(selection.id, { name: value });
-                          }
-                        }}
-                        options={ZONE_NAME_SUGGESTIONS.map(name => ({ value: name, label: name }))}
-                        placeholder="Select a zone name"
-                        variant="ghost"
-                      />
-                      <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('name', zoneName)} issue={getFieldValidationIssue('name', zoneName) || undefined} />
-                    </div>
-                  </>
-                ) : null}
                 {showFhsAreaSplit ? (
                   (() => {
                     const zone = selection?.type === 'zone' ? getZoneById(selection.id) : undefined;
@@ -5452,10 +5423,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 <h3 className="form-section-title">Element Details</h3>
 
                 <div className="element-form-grid">
-                  {/* Show zone for placeable elements; SpaceHeatSystem needs this even in FHS mode. */}
-                  {!isGlobalElementType(elementType) &&
-                    (!complianceSettings.complianceValidationEnabled ||
-                      (elementType === 'System' && systemFormState.systemSubcategory === 'SpaceHeatSystem')) && (
+                  {/* Only a space heat system picks its zone. */}
+                  {elementType === 'System' && systemFormState.systemSubcategory === 'SpaceHeatSystem' && (
                     <>
                       <div className="element-label">Zone:</div>
                       <div className="element-input" ref={registerBaseFieldRefs(['zoneId', 'zone_id'])}>
@@ -5726,7 +5695,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     : 'wall'
                   : null
               }
-              complianceValidationEnabled={!!complianceSettings.complianceValidationEnabled}
               groundFloorType={assemblyModalGroundFloorType}
               workspaceResourcePort={workspaceResourcePort}
               externalDetailCataloguePort={externalDetailCataloguePort}

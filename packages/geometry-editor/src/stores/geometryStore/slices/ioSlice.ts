@@ -1055,7 +1055,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     const exportZones = currentState.zones;
     if (exportZones.length > 0) {
-      // The converter reads the living-room split whatever ComplianceValidationEnabled says.
+      // The converter reads the living-room split from the first zone.
       const primaryZoneId = exportZones[0]?.id;
       const zoneHeader = [...ZONE_HEADERS_FHS];
       const zoneColumnCount = zoneHeader.length;

@@ -23,7 +23,6 @@ import {
 } from '../lib/fabricDefaultsEditableProps';
 import { resolveFieldPresentation, type ResolvedFieldPresentation } from '../lib/fieldPresentation';
 import { formatSchemaInfoForTooltip } from '../utils/schemaTooltipHelpers';
-import { useGeometryStore } from '../stores/geometryStore';
 import { StandardDropdown } from './StandardDropdown';
 import { StandardInput } from './StandardInput';
 import { Tooltip } from './Tooltip';
@@ -182,13 +181,12 @@ export function FabricDefaultsEditorPanel({
   onDirtyChange,
 }: FabricDefaultsEditorPanelProps): React.ReactElement {
   const schemaPort = useGeometrySchemaPort();
-  const useFHSSchema = useGeometryStore((s) => !!s.complianceSettings?.complianceValidationEnabled);
+  const useFHSSchema = true; // Every target is an FHS target.
 
   const schemaReady = schemaPort.availability === 'available' &&
-    !!schemaPort.getRootSchema(useFHSSchema ? 'fhs' : 'core');
+    !!schemaPort.getRootSchema('fhs');
   const defaultsSig = useMemo(() => defaultsContentSig(defaultsRoot), [defaultsRoot]);
-  const documentKey = [filePath, defaultsSig, `session:${sessionRevision}`,
-    `fhs:${useFHSSchema ? '1' : '0'}`].join('\0');
+  const documentKey = [filePath, defaultsSig, `session:${sessionRevision}`].join('\0');
   // Only the first successful schema load initializes a document's draft.
   // A later target load/failure must not replace unsaved edits with persisted defaults.
   const [schemaInitialized, setSchemaInitialized] = useKeyedState(documentKey, schemaReady);
@@ -392,7 +390,7 @@ export function FabricDefaultsEditorPanel({
                             schemaPort,
                           );
                           const presentation = resolveFieldPresentation({
-                            mode: useFHSSchema ? 'fhs' : 'core',
+                            mode: 'fhs',
                             propertyKey: desc.key,
                             elementType,
                             subtype: loc ? subtypeForFabricRole(role, loc.template) : undefined,

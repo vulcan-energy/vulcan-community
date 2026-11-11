@@ -149,9 +149,6 @@ function defaultsFileLabel(path: string): string {
   return shortHash ? `This model's defaults (${shortHash})` : path;
 }
 
-const COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED = true;
-const COMPLIANCE_VALIDATION_LOCK_NOTE =
-  "FHS-compatible export is required for now. Core / non-FHS defaults will be re-enabled once alternative defaults are supported.";
 
 function DefaultsEditIcon() {
   return (
@@ -728,10 +725,6 @@ export function GlobalSettingsModal({
     complianceSettings.storeys_in_dwelling !== undefined;
   const isStoreyOfDwellingManual =
     complianceSettings.storey_of_dwelling !== undefined;
-  const effectiveComplianceValidationEnabled =
-    COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED
-      ? true
-      : !!complianceSettings.complianceValidationEnabled;
 
   const suggestedVentHeight = useMemo(
     () =>
@@ -966,49 +959,46 @@ export function GlobalSettingsModal({
 
   const fhsComplianceRequiredIssues = useMemo(() => {
     const issues: string[] = [];
-    if (effectiveComplianceValidationEnabled) {
-      // Every model-input row the save would leave out: the same check that blocks the model.
-      issues.push(...unsetMetadataInputIssues(
-        { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
-        targetRoot,
-        defaultsJson,
-      ));
-      const bedroomCountIssue = fhsBedroomCountIssue(
-        complianceSettings.NumberOfBedrooms
-      );
-      if (bedroomCountIssue) {
-        issues.push(bedroomCountIssue);
-      }
-      if (
+    // Every model-input row the save would leave out: the same check that blocks the model.
+    issues.push(...unsetMetadataInputIssues(
+      { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
+      targetRoot,
+      defaultsJson,
+    ));
+    const bedroomCountIssue = fhsBedroomCountIssue(
+      complianceSettings.NumberOfBedrooms
+    );
+    if (bedroomCountIssue) {
+      issues.push(bedroomCountIssue);
+    }
+    if (
+      typeof effectiveStoreysInDwelling === "number" &&
+      effectiveStoreysInDwelling < 1
+    ) {
+      issues.push("Storeys in dwelling must be at least 1.");
+    }
+    if (
+      effectiveBuildType === "flat" &&
+      typeof complianceSettings.storeys_in_building === "number"
+    ) {
+      if (complianceSettings.storeys_in_building < 1) {
+        issues.push("Storeys in building must be at least 1.");
+      } else if (
         typeof effectiveStoreysInDwelling === "number" &&
-        effectiveStoreysInDwelling < 1
+        complianceSettings.storeys_in_building < effectiveStoreysInDwelling
       ) {
-        issues.push("Storeys in dwelling must be at least 1.");
+        issues.push(
+          "Storeys in building should be greater than or equal to storeys in dwelling."
+        );
       }
-      if (
-        effectiveBuildType === "flat" &&
-        typeof complianceSettings.storeys_in_building === "number"
-      ) {
-        if (complianceSettings.storeys_in_building < 1) {
-          issues.push("Storeys in building must be at least 1.");
-        } else if (
-          typeof effectiveStoreysInDwelling === "number" &&
-          complianceSettings.storeys_in_building < effectiveStoreysInDwelling
-        ) {
-          issues.push(
-            "Storeys in building should be greater than or equal to storeys in dwelling."
-          );
-        }
-      }
-      if (complianceSettings.ColdWaterSource === undefined) {
-        issues.push("Cold water source is required when strict checks are on.");
-      }
+    }
+    if (complianceSettings.ColdWaterSource === undefined) {
+      issues.push("Cold water source is required when strict checks are on.");
     }
     return issues;
   }, [
     complianceSettings,
     effectiveBuildType,
-    effectiveComplianceValidationEnabled,
     effectiveStoreysInDwelling,
     elementsById,
     floors,
@@ -1052,13 +1042,12 @@ export function GlobalSettingsModal({
         elements: Object.values(elementsById),
         floors,
         zones,
-        complianceValidationEnabled: effectiveComplianceValidationEnabled,
+        complianceValidationEnabled: true,
         complianceSettings,
         globalOrientationOffset,
       }),
     [
       complianceSettings,
-      effectiveComplianceValidationEnabled,
       elementsById,
       floors,
       globalOrientationOffset,
@@ -1738,134 +1727,6 @@ export function GlobalSettingsModal({
                     >
                       <div
                         style={{
-                          padding: "12px 14px",
-                          borderRadius: "var(--radius-md)",
-                          background: "var(--bg-tertiary)",
-                          border: "1px solid var(--border-subtle)",
-                          marginBottom: 2,
-                        }}
-                      >
-                        <label
-                          data-field-key="ComplianceValidationEnabled"
-                          style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: "var(--spacing-sm)",
-                            cursor: COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED
-                              ? "default"
-                              : "pointer",
-                            margin: 0,
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            // The editor applies the FHS checks to every file; the file's row is only saved.
-                            checked={complianceSettings.complianceValidationEnabled !== false}
-                            onChange={(e) =>
-                              setComplianceSettings({
-                                complianceValidationEnabled: e.target.checked,
-                              })
-                            }
-                            disabled={COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED}
-                            style={{
-                              cursor: COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED
-                                ? "not-allowed"
-                                : "pointer",
-                              marginTop: 2,
-                            }}
-                          />
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 6,
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: 13,
-                                  fontWeight: 500,
-                                  color: "var(--text-primary)",
-                                }}
-                              >
-                                Apply Future Homes Standard (FHS) validation to
-                                inputs
-                              </span>
-                              {COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED && (
-                                <span
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    padding: "2px 8px",
-                                    borderRadius: 999,
-                                    background:
-                                      "var(--validation-info-badge-bg)",
-                                    border:
-                                      "1px solid var(--validation-info-badge-border)",
-                                    color: "var(--validation-info-text)",
-                                    fontSize: 11,
-                                    fontWeight: 600,
-                                    lineHeight: 1.4,
-                                  }}
-                                >
-                                  Required for now
-                                </span>
-                              )}
-                            </div>
-                            <span
-                              style={{
-                                fontSize: 11,
-                                color: "var(--text-secondary)",
-                                lineHeight: 1.45,
-                              }}
-                            >
-                              The FHS pathway strips values that are not
-                              accepted by FHS from the input file and merges
-                              multiple zones into one. Missing Part G, bedroom
-                              count, or heating control stops the run until you
-                              fill them in.
-                            </span>
-                            {COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED && (
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  color: "var(--text-secondary)",
-                                  lineHeight: 1.45,
-                                }}
-                              >
-                                {COMPLIANCE_VALIDATION_LOCK_NOTE}
-                              </span>
-                            )}
-                            {!COMPLIANCE_VALIDATION_TEMPORARILY_LOCKED && (
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  color: "var(--text-secondary)",
-                                  lineHeight: 1.45,
-                                }}
-                              >
-                                When it is off, the same problems show as
-                                warnings and may only fail later in the
-                                pipeline.
-                              </span>
-                            )}
-                          </div>
-                        </label>
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: "var(--spacing-sm)",
-                          paddingTop: "var(--spacing-sm)",
-                          borderTop: "1px solid var(--border-subtle)",
                           display: "flex",
                           flexDirection: "column",
                           gap: "var(--spacing-md)",

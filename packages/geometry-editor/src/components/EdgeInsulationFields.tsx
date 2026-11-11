@@ -7,7 +7,6 @@ import { StandardInput } from './StandardInput';
 import { renderFieldLabelWithTooltip } from './jsonformsRenderers';
 import { ResolvedFieldLabel } from './ResolvedFieldLabel';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import { useGeometryStore } from '../stores/geometryStore';
 import { fieldUnitForAdornment, resolveFieldPresentation } from '../lib/fieldPresentation';
 import {
   extraJsonEdgeInsulationToFormValues,
@@ -33,7 +32,6 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
   flat = false,
 }) => {
   const schemaPort = useGeometrySchemaPort();
-  const useFHSSchema = useGeometryStore((state) => !!state.complianceSettings?.complianceValidationEnabled);
   const valueKey = useMemo(() => JSON.stringify(value ?? null), [value]);
   const [form, setForm] = useKeyedState<EdgeInsulationFormValues>(
     valueKey,
@@ -60,7 +58,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
 
   const compact = Boolean(flat);
   const resistancePresentation = resolveFieldPresentation({
-    mode: useFHSSchema ? 'fhs' : 'core',
+    mode: 'fhs',
     propertyKey: 'edge_thermal_resistance',
     elementType,
     subtype: 'Slab_edge_insulation',
@@ -68,7 +66,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
   }, schemaPort);
   const dimensionPropertyKey = form.orientation === 'vertical' ? 'depth' : 'width';
   const dimensionPresentation = resolveFieldPresentation({
-    mode: useFHSSchema ? 'fhs' : 'core',
+    mode: 'fhs',
     propertyKey: dimensionPropertyKey,
     elementType,
     subtype: 'Slab_edge_insulation',
@@ -109,7 +107,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
 
       <div style={{ margin: ROW_MARGIN(compact) }}>
         <StandardInput
-          label={<ResolvedFieldLabel presentation={resistancePresentation} useFHSSchema={useFHSSchema} />}
+          label={<ResolvedFieldLabel presentation={resistancePresentation} useFHSSchema />}
           type="number"
           unit={fieldUnitForAdornment(resistancePresentation)}
           step="any"
@@ -123,7 +121,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
 
       <div style={{ margin: ROW_MARGIN(compact) }}>
         <StandardInput
-          label={<ResolvedFieldLabel presentation={dimensionPresentation} useFHSSchema={useFHSSchema} />}
+          label={<ResolvedFieldLabel presentation={dimensionPresentation} useFHSSchema />}
           type="number"
           unit={fieldUnitForAdornment(dimensionPresentation)}
           step="any"

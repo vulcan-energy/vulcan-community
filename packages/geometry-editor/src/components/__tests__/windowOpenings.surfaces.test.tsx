@@ -312,7 +312,6 @@ describe('main-form window opening inputs', () => {
       elementIds: [element.id],
       zones: [{ id: 'zone-1', name: 'Zone', floorArea: 1, height: 2 }],
       zoneIds: ['zone-1'],
-      complianceSettings: { ...store.getState().complianceSettings, complianceValidationEnabled: true },
     });
     render(
       <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>

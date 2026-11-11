@@ -106,7 +106,6 @@ export interface DrawToolbarProps {
   /** Shown above the draw toolbar (e.g. auto thermal bridge preview entry). */
   leadingAccessory?: React.ReactNode;
   renderLeadingAccessory?: () => React.ReactNode;
-  complianceValidationEnabled?: boolean;
   /** When true, toolbar is not rendered (rare; floor picker stays available when Space Labeller is open). */
   hidden?: boolean;
 }
@@ -143,7 +142,6 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   viewMode,
   setViewMode,
   onPrefetch3DView,
-  complianceValidationEnabled = false,
   wrapperRef,
   style,
   dragHandle,
@@ -153,11 +151,8 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
 }) {
   const in3D = viewMode === '3d';
   const drawElementTypeOptions = useMemo(
-    () =>
-      ELEMENT_TYPE_ORDER.filter(
-        (type) => !(complianceValidationEnabled && COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(type))
-      ),
-    [complianceValidationEnabled]
+    () => ELEMENT_TYPE_ORDER.filter((type) => !COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(type)),
+    []
   );
   const drawModeOptions = useMemo(
     () => getDrawModeOptionsForElementType(drawElementType),
@@ -203,13 +198,13 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   }, [in3D, resetDraftForMode, setDrawElementType, setDrawMode]);
 
   useEffect(() => {
-    if (complianceValidationEnabled && COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(drawElementType)) {
+    if (COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(drawElementType)) {
       const nextMode = getDefaultDrawModeForElementType('BuildingElementOpaque');
       setDrawElementType('BuildingElementOpaque');
       setDrawMode(nextMode);
       resetDraftForMode(nextMode);
     }
-  }, [complianceValidationEnabled, drawElementType, resetDraftForMode, setDrawElementType, setDrawMode]);
+  }, [drawElementType, resetDraftForMode, setDrawElementType, setDrawMode]);
 
   useEffect(() => {
     if (!isServiceLineElementType(drawElementType)) {

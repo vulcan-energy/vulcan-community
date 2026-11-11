@@ -73,7 +73,7 @@ import {
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import { validateZone as validateZoneCore } from '../geometry/validation/validateZone';
 import { validateSpaceLabels } from '../geometry/validation/validateSpaceLabels';
-import { selectPartFData, type PartFFinding } from '../geometry/validation/partF';
+import { selectPartFData } from '../geometry/validation/partF';
 import {
   aggregateDwellingCounts,
   applySpaceLabelsToZonesAndCompliance,
@@ -2847,22 +2847,17 @@ const validateElementForState = (
   const eb = elementsById ?? state.elementsById;
   const linearThermalBridgeIssues = findLinearThermalBridgeIssues(Object.values(eb), state.floors);
   const cs = state.complianceSettings;
-  // Blocking checks follow the FHS rules whatever the file's ComplianceValidationEnabled row says:
-  // every target is an FHS target, and the converter validates every file against it.
-  const complianceOn = true;
-  let partFFindings: PartFFinding[] | undefined;
-  if (complianceOn) {
-    partFFindings = selectPartFData({
-      zones: state.zones,
-      elementsById: eb,
-      spaceLabelsById: state.spaceLabelsById,
-      spaceLabelIds: state.spaceLabelIds,
-      complianceSettings: cs,
-      elements: Object.values(eb),
-      defaults: state.defaultsJson,
-      defaultsLookup,
-    }).findings;
-  }
+  // Blocking checks follow the FHS rules: every target is an FHS target.
+  const partFFindings = selectPartFData({
+    zones: state.zones,
+    elementsById: eb,
+    spaceLabelsById: state.spaceLabelsById,
+    spaceLabelIds: state.spaceLabelIds,
+    complianceSettings: cs,
+    elements: Object.values(eb),
+    defaults: state.defaultsJson,
+    defaultsLookup,
+  }).findings;
   return validateElementCore(element, {
     schemaPort,
     sourceCsvVersion: state.sourceCsvVersion,
@@ -2871,7 +2866,7 @@ const validateElementForState = (
     zones: state.zones,
     floors: state.floors,
     globalOrientationOffset: state.globalOrientationOffset,
-    complianceValidationEnabled: complianceOn,
+    complianceValidationEnabled: true,
     complianceSettings: cs,
     numberOfBedrooms: cs?.NumberOfBedrooms,
     calculateContextShadingDistance: state.calculateContextShadingDistance,
@@ -7654,21 +7649,17 @@ const createGeometryState = (
     // each `validateElement` call would re-resolve and re-evaluate them, giving O(N²) cost
     // on a model where the data is dwelling-wide and identical for every element.
     const cs = state.complianceSettings;
-    // Blocking checks follow the FHS rules whatever the file's ComplianceValidationEnabled row says:
-    // every target is an FHS target, and the converter validates every file against it.
-    const complianceOn = true;
-    const partFFindings = complianceOn
-      ? selectPartFData({
-          zones: state.zones,
-          elementsById: state.elementsById,
-          spaceLabelsById: state.spaceLabelsById,
-          spaceLabelIds: state.spaceLabelIds,
-          complianceSettings: cs,
-          elements: Object.values(state.elementsById),
-          defaults: state.defaultsJson,
-          defaultsLookup: state.getDefaultsLookup(),
-        }).findings
-      : undefined;
+    // Blocking checks follow the FHS rules: every target is an FHS target.
+    const partFFindings = selectPartFData({
+      zones: state.zones,
+      elementsById: state.elementsById,
+      spaceLabelsById: state.spaceLabelsById,
+      spaceLabelIds: state.spaceLabelIds,
+      complianceSettings: cs,
+      elements: Object.values(state.elementsById),
+      defaults: state.defaultsJson,
+      defaultsLookup: state.getDefaultsLookup(),
+    }).findings;
     const linearThermalBridgeIssues = findLinearThermalBridgeIssues(
       Object.values(state.elementsById),
       state.floors,
@@ -7685,7 +7676,7 @@ const createGeometryState = (
       zones: state.zones,
       floors: state.floors,
       globalOrientationOffset: state.globalOrientationOffset,
-      complianceValidationEnabled: complianceOn,
+      complianceValidationEnabled: true,
       complianceSettings: cs,
       numberOfBedrooms: cs?.NumberOfBedrooms,
       calculateContextShadingDistance: state.calculateContextShadingDistance,
@@ -7716,7 +7707,7 @@ const createGeometryState = (
 
       const validation = validateZone(zone, {
         elementsById: state.elementsById,
-        complianceValidationEnabled: complianceOn,
+        complianceValidationEnabled: true,
         primaryFhsZoneId,
         simplifiedThermalBridgingOffered: simplifiedThermalBridgingOffered(schemaPort, 'fhs'),
       });
@@ -7728,7 +7719,7 @@ const createGeometryState = (
       zones: state.zones,
       elementsById: state.elementsById,
       spaceInferenceWallPrintByZone: state.spaceInferenceWallPrintByZone,
-      complianceValidationEnabled: complianceOn,
+      complianceValidationEnabled: true,
     });
     allWarnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     allCriticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));
@@ -7746,7 +7737,7 @@ const createGeometryState = (
         elements: Object.values(state.elementsById),
         floors: state.floors,
         zones: state.zones,
-        complianceValidationEnabled: complianceOn,
+        complianceValidationEnabled: true,
         complianceSettings: state.complianceSettings,
         globalOrientationOffset: state.globalOrientationOffset,
       }),
@@ -7755,7 +7746,7 @@ const createGeometryState = (
     const elements = Object.values(state.elementsById);
     // A loaded file (absentMetadataRows is set) converts against the target even with no elements;
     // a new document stays quiet until something is drawn.
-    if (complianceOn && (elements.some((element) => !element.isPlaceholder) || state.complianceSettings.absentMetadataRows)) {
+    if (elements.some((element) => !element.isPlaceholder) || state.complianceSettings.absentMetadataRows) {
       allCriticalIssues.push(...unsetMetadataInputIssues(
         { ...state, elements },
         schemaPort.availability === 'available' ? schemaPort.getRootSchema('fhs') : null,
@@ -7771,26 +7762,22 @@ const createGeometryState = (
 
   detectMissingElements: () => {
     const state = get();
-    // Missing-element checks follow the FHS rules whatever the file's ComplianceValidationEnabled row says:
-    // every target is an FHS target, and the converter validates every file against it.
-    const complianceValidationEnabled = true;
+    // Missing-element checks follow the FHS rules: every target is an FHS target.
     return detectMissingElements(
       state.zones,
       state.elementsById,
-      complianceValidationEnabled,
+      true,
       state.complianceSettings.PartO_active_cooling_required || false,
-      complianceValidationEnabled
-        ? selectPartFData({
-            zones: state.zones,
-            elementsById: state.elementsById,
-            spaceLabelsById: state.spaceLabelsById,
-            spaceLabelIds: state.spaceLabelIds,
-            complianceSettings: state.complianceSettings,
-            elements: Object.values(state.elementsById),
-            defaults: state.defaultsJson,
-            defaultsLookup: state.getDefaultsLookup(),
-          }).context
-        : undefined,
+      selectPartFData({
+        zones: state.zones,
+        elementsById: state.elementsById,
+        spaceLabelsById: state.spaceLabelsById,
+        spaceLabelIds: state.spaceLabelIds,
+        complianceSettings: state.complianceSettings,
+        elements: Object.values(state.elementsById),
+        defaults: state.defaultsJson,
+        defaultsLookup: state.getDefaultsLookup(),
+      }).context,
       state.floors,
     );
   }
