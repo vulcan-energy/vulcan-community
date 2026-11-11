@@ -276,6 +276,12 @@
       "rights_status": "approved"
     },
     {
+      "path": "LICENSES/MIT-HEM-FHS-wrapper.txt",
+      "source_path": "LICENSES/MIT-HEM-FHS-wrapper.txt",
+      "license": "MIT",
+      "rights_status": "approved"
+    },
+    {
       "path": "LICENSES/OGL-UK-3.0.txt",
       "source_path": "LICENSES/OGL-UK-3.0.txt",
       "license": "OGL-UK-3.0",

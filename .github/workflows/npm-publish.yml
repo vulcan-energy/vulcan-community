@@ -5,7 +5,8 @@ name: npm publish
 
 # Publishes @vulcan-energy/community-cli with npm trusted publishing (no token):
 # configure this repository and workflow as the package's trusted publisher on npmjs.com.
-# The CLI ships the Community model WASM so convert and preflight work from an install.
+# The package carries cli.js and its notices only; convert and preflight need the model
+# WASM, built from source.
 
 on:
   workflow_dispatch:
@@ -17,14 +18,13 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: npm-publish
   cancel-in-progress: false
 
 jobs:
-  publish:
+  pack:
     runs-on: ubuntu-latest
     steps:
       # Third-party code is pinned to a full commit SHA rather than a mutable tag.
@@ -32,23 +32,9 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch; the toolchain input selects nightly
-        with:
-          toolchain: nightly
-          components: rust-src
-          targets: wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.14.0 --locked
-
-      - name: Build the Community model WASM
-        run: ./scripts/build-model-wasm.sh
-
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
-          cache: npm
-          registry-url: https://registry.npmjs.org
+          node-version: 22.19.0
 
       - name: Install JavaScript dependencies
         run: npm ci
@@ -56,29 +42,51 @@ jobs:
       - name: Release licensing validation
         run: node scripts/validate-licensing.mjs --release
 
-      - name: Build the CLI with the WASM
+      - name: Build the CLI
         run: npm run build -w apps/cli
 
-      # The packed tarball, installed on its own, must run every command it documents.
-      - name: Install and exercise the packed CLI
+      # The packed tarball, installed on its own on the oldest supported Node, must run the
+      # commands it ships and carry its notices.
+      - name: Pack, install and exercise the CLI
         run: |
           set -euo pipefail
-          pack_dir="$(mktemp -d)"
-          (cd apps/cli && npm pack --pack-destination "$pack_dir")
+          mkdir -p pack
+          (cd apps/cli && npm pack --pack-destination ../../pack)
+          tarball="$(ls pack/*.tgz)"
+          for file in package/dist/cli.js package/dist/THIRD_PARTY_NOTICES.md package/LICENSE package/NOTICE package/LICENSES/MIT-HEM-FHS-wrapper.txt; do
+            tar -tzf "$tarball" | grep -qx "$file"
+          done
           install_dir="$(mktemp -d)"
-          (cd "$install_dir" && echo '{"private":true}' > package.json && npm install --no-audit --no-fund "$pack_dir"/*.tgz)
+          (cd "$install_dir" && echo '{"private":true}' > package.json && npm install --no-audit --no-fund "$GITHUB_WORKSPACE/$tarball")
           cli="$install_dir/node_modules/.bin/vulcan-community"
-          tar -tzf "$pack_dir"/*.tgz | grep -qx 'package/LICENSE'
-          tar -tzf "$pack_dir"/*.tgz | grep -q 'package/dist/vulcan_model_wasm_bg.wasm'
           fixture=crates/vulcan-model-wasm/tests/fixtures/min_working.csv
-          defaults=data/defaults/defaults_template.json
           "$cli" check "$fixture" --json --fail-on=none > /dev/null
           "$cli" thermal-bridges "$fixture" --json > /dev/null
-          check='const r = JSON.parse(require("fs").readFileSync(0, "utf8")); process.exit(r[process.argv[1]].is_valid ? 0 : 1)'
-          "$cli" convert "$fixture" --defaults "$defaults" --json | node -e "$check" validation
-          "$cli" preflight "$fixture" --defaults "$defaults" --json | node -e "$check" preflight
           "$cli" version
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: community-cli-tarball
+          path: pack/*.tgz
+          if-no-files-found: error
+
+  # Only this job can mint an npm token, only from main, and only when not a dry run.
+  publish:
+    needs: pack
+    if: ${{ !inputs.dry_run && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: community-cli-tarball
+
       - name: Publish
-        if: ${{ !inputs.dry_run }}
-        run: npm publish -w apps/cli --provenance --access public
+        run: npm publish ./*.tgz --access public

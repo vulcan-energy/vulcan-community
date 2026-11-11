@@ -24,7 +24,8 @@
     "vulcan-community": "dist/cli.js"
   },
   "files": [
-    "dist/",
+    "dist/cli.js",
+    "dist/THIRD_PARTY_NOTICES.md",
     "README.md",
     "LICENSE",
     "LICENSES/",
