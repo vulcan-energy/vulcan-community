@@ -59,20 +59,21 @@ export function elevationAtSlopedVertexM(
 }
 
 /**
- * Closed prism from a pair of matching rings. `capTriangles` index into the ring (as produced by
- * THREE.ShapeUtils.triangulateShape over the ring's 2D contour). Earcut emits cap triangles in
- * the contour's overall CCW orientation, while the side quads follow raw ring order — so when the
- * 2D contour is clockwise (ShapeUtils.area(contour) < 0) the side winding must be reversed to
- * keep every face outward; otherwise concave rings render with caps and sides disagreeing and
- * computeVertexNormals() averages contradictory normals at every vertex.
+ * Closed prism from a pair of matching vertex lists, made of one or more rings (`rings`, each a
+ * run of `n` vertices from `start`). `capTriangles` index into the vertices (as produced by
+ * THREE.ShapeUtils.triangulateShape over the 2D contour and its holes). Earcut emits cap
+ * triangles in the contour's overall CCW orientation, while the side quads follow raw ring order —
+ * so when an outer ring is clockwise (ShapeUtils.area(contour) < 0), or a hole counter-clockwise,
+ * its side winding must be reversed (`reverse`) to keep every face outward; otherwise concave
+ * rings render with caps and sides disagreeing and computeVertexNormals() averages contradictory
+ * normals at every vertex.
  */
 export function buildClosedPrismGeometry(
   top: THREE.Vector3[],
   bottom: THREE.Vector3[],
   capTriangles: number[][],
-  reverseSideWinding: boolean,
+  rings: ReadonlyArray<{ start: number; n: number; reverse: boolean }>,
 ): THREE.BufferGeometry {
-  const n = top.length;
   const positions: number[] = [];
   const indices: number[] = [];
 
@@ -93,18 +94,21 @@ export function buildClosedPrismGeometry(
     indices.push(botIdx[i], botIdx[k], botIdx[j]);
   }
 
-  for (let i = 0; i < n; i += 1) {
-    const j = (i + 1) % n;
-    const t0 = topIdx[i];
-    const t1 = topIdx[j];
-    const b0 = botIdx[i];
-    const b1 = botIdx[j];
-    if (reverseSideWinding) {
-      indices.push(t0, t1, b0);
-      indices.push(t1, b1, b0);
-    } else {
-      indices.push(t0, b0, t1);
-      indices.push(t1, b0, b1);
+  for (const { start, n, reverse } of rings) {
+    for (let k = 0; k < n; k += 1) {
+      const i = start + k;
+      const j = start + ((k + 1) % n);
+      const t0 = topIdx[i];
+      const t1 = topIdx[j];
+      const b0 = botIdx[i];
+      const b1 = botIdx[j];
+      if (reverse) {
+        indices.push(t0, t1, b0);
+        indices.push(t1, b1, b0);
+      } else {
+        indices.push(t0, b0, t1);
+        indices.push(t1, b0, b1);
+      }
     }
   }
 
@@ -117,6 +121,7 @@ export function buildClosedPrismGeometry(
 
 /**
  * Thick sloped slab: top surface pitched, bottom offset along interior plane normal by thicknessM.
+ * `surface` (plan polygons: outer ring, then holes) is drawn instead of `points` when given.
  */
 export function buildSlopedPolygonBufferGeometry(
   points: Array<[number, number]>,
@@ -125,14 +130,23 @@ export function buildSlopedPolygonBufferGeometry(
   baseElevationM: number,
   pitchDeg: number,
   thicknessM: number,
+  surface: Array<Array<Array<[number, number]>>> = [[points]],
 ): THREE.BufferGeometry {
-  const top: THREE.Vector3[] = points.map(([x, y]) => {
-    const h = elevationAtSlopedVertexM([x, y], eavesAnchor, inwardNormal2D, baseElevationM, pitchDeg);
-    return new THREE.Vector3(x, h, -y);
-  });
-
-  const contour = points.map((p) => new THREE.Vector2(p[0], p[1]));
-  const tri = ShapeUtils.triangulateShape(contour, []) as number[][];
+  const top: THREE.Vector3[] = [];
+  const tri: number[][] = [];
+  const rings: Array<{ start: number; n: number; reverse: boolean }> = [];
+  for (const polygon of surface) {
+    const offset = top.length;
+    const contours = polygon.map((ring) => ring.map((p) => new THREE.Vector2(p[0], p[1])));
+    const faces = ShapeUtils.triangulateShape(contours[0]!, contours.slice(1)) as number[][];
+    faces.forEach((f) => tri.push(f.map((i) => i + offset)));
+    contours.forEach((contour, k) => {
+      rings.push({ start: top.length, n: contour.length, reverse: (ShapeUtils.area(contour) < 0) !== (k > 0) });
+      contour.forEach(({ x, y }) => {
+        top.push(new THREE.Vector3(x, elevationAtSlopedVertexM([x, y], eavesAnchor, inwardNormal2D, baseElevationM, pitchDeg), -y));
+      });
+    });
+  }
   if (tri.length === 0) {
     return new THREE.BufferGeometry();
   }
@@ -155,5 +169,5 @@ export function buildSlopedPolygonBufferGeometry(
 
   const bottom = top.map((v) => v.clone().addScaledVector(n3, -Math.max(thicknessM, 0.02)));
 
-  return buildClosedPrismGeometry(top, bottom, tri, ShapeUtils.area(contour) < 0);
+  return buildClosedPrismGeometry(top, bottom, tri, rings);
 }

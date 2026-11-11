@@ -83,6 +83,8 @@ export interface PolygonPrismPrimitive {
   /** True when 3D uses a preview height because the element has no positive height value. */
   usesFallbackHeight?: boolean;
   windowVentilation?: WindowVentilation3D;
+  /** Plan polygons to draw (outer ring, then holes) when part of `points` is cut out: a roof under walls standing on it. */
+  surface?: Array<Array<Array<[number, number]>>>;
 }
 
 /** Pitched planar surface with an explicit horizontal-contour hinge basis. */
@@ -104,6 +106,8 @@ export interface PolygonSlopedPrimitive {
   isOpening: boolean;
   isCurrentFloor: boolean;
   opacity?: number;
+  /** Plan polygons to draw (outer ring, then holes) when part of `points` is cut out: a roof under walls standing on it. */
+  surface?: Array<Array<Array<[number, number]>>>;
 }
 
 /** Arbitrary 3D face used for triangular cheeks, gable ends, and similar non-rectangular wall surfaces. */

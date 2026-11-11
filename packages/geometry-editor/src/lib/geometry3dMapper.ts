@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { normalizeProfilePoints, interpolateProfileHeight } from './profileLineFace';
+import polygonClipping from 'polygon-clipping';
 import { isRoofLikeOpaqueElement } from './roofElement';
+import { deriveRoofCutout, effectiveFloorsOf, elementsOf } from './roofCutouts';
 import { getPointElementIconNode } from './pointElementIconSpec';
 import { getElementColor } from './shapeUtils';
 import { isOpaqueExternalDoorLineElement, isUnheatedPitchedRoofPlanAreaElement } from './elementArea';
@@ -1102,6 +1104,13 @@ function mapElementTo3DPrimitives(
           ...buildBasementGroundContextFaces(element as BuildingElementGround, floorZLookup, floors, currentFloorZ),
         ];
       }
+      if (t === 'BuildingElementOpaque') {
+        const cutout = deriveRoofCutout(element, allElements, floors, globalOrientationOffset);
+        // The part of the roof under walls standing on it is inside the dwelling: not drawn.
+        if (cutout && cutout.polygons.length > 0) {
+          p.surface = polygonClipping.difference([p.points], cutout.polygons).map((polygon) => polygon.map((ring) => ring.slice(0, -1)));
+        }
+      }
       if (p.kind === 'polygon-sloped') {
         const ceilingFace = mapUnheatedPitchedRoofCeilingFace(
           element,
@@ -1161,8 +1170,8 @@ export function buildGeometry3DPrimitives({
   // Bake wall-derived + user-override storey heights into the floors array once, then thread
   // the effective floors through the renderer. Without this, models authored under the new
   // ensureFloorForZ (height=0) would render every storey at zero elevation.
-  const allElements = Object.values(elementsById);
-  const effFloors = withEffectiveStoreyHeights(floors, allElements);
+  const allElements = elementsOf(elementsById);
+  const effFloors = effectiveFloorsOf(floors, allElements);
   const floorElevations = getFloorElevations(effFloors);
   const floorZLookup = getFloorZLookup(effFloors);
   const primitives: Geometry3DPrimitive[] = [];

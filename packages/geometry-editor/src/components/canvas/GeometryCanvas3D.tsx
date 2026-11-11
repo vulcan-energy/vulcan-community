@@ -227,7 +227,7 @@ export function buildPlanarFaceGeometry(
     const half = thicknessM / 2;
     const top = vertices.map((vertex) => vertex.clone().addScaledVector(planeNormal, half));
     const bottom = vertices.map((vertex) => vertex.clone().addScaledVector(planeNormal, -half));
-    return buildClosedPrismGeometry(top, bottom, triangles, THREE.ShapeUtils.area(contour) < 0);
+    return buildClosedPrismGeometry(top, bottom, triangles, [{ start: 0, n: top.length, reverse: THREE.ShapeUtils.area(contour) < 0 }]);
   }
 
   const positions: number[] = [];
@@ -1864,16 +1864,15 @@ const PolygonPrismMesh: React.FC<{
   const renderOrder = meshRenderOrderForFloor(primitive.isCurrentFloor, isOpening);
 
   const geometry = useMemo(() => {
-    const shape = new THREE.Shape();
     // Important: shape points are in pre-rotation shape space; do not mirror Y here.
-    const points = primitive.points.map(modelXYToExtrudeShapeXY);
-    shape.moveTo(points[0][0], points[0][1]);
-    for (let i = 1; i < points.length; i += 1) {
-      shape.lineTo(points[i][0], points[i][1]);
-    }
-    shape.closePath();
+    const toVectors = (ring: Array<[number, number]>) => ring.map((p) => new THREE.Vector2(...modelXYToExtrudeShapeXY(p)));
+    const shapes = (primitive.surface ?? [[primitive.points]]).map(([outer, ...holes]) => {
+      const shape = new THREE.Shape(toVectors(outer!));
+      shape.holes = holes.map((hole) => new THREE.Path(toVectors(hole)));
+      return shape;
+    });
 
-    const extruded = new THREE.ExtrudeGeometry(shape, {
+    const extruded = new THREE.ExtrudeGeometry(shapes, {
       depth: Math.max(primitive.heightM, 0.02),
       bevelEnabled: false,
       steps: 1,
@@ -2009,6 +2008,7 @@ const PolygonSlopedMesh: React.FC<{
       primitive.baseElevationM,
       primitive.pitchDeg,
       primitive.thicknessM,
+      primitive.surface,
     );
   }, [primitive]);
 
