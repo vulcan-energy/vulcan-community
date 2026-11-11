@@ -32,13 +32,18 @@ describe('vulcan-community commands', () => {
     expect(Array.isArray(result.missingElements)).toBe(true);
   });
 
-  // A CSV with no TargetBundleId is the a7 target, an FHS model; only FALSE selects core.
-  it('check reads a CSV without ComplianceValidationEnabled as FHS', () => {
+  // A CSV with no TargetBundleId is the a7 target, an FHS model; only FALSE on an unpinned CSV selects core.
+  it('check reads the model type from the target', () => {
     const csv = join(mkdtempSync(join(tmpdir(), 'vulcan-cli-')), 'no-row.csv');
     writeFileSync(csv, readFileSync(fixture, 'utf8').replace(/^ComplianceValidationEnabled,.*\n/m, ''));
     expect(checkGeometryCsv(csv).complianceValidationEnabled).toBe(true);
     writeFileSync(csv, readFileSync(fixture, 'utf8').replace(/^ComplianceValidationEnabled,TRUE/m, 'ComplianceValidationEnabled,FALSE'));
     expect(checkGeometryCsv(csv).complianceValidationEnabled).toBe(false);
+    // A pinned CSV is its target's model type whatever the row says.
+    writeFileSync(csv, readFileSync(fixture, 'utf8')
+      .replace(/^ComplianceValidationEnabled,TRUE/m, 'ComplianceValidationEnabled,FALSE')
+      .replace(/^Metadata,.*\n/m, (row) => `${row}TargetBundleId,rust-fhs-a7-62d3df70-c5ba2673-v1,\n`));
+    expect(checkGeometryCsv(csv).complianceValidationEnabled).toBe(true);
   });
 
   it('convert refuses a CSV pinned to a HEM version instead of converting it with the bundled schema', async () => {

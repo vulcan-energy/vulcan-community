@@ -180,6 +180,7 @@ import {
 import {
   emptyGeometryInspectorContributions,
   GeometryInspectorEvidenceContext,
+  targetSchemaMode,
   unavailableGeometryWorkspaceResourcePort,
   type GeometryInspectorContributions,
   type GeometryWorkspaceResourcePort,
@@ -964,6 +965,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 }) => {
   const geometryStore = useGeometryStoreApi();
   const schemaPort = useGeometrySchemaPort();
+  // The selected target decides the schema, the tooltips and which checks apply.
+  const schemaMode = targetSchemaMode(schemaPort);
+  const useFHSSchema = schemaMode === 'fhs';
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -1056,14 +1060,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     [zones],
   );
 
-  const targetAcceptsThermalBridgingTotal = simplifiedThermalBridgingOffered(schemaPort, 'fhs');
+  const targetAcceptsThermalBridgingTotal = simplifiedThermalBridgingOffered(schemaPort, schemaMode);
   const selectedZoneValidation = useMemo(() => {
     if (selection?.type !== 'zone') return null;
     const zone = getZoneById(selection.id);
     if (!zone) return null;
     return validateZone(zone, {
       elementsById,
-      complianceValidationEnabled: true,
+      complianceValidationEnabled: useFHSSchema,
       primaryFhsZoneId,
       simplifiedThermalBridgingOffered: targetAcceptsThermalBridgingTotal,
     });
@@ -1071,6 +1075,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     selection,
     getZoneById,
     elementsById,
+    useFHSSchema,
     primaryFhsZoneId,
     targetAcceptsThermalBridgingTotal,
   ]);
@@ -1097,16 +1102,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return selection?.id ? getElementById(selection.id)?.name || '' : '';
   }, [selection?.id, selection?.type, getElementById, selectedElementV]);
 
-  // Every target is an FHS target: tooltips and advanced fields resolve against the FHS schema.
-  const useFHSSchema = true;
   const applianceKeyOptions = useMemo(() => {
     const schemaKeys = schemaPort.availability === 'available'
-      ? schemaPort.getApplianceKeys('fhs')
+      ? schemaPort.getApplianceKeys(schemaMode)
       : [];
     if (schemaKeys.length > 0) return schemaKeys;
     // The canonical base vocabulary remains available before an injected schema is loaded.
     return [...(APPLIANCE_KEYS as readonly string[])];
-  }, [schemaPort]);
+  }, [schemaPort, schemaMode]);
 
   const zoneComparisonInfoPillItems = useMemo(
     () => {
@@ -1263,8 +1266,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     && (
       (primaryFhsZoneId ? selection.id === primaryFhsZoneId : zones.every((zone) => zone.isPlaceholder))
     );
-  const showFhsAreaSplit = isPrimaryFhsZoneSelection;
-  const showFhsPrimaryZoneNote = selection?.type === 'zone' && !isPrimaryFhsZoneSelection;
+  const showFhsAreaSplit = useFHSSchema && isPrimaryFhsZoneSelection;
+  const showFhsPrimaryZoneNote = useFHSSchema && selection?.type === 'zone' && !isPrimaryFhsZoneSelection;
   const treatedAreaLabelMismatch = useMemo(() => {
     if (selection?.type !== 'zone' || !showFhsAreaSplit) return null;
     const zone = getZoneById(selection.id);
@@ -1747,7 +1750,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   const elementFormStateCtx = {
     schemaPort,
-    schemaMode: 'fhs' as const,
+    schemaMode,
     elementType,
     commitElementNumericField,
     commitExistingElementDraft,
@@ -1916,7 +1919,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // memo-partition writeup. isSystemElementType stays here (below) since
   // handleAdvancedFieldsChange (orchestrator-retained) still needs it.
   const elementFieldPresentation = createElementCreatorFieldPresentationResolver({
-    mode: 'fhs',
+    mode: schemaMode,
     schemaPort,
     elementType,
     floorType: buildingElementGroundFormState.floorType || undefined,
@@ -4722,6 +4725,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     }
                   }}
                   options={ELEMENT_TYPES.filter((type) => {
+                      if (!useFHSSchema) return true;
                       // Keep legacy FHS-excluded types editable when selected, but prevent selecting them for new additions.
                       const excludedInFHS: ElementType[] = ['CombustionAppliances'];
                       return !excludedInFHS.includes(type) || elementType === type;

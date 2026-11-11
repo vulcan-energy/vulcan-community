@@ -37,7 +37,7 @@ export async function convertCsv(csvArg: string, options: ConvertOptions): Promi
   if (metadata.targetBundleId) {
     throw new Error(`CSV pins TargetBundleId '${metadata.targetBundleId}'. This CLI converts with its bundled schema and cannot apply that HEM version. Use Vulcan to prepare it, or remove the TargetBundleId line to convert with the bundled schema.`);
   }
-  const profile: CommunityModelProfile = csvModelProfile(metadata.complianceSettings.complianceValidationCell);
+  const profile: CommunityModelProfile = csvModelProfile(metadata.targetBundleId, metadata.complianceSettings.complianceValidationCell);
   if (metadata.schemaProfile === 'ecaas_input_fhs' && options.schema === undefined) {
     throw new Error('SchemaProfile ecaas_input_fhs needs --schema <file>; Vulcan Community does not bundle that schema.');
   }

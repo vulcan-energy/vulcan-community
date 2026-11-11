@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import React, {
   useCallback,
   useEffect,
@@ -993,7 +994,7 @@ export function GlobalSettingsModal({
       }
     }
     if (complianceSettings.ColdWaterSource === undefined) {
-      issues.push("Cold water source is required when strict checks are on.");
+      issues.push("Cold water source is not set. Enter it in Global Settings.");
     }
     return issues;
   }, [
@@ -1042,12 +1043,13 @@ export function GlobalSettingsModal({
         elements: Object.values(elementsById),
         floors,
         zones,
-        complianceValidationEnabled: true,
+        complianceValidationEnabled: targetSchemaMode(schemaPort) === 'fhs',
         complianceSettings,
         globalOrientationOffset,
       }),
     [
       complianceSettings,
+      schemaPort,
       elementsById,
       floors,
       globalOrientationOffset,

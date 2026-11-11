@@ -33,6 +33,7 @@ import {
 } from '../../../../geometry-editor-host/src/modelSchemaProfilePort';
 import type { GeometrySourceComparisonPort } from '../../../../geometry-editor-host/src/sourceComparisonPort';
 import { useGeometrySchemaPort } from '../../../../geometry-editor-host/src/editorServicePorts';
+import { targetSchemaMode } from '../../../../geometry-editor-host/src/schemaPort';
 import { simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import type { ElementCategoryGhostKey, ElementCategoryGhostState } from '../../lib/elementCategoryVisibility';
 import { HideElementsDropdown } from './HideElementsDropdown';
@@ -674,7 +675,8 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     return counts;
   }, [elementsById]);
   const schemaPort = useGeometrySchemaPort();
-  const bridgingOffered = simplifiedThermalBridgingOffered(schemaPort, 'fhs');
+  const schemaMode = targetSchemaMode(schemaPort);
+  const bridgingOffered = simplifiedThermalBridgingOffered(schemaPort, schemaMode);
   const zoneValidationById = useMemo(() => {
     const validations = new Map<string, ValidationResult>();
     const spaceLabelIdsByZone = new Map<string, string[]>();
@@ -689,7 +691,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     for (const zone of zones) {
       const zoneValidation = validateZone(zone, {
         elementsById,
-        complianceValidationEnabled: true,
+        complianceValidationEnabled: schemaMode === 'fhs',
         primaryFhsZoneId,
         simplifiedThermalBridgingOffered: bridgingOffered,
       });
@@ -702,7 +704,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
         zones,
         elementsById,
         spaceInferenceWallPrintByZone,
-        complianceValidationEnabled: true,
+        complianceValidationEnabled: schemaMode === 'fhs',
       });
       validations.set(zone.id, withTargetIssues({
         hasIssues: zoneValidation.hasIssues || spaceValidation.hasIssues,
@@ -716,6 +718,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   }, [
     elementsById,
     primaryFhsZoneId,
+    schemaMode,
     spaceInferenceWallPrintByZone,
     spaceLabelIds,
     spaceLabelsById,

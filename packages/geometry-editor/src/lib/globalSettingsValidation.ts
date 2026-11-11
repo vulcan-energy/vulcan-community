@@ -23,7 +23,6 @@ import {
   withEffectiveStoreyHeights,
 } from './zoneDerivation';
 import { fhsStoreyToCanvasFloor } from './storeySemantics';
-import { csvModelProfile } from '../geometry/io/modelSchemaProfile';
 import { calculateDwellingLengthWidthFromGroundElements } from './buildingFootprintDimensions';
 
 /**
@@ -520,8 +519,6 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs): Array<[string, str
     ['HeatingControlType', text(compliance.HeatingControlType)],
     ['PartGcompliance', bool(compliance.PartGcompliance)],
     ['ColdWaterSource', text(compliance.ColdWaterSource)],
-    // Vulcan ignores the row; the community core mode (csvModelProfile) stays in the file.
-    ['ComplianceValidationEnabled', csvModelProfile(compliance.complianceValidationCell) === 'core' ? 'FALSE' : undefined],
     ['ScenariosBaseModelEnabled', bool(compliance.scenariosBaseModelEnabled)],
     ['AirPermeability_test_pressure', text(compliance.AirPermeability_test_pressure)],
     ['AirPermeability_test_result', num(compliance.AirPermeability_test_result)],

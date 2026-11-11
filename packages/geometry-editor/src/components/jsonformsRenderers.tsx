@@ -36,7 +36,7 @@ import {
 } from '../lib/windowOpenings';
 import type { SchemaNode } from '../lib/schemaTypes';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import type { GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
+import { targetSchemaMode, type GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 import {
   WindowDetailChip,
   WindowDetailCollectionShell,
@@ -272,7 +272,7 @@ const ProviderFieldLabelWithTooltip: React.FC<{
   return renderFieldLabelWithTooltipForMode(
     label,
     elementType,
-    useFHSSchema ?? true,
+    useFHSSchema ?? targetSchemaMode(schemaPort) === 'fhs',
     schemaPort,
   );
 };

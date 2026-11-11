@@ -115,7 +115,7 @@ export function checkGeometryCsv(csvArg: string) {
   const allElements = elements.filter((element) => !element.isPlaceholder);
   const byId = elementsById(elements);
   const complianceValidationEnabled =
-    csvModelProfile(parsed.metadata.complianceSettings.complianceValidationCell) === 'fhs';
+    csvModelProfile(parsed.metadata.targetBundleId, parsed.metadata.complianceSettings.complianceValidationCell) === 'fhs';
 
   const partFData = complianceValidationEnabled
     ? selectPartFData({

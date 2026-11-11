@@ -78,6 +78,8 @@ import { FHS_MASS_CLASS_COMMENTARY } from '../lib/assemblyAppliedUi';
 import { roundToTwoDecimals } from '../geometry/constants';
 import type { GroundFloorType } from '../lib/groundUValueCalculator';
 import type { GeometryWorkspaceResourcePort } from '../../../geometry-editor-host/src';
+import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
+import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import type {
   ExternalConstructionDetailProfile,
   ExternalDetailCataloguePort,
@@ -221,6 +223,8 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
   initialOpaqueSubtype = null,
   groundFloorType = null,
 }) => {
+  // An FHS target takes areal heat capacity as a band label.
+  const snapsToFhsBand = targetSchemaMode(useGeometrySchemaPort()) === 'fhs';
   const heatedAdjacentHalfConstruction = useMemo(
     () => shouldUseHeatedAdjacentHalfConstructionFabric(elementMode),
     [elementMode],
@@ -651,8 +655,8 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
   }, [massSuggestion]);
 
   const arealWrittenValue = useMemo(
-    () => resolveFabricArealHeatCapacityForElement(calc.arealJPerM2K, true),
-    [calc.arealJPerM2K],
+    () => resolveFabricArealHeatCapacityForElement(calc.arealJPerM2K, snapsToFhsBand),
+    [calc.arealJPerM2K, snapsToFhsBand],
   );
   const arealWrittenJ = useMemo(
     () => arealHeatCapacityJPerM2KFromBand(arealWrittenValue),
@@ -799,7 +803,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
       calc.arealJPerM2K != null ? roundToTwoDecimals(calc.arealJPerM2K) : undefined;
     const arealElementValue = resolveFabricArealHeatCapacityForElement(
       calc.arealJPerM2K,
-      true,
+      snapsToFhsBand,
     );
     if (arealRawJ != null) {
       envelope.arealHeatCapacity_J_m2K = arealRawJ;
@@ -865,6 +869,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
     elementMode,
     elementPitchDeg,
     externalDetailProfile,
+    snapsToFhsBand,
     heatedAdjacentHalfConstruction,
     suspendedGroundAssembly,
     suspendedGroundVoidSplit,
@@ -2150,7 +2155,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
                               {' ('}
                               {(arealWrittenJ / 1000).toFixed(2)} kJ/(m²·K)
                               {')'}
-                              {Math.abs(arealWrittenJ - calc.arealJPerM2K) > 1 ? (
+                              {snapsToFhsBand && Math.abs(arealWrittenJ - calc.arealJPerM2K) > 1 ? (
                                 <span style={{ color: 'var(--accent-blue)' }}> (FHS band)</span>
                               ) : null}
                             </>
@@ -2176,7 +2181,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
                               {' ('}
                               {(arealWrittenJ / 1000).toFixed(2)} kJ/(m²·K)
                               {')'}
-                              {Math.abs(arealWrittenJ - calc.arealJPerM2K) > 1 ? (
+                              {snapsToFhsBand && Math.abs(arealWrittenJ - calc.arealJPerM2K) > 1 ? (
                                 <span style={{ color: 'var(--accent-blue)' }}> (FHS band)</span>
                               ) : null}
                             </>
@@ -2364,7 +2369,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
                               {' ('}
                               {(arealWrittenJ / 1000).toFixed(2)} kJ/(m²·K)
                               {')'}
-                              {Math.abs(arealWrittenJ - calc.arealJPerM2K) > 1 ? (
+                              {snapsToFhsBand && Math.abs(arealWrittenJ - calc.arealJPerM2K) > 1 ? (
                                 <span style={{ color: 'var(--accent-blue)' }}> (FHS band)</span>
                               ) : null}
                             </>
@@ -2390,7 +2395,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
                               {' ('}
                               {(arealWrittenJ / 1000).toFixed(2)} kJ/(m²·K)
                               {')'}
-                              {Math.abs(arealWrittenJ - calc.arealJPerM2K) > 1 ? (
+                              {snapsToFhsBand && Math.abs(arealWrittenJ - calc.arealJPerM2K) > 1 ? (
                                 <span style={{ color: 'var(--accent-blue)' }}> (FHS band)</span>
                               ) : null}
                             </>

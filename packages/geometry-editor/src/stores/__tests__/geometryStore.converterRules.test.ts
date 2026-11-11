@@ -42,6 +42,8 @@ type Case = {
   refuses?: string;
   /** Edits after the load (and the defaults), before the checks. */
   then?: (store: ReturnType<typeof createGeometryStore>) => void;
+  /** Load in a host with a target catalogue, as Vulcan is. */
+  targetHost?: true;
   /** Text the load notices must contain, or must not contain. */
   notice?: string;
   noNotice?: string;
@@ -144,7 +146,7 @@ const CASES: Case[] = [
   { name: 'blank HeatingControlType row', edit: replace('HeatingControlType,SeparateTempControl,', 'HeatingControlType,,'), defaults: true,
     blocks: ['Heating Control Type is not set'], saves: { 'Metadata|HeatingControlType': '' } },
   // The converter ignores ComplianceValidationEnabled: FALSE still takes false for an absent
-  // KitchenExtractorHoodExternal row. Only FALSE is saved, for the community core mode.
+  // KitchenExtractorHoodExternal row. Only a host without targets saves FALSE, for the community core mode.
   { name: 'compliance validation off changes nothing', defaults: true,
     edit: (csv) => replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,')(csv).replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
     allows: ['Kitchen cooker hood extracts to outside'], saves: { 'Metadata|KitchenExtractorHoodExternal': 'FALSE', 'Metadata|ComplianceValidationEnabled': 'FALSE' } },
@@ -237,6 +239,8 @@ const CASES: Case[] = [
     edit: appendSection('Combustion Appliances,,,,,,,,\nName,Type,appliance_type,exhaust_situation,fuel_type,supply_situation,base_height,coords,extra_json\nFire,Appliance,open_fireplace,into_room,wood,room_air,,"0,0,0",') },
   // A row the save leaves out is named.
   { name: 'a row the editor does not keep', edit: appendSection('Test Section,\nName,Value\nProbe,1'), notice: 'Probe row in Test Section → left out' },
+  { name: 'a host with targets does not save ComplianceValidationEnabled FALSE', targetHost: true,
+    edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,'), saves: { 'Metadata|ComplianceValidationEnabled': null } },
   // Any other ComplianceValidationEnabled cell is ignored and left out of the save.
   { name: 'ComplianceValidationEnabled TRUE is not saved', edit: (csv) => csv, saves: { 'Metadata|ComplianceValidationEnabled': null } },
   { name: 'ComplianceValidationEnabled that is not TRUE or FALSE', edit: replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,yes,'),
@@ -267,7 +271,8 @@ const CASES: Case[] = [
 ];
 
 function load(c: Case) {
-  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+  const schemaPort = c.targetHost ? { ...canonicalGeometrySchemaPort, targetSchemaMode: () => 'fhs' as const } : canonicalGeometrySchemaPort;
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort });
   const { warnings } = store.getState().loadFromCSV(c.edit(sample));
   if (c.defaults) store.setState({ defaultsJson: defaults, defaultsLoading: false } as never);
   c.then?.(store);

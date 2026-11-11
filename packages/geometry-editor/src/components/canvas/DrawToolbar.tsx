@@ -6,6 +6,8 @@ import type { DrawMode } from '../../hooks/useDrawingMode';
 import type { Element, ElementType, Floor } from '../../geometry/types';
 import type { ValidationResult } from '../../geometry/validation/types';
 import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
+import { useGeometrySchemaPort } from '../../../../geometry-editor-host/src/editorServicePorts';
+import { targetSchemaMode } from '../../../../geometry-editor-host/src/schemaPort';
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { StandardDropdown } from '../StandardDropdown';
 import { ElementTypePicker } from '../ElementTypePicker';
@@ -150,9 +152,10 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   hidden = false,
 }) {
   const in3D = viewMode === '3d';
+  const excludesComplianceTypes = targetSchemaMode(useGeometrySchemaPort()) === 'fhs';
   const drawElementTypeOptions = useMemo(
-    () => ELEMENT_TYPE_ORDER.filter((type) => !COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(type)),
-    []
+    () => ELEMENT_TYPE_ORDER.filter((type) => !(excludesComplianceTypes && COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(type))),
+    [excludesComplianceTypes]
   );
   const drawModeOptions = useMemo(
     () => getDrawModeOptionsForElementType(drawElementType),
@@ -198,13 +201,13 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   }, [in3D, resetDraftForMode, setDrawElementType, setDrawMode]);
 
   useEffect(() => {
-    if (COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(drawElementType)) {
+    if (excludesComplianceTypes && COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(drawElementType)) {
       const nextMode = getDefaultDrawModeForElementType('BuildingElementOpaque');
       setDrawElementType('BuildingElementOpaque');
       setDrawMode(nextMode);
       resetDraftForMode(nextMode);
     }
-  }, [drawElementType, resetDraftForMode, setDrawElementType, setDrawMode]);
+  }, [excludesComplianceTypes, drawElementType, resetDraftForMode, setDrawElementType, setDrawMode]);
 
   useEffect(() => {
     if (!isServiceLineElementType(drawElementType)) {

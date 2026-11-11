@@ -6,6 +6,7 @@ import { StandardInput } from './StandardInput';
 import { renderFieldLabelWithTooltip } from './jsonformsRenderers';
 import { ResolvedFieldLabel } from './ResolvedFieldLabel';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
+import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import { fieldUnitForAdornment, resolveFieldPresentation } from '../lib/fieldPresentation';
 import {
   defaultFancoilTestData,
@@ -44,6 +45,7 @@ export const FancoilTestDataFields: React.FC<FancoilTestDataFieldsProps> = ({
   flat = false,
 }) => {
   const schemaPort = useGeometrySchemaPort();
+  const schemaMode = targetSchemaMode(schemaPort);
   const valueKey = useMemo(() => JSON.stringify(value ?? null), [value]);
   const parsed = parseFancoilTestData(value);
   const [draft, setDraft] = useKeyedState(valueKey, {
@@ -64,7 +66,7 @@ export const FancoilTestDataFields: React.FC<FancoilTestDataFieldsProps> = ({
 
   const compact = Boolean(flat);
   const resolveFancoilField = (propertyKey: string, label: string) => resolveFieldPresentation({
-    mode: 'fhs',
+    mode: schemaMode,
     propertyKey,
     elementType,
     subtype: 'fancoil',
@@ -135,7 +137,7 @@ export const FancoilTestDataFields: React.FC<FancoilTestDataFieldsProps> = ({
         >
           <div>
             <div style={{ fontSize: 11, marginBottom: 4, color: 'var(--text-secondary)' }}>
-              <ResolvedFieldLabel presentation={temperaturePresentation} useFHSSchema />
+              <ResolvedFieldLabel presentation={temperaturePresentation} useFHSSchema={schemaMode === 'fhs'} />
             </div>
             <StandardInput
               type="number"
@@ -155,7 +157,7 @@ export const FancoilTestDataFields: React.FC<FancoilTestDataFieldsProps> = ({
           </div>
           <div>
             <div style={{ fontSize: 11, marginBottom: 4, color: 'var(--text-secondary)' }}>
-              <ResolvedFieldLabel presentation={outputPresentation} useFHSSchema />
+              <ResolvedFieldLabel presentation={outputPresentation} useFHSSchema={schemaMode === 'fhs'} />
             </div>
             <StandardInput
               type="text"
@@ -202,7 +204,7 @@ export const FancoilTestDataFields: React.FC<FancoilTestDataFieldsProps> = ({
       </button>
 
       <div style={{ fontWeight: 600, fontSize: 12, margin: '12px 0 4px' }}>
-        <ResolvedFieldLabel presentation={fanPowerPresentation} useFHSSchema />
+        <ResolvedFieldLabel presentation={fanPowerPresentation} useFHSSchema={schemaMode === 'fhs'} />
       </div>
       {form.fan_power_W.map((w, i) => (
         <div

@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import type { GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
+import { targetSchemaMode, type GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 import { useKeyedState } from '../hooks/useKeyedState';
 import {
   applyFabricMergeTemplateUpdates,
@@ -181,10 +181,11 @@ export function FabricDefaultsEditorPanel({
   onDirtyChange,
 }: FabricDefaultsEditorPanelProps): React.ReactElement {
   const schemaPort = useGeometrySchemaPort();
-  const useFHSSchema = true; // Every target is an FHS target.
+  const schemaMode = targetSchemaMode(schemaPort);
+  const useFHSSchema = schemaMode === 'fhs';
 
   const schemaReady = schemaPort.availability === 'available' &&
-    !!schemaPort.getRootSchema('fhs');
+    !!schemaPort.getRootSchema(schemaMode);
   const defaultsSig = useMemo(() => defaultsContentSig(defaultsRoot), [defaultsRoot]);
   const documentKey = [filePath, defaultsSig, `session:${sessionRevision}`].join('\0');
   // Only the first successful schema load initializes a document's draft.
@@ -390,7 +391,7 @@ export function FabricDefaultsEditorPanel({
                             schemaPort,
                           );
                           const presentation = resolveFieldPresentation({
-                            mode: 'fhs',
+                            mode: schemaMode,
                             propertyKey: desc.key,
                             elementType,
                             subtype: loc ? subtypeForFabricRole(role, loc.template) : undefined,

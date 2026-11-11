@@ -32,6 +32,7 @@ import { isVulcanUiPartyFloorElement } from '../lib/assemblyMaterialFabric';
 import { coerceElementToStrictestNumericTyping } from '../lib/schemaCoercion';
 import { cloneJsonValue, jsonValuesEqual } from '../lib/jsonTypes';
 import {
+  targetSchemaMode,
   unavailableGeometrySchemaPort,
   type GeometrySchemaPort,
 } from '../../../geometry-editor-host/src/schemaPort';
@@ -2847,7 +2848,7 @@ const validateElementForState = (
   const eb = elementsById ?? state.elementsById;
   const linearThermalBridgeIssues = findLinearThermalBridgeIssues(Object.values(eb), state.floors);
   const cs = state.complianceSettings;
-  // Blocking checks follow the FHS rules: every target is an FHS target.
+  // Blocking checks follow the selected target's rules.
   const partFFindings = selectPartFData({
     zones: state.zones,
     elementsById: eb,
@@ -2866,7 +2867,7 @@ const validateElementForState = (
     zones: state.zones,
     floors: state.floors,
     globalOrientationOffset: state.globalOrientationOffset,
-    complianceValidationEnabled: true,
+    complianceValidationEnabled: targetSchemaMode(schemaPort) === 'fhs',
     complianceSettings: cs,
     numberOfBedrooms: cs?.NumberOfBedrooms,
     calculateContextShadingDistance: state.calculateContextShadingDistance,
@@ -7649,7 +7650,8 @@ const createGeometryState = (
     // each `validateElement` call would re-resolve and re-evaluate them, giving O(N²) cost
     // on a model where the data is dwelling-wide and identical for every element.
     const cs = state.complianceSettings;
-    // Blocking checks follow the FHS rules: every target is an FHS target.
+    // Blocking checks follow the selected target's rules.
+    const targetIsFhs = targetSchemaMode(schemaPort) === 'fhs';
     const partFFindings = selectPartFData({
       zones: state.zones,
       elementsById: state.elementsById,
@@ -7676,7 +7678,7 @@ const createGeometryState = (
       zones: state.zones,
       floors: state.floors,
       globalOrientationOffset: state.globalOrientationOffset,
-      complianceValidationEnabled: true,
+      complianceValidationEnabled: targetIsFhs,
       complianceSettings: cs,
       numberOfBedrooms: cs?.NumberOfBedrooms,
       calculateContextShadingDistance: state.calculateContextShadingDistance,
@@ -7707,7 +7709,7 @@ const createGeometryState = (
 
       const validation = validateZone(zone, {
         elementsById: state.elementsById,
-        complianceValidationEnabled: true,
+        complianceValidationEnabled: targetIsFhs,
         primaryFhsZoneId,
         simplifiedThermalBridgingOffered: simplifiedThermalBridgingOffered(schemaPort, 'fhs'),
       });
@@ -7719,7 +7721,7 @@ const createGeometryState = (
       zones: state.zones,
       elementsById: state.elementsById,
       spaceInferenceWallPrintByZone: state.spaceInferenceWallPrintByZone,
-      complianceValidationEnabled: true,
+      complianceValidationEnabled: targetIsFhs,
     });
     allWarnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     allCriticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));
@@ -7737,7 +7739,7 @@ const createGeometryState = (
         elements: Object.values(state.elementsById),
         floors: state.floors,
         zones: state.zones,
-        complianceValidationEnabled: true,
+        complianceValidationEnabled: targetIsFhs,
         complianceSettings: state.complianceSettings,
         globalOrientationOffset: state.globalOrientationOffset,
       }),
@@ -7749,7 +7751,7 @@ const createGeometryState = (
     if (elements.some((element) => !element.isPlaceholder) || state.complianceSettings.absentMetadataRows) {
       allCriticalIssues.push(...unsetMetadataInputIssues(
         { ...state, elements },
-        schemaPort.availability === 'available' ? schemaPort.getRootSchema('fhs') : null,
+        schemaPort.availability === 'available' ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null,
         state.defaultsLoading ? undefined : state.defaultsJson,
       ));
     }
@@ -7762,11 +7764,11 @@ const createGeometryState = (
 
   detectMissingElements: () => {
     const state = get();
-    // Missing-element checks follow the FHS rules: every target is an FHS target.
+    // Missing-element checks follow the selected target's rules.
     return detectMissingElements(
       state.zones,
       state.elementsById,
-      true,
+      targetSchemaMode(schemaPort) === 'fhs',
       state.complianceSettings.PartO_active_cooling_required || false,
       selectPartFData({
         zones: state.zones,

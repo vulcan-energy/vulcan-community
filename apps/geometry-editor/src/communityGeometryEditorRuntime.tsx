@@ -85,7 +85,10 @@ export function createCommunityGeometryEditorRuntime(
     session: options.session,
     workspaceResourcePort: workspaceResources.port,
     getDefaultsPath: () => options.store.getState().defaultsPath,
-    getProfile: () => csvModelProfile(options.store.getState().complianceSettings.complianceValidationCell),
+    getProfile: () => {
+      const state = options.store.getState();
+      return csvModelProfile(state.targetBundleId, state.complianceSettings.complianceValidationCell);
+    },
     loadSchemaText: loadCommunitySchemaText,
     builder: options.modelBuilder ?? createCommunityModelWorkerBuilder(),
   });
