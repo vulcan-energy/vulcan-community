@@ -426,3 +426,63 @@ fn derived_numbers_that_overflow_fail_with_e055_instead_of_panicking() {
         );
     }
 }
+
+#[test]
+fn window_without_authored_parts_never_takes_template_airflow_height() {
+    use vulcan_model_transform::ConversionProfile::*;
+    let csv = r#"Metadata
+VulcanCsvVersion,3
+
+Zone
+Name,Type,volume,floor_area
+Living,Zone,100,40
+
+Window Elements
+Name,Zone,Type,area,pitch,width,height,base_height,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Upper,Living,BuildingElementTransparent,1.2,90,1,1.2,3.6,1.2,4.2,0.5,"0,0,1|1,0,1","{""u_value"":1.2,""g_value"":0.6}"
+Unset,Living,BuildingElementTransparent,1.2,90,1,1.2,3.6,1.2,,0.5,"2,0,1|3,0,1","{""u_value"":1.2,""g_value"":0.6}"
+"#;
+    // The shipped template's window ventilates at 1.5 m.
+    const FHS_SCHEMA: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data/schemas/input_fhs.schema.json"
+    ));
+    const DEFAULTS_TEMPLATE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data/defaults/defaults_template.json"
+    ));
+    // The shipped schema is a7's; target_mappings tests the physical-opening contracts.
+    for (conversion_profile, version) in [
+        (CurrentRustFhs, "1.0.0a7"),
+        (DividedOpeningHalfPartitionV1, "1.0.0a7"),
+    ] {
+        let output = transform_geometry_csv(TransformRequest {
+            csv: csv.into(),
+            schema_json: FHS_SCHEMA.into(),
+            defaults_json: DEFAULTS_TEMPLATE.into(),
+            profile: ModelProfile::Fhs,
+            conversion_profile,
+            version_metadata: VersionMetadata {
+                hem_core_version: version.into(),
+                fhs_wrapper_version: Some(version.into()),
+            },
+        })
+        .unwrap();
+        let elements = &output.model["Zone"]["Living"]["BuildingElement"];
+        assert_eq!(
+            elements["Upper"]["window_part_list"],
+            serde_json::json!([{"mid_height_air_flow_path": 4.2}]),
+            "{conversion_profile:?}: {elements}"
+        );
+        assert!(
+            elements["Unset"].get("window_part_list").is_none(),
+            "{conversion_profile:?}: a window with no mid_height kept the template's parts: {}",
+            elements["Unset"]
+        );
+        assert!(
+            elements["Unset"].get("mid_height").is_none(),
+            "{conversion_profile:?}: {}",
+            elements["Unset"]
+        );
+    }
+}

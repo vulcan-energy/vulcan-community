@@ -2721,6 +2721,10 @@ impl JSONBuilder {
                     let target_path =
                         crate::json_pointer(&["Zone", zone_name, "BuildingElement", element_name]);
                     let contract = self.input_contract;
+                    crate::target_mappings::map_window_own_airflow_height(
+                        element_row,
+                        &mut element_obj,
+                    );
                     let diagnostics = match contract.elements {
                         crate::ElementInputConvention::PhysicalOpeningFullPartition => {
                             crate::target_mappings::map_physical_opening_full_partition_element(

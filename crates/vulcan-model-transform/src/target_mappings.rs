@@ -105,6 +105,27 @@ fn error(errors: &mut Vec<ValidationError>, path: &str, field: &str, message: &s
     });
 }
 
+/// Every contract: a window with no authored list ventilates at its own height, never the
+/// template's. With no mid_height it has no parts, so validation asks for the height.
+/// A contract that maps physical openings replaces this list afterwards.
+pub(crate) fn map_window_own_airflow_height(row: &Row, model: &mut Value) {
+    let Some(element) = model.as_object_mut() else {
+        return;
+    };
+    if element.get("type").and_then(Value::as_str) != Some("BuildingElementTransparent")
+        || field(row, "window_part_list").is_some()
+    {
+        return;
+    }
+    match field(row, "mid_height").filter(|v| v.is_number()) {
+        Some(mid_height) => element.insert(
+            "window_part_list".into(),
+            json!([{ "mid_height_air_flow_path": mid_height }]),
+        ),
+        None => element.remove("window_part_list"),
+    };
+}
+
 pub(crate) fn map_physical_opening_full_partition_element(
     row: &Row,
     model: &mut Value,
@@ -145,15 +166,6 @@ pub(crate) fn map_divided_opening_half_partition_element(
         return errors;
     };
     if element.get("type").and_then(Value::as_str) == Some("BuildingElementTransparent") {
-        // A window with no authored list ventilates at its own height, never the template's.
-        if field(row, "window_part_list").is_none() {
-            if let Some(mid_height) = field(row, "mid_height").filter(|v| v.is_number()) {
-                element.insert(
-                    "window_part_list".into(),
-                    json!([{ "mid_height_air_flow_path": mid_height }]),
-                );
-            }
-        }
         return errors;
     }
     let party = element.get("type").and_then(Value::as_str) == Some("BuildingElementPartyWall");
@@ -646,6 +658,37 @@ fn construction_resistance(u: f64, pitch: f64) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn physical_opening_window_never_keeps_template_parts() {
+        let template = || json!({"type":"BuildingElementTransparent","window_part_list":[{"mid_height_air_flow_path":1.5}]});
+        let upper = Row::from([
+            ("base_height".into(), json!(3.6)),
+            ("height".into(), json!(1.2)),
+            ("mid_height".into(), json!(4.2)),
+            ("free_area_height".into(), json!(1.2)),
+            ("max_window_open_area".into(), json!(0.5)),
+        ]);
+        let mut unset = upper.clone();
+        unset.remove("mid_height");
+        for whole_u in [false, true] {
+            let mut model = template();
+            map_window_own_airflow_height(&upper, &mut model);
+            let errors =
+                map_physical_opening_full_partition_element(&upper, &mut model, "w", whole_u, 0.0);
+            assert!(errors.is_empty(), "{errors:?}");
+            assert_eq!(
+                model["window_part_list"],
+                json!([{"mid_height":4.2,"free_area_height":1.2,"max_window_open_area":0.5}])
+            );
+            let mut model = template();
+            map_window_own_airflow_height(&unset, &mut model);
+            let errors =
+                map_physical_opening_full_partition_element(&unset, &mut model, "w", whole_u, 0.0);
+            assert!(!errors.is_empty());
+            assert!(model.get("window_part_list").is_none(), "{model}");
+        }
+    }
+
     #[test]
     fn canonical_contracts_match_legacy_element_projection() {
         use crate::{ConversionProfile::*, ElementInputConvention};
