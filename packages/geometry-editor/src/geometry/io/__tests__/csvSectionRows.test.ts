@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import { parseCsvSections, stripLegacyBuildingServicesBlocks } from '../csvSectionRows';
+import { csvMetadataValue, parseCsvSections, stripLegacyBuildingServicesBlocks } from '../csvSectionRows';
 
 describe('csvSectionRows', () => {
   it('stripLegacyBuildingServicesBlocks removes deprecated blocks before the next section', () => {
@@ -26,5 +26,10 @@ describe('csvSectionRows', () => {
     const hw = sections.find((s) => s.name === 'Hot Water Outlets');
     expect(hw?.rows).toHaveLength(1);
     expect(hw?.rows[0]?.data['Name']).toBe('Bath 1');
+  });
+
+  it('csvMetadataValue skips blank rows in Metadata and stops at the next section', () => {
+    expect(csvMetadataValue('Metadata,,\nPostcode,MK40 1AA,\n,,\n\nTargetBundleId,hem-x,\nZone,,\n', 'TargetBundleId')).toBe('hem-x');
+    expect(csvMetadataValue('Metadata,,\nPostcode,MK40 1AA,\n\nZone,,\nName,Type\nTargetBundleId,Zone\n', 'TargetBundleId')).toBeUndefined();
   });
 });
