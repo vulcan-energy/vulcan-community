@@ -6,7 +6,7 @@
 use crate::parser::PARTY_ELEMENT_MARKER;
 use crate::ValidationError;
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Pinned Python a8/a9 sum each sector's `width / 360` for a flat element no obstacle reaches,
 /// then take acos of it: 36 * (10/360) rounds above 1 and fails. Only the converter's own
@@ -84,7 +84,7 @@ pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: cra
     }
 }
 
-type Row = HashMap<String, Value>;
+type Row = BTreeMap<String, Value>;
 
 /// Non-blocking mapping diagnostic: the builder reports it beside schema omissions.
 pub(crate) const TARGET_INPUT_WARNING: &str = "W_TARGET_INPUT";

@@ -3,7 +3,7 @@
 
 use crate::error::ParseError;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// The one `_`-prefixed `extra_json` key the merge reads: it classifies a horizontal adjacent
 /// element as a party floor. The merge consumes it and never writes it to the model.
@@ -19,7 +19,7 @@ pub struct CSVParser {
     state: ParserState,
     current_section: Option<String>,
     current_line_number: usize,
-    section_data: HashMap<String, Vec<HashMap<String, Value>>>,
+    section_data: BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     section_headers: HashMap<String, Vec<String>>,
     seen_sections: HashSet<String>,
     defined_zones: HashSet<String>,
@@ -49,7 +49,7 @@ impl CSVParser {
             state: ParserState::Initial,
             current_section: None,
             current_line_number: 0,
-            section_data: HashMap::new(),
+            section_data: BTreeMap::new(),
             section_headers: HashMap::new(),
             seen_sections: HashSet::new(),
             defined_zones: HashSet::new(),
@@ -57,10 +57,12 @@ impl CSVParser {
         }
     }
 
+    /// Sections and row cells are B-tree maps: callers iterate them into JSON, and a hash map's
+    /// order changes with its seed, so the same CSV would give different bytes.
     pub fn parse_csv(
         &mut self,
         content: &str,
-    ) -> Result<HashMap<String, Vec<HashMap<String, Value>>>, ParseError> {
+    ) -> Result<BTreeMap<String, Vec<BTreeMap<String, Value>>>, ParseError> {
         self.reset();
 
         // Excel / Windows editors often save UTF-8 with BOM; paste can include it. That breaks the
@@ -183,7 +185,7 @@ impl CSVParser {
 
             // Process data row
             let headers = self.section_headers.get(&section_name).unwrap();
-            let mut row_data = HashMap::new();
+            let mut row_data = BTreeMap::new();
 
             for (i, header) in headers.iter().enumerate() {
                 let value = adjusted_columns.get(i).map(|v| v.as_str()).unwrap_or("");
@@ -323,7 +325,7 @@ impl CSVParser {
 
     fn validate_row(
         &mut self,
-        row_data: &HashMap<String, Value>,
+        row_data: &BTreeMap<String, Value>,
         section: &str,
     ) -> Result<(), ParseError> {
         // Skip validation for completely empty rows (all values are null or empty strings)
