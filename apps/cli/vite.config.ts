@@ -12,6 +12,15 @@ const UPSTREAM_DATA_NOTICES: Record<string, { name: string; licence: string }> =
 };
 const REPO_ROOT = resolve(__dirname, '../..');
 
+/** The licence-manifest entry covering a repo path (exact path, else the longest matching `dir/**`). */
+function manifestLicence(path: string, entries: { path: string; license: string }[]): string | undefined {
+  const exact = entries.find((entry) => entry.path === path);
+  if (exact) return exact.license;
+  return entries
+    .filter((entry) => entry.path.endsWith('/**') && path.startsWith(entry.path.slice(0, -2)))
+    .sort((a, b) => b.path.length - a.path.length)[0]?.license;
+}
+
 /**
  * THIRD_PARTY_NOTICES.md for what Rollup actually bundled into cli.js (npm packages and
  * upstream MIT data files), with each licence text, so the notices cannot drift.
@@ -20,15 +29,27 @@ function thirdPartyNotices(): Plugin {
   return {
     name: 'third-party-notices',
     generateBundle(_options, bundle) {
+      const { entries } = JSON.parse(readFileSync(join(REPO_ROOT, 'licence-manifest.json'), 'utf8')) as { entries: { path: string; license: string }[] };
       const packages = new Map<string, string>();
       const upstream = new Set<string>();
       for (const output of Object.values(bundle)) {
         if (output.type !== 'chunk') continue;
         for (const id of Object.keys(output.modules)) {
           const match = /^(.*\/node_modules\/((?:@[^/]+\/)?[^/]+))\//.exec(id.replace(/\\/g, '/'));
-          if (match) packages.set(match[2]!, match[1]!);
+          if (match) {
+            packages.set(match[2]!, match[1]!);
+            continue;
+          }
           const relative = id.replace(/\?.*$/, '').replace(/\\/g, '/').replace(`${REPO_ROOT.replace(/\\/g, '/')}/`, '');
-          if (UPSTREAM_DATA_NOTICES[relative]) upstream.add(relative);
+          if (UPSTREAM_DATA_NOTICES[relative]) {
+            upstream.add(relative);
+            continue;
+          }
+          // Fail closed: any other bundled repo file must be ours (AGPL) or it needs a notice here.
+          const licence = manifestLicence(relative, entries);
+          if (licence !== 'AGPL-3.0-only') {
+            throw new Error(`cli.js bundles ${relative} (${licence ?? 'not in licence-manifest.json'}); add its notice to UPSTREAM_DATA_NOTICES or keep it out of the CLI`);
+          }
         }
       }
       const sections = [...packages.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, root]) => {

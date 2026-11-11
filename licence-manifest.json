@@ -279,7 +279,10 @@
       "path": "LICENSES/MIT-HEM-FHS-wrapper.txt",
       "source_path": "LICENSES/MIT-HEM-FHS-wrapper.txt",
       "license": "MIT",
-      "rights_status": "approved"
+      "rights_status": "approved",
+      "source": "https://github.com/communitiesuk/epb-hem-wrapper-fhs",
+      "source_revision": "dd5ba73a19674d631da59b4924bb7dc2833fbb3b",
+      "provenance": "Verbatim copy of the upstream LICENSE.md at source_revision (added upstream after the pinned hem_fhs_upstream revision); reproduced for data/schemas/input_fhs.schema.json"
     },
     {
       "path": "LICENSES/OGL-UK-3.0.txt",
