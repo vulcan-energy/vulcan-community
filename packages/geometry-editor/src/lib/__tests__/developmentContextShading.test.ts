@@ -374,6 +374,35 @@ describe('developmentContextShading', () => {
     expect(sharedContext.extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.sourceStem).toBe('plot-b');
   });
 
+  it('copies sibling ContextShading unless its outline overlaps the active dwelling footprint', () => {
+    const at = (points: number[][]) => points.map(([x, y]) => ({ x, y, z: 0 }));
+    const sync = (activePoints: number[][], contextPoints: number[][]) => {
+      const active = { ...ground('active-ground', 'Active Ground', 0, 0, 1, 1), coordinates: at(activePoints) } as Element;
+      const context = { ...contextShading('source-context', 'Neighbour', 0, 0, 1, 1), coordinates: at(contextPoints) } as Element;
+      const result = syncDevelopmentContextShadingElements({
+        projectId: 'project',
+        activeStem: 'plot-a',
+        elementsById: { [active.id]: active },
+        elementIds: [active.id],
+        zones: [zone],
+        floors: deriveFloorsFromElements([active]),
+        contextModels: [contextModel('plot-b', [ground('source-ground', 'Source Ground', 40, 0, 44, 4), context])],
+      });
+      const copied = Object.values(result.elementsById)
+        .some((element) => element.extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.sourceElementId === 'source-context');
+      return { copied, skipped: result.skippedContextOverlapCount };
+    };
+    const lShape = [[0, 0], [6, 0], [6, 2], [2, 2], [2, 6], [0, 6]];
+    const diamond = [[3, 0], [6, 3], [3, 6], [0, 3]];
+    // In the notch of an L, by the corner of a dwelling rotated 45 degrees, and wrapped around it:
+    // each bounding box overlaps the dwelling, but the outline does not.
+    expect(sync(lShape, [[3, 3], [5, 3], [5, 5], [3, 5]])).toEqual({ copied: true, skipped: 0 });
+    expect(sync(diamond, [[0, 0], [1, 0], [1, 1], [0, 1]])).toEqual({ copied: true, skipped: 0 });
+    expect(sync([[2, 2], [4, 2], [4, 4], [2, 4]], [[0, 0], [6, 0], [6, 6], [5, 6], [5, 1], [1, 1], [1, 6], [0, 6]]))
+      .toEqual({ copied: true, skipped: 0 });
+    expect(sync(lShape, [[1, 1], [3, 1], [3, 3], [1, 3]])).toEqual({ copied: false, skipped: 1 });
+  });
+
   it('materialises local explicit ContextShading as a shared editable source', () => {
     const activeGround = ground('active-ground', 'Active Ground', 0, 0, 4, 4);
     const activeContext = contextShading('active-tree', 'Tree belt', 20, 0, 22, 4, 6.5);

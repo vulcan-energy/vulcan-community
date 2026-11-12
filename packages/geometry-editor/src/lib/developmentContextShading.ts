@@ -4,6 +4,7 @@
 import type { ComplianceSettings, ParsedCsvMetadata } from '../geometry/io/parseCsvToGeometry';
 import type { ContextShading, Element, Floor, Zone } from '../geometry/types';
 import { roundToTwoDecimals } from '../geometry/constants';
+import polygonClipping, { type Polygon } from 'polygon-clipping';
 import { calculatePolygonArea } from './polygonSync';
 import {
   calculateContextShadingAngularRangeFromCoordinates,
@@ -60,6 +61,8 @@ export interface SyncDevelopmentContextShadingResult {
   generatedCount: number;
   skippedSameFloorOverlapCount: number;
   skippedUnknownHeightCount: number;
+  /** Sibling ContextShading not copied because its outline overlaps this dwelling's footprint. */
+  skippedContextOverlapCount: number;
 }
 
 type FootprintCandidate = {
@@ -154,6 +157,15 @@ function boundsOverlapArea(a: Bounds, b: Bounds): number {
   const width = Math.max(0, Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX));
   const height = Math.max(0, Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY));
   return width * height;
+}
+
+/** Plan area (m²) where an outline overlaps any of the footprints: true polygon intersection. */
+function overlapAreaM2(outline: Coord[], footprints: Coord[][]): number {
+  if (outline.length < 3) return 0;
+  const ring = (coords: Coord[]): Polygon => [coords.map((coord) => [coord.x, coord.y] as [number, number])];
+  return footprints.reduce((sum, footprint) => polygonClipping.intersection(ring(outline), ring(footprint))
+    .reduce((total, polygon) => total + polygon.reduce((area, rings, index) =>
+      area + (index ? -1 : 1) * Math.abs(calculatePolygonArea(rings.map(([x, y]) => ({ x, y, z: 0 })))), 0), sum), 0);
 }
 
 function isContextGeneratedElement(element: Element): element is ContextShading {
@@ -676,6 +688,8 @@ export function syncDevelopmentContextShadingElements(
   );
   let skippedSameFloorOverlapCount = 0;
   let skippedUnknownHeightCount = 0;
+  let skippedContextOverlapCount = 0;
+  const activeFootprints = getFootprintCandidates(activeElements, activeFloors).map((candidate) => candidate.element.coordinates);
 
   if (activeParent) {
     for (const model of args.contextModels) {
@@ -722,6 +736,12 @@ export function syncDevelopmentContextShadingElements(
         const dedupeKey = explicitContextShadingIdentityKey(args.projectId, sourceContext);
         if (seenExplicitContextShading.has(dedupeKey)) continue;
         seenExplicitContextShading.add(dedupeKey);
+        // As a model footprint above: a copied obstacle on top of this dwelling would shade it, and
+        // the user could not remove it because the next sync writes it again.
+        if (overlapAreaM2(sourceContext.coordinates ?? [], activeFootprints) > FOOTPRINT_OVERLAP_TOLERANCE_M2) {
+          skippedContextOverlapCount++;
+          continue;
+        }
 
         const key = sourceKeyFor(args.projectId, args.activeStem, model.stem, 'explicit_context_shading', sharedId);
         const existing = existingGenerated.get(key);
@@ -783,5 +803,6 @@ export function syncDevelopmentContextShadingElements(
     generatedCount: targets.size,
     skippedSameFloorOverlapCount,
     skippedUnknownHeightCount,
+    skippedContextOverlapCount,
   };
 }
