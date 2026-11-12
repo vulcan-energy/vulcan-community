@@ -40,7 +40,14 @@ import {
 } from '../../../geometry/guideOverlayByFloor';
 import { resolveBuildingElementPitch } from '../../../geometry/derivePitchFromGeometry';
 import { formatCoords } from '../../../geometry/coords';
-import { roundToTwoDecimals } from '../../../geometry/constants';
+import { MIN_WALL_SEGMENT, roundToTwoDecimals } from '../../../geometry/constants';
+import {
+  deriveSlopedPolygonOrientation360,
+  deriveWallProperties,
+  isSlopedFabricEnvelopePolygon,
+  isWallLikeLineElement,
+} from '../../../lib/openingSegmentOutward';
+import { getParentOrientation360 } from '../../../lib/parentOrientation';
 import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGeometry';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
@@ -2167,6 +2174,37 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const patch = buildTransparentHostDerivedPatch(opening, derived);
       if (typeof opening.base_height === 'number' && Number.isFinite(opening.base_height)) delete patch.base_height;
       Object.assign(opening, patch);
+    }
+
+    // A blank orientation360 takes the bearing the editor derives from the coordinates. A hosted
+    // opening takes its host's bearing, as hosting it does. Authored values stay.
+    const offset = metadata.globalOrientationOffset;
+    const blankOrientation = newElements.filter(
+      (element) => !Number.isFinite((element as { orientation360?: unknown }).orientation360),
+    );
+    const hostOf = (element: Element) =>
+      (element.type === 'BuildingElementTransparent' || (element.type === 'BuildingElementOpaque' && element.is_external_door))
+      && element.parent_element
+        ? importedOpaqueByName(element.parent_element, element.zoneId)
+        : undefined;
+    const ownBearing = (element: Element): number | null => {
+      if (isWallLikeLineElement(element)) {
+        const wall = deriveWallProperties(element, offset);
+        return wall.width >= MIN_WALL_SEGMENT ? wall.orientation360 : null;
+      }
+      if (isSlopedFabricEnvelopePolygon(element) && !isOrientationPitchAxis(element)) {
+        return deriveSlopedPolygonOrientation360(element, offset);
+      }
+      return null;
+    };
+    const setBearing = (element: Element, bearing: number | null | undefined) => {
+      if (typeof bearing === 'number') (element as { orientation360?: number }).orientation360 = bearing;
+    };
+    // Hosts first, so a hosted opening reads its host's bearing.
+    for (const element of blankOrientation) if (!hostOf(element)) setBearing(element, ownBearing(element));
+    for (const element of blankOrientation) {
+      const host = hostOf(element);
+      if (host) setBearing(element, getParentOrientation360(host, offset));
     }
 
     const { elementsById, elementIds } = migrateElementsToNormalized(newElements);
