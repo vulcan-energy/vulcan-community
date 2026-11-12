@@ -144,7 +144,8 @@ function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
 }
 
-function parseTreatmentUi(raw: unknown): TreatmentUiV1 | null {
+/** The saved `_treatment_ui`, or null when it is not a valid v1 record. */
+export function parseTreatmentUi(raw: unknown): TreatmentUiV1 | null {
   if (!isRecord(raw)) return null;
   if (raw.v !== 1) return null;
   if (raw.source !== 'table' && raw.source !== 'custom') return null;
