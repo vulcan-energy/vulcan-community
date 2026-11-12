@@ -12,6 +12,7 @@ import {
   SPACE_LABEL_OPEN_TO_LIVING_ROOM_KEY,
 } from '../../lib/spaceLabelDerivation';
 import { useGeometryStore } from '../../stores/geometryStore';
+import type { GeometrySpaceLabelFieldsContribution } from '../../../../geometry-editor-host/src/inspectorContributions';
 import { StandardDropdown } from '../StandardDropdown';
 import { ValidationPill } from '../ValidationIndicator';
 
@@ -41,6 +42,8 @@ export interface SpaceLabellerPanelProps {
   onStartDrawFootprint?: () => void;
   onCancelDrawFootprint?: () => void;
   isDrawingFootprint?: boolean;
+  /** Host fields shown on every row, e.g. a task-specific toggle. */
+  spaceLabelFields?: GeometrySpaceLabelFieldsContribution | null;
 }
 
 export const SpaceLabellerPanel: React.FC<SpaceLabellerPanelProps> = ({
@@ -52,6 +55,7 @@ export const SpaceLabellerPanel: React.FC<SpaceLabellerPanelProps> = ({
   onStartDrawFootprint,
   onCancelDrawFootprint,
   isDrawingFootprint = false,
+  spaceLabelFields = null,
 }) => {
   const zones = useGeometryStore((s) => s.zones);
   const zone = useMemo(() => zones.find((z) => z.id === zoneId), [zones, zoneId]);
@@ -208,6 +212,7 @@ export const SpaceLabellerPanel: React.FC<SpaceLabellerPanelProps> = ({
                 onExpandForRoomTypeConsumed={onExpandLabelConsumed}
                 onCenterFootprintForLabel={onCenterFootprintForLabel}
                 warnings={openToLivingWarningsByLabelId.get(sl.id) ?? []}
+                spaceLabelFields={spaceLabelFields}
               />
             ))
           )}
@@ -236,6 +241,7 @@ function SpaceLabelCompactRow({
   onExpandForRoomTypeConsumed,
   onCenterFootprintForLabel,
   warnings,
+  spaceLabelFields,
 }: {
   displayIndex: number;
   label: SpaceLabel;
@@ -243,27 +249,39 @@ function SpaceLabelCompactRow({
   onExpandForRoomTypeConsumed?: () => void;
   onCenterFootprintForLabel?: (labelId: string) => void;
   warnings?: string[];
+  spaceLabelFields: GeometrySpaceLabelFieldsContribution | null;
 }) {
   const updateSpaceLabel = useGeometryStore((s) => s.updateSpaceLabel);
   const removeSpaceLabel = useGeometryStore((s) => s.removeSpaceLabel);
   const spaceLabellerSelectedLabelId = useGeometryStore((s) => s.spaceLabellerSelectedLabelId);
   const setSpaceLabellerSelectedLabelId = useGeometryStore((s) => s.setSpaceLabellerSelectedLabelId);
   const roomTypeSelectRef = useRef<HTMLSelectElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
   const isRowSelected = spaceLabellerSelectedLabelId === label.id;
   const canMarkOpenToLiving = canSpaceLabelBeMarkedOpenToLivingRoom(label);
   const isOpenToLiving = isSpaceLabelOpenToLivingRoom(label);
 
-  const setOpenToLivingRoom = (nextValue: boolean) => {
-    const nextExtraJson = { ...(label.extra_json ?? {}) };
+  const patchExtraJson = (update: (current: Record<string, unknown>) => Record<string, unknown>) => {
+    const nextExtraJson = update({ ...(label.extra_json ?? {}) });
+    updateSpaceLabel(label.id, {
+      extra_json: Object.keys(nextExtraJson).length > 0 ? nextExtraJson : undefined,
+    });
+  };
+
+  const setOpenToLivingRoom = (nextValue: boolean) => patchExtraJson((nextExtraJson) => {
     if (nextValue) {
       nextExtraJson[SPACE_LABEL_OPEN_TO_LIVING_ROOM_KEY] = true;
     } else {
       delete nextExtraJson[SPACE_LABEL_OPEN_TO_LIVING_ROOM_KEY];
     }
-    updateSpaceLabel(label.id, {
-      extra_json: Object.keys(nextExtraJson).length > 0 ? nextExtraJson : undefined,
-    });
-  };
+    return nextExtraJson;
+  });
+  const HostFields = spaceLabelFields?.render;
+
+  // A selection made elsewhere (for example on the plan) brings its row into view.
+  useLayoutEffect(() => {
+    if (isRowSelected) rowRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [isRowSelected]);
 
   useLayoutEffect(() => {
     if (!expandForRoomTypeId || expandForRoomTypeId !== label.id) return;
@@ -273,6 +291,7 @@ function SpaceLabelCompactRow({
 
   return (
     <div
+      ref={rowRef}
       className={`space-labeller-panel__row${isRowSelected ? ' space-labeller-panel__row--selected' : ''}`}
     >
       <button
@@ -329,6 +348,15 @@ function SpaceLabelCompactRow({
       >
         <DeleteSpaceIcon />
       </button>
+      {HostFields ? (
+        <div
+          className="space-labeller-panel__row-host"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <HostFields label={label} onPatchExtraJson={patchExtraJson} />
+        </div>
+      ) : null}
       {warnings && warnings.length > 0 ? (
         <div className="space-labeller-panel__row-warning">
           {warnings.map((message, i) => (

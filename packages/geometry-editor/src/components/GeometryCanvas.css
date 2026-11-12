@@ -1237,6 +1237,19 @@
   gap: 4px;
 }
 
+.space-labeller-panel__row-host {
+  flex: 1 0 100%;
+  min-width: 0;
+  margin-left: 38px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.space-labeller-panel__row-host:empty {
+  display: none;
+}
+
 .space-labeller-panel__row--selected {
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 1px var(--focus-outline);
