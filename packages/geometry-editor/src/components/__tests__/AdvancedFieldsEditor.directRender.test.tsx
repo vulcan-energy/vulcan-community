@@ -1384,6 +1384,11 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   'core/Vents [every subtype]': [
     'pressure_difference_ref | Pressure Difference Ref | textbox | 0 | - | - | tip',
   ],
+  // Core names its window shading item WindowShadingObject (FHS: WindowShading).
+  'core/WindowShading [every subtype]': [
+    'type | Type | select | - | - | - | tip',
+    'distance | Distance | textbox | 0 | - | - | tip',
+  ],
 };
 
 describe('R4.6b-1 standing invariant: what every Advanced Fields row actually renders', () => {
@@ -1393,7 +1398,7 @@ describe('R4.6b-1 standing invariant: what every Advanced Fields row actually re
     // Floors would let this pass vacuously; these are the exact populations the pinned
     // inventory below was captured from, so they are equalities.
     expect(routesSwept).toBe(674);
-    expect(routesWithRows).toBe(372);
+    expect(routesWithRows).toBe(387);
 
     expect(inventory).toEqual(EXPECTED_RENDERED_ROWS);
   });

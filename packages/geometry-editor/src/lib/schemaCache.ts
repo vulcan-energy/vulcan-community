@@ -1234,6 +1234,11 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
     if (fromShs) return fromShs;
   }
 
+  // Core names the window shading item `WindowShadingObject`; FHS names it `WindowShading`.
+  if (elementType === 'WindowShading' && !schema.$defs.WindowShading && schema.$defs.WindowShadingObject) {
+    return { ...schema.$defs.WindowShadingObject, $defs: schema.$defs };
+  }
+
   const resolveGroundSubtypeSchema = (candidate: SchemaNode | null): SchemaNode | null => {
     if (elementType !== 'BuildingElementGround' || !subtype || !candidate?.oneOf || !Array.isArray(candidate.oneOf)) {
       return candidate;

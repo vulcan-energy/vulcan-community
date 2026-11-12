@@ -194,8 +194,10 @@ export function checkGeometryCsv(csvArg: string) {
   const missingElements = detectMissingElements(
     parsed.zones,
     byId,
-    complianceValidationEnabled,
-    parsed.metadata.complianceSettings.PartO_active_cooling_required,
+    {
+      complianceValidationEnabled,
+      partOActiveCoolingRequired: parsed.metadata.complianceSettings.PartO_active_cooling_required,
+    },
     partFData?.context,
     floors,
   );

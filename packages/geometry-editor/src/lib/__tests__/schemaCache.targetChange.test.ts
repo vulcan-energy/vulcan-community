@@ -112,8 +112,8 @@ describe('elementTypeAvailability', () => {
   it.each([
     ['fhs', 'hem_fhs_upstream/schema/input_fhs.schema.json', ['CombustionAppliances']],
     ['fhs', 'data/schemas/input_fhs.schema.json', ['CombustionAppliances']],
-    ['core', 'hem_engine_upstream/schemas/core-input.schema.json', ['WindowShading', 'Lighting', 'Appliance', 'CombustionAppliances']],
-    ['core', 'data/schemas/core-input.schema.json', ['WindowShading', 'Lighting', 'Appliance', 'CombustionAppliances']],
+    ['core', 'hem_engine_upstream/schemas/core-input.schema.json', ['Lighting', 'Appliance', 'CombustionAppliances']],
+    ['core', 'data/schemas/core-input.schema.json', ['Lighting', 'Appliance', 'CombustionAppliances']],
   ] as const)('%s %s offers every type it has a section for', (mode, path, absent) => {
     expect(unavailable(port(mode, root(path)))).toEqual(absent);
   });
