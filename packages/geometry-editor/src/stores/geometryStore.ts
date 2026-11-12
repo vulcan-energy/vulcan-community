@@ -3224,6 +3224,8 @@ const createGeometryState = (
     if (origin && !(Number.isFinite(origin.x) && Number.isFinite(origin.y))) {
       throw new Error(`Shading origin must be a finite point, got (${origin.x}, ${origin.y}).`);
     }
+    // Centimetre precision, like the other plan coordinates; the stored point is the one used.
+    if (origin) origin = { x: roundToTwoDecimals(origin.x), y: roundToTwoDecimals(origin.y) };
     set((state) => {
       const elementsById = { ...state.elementsById };
       // First element per name, as the other parent lookups (`find`) resolve it.

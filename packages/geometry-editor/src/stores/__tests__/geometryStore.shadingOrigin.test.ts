@@ -62,6 +62,11 @@ describe('model shading origin', () => {
     expect(derived(store)).toEqual(centroidValues);
 
     store.getState().redo();
+    expect(store.getState().shadingOrigin).toEqual({ x: 2, y: -8 });
+
+    store.getState().setShadingOrigin({ x: 2.123456, y: -8.004 });
+    expect(store.getState().shadingOrigin).toEqual({ x: 2.12, y: -8 });
+
     store.getState().setShadingOrigin(null);
     expect(store.getState().shadingOrigin).toBeNull();
     expect(derived(store)).toEqual(centroidValues);
