@@ -9,6 +9,7 @@ import { calculatePolygonArea } from './polygonSync';
 import {
   calculateContextShadingAngularRangeFromCoordinates,
   calculateContextShadingDistanceFromCoordinates,
+  type PlanPoint,
 } from './contextShadingGeometry';
 import { deriveFloorsFromElements } from './floorDerivation';
 import { elementBaseElevationMForTb, slabElevationMForFloorZ } from './geometry3dMapper';
@@ -52,6 +53,8 @@ export interface SyncDevelopmentContextShadingArgs {
   complianceSettings?: ComplianceSettings;
   contextModels: DevelopmentContextShadingModel[];
   globalOrientationOffset?: number;
+  /** The active model's saved shading origin (null: the parent floor centroid). */
+  shadingOrigin: PlanPoint | null;
 }
 
 export interface SyncDevelopmentContextShadingResult {
@@ -533,6 +536,7 @@ function buildGeneratedContextShadingFromCoordinates(args: {
   projectId: string;
   activeStem: string;
   globalOrientationOffset: number;
+  shadingOrigin: PlanPoint | null;
   sharedId?: string;
   sourceName?: string;
 }): ContextShading {
@@ -557,11 +561,12 @@ function buildGeneratedContextShadingFromCoordinates(args: {
   const angles = calculateContextShadingAngularRangeFromCoordinates(
     draft,
     args.parent,
+    args.shadingOrigin,
     args.globalOrientationOffset,
   );
   draft.start_angle = roundToTwoDecimals(angles.start_angle);
   draft.end_angle = roundToTwoDecimals(angles.end_angle);
-  draft.distance = calculateContextShadingDistanceFromCoordinates(draft, args.parent);
+  draft.distance = calculateContextShadingDistanceFromCoordinates(draft, args.parent, args.shadingOrigin);
 
   const metaWithoutSignature = {
     version: 1 as const,
@@ -600,6 +605,7 @@ function buildGeneratedContextShading(args: {
   projectId: string;
   activeStem: string;
   globalOrientationOffset: number;
+  shadingOrigin: PlanPoint | null;
 }): ContextShading {
   const key = sourceKeyFor(args.projectId, args.activeStem, args.sourceModel.stem);
   return buildGeneratedContextShadingFromCoordinates({
@@ -618,6 +624,7 @@ function buildGeneratedContextShading(args: {
     projectId: args.projectId,
     activeStem: args.activeStem,
     globalOrientationOffset: args.globalOrientationOffset,
+    shadingOrigin: args.shadingOrigin,
   });
 }
 
@@ -726,6 +733,7 @@ export function syncDevelopmentContextShadingElements(
             projectId: args.projectId,
             activeStem: args.activeStem,
             globalOrientationOffset: args.globalOrientationOffset ?? 0,
+            shadingOrigin: args.shadingOrigin,
           }));
         }
       }
@@ -762,6 +770,7 @@ export function syncDevelopmentContextShadingElements(
           projectId: args.projectId,
           activeStem: args.activeStem,
           globalOrientationOffset: args.globalOrientationOffset ?? 0,
+          shadingOrigin: args.shadingOrigin,
           sharedId,
           sourceName: sourceContext.name,
         }));

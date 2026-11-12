@@ -87,3 +87,20 @@ T0,ContextShading,obstacle,30,45,20,5,,,"15.000,10.000,0.000"
     expect((cs as any).coordinates?.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe('parseCsvToGeometry — shading origin metadata', () => {
+  const withRows = (...rows: string[]) => ['Metadata,,', 'GlobalOrientationOffset,0,', ...rows].join('\n');
+
+  it('reads both rows as one origin, and none as the default', () => {
+    expect(parseCsvToGeometry(withRows('ShadingOriginX,1.5,', 'ShadingOriginY,-2,')).metadata.shadingOrigin)
+      .toEqual({ x: 1.5, y: -2 });
+    expect(parseCsvToGeometry(withRows()).metadata.shadingOrigin).toBeNull();
+  });
+
+  it('rejects one row without the other, or a value that is not a number', () => {
+    expect(() => parseCsvToGeometry(withRows('ShadingOriginX,1.5,')))
+      .toThrow('ShadingOriginX and ShadingOriginY must both be set or both be absent');
+    expect(() => parseCsvToGeometry(withRows('ShadingOriginX,1.5,', 'ShadingOriginY,north,')))
+      .toThrow('Invalid ShadingOriginY: "north"');
+  });
+});

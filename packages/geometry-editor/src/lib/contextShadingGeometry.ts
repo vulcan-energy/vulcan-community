@@ -4,7 +4,7 @@
 import { roundToTwoDecimals } from '../geometry/constants';
 import type { ContextShading, Element } from '../geometry/types';
 
-type PlanPoint = { x: number; y: number };
+export type PlanPoint = { x: number; y: number };
 
 const normalizeDegrees = (angle: number): number => ((angle % 360) + 360) % 360;
 
@@ -39,6 +39,17 @@ export function getPlanCenter(coords: PlanPoint[] | undefined): PlanPoint | null
   };
 }
 
+/**
+ * The one point every Context Shading angle and distance is measured from: the model's saved
+ * shading origin when set, else the area centroid of the shading's parent floor.
+ */
+export function resolveContextShadingOrigin(
+  shadingOrigin: PlanPoint | null,
+  parentElement: Pick<Element, 'coordinates'>,
+): PlanPoint | null {
+  return shadingOrigin ?? getPlanCenter(parentElement.coordinates);
+}
+
 function pointAzimuthDeg(point: PlanPoint, origin: PlanPoint): number {
   const mathematicalDeg = Math.atan2(point.y - origin.y, point.x - origin.x) * 180 / Math.PI;
   return normalizeDegrees(90 - mathematicalDeg);
@@ -69,8 +80,9 @@ function smallestAngularRange(angles: number[]): { start_angle: number; end_angl
 }
 
 export function calculateContextShadingAngularRangeFromCoordinates(
-  contextShading: ContextShading,
-  parentElement: Element,
+  contextShading: Pick<ContextShading, 'coordinates'>,
+  parentElement: Pick<Element, 'coordinates'>,
+  shadingOrigin: PlanPoint | null,
   globalOffsetDeg = 0,
 ): { start_angle: number; end_angle: number } {
   if (!contextShading.coordinates || !parentElement.coordinates ||
@@ -78,11 +90,11 @@ export function calculateContextShadingAngularRangeFromCoordinates(
     return { start_angle: 0, end_angle: 0 };
   }
 
-  const parentCenter = getPlanCenter(parentElement.coordinates);
-  if (!parentCenter) return { start_angle: 0, end_angle: 0 };
+  const origin = resolveContextShadingOrigin(shadingOrigin, parentElement);
+  if (!origin) return { start_angle: 0, end_angle: 0 };
 
   let { start_angle, end_angle } = smallestAngularRange(
-    contextShading.coordinates.map((coord) => pointAzimuthDeg(coord, parentCenter)),
+    contextShading.coordinates.map((coord) => pointAzimuthDeg(coord, origin)),
   );
 
   if (globalOffsetDeg) {
@@ -96,12 +108,13 @@ export function calculateContextShadingAngularRangeFromCoordinates(
 export function calculateContextShadingDistanceFromCoordinates(
   contextShading: Pick<ContextShading, 'coordinates'>,
   parentElement: Pick<Element, 'coordinates'>,
+  shadingOrigin: PlanPoint | null,
 ): number {
   const shadingCenter = getPlanCenter(contextShading.coordinates);
-  const parentCenter = getPlanCenter(parentElement.coordinates);
-  if (!shadingCenter || !parentCenter) return 0;
+  const origin = parentElement.coordinates?.length ? resolveContextShadingOrigin(shadingOrigin, parentElement) : null;
+  if (!shadingCenter || !origin) return 0;
   return roundToTwoDecimals(Math.hypot(
-    shadingCenter.x - parentCenter.x,
-    shadingCenter.y - parentCenter.y,
+    shadingCenter.x - origin.x,
+    shadingCenter.y - origin.y,
   ));
 }

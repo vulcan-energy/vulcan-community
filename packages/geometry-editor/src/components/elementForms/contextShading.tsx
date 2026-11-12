@@ -58,6 +58,8 @@ export interface ContextShadingFormState {
     globalOrientationOffset?: number,
   ) => { start_angle: number; end_angle: number };
   calculateContextShadingDistance: (contextShading: ContextShading, parent: Element) => number;
+  shadingOriginIsSet: boolean;
+  resetShadingOrigin: () => void;
 }
 
 function useFormState(ctx: ElementFormStateCtx): ContextShadingFormState {
@@ -67,6 +69,8 @@ function useFormState(ctx: ElementFormStateCtx): ContextShadingFormState {
   const calculateContextShadingAngles = useGeometryStore((s) => s.calculateContextShadingAngles);
   const calculateShadingAngularRange = useGeometryStore((s) => s.calculateShadingAngularRange);
   const calculateContextShadingDistance = useGeometryStore((s) => s.calculateContextShadingDistance);
+  const shadingOriginIsSet = useGeometryStore((s) => Boolean(s.shadingOrigin));
+  const setShadingOrigin = useGeometryStore((s) => s.setShadingOrigin);
 
   return {
     contextShadingType,
@@ -80,6 +84,8 @@ function useFormState(ctx: ElementFormStateCtx): ContextShadingFormState {
     calculateContextShadingAngles,
     calculateShadingAngularRange,
     calculateContextShadingDistance,
+    shadingOriginIsSet,
+    resetShadingOrigin: () => setShadingOrigin(null),
   };
 }
 
@@ -131,6 +137,8 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
       calculateContextShadingAngles,
       calculateShadingAngularRange,
       calculateContextShadingDistance,
+      shadingOriginIsSet,
+      resetShadingOrigin,
     } = state;
     const {
       elementType,
@@ -300,6 +308,17 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
           />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('distance', distanceInput.value)} issue={getFieldValidationIssue('distance', distanceInput.value) || undefined} />
         </div>
+        {shadingOriginIsSet ? (
+          <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button
+              type="button"
+              className="btn editor-action-btn editor-action-btn--secondary"
+              onClick={resetShadingOrigin}
+            >
+              Reset origin to floor centre
+            </button>
+          </div>
+        ) : null}
         {renderFieldLabel('Height (m):', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs('height')}>
           <StandardInput

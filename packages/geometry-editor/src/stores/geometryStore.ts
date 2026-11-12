@@ -221,6 +221,7 @@ import { collectDuplicateElementNameWarnings } from '../lib/elementNameDuplicate
 import {
   calculateContextShadingAngularRangeFromCoordinates,
   calculateContextShadingDistanceFromCoordinates,
+  type PlanPoint,
 } from '../lib/contextShadingGeometry';
 import {
   syncDevelopmentContextShadingElements,
@@ -674,7 +675,7 @@ function findLowestContextShadingParent(
 function applyContextShadingCreationDerivations(
   prevElement: Element,
   normalizedUpdates: Partial<Element>,
-  state: Pick<GeometryState, 'elementsById' | 'floors' | 'globalOrientationOffset'>,
+  state: Pick<GeometryState, 'elementsById' | 'floors' | 'globalOrientationOffset' | 'shadingOrigin'>,
 ): void {
   if (prevElement.type !== 'ContextShading') return;
 
@@ -704,16 +705,17 @@ function applyContextShadingCreationDerivations(
   const angles = calculateContextShadingAngularRangeFromCoordinates(
     draft,
     parent,
+    state.shadingOrigin,
     state.globalOrientationOffset,
   );
   updateRecord.start_angle = roundToTwoDecimals(angles.start_angle);
   updateRecord.end_angle = roundToTwoDecimals(angles.end_angle);
-  updateRecord.distance = calculateContextShadingDistanceFromCoordinates(draft, parent);
+  updateRecord.distance = calculateContextShadingDistanceFromCoordinates(draft, parent, state.shadingOrigin);
 }
 
 function applyNewContextShadingElementDerivations(
   element: Element,
-  state: Pick<GeometryState, 'elementsById' | 'floors' | 'globalOrientationOffset'>,
+  state: Pick<GeometryState, 'elementsById' | 'floors' | 'globalOrientationOffset' | 'shadingOrigin'>,
 ): void {
   if (element.type !== 'ContextShading') return;
 
@@ -736,6 +738,7 @@ function applyNewContextShadingElementDerivations(
   const angles = calculateContextShadingAngularRangeFromCoordinates(
     contextElement,
     parent,
+    state.shadingOrigin,
     state.globalOrientationOffset,
   );
   if (typeof contextElement.start_angle !== 'number' || !Number.isFinite(contextElement.start_angle)) {
@@ -745,7 +748,7 @@ function applyNewContextShadingElementDerivations(
     contextElement.end_angle = roundToTwoDecimals(angles.end_angle);
   }
   if (typeof contextElement.distance !== 'number' || !Number.isFinite(contextElement.distance) || contextElement.distance <= 0) {
-    contextElement.distance = calculateContextShadingDistanceFromCoordinates(contextElement, parent);
+    contextElement.distance = calculateContextShadingDistanceFromCoordinates(contextElement, parent, state.shadingOrigin);
   }
 }
 
@@ -1640,6 +1643,10 @@ export interface GeometryState extends
     offset: number,
     options?: { recompute?: boolean },
   ) => void;
+  /** The model's one Context Shading origin; null measures from each shading's parent floor centroid. */
+  shadingOrigin: PlanPoint | null;
+  /** Sets the origin and re-derives every Context Shading's angles and distance (one undo step). */
+  setShadingOrigin: (origin: PlanPoint | null) => void;
 
   calculateContextShadingAngles: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg?: number) => { start_angle: number; end_angle: number };
   calculateShadingAngularRange: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg?: number) => { start_angle: number; end_angle: number };
@@ -3064,6 +3071,7 @@ const createGeometryState = (
       lastSavedCsv: null,
       targetValidation: null,
       globalOrientationOffset: 0,
+      shadingOrigin: null,
       ...extras,
     }));
   };
@@ -3210,6 +3218,32 @@ const createGeometryState = (
     if (options.recompute ?? true) {
       get().recomputeOrientationsForGlobalOffset(previousOffset, nextOffset);
     }
+  },
+  shadingOrigin: null,
+  setShadingOrigin: (origin) => {
+    if (origin && !(Number.isFinite(origin.x) && Number.isFinite(origin.y))) {
+      throw new Error(`Shading origin must be a finite point, got (${origin.x}, ${origin.y}).`);
+    }
+    set((state) => {
+      const elementsById = { ...state.elementsById };
+      // First element per name, as the other parent lookups (`find`) resolve it.
+      const byName = new Map(Object.values(state.elementsById).reverse().map((element) => [element.name, element]));
+      for (const element of Object.values(state.elementsById)) {
+        if (element.type !== 'ContextShading' || !element.coordinates?.length) continue;
+        const parent = element.parent_element ? byName.get(element.parent_element) : undefined;
+        if (!parent?.coordinates?.length) continue;
+        const angles = calculateContextShadingAngularRangeFromCoordinates(element, parent, origin, state.globalOrientationOffset);
+        elementsById[element.id] = {
+          ...element,
+          start_angle: roundToTwoDecimals(angles.start_angle),
+          end_angle: roundToTwoDecimals(angles.end_angle),
+          distance: calculateContextShadingDistanceFromCoordinates(element, parent, origin),
+          _v: (element._v ?? 0) + 1,
+        } as Element;
+      }
+      return { shadingOrigin: origin, elementsById };
+    });
+    get().saveToHistory('setShadingOrigin');
   },
   ...createIoSlice({
     defaultDefaultsPath,
@@ -7566,18 +7600,18 @@ const createGeometryState = (
   // local north convention (raw azimuth − offset), matching how `orientation360` is stored
   // on walls/PV. Default is 0 so existing geometry-only callers keep raw azimuth.
   calculateShadingAngularRange: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg = 0) => {
-    return calculateContextShadingAngularRangeFromCoordinates(contextShading, parentElement, globalOffsetDeg);
+    return calculateContextShadingAngularRangeFromCoordinates(contextShading, parentElement, get().shadingOrigin, globalOffsetDeg);
   },
 
   // Calculate ContextShading angles from the actual footprint relative to parent.
   // See `calculateShadingAngularRange` for the offset convention.
   calculateContextShadingAngles: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg = 0) => {
-    return calculateContextShadingAngularRangeFromCoordinates(contextShading, parentElement, globalOffsetDeg);
+    return calculateContextShadingAngularRangeFromCoordinates(contextShading, parentElement, get().shadingOrigin, globalOffsetDeg);
   },
 
   // Calculate ContextShading distance from center to parent center
   calculateContextShadingDistance: (contextShading: ContextShading, parentElement: Element) => {
-    return calculateContextShadingDistanceFromCoordinates(contextShading, parentElement);
+    return calculateContextShadingDistanceFromCoordinates(contextShading, parentElement, get().shadingOrigin);
   },
 
   syncDevelopmentContextShading: ({ projectId, activeStem, contextModels }) => {
@@ -7592,6 +7626,7 @@ const createGeometryState = (
       complianceSettings: state.complianceSettings,
       contextModels,
       globalOrientationOffset: state.globalOrientationOffset,
+      shadingOrigin: state.shadingOrigin,
     });
     if (result.changed) {
       set({

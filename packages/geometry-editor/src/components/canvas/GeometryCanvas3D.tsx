@@ -2856,6 +2856,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
   const updateElement = useGeometryStore((state) => state.updateElement);
   const commitVertexPositionUpdates = useGeometryStore((state) => state.commitVertexPositionUpdates);
   const snapCorners = useGeometryStore((state) => state.snapCorners);
+  const shadingOrigin = useGeometryStore((state) => state.shadingOrigin);
   const snapTol = useGeometryStore((state) => ((state as { PROJECT_DEFAULTS?: { snap_m?: number } }).PROJECT_DEFAULTS?.snap_m ?? 0.1));
   const previewActive = Boolean(thermalBridgePreview?.active);
   const [editDragging, setEditDragging] = useState(false);
@@ -2864,9 +2865,9 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
     () => {
       void themeId;
       void customTheme;
-      return buildGeometry3DPrimitives({ elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset });
+      return buildGeometry3DPrimitives({ elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset, shadingOrigin });
     },
-    [elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset, themeId, customTheme],
+    [elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset, shadingOrigin, themeId, customTheme],
   );
   const previewRelatedElementIds = useMemo(() => {
     return new Set(thermalBridgePreview?.highlightedHostIds ?? []);
@@ -2920,9 +2921,10 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
           floors,
           currentFloorZ,
           globalOrientationOffset,
+          shadingOrigin,
         })
       : [],
-    [currentFloorZ, editPreviewElementIds, editPreviewElementsById, editPreviewSceneElementsById, floors, globalOrientationOffset],
+    [currentFloorZ, editPreviewElementIds, editPreviewElementsById, editPreviewSceneElementsById, floors, globalOrientationOffset, shadingOrigin],
   );
 
   const center = useMemo<[number, number, number]>(() => {

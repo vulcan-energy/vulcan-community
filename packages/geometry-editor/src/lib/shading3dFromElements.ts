@@ -14,7 +14,7 @@ import { frameInsetFromFrameAreaFraction } from './geometryVentilationOverlay';
 import type { OrientedBoxPrimitive, PolygonPrismPrimitive } from './geometry3dPrimitivesTypes';
 import { segmentTangentAndOpeningOutwardModelXY } from './openingSegmentOutward';
 import { createParentElementLookup } from './elementNameRemap';
-import { getPlanCenter } from './contextShadingGeometry';
+import { getPlanCenter, resolveContextShadingOrigin, type PlanPoint } from './contextShadingGeometry';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -423,6 +423,7 @@ export function buildWindowShadingOrientedBoxes(
 export function buildContextShadingSectorPrism(
   shading: Element & { type: 'ContextShading' },
   elementsById: Record<string, Element>,
+  shadingOrigin: PlanPoint | null,
   floorElevations: Map<number, number>,
   getElementBaseElevation: (el: Element, fe: Map<number, number>) => number,
   getElementFloorZ: (el: Element) => number,
@@ -456,19 +457,14 @@ export function buildContextShadingSectorPrism(
   }
 
   const dist = isFiniteNumber(shading.distance) && shading.distance > 0 ? shading.distance : 2;
-  let ox: number;
-  let oy: number;
-
   const parent = shading.parent_element
     ? findElementByNameOrId(elementsById, shading.parent_element)
     : null;
-  if (parent?.coordinates && parent.coordinates.length >= 3) {
-    ({ x: ox, y: oy } = getPlanCenter(parent.coordinates)!);
-  } else if (shading.coordinates?.length) {
-    ({ x: ox, y: oy } = getPlanCenter(shading.coordinates)!);
-  } else {
-    return null;
-  }
+  const origin = parent?.coordinates && parent.coordinates.length >= 3
+    ? resolveContextShadingOrigin(shadingOrigin, parent)
+    : getPlanCenter(shading.coordinates);
+  if (!origin) return null;
+  const { x: ox, y: oy } = origin;
 
   const startDeg = isFiniteNumber(shading.start_angle) ? shading.start_angle : 0;
   const endDeg = isFiniteNumber(shading.end_angle) ? shading.end_angle : 45;

@@ -21,6 +21,7 @@ import {
   buildContextShadingSectorPrism,
   buildWindowShadingOrientedBoxes,
 } from './shading3dFromElements';
+import type { PlanPoint } from './contextShadingGeometry';
 import { groundSlabPolygonEdgesXY, nonBasementGroundSurfaceElevationM } from './suspendedFloorGeometry';
 import {
   basementFloorSurfaceElevationM,
@@ -62,6 +63,8 @@ interface BuildGeometry3DPrimitivesOptions {
   floors: Floor[];
   currentFloorZ?: number;
   globalOrientationOffset?: number;
+  /** The model's Context Shading origin; null or absent measures from each parent floor centroid. */
+  shadingOrigin?: PlanPoint | null;
 }
 
 const WALL_DEFAULT_HEIGHT_M = 2.4;
@@ -1032,6 +1035,7 @@ function mapElementTo3DPrimitives(
   floorZLookup: FloorZLookup,
   allElements: Element[],
   globalOrientationOffset: number | undefined,
+  shadingOrigin: PlanPoint | null,
   currentFloorZ?: number,
 ): Geometry3DPrimitive[] {
   const t = element.type;
@@ -1074,6 +1078,7 @@ function mapElementTo3DPrimitives(
     const prism = buildContextShadingSectorPrism(
       element as Element & { type: 'ContextShading' },
       elementsById,
+      shadingOrigin,
       floorElevations,
       (targetElement, targetFloorElevations) => getElementBaseElevation(targetElement, targetFloorElevations, floorZLookup),
       (targetElement) => getElementFloorZ(targetElement, floorZLookup),
@@ -1166,6 +1171,7 @@ export function buildGeometry3DPrimitives({
   floors,
   currentFloorZ,
   globalOrientationOffset,
+  shadingOrigin = null,
 }: BuildGeometry3DPrimitivesOptions): Geometry3DPrimitive[] {
   // Bake wall-derived + user-override storey heights into the floors array once, then thread
   // the effective floors through the renderer. Without this, models authored under the new
@@ -1179,7 +1185,7 @@ export function buildGeometry3DPrimitives({
   for (const elementId of elementIds) {
     const element = elementsById[elementId];
     if (!element) continue;
-    primitives.push(...mapElementTo3DPrimitives(element, elementsById, floorElevations, effFloors, floorZLookup, allElements, globalOrientationOffset, currentFloorZ));
+    primitives.push(...mapElementTo3DPrimitives(element, elementsById, floorElevations, effFloors, floorZLookup, allElements, globalOrientationOffset, shadingOrigin, currentFloorZ));
   }
 
   return primitives;

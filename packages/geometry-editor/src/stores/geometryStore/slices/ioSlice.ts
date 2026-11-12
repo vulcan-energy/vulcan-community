@@ -908,6 +908,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       : 0;
     lines.push('Metadata,,,,,,,,,,,,,');
     lines.push(`GlobalOrientationOffset,${orientationOffset},,,,,,,,,,,,,`);
+    if (state.shadingOrigin) {
+      lines.push(`ShadingOriginX,${state.shadingOrigin.x},,,,,,,,,,,,,`);
+      lines.push(`ShadingOriginY,${state.shadingOrigin.y},,,,,,,,,,,,,`);
+    }
     if (exportVersion < 3 && state.sourceProvenanceMarkersVersion !== undefined) {
       lines.push(`${PROVENANCE_MARKERS_METADATA_KEY},${state.sourceProvenanceMarkersVersion},,,,,,,,,,,,,`);
     }
@@ -1797,6 +1801,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Recompute is only meaningful when the user changes the offset interactively,
     // and at this point in loadFromCSV the new elements aren't in state yet anyway.
     get().setGlobalOrientationOffset(metadata.globalOrientationOffset, { recompute: false });
+    // Loaded shadings already carry the angles derived from this origin.
+    set({ shadingOrigin: metadata.shadingOrigin });
     {
       // Use the CSV's explicit path, or the embedding host's configured default.
       // Community supplies its one starter defaults_template.json resource;

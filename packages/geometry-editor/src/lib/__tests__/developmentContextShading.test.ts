@@ -136,6 +136,7 @@ describe('developmentContextShading', () => {
       wall('source-wall', 'Source Wall', 8, 0, 12, 0, 2.7),
     ];
     const first = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: { [activeGround.id]: activeGround },
@@ -155,6 +156,7 @@ describe('developmentContextShading', () => {
     expect(generated.extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.sourceStem).toBe('plot-b');
 
     const second = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: first.elementsById,
@@ -178,6 +180,7 @@ describe('developmentContextShading', () => {
       wall('source-wall', 'Source Wall', 8, 0, 12, 0, 2.7),
     ];
     const first = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'draft_model',
       elementsById: { [activeGround.id]: activeGround },
@@ -191,6 +194,7 @@ describe('developmentContextShading', () => {
     expect(draftGenerated.extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.activeStem).toBe('draft_model');
 
     const renamed = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-new',
       elementsById: first.elementsById,
@@ -212,6 +216,7 @@ describe('developmentContextShading', () => {
     const sourceGround = ground('source-ground', 'Source Ground', 8, 0, 12, 4);
 
     const result = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: { [activeGround.id]: activeGround },
@@ -239,6 +244,7 @@ describe('developmentContextShading', () => {
     ];
 
     const sameFloor = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: { [activeGround.id]: activeGround },
@@ -256,6 +262,7 @@ describe('developmentContextShading', () => {
     expect(sameFloor.skippedSameFloorOverlapCount).toBe(1);
 
     const stacked = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: { [activeGround.id]: activeGround },
@@ -290,6 +297,7 @@ describe('developmentContextShading', () => {
       wall('source-wall', 'Source Wall', 8, 0, 12, 0, 2.4),
     ];
     const first = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: { [activeGround.id]: activeGround },
@@ -309,6 +317,7 @@ describe('developmentContextShading', () => {
       distance: 99,
     } as Element;
     const second = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: {
@@ -339,6 +348,7 @@ describe('developmentContextShading', () => {
     ];
 
     const result = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: { [activeGround.id]: activeGround },
@@ -380,6 +390,7 @@ describe('developmentContextShading', () => {
       const active = { ...ground('active-ground', 'Active Ground', 0, 0, 1, 1), coordinates: at(activePoints) } as Element;
       const context = { ...contextShading('source-context', 'Neighbour', 0, 0, 1, 1), coordinates: at(contextPoints) } as Element;
       const result = syncDevelopmentContextShadingElements({
+        shadingOrigin: null,
         projectId: 'project',
         activeStem: 'plot-a',
         elementsById: { [active.id]: active },
@@ -408,6 +419,7 @@ describe('developmentContextShading', () => {
     const activeContext = contextShading('active-tree', 'Tree belt', 20, 0, 22, 4, 6.5);
 
     const result = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: {
@@ -441,6 +453,7 @@ describe('developmentContextShading', () => {
       contextShading('source-tree-copy', 'Tree belt copy', 20, 0, 22, 4, 6.5),
     ];
     const first = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: { [activeGround.id]: activeGround },
@@ -462,6 +475,7 @@ describe('developmentContextShading', () => {
     } as Element;
 
     const second = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: {
@@ -520,6 +534,7 @@ describe('developmentContextShading', () => {
     } as Element;
 
     const result = syncDevelopmentContextShadingElements({
+      shadingOrigin: null,
       projectId: 'project',
       activeStem: 'plot-a',
       elementsById: { [activeGround.id]: activeGround },

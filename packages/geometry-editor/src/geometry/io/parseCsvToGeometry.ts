@@ -221,6 +221,8 @@ export type FloorBaseHeightOverrideRow = Readonly<{ zIndex: number; baseHeight: 
 
 export type ParsedCsvMetadata = {
   globalOrientationOffset: number;
+  /** The model's Context Shading origin (ShadingOriginX/Y rows); null measures from each parent floor centroid. */
+  shadingOrigin: { x: number; y: number } | null;
   vulcanCsvVersion: number;
   targetBundleId?: string;
   /** Opaque shared-model identity (a uuid), stamped by the host on first save. */
@@ -292,6 +294,7 @@ export const parseCsvToGeometry = (
   const tabularCsv = stripLegacyBuildingServicesBlocks(lines.slice(tabularStart).join('\n'));
 
   let globalOffset = 0;
+  const shadingOriginCells: { ShadingOriginX?: number; ShadingOriginY?: number } = {};
   let detectedProvenanceMarkersVersion: number | undefined;
   let detectedVulcanCsvVersion: string | undefined;
   let detectedDefaultsPath: string | undefined;
@@ -342,6 +345,14 @@ export const parseCsvToGeometry = (
     if (hostMetadataKey && hostDocumentMetadataKeys.has(hostMetadataKey)) {
       const value = metadataFields[1]?.trim();
       if (value) detectedHostDocumentMetadata[hostMetadataKey] = value;
+      continue;
+    }
+    if (hostMetadataKey === 'ShadingOriginX' || hostMetadataKey === 'ShadingOriginY') {
+      const value = metadataNumber(line);
+      if (!Number.isFinite(value)) {
+        throw new Error(`Invalid ${hostMetadataKey}: "${metadataFields[1]?.trim() ?? ''}". It must be a number of metres.`);
+      }
+      shadingOriginCells[hostMetadataKey] = value;
       continue;
     }
     if (line.startsWith('GlobalOrientationOffset,')) {
@@ -773,6 +784,11 @@ export const parseCsvToGeometry = (
       ground.total_area = automaticTotal;
     }
   }
+  const { ShadingOriginX: originX, ShadingOriginY: originY } = shadingOriginCells;
+  if ((originX === undefined) !== (originY === undefined)) {
+    throw new Error('ShadingOriginX and ShadingOriginY must both be set or both be absent.');
+  }
+  const shadingOrigin = originX !== undefined && originY !== undefined ? { x: originX, y: originY } : null;
   const referenceNormalizedElements = migrateVulcanCsvElementsForEditor(
     newElements,
     csvVersion,
@@ -787,6 +803,7 @@ export const parseCsvToGeometry = (
     warnings,
     metadata: {
       globalOrientationOffset: globalOffset,
+      shadingOrigin,
       vulcanCsvVersion: csvVersion,
       targetBundleId,
       modelId: detectedModelId,

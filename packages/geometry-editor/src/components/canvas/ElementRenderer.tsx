@@ -9,6 +9,7 @@ import { HOVER_GLOW } from './elementRendererPalette';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
 import type { Element, Floor } from '../../geometry/types';
 import {
+  useGeometryStore,
   useGeometryStoreApi,
   type GeometryStoreApi,
   generateDefaultCoordinates,
@@ -36,7 +37,12 @@ import { getDormerBundleInfo } from '../../lib/dormerGeometry';
 import { deriveRoofCutout, effectiveFloorsOf, elementsOf } from '../../lib/roofCutouts';
 import { isElementOnActiveCanvasFloor } from '../../lib/elementCanvasFloor';
 import { isDevelopmentContextGeneratedShading } from '../../lib/developmentContextShading';
-import { getPlanCenter } from '../../lib/contextShadingGeometry';
+import {
+  calculateContextShadingAngularRangeFromCoordinates,
+  getPlanCenter,
+  resolveContextShadingOrigin,
+  type PlanPoint,
+} from '../../lib/contextShadingGeometry';
 import {
   cascadeHostedDescendantGeometry,
   collectHostedDescendantElementIds,
@@ -695,6 +701,9 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   mvhrBadgeInline = false,
 }) => {
   const geometryStore = useGeometryStoreApi();
+  const shadingOrigin = useGeometryStore((state) => state.shadingOrigin);
+  // The shading origin while its handle is dragged; the arc follows it before the drop commits.
+  const [shadingOriginDrag, setShadingOriginDrag] = useState<PlanPoint | null>(null);
   const arrowRotateInteractionRef = useRef<{
     target: ArrowRotateDragTarget;
     session: CanvasInteractionSession<ArrowRotateSnapshot>;
@@ -2708,8 +2717,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                 .find(el => el && el.name === contextShading.parent_element);
               if (!parentElement || !parentElement.coordinates) return null;
 
-              // Calculate parent center
-              const parentCenter = getPlanCenter(parentElement.coordinates);
+              // The model's shading origin (the parent floor centroid unless the user placed it).
+              const parentCenter = resolveContextShadingOrigin(shadingOriginDrag ?? shadingOrigin, parentElement);
               if (!parentCenter) return null;
               const parentCenterCanvas = worldToCanvas(parentCenter, scale, panOffset, canvasCenter);
 
@@ -2722,8 +2731,11 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               const distance = Math.hypot(contextCenter.x - parentCenter.x, contextCenter.y - parentCenter.y);
 
               // Calculate angles in real-time using current coordinates
-              const { calculateShadingAngularRange } = geometryStore.getState();
-              const { start_angle, end_angle } = calculateShadingAngularRange({ ...element, coordinates }, parentElement);
+              const { start_angle, end_angle } = calculateContextShadingAngularRangeFromCoordinates(
+                { coordinates },
+                parentElement,
+                shadingOriginDrag ?? shadingOrigin,
+              );
 
               // Use raw azimuth for geometry (visual arc should reflect real-world position)
               // Convert azimuth (0°=N) to canvas angle (0°=E) by rotating -90° (+270°)
@@ -2751,15 +2763,36 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
 
               return (
                 <Group key={`context-shading-arc-${element.id}`}>
-                  {/* Parent center highlight */}
+                  {/* Shading origin: drag to place it for the whole model */}
                   <Circle
+                    name="shading-origin-handle"
                     x={parentCenterCanvas.x}
                     y={parentCenterCanvas.y}
                     radius={8}
                     fill={canvasInteractionPalette.guideFill}
                     stroke={canvasInteractionPalette.guide}
                     strokeWidth={2}
-                    listening={false}
+                    draggable
+                    listening
+                    onMouseEnter={(e) => {
+                      const stage = e.target.getStage();
+                      if (stage) stage.container().style.cursor = 'move';
+                    }}
+                    onMouseLeave={(e) => {
+                      const stage = e.target.getStage();
+                      if (stage) stage.container().style.cursor = '';
+                    }}
+                    onDragStart={(e) => { e.cancelBubble = true; }}
+                    onDragMove={(e) => {
+                      e.cancelBubble = true;
+                      setShadingOriginDrag(canvasToWorld({ x: e.target.x(), y: e.target.y() }, scale, panOffset, canvasCenter));
+                    }}
+                    onDragEnd={(e) => {
+                      e.cancelBubble = true;
+                      const world = canvasToWorld({ x: e.target.x(), y: e.target.y() }, scale, panOffset, canvasCenter);
+                      setShadingOriginDrag(null);
+                      geometryStore.getState().setShadingOrigin({ x: world.x, y: world.y });
+                    }}
                   />
 
                   {/* Reference lines at start/end angles */}

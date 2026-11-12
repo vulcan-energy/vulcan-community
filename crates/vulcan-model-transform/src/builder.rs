@@ -1146,6 +1146,8 @@ fn strip_nested_cleared_fields(value: &Value) -> Value {
 /// metadata mergers (it was previously triplicated and had already drifted).
 const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "GlobalOrientationOffset",
+    "ShadingOriginX",
+    "ShadingOriginY",
     "VulcanCsvVersion",
     "DefaultsPath",
     "Postcode",
@@ -4709,6 +4711,8 @@ impl JSONBuilder {
                     // Skip known metadata fields that aren't compliance settings. Every model is
                     // converted for an FHS target, so the old ComplianceValidationEnabled row is ignored.
                     if name == "GlobalOrientationOffset"
+                        || name == "ShadingOriginX"
+                        || name == "ShadingOriginY"
                         || name == "DefaultsPath"
                         || name == VULCAN_CSV_VERSION
                         || name == "ComplianceValidationEnabled"
@@ -9733,6 +9737,21 @@ window 0,Living,BuildingElementTransparent,1.2,90,1,1.2,90,3.2,{stored_mid_heigh
                 Some(1.4),
             );
         }
+    }
+
+    #[test]
+    fn shading_origin_metadata_stays_out_of_the_model_json() {
+        let csv = r#"Metadata
+GlobalOrientationOffset,0
+ShadingOriginX,1.25
+ShadingOriginY,-3.5
+
+Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+"#;
+        let json = build_full_json(csv).to_string();
+        assert!(!json.contains("ShadingOrigin"), "{json}");
     }
 
     #[test]
