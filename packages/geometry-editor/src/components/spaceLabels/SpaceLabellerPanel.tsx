@@ -336,7 +336,6 @@ function SpaceLabelCompactRow({
           <span>Open to living</span>
         </label>
       ) : null}
-      {HostFields ? <HostFields label={label} onPatchExtraJson={patchExtraJson} /> : null}
       <button
         type="button"
         className="space-labeller-panel__icon-btn"
@@ -349,6 +348,11 @@ function SpaceLabelCompactRow({
       >
         <DeleteSpaceIcon />
       </button>
+      {HostFields ? (
+        <div className="space-labeller-panel__row-host">
+          <HostFields label={label} onPatchExtraJson={patchExtraJson} />
+        </div>
+      ) : null}
       {warnings && warnings.length > 0 ? (
         <div className="space-labeller-panel__row-warning">
           {warnings.map((message, i) => (
