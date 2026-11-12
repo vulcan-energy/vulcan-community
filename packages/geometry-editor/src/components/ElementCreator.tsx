@@ -162,7 +162,7 @@ import {
   getParentOrientation360,
   buildHostedLinearParentPatch,
 } from '../lib/parentOrientation';
-import type { MvhrDuctRole, MvhrTerminalRole } from '../lib/mvhrDuctwork';
+import type { MvhrDuctRole, MvhrTerminalRole } from '../lib/mvhrRoles';
 import { useMvhrDuctTerminalManager } from './MvhrDuctTerminalManager';
 import {
   computeAutoDormerBundleName,

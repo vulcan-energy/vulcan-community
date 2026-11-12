@@ -20,7 +20,8 @@ import { findHostElementForAutoTbProposal } from '../geometry/thermalBridge/reso
 import { useThermalBridgePreviewMode } from './useThermalBridgePreviewMode';
 import { getElementCanvasFloorZValue, networkPoint3 } from '../lib/elementCanvasFloor';
 import { withEffectiveStoreyHeights } from '../lib/zoneDerivation';
-import { planAutoDucts, planPrimaryPipework, primaryPipeworkPairs, type MvhrDuctRole, type Point3 } from '../lib/mvhrDuctwork';
+import { planAutoDucts, planPrimaryPipework, primaryPipeworkPairs, type Point3 } from '../lib/mvhrDuctwork';
+import type { MvhrDuctRole } from '../lib/mvhrRoles';
 import type { GeometryState } from '../stores/geometryStore';
 
 export interface ThermalBridgePreviewAnchor { x: number; y: number }

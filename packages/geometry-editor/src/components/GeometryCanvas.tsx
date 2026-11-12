@@ -130,13 +130,8 @@ import {
   serviceLineModeFromDrawMode,
 } from '../lib/serviceLineDrawModes';
 import { roundToTwoDecimals } from '../geometry/constants';
-import {
-  defaultMvhrTerminalZ,
-  getMechanicalVentilationDuctworkRoleStyle,
-  isMvhrTerminalHost,
-  type MvhrDuctRole,
-  type MvhrTerminalRole,
-} from '../lib/mvhrDuctwork';
+import { defaultMvhrTerminalZ, isMvhrTerminalHost } from '../lib/mvhrDuctwork';
+import { getMechanicalVentilationDuctworkRoleStyle, type MvhrDuctRole, type MvhrTerminalRole } from '../lib/mvhrRoles';
 import {
   buildPvPanelRectangleCoords,
   getPvFootprintDimensionsFromPreset,

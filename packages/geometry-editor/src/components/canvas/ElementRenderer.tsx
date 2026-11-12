@@ -91,7 +91,7 @@ import { getMvhrTerminalBadgeSize } from '../../lib/drawModeTooltipPill';
 import type { SnapEvent } from '../../lib/snapEvent';
 import type { SnapFeedbackSignal } from './snapFeedbackSignal';
 import { geometryPerf } from '../../lib/geometryPerf';
-import { getMechanicalVentilationDuctworkRoleStyle } from '../../lib/mvhrDuctwork';
+import { getMechanicalVentilationDuctworkRoleStyle } from '../../lib/mvhrRoles';
 import {
   isOrientationPitchAxis,
   slopedPolygonPlaneBasis,

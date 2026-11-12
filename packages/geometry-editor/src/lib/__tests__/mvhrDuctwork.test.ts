@@ -17,16 +17,15 @@ import {
   defaultMvhrTerminalZ,
   planAutoDucts,
   deriveMechanicalVentilationTerminalPosition,
-  getMvhrDuctRoleStyle,
   hostedMvhrTerminalDraft,
   isMvhrTerminalHost,
   looseDuctRunEndNearestUnit,
-  MVHR_DUCT_ROLE_STYLES,
   planPrimaryPipework,
   planPrimaryPipeworkByPair,
   primaryPipeRunGap,
   terminalConnectsToDuctEndpoint,
 } from '../mvhrDuctwork';
+import { getMvhrDuctRoleStyle, MVHR_DUCT_ROLE_STYLES } from '../mvhrRoles';
 import { networkPoint3 } from '../elementCanvasFloor';
 
 describe('mvhrDuctwork helpers', () => {

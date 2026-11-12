@@ -7,7 +7,7 @@ import type Konva from 'konva';
 import { worldToCanvas } from '../../lib/shapeUtils';
 import { readRootCssVar } from '../../lib/cssVars';
 import type { CanvasPreview, ThermalBridgePreviewAnchor } from '../../hooks/useAutoThermalBridgePreview';
-import { MVHR_DUCT_ROLE_STYLES } from '../../lib/mvhrDuctwork';
+import { MVHR_DUCT_ROLE_STYLES } from '../../lib/mvhrRoles';
 import type { AutoThermalBridgeCandidate } from '../../geometry/thermalBridge/autoThermalBridgeCandidates';
 import type { DrawingCanvasPalette } from './drawingPreviewPalette';
 import { thermalBridgeCandidatesForRender, thermalBridgeIssuesForRender } from './thermalBridgePreviewRenderRows';

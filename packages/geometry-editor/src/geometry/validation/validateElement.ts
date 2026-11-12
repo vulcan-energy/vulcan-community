@@ -125,15 +125,13 @@ import {
 } from '../../lib/parentControlledFloor';
 import { getElementCanvasFloorZValue, networkPoint3 } from '../../lib/elementCanvasFloor';
 import {
-  MVHR_DUCT_ROLES,
   collectMvhrDuctTopologyWarnings,
   deriveMechanicalVentilationTerminalPosition,
-  isMvhrDuctRole,
   isMvhrTerminalHost,
-  isMvhrTerminalRole,
   primaryPipeRunGap,
   terminalConnectsToDuctEndpoint,
 } from '../../lib/mvhrDuctwork';
+import { MVHR_DUCT_ROLES, isMvhrDuctRole, isMvhrTerminalRole } from '../../lib/mvhrRoles';
 
 // ---------------- Module-level pure helpers ----------------
 // Hoisted from inside `validateElementCore` because they have no closure state. Available to
