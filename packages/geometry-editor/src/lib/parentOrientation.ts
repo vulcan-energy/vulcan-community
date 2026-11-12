@@ -3,7 +3,7 @@
 
 import { createElementNameLookup } from './elementNameRemap';
 import { deriveWallProperties } from './openingSegmentOutward';
-import { roundToFourDecimals } from '../geometry/constants';
+import { MIN_WALL_SEGMENT, roundToFourDecimals } from '../geometry/constants';
 import { projectSegmentOntoParent } from './snapUtils';
 import {
   applyMechanicalVentilationCsvPositionColumns,
@@ -28,16 +28,13 @@ export function getParentOrientation360(
   parent: Element,
   globalOrientationOffset: number,
 ): number | undefined {
+  // A segment too short to give a bearing falls back to the host's own value, never to 0.
   if (Array.isArray(parent.coordinates) && parent.coordinates.length === 2) {
-    try {
-      return deriveWallProperties(parent, globalOrientationOffset).orientation360;
-    } catch {
-      return undefined;
-    }
+    const wall = deriveWallProperties(parent, globalOrientationOffset);
+    if (wall.width >= MIN_WALL_SEGMENT) return wall.orientation360;
   }
-  return 'orientation360' in parent && typeof parent.orientation360 === 'number'
-    ? parent.orientation360
-    : undefined;
+  const orientation = (parent as { orientation360?: unknown }).orientation360;
+  return typeof orientation === 'number' && Number.isFinite(orientation) ? orientation : undefined;
 }
 
 export function projectLinearChildOntoParentSegment(
