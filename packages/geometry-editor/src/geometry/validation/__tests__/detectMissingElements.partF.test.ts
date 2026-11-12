@@ -160,8 +160,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([radiator]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx(),
     );
 
@@ -179,8 +178,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([system]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx(),
     );
 
@@ -194,8 +192,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([system]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx(),
     );
 
@@ -210,8 +207,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, bath]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({ storeys: 2 }),
     );
 
@@ -229,8 +225,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, bath]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({ storeys: 1 }),
     );
 
@@ -246,8 +241,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, shower]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({ storeys: 2 }),
     );
 
@@ -263,8 +257,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, shower]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({ storeys: 2 }),
     );
 
@@ -284,8 +277,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById(els),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({ spaceLabels: [bedroomLabel(0, 0)] }),
     );
 
@@ -307,7 +299,7 @@ describe('detectMissingElements + Part F', () => {
     const cmev = mv('Centralised continuous MEV', 200);
     const els = [wall, cmev];
 
-    const missing = detectMissingElements([z1], elementsById(els), true, false);
+    const missing = detectMissingElements([z1], elementsById(els), { complianceValidationEnabled: true, partOActiveCoolingRequired: false });
     const partFRows = missing.filter((m) => m.path.startsWith('/InfiltrationVentilation/'));
     expect(partFRows).toHaveLength(0);
   });
@@ -321,8 +313,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById(els),
-      false,
-      false,
+      { complianceValidationEnabled: false, partOActiveCoolingRequired: false },
       partFCtx({ spaceLabels: [bedroomLabel(0, 0)] }),
     );
     expect(missing).toHaveLength(0);
@@ -336,8 +327,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([placeholder, cmev]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx(),
     );
     const partFRows = missing.filter((m) => m.path.startsWith('/InfiltrationVentilation/'));
@@ -352,8 +342,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, cmev]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({ habitableRooms: undefined }),
     );
     const partFRows = missing.filter((m) => m.path.startsWith('/InfiltrationVentilation/'));
@@ -369,8 +358,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, wnd, cmev]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({ spaceLabels: [bedroomLabel(0, 0)] }),
     );
     const areaRow = missing.find((m) => m.path.endsWith('/background_area_continuous'));
@@ -398,8 +386,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, cmev, ...enoughVents]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx(),
     );
     expect(missing.find((m) => m.path.endsWith('/whole_dwelling_continuous'))).toBeUndefined();
@@ -425,8 +412,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, imev1, imev2, ...padVents]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({
         bedrooms: 1,
         habitableRooms: 5,
@@ -455,8 +441,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, mvhr, offendingVent]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx(),
     );
     expect(missing.find((m) => m.path.endsWith('/mvhr_no_background_vents'))).toBeUndefined();
@@ -473,8 +458,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, imev, cmev]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({
         bedrooms: 4,
         habitableRooms: 5,
@@ -514,8 +498,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, cmev, oneHugeVent]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({ bedrooms: 4, habitableRooms: 5 }),
     );
     const partFRows = missing.filter((m) => m.path.startsWith('/InfiltrationVentilation/'));
@@ -535,8 +518,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, imev1, imev2, imev3]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({
         bedrooms: 2,
         habitableRooms: 4,
@@ -572,8 +554,7 @@ describe('detectMissingElements + Part F', () => {
     const missing = detectMissingElements(
       [z1],
       elementsById([wall, imev, ...padVents]),
-      true,
-      false,
+      { complianceValidationEnabled: true, partOActiveCoolingRequired: false },
       partFCtx({
         bedrooms: 1,
         habitableRooms: 5,

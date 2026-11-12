@@ -7,7 +7,8 @@ import type { Element, ElementType, Floor } from '../../geometry/types';
 import type { ValidationResult } from '../../geometry/validation/types';
 import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
 import { useGeometrySchemaPort } from '../../../../geometry-editor-host/src/editorServicePorts';
-import { targetSchemaMode } from '../../../../geometry-editor-host/src/schemaPort';
+import { elementTypeAvailability } from '../../lib/schemaCache';
+import { useGeometryStore } from '../../stores/geometryStore';
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { StandardDropdown } from '../StandardDropdown';
 import { ElementTypePicker } from '../ElementTypePicker';
@@ -19,8 +20,6 @@ import {
   type MvhrDuctRole,
   type MvhrTerminalRole,
 } from '../../lib/mvhrRoles';
-
-const COMPLIANCE_EXCLUDED_DRAW_TYPES: ElementType[] = ['CombustionAppliances'];
 
 function drawingTypeIncludes(types: readonly ElementType[], type: ElementType): boolean {
   return types.includes(type);
@@ -152,11 +151,15 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   hidden = false,
 }) {
   const in3D = viewMode === '3d';
-  const excludesComplianceTypes = targetSchemaMode(useGeometrySchemaPort()) === 'fhs';
+  const schemaPort = useGeometrySchemaPort();
+  const modelSettings = useGeometryStore((s) => s.complianceSettings);
+  // Until the target schema loads only the current type is listed; the host reports a failed load.
   const drawElementTypeOptions = useMemo(
-    () => ELEMENT_TYPE_ORDER.filter((type) => !(excludesComplianceTypes && COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(type))),
-    [excludesComplianceTypes]
+    () => ELEMENT_TYPE_ORDER.filter((type) =>
+      type === drawElementType || elementTypeAvailability(schemaPort, type, modelSettings).available),
+    [drawElementType, schemaPort, modelSettings]
   );
+  const drawElementTypeExcluded = 'reason' in elementTypeAvailability(schemaPort, drawElementType, modelSettings);
   const drawModeOptions = useMemo(
     () => getDrawModeOptionsForElementType(drawElementType),
     [drawElementType],
@@ -201,13 +204,13 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   }, [in3D, resetDraftForMode, setDrawElementType, setDrawMode]);
 
   useEffect(() => {
-    if (excludesComplianceTypes && COMPLIANCE_EXCLUDED_DRAW_TYPES.includes(drawElementType)) {
+    if (drawElementTypeExcluded) {
       const nextMode = getDefaultDrawModeForElementType('BuildingElementOpaque');
       setDrawElementType('BuildingElementOpaque');
       setDrawMode(nextMode);
       resetDraftForMode(nextMode);
     }
-  }, [excludesComplianceTypes, drawElementType, resetDraftForMode, setDrawElementType, setDrawMode]);
+  }, [drawElementTypeExcluded, resetDraftForMode, setDrawElementType, setDrawMode]);
 
   useEffect(() => {
     if (!isServiceLineElementType(drawElementType)) {

@@ -1467,10 +1467,9 @@ pub struct JSONBuilder {
     opaque_template_roof: Option<Value>,
     /// Indexed from defaults: last opaque with `is_external_door` true.
     opaque_template_external_door: Option<Value>,
-    /// True when this builder was initialised with an FHS schema (input_fhs.schema.json).
-    /// In that case we keep richer FHS-only fields; for Core schemas we rely strictly
-    /// on the Core schema's allowed properties when pruning.
-    is_fhs_schema: bool,
+    /// Model profile the output targets; every profile-dependent step asks it a
+    /// capability question (see `ModelProfile`).
+    profile: ModelProfile,
     input_contract: crate::InputContract,
     schema_omissions: RefCell<Vec<crate::finalization::SchemaOmission>>,
     /// FHS cold-water source selected from CSV Metadata `ColdWaterSource`.
@@ -1493,11 +1492,6 @@ impl JSONBuilder {
         self.input_contract = profile.input_contract();
     }
 
-    /// True when this builder validates against an FHS-family schema (FHS / ECaaS).
-    pub fn targets_fhs_schema(&self) -> bool {
-        self.is_fhs_schema
-    }
-
     /// Top-level property names the active schema accepts. Used to reject unknown
     /// root keys, since schema roots are not strict (`unevaluatedProperties` absent).
     pub fn schema_root_property_names(&self) -> HashSet<String> {
@@ -1518,10 +1512,14 @@ impl JSONBuilder {
         // Detect FHS schema by inspecting schema content (required fields), not the
         // file path. Path-based detection was too broad and could misclassify
         // core schema paths that happened to include "fhs".
-        let is_fhs = Self::detect_fhs_schema(&schema);
+        let profile = if Self::detect_fhs_schema(&schema) {
+            ModelProfile::Fhs
+        } else {
+            ModelProfile::Core
+        };
 
         let mut builder = Self {
-            is_fhs_schema: is_fhs,
+            profile,
             input_contract: crate::ConversionProfile::default().input_contract(),
             schema_omissions: RefCell::new(Vec::new()),
             schema,
@@ -1554,10 +1552,8 @@ impl JSONBuilder {
         let defaults: Value = serde_json::from_str(defaults_json)
             .map_err(|e| BuildError::new("E006", &format!("Failed to parse defaults JSON: {e}")))?;
 
-        let is_fhs = profile == ModelProfile::Fhs;
-
         let mut builder = Self {
-            is_fhs_schema: is_fhs,
+            profile,
             input_contract: crate::ConversionProfile::default().input_contract(),
             schema_omissions: RefCell::new(Vec::new()),
             schema,
@@ -1940,7 +1936,7 @@ impl JSONBuilder {
             }
         }
 
-        if self.is_fhs_schema {
+        if self.profile.requires_authored_heating_systems() {
             if let Some(root) = result.as_object_mut() {
                 // FHS hot-water source must be explicitly authored through Systems.
                 // Keep defaults_template.json as a source of field defaults, not as an implicit model element.
@@ -1957,14 +1953,14 @@ impl JSONBuilder {
         // Consolidate zones for FHS schema (FHS only supports single zone)
         // This must happen after build_zone_structure but before process_root_level_sections
         // so that systems and elements are processed correctly
-        if self.is_fhs_schema {
+        if self.profile.consolidates_to_single_zone() {
             self.consolidate_zones_for_fhs(&mut result)?;
         }
 
         // Process root-level sections (includes merge_ventilation_systems, merge_water_pipework, merge_wet_emitters)
         self.process_root_level_sections(&mut result, csv_data)?;
 
-        if self.is_fhs_schema {
+        if self.profile.requires_fhs_wrapper_fields() {
             self.apply_fhs_cold_water_source(&mut result);
             self.sanitize_fhs_output(&mut result);
         }
@@ -2111,7 +2107,7 @@ impl JSONBuilder {
 
                         // Remove FHS-disallowed properties if using FHS schema
                         // This provides defense-in-depth in case these properties are added back to defaults
-                        if self.is_fhs_schema {
+                        if self.profile.zone_uses_living_and_rest_areas() {
                             zone_obj.remove("area");
                             zone_obj.remove("height");
                             zone_obj.remove("temp_setpnt_init");
@@ -2138,7 +2134,7 @@ impl JSONBuilder {
                     zone_obj["volume"] = volume.clone();
                 }
                 let csv_floor_area = zone_row.get("floor_area").cloned();
-                if !self.is_fhs_schema {
+                if !self.profile.zone_uses_living_and_rest_areas() {
                     if let Some(floor_area) = csv_floor_area.as_ref() {
                         zone_obj["area"] = floor_area.clone();
                     }
@@ -2159,7 +2155,7 @@ impl JSONBuilder {
                     if let Some(h) = height.as_f64() {
                         if h > 0.0 {
                             // Store height in zone object (only for Core schema, not FHS)
-                            if !self.is_fhs_schema {
+                            if !self.profile.zone_uses_living_and_rest_areas() {
                                 zone_obj["height"] =
                                     Value::Number(serde_json::Number::from_f64(h).unwrap());
                             }
@@ -2250,7 +2246,9 @@ impl JSONBuilder {
                 if let Some(zone_obj) = zone.as_object_mut() {
                     // If temp_setpnt_init is missing, copy from defaults or set to 21.0 (like Python)
                     // Skip inserting temp_setpnt_init for FHS schema (not allowed by FHS schema)
-                    if !self.is_fhs_schema && !zone_obj.contains_key("temp_setpnt_init") {
+                    if !self.profile.zone_uses_living_and_rest_areas()
+                        && !zone_obj.contains_key("temp_setpnt_init")
+                    {
                         let default_val = if let Some(default_zone) =
                             self.defaults.get("Zone").and_then(|z| z.get(zone_name))
                         {
@@ -2640,7 +2638,7 @@ impl JSONBuilder {
                         let supports_calculated_area = schema_element_type
                             == "BuildingElementOpaque"
                             || (schema_element_type == "BuildingElementTransparent"
-                                && !self.is_fhs_schema);
+                                && self.profile.derives_transparent_area_from_dimensions());
                         let needs_area_calculation = supports_calculated_area && {
                             let current_area = element_obj_map
                                 .get("area")
@@ -2711,7 +2709,7 @@ impl JSONBuilder {
                         }
                     }
 
-                    if self.is_fhs_schema {
+                    if self.profile.requires_fhs_wrapper_fields() {
                         if let Some(element_obj_map) = element_obj.as_object_mut() {
                             self.normalize_building_element_for_fhs(
                                 element_obj_map,
@@ -3261,7 +3259,7 @@ impl JSONBuilder {
                 .ok_or_else(|| {
                     BuildError::new("E038", &format!("EnergySupply '{name}' is not an object"))
                 })?;
-            if self.is_fhs_schema {
+            if self.profile.requires_fhs_wrapper_fields() {
                 Self::clean_energy_supply_entry_for_fhs(entry);
             }
         }
@@ -3424,7 +3422,7 @@ impl JSONBuilder {
         // This is done here instead of in merge_compliance_settings to ensure it happens after calculate_leaks_areas
         self.merge_air_permeability_from_metadata(result, csv_data)?;
 
-        if self.is_fhs_schema {
+        if self.profile.requires_fhs_wrapper_fields() {
             self.merge_input_metadata(result)?;
         }
 
@@ -4384,7 +4382,7 @@ impl JSONBuilder {
                 // Clear default vents and mechanical ventilation
                 inf_map.insert("Vents".to_string(), Value::Object(serde_json::Map::new()));
                 inf_map.remove("MechanicalVentilation");
-                if self.is_fhs_schema {
+                if self.profile.requires_fhs_wrapper_fields() {
                     inf_map.remove("cross_vent_possible");
                 }
                 inf_map.remove("cross_vent_factor");
@@ -4635,7 +4633,7 @@ impl JSONBuilder {
     }
 
     fn effective_cold_water_source(&self) -> &str {
-        if self.is_fhs_schema {
+        if self.profile.requires_fhs_wrapper_fields() {
             self.cold_water_source.as_str()
         } else {
             COLD_WATER_SOURCE_DEFAULT
@@ -4643,7 +4641,7 @@ impl JSONBuilder {
     }
 
     fn apply_fhs_cold_water_source(&self, result: &mut Value) {
-        if !self.is_fhs_schema {
+        if !self.profile.requires_fhs_wrapper_fields() {
             return;
         }
 
@@ -4968,7 +4966,7 @@ impl JSONBuilder {
     /// When using the FHS schema, ensure required root booleans exist by inserting `false` when
     /// CSV metadata did not set them.
     fn apply_fhs_implicit_false_root_booleans(&self, result: &mut Value) {
-        if !self.is_fhs_schema {
+        if !self.profile.requires_fhs_wrapper_fields() {
             return;
         }
         // The documented default for an ABSENT Metadata row (see the Geometry CSV contract); a
@@ -5040,7 +5038,7 @@ impl JSONBuilder {
 
                             if let Some(leaks_obj) = leaks.as_object_mut() {
                                 if leaks_field_name == "test_pressure" {
-                                    if self.is_fhs_schema {
+                                    if self.profile.requires_fhs_wrapper_fields() {
                                         match &val {
                                             Value::String(s) => {
                                                 leaks_obj.insert(
@@ -5286,7 +5284,7 @@ impl JSONBuilder {
                 }
                 for key in ["pitch", "orientation360"] {
                     if let Some(num) = self.csv_number_non_fatal(row.get(key), key, &pv_path) {
-                        let value = if self.is_fhs_schema {
+                        let value = if self.profile.requires_integer_orientation_and_pitch() {
                             Value::Number(serde_json::Number::from(num.round() as i64))
                         } else {
                             Value::Number(
@@ -5310,7 +5308,9 @@ impl JSONBuilder {
                         }
                         // FHS schema requires integer orientation360/pitch.
                         let processed_value =
-                            if self.is_fhs_schema && (key == "orientation360" || key == "pitch") {
+                            if self.profile.requires_integer_orientation_and_pitch()
+                                && (key == "orientation360" || key == "pitch")
+                            {
                                 if let Some(f) = value.as_f64() {
                                     Value::Number(serde_json::Number::from(f.round() as i64))
                                 } else {
@@ -5980,7 +5980,7 @@ impl JSONBuilder {
             })?;
 
         // Update first zone with consolidated values
-        if !self.is_fhs_schema {
+        if !self.profile.zone_uses_living_and_rest_areas() {
             first_zone.insert(
                 "area".to_string(),
                 Value::Number(serde_json::Number::from_f64(total_area).unwrap()),
@@ -6001,8 +6001,8 @@ impl JSONBuilder {
         }
         // Set height if we have any height values (even if only one zone had height)
         // Skip inserting height for FHS schema (not allowed by FHS schema)
-        // Note: This function only runs when is_fhs_schema is true, but we check anyway for safety
-        if !self.is_fhs_schema {
+        // Only single-zone profiles reach this function; the zone-area question is still asked here.
+        if !self.profile.zone_uses_living_and_rest_areas() {
             if height_count > 0 {
                 let avg_height = height_sum / height_count as f64;
                 first_zone.insert(
@@ -6755,7 +6755,7 @@ impl JSONBuilder {
         &self,
         heat_source_wet: &mut serde_json::Map<String, Value>,
     ) {
-        if !self.is_fhs_schema {
+        if !self.profile.requires_fhs_wrapper_fields() {
             return;
         }
         for entry in heat_source_wet.values_mut() {
@@ -6816,7 +6816,7 @@ impl JSONBuilder {
             if let Some(hw_source_obj) = hot_water_source.as_object_mut() {
                 for (hw_name, hw_source) in hw_source_obj.iter_mut() {
                     if let Some(hw_obj) = hw_source.as_object_mut() {
-                        if self.is_fhs_schema {
+                        if self.profile.requires_authored_heating_systems() {
                             match hw_obj.get("type").and_then(|v| v.as_str()) {
                                 Some("CombiBoiler") | Some("HIU") | Some("HeatBattery") => {
                                     if !is_valid(
@@ -6908,7 +6908,7 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
-        if !self.is_fhs_schema {
+        if !self.profile.requires_authored_heating_systems() {
             return Ok(());
         }
         if !Self::systems_csv_presets_dry_space_heat_only(csv_data)
@@ -7412,7 +7412,7 @@ impl JSONBuilder {
                 // `Wet Emitters` table (header-only section parses as `Some(vec![])`).
                 // Core: keep defaults so `update_default_space_heat_systems` can rename/reconcile
                 // (e.g. multi-zone geometry CSV without a Wet Emitters section).
-                if self.is_fhs_schema {
+                if self.profile.requires_authored_heating_systems() {
                     let authored: HashSet<String> =
                         Self::authored_space_heat_system_aliases_from_systems_csv(csv_data)
                             .into_values()
@@ -7443,14 +7443,16 @@ impl JSONBuilder {
                     })
                 })
                 .unwrap_or(false);
-            if self.is_fhs_schema && !has_explicit_heat_source_wet_system {
+            if self.profile.requires_authored_heating_systems()
+                && !has_explicit_heat_source_wet_system
+            {
                 return Err(BuildError::new(
                     "E044",
                     "Wet Emitters require an explicit HeatSourceWet system (add a Systems row with subcategory='HeatSourceWet')",
                 ));
             }
 
-            let consolidated_zone_name = if self.is_fhs_schema {
+            let consolidated_zone_name = if self.profile.consolidates_to_single_zone() {
                 result
                     .get("Zone")
                     .and_then(|z| z.as_object())
@@ -7852,7 +7854,7 @@ impl JSONBuilder {
                     }
                 }
             }
-        } else if self.is_fhs_schema {
+        } else if self.profile.requires_authored_heating_systems() {
             // No "Wet Emitters" section in the CSV: strip defaults-template wet SHS, but do not
             // wipe `SpaceHeatSystem` entries that were just merged from `Systems` (e.g. dry
             // `SpaceHeatSystem` presets) — that merge runs in `merge_systems` *before* this
@@ -8107,7 +8109,9 @@ impl JSONBuilder {
         schema_element_type: &str,
         floor_type: Option<&str>,
     ) -> Value {
-        if (key == "orientation360" || key == "pitch") && self.is_fhs_schema {
+        if (key == "orientation360" || key == "pitch")
+            && self.profile.requires_integer_orientation_and_pitch()
+        {
             if let Some(f) = value.as_f64() {
                 return Value::Number(serde_json::Number::from(f.round() as i64));
             }
@@ -8852,7 +8856,7 @@ impl JSONBuilder {
         if let Some(zones) = result.get_mut("Zone").and_then(|z| z.as_object_mut()) {
             for (zone_name, zone_val) in zones.iter_mut() {
                 if let Some(zone_obj) = zone_val.as_object_mut() {
-                    let current_area = if self.is_fhs_schema {
+                    let current_area = if self.profile.zone_uses_living_and_rest_areas() {
                         zone_obj
                             .get("livingroom_area")
                             .and_then(|v| v.as_f64())
@@ -9001,7 +9005,7 @@ impl JSONBuilder {
 
                     // Update zone area if we calculated it
                     if calculated_area > 0.0 {
-                        if !self.is_fhs_schema {
+                        if !self.profile.zone_uses_living_and_rest_areas() {
                             zone_obj.insert(
                                 "area".to_string(),
                                 json_number(

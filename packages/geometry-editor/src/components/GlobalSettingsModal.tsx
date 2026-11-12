@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import { targetValidationFlags } from '../geometry/validation/validateElement';
 import React, {
   useCallback,
   useEffect,
@@ -487,12 +488,16 @@ export function GlobalSettingsModal({
   focusFieldKey,
 }: GlobalSettingsModalProps) {
   const schemaPort = useGeometrySchemaPort();
-  const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema("fhs") : null;
+  const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null;
+  // Dwelling fields show only where the target's root schema has them; no schema says nothing.
   const showStoreyOfDwelling = targetFieldAvailability(targetRoot, ["General", "storey_of_dwelling"]) !== "absent";
-  const showSanitaryAccommodations = targetFieldAvailability(targetRoot, ["NumberOfSanitaryAccommodations"]) !== "absent";
-  const roomCountRows = showSanitaryAccommodations
-    ? ROOM_COUNT_COMPLIANCE_ROWS
-    : ROOM_COUNT_COMPLIANCE_ROWS.filter((row) => row.field !== "NumberOfSanitaryAccommodations");
+  const roomCountRows = useMemo(
+    () => ROOM_COUNT_COMPLIANCE_ROWS.filter((row) => targetFieldAvailability(targetRoot, [row.field]) !== "absent"),
+    [targetRoot],
+  );
+  const showGroundFloorArea = targetFieldAvailability(targetRoot, ["GroundFloorArea"]) !== "absent";
+  const showBuildingLength = targetFieldAvailability(targetRoot, ["BuildingLength"]) !== "absent";
+  const showBuildingWidth = targetFieldAvailability(targetRoot, ["BuildingWidth"]) !== "absent";
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -1043,7 +1048,7 @@ export function GlobalSettingsModal({
         elements: Object.values(elementsById),
         floors,
         zones,
-        complianceValidationEnabled: targetSchemaMode(schemaPort) === 'fhs',
+        complianceValidationEnabled: targetValidationFlags(schemaPort, complianceSettings).complianceValidationEnabled,
         complianceSettings,
         globalOrientationOffset,
       }),
@@ -2339,6 +2344,7 @@ export function GlobalSettingsModal({
                         })}
                       </div>
 
+                      {showGroundFloorArea ? (
                       <div>
                         <DerivedNumberField
                           label={complianceFieldLabel(
@@ -2362,7 +2368,9 @@ export function GlobalSettingsModal({
                           resetAriaLabel="Reset ground floor area to derived value"
                         />
                       </div>
+                      ) : null}
 
+                      {showBuildingLength ? (
                       <DerivedNumberField
                         label={complianceFieldLabel(
                           "Building length (m)",
@@ -2384,7 +2392,9 @@ export function GlobalSettingsModal({
                         resetTitle={`Reset to geometry-derived building length (${derivedLW.lengthM} m)`}
                         resetAriaLabel="Reset building length to derived value"
                       />
+                      ) : null}
 
+                      {showBuildingWidth ? (
                       <DerivedNumberField
                         label={complianceFieldLabel(
                           "Building width (m)",
@@ -2404,6 +2414,7 @@ export function GlobalSettingsModal({
                         resetTitle={`Reset to geometry-derived building width (${derivedLW.widthM} m)`}
                         resetAriaLabel="Reset building width to derived value"
                       />
+                      ) : null}
 
                       <StandardDropdown
                         label={

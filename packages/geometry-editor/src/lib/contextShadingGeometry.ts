@@ -105,3 +105,34 @@ export function calculateContextShadingDistanceFromCoordinates(
     shadingCenter.y - parentCenter.y,
   ));
 }
+
+/**
+ * Re-derives every drawn Context Shading's start angle, end angle and distance from its
+ * footprint and parent, so stored values always match the drawing (the form shows the
+ * derived values). Returns the input array unchanged when nothing differs.
+ */
+export function rederiveContextShadingFromDrawing<T extends Element>(elements: readonly T[], globalOffsetDeg: number): T[] {
+  const byName = new Map<string, T>();
+  for (const element of elements) {
+    if (element.name && !byName.has(element.name)) byName.set(element.name, element);
+  }
+  let changed = false;
+  const next = elements.map((element) => {
+    if (element.type !== 'ContextShading' || !element.coordinates?.length) return element;
+    const shading = element as unknown as ContextShading;
+    const parent = shading.parent_element ? byName.get(shading.parent_element) : undefined;
+    if (!parent?.coordinates?.length) return element;
+    const angles = calculateContextShadingAngularRangeFromCoordinates(shading, parent, globalOffsetDeg);
+    const derived = {
+      start_angle: roundToTwoDecimals(angles.start_angle),
+      end_angle: roundToTwoDecimals(angles.end_angle),
+      distance: calculateContextShadingDistanceFromCoordinates(shading, parent),
+    };
+    if (derived.start_angle === shading.start_angle && derived.end_angle === shading.end_angle && derived.distance === shading.distance) {
+      return element;
+    }
+    changed = true;
+    return { ...element, ...derived };
+  });
+  return changed ? next : (elements as T[]);
+}
