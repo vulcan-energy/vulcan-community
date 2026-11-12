@@ -144,7 +144,8 @@ function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
 }
 
-function parseTreatmentUi(raw: unknown): TreatmentUiV1 | null {
+/** The saved `_treatment_ui`, or null when it is not a valid v1 record. */
+export function parseTreatmentUi(raw: unknown): TreatmentUiV1 | null {
   if (!isRecord(raw)) return null;
   if (raw.v !== 1) return null;
   if (raw.source !== 'table' && raw.source !== 'custom') return null;
@@ -297,12 +298,15 @@ export function windowTreatmentFormToExtraJson(form: WindowTreatmentFormValues):
     if (!Number.isFinite(trans_red)) {
       return { ok: false, reason: 'incomplete' };
     }
+    if (tty === 'curtains' && form.mounting === 'outside') {
+      return { ok: false, reason: 'incomplete' };
+    }
     const treatmentUi: TreatmentUiV1 = {
       v: 1,
       source: 'custom',
       category: 'white_venetian',
       tier: 0,
-      mounting: 'inside',
+      mounting: form.mounting,
     };
     return {
       ok: true,

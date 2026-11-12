@@ -124,8 +124,24 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
   const compact = Boolean(flat);
   const cat = form.category || 'white_venetian';
   const showColoured = cat === 'coloured';
-  const outsideOk = mountingOutsideAllowed(cat, form.colouredKind);
   const tableMode = form.source !== 'custom';
+  const outsideOk = tableMode ? mountingOutsideAllowed(cat, form.colouredKind) : form.custom_type !== 'curtains';
+  const placement = (
+    <div style={{ margin: ROW(compact) }}>
+      <StandardDropdown
+        label={<span style={{ fontSize: '12px', fontWeight: 500 }}>Placement</span>}
+        value={form.mounting}
+        onChange={(v) => apply({ ...form, mounting: v === 'outside' ? 'outside' : 'inside' })}
+        options={[
+          { value: 'inside', label: 'Inside' },
+          ...(outsideOk ? [{ value: 'outside', label: 'Outside' }] : []),
+        ]}
+        placeholder=""
+        size="md"
+        variant="ghost"
+      />
+    </div>
+  );
   const transmittancePresentation = resolveFieldPresentation({
     mode: schemaMode,
     propertyKey: 'trans_red',
@@ -251,20 +267,7 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
                 </div>
               )}
 
-              <div style={{ margin: ROW(compact) }}>
-                <StandardDropdown
-                  label={<span style={{ fontSize: '12px', fontWeight: 500 }}>Placement</span>}
-                  value={form.mounting}
-                  onChange={(v) => apply({ ...form, mounting: v === 'outside' ? 'outside' : 'inside' })}
-                  options={[
-                    { value: 'inside', label: 'Inside' },
-                    ...(outsideOk ? [{ value: 'outside', label: 'Outside' }] : []),
-                  ]}
-                  placeholder=""
-                  size="md"
-                  variant="ghost"
-                />
-              </div>
+              {placement}
             </>
           )}
 
@@ -275,7 +278,9 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
                   label={<span style={{ fontSize: '12px', fontWeight: 500 }}>Kind</span>}
                   value={form.custom_type || 'blinds'}
                   onChange={(v) =>
-                    apply({ ...form, custom_type: v === 'curtains' ? 'curtains' : 'blinds' })
+                    apply(v === 'curtains'
+                      ? { ...form, custom_type: 'curtains', mounting: 'inside' }
+                      : { ...form, custom_type: 'blinds' })
                   }
                   options={[
                     { value: 'blinds', label: 'Blinds' },
@@ -286,6 +291,7 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
                   variant="ghost"
                 />
               </div>
+              {placement}
               <div style={{ margin: ROW(compact) }}>
                 <StandardInput
                   label={inlineLabelRow(
