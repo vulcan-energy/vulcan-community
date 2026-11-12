@@ -637,7 +637,10 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
     const ref = typeof node?.$ref === 'string' ? node.$ref.split('/').pop() : undefined;
     if (ref) node = record(defs?.[ref]);
   }
-  return Array.isArray(node?.required) && node.required.includes(path[path.length - 1]);
+  // `then.required` too: General requires storeys_in_building (a7: storey_of_dwelling) only `if`
+  // build_type is flat, and those rows are listed only for a flat (enteredOrDerivedRowValues).
+  const required = [node?.required, record(node?.then)?.required].flatMap((list) => (Array.isArray(list) ? list : []));
+  return required.includes(path[path.length - 1]);
 }
 
 /**

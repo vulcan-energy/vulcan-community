@@ -1966,6 +1966,8 @@ impl JSONBuilder {
         }
 
         crate::target_mappings::map_contract_unobstructed_shading(&mut result, self.input_contract);
+        crate::target_mappings::map_flat_exhaust_position(&mut result, self.input_contract);
+        crate::target_mappings::map_named_cold_appliances(&mut result, self.input_contract);
 
         // Schema-based cleanup: removes properties not allowed by the schema
         // This replaces hardcoded cleanup functions with a programmatic approach
