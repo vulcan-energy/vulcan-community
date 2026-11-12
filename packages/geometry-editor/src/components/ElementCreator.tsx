@@ -23,7 +23,7 @@ import {
   type ElementFormRenderCtx,
 } from './elementForms/types';
 import { electricBatteryFormModule } from './elementForms/electricBattery';
-import { simplifiedThermalBridgingOffered } from '../lib/schemaCache';
+import { elementTypeAvailability, simplifiedThermalBridgingOffered } from '../lib/schemaCache';
 import { thermalBridgeLinearFormModule } from './elementForms/thermalBridgeLinear';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
 import { buildLightingPatch, lightingFormModule } from './elementForms/lighting';
@@ -970,6 +970,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const schemaMode = targetSchemaMode(schemaPort);
   const useFHSSchema = schemaMode === 'fhs';
   const { complianceValidationEnabled } = useTargetValidationFlags();
+  const modelSettings = useGeometryStore((s) => s.complianceSettings);
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -4726,16 +4727,19 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       setSelection({ ...selection, type: nextSelectionType });
                     }
                   }}
-                  options={ELEMENT_TYPES.filter((type) => {
-                      if (!useFHSSchema) return true;
-                      // Keep legacy FHS-excluded types editable when selected, but prevent selecting them for new additions.
-                      const excludedInFHS: ElementType[] = ['CombustionAppliances'];
-                      return !excludedInFHS.includes(type) || elementType === type;
-                    })}
+                  // An existing element keeps its type when the target does not take it; it is not offered for others.
+                  options={ELEMENT_TYPES.filter((type) =>
+                    type === elementType || elementTypeAvailability(schemaPort, type, modelSettings).available)}
                   placeholder="Select element type..."
                   ariaLabel="Element type"
                   className="element-editor-type-picker"
                 />
+                {(() => {
+                  const availability = elementTypeAvailability(schemaPort, elementType, modelSettings);
+                  return availability.available ? null : (
+                    <div style={INLINE_FIELD_NOTE_STYLE}>{availability.reason}</div>
+                  );
+                })()}
               </div>
               {(selection.type === 'element' || selection.type === 'global') && (
                 <div className="element-editor-meta-control element-editor-meta-control--shape" ref={registerBaseFieldRefs('shape')}>

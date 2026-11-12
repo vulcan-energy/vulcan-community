@@ -1,8 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode, thermalBridgingAcceptsTotal } from '../schemaCache';
+import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode, thermalBridgingAcceptsTotal, elementTypeAvailability, resolveElementSubschemaForProfile } from '../schemaCache';
+import { ELEMENT_TYPE_ORDER } from '../elementTypeMetadata';
+import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import { ensureRootSchema, getAjvInstance, resetGeometrySchemaValidators } from '../ajvCache';
 
 const schema = (minimum: number) => ({ type: 'object', properties: { value: { type: 'number', minimum } } });
@@ -90,5 +94,31 @@ describe('target-scoped schema caches', () => {
     expect(getAjvInstance().getSchema('root')!({ value: 2 })).toBe(true);
     ensureRootSchema(schema(9));
     expect(getAjvInstance().getSchema('root')!({ value: 2 })).toBe(false);
+  });
+});
+
+describe('elementTypeAvailability', () => {
+  const root = (path: string) => JSON.parse(readFileSync(join(import.meta.dirname, '../../../../..', path), 'utf8'));
+  const port = (mode: GeometrySchemaMode, schemaRoot: unknown, extra: Partial<GeometrySchemaPort> = {}) => ({
+    availability: 'available',
+    targetSchemaMode: () => mode,
+    getRootSchema: () => schemaRoot,
+    getElementSubschema: (_: GeometrySchemaMode, type: string) => resolveElementSubschemaForProfile(schemaRoot as never, mode, type),
+    ...extra,
+  }) as unknown as GeometrySchemaPort;
+  const unavailable = (p: GeometrySchemaPort) => ELEMENT_TYPE_ORDER.filter((type) => !elementTypeAvailability(p, type, {}).available);
+
+  it('offers every type the FHS schema has; no current schema has CombustionAppliances', () => {
+    expect(unavailable(port('fhs', root('hem_fhs_upstream/schema/input_fhs.schema.json')))).toEqual(['CombustionAppliances']);
+    expect(unavailable(port('core', root('hem_engine_upstream/schemas/core-input.schema.json')))).toContain('CombustionAppliances');
+  });
+
+  it('hides a type the host excludes, with its reason, and says nothing before the schema loads', () => {
+    const excluding = port('fhs', null, { targetRules: () => ({
+      modelValidityChecks: true, buildingRegulationsChecks: false, hiddenFields: {},
+      excludedElementTypes: { Lighting: { reason: 'Not used by this target.' } },
+    }) });
+    expect(elementTypeAvailability(excluding, 'Lighting', {})).toEqual({ available: false, reason: 'Not used by this target.' });
+    expect(unavailable(excluding)).toEqual(['Lighting']);
   });
 });

@@ -8,7 +8,7 @@ import { resolveRefChain, resolveRefNode } from './schemaRefResolver';
 import { flattenIfThenAllOfProperties } from './systemSchemaFlatten';
 import { isForbiddenSchemaNode } from './schemaShape';
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
-import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
+import { targetRules, targetSchemaMode, type GeometrySchemaMode, type GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 
 export type GeometrySchemaAssetSource = Readonly<{
   loadText(mode: GeometrySchemaMode): Promise<string>;
@@ -2302,6 +2302,29 @@ function schemaNodeAcceptsNumber(node: unknown, root: unknown): boolean {
   const resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
   if ([resolved.type].flat().some((type) => type === 'number' || type === 'integer')) return true;
   return [resolved.anyOf, resolved.oneOf].some((list) => Array.isArray(list) && list.some((branch) => schemaNodeAcceptsNumber(branch, root)));
+}
+
+/**
+ * Types with no schema section of their own, so the target schema cannot rule them out:
+ * context shading and MVHR terminals convert into other sections, and a System's section is its subtype.
+ */
+const TYPES_WITHOUT_OWN_SCHEMA_SECTION: ReadonlySet<string> = new Set(['ContextShading', 'MechanicalVentilationTerminal', 'System']);
+
+export type ElementTypeAvailability = { available: true } | { available: false; reason: string };
+
+/** Whether the selected target takes this element type: its schema has the section and the host's rules do not exclude it. */
+export function elementTypeAvailability(
+  port: GeometrySchemaPort,
+  elementType: string,
+  modelSettings: Readonly<Record<string, unknown>>,
+): ElementTypeAvailability {
+  const excluded = targetRules(port, modelSettings).excludedElementTypes[elementType];
+  if (excluded) return { available: false, reason: excluded.reason };
+  if (port.availability !== 'available' || TYPES_WITHOUT_OWN_SCHEMA_SECTION.has(elementType)) return { available: true };
+  const mode = targetSchemaMode(port);
+  // No schema yet says nothing.
+  if (!port.getRootSchema(mode) || port.getElementSubschema(mode, elementType)) return { available: true };
+  return { available: false, reason: "The selected target's input has no section for this element type." };
 }
 
 /** Whether to offer a single simplified ψ total: the schema accepts one and the host declares no stricter contract. */
