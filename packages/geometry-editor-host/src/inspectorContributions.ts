@@ -126,12 +126,26 @@ export type GeometryInspectorElementFieldsContribution = Readonly<{
   render: ComponentType<GeometryInspectorElementFieldsContext>;
 }>;
 
+export type GeometrySpaceLabelFieldsContext = Readonly<{
+  /** The Space Labeller row this field belongs to. */
+  label: Readonly<{ id: string; name: string; room_type: string; extra_json?: Record<string, unknown> }>;
+  /** Merge a host-owned field into the label's existing extra_json. */
+  onPatchExtraJson(
+    update: (current: Record<string, unknown>) => Record<string, unknown>,
+  ): void;
+}>;
+
+export type GeometrySpaceLabelFieldsContribution = Readonly<{
+  render: ComponentType<GeometrySpaceLabelFieldsContext>;
+}>;
+
 export type GeometryInspectorContributions = Readonly<{
   evidence: GeometryInspectorEvidenceContribution | null;
   detailedJunctionSolver: GeometryDetailedJunctionSolverContribution | null;
   productCatalogue: GeometryProductCatalogueContribution | null;
   constructionDetails: GeometryConstructionDetailsContribution | null;
   elementFields: GeometryInspectorElementFieldsContribution | null;
+  spaceLabelFields: GeometrySpaceLabelFieldsContribution | null;
 }>;
 
 export function defineGeometryInspectorContributions(
@@ -143,6 +157,7 @@ export function defineGeometryInspectorContributions(
     productCatalogue: contributions.productCatalogue ?? null,
     constructionDetails: contributions.constructionDetails ?? null,
     elementFields: contributions.elementFields ?? null,
+    spaceLabelFields: contributions.spaceLabelFields ?? null,
   });
 }
 

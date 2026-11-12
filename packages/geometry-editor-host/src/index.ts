@@ -52,6 +52,8 @@ export {
   type GeometryConstructionDetailsContribution,
   type GeometryInspectorElementFieldsContext,
   type GeometryInspectorElementFieldsContribution,
+  type GeometrySpaceLabelFieldsContext,
+  type GeometrySpaceLabelFieldsContribution,
   type GeometryDetailedJunctionSolverContribution,
   type GeometryDetailedJunctionSolverProps,
   type GeometryInspectorContributions,

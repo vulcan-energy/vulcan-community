@@ -9518,6 +9518,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                       onStartDrawFootprint={handleStartDrawSpaceLabelFootprint}
                       onCancelDrawFootprint={handleCancelDrawSpaceLabelFootprint}
                       isDrawingFootprint={drawMode === 'space-label-polygon'}
+                      spaceLabelFields={inspectorContributions.spaceLabelFields}
                     />,
                   )
                 ) : showCanvasDecoration && activeCanvasDecoration ? (
