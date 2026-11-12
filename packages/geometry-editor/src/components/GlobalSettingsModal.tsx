@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import { targetValidationFlags } from '../geometry/validation/validateElement';
 import React, {
   useCallback,
   useEffect,
@@ -1043,7 +1043,7 @@ export function GlobalSettingsModal({
         elements: Object.values(elementsById),
         floors,
         zones,
-        complianceValidationEnabled: targetSchemaMode(schemaPort) === 'fhs',
+        complianceValidationEnabled: targetValidationFlags(schemaPort, complianceSettings).complianceValidationEnabled,
         complianceSettings,
         globalOrientationOffset,
       }),

@@ -174,6 +174,19 @@ it('blocks a required value with its own CSV column even when the defaults templ
   expect(issues).not.toContain('u_value');
 });
 
+it('reads the target schema even with compliance checks off', () => {
+  const modes: string[] = [];
+  const schemaPort = {
+    ...unavailableGeometrySchemaPort,
+    availability: 'available',
+    getSchemaSubtypeForElementData: () => undefined,
+    getElementSubschema: (mode: string) => { modes.push(mode); return null; },
+  } as never;
+  const bridge = { id: 'tb', name: 'E1', zoneId: 'zone-1', type: 'ThermalBridgePoint', heat_transfer_coeff: 0.1 } as unknown as Element;
+  validateElementCore(bridge, { schemaPort, complianceValidationEnabled: false });
+  expect(modes).toEqual(['fhs']);
+});
+
 it('blocks a linear thermal bridge with no psi', () => {
   const bridge = {
     id: 'tb', name: 'E1', zoneId: 'zone-1', type: 'ThermalBridgeLinear', length: 4,

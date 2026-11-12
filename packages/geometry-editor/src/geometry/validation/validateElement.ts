@@ -11,8 +11,10 @@ import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
-import type {
-  GeometrySchemaPort,
+import {
+  targetRules,
+  targetSchemaMode,
+  type GeometrySchemaPort,
 } from '../../../../geometry-editor-host/src/schemaPort';
 import { hasDefaultValue, type DefaultsLookup } from '../../lib/defaultsCache';
 import {
@@ -436,6 +438,22 @@ export function partFFieldKeyForRule(rule: PartFFinding['rule']): string | undef
   }
 }
 
+/**
+ * The validators' switches from the target's rules. `complianceValidationEnabled` gates the FHS
+ * target's own model rules (such as the living-room area split), so it also needs an FHS target;
+ * `buildingRegulationsChecks` gates Part F and Part O.
+ */
+export const targetValidationFlags = (
+  schemaPort: GeometrySchemaPort,
+  modelSettings: Readonly<Record<string, unknown>>,
+): { complianceValidationEnabled: boolean; buildingRegulationsChecks: boolean } => {
+  const rules = targetRules(schemaPort, modelSettings);
+  return {
+    complianceValidationEnabled: rules.modelValidityChecks && targetSchemaMode(schemaPort) === 'fhs',
+    buildingRegulationsChecks: rules.buildingRegulationsChecks,
+  };
+};
+
 export interface ValidationContext {
   sourceCsvVersion?: number;
   csvUpgradeRequested?: boolean;
@@ -445,7 +463,10 @@ export interface ValidationContext {
   zones?: Zone[];
   floors?: Floor[];
   globalOrientationOffset?: number;
+  /** The FHS target's model rules (see {@link targetValidationFlags}). */
   complianceValidationEnabled?: boolean;
+  /** Part F checks; defaults to `complianceValidationEnabled`. */
+  buildingRegulationsChecks?: boolean;
   /** Global inputs used to resolve the same ventilation-zone base height written on save. */
   complianceSettings?: GlobalSettingsShape;
   numberOfBedrooms?: number;
@@ -1021,6 +1042,7 @@ export const validateElementCore = (
   const zones = context.zones || [];
   const floors = context.floors;
   const complianceValidationEnabled = context.complianceValidationEnabled || false;
+  const buildingRegulationsChecks = context.buildingRegulationsChecks ?? complianceValidationEnabled;
   const numberOfBedrooms = context.numberOfBedrooms;
   const defaultsLoading = context.defaultsLoading || false;
   const schemaPort = context.schemaPort;
@@ -1231,7 +1253,7 @@ export const validateElementCore = (
       }
       issues.push(...validateWindowOpenings(
         el,
-        windowPartsArePhysical(schemaPort, complianceValidationEnabled ? 'fhs' : 'core'),
+        windowPartsArePhysical(schemaPort, targetSchemaMode(schemaPort)),
         () => getAreaBasedElementExportGeometry(el, context.globalOrientationOffset),
       ));
       if (complianceValidationEnabled && context.complianceSettings) {
@@ -1507,7 +1529,7 @@ export const validateElementCore = (
         issues.push(geo('Shading Type is required', 'shading_type'));
         break;
       }
-      const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, complianceValidationEnabled ? 'fhs' : 'core');
+      const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, targetSchemaMode(schemaPort));
       if (allowedShadingTypes && !allowedShadingTypes.includes(shadingElement.shading_type)) {
         const windowName = shadingElement.parent_element?.trim();
         issues.push(geo(shadingElement.shading_type === 'reveal'
@@ -1860,7 +1882,7 @@ export const validateElementCore = (
           issues.push(geo('Parent reference is ambiguous', 'parent_element'));
         }
       }
-      if (complianceValidationEnabled) appendPartFIssuesForElement(ventsElement.id);
+      if (buildingRegulationsChecks) appendPartFIssuesForElement(ventsElement.id);
       break;
     }
 
@@ -1884,7 +1906,7 @@ export const validateElementCore = (
           }
         }
       }
-      if (complianceValidationEnabled) appendPartFIssuesForElement(mechVentElement.id);
+      if (buildingRegulationsChecks) appendPartFIssuesForElement(mechVentElement.id);
       if (mechVentElement.vent_type === 'MVHR' && elementsById) {
         const ducts = linkedMvhrDucts(mechVentElement.name);
         const unitPoint = networkPoint3(mechVentElement, effectiveFloors());
@@ -2164,8 +2186,8 @@ export const validateElementCore = (
       element as unknown as Record<string, unknown>,
     );
 
-    // Active-schema validation: use FHS when compliance validation is enabled, core otherwise.
-    const schemaMode = complianceValidationEnabled ? 'fhs' : 'core';
+    // The selected target decides the schema; turning compliance checks off never switches it.
+    const schemaMode = targetSchemaMode(schemaPort);
     const activeSubschema = schemaPort.getElementSubschema(schemaMode, element.type, schemaSubtype);
     if (activeSubschema) {
       const elementData = element as unknown as Record<string, unknown>;

@@ -42,7 +42,6 @@ import {
   type GeometryInspectorContributions,
 } from '../../../geometry-editor-host/src/inspectorContributions';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import { useGeometrySourceComparisonPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import {
   useGeometryStore,
@@ -293,6 +292,7 @@ import {
 } from '../lib/developmentContextShading';
 import {
   getFloorStackWarningElementIds,
+  targetValidationFlags,
   validateElementCore,
   type ValidationContext,
 } from '../geometry/validation/validateElement';
@@ -2668,7 +2668,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       zones,
       floors,
       globalOrientationOffset,
-      complianceValidationEnabled: targetSchemaMode(schemaPort) === 'fhs',
+      ...targetValidationFlags(schemaPort, complianceSettings),
       complianceSettings,
       numberOfBedrooms: complianceSettings?.NumberOfBedrooms,
       calculateContextShadingDistance,

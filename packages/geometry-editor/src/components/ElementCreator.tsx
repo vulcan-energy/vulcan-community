@@ -145,6 +145,7 @@ import {
 } from '../lib/parentControlledFloor';
 import { WallShapeRows, type WallShapeCommit } from './WallShapeRows';
 import { useKeyedState } from '../hooks/useKeyedState';
+import { useTargetValidationFlags } from '../hooks/useTargetRules';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -968,6 +969,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // The selected target decides the schema, the tooltips and which checks apply.
   const schemaMode = targetSchemaMode(schemaPort);
   const useFHSSchema = schemaMode === 'fhs';
+  const { complianceValidationEnabled } = useTargetValidationFlags();
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -1067,7 +1069,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (!zone) return null;
     return validateZone(zone, {
       elementsById,
-      complianceValidationEnabled: useFHSSchema,
+      complianceValidationEnabled,
       primaryFhsZoneId,
       simplifiedThermalBridgingOffered: targetAcceptsThermalBridgingTotal,
     });
@@ -1075,7 +1077,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     selection,
     getZoneById,
     elementsById,
-    useFHSSchema,
+    complianceValidationEnabled,
     primaryFhsZoneId,
     targetAcceptsThermalBridgingTotal,
   ]);

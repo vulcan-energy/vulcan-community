@@ -25,6 +25,17 @@ export interface GeometrySchemaParameterInfo {
   source?: 'schema' | 'hem_guidance';
 }
 
+/** A host's per-target rules the schema cannot state; each exclusion carries the reason shown to the user. */
+export interface TargetRules {
+  /** Checks that the model is complete and consistent for this target, such as a wet emitter needing a heat source. */
+  modelValidityChecks: boolean;
+  /** Building Regulations checks, such as Part F and Part O. */
+  buildingRegulationsChecks: boolean;
+  excludedElementTypes: Readonly<Record<string, { reason: string }>>;
+  /** Fields hidden per element type. */
+  hiddenFields: Readonly<Record<string, Readonly<Record<string, { reason: string }>>>>;
+}
+
 export interface GeometrySchemaPropertyValidation {
   valid: boolean;
   errors?: readonly string[];
@@ -41,6 +52,8 @@ export interface GeometrySchemaPort {
   getRevision?(): number;
   /** The selected target needs thermal-bridge records even where its schema accepts a total. */
   requiresDetailedThermalBridges?(): boolean;
+  /** The selected target's rules for these model settings; undefined keeps the defaults of {@link targetRules}. */
+  targetRules?(modelSettings: Readonly<Record<string, unknown>>): TargetRules | undefined;
   /** The selected target's model type; undefined when the host has no target catalogue. */
   targetSchemaMode?(): GeometrySchemaMode | undefined;
   preload(mode: GeometrySchemaMode): Promise<void>;
@@ -88,6 +101,23 @@ export interface GeometrySchemaPort {
  */
 export function targetSchemaMode(port?: GeometrySchemaPort): GeometrySchemaMode {
   return port?.targetSchemaMode?.() ?? 'fhs';
+}
+
+/**
+ * The host's rules, else the defaults: model-validity checks run for every target, Building
+ * Regulations checks run for an FHS target, and nothing is excluded or hidden.
+ */
+export function targetRules(
+  port: GeometrySchemaPort | undefined,
+  modelSettings: Readonly<Record<string, unknown>>,
+): TargetRules {
+  return port?.targetRules?.(modelSettings)
+    ?? {
+      modelValidityChecks: true,
+      buildingRegulationsChecks: targetSchemaMode(port) === 'fhs',
+      excludedElementTypes: {},
+      hiddenFields: {},
+    };
 }
 
 function unavailable(operation: string): never {
