@@ -349,7 +349,11 @@ function SpaceLabelCompactRow({
         <DeleteSpaceIcon />
       </button>
       {HostFields ? (
-        <div className="space-labeller-panel__row-host">
+        <div
+          className="space-labeller-panel__row-host"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
           <HostFields label={label} onPatchExtraJson={patchExtraJson} />
         </div>
       ) : null}

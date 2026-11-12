@@ -1246,6 +1246,10 @@
   gap: 6px;
 }
 
+.space-labeller-panel__row-host:empty {
+  display: none;
+}
+
 .space-labeller-panel__row--selected {
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 1px var(--focus-outline);
