@@ -32,6 +32,81 @@ pub enum ModelProfile {
     Fhs,
 }
 
+/// Each question a profile answers. Exhaustive matches only: a new profile must
+/// answer every question here before the crate compiles.
+impl ModelProfile {
+    /// Input runs through the FHS wrapper, so it needs FHS wrapper version metadata
+    /// and may use the Python FHS (physical-opening) converter contracts.
+    pub fn requires_fhs_wrapper_version(self) -> bool {
+        match self {
+            Self::Core => false,
+            Self::Fhs => true,
+        }
+    }
+
+    /// Merged JSON must also parse as the HEM engine's own `Input` (E049).
+    pub(crate) fn parses_as_core_engine_input(self) -> bool {
+        match self {
+            Self::Core => true,
+            Self::Fhs => false,
+        }
+    }
+
+    /// The input schema allows one zone, so CSV zones are consolidated into the first.
+    pub(crate) fn consolidates_to_single_zone(self) -> bool {
+        match self {
+            Self::Core => false,
+            Self::Fhs => true,
+        }
+    }
+
+    /// Zones carry `livingroom_area` + `restofdwelling_area` and no `area`, `height`
+    /// or `temp_setpnt_init`.
+    pub(crate) fn zone_uses_living_and_rest_areas(self) -> bool {
+        match self {
+            Self::Core => false,
+            Self::Fhs => true,
+        }
+    }
+
+    /// A transparent element with no positive `area` gets width × height as its area.
+    pub(crate) fn derives_transparent_area_from_dimensions(self) -> bool {
+        match self {
+            Self::Core => true,
+            Self::Fhs => false,
+        }
+    }
+
+    /// `orientation360` and `pitch` must be integers.
+    pub(crate) fn requires_integer_orientation_and_pitch(self) -> bool {
+        match self {
+            Self::Core => false,
+            Self::Fhs => true,
+        }
+    }
+
+    /// Hot-water source and wet heat plant come only from authored `Systems` rows,
+    /// never from defaults-template entries. This also repoints a hot-water source's
+    /// missing wet heat source reference to the first wet heat source.
+    pub(crate) fn requires_authored_heating_systems(self) -> bool {
+        match self {
+            Self::Core => false,
+            Self::Fhs => true,
+        }
+    }
+
+    /// Output takes the FHS wrapper's field shapes: `InputMetadata`, implicit root
+    /// booleans, metadata cold-water source, enum test pressure, `is_heat_network` on
+    /// wet heat sources, and FHS cleanup of root keys, building elements, energy
+    /// supplies and ventilation.
+    pub(crate) fn requires_fhs_wrapper_fields(self) -> bool {
+        match self {
+            Self::Core => false,
+            Self::Fhs => true,
+        }
+    }
+}
+
 /// Explicit converter contract; release labels never select translation rules implicitly.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -270,7 +345,7 @@ pub(crate) fn json_pointer(segments: &[&str]) -> String {
 fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
     if request.conversion_profile.input_contract().elements
         == ElementInputConvention::PhysicalOpeningFullPartition
-        && request.profile != ModelProfile::Fhs
+        && !request.profile.requires_fhs_wrapper_version()
     {
         return Err(TransformError::InvalidRequest(
             "Physical-opening/full-partition conversion requires the FHS profile.".into(),
@@ -304,7 +379,7 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
     if request.version_metadata.hem_core_version.trim().is_empty() {
         missing.push("HEM core version");
     }
-    if request.profile == ModelProfile::Fhs
+    if request.profile.requires_fhs_wrapper_version()
         && request
             .version_metadata
             .fhs_wrapper_version
@@ -391,7 +466,7 @@ fn enforce_pure_hem_input(
         }
     }
 
-    if profile == ModelProfile::Core {
+    if profile.parses_as_core_engine_input() {
         if let Err(error) = serde_json::from_value::<hem_upstream::input::Input>(json.clone()) {
             let message = error.to_string();
             if message.contains("unknown field") {
