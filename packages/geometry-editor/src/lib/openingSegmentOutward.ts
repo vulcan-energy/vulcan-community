@@ -8,6 +8,8 @@ import {
   roundToTwoDecimals,
 } from '../geometry/constants';
 import type { Element } from '../geometry/types';
+import { normalizePitch360 } from './elementAutoNaming';
+import { getElementShape } from './shapeUtils';
 
 /**
  * Derive the rounded dimensions and metrics for a two-point wall. Orientation is the segment's
@@ -281,3 +283,37 @@ export function applyCompassOrientationToLineCoords(
     { x: midX + halfSpanX, y: midY + halfSpanY, z: b.z },
   ];
 }
+
+/** Compass bearing from the low eaves edge coords[0]→coords[1] (sloped envelope polygons only). */
+export function deriveSlopedPolygonOrientation360(
+  element: Element,
+  globalOrientationOffset: number,
+): number | null {
+  const coords = element.coordinates;
+  if (!coords || coords.length < 2) return null;
+  const pitchRaw = (element as { pitch?: unknown }).pitch;
+  if (typeof pitchRaw !== 'number' || !Number.isFinite(pitchRaw)) return null;
+  const pitch = normalizePitch360(pitchRaw);
+  if (!(pitch > 0 && pitch < 90)) return null;
+  const A = coords[0];
+  const B = coords[1];
+  const o = orientation360SlopedFromFirstEdge(A.x, A.y, B.x, B.y, globalOrientationOffset);
+  if (o === null || !Number.isFinite(o)) return null;
+  return roundToTwoDecimals(o);
+}
+
+export function isSlopedFabricEnvelopePolygon(element: Element): boolean {
+  if (element.type !== 'BuildingElementOpaque' && element.type !== 'BuildingElementTransparent') {
+    return false;
+  }
+  return getElementShape(element) === 'sloped-polygon';
+}
+
+export const isWallLikeLineElement = (element: Element): element is Element & { height?: number } =>
+  (
+    element.type === 'BuildingElementOpaque' ||
+    element.type === 'BuildingElementTransparent' ||
+    element.type === 'BuildingElementAdjacentConditionedSpace' ||
+    element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' ||
+    element.type === 'BuildingElementPartyWall'
+  ) && getElementShape(element) === 'line';
