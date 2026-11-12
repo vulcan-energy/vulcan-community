@@ -14,6 +14,7 @@ import { frameInsetFromFrameAreaFraction } from './geometryVentilationOverlay';
 import type { OrientedBoxPrimitive, PolygonPrismPrimitive } from './geometry3dPrimitivesTypes';
 import { segmentTangentAndOpeningOutwardModelXY } from './openingSegmentOutward';
 import { createParentElementLookup } from './elementNameRemap';
+import { getPlanCenter } from './contextShadingGeometry';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -59,17 +60,6 @@ function findElementByNameOrId(
     if (el.name === nameOrId) return el;
   }
   return null;
-}
-
-function polygonCentroid2D(coords: Array<{ x: number; y: number }>): [number, number] {
-  if (coords.length === 0) return [0, 0];
-  let sx = 0;
-  let sy = 0;
-  for (const c of coords) {
-    sx += c.x;
-    sy += c.y;
-  }
-  return [sx / coords.length, sy / coords.length];
 }
 
 /** Same rules as geometry3dMapper — closed ring without duplicate closing vertex. */
@@ -473,10 +463,9 @@ export function buildContextShadingSectorPrism(
     ? findElementByNameOrId(elementsById, shading.parent_element)
     : null;
   if (parent?.coordinates && parent.coordinates.length >= 3) {
-    const pts = parent.coordinates.map((c) => ({ x: c.x, y: c.y }));
-    [ox, oy] = polygonCentroid2D(pts);
+    ({ x: ox, y: oy } = getPlanCenter(parent.coordinates)!);
   } else if (shading.coordinates?.length) {
-    [ox, oy] = polygonCentroid2D(shading.coordinates.map((c) => ({ x: c.x, y: c.y })));
+    ({ x: ox, y: oy } = getPlanCenter(shading.coordinates)!);
   } else {
     return null;
   }

@@ -8,11 +8,34 @@ type PlanPoint = { x: number; y: number };
 
 const normalizeDegrees = (angle: number): number => ((angle % 360) + 360) % 360;
 
-function getPlanCenter(coords: PlanPoint[] | undefined): PlanPoint | null {
+export function getPlanCenter(coords: PlanPoint[] | undefined): PlanPoint | null {
   if (!coords || coords.length === 0) return null;
+  const last = coords[coords.length - 1];
+  const ring = coords.length > 1 && last.x === coords[0].x && last.y === coords[0].y
+    ? coords.slice(0, -1)
+    : coords;
+  // Sum relative to the first vertex so large (e.g. grid) coordinates keep their precision.
+  const { x: x0, y: y0 } = ring[0];
+  let twiceArea = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const ax = ring[i].x - x0;
+    const ay = ring[i].y - y0;
+    const bx = ring[(i + 1) % ring.length].x - x0;
+    const by = ring[(i + 1) % ring.length].y - y0;
+    const cross = ax * by - bx * ay;
+    twiceArea += cross;
+    cx += (ax + bx) * cross;
+    cy += (ay + by) * cross;
+  }
+  if (Math.abs(twiceArea) > 1e-9) {
+    return { x: x0 + cx / (3 * twiceArea), y: y0 + cy / (3 * twiceArea) };
+  }
+  // A point, line or zero-area shape has no area centroid; its centre is the vertex mean.
   return {
-    x: coords.reduce((sum, coord) => sum + coord.x, 0) / coords.length,
-    y: coords.reduce((sum, coord) => sum + coord.y, 0) / coords.length,
+    x: ring.reduce((sum, coord) => sum + coord.x, 0) / ring.length,
+    y: ring.reduce((sum, coord) => sum + coord.y, 0) / ring.length,
   };
 }
 
