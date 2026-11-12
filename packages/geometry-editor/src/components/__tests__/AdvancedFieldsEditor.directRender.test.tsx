@@ -115,6 +115,7 @@ type MountArgs = {
   extraJson: Record<string, unknown>;
   currentDataExtra?: Record<string, unknown>;
   onChange?: ReturnType<typeof vi.fn>;
+  schemaPort?: typeof canonicalGeometrySchemaPort;
 };
 
 function renderEditor({
@@ -124,11 +125,12 @@ function renderEditor({
   extraJson,
   currentDataExtra = {},
   onChange = vi.fn(),
+  schemaPort = canonicalGeometrySchemaPort,
 }: MountArgs) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   const utils = render(
     <GeometryEditorServicePortsProvider
-      schemaPort={canonicalGeometrySchemaPort}
+      schemaPort={schemaPort}
       workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}
     >
       <GeometryStoreProvider store={store}>
@@ -1351,6 +1353,21 @@ describe('R4.6b-1 standing invariant: what every Advanced Fields row actually re
 });
 
 describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
+  it('hides the fields the host target rules hide', () => {
+    const schemaPort = {
+      ...canonicalGeometrySchemaPort,
+      targetRules: () => ({
+        modelValidityChecks: true, buildingRegulationsChecks: true, excludedElementTypes: {},
+        hiddenFields: { ElectricBattery: { battery_age: { reason: 'Not used by this target.' } } },
+      }),
+    };
+    const shown = fieldKeys(renderEditor({ elementType: 'ElectricBattery', useFHSSchema: false, extraJson: {} }).container);
+    cleanup();
+    const hidden = fieldKeys(renderEditor({ elementType: 'ElectricBattery', useFHSSchema: false, extraJson: {}, schemaPort }).container);
+    expect(shown).toContain('battery_age');
+    expect(hidden).toEqual(shown.filter((key) => key !== 'battery_age'));
+  });
+
   it('Core battery numeric bounds retain inclusive and exclusive minima', () => {
     const { container } = renderEditor({ elementType: 'ElectricBattery', useFHSSchema: false, extraJson: {} });
     for (const key of ['battery_age', 'minimum_charge_rate_one_way_trip', 'maximum_charge_rate_one_way_trip', 'maximum_discharge_rate_one_way_trip']) {

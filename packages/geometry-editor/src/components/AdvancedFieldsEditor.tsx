@@ -30,6 +30,7 @@ import {
   JUNCTION_TYPE_ENUM,
 } from '../lib/simplifiedFabricMap';
 import { useGeometryStore, useGeometryStoreApi } from '../stores/geometryStore';
+import { useTargetRules } from '../hooks/useTargetRules';
 import { useShallow } from 'zustand/react/shallow';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../lib/junctionPsiDefaultsCsv';
 import { UnheatedSpaceRuCalculatorModal } from './UnheatedSpaceRuCalculatorModal';
@@ -834,12 +835,14 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         : null,
     [schemaMode, schemaPort],
   );
+  const { hiddenFields } = useTargetRules();
+  // Fields Advanced does not show: those the standard form owns, and those the target hides.
   const getBaseFields = useCallback(
-    (type: string): readonly string[] =>
-      schemaPort.availability === 'available'
-        ? schemaPort.getBaseFieldsForElementType(type)
-        : [],
-    [schemaPort],
+    (type: string): readonly string[] => [
+      ...(schemaPort.availability === 'available' ? schemaPort.getBaseFieldsForElementType(type) : []),
+      ...Object.keys(hiddenFields[type] ?? {}),
+    ],
+    [hiddenFields, schemaPort],
   );
   const getActiveRootSchema = useCallback(
     (): SchemaNode | null =>
