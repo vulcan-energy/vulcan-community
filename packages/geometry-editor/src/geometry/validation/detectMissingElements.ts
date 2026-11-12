@@ -261,24 +261,31 @@ export const detectMissingElements = (
   simplifiedThermalBridgingOffered = true,
   /** Part F rows; Part O comes in as `partOActiveCoolingRequired`. */
   buildingRegulationsChecks = complianceValidationEnabled,
+  /** Rows any target needs, such as a heat source for wet emitters. */
+  modelValidityChecks = complianceValidationEnabled,
 ): MissingElement[] => {
-  if (!complianceValidationEnabled && !buildingRegulationsChecks) return [];
+  if (!complianceValidationEnabled && !buildingRegulationsChecks && !modelValidityChecks) return [];
 
   const elements = Object.values(elementsById);
   const hasAnyRealElements = elements.some((el) => !el.isPlaceholder);
+  const checksModel = modelValidityChecks && hasAnyRealElements;
+  const wetEmittersNeedHeatSource = checksModel
+    && elements.some((el) => !el.isPlaceholder && el.type === 'WetEmitter')
+    && !elements.some(systemElementProvidesHeatSourceWet);
+  const hasHotWaterSource = elements.some(systemElementProvidesHotWaterSource);
+  const hotWaterNeedsHeatSource = checksModel && hasHotWaterSource && hotWaterSourceReferencesUnsatisfiedHeatSourceWet(elements);
+  const heatSourceRow = (message: string): MissingElement => ({
+    type: 'System',
+    requiredBy: complianceValidationEnabled ? 'fhs' : 'schema',
+    path: '/HeatSourceWet',
+    message: complianceValidationEnabled ? `FHS: ${message}` : message,
+    pillQualifier: 'Heat source',
+  });
 
   const dwellingWide: MissingElement[] = [];
   if (complianceValidationEnabled && hasAnyRealElements) {
-    const hasAnyWetEmitter = elements.some((el) => !el.isPlaceholder && el.type === 'WetEmitter');
-    const hasHeatSourceWetSystem = elements.some(systemElementProvidesHeatSourceWet);
-    if (hasAnyWetEmitter && !hasHeatSourceWetSystem) {
-      dwellingWide.push({
-        type: 'System',
-        requiredBy: 'fhs',
-        path: '/HeatSourceWet',
-        message: 'FHS: Heat source required when Wet Emitters are present',
-        pillQualifier: 'Heat source',
-      });
+    if (wetEmittersNeedHeatSource) {
+      dwellingWide.push(heatSourceRow('Heat source required when Wet Emitters are present'));
     }
 
     const hasMechanicalVentilation = elements.some((el) =>
@@ -322,7 +329,6 @@ export const detectMissingElements = (
       }
     }
 
-    const hasHotWaterSource = elements.some(systemElementProvidesHotWaterSource);
     if (!hasHotWaterSource) {
       dwellingWide.push({
         type: 'System',
@@ -331,14 +337,8 @@ export const detectMissingElements = (
         message: 'FHS: Hot water source',
         pillQualifier: 'Hot water source',
       });
-    } else if (hotWaterSourceReferencesUnsatisfiedHeatSourceWet(elements)) {
-      dwellingWide.push({
-        type: 'System',
-        requiredBy: 'fhs',
-        path: '/HeatSourceWet',
-        message: 'FHS: Heat source required by hot water source',
-        pillQualifier: 'Heat source',
-      });
+    } else if (hotWaterNeedsHeatSource) {
+      dwellingWide.push(heatSourceRow('Heat source required by hot water source'));
     }
 
     // FHS notional preprocessor: multi-storey dwellings add notional WWHRS to
@@ -437,6 +437,10 @@ export const detectMissingElements = (
         batchPlan: { drafts: pipeDrafts, summary: `${pipeDrafts.length} pipework elements` },
       });
     }
+  } else {
+    // A target without the FHS rules still needs a consistent model.
+    if (wetEmittersNeedHeatSource) dwellingWide.push(heatSourceRow('Heat source required when Wet Emitters are present'));
+    if (hotWaterNeedsHeatSource) dwellingWide.push(heatSourceRow('Heat source required by hot water source'));
   }
 
   const perZone: MissingElement[] = [];

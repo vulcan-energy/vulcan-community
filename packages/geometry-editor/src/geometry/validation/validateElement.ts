@@ -441,15 +441,16 @@ export function partFFieldKeyForRule(rule: PartFFinding['rule']): string | undef
 /**
  * The validators' switches from the target's rules. `complianceValidationEnabled` gates the FHS
  * target's own model rules (such as the living-room area split), so it also needs an FHS target;
- * `buildingRegulationsChecks` gates Part F and Part O.
+ * `modelValidityChecks` gates checks any target needs; `buildingRegulationsChecks` gates Part F and Part O.
  */
 export const targetValidationFlags = (
   schemaPort: GeometrySchemaPort,
   modelSettings: Readonly<Record<string, unknown>>,
-): { complianceValidationEnabled: boolean; buildingRegulationsChecks: boolean } => {
+): { complianceValidationEnabled: boolean; modelValidityChecks: boolean; buildingRegulationsChecks: boolean } => {
   const rules = targetRules(schemaPort, modelSettings);
   return {
     complianceValidationEnabled: rules.modelValidityChecks && targetSchemaMode(schemaPort) === 'fhs',
+    modelValidityChecks: rules.modelValidityChecks,
     buildingRegulationsChecks: rules.buildingRegulationsChecks,
   };
 };
@@ -467,6 +468,8 @@ export interface ValidationContext {
   complianceValidationEnabled?: boolean;
   /** Part F checks; defaults to `complianceValidationEnabled`. */
   buildingRegulationsChecks?: boolean;
+  /** Checks any target needs, such as heat-source links; defaults to `complianceValidationEnabled`. */
+  modelValidityChecks?: boolean;
   /** Global inputs used to resolve the same ventilation-zone base height written on save. */
   complianceSettings?: GlobalSettingsShape;
   numberOfBedrooms?: number;
@@ -1043,6 +1046,7 @@ export const validateElementCore = (
   const floors = context.floors;
   const complianceValidationEnabled = context.complianceValidationEnabled || false;
   const buildingRegulationsChecks = context.buildingRegulationsChecks ?? complianceValidationEnabled;
+  const modelValidityChecks = context.modelValidityChecks ?? complianceValidationEnabled;
   const numberOfBedrooms = context.numberOfBedrooms;
   const defaultsLoading = context.defaultsLoading || false;
   const schemaPort = context.schemaPort;
@@ -2160,18 +2164,19 @@ export const validateElementCore = (
           issues.push(geo(msg, 'extra_json'));
         }
       }
-      if (complianceValidationEnabled && elementsById) {
+      if (modelValidityChecks && elementsById) {
+        const linkIssue = complianceValidationEnabled ? fhs : geo;
         for (const msg of hotWaterSourceHeatSourceWetLinkMessagesForElement(
           element,
           Object.values(elementsById),
         )) {
-          issues.push(fhs(msg, 'extra_json'));
+          issues.push(linkIssue(msg, 'extra_json'));
         }
         for (const msg of spaceHeatSystemHeatSourceWetLinkMessagesForElement(
           element,
           Object.values(elementsById),
         )) {
-          issues.push(fhs(msg, 'extra_json'));
+          issues.push(linkIssue(msg, 'extra_json'));
         }
       }
       break;

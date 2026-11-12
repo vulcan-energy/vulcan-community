@@ -127,3 +127,10 @@ describe('detectMissingElements thermal bridging', () => {
     expect(bridgingMessage(false)).toBe('FHS: thermal bridges');
   });
 });
+
+it('asks for a heat source for wet emitters on a target without the FHS rules', () => {
+  const emitter = { id: 'rad', name: 'Rad', type: 'WetEmitter', coordinates: [], isPlaceholder: false } as unknown as Element;
+  const rows = detectMissingElements([], { rad: emitter }, false, false, undefined, [], true, false, true);
+  expect(rows.map((row) => [row.requiredBy, row.message])).toEqual([['schema', 'Heat source required when Wet Emitters are present']]);
+  expect(detectMissingElements([], { rad: emitter }, false)).toEqual([]);
+});

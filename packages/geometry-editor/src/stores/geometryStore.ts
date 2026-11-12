@@ -7608,7 +7608,7 @@ const createGeometryState = (
     // on a model where the data is dwelling-wide and identical for every element.
     const cs = state.complianceSettings;
     // Blocking checks follow the selected target's rules.
-    const { complianceValidationEnabled, buildingRegulationsChecks } = targetValidationFlags(schemaPort, cs);
+    const { complianceValidationEnabled, modelValidityChecks, buildingRegulationsChecks } = targetValidationFlags(schemaPort, cs);
     const partFFindings = selectPartFData({
       zones: state.zones,
       elementsById: state.elementsById,
@@ -7636,6 +7636,7 @@ const createGeometryState = (
       floors: state.floors,
       globalOrientationOffset: state.globalOrientationOffset,
       complianceValidationEnabled,
+      modelValidityChecks,
       buildingRegulationsChecks,
       complianceSettings: cs,
       numberOfBedrooms: cs?.NumberOfBedrooms,
@@ -7723,7 +7724,7 @@ const createGeometryState = (
   detectMissingElements: () => {
     const state = get();
     // Missing-element checks follow the selected target's rules.
-    const { complianceValidationEnabled, buildingRegulationsChecks } =
+    const { complianceValidationEnabled, modelValidityChecks, buildingRegulationsChecks } =
       targetValidationFlags(schemaPort, state.complianceSettings);
     return detectMissingElements(
       state.zones,
@@ -7743,6 +7744,7 @@ const createGeometryState = (
       state.floors,
       undefined,
       buildingRegulationsChecks,
+      modelValidityChecks,
     );
   }
   });
