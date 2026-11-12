@@ -297,12 +297,15 @@ export function windowTreatmentFormToExtraJson(form: WindowTreatmentFormValues):
     if (!Number.isFinite(trans_red)) {
       return { ok: false, reason: 'incomplete' };
     }
+    if (tty === 'curtains' && form.mounting === 'outside') {
+      return { ok: false, reason: 'incomplete' };
+    }
     const treatmentUi: TreatmentUiV1 = {
       v: 1,
       source: 'custom',
       category: 'white_venetian',
       tier: 0,
-      mounting: 'inside',
+      mounting: form.mounting,
     };
     return {
       ok: true,

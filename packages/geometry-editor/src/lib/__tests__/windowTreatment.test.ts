@@ -54,6 +54,16 @@ describe('windowTreatment', () => {
     ]);
   });
 
+  it('keeps the Placement of a custom blind and refuses outside curtains', () => {
+    const custom = { ...defaultWindowTreatmentFormValues(), enabled: true, source: 'custom' as const,
+      custom_trans_red: '0.3', delta_r: '0.1', mounting: 'outside' as const };
+    const ser = windowTreatmentFormToExtraJson({ ...custom, custom_type: 'blinds' });
+    expect(ser.ok && ser.treatmentUi?.mounting).toBe('outside');
+    if (!ser.ok) return;
+    expect(extraJsonToWindowTreatmentForm(ser.treatment, ser.treatmentUi).mounting).toBe('outside');
+    expect(windowTreatmentFormToExtraJson({ ...custom, custom_type: 'curtains' }).ok).toBe(false);
+  });
+
   it('round-trips _treatment_ui', () => {
     const f = defaultWindowTreatmentFormValues();
     const ser = windowTreatmentFormToExtraJson({
