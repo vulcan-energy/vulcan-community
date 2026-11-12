@@ -18,6 +18,55 @@ pub fn map_target_unobstructed_shading(model: &mut Value, profile: crate::Conver
     map_contract_unobstructed_shading(model, profile.input_contract());
 }
 
+/// Pinned Python a8/a9 read an extract fan's exhaust position only from `mid_height_air_flow_path`,
+/// `orientation360` and `pitch`, and fail with a KeyError on a fan that has only the schema's
+/// `position_exhaust` object. Give such a fan the same position as flat fields.
+pub(crate) fn map_flat_exhaust_position(model: &mut Value, contract: crate::InputContract) {
+    if !contract.fan_reads_flat_exhaust_position {
+        return;
+    }
+    let Some(fans) = model
+        .pointer_mut("/InfiltrationVentilation/MechanicalVentilation")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    for fan in fans.values_mut().filter_map(Value::as_object_mut) {
+        let flat_vent_type = matches!(
+            fan.get("vent_type").and_then(Value::as_str),
+            Some(
+                "Intermittent MEV" | "Centralised continuous MEV" | "Decentralised continuous MEV"
+            )
+        );
+        if !flat_vent_type || fan.contains_key("orientation360") {
+            continue;
+        }
+        let Some(Value::Object(position)) = fan.remove("position_exhaust") else {
+            continue;
+        };
+        fan.extend(position);
+    }
+}
+
+/// The Rust a7 schema's `not allOf` holds for an Appliances object that names neither Fridge nor
+/// Fridge-Freezer, so it rejects one; its wrapper gives every appliance the input does not name
+/// its FHS default, exactly as for "Default". Naming both "Default" is the same wrapper input
+/// and passes the schema. A model that names either keeps exactly what it authored.
+pub(crate) fn map_named_cold_appliances(model: &mut Value, contract: crate::InputContract) {
+    if !contract.schema_needs_named_cold_appliance {
+        return;
+    }
+    let Some(appliances) = model.get_mut("Appliances").and_then(Value::as_object_mut) else {
+        return;
+    };
+    if appliances.contains_key("Fridge") || appliances.contains_key("Fridge-Freezer") {
+        return;
+    }
+    for key in ["Fridge", "Fridge-Freezer"] {
+        appliances.insert(key.into(), Value::String("Default".into()));
+    }
+}
+
 pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: crate::InputContract) {
     if !contract.uses_exact_empty_shading_sectors {
         return;
@@ -740,6 +789,64 @@ mod tests {
                 crate::validate_target_input(&readiness, legacy, &a8_version()),
                 crate::validate_target_input(&readiness, canonical, &a8_version())
             );
+        }
+    }
+
+    #[test]
+    fn flat_fans_take_position_exhaust_as_flat_fields_on_python_targets_only() {
+        use crate::ConversionProfile::*;
+        let source = json!({"InfiltrationVentilation":{"MechanicalVentilation":{
+            "Wrapped":{"vent_type":"Intermittent MEV","position_exhaust":{"mid_height_air_flow_path":2.2,"orientation360":90,"pitch":90}},
+            "Flat":{"vent_type":"Intermittent MEV","mid_height_air_flow_path":1.5,"orientation360":180,"pitch":90},
+            "Heat recovery":{"vent_type":"MVHR","position_exhaust":{"mid_height_air_flow_path":2.2,"orientation360":90,"pitch":90}}
+        }}});
+        for profile in [PythonFhsA8, PythonFhsA9] {
+            let mut model = source.clone();
+            map_flat_exhaust_position(&mut model, profile.input_contract());
+            let fans = &model["InfiltrationVentilation"]["MechanicalVentilation"];
+            assert_eq!(
+                fans["Wrapped"],
+                json!({"vent_type":"Intermittent MEV","mid_height_air_flow_path":2.2,"orientation360":90,"pitch":90})
+            );
+            assert_eq!(
+                fans["Flat"],
+                source["InfiltrationVentilation"]["MechanicalVentilation"]["Flat"]
+            );
+            assert_eq!(
+                fans["Heat recovery"],
+                source["InfiltrationVentilation"]["MechanicalVentilation"]["Heat recovery"]
+            );
+        }
+        let mut model = source.clone();
+        map_flat_exhaust_position(&mut model, CurrentRustFhs.input_contract());
+        assert_eq!(model, source);
+    }
+
+    #[test]
+    fn a7_names_both_cold_appliances_default_only_when_neither_is_named() {
+        use crate::ConversionProfile::*;
+        for (appliances, expected) in [
+            (
+                json!({}),
+                json!({"Fridge":"Default","Fridge-Freezer":"Default"}),
+            ),
+            (
+                json!({"Hobs":"Default"}),
+                json!({"Hobs":"Default","Fridge":"Default","Fridge-Freezer":"Default"}),
+            ),
+            (
+                json!({"Fridge":"Not Installed"}),
+                json!({"Fridge":"Not Installed"}),
+            ),
+        ] {
+            let mut model = json!({"Appliances": appliances.clone()});
+            map_named_cold_appliances(&mut model, CurrentRustFhs.input_contract());
+            assert_eq!(model["Appliances"], expected);
+            for profile in [PythonFhsA8, PythonFhsA9] {
+                let mut model = json!({"Appliances": appliances.clone()});
+                map_named_cold_appliances(&mut model, profile.input_contract());
+                assert_eq!(model["Appliances"], appliances);
+            }
         }
     }
 

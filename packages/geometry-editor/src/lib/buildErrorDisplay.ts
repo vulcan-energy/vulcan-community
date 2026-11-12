@@ -112,6 +112,9 @@ const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => 
     (item.message.includes('has less than') || keyword === 'minProperties')
   ) {
     userMessage = 'Add at least one hot water outlet.';
+  } else if (pathSegments[0] === 'Zone' && pathSegments[2] === 'Lighting' && pathSegments.length === 3 && item.message.startsWith('null ')) {
+    // The converter writes no Lighting for a zone without light rows.
+    userMessage = 'Add at least one light to this zone.';
   } else if (
     pathSegments[0] === 'InfiltrationVentilation' &&
     pathSegments[1] === 'MechanicalVentilation' &&

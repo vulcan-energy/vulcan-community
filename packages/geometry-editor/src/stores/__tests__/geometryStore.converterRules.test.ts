@@ -128,6 +128,13 @@ const CASES: Case[] = [
   // blocks where the target requires it, with what the labels or geometry show as a hint.
   { name: 'absent base height with no defaults value', defaults: true, edit: replace('Ventilation_ventilation_zone_base_height,0,,,,,,,,,,,,,\n', ''),
     blocks: ['Ventilation Zone Base Height (m) is not set. Enter it in Global Settings. The geometry gives 0.'], saves: { 'Metadata|Ventilation_ventilation_zone_base_height': null } },
+  // FHS requires these only for a flat (the schema's `if build_type flat`): the converter blocks a flat without them.
+  { name: 'a flat with no storeys in building', defaults: true, edit: replace('General_build_type,house,', 'General_build_type,flat,'),
+    blocks: ['Storeys in building is not set. Enter it in Global Settings.'], saves: { 'Metadata|General_storeys_in_building': null } },
+  { name: 'a flat with storeys in building', defaults: true,
+    edit: replace('General_build_type,house,,,,,,,,,,,,,\n', 'General_build_type,flat,,,,,,,,,,,,,\nGeneral_storeys_in_building,4,,,,,,,,,,,,,\n'),
+    allows: ['Storeys in building is not set'], saves: { 'Metadata|General_storeys_in_building': '4' } },
+  { name: 'a house needs no storeys in building', defaults: true, edit: (csv) => csv, allows: ['Storeys in building is not set'] },
   { name: 'absent bathroom count with no defaults value', defaults: true, edit: replace('NumberOfBathrooms,1,,,,,,,,,,,,,\n', ''),
     blocks: ['Number of bathrooms is not set. Enter it in Global Settings. Space labels show 1.'], saves: { 'Metadata|NumberOfBathrooms': null } },
   { name: 'a Systems row supplies the absent rows', edit: systemsVentilation, defaults: true, noNotice: 'Shield Class',

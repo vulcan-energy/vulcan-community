@@ -63,6 +63,10 @@ pub(crate) struct InputContract {
     /// Pinned Python core meters fan-coil power through the wet system's own `EnergySupply` and
     /// crashes when it is absent.
     pub fan_coil_needs_energy_supply: bool,
+    /// Pinned Python core reads an extract fan's exhaust position only from the flat fields.
+    pub fan_reads_flat_exhaust_position: bool,
+    /// Rust a7's schema rejects Appliances that name neither Fridge nor Fridge-Freezer.
+    pub schema_needs_named_cold_appliance: bool,
 }
 
 impl ConversionProfile {
@@ -87,6 +91,8 @@ impl ConversionProfile {
             requires_detailed_thermal_bridges: detailed_bridges,
             uses_exact_empty_shading_sectors: physical_openings,
             fan_coil_needs_energy_supply: physical_openings,
+            fan_reads_flat_exhaust_position: physical_openings,
+            schema_needs_named_cold_appliance: !physical_openings,
         }
     }
 }

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import { targetValidationIssues, withTargetIssues } from '../buildErrorDisplay';
+import { displayBuildErrorRows, targetValidationIssues, withTargetIssues } from '../buildErrorDisplay';
+import { resolveIssueTarget } from '../issueTarget';
 
 const model = {
   zones: [{ id: 'z1', name: 'Zone 1' }],
@@ -45,5 +46,15 @@ describe('targetValidationIssues', () => {
     expect(result.warnings).toMatchObject([{ message: 'HEM 1.0.0a8: Check the opening height.', fieldKey: 'window_part_list' }]);
     expect(result.issues).toHaveLength(1);
     expect(withTargetIssues(clean, elements.get('pw')?.filter((issue) => issue.warning))).toMatchObject({ hasIssues: false, hasWarnings: true });
+  });
+});
+
+describe('displayBuildErrorRows', () => {
+  it('asks for a light on a zone that has none', () => {
+    const [row] = displayBuildErrorRows(
+      [{ source: 'schema', code: 'E026', keyword: 'type', path: '/Zone/Zone 1/Lighting', message: 'null is not of type "object"' }],
+      (path) => resolveIssueTarget(path, model),
+    );
+    expect(row).toMatchObject({ userMessage: 'Add at least one light to this zone.', target: { zoneId: 'z1' } });
   });
 });
