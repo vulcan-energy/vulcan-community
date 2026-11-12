@@ -1404,8 +1404,8 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     const schemaPort = {
       ...canonicalGeometrySchemaPort,
       targetRules: () => ({
-        modelValidityChecks: true, buildingRegulationsChecks: true, excludedElementTypes: {},
-        hiddenFields: { ElectricBattery: { battery_age: { reason: 'Not used by this target.' } } },
+        modelValidityChecks: true, fhsInputRules: true, buildingRegulationsChecks: true, excludedElementTypes: {},
+        hiddenFields: { ElectricBattery: ['battery_age'] },
       }),
     };
     const shown = fieldKeys(renderEditor({ elementType: 'ElectricBattery', useFHSSchema: false, extraJson: {} }).container);

@@ -153,11 +153,13 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   const in3D = viewMode === '3d';
   const schemaPort = useGeometrySchemaPort();
   const modelSettings = useGeometryStore((s) => s.complianceSettings);
+  // Until the target schema loads only the current type is listed; the host reports a failed load.
   const drawElementTypeOptions = useMemo(
-    () => ELEMENT_TYPE_ORDER.filter((type) => elementTypeAvailability(schemaPort, type, modelSettings).available),
-    [schemaPort, modelSettings]
+    () => ELEMENT_TYPE_ORDER.filter((type) =>
+      type === drawElementType || elementTypeAvailability(schemaPort, type, modelSettings).available),
+    [drawElementType, schemaPort, modelSettings]
   );
-  const drawElementTypeAvailable = elementTypeAvailability(schemaPort, drawElementType, modelSettings).available;
+  const drawElementTypeExcluded = 'reason' in elementTypeAvailability(schemaPort, drawElementType, modelSettings);
   const drawModeOptions = useMemo(
     () => getDrawModeOptionsForElementType(drawElementType),
     [drawElementType],
@@ -202,13 +204,13 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   }, [in3D, resetDraftForMode, setDrawElementType, setDrawMode]);
 
   useEffect(() => {
-    if (!drawElementTypeAvailable) {
+    if (drawElementTypeExcluded) {
       const nextMode = getDefaultDrawModeForElementType('BuildingElementOpaque');
       setDrawElementType('BuildingElementOpaque');
       setDrawMode(nextMode);
       resetDraftForMode(nextMode);
     }
-  }, [drawElementTypeAvailable, resetDraftForMode, setDrawElementType, setDrawMode]);
+  }, [drawElementTypeExcluded, resetDraftForMode, setDrawElementType, setDrawMode]);
 
   useEffect(() => {
     if (!isServiceLineElementType(drawElementType)) {

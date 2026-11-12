@@ -2333,9 +2333,16 @@ function schemaNodeAcceptsNumber(node: unknown, root: unknown): boolean {
  */
 const TYPES_WITHOUT_OWN_SCHEMA_SECTION: ReadonlySet<string> = new Set(['ContextShading', 'MechanicalVentilationTerminal', 'System']);
 
-export type ElementTypeAvailability = { available: true } | { available: false; reason: string };
+export type ElementTypeAvailability =
+  | { available: true }
+  | { available: false; reason: string }
+  /** The target schema is not loaded, so whether the target takes the type is unknown. */
+  | { available: false; pending: true };
 
-/** Whether the selected target takes this element type: its schema has the section and the host's rules do not exclude it. */
+/**
+ * Whether the selected target takes this element type: its schema has the section and the host's
+ * rules do not exclude it. Until the schema loads the answer is pending, not available.
+ */
 export function elementTypeAvailability(
   port: GeometrySchemaPort,
   elementType: string,
@@ -2345,8 +2352,8 @@ export function elementTypeAvailability(
   if (excluded) return { available: false, reason: excluded.reason };
   if (port.availability !== 'available' || TYPES_WITHOUT_OWN_SCHEMA_SECTION.has(elementType)) return { available: true };
   const mode = targetSchemaMode(port);
-  // No schema yet says nothing.
-  if (!port.getRootSchema(mode) || port.getElementSubschema(mode, elementType)) return { available: true };
+  if (!port.getRootSchema(mode)) return { available: false, pending: true };
+  if (port.getElementSubschema(mode, elementType)) return { available: true };
   return { available: false, reason: "The selected target's input has no section for this element type." };
 }
 

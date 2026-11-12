@@ -250,20 +250,32 @@ export interface PartFDetectionContext {
   isKitchenVentExternal?: boolean;
 }
 
+/** Which rows to emit; see `targetValidationFlags`. The two optional switches default to the FHS one. */
+export interface MissingElementChecks {
+  /** The FHS wrapper's input rules: the "FHS:" rows. */
+  complianceValidationEnabled: boolean;
+  /** Part F rows, and the Part O cooling row when `partOActiveCoolingRequired`. */
+  buildingRegulationsChecks?: boolean;
+  /** Rows any target needs, such as a heat source for wet emitters. */
+  modelValidityChecks?: boolean;
+  partOActiveCoolingRequired?: boolean;
+}
+
 // Detect missing required elements for zones based on the FHS schema
 export const detectMissingElements = (
   zones: Zone[],
   elementsById: Record<string, Element>,
-  complianceValidationEnabled: boolean,
-  partOActiveCoolingRequired?: boolean,
+  checks: MissingElementChecks,
   partFContext?: PartFDetectionContext,
   floors: Floor[] = [],
   simplifiedThermalBridgingOffered = true,
-  /** Part F rows; Part O comes in as `partOActiveCoolingRequired`. */
-  buildingRegulationsChecks = complianceValidationEnabled,
-  /** Rows any target needs, such as a heat source for wet emitters. */
-  modelValidityChecks = complianceValidationEnabled,
 ): MissingElement[] => {
+  const {
+    complianceValidationEnabled,
+    buildingRegulationsChecks = complianceValidationEnabled,
+    modelValidityChecks = complianceValidationEnabled,
+  } = checks;
+  const partOActiveCoolingRequired = buildingRegulationsChecks && !!checks.partOActiveCoolingRequired;
   if (!complianceValidationEnabled && !buildingRegulationsChecks && !modelValidityChecks) return [];
 
   const elements = Object.values(elementsById);

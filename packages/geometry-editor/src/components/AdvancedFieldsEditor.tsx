@@ -840,7 +840,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const getBaseFields = useCallback(
     (type: string): readonly string[] => [
       ...(schemaPort.availability === 'available' ? schemaPort.getBaseFieldsForElementType(type) : []),
-      ...Object.keys(hiddenFields[type] ?? {}),
+      ...(hiddenFields[type] ?? []),
     ],
     [hiddenFields, schemaPort],
   );

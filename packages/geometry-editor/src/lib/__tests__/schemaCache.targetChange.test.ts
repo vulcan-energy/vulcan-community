@@ -118,12 +118,13 @@ describe('elementTypeAvailability', () => {
     expect(unavailable(port(mode, root(path)))).toEqual(absent);
   });
 
-  it('hides a type the host excludes, with its reason, and says nothing before the schema loads', () => {
+  it('hides a type the host excludes, with its reason, and offers nothing else before the schema loads', () => {
     const excluding = port('fhs', null, { targetRules: () => ({
-      modelValidityChecks: true, buildingRegulationsChecks: false, hiddenFields: {},
+      modelValidityChecks: true, fhsInputRules: true, buildingRegulationsChecks: false, hiddenFields: {},
       excludedElementTypes: { Lighting: { reason: 'Not used by this target.' } },
     }) });
     expect(elementTypeAvailability(excluding, 'Lighting', {})).toEqual({ available: false, reason: 'Not used by this target.' });
-    expect(unavailable(excluding)).toEqual(['Lighting']);
+    expect(elementTypeAvailability(excluding, 'BuildingElementOpaque', {})).toEqual({ available: false, pending: true });
+    expect(elementTypeAvailability(excluding, 'System', {})).toEqual({ available: true });
   });
 });

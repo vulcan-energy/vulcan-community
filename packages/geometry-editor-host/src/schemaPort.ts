@@ -25,15 +25,22 @@ export interface GeometrySchemaParameterInfo {
   source?: 'schema' | 'hem_guidance';
 }
 
-/** A host's per-target rules the schema cannot state; each exclusion carries the reason shown to the user. */
+/** A host's per-target rules the schema cannot state. */
 export interface TargetRules {
   /** Checks that the model is complete and consistent for this target, such as a wet emitter needing a heat source. */
   modelValidityChecks: boolean;
+  /**
+   * The FHS wrapper's own input rules: the living-room area split, thermal bridging, the FHS
+   * missing-element rows, discrete areal heat capacity, the glazing limit. A target that reads
+   * the FHS schema without the FHS wrapper sets this false.
+   */
+  fhsInputRules: boolean;
   /** Building Regulations checks, such as Part F and Part O. */
   buildingRegulationsChecks: boolean;
+  /** Element types the target does not take, each with the reason shown on an existing element. */
   excludedElementTypes: Readonly<Record<string, { reason: string }>>;
-  /** Fields hidden per element type. */
-  hiddenFields: Readonly<Record<string, Readonly<Record<string, { reason: string }>>>>;
+  /** Field keys hidden per element type. */
+  hiddenFields: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface GeometrySchemaPropertyValidation {
@@ -104,8 +111,8 @@ export function targetSchemaMode(port?: GeometrySchemaPort): GeometrySchemaMode 
 }
 
 /**
- * The host's rules, else the defaults: model-validity checks run for every target, Building
- * Regulations checks run for an FHS target, and nothing is excluded or hidden.
+ * The host's rules, else the defaults: model-validity checks run for every target, the FHS
+ * input rules and Building Regulations checks for an FHS target, and nothing is excluded or hidden.
  */
 export function targetRules(
   port: GeometrySchemaPort | undefined,
@@ -114,6 +121,7 @@ export function targetRules(
   return port?.targetRules?.(modelSettings)
     ?? {
       modelValidityChecks: true,
+      fhsInputRules: targetSchemaMode(port) === 'fhs',
       buildingRegulationsChecks: targetSchemaMode(port) === 'fhs',
       excludedElementTypes: {},
       hiddenFields: {},

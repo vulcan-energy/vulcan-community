@@ -440,8 +440,8 @@ export function partFFieldKeyForRule(rule: PartFFinding['rule']): string | undef
 
 /**
  * The validators' switches from the target's rules. `complianceValidationEnabled` gates the FHS
- * target's own model rules (such as the living-room area split), so it also needs an FHS target;
- * `modelValidityChecks` gates checks any target needs; `buildingRegulationsChecks` gates Part F and Part O.
+ * wrapper's input rules (`fhsInputRules`); `modelValidityChecks` gates checks any target needs;
+ * `buildingRegulationsChecks` gates Part F and Part O.
  */
 export const targetValidationFlags = (
   schemaPort: GeometrySchemaPort,
@@ -449,7 +449,7 @@ export const targetValidationFlags = (
 ): { complianceValidationEnabled: boolean; modelValidityChecks: boolean; buildingRegulationsChecks: boolean } => {
   const rules = targetRules(schemaPort, modelSettings);
   return {
-    complianceValidationEnabled: rules.modelValidityChecks && targetSchemaMode(schemaPort) === 'fhs',
+    complianceValidationEnabled: rules.fhsInputRules,
     modelValidityChecks: rules.modelValidityChecks,
     buildingRegulationsChecks: rules.buildingRegulationsChecks,
   };
@@ -464,7 +464,7 @@ export interface ValidationContext {
   zones?: Zone[];
   floors?: Floor[];
   globalOrientationOffset?: number;
-  /** The FHS target's model rules (see {@link targetValidationFlags}). */
+  /** The FHS wrapper's input rules (see {@link targetValidationFlags}). */
   complianceValidationEnabled?: boolean;
   /** Part F checks; defaults to `complianceValidationEnabled`. */
   buildingRegulationsChecks?: boolean;
@@ -2732,8 +2732,9 @@ export const collectGeometryValidation = (
     globalOrientationOffset?: number;
   },
 ): GeometryValidationSummary => {
-  // The converter checks every file against the FHS target, whatever its ComplianceValidationEnabled row says.
-  const complianceValidationEnabled = true;
+  // The selected target's rules, as in the editor; the file's ComplianceValidationEnabled row plays no part.
+  const flags = targetValidationFlags(options.schemaPort, options.complianceSettings ?? {});
+  const { complianceValidationEnabled } = flags;
   const warnings: string[] = [];
   const criticalIssues: string[] = [];
   const elementsById: Record<string, Element> = {};
@@ -2757,7 +2758,7 @@ export const collectGeometryValidation = (
       zones,
       floors: options.floors,
       globalOrientationOffset: options.globalOrientationOffset,
-      complianceValidationEnabled,
+      ...flags,
       complianceSettings: options.complianceSettings,
       numberOfBedrooms: options.complianceSettings?.NumberOfBedrooms,
       calculateContextShadingDistance: options.calculateContextShadingDistance,
@@ -2796,8 +2797,7 @@ export const collectGeometryValidation = (
   const missingElements = detectMissingElements(
     zones,
     elementsById,
-    complianceValidationEnabled,
-    options.partOActiveCoolingRequired,
+    { ...flags, partOActiveCoolingRequired: options.partOActiveCoolingRequired },
     options.partFContext,
     options.floors,
     bridgingOffered,
@@ -2805,7 +2805,7 @@ export const collectGeometryValidation = (
   const partFInput = options.partFContext
     ? partFInputFromContext(options.partFContext, elements)
     : null;
-  if (!partFInput) {
+  if (flags.buildingRegulationsChecks && !partFInput) {
     warnings.push(
       'Part F ventilation sufficiency was not checked (dwelling room counts missing).',
     );

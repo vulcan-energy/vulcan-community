@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import { targetValidationFlags } from '../geometry/validation/validateElement';
 import React, {
   useCallback,
@@ -487,7 +488,7 @@ export function GlobalSettingsModal({
   focusFieldKey,
 }: GlobalSettingsModalProps) {
   const schemaPort = useGeometrySchemaPort();
-  const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema("fhs") : null;
+  const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null;
   // Dwelling fields show only where the target's root schema has them; no schema says nothing.
   const showStoreyOfDwelling = targetFieldAvailability(targetRoot, ["General", "storey_of_dwelling"]) !== "absent";
   const roomCountRows = useMemo(

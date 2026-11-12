@@ -7724,13 +7724,13 @@ const createGeometryState = (
   detectMissingElements: () => {
     const state = get();
     // Missing-element checks follow the selected target's rules.
-    const { complianceValidationEnabled, modelValidityChecks, buildingRegulationsChecks } =
-      targetValidationFlags(schemaPort, state.complianceSettings);
     return detectMissingElements(
       state.zones,
       state.elementsById,
-      complianceValidationEnabled,
-      buildingRegulationsChecks && (state.complianceSettings.PartO_active_cooling_required || false),
+      {
+        ...targetValidationFlags(schemaPort, state.complianceSettings),
+        partOActiveCoolingRequired: state.complianceSettings.PartO_active_cooling_required,
+      },
       selectPartFData({
         zones: state.zones,
         elementsById: state.elementsById,
@@ -7742,9 +7742,6 @@ const createGeometryState = (
         defaultsLookup: state.getDefaultsLookup(),
       }).context,
       state.floors,
-      undefined,
-      buildingRegulationsChecks,
-      modelValidityChecks,
     );
   }
   });

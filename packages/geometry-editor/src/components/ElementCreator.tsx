@@ -1383,6 +1383,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const [elementName, setElementName] = useState('');
   const elementNameEditingRef = useRef(false);
   const [elementType, setElementType] = useState<ElementType>('BuildingElementOpaque');
+  // The types to offer (an existing element keeps its own) and why its own type is excluded, once per change.
+  const { elementTypeOptions, elementTypeExclusion } = useMemo(() => {
+    const own = elementTypeAvailability(schemaPort, elementType, modelSettings);
+    return {
+      elementTypeOptions: ELEMENT_TYPES.filter((type) =>
+        type === elementType || elementTypeAvailability(schemaPort, type, modelSettings).available),
+      elementTypeExclusion: 'reason' in own ? own.reason : null,
+    };
+  }, [elementType, modelSettings, schemaPort]);
   const [elementZoneId, setElementZoneId] = useState<string>('');
   const [elementFloorId, setElementFloorId] = useState<string>('');
 
@@ -4728,18 +4737,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     }
                   }}
                   // An existing element keeps its type when the target does not take it; it is not offered for others.
-                  options={ELEMENT_TYPES.filter((type) =>
-                    type === elementType || elementTypeAvailability(schemaPort, type, modelSettings).available)}
+                  options={elementTypeOptions}
                   placeholder="Select element type..."
                   ariaLabel="Element type"
                   className="element-editor-type-picker"
                 />
-                {(() => {
-                  const availability = elementTypeAvailability(schemaPort, elementType, modelSettings);
-                  return availability.available ? null : (
-                    <div style={INLINE_FIELD_NOTE_STYLE}>{availability.reason}</div>
-                  );
-                })()}
+                {elementTypeExclusion ? (
+                  <div style={INLINE_FIELD_NOTE_STYLE}>{elementTypeExclusion}</div>
+                ) : null}
               </div>
               {(selection.type === 'element' || selection.type === 'global') && (
                 <div className="element-editor-meta-control element-editor-meta-control--shape" ref={registerBaseFieldRefs('shape')}>
