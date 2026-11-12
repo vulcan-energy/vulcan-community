@@ -108,9 +108,14 @@ describe('elementTypeAvailability', () => {
   }) as unknown as GeometrySchemaPort;
   const unavailable = (p: GeometrySchemaPort) => ELEMENT_TYPE_ORDER.filter((type) => !elementTypeAvailability(p, type, {}).available);
 
-  it('offers every type the FHS schema has; no current schema has CombustionAppliances', () => {
-    expect(unavailable(port('fhs', root('hem_fhs_upstream/schema/input_fhs.schema.json')))).toEqual(['CombustionAppliances']);
-    expect(unavailable(port('core', root('hem_engine_upstream/schemas/core-input.schema.json')))).toContain('CombustionAppliances');
+  // Exact lists: a resolver gap fails here instead of hiding a type. Each is a section the schema lacks.
+  it.each([
+    ['fhs', 'hem_fhs_upstream/schema/input_fhs.schema.json', ['CombustionAppliances']],
+    ['fhs', 'data/schemas/input_fhs.schema.json', ['CombustionAppliances']],
+    ['core', 'hem_engine_upstream/schemas/core-input.schema.json', ['WindowShading', 'Lighting', 'Appliance', 'CombustionAppliances']],
+    ['core', 'data/schemas/core-input.schema.json', ['WindowShading', 'Lighting', 'Appliance', 'CombustionAppliances']],
+  ] as const)('%s %s offers every type it has a section for', (mode, path, absent) => {
+    expect(unavailable(port(mode, root(path)))).toEqual(absent);
   });
 
   it('hides a type the host excludes, with its reason, and says nothing before the schema loads', () => {

@@ -531,6 +531,8 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
     expect(moved).toEqual([
       'core/BuildingElementAdjacentConditionedSpace.thermal_resistance_construction -> number',
       'core/BuildingElementAdjacentConditionedSpace.u_value -> number',
+      'core/BuildingElementAdjacentUnconditionedSpace_Simple.thermal_resistance_construction -> number',
+      'core/BuildingElementAdjacentUnconditionedSpace_Simple.u_value -> number',
       'core/BuildingElementOpaque.is_unheated_pitched_roof -> boolean',
       'core/BuildingElementOpaque.thermal_resistance_construction -> number',
       'core/BuildingElementOpaque.u_value -> number',
@@ -561,6 +563,12 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
       'core/System:InfiltrationVentilation.ach_max_static_calcs -> number',
       'core/System:InfiltrationVentilation.ach_min_static_calcs -> number',
       'core/System:InfiltrationVentilation.vent_opening_ratio_init -> number',
+      'core/WetEmitter.c -> number',
+      'core/WetEmitter.c_per_m -> number',
+      'core/WetEmitter.length -> number',
+      'core/WetEmitter.n_units -> number',
+      'core/WetEmitter.thermal_mass -> number',
+      'core/WetEmitter.thermal_mass_per_m -> number',
       'fhs/System:HotWaterSource.rejected_energy_1 -> number',
       'fhs/System:HotWaterSource.rejected_factor_3 -> number',
       'fhs/System:HotWaterSource.storage_loss_factor_1 -> number',
@@ -1337,6 +1345,45 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'fancoil_test_data | Fancoil test data | textbox | 0.01 | - | - | no-tip',
     'frac_convective | Frac Convective | textbox | - | - | - | tip',
   ],
+  'core/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
+    'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | - | - | tip',
+  ],
+  'core/WetEmitter [- Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door floor roof wall]': [
+    'c | c | textbox | 0 | - | - | tip',
+    'c_per_m | c per m | textbox | 0 | - | - | tip',
+    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+    'thermal_mass_per_m | Thermal Mass Per M | textbox | 0 | - | - | tip',
+    'length | Length | textbox | 0 | - | - | tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
+    'n | n | textbox | 0 | - | - | tip',
+    'emitter_floor_area | Emitter Floor Area | textbox | 0 | - | - | tip',
+    'equivalent_specific_thermal_mass | Equivalent Specific Thermal Mass | textbox | 0 | - | - | tip',
+    'system_performance_factor | System Performance Factor | textbox | 0 | - | - | tip',
+    'fancoil_test_data | Fancoil Test Data | textbox | - | - | {"fan_power_W":[1],"fan_speed_data":[{"power_output":[0],"temperature_diff":1}]} | tip',
+    'n_units | N Units | textbox | 0 | - | - | tip',
+  ],
+  'core/WetEmitter [radiator]': [
+    'c | c | textbox | 0 | - | - | tip',
+    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
+    'n | n | textbox | 0 | - | - | tip',
+  ],
+  'core/WetEmitter [ufh]': [
+    'equivalent_specific_thermal_mass | Equivalent Specific Thermal Mass | textbox | 0 | - | - | tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
+    'system_performance_factor | System Performance Factor | textbox | 0 | - | - | tip',
+  ],
+  'core/WetEmitter [fancoil]': [
+    'fancoil_test_data | Fancoil test data | textbox | 0.01 | - | - | no-tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
+  ],
+  'core/Vents [every subtype]': [
+    'pressure_difference_ref | Pressure Difference Ref | textbox | 0 | - | - | tip',
+  ],
 };
 
 describe('R4.6b-1 standing invariant: what every Advanced Fields row actually renders', () => {
@@ -1346,7 +1393,7 @@ describe('R4.6b-1 standing invariant: what every Advanced Fields row actually re
     // Floors would let this pass vacuously; these are the exact populations the pinned
     // inventory below was captured from, so they are equalities.
     expect(routesSwept).toBe(674);
-    expect(routesWithRows).toBe(327);
+    expect(routesWithRows).toBe(372);
 
     expect(inventory).toEqual(EXPECTED_RENDERED_ROWS);
   });

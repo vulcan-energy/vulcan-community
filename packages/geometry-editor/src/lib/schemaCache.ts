@@ -741,6 +741,25 @@ function mergeFhsWetEmitterItemPropertiesForSubtype(
   return { properties: mergedProps, required: mergedReq, conditional };
 }
 
+/**
+ * Core `emitters[]` items are a `oneOf` discriminated by `wet_emitter_type`: the subtype's variant,
+ * or with no subtype the union of every variant's properties (nothing required).
+ */
+function resolveCoreWetEmitterItemSubschema(schema: SchemaNode, subtype?: string): SchemaNode | null {
+  const items = asSchemaNode(schema.$defs?.SpaceHeatSystemWetDistribution?.properties?.emitters?.items);
+  const mapped = subtype ? items?.discriminator?.mapping?.[subtype] : undefined;
+  const variants = (mapped ? [{ $ref: mapped }] : Array.isArray(items?.oneOf) ? items.oneOf : [])
+    .map((variant) => resolveRefNode(schema, variant))
+    .filter((variant): variant is SchemaNode => !!variant?.properties);
+  if (variants.length === 0) return null;
+  return {
+    type: 'object',
+    properties: Object.assign({}, ...variants.map((variant) => variant.properties)),
+    required: mapped ? schemaStringArray(variants[0].required) : [],
+    $defs: schema.$defs || {},
+  };
+}
+
 /** Advanced Fields + validation for geometry `WetEmitter` rows (FHS emitter item keys in `extra_json`). */
 function resolveFhsWetEmitterItemSubschema(schema: SchemaNode, subtype?: string): SchemaNode | null {
   const items = extractFhsWetDistributionEmittersItemSchema(schema);
@@ -1211,7 +1230,7 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
   }
 
   if (elementType === 'WetEmitter') {
-    const fromShs = resolveFhsWetEmitterItemSubschema(schema, subtype);
+    const fromShs = resolveFhsWetEmitterItemSubschema(schema, subtype) ?? resolveCoreWetEmitterItemSubschema(schema, subtype);
     if (fromShs) return fromShs;
   }
 
@@ -1296,6 +1315,9 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
     // Special handling for MechanicalVentilation - check InfiltrationVentilation.properties path
     if (elementType === 'MechanicalVentilation') {
       baseSchema = resolveCoreMechanicalVentilationBaseSchema(schema, schemaKey);
+    } else if (schemaKey === 'Vents' || schemaKey === 'CombustionAppliances') {
+      // Core declares these under $defs.InfiltrationVentilation.properties, as maps of a $ref.
+      baseSchema = resolveRefNode(schema, unwrapAdditionalProperties(schema.$defs?.InfiltrationVentilation?.properties?.[schemaKey]));
     } else {
       // For other element types, prefer $defs entry when available
       baseSchema = schema.$defs[schemaKey];
@@ -1507,7 +1529,8 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
       'BuildingElementTransparent': ['BuildingElementTransparent', 'BuildingElementTransparentFHS'],
       'BuildingElementGround': ['BuildingElementGround', 'BuildingElementGroundHeatedBasement', 'BuildingElementGroundSlabEdgeInsulation', 'BuildingElementGroundSlabNoEdgeInsulation', 'BuildingElementGroundSuspendedFloor', 'BuildingElementGroundUnheatedBasement'],
       'BuildingElementAdjacentConditionedSpace': ['BuildingElementAdjacentConditionedSpace'],
-      'BuildingElementAdjacentUnconditionedSpace_Simple': ['BuildingElementAdjacentUnconditionedSpace_Simple'],
+      // Core titles the variant without the underscore.
+      'BuildingElementAdjacentUnconditionedSpace_Simple': ['BuildingElementAdjacentUnconditionedSpace_Simple', 'BuildingElementAdjacentUnconditionedSpaceSimple'],
       'BuildingElementPartyWall': ['BuildingElementPartyWall']
     };
 
