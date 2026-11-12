@@ -61,11 +61,19 @@ impl ModelProfile {
     }
 
     /// Zones carry `livingroom_area` + `restofdwelling_area` and no `area`, `height`
-    /// or `temp_setpnt_init`; transparent elements get no width × height area.
+    /// or `temp_setpnt_init`.
     pub(crate) fn zone_uses_living_and_rest_areas(self) -> bool {
         match self {
             Self::Core => false,
             Self::Fhs => true,
+        }
+    }
+
+    /// A transparent element with no positive `area` gets width × height as its area.
+    pub(crate) fn derives_transparent_area_from_dimensions(self) -> bool {
+        match self {
+            Self::Core => true,
+            Self::Fhs => false,
         }
     }
 
@@ -78,7 +86,8 @@ impl ModelProfile {
     }
 
     /// Hot-water source and wet heat plant come only from authored `Systems` rows,
-    /// never from defaults-template entries.
+    /// never from defaults-template entries. This also repoints a hot-water source's
+    /// missing wet heat source reference to the first authored one.
     pub(crate) fn requires_authored_heating_systems(self) -> bool {
         match self {
             Self::Core => false,
@@ -87,8 +96,9 @@ impl ModelProfile {
     }
 
     /// Output takes the FHS wrapper's field shapes: `InputMetadata`, implicit root
-    /// booleans, metadata cold-water source, enum test pressure, and FHS cleanup of
-    /// root keys, building elements, energy supplies and ventilation.
+    /// booleans, metadata cold-water source, enum test pressure, `is_heat_network` on
+    /// wet heat sources, and FHS cleanup of root keys, building elements, energy
+    /// supplies and ventilation.
     pub(crate) fn requires_fhs_wrapper_fields(self) -> bool {
         match self {
             Self::Core => false,

@@ -2636,7 +2636,7 @@ impl JSONBuilder {
                         let supports_calculated_area = schema_element_type
                             == "BuildingElementOpaque"
                             || (schema_element_type == "BuildingElementTransparent"
-                                && !self.profile.zone_uses_living_and_rest_areas());
+                                && self.profile.derives_transparent_area_from_dimensions());
                         let needs_area_calculation = supports_calculated_area && {
                             let current_area = element_obj_map
                                 .get("area")
