@@ -1492,11 +1492,6 @@ impl JSONBuilder {
         self.input_contract = profile.input_contract();
     }
 
-    /// True when this builder validates against an FHS-family schema (FHS / ECaaS).
-    pub fn targets_fhs_schema(&self) -> bool {
-        self.profile.requires_fhs_wrapper_fields()
-    }
-
     /// Top-level property names the active schema accepts. Used to reject unknown
     /// root keys, since schema roots are not strict (`unevaluatedProperties` absent).
     pub fn schema_root_property_names(&self) -> HashSet<String> {
