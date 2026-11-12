@@ -20,6 +20,7 @@ import {
   lineIntersection,
   isColinear,
 } from '../lib/shapeUtils';
+import { getParentOrientation360 } from '../lib/parentOrientation';
 import { readProfiledLineFace, reverseGeometryFaceInExtraJson } from '../lib/profileLineFace';
 import { syncPolygonElement, unionPolygons, calculatePolygonArea } from '../lib/polygonSync';
 import {
@@ -2123,21 +2124,6 @@ const isHostedMvhrTerminalPointElement = (
   typeof element.host_element === 'string' &&
   element.host_element.trim().length > 0;
 
-const getParentPlacementOrientation360 = (
-  parent: Element,
-  globalOrientationOffset: number,
-): number | undefined => {
-  if (Array.isArray(parent.coordinates) && parent.coordinates.length === 2) {
-    try {
-      return deriveWallProperties(parent, globalOrientationOffset).orientation360;
-    } catch {
-      return undefined;
-    }
-  }
-  const orientation = (parent as { orientation360?: unknown }).orientation360;
-  return typeof orientation === 'number' && Number.isFinite(orientation) ? orientation : undefined;
-};
-
 const buildMechanicalVentilationHostPlacementPatch = (
   element: MechanicalVentilation,
   parent: Element | undefined,
@@ -2146,7 +2132,7 @@ const buildMechanicalVentilationHostPlacementPatch = (
   if (!parent || !canMechanicalVentilationInheritHostPlacement(element.vent_type)) return {};
 
   const columns: Partial<Record<'orientation360' | 'pitch', number>> = {};
-  const orientation360 = getParentPlacementOrientation360(parent, globalOrientationOffset);
+  const orientation360 = getParentOrientation360(parent, globalOrientationOffset);
   if (typeof orientation360 === 'number') {
     columns.orientation360 = Math.round(orientation360);
   }

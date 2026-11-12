@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGeometryStore } from '../geometryStore';
 import type { Element } from '../../geometry/types';
+import { buildHostedLinearParentPatch } from '../../lib/parentOrientation';
 
 // A blank orientation360 cell on an element whose bearing the editor derives from its coordinates
 // loads with the bearing that drawing the element gives. An authored value is kept.
@@ -21,15 +22,18 @@ Front wall,Dwelling,BuildingElementOpaque,22.4,90,8,2.8,,0,,FALSE,,"0,0,0|8,0,0"
 Back wall,Dwelling,BuildingElementOpaque,22.4,90,8,2.8,,0,,FALSE,,"8,8,0|0,8,0",
 Side wall,Dwelling,BuildingElementOpaque,22.4,90,8,2.8,123,0,,FALSE,,"8,0,0|8,8,0",
 Entry door,Dwelling,BuildingElementOpaque,2,90,1,2,,0,,TRUE,Front wall,"0.5,0,0|1.5,0,0",
+Tiny wall,Dwelling,BuildingElementOpaque,0.01,90,0.001,2.8,,0,,FALSE,,"4,4,0|4.001,4,0",
+Tiny door,Dwelling,BuildingElementOpaque,2,90,1,2,,0,,TRUE,Tiny wall,"3.5,4,0|4.5,4,0",
 
 Window Elements,,,,,,,,,,,,,,
 Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
 North window,Dwelling,BuildingElementTransparent,1.2,90,1,1.2,,0.8,Back wall,0.25,1.2,1.4,0.5,"1.5,8,0|2.5,8,0",
 `;
 
+let lastWarnings: string[] = [];
 const orientationByName = (offset: number) => {
   const store = createGeometryStore({ defaultDefaultsPath: null });
-  store.getState().loadFromCSV(csv(offset));
+  lastWarnings = store.getState().loadFromCSV(csv(offset)).warnings;
   return Object.fromEntries(
     Object.values(store.getState().elementsById).map((e) => [e.name, (e as { orientation360?: number }).orientation360]),
   );
@@ -66,5 +70,15 @@ describe('blank orientation360 on load', () => {
     expect(loaded['Entry door']).toBe(loaded['Front wall']);
     // The window's own coordinates run against the host; hosting takes the host bearing.
     expect(loaded['North window']).toBe(loaded['Back wall']);
+  });
+
+  it('leaves a bearing blank when the host segment is too short to give one', () => {
+    const loaded = orientationByName(30);
+    expect(loaded['Tiny wall']).toBeUndefined();
+    expect(loaded['Tiny door']).toBeUndefined();
+    expect(lastWarnings.join()).not.toMatch(/Tiny (door|wall) orientation360/);
+    const tinyWall = { type: 'BuildingElementOpaque', coordinates: [{ x: 4, y: 4, z: 0 }, { x: 4.001, y: 4, z: 0 }] } as Element;
+    const door = { type: 'BuildingElementOpaque', is_external_door: true, coordinates: [{ x: 3.5, y: 4, z: 0 }, { x: 4.5, y: 4, z: 0 }] } as Element;
+    expect(buildHostedLinearParentPatch(door, tinyWall, 'Tiny wall', null, 0)).not.toHaveProperty('orientation360');
   });
 });
