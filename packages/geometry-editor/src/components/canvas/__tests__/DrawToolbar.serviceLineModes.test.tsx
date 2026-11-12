@@ -7,12 +7,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DrawToolbar } from '../DrawToolbar';
 import type { DrawMode } from '../../../hooks/useDrawingMode';
 import type { ElementType } from '../../../geometry/types';
+import { createGeometryStore, GeometryStoreProvider } from '../../../stores/geometryStore';
 
 function renderToolbar(
   drawElementType: ElementType,
   overrides: Partial<React.ComponentProps<typeof DrawToolbar>> = {},
 ) {
   return render(
+    <GeometryStoreProvider store={createGeometryStore()}>
     <DrawToolbar
       drawMode={'tb-plan-line' as DrawMode}
       setDrawMode={vi.fn()}
@@ -44,7 +46,8 @@ function renderToolbar(
       viewMode="2d"
       setViewMode={vi.fn()}
       {...overrides}
-    />,
+    />
+    </GeometryStoreProvider>,
   );
 }
 

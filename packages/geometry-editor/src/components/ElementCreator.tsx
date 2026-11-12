@@ -23,7 +23,7 @@ import {
   type ElementFormRenderCtx,
 } from './elementForms/types';
 import { electricBatteryFormModule } from './elementForms/electricBattery';
-import { simplifiedThermalBridgingOffered } from '../lib/schemaCache';
+import { elementTypeAvailability, simplifiedThermalBridgingOffered } from '../lib/schemaCache';
 import { thermalBridgeLinearFormModule } from './elementForms/thermalBridgeLinear';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
 import { buildLightingPatch, lightingFormModule } from './elementForms/lighting';
@@ -145,6 +145,7 @@ import {
 } from '../lib/parentControlledFloor';
 import { WallShapeRows, type WallShapeCommit } from './WallShapeRows';
 import { useKeyedState } from '../hooks/useKeyedState';
+import { useTargetValidationFlags } from '../hooks/useTargetRules';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -968,6 +969,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // The selected target decides the schema, the tooltips and which checks apply.
   const schemaMode = targetSchemaMode(schemaPort);
   const useFHSSchema = schemaMode === 'fhs';
+  const { complianceValidationEnabled } = useTargetValidationFlags();
+  const modelSettings = useGeometryStore((s) => s.complianceSettings);
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -1067,7 +1070,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (!zone) return null;
     return validateZone(zone, {
       elementsById,
-      complianceValidationEnabled: useFHSSchema,
+      complianceValidationEnabled,
       primaryFhsZoneId,
       simplifiedThermalBridgingOffered: targetAcceptsThermalBridgingTotal,
     });
@@ -1075,7 +1078,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     selection,
     getZoneById,
     elementsById,
-    useFHSSchema,
+    complianceValidationEnabled,
     primaryFhsZoneId,
     targetAcceptsThermalBridgingTotal,
   ]);
@@ -1380,6 +1383,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const [elementName, setElementName] = useState('');
   const elementNameEditingRef = useRef(false);
   const [elementType, setElementType] = useState<ElementType>('BuildingElementOpaque');
+  // The types to offer (an existing element keeps its own) and why its own type is excluded, once per change.
+  const { elementTypeOptions, elementTypeExclusion } = useMemo(() => {
+    const own = elementTypeAvailability(schemaPort, elementType, modelSettings);
+    return {
+      elementTypeOptions: ELEMENT_TYPES.filter((type) =>
+        type === elementType || elementTypeAvailability(schemaPort, type, modelSettings).available),
+      elementTypeExclusion: 'reason' in own ? own.reason : null,
+    };
+  }, [elementType, modelSettings, schemaPort]);
   const [elementZoneId, setElementZoneId] = useState<string>('');
   const [elementFloorId, setElementFloorId] = useState<string>('');
 
@@ -4724,16 +4736,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       setSelection({ ...selection, type: nextSelectionType });
                     }
                   }}
-                  options={ELEMENT_TYPES.filter((type) => {
-                      if (!useFHSSchema) return true;
-                      // Keep legacy FHS-excluded types editable when selected, but prevent selecting them for new additions.
-                      const excludedInFHS: ElementType[] = ['CombustionAppliances'];
-                      return !excludedInFHS.includes(type) || elementType === type;
-                    })}
+                  // An existing element keeps its type when the target does not take it; it is not offered for others.
+                  options={elementTypeOptions}
                   placeholder="Select element type..."
                   ariaLabel="Element type"
                   className="element-editor-type-picker"
                 />
+                {elementTypeExclusion ? (
+                  <div style={INLINE_FIELD_NOTE_STYLE}>{elementTypeExclusion}</div>
+                ) : null}
               </div>
               {(selection.type === 'element' || selection.type === 'global') && (
                 <div className="element-editor-meta-control element-editor-meta-control--shape" ref={registerBaseFieldRefs('shape')}>

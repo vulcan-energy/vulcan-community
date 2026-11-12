@@ -38,7 +38,7 @@ describe('detectMissingElements FHS payload rules', () => {
   it('keeps the HotWaterSource finding for a category-only system shell', () => {
     const hollowHotWaterSource = system({ extra_json: undefined });
 
-    const findings = detectMissingElements([], byId([hollowHotWaterSource]), true);
+    const findings = detectMissingElements([], byId([hollowHotWaterSource]), { complianceValidationEnabled: true });
 
     expect(findings.some((finding) => finding.path === '/HotWaterSource')).toBe(true);
   });
@@ -54,7 +54,7 @@ describe('detectMissingElements FHS payload rules', () => {
       },
     });
 
-    const findings = detectMissingElements([], byId([storageTank]), true);
+    const findings = detectMissingElements([], byId([storageTank]), { complianceValidationEnabled: true });
 
     expect(findings.some((finding) => finding.path === '/HotWaterSource')).toBe(false);
   });
@@ -71,13 +71,13 @@ describe('detectMissingElements FHS payload rules', () => {
       },
     });
 
-    const findings = detectMissingElements([], byId([unrelatedSystem]), true);
+    const findings = detectMissingElements([], byId([unrelatedSystem]), { complianceValidationEnabled: true });
 
     expect(findings.some((finding) => finding.path === '/HotWaterSource')).toBe(true);
   });
 
   it('requires a Fridge or Fridge-Freezer when another appliance is authored', () => {
-    const findings = detectMissingElements([], byId([appliance('Oven')]), true);
+    const findings = detectMissingElements([], byId([appliance('Oven')]), { complianceValidationEnabled: true });
 
     expect(findings).toContainEqual(expect.objectContaining({
       type: 'Appliance',
@@ -89,7 +89,7 @@ describe('detectMissingElements FHS payload rules', () => {
   it.each(['Fridge', 'Fridge-Freezer'] as const)(
     'accepts %s as the required refrigeration appliance',
     (appliancekey) => {
-      const findings = detectMissingElements([], byId([appliance(appliancekey)]), true);
+      const findings = detectMissingElements([], byId([appliance(appliancekey)]), { complianceValidationEnabled: true });
 
       expect(
         findings.some((finding) => finding.path === '/Appliances/FridgeOrFridgeFreezer'),
@@ -103,7 +103,7 @@ describe('detectMissingElements FHS payload rules', () => {
     const heatPump = system({ id: 'hp', name: 'Heat Pump', subcategory: 'HeatSourceWet', extra_json: { HeatSourceWet: { hp: { type: 'HeatPump' } } } });
     const cylinder = (type: string) => system({ id: 'cyl', name: 'Cylinder', coordinates: [{ x: 6, y: 1, z: 0 }],
       extra_json: { HotWaterSource: { 'hw cylinder': { type, HeatSource: { hp: { type: 'HeatSourceWet', name: 'hp' } } } } } });
-    const row = (elements: Element[]) => detectMissingElements([], byId(elements), true, undefined, undefined, floors)
+    const row = (elements: Element[]) => detectMissingElements([], byId(elements), { complianceValidationEnabled: true }, undefined, floors)
       .find((finding) => finding.type === 'WaterPipework');
 
     expect(row(['StorageTank'].map(cylinder).concat(ground, heatPump))).toMatchObject({
@@ -120,10 +120,17 @@ describe('detectMissingElements FHS payload rules', () => {
 describe('detectMissingElements thermal bridging', () => {
   const zone = { id: 'z1', name: 'Living', floorArea: 30, height: 2.4, volume: 72 };
   const wall = { id: 'w', name: 'Wall', type: 'BuildingElementOpaque', zoneId: 'z1', parent_element: null, coordinates: [] } as unknown as Element;
-  const bridgingMessage = (offered?: boolean) => detectMissingElements([zone], byId([wall]), true, undefined, undefined, [], offered)
+  const bridgingMessage = (offered?: boolean) => detectMissingElements([zone], byId([wall]), { complianceValidationEnabled: true }, undefined, [], offered)
     .find((finding) => finding.fieldKey === 'simplifiedThermalBridging')?.message;
   it('mentions simplified psi only where the target offers it', () => {
     expect(bridgingMessage()).toBe('FHS: TB or simplified ψ');
     expect(bridgingMessage(false)).toBe('FHS: thermal bridges');
   });
+});
+
+it('asks for a heat source for wet emitters on a target without the FHS rules', () => {
+  const emitter = { id: 'rad', name: 'Rad', type: 'WetEmitter', coordinates: [], isPlaceholder: false } as unknown as Element;
+  const rows = detectMissingElements([], { rad: emitter }, { complianceValidationEnabled: false, buildingRegulationsChecks: false, modelValidityChecks: true });
+  expect(rows.map((row) => [row.requiredBy, row.message])).toEqual([['schema', 'Heat source required when Wet Emitters are present']]);
+  expect(detectMissingElements([], { rad: emitter }, { complianceValidationEnabled: false })).toEqual([]);
 });

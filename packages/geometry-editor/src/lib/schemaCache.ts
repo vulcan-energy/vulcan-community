@@ -8,7 +8,7 @@ import { resolveRefChain, resolveRefNode } from './schemaRefResolver';
 import { flattenIfThenAllOfProperties } from './systemSchemaFlatten';
 import { isForbiddenSchemaNode } from './schemaShape';
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
-import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
+import { targetRules, targetSchemaMode, type GeometrySchemaMode, type GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 
 export type GeometrySchemaAssetSource = Readonly<{
   loadText(mode: GeometrySchemaMode): Promise<string>;
@@ -741,6 +741,25 @@ function mergeFhsWetEmitterItemPropertiesForSubtype(
   return { properties: mergedProps, required: mergedReq, conditional };
 }
 
+/**
+ * Core `emitters[]` items are a `oneOf` discriminated by `wet_emitter_type`: the subtype's variant,
+ * or with no subtype the union of every variant's properties (nothing required).
+ */
+function resolveCoreWetEmitterItemSubschema(schema: SchemaNode, subtype?: string): SchemaNode | null {
+  const items = asSchemaNode(schema.$defs?.SpaceHeatSystemWetDistribution?.properties?.emitters?.items);
+  const mapped = subtype ? items?.discriminator?.mapping?.[subtype] : undefined;
+  const variants = (mapped ? [{ $ref: mapped }] : Array.isArray(items?.oneOf) ? items.oneOf : [])
+    .map((variant) => resolveRefNode(schema, variant))
+    .filter((variant): variant is SchemaNode => !!variant?.properties);
+  if (variants.length === 0) return null;
+  return {
+    type: 'object',
+    properties: Object.assign({}, ...variants.map((variant) => variant.properties)),
+    required: mapped ? schemaStringArray(variants[0].required) : [],
+    $defs: schema.$defs || {},
+  };
+}
+
 /** Advanced Fields + validation for geometry `WetEmitter` rows (FHS emitter item keys in `extra_json`). */
 function resolveFhsWetEmitterItemSubschema(schema: SchemaNode, subtype?: string): SchemaNode | null {
   const items = extractFhsWetDistributionEmittersItemSchema(schema);
@@ -1211,8 +1230,13 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
   }
 
   if (elementType === 'WetEmitter') {
-    const fromShs = resolveFhsWetEmitterItemSubschema(schema, subtype);
+    const fromShs = resolveFhsWetEmitterItemSubschema(schema, subtype) ?? resolveCoreWetEmitterItemSubschema(schema, subtype);
     if (fromShs) return fromShs;
+  }
+
+  // Core names the window shading item `WindowShadingObject`; FHS names it `WindowShading`.
+  if (elementType === 'WindowShading' && !schema.$defs.WindowShading && schema.$defs.WindowShadingObject) {
+    return { ...schema.$defs.WindowShadingObject, $defs: schema.$defs };
   }
 
   const resolveGroundSubtypeSchema = (candidate: SchemaNode | null): SchemaNode | null => {
@@ -1296,6 +1320,9 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
     // Special handling for MechanicalVentilation - check InfiltrationVentilation.properties path
     if (elementType === 'MechanicalVentilation') {
       baseSchema = resolveCoreMechanicalVentilationBaseSchema(schema, schemaKey);
+    } else if (schemaKey === 'Vents' || schemaKey === 'CombustionAppliances') {
+      // Core declares these under $defs.InfiltrationVentilation.properties, as maps of a $ref.
+      baseSchema = resolveRefNode(schema, unwrapAdditionalProperties(schema.$defs?.InfiltrationVentilation?.properties?.[schemaKey]));
     } else {
       // For other element types, prefer $defs entry when available
       baseSchema = schema.$defs[schemaKey];
@@ -1507,7 +1534,8 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
       'BuildingElementTransparent': ['BuildingElementTransparent', 'BuildingElementTransparentFHS'],
       'BuildingElementGround': ['BuildingElementGround', 'BuildingElementGroundHeatedBasement', 'BuildingElementGroundSlabEdgeInsulation', 'BuildingElementGroundSlabNoEdgeInsulation', 'BuildingElementGroundSuspendedFloor', 'BuildingElementGroundUnheatedBasement'],
       'BuildingElementAdjacentConditionedSpace': ['BuildingElementAdjacentConditionedSpace'],
-      'BuildingElementAdjacentUnconditionedSpace_Simple': ['BuildingElementAdjacentUnconditionedSpace_Simple'],
+      // Core titles the variant without the underscore.
+      'BuildingElementAdjacentUnconditionedSpace_Simple': ['BuildingElementAdjacentUnconditionedSpace_Simple', 'BuildingElementAdjacentUnconditionedSpaceSimple'],
       'BuildingElementPartyWall': ['BuildingElementPartyWall']
     };
 
@@ -2302,6 +2330,36 @@ function schemaNodeAcceptsNumber(node: unknown, root: unknown): boolean {
   const resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
   if ([resolved.type].flat().some((type) => type === 'number' || type === 'integer')) return true;
   return [resolved.anyOf, resolved.oneOf].some((list) => Array.isArray(list) && list.some((branch) => schemaNodeAcceptsNumber(branch, root)));
+}
+
+/**
+ * Types with no schema section of their own, so the target schema cannot rule them out:
+ * context shading and MVHR terminals convert into other sections, and a System's section is its subtype.
+ */
+const TYPES_WITHOUT_OWN_SCHEMA_SECTION: ReadonlySet<string> = new Set(['ContextShading', 'MechanicalVentilationTerminal', 'System']);
+
+export type ElementTypeAvailability =
+  | { available: true }
+  | { available: false; reason: string }
+  /** The target schema is not loaded, so whether the target takes the type is unknown. */
+  | { available: false; pending: true };
+
+/**
+ * Whether the selected target takes this element type: its schema has the section and the host's
+ * rules do not exclude it. Until the schema loads the answer is pending, not available.
+ */
+export function elementTypeAvailability(
+  port: GeometrySchemaPort,
+  elementType: string,
+  modelSettings: Readonly<Record<string, unknown>>,
+): ElementTypeAvailability {
+  const excluded = targetRules(port, modelSettings).excludedElementTypes[elementType];
+  if (excluded) return { available: false, reason: excluded.reason };
+  if (port.availability !== 'available' || TYPES_WITHOUT_OWN_SCHEMA_SECTION.has(elementType)) return { available: true };
+  const mode = targetSchemaMode(port);
+  if (!port.getRootSchema(mode)) return { available: false, pending: true };
+  if (port.getElementSubschema(mode, elementType)) return { available: true };
+  return { available: false, reason: "The selected target's input has no section for this element type." };
 }
 
 /** Whether to offer a single simplified ψ total: the schema accepts one and the host declares no stricter contract. */

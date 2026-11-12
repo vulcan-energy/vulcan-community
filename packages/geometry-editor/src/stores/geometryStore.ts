@@ -71,6 +71,7 @@ import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../lib/overrideProvenance
 import {
   getFloorStackWarningElementIds,
   validateElementCore,
+  targetValidationFlags,
 } from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import { validateZone as validateZoneCore } from '../geometry/validation/validateZone';
@@ -2822,7 +2823,7 @@ const validateElementForState = (
     zones: state.zones,
     floors: state.floors,
     globalOrientationOffset: state.globalOrientationOffset,
-    complianceValidationEnabled: targetSchemaMode(schemaPort) === 'fhs',
+    ...targetValidationFlags(schemaPort, cs),
     complianceSettings: cs,
     numberOfBedrooms: cs?.NumberOfBedrooms,
     calculateContextShadingDistance: state.calculateContextShadingDistance,
@@ -7607,7 +7608,7 @@ const createGeometryState = (
     // on a model where the data is dwelling-wide and identical for every element.
     const cs = state.complianceSettings;
     // Blocking checks follow the selected target's rules.
-    const targetIsFhs = targetSchemaMode(schemaPort) === 'fhs';
+    const { complianceValidationEnabled, modelValidityChecks, buildingRegulationsChecks } = targetValidationFlags(schemaPort, cs);
     const partFFindings = selectPartFData({
       zones: state.zones,
       elementsById: state.elementsById,
@@ -7634,7 +7635,9 @@ const createGeometryState = (
       zones: state.zones,
       floors: state.floors,
       globalOrientationOffset: state.globalOrientationOffset,
-      complianceValidationEnabled: targetIsFhs,
+      complianceValidationEnabled,
+      modelValidityChecks,
+      buildingRegulationsChecks,
       complianceSettings: cs,
       numberOfBedrooms: cs?.NumberOfBedrooms,
       calculateContextShadingDistance: state.calculateContextShadingDistance,
@@ -7665,7 +7668,7 @@ const createGeometryState = (
 
       const validation = validateZone(zone, {
         elementsById: state.elementsById,
-        complianceValidationEnabled: targetIsFhs,
+        complianceValidationEnabled,
         primaryFhsZoneId,
         simplifiedThermalBridgingOffered: simplifiedThermalBridgingOffered(schemaPort, 'fhs'),
       });
@@ -7677,7 +7680,7 @@ const createGeometryState = (
       zones: state.zones,
       elementsById: state.elementsById,
       spaceInferenceWallPrintByZone: state.spaceInferenceWallPrintByZone,
-      complianceValidationEnabled: targetIsFhs,
+      complianceValidationEnabled,
     });
     allWarnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     allCriticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));
@@ -7695,7 +7698,7 @@ const createGeometryState = (
         elements: Object.values(state.elementsById),
         floors: state.floors,
         zones: state.zones,
-        complianceValidationEnabled: targetIsFhs,
+        complianceValidationEnabled,
         complianceSettings: state.complianceSettings,
         globalOrientationOffset: state.globalOrientationOffset,
       }),
@@ -7724,8 +7727,10 @@ const createGeometryState = (
     return detectMissingElements(
       state.zones,
       state.elementsById,
-      targetSchemaMode(schemaPort) === 'fhs',
-      state.complianceSettings.PartO_active_cooling_required || false,
+      {
+        ...targetValidationFlags(schemaPort, state.complianceSettings),
+        partOActiveCoolingRequired: state.complianceSettings.PartO_active_cooling_required,
+      },
       selectPartFData({
         zones: state.zones,
         elementsById: state.elementsById,

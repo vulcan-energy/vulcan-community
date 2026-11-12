@@ -82,8 +82,10 @@ export {
 } from './canvasEvidenceContribution';
 
 export {
+  targetRules,
   targetSchemaMode,
   unavailableGeometrySchemaPort,
+  type TargetRules,
   type GeometrySchemaMode,
   type GeometrySchemaNode,
   type GeometrySchemaParameterInfo,
