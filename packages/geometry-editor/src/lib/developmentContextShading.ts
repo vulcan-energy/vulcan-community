@@ -722,6 +722,10 @@ export function syncDevelopmentContextShadingElements(
         const dedupeKey = explicitContextShadingIdentityKey(args.projectId, sourceContext);
         if (seenExplicitContextShading.has(dedupeKey)) continue;
         seenExplicitContextShading.add(dedupeKey);
+        // As a model footprint above: a copied obstacle on top of this dwelling would shade it, and
+        // the user could not remove it because the next sync writes it again.
+        const contextBounds = polygonBounds(sourceContext.coordinates ?? []);
+        if (contextBounds && boundsOverlapArea(activeParent.bounds, contextBounds) > FOOTPRINT_OVERLAP_TOLERANCE_M2) continue;
 
         const key = sourceKeyFor(args.projectId, args.activeStem, model.stem, 'explicit_context_shading', sharedId);
         const existing = existingGenerated.get(key);

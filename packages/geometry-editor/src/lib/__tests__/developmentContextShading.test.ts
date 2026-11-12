@@ -374,6 +374,29 @@ describe('developmentContextShading', () => {
     expect(sharedContext.extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.sourceStem).toBe('plot-b');
   });
 
+  it('does not copy a sibling ContextShading that overlaps the active dwelling footprint', () => {
+    const activeGround = ground('active-ground', 'Active Ground', 0, 0, 4, 4);
+    const sourceElements = [
+      ground('source-ground', 'Source Ground', 8, 0, 12, 4),
+      contextShading('source-on-plot-a', 'Over plot a', 1, 1, 3, 3),
+      contextShading('source-beside', 'Beside plot a', 4, 0, 6, 4),
+    ];
+    const result = syncDevelopmentContextShadingElements({
+      projectId: 'project',
+      activeStem: 'plot-a',
+      elementsById: { [activeGround.id]: activeGround },
+      elementIds: [activeGround.id],
+      zones: [zone],
+      floors: deriveFloorsFromElements([activeGround]),
+      contextModels: [contextModel('plot-b', sourceElements)],
+    });
+    const copied = Object.values(result.elementsById)
+      .map((element) => element.extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.sourceElementId)
+      .filter(Boolean);
+    expect(copied).toContain('source-beside');
+    expect(copied).not.toContain('source-on-plot-a');
+  });
+
   it('materialises local explicit ContextShading as a shared editable source', () => {
     const activeGround = ground('active-ground', 'Active Ground', 0, 0, 4, 4);
     const activeContext = contextShading('active-tree', 'Tree belt', 20, 0, 22, 4, 6.5);
