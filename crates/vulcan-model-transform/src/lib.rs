@@ -87,7 +87,7 @@ impl ModelProfile {
 
     /// Hot-water source and wet heat plant come only from authored `Systems` rows,
     /// never from defaults-template entries. This also repoints a hot-water source's
-    /// missing wet heat source reference to the first authored one.
+    /// missing wet heat source reference to the first wet heat source.
     pub(crate) fn requires_authored_heating_systems(self) -> bool {
         match self {
             Self::Core => false,
