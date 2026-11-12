@@ -41,6 +41,7 @@ import {
 import { resolveBuildingElementPitch } from '../../../geometry/derivePitchFromGeometry';
 import { formatCoords } from '../../../geometry/coords';
 import { roundToTwoDecimals } from '../../../geometry/constants';
+import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGeometry';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
@@ -2339,9 +2340,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const loadedCsvBaseline = get().generateCSV({ allowUnresolvedMigration: true });
     // Applied after the baseline so the upgrade leaves the model dirty and the next save writes it.
     const loadedElements = get().elementIds.map(id => get().elementsById[id]);
-    const upgradedElements = liftStoreyIndexDuctsToMetres(
-      upgradePcdbProductReferences(loadedElements),
-      withEffectiveStoreyHeights(get().floors, loadedElements),
+    const upgradedElements = rederiveContextShadingFromDrawing(
+      liftStoreyIndexDuctsToMetres(
+        upgradePcdbProductReferences(loadedElements),
+        withEffectiveStoreyHeights(get().floors, loadedElements),
+      ),
+      get().globalOrientationOffset,
     );
     const upgraded = upgradedElements !== loadedElements;
     if (upgraded) {
