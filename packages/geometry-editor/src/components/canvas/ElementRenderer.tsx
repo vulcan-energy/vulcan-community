@@ -36,6 +36,7 @@ import { getDormerBundleInfo } from '../../lib/dormerGeometry';
 import { deriveRoofCutout, effectiveFloorsOf, elementsOf } from '../../lib/roofCutouts';
 import { isElementOnActiveCanvasFloor } from '../../lib/elementCanvasFloor';
 import { isDevelopmentContextGeneratedShading } from '../../lib/developmentContextShading';
+import { getPlanCenter } from '../../lib/contextShadingGeometry';
 import {
   cascadeHostedDescendantGeometry,
   collectHostedDescendantElementIds,
@@ -2708,18 +2709,13 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               if (!parentElement || !parentElement.coordinates) return null;
 
               // Calculate parent center
-              const parentCoords = parentElement.coordinates;
-              const parentCenter = {
-                x: parentCoords.reduce((sum: number, coord: any) => sum + coord.x, 0) / parentCoords.length,
-                y: parentCoords.reduce((sum: number, coord: any) => sum + coord.y, 0) / parentCoords.length
-              };
+              const parentCenter = getPlanCenter(parentElement.coordinates);
+              if (!parentCenter) return null;
               const parentCenterCanvas = worldToCanvas(parentCenter, scale, panOffset, canvasCenter);
 
               // Calculate ContextShading center using current coordinates (real-time during drag)
-              const contextCenter = {
-                x: coordinates.reduce((sum: number, coord: any) => sum + coord.x, 0) / coordinates.length,
-                y: coordinates.reduce((sum: number, coord: any) => sum + coord.y, 0) / coordinates.length
-              };
+              const contextCenter = getPlanCenter(coordinates);
+              if (!contextCenter) return null;
               const contextCenterCanvas = worldToCanvas(contextCenter, scale, panOffset, canvasCenter);
 
               // Calculate distance
