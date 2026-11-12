@@ -30,7 +30,7 @@ import {
 } from './basementGeometry';
 import { isOrientationPitchAxis, slopedPolygonPlaneBasis } from './slopePitchAxis';
 import { calculateDerivedBaseHeight, withEffectiveStoreyHeights } from './zoneDerivation';
-import { getMechanicalVentilationDuctworkRoleStyle } from './mvhrDuctwork';
+import { getMechanicalVentilationDuctworkRoleStyle } from './mvhrRoles';
 import { readRootCssVar } from './cssVars';
 import type {
   Geometry3DPrimitive,

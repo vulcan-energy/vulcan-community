@@ -70,12 +70,8 @@ import { useState } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import type { Element } from '../../geometry/types';
 import { getParentByName } from '../../lib/parentOrientation';
-import {
-  defaultMvhrTerminalZ,
-  deriveMechanicalVentilationTerminalPosition,
-  isMvhrTerminalHost,
-  MVHR_TERMINAL_ROLES,
-} from '../../lib/mvhrDuctwork';
+import { defaultMvhrTerminalZ, deriveMechanicalVentilationTerminalPosition, isMvhrTerminalHost } from '../../lib/mvhrDuctwork';
+import { MVHR_TERMINAL_ROLES } from '../../lib/mvhrRoles';
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';

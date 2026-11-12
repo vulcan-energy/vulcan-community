@@ -18,7 +18,7 @@ import {
   MVHR_TERMINAL_ROLES,
   type MvhrDuctRole,
   type MvhrTerminalRole,
-} from '../../lib/mvhrDuctwork';
+} from '../../lib/mvhrRoles';
 
 const COMPLIANCE_EXCLUDED_DRAW_TYPES: ElementType[] = ['CombustionAppliances'];
 

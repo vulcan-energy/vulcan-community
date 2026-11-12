@@ -65,15 +65,13 @@ import type { IconNode } from 'lucide';
 import { Pencil, Plus, X as XIcon } from 'lucide';
 import type { Element } from '../geometry/types';
 import { isGlobalObject, type GeometryStoreApi } from '../stores/geometryStore';
+import { defaultMvhrTerminalZ, hostedMvhrTerminalDraft, isMvhrTerminalHost } from '../lib/mvhrDuctwork';
 import {
   MVHR_DUCT_ROLES,
   MVHR_TERMINAL_ROLES,
-  defaultMvhrTerminalZ,
-  hostedMvhrTerminalDraft,
-  isMvhrTerminalHost,
   type MvhrDuctRole,
   type MvhrTerminalRole,
-} from '../lib/mvhrDuctwork';
+} from '../lib/mvhrRoles';
 import { generateUniqueElementName } from '../lib/elementAutoNaming';
 import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, networkPoint3 } from '../lib/elementCanvasFloor';
 import { withEffectiveStoreyHeights } from '../lib/zoneDerivation';
