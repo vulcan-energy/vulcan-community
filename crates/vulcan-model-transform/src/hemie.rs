@@ -27,7 +27,7 @@ type Row = BTreeMap<String, Value>;
 type Rows = BTreeMap<String, Vec<Row>>;
 type P = [f64; 2];
 
-/// ours, decided by Baz (13 November): plan tolerance (m) for joining wall ends, matching walls to outline edges and stacking
+/// ours: plan tolerance (m) for joining wall ends, matching walls to outline edges and stacking
 /// one floor's outline on the floor below.
 const TOL: f64 = 0.1;
 /// DESNZ-defined: the height between storeys, and between a storey and a roof room, that is in
@@ -36,7 +36,7 @@ const STOREY_GAP: f64 = 0.25;
 /// DESNZ-defined: a room in the roof's common walls are under this height (m) for at least half
 /// their length; otherwise the floor is a storey.
 const COMMON_WALL_HEIGHT: f64 = 1.8;
-/// ours, decided by Baz (13 November): how far a roof plane may overhang the building part it covers (m).
+/// ours: how far a roof plane may overhang the building part it covers (m).
 const EAVES: f64 = 0.6;
 /// DESNZ-defined: heated pitched roof areal heat capacity when the element states none (J/m².K).
 const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
@@ -1023,9 +1023,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             .collect()
     };
 
-    // One outline per storey. Rule 1, decided by Baz (13 November), following DESNZ's model:
-    // where a floor is not over the floor below (overhanging or drawn beside it), that area is
-    // its own building part, with its own base height and an exposed floor.
+    // One outline per storey. Ours, following DESNZ's model: where a floor is not over the floor
+    // below (overhanging or drawn beside it), that area is its own building part, with its own
+    // base height and an exposed floor.
     let mut rings: Vec<Vec<P>> = Vec::new();
     for &level in &storey_levels {
         let mut ring = match ring_of_walls(&on_level(level)) {
@@ -1052,7 +1052,8 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
     }
 
-    // Building parts: one per column of storeys, so each has one roof (derived from the model).
+    // Building parts: one per column of storeys, so each has one roof (ours; HEMIE also allows
+    // parts stacked on one another, 0.25 m apart).
     let cells = match faces(&rings) {
         Ok(cells) => cells,
         Err(message) => {
@@ -1072,15 +1073,19 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 storeys: Vec::new(),
                 ceilings: Vec::new(),
             }),
-            Some(Err(gap)) => ctx.errors.push(error(on_level(gap as i64 + 1)[0].path(), format!("Floor {} is over a lower floor with no floor {gap} between them, around ({:.2}, {:.2}). A building part's storeys stack one on another; draw floor {gap} there, or move the floor above.", gap + 1, p[0], p[1]))),
+            Some(Err(gaps)) => {
+                let above = gaps.last().expect("a gap") + 1;
+                let missing: Vec<String> = gaps.iter().map(usize::to_string).collect();
+                ctx.errors.push(error(on_level(above as i64)[0].path(), format!("Floor {above} is over a lower floor with no floor {} between them, around ({:.2}, {:.2}). A building part's storeys stack one on another; draw the missing floors there, or move the floor above.", missing.join(" or "), p[0], p[1])));
+            }
         }
     }
     if parts.is_empty() {
         return None;
     }
-    // ours: parts in order of storeys, then footprint. DESNZ-defined (EPC 11 11.3.3, EPC 02
-    // 2.5.3): the part with the front door is the reference part, and its ground storey's
-    // footprint starts with the front-door wall.
+    // ours: parts in order of storeys, then footprint. DESNZ-defined: the part with the front
+    // door is the reference part, and its ground storey's footprint starts with the front-door
+    // wall.
     parts.sort_by(|a, b| {
         b.top
             .cmp(&a.top)
@@ -1103,8 +1108,10 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
         wall
     });
+    // The reference part is on the lowest floor: its lowest storey holds the front door.
     if let Some(front) = front {
         let reference = (0..parts.len())
+            .filter(|&i| parts[i].bottom == 0)
             .min_by(|&i, &j| {
                 boundary_dist(front.plan_mid(), &parts[i].poly)
                     .total_cmp(&boundary_dist(front.plan_mid(), &parts[j].poly))
@@ -1216,7 +1223,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             // included (the roof sits a gap above it). Derived from the model: a Vulcan wall runs
             // from its floor to the next floor or to the roof, so the ceiling height is the wall
             // height less the gap on every storey.
-            parts[pi].ceilings.push(storey_height - STOREY_GAP);
+            parts[pi]
+                .ceilings
+                .push(parts::round_ceiling(storey_height - STOREY_GAP));
             parts[pi].storeys.push(ring);
         }
     }
@@ -1370,13 +1379,6 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         .collect();
     // Derived from the model: HEMIE's floor total_area is the ground floor area of the whole dwelling.
     let ground_total: f64 = grounds.iter().filter_map(|g| g.num("area")).sum();
-    // Derived from the model: a part that starts above the lowest floor sits on the floors below
-    // that point, each its floor-to-floor height.
-    let heights = parts::level_heights(&walls, rings.len());
-    let offsets: Vec<f64> = parts
-        .iter()
-        .map(|p| heights[..p.bottom].iter().sum())
-        .collect();
     let mut floors_used = BTreeSet::new();
     let mut building_parts = Map::new();
     for (pi, part) in parts.iter().enumerate() {
@@ -1401,7 +1403,6 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             name: &names[pi],
             bottom: part.bottom,
             point: interior_point(&part.poly),
-            ring: &part.storeys[0],
         };
         if let Some(floor) = parts::part_floor(ctx, &els, &floor_of, ground_total, &mut floors_used)
         {
@@ -1464,7 +1465,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     geometry.insert("reference_building_part".into(), json!(names[0]));
     geometry.insert("reference_orientation".into(), json!(reference_orientation));
     let full_ventilation = &model["InfiltrationVentilation"];
-    // DESNZ-defined (EPC 11 11.3.3): the base height, or else the base storey, from which HEMIE
+    // DESNZ-defined: the base height, or else the base storey, from which HEMIE
     // estimates it.
     match (
         full_ventilation
@@ -1480,13 +1481,19 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
         (None, None) => ctx.errors.push(error("/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or base storey, which HEMIE Geometry needs. Add the Metadata row Ventilation_ventilation_zone_base_height or General_storey_of_dwelling.".into())),
     }
-    // DESNZ-defined (EPC 02 2.5.2): a part's base height defaults to the dwelling's; a part that
-    // starts higher states its own, the dwelling's base plus the floors below it.
-    if let Some(base) = parts::dwelling_base(&geometry) {
-        for (pi, offset) in offsets.iter().enumerate() {
-            if *offset > 0.0 {
-                building_parts[&names[pi]]["base_height"] = json!(base + offset);
-            }
+    // DESNZ-defined: a part's base height defaults to the dwelling's; a part that starts higher
+    // states its own. With no dwelling base the error is already reported, so 0 stands in.
+    let dwelling = parts::dwelling_base(&geometry);
+    let bases = match parts::base_heights(&parts, dwelling.unwrap_or(0.0)) {
+        Ok(bases) => bases,
+        Err(i) => {
+            ctx.errors.push(error("/Zone".into(), format!("Building part '{}' starts on floor {}, but no building part has a storey on floor {} to carry it. Draw the floor below it.", names[i], parts[i].bottom, parts[i].bottom - 1)));
+            return None;
+        }
+    };
+    for (pi, part) in parts.iter().enumerate() {
+        if part.bottom > 0 {
+            building_parts[&names[pi]]["base_height"] = json!(bases[pi]);
         }
     }
     geometry.insert("building_parts".into(), Value::Object(building_parts));
@@ -1498,9 +1505,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     // As HEMIE derives the dwelling height: the tallest part's storeys and the gaps between them.
     let dwelling_height = parts
         .iter()
-        .zip(&offsets)
-        .map(|(p, offset)| {
-            offset + p.ceilings.iter().sum::<f64>() + STOREY_GAP * (p.ceilings.len() as f64 - 1.0)
+        .zip(&bases)
+        .map(|(p, base)| {
+            base - dwelling.unwrap_or(0.0)
+                + p.ceilings.iter().sum::<f64>()
+                + STOREY_GAP * (p.ceilings.len() as f64 - 1.0)
         })
         .fold(0.0, f64::max);
     let ventilation = infiltration(ctx, full_ventilation, dwelling_height);
@@ -1686,7 +1695,7 @@ fn roof(
                 return None;
             }
             _ => {
-                // ours, decided by Baz (13 November): HEMIE has no hipped roof, so a hipped roof
+                // ours: HEMIE has no hipped roof, so a hipped roof
                 // is dual pitch, reported.
                 ctx.notices.push(notice(
                     "/Zone",
@@ -1700,7 +1709,7 @@ fn roof(
         };
         let main = &measured[largest(&measured)];
         let (slope_orientation, _) = slope(top_ring, main.orientation, orient);
-        // ours, decided by Baz (13 November): one pitch per roof, the area-weighted mean of its
+        // ours: one pitch per roof, the area-weighted mean of its
         // planes, reported.
         let (area, weighted) = measured
             .iter()
@@ -1983,7 +1992,7 @@ fn dormer<'e>(
         Some("mono-pitch") => ("mono", "dormerRoofPitch"),
         // Derived from the model: a gable-fronted dormer has two slopes either side of a ridge.
         Some("gable-front") => ("dual", "gableRoofPitch"),
-        // ours, decided by Baz (13 November): HEMIE has no hipped dormer, so a hip dormer is
+        // ours: HEMIE has no hipped dormer, so a hip dormer is
         // dual pitch, reported.
         Some("hip") => {
             ctx.notices.push(notice(
@@ -2100,7 +2109,7 @@ fn infiltration(ctx: &mut Ctx, full: &Value, dwelling_height: f64) -> Option<Val
     iv.insert("model_type".into(), json!("hemie"));
     // The assessor's values: an existing building's absent shield class, noise nuisance and air
     // test rows leave no template value in the model (`existing_building_optional_rows`).
-    // DESNZ-defined (EPC 11 Tables 11.7.2, 11.4.2): HEMIE takes shield class from the terrain
+    // DESNZ-defined: HEMIE takes shield class from the terrain
     // class and noise nuisance as No; the other three are required.
     for (key, required) in [
         ("cross_vent_possible", true),
@@ -2137,7 +2146,7 @@ fn infiltration(ctx: &mut Ctx, full: &Value, dwelling_height: f64) -> Option<Val
             }
         }
     } else {
-        // DESNZ-defined (EPC 05 5.4): with no air test, HEMIE estimates the leakage; the zone
+        // DESNZ-defined: with no air test, HEMIE estimates the leakage; the zone
         // height is the dwelling height HEMIE derives from the storeys.
         out.insert("ventilation_zone_height".into(), json!(dwelling_height));
         ctx.notices.push(notice("/InfiltrationVentilation/Leaks", format!("No air test is stated, so HEMIE estimates the air leakage, with ventilation zone height {dwelling_height:.2} m from the storeys.")));
