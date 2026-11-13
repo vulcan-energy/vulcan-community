@@ -86,10 +86,9 @@ fn blocked_at(objects: &[Object], azimuth: f64) -> f64 {
     ((below + 90.0 - above) / 90.0).min(1.0)
 }
 
-/// DESNZ-defined (TN-007 2.2): the share of a segment's sky dome the objects block, the mean of
-/// the blocked elevation over the segment's azimuths. Exact: the blocked elevation changes only
-/// at an object's start or end.
-fn blocked(objects: &[Object], centre: f64) -> f64 {
+/// The azimuths where what shades a segment can change: its bounds and each object's start and
+/// end inside it, in order.
+fn cuts(objects: &[Object], centre: f64) -> Vec<f64> {
     let lo = centre - 45.0;
     let mut cuts = vec![lo, lo + 90.0];
     for o in objects {
@@ -101,7 +100,14 @@ fn blocked(objects: &[Object], centre: f64) -> f64 {
         }
     }
     cuts.sort_by(f64::total_cmp);
-    cuts.windows(2)
+    cuts
+}
+
+/// DESNZ-defined: the share of a segment's sky dome the objects block, the mean of the blocked
+/// elevation over the segment's azimuths. Exact: the blocked elevation changes only at a cut.
+fn blocked(objects: &[Object], centre: f64) -> f64 {
+    cuts(objects, centre)
+        .windows(2)
         .map(|w| (w[1] - w[0]) * blocked_at(objects, (w[0] + w[1]) / 2.0))
         .sum::<f64>()
         / 90.0
@@ -139,7 +145,7 @@ pub(super) fn distant(
     let base = geometry["ventilation_zone_base_height"]
         .as_f64()
         .or_else(|| Some(geometry["base_storey_of_dwelling"].as_f64()? * STOREY_BELOW))
-        .unwrap_or(0.0);
+        .expect("Geometry states a base height or base storey");
     // As HEMIE derives the dwelling height: the tallest part's storeys and the gaps between them.
     let dwelling_height = geometry["building_parts"]
         .as_object()
@@ -155,7 +161,11 @@ pub(super) fn distant(
             ceilings.iter().sum::<f64>() + STOREY_GAP * (ceilings.len() as f64 - 1.0)
         })
         .fold(0.0, f64::max);
-    let reference = geometry["reference_orientation"].as_f64().unwrap_or(0.0);
+    // As HEMIE centres the segments: on the whole degrees of the reference orientation.
+    let reference = geometry["reference_orientation"]
+        .as_f64()
+        .expect("Geometry states its reference orientation")
+        .trunc();
 
     let mut objects = Vec::new();
     for row in rows {
@@ -172,16 +182,17 @@ pub(super) fn distant(
         else {
             return Err(error(super::json_pointer(&["Context Shading", name]), format!("Context Shading row '{name}' has no height or distance, which HEMIE's distant shading is measured from. Give both.")));
         };
-        // DESNZ-defined: objects below the lowest storey are ignored.
+        // DESNZ-defined: objects below the lowest storey are ignored, an overhang as well as an
+        // obstacle.
         let height = height - base;
-        if height <= 0.0 && kind == "obstacle" {
+        if height <= 0.0 {
             continue;
         }
         objects.push(Object {
             name,
             start,
             end,
-            angle: height.max(0.0).atan2(distance).to_degrees(),
+            angle: height.atan2(distance).to_degrees(),
             overhang: kind == "overhang",
             height,
         });
@@ -192,13 +203,13 @@ pub(super) fn distant(
     for (k, key) in SEGMENTS.iter().enumerate() {
         let centre = (reference + 90.0 * k as f64).rem_euclid(360.0);
         let fraction = blocked(&objects, centre);
-        // ours (DESNZ: "tall enough to affect the roof"): the roof is shaded when an object in
-        // the segment rises above the dwelling, as HEMIE's unshaded-roof object stops at its
-        // height (TN-007 2.2).
+        // ours: the roof is shaded when an object in the segment rises above the dwelling, as
+        // HEMIE's unshaded-roof object stops at the dwelling height.
+        let cuts = cuts(&objects, centre);
         let tall: Vec<&str> = objects
             .iter()
             .filter(|o| o.height > dwelling_height)
-            .filter(|o| (0..90).any(|d| o.covers(centre - 44.5 + f64::from(d))))
+            .filter(|o| cuts.windows(2).any(|w| o.covers((w[0] + w[1]) / 2.0)))
             .map(|o| o.name)
             .collect();
         let shading = level(fraction);
@@ -238,8 +249,9 @@ const KINDS: [(&str, &str, &str); 4] = [
 ];
 
 /// Why no reveal is sent: HEMIE 0.18.1's only reveal category ("deep window") expands to a
-/// window shading object of type "reveal", which HEM Core 2.0.0a4 rejects.
-const NO_REVEAL: &str = "HEMIE's reveal category does not run in this release (HEM Core rejects a reveal), so no reveal is sent";
+/// window shading object of type "reveal", which the EPC wrapper's preprocessing rejects (it
+/// does not ask HEM Core to expand reveals).
+const NO_REVEAL: &str = "HEMIE's reveal category does not run in this release (the EPC wrapper rejects a reveal), so no reveal is sent";
 
 /// The window's close-shading categories. Stated categories are the assessor's; a measured
 /// Window Shading row needs the category of its kind (what the feature is: a canopy or a
@@ -306,12 +318,16 @@ mod tests {
     use super::super::tests::{box_walls, csv, gable_roof, ground, house, run, BOX, SETTINGS};
     use super::*;
 
-    fn geometry(reference: f64) -> Value {
-        json!({"reference_orientation": reference, "ventilation_zone_base_height": 0.0,
+    fn geometry(reference: f64, base: f64) -> Value {
+        json!({"reference_orientation": reference, "ventilation_zone_base_height": base,
             "building_parts": {"Main": {"storeys": [{"ceiling_height": 2.5}, {"ceiling_height": 2.5}]}}})
     }
 
     fn derive(rows: &[&str], reference: f64) -> (Value, Vec<SchemaOmission>) {
+        derive_from(rows, reference, 0.0)
+    }
+
+    fn derive_from(rows: &[&str], reference: f64, base: f64) -> (Value, Vec<SchemaOmission>) {
         let text = format!(
             "Context Shading\nName,Type,shading_type,start_angle,end_angle,distance,height\n{}\n",
             rows.join("\n")
@@ -324,7 +340,7 @@ mod tests {
             missing: Default::default(),
         };
         let mut notices = Vec::new();
-        let value = distant(&settings, &geometry(reference), &mut notices).expect("derived");
+        let value = distant(&settings, &geometry(reference, base), &mut notices).expect("derived");
         (value["DwellingShadingSegments"].clone(), notices)
     }
 
@@ -361,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn an_overhang_blocks_the_sky_above_it_and_obstacles_below_the_storey_are_ignored() {
+    fn an_overhang_blocks_the_sky_above_it_and_objects_below_the_storey_are_ignored() {
         let (s, _) = derive(&["Canopy,ContextShading,overhang,135,225,10,10"], 180.0);
         assert_eq!(s[SEGMENTS[0]]["shading_fraction"], "Moderate");
         let (s, notices) = derive(&["Fence,ContextShading,obstacle,135,225,3,0"], 180.0);
@@ -369,6 +385,13 @@ mod tests {
         assert!(notices[0]
             .message
             .starts_with("No Context Shading rises above"));
+        // A canopy below an upper-floor flat shades nothing above its lowest storey.
+        let (s, _) = derive_from(
+            &["Canopy,ContextShading,overhang,135,225,2,2.5"],
+            180.0,
+            3.0,
+        );
+        assert_eq!(s[SEGMENTS[0]]["shading_fraction"], "Very light");
     }
 
     #[test]
@@ -415,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reveal_is_not_sent_as_hem_core_rejects_it() {
+    fn a_reveal_is_not_sent_as_the_epc_wrapper_rejects_it() {
         let (model, errors, notices) = run(&window_house("", "R,Z,reveal,W1,0.2,,0.03,"));
         assert!(errors.is_empty(), "{errors:#?}");
         assert!(window_of(&model).get("reveal").is_none());
