@@ -752,8 +752,12 @@ export function GlobalSettingsModal({
     () => calculateDwellingDetailsSuggestion(Object.values(elementsById)),
     [elementsById]
   );
+  // A file's build type the editor cannot hold (an HEM:EPC built form) is shown and saved as is.
+  const fileBuildType =
+    complianceSettings.unreadMetadataRows?.General_build_type || undefined;
   const effectiveBuildType =
     complianceSettings.build_type ?? dwellingDetailsSuggestion.buildType;
+  const shownBuildType = complianceSettings.build_type ?? fileBuildType ?? effectiveBuildType;
   const effectiveStoreysInDwelling =
     complianceSettings.storeys_in_dwelling ??
     dwellingDetailsSuggestion.storeysInDwelling;
@@ -1831,20 +1835,21 @@ export function GlobalSettingsModal({
                                     style={{
                                       fontSize: 11,
                                       fontWeight: 400,
-                                      color: isBuildTypeManual
+                                      color: isBuildTypeManual || fileBuildType
                                         ? "var(--text-warning)"
                                         : "var(--text-muted)",
                                     }}
                                   >
-                                    {isBuildTypeManual
+                                    {isBuildTypeManual || fileBuildType
                                       ? "(manual override)"
                                       : "(auto)"}
                                   </span>
                                 )}
                               </div>
                             }
-                            value={effectiveBuildType || ""}
+                            value={shownBuildType || ""}
                             onChange={(value) => {
+                              if (value === shownBuildType) return;
                               const next =
                                 value === ""
                                   ? undefined
@@ -1863,6 +1868,12 @@ export function GlobalSettingsModal({
                                 patch.storey_of_dwelling = undefined;
                                 patch.storeys_in_building = undefined;
                               }
+                              // The user's choice replaces the file's build type.
+                              if (fileBuildType) {
+                                const unread = { ...complianceSettings.unreadMetadataRows };
+                                delete unread.General_build_type;
+                                patch.unreadMetadataRows = unread;
+                              }
                               setComplianceSettings(patch);
                             }}
                             options={[
@@ -1874,6 +1885,9 @@ export function GlobalSettingsModal({
                               },
                               { value: "house", label: "House" },
                               { value: "flat", label: "Flat" },
+                              ...(fileBuildType && !complianceSettings.build_type
+                                ? [{ value: fileBuildType, label: fileBuildType }]
+                                : []),
                             ]}
                             placeholder="Select build type..."
                             variant="ghost"

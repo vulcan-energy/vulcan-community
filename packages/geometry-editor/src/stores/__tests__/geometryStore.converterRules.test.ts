@@ -414,3 +414,79 @@ it('fills rows from the defaults only with values the target schema takes', () =
   expect(fill({ properties: { General: { properties: { build_type: { enum: ['detached', 'flat'] } } } } }))
     .toEqual({ build_type: undefined, PartO_active_cooling_required: undefined, KitchenExtractorHoodExternal: undefined });
 });
+
+// A new model filled from the FHS defaults template, then switched to a target that requires the
+// EPC rows: no defaults value stands in for a row the user must state, nor for a value the target's
+// schema rejects. The schema arrives after the switch; the editor waits for it.
+it('a target switch drops the defaults values the target requires or rejects, unless the user typed them', () => {
+  const template = JSON.parse(fixture('data/defaults/defaults_template.json'));
+  const fhs = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  const epc = { properties: { General: { properties: { build_type: { enum: ['detached', 'flat'] }, storeys_in_dwelling: { type: 'integer' } } } } };
+  const target: { rules?: { requiredMetadataRows: string[] } } = {};
+  let root: unknown = fhs;
+  let schemaArrives = () => {};
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+    ...canonicalGeometrySchemaPort,
+    targetRules: () => target.rules,
+    getRootSchema: () => root as never,
+    subscribe: (listener) => { schemaArrives = listener; return () => {}; },
+  } });
+  store.setState({ defaultsJson: template, defaultsLoading: false } as never);
+  expect(store.getState().complianceSettings).toMatchObject({ Ventilation_altitude: 30, build_type: 'house', PartO_active_cooling_required: false });
+  store.getState().setComplianceSettings({ Ventilation_terrain_class: 'Suburban' } as never);
+
+  target.rules = { requiredMetadataRows: [
+    'PartGcompliance', 'NumberOfBedrooms', 'NumberOfWetRooms', 'HeatingControlType', 'ColdWaterSource',
+    'Ventilation_altitude', 'Ventilation_shield_class', 'Ventilation_terrain_class', 'Ventilation_noise_nuisance',
+    'AirPermeability_test_pressure', 'AirPermeability_test_result', 'AirPermeability_ventilation_zone_height',
+  ] };
+  root = null;
+  store.getState().setTargetBundleId('epc');
+  const dropped = ['Ventilation_altitude', 'Ventilation_shield_class', 'Ventilation_noise_nuisance',
+    'AirPermeability_test_pressure', 'AirPermeability_test_result', 'AirPermeability_ventilation_zone_height', 'PartGcompliance'];
+  const settings = () => store.getState().complianceSettings as Record<string, unknown>;
+  for (const key of dropped) expect(settings()[key], key).toBeUndefined();
+  expect(settings().Ventilation_terrain_class).toBe('Suburban');
+
+  root = epc;
+  schemaArrives();
+  for (const key of [...dropped, 'build_type', 'PartO_active_cooling_required', 'KitchenExtractorHoodExternal']) expect(settings()[key], key).toBeUndefined();
+  expect(settings().Ventilation_terrain_class).toBe('Suburban');
+  expect(settings().storeys_in_dwelling).toBe(1);
+});
+
+// With the target's schema not yet loaded the defaults fill waits for it, so no value goes in unchecked.
+it('fills from the defaults only once the target schema is known', () => {
+  let root: unknown = null;
+  let schemaArrives = () => {};
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+    ...canonicalGeometrySchemaPort,
+    getRootSchema: () => root as never,
+    subscribe: (listener) => { schemaArrives = listener; return () => {}; },
+  } });
+  store.setState({ defaultsJson: { General: { build_type: 'house', storeys_in_dwelling: 1 } }, defaultsLoading: false } as never);
+  expect(store.getState().complianceSettings.build_type).toBeUndefined();
+  root = { properties: { General: { properties: { build_type: { enum: ['detached', 'flat'] }, storeys_in_dwelling: { type: 'integer' } } } } };
+  schemaArrives();
+  expect(store.getState().complianceSettings.build_type).toBeUndefined();
+  expect(store.getState().complianceSettings.storeys_in_dwelling).toBe(1);
+});
+
+// HEM:EPC takes a built form as build_type; the editor holds only house or flat. A file's value is
+// kept, and it is an issue only where the target's schema rejects it.
+it('keeps a build type the editor cannot hold and reports it only where the target rejects it', () => {
+  const fhs = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  const epc = structuredClone(fhs);
+  epc.properties.General.properties.build_type = { enum: ['detached', 'flat'] };
+  const check = (root: unknown) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...canonicalGeometrySchemaPort, getRootSchema: () => root as never } });
+    store.getState().loadFromCSV(replace('General_build_type,house,', 'General_build_type,detached,')(sample));
+    const state = store.getState();
+    return {
+      issue: state.collectAllGeometryWarnings().criticalIssues.some((text) => text.includes("Build type is 'detached'")),
+      saved: state.generateCSV({ allowUnresolvedMigration: true }).includes('\nGeneral_build_type,detached,'),
+    };
+  };
+  expect(check(fhs)).toEqual({ issue: true, saved: true });
+  expect(check(epc)).toEqual({ issue: false, saved: true });
+});

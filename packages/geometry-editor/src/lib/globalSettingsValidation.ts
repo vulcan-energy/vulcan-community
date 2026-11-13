@@ -618,14 +618,20 @@ function templateMetadataValue(defaults: unknown, key: string): unknown {
  * so does a row the save would otherwise leave out. A blank row is not filled (the converter blocks
  * it), nor a row a Systems row sets, nor a row in `requiredRows`: the target requires the user to
  * state it, so no defaults value stands in. Filled rows leave `absentMetadataRows`, so later defaults never
- * replace a value the user has since edited. `notice` is undefined when the save adds no row.
+ * replace a value the user has since edited, and join `initialValueRows`, so a target switch can drop
+ * them (withoutTargetInitialValues). `notice` is undefined when the save adds no row.
+ *
+ * `targetRoot` is the target's root schema: a value is filled only where it accepts it. `null` means
+ * that schema has not loaded, and the fill waits for it: the result is undefined. `undefined` means
+ * the host has no schema at all, and every value is filled.
  */
 export function absentMetadataRowFill(
   state: MetadataRowInputs,
   defaults: unknown,
-  requiredRows: readonly string[] = [],
-  targetRoot: unknown = null,
-): { patch: Record<string, unknown>; notice?: string } {
+  requiredRows: readonly string[],
+  targetRoot: unknown,
+): { patch: Record<string, unknown>; notice?: string } | undefined {
+  if (targetRoot === null) return undefined;
   const settings = state.complianceSettings;
   const required = new Set(requiredRows);
   const patch: Record<string, unknown> = {};
@@ -649,6 +655,7 @@ export function absentMetadataRowFill(
       : []));
   for (const key of sources.keys()) absent.delete(key);
   if (sources.size && settings.absentMetadataRows) patch.absentMetadataRows = [...absent];
+  if (sources.size) patch.initialValueRows = [...new Set([...(settings.initialValueRows ?? []), ...[...sources.keys()].map(metadataSettingKey)])];
   const one = added.length === 1;
   return {
     patch,
@@ -656,6 +663,33 @@ export function absentMetadataRowFill(
       ? `The file has no row for ${one ? 'this setting' : `these ${added.length} settings`}, so the editor shows and saves ${one ? 'this value' : 'these values'}: ${added.join('; ')}.`
       : undefined,
   };
+}
+
+/**
+ * The settings without each initial value (`initialValueRows`: an FHS initial value or a defaults fill
+ * the user has not set since) that the target requires the user to state or, for a metadata row,
+ * that its schema does not take. With no schema (`targetRoot` null or undefined) only the required
+ * values go; the caller checks again when the schema arrives.
+ */
+export function withoutTargetInitialValues(
+  settings: GeometryState['complianceSettings'],
+  requiredRows: readonly string[],
+  targetRoot: unknown,
+): GeometryState['complianceSettings'] {
+  const required = new Set(requiredRows.map(metadataSettingKey));
+  const rowBySetting = new Map(Object.keys(METADATA_INPUT_LABELS).map((row) => [metadataSettingKey(row), row]));
+  const values = settings as Record<string, unknown>;
+  const initial = settings.initialValueRows ?? [];
+  const rejected = (key: string) => {
+    const row = rowBySetting.get(key);
+    return targetRoot != null && row !== undefined && !targetFieldAccepts(targetRoot, metadataSchemaPath(row), values[key]);
+  };
+  const dropped = new Set(initial.filter((key) => required.has(key) || rejected(key)));
+  if (dropped.size === 0) return settings;
+  const next: Record<string, unknown> = { ...settings };
+  for (const key of dropped) delete next[key];
+  next.initialValueRows = initial.filter((key) => !dropped.has(key));
+  return next as GeometryState['complianceSettings'];
 }
 
 /** Whether the target's schema requires the value; with no schema, assume it does. */
@@ -691,6 +725,11 @@ export function unsetMetadataInputIssues(
 ): string[] {
   const required = new Set(requiredRows);
   const unread = state.complianceSettings.unreadMetadataRows ?? {};
+  // A cell the editor cannot hold that the target's schema takes (an HEM:EPC built form as
+  // build_type) is saved as in the file and is no issue.
+  const accepted = new Set(Object.keys(unread).filter((key) => unread[key]
+    && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) === 'available'
+    && targetFieldAccepts(targetRoot, metadataSchemaPath(key), unread[key])));
   const blank = new Set(Object.keys(unread));
   const derived = new Map(enteredOrDerivedRowValues(state));
   // The value the editor can work out, as a hint; the user enters it so the save writes it.
@@ -699,7 +738,7 @@ export function unsetMetadataInputIssues(
     if (value === undefined) return '';
     return key.startsWith('NumberOf') ? ` Space labels show ${value}.` : ` The geometry gives ${value}.`;
   };
-  return metadataRowValues(state).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS
+  return metadataRowValues(state).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && !accepted.has(key)
       && !systemsRowSetsMetadataInput(state.elements, key)
       && (required.has(key) || (!TARGET_INPUT_ROW_SET.has(key)
         && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'

@@ -28,9 +28,8 @@ import {
 import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionRows';
 import { derivePvDimensionsFromCoords } from '../../../lib/pvPanelFootprint';
 import { BUILDING_ALIASES } from '../../../geometry/io/ingestGeometryTabularSections';
-import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/globalSettingsValidation';
+import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues, withoutTargetInitialValues } from '../../../lib/globalSettingsValidation';
 import { csvModelProfile } from '../../../geometry/io/modelSchemaProfile';
-import { withoutRequiredInitialValues } from './complianceSlice';
 import {
   encodeGuideOverlayMetadataValue,
   encodeGuideOverlaySourceMetadataValue,
@@ -166,7 +165,10 @@ export interface IoSlice {
   setLastSavedCsv: (csv: string | null) => void;
   /** Internal cancellation hook used by document-boundary reset actions. */
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => void;
-  /** True from a load that ended before its defaults arrived until they arrive. */
+  /**
+   * True while the defaults fill waits: from a load that ended before its defaults arrived, or from
+   * defaults or a target switch that came before the target's schema, until both are at hand.
+   */
   loadAwaitsDefaults: boolean;
   /** The rows the last loaded file lacks that the defaults filled (absentMetadataRowFill); load UIs show it as a notice. */
   lateLoadNotice: string | null;
@@ -826,6 +828,10 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
     : [];
 };
 
+/** The target's root schema for the defaults fill: null until it loads, undefined for a host with no schema. */
+export const metadataFillRoot = (port: GeometrySchemaPort): unknown =>
+  port.availability === 'available' ? port.getRootSchema(targetSchemaMode(port)) : undefined;
+
 export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   // Scheduling belongs to this store instance. Separate editor stores must not
   // cancel or version one another's pending defaults reads.
@@ -867,12 +873,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       targetBundleId,
       csvValidationCache: {},
       targetValidation: null,
-      // The host selects the port's target before it sets the pin, so these are the new target's rules.
-      complianceSettings: {
-        ...withoutRequiredInitialValues(state.complianceSettings, targetRules(options.schemaPort, state.complianceSettings).requiredMetadataRows),
-        scenariosBaseModelEnabled: false,
-      },
+      // The new target may take a defaults value the old one did not.
+      loadAwaitsDefaults: true,
+      complianceSettings: { ...state.complianceSettings, scenariosBaseModelEnabled: false },
     });
+    // The host selects the port's target before it sets the pin, so these are the new target's rules.
+    followTarget();
   },
   getCsvMigrationIssues: () => csvMigrationIssues(Object.values(get().elementsById), get().sourceCsvVersion),
   resolveCsvUValueInterpretation: (ids, meaning) => set(state => ({ elementsById: Object.fromEntries(Object.entries(state.elementsById).map(([id, element]) => [id, ids.includes(id) ? resolveCsvUValueMeaning(element, meaning) : element])) })),
@@ -2387,15 +2393,18 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Defaults kept from before the load (keepUnchangedDefaults) fill the rows this file lacks now;
     // defaults read for the file fill them when they arrive (withPrecomputedDefaultsLookup). Both
     // use absentMetadataRowFill and give the notice as lateLoadNotice.
+    // A target schema not yet loaded defers the fill to followTarget.
     const loaded = get();
-    if (loaded.defaultsJson && !loaded.defaultsLoading) {
-      const { patch, notice } = absentMetadataRowFill(
+    const fill = loaded.defaultsJson && !loaded.defaultsLoading
+      ? absentMetadataRowFill(
         { ...loaded, elements: Object.values(loaded.elementsById) },
         loaded.defaultsJson,
         targetRules(options.schemaPort, loaded.complianceSettings).requiredMetadataRows,
-        options.schemaPort.availability === 'available' ? options.schemaPort.getRootSchema(targetSchemaMode(options.schemaPort)) : null,
-      );
-      set({ complianceSettings: { ...loaded.complianceSettings, ...patch }, loadAwaitsDefaults: false, lateLoadNotice: notice ?? null });
+        metadataFillRoot(options.schemaPort),
+      )
+      : undefined;
+    if (fill) {
+      set({ complianceSettings: { ...loaded.complianceSettings, ...fill.patch }, loadAwaitsDefaults: false, lateLoadNotice: fill.notice ?? null });
     } else {
       set({ loadAwaitsDefaults: true, lateLoadNotice: null });
     }
@@ -2423,6 +2432,28 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed)], upgraded };
   }
+
+  /**
+   * Brings the values the user has not typed in line with the selected target: drops those it
+   * requires the user to state or its schema rejects (withoutTargetInitialValues), then runs a
+   * waiting defaults fill. Without the target's schema the fill and the schema check wait for it.
+   */
+  function followTarget(): void {
+    const state = get();
+    const root = metadataFillRoot(options.schemaPort);
+    const required = targetRules(options.schemaPort, state.complianceSettings).requiredMetadataRows;
+    const settings = withoutTargetInitialValues(state.complianceSettings, required, root);
+    const fill = state.loadAwaitsDefaults && state.defaultsJson && !state.defaultsLoading
+      ? absentMetadataRowFill({ ...state, complianceSettings: settings, elements: Object.values(state.elementsById) }, state.defaultsJson, required, root)
+      : undefined;
+    if (!fill && settings === state.complianceSettings) return;
+    set({
+      complianceSettings: fill ? { ...settings, ...fill.patch } : settings,
+      ...(fill ? { loadAwaitsDefaults: false, ...(fill.notice ? { lateLoadNotice: fill.notice } : {}) } : {}),
+    });
+  }
+  // ponytail: never unsubscribed; a store lives as long as its editor. Add a dispose when stores are discarded at runtime.
+  options.schemaPort.subscribe?.(followTarget);
 
   return slice;
   };

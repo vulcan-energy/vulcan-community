@@ -151,7 +151,7 @@ import {
 } from './geometryStore/slices/selectionSlice';
 import { createHistorySlice, type HistorySlice } from './geometryStore/slices/historySlice';
 import { createFloorSlice, type FloorSlice } from './geometryStore/slices/floorSlice';
-import { createIoSlice, DEFAULT_DEFAULTS_PATH, type IoSlice } from './geometryStore/slices/ioSlice';
+import { createIoSlice, DEFAULT_DEFAULTS_PATH, metadataFillRoot, type IoSlice } from './geometryStore/slices/ioSlice';
 import {
   createDefaultNamingPreferences,
   formatAutoElementName,
@@ -2929,21 +2929,23 @@ const withPrecomputedDefaultsLookup = (
     if (defaultsJson !== state.defaultsJson) {
       // A metadata row the document lacks shows the value the converter will take from these
       // defaults, and the save writes it.
+      // Before the target's schema loads, the fill waits for it (ioSlice followTarget).
       const complianceSettings = (update as Partial<GeometryState>).complianceSettings ?? state.complianceSettings;
-      const { patch, notice } = defaultsJson
+      const fill = defaultsJson
         ? absentMetadataRowFill(
           { ...state, complianceSettings, elements: Object.values(state.elementsById) },
           defaultsJson,
           targetRules(schemaPort, complianceSettings).requiredMetadataRows,
-          schemaPort.availability === 'available' ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null,
+          metadataFillRoot(schemaPort),
         )
         : { patch: {} };
       return {
         ...update,
         defaultsLookup: createDefaultsLookup(defaultsJson),
-        ...(Object.keys(patch).length ? { complianceSettings: { ...complianceSettings, ...patch } } : {}),
+        ...(fill && Object.keys(fill.patch).length ? { complianceSettings: { ...complianceSettings, ...fill.patch } } : {}),
         // A load that ended before these defaults arrived lists the rows they fill.
-        ...(defaultsJson && state.loadAwaitsDefaults ? { loadAwaitsDefaults: false, lateLoadNotice: notice ?? null } : {}),
+        ...(!fill ? { loadAwaitsDefaults: true }
+          : defaultsJson && state.loadAwaitsDefaults ? { loadAwaitsDefaults: false, lateLoadNotice: fill.notice ?? null } : {}),
       } as Partial<GeometryState>;
     }
   }

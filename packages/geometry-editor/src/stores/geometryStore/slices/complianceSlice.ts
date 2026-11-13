@@ -73,8 +73,9 @@ export interface ComplianceSlice {
     /** Model-input rows the loaded file lacks and the defaults have not yet filled. */
     absentMetadataRows?: string[];
     /**
-     * Rows a new model holds at their FHS initial value and the user has not set since. A target
-     * that requires a row (TargetRules.requiredMetadataRows) starts it empty instead.
+     * Settings a new model holds at their FHS initial value, and rows filled from the defaults, that
+     * the user has not set since. A target that requires one (TargetRules.requiredMetadataRows) or
+     * whose schema rejects it starts it empty instead (withoutTargetInitialValues).
      */
     initialValueRows?: string[];
   };
@@ -97,21 +98,6 @@ export const createInitialComplianceSettings = (): GeometryState['complianceSett
   ...FHS_COMPLIANCE_DEFAULTS,
   initialValueRows: Object.keys(FHS_COMPLIANCE_DEFAULTS),
 });
-
-/** The settings with every initial value the target requires the user to state removed. */
-export function withoutRequiredInitialValues(
-  settings: GeometryState['complianceSettings'],
-  requiredRows: readonly string[],
-): GeometryState['complianceSettings'] {
-  const required = new Set(requiredRows);
-  const initial = settings.initialValueRows ?? [];
-  const dropped = initial.filter((key) => required.has(key));
-  if (dropped.length === 0) return settings;
-  const next: Record<string, unknown> = { ...settings };
-  for (const key of dropped) delete next[key];
-  next.initialValueRows = initial.filter((key) => !required.has(key));
-  return next as GeometryState['complianceSettings'];
-}
 
 function deleteExplicitUndefined(
   target: Record<string, unknown>,
