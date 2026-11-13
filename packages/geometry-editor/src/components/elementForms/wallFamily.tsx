@@ -12,11 +12,10 @@
 // useMvhrDuctTerminalManager); its effects keep their order relative to
 // ElementCreator's other effects.
 //
-// Moved verbatim from ElementCreator; its locals arrive as named args.
 // `selection` is ElementFormSelection, structurally the non-null Selection
-// ElementCreatorContent receives. commitExistingElementDraftRef joins three
-// dependency arrays: a ref from another component is stable, but the lint
-// rule cannot see that through an argument.
+// ElementCreatorContent receives. commitExistingElementDraftRef sits in
+// dependency arrays only because the lint rule cannot see a ref is stable
+// through an argument.
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, type MutableRefObject, type ReactNode } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
@@ -60,6 +59,7 @@ import { WallShapeRows, type WallShapeCommit } from '../WallShapeRows';
 import {
   decimalInputProps,
   parseLiveDecimalInput,
+  readExtraJsonRecord,
   INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
@@ -82,17 +82,14 @@ function isAreaBasedExportElement(element: Element): element is AreaBasedExportE
 export function useWallFamilyFormState({
   selection,
   selectedElement,
-  selectedElementV,
   selectedShape,
-  selectedIsDormerAnchor,
   wallShared,
-  buildingElementTransparentFormState,
+  transparentMidHeightInput,
   getElementById,
   updateElement,
   geometryStore,
   allElements,
   floors,
-  isExistingElementSelection,
   commitExistingElementDraftRef,
   elementType,
   renderFieldLabel,
@@ -101,17 +98,14 @@ export function useWallFamilyFormState({
 }: {
   selection: ElementFormSelection;
   selectedElement: Element | null;
-  selectedElementV: unknown;
   selectedShape: CanvasShape | null;
-  selectedIsDormerAnchor: boolean;
   wallShared: WallSharedFormGroup;
-  buildingElementTransparentFormState: { midHeightInput: NumericDraftInputBinding };
+  transparentMidHeightInput: NumericDraftInputBinding;
   getElementById: (id: string) => Element | undefined;
   updateElement: (id: string, updates: Partial<Element>, skipAutoSave?: boolean) => void;
   geometryStore: GeometryStoreApi;
   allElements: Element[];
   floors: Floor[];
-  isExistingElementSelection: () => boolean;
   commitExistingElementDraftRef: MutableRefObject<(overrides?: Partial<Element>) => void>;
   elementType: ElementType;
   renderFieldLabel: (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string) => ReactNode;
@@ -121,13 +115,14 @@ export function useWallFamilyFormState({
     value: unknown,
   ) => { message: string; variant: 'error' | 'warning' } | null;
 }) {
+  const isExistingSelection = (selection.type === 'element' || selection.type === 'global') && !selection.isPlaceholder;
   const [wallShapeOpen, setWallShapeOpen] = useKeyedState(
-    selection?.id ?? 'none',
+    selection.id,
     false,
   );
 
   useEffect(() => {
-    if (!selectedElement || (selection?.type !== 'element' && selection?.type !== 'global')) return;
+    if (!selectedElement || (selection.type !== 'element' && selection.type !== 'global')) return;
     if (
       selectedElement.type !== 'BuildingElementOpaque' &&
       selectedElement.type !== 'BuildingElementTransparent' &&
@@ -156,8 +151,8 @@ export function useWallFamilyFormState({
   // exhaustive-deps, which (unlike a same-component useRef) can't verify
   // stability through a property access on another hook's return value.
   }, [
-    selection?.id,
-    selection?.type,
+    selection.id,
+    selection.type,
     selectedElement,
     wallShared.areaInputSetValueRef,
     wallShared.heightInputSetValueRef,
@@ -167,7 +162,7 @@ export function useWallFamilyFormState({
   // Surface-facing control must read pitch from the store (`selectedElement`), not only local
   // `pitch` state — they can diverge, which made re-picking 0 a no-op and mis-saved CSV.
   const horizontalPolygonControlPitch = useMemo(() => {
-    if (selection?.type !== 'element' || !selectedElement) return wallShared.pitch;
+    if (selection.type !== 'element' || !selectedElement) return wallShared.pitch;
     if (!isAdjacentLikeElement(selectedElement) || getElementShape(selectedElement) !== 'polygon') {
       return wallShared.pitch;
     }
@@ -176,11 +171,11 @@ export function useWallFamilyFormState({
       return Math.round(p);
     }
     return wallShared.pitch;
-  }, [selection?.type, selectedElement, wallShared.pitch]);
+  }, [selection.type, selectedElement, wallShared.pitch]);
 
   // 90° is the wall/line default; a flat horizontal polygon must be 0 or 180. Heal to match parse/export.
   useLayoutEffect(() => {
-    if (selection?.type !== 'element' || !selection.id) return;
+    if (selection.type !== 'element' || !selection.id) return;
     const el = getElementById(selection.id);
     if (!el || !isAdjacentLikeElement(el)) return;
     if (getElementShape(el) !== 'polygon') return;
@@ -191,22 +186,12 @@ export function useWallFamilyFormState({
     if (healed !== undefined && healed !== p) {
       updateElement(el.id, { pitch: healed });
     }
-  }, [selection?.id, selection?.type, getElementById, updateElement, selectedElement, selectedElementV]);
+  }, [selection.id, selection.type, getElementById, updateElement, selectedElement]);
 
   const derivedPolygonArea = useMemo((): number => {
     if (!selectedElement?.coordinates || selectedElement.coordinates.length < 3) return 0;
     try { return roundToTwoDecimals(calculatePolygonArea(selectedElement.coordinates)); } catch { return 0; }
   }, [selectedElement]);
-
-  // derivedGroundArea/derivedGroundEffectiveArea/derivedGroundShapePerimeter/
-  // groundPerimeterDetails/groundPerimeterManual/derivedGroundPerimeter/
-  // groundPerimeterBreakdownText/resetGroundPerimeterToAuto and the
-  // U-value/extra_json autofill sync effect now live inside
-  // buildingElementGroundFormState (elementForms/buildingElementGround.tsx,
-  // slice-6 brief Stage 1) — the orchestrator reads
-  // buildingElementGroundFormState.derivedGroundArea/derivedGroundPerimeter
-  // directly wherever still needed below (same precedent as
-  // systemFormState.systemSubcategory / wetEmitterFormState.subcategory).
 
   const liveWidthValue = parseLiveDecimalInput(wallShared.widthInput.inputValue);
   const liveHeightValue = parseLiveDecimalInput(wallShared.heightInput.inputValue);
@@ -266,25 +251,7 @@ export function useWallFamilyFormState({
       _heightUserOverride: false,
     } as Partial<Element>);
   }, [commitExistingElementDraftRef, selectedSlopedDimensions, wallShared.heightInput]);
-  // selectedSlopedTransparentNeedsRebuild/showSlopedTransparentRebuildOpening/
-  // rebuildSelectedSlopedTransparentOpening now live inline inside
-  // buildingElementTransparentFormState's renderPanel (elementForms/
-  // buildingElementTransparent.tsx, slice-6 brief STAGE 3), computed from
-  // ElementFormRenderCtx.selectedSlopedDimensions (which stays here — see
-  // types.ts, it's not Transparent-exclusive).
 
-  // selectedOpaqueAreaSummary/canMarkUnheatedPitchedRoof/canMarkExternalDoor
-  // moved to elementForms/buildingElementOpaque.tsx (slice-6 brief STAGE 4)
-  // — all three Opaque-exclusive (decision 7), computed inline in that
-  // module's renderPanel (no new ctx surface needed: elementsById is
-  // already generic, and the state.pitch/elementType/selectedShape reads
-  // are all already threaded).
-  //
-  // unheatedPitchedRoofCeilingElevationSuggestion (below) STAYS here,
-  // unchanged — it needs `floors`, which no module holds (same "computed
-  // orchestrator-side, threaded as a plain render-time value" precedent as
-  // onSiteHostDerivation/selectedPvDimensionNotes) — now exposed to Opaque's
-  // module via ElementFormRenderCtx.unheatedPitchedRoofCeilingElevationSuggestion.
   const unheatedPitchedRoofCeilingElevationSuggestion = useMemo(() => {
     if (!selectedElement || selectedElement.type !== 'BuildingElementOpaque') return null;
     const draftRoof = {
@@ -313,19 +280,10 @@ export function useWallFamilyFormState({
     ) {
       return false;
     }
-    if (selectedIsDormerAnchor) return false;
-    const ex = selectedElement.extra_json;
-    if (ex && typeof ex === 'object' && !Array.isArray(ex) && (ex as Record<string, unknown>).dormer_bundle) {
-      return false;
-    }
-    if (ex && typeof ex === 'object' && !Array.isArray(ex)) {
-      const gf = (ex as Record<string, unknown>).geometry_face;
-      if (gf && typeof gf === 'object' && gf !== null && !Array.isArray(gf)) {
-        if ((gf as Record<string, unknown>).kind === 'planar-face-3d') return false;
-      }
-    }
-    return true;
-  }, [selectedElement, selectedShape, selectedIsDormerAnchor]);
+    // A dormer anchor carries `dormer_bundle`, so this also excludes it.
+    const ex = readExtraJsonRecord(selectedElement.extra_json);
+    return !ex.dormer_bundle && readExtraJsonRecord(ex.geometry_face).kind !== 'planar-face-3d';
+  }, [selectedElement, selectedShape]);
 
   const selectedWallFace = useMemo(
     () => (canUseWallShape && selectedElement ? readProfiledLineFace(selectedElement.extra_json) : null),
@@ -349,13 +307,10 @@ export function useWallFamilyFormState({
   /** Commits a wall shape edit: a profiled face with its synced scalars, or a plain height. */
   const applyWallShape = useCallback(
     (next: WallShapeCommit) => {
-      if (!isExistingElementSelection()) return;
+      if (!isExistingSelection) return;
       const el = getElementById(selection.id);
       if (!el) return;
-      const extra: Record<string, unknown> =
-        el.extra_json && typeof el.extra_json === 'object' && !Array.isArray(el.extra_json)
-          ? { ...(el.extra_json as Record<string, unknown>) }
-          : {};
+      const extra = { ...readExtraJsonRecord(el.extra_json) };
       if ('face' in next) extra.geometry_face = next.face;
       else delete extra.geometry_face;
       const draft = { ...el, extra_json: extra, ...('flatHeight' in next ? { height: next.flatHeight } : {}) } as Element;
@@ -374,21 +329,21 @@ export function useWallFamilyFormState({
       commitExistingElementDraftRef.current(midHeight === undefined ? patch : { ...patch, mid_height: midHeight } as Partial<Element>);
       wallShared.widthInput.setValue(exp.width);
       wallShared.heightInput.setValue(exp.height);
-      if (midHeight !== undefined) buildingElementTransparentFormState.midHeightInput.setValue(midHeight);
+      if (midHeight !== undefined) transparentMidHeightInput.setValue(midHeight);
     },
     [
       commitExistingElementDraftRef,
       selection,
-      isExistingElementSelection,
+      isExistingSelection,
       getElementById,
       wallShared.widthInput,
       wallShared.heightInput,
-      buildingElementTransparentFormState.midHeightInput,
+      transparentMidHeightInput,
       geometryStore,
     ],
   );
 
-  const wallShapeAvailable = canUseWallShape && isExistingElementSelection();
+  const wallShapeAvailable = canUseWallShape && isExistingSelection;
   // A wall with a stored face keeps the section open: collapsing it would hide its shape.
   const wallShapeExpanded = wallShapeAvailable && (wallShapeOpen || !!selectedWallFace);
   const wallShapeToggle =
