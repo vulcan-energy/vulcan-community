@@ -701,6 +701,7 @@ export function useDormerBundleEditor(args: {
           }}
           options={[
             { value: 'mono-pitch', label: 'Mono-pitch' },
+            { value: 'flat', label: 'Flat' },
             { value: 'gable-front', label: 'Gable-front' },
             { value: 'hip', label: 'Hip' },
           ]}
@@ -744,7 +745,7 @@ export function useDormerBundleEditor(args: {
           size="md"
         />
       </div>
-      {selectedDormerType === 'mono-pitch' ? (
+      {selectedDormerType === 'flat' ? null : selectedDormerType === 'mono-pitch' ? (
         <>
           {renderFieldLabel('Dormer Roof Pitch (degrees):', elementType, 'pitch')}
           <div className="element-input">
