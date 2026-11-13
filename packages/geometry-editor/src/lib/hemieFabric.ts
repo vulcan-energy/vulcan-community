@@ -20,7 +20,7 @@ const BORDER_AREAS = new Set(['CA', 'CH', 'HR', 'LD', 'LL', 'NP', 'SY', 'TD']);
 const OUTSIDE_AREAS = new Set(['IM', 'GY', 'JE']);
 const ENGLAND_AREAS = new Set(('AL B BA BB BD BH BL BN BR BS CB CM CO CR CT CV CW DA DE DH DL DN DT DY E EC EN EX FY GL GU HA '
   + 'HD HG HP HU HX IG IP KT L LA LE LN LS LU M ME MK N NE NG NN NR NW OL OX PE PL PO PR RG RH RM S SE SG SK SL SM SN SO '
-  + 'SP SR SS ST SW TA TF TN TQ TR TS TW UB W WA WC WD WF WN WR WS WV').split(' '));
+  + 'SP SR SS ST SW TA TF TN TQ TR TS TW UB W WA WC WD WF WN WR WS WV YO').split(' '));
 
 /** The nation the model states for a postcode in a border area. */
 export const HEMIE_NATION = 'HEMIE_nation';

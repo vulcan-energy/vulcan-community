@@ -68,6 +68,20 @@ it('groups elements by fabric, largest group first', () => {
   expect(groups[0]!.color).not.toBe(groups[1]!.color);
 });
 
+it('knows every UK postcode area and the Crown dependency areas', () => {
+  // The 121 UK postcode areas (BT included) and the three Crown dependency areas.
+  const areas = ('AB AL B BA BB BD BH BL BN BR BS BT CA CB CF CH CM CO CR CT CV CW DA DD DE DG DH DL DN DT DY E EC EH EN '
+    + 'EX FK FY G GL GU HA HD HG HP HR HS HU HX IG IP IV KA KT KW KY L LA LD LE LL LN LS LU M ME MK ML N NE NG NN NP NR '
+    + 'NW OL OX PA PE PH PL PO PR RG RH RM S SA SE SG SK SL SM SN SO SP SR SS ST SW SY TA TD TF TN TQ TR TS TW UB W WA '
+    + 'WC WD WF WN WR WS WV YO ZE GY IM JE').split(' ');
+  expect(areas).toHaveLength(124);
+  const unknown = areas.filter((area) => {
+    const postcode = `${area}1 1AA`;
+    return !postcodeRegion(postcode) && !postcodeBorderArea(postcode) && !postcodeOutsideArea(postcode);
+  });
+  expect(unknown).toEqual([]);
+});
+
 it('derives the region from the postcode area, and asks it in a border area', () => {
   expect(['MK40 1AA', 'cf10 1aa', 'EH1 1AA', 'BT1 1AA'].map((postcode) => postcodeRegion(postcode)))
     .toEqual(['England', 'Wales', 'Scotland', 'Northern Ireland']);

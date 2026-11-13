@@ -12,6 +12,7 @@ import {
   libraryElementTypeForElement,
 } from '../multiSelectAssemblyApply';
 import { validateElementCore } from '../../geometry/validation/validateElement';
+import { createGeometryStore } from '../../stores/geometryStore';
 import type { Element } from '../../geometry/types';
 
 const brick = {
@@ -117,5 +118,26 @@ describe('areal heat capacity without material ρ/c', () => {
     const extra = applied.extra_json as Record<string, unknown>;
     expect(extra.thermal_resistance_construction).toBeDefined();
     expect(extra.areal_heat_capacity).toBeUndefined();
+  });
+});
+
+describe('creation default assemblies', () => {
+  it('apply to a new element, except under construction bands, which keep the stored choice', () => {
+    const created = (constructionBands: boolean) => {
+      const store = createGeometryStore({
+        defaultDefaultsPath: null,
+        schemaPort: { ...unavailableGeometrySchemaPort, targetRules: () => ({ constructionBands }) },
+      });
+      store.setState({ bundledAssemblyLibrary: library });
+      store.getState().setCreationDefaultAssemblyIds({ wall: ventilatedWallRow.id });
+      const id = store.getState().createPlaceholderElement('z1', 'BuildingElementOpaque');
+      const state = store.getState();
+      return { extra: state.elementsById[id]!.extra_json as Record<string, unknown> | undefined, ids: state.creationDefaultAssemblyIds };
+    };
+    expect(created(false).extra?.thermal_resistance_construction).toBeDefined();
+    const banded = created(true);
+    expect(banded.extra?.thermal_resistance_construction).toBeUndefined();
+    expect(banded.extra?.u_value).toBeUndefined();
+    expect(banded.ids).toEqual({ wall: ventilatedWallRow.id });
   });
 });

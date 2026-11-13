@@ -765,7 +765,8 @@ impl Ctx<'_> {
             .map(|e| e.get(key).map_or("the model's".into(), Value::to_string))
             .collect();
         if values.len() > 1 {
-            self.errors.push(error(elements[0].path(), format!("HEMIE gives {} one {key}, but they state different values ({}). Give them one {key}, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), values.into_iter().collect::<Vec<_>>().join(", "))));
+            let field = key.replace('_', " ");
+            self.errors.push(error(elements[0].path(), format!("HEMIE gives {} one {field}, but they state different values ({}). Give them one {field}, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), values.into_iter().collect::<Vec<_>>().join(", "))));
         }
         elements[0].get(key)
     }
@@ -1600,13 +1601,13 @@ const SCOTLAND_AREAS: [&str; 15] = [
 ];
 const WALES_AREAS: [&str; 2] = ["CF", "SA"];
 const BORDER_AREAS: [&str; 8] = ["CA", "CH", "HR", "LD", "LL", "NP", "SY", "TD"];
-const ENGLAND_AREAS: [&str; 94] = [
+const ENGLAND_AREAS: [&str; 95] = [
     "AL", "B", "BA", "BB", "BD", "BH", "BL", "BN", "BR", "BS", "CB", "CM", "CO", "CR", "CT", "CV",
     "CW", "DA", "DE", "DH", "DL", "DN", "DT", "DY", "E", "EC", "EN", "EX", "FY", "GL", "GU", "HA",
     "HD", "HG", "HP", "HU", "HX", "IG", "IP", "KT", "L", "LA", "LE", "LN", "LS", "LU", "M", "ME",
     "MK", "N", "NE", "NG", "NN", "NR", "NW", "OL", "OX", "PE", "PL", "PO", "PR", "RG", "RH", "RM",
     "S", "SE", "SG", "SK", "SL", "SM", "SN", "SO", "SP", "SR", "SS", "ST", "SW", "TA", "TF", "TN",
-    "TQ", "TR", "TS", "TW", "UB", "W", "WA", "WC", "WD", "WF", "WN", "WR", "WS", "WV",
+    "TQ", "TR", "TS", "TW", "UB", "W", "WA", "WC", "WD", "WF", "WN", "WR", "WS", "WV", "YO",
 ];
 /// The Isle of Man and the Channel Islands, outside the UK EPC schemes.
 const OUTSIDE_AREAS: [&str; 3] = ["IM", "GY", "JE"];
@@ -2887,11 +2888,11 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert_eq!(errors.len(), 1, "{errors:#?}");
         assert!(errors[0]
             .message
-            .contains("HEMIE gives 'Roof S', 'Roof N' one age_band"));
+            .contains("HEMIE gives 'Roof S', 'Roof N' one age band"));
         roof[1] += r#""{""age_band"":""K"",""insulation_location"":""rafters""}""#;
         let (_, errors, _) = run(&house(roof.clone()));
         assert_eq!(errors.len(), 1, "{errors:#?}");
-        assert!(errors[0].message.contains("one insulation_location"));
+        assert!(errors[0].message.contains("one insulation location"));
         roof[0] = roof[0].replace(
             r#""age_band"":""K""}"#,
             r#""age_band"":""K"",""insulation_location"":""rafters""}"#,
@@ -3054,6 +3055,21 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             let (_, errors, _) = run(&house(gable_roof()).replace("MK40 1AA", postcode));
             assert_eq!(errors.len(), 1, "{postcode}: {errors:#?}");
             assert_eq!(errors[0].path, "/Metadata/Postcode");
+        }
+    }
+
+    #[test]
+    fn every_uk_postcode_area_is_known() {
+        // The 121 UK postcode areas (BT included) and the three Crown dependency areas.
+        let uk = "AB AL B BA BB BD BH BL BN BR BS BT CA CB CF CH CM CO CR CT CV CW DA DD DE DG DH \
+            DL DN DT DY E EC EH EN EX FK FY G GL GU HA HD HG HP HR HS HU HX IG IP IV KA KT KW KY L \
+            LA LD LE LL LN LS LU M ME MK ML N NE NG NN NP NR NW OL OX PA PE PH PL PO PR RG RH RM S \
+            SA SE SG SK SL SM SN SO SP SR SS ST SW SY TA TD TF TN TQ TR TS TW UB W WA WC WD WF WN WR \
+            WS WV YO ZE";
+        let areas: Vec<&str> = uk.split_whitespace().chain(["GY", "IM", "JE"]).collect();
+        assert_eq!(areas.len(), 124);
+        for area in areas {
+            assert!(postcode_region(&format!("{area}1 1AA")).is_some(), "{area}");
         }
     }
 
