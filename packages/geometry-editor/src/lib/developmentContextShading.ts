@@ -63,6 +63,8 @@ export interface SyncDevelopmentContextShadingResult {
   skippedUnknownHeightCount: number;
   /** Sibling ContextShading not copied because its outline overlaps this dwelling's footprint. */
   skippedContextOverlapCount: number;
+  /** One line per generated neighbour left out because HEM cannot take its distance. */
+  leftOutNotices: string[];
 }
 
 type FootprintCandidate = {
@@ -778,8 +780,11 @@ export function syncDevelopmentContextShadingElements(
 
   // HEM takes only a distance above 0 (FHS guidance 2.3.1 gives 0 or less for an object beside
   // the dwelling), so a generated object without one is left out; every other one is kept.
+  const leftOutNotices: string[] = [];
   for (const [key, target] of targets) {
-    if (!(target.distance > 0)) targets.delete(key);
+    if (target.distance > 0) continue;
+    targets.delete(key);
+    leftOutNotices.push(`${target.name} left out: level with or behind this dwelling's facade, so its distance is not above 0.`);
   }
   for (const [key, target] of targets) {
     const existing = existingGenerated.get(key);
@@ -816,5 +821,6 @@ export function syncDevelopmentContextShadingElements(
     skippedSameFloorOverlapCount,
     skippedUnknownHeightCount,
     skippedContextOverlapCount,
+    leftOutNotices,
   };
 }

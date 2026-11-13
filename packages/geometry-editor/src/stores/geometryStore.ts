@@ -1635,6 +1635,7 @@ export interface GeometryState extends
     skippedSameFloorOverlapCount: number;
     skippedUnknownHeightCount: number;
     skippedContextOverlapCount: number;
+    leftOutNotices: string[];
   };
 
   // Canvas preferences
@@ -7581,6 +7582,7 @@ const createGeometryState = (
       skippedSameFloorOverlapCount: result.skippedSameFloorOverlapCount,
       skippedUnknownHeightCount: result.skippedUnknownHeightCount,
       skippedContextOverlapCount: result.skippedContextOverlapCount,
+      leftOutNotices: result.leftOutNotices,
     };
   },
 

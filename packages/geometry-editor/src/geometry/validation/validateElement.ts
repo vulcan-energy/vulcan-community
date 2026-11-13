@@ -1858,14 +1858,11 @@ export const validateElementCore = (
           if (!(derivedDistance > 0)) {
             issues.push(geo(`Distance is ${derivedDistance} m: the object is level with or behind the facade of the dwelling's closest external wall (for example beside it, or beyond a party wall), not in front of it. HEM needs a distance above 0. FHS guidance 2.3.1 measures it perpendicular from that wall to the object's closest face.`, 'distance'));
           }
-          // Shown, never blocking: before the thickness rule the distance ran from the internal line.
+          // A warning, never blocking: before the thickness rule the distance ran from the internal line.
+          // A thickness the model gives (wall layers, floor, ground floor) needs no message.
           const thickness = contextShadingDistanceDetails(contextElement, parent, Object.values(elementsById))?.thickness;
           if (thickness?.source === 'none') {
             warnings.push(geo('No wall thickness in the model (no construction layers on the closest external wall, no thickness_walls on the floor or the ground floor), so the distance is measured from the internal wall line.', 'distance'));
-          } else if (thickness?.source === 'wall_layers') {
-            warnings.push(geo(`Distance measured from the outside face of ${thickness.name}: ${thickness.thicknessM} m thick from its construction layers.`, 'distance'));
-          } else if (thickness?.source === 'ground_floor') {
-            warnings.push(geo(`Distance measured from the outside wall face, using the ${thickness.thicknessM} m thickness_walls of ground floor ${thickness.name}.`, 'distance'));
           }
         } else {
           issues.push(geo('Missing parent or coordinates', 'parent_element'));
