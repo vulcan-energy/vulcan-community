@@ -1106,7 +1106,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'boolean',
   },
   'is_external_door': {
-    description: 'Whether this is an external door (boolean). When true, the element uses door-specific U-values and air permeability in fabric heat loss calculations. If the door is more than 60% glazed, model it as a window instead (HEM:FHS Building Fabric guidance).',
+    description: 'Whether this is an external door (boolean). When true, the element uses door-specific U-values and air permeability in fabric heat loss calculations. Model a glazed door as a window when glazing is more than 60% of its area (HEM:FHS) or 60% or more (HEM:EPC).',
     type: 'boolean',
   },
   // BuildingElementTransparent

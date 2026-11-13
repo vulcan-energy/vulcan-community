@@ -4,6 +4,7 @@
 import { calculatePolygonArea } from './polygonSync';
 import { roundToTwoDecimals } from '../geometry/constants';
 import type { SpaceLabel, Zone } from '../geometry/types';
+import type { TargetRules } from '../../../geometry-editor-host/src/schemaPort';
 import { analyzeSpaceLabelGeometry,
   isMaterialTreatedAreaDifference, type SpaceLabelGeometryAnalysis } from './spaceLabelGeometry';
 
@@ -170,6 +171,27 @@ export const DWELLING_COUNT_FIELD_LABELS: Record<DwellingCountField, string> = {
   NumberOfSanitaryAccommodations: 'Sanitary accommodations',
 };
 
+/** The target rules that change what the space labels give. */
+export type SpaceLabelRules = Pick<TargetRules, 'assessorInputs' | 'singleStoreyLivingArea'>;
+/** The rules every target without its own follows: every count derived, living area on any storey. */
+export const DEFAULT_SPACE_LABEL_RULES: SpaceLabelRules = { assessorInputs: [], singleStoreyLivingArea: false };
+
+/**
+ * The storey the living area is on, where the target keeps it on one storey: the only storey
+ * with a living-room label. Undefined when no storey, or more than one, has one.
+ */
+export function singleLivingRoomStorey(labels: SpaceLabel[]): number | undefined {
+  const storeys = livingRoomStoreys(labels);
+  return storeys.length === 1 ? storeys[0] : undefined;
+}
+
+/** The storeys that have a living-room label, lowest first. */
+export function livingRoomStoreys(labels: SpaceLabel[]): number[] {
+  const storeys = new Set<number>();
+  for (const label of labels) if (isLivingRoomSpaceLabel(label)) storeys.add(label.storey);
+  return [...storeys].sort((a, b) => a - b);
+}
+
 export type DwellingCountMismatch = { field: DwellingCountField; derived: number; stored: number };
 
 function emptyDwellingCounts(): Record<DwellingCountField, number> {
@@ -209,7 +231,8 @@ export function dwellingCountZoneIds(zones: Zone[]): string[] {
 export function aggregateDwellingCounts(
   labels: SpaceLabel[],
   zoneIds: readonly string[],
-): { dwellingCounts: Record<DwellingCountField, number>; hasLabelledFootprints: boolean } {
+  rules: SpaceLabelRules = DEFAULT_SPACE_LABEL_RULES,
+): { dwellingCounts: Partial<Record<DwellingCountField, number>>; hasLabelledFootprints: boolean } {
   const counted = new Set(zoneIds);
   const dwellingCounts = emptyDwellingCounts();
   let hasLabelledFootprints = false;
@@ -225,6 +248,8 @@ export function aggregateDwellingCounts(
       dwellingCounts[key] += typeof v === 'number' && Number.isFinite(v) ? v : 0;
     }
   }
+  // The assessor enters these; the labels give no value for them.
+  for (const field of rules.assessorInputs) delete dwellingCounts[field as DwellingCountField];
 
   return { dwellingCounts, hasLabelledFootprints };
 }
@@ -238,6 +263,7 @@ export function getDwellingCountSpaceLabelMismatchState(
   spaceLabelIds: string[],
   spaceLabelsById: Record<string, SpaceLabel | undefined>,
   complianceSettings: ComplianceSettingsShape,
+  rules: SpaceLabelRules = DEFAULT_SPACE_LABEL_RULES,
 ): { hasLabelledFootprintsInPrimary: boolean; mismatches: DwellingCountMismatch[] } {
   const labels = spaceLabelIds
     .map((id) => spaceLabelsById[id])
@@ -245,13 +271,16 @@ export function getDwellingCountSpaceLabelMismatchState(
   const { dwellingCounts, hasLabelledFootprints } = aggregateDwellingCounts(
     labels,
     dwellingCountZoneIds(zones),
+    rules,
   );
   if (!hasLabelledFootprints) {
     return { hasLabelledFootprintsInPrimary: false, mismatches: [] };
   }
   const mismatches: DwellingCountMismatch[] = [];
   for (const field of DWELLING_COUNT_FIELDS) {
-    const derived = Math.max(0, Math.round(dwellingCounts[field]));
+    const count = dwellingCounts[field];
+    if (count === undefined) continue;
+    const derived = Math.max(0, Math.round(count));
     const raw = complianceSettings[field];
     if (raw === undefined || raw === null) continue;
     const stored = Math.max(0, Math.floor(Number(raw)));
@@ -281,6 +310,7 @@ export function aggregateSpaceLabelsForZone(
   primaryZoneId: string,
   registry: Record<string, SpaceLabelRoomRule> = DEFAULT_SPACE_LABEL_ROOM_REGISTRY,
   geometryAnalysis?: SpaceLabelGeometryAnalysis,
+  rules: SpaceLabelRules = DEFAULT_SPACE_LABEL_RULES,
 ): SpaceLabelAggregate {
   void registry;
   const dwellingCounts: Record<DwellingCountField, number> = emptyDwellingCounts();
@@ -289,6 +319,11 @@ export function aggregateSpaceLabelsForZone(
   let livingAreaM2 = 0;
 
   const analysis = geometryAnalysis ?? analyzeSpaceLabelGeometry(labels.filter((label) => label.zoneId === primaryZoneId));
+  // A target that keeps the living area on one storey takes none where it cannot tell which storey.
+  const livingStorey = rules.singleStoreyLivingArea
+    ? singleLivingRoomStorey(labels.filter((label) => label.zoneId === primaryZoneId))
+    : undefined;
+  const inLivingArea = (label: SpaceLabel) => !rules.singleStoreyLivingArea || label.storey === livingStorey;
 
   for (const label of labels) {
     if (label.zoneId !== primaryZoneId) continue;
@@ -298,7 +333,7 @@ export function aggregateSpaceLabelsForZone(
     const area = roundToTwoDecimals(analysis.effectiveAreasByLabelId[label.id] ?? spaceLabelPlanAreaM2(label));
     if (!rule.excludeFromFloorArea && area > 0) {
       totalFloorAreaM2 += area;
-      if (rule.livingBucket === 'living' || isSpaceLabelOpenToLivingRoom(label)) livingAreaM2 += area;
+      if ((rule.livingBucket === 'living' || isSpaceLabelOpenToLivingRoom(label)) && inLivingArea(label)) livingAreaM2 += area;
     }
 
     for (const [k, v] of Object.entries(rule.increments)) {
@@ -342,7 +377,7 @@ export type ComplianceSettingsShape = Partial<{
 }>;
 
 /** Dwelling count fields including zeros — used when UI edits drive compliance from Space labels. */
-export function fullDwellingCountsCompliancePatch(counts: SpaceLabelAggregate['dwellingCounts']): ComplianceSettingsShape {
+export function fullDwellingCountsCompliancePatch(counts: Partial<Record<DwellingCountField, number>>): ComplianceSettingsShape {
   const patch: ComplianceSettingsShape = {};
   (Object.entries(counts) as [DwellingCountField, number][]).forEach(([key, value]) => {
     patch[key] = Math.max(0, Math.round(value));
@@ -372,7 +407,7 @@ export function applySpaceLabelsToZonesAndCompliance(
   zones: Zone[],
   labels: SpaceLabel[],
   geometryAnalysis?: SpaceLabelGeometryAnalysis,
-  options?: { preserveManualFloorAreaOverride?: boolean },
+  options?: { preserveManualFloorAreaOverride?: boolean; rules?: SpaceLabelRules },
 ): { zones: Zone[]; compliancePatch: ComplianceSettingsShape } {
   const primary = zones.find((z) => !z.isPlaceholder);
   const compliancePatch: ComplianceSettingsShape = {};
@@ -380,8 +415,8 @@ export function applySpaceLabelsToZonesAndCompliance(
     return { zones, compliancePatch };
   }
 
-  const agg = aggregateSpaceLabelsForZone(labels, primary.id, DEFAULT_SPACE_LABEL_ROOM_REGISTRY, geometryAnalysis);
-  const counts = aggregateDwellingCounts(labels, dwellingCountZoneIds(zones));
+  const agg = aggregateSpaceLabelsForZone(labels, primary.id, DEFAULT_SPACE_LABEL_ROOM_REGISTRY, geometryAnalysis, options?.rules);
+  const counts = aggregateDwellingCounts(labels, dwellingCountZoneIds(zones), options?.rules);
   const hasFloor = agg.totalFloorAreaM2 > 0;
   if (!hasFloor && !counts.hasLabelledFootprints) {
     return { zones, compliancePatch };

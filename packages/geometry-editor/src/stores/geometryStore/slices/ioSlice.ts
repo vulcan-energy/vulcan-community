@@ -52,7 +52,7 @@ import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGe
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
-import type { GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
+import { targetRules, type GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import type { GeometryWorkspaceResourcePort } from '../../../../../geometry-editor-host/src/workspaceResourcePort';
 import {
   alignHostedSlopedPanelToHostOrientation,
@@ -1028,7 +1028,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // blank or unreadable is written as it was, which the converter blocks; leaving it out would let
     // the converter take the defaults template's value instead.
     const unreadRows = compliance.unreadMetadataRows ?? {};
-    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements })) {
+    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements, rules: targetRules(options.schemaPort, compliance) })) {
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
@@ -2013,6 +2013,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const dwellingWide = aggregateDwellingCounts(
         newSpaceLabels,
         dwellingCountZoneIds(newZones),
+        targetRules(options.schemaPort, importedSettings),
       );
       if (dwellingWide.hasLabelledFootprints) {
         const agg = { dwellingCounts: dwellingWide.dwellingCounts };
@@ -2030,7 +2031,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         ];
         for (const [csKey, aggKey] of roomFields) {
           const imported = importedSettings[csKey];
-          const derivedCount = Math.round(agg.dwellingCounts[aggKey]);
+          const derived = agg.dwellingCounts[aggKey];
+          if (derived === undefined) continue;
+          const derivedCount = Math.round(derived);
           if (typeof imported === 'number' && imported === derivedCount) {
             (importedSettings as Record<string, unknown>)[csKey as string] = undefined;
           }
@@ -2287,6 +2290,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         : undefined;
       const applied = applySpaceLabelsToZonesAndCompliance(zonesForStore, labelList, geometryAnalysis, {
         preserveManualFloorAreaOverride: true,
+        rules: targetRules(options.schemaPort, get().complianceSettings),
       });
       zonesForStore = applied.zones;
     }
@@ -2367,7 +2371,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // use absentMetadataRowFill and give the notice as lateLoadNotice.
     const loaded = get();
     if (loaded.defaultsJson && !loaded.defaultsLoading) {
-      const { patch, notice } = absentMetadataRowFill({ ...loaded, elements: Object.values(loaded.elementsById) }, loaded.defaultsJson);
+      const { patch, notice } = absentMetadataRowFill({ ...loaded, elements: Object.values(loaded.elementsById), rules: targetRules(options.schemaPort, loaded.complianceSettings) }, loaded.defaultsJson);
       set({ complianceSettings: { ...loaded.complianceSettings, ...patch }, loadAwaitsDefaults: false, lateLoadNotice: notice ?? null });
     } else {
       set({ loadAwaitsDefaults: true, lateLoadNotice: null });

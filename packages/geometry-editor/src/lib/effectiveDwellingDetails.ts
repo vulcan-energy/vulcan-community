@@ -28,10 +28,13 @@ import {
   aggregateSpaceLabelsForZone,
   dwellingCountZoneIds,
   type SpaceLabelAggregate,
+  type SpaceLabelRules,
 } from './spaceLabelDerivation';
 import type { Element, Floor, SpaceLabel, Zone } from '../geometry/types';
 
 export interface EffectiveDwellingDetailsInputs {
+  /** The selected target's space-label rules; absent, the defaults. */
+  rules?: SpaceLabelRules;
   zones: Zone[];
   elementsById: Record<string, Element>;
   spaceLabelsById: Record<string, SpaceLabel>;
@@ -162,12 +165,12 @@ export function resolveEffectiveDwellingDetails(
   );
   const labelAgg: SpaceLabelAggregate | null =
     primaryZone && hasLabelledFootprints
-      ? aggregateSpaceLabelsForZone(primaryLabels, primaryZone.id)
+      ? aggregateSpaceLabelsForZone(primaryLabels, primaryZone.id, undefined, undefined, input.rules)
       : null;
 
   // Areas above are per-zone (each zone carries its own living/rest split); room
   // counts below describe the dwelling and must span every non-placeholder zone.
-  const dwellingWide = aggregateDwellingCounts(allLabels, dwellingCountZoneIds(input.zones));
+  const dwellingWide = aggregateDwellingCounts(allLabels, dwellingCountZoneIds(input.zones), input.rules);
   const counts = dwellingWide.hasLabelledFootprints ? dwellingWide.dwellingCounts : null;
 
   return {

@@ -10,6 +10,7 @@ import type {
 } from '../geometry/types';
 import type { GeometryState } from '../stores/geometryStore';
 import { resolveEffectiveDwellingDetails, resolveEffectiveVentilationBaseHeight } from './effectiveDwellingDetails';
+import type { SpaceLabelRules } from './spaceLabelDerivation';
 import { targetFieldAvailability } from './schemaCache';
 import { resolveBuildingElementPitch } from '../geometry/derivePitchFromGeometry';
 import { getAreaBasedElementExportGeometry } from './elementArea';
@@ -494,6 +495,8 @@ const text = (value: string | undefined) => (value ? value : undefined);
 export type MetadataRowInputs = Pick<GeometryState, 'zones' | 'elementsById' | 'spaceLabelsById' | 'spaceLabelIds' | 'complianceSettings'> & {
   floors: Floor[];
   elements: Element[];
+  /** The selected target's space-label rules. */
+  rules: SpaceLabelRules;
 };
 
 /**
@@ -508,6 +511,7 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs): Array<[string, str
     spaceLabelsById: state.spaceLabelsById as Record<string, SpaceLabel>,
     spaceLabelIds: state.spaceLabelIds,
     complianceSettings: compliance,
+    rules: state.rules,
   });
   const derivedGFA = calculateGroundFloorArea(state.elements);
   const derivedVentHeight = calculateSuggestedVentilationHeight(state.elements, state.floors);

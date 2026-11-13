@@ -41,6 +41,10 @@ export interface TargetRules {
   excludedElementTypes: Readonly<Record<string, { reason: string }>>;
   /** Field keys hidden per element type. */
   hiddenFields: Readonly<Record<string, readonly string[]>>;
+  /** Model inputs the assessor enters: the editor derives no value for them, for example from space labels. */
+  assessorInputs: readonly string[];
+  /** The living area stays on the living room's storey, and a dwelling with no living room takes its largest public room. */
+  singleStoreyLivingArea: boolean;
 }
 
 export interface GeometrySchemaPropertyValidation {
@@ -125,6 +129,8 @@ export function targetRules(
       buildingRegulationsChecks: targetSchemaMode(port) === 'fhs',
       excludedElementTypes: {},
       hiddenFields: {},
+      assessorInputs: [],
+      singleStoreyLivingArea: false,
     };
 }
 

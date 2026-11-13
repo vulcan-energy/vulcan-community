@@ -765,7 +765,7 @@ fn mvhr_terminal_mid_height(
         return Err(BuildError::new(
             "E040",
             &format!(
-                "MechanicalVentilationTerminal '{terminal_name}' height {mid_height}m is outside FHS range 1..60"
+                "MechanicalVentilationTerminal '{terminal_name}' height {mid_height}m is outside the allowed range 1..60 m"
             ),
         ));
     }
@@ -821,7 +821,7 @@ fn mvhr_terminal_manual_position_values(
         return Err(BuildError::new(
             "E040",
             &format!(
-                "MechanicalVentilationTerminal '{terminal_name}' manual orientation360/pitch are outside FHS ranges"
+                "MechanicalVentilationTerminal '{terminal_name}' manual orientation360/pitch are outside the allowed ranges (orientation360 0..360, pitch 0..180)"
             ),
         ));
     }
@@ -899,7 +899,7 @@ fn mvhr_terminal_host_position_values(
         return Err(BuildError::new(
             "E040",
             &format!(
-                "MechanicalVentilationTerminal '{terminal_name}' host orientation360/pitch are outside FHS ranges"
+                "MechanicalVentilationTerminal '{terminal_name}' host orientation360/pitch are outside the allowed ranges (orientation360 0..360, pitch 0..180)"
             ),
         ));
     }
@@ -2439,7 +2439,13 @@ impl JSONBuilder {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
-                if simplified {
+                if simplified && !self.profile.offers_simplified_thermal_bridging() {
+                    self.push_non_fatal(
+                        "E_EPC_THERMAL_BRIDGING",
+                        &crate::json_pointer(&["Zone", zone_name, "ThermalBridging"]),
+                        &format!("Zone '{zone_name}' uses simplified thermal bridging (0.2 x exposed area), which HEM:EPC does not take. Turn it off and add the thermal bridges: calculated junction details, junctions from an accredited database, or the DESNZ-defined default psi values."),
+                    );
+                } else if simplified {
                     // Calculate total exposed area (Exposed Elements + Window Elements)
                     let mut total_area = 0.0;
                     if let Some(exposed_elements) = csv_data.get("Exposed Elements") {

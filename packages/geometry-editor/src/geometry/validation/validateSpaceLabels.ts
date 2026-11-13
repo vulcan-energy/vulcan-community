@@ -9,7 +9,9 @@ import {
   isLivingRoomSpaceLabel,
   isSpaceLabelOpenToLivingRoom,
   resolveRoomTypeRule,
+  livingRoomStoreys,
   spaceLabelPlanAreaM2,
+  type SpaceLabelRules,
 } from '../../lib/spaceLabelDerivation';
 import {
   analyzeSpaceLabelGeometry,
@@ -24,6 +26,8 @@ export type SpaceLabelValidationContext = {
   elementsById?: Record<string, Element>;
   spaceInferenceWallPrintByZone?: Record<string, string>;
   complianceValidationEnabled?: boolean;
+  /** The selected target's space-label rules; absent, the defaults. */
+  rules?: SpaceLabelRules;
 };
 
 const ADJACENCY_EPS_M = 0.03;
@@ -253,6 +257,14 @@ export function validateSpaceLabels(
         ));
       }
     }
+  }
+
+  const labelled = primaryLabels.filter((label) => (label.room_type?.trim() ?? '') !== '');
+  const storeys = livingRoomStoreys(labelled);
+  if (context.rules?.singleStoreyLivingArea && labelled.length > 0 && storeys.length !== 1) {
+    issues.push(warn(storeys.length === 0
+      ? 'No space label is a living room. The living area is the lounge or living room, or else the largest public room: set that room\'s type to Living room.'
+      : `The living area is on one storey, but living-room labels are on storeys ${storeys.join(' and ')}. Set the type Living room on one storey only.`));
   }
 
   if (context.complianceValidationEnabled && primaryZone) {

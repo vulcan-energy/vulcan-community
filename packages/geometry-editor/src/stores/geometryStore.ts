@@ -34,6 +34,7 @@ import { dropAssemblyEnvelopeOnFabricOverride } from '../lib/assemblyAppliedUi';
 import { coerceElementToStrictestNumericTyping } from '../lib/schemaCoercion';
 import { cloneJsonValue, jsonValuesEqual } from '../lib/jsonTypes';
 import {
+  targetRules,
   targetSchemaMode,
   unavailableGeometrySchemaPort,
   type GeometrySchemaPort,
@@ -2910,6 +2911,7 @@ const freezePostCommandEvent = (
 const withPrecomputedDefaultsLookup = (
   state: GeometryState,
   update: unknown,
+  schemaPort: GeometrySchemaPort,
 ): Partial<GeometryState> | GeometryState => {
   if (
     update &&
@@ -2922,7 +2924,7 @@ const withPrecomputedDefaultsLookup = (
       // defaults, and the save writes it.
       const complianceSettings = (update as Partial<GeometryState>).complianceSettings ?? state.complianceSettings;
       const { patch, notice } = defaultsJson
-        ? absentMetadataRowFill({ ...state, complianceSettings, elements: Object.values(state.elementsById) }, defaultsJson)
+        ? absentMetadataRowFill({ ...state, complianceSettings, elements: Object.values(state.elementsById), rules: targetRules(schemaPort, complianceSettings) }, defaultsJson)
         : { patch: {} };
       return {
         ...update,
@@ -2957,7 +2959,7 @@ const createGeometryState = (
       const update = typeof partial === 'function'
         ? (partial as (current: GeometryState) => Partial<GeometryState> | GeometryState)(state)
         : partial;
-      return withPrecomputedDefaultsLookup(state, update);
+      return withPrecomputedDefaultsLookup(state, update, schemaPort);
     }, replace as false);
   }) as typeof rawSet;
 
@@ -5112,7 +5114,8 @@ const createGeometryState = (
     const geometryAnalysis = primary
       ? analyzeZoneSpaceLabels(primary.id, labels, Object.values(state.elementsById).filter(Boolean))
       : undefined;
-    const { zones: nextZones } = applySpaceLabelsToZonesAndCompliance(state.zones, labels, geometryAnalysis);
+    const rules = targetRules(schemaPort, state.complianceSettings);
+    const { zones: nextZones } = applySpaceLabelsToZonesAndCompliance(state.zones, labels, geometryAnalysis, { rules });
     set({ zones: nextZones });
 
     if (labels.length > 0) {
@@ -5123,6 +5126,7 @@ const createGeometryState = (
       const { dwellingCounts, hasLabelledFootprints } = aggregateDwellingCounts(
         labels,
         dwellingCountZoneIds(nextZones),
+        rules,
       );
       if (hasLabelledFootprints) {
         get().setComplianceSettings(fullDwellingCountsCompliancePatch(dwellingCounts));
@@ -7682,6 +7686,7 @@ const createGeometryState = (
 
     const spaceLabelValidation = validateSpaceLabels(state.spaceLabelsById, state.spaceLabelIds, {
       zones: state.zones,
+      rules: targetRules(schemaPort, cs),
       elementsById: state.elementsById,
       spaceInferenceWallPrintByZone: state.spaceInferenceWallPrintByZone,
       complianceValidationEnabled,
@@ -7694,6 +7699,7 @@ const createGeometryState = (
       state.spaceLabelIds,
       state.spaceLabelsById,
       state.complianceSettings,
+      targetRules(schemaPort, cs),
     );
     allWarnings.push(...formatDwellingCountMismatchWarnings(dwellingMismatchState.mismatches));
     allWarnings.push(...collectDuplicateElementNameWarnings(Object.values(state.elementsById), state.zones));
@@ -7713,7 +7719,7 @@ const createGeometryState = (
     // a new document stays quiet until something is drawn.
     if (elements.some((element) => !element.isPlaceholder) || state.complianceSettings.absentMetadataRows) {
       allCriticalIssues.push(...unsetMetadataInputIssues(
-        { ...state, elements },
+        { ...state, elements, rules: targetRules(schemaPort, state.complianceSettings) },
         schemaPort.availability === 'available' ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null,
         state.defaultsLoading ? undefined : state.defaultsJson,
       ));
@@ -7764,7 +7770,7 @@ export const createGeometryStore = (
       const update = typeof partial === 'function'
         ? (partial as (current: GeometryState) => Partial<GeometryState> | GeometryState)(state)
         : partial;
-      return withPrecomputedDefaultsLookup(state, update);
+      return withPrecomputedDefaultsLookup(state, update, options.schemaPort ?? unavailableGeometrySchemaPort);
     }, replace as false);
   }) as typeof store.setState;
   return store;

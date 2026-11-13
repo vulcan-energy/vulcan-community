@@ -2788,7 +2788,7 @@ export const collectGeometryValidation = (
     const spaceLabelValidation = validateSpaceLabels(
       Object.fromEntries(options.spaceLabels.map((label) => [label.id, label])),
       options.spaceLabels.map((label) => label.id),
-      { zones, elementsById, complianceValidationEnabled },
+      { zones, elementsById, complianceValidationEnabled, rules: targetRules(options.schemaPort, options.complianceSettings ?? {}) },
     );
     warnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     criticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));

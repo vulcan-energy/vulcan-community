@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import { useTargetRules } from '../hooks/useTargetRules';
 import { targetValidationFlags } from '../geometry/validation/validateElement';
 import React, {
   useCallback,
@@ -488,6 +489,7 @@ export function GlobalSettingsModal({
   focusFieldKey,
 }: GlobalSettingsModalProps) {
   const schemaPort = useGeometrySchemaPort();
+  const rules = useTargetRules();
   const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null;
   // Dwelling fields show only where the target's root schema has them; no schema says nothing.
   const showStoreyOfDwelling = targetFieldAvailability(targetRoot, ["General", "storey_of_dwelling"]) !== "absent";
@@ -967,7 +969,7 @@ export function GlobalSettingsModal({
     const issues: string[] = [];
     // Every model-input row the save would leave out: the same check that blocks the model.
     issues.push(...unsetMetadataInputIssues(
-      { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
+      { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById), rules },
       targetRoot,
       defaultsJson,
     ));
@@ -1008,6 +1010,7 @@ export function GlobalSettingsModal({
     effectiveStoreysInDwelling,
     elementsById,
     floors,
+    rules,
     spaceLabelIds,
     spaceLabelsById,
     targetRoot,
@@ -1031,9 +1034,10 @@ export function GlobalSettingsModal({
         zones,
         spaceLabelIds,
         spaceLabelsById,
-        complianceSettings
+        complianceSettings,
+        rules
       ),
-    [complianceSettings, spaceLabelIds, spaceLabelsById, zones]
+    [complianceSettings, rules, spaceLabelIds, spaceLabelsById, zones]
   );
   const dwellingCountVersusSpaceLabelWarnings = useMemo(
     () =>
@@ -1071,9 +1075,9 @@ export function GlobalSettingsModal({
     const labels = spaceLabelIds
       .map((id) => spaceLabelsById[id])
       .filter((label): label is NonNullable<typeof label> => !!label);
-    const result = aggregateDwellingCounts(labels, dwellingCountZoneIds(zones));
+    const result = aggregateDwellingCounts(labels, dwellingCountZoneIds(zones), rules);
     return result.hasLabelledFootprints ? result.dwellingCounts : null;
-  }, [spaceLabelIds, spaceLabelsById, zones]);
+  }, [rules, spaceLabelIds, spaceLabelsById, zones]);
   const applyAllRoomCountsFromSpaceLabels = useCallback(() => {
     if (!primaryZoneForSpaceLabels || !dwellingRoomCounts) return;
     setComplianceSettings(fullDwellingCountsCompliancePatch(dwellingRoomCounts));
@@ -2238,7 +2242,7 @@ export function GlobalSettingsModal({
                           const derived = dwellingRoomCounts
                             ? Math.max(
                                 0,
-                                Math.round(dwellingRoomCounts[row.field])
+                                Math.round(dwellingRoomCounts[row.field] ?? 0)
                               )
                             : 0;
                           const stored = complianceSettings[row.field];

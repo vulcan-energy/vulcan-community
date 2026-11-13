@@ -34,7 +34,7 @@ import {
 import type { GeometrySourceComparisonPort } from '../../../../geometry-editor-host/src/sourceComparisonPort';
 import { useGeometrySchemaPort } from '../../../../geometry-editor-host/src/editorServicePorts';
 import { targetSchemaMode } from '../../../../geometry-editor-host/src/schemaPort';
-import { useTargetValidationFlags } from '../../hooks/useTargetRules';
+import { useTargetRules, useTargetValidationFlags } from '../../hooks/useTargetRules';
 import { simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import type { ElementCategoryGhostKey, ElementCategoryGhostState } from '../../lib/elementCategoryVisibility';
 import { HideElementsDropdown } from './HideElementsDropdown';
@@ -679,6 +679,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   const schemaMode = targetSchemaMode(schemaPort);
   const bridgingOffered = simplifiedThermalBridgingOffered(schemaPort, schemaMode);
   const { complianceValidationEnabled } = useTargetValidationFlags();
+  const rules = useTargetRules();
   const zoneValidationById = useMemo(() => {
     const validations = new Map<string, ValidationResult>();
     const spaceLabelIdsByZone = new Map<string, string[]>();
@@ -707,6 +708,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
         elementsById,
         spaceInferenceWallPrintByZone,
         complianceValidationEnabled,
+        rules,
       });
       validations.set(zone.id, withTargetIssues({
         hasIssues: zoneValidation.hasIssues || spaceValidation.hasIssues,
@@ -721,6 +723,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     elementsById,
     primaryFhsZoneId,
     complianceValidationEnabled,
+    rules,
     spaceInferenceWallPrintByZone,
     spaceLabelIds,
     spaceLabelsById,

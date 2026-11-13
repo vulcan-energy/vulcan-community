@@ -7,6 +7,7 @@ import { validateSpaceLabels } from '../../geometry/validation/validateSpaceLabe
 import { analyzeSpaceLabelGeometry, analyzeZoneSpaceLabels, getTreatedFloorBoundaryPolygonsForZone } from '../spaceLabelGeometry';
 import { calculateDerivedFloorArea, getVolumeCalculationBreakdown, partyElementPitchKeepingSurface } from '../zoneDerivation';
 import {
+  aggregateDwellingCounts,
   aggregateSpaceLabelsForZone,
   applySpaceLabelsToZonesAndCompliance,
   formatDwellingCountMismatchWarnings,
@@ -269,6 +270,49 @@ describe('spaceLabelDerivation', () => {
     expect(msgs[0]).toContain('Bedrooms');
     expect(msgs[0]).toContain('entered 2');
     expect(msgs[0]).toContain('space labels 1');
+  });
+});
+
+describe('HEM:EPC space-label rules', () => {
+  const epc = { assessorInputs: ['NumberOfHotTappedRooms'], singleStoreyLivingArea: true };
+  const zone: Zone = { id: 'zp', name: 'Dwelling', floorArea: 0, height: 2.5, volume: 0, simplifiedThermalBridging: false };
+  const label = (id: string, room_type: string, storey: number, x0: number, extra_json?: Record<string, unknown>): SpaceLabel => ({
+    id, name: id, zoneId: 'zp', storey, room_type, coordinates: rect(x0, 0, x0 + 3, 4, storey * 2.5), ...(extra_json ? { extra_json } : {}),
+  });
+
+  it('derives no hot-tapped room count: the assessor enters it', () => {
+    const labels = [label('k', 'kitchen', 0, 0), label('b', 'bathroom', 1, 0)];
+    const counts = aggregateDwellingCounts(labels, ['zp'], epc).dwellingCounts;
+    expect(counts.NumberOfWetRooms).toBe(2);
+    expect(counts).not.toHaveProperty('NumberOfHotTappedRooms');
+    expect(fullDwellingCountsCompliancePatch(counts)).not.toHaveProperty('NumberOfHotTappedRooms');
+    const byId = Object.fromEntries(labels.map((l) => [l.id, l]));
+    const state = getDwellingCountSpaceLabelMismatchState([zone], ['k', 'b'], byId, { NumberOfHotTappedRooms: 3 }, epc);
+    expect(state.mismatches).toEqual([]);
+    // FHS keeps its derived count.
+    expect(aggregateDwellingCounts(labels, ['zp']).dwellingCounts.NumberOfHotTappedRooms).toBe(2);
+  });
+
+  it('keeps the living area on the living room\'s storey', () => {
+    const labels = [
+      label('lr', 'living_room', 0, 0),
+      label('landing', 'circulation', 1, 0, { open_to_living_room: true }),
+    ];
+    expect(aggregateSpaceLabelsForZone(labels, 'zp', undefined, undefined, epc).livingAreaM2).toBe(12);
+    expect(aggregateSpaceLabelsForZone(labels, 'zp').livingAreaM2).toBe(24);
+  });
+
+  it('fails naming the fix when the drawing cannot tell the living area', () => {
+    const issues = (labels: SpaceLabel[], rules?: typeof epc) => validateSpaceLabels(
+      Object.fromEntries(labels.map((l) => [l.id, l])), labels.map((l) => l.id), { zones: [zone], ...(rules ? { rules } : {}) },
+    ).issues.map((i) => i.message);
+    const noLivingRoom = [label('d', 'other_habitable', 0, 0), label('bed', 'bedroom', 1, 0)];
+    expect(issues(noLivingRoom, epc).join()).toContain('largest public room');
+    expect(issues(noLivingRoom)).toEqual([]);
+    const twoStoreys = [label('lr0', 'living_room', 0, 0), label('lr1', 'living_room', 1, 0)];
+    expect(issues(twoStoreys, epc).join()).toContain('one storey');
+    expect(aggregateSpaceLabelsForZone(twoStoreys, 'zp', undefined, undefined, epc).livingAreaM2).toBe(0);
+    expect(issues(twoStoreys)).toEqual([]);
   });
 });
 

@@ -272,6 +272,27 @@ impl ModelProfile {
         }
     }
 
+    /// A zone may state "simplified thermal bridging": ThermalBridging is then 0.2 W/m²K times its
+    /// exposed area. EPC differs: DESNZ-defined new-build methods are calculated junction details,
+    /// an accredited junction database or the default ψ values; an existing building takes the
+    /// age-band y-value through HEMIE. None of them is the 0.2 total.
+    pub(crate) fn offers_simplified_thermal_bridging(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => true,
+            Self::Epc => false,
+        }
+    }
+
+    /// Scenarios follow Building Regulations Part F: an MVHR unit removes the background vents,
+    /// and a scenario cannot remove every fan. Core keeps the rules its scenarios have always
+    /// had. EPC differs: the EPC wrapper runs no Part F checks.
+    pub fn applies_part_f_to_scenarios(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => true,
+            Self::Epc => false,
+        }
+    }
+
     /// A party wall states `party_wall_lining_type` exactly when its cavity type takes one.
     /// EPC differs: HEM Core 2.0.0a4 `BuildingElementPartyWall.validate_party_wall_lining_type`
     /// (pydantic) rejects a lining type on any other cavity, which the JSON schema allows.
@@ -557,13 +578,14 @@ pub fn validate_target_input(
             .and_then(Value::as_object)
             .is_some_and(|sources| !sources.contains_key("hw cylinder"))
     {
-        // Both FHS schemas declare only this main-source key (including
-        // PointOfUse). Notional edit_storagetank indexes it unconditionally;
-        // an empty schema-valid object is not a usable hot-water source.
+        // The FHS and EPC wrappers read the main source only under this key
+        // (including PointOfUse): the FHS notional's edit_storagetank and the EPC
+        // wrapper's water-heating usage split both index it unconditionally, so an
+        // empty schema-valid object is not a usable hot-water source.
         errors.push(ValidationError {
             code: "E_PYTHON_FHS_HOT_WATER_SOURCE".into(),
             path: "/HotWaterSource/hw cylinder".into(),
-            message: format!("{hem} requires the main hot-water source under 'hw cylinder', including point-of-use systems. Supply a compatible main source; unsupported names are preserved in the authored CSV and are not renamed automatically."),
+            message: format!("{hem}: the wrapper reads the main hot-water source only under 'hw cylinder', including point-of-use systems. Supply a compatible main source; unsupported names are preserved in the authored CSV and are not renamed automatically."),
             schema_path: None, keyword: None,
         });
     }
