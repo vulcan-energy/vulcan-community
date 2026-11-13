@@ -212,7 +212,7 @@ pub(super) fn party_ceiling_roof(ctx: &mut Ctx, ceilings: &[&El], planes: &[&El]
         return None;
     }
     let key = party_construction(ctx, "party_ceiling", first);
-    Some(json!({"roof_type": "Party", "construction": key}))
+    Some(ctx.with_age_band(ceilings, json!({"roof_type": "Party", "construction": key})))
 }
 
 pub(super) struct PartFloor<'p> {
@@ -269,7 +269,10 @@ pub(super) fn part_floor<'e>(
         "BuildingElementGround" => ground_floor(ctx, e, part, ground_total),
         "BuildingElementOpaque" => {
             let key = ctx.construction("above_external_area_floor", &[e], &[]);
-            Some(json!({"floor_type": "not next to ground (external)", "construction": key}))
+            Some(ctx.with_age_band(
+                &[e],
+                json!({"floor_type": "not next to ground (external)", "construction": key}),
+            ))
         }
         "BuildingElementAdjacentUnconditionedSpace_Simple" => {
             let Some(space) = e.text("adjacent_space_type") else {
@@ -277,13 +280,14 @@ pub(super) fn part_floor<'e>(
                 return None;
             };
             let key = ctx.construction("above_internal_unconditioned_area_floor", &[e], &[]);
-            Some(
+            Some(ctx.with_age_band(
+                &[e],
                 json!({"floor_type": "not next to ground (unconditioned)", "adjacent_space": space, "construction": key}),
-            )
+            ))
         }
         _ => {
             let key = party_construction(ctx, "party_floor", e);
-            Some(json!({"floor_type": "party", "construction": key}))
+            Some(ctx.with_age_band(&[e], json!({"floor_type": "party", "construction": key})))
         }
     }
 }

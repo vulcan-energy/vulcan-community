@@ -8,11 +8,11 @@
 //! read from the element), or "ours" (a Vulcan choice awaiting confirmation). A shape or value
 //! the converter cannot express fails and names the element; nothing is approximated silently.
 //!
-//! EPC model settings are Metadata rows: `HEMIE_age_band`, `HEMIE_region`, `HEMIE_front_door`
-//! (needed when the model has several doors), and per HEMIE
+//! EPC model settings are Metadata rows: `HEMIE_age_band`, and per HEMIE
 //! construction type `HEMIE_construction_<construction_type>`, a JSON object of that
 //! construction's fields (for example `{"wall_construction_type":"cavity"}`). A value on the
-//! element wins over the setting.
+//! element wins over the setting, and an element may state its own `age_band`. A door marked
+//! `is_front_door` is the front door. The region comes from the model's postcode.
 
 use crate::finalization::SchemaOmission;
 use crate::target_mappings::TARGET_INPUT_WARNING;
@@ -47,6 +47,27 @@ const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
 /// walls; a window elsewhere carries this placeholder unless the glazing setting states one.
 const UNUSED_WINDOW_HEAT_CAPACITY: f64 = 0.0;
 const SETTING: &str = "HEMIE_";
+/// Construction fields an element may state for itself, over the model's construction setting
+/// (derived from the model).
+const ELEMENT_OVERRIDE_KEYS: [&str; 5] = [
+    "wall_construction_type",
+    "glazing_type",
+    "frame_material",
+    "glazing_gap",
+    "insulation_location",
+];
+/// Fields only this converter reads from an element row; no HEM input takes them, so the
+/// full-input build leaves them out of the HEM element.
+pub(crate) const ELEMENT_ONLY_KEYS: [&str; 8] = [
+    "age_band",
+    "is_front_door",
+    "wall_construction_type",
+    "glazing_type",
+    "frame_material",
+    "glazing_gap",
+    "insulation_location",
+    "construction_weight",
+];
 
 #[path = "hemie_systems.rs"]
 mod systems;
@@ -650,6 +671,11 @@ impl Ctx<'_> {
         let mut c = self.settings.construction(construction_type);
         c.insert("construction_type".into(), json!(construction_type));
         let first = elements[0];
+        for key in ELEMENT_OVERRIDE_KEYS {
+            if let Some(value) = self.agreed(elements, key) {
+                c.insert(key.into(), value.clone());
+            }
+        }
         let u_values: BTreeSet<String> = elements
             .iter()
             .filter_map(|e| e.num("u_value"))
@@ -729,6 +755,28 @@ impl Ctx<'_> {
         }
         self.require(construction_type, &mut c);
         self.constructions.add(c)
+    }
+
+    /// The value the elements state for a field, alike on each; HEMIE gives the group one
+    /// value, so elements that differ (or that state it and leave it to the model) fail.
+    fn agreed<'e>(&mut self, elements: &[&El<'e>], key: &str) -> Option<&'e Value> {
+        let values: BTreeSet<String> = elements
+            .iter()
+            .map(|e| e.get(key).map_or("the model's".into(), Value::to_string))
+            .collect();
+        if values.len() > 1 {
+            self.errors.push(error(elements[0].path(), format!("HEMIE gives {} one {key}, but they state different values ({}). Give them one {key}, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), values.into_iter().collect::<Vec<_>>().join(", "))));
+        }
+        elements[0].get(key)
+    }
+
+    /// The value with the elements' own age band, which HEMIE takes over its building part's
+    /// (derived from the model).
+    fn with_age_band(&mut self, elements: &[&El], mut value: Value) -> Value {
+        if let Some(band) = self.agreed(elements, "age_band") {
+            value["age_band"] = band.clone();
+        }
+        value
     }
 
     /// Fields HEMIE needs that have no DESNZ default; each one missing is listed in the
@@ -950,10 +998,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         .unwrap_or_default();
     let zone = &model["Zone"][&zone_name];
     let age_band = ctx.settings.text("age_band", "A to M");
-    let region = ctx.settings.text(
-        "region",
-        "England, Wales, Scotland, Northern Ireland or Isle of Man",
-    );
+    let region = region(ctx);
 
     // Line walls and the elements HEMIE geometry cannot hold yet.
     let mut walls: Vec<(&El, Kind)> = Vec::new();
@@ -1299,6 +1344,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         hemie_walls[wi]
             .value
             .insert("construction".into(), json!(key));
+        if let Some(band) = source.get("age_band") {
+            hemie_walls[wi]
+                .value
+                .insert("age_band".into(), band.clone());
+        }
         if kind == Kind::Sheltered {
             match source.text("adjacent_space_type") {
                 Some(space) => {
@@ -1335,7 +1385,10 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                     "party_or_sheltered_door"
                 };
                 let key = ctx.construction(door_type, &[opening], &[]);
-                let mut d = json!({"width": opening.num("width"), "height": opening.num("height"), "construction": key});
+                let mut d = ctx.with_age_band(
+                    &[opening],
+                    json!({"width": opening.num("width"), "height": opening.num("height"), "construction": key}),
+                );
                 if let Some(vents) = systems::host_vents(ctx, opening.name) {
                     d["mechanical_vents"] = vents;
                 }
@@ -1540,30 +1593,145 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     Some((Value::Object(geometry), ventilation?))
 }
 
-/// The front door: the one the `HEMIE_front_door` setting names, or the model's only door.
-fn front_door<'e>(ctx: &mut Ctx, doors: &[&'e El<'e>]) -> Option<&'e El<'e>> {
-    let field = format!("{SETTING}front_door");
-    if let Some(named) = ctx.settings.raw(&field) {
-        let found = doors
-            .iter()
-            .find(|d| named.as_str() == Some(d.name))
-            .copied();
-        if found.is_none() {
-            ctx.errors.push(error("/Metadata".into(), format!("The model setting {field} is {named}, which is not a door of the model. Give the front door's name.")));
-        }
-        return found;
+// The nation by postcode area: area level, because district boundaries cross national borders
+// and no district table is pinned here. Border areas ask the model's stated nation.
+const SCOTLAND_AREAS: [&str; 15] = [
+    "AB", "DD", "DG", "EH", "FK", "G", "HS", "IV", "KA", "KW", "KY", "ML", "PA", "PH", "ZE",
+];
+const WALES_AREAS: [&str; 2] = ["CF", "SA"];
+const BORDER_AREAS: [&str; 8] = ["CA", "CH", "HR", "LD", "LL", "NP", "SY", "TD"];
+const ENGLAND_AREAS: [&str; 94] = [
+    "AL", "B", "BA", "BB", "BD", "BH", "BL", "BN", "BR", "BS", "CB", "CM", "CO", "CR", "CT", "CV",
+    "CW", "DA", "DE", "DH", "DL", "DN", "DT", "DY", "E", "EC", "EN", "EX", "FY", "GL", "GU", "HA",
+    "HD", "HG", "HP", "HU", "HX", "IG", "IP", "KT", "L", "LA", "LE", "LN", "LS", "LU", "M", "ME",
+    "MK", "N", "NE", "NG", "NN", "NR", "NW", "OL", "OX", "PE", "PL", "PO", "PR", "RG", "RH", "RM",
+    "S", "SE", "SG", "SK", "SL", "SM", "SN", "SO", "SP", "SR", "SS", "ST", "SW", "TA", "TF", "TN",
+    "TQ", "TR", "TS", "TW", "UB", "W", "WA", "WC", "WD", "WF", "WN", "WR", "WS", "WV",
+];
+/// The Isle of Man and the Channel Islands, outside the UK EPC schemes.
+const OUTSIDE_AREAS: [&str; 3] = ["IM", "GY", "JE"];
+const NATIONS: [&str; 4] = ["England", "Wales", "Scotland", "Northern Ireland"];
+
+enum PostcodeNation {
+    Derived(&'static str),
+    Border,
+    Outside,
+}
+
+/// A postcode's area and what it gives the nation; None for a malformed postcode or an unknown area.
+fn postcode_region(postcode: &str) -> Option<(String, PostcodeNation)> {
+    let code: String = postcode
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_uppercase();
+    if !code.is_ascii() {
+        return None;
     }
-    match doors {
-        [only] => {
+    let (outward, inward) = code.split_at(code.len().checked_sub(3)?);
+    let area: String = outward
+        .chars()
+        .take_while(char::is_ascii_alphabetic)
+        .collect();
+    let district = &outward[area.len()..];
+    let well_formed = (1..=2).contains(&area.len())
+        && (1..=2).contains(&district.len())
+        && district.starts_with(|c: char| c.is_ascii_digit())
+        && district.chars().all(|c| c.is_ascii_alphanumeric())
+        && inward.starts_with(|c: char| c.is_ascii_digit())
+        && inward[1..].chars().all(|c| c.is_ascii_alphabetic());
+    if !well_formed {
+        return None;
+    }
+    let region = match area.as_str() {
+        "BT" => PostcodeNation::Derived("Northern Ireland"),
+        a if SCOTLAND_AREAS.contains(&a) => PostcodeNation::Derived("Scotland"),
+        a if WALES_AREAS.contains(&a) => PostcodeNation::Derived("Wales"),
+        a if ENGLAND_AREAS.contains(&a) => PostcodeNation::Derived("England"),
+        a if BORDER_AREAS.contains(&a) => PostcodeNation::Border,
+        a if OUTSIDE_AREAS.contains(&a) => PostcodeNation::Outside,
+        _ => return None,
+    };
+    Some((area, region))
+}
+
+/// The region from the model's postcode, or in a border area the nation the model states,
+/// reported; a missing or unknown postcode, or a border area with no nation, fails naming the field.
+fn region(ctx: &mut Ctx) -> Option<String> {
+    let postcode = ctx
+        .settings
+        .raw("Postcode")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let path = "/Metadata/Postcode".to_string();
+    let Some((area, derived)) = postcode_region(postcode) else {
+        ctx.errors.push(error(path, if postcode.trim().is_empty() {
+            "The model has no postcode. The existing-building converter takes the region from it; give the Postcode in Dwelling Details.".into()
+        } else {
+            format!("Postcode '{postcode}' is not a postcode in England, Wales, Scotland or Northern Ireland, so the region is not known. Check the Postcode in Dwelling Details.")
+        }));
+        return None;
+    };
+    match derived {
+        PostcodeNation::Derived(region) => {
+            ctx.notices.push(notice(
+                &path,
+                format!("Region {region}, from the postcode {postcode}."),
+            ));
+            return Some(region.into());
+        }
+        PostcodeNation::Outside => {
+            ctx.errors.push(error(path, format!("Postcode {area} is outside England, Wales, Scotland and Northern Ireland; HEM:EPC does not cover it.")));
+            return None;
+        }
+        PostcodeNation::Border => {}
+    }
+    let field = format!("{SETTING}nation");
+    match ctx.settings.raw(&field).and_then(Value::as_str) {
+        Some(nation) if NATIONS.contains(&nation) => {
+            ctx.notices.push(notice(
+                &format!("/Metadata/{field}"),
+                format!("Region {nation}, as stated for postcode area {area}."),
+            ));
+            Some(nation.into())
+        }
+        stated => {
+            ctx.errors.push(error(format!("/Metadata/{field}"), format!("Postcode area {area} spans two nations{}. State the nation under the Postcode in Dwelling Details.", stated.map_or(String::new(), |s| format!(", and '{s}' is not England, Wales, Scotland or Northern Ireland")))));
+            None
+        }
+    }
+}
+
+/// The front door: the door marked `is_front_door`, or the model's only door.
+fn front_door<'e>(ctx: &mut Ctx, doors: &[&'e El<'e>]) -> Option<&'e El<'e>> {
+    let marked: Vec<&El> = doors
+        .iter()
+        .copied()
+        .filter(|d| d.flag("is_front_door"))
+        .collect();
+    let names = |doors: &[&El]| quoted(&doors.iter().map(|d| d.name).collect::<Vec<_>>());
+    match (marked.as_slice(), doors) {
+        ([front], _) => Some(front),
+        ([], [only]) => {
             ctx.notices.push(notice(&only.path(), format!("'{}' is the model's only door, so it is the front door: its building part is the reference part, and its wall is the first wall of that part's ground storey.", only.name)));
             Some(only)
         }
-        [] => {
+        ([], []) => {
             ctx.errors.push(error("/Zone".into(), "The model has no door. The reference building part is the one with the front door; draw the front door.".into()));
             None
         }
-        many => {
-            ctx.errors.push(error("/Metadata".into(), format!("The model has doors {}, so the front door is not known. Add the Metadata row {field} with the front door's name.", quoted(&many.iter().map(|d| d.name).collect::<Vec<_>>()))));
+        ([], many) => {
+            ctx.errors.push(error(many[0].path(), format!("The model has doors {}, and none is marked as the front door. Mark the front door.", names(many))));
+            None
+        }
+        (many, _) => {
+            ctx.errors.push(error(
+                many[0].path(),
+                format!(
+                    "Doors {} are each marked as the front door. Mark one door only.",
+                    names(many)
+                ),
+            ));
             None
         }
     }
@@ -1582,7 +1750,10 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
         Vec::new()
     };
     let key = ctx.construction("window", &[e], &extra);
-    let mut w = json!({"width": e.num("width"), "height": e.num("height"), "window_sections": sections, "construction": key});
+    let mut w = ctx.with_age_band(
+        &[e],
+        json!({"width": e.num("width"), "height": e.num("height"), "window_sections": sections, "construction": key}),
+    );
     // Derived from the model: background vents drawn in this window.
     let mut vents = Vec::new();
     for row in window_vents(ctx.settings.csv, e.name) {
@@ -1628,7 +1799,10 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
         }
     };
     let key = ctx.construction(construction_type, &[g], &[]);
-    Some(json!({"floor_type": floor_type, "construction": key, "total_area": total_area}))
+    Some(ctx.with_age_band(
+        &[g],
+        json!({"floor_type": floor_type, "construction": key, "total_area": total_area}),
+    ))
 }
 
 /// The pitched roof's slope orientation: an edge orientation of the top storey's minimum
@@ -1692,7 +1866,10 @@ fn roof(
         let key = ctx.construction("flat_roof", &flat, &[]);
         let lights = roof_windows(ctx, windows, &flat, placed);
         // ours: Vulcan does not record whether a flat roof is cold or warm, so it is Unknown.
-        Some(json!({"roof_type": "Unknown Flat", "construction": key, "windows": lights}))
+        Some(ctx.with_age_band(
+            &flat,
+            json!({"roof_type": "Unknown Flat", "construction": key, "windows": lights}),
+        ))
     } else if !pitched.is_empty() {
         if windows
             .iter()
@@ -1754,10 +1931,11 @@ fn roof(
         rectangularity_notice(ctx, part, top_ring);
         let key = ctx.construction("unheated_pitched_roof", &pitched, &[]);
         // ours: Vulcan does not record cold or warm, so it is Unknown.
-        Some(
+        Some(ctx.with_age_band(
+            &pitched,
             json!({"roof_type": "Unknown Pitched (Unheated)", "construction": key, "pitch_type": pitch_type,
             "slope_orientation": slope_orientation, "pitch": "Custom", "custom_pitch": weighted / area}),
-        )
+        ))
     } else {
         ctx.errors.push(error(
             "/Zone".into(),
@@ -1879,7 +2057,10 @@ fn room_in_roof(
             Kind::Sheltered => "sheltered_wall",
         };
         let key = ctx.construction(construction_type, &[w], &[]);
-        let mut value = json!({"wall_type": kind.wall_type(), "construction": key});
+        let mut value = ctx.with_age_band(
+            &[w],
+            json!({"wall_type": kind.wall_type(), "construction": key}),
+        );
         if kind == Kind::Sheltered {
             // Derived from the model: behind a roof room's sheltered wall is the roof void.
             value["adjacent_space_type"] = json!("roof void");
@@ -1924,6 +2105,9 @@ fn room_in_roof(
     };
     let mut roof = Map::new();
     roof.insert("roof_type".into(), json!("Room In Roof"));
+    if let Some(band) = ctx.agreed(&heated, "age_band") {
+        roof.insert("age_band".into(), band.clone());
+    }
     let both_sides = heated.iter().any(|p| side(centroid(&p.pts)) < 0.0)
         && heated.iter().any(|p| side(centroid(&p.pts)) >= 0.0);
     if knees.is_empty() && !both_sides {
@@ -2210,7 +2394,7 @@ mod tests {
     pub(super) const HEADER: &str = "Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json";
     pub(super) const SETTINGS: &str = r#"IsExistingBuilding,TRUE
 HEMIE_age_band,D
-HEMIE_region,England
+Postcode,MK40 1AA
 HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}"
 HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
 
@@ -2297,6 +2481,9 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             door("Front", "W00", [3.5, 0.0], [4.5, 0.0]),
         )
     }
+
+    /// A door row's extra_json marking it as the front door.
+    const FRONT_DOOR: &str = r#""{""is_front_door"":true}""#;
 
     pub(super) fn door(name: &str, host: &str, a: P, b: P) -> String {
         format!(
@@ -2668,11 +2855,12 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert_eq!(errors.len(), 1, "{errors:#?}");
         assert!(errors[0]
             .message
-            .contains("doors 'Back', 'Front', so the front door is not known"));
-        let (model, errors, _) = run(&text.replace(
-            "IsExistingBuilding,TRUE",
-            "IsExistingBuilding,TRUE\nHEMIE_front_door,Back",
-        ));
+            .contains("doors 'Back', 'Front', and none is marked as the front door"));
+        let marked = text.replace(
+            &door("Back", "W01", [8.0, 2.5], [8.0, 3.5]),
+            &(door("Back", "W01", [8.0, 2.5], [8.0, 3.5]) + FRONT_DOOR),
+        );
+        let (model, errors, _) = run(&marked);
         assert!(errors.is_empty(), "{errors:#?}");
         let zone = &model["Zone"];
         assert_eq!(
@@ -2680,6 +2868,65 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             "LINEARRING (8 0, 8 6, 0 6, 0 0, 8 0)"
         );
         assert_eq!(zone["reference_orientation"], 90.0);
+        let both = marked.replace(
+            &door("Front", "W00", [3.5, 0.0], [4.5, 0.0]),
+            &(door("Front", "W00", [3.5, 0.0], [4.5, 0.0]) + FRONT_DOOR),
+        );
+        let (_, errors, _) = run(&both);
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0]
+            .message
+            .contains("Doors 'Back', 'Front' are each marked as the front door"));
+    }
+
+    #[test]
+    fn roof_planes_that_differ_in_age_band_or_construction_stop() {
+        let mut roof = gable_roof();
+        roof[0] += r#""{""age_band"":""K""}""#;
+        let (_, errors, _) = run(&house(roof.clone()));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0]
+            .message
+            .contains("HEMIE gives 'Roof S', 'Roof N' one age_band"));
+        roof[1] += r#""{""age_band"":""K"",""insulation_location"":""rafters""}""#;
+        let (_, errors, _) = run(&house(roof.clone()));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0].message.contains("one insulation_location"));
+        roof[0] = roof[0].replace(
+            r#""age_band"":""K""}"#,
+            r#""age_band"":""K"",""insulation_location"":""rafters""}"#,
+        );
+        let (model, errors, _) = run(&house(roof));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let main_roof = &model["Zone"]["building_parts"]["Main"]["roof"];
+        assert_eq!(main_roof["age_band"], "K");
+        let key = main_roof["construction"].as_str().unwrap();
+        assert_eq!(
+            model["Zone"]["constructions"][key]["insulation_location"],
+            "rafters"
+        );
+    }
+
+    #[test]
+    fn a_roof_rooms_slopes_and_walls_take_their_own_age_band() {
+        let mut exposed: Vec<String> = heated_roof()
+            .into_iter()
+            .map(|p| p + r#""{""age_band"":""K""}""#)
+            .collect();
+        exposed.push(gable("G W", [0.0, 0.0], [0.0, 6.0]).replace(
+            r#""{""geometry_face"#,
+            r#""{""age_band"":""J"",""geometry_face"#,
+        ));
+        exposed.push(gable("G E", [8.0, 0.0], [8.0, 6.0]));
+        let (model, errors, _) = run(&house(exposed));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let room = &model["Zone"]["building_parts"]["Main"]["roof"];
+        assert_eq!(room["age_band"], "K");
+        let bands: Vec<&Value> = ["left_gable_wall", "right_gable_wall"]
+            .iter()
+            .filter_map(|side| room[side].get("age_band"))
+            .collect();
+        assert_eq!(bands, [&json!("J")]);
     }
 
     #[test]
@@ -2763,6 +3010,54 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
+    fn the_region_comes_from_the_postcode() {
+        for (postcode, region) in [
+            ("MK40 1AA", "England"),
+            ("cf10 1aa", "Wales"),
+            ("EH1 1AA", "Scotland"),
+            ("BT1 1AA", "Northern Ireland"),
+        ] {
+            let text = house(gable_roof()).replace("MK40 1AA", postcode);
+            let (model, errors, notices) = run(&text);
+            assert!(errors.is_empty(), "{postcode}: {errors:#?}");
+            assert_eq!(model["Zone"]["region"], region, "{postcode}");
+            assert!(
+                notices.iter().any(|n| n
+                    .message
+                    .contains(&format!("Region {region}, from the postcode"))),
+                "{postcode}: {notices:#?}"
+            );
+        }
+        // A border area takes the nation the model states, and fails without one.
+        let border = house(gable_roof()).replace("MK40", "CH5");
+        let (_, errors, _) = run(&border);
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(errors[0].path, "/Metadata/HEMIE_nation");
+        assert!(errors[0].message.contains("CH spans two nations"));
+        let stated = border.replace("Postcode,", "HEMIE_nation,Wales\nPostcode,");
+        let (model, errors, notices) = run(&stated);
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(model["Zone"]["region"], "Wales");
+        assert!(notices.iter().any(|n| n
+            .message
+            .contains("Region Wales, as stated for postcode area CH")));
+        // Elsewhere the nation comes from the postcode, whatever a stale stated nation says.
+        let stale = house(gable_roof()).replace("Postcode,", "HEMIE_nation,Wales\nPostcode,");
+        assert_eq!(run(&stale).0["Zone"]["region"], "England");
+        for area in ["IM", "GY", "JE"] {
+            let (_, errors, _) = run(&house(gable_roof()).replace("MK40", &format!("{area}1")));
+            assert_eq!(errors.len(), 1, "{area}: {errors:#?}");
+            assert_eq!(errors[0].path, "/Metadata/Postcode");
+            assert_eq!(errors[0].message, format!("Postcode {area} is outside England, Wales, Scotland and Northern Ireland; HEM:EPC does not cover it."));
+        }
+        for postcode in ["", "MK40", "XX1 1AA", "M1X 1AA1"] {
+            let (_, errors, _) = run(&house(gable_roof()).replace("MK40 1AA", postcode));
+            assert_eq!(errors.len(), 1, "{postcode}: {errors:#?}");
+            assert_eq!(errors[0].path, "/Metadata/Postcode");
+        }
+    }
+
+    #[test]
     fn missing_settings_are_listed_in_one_error() {
         let text = house(gable_roof())
             .replace("HEMIE_age_band,D\n", "")
@@ -2802,6 +3097,35 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             json!({"construction_type": "party_wall", "party_wall_type": "unfilled_cavity", "cavity_seal_type": "unsealed", "party_wall_lining_type": "wet_plaster"})
         );
         assert!(notices.iter().any(|n| n.message.contains("W00 (U 0.45)")));
+    }
+
+    #[test]
+    fn an_element_states_its_own_age_band_and_construction() {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed[2] = exposed[2].replace(
+            "\",",
+            "\",\"{\"\"age_band\"\":\"\"K\"\",\"\"wall_construction_type\"\":\"\"timber frame\"\"}\"",
+        );
+        exposed.extend(gable_roof());
+        let (model, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let walls = model["Zone"]["building_parts"]["Main"]["walls"]
+            .as_array()
+            .unwrap();
+        let own: Vec<&Value> = walls.iter().filter(|w| w["age_band"] == "K").collect();
+        assert_eq!(own.len(), 1, "{walls:#?}");
+        let key = own[0]["construction"].as_str().unwrap();
+        assert_eq!(
+            model["Zone"]["constructions"][key]["wall_construction_type"],
+            "timber frame"
+        );
+        // The other walls keep the model's band and construction.
+        let other = walls.iter().find(|w| w.get("age_band").is_none()).unwrap();
+        let key = other["construction"].as_str().unwrap();
+        assert_eq!(
+            model["Zone"]["constructions"][key]["wall_construction_type"],
+            "cavity"
+        );
     }
 
     #[test]
