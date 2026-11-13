@@ -9282,8 +9282,7 @@
         "measured_air_flow_rate": 80,
         "mid_height_air_flow_path": 1.5,
         "orientation360": 180,
-        "pitch": 90,
-        "installation_type": "no_installation_scheme"
+        "pitch": 90
       },
       "mechvent_intermittent_mev": {
         "vent_type": "Intermittent MEV",
@@ -9303,8 +9302,7 @@
         "design_outdoor_air_flow_rate": 80,
         "mid_height_air_flow_path": 1.5,
         "orientation360": 180,
-        "pitch": 90,
-        "installation_type": "no_installation_scheme"
+        "pitch": 90
       },
       "mechvent_mvhr": {
         "vent_type": "MVHR",
@@ -9365,8 +9363,7 @@
             "reflective": false,
             "duct_type": "exhaust"
           }
-        ],
-        "installation_type": "no_installation_scheme"
+        ]
       }
     },
     "cross_vent_possible": false

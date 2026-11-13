@@ -1187,6 +1187,9 @@ const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     crate::epc_products::RADIATOR_SETTING,
     crate::epc_products::UFH_SETTING,
     crate::epc_products::RADIATOR_LENGTH_SETTING,
+    "Appliances_has_dryer",
+    "Appliances_has_dishwasher",
+    "Appliances_has_separate_fridge_or_freezer",
 ];
 
 /// Metadata rows that set a model input. A present row with no value is E066: it must never
@@ -1501,6 +1504,8 @@ pub struct JSONBuilder {
     /// The model's product settings (Metadata rows), read once per build.
     product_settings: RefCell<crate::epc_products::Settings>,
     product_slots: RefCell<Vec<crate::ProductSlot>>,
+    /// Element paths whose `solar_absorption_coeff` came from a colour.
+    colour_coefficients: RefCell<Vec<String>>,
 }
 
 impl JSONBuilder {
@@ -1559,6 +1564,7 @@ impl JSONBuilder {
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
             product_database: None,
             product_settings: RefCell::default(),
+            colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
         };
 
@@ -1596,6 +1602,7 @@ impl JSONBuilder {
             hem_core_version: version_metadata.hem_core_version.clone(),
             product_database: None,
             product_settings: RefCell::default(),
+            colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
         };
         builder.index_templates();
@@ -1991,21 +1998,18 @@ impl JSONBuilder {
         // Consolidate zones for FHS schema (FHS only supports single zone)
         // This must happen after build_zone_structure but before process_root_level_sections
         // so that systems and elements are processed correctly
-        if self.profile.consolidates_to_single_zone() {
-            let zones: Vec<String> = result["Zone"]
-                .as_object()
-                .map(|zones| zones.keys().cloned().collect())
-                .unwrap_or_default();
+        let zones: Vec<String> = result["Zone"]
+            .as_object()
+            .map(|zones| zones.keys().cloned().collect())
+            .unwrap_or_default();
+        if self.profile.rejects_several_zones() && zones.len() > 1 {
+            self.push_non_fatal(
+                "E_EPC_MULTI_ZONE",
+                "/Zone",
+                &format!("The model has several zones ({}). HEM:EPC needs the order in which they are heated (ZoneProcessingOrder), which Vulcan cannot state yet, and zones are never merged. Model the dwelling as one zone.", zones.join(", ")),
+            );
+        } else if self.profile.consolidates_to_single_zone() {
             self.consolidate_zones_for_fhs(&mut result)?;
-            if zones.len() > 1 && self.profile.reports_zone_consolidation() {
-                self.schema_omissions
-                    .borrow_mut()
-                    .push(crate::finalization::SchemaOmission {
-                        code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
-                        path: "/Zone".into(),
-                        message: format!("The zones {} are merged into one. The target accepts several zones, but the converter does not yet give each its own areas and heating order, so results can differ from a model with separate zones.", zones.join(", ")),
-                    });
-            }
         }
 
         // Process root-level sections (includes merge_ventilation_systems, merge_water_pipework, merge_wet_emitters)
@@ -2050,7 +2054,12 @@ impl JSONBuilder {
             crate::epc_mappings::map_cylinder_coils(result, &mut errors);
         }
         if self.profile.references_products() {
-            crate::epc_mappings::report_ventilation_defaults(result, csv_data, &mut notices);
+            crate::epc_mappings::report_ventilation_defaults(
+                result,
+                csv_data,
+                &mut errors,
+                &mut notices,
+            );
         }
         if self.profile.derives_build_type_from_party_walls() {
             let stated = csv_data.get("Metadata").into_iter().flatten().any(|row| {
@@ -2114,7 +2123,11 @@ impl JSONBuilder {
             crate::epc_mappings::check_party_wall_lining(result, &mut errors);
         }
         if self.profile.uses_solar_absorption_coeff() {
-            crate::epc_mappings::check_solar_absorption(result, &mut errors);
+            crate::epc_mappings::check_solar_absorption(
+                result,
+                &self.colour_coefficients.borrow(),
+                &mut errors,
+            );
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
@@ -2291,6 +2304,14 @@ impl JSONBuilder {
                 if let Some(restofdwelling_area) = zone_row.get("restofdwelling_area") {
                     if !restofdwelling_area.is_null() {
                         zone_obj["restofdwelling_area"] = restofdwelling_area.clone();
+                    }
+                }
+                if self.profile.states_zone_convective_fraction() {
+                    if let Some(fraction) = zone_row
+                        .get("frac_convective_heating")
+                        .filter(|v| v.is_number())
+                    {
+                        zone_obj["frac_convective_heating"] = fraction.clone();
                     }
                 }
                 // Process height: store it in zone object, and if volume is missing, calculate volume = floor_area * height
@@ -2689,10 +2710,18 @@ impl JSONBuilder {
                         if self.profile.uses_solar_absorption_coeff() {
                             // The authored colour wins over the template's; an authored
                             // coefficient wins over both and is merged below.
+                            let authored_coeff = element_row
+                                .get("solar_absorption_coeff")
+                                .is_some_and(|v| !v.is_null() && v != "")
+                                || element_row
+                                    .get("extra_json")
+                                    .and_then(|extra| extra.get("solar_absorption_coeff"))
+                                    .is_some();
                             let colour = element_row
                                 .get("extra_json")
                                 .and_then(|extra| extra.get("colour"))
                                 .or_else(|| obj.get("colour"))
+                                .filter(|_| !authored_coeff)
                                 .cloned();
                             if let Some(colour) = colour {
                                 match colour
@@ -2703,6 +2732,14 @@ impl JSONBuilder {
                                         obj.insert(
                                             "solar_absorption_coeff".to_string(),
                                             serde_json::json!(coeff),
+                                        );
+                                        self.colour_coefficients.borrow_mut().push(
+                                            crate::json_pointer(&[
+                                                "Zone",
+                                                zone_name,
+                                                "BuildingElement",
+                                                element_name,
+                                            ]),
                                         );
                                     }
                                     None => self.push_non_fatal(

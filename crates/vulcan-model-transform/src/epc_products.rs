@@ -825,11 +825,14 @@ const FRAC_CONVECTIVE_FIELDS: [(&str, &str); 4] = [
     ("StorageHeater", "frac_convective"),
 ];
 
-/// Each zone with a heating system states `frac_convective_heating` (required by the wrapper's
-/// zone model when the zone is heated). Derived as HEMIE 0.18.1 derives it
-/// (`Dwelling.zone`): the convective fraction of the zone's first space heating system, which
-/// for a wet distribution is its first emitter's; here that is the fraction the slot's product
-/// gives, else the system's own authored `frac_convective`. Otherwise an error names the zone.
+/// Each heated zone states `frac_convective_heating` (the EPC wrapper's zone model requires
+/// it). A value on the Zone row wins. Otherwise it is derived and reported:
+/// - existing build: as HEMIE 0.18.1 `Dwelling.zone` derives it, the convective fraction of
+///   the zone's first heating system (for a wet distribution, its first emitter);
+/// - new build: the convective fraction every emitter of the zone's heating systems shares.
+///   Emitters that differ, or none, leave it required: an error names the zone.
+///
+/// An emitter's fraction is the one its product gives, else its own authored `frac_convective`.
 pub(crate) fn derive_zone_frac_convective(
     model: &mut Value,
     db: &ProductDatabase,
@@ -838,37 +841,35 @@ pub(crate) fn derive_zone_frac_convective(
     notices: &mut Vec<SchemaOmission>,
 ) {
     let systems = model["SpaceHeatSystem"].clone();
+    let existing = model["IsExistingBuilding"] == true;
     let Some(zones) = model.get_mut("Zone").and_then(Value::as_object_mut) else {
         return;
     };
-    for (zone, zone_value) in zones {
-        let first = match &zone_value["SpaceHeatSystem"] {
-            Value::String(name) => Some(name.clone()),
-            Value::Array(names) => names.first().and_then(Value::as_str).map(str::to_string),
-            _ => None,
-        };
-        let Some(system_name) = first else {
-            continue;
-        };
-        if zone_value
-            .get("frac_convective_heating")
-            .is_some_and(|v| !v.is_null())
-        {
-            continue;
-        }
-        let system = &systems[&system_name];
-        let (object, path) = if system["type"] == "WetDistribution" {
-            (
-                &system["emitters"][0],
-                json_pointer(&["SpaceHeatSystem", &system_name, "emitters", "0"]),
-            )
+    // (path, object) of each emitter, or of the system itself when it has none.
+    let emitters = |name: &str| -> Vec<(String, Value)> {
+        let system = &systems[name];
+        if system["type"] == "WetDistribution" {
+            system["emitters"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, e)| {
+                    (
+                        json_pointer(&["SpaceHeatSystem", name, "emitters", &i.to_string()]),
+                        e.clone(),
+                    )
+                })
+                .collect()
         } else {
-            (system, json_pointer(&["SpaceHeatSystem", &system_name]))
-        };
+            vec![(json_pointer(&["SpaceHeatSystem", name]), system.clone())]
+        }
+    };
+    // None: unpicked product (its own error stands); Some(None): no fraction known.
+    let fraction = |path: &str, object: &Value| -> Option<Option<(f64, String)>> {
         let slot = slots.iter().find(|slot| slot.path == path);
-        // A product still to be picked already has its error; the fraction follows the pick.
         if slot.is_some_and(|slot| slot.product_id.is_none()) {
-            continue;
+            return None;
         }
         let from_product = slot
             .and_then(|slot| db.products.get(&slot.product_id?))
@@ -881,18 +882,75 @@ pub(crate) fn derive_zone_frac_convective(
                     format!("product {}", product.id),
                 ))
             });
-        let found = from_product.or_else(|| {
+        Some(from_product.or_else(|| {
             object["frac_convective"]
                 .as_f64()
-                .map(|f| (f, "its authored frac_convective".to_string()))
-        });
-        let zone_path = json_pointer(&["Zone", zone, "frac_convective_heating"]);
-        match found {
-            Some((fraction, source)) => {
-                zone_value["frac_convective_heating"] = json!(fraction);
-                notices.push(notice(&zone_path, format!("Zone '{zone}' takes frac_convective_heating {fraction} from its heating system '{system_name}' ({source}), as HEMIE derives it from the first system's first emitter.")));
+                .map(|f| (f, "authored".to_string()))
+        }))
+    };
+    for (zone, zone_value) in zones {
+        let names: Vec<String> = match &zone_value["SpaceHeatSystem"] {
+            Value::String(name) => vec![name.clone()],
+            Value::Array(names) => names
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+            _ => vec![],
+        };
+        if names.is_empty()
+            || zone_value
+                .get("frac_convective_heating")
+                .is_some_and(|v| !v.is_null())
+        {
+            continue;
+        }
+        let considered: Vec<(String, Value)> = if existing {
+            emitters(&names[0]).into_iter().take(1).collect()
+        } else {
+            names.iter().flat_map(|name| emitters(name)).collect()
+        };
+        let mut found = Vec::new();
+        let mut pending = false;
+        for (path, object) in &considered {
+            match fraction(path, object) {
+                None => pending = true,
+                Some(value) => found.push(value),
             }
-            None => errors.push(error("E_EPC_ZONE_FRAC_CONVECTIVE", zone_path, format!("Zone '{zone}' needs frac_convective_heating, and its heating system '{system_name}' gives no convective fraction (its product has none and the row states none). State frac_convective on the system or its first emitter."))),
+        }
+        if pending {
+            continue;
+        }
+        let zone_path = json_pointer(&["Zone", zone, "frac_convective_heating"]);
+        let values: Vec<f64> = found.iter().flatten().map(|(f, _)| *f).collect();
+        let shared = (!found.is_empty()
+            && found.iter().all(Option::is_some)
+            && values.windows(2).all(|w| w[0] == w[1]))
+        .then(|| values[0]);
+        match shared {
+            Some(value) => {
+                zone_value["frac_convective_heating"] = json!(value);
+                let rule = if existing {
+                    format!(
+                        "HEMIE's rule: the first heating system's first emitter ({})",
+                        found[0].as_ref().unwrap().1
+                    )
+                } else {
+                    format!(
+                        "the fraction all {} emitter(s) of its heating systems share",
+                        found.len()
+                    )
+                };
+                notices.push(notice(&zone_path, format!("Zone '{zone}' takes frac_convective_heating {value}, derived by {rule}. State frac_convective_heating on the Zone row to change it.")));
+            }
+            None => {
+                let why = if found.iter().any(Option::is_none) || found.is_empty() {
+                    "an emitter of its heating systems gives no convective fraction"
+                } else {
+                    "the emitters of its heating systems have different convective fractions"
+                };
+                errors.push(error("E_EPC_ZONE_FRAC_CONVECTIVE", zone_path, format!("Zone '{zone}' needs frac_convective_heating, and {why}, so it cannot be derived. State frac_convective_heating on the Zone row.")));
+            }
         }
     }
 }
@@ -1307,39 +1365,61 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_heated_zone_takes_its_first_systems_convective_fraction() {
-        let mut model = json!({
-            "SpaceHeatSystem": {
-                "rads": {"type": "WetDistribution", "emitters": [{"wet_emitter_type": "radiator", "product_id": 650047}]},
-                "inline": {"type": "InstantElecHeater", "frac_convective": 0.95},
-                "none": {"type": "InstantElecHeater"}
-            },
-            "Zone": {"a": {"SpaceHeatSystem": "rads"}, "b": {"SpaceHeatSystem": ["inline", "rads"]}, "c": {"SpaceHeatSystem": "none"}, "d": {}}
-        });
-        let slots = vec![ProductSlot {
-            path: "/SpaceHeatSystem/rads/emitters/0".into(),
+    fn a_heated_zone_derives_its_convective_fraction() {
+        let slot = |path: &str, id: u64| ProductSlot {
+            path: path.into(),
             system_type: "radiator".into(),
-            product_id: Some(650047),
+            product_id: Some(id),
             source: ProductSource::Product,
             label: None,
             rule: String::new(),
             technology_types: vec![],
-        }];
-        let (mut errors, mut notices) = (Vec::new(), Vec::new());
-        derive_zone_frac_convective(&mut model, &db(), &slots, &mut errors, &mut notices);
-        assert_eq!(model["Zone"]["a"]["frac_convective_heating"], 0.82);
-        assert_eq!(model["Zone"]["b"]["frac_convective_heating"], 0.95);
-        assert!(model["Zone"]["d"].get("frac_convective_heating").is_none());
-        assert!(notices[0].message.contains("(product 650047)"));
+        };
+        let model = |existing: bool| {
+            json!({
+                "IsExistingBuilding": existing,
+                "SpaceHeatSystem": {
+                    "rads": {"type": "WetDistribution", "emitters": [{"wet_emitter_type": "radiator"}, {"wet_emitter_type": "radiator"}]},
+                    "mixed": {"type": "WetDistribution", "emitters": [{"wet_emitter_type": "radiator"}, {"wet_emitter_type": "radiator"}]},
+                    "inline": {"type": "InstantElecHeater", "frac_convective": 0.95},
+                    "none": {"type": "InstantElecHeater"}
+                },
+                "Zone": {"a": {"SpaceHeatSystem": "rads"}, "b": {"SpaceHeatSystem": "mixed"}, "c": {"SpaceHeatSystem": ["inline"]}, "d": {"SpaceHeatSystem": "none"}, "e": {}, "f": {"SpaceHeatSystem": "none", "frac_convective_heating": 0.5}}
+            })
+        };
+        // 650047 is T22 (0.82); 650000 is T10 (0.44).
+        let slots = vec![
+            slot("/SpaceHeatSystem/rads/emitters/0", 650047),
+            slot("/SpaceHeatSystem/rads/emitters/1", 650047),
+            slot("/SpaceHeatSystem/mixed/emitters/0", 650047),
+            slot("/SpaceHeatSystem/mixed/emitters/1", 650000),
+        ];
+        let run = |existing: bool| {
+            let mut model = model(existing);
+            let (mut errors, mut notices) = (Vec::new(), Vec::new());
+            derive_zone_frac_convective(&mut model, &db(), &slots, &mut errors, &mut notices);
+            let codes: Vec<String> = errors.iter().map(|e| e.path.clone()).collect();
+            (model, codes, notices)
+        };
+        let (new, errors, notices) = run(false);
+        assert_eq!(new["Zone"]["a"]["frac_convective_heating"], 0.82);
+        assert_eq!(new["Zone"]["c"]["frac_convective_heating"], 0.95);
+        assert_eq!(new["Zone"]["f"]["frac_convective_heating"], 0.5);
+        assert!(new["Zone"]["e"].get("frac_convective_heating").is_none());
         assert_eq!(
-            errors
-                .iter()
-                .map(|e| (e.code.as_str(), e.path.as_str()))
-                .collect::<Vec<_>>(),
-            [(
-                "E_EPC_ZONE_FRAC_CONVECTIVE",
-                "/Zone/c/frac_convective_heating"
-            )]
+            errors,
+            [
+                "/Zone/b/frac_convective_heating",
+                "/Zone/d/frac_convective_heating"
+            ]
         );
+        assert!(notices[0]
+            .message
+            .contains("the fraction all 2 emitter(s) of its heating systems share"));
+        // Existing build: HEMIE takes the first emitter, so mixed emitters derive.
+        let (existing, errors, notices) = run(true);
+        assert_eq!(existing["Zone"]["b"]["frac_convective_heating"], 0.82);
+        assert_eq!(errors, ["/Zone/d/frac_convective_heating"]);
+        assert!(notices.iter().any(|n| n.message.contains("HEMIE's rule")));
     }
 }

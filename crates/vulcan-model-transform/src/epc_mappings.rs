@@ -86,7 +86,24 @@ pub(crate) fn solar_absorption_coeff(colour: &str) -> Option<f64> {
     }
 }
 
-/// Appliance rows give presence; `Oven` and `Hobs` take the row's `EnergySupply`, which EPC
+/// The appliance presence fields, the Metadata row that states each, and the Appliances keys
+/// that show one is drawn. Presence is a required assessor input (User Inputs Guidance EPC
+/// 09): a missing row is an error, never "absent".
+pub(crate) const APPLIANCE_PRESENCE: [(&str, &str, &[&str]); 3] = [
+    ("has_dryer", "Appliances_has_dryer", &["Clothes_drying"]),
+    (
+        "has_dishwasher",
+        "Appliances_has_dishwasher",
+        &["Dishwasher"],
+    ),
+    (
+        "has_separate_fridge_or_freezer",
+        "Appliances_has_separate_fridge_or_freezer",
+        &["Fridge", "Freezer"],
+    ),
+];
+
+/// Appliance presence comes from Metadata rows, checked against drawn Appliances rows; `Oven` and `Hobs` take the row's `EnergySupply`, which EPC
 /// requires (User Inputs Guidance EPC 09): a missing one is an error, never a template value.
 pub(crate) fn map_appliances(model: &mut Value, csv: &Rows, errors: &mut Vec<ValidationError>) {
     let rows: Vec<&BTreeMap<String, Value>> = csv.get("Appliances").into_iter().flatten().collect();
@@ -98,12 +115,42 @@ pub(crate) fn map_appliances(model: &mut Value, csv: &Rows, errors: &mut Vec<Val
             .any(|row| key_of(row).is_some_and(|k| keys.contains(&k)))
     };
     let mut appliances = Map::new();
-    appliances.insert("has_dryer".into(), json!(has(&["Clothes_drying"])));
-    appliances.insert("has_dishwasher".into(), json!(has(&["Dishwasher"])));
-    appliances.insert(
-        "has_separate_fridge_or_freezer".into(),
-        json!(has(&["Fridge", "Freezer"])),
-    );
+    let stated = |name: &str| {
+        csv.get("Metadata").into_iter().flatten().find_map(|row| {
+            (row.get("Field").and_then(Value::as_str) == Some(name)).then(|| row.get("Value"))?
+        })
+    };
+    let mut missing = Vec::new();
+    for (field, row, keys) in APPLIANCE_PRESENCE {
+        let drawn = has(keys);
+        let value = match stated(row) {
+            Some(Value::Bool(b)) => Some(*b),
+            Some(Value::String(t)) => match t.trim().to_ascii_uppercase().as_str() {
+                "TRUE" => Some(true),
+                "FALSE" => Some(false),
+                _ => None,
+            },
+            _ => None,
+        };
+        match value {
+            None => missing.push(row),
+            Some(false) if drawn => errors.push(error(
+                "E_EPC_APPLIANCE_PRESENCE",
+                "/Metadata".into(),
+                format!("Metadata row '{row}' is FALSE, but the plan has a {} appliance. Correct one of them.", keys.join(" or ")),
+            )),
+            Some(present) => {
+                appliances.insert(field.into(), json!(present));
+            }
+        }
+    }
+    if !missing.is_empty() {
+        errors.push(error(
+            "E_EPC_APPLIANCE_PRESENCE",
+            "/Metadata".into(),
+            format!("HEM:EPC requires the appliance spaces to be stated, and the Metadata section has no TRUE or FALSE row for: {}. Add each row.", missing.join(", ")),
+        ));
+    }
     for key in ["Oven", "Hobs"] {
         let authored = rows
             .iter()
@@ -156,14 +203,14 @@ pub(crate) fn map_pv_panels(model: &mut Value) {
     }
 }
 
-const VENTILATION_DEFAULT_FIELDS: [&str; 3] =
-    ["installation_type", "sup_air_flw_ctrl", "sup_air_temp_ctrl"];
+const VENTILATION_DEFAULT_FIELDS: [&str; 2] = ["sup_air_flw_ctrl", "sup_air_temp_ctrl"];
 
 /// Mechanical ventilation fields EPC adds come from the target defaults' template for the
 /// system's `vent_type` unless its Ventilation Systems row states them; report each one used.
 pub(crate) fn report_ventilation_defaults(
     model: &Value,
     csv: &Rows,
+    errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
 ) {
     let Some(systems) = model
@@ -184,6 +231,22 @@ pub(crate) fn report_ventilation_defaults(
                     || row.get("extra_json").and_then(|e| e.get(field)).is_some()
             })
         };
+        // A continuous system's installation type is a required assessor input (no default).
+        let continuous = !matches!(
+            system.get("vent_type").and_then(Value::as_str),
+            Some("Intermittent MEV" | "Positive input ventilation")
+        );
+        if continuous
+            && !system
+                .as_object()
+                .is_some_and(|s| s.contains_key("installation_type"))
+        {
+            errors.push(error(
+                "E_EPC_VENTILATION_INSTALLATION",
+                json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name, "installation_type"]),
+                format!("Ventilation system '{name}': state its installation_type (installation_scheme or no_installation_scheme) on its Ventilation Systems row. There is no default."),
+            ));
+        }
         let used: Vec<String> = VENTILATION_DEFAULT_FIELDS
             .iter()
             .filter(|field| !authored(field))
@@ -245,22 +308,40 @@ pub(crate) fn map_cylinder_coils(model: &mut Value, errors: &mut Vec<ValidationE
     }
 }
 
-/// Every opaque element states `solar_absorption_coeff` (EPC requires it): authored, or from
-/// an authored colour. A missing one is an error naming the element.
-pub(crate) fn check_solar_absorption(model: &Value, errors: &mut Vec<ValidationError>) {
-    for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
+/// Every opaque element states `solar_absorption_coeff` (EPC requires it). A new build must
+/// author the coefficient; the colour-to-coefficient map (HEMIE) applies only to an existing
+/// building. `from_colour` lists the element paths whose coefficient came from a colour.
+pub(crate) fn check_solar_absorption(
+    model: &mut Value,
+    from_colour: &[String],
+    errors: &mut Vec<ValidationError>,
+) {
+    let existing = model["IsExistingBuilding"] == true;
+    for (zone, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
         for (name, element) in zone_value["BuildingElement"]
-            .as_object()
+            .as_object_mut()
             .into_iter()
             .flatten()
         {
+            let path = json_pointer(&["Zone", zone, "BuildingElement", name]);
+            let from_a_colour = from_colour.contains(&path);
+            if !existing && from_a_colour {
+                if let Some(element) = element.as_object_mut() {
+                    element.remove("solar_absorption_coeff");
+                }
+            }
             if element["type"] == "BuildingElementOpaque"
                 && element.get("solar_absorption_coeff").is_none()
             {
+                let message = match (existing, from_a_colour) {
+                    (false, true) => format!("Element '{name}' gives a colour, which only an existing building may use. A new build states solar_absorption_coeff."),
+                    (false, false) => format!("Element '{name}' needs its solar_absorption_coeff. There is no default."),
+                    (true, _) => format!("Element '{name}' needs its solar_absorption_coeff or its surface colour (Light, Intermediate or Dark). There is no default."),
+                };
                 errors.push(error(
                     "E_EPC_SOLAR_ABSORPTION",
-                    json_pointer(&["Zone", zone, "BuildingElement", name, "solar_absorption_coeff"]),
-                    format!("Element '{name}' needs its surface colour (Light, Intermediate or Dark) or solar_absorption_coeff. There is no default."),
+                    format!("{path}/solar_absorption_coeff"),
+                    message,
                 ));
             }
         }

@@ -59,21 +59,21 @@ impl ModelProfile {
         }
     }
 
-    /// CSV zones are consolidated into the first.
-    /// FHS: the input schema allows one zone. EPC differs: `Zone` is a map and
-    /// `ZoneProcessingOrder` orders several heated zones (wrapper `models/input.py`),
-    /// but per-zone living/rest areas and the processing order have no Vulcan source
-    /// yet, so EPC consolidates as FHS does until they do.
+    /// CSV zones are consolidated into the first. FHS: the input schema allows one zone.
+    /// EPC never consolidates: see `rejects_several_zones`.
     pub(crate) fn consolidates_to_single_zone(self) -> bool {
         match self {
             Self::Core => false,
-            Self::Fhs | Self::Epc => true,
+            Self::Fhs => true,
+            // A single EPC zone needs no consolidation; several are rejected first.
+            Self::Epc => true,
         }
     }
 
-    /// Merging several CSV zones changes results, so it is reported. FHS: the schema allows
-    /// one zone, so merging is the input's meaning. EPC differs: it accepts several zones.
-    pub(crate) fn reports_zone_consolidation(self) -> bool {
+    /// Several CSV zones are an error naming them, never merged. EPC: `Zone` is a map, but a
+    /// model with more than one heated zone needs `ZoneProcessingOrder` (EPC wrapper
+    /// `models/input.py`), which has no Vulcan source yet.
+    pub(crate) fn rejects_several_zones(self) -> bool {
         match self {
             Self::Core | Self::Fhs => false,
             Self::Epc => true,
@@ -249,6 +249,15 @@ impl ModelProfile {
                 "AirPermeability_test_result",
                 "AirPermeability_ventilation_zone_height",
             ],
+        }
+    }
+
+    /// A zone row may state `frac_convective_heating`. EPC differs: the wrapper's zone model
+    /// requires it for a heated zone.
+    pub(crate) fn states_zone_convective_fraction(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
         }
     }
 
