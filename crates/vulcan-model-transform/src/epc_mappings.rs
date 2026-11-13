@@ -247,6 +247,21 @@ pub(crate) fn report_ventilation_defaults(
                 format!("Ventilation system '{name}': state its installation_type (installation_scheme or no_installation_scheme) on its Ventilation Systems row. There is no default."),
             ));
         }
+        // A stopped intermittent extract fan leaks; its back-draught protection and diameter
+        // are assessor inputs with no default. DESNZ-defined (HEM Core V2 note VEN020).
+        let intermittent =
+            system.get("vent_type").and_then(Value::as_str) == Some("Intermittent MEV");
+        if intermittent
+            && system
+                .get("leakage_when_stopped")
+                .is_none_or(Value::is_null)
+        {
+            errors.push(error(
+                "E_EPC_FAN_LEAKAGE",
+                json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name, "leakage_when_stopped"]),
+                format!("Intermittent extract fan '{name}': state leakage_when_stopped with its back_draught_protection (internal damper, external terminal or none) and diameter (100 mm or 150 mm) on its Ventilation Systems row. There is no default."),
+            ));
+        }
         let used: Vec<String> = VENTILATION_DEFAULT_FIELDS
             .iter()
             .filter(|field| !authored(field))
