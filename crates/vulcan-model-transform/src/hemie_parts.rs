@@ -139,6 +139,8 @@ pub(super) struct PartFloor<'p> {
     pub name: &'p str,
     pub bottom: usize,
     pub point: P,
+    pub ring: &'p [P],
+    pub walls: &'p [&'p El<'p>],
 }
 
 /// The floor under a building part's lowest storey, by what is drawn there (derived from the
@@ -180,7 +182,7 @@ pub(super) fn part_floor<'e>(
         }
     };
     match e.ty {
-        "BuildingElementGround" => ground_floor(ctx, e, ground_total),
+        "BuildingElementGround" => ground_floor(ctx, e, part, ground_total),
         "BuildingElementOpaque" => {
             let key = ctx.construction("above_external_area_floor", &[e], &[]);
             Some(json!({"floor_type": "not next to ground (external)", "construction": key}))
@@ -202,7 +204,7 @@ pub(super) fn part_floor<'e>(
     }
 }
 
-fn ground_floor(ctx: &mut Ctx, g: &El, ground_total: f64) -> Option<Value> {
+fn ground_floor(ctx: &mut Ctx, g: &El, part: &PartFloor, ground_total: f64) -> Option<Value> {
     // Ours: a dwelling whose base storey is above the ground has no floor on the ground.
     if let Some(storey) = ctx.model["General"]["storey_of_dwelling"]
         .as_i64()
@@ -213,15 +215,24 @@ fn ground_floor(ctx: &mut Ctx, g: &El, ground_total: f64) -> Option<Value> {
     }
     let mut floor = floor(ctx, g, ground_total)?;
     let basement = floor["floor_type"].as_str().unwrap_or_default().to_string();
-    if basement == "heated basement" {
-        // DESNZ-defined: a basement is one floor element under the storey above it, never a
-        // storey. Vulcan draws a heated basement as floor 0 with its walls, so converting it
-        // would count the basement twice; it fails until the drawing can say which floor it is.
-        ctx.errors.push(error(g.path(), format!("Ground floor '{}' is a heated basement, so floor 0 over it is the basement itself. HEMIE enters a basement as the floor of the storey above it, not as a storey, and the existing-building converter does not take a heated basement yet.", g.name)));
-        return None;
-    }
-    if basement != "unheated basement" {
+    if !basement.ends_with("basement") {
         return Some(floor);
+    }
+    // DESNZ-defined: a basement is one floor element under the storey above it, never a storey.
+    // Derived from the model: walls of that storey drawn starting below the ground are the
+    // basement's own walls, so the drawing also has the basement as a storey; converting it
+    // would count the basement twice.
+    let below: Vec<&str> = part
+        .walls
+        .iter()
+        .filter(|w| w.num("base_height").is_some_and(|b| b < 0.0))
+        .map(|w| w.name)
+        .collect();
+    if !below.is_empty() {
+        let mut names = below;
+        names.dedup();
+        ctx.errors.push(error(g.path(), format!("Ground floor '{}' is a basement, but walls {} on floor {} start below the ground, so the basement is also drawn as a storey. HEMIE enters a basement as one floor under the storey above it: draw the floor above the basement as floor {}, or make these walls start at the ground.", g.name, quoted(&names), part.bottom, part.bottom)));
+        return None;
     }
     // Derived from the model: the basement measurements the element or the model setting
     // states. Unstated ones take HEMIE's DESNZ defaults for the depth descriptor, reported.
@@ -238,11 +249,11 @@ fn ground_floor(ctx: &mut Ctx, g: &El, ground_total: f64) -> Option<Value> {
         floor["basement_depth_descriptor"] = json!(descriptor);
     }
     let mut defaulted = Vec::new();
-    for key in [
-        "depth_basement_floor",
-        "height_basement_walls",
-        "basement_air_volume",
-    ] {
+    let mut fields = vec!["depth_basement_floor"];
+    if basement == "unheated basement" {
+        fields.extend(["height_basement_walls", "basement_air_volume"]);
+    }
+    for key in fields {
         // A fully underground basement's walls are 0 m above the ground.
         match g
             .num(key)
@@ -251,6 +262,20 @@ fn ground_floor(ctx: &mut Ctx, g: &El, ground_total: f64) -> Option<Value> {
             Some(v) => floor[key] = json!(v),
             None => defaulted.push(key),
         }
+    }
+    // DESNZ-defined: a heated basement's heat capacity comes from the floor above it unless its
+    // construction states one; derived from the model, that floor is the lowest storey.
+    let key = floor["construction"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let stated = ctx.constructions.by_name[&key]
+        .get("areal_heat_capacity")
+        .is_some();
+    if basement == "heated basement" && !stated {
+        let perimeter: f64 = edges(part.ring).map(|(a, b)| dist(a, b)).sum();
+        floor["floor_above_basement_area"] = json!(signed_area(part.ring));
+        floor["floor_above_basement_perimeter"] = json!(perimeter);
     }
     if !defaulted.is_empty() {
         ctx.notices.push(notice(
@@ -456,13 +481,35 @@ mod tests {
     }
 
     #[test]
-    fn a_heated_basement_drawn_as_floor_0_fails_rather_than_counting_twice() {
+    fn a_heated_basement_takes_its_depth_and_the_floor_above_it() {
         let mut exposed = box_walls(&BOX, &[0]);
+        exposed.push(plane("Roof", 1, &BOX, 0.0, 0.0, false));
+        let (model, errors, _) = run(&csv(SETTINGS, &exposed, &basement("Heated_basement", "{}")));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let floor = &model["Zone"]["building_parts"]["Main"]["floor"];
+        assert_eq!(floor["floor_type"], "heated basement");
+        assert_eq!(floor["depth_basement_floor"], 2.0);
+        assert_eq!(floor["floor_above_basement_area"], 48.0);
+        assert_eq!(floor["floor_above_basement_perimeter"], 28.0);
+    }
+
+    #[test]
+    fn a_basement_also_drawn_as_a_storey_below_the_ground_fails_naming_its_walls() {
+        let mut exposed: Vec<String> = box_walls(&BOX, &[0])
+            .into_iter()
+            .map(|w| w.replace(",90,1,2.8,0,0,", ",90,1,2.8,0,-2,"))
+            .collect();
         exposed.push(plane("Roof", 1, &BOX, 0.0, 0.0, false));
         let (_, errors, _) = run(&csv(SETTINGS, &exposed, &basement("Heated_basement", "{}")));
         assert_eq!(errors.len(), 1, "{errors:#?}");
         assert!(errors[0].path.ends_with("/Floor"));
-        assert!(errors[0].message.contains("is a heated basement"));
+        assert!(
+            errors[0]
+                .message
+                .contains("walls 'W00', 'W01', 'W02', 'W03' on floor 0 start below the ground"),
+            "{}",
+            errors[0].message
+        );
     }
 
     #[test]

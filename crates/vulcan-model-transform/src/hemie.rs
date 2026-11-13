@@ -1399,10 +1399,17 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         let mut bp = Map::new();
         bp.insert("storeys".into(), Value::Array(storeys));
         bp.insert("walls".into(), Value::Array(part_walls));
+        let lowest_walls: Vec<&El> = hemie_walls
+            .iter()
+            .filter(|w| w.part == pi && w.storey == part.bottom)
+            .map(|w| w.source)
+            .collect();
         let floor_of = parts::PartFloor {
             name: &names[pi],
             bottom: part.bottom,
             point: interior_point(&part.poly),
+            ring: &part.storeys[0],
+            walls: &lowest_walls,
         };
         if let Some(floor) = parts::part_floor(ctx, &els, &floor_of, ground_total, &mut floors_used)
         {
