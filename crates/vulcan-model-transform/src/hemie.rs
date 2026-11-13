@@ -662,6 +662,24 @@ impl Ctx<'_> {
         value
     }
 
+    /// A wall's height to its eaves: the lowest point of a profiled top, else its height.
+    /// Derived from the model: the exported height of a profiled wall is its mean height, and
+    /// the gable above the eaves is not part of the storey.
+    fn eaves(&mut self, e: &El) -> Option<f64> {
+        let height = self.need(e, "height")?;
+        let profile_low = e
+            .get("geometry_face")
+            .and_then(|face| face.get("top_profile"))
+            .and_then(Value::as_array)
+            .and_then(|points| {
+                points
+                    .iter()
+                    .filter_map(|p| p.get("h")?.as_f64())
+                    .reduce(f64::min)
+            });
+        Some(profile_low.unwrap_or(height))
+    }
+
     /// The model setting for a construction type, overlaid with what the elements state. A
     /// U-value on the element is a documented U-value (derived from the model).
     fn construction(
@@ -994,6 +1012,11 @@ pub(crate) fn map_existing_building(
 
 fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let els = elements(csv);
+    let left_out = bundles::left_out(ctx, &els);
+    let els: Vec<El> = els
+        .into_iter()
+        .filter(|e| !left_out.contains(e.name))
+        .collect();
     let model = ctx.model;
     let zone_name = model["Zone"]
         .as_object()
@@ -1005,26 +1028,22 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
 
     // Line walls and the elements HEMIE geometry cannot hold yet.
     let bays = bundles::bays(ctx, &els);
-    let mut walls: Vec<(&El, Kind)> = Vec::new();
+    let (hosts, pieces, conservatory_floors) = bundles::conservatory_hosts(ctx, &els);
+    let mut walls: Vec<(&El, Kind)> = pieces.iter().map(|p| (p, Kind::External)).collect();
     for e in &els {
-        if bundles::is_bay_wall(e) {
+        if bundles::is_bay_wall(e) || hosts.contains(e.name) {
             continue;
         }
         if let Some(kind) = wall_kind(e) {
             if e.num("pitch").is_some_and(|p| (p - 90.0).abs() > 1e-6) {
                 ctx.errors.push(error(e.path(), format!("'{}' is a leaning wall (pitch {}). The existing-building converter takes vertical walls only.", e.name, e.num("pitch").unwrap_or_default())));
-            } else if e.text("parent_element").is_some() {
+            } else if e.text("parent_element").is_some() && bundles::tag(e).is_none() {
                 ctx.errors.push(error(e.path(), format!("'{}' is a wall inside another element, which the existing-building converter does not take. Draw it as a wall of the storey outline.", e.name)));
             } else {
                 walls.push((e, kind));
             }
         }
     }
-    walls.extend(
-        bays.iter()
-            .filter_map(|b| b.chord.as_ref())
-            .map(|c| (c, Kind::External)),
-    );
     if walls.is_empty() {
         ctx.errors.push(error(
             "/Zone".into(),
@@ -1133,8 +1152,10 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     }
 
     // Building parts: one per column of storeys, so each has one roof (ours; HEMIE also allows
-    // parts stacked on one another, 0.25 m apart).
-    let cells = match faces(&rings) {
+    // parts stacked on one another, 0.25 m apart). Derived from the model: a conservatory is its
+    // own building part, even on a bungalow.
+    let arrangement: Vec<Vec<P>> = rings.iter().chain(&conservatory_floors).cloned().collect();
+    let cells = match faces(&arrangement) {
         Ok(cells) => cells,
         Err(message) => {
             ctx.errors.push(error("/Zone".into(), message));
@@ -1253,7 +1274,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 match wall {
                     Some(w) => {
                         used.insert(w.name);
-                        let Some(h) = ctx.need(w, "height") else {
+                        let Some(h) = ctx.eaves(w) else {
                             continue;
                         };
                         if h <= STOREY_GAP && !low.iter().any(|x: &&El| x.name == w.name) {

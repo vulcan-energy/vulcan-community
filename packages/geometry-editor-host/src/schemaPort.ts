@@ -68,6 +68,8 @@ export interface TargetRules {
    * fabric defaults replace the default assemblies, and the canvas can colour elements by fabric.
    */
   constructionBands: boolean;
+  /** The bay window and conservatory bundles an existing building's HEMIE description takes. */
+  hemieBundles: boolean;
 }
 
 export interface GeometrySchemaPropertyValidation {
@@ -140,8 +142,9 @@ export function targetSchemaMode(port?: GeometrySchemaPort): GeometrySchemaMode 
 /**
  * The host's rules over the defaults: model-validity checks run for every target, the FHS input
  * rules and Building Regulations checks for an FHS target, nothing is excluded or hidden,
- * products come from the host's own sources, and no Metadata row is required beyond what the
- * schema and defaults decide; fabric comes from elements and default assemblies.
+ * products come from the host's own sources, no Metadata row is required beyond what the
+ * schema and defaults decide, fabric comes from elements and default assemblies, and no HEMIE
+ * bundles are offered.
  */
 export function targetRules(
   port: GeometrySchemaPort | undefined,
@@ -158,6 +161,7 @@ export function targetRules(
     batteryGridInputs: false,
     storeyBuildTypes: ['flat'],
     constructionBands: false,
+    hemieBundles: false,
     ...port?.targetRules?.(modelSettings),
   };
 }

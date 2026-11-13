@@ -7,6 +7,7 @@ import { calculatePolygonArea, isAdjacentConditionedInternalFloorDoubled } from 
 import { roundToTwoDecimals } from '../geometry/constants';
 import { canvasFloorToFhsStorey, fhsStoreyToCanvasFloor } from './storeySemantics';
 import { shiftPhysicalPartHeight } from './windowOpenings';
+import { getHemieBundle } from './hemieBundles';
 import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, physicalZUsesFloorId } from './elementCanvasFloor';
 
 // Lives beside the storey convention (elementCanvasFloor) so connectivity code can use it without
@@ -121,11 +122,17 @@ export function partyElementPitchKeepingSurface(el: Element, elements: Element[]
   return (el as { pitch?: number }).pitch === 180 || isInternalFloorElement(el, elements) ? 180 : 0;
 }
 
+/** A separated or unheated conservatory is not part of the dwelling, so its floor is not treated floor area. */
+function isOutsideDwelling(el: Element): boolean {
+  const bundle = getHemieBundle(el);
+  return bundle?.kind === 'conservatory' && bundle.conservatory_type !== 'non-separated';
+}
+
 /** Elements whose plan polygons make up treated floor area: ground, pitch-180 and internal floors. */
 export function getTreatedFloorElements(elements: Element[]): Element[] {
   const isDirectFloor = (el: Element): boolean =>
-    (el.type === 'BuildingElementGround' && (el.coordinates?.length ?? 0) >= 3)
-    || isWalkableFloorHorizontalPolygon(el);
+    ((el.type === 'BuildingElementGround' && (el.coordinates?.length ?? 0) >= 3)
+    || isWalkableFloorHorizontalPolygon(el)) && !isOutsideDwelling(el);
   const counted = elements.filter(isDirectFloor);
   for (const el of elements) {
     if (isDirectFloor(el) || !isInternalFloorElement(el, elements)) continue;
