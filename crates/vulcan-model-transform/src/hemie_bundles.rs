@@ -1161,6 +1161,9 @@ mod tests {
             (room["ceiling_width"].as_f64().unwrap() - 2.0).abs() < 1e-9,
             "{room:#}"
         );
+        // The high north wall is the back wall, not a knee wall: only the south knee counts.
+        assert_eq!(room["average_knee_wall_height"], 1.0);
+        assert!(room.get("back_wall").is_some() && room.get("front_knee_wall").is_some());
     }
 
     #[test]

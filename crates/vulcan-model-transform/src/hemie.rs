@@ -2161,11 +2161,21 @@ fn room_in_roof(
         tops?.into_iter().fold(f64::MIN, f64::max) - floor?
     };
     // DESNZ-defined: the mean knee wall height, zero with no knee walls.
-    let knee_heights: Vec<Option<f64>> = knees.iter().map(|k| ctx.need(k, "height")).collect();
-    let knee_height = if knees.is_empty() {
+    let both_sides = heated.iter().any(|p| side(centroid(&p.pts)) < 0.0)
+        && heated.iter().any(|p| side(centroid(&p.pts)) >= 0.0);
+    // DESNZ-defined, as HEMIE's mono form: a mono room's back wall is its full-height wall
+    // (HEMIE gives it the maximum ceiling height), so only the walls under the slope count.
+    let under_slope: Vec<&El> = knees
+        .iter()
+        .copied()
+        .filter(|k| both_sides || side(k.plan_mid()) >= 0.0)
+        .collect();
+    let knee_heights: Vec<Option<f64>> =
+        under_slope.iter().map(|k| ctx.need(k, "height")).collect();
+    let knee_height = if under_slope.is_empty() {
         0.0
     } else {
-        knee_heights.into_iter().sum::<Option<f64>>()? / knees.len() as f64
+        knee_heights.into_iter().sum::<Option<f64>>()? / under_slope.len() as f64
     };
     let room_wall = |ctx: &mut Ctx, w: &El, placed: &mut BTreeSet<String>| -> Value {
         let kind = wall_kind(w).expect("roof-room walls are wall lines");
@@ -2226,8 +2236,6 @@ fn room_in_roof(
     if let Some(band) = ctx.agreed(&heated, "age_band") {
         roof.insert("age_band".into(), band.clone());
     }
-    let both_sides = heated.iter().any(|p| side(centroid(&p.pts)) < 0.0)
-        && heated.iter().any(|p| side(centroid(&p.pts)) >= 0.0);
     if knees.is_empty() && !both_sides {
         // HEMIE requires a mono-pitched room's back wall, which would be a knee wall here.
         ctx.errors.push(error(main.path(), "The room in the roof slopes one way and has no wall under its high side. Draw that wall.".into()));
