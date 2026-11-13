@@ -8,7 +8,8 @@
 //! read from the element), or "ours" (a Vulcan choice awaiting confirmation). A shape or value
 //! the converter cannot express fails and names the element; nothing is approximated silently.
 //!
-//! EPC model settings are Metadata rows: `HEMIE_age_band`, `HEMIE_region`, and per HEMIE
+//! EPC model settings are Metadata rows: `HEMIE_age_band`, `HEMIE_region`, `HEMIE_front_door`
+//! (needed when the model has several doors), and per HEMIE
 //! construction type `HEMIE_construction_<construction_type>`, a JSON object of that
 //! construction's fields (for example `{"wall_construction_type":"cavity"}`). A value on the
 //! element wins over the setting.
@@ -1102,12 +1103,35 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             }
         })
         .collect();
-    // ours: the reference part is the one with the most storeys, then the largest footprint.
+    // ours: parts in order of storeys, then footprint. DESNZ-defined (EPC 11 11.3.3, EPC 02
+    // 2.5.3): the part with the front door is the reference part, and its ground storey's
+    // footprint starts with the front-door wall.
     parts.sort_by(|a, b| {
         b.top
             .cmp(&a.top)
             .then(signed_area(&b.poly).total_cmp(&signed_area(&a.poly)))
     });
+    let doors: Vec<&El> = els
+        .iter()
+        .filter(|e| e.ty == "BuildingElementOpaque" && e.flag("is_external_door"))
+        .collect();
+    let front = front_door(ctx, &doors)?;
+    let Some(front_wall) = walls
+        .iter()
+        .map(|(w, _)| *w)
+        .find(|w| front.host() == Some(w.name) && w.level == 0)
+    else {
+        ctx.errors.push(error(front.path(), format!("Front door '{}' is not in a wall of floor 0. The reference building part's ground storey starts with the front-door wall; link the door to its wall.", front.name)));
+        return None;
+    };
+    let reference = (0..parts.len())
+        .min_by(|&i, &j| {
+            boundary_dist(front.plan_mid(), &parts[i].poly)
+                .total_cmp(&boundary_dist(front.plan_mid(), &parts[j].poly))
+        })
+        .expect("parts");
+    let reference = parts.remove(reference);
+    parts.insert(0, reference);
 
     // ours: part names; the reference part is "Main".
     let names: Vec<String> = (0..parts.len())
@@ -1126,8 +1150,26 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     for pi in 0..parts.len() {
         for s in 0..=parts[pi].top {
             let level_walls = on_level(s as i64);
-            let (ring, carried) =
+            let (mut ring, mut carried) =
                 merge_edges(with_wall_ends(&parts[pi].poly, &level_walls), &level_walls);
+            if pi == 0 && s == 0 {
+                let m = front.plan_mid();
+                let Some(first) = (0..ring.len())
+                    .filter(|&i| carried[i].is_some_and(|w| w.name == front_wall.name))
+                    .min_by(|&i, &j| {
+                        seg_dist(m, ring[i], ring[(i + 1) % ring.len()]).total_cmp(&seg_dist(
+                            m,
+                            ring[j],
+                            ring[(j + 1) % ring.len()],
+                        ))
+                    })
+                else {
+                    ctx.errors.push(error(front.path(), format!("Front door '{}' is not on the ground outline of its building part. Link it to an outside wall of floor 0.", front.name)));
+                    return None;
+                };
+                ring.rotate_left(first);
+                carried.rotate_left(first);
+            }
             let mut lengths = 0.0;
             let mut height_sum = 0.0;
             let mut heights = BTreeSet::new();
@@ -1215,10 +1257,6 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let windows: Vec<&El> = els
         .iter()
         .filter(|e| e.ty == "BuildingElementTransparent")
-        .collect();
-    let doors: Vec<&El> = els
-        .iter()
-        .filter(|e| e.ty == "BuildingElementOpaque" && e.flag("is_external_door"))
         .collect();
     let mut placed: BTreeSet<String> = BTreeSet::new();
     for wi in 0..hemie_walls.len() {
@@ -1433,14 +1471,21 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     geometry.insert("reference_building_part".into(), json!(names[0]));
     geometry.insert("reference_orientation".into(), json!(reference_orientation));
     let full_ventilation = &model["InfiltrationVentilation"];
-    match full_ventilation
-        .get("ventilation_zone_base_height")
-        .filter(|v| !v.is_null())
-    {
-        Some(height) => {
+    // DESNZ-defined (EPC 11 11.3.3): the base height, or else the base storey, from which HEMIE
+    // estimates it.
+    match (
+        full_ventilation
+            .get("ventilation_zone_base_height")
+            .filter(|v| !v.is_null()),
+        model["General"]["storey_of_dwelling"].as_i64(),
+    ) {
+        (Some(height), _) => {
             geometry.insert("ventilation_zone_base_height".into(), height.clone());
         }
-        None => ctx.errors.push(error("/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height, which HEMIE Geometry needs. Add the Metadata row Ventilation_ventilation_zone_base_height.".into())),
+        (None, Some(storey)) => {
+            geometry.insert("base_storey_of_dwelling".into(), json!(storey));
+        }
+        (None, None) => ctx.errors.push(error("/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or base storey, which HEMIE Geometry needs. Add the Metadata row Ventilation_ventilation_zone_base_height or General_storey_of_dwelling.".into())),
     }
     geometry.insert("building_parts".into(), Value::Object(building_parts));
     geometry.insert(
@@ -1448,11 +1493,45 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         Value::Object(std::mem::take(&mut ctx.constructions.by_name)),
     );
 
-    let ventilation = infiltration(ctx, full_ventilation);
+    // As HEMIE derives the dwelling height: the tallest part's storeys and the gaps between them.
+    let dwelling_height = parts
+        .iter()
+        .map(|p| p.ceilings.iter().sum::<f64>() + STOREY_GAP * (p.ceilings.len() as f64 - 1.0))
+        .fold(0.0, f64::max);
+    let ventilation = infiltration(ctx, full_ventilation, dwelling_height);
     if !ctx.errors.is_empty() {
         return None;
     }
     Some((Value::Object(geometry), ventilation?))
+}
+
+/// The front door: the one the `HEMIE_front_door` setting names, or the model's only door.
+fn front_door<'e>(ctx: &mut Ctx, doors: &[&'e El<'e>]) -> Option<&'e El<'e>> {
+    let field = format!("{SETTING}front_door");
+    if let Some(named) = ctx.settings.raw(&field) {
+        let found = doors
+            .iter()
+            .find(|d| named.as_str() == Some(d.name))
+            .copied();
+        if found.is_none() {
+            ctx.errors.push(error("/Metadata".into(), format!("The model setting {field} is {named}, which is not a door of the model. Give the front door's name.")));
+        }
+        return found;
+    }
+    match doors {
+        [only] => {
+            ctx.notices.push(notice(&only.path(), format!("'{}' is the model's only door, so it is the front door: its building part is the reference part, and its wall is the first wall of that part's ground storey.", only.name)));
+            Some(only)
+        }
+        [] => {
+            ctx.errors.push(error("/Zone".into(), "The model has no door. The reference building part is the one with the front door; draw the front door.".into()));
+            None
+        }
+        many => {
+            ctx.errors.push(error("/Metadata".into(), format!("The model has doors {}, so the front door is not known. Add the Metadata row {field} with the front door's name.", quoted(&many.iter().map(|d| d.name).collect::<Vec<_>>()))));
+            None
+        }
+    }
 }
 
 fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
@@ -2004,12 +2083,13 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
 
 /// The HEMIE InfiltrationVentilation Geometry needs: the model's ventilation inputs, and its air
 /// test or, without one, the leakage-estimate inputs from the settings.
-fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
+fn infiltration(ctx: &mut Ctx, full: &Value, dwelling_height: f64) -> Option<Value> {
     let mut iv = Map::new();
     iv.insert("model_type".into(), json!("hemie"));
-    // The assessor's values: the EPC profile requires each as a Metadata row, never a template
-    // value. HEMIE derives shield class from the terrain and takes no noise nuisance as false,
-    // so those two pass only when stated; the other three it requires.
+    // The assessor's values: an existing building's absent shield class, noise nuisance and air
+    // test rows leave no template value in the model (`existing_building_optional_rows`).
+    // DESNZ-defined (EPC 11 Tables 11.7.2, 11.4.2): HEMIE takes shield class from the terrain
+    // class and noise nuisance as No; the other three are required.
     for (key, required) in [
         ("cross_vent_possible", true),
         ("terrain_class", true),
@@ -2022,16 +2102,33 @@ fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
                 iv.insert(key.into(), v.clone());
             }
             None if required => ctx.errors.push(error(format!("/InfiltrationVentilation/{key}"), format!("The model states no {key}, which HEMIE requires. Add the Metadata row Ventilation_{key}."))),
-            None => {}
+            None => ctx.notices.push(notice(&format!("/InfiltrationVentilation/{key}"), format!("No Metadata row states Ventilation_{key}, so HEMIE applies the DESNZ default: {}.", if key == "shield_class" { "from the terrain class" } else { "No" }))),
         }
     }
     let leaks = &full["Leaks"];
+    let stated = |key: &str| leaks.get(key).filter(|v| !v.is_null());
     let mut out = Map::new();
-    if let Some(result) = leaks.get("test_result").filter(|v| !v.is_null()) {
-        // Derived from the model: the measured air test.
-        out.insert("test_result".into(), result.clone());
-        out.insert("test_pressure".into(), leaks["test_pressure"].clone());
+    let tested = stated("test_result").is_some();
+    if tested {
+        // Derived from the model: the measured air test the assessor stated.
+        for key in ["test_result", "test_pressure", "ventilation_zone_height"] {
+            match stated(key) {
+                Some(v) => {
+                    out.insert(key.into(), v.clone());
+                }
+                None => ctx.errors.push(error(
+                    format!("/InfiltrationVentilation/Leaks/{key}"),
+                    format!(
+                        "The air test states no {key}. Add the Metadata row AirPermeability_{key}."
+                    ),
+                )),
+            }
+        }
     } else {
+        // DESNZ-defined (EPC 05 5.4): with no air test, HEMIE estimates the leakage; the zone
+        // height is the dwelling height HEMIE derives from the storeys.
+        out.insert("ventilation_zone_height".into(), json!(dwelling_height));
+        ctx.notices.push(notice("/InfiltrationVentilation/Leaks", format!("No air test is stated, so HEMIE estimates the air leakage, with ventilation zone height {dwelling_height:.2} m from the storeys.")));
         let field = format!("{SETTING}infiltration_properties");
         let parsed = ctx.settings.raw(&field).map(|v| match v {
             Value::String(s) => serde_json::from_str::<Map<String, Value>>(s).ok(),
@@ -2048,17 +2145,16 @@ fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
             }
         }
     }
-    // Derived from the model: the envelope area and zone height the air test refers to. The
-    // schema requires them although HEMIE Geometry can give them (open question).
-    for key in ["env_area", "ventilation_zone_height"] {
-        match leaks.get(key).filter(|v| !v.is_null()) {
-            Some(v) => {
-                out.insert(key.into(), v.clone());
-            }
-            None => {
-                ctx.errors.push(error(format!("/InfiltrationVentilation/Leaks/{key}"), format!("The model states no air-test {key}, which the existing-building input requires. State it in the Metadata section.")));
-            }
+    // Derived from the model: the envelope area of the drawn elements. The schema requires it
+    // although HEMIE Geometry can give it (E9).
+    match stated("env_area") {
+        Some(v) => {
+            out.insert("env_area".into(), v.clone());
         }
+        None => ctx.errors.push(error(
+            "/InfiltrationVentilation/Leaks/env_area".into(),
+            "The model has no envelope area, which the existing-building input requires.".into(),
+        )),
     }
     iv.insert("Leaks".into(), Value::Object(out));
     Some(Value::Object(iv))
@@ -2072,7 +2168,8 @@ mod tests {
     const SETTINGS: &str = r#"IsExistingBuilding,TRUE
 HEMIE_age_band,D
 HEMIE_region,England
-HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#;
+HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}"
+HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
 
     fn wall(name: &str, level: i64, a: P, b: P, height: f64) -> String {
         format!(
@@ -2149,24 +2246,40 @@ HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#;
         ]
     }
 
+    /// The model with its front door in the middle of W00, the south wall of floor 0.
     fn csv(settings: &str, exposed: &[String], extra: &str) -> String {
         format!(
-            "Metadata,,\n{settings}\n\nZone,,\nName,Type\nZ,Zone\n\nExposed Elements\n{HEADER}\n{}\n\n{extra}\n",
-            exposed.join("\n")
+            "Metadata,,\n{settings}\n\nZone,,\nName,Type\nZ,Zone\n\nExposed Elements\n{HEADER}\n{}\n{}\n\n{extra}\n",
+            exposed.join("\n"),
+            door("Front", "W00", [3.5, 0.0], [4.5, 0.0]),
         )
     }
 
-    fn run(text: &str) -> (Value, Vec<ValidationError>, Vec<SchemaOmission>) {
-        let rows = crate::parser::CSVParser::new()
-            .parse_csv(text)
-            .expect("csv");
-        let mut model = json!({
+    fn door(name: &str, host: &str, a: P, b: P) -> String {
+        format!(
+            "{name},Z,BuildingElementOpaque,2,90,1,2,0,0,FALSE,TRUE,{host},\"{},{},0|{},{},0\",",
+            a[0], a[1], b[0], b[1]
+        )
+    }
+
+    fn full_input() -> Value {
+        json!({
             "Zone": {"Z": {"livingroom_area": 20.0, "restofdwelling_area": 76.0}},
             "General": {"build_type": "detached"},
             "NumberOfHabitableRooms": 3,
             "InfiltrationVentilation": {"cross_vent_possible": false, "terrain_class": "Suburban", "altitude": 0, "ventilation_zone_base_height": 0,
                 "Leaks": {"test_pressure": "Standard", "test_result": 5, "env_area": 200, "ventilation_zone_height": 5.6}}
-        });
+        })
+    }
+
+    fn run(text: &str) -> (Value, Vec<ValidationError>, Vec<SchemaOmission>) {
+        run_on(text, full_input())
+    }
+
+    fn run_on(text: &str, mut model: Value) -> (Value, Vec<ValidationError>, Vec<SchemaOmission>) {
+        let rows = crate::parser::CSVParser::new()
+            .parse_csv(text)
+            .expect("csv");
         let (mut errors, mut notices) = (Vec::new(), Vec::new());
         map_existing_building(&mut model, &rows, &json!({}), &mut errors, &mut notices);
         (model, errors, notices)
@@ -2212,7 +2325,7 @@ HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#;
             .parse_csv(&csv(SETTINGS, &walls, ""))
             .unwrap();
         let els = elements(&rows);
-        let refs: Vec<&El> = els.iter().collect();
+        let refs: Vec<&El> = els.iter().filter(|e| wall_kind(e).is_some()).collect();
         let ring = ring_of_walls(&refs).unwrap();
         assert!(signed_area(&ring) > 0.0);
         // An open outline names the walls at its open ends.
@@ -2513,6 +2626,62 @@ HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#;
             "{}",
             errors[0].message
         );
+    }
+
+    #[test]
+    fn the_front_door_sets_the_reference_part_and_its_first_wall() {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(gable_roof());
+        exposed.push(door("Back", "W01", [8.0, 2.5], [8.0, 3.5]));
+        let text = csv(SETTINGS, &exposed, &ground(&BOX));
+        let (_, errors, _) = run(&text);
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0]
+            .message
+            .contains("doors 'Back', 'Front', so the front door is not known"));
+        let (model, errors, _) = run(&text.replace(
+            "IsExistingBuilding,TRUE",
+            "IsExistingBuilding,TRUE\nHEMIE_front_door,Back",
+        ));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let zone = &model["Zone"];
+        assert_eq!(
+            zone["building_parts"]["Main"]["storeys"][0]["floorplan"],
+            "LINEARRING (8 0, 8 6, 0 6, 0 0, 8 0)"
+        );
+        assert_eq!(zone["reference_orientation"], 90.0);
+    }
+
+    #[test]
+    fn with_no_air_test_hemie_estimates_the_leakage_and_takes_desnz_defaults() {
+        let text = house(gable_roof()).replace(
+            "IsExistingBuilding,TRUE",
+            "IsExistingBuilding,TRUE\nHEMIE_infiltration_properties,\"{\"\"number_of_open_fireplaces\"\":0}\"",
+        );
+        let mut model = full_input();
+        model["InfiltrationVentilation"]["Leaks"] = json!({"env_area": 200});
+        model["InfiltrationVentilation"]
+            .as_object_mut()
+            .unwrap()
+            .remove("ventilation_zone_base_height");
+        model["General"]["storey_of_dwelling"] = json!(2);
+        let (model, errors, notices) = run_on(&text, model);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let leaks = &model["InfiltrationVentilation"]["Leaks"];
+        assert_eq!(
+            leaks["infiltration_properties"],
+            json!({"number_of_open_fireplaces": 0})
+        );
+        assert!(leaks.get("test_result").is_none());
+        // Two storeys of 2.55 m and the gap between them.
+        assert!((leaks["ventilation_zone_height"].as_f64().unwrap() - 5.35).abs() < 1e-9);
+        assert_eq!(model["Zone"]["base_storey_of_dwelling"], 2);
+        assert!(model["InfiltrationVentilation"]
+            .get("shield_class")
+            .is_none());
+        for key in ["shield_class", "noise_nuisance"] {
+            assert!(notices.iter().any(|n| n.path.ends_with(key)), "{key}");
+        }
     }
 
     #[test]

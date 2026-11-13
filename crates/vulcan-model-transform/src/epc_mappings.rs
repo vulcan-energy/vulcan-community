@@ -454,6 +454,11 @@ pub(crate) fn apply_desnz_defaults(
         .as_str()
         .unwrap_or_default()
         .to_string();
+    // DESNZ-defined (EPC 11 11.3.3): an existing building may give its base storey instead, and
+    // HEMIE estimates the base height from it.
+    let base_storey = (model.get("IsExistingBuilding") == Some(&Value::Bool(true)))
+        .then(|| model["General"]["storey_of_dwelling"].as_i64())
+        .flatten();
     if let Some(ventilation) = model
         .get_mut("InfiltrationVentilation")
         .and_then(Value::as_object_mut)
@@ -476,8 +481,10 @@ pub(crate) fn apply_desnz_defaults(
             {
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
                 notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, DESNZ's default for a dwelling at ground level. Add the row to state it.")));
+            } else if let Some(storey) = base_storey {
+                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so HEMIE estimates it from the base storey, {storey} (General_storey_of_dwelling).")));
             } else {
-                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: add the Metadata row Ventilation_ventilation_zone_base_height.", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
+                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: add the Metadata row Ventilation_ventilation_zone_base_height. An existing building may give its base storey instead (General_storey_of_dwelling).", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
             }
         }
         if let Some(area) = ventilation.get("Leaks").and_then(|l| l.get("env_area")) {

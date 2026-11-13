@@ -5370,6 +5370,7 @@ impl JSONBuilder {
                 })
             })
             .collect();
+        let existing = result.get("IsExistingBuilding") == Some(&Value::Bool(true));
         for name in self.profile.required_metadata_rows() {
             let pointer = if let Some(key) = name.strip_prefix("AirPermeability_") {
                 format!("/InfiltrationVentilation/Leaks/{key}")
@@ -5381,7 +5382,20 @@ impl JSONBuilder {
             let stated_by_systems = systems_fragments
                 .iter()
                 .any(|fragment| fragment.pointer(&pointer).is_some_and(|v| !v.is_null()));
-            if !present.contains(*name) && !stated_by_systems {
+            if present.contains(*name) || stated_by_systems {
+                continue;
+            }
+            if existing
+                && self
+                    .profile
+                    .existing_building_optional_rows()
+                    .contains(name)
+            {
+                let (parent, key) = pointer.rsplit_once('/').expect("a pointer");
+                if let Some(object) = result.pointer_mut(parent).and_then(Value::as_object_mut) {
+                    object.remove(key);
+                }
+            } else {
                 missing.push(*name);
             }
         }

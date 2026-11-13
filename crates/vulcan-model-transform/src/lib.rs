@@ -255,6 +255,23 @@ impl ModelProfile {
         }
     }
 
+    /// Required rows an existing building may leave out, DESNZ-defined: with no air test HEMIE
+    /// estimates the leakage (EPC 05 5.3.1), shield class follows the terrain class (EPC 11
+    /// Table 11.7.2) and noise nuisance is No (EPC 11 Table 11.4.2). An absent row removes the
+    /// template's value, so only a stated value reaches HEMIE.
+    pub(crate) fn existing_building_optional_rows(self) -> &'static [&'static str] {
+        match self {
+            Self::Core | Self::Fhs => &[],
+            Self::Epc => &[
+                "Ventilation_shield_class",
+                "Ventilation_noise_nuisance",
+                "AirPermeability_test_pressure",
+                "AirPermeability_test_result",
+                "AirPermeability_ventilation_zone_height",
+            ],
+        }
+    }
+
     /// A zone row may state `frac_convective_heating`. EPC differs: the wrapper's zone model
     /// requires it for a heated zone.
     pub(crate) fn states_zone_convective_fraction(self) -> bool {
