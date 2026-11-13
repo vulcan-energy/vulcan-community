@@ -14,6 +14,8 @@ import { isPointInPolygon2D } from './pointInPolygon';
 
 export type HemieBundleKind = 'bay' | 'conservatory';
 export type ConservatoryType = 'non-separated' | 'separated' | 'unheated';
+/** HEMIE's unheated space types for a sheltered wall. */
+export type AdjacentSpaceType = 'corridor' | 'garage' | 'roof void' | 'stairwell';
 
 export interface BayParameters {
   /** Distance along the host wall, from its first point to the middle of the opening (m). */
@@ -36,9 +38,12 @@ export interface ConservatoryParameters {
   wallHeight: number;
   /** Opaque wall below the glazing (m). */
   dwarfWallHeight: number;
-  roof: 'flat' | 'lean-to';
+  /** Dual: a ridge from the host wall to a gable over the front wall. */
+  roof: 'flat' | 'lean-to' | 'dual';
   roofPitch: number;
   conservatoryType: ConservatoryType;
+  /** Unheated only: the space the host wall, sheltered where it adjoins, borders. */
+  adjacentSpaceType?: AdjacentSpaceType;
 }
 
 export type HemieBundleParameters = BayParameters | ConservatoryParameters;
@@ -49,6 +54,7 @@ export interface HemieBundleTag {
   role: string;
   host_wall: string;
   conservatory_type?: ConservatoryType;
+  adjacent_space_type?: AdjacentSpaceType;
   /** On the anchor (front wall) only: the parameters, and the stem of the member names. */
   parameters?: HemieBundleParameters;
   bundle_name?: string;
@@ -381,7 +387,7 @@ export function conservatoryParametersProblem(host: BuildingElementOpaque, p: Co
   if (!(p.width >= 1) || !(p.depth >= 1)) return 'Give the conservatory a width and a depth of at least 1 m.';
   if (!(p.wallHeight > p.dwarfWallHeight + 0.3)) return 'Make the walls at least 0.3 m taller than the dwarf wall, so they hold glazing.';
   if (!(p.dwarfWallHeight >= 0)) return 'Give the dwarf wall a height of 0 m or more.';
-  if (p.roof === 'lean-to' && !(p.roofPitch > 0 && p.roofPitch < 60)) return 'Give the lean-to roof a pitch between 1° and 59°.';
+  if (p.roof !== 'flat' && !(p.roofPitch > 0 && p.roofPitch < 60)) return 'Give the roof a pitch between 1° and 59°.';
   if (p.centre - p.width / 2 < -1e-6 || p.centre + p.width / 2 > f.length + 1e-6) return `The conservatory runs past the ends of '${host.name}' (${roundToTwoDecimals(f.length)} m long).`;
   if (f.level !== 0) return 'A conservatory is a single storey on the ground: place it on a ground-floor wall.';
   return null;
@@ -400,6 +406,7 @@ export function buildConservatoryBundleDraft(input: BundleDraftInput<Conservator
       role,
       host_wall: host.name,
       conservatory_type: p.conservatoryType,
+      ...(p.conservatoryType === 'unheated' && p.adjacentSpaceType ? { adjacent_space_type: p.adjacentSpaceType } : {}),
       ...extra,
     },
   });
@@ -410,8 +417,11 @@ export function buildConservatoryBundleDraft(input: BundleDraftInput<Conservator
   const fb = add(b, scale(f.n, p.depth));
   const H = p.wallHeight;
   const leanTo = p.roof === 'lean-to';
-  const pitch = leanTo ? p.roofPitch : 0;
-  const rise = round3(p.depth * Math.tan((pitch * Math.PI) / 180));
+  const dual = p.roof === 'dual';
+  const pitch = p.roof === 'flat' ? 0 : p.roofPitch;
+  const tan = Math.tan((pitch * Math.PI) / 180);
+  // A lean-to rises over the depth to the host wall; a dual roof over half the width to the ridge.
+  const rise = round3((dual ? p.width / 2 : p.depth) * tan);
   // Non-separated, the conservatory is part of the dwelling and the wall it adjoins is internal.
   const nets = p.conservatoryType === 'non-separated' ? { parent_netting_area: round3(p.width * f.height) } : {};
   const glazingHeight = round3(H - p.dwarfWallHeight - WINDOW_INSET);
@@ -419,30 +429,32 @@ export function buildConservatoryBundleDraft(input: BundleDraftInput<Conservator
     front: name('front-wall', 'front'),
     left: name('left-wall', 'left side'),
     right: name('right-wall', 'right side'),
-    roof: name('roof', 'roof'),
   };
-  const roofOrientation = bearing(fa, fb, offset);
   const members: HemieBundleMemberDraft[] = [
     {
       role: 'front-wall',
       type: 'BuildingElementOpaque',
       name: names.front,
       parent_element: host.name,
-      updates: wall(f, fa, fb, H, offset, { ...tag('front-wall', { parameters: p, bundle_name: stem }), ...nets }),
+      updates: wall(f, fa, fb, H, offset, {
+        ...tag('front-wall', { parameters: p, bundle_name: stem }),
+        ...nets,
+        ...(dual ? { geometry_face: { ...profile(H, H, true), top_profile: [{ t: 0, h: H }, { t: 0.5, h: H + rise }, { t: 1, h: H }] } } : {}),
+      }),
     },
     {
       role: 'left-wall',
       type: 'BuildingElementOpaque',
       name: names.left,
       parent_element: null,
-      updates: wall(f, a, fa, H, offset, { ...tag('left-wall'), ...(rise > 0 ? { geometry_face: profile(H + rise, H, false) } : {}) }),
+      updates: wall(f, a, fa, H, offset, { ...tag('left-wall'), ...(leanTo && rise > 0 ? { geometry_face: profile(H + rise, H, false) } : {}) }),
     },
     {
       role: 'right-wall',
       type: 'BuildingElementOpaque',
       name: names.right,
       parent_element: null,
-      updates: wall(f, fb, b, H, offset, { ...tag('right-wall'), ...(rise > 0 ? { geometry_face: profile(H + rise, H, true) } : {}) }),
+      updates: wall(f, fb, b, H, offset, { ...tag('right-wall'), ...(leanTo && rise > 0 ? { geometry_face: profile(H + rise, H, true) } : {}) }),
     },
     { role: 'front-glazing', type: 'BuildingElementTransparent', name: name('front-glazing', 'front glazing'), parent_element: names.front, updates: windowIn(f, fa, fb, p.dwarfWallHeight, glazingHeight, offset, tag('front-glazing')) },
     { role: 'left-glazing', type: 'BuildingElementTransparent', name: name('left-glazing', 'left glazing'), parent_element: names.left, updates: windowIn(f, a, fa, p.dwarfWallHeight, glazingHeight, offset, tag('left-glazing')) },
@@ -464,32 +476,49 @@ export function buildConservatoryBundleDraft(input: BundleDraftInput<Conservator
       extra_json: { ...(fields.extra_json as Record<string, unknown> | undefined), ...tag('floor') },
     },
   });
-  const slope = p.depth / Math.cos((pitch * Math.PI) / 180);
-  members.push({
-    role: 'roof',
-    type: 'BuildingElementOpaque',
-    name: names.roof,
-    parent_element: null,
-    updates: {
-      coordinates: polygon([fa, fb, b, a], f.level + 1),
-      width: p.width,
-      height: round3(slope),
-      area: round3(p.width * slope),
-      pitch,
-      orientation360: roofOrientation,
-      base_height: round3(f.base + H),
-      is_unheated_pitched_roof: false,
-      extra_json: tag('roof'),
-    },
-  });
-  members.push({
-    role: 'roof-glazing',
-    type: 'BuildingElementTransparent',
-    name: name('roof-glazing', 'roof glazing'),
-    parent_element: names.roof,
-    // Rooflight from the eaves (the front) up towards the host wall.
-    updates: rooflight(fa, fb, scale(f.n, -1), p.depth, pitch, f.base + H, roofOrientation, f.level + 1, tag('roof-glazing')),
-  });
+  const cos = Math.cos((pitch * Math.PI) / 180);
+  // Each roof plane: its eaves edge first (a sloped plane falls across its first edge), the
+  // direction up the slope, and its run from the eaves.
+  const ridgeHost = c;
+  const ridgeFront = add(c, scale(f.n, p.depth));
+  const planes: Array<{ suffix: string; label: string; pts: V[]; up: V; run: number }> = dual
+    ? [
+      { suffix: '', label: 'left', pts: [a, fa, ridgeFront, ridgeHost], up: f.t, run: p.width / 2 },
+      { suffix: '-2', label: 'right', pts: [fb, b, ridgeHost, ridgeFront], up: scale(f.t, -1), run: p.width / 2 },
+    ]
+    : [{ suffix: '', label: '', pts: [fa, fb, b, a], up: scale(f.n, -1), run: p.depth }];
+  for (const plane of planes) {
+    const [e0, e1] = plane.pts;
+    const along = Math.hypot(e1[0] - e0[0], e1[1] - e0[1]);
+    const slope = plane.run / cos;
+    const roofName = name(`roof${plane.suffix}`, plane.label ? `roof ${plane.label}` : 'roof');
+    const orientation360 = bearing(e0, e1, offset);
+    members.push({
+      role: `roof${plane.suffix}`,
+      type: 'BuildingElementOpaque',
+      name: roofName,
+      parent_element: null,
+      updates: {
+        coordinates: polygon(plane.pts, f.level + 1),
+        width: round3(along),
+        height: round3(slope),
+        area: round3(along * slope),
+        pitch,
+        orientation360,
+        base_height: round3(f.base + H),
+        is_unheated_pitched_roof: false,
+        extra_json: tag(`roof${plane.suffix}`),
+      },
+    });
+    members.push({
+      role: `roof-glazing${plane.suffix}`,
+      type: 'BuildingElementTransparent',
+      name: name(`roof-glazing${plane.suffix}`, `roof glazing${plane.label ? ` ${plane.label}` : ''}`),
+      parent_element: roofName,
+      // Rooflight from the eaves up the slope.
+      updates: rooflight(e0, e1, plane.up, plane.run, pitch, f.base + H, orientation360, f.level + 1, tag(`roof-glazing${plane.suffix}`)),
+    });
+  }
   return { bundleId, members };
 }
 
@@ -556,3 +585,29 @@ export function groundFloorUnderWall(host: BuildingElementOpaque, elements: Elem
     && isPointInPolygon2D({ x: inside[0], y: inside[1] }, element.coordinates)) as BuildingElementGround | undefined) ?? null;
 }
 
+
+const ON_HOST_TOL = 0.01;
+
+/**
+ * Why a bundle no longer fits its host wall, or null: the host is gone, or a side wall no longer
+ * starts on it (the host moved after the bundle was placed). Shown on the anchor; regenerating
+ * the bundle from its parameters places it on the host again.
+ */
+export function hemieBundleHostProblem(anchor: Element, elements: Iterable<Element>): string | null {
+  const tag = getHemieBundle(anchor);
+  if (!tag || tag.role !== 'front-wall') return null;
+  const all = [...elements];
+  const label = tag.kind === 'bay' ? 'bay' : 'conservatory';
+  const host = all.find((element) => element.name === tag.host_wall && isHemieBundleHost(element));
+  if (!host) return `Its host wall '${tag.host_wall}' is gone. Delete the ${label} and place it again.`;
+  const [A, B] = host.coordinates;
+  const onHost = (p: { x: number; y: number }) => {
+    const dx = B.x - A.x;
+    const dy = B.y - A.y;
+    const k = Math.min(Math.max(((p.x - A.x) * dx + (p.y - A.y) * dy) / (dx * dx + dy * dy), 0), 1);
+    return Math.hypot(p.x - (A.x + k * dx), p.y - (A.y + k * dy)) <= ON_HOST_TOL;
+  };
+  const sides = getHemieBundleMembers(all, tag.bundle_id).filter((m) => ['left-wall', 'right-wall'].includes(getHemieBundle(m)!.role));
+  const fits = sides.length === 2 && sides.every((side) => side.coordinates.filter(onHost).length === 1);
+  return fits ? null : `The ${label} no longer sits on its host wall '${tag.host_wall}'. Choose Place again to move it onto the wall.`;
+}

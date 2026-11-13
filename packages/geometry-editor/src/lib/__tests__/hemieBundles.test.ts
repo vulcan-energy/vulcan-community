@@ -10,6 +10,7 @@ import {
   buildConservatoryBundleDraft,
   bundleMemberNames,
   getHemieBundle,
+  hemieBundleHostProblem,
   planBundleUpdate,
 } from '../hemieBundles';
 
@@ -125,5 +126,43 @@ describe('conservatory bundle', () => {
     expect(role(members, 'left-wall').updates.extra_json.geometry_face).toMatchObject({
       top_profile: [{ t: 0, h: 2.4 + 1.092 }, { t: 1, h: 2.4 }],
     });
+  });
+
+  it('has a dual-pitch roof: two slopes from a ridge to a front gable', () => {
+    const members = buildConservatoryBundleDraft({
+      host: host(),
+      parameters: { ...CONSERVATORY_DEFAULTS, centre: 3, roof: 'dual' },
+      existingNames: [],
+      globalOrientationOffset: 0,
+    }).members;
+    // Slopes face west and east, each over half the 3 m width; each has a rooflight.
+    expect(role(members, 'roof').updates).toMatchObject({ pitch: 20, orientation360: 270, width: 3 });
+    expect(role(members, 'roof-2').updates).toMatchObject({ pitch: 20, orientation360: 90, width: 3 });
+    expect(role(members, 'roof-glazing-2').parent_element).toBe('Conservatory 1 roof right');
+    expect(role(members, 'front-wall').updates.extra_json.geometry_face).toMatchObject({
+      top_profile: [{ t: 0, h: 2.4 }, { t: 0.5, h: 2.4 + 0.546 }, { t: 1, h: 2.4 }],
+    });
+    expect(role(members, 'left-wall').updates.extra_json).not.toHaveProperty('geometry_face');
+  });
+
+  it('states the unheated space on an unheated conservatory', () => {
+    const members = buildConservatoryBundleDraft({
+      host: host(),
+      parameters: { ...CONSERVATORY_DEFAULTS, centre: 3, conservatoryType: 'unheated', adjacentSpaceType: 'garage' },
+      existingNames: [],
+      globalOrientationOffset: 0,
+    }).members;
+    expect(role(members, 'left-wall').updates.extra_json.hemie_bundle).toMatchObject({ adjacent_space_type: 'garage' });
+  });
+
+  it('names a bundle whose host wall moved', () => {
+    const members = draft('non-separated').members.map((m, i) => ({
+      id: `m${i}`, name: m.name, type: m.type, parent_element: m.parent_element, ...m.updates,
+    })) as unknown as Element[];
+    const anchor = members[0];
+    expect(hemieBundleHostProblem(anchor, [host(), ...members])).toBeNull();
+    const moved = { ...host(), coordinates: [{ x: 0, y: -1, z: 0 }, { x: 6, y: -1, z: 0 }] };
+    expect(hemieBundleHostProblem(anchor, [moved, ...members])).toMatch(/no longer sits on its host wall 'Wall \(S\)'/);
+    expect(hemieBundleHostProblem(anchor, members)).toMatch(/is gone/);
   });
 });

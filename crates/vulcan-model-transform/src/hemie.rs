@@ -929,7 +929,7 @@ fn merge_edges<'e>(ring: Vec<P>, walls: &[&'e El<'e>]) -> (Vec<P>, Vec<Option<&'
         let merge = (0..n).find(|&i| {
             let prev = (i + n - 1) % n;
             let same = match (carried[prev], carried[i]) {
-                (Some(x), Some(y)) => x.name == y.name,
+                (Some(x), Some(y)) => std::ptr::eq(x, y),
                 (None, None) => true,
                 _ => false,
             };
@@ -1013,6 +1013,7 @@ pub(crate) fn map_existing_building(
 fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let els = elements(csv);
     let left_out = bundles::left_out(ctx, &els);
+    let (hosts, pieces, conservatory_floors) = bundles::conservatory_hosts(ctx, &els);
     let els: Vec<El> = els
         .into_iter()
         .filter(|e| !left_out.contains(e.name))
@@ -1028,8 +1029,10 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
 
     // Line walls and the elements HEMIE geometry cannot hold yet.
     let bays = bundles::bays(ctx, &els);
-    let (hosts, pieces, conservatory_floors) = bundles::conservatory_hosts(ctx, &els);
-    let mut walls: Vec<(&El, Kind)> = pieces.iter().map(|p| (p, Kind::External)).collect();
+    let mut walls: Vec<(&El, Kind)> = pieces
+        .iter()
+        .map(|(p, _)| (p, wall_kind(p).expect("host wall")))
+        .collect();
     for e in &els {
         if bundles::is_bay_wall(e) || hosts.contains(e.name) {
             continue;
@@ -1283,11 +1286,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                         lengths += dist(a, b);
                         height_sum += h * dist(a, b);
                         heights.insert(format!("{h}"));
-                        let kind = walls
-                            .iter()
-                            .find(|(x, _)| x.name == w.name)
-                            .map(|(_, k)| *k)
-                            .expect("wall");
+                        let kind = wall_kind(w).expect("wall");
                         let mut value = Map::new();
                         value.insert("wall_type".into(), json!(kind.wall_type()));
                         value.insert("storey_index".into(), json!(s - bottom));
@@ -1380,11 +1379,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             continue;
         }
         let source = hemie_walls[wi].source;
-        let kind = walls
-            .iter()
-            .find(|(x, _)| x.name == source.name)
-            .map(|(_, k)| *k)
-            .expect("wall");
+        let kind = wall_kind(source).expect("wall");
         let construction_type = match kind {
             Kind::External => "external_wall",
             Kind::Party => "party_wall",
@@ -1400,7 +1395,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 .insert("age_band".into(), band.clone());
         }
         if kind == Kind::Sheltered {
-            match source.text("adjacent_space_type") {
+            // A sheltered piece of an unheated conservatory's host wall takes the bundle's space.
+            let piece = pieces.iter().find(|(p, _)| std::ptr::eq(p, source));
+            match piece.map_or(source.text("adjacent_space_type"), |(_, space)| *space) {
                 Some(space) => {
                     hemie_walls[wi].value.insert("adjacent_space_type".into(), json!(space));
                 }
@@ -1457,7 +1454,6 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     bundles::conservatory_walls(
         ctx,
         &conservatory,
-        &walls,
         &mut hemie_walls,
         &windows,
         &doors,
@@ -1577,14 +1573,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             let gables: Vec<(&El, Kind, P, P)> = hemie_walls
                 .iter()
                 .filter(|w| w.part == pi)
-                .map(|w| {
-                    let kind = walls
-                        .iter()
-                        .find(|(x, _)| x.name == w.source.name)
-                        .map(|(_, k)| *k)
-                        .expect("wall");
-                    (w.source, kind, w.a, w.b)
-                })
+                .map(|w| (w.source, wall_kind(w.source).expect("wall"), w.a, w.b))
                 .collect();
             bundles::conservatory_roof(
                 ctx,

@@ -17,6 +17,7 @@ import {
   getHemieBundle,
   getHemieBundleMembers,
   groundFloorUnderWall,
+  hemieBundleHostProblem,
   isHemieBundleHost,
   planBundleUpdate,
   type BayParameters,
@@ -26,9 +27,10 @@ import { StandardDropdown } from './StandardDropdown';
 import { StandardInput } from './StandardInput';
 import { INLINE_FIELD_NOTE_STYLE } from './elementForms/formPrimitives';
 
-type Field<P> =
+type Field<P> = (
   | { key: keyof P; label: string; kind: 'number'; unit?: string }
-  | { key: keyof P; label: string; kind: 'choice'; options: Array<{ value: string; label: string }> };
+  | { key: keyof P; label: string; kind: 'choice'; options: Array<{ value: string; label: string }> }
+) & { shown?: (p: P) => boolean };
 
 const BAY_FIELDS: Field<BayParameters>[] = [
   { key: 'centre', label: 'Opening centre from wall start', kind: 'number', unit: 'm' },
@@ -43,13 +45,20 @@ const BAY_FIELDS: Field<BayParameters>[] = [
 
 const CONSERVATORY_FIELDS: Field<ConservatoryParameters>[] = [
   { key: 'conservatoryType', label: 'Type', kind: 'choice', options: [{ value: 'non-separated', label: 'Non-separated (heated, open to the dwelling)' }, { value: 'separated', label: 'Separated' }, { value: 'unheated', label: 'Unheated' }] },
+  {
+    key: 'adjacentSpaceType',
+    label: 'Unheated space type',
+    kind: 'choice',
+    options: [{ value: '', label: 'Choose…' }, ...['corridor', 'garage', 'roof void', 'stairwell'].map((v) => ({ value: v, label: v[0].toUpperCase() + v.slice(1) }))],
+    shown: (p) => p.conservatoryType === 'unheated',
+  },
   { key: 'centre', label: 'Centre from wall start', kind: 'number', unit: 'm' },
   { key: 'width', label: 'Width', kind: 'number', unit: 'm' },
   { key: 'depth', label: 'Depth', kind: 'number', unit: 'm' },
   { key: 'wallHeight', label: 'Wall height (to eaves)', kind: 'number', unit: 'm' },
   { key: 'dwarfWallHeight', label: 'Dwarf wall height', kind: 'number', unit: 'm' },
-  { key: 'roof', label: 'Roof', kind: 'choice', options: [{ value: 'lean-to', label: 'Lean-to' }, { value: 'flat', label: 'Flat' }] },
-  { key: 'roofPitch', label: 'Roof pitch', kind: 'number', unit: '°' },
+  { key: 'roof', label: 'Roof', kind: 'choice', options: [{ value: 'lean-to', label: 'Lean-to' }, { value: 'dual', label: 'Dual pitch (gable at the front)' }, { value: 'flat', label: 'Flat' }] },
+  { key: 'roofPitch', label: 'Roof pitch', kind: 'number', unit: '°', shown: (p) => p.roof !== 'flat' },
 ];
 
 /** Remount per anchor (`key`): field edits not yet committed belong to one bundle. */
@@ -66,8 +75,9 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
   const isBay = tag.kind === 'bay';
   const fields = (isBay ? BAY_FIELDS : CONSERVATORY_FIELDS) as Field<Record<string, unknown>>[];
   const parameters = draft as unknown as BayParameters & ConservatoryParameters;
+  const hostProblem = hemieBundleHostProblem(anchor, Object.values(elementsById));
   const problem = !host
-    ? `Its host wall '${tag.host_wall}' is gone. Delete the ${isBay ? 'bay' : 'conservatory'} and place it again.`
+    ? hostProblem
     : isBay ? bayParametersProblem(host, parameters) : conservatoryParametersProblem(host, parameters);
 
   const commit = (next: Record<string, unknown>) => {
@@ -106,11 +116,11 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
 
   return (
     <>
-      {fields.map((field) => (
+      {fields.filter((field) => !field.shown || field.shown(draft)).map((field) => (
         <FieldRow key={String(field.key)} label={`${field.label}:`}>
           {field.kind === 'choice' ? (
             <StandardDropdown
-              value={String(draft[field.key as string])}
+              value={String(draft[field.key as string] ?? '')}
               onChange={(value) => commit({ ...draft, [field.key]: value === 'true' ? true : value === 'false' ? false : value })}
               options={field.options}
               aria-label={field.label}
@@ -134,9 +144,18 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
         </FieldRow>
       ))}
       {problem ? <div style={INLINE_FIELD_NOTE_STYLE} role="alert">{problem}</div> : null}
+      {host && hostProblem ? (
+        <>
+          <div style={INLINE_FIELD_NOTE_STYLE} role="alert">{hostProblem}</div>
+          <button type="button" className="btn btn-nav btn-small" onClick={() => commit(draft)}>Place again</button>
+        </>
+      ) : null}
       {!isBay && parameters.conservatoryType !== 'non-separated' ? (
         <div style={INLINE_FIELD_NOTE_STYLE}>
-          Not entered in the EPC: only a heated conservatory open to the dwelling is. &apos;{tag.host_wall}&apos; stays an external wall.
+          Not entered in the EPC: only a heated conservatory open to the dwelling is.{' '}
+          {parameters.conservatoryType === 'unheated'
+            ? <>&apos;{tag.host_wall}&apos; is a sheltered wall where the conservatory adjoins it.</>
+            : <>&apos;{tag.host_wall}&apos; stays an external wall.</>}
         </div>
       ) : null}
     </>

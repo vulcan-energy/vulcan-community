@@ -22,6 +22,7 @@ pub(super) struct Tag<'a> {
     role: &'a str,
     host: &'a str,
     conservatory_type: Option<&'a str>,
+    adjacent_space_type: Option<&'a str>,
 }
 
 pub(super) fn tag<'a>(e: &El<'a>) -> Option<Tag<'a>> {
@@ -33,6 +34,7 @@ pub(super) fn tag<'a>(e: &El<'a>) -> Option<Tag<'a>> {
         role: text("role")?,
         host: text("host_wall")?,
         conservatory_type: text("conservatory_type"),
+        adjacent_space_type: text("adjacent_space_type"),
     })
 }
 
@@ -41,7 +43,7 @@ fn is_member_wall(e: &El, kind: &str) -> bool {
 }
 
 /// The member of bundle `id` with `role`.
-fn member<'e>(els: &'e [El<'e>], id: &str, role: &str) -> Option<&'e El<'e>> {
+fn member<'s, 'e>(els: &'s [El<'e>], id: &str, role: &str) -> Option<&'s El<'e>> {
     els.iter()
         .find(|e| tag(e).is_some_and(|t| t.id == id && t.role == role))
 }
@@ -60,8 +62,9 @@ fn side_ends(side: &El, host: &El) -> Option<(P, P)> {
 // Conservatories: which are left out, and the host wall each adjoins
 
 /// DESNZ-defined: a separated or an unheated conservatory is not entered. Every member of one,
-/// and every opening in a member, is left out of the conversion, with a notice; the host wall
-/// stays as drawn.
+/// and every opening in a member, is left out of the conversion, with a notice. The host wall
+/// of a separated one stays as drawn; that of an unheated one is sheltered where it adjoins
+/// (`conservatory_hosts`).
 pub(super) fn left_out<'a>(ctx: &mut Ctx, els: &[El<'a>]) -> BTreeSet<&'a str> {
     let mut out: BTreeSet<&'a str> = BTreeSet::new();
     let mut said: BTreeSet<&str> = BTreeSet::new();
@@ -81,7 +84,15 @@ pub(super) fn left_out<'a>(ctx: &mut Ctx, els: &[El<'a>]) -> BTreeSet<&'a str> {
         };
         out.insert(e.name);
         if said.insert(t.id) {
-            ctx.notices.push(notice("/Zone", format!("The {status} conservatory on '{}' is left out: only a heated conservatory open to the dwelling is entered. '{}' stays an external wall.", t.host, t.host)));
+            let host = if status == "unheated" {
+                format!(
+                    "'{}' is a sheltered wall where the conservatory adjoins it.",
+                    t.host
+                )
+            } else {
+                format!("'{}' stays an external wall.", t.host)
+            };
+            ctx.notices.push(notice("/Zone", format!("The {status} conservatory on '{}' is left out: only a heated conservatory open to the dwelling is entered. {host}", t.host)));
         }
     }
     let hosted: Vec<&'a str> = els
@@ -93,21 +104,38 @@ pub(super) fn left_out<'a>(ctx: &mut Ctx, els: &[El<'a>]) -> BTreeSet<&'a str> {
     out
 }
 
-/// A non-separated conservatory's host wall, less the span the conservatory adjoins: that span
+/// A conservatory's host wall, split where the conservatory adjoins it. Non-separated, that span
 /// is internal, between two parts of the dwelling (DESNZ-defined: a conservatory wall is an
-/// edge not shared with another building part). Returns the host walls replaced, their pieces
-/// on either side of the span, and the conservatory floors (each its own building part).
+/// edge not shared with another building part), so it is left out. Unheated, the span is a
+/// sheltered wall with the unheated space type the bundle states (DESNZ-defined, EPC 04 4.3.1).
+/// Separated, the host wall stays as drawn. Reads the members of every conservatory, so it
+/// takes the elements before `left_out`. Returns the host walls replaced, their pieces (each with
+/// its unheated space type when sheltered), and the non-separated conservatory floors (each its
+/// own building part).
 #[allow(clippy::type_complexity)]
 pub(super) fn conservatory_hosts<'a>(
     ctx: &mut Ctx,
-    els: &'a [El<'a>],
-) -> (BTreeSet<&'a str>, Vec<El<'a>>, Vec<Vec<P>>) {
+    els: &[El<'a>],
+) -> (
+    BTreeSet<&'a str>,
+    Vec<(El<'a>, Option<&'a str>)>,
+    Vec<Vec<P>>,
+) {
     let (mut hosts, mut pieces, mut floors) = (BTreeSet::new(), Vec::new(), Vec::new());
-    let ids: BTreeSet<&str> = els
+    let ids: BTreeMap<&str, Option<&str>> = els
         .iter()
-        .filter_map(|e| tag(e).filter(|t| t.kind == "conservatory").map(|t| t.id))
+        .filter_map(|e| {
+            tag(e)
+                .filter(|t| t.kind == "conservatory")
+                .map(|t| (t.id, t.conservatory_type))
+        })
         .collect();
-    for id in ids {
+    for (id, status) in ids {
+        let unheated = match status {
+            Some("non-separated") => false,
+            Some("unheated") => true,
+            _ => continue, // separated stays as drawn; any other type is a `left_out` error
+        };
         let (Some(left), Some(right), Some(floor)) = (
             member(els, id, "left-wall"),
             member(els, id, "right-wall"),
@@ -116,7 +144,17 @@ pub(super) fn conservatory_hosts<'a>(
             ctx.errors.push(error("/Zone".into(), format!("Conservatory '{id}' has lost a side wall or its floor. Place the conservatory again from its host wall.")));
             continue;
         };
-        let host_name = tag(left).expect("member").host;
+        let t = tag(left).expect("member");
+        let host_name = t.host;
+        let space = if unheated {
+            let Some(space) = t.adjacent_space_type else {
+                ctx.errors.push(error(left.path(), format!("Unheated conservatory '{id}' does not state what unheated space '{host_name}' borders. Choose corridor, garage, roof void or stairwell on the conservatory.")));
+                continue;
+            };
+            Some(space)
+        } else {
+            None
+        };
         let Some(host) = els
             .iter()
             .find(|e| e.name == host_name && wall_kind(e).is_some() && tag(e).is_none())
@@ -132,7 +170,8 @@ pub(super) fn conservatory_hosts<'a>(
         let along = |x: P| dot(sub(x, p), unit(sub(q, p)));
         let (lo, hi) = if along(a) <= along(b) { (a, b) } else { (b, a) };
         if let Some(o) = els.iter().find(|o| {
-            o.host() == Some(host.name)
+            !unheated
+                && o.host() == Some(host.name)
                 && (o.ty == "BuildingElementTransparent" || o.flag("is_external_door"))
                 && o.pts.len() >= 2
                 && (along(o.plan_mid()) - along(lo)) > TOL
@@ -142,19 +181,31 @@ pub(super) fn conservatory_hosts<'a>(
             continue;
         }
         hosts.insert(host.name);
-        for (from, to) in [(p, lo), (hi, q)] {
+        let mut spans = vec![(p, lo, None), (hi, q, None)];
+        if unheated {
+            spans.insert(1, (lo, hi, space));
+        }
+        for (from, to, space) in spans {
             if dist(from, to) > TOL {
-                pieces.push(El {
+                let ty = if space.is_some() {
+                    "BuildingElementAdjacentUnconditionedSpace_Simple"
+                } else {
+                    host.ty
+                };
+                let piece = El {
                     row: host.row,
                     name: host.name,
                     zone: host.zone,
-                    ty: host.ty,
+                    ty,
                     pts: vec![from, to],
                     level: host.level,
-                });
+                };
+                pieces.push((piece, space));
             }
         }
-        floors.push(floor.pts.clone());
+        if !unheated {
+            floors.push(floor.pts.clone());
+        }
     }
     (hosts, pieces, floors)
 }
@@ -565,7 +616,6 @@ fn defaulted_notice(ctx: &mut Ctx, part: &str, defaulted: Vec<String>) {
 pub(super) fn conservatory_walls(
     ctx: &mut Ctx,
     conservatory: &[bool],
-    kinds: &[(&El, Kind)],
     walls: &mut [HemieWall],
     windows: &[&El],
     doors: &[&El],
@@ -578,11 +628,7 @@ pub(super) fn conservatory_walls(
             continue;
         }
         let source = walls[wi].source;
-        let kind = kinds
-            .iter()
-            .find(|(x, _)| x.name == source.name)
-            .map(|(_, k)| *k)
-            .expect("wall");
+        let kind = wall_kind(source).expect("wall");
         // The edge of the host wall nearest each opening, as for storey walls.
         let nearest = |o: &El| {
             let m = o.plan_mid();
@@ -786,8 +832,14 @@ pub(super) fn conservatory_roof(
     roof["pitch_type"] = json!(pitch_type);
     roof["slope_orientation"] = json!(slope_orientation);
     roof["pitch"] = json!(pitch);
-    roof["is_external_left_gable_wall"] = json!(gable_at(left));
-    roof["is_external_right_gable_wall"] = json!(gable_at(scale(left, -1.0)));
+    let (left, right) = (gable_at(left), gable_at(scale(left, -1.0)));
+    roof["is_external_left_gable_wall"] = json!(left);
+    roof["is_external_right_gable_wall"] = json!(right);
+    // HEMIE builds an exposed gable of a conservatory roof as wholly glazed, with no input for
+    // its glazing; the drawing's gable glazing does not reach it.
+    if left || right {
+        ctx.notices.push(notice("/Zone", format!("Conservatory '{part}': HEMIE treats the triangle of each exposed gable above the eaves as fully glazed, whatever is drawn there.")));
+    }
     Some(roof)
 }
 
@@ -1141,6 +1193,7 @@ mod tests {
         // Facing north (the slope), the profiled west gable is on the left.
         assert_eq!(roof["is_external_left_gable_wall"], true);
         assert_eq!(roof["is_external_right_gable_wall"], false);
+        assert!(notices.iter().any(|n| n.message.contains("fully glazed")));
         assert!(notices
             .iter()
             .any(|n| n.message.contains("opens as closed, the default")));
@@ -1155,6 +1208,68 @@ mod tests {
             .filter(|w| w["storey_index"] == 0)
             .count();
         assert_eq!(ground_walls, 5, "{main}");
+    }
+
+    #[test]
+    fn a_dual_pitch_conservatory_roof_has_its_front_gable() {
+        let roof_cell = cell(conservatory("roof", "non-separated"));
+        let lean_to = plane(
+            "C roof",
+            1,
+            &[[2.0, 6.0], [6.0, 6.0], [6.0, 9.0], [2.0, 9.0]],
+            15.0,
+            0.0,
+            false,
+        )
+        .replacen(",10,", ",7,", 1)
+            + roof_cell.as_str();
+        let dual = [
+            plane(
+                "C roof W",
+                1,
+                &[[2.0, 9.0], [2.0, 6.0], [4.0, 6.0], [4.0, 9.0]],
+                20.0,
+                270.0,
+                false,
+            ),
+            plane(
+                "C roof E",
+                1,
+                &[[6.0, 6.0], [6.0, 9.0], [4.0, 9.0], [4.0, 6.0]],
+                20.0,
+                90.0,
+                false,
+            ),
+        ]
+        .map(|p| p.replacen(",10,", ",7,", 1) + roof_cell.as_str())
+        .join("\n");
+        let glazing = conservatory("roof-glazing", "non-separated");
+        let house = conservatory_house("non-separated", &[0, 1])
+            .replace(&lean_to, &dual)
+            .replace(
+                &opening("Rooflight", "C roof", 1, [3.0, 7.0], [5.0, 7.0], 2.0, 1.5, &glazing),
+                &[
+                    opening("RL W", "C roof W", 1, [2.5, 7.0], [3.5, 7.0], 2.0, 1.5, &glazing),
+                    opening("RL E", "C roof E", 1, [4.5, 7.0], [5.5, 7.0], 2.0, 1.5, &glazing),
+                ]
+                .join("\n"),
+            )
+            .replace(r#"{""geometry_face"":{""top_profile"":[{""h"":2.4},{""h"":3.2}]},"#, "{")
+            .replace(
+                r#"{""hemie_bundle"":{""kind"":""conservatory"",""bundle_id"":""conservatory-1"",""role"":""front-wall"""#,
+                r#"{""geometry_face"":{""top_profile"":[{""h"":2.4},{""h"":3.1},{""h"":2.4}]},""hemie_bundle"":{""kind"":""conservatory"",""bundle_id"":""conservatory-1"",""role"":""front-wall"""#,
+            );
+        let (model, errors, notices) = run(&house);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let roof = &conservatory_part(&model)["roof"];
+        assert_eq!(roof["pitch_type"], "dual", "{roof}");
+        assert!((roof["glazing_fraction"].as_f64().unwrap() - 0.3).abs() < 1e-9);
+        // The front (north) wall is the one exposed gable, on one side of the slope it faces.
+        assert_ne!(
+            roof["is_external_left_gable_wall"], roof["is_external_right_gable_wall"],
+            "{roof}"
+        );
+        assert!(notices.iter().any(|n| n.message.contains("fully glazed")));
     }
 
     #[test]
@@ -1173,21 +1288,44 @@ mod tests {
 
     #[test]
     fn separated_and_unheated_conservatories_are_left_out_with_a_notice() {
+        let sheltered =
+            r#"HEMIE_construction_sheltered_wall,"{""wall_construction_type"":""cavity""}""#;
         for status in ["separated", "unheated"] {
-            let (model, errors, notices) = run(&conservatory_house(status, &[0, 1]));
+            let house = conservatory_house(status, &[0, 1])
+                .replace(
+                    r#""conservatory_type"":""unheated"""#,
+                    r#""conservatory_type"":""unheated"",""adjacent_space_type"":""garage"""#,
+                )
+                .replacen(
+                    "HEMIE_region,England",
+                    &format!("HEMIE_region,England\n{sheltered}"),
+                    1,
+                );
+            let (model, errors, notices) = run(&house);
             assert!(errors.is_empty(), "{status}: {errors:#?}");
             let parts = model["Zone"]["building_parts"].as_object().unwrap();
             assert_eq!(parts.len(), 1, "{status}");
-            // The host wall stays one external wall.
-            assert!(
-                parts["Main"]["walls"]
-                    .as_array()
-                    .unwrap()
+            let ground: Vec<&Value> = parts["Main"]["walls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|w| w["storey_index"] == 0)
+                .collect();
+            if status == "separated" {
+                // The host wall stays one external wall.
+                assert_eq!(ground.len(), 4, "{ground:#?}");
+            } else {
+                // DESNZ (EPC 04 4.3.1): the host wall is sheltered where the unheated
+                // conservatory adjoins it, with the space type the bundle states.
+                assert_eq!(ground.len(), 6, "{ground:#?}");
+                let shelt: Vec<&&Value> = ground
                     .iter()
-                    .filter(|w| w["storey_index"] == 0)
-                    .count()
-                    == 4
-            );
+                    .filter(|w| w["wall_type"] == "sheltered")
+                    .collect();
+                assert_eq!(shelt.len(), 1, "{ground:#?}");
+                assert_eq!(shelt[0]["adjacent_space_type"], "garage");
+                assert_eq!(shelt[0]["construction"], "sheltered_wall");
+            }
             assert!(
                 notices
                     .iter()
@@ -1196,6 +1334,14 @@ mod tests {
                 "{status}: {notices:#?}"
             );
         }
+        // No space type: the converter cannot choose one.
+        let (_, errors, _) = run(&conservatory_house("unheated", &[0, 1]));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("does not state what unheated space")),
+            "{errors:#?}"
+        );
     }
 
     #[test]
