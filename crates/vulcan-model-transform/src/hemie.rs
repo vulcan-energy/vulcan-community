@@ -29,6 +29,9 @@ const TOL: f64 = 0.1;
 /// DESNZ-defined: the height between storeys, and between a storey and a roof room, that is in
 /// no storey's ceiling height (m).
 const STOREY_GAP: f64 = 0.25;
+/// DESNZ-defined: a room in the roof's common walls are under this height (m) for at least half
+/// their length; otherwise the floor is a storey.
+const COMMON_WALL_HEIGHT: f64 = 1.8;
 /// ours: how far a roof plane may overhang the building part it covers (m).
 const EAVES: f64 = 0.6;
 /// DESNZ-defined: heated pitched roof areal heat capacity when the element states none (J/m².K).
@@ -394,6 +397,9 @@ impl<'a> El<'a> {
         self.text("linked_wall")
             .or_else(|| self.text("parent_element"))
     }
+    fn length(&self) -> f64 {
+        dist(self.pts[0], self.pts[1])
+    }
     fn plan_mid(&self) -> P {
         centroid(&self.pts)
     }
@@ -603,14 +609,21 @@ impl Ctx<'_> {
     /// A number the element must state; a missing one is an error naming the element and field.
     fn need(&mut self, e: &El, key: &str) -> Option<f64> {
         let value = e.num(key);
-        if value.is_none() {
-            self.errors.push(error(
-                e.path(),
-                format!(
-                    "'{}' does not state its {key}, which the existing-building converter needs.",
-                    e.name
-                ),
-            ));
+        let missing = error(
+            e.path(),
+            format!(
+                "'{}' does not state its {key}, which the existing-building converter needs.",
+                e.name
+            ),
+        );
+        // Once per element and field, though a wall can be several outline edges.
+        if value.is_none()
+            && !self
+                .errors
+                .iter()
+                .any(|x| x.path == missing.path && x.message == missing.message)
+        {
+            self.errors.push(missing);
         }
         value
     }
@@ -985,6 +998,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     // Rule: a floor under heated slopes with gables is a room in the roof, not a storey; a gable
     // has a sloped top, a knee wall does not (derived from the model). With gables only, the
     // slopes run down to the floor: a room in the roof with knee height 0 (DESNZ-defined).
+    // DESNZ-defined: where external walls continue up from the storey below (common walls),
+    // the floor is a room in the roof only when under 1.8 m for at least half their length;
+    // otherwise it is a storey, and heated slopes over it are a vaulted ceiling.
     let heated_above = top_level > 0
         && planes
             .iter()
@@ -995,7 +1011,17 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         .map(|(w, _)| *w)
         .collect();
     let has_gables = top_walls.iter().any(|w| w.has_profile());
-    let roof_room = (heated_above && has_gables).then_some(top_level);
+    let (mut common, mut low) = (0.0, 0.0);
+    for (w, kind) in &walls {
+        if w.level == top_level && *kind == Kind::External && !w.has_profile() {
+            let h = ctx.need(w, "height")?;
+            common += w.length();
+            if h < COMMON_WALL_HEIGHT {
+                low += w.length();
+            }
+        }
+    }
+    let roof_room = (heated_above && has_gables && low >= common / 2.0).then_some(top_level);
     let storey_levels: Vec<i64> = levels
         .iter()
         .copied()
@@ -1144,7 +1170,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 }
             }
             if carried.iter().all(Option::is_none) {
-                ctx.errors.push(error("/Zone".into(), format!("Building part '{}' has no walls on floor {s}: the floor above touches the outline of floor {s} only at a corner. Draw floor {} against a wall of floor {s}, or draw it as its own outline.", names[pi], s + 1)));
+                ctx.errors.push(error("/Zone".into(), format!("Building part '{}' has no walls on floor {s}: floor {} does not sit on the floor below. HEMIE needs each storey stacked on the one below.", names[pi], s + 1)));
                 continue;
             }
             if lengths == 0.0 {
@@ -2325,6 +2351,25 @@ HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#;
     }
 
     #[test]
+    fn a_vaulted_first_floor_with_gables_and_full_height_eaves_walls_fails_as_vaulted() {
+        let profile =
+            r#""{""geometry_face"":{""top_profile"":[{""h"":2.8},{""h"":5},{""h"":2.8}]}}""#;
+        let mut exposed = box_walls(&BOX, &[0]);
+        exposed.push(wall("E S", 1, [0.0, 0.0], [8.0, 0.0], 2.8));
+        exposed.push(wall("G E", 1, [8.0, 0.0], [8.0, 6.0], 2.8) + profile);
+        exposed.push(wall("E N", 1, [8.0, 6.0], [0.0, 6.0], 2.8));
+        exposed.push(wall("G W", 1, [0.0, 6.0], [0.0, 0.0], 2.8) + profile);
+        exposed.extend(heated_roof());
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(
+            errors[0].message.contains("vaulted ceiling"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
     fn several_gables_at_one_end_of_a_roof_room_stop_and_are_named() {
         let mut exposed = heated_roof();
         exposed.push(gable("G W1", [0.0, 0.0], [0.0, 3.0]));
@@ -2342,13 +2387,23 @@ HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#;
     }
 
     #[test]
-    fn a_wall_with_no_height_stops_and_is_named() {
-        let mut exposed = box_walls(&BOX, &[0, 1]);
-        exposed[0] = exposed[0].replace(",90,1,2.8,", ",90,1,,");
+    fn a_wall_with_no_height_stops_and_is_named_once() {
+        // W01 runs along the main part and the extension: two outline edges, one error.
+        let l: [P; 6] = [
+            [0.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 9.0],
+            [5.0, 9.0],
+            [5.0, 6.0],
+            [0.0, 6.0],
+        ];
+        let mut exposed = box_walls(&l, &[0]);
+        exposed[1] = exposed[1].replace(",90,1,2.8,", ",90,1,,");
+        exposed.extend(box_walls(&BOX, &[1]));
         exposed.extend(gable_roof());
-        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&l)));
         assert_eq!(errors.len(), 1, "{errors:#?}");
-        assert!(errors[0].path.ends_with("/W00"));
+        assert!(errors[0].path.ends_with("/W01"));
         assert!(errors[0].message.contains("does not state its height"));
     }
 
