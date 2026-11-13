@@ -64,8 +64,8 @@ export interface GeometrySchemaPort {
   getRevision?(): number;
   /** The selected target needs thermal-bridge records even where its schema accepts a total. */
   requiresDetailedThermalBridges?(): boolean;
-  /** The selected target's rules for these model settings; undefined keeps the defaults of {@link targetRules}. */
-  targetRules?(modelSettings: Readonly<Record<string, unknown>>): TargetRules | undefined;
+  /** The selected target's rules for these model settings; a rule it leaves out keeps the default of {@link targetRules}. */
+  targetRules?(modelSettings: Readonly<Record<string, unknown>>): Partial<TargetRules> | undefined;
   /** The selected target's model type; undefined when the host has no target catalogue. */
   targetSchemaMode?(): GeometrySchemaMode | undefined;
   preload(mode: GeometrySchemaMode): Promise<void>;
@@ -116,11 +116,14 @@ export function targetSchemaMode(port?: GeometrySchemaPort): GeometrySchemaMode 
 }
 
 /**
- * The default rules: model-validity checks run for every target, the FHS input rules and
- * Building Regulations checks for an FHS target, nothing is excluded or hidden, and products
- * come from the host's own sources.
+ * The host's rules over the defaults: model-validity checks run for every target, the FHS input
+ * rules and Building Regulations checks for an FHS target, nothing is excluded or hidden, and
+ * products come from the host's own sources.
  */
-export function defaultTargetRules(port: GeometrySchemaPort | undefined): TargetRules {
+export function targetRules(
+  port: GeometrySchemaPort | undefined,
+  modelSettings: Readonly<Record<string, unknown>>,
+): TargetRules {
   return {
     modelValidityChecks: true,
     fhsInputRules: targetSchemaMode(port) === 'fhs',
@@ -128,15 +131,8 @@ export function defaultTargetRules(port: GeometrySchemaPort | undefined): Target
     excludedElementTypes: {},
     hiddenFields: {},
     hemDatabaseProducts: false,
+    ...port?.targetRules?.(modelSettings),
   };
-}
-
-/** The host's rules, else {@link defaultTargetRules}. */
-export function targetRules(
-  port: GeometrySchemaPort | undefined,
-  modelSettings: Readonly<Record<string, unknown>>,
-): TargetRules {
-  return port?.targetRules?.(modelSettings) ?? defaultTargetRules(port);
 }
 
 function unavailable(operation: string): never {

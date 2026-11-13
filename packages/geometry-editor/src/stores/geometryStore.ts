@@ -2872,7 +2872,7 @@ export interface CreateGeometryStoreOptions {
   /**
    * Workspace path of a pinned target's own standard defaults, used in place of
    * defaultDefaultsPath for a document pinned to it; undefined (or an unknown pin) keeps
-   * defaultDefaultsPath. A document on its target's standard defaults moves to the new
+   * defaultDefaultsPath. Ignored when defaultDefaultsPath is null. A document on its target's standard defaults moves to the new
    * target's when the pin changes.
    */
   defaultsPathForTarget?: (targetBundleId: string) => string | undefined;

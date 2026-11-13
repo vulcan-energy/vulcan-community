@@ -108,6 +108,8 @@ export type GeometryProductSlot = Readonly<{
   candidates: readonly GeometryProductCandidate[];
   /** Name of the Geometry CSV row the system comes from. */
   row?: string;
+  /** Model path of that row's own object; `path` is below it. */
+  row_path?: string;
 }>;
 
 /** Plain words for the HEM Database technology types, for chips and pickers. */

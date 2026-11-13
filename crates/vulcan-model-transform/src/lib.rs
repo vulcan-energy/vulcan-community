@@ -478,6 +478,9 @@ pub struct ProductSlot {
     /// Name of the Geometry CSV row the system comes from, where one does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub row: Option<String>,
+    /// Model path of that row's own object: the slot's object sits at `path` below it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

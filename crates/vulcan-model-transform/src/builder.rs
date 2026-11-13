@@ -2216,16 +2216,21 @@ impl JSONBuilder {
             let rows = self.slot_rows.borrow();
             *self.product_slots.borrow_mut() = slots
                 .into_iter()
-                .map(|slot| crate::ProductSlot {
+                .map(|slot| {
                     // The innermost authored object that holds the slot.
-                    row: rows
+                    let (row_path, row) = rows
                         .iter()
                         .filter(|(path, _)| {
                             slot.path == *path || slot.path.starts_with(&format!("{path}/"))
                         })
                         .max_by_key(|(path, _)| path.len())
-                        .map(|(_, row)| row.clone()),
-                    ..slot
+                        .cloned()
+                        .unzip();
+                    crate::ProductSlot {
+                        row,
+                        row_path,
+                        ..slot
+                    }
                 })
                 .collect();
         }

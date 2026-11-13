@@ -96,6 +96,17 @@ describe('geometry store default defaults-path policy', () => {
     expect(store.getState().defaultsPath).toBe('input/defaults/mine.json');
   });
 
+  it('a host with no implicit defaults (null) takes no target standard defaults either', () => {
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      defaultsPathForTarget: () => 'input/defaults/epc.json',
+    });
+    store.getState().loadFromCSV('Metadata,,,,\nTargetBundleId,epc,,,\nZone,,,,\n');
+    expect(store.getState().defaultsPath).toBeUndefined();
+    store.getState().setTargetBundleId('fhs');
+    expect(store.getState().generateCSV()).not.toContain('DefaultsPath,');
+  });
+
   it('keepUnchangedDefaults skips re-reading unchanged defaults and psi tables; default loads still re-read', async () => {
     const csv = [
       'Metadata,,,,,,,,,,,,,',

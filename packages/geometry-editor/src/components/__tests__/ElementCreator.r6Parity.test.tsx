@@ -581,3 +581,31 @@ describe('SpaceHeatSystem heat source creation', () => {
     }
   });
 });
+
+describe('System source on a HEM Database products target', () => {
+  it('shows no sample or PCDB source for a system without a product slot', () => {
+    const port = { ...unavailableGeometrySchemaPort, targetRules: () => ({ hemDatabaseProducts: true }) };
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const cylinder = {
+      id: 'hw', type: 'System', name: 'Cylinder', subcategory: 'HotWaterSource', zoneId: 'zone',
+      coordinates: [{ x: 0, y: 0, z: 1 }], extra_json: { HotWaterSource: { 'hw cylinder': { type: 'StorageTank' } } },
+    } as Element;
+    store.setState({
+      elementsById: { hw: cylinder }, elementIds: ['hw'],
+      zones: [{ id: 'zone', name: 'Zone', floorArea: 1, height: 2 }], zoneIds: ['zone'],
+    });
+    render(
+      <GeometryEditorServicePortsProvider schemaPort={port} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
+        <GeometryStoreProvider store={store}>
+          <ElementCreator selection={{ type: 'element', id: 'hw' } as never} setSelection={vi.fn()} useCard={false}
+            inspectorContributions={{ ...emptyGeometryInspectorContributions, productCatalogue: {
+              hasAppliedSystemData: () => false, renderAdvancedHotWaterAction: () => null, renderSystemSource: () => null,
+            } }} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+    expect(screen.queryByRole('button', { name: 'PCDB' })).toBeNull();
+    expect(screen.queryByText('Preset')).toBeNull();
+    expect(screen.getByText('Category')).toBeTruthy();
+  });
+});

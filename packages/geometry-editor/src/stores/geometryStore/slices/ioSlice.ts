@@ -833,9 +833,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     defaultsRetryTimers: new Set(),
   };
   let knownIds = emptyKnownIds();
-  /** The defaults a document pinned to `targetBundleId` uses when it names none. */
+  /**
+   * The defaults a document pinned to `targetBundleId` uses when it names none. A host with no
+   * implicit defaults (`defaultDefaultsPath: null`) takes no target defaults either.
+   */
   const standardDefaultsPath = (targetBundleId: string | undefined) =>
-    (targetBundleId && options.defaultsPathForTarget?.(targetBundleId)) || options.defaultDefaultsPath;
+    options.defaultDefaultsPath &&
+    ((targetBundleId && options.defaultsPathForTarget?.(targetBundleId)) || options.defaultDefaultsPath);
 
   return (set, get) => {
   const slice: IoSlice = {

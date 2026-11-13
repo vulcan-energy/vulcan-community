@@ -4129,6 +4129,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       },
       renderMvhrDuctAndTerminalManager,
       productCatalogue,
+      hemDatabaseProducts,
       systemHasProductSlot: !!selectedElement?.name && !!productSlots?.some((slot) => slot.row === selectedElement.name),
       renderSpaceHeatSystemPicker,
       renderSpaceHeatSystemEmitterManager,

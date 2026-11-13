@@ -621,6 +621,7 @@ pub(crate) fn resolve_products(
                     default_source: None,
                     candidates: None,
                     row: None,
+                    row_path: None,
                 });
                 continue;
             };
@@ -781,6 +782,7 @@ pub(crate) fn resolve_products(
                 default_source,
                 candidates: Some(key),
                 row: None,
+                row_path: None,
             });
         }
     }
@@ -1470,6 +1472,7 @@ pub(crate) mod tests {
             default_source: None,
             candidates: None,
             row: None,
+            row_path: None,
         };
         let model = |existing: bool| {
             json!({
