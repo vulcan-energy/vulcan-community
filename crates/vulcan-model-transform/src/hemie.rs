@@ -894,6 +894,7 @@ pub(crate) fn map_existing_building(
         notices: Vec::new(),
         model: &snapshot,
     };
+    systems::check_vents(&mut ctx);
     let converted = convert(&mut ctx, csv);
     if !ctx.settings.missing.is_empty() {
         ctx.errors.push(error("/Metadata".into(), format!("An existing-building EPC needs these model settings, which the Metadata section does not state: {}.", ctx.settings.missing.iter().cloned().collect::<Vec<_>>().join("; "))));
@@ -1603,7 +1604,9 @@ fn roof_windows(
         .filter(|w| hosts.iter().any(|h| w.host() == Some(h.name)))
         .filter_map(|w| {
             placed.insert(w.name.to_string());
-            window(ctx, w, true)
+            let mut value = window(ctx, w, true)?;
+            systems::no_roof_window_vents(ctx, w.name, &mut value);
+            Some(value)
         })
         .collect()
 }

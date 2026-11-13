@@ -126,28 +126,69 @@ fn hemie_def<'s>(schema: &'s Value, section: &str, ty: &str) -> Option<&'s str> 
     })
 }
 
-/// DESNZ-defined: with no volume, dimensions or volume descriptor HEMIE takes
-/// the tank as inaccessible; with no standing loss, efficiency class or install year, the
-/// install year is unknown. HEMIE 0.18.1 requires one of each, so Vulcan states the default.
-fn tank_descriptors(tank: &mut Value, path: &str, notices: &mut Vec<SchemaOmission>) {
-    let has =
-        |t: &Value, keys: &[&str]| keys.iter().all(|k| t.get(*k).is_some_and(|v| !v.is_null()));
+/// A storage or buffer tank's size and standing loss: what it states, or the DESNZ defaults.
+/// DESNZ-defined: with no volume, dimensions or volume descriptor HEMIE takes the tank as
+/// inaccessible; with no standing loss or efficiency class, the install year, unknown when not
+/// given (a buffer tank's pump power defaults from the install year too). HEMIE 0.18.1 requires
+/// them, so Vulcan states the defaults. A half-stated or doubly stated size fails, naming it.
+/// `category` is the volume descriptor's key: `tank_volume_category`, or `volume_category` for
+/// a buffer tank.
+fn tank_descriptors(
+    tank: &mut Value,
+    category: &str,
+    path: &str,
+    errors: &mut Vec<ValidationError>,
+    notices: &mut Vec<SchemaOmission>,
+) -> bool {
+    let has = |t: &Value, key: &str| t.get(key).is_some_and(|v| !v.is_null());
+    let errors_before = errors.len();
     let (mut missing, mut applied) = (Vec::new(), Vec::new());
-    if !has(tank, &["volume"])
-        && !has(tank, &["external_diameter", "external_height"])
-        && !has(tank, &["tank_volume_category"])
-    {
-        tank["tank_volume_category"] = json!("Inaccessible");
-        missing.push("volume, dimensions or volume descriptor");
-        applied.push("volume descriptor Inaccessible");
+    let dims = ["external_diameter", "external_height"];
+    match dims.map(|k| has(tank, k)) {
+        [true, false] | [false, true] => {
+            let (given, absent) = if has(tank, dims[0]) {
+                (dims[0], dims[1])
+            } else {
+                (dims[1], dims[0])
+            };
+            errors.push(error(path.into(), format!("The tank states its {given} but not its {absent}. Give both, or its volume or volume descriptor instead.")));
+        }
+        both => {
+            let sizes: Vec<&str> = [
+                ("volume", has(tank, "volume")),
+                ("external dimensions", both[0]),
+                (category, has(tank, category)),
+            ]
+            .into_iter()
+            .filter_map(|(k, stated)| stated.then_some(k))
+            .collect();
+            match sizes[..] {
+                [] => {
+                    tank[category] = json!("Inaccessible");
+                    missing.push("volume, dimensions or volume descriptor");
+                    applied.push("volume descriptor Inaccessible");
+                }
+                [_] => {}
+                _ => errors.push(error(path.into(), format!("The tank states its size more than once ({}). HEMIE takes one: keep the most specific.", sizes.join(", ")))),
+            }
+        }
     }
-    if !has(tank, &["daily_losses"])
-        && !has(tank, &["energy_efficiency_class"])
-        && !has(tank, &["installation_year"])
-    {
+    let year = has(tank, "installation_year");
+    let loss = has(tank, "daily_losses") || has(tank, "energy_efficiency_class");
+    let pump = has(tank, "pump_power_at_flow_rate");
+    // A buffer tank needs its pump power or install year even with a standing loss.
+    let buffer = category == "volume_category";
+    if !year && !pump && (!loss || buffer) {
         tank["installation_year"] = json!("unknown");
-        missing.push("standing loss, efficiency class or install year");
+        missing.push(if loss {
+            "install year"
+        } else {
+            "standing loss, efficiency class or install year"
+        });
         applied.push("install year unknown");
+    } else if !year && !loss {
+        // The buffer tank's pump power and its install year are alternatives (HEMIE code).
+        errors.push(error(path.into(), "The buffer tank states its pump power but no standing loss, efficiency class or install year, and HEMIE takes the install year only in place of the pump power. State its standing loss or efficiency class.".into()));
     }
     if !applied.is_empty() {
         notices.push(notice(
@@ -159,6 +200,7 @@ fn tank_descriptors(tank: &mut Value, path: &str, notices: &mut Vec<SchemaOmissi
             ),
         ));
     }
+    errors.len() == errors_before
 }
 
 /// Give every system that has a HEMIE form in that form, with no `Zone`.
@@ -187,8 +229,23 @@ pub(super) fn map_systems(
             let mut hemie = system.clone();
             hemie.as_object_mut().expect("system").remove("Zone");
             hemie["model_type"] = json!("hemie");
-            if system["type"] == "StorageTank" {
-                tank_descriptors(&mut hemie, &path, notices);
+            let tanks_ok = match system["type"].as_str() {
+                Some("StorageTank") => {
+                    tank_descriptors(&mut hemie, "tank_volume_category", &path, errors, notices)
+                }
+                _ => match hemie.get_mut("BufferTank").filter(|b| b.is_object()) {
+                    Some(buffer) => tank_descriptors(
+                        buffer,
+                        "volume_category",
+                        &format!("{path}/BufferTank"),
+                        errors,
+                        notices,
+                    ),
+                    None => true,
+                },
+            };
+            if !tanks_ok {
+                continue;
             }
             if let Some(projected) = to_form(&hemie, def, &path, &mut defs, errors, notices) {
                 *system = projected;
@@ -244,38 +301,53 @@ fn vents(csv: &Rows) -> Vec<Vent<'_>> {
     out
 }
 
+/// Check each vent's row once: its position, and a host that names one element.
+pub(super) fn check_vents(ctx: &mut Ctx) {
+    let csv = ctx.settings.csv;
+    let els = super::elements(csv);
+    for vent in vents(csv) {
+        let path = json_pointer(&[VENTILATION, vent.name]);
+        match text(vent.row, "vent_position") {
+            Some("bottom" | "middle" | "top") => {}
+            Some(other) => ctx.errors.push(error(path.clone(), format!("Vent '{}' has vent_position '{other}'. Give bottom, middle or top.", vent.name))),
+            // DESNZ-defined: a vent's position in its element defaults to middle.
+            None => ctx.notices.push(notice(&path, format!("Vent '{}' states no vent_position, so HEMIE takes the DESNZ default: the middle of its element.", vent.name))),
+        }
+        if let Some(host) = text(vent.row, "host_element") {
+            if els.iter().filter(|e| e.name == host).count() > 1 {
+                ctx.errors.push(error(path, format!("Vent '{}' names host_element '{host}', which more than one element is called. Rename one so the vent's element is unambiguous.", vent.name)));
+            }
+        }
+    }
+}
+
 /// The mechanical vents in `host` (a wall, window or door), as HEMIE `mechanical_vents`.
 pub(super) fn host_vents(ctx: &mut Ctx, host: &str) -> Option<Value> {
     let mut out = Map::new();
     for vent in vents(ctx.settings.csv) {
-        if text(vent.row, "host_element") != Some(host) {
-            continue;
+        if text(vent.row, "host_element") == Some(host) {
+            let position = text(vent.row, "vent_position").unwrap_or("middle");
+            out.insert(
+                vent.name.into(),
+                json!({"type": "Mechanical", "position": position, "vent_system": vent.vent_type}),
+            );
         }
-        let path = json_pointer(&[VENTILATION, vent.name]);
-        let position = match text(vent.row, "vent_position") {
-            Some(p @ ("bottom" | "middle" | "top")) => p,
-            Some(other) => {
-                ctx.errors.push(error(
-                    path,
-                    format!(
-                        "Vent '{}' has vent_position '{other}'. Give bottom, middle or top.",
-                        vent.name
-                    ),
-                ));
-                continue;
-            }
-            // DESNZ-defined: a vent's position in its element defaults to middle.
-            None => {
-                ctx.notices.push(notice(&path, format!("Vent '{}' states no vent_position, so HEMIE takes the DESNZ default: the middle of '{host}'.", vent.name)));
-                "middle"
-            }
-        };
-        out.insert(
-            vent.name.into(),
-            json!({"type": "Mechanical", "position": position, "vent_system": vent.vent_type}),
-        );
     }
     (!out.is_empty()).then_some(Value::Object(out))
+}
+
+/// HEMIE 0.18.1 takes no vents in a roof window (it collects them from walls, roof-room walls,
+/// dormers and bays only), so a vent there fails, naming it.
+pub(super) fn no_roof_window_vents(ctx: &mut Ctx, window: &str, value: &mut Value) {
+    let Some(Value::Object(vents)) = value
+        .as_object_mut()
+        .and_then(|w| w.remove("mechanical_vents"))
+    else {
+        return;
+    };
+    for name in vents.keys() {
+        ctx.errors.push(error(json_pointer(&[VENTILATION, name]), format!("Vent '{name}' is in roof window '{window}'. HEMIE takes no mechanical vents in roof windows; name the wall, window or door it vents through.")));
+    }
 }
 
 /// Vents in storey walls go in the first outline edge of that wall: a wall's edges are
@@ -464,6 +536,54 @@ mod tests {
                     && e.message.contains("\"boiler_location\"")),
             "{errors:#?}"
         );
+    }
+
+    #[test]
+    fn a_half_or_doubly_stated_tank_size_fails_naming_it() {
+        let (_, errors, _) = run(
+            json!({"HotWaterSource": {"hw": tank(json!({"external_diameter": 0.5, "daily_losses": 1.6}))}}),
+        );
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0]
+            .message
+            .contains("external_diameter but not its external_height"));
+        let (_, errors, _) = run(
+            json!({"HotWaterSource": {"hw": tank(json!({"volume": 200, "tank_volume_category": "Large", "daily_losses": 1.6}))}}),
+        );
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0]
+            .message
+            .contains("more than once (volume, tank_volume_category)"));
+    }
+
+    fn heat_pump(buffer: Value) -> Value {
+        json!({"HeatSourceWet": {"hp": {"type": "HeatPump", "product_id": 693003, "EnergySupply": "mains elec",
+            "source_type": "OutsideAir", "BufferTank": buffer}}})
+    }
+
+    #[test]
+    fn a_buffer_tank_takes_the_desnz_descriptors_unless_its_pump_power_is_stated() {
+        let (model, errors, notices) = run(heat_pump(json!({})));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let buffer = &model["HeatSourceWet"]["hp"]["BufferTank"];
+        assert_eq!(buffer["volume_category"], "Inaccessible");
+        assert_eq!(buffer["installation_year"], "unknown");
+        assert!(notices
+            .iter()
+            .any(|n| n.path == "/HeatSourceWet/hp/BufferTank"));
+        // A stated pump power stands in for the install year; the loss needs its own value.
+        let (model, errors, _) = run(heat_pump(
+            json!({"volume": 100, "daily_losses": 1.0, "pump_power_at_flow_rate": 0.05}),
+        ));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert!(model["HeatSourceWet"]["hp"]["BufferTank"]
+            .get("installation_year")
+            .is_none());
+        let (_, errors, _) = run(heat_pump(
+            json!({"volume": 100, "pump_power_at_flow_rate": 0.05}),
+        ));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(errors[0].path, "/HeatSourceWet/hp/BufferTank");
     }
 
     fn ventilation(rows: &[&str]) -> Rows {

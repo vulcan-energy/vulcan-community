@@ -2281,17 +2281,6 @@ impl JSONBuilder {
                 &mut errors,
                 &mut notices,
             );
-            // Mechanical ventilation moved into HEMIE Geometry, and its product with it.
-            if result["Zone"]["model_type"] == "hemie" {
-                for slot in self.product_slots.borrow_mut().iter_mut() {
-                    if let Some(name) = slot
-                        .path
-                        .strip_prefix("/InfiltrationVentilation/MechanicalVentilation/")
-                    {
-                        slot.path = format!("/Zone/mechanical_ventilation_system/{name}");
-                    }
-                }
-            }
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
