@@ -2174,25 +2174,6 @@ impl JSONBuilder {
                 }
             }
         }
-        if self.profile.converts_existing_buildings_to_hemie()
-            && result.get("IsExistingBuilding") == Some(&Value::Bool(true))
-        {
-            // HEMIE Geometry replaces the full-input zone, so its element checks do not apply.
-            let full_zone = |path: &str| path.starts_with("/Zone/");
-            self.non_fatal_errors
-                .borrow_mut()
-                .retain(|e| !full_zone(&e.path));
-            self.schema_omissions
-                .borrow_mut()
-                .retain(|o| !full_zone(&o.path));
-            crate::hemie::map_existing_building(
-                result,
-                csv_data,
-                &self.schema,
-                &mut errors,
-                &mut notices,
-            );
-        }
         if self.profile.references_products() {
             let settings = self.product_settings.borrow().clone();
             let db = self
@@ -2240,6 +2221,27 @@ impl JSONBuilder {
         if self.profile.checks_party_wall_lining() {
             crate::epc_mappings::check_element_fields(result, &self.schema, &mut errors);
             crate::epc_mappings::check_primary_pipework(result, &self.schema, &mut errors);
+        }
+        if self.profile.converts_existing_buildings_to_hemie()
+            && result.get("IsExistingBuilding") == Some(&Value::Bool(true))
+        {
+            // HEMIE Geometry replaces the full-input zone, so its element checks do not apply.
+            let full_zone = |path: &str| path.starts_with("/Zone/");
+            self.non_fatal_errors
+                .borrow_mut()
+                .retain(|e| !full_zone(&e.path));
+            self.schema_omissions
+                .borrow_mut()
+                .retain(|o| !full_zone(&o.path));
+            errors.retain(|e| !full_zone(&e.path));
+            notices.retain(|o| !full_zone(&o.path));
+            crate::hemie::map_existing_building(
+                result,
+                csv_data,
+                &self.schema,
+                &mut errors,
+                &mut notices,
+            );
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
