@@ -643,7 +643,14 @@ const FAN_COIL_COOLING: &[Need] = &[
 /// section, the referring system's type (None: any), the reference's pointer inside it, the
 /// section it names, and what the named entry must be. A meta system's members are checked
 /// as well.
-const SYSTEM_REFERENCES: [(&str, Option<&str>, &str, &str, &[Need]); 7] = [
+type SystemReference = (
+    &'static str,
+    Option<&'static str>,
+    &'static str,
+    &'static str,
+    &'static [Need],
+);
+const SYSTEM_REFERENCES: [SystemReference; 7] = [
     (
         "SpaceHeatSystem",
         None,
