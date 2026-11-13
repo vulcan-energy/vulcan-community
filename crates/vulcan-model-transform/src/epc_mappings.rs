@@ -375,16 +375,9 @@ pub(crate) fn check_solar_absorption(
 ///   reported.
 pub(crate) fn apply_desnz_defaults(
     model: &mut Value,
-    csv: &Rows,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
 ) {
-    let stated = |name: &str| {
-        csv.get("Metadata")
-            .into_iter()
-            .flatten()
-            .any(|row| row.get("Field").and_then(Value::as_str) == Some(name))
-    };
     for (supply, value) in model["EnergySupply"].as_object_mut().into_iter().flatten() {
         let Some(battery) = value
             .get_mut("ElectricBattery")
@@ -465,7 +458,12 @@ pub(crate) fn apply_desnz_defaults(
         .get_mut("InfiltrationVentilation")
         .and_then(Value::as_object_mut)
     {
-        if !stated("Ventilation_ventilation_zone_base_height") {
+        // Stated by a Metadata row or a Systems InfiltrationVentilation row: both are merged
+        // into the model before this runs, and the EPC template carries no value.
+        if ventilation
+            .get("ventilation_zone_base_height")
+            .is_none_or(Value::is_null)
+        {
             let path = "/InfiltrationVentilation/ventilation_zone_base_height";
             if [
                 "detached",

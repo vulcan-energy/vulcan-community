@@ -2146,7 +2146,7 @@ impl JSONBuilder {
             );
         }
         if self.profile.references_products() {
-            crate::epc_mappings::apply_desnz_defaults(result, csv_data, &mut errors, &mut notices);
+            crate::epc_mappings::apply_desnz_defaults(result, &mut errors, &mut notices);
         }
         if self.profile.checks_party_wall_lining() {
             crate::epc_mappings::check_element_fields(result, &self.schema, &mut errors);
