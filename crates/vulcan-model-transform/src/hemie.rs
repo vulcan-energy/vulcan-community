@@ -969,6 +969,15 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         ));
         return None;
     }
+    // A basement drawn as floor 0: its walls are not storey walls, and floor 1 is storey 0.
+    let (first, basement_depth) = match parts::basement_storey(ctx, &els, &walls) {
+        Err(()) => return None,
+        Ok(Some(depth)) => {
+            walls.retain(|(w, _)| w.level != 0);
+            (1, Some(depth))
+        }
+        Ok(None) => (0, None),
+    };
     let planes: Vec<&El> = els.iter().filter(|e| is_plane(e)).collect();
     let heated =
         |p: &&El| p.num("pitch").is_some_and(|x| x > 0.0) && !p.flag("is_unheated_pitched_roof");
@@ -1010,9 +1019,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     if storey_levels
         .iter()
         .enumerate()
-        .any(|(i, l)| *l != i as i64)
+        .any(|(i, l)| *l != i as i64 + first)
     {
-        ctx.errors.push(error("/Zone".into(), format!("The floors with walls are {storey_levels:?}. HEMIE storeys start at floor 0 and follow one another.")));
+        ctx.errors.push(error("/Zone".into(), format!("The floors with walls are {storey_levels:?}. HEMIE storeys start at floor {first} and follow one another.")));
         return None;
     }
     let on_level = |level: i64| -> Vec<&El> {
@@ -1074,9 +1083,12 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 ceilings: Vec::new(),
             }),
             Some(Err(gaps)) => {
-                let above = gaps.last().expect("a gap") + 1;
-                let missing: Vec<String> = gaps.iter().map(usize::to_string).collect();
-                ctx.errors.push(error(on_level(above as i64)[0].path(), format!("Floor {above} is over a lower floor with no floor {} between them, around ({:.2}, {:.2}). A building part's storeys stack one on another; draw the missing floors there, or move the floor above.", missing.join(" or "), p[0], p[1])));
+                let above = *gaps.last().expect("a gap") as i64 + 1 + first;
+                let missing: Vec<String> = gaps
+                    .iter()
+                    .map(|g| (*g as i64 + first).to_string())
+                    .collect();
+                ctx.errors.push(error(on_level(above)[0].path(), format!("Floor {above} is over a lower floor with no floor {} between them, around ({:.2}, {:.2}). A building part's storeys stack one on another; draw the missing floors there, or move the floor above.", missing.join(" or "), p[0], p[1])));
             }
         }
     }
@@ -1102,7 +1114,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         let wall = walls
             .iter()
             .map(|(w, _)| *w)
-            .find(|w| front.host() == Some(w.name) && w.level == 0);
+            .find(|w| front.host() == Some(w.name) && w.level == first);
         if wall.is_none() {
             ctx.errors.push(error(front.path(), format!("Front door '{}' is not in a wall of floor 0. The reference building part's ground storey starts with the front-door wall; link the door to its wall.", front.name)));
         }
@@ -1139,7 +1151,8 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     for pi in 0..parts.len() {
         let bottom = parts[pi].bottom;
         for s in bottom..=parts[pi].top {
-            let level_walls = on_level(s as i64);
+            let level = s as i64 + first;
+            let level_walls = on_level(level);
             let (mut ring, mut carried) =
                 merge_edges(with_wall_ends(&parts[pi].poly, &level_walls), &level_walls);
             if let (0, true, Some(front), Some(front_wall)) = (pi, s == bottom, front, front_wall) {
@@ -1187,7 +1200,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                         value.insert("floorplan_index".into(), json!(i));
                         hemie_walls.push(HemieWall {
                             part: pi,
-                            storey: s,
+                            storey: level as usize,
                             a,
                             b,
                             source: w,
@@ -1202,13 +1215,13 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                                 && boundary_dist(mid(a, b), &other.poly) <= TOL
                         });
                         if !shared {
-                            ctx.errors.push(error("/Zone".into(), format!("Floor {s} has no wall within {TOL} m of its outline between ({:.2}, {:.2}) and ({:.2}, {:.2}). Draw the wall there.", a[0], a[1], b[0], b[1])));
+                            ctx.errors.push(error("/Zone".into(), format!("Floor {level} has no wall within {TOL} m of its outline between ({:.2}, {:.2}) and ({:.2}, {:.2}). Draw the wall there.", a[0], a[1], b[0], b[1])));
                         }
                     }
                 }
             }
             if carried.iter().all(Option::is_none) {
-                ctx.errors.push(error("/Zone".into(), format!("Building part '{}' has no walls on floor {s}: floor {} does not sit on the floor below. HEMIE needs each storey stacked on the one below.", names[pi], s + 1)));
+                ctx.errors.push(error("/Zone".into(), format!("Building part '{}' has no walls on floor {level}: floor {} does not sit on the floor below. HEMIE needs each storey stacked on the one below.", names[pi], level + 1)));
                 continue;
             }
             if lengths == 0.0 {
@@ -1217,7 +1230,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             // ours: one ceiling height per storey, the length-weighted mean of its walls.
             let storey_height = height_sum / lengths;
             if heights.len() > 1 {
-                ctx.notices.push(notice("/Zone", format!("The walls of floor {s} have heights {}. HEMIE takes one ceiling height per storey of a building part, so it uses their length-weighted mean, {storey_height:.3} m.", heights.into_iter().collect::<Vec<_>>().join(", "))));
+                ctx.notices.push(notice("/Zone", format!("The walls of floor {level} have heights {}. HEMIE takes one ceiling height per storey of a building part, so it uses their length-weighted mean, {storey_height:.3} m.", heights.into_iter().collect::<Vec<_>>().join(", "))));
             }
             // DESNZ-defined: HEMIE puts the storey gap above every storey's ceiling, the top one
             // included (the roof sits a gap above it). Derived from the model: a Vulcan wall runs
@@ -1399,17 +1412,14 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         let mut bp = Map::new();
         bp.insert("storeys".into(), Value::Array(storeys));
         bp.insert("walls".into(), Value::Array(part_walls));
-        let lowest_walls: Vec<&El> = hemie_walls
-            .iter()
-            .filter(|w| w.part == pi && w.storey == part.bottom)
-            .map(|w| w.source)
-            .collect();
         let floor_of = parts::PartFloor {
             name: &names[pi],
             bottom: part.bottom,
+            level: part.bottom as i64 + first,
+            first,
             point: interior_point(&part.poly),
             ring: &part.storeys[0],
-            walls: &lowest_walls,
+            basement_depth,
         };
         if let Some(floor) = parts::part_floor(ctx, &els, &floor_of, ground_total, &mut floors_used)
         {
@@ -1494,7 +1504,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let bases = match parts::base_heights(&parts, dwelling.unwrap_or(0.0)) {
         Ok(bases) => bases,
         Err(i) => {
-            ctx.errors.push(error("/Zone".into(), format!("Building part '{}' starts on floor {}, but no building part has a storey on floor {} to carry it. Draw the floor below it.", names[i], parts[i].bottom, parts[i].bottom - 1)));
+            ctx.errors.push(error("/Zone".into(), format!("Building part '{}' starts on floor {}, but no building part has a storey on floor {} to carry it. Draw the floor below it.", names[i], parts[i].bottom as i64 + first, parts[i].bottom as i64 + first - 1)));
             return None;
         }
     };
