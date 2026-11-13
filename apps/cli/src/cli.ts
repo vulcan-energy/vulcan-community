@@ -26,13 +26,18 @@ Commands:
       Propose automatic thermal bridges for a geometry CSV.
   thermal-bridges <csv> --validate [--with-auto] [--summary|--json]
       Validate the CSV's linear thermal bridges, optionally with the auto proposals added.
-  convert <csv> [--output <file>] [--schema <file>] [--defaults <file>] [--json]
+  convert <csv> [--output <file>] [--schema <file>] [--defaults <file>] [--profile <p>] [--json]
       Convert a geometry CSV to HEM input JSON (stdout, or --output). Defaults come from
       --defaults, else the CSV's DefaultsPath (relative to the current directory), else
       the bundled template. Exits 1 when the model fails schema validation.
-  preflight <csv|json> [--schema <file>] [--defaults <file>] [--json]
+  preflight <csv|json> [--schema <file>] [--defaults <file>] [--profile <p>] [--json]
       Run FHS preflight (no simulation) on a HEM JSON, or on a CSV after convert.
+      With --profile epc, convert the CSV and check it against the HEM:EPC schema.
       Exits 1 on any issue.
+
+  --profile core|fhs|epc selects the input: by default FHS, or core when the CSV has
+  ComplianceValidationEnabled,FALSE. epc is HEM:EPC input: new build, or an existing
+  building (HEMIE) when the CSV's Metadata states IsExistingBuilding,TRUE.
   version [--json]
       Print the version and legal notices.
 
@@ -104,11 +109,12 @@ const MODEL_OPTIONS = {
   json: { type: 'boolean' },
   schema: { type: 'string' },
   defaults: { type: 'string' },
+  profile: { type: 'string' },
 } as const;
 
 async function runConvert(args: string[]): Promise<number> {
   const usage =
-    'vulcan-community convert <csv> [--output <file>] [--schema <file>] [--defaults <file>] [--json]';
+    'vulcan-community convert <csv> [--output <file>] [--schema <file>] [--defaults <file>] [--profile <p>] [--json]';
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -130,10 +136,10 @@ async function runConvert(args: string[]): Promise<number> {
 }
 
 async function runPreflight(args: string[]): Promise<number> {
-  const usage = 'vulcan-community preflight <csv|json> [--schema <file>] [--defaults <file>] [--json]';
+  const usage = 'vulcan-community preflight <csv|json> [--schema <file>] [--defaults <file>] [--profile <p>] [--json]';
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: MODEL_OPTIONS });
   const result = await preflightModel(singleCsv(positionals, usage), values);
-  const passed = preflightPassed(result);
+  const passed = preflightPassed(result, values);
   if (values.json) {
     console.log(JSON.stringify(result, null, 2));
     return passed ? 0 : 1;
@@ -144,7 +150,8 @@ async function runPreflight(args: string[]): Promise<number> {
   for (const error of result.preflight?.errors ?? []) {
     console.error(`  [${error.code}] ${error.path}: ${error.message}`);
   }
-  console.log(passed ? 'FHS preflight passed' : 'FHS preflight failed');
+  const name = values.profile === 'epc' ? 'EPC preflight' : 'FHS preflight';
+  console.log(`${name} ${passed ? 'passed' : 'failed'}`);
   return passed ? 0 : 1;
 }
 

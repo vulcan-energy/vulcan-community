@@ -9,7 +9,12 @@ import { defineConfig, type Plugin } from 'vite';
 const UPSTREAM_DATA_NOTICES: Record<string, { name: string; licence: string }> = {
   'data/schemas/core-input.schema.json': { name: 'Home Energy Model (HEM) input schema', licence: 'hem_engine_upstream/LICENSE.md' },
   'data/schemas/input_fhs.schema.json': { name: 'HEM Future Homes Standard wrapper input schema', licence: 'LICENSES/MIT-HEM-FHS-wrapper.txt' },
+  'data/schemas/hem_epc_orchestrator_input.schema.json': { name: 'HEM:EPC Orchestrator input schema', licence: 'LICENSES/MIT-HEM-EPC-Orchestrator.txt' },
+  'data/hem_database/1.0.0a10/': { name: 'HEM Database client product data', licence: 'LICENSES/MIT-HEM-Database-Client.txt' },
 };
+/** The notice key of an upstream data file: its exact path, or its directory key ending in /. */
+const upstreamDataKey = (path: string): string | undefined =>
+  UPSTREAM_DATA_NOTICES[path] ? path : Object.keys(UPSTREAM_DATA_NOTICES).find((key) => key.endsWith('/') && path.startsWith(key));
 const REPO_ROOT = resolve(__dirname, '../..');
 
 /** The licence-manifest entry covering a repo path (exact path, else the longest matching `dir/**`). */
@@ -42,8 +47,9 @@ function thirdPartyNotices(): Plugin {
             continue;
           }
           const relative = id.replace(/\?.*$/, '').replace(/\\/g, '/').replace(`${REPO_ROOT.replace(/\\/g, '/')}/`, '');
-          if (UPSTREAM_DATA_NOTICES[relative]) {
-            upstream.add(relative);
+          const upstreamKey = upstreamDataKey(relative);
+          if (upstreamKey) {
+            upstream.add(upstreamKey);
             continue;
           }
           // Fail closed: any other bundled repo file must be ours (AGPL) or it needs a notice here.

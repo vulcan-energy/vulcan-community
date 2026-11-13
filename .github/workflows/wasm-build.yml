@@ -69,3 +69,7 @@ jobs:
           check='const r = JSON.parse(require("fs").readFileSync(0, "utf8")); process.exit(r[process.argv[1]].is_valid ? 0 : 1)'
           node apps/cli/dist/cli.js convert "$fixture" --defaults "$defaults" --json | node -e "$check" validation
           node apps/cli/dist/cli.js preflight "$fixture" --defaults "$defaults" --json | node -e "$check" preflight
+
+      # The CLI tests that need the model WASM (HEM:EPC new build and existing building).
+      - name: Test the CLI with the WASM
+        run: npx vitest run apps/cli
