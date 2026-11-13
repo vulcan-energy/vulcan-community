@@ -767,10 +767,34 @@ pub(crate) fn check_system_catalogue(
             format!("Unconditioned zone '{name}' uses method Direct, which this HEM:EPC target rejects. Use method Calculated and state the zone's envelope in building_element."),
         ));
     }
-    // A room heater whose product has auxiliary power states the supply for it: the wrapper
-    // rejects one without (`validate_power_aux_needs_supply`).
-    for (name, system) in model["SpaceHeatSystem"].as_object().into_iter().flatten() {
-        let aux_power = system["product_id"]
+    // A room heater whose product gives auxiliary power fields (even 0) states the supply for
+    // them: the wrapper rejects one without (`validate_power_aux_needs_supply`). A back
+    // boiler's integrated room heater takes the back boiler's product.
+    let room_heaters = model["SpaceHeatSystem"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, s)| (vec!["SpaceHeatSystem", name.as_str()], s, s))
+        .chain(
+            model["HeatSourceWet"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(_, s)| s["type"] == "BackBoiler")
+                .map(|(name, s)| {
+                    (
+                        vec![
+                            "HeatSourceWet",
+                            name.as_str(),
+                            "integrated_space_heat_system",
+                        ],
+                        s,
+                        &s["integrated_space_heat_system"],
+                    )
+                }),
+        );
+    for (segments, owner, heater) in room_heaters {
+        let aux_fields = owner["product_id"]
             .as_u64()
             .and_then(|id| db.products.get(&id))
             .filter(|product| product.table == "RoomHeater")
@@ -788,11 +812,12 @@ pub(crate) fn check_system_catalogue(
                         .is_some_and(|v| !v.is_empty() && v != "NULL")
                 })
             });
-        if aux_power && system["EnergySupply_aux"].as_str().is_none() {
+        if aux_fields && heater["EnergySupply_aux"].as_str().is_none() {
+            let name = segments[1];
             errors.push(error(
                 "E_EPC_REQUIRED_INPUT",
-                json_pointer(&["SpaceHeatSystem", name, "EnergySupply_aux"]),
-                format!("Room heater '{name}': its product has auxiliary power, so state EnergySupply_aux on its Systems row."),
+                format!("{}/EnergySupply_aux", json_pointer(&segments)),
+                format!("Room heater '{name}': its product gives auxiliary power fields, so state EnergySupply_aux on its Systems row."),
             ));
         }
     }
