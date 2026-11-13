@@ -72,6 +72,11 @@ export interface ComplianceSlice {
     productSettings?: Partial<Record<ProductSettingRow, string>>;
     /** Model-input rows the loaded file lacks and the defaults have not yet filled. */
     absentMetadataRows?: string[];
+    /**
+     * Rows a new model holds at their FHS initial value and the user has not set since. A target
+     * that requires a row (TargetRules.requiredMetadataRows) starts it empty instead.
+     */
+    initialValueRows?: string[];
   };
   setComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
   replaceComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
@@ -90,7 +95,23 @@ const FHS_COMPLIANCE_DEFAULTS: Partial<GeometryState['complianceSettings']> = {
 
 export const createInitialComplianceSettings = (): GeometryState['complianceSettings'] => ({
   ...FHS_COMPLIANCE_DEFAULTS,
+  initialValueRows: Object.keys(FHS_COMPLIANCE_DEFAULTS),
 });
+
+/** The settings with every initial value the target requires the user to state removed. */
+export function withoutRequiredInitialValues(
+  settings: GeometryState['complianceSettings'],
+  requiredRows: readonly string[],
+): GeometryState['complianceSettings'] {
+  const required = new Set(requiredRows);
+  const initial = settings.initialValueRows ?? [];
+  const dropped = initial.filter((key) => required.has(key));
+  if (dropped.length === 0) return settings;
+  const next: Record<string, unknown> = { ...settings };
+  for (const key of dropped) delete next[key];
+  next.initialValueRows = initial.filter((key) => !required.has(key));
+  return next as GeometryState['complianceSettings'];
+}
 
 function deleteExplicitUndefined(
   target: Record<string, unknown>,
@@ -118,6 +139,9 @@ export const createComplianceSlice: GeometryStoreSlice = (set) => ({
   setComplianceSettings: (settings) => {
     set((state) => {
       const newSettings: Record<string, unknown> = { ...state.complianceSettings, ...settings };
+      // A row the user sets is no longer an initial value.
+      const initial = state.complianceSettings.initialValueRows?.filter((key) => !(key in settings));
+      if (initial) newSettings.initialValueRows = initial;
 
       // Spreading `key: undefined` leaves the key present with value undefined.
       // For any field the caller explicitly set to undefined, drop the key so

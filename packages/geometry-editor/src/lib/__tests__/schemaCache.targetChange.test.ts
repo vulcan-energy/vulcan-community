@@ -57,6 +57,26 @@ describe('target-scoped schema caches', () => {
     expect(applianceRequiresEnergySupply({ properties: { Appliances: { patternProperties: { 'Oven|Hobs': { enum: ['Default'] } } } } }, 'Oven')).toBe(false);
     expect(applianceRequiresEnergySupply(null, 'Oven')).toBe(false);
   });
+  it('resolves Core-shaped sections behind pydantic unions (HEM:EPC full input)', () => {
+    const root = {
+      type: 'object',
+      properties: {
+        OnSiteGeneration: { anyOf: [{ type: 'object', additionalProperties: { anyOf: [{ $ref: '#/$defs/PvWithPanels' }] } }, { type: 'null' }] },
+        InfiltrationVentilation: { anyOf: [{ $ref: '#/$defs/EpcInfiltrationVentilation' }] },
+      },
+      $defs: {
+        PvWithPanels: { type: 'object', properties: { inverter_type: { type: 'string' }, panels: { type: 'array' } } },
+        EpcInfiltrationVentilation: { type: 'object', properties: { Vents: { anyOf: [{ additionalProperties: { $ref: '#/$defs/Vent' } }, { type: 'null' }] } } },
+        Vent: { type: 'object', properties: { area_cm2: { type: 'number' } } },
+        ElectricityFuelProperties: { properties: { ElectricBattery: { anyOf: [{ $ref: '#/$defs/BatteryProduct' }, { type: 'null' }] } } },
+        BatteryProduct: { type: 'object', properties: { product_id: { type: 'integer' }, battery_age: { type: 'number' } } },
+      },
+    };
+    const keys = (type: string) => Object.keys(resolveElementSubschemaForProfile(root, 'core', type)?.properties ?? {});
+    expect(keys('OnSiteGeneration')).toEqual(['inverter_type', 'panels']);
+    expect(keys('Vents')).toEqual(['area_cm2']);
+    expect(keys('ElectricBattery')).toEqual(['product_id', 'battery_age']);
+  });
   it('notifies mounted consumers on invalidation and successful load only', async () => {
     const revisions: number[] = [];
     const unsubscribe = subscribeGeometrySchema(() => revisions.push(getGeometrySchemaRevision()));

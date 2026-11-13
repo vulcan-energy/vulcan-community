@@ -214,8 +214,12 @@
   padding-right: 28px !important;
 }
 
+/* Same compact text as the Shape and Floor selects beside it (details-panel select rule). */
 .element-editor-meta-control--type .element-type-picker__trigger.standard-dropdown {
   width: 100%;
+  font-size: var(--font-size-xs);
+  padding-left: 6px;
+  padding-right: 28px;
 }
 
 @media (max-width: 520px) {

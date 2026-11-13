@@ -12,6 +12,7 @@ import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
 import { useTargetRules } from '../../hooks/useTargetRules';
+import { elementSchemaTakesField } from '../../lib/schemaCache';
 import { decimalInputProps, readExtraJsonRecord, useDecimalInput } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
@@ -24,6 +25,8 @@ export interface ElectricBatteryFormState {
   setBatteryLocation: (value: BatteryLocation) => void;
   /** The target takes age, grid charging and grid export (TargetRules.batteryGridInputs). */
   gridInputs: boolean;
+  /** The target's battery schema takes capacity and efficiency; a HEM Database product states its own. */
+  ratingInputs: boolean;
   /** The selected battery's `extra_json`, where age, grid charging and grid export are stored. */
   extra: Record<string, unknown>;
   commitExtra: (key: string, value: unknown) => void;
@@ -34,6 +37,7 @@ function useFormState(ctx: ElementFormStateCtx): ElectricBatteryFormState {
   const batteryEfficiencyInput = useDecimalInput('', ctx.commitElementNumericField('charge_discharge_efficiency_round_trip'), { commitOnChange: true });
   const [batteryLocation, setBatteryLocation] = useState<BatteryLocation>('');
   const gridInputs = useTargetRules().batteryGridInputs;
+  const ratingInputs = elementSchemaTakesField(ctx.schemaPort, 'ElectricBattery', 'charge_discharge_efficiency_round_trip');
   const extra = readExtraJsonRecord(ctx.selection ? ctx.getElementById(ctx.selection.id)?.extra_json : undefined);
   const commitExtra = (key: string, value: unknown) => {
     const next = { ...extra };
@@ -41,7 +45,7 @@ function useFormState(ctx: ElementFormStateCtx): ElectricBatteryFormState {
     else next[key] = value;
     ctx.commitExistingElementDraft({ extra_json: Object.keys(next).length ? next : undefined } as Partial<Element>);
   };
-  return { batteryCapacityInput, batteryEfficiencyInput, batteryLocation, setBatteryLocation, gridInputs, extra, commitExtra };
+  return { batteryCapacityInput, batteryEfficiencyInput, batteryLocation, setBatteryLocation, gridInputs, ratingInputs, extra, commitExtra };
 }
 
 const yesNo = (value: unknown) => (value === true ? 'TRUE' : value === false ? 'FALSE' : '');
@@ -102,7 +106,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
   },
 
   renderPanel(state, ctx) {
-    const { batteryCapacityInput, batteryEfficiencyInput, batteryLocation, setBatteryLocation, gridInputs, extra, commitExtra } = state;
+    const { batteryCapacityInput, batteryEfficiencyInput, batteryLocation, setBatteryLocation, gridInputs, ratingInputs, extra, commitExtra } = state;
     const {
       elementType,
       fieldUnit,
@@ -120,6 +124,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
     } : null;
     return (
       <>
+        {ratingInputs && <>
         {renderFieldLabelWithComparisonIndicator('Capacity (kWh):', elementType, globalComparisonFieldIndicators.capacity)}
         <div className="element-input" ref={registerBaseFieldRefs('capacity')}>
           <StandardInput
@@ -148,6 +153,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
           />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('charge_discharge_efficiency_round_trip', batteryEfficiencyInput.value)} issue={getFieldValidationIssue('charge_discharge_efficiency_round_trip', batteryEfficiencyInput.value) || undefined} />
         </div>
+        </>}
         {renderFieldLabel('Battery Location:', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs(['batteryLocation', 'battery_location'])}>
           <StandardDropdown

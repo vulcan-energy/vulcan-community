@@ -380,3 +380,37 @@ it('asks for a party wall lining only for the cavity types the target lists', ()
     __setSchemaObjectForTests(plain);
   }
 });
+
+// A new model's FHS initial values stand only where the target does not require the user to state them.
+it('drops the initial values a newly selected target requires, keeping what the user set', () => {
+  let rules: { requiredMetadataRows: string[] } | undefined;
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...canonicalGeometrySchemaPort, targetRules: () => rules } });
+  store.getState().setComplianceSettings({ NumberOfBedrooms: 3 });
+  rules = { requiredMetadataRows: ['PartGcompliance', 'NumberOfBedrooms', 'HeatingControlType'] };
+  store.getState().setTargetBundleId('epc');
+  const settings = store.getState().complianceSettings;
+  expect(settings.PartGcompliance).toBeUndefined();
+  expect(settings.HeatingControlType).toBeUndefined();
+  expect(settings.NumberOfBedrooms).toBe(3);
+  expect(settings.ColdWaterSource).toBe('mains water');
+
+  rules = undefined;
+  store.getState().clearAll();
+  store.getState().setTargetBundleId('fhs');
+  expect(store.getState().complianceSettings).toMatchObject({ PartGcompliance: true, HeatingControlType: 'SeparateTempControl', NumberOfBedrooms: 1 });
+});
+
+// Defaults fill a row only where the target's schema takes the value: HEM:EPC has no Part O or
+// cooker hood row and no `house` build type.
+it('fills rows from the defaults only with values the target schema takes', () => {
+  const fill = (root: unknown) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...canonicalGeometrySchemaPort, getRootSchema: () => root as never } });
+    store.setState({ defaultsJson: { General: { build_type: 'house', storeys_in_dwelling: 1 } }, defaultsLoading: false } as never);
+    const { build_type, PartO_active_cooling_required, KitchenExtractorHoodExternal } = store.getState().complianceSettings;
+    return { build_type, PartO_active_cooling_required, KitchenExtractorHoodExternal };
+  };
+  expect(fill(JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'))))
+    .toEqual({ build_type: 'house', PartO_active_cooling_required: false, KitchenExtractorHoodExternal: false });
+  expect(fill({ properties: { General: { properties: { build_type: { enum: ['detached', 'flat'] } } } } }))
+    .toEqual({ build_type: undefined, PartO_active_cooling_required: undefined, KitchenExtractorHoodExternal: undefined });
+});

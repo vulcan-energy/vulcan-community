@@ -9,7 +9,7 @@ import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
-import { simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
+import { elementSchemaTakesField, simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
 import {
   targetRules,
@@ -2057,10 +2057,12 @@ export const validateElementCore = (
 
     case 'ElectricBattery': {
       const batteryElement = element as ElectricBattery;
-      if (!batteryElement.capacity || batteryElement.capacity <= 0 || batteryElement.capacity > 50) {
+      if (elementSchemaTakesField(schemaPort, 'ElectricBattery', 'capacity')
+        && (!batteryElement.capacity || batteryElement.capacity <= 0 || batteryElement.capacity > 50)) {
         issues.push(geo('Capacity must be between 0 and 50 kWh', 'capacity'));
       }
-      if (batteryElement.charge_discharge_efficiency_round_trip === undefined || batteryElement.charge_discharge_efficiency_round_trip < 0 || batteryElement.charge_discharge_efficiency_round_trip > 1) {
+      if (elementSchemaTakesField(schemaPort, 'ElectricBattery', 'charge_discharge_efficiency_round_trip')
+        && (batteryElement.charge_discharge_efficiency_round_trip === undefined || batteryElement.charge_discharge_efficiency_round_trip < 0 || batteryElement.charge_discharge_efficiency_round_trip > 1)) {
         issues.push(geo('Charge/Discharge Efficiency must be between 0 and 1', 'charge_discharge_efficiency_round_trip'));
       }
       // Unset is the DESNZ-defined default (outside) for a target that takes the battery's grid inputs.
@@ -2217,10 +2219,13 @@ export const validateElementCore = (
       );
       const allRequiredFields = [...new Set([...requiredFields, ...conditionalRequiredFields])];
       const reportedFields = new Set(issues.map((issue) => issue.fieldKey));
+      const hiddenFields = new Set(targetRules(schemaPort, context.complianceSettings ?? {}).hiddenFields[element.type] ?? []);
 
       for (const field of allRequiredFields) {
         // a8/a9: the converter always sets this value, and no form offers it.
         if (field === 'is_adjacent_space_within_dwelling') continue;
+        // The target hides it: the converter or another form supplies it.
+        if (hiddenFields.has(field)) continue;
         // Check if field exists in element directly or in extra_json
         // Also check for null/undefined values (they count as missing)
         // NOTE: OnSiteGeneration has a naming collision:

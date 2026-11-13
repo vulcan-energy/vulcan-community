@@ -2935,6 +2935,7 @@ const withPrecomputedDefaultsLookup = (
           { ...state, complianceSettings, elements: Object.values(state.elementsById) },
           defaultsJson,
           targetRules(schemaPort, complianceSettings).requiredMetadataRows,
+          schemaPort.availability === 'available' ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null,
         )
         : { patch: {} };
       return {

@@ -30,6 +30,7 @@ import { derivePvDimensionsFromCoords } from '../../../lib/pvPanelFootprint';
 import { BUILDING_ALIASES } from '../../../geometry/io/ingestGeometryTabularSections';
 import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/globalSettingsValidation';
 import { csvModelProfile } from '../../../geometry/io/modelSchemaProfile';
+import { withoutRequiredInitialValues } from './complianceSlice';
 import {
   encodeGuideOverlayMetadataValue,
   encodeGuideOverlaySourceMetadataValue,
@@ -52,7 +53,7 @@ import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGe
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
-import { targetRules, type GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
+import { targetRules, targetSchemaMode, type GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import type { GeometryWorkspaceResourcePort } from '../../../../../geometry-editor-host/src/workspaceResourcePort';
 import {
   alignHostedSlopedPanelToHostOrientation,
@@ -866,7 +867,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       targetBundleId,
       csvValidationCache: {},
       targetValidation: null,
-      complianceSettings: { ...state.complianceSettings, scenariosBaseModelEnabled: false },
+      // The host selects the port's target before it sets the pin, so these are the new target's rules.
+      complianceSettings: {
+        ...withoutRequiredInitialValues(state.complianceSettings, targetRules(options.schemaPort, state.complianceSettings).requiredMetadataRows),
+        scenariosBaseModelEnabled: false,
+      },
     });
   },
   getCsvMigrationIssues: () => csvMigrationIssues(Object.values(get().elementsById), get().sourceCsvVersion),
@@ -2388,6 +2393,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         { ...loaded, elements: Object.values(loaded.elementsById) },
         loaded.defaultsJson,
         targetRules(options.schemaPort, loaded.complianceSettings).requiredMetadataRows,
+        options.schemaPort.availability === 'available' ? options.schemaPort.getRootSchema(targetSchemaMode(options.schemaPort)) : null,
       );
       set({ complianceSettings: { ...loaded.complianceSettings, ...patch }, loadAwaitsDefaults: false, lateLoadNotice: notice ?? null });
     } else {

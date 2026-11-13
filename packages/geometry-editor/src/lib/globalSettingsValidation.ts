@@ -10,7 +10,7 @@ import type {
 } from '../geometry/types';
 import type { GeometryState } from '../stores/geometryStore';
 import { resolveEffectiveDwellingDetails, resolveEffectiveVentilationBaseHeight } from './effectiveDwellingDetails';
-import { targetFieldAvailability } from './schemaCache';
+import { targetFieldAccepts, targetFieldAvailability } from './schemaCache';
 import { resolveBuildingElementPitch } from '../geometry/derivePitchFromGeometry';
 import { getAreaBasedElementExportGeometry } from './elementArea';
 import {
@@ -624,6 +624,7 @@ export function absentMetadataRowFill(
   state: MetadataRowInputs,
   defaults: unknown,
   requiredRows: readonly string[] = [],
+  targetRoot: unknown = null,
 ): { patch: Record<string, unknown>; notice?: string } {
   const settings = state.complianceSettings;
   const required = new Set(requiredRows);
@@ -635,7 +636,8 @@ export function absentMetadataRowFill(
     if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
       || required.has(key) || systemsRowSetsMetadataInput(state.elements, key)) continue;
     const template = templateMetadataValue(defaults, key);
-    if (template === undefined) continue;
+    // A target that lacks the field, or does not take the value (HEM:EPC has no `house` build type), gets no fill.
+    if (template === undefined || !targetFieldAccepts(targetRoot, metadataSchemaPath(key), template)) continue;
     patch[metadataSettingKey(key)] = template;
     sources.set(key, valueAt(defaults, metadataSchemaPath(key)) === undefined
       ? 'the converter\'s value for a missing row'

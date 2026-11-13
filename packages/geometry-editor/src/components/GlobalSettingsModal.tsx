@@ -521,6 +521,8 @@ export function GlobalSettingsModal({
     [targetRoot],
   );
   const showGroundFloorArea = targetFieldAvailability(targetRoot, ["GroundFloorArea"]) !== "absent";
+  const showPartOCooling = targetFieldAvailability(targetRoot, ["PartO_active_cooling_required"]) !== "absent";
+  const showKitchenHood = targetFieldAvailability(targetRoot, ["KitchenExtractorHoodExternal"]) !== "absent";
   const showBuildingLength = targetFieldAvailability(targetRoot, ["BuildingLength"]) !== "absent";
   const showBuildingWidth = targetFieldAvailability(targetRoot, ["BuildingWidth"]) !== "absent";
   const { requiredMetadataRows } = useTargetRules();
@@ -1754,7 +1756,7 @@ export function GlobalSettingsModal({
                         marginBottom: "var(--spacing-sm)",
                       }}
                     >
-                      Configure dwelling-level details used by the FHS
+                      Configure dwelling-level details used by the
                       calculation. Some values can be suggested from geometry,
                       but you can override them where needed.
                     </div>
@@ -1795,7 +1797,7 @@ export function GlobalSettingsModal({
                             lineHeight: 1.45,
                           }}
                         >
-                          Dwelling form is exported to FHS <code>General</code>.
+                          Dwelling form is exported to <code>General</code>.
                           Auto suggestions count distinct floor levels with
                           ground-contact floors or pitch-180 walkable floor
                           polygons; pitch-0 roof/ceiling surfaces and line walls
@@ -2152,6 +2154,7 @@ export function GlobalSettingsModal({
                         )}
                       </div>
 
+                      {showPartOCooling && (
                       <div
                         style={{
                           marginTop: "var(--spacing-sm)",
@@ -2190,6 +2193,7 @@ export function GlobalSettingsModal({
                           )}
                         </label>
                       </div>
+                      )}
 
                       <div
                         style={{
@@ -2561,6 +2565,7 @@ export function GlobalSettingsModal({
                       </label>
                       )}
                       {APPLIANCE_ROWS.flatMap((key) => (requiredRows.has(key) ? [<RequiredYesNo key={key} {...requiredYesNoProps(key)} />] : []))}
+                      {showKitchenHood && (
                       <label
                         style={{
                           display: "flex",
@@ -2591,6 +2596,7 @@ export function GlobalSettingsModal({
                           "Kitchen hood"
                         )}
                       </label>
+                      )}
                     </div>
                   </div>
                 )}
