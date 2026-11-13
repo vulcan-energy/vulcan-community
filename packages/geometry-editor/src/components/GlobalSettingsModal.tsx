@@ -1747,6 +1747,13 @@ export function GlobalSettingsModal({
 
               {calculationTargetSection}
 
+              {/* With the target: it decides which inputs and defaults the model takes. */}
+              {requiredRows.has("IsExistingBuilding") && (
+                <div data-field-section="target" style={{ marginBottom: "var(--spacing-md)" }}>
+                  <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />
+                </div>
+              )}
+
               {/* Evidence linking for global settings */}
               {evidenceSection}
 
@@ -2589,7 +2596,6 @@ export function GlobalSettingsModal({
                         size="md"
                       />
 
-                      {requiredRows.has("IsExistingBuilding") && <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />}
                       {requiredRows.has("HasElectricitySmartMeter") && <RequiredYesNo {...requiredYesNoProps("HasElectricitySmartMeter")} />}
                       {requiredRows.has("PartGcompliance") ? <RequiredYesNo {...requiredYesNoProps("PartGcompliance", "Part G Compliance")} /> : (
                       <label

@@ -118,6 +118,27 @@ describe("GlobalSettingsModal target-required rows", () => {
   });
 });
 
+describe("GlobalSettingsModal existing building", () => {
+  it("asks it with the target, before the dwelling details, without opening a section", async () => {
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={{ ...canonicalGeometrySchemaPort, targetRules: () => ({ requiredMetadataRows: ["IsExistingBuilding"] }) }}
+        workspaceResourcePort={createResources()}
+      >
+        <GeometryStoreProvider store={createGeometryStore()}>
+          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="IsExistingBuilding"
+            calculationTargetSection={<div>HEM model version</div>} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    const existing = await screen.findByLabelText("Existing building");
+    const order = (a: Node, b: Node) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(order(screen.getByText("HEM model version"), existing)).toBeTruthy();
+    expect(order(existing, screen.getByText("Dwelling Details"))).toBeTruthy();
+    expect(screen.queryByLabelText("Property postcode")).not.toBeInTheDocument();
+  });
+});
+
 describe("GlobalSettingsModal border postcode", () => {
   it.each([
     ["CH4 1AA", true, true],
