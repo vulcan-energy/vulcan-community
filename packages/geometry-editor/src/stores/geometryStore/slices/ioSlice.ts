@@ -52,7 +52,7 @@ import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGe
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
-import type { GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
+import { targetRules, type GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import type { GeometryWorkspaceResourcePort } from '../../../../../geometry-editor-host/src/workspaceResourcePort';
 import {
   alignHostedSlopedPanelToHostOrientation,
@@ -1717,7 +1717,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         const zone = element.zoneId ? currentState.getZoneById(element.zoneId) : undefined;
         const zoneName = zone ? zone.name : '';
         const extraJson = encodePromotedExtraJsonFields(element);
-        delete extraJson.grid_charging_possible;
         delete extraJson.threshold_charges;
         delete extraJson.threshold_prices;
         delete extraJson.tariff;
@@ -2385,7 +2384,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // use absentMetadataRowFill and give the notice as lateLoadNotice.
     const loaded = get();
     if (loaded.defaultsJson && !loaded.defaultsLoading) {
-      const { patch, notice } = absentMetadataRowFill({ ...loaded, elements: Object.values(loaded.elementsById) }, loaded.defaultsJson);
+      const { patch, notice } = absentMetadataRowFill(
+        { ...loaded, elements: Object.values(loaded.elementsById) },
+        loaded.defaultsJson,
+        targetRules(options.schemaPort, loaded.complianceSettings).requiredMetadataRows,
+      );
       set({ complianceSettings: { ...loaded.complianceSettings, ...patch }, loadAwaitsDefaults: false, lateLoadNotice: notice ?? null });
     } else {
       set({ loadAwaitsDefaults: true, lateLoadNotice: null });

@@ -47,6 +47,8 @@ type Case = {
   /** Text the load notices must contain, or must not contain. */
   notice?: string;
   noNotice?: string;
+  /** Load for a target whose rules require these Metadata rows (an EPC target). */
+  requires?: readonly string[];
 };
 
 const replace = (from: string, to: string) => (csv: string) => {
@@ -69,8 +71,38 @@ const kitchen = (zone: string, type: string, keepCoords = true) => (csv: string)
 
 const appendSection = (text: string) => (csv: string) => `${csv.trimEnd()}\n\n${text}\n`;
 const noFloorAreaExtra = (csv: string) => csv.replace('""emitter_floor_area"":8.89,', '');
+const EPC_ROW_CELLS: ReadonlyArray<readonly [string, string]> = [
+  ['HasElectricitySmartMeter', 'TRUE'], ['IsExistingBuilding', 'FALSE'], ['Ventilation_cross_vent_possible', 'FALSE'],
+  ['Appliances_has_dryer', 'FALSE'], ['Appliances_has_dishwasher', 'TRUE'], ['Appliances_has_separate_fridge_or_freezer', 'FALSE'],
+];
+const EPC_ROWS = EPC_ROW_CELLS.map(([key]) => key);
+const withMetadata = (rows: ReadonlyArray<readonly [string, string]>) => (csv: string) =>
+  csv.replace('Metadata,,,,,,,,,,,,,\n', `Metadata,,,,,,,,,,,,,\n${rows.map(([k, v]) => `${k},${v},,,,,,,,,,,,,\n`).join('')}`);
 
 const CASES: Case[] = [
+  // HEM:EPC inputs: Metadata rows the target requires, saved as typed. FHS models never write them.
+  { name: 'EPC rows save as typed', requires: EPC_ROWS, edit: withMetadata(EPC_ROW_CELLS), defaults: true,
+    allows: ['Electricity smart meter is not set', 'Has a dishwasher is not set', 'Cross ventilation possible is not set'],
+    saves: Object.fromEntries(EPC_ROW_CELLS.map(([key, value]) => [`Metadata|${key}`, value])) },
+  { name: 'EPC rows also save as typed for an FHS target', edit: withMetadata(EPC_ROW_CELLS),
+    saves: Object.fromEntries(EPC_ROW_CELLS.map(([key, value]) => [`Metadata|${key}`, value])) },
+  { name: 'an FHS model writes no EPC row and needs none', defaults: true, edit: (csv) => csv,
+    allows: ['Electricity smart meter', 'Existing building', 'Cross ventilation possible', 'clothes dryer'],
+    saves: Object.fromEntries(EPC_ROW_CELLS.map(([key]) => [`Metadata|${key}`, null])) },
+  // An absent required row has no default: the defaults file's value never fills it.
+  { name: 'EPC rows absent block and stay unset', requires: [...EPC_ROWS, 'Ventilation_altitude'], defaults: true,
+    edit: (csv) => csv.replace(/^Ventilation_altitude,.*\n/m, ''),
+    blocks: ['Electricity smart meter is not set', 'Existing building is not set', 'Cross ventilation possible is not set',
+      'Has a clothes dryer is not set', 'Has a dishwasher is not set', 'Has a separate fridge or freezer is not set', 'Altitude (m) is not set'],
+    saves: { 'Metadata|HasElectricitySmartMeter': null, 'Metadata|Ventilation_altitude': null } },
+  // A battery's grid charging is saved as typed; the converter drops it for a target without it.
+  { name: 'battery grid charging saves as typed',
+    edit: replace('Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json\n',
+      'Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json\nBattery,Zone 1,ElectricBattery,ElectricBattery,,,"1,1,0","{""capacity"":5,""grid_charging_possible"":false,""battery_age"":2}"\n'),
+    saves: { 'Systems|Battery|extra_json': '{"grid_charging_possible":false,"battery_age":2,"_name_auto_sync":false,"capacity":5}' } },
+  { name: 'an EPC row set in the editor saves', requires: EPC_ROWS, edit: (csv) => csv,
+    then: (store) => store.getState().setComplianceSettings({ HasElectricitySmartMeter: false, Appliances_has_dishwasher: true }),
+    saves: { 'Metadata|HasElectricitySmartMeter': 'FALSE', 'Metadata|Appliances_has_dishwasher': 'TRUE', 'Metadata|IsExistingBuilding': null } },
   // Converter: unit_number is a whole number of 1 or more, or blank (E055 otherwise), on every emitter.
   { name: 'radiator unit_number 0.5', edit: radiator('0.5'), blocks: ['Radiator|unit_number'], saves: { 'Wet Emitters|Radiator|unit_number': '0.5' } },
   { name: 'radiator unit_number 1.5', edit: radiator('1.5'), blocks: ['Radiator|unit_number'], saves: { 'Wet Emitters|Radiator|unit_number': '1.5' } },
@@ -278,7 +310,11 @@ const CASES: Case[] = [
 ];
 
 function load(c: Case) {
-  const schemaPort = c.targetHost ? { ...canonicalGeometrySchemaPort, targetSchemaMode: () => 'fhs' as const } : canonicalGeometrySchemaPort;
+  const schemaPort = {
+    ...canonicalGeometrySchemaPort,
+    ...(c.targetHost || c.requires ? { targetSchemaMode: () => 'fhs' as const } : {}),
+    ...(c.requires ? { targetRules: () => ({ requiredMetadataRows: c.requires! }) } : {}),
+  };
   const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort });
   const { warnings } = store.getState().loadFromCSV(c.edit(sample));
   if (c.defaults) store.setState({ defaultsJson: defaults, defaultsLoading: false } as never);

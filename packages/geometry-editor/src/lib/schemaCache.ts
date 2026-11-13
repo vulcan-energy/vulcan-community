@@ -155,16 +155,25 @@ export function getSchemaObjectForMode(useFHSSchema: boolean): SchemaNode | null
   return useFHSSchema ? getFHSSchemaObject() : getSchemaObject();
 }
 
+/** The root `Appliances` schema with its `$ref` followed. */
+function rootAppliancesSchema(root: unknown): SchemaNode | undefined {
+  const appliances = isRecord(root) && isRecord(root.properties) ? root.properties.Appliances : undefined;
+  return isRecord(appliances) ? dereferenceSchemaNodeInRoot(appliances, root) as SchemaNode : undefined;
+}
+
 /**
- * Returns appliance keys from the active root schema `Appliances.patternProperties`.
+ * Returns appliance keys from the active root schema: `Appliances.patternProperties`, or else its
+ * named properties that are appliances (not TRUE or FALSE presence fields).
  * Example schema pattern key:
  *   "Clothes_washing|Clothes_drying|Dishwasher|Fridge|..."
  */
 export function getApplianceKeysForMode(useFHSSchema: boolean): string[] {
-  const root = getSchemaObjectForMode(useFHSSchema);
-  const appliances = root?.properties?.Appliances;
+  const appliances = rootAppliancesSchema(getSchemaObjectForMode(useFHSSchema));
   const patternProps = appliances?.patternProperties;
-  if (!patternProps) return [];
+  if (!patternProps) {
+    return Object.entries(appliances?.properties ?? {})
+      .flatMap(([key, property]) => (isRecord(property) && property.type === 'boolean' ? [] : [key]));
+  }
 
   const keys = new Set<string>();
   for (const patternKey of Object.keys(patternProps)) {
@@ -176,6 +185,12 @@ export function getApplianceKeysForMode(useFHSSchema: boolean): string[] {
     }
   }
   return [...keys];
+}
+
+/** Whether the target's schema has the appliance state its energy supply. */
+export function applianceRequiresEnergySupply(root: unknown, applianceKey: string): boolean {
+  const entry = rootAppliancesSchema(root)?.properties?.[applianceKey];
+  return isRecord(entry) && Array.isArray(entry.required) && entry.required.includes('EnergySupply');
 }
 
 /**

@@ -11,6 +11,7 @@ import { roundToTwoDecimals } from '../../geometry/constants';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
+import { useTargetRules } from '../../hooks/useTargetRules';
 import { decimalInputProps, readExtraJsonRecord, useDecimalInput } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
@@ -21,14 +22,30 @@ export interface ElectricBatteryFormState {
   batteryEfficiencyInput: ReturnType<typeof useDecimalInput>;
   batteryLocation: BatteryLocation;
   setBatteryLocation: (value: BatteryLocation) => void;
+  /** The target takes age, grid charging and grid export (TargetRules.batteryGridInputs). */
+  gridInputs: boolean;
+  /** The selected battery's `extra_json`, where age, grid charging and grid export are stored. */
+  extra: Record<string, unknown>;
+  commitExtra: (key: string, value: unknown) => void;
 }
 
 function useFormState(ctx: ElementFormStateCtx): ElectricBatteryFormState {
   const batteryCapacityInput = useDecimalInput('', ctx.commitElementNumericField('capacity'), { commitOnChange: true });
   const batteryEfficiencyInput = useDecimalInput('', ctx.commitElementNumericField('charge_discharge_efficiency_round_trip'), { commitOnChange: true });
   const [batteryLocation, setBatteryLocation] = useState<BatteryLocation>('');
-  return { batteryCapacityInput, batteryEfficiencyInput, batteryLocation, setBatteryLocation };
+  const gridInputs = useTargetRules().batteryGridInputs;
+  const extra = readExtraJsonRecord(ctx.selection ? ctx.getElementById(ctx.selection.id)?.extra_json : undefined);
+  const commitExtra = (key: string, value: unknown) => {
+    const next = { ...extra };
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+    ctx.commitExistingElementDraft({ extra_json: Object.keys(next).length ? next : undefined } as Partial<Element>);
+  };
+  return { batteryCapacityInput, batteryEfficiencyInput, batteryLocation, setBatteryLocation, gridInputs, extra, commitExtra };
 }
+
+const yesNo = (value: unknown) => (value === true ? 'TRUE' : value === false ? 'FALSE' : '');
+const YES_NO = [{ value: 'TRUE', label: 'Yes' }, { value: 'FALSE', label: 'No' }];
 
 export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormState> = {
   type: 'ElectricBattery',
@@ -75,7 +92,6 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
       delete restExtraJson.capacity;
       delete restExtraJson.charge_discharge_efficiency_round_trip;
       delete restExtraJson.battery_location;
-      delete restExtraJson.grid_charging_possible;
       delete restExtraJson.threshold_charges;
       delete restExtraJson.threshold_prices;
       delete restExtraJson.tariff;
@@ -86,7 +102,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
   },
 
   renderPanel(state, ctx) {
-    const { batteryCapacityInput, batteryEfficiencyInput, batteryLocation, setBatteryLocation } = state;
+    const { batteryCapacityInput, batteryEfficiencyInput, batteryLocation, setBatteryLocation, gridInputs, extra, commitExtra } = state;
     const {
       elementType,
       fieldUnit,
@@ -97,6 +113,11 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
       globalComparisonFieldIndicators,
       commitExistingElementDraft,
     } = ctx;
+    const gridLabels = gridInputs ? {
+      age: renderFieldLabel('Battery Age (years):', elementType, 'battery_age'),
+      charging: renderFieldLabel('Grid Charging Possible:', elementType, 'grid_charging_possible'),
+      exporting: renderFieldLabel('Grid Exporting Possible:', elementType, 'grid_exporting_possible'),
+    } : null;
     return (
       <>
         {renderFieldLabelWithComparisonIndicator('Capacity (kWh):', elementType, globalComparisonFieldIndicators.capacity)}
@@ -140,10 +161,53 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
               { value: 'inside', label: 'Inside' },
               { value: 'outside', label: 'Outside' }
             ]}
+            placeholder={gridInputs ? 'Outside (DESNZ-defined default)' : undefined}
             variant="ghost"
             size="md"
           />
         </div>
+        {gridLabels && (
+          <>
+            {gridLabels.age}
+            <div className="element-input" ref={registerBaseFieldRefs('battery_age')}>
+              <StandardInput
+                type="number"
+                value={typeof extra.battery_age === 'number' ? String(extra.battery_age) : ''}
+                onChange={(event) => {
+                  const value = event.target.value.trim();
+                  commitExtra('battery_age', value === '' || !Number.isFinite(Number(value)) ? undefined : Number(value));
+                }}
+                placeholder="5 (DESNZ-defined default)"
+                min="0"
+                variant="ghost"
+                size="md"
+                className="flex-1"
+              />
+            </div>
+            {gridLabels.charging}
+            <div className="element-input" ref={registerBaseFieldRefs('grid_charging_possible')}>
+              <StandardDropdown
+                value={yesNo(extra.grid_charging_possible)}
+                onChange={(value) => commitExtra('grid_charging_possible', value === '' ? undefined : value === 'TRUE')}
+                options={YES_NO}
+                placeholder="Yes (DESNZ-defined default)"
+                variant="ghost"
+                size="md"
+              />
+            </div>
+            {gridLabels.exporting}
+            <div className="element-input" ref={registerBaseFieldRefs('grid_exporting_possible')}>
+              <StandardDropdown
+                value={yesNo(extra.grid_exporting_possible)}
+                onChange={(value) => commitExtra('grid_exporting_possible', value === '' ? undefined : value === 'TRUE')}
+                options={YES_NO}
+                placeholder="No (DESNZ-defined default)"
+                variant="ghost"
+                size="md"
+              />
+            </div>
+          </>
+        )}
       </>
     );
   },

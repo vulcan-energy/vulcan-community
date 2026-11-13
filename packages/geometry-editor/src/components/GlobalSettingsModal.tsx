@@ -31,6 +31,8 @@ import {
   collectGlobalSettingsWarnings,
   fhsBedroomCountIssue,
   globalSettingsFieldSection,
+  METADATA_INPUT_LABELS,
+  type TargetInputRow,
 } from "../lib/globalSettingsValidation";
 import {
   DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH,
@@ -64,6 +66,7 @@ import { StandardInput } from "./StandardInput";
 import { Tooltip } from "./Tooltip";
 import { ValidationIndicator, ValidationPill } from "./ValidationIndicator";
 import { useKeyedState } from "../hooks/useKeyedState";
+import { useTargetRules } from "../hooks/useTargetRules";
 
 export type GlobalSettingsDefaultsCompatibility = DefaultsCompatibility;
 
@@ -183,6 +186,28 @@ function DefaultsDuplicateIcon() {
       <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
+  );
+}
+
+type RequiredYesNoKey = TargetInputRow | "PartGcompliance" | "Ventilation_noise_nuisance";
+const APPLIANCE_ROWS = ["Appliances_has_dryer", "Appliances_has_dishwasher", "Appliances_has_separate_fridge_or_freezer"] as const;
+
+/** A TRUE or FALSE row the target requires: empty until the user picks, never a box that reads as "no". */
+function RequiredYesNo({ label, value, onChange }: {
+  label: ReactNode;
+  value: boolean | undefined;
+  onChange: (value: boolean | undefined) => void;
+}) {
+  return (
+    <StandardDropdown
+      label={label}
+      value={value === undefined ? "" : value ? "TRUE" : "FALSE"}
+      onChange={(next) => onChange(next === "" ? undefined : next === "TRUE")}
+      options={[{ value: "TRUE", label: "Yes" }, { value: "FALSE", label: "No" }]}
+      placeholder="Select..."
+      variant="ghost"
+      size="md"
+    />
   );
 }
 
@@ -498,6 +523,8 @@ export function GlobalSettingsModal({
   const showGroundFloorArea = targetFieldAvailability(targetRoot, ["GroundFloorArea"]) !== "absent";
   const showBuildingLength = targetFieldAvailability(targetRoot, ["BuildingLength"]) !== "absent";
   const showBuildingWidth = targetFieldAvailability(targetRoot, ["BuildingWidth"]) !== "absent";
+  const { requiredMetadataRows } = useTargetRules();
+  const requiredRows = useMemo(() => new Set(requiredMetadataRows), [requiredMetadataRows]);
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -581,6 +608,11 @@ export function GlobalSettingsModal({
     hardcodedExtra,
     useFHSSchema
   );
+  const requiredYesNoProps = (key: RequiredYesNoKey, label = METADATA_INPUT_LABELS[key] ?? key) => ({
+    label: complianceFieldLabel(label, key),
+    value: complianceSettings[key],
+    onChange: (value: boolean | undefined) => setComplianceSettings({ [key]: value }),
+  });
   const complianceFieldUnit = (paramId: string, label = paramId) => {
     const presentation = complianceFieldPresentation(paramId, label);
     return presentation.unit.status === "resolved" ? presentation.unit.display : undefined;
@@ -970,6 +1002,7 @@ export function GlobalSettingsModal({
       { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
       targetRoot,
       defaultsJson,
+      requiredMetadataRows,
     ));
     const bedroomCountIssue = fhsBedroomCountIssue(
       complianceSettings.NumberOfBedrooms
@@ -1012,6 +1045,7 @@ export function GlobalSettingsModal({
     spaceLabelsById,
     targetRoot,
     defaultsJson,
+    requiredMetadataRows,
     zones,
   ]);
 
@@ -2495,6 +2529,9 @@ export function GlobalSettingsModal({
                         size="md"
                       />
 
+                      {requiredRows.has("IsExistingBuilding") && <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />}
+                      {requiredRows.has("HasElectricitySmartMeter") && <RequiredYesNo {...requiredYesNoProps("HasElectricitySmartMeter")} />}
+                      {requiredRows.has("PartGcompliance") ? <RequiredYesNo {...requiredYesNoProps("PartGcompliance", "Part G Compliance")} /> : (
                       <label
                         style={{
                           display: "flex",
@@ -2522,6 +2559,8 @@ export function GlobalSettingsModal({
                           "Part G Compliance"
                         )}
                       </label>
+                      )}
+                      {APPLIANCE_ROWS.flatMap((key) => (requiredRows.has(key) ? [<RequiredYesNo key={key} {...requiredYesNoProps(key)} />] : []))}
                       <label
                         style={{
                           display: "flex",
@@ -3035,6 +3074,8 @@ export function GlobalSettingsModal({
                       )}
                     </div>
 
+                    {requiredRows.has("Ventilation_noise_nuisance") ? <RequiredYesNo {...requiredYesNoProps("Ventilation_noise_nuisance", "Noise nuisance")} /> : (
+                    <>
                     <div
                       style={{
                         display: "flex",
@@ -3084,6 +3125,9 @@ export function GlobalSettingsModal({
                     >
                       Whether external noise limits window opening for cooling
                     </div>
+                    </>
+                    )}
+                    {requiredRows.has("Ventilation_cross_vent_possible") && <RequiredYesNo {...requiredYesNoProps("Ventilation_cross_vent_possible")} />}
                   </div>
                 )}
               </div>

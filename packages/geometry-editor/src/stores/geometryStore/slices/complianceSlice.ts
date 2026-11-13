@@ -49,6 +49,13 @@ export interface ComplianceSlice {
     NumberOfBathrooms?: number;
     NumberOfSanitaryAccommodations?: number;
     KitchenExtractorHoodExternal?: boolean;
+    /** Metadata rows only some targets take (TARGET_INPUT_ROWS); unset means the file has no row. */
+    HasElectricitySmartMeter?: boolean;
+    IsExistingBuilding?: boolean;
+    Ventilation_cross_vent_possible?: boolean;
+    Appliances_has_dryer?: boolean;
+    Appliances_has_dishwasher?: boolean;
+    Appliances_has_separate_fridge_or_freezer?: boolean;
     /** FHS General.build_type. Undefined means use geometry-derived suggestion when available. */
     build_type?: 'flat' | 'house';
     /** Explicit SAP 10.2 Built-Form code. Never inferred or defaulted from geometry. */

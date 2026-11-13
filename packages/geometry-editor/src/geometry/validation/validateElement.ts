@@ -2063,7 +2063,10 @@ export const validateElementCore = (
       if (batteryElement.charge_discharge_efficiency_round_trip === undefined || batteryElement.charge_discharge_efficiency_round_trip < 0 || batteryElement.charge_discharge_efficiency_round_trip > 1) {
         issues.push(geo('Charge/Discharge Efficiency must be between 0 and 1', 'charge_discharge_efficiency_round_trip'));
       }
-      if (!batteryElement.battery_location || (batteryElement.battery_location !== 'inside' && batteryElement.battery_location !== 'outside')) {
+      // Unset is the DESNZ-defined default (outside) for a target that takes the battery's grid inputs.
+      const locationDefaulted = !batteryElement.battery_location
+        && targetRules(context.schemaPort, context.complianceSettings ?? {}).batteryGridInputs;
+      if (!locationDefaulted && batteryElement.battery_location !== 'inside' && batteryElement.battery_location !== 'outside') {
         issues.push(geo('Battery Location must be "inside" or "outside"', 'battery_location'));
       }
       break;

@@ -34,6 +34,7 @@ import { dropAssemblyEnvelopeOnFabricOverride } from '../lib/assemblyAppliedUi';
 import { coerceElementToStrictestNumericTyping } from '../lib/schemaCoercion';
 import { cloneJsonValue, jsonValuesEqual } from '../lib/jsonTypes';
 import {
+  targetRules,
   targetSchemaMode,
   unavailableGeometrySchemaPort,
   type GeometrySchemaPort,
@@ -2917,6 +2918,7 @@ const freezePostCommandEvent = (
 const withPrecomputedDefaultsLookup = (
   state: GeometryState,
   update: unknown,
+  schemaPort: GeometrySchemaPort,
 ): Partial<GeometryState> | GeometryState => {
   if (
     update &&
@@ -2929,7 +2931,11 @@ const withPrecomputedDefaultsLookup = (
       // defaults, and the save writes it.
       const complianceSettings = (update as Partial<GeometryState>).complianceSettings ?? state.complianceSettings;
       const { patch, notice } = defaultsJson
-        ? absentMetadataRowFill({ ...state, complianceSettings, elements: Object.values(state.elementsById) }, defaultsJson)
+        ? absentMetadataRowFill(
+          { ...state, complianceSettings, elements: Object.values(state.elementsById) },
+          defaultsJson,
+          targetRules(schemaPort, complianceSettings).requiredMetadataRows,
+        )
         : { patch: {} };
       return {
         ...update,
@@ -2964,7 +2970,7 @@ const createGeometryState = (
       const update = typeof partial === 'function'
         ? (partial as (current: GeometryState) => Partial<GeometryState> | GeometryState)(state)
         : partial;
-      return withPrecomputedDefaultsLookup(state, update);
+      return withPrecomputedDefaultsLookup(state, update, schemaPort);
     }, replace as false);
   }) as typeof rawSet;
 
@@ -7724,6 +7730,7 @@ const createGeometryState = (
         { ...state, elements },
         schemaPort.availability === 'available' ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null,
         state.defaultsLoading ? undefined : state.defaultsJson,
+        targetRules(schemaPort, state.complianceSettings).requiredMetadataRows,
       ));
     }
 
@@ -7772,7 +7779,7 @@ export const createGeometryStore = (
       const update = typeof partial === 'function'
         ? (partial as (current: GeometryState) => Partial<GeometryState> | GeometryState)(state)
         : partial;
-      return withPrecomputedDefaultsLookup(state, update);
+      return withPrecomputedDefaultsLookup(state, update, options.schemaPort ?? unavailableGeometrySchemaPort);
     }, replace as false);
   }) as typeof store.setState;
   return store;

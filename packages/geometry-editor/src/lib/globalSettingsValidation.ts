@@ -413,6 +413,8 @@ const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
   "BuildingLength",
   "BuildingWidth",
   "KitchenExtractorHoodExternal",
+  "HasElectricitySmartMeter",
+  "IsExistingBuilding",
 ]);
 
 /** Where a CSV Metadata key is edited in Global Settings; null when it is not. */
@@ -422,7 +424,7 @@ export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSect
   if (key.startsWith("AirPermeability_test_")) return "airTightness";
   if (key.startsWith("Ventilation_") || key === "AirPermeability_ventilation_zone_height") return "ventilation";
   if (key === "JunctionPsiDefaultsPath" || key.startsWith("DetailedBridgePsiProfile")) return "thermalBridging";
-  if (key.startsWith("General_") || key.startsWith("NumberOf") || DWELLING_FIELD_KEYS.has(key)) return "dwelling";
+  if (key.startsWith("General_") || key.startsWith("NumberOf") || key.startsWith("Appliances_") || DWELLING_FIELD_KEYS.has(key)) return "dwelling";
   return null;
 }
 
@@ -460,13 +462,35 @@ export const METADATA_INPUT_LABELS: Readonly<Record<string, string>> = {
   General_storeys_in_dwelling: 'Storeys in dwelling',
   General_storey_of_dwelling: 'Storey of dwelling',
   General_storeys_in_building: 'Storeys in building',
+  HasElectricitySmartMeter: 'Electricity smart meter',
+  IsExistingBuilding: 'Existing building',
+  Ventilation_cross_vent_possible: 'Cross ventilation possible',
+  Appliances_has_dryer: 'Has a clothes dryer',
+  Appliances_has_dishwasher: 'Has a dishwasher',
+  Appliances_has_separate_fridge_or_freezer: 'Has a separate fridge or freezer',
 };
+
+/**
+ * TRUE or FALSE Metadata rows that only some targets take. Global Settings shows one, and the
+ * editor asks for it, only when the target lists it in `TargetRules.requiredMetadataRows`.
+ */
+export const TARGET_INPUT_ROWS = [
+  'HasElectricitySmartMeter',
+  'IsExistingBuilding',
+  'Ventilation_cross_vent_possible',
+  'Appliances_has_dryer',
+  'Appliances_has_dishwasher',
+  'Appliances_has_separate_fridge_or_freezer',
+] as const;
+export type TargetInputRow = (typeof TARGET_INPUT_ROWS)[number];
+export const TARGET_INPUT_ROW_SET: ReadonlySet<string> = new Set(TARGET_INPUT_ROWS);
 
 /** Where the converter writes a metadata input row in the model. */
 const metadataSchemaPath = (key: string): string[] => {
   if (key.startsWith('General_')) return ['General', key.slice('General_'.length)];
   if (key.startsWith('Ventilation_')) return ['InfiltrationVentilation', key.slice('Ventilation_'.length)];
   if (key.startsWith('AirPermeability_')) return ['InfiltrationVentilation', 'Leaks', key.slice('AirPermeability_'.length)];
+  if (key.startsWith('Appliances_')) return ['Appliances', key.slice('Appliances_'.length)];
   return [key];
 };
 
@@ -551,6 +575,7 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs): Array<[string, str
   if (dd.buildType === 'flat') {
     rows.push(['General_storey_of_dwelling', count(dd.storeyOfDwelling)], ['General_storeys_in_building', num(compliance.storeys_in_building)]);
   }
+  rows.push(...TARGET_INPUT_ROWS.map((key): [string, string | undefined] => [key, bool(compliance[key])]));
   return rows;
 }
 
@@ -591,18 +616,24 @@ function templateMetadataValue(defaults: unknown, key: string): unknown {
  *
  * A row the file lacks takes that value even where the geometry or space labels give another, and
  * so does a row the save would otherwise leave out. A blank row is not filled (the converter blocks
- * it), nor a row a Systems row sets. Filled rows leave `absentMetadataRows`, so later defaults never
+ * it), nor a row a Systems row sets, nor a row in `requiredRows`: the target requires the user to
+ * state it, so no defaults value stands in. Filled rows leave `absentMetadataRows`, so later defaults never
  * replace a value the user has since edited. `notice` is undefined when the save adds no row.
  */
-export function absentMetadataRowFill(state: MetadataRowInputs, defaults: unknown): { patch: Record<string, unknown>; notice?: string } {
+export function absentMetadataRowFill(
+  state: MetadataRowInputs,
+  defaults: unknown,
+  requiredRows: readonly string[] = [],
+): { patch: Record<string, unknown>; notice?: string } {
   const settings = state.complianceSettings;
+  const required = new Set(requiredRows);
   const patch: Record<string, unknown> = {};
   const sources = new Map<string, string>();
   const blank = new Set(Object.keys(settings.unreadMetadataRows ?? {}));
   const absent = new Set(settings.absentMetadataRows);
   for (const [key, value] of metadataRowValues(state)) {
     if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
-      || systemsRowSetsMetadataInput(state.elements, key)) continue;
+      || required.has(key) || systemsRowSetsMetadataInput(state.elements, key)) continue;
     const template = templateMetadataValue(defaults, key);
     if (template === undefined) continue;
     patch[metadataSettingKey(key)] = template;
@@ -646,10 +677,17 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
 /**
  * One issue per model-input metadata row the save would leave out although the target's schema
  * takes it (or no schema says otherwise): the file had the row blank, the user cleared a value, or
- * no defaults value exists for a value the schema requires. `defaults` is undefined while the
+ * no defaults value exists for a value the schema requires. A row in `requiredRows` (the target's
+ * `requiredMetadataRows`) is an issue whenever it is unset. `defaults` is undefined while the
  * defaults are still loading, when only blank rows are known to be unset.
  */
-export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: unknown, defaults: unknown): string[] {
+export function unsetMetadataInputIssues(
+  state: MetadataRowInputs,
+  targetRoot: unknown,
+  defaults: unknown,
+  requiredRows: readonly string[] = [],
+): string[] {
+  const required = new Set(requiredRows);
   const unread = state.complianceSettings.unreadMetadataRows ?? {};
   const blank = new Set(Object.keys(unread));
   const derived = new Map(enteredOrDerivedRowValues(state));
@@ -661,9 +699,10 @@ export function unsetMetadataInputIssues(state: MetadataRowInputs, targetRoot: u
   };
   return metadataRowValues(state).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS
       && !systemsRowSetsMetadataInput(state.elements, key)
-      && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
-      && (blank.has(key) || (defaults !== undefined
-        && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))
+      && (required.has(key) || (!TARGET_INPUT_ROW_SET.has(key)
+        && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
+        && (blank.has(key) || (defaults !== undefined
+          && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))))
     ? [unread[key]
       ? `Global Settings: ${METADATA_INPUT_LABELS[key]} is '${unread[key]}', which the target does not accept. Enter it in Global Settings.${hint(key)}`
       : `Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.${hint(key)}`]

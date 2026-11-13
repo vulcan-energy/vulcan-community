@@ -46,6 +46,17 @@ export interface TargetRules {
    * product sources, such as a sample/catalogue source switch, do not apply.
    */
   hemDatabaseProducts: boolean;
+  /**
+   * Metadata rows the user must state for this target: no defaults-file value fills one, and an
+   * unset one is an error. Global Settings shows a row that only some targets take (such as
+   * `HasElectricitySmartMeter`) only when it is listed here.
+   */
+  requiredMetadataRows: readonly string[];
+  /**
+   * A battery states its age, grid charging and grid export; each one left unset takes a
+   * DESNZ-defined default in the converter, which the battery form shows.
+   */
+  batteryGridInputs: boolean;
 }
 
 export interface GeometrySchemaPropertyValidation {
@@ -117,8 +128,9 @@ export function targetSchemaMode(port?: GeometrySchemaPort): GeometrySchemaMode 
 
 /**
  * The host's rules over the defaults: model-validity checks run for every target, the FHS input
- * rules and Building Regulations checks for an FHS target, nothing is excluded or hidden, and
- * products come from the host's own sources.
+ * rules and Building Regulations checks for an FHS target, nothing is excluded or hidden,
+ * products come from the host's own sources, and no Metadata row is required beyond what the
+ * schema and defaults decide.
  */
 export function targetRules(
   port: GeometrySchemaPort | undefined,
@@ -131,6 +143,8 @@ export function targetRules(
     excludedElementTypes: {},
     hiddenFields: {},
     hemDatabaseProducts: false,
+    requiredMetadataRows: [],
+    batteryGridInputs: false,
     ...port?.targetRules?.(modelSettings),
   };
 }
