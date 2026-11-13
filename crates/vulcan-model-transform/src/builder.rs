@@ -2222,6 +2222,29 @@ impl JSONBuilder {
             crate::epc_mappings::check_element_fields(result, &self.schema, &mut errors);
             crate::epc_mappings::check_primary_pipework(result, &self.schema, &mut errors);
         }
+        if self.profile.converts_existing_buildings_to_hemie()
+            && result.get("IsExistingBuilding") == Some(&Value::Bool(true))
+        {
+            // HEMIE Geometry replaces the full-input zone, so its element checks do not apply.
+            // An element HEMIE cannot hold (the catalogue's unsupported systems) still fails:
+            // HEMIE takes no wall next to an unconditioned zone, so it would drop it unsaid.
+            let full_zone = |path: &str| path.starts_with("/Zone/");
+            self.non_fatal_errors
+                .borrow_mut()
+                .retain(|e| !full_zone(&e.path));
+            self.schema_omissions
+                .borrow_mut()
+                .retain(|o| !full_zone(&o.path));
+            errors.retain(|e| e.code == "E_EPC_UNSUPPORTED_SYSTEM" || !full_zone(&e.path));
+            notices.retain(|o| !full_zone(&o.path));
+            crate::hemie::map_existing_building(
+                result,
+                csv_data,
+                &self.schema,
+                &mut errors,
+                &mut notices,
+            );
+        }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
         self.schema_omissions.borrow_mut().extend(notices);
@@ -3720,6 +3743,9 @@ impl JSONBuilder {
                             "env_area".to_string(),
                             json_number(calculated_env_area, "env_area (sum of element areas)")?,
                         );
+                    } else if self.profile.references_products() {
+                        // EPC: the envelope area is derived or stated, never the template's.
+                        leaks_obj.remove("env_area");
                     }
                 }
             }
@@ -5303,12 +5329,16 @@ impl JSONBuilder {
         // A Metadata input with no row keeps the template value, or the FHS default above. Every
         // other Metadata merge (ventilation, air permeability) only writes present rows, so the
         // model already holds the value each absent setting will use.
-        let present: HashSet<String> = csv_data
-            .get("Metadata")
-            .into_iter()
-            .flatten()
-            .filter_map(|row| extract_metadata_field(row).0)
-            .collect();
+        // A row counts only with a value: a blank row is E066 and must not keep the template's.
+        let mut present: HashSet<String> = HashSet::new();
+        let mut blank: HashSet<String> = HashSet::new();
+        for row in csv_data.get("Metadata").into_iter().flatten() {
+            match extract_metadata_field(row) {
+                (Some(name), Some(_)) => present.insert(name),
+                (Some(name), None) => blank.insert(name),
+                _ => false,
+            };
+        }
         // A Systems InfiltrationVentilation fragment is wrapped in its root key, so a model
         // pointer finds the setting in it. The merge takes only that key from the fragment.
         let systems_fragments: Vec<&Value> = csv_data
@@ -5321,7 +5351,7 @@ impl JSONBuilder {
         let mut missing = Vec::new();
         let used: Vec<String> = METADATA_INPUT_FIELD_NAMES
             .iter()
-            .filter(|name| !present.contains(**name))
+            .filter(|name| !present.contains(**name) && !blank.contains(**name))
             .filter_map(|name| {
                 let pointer = if let Some(key) = name.strip_prefix("General_") {
                     format!("/General/{key}")
@@ -5349,6 +5379,7 @@ impl JSONBuilder {
                 })
             })
             .collect();
+        let existing = result.get("IsExistingBuilding") == Some(&Value::Bool(true));
         for name in self.profile.required_metadata_rows() {
             let pointer = if let Some(key) = name.strip_prefix("AirPermeability_") {
                 format!("/InfiltrationVentilation/Leaks/{key}")
@@ -5360,7 +5391,20 @@ impl JSONBuilder {
             let stated_by_systems = systems_fragments
                 .iter()
                 .any(|fragment| fragment.pointer(&pointer).is_some_and(|v| !v.is_null()));
-            if !present.contains(*name) && !stated_by_systems {
+            if present.contains(*name) || stated_by_systems {
+                continue;
+            }
+            if existing
+                && self
+                    .profile
+                    .existing_building_optional_rows()
+                    .contains(name)
+            {
+                let (parent, key) = pointer.rsplit_once('/').expect("a pointer");
+                if let Some(object) = result.pointer_mut(parent).and_then(Value::as_object_mut) {
+                    object.remove(key);
+                }
+            } else if !blank.contains(*name) {
                 missing.push(*name);
             }
         }

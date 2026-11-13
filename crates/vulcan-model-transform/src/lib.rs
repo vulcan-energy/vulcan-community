@@ -17,6 +17,7 @@ pub mod parser {
 mod epc_mappings;
 pub mod epc_products;
 pub mod finalization;
+mod hemie;
 pub mod preflight_diagnostics;
 mod schema_validation;
 mod target_mappings;
@@ -254,6 +255,23 @@ impl ModelProfile {
         }
     }
 
+    /// Required rows an existing building may leave out, DESNZ-defined: with no air test HEMIE
+    /// estimates the leakage (EPC 05 5.3.1), shield class follows the terrain class (EPC 11
+    /// Table 11.7.2) and noise nuisance is No (EPC 11 Table 11.4.2). An absent row removes the
+    /// template's value, so only a stated value reaches HEMIE.
+    pub(crate) fn existing_building_optional_rows(self) -> &'static [&'static str] {
+        match self {
+            Self::Core | Self::Fhs => &[],
+            Self::Epc => &[
+                "Ventilation_shield_class",
+                "Ventilation_noise_nuisance",
+                "AirPermeability_test_pressure",
+                "AirPermeability_test_result",
+                "AirPermeability_ventilation_zone_height",
+            ],
+        }
+    }
+
     /// A zone row may state `frac_convective_heating`. EPC differs: the wrapper's zone model
     /// requires it for a heated zone.
     pub(crate) fn states_zone_convective_fraction(self) -> bool {
@@ -288,6 +306,16 @@ impl ModelProfile {
     /// JSON schema cannot check, and no combustion appliance input. A `HeatSourceWarmAir`
     /// Systems row routes only here: no other schema has warm-air heaters.
     pub(crate) fn checks_system_catalogue(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// A model stating `IsExistingBuilding` converts its zone to HEMIE Geometry and its
+    /// ventilation to the HEMIE input Geometry needs. EPC differs: existing-building EPCs use
+    /// HEMIE Geometry, which forces HEMIE InfiltrationVentilation (`hemie.rs`).
+    pub(crate) fn converts_existing_buildings_to_hemie(self) -> bool {
         match self {
             Self::Core | Self::Fhs => false,
             Self::Epc => true,
