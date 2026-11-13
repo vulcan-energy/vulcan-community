@@ -1567,6 +1567,9 @@ pub struct JSONBuilder {
     /// The model's product settings (Metadata rows), read once per build.
     product_settings: RefCell<crate::epc_products::Settings>,
     product_slots: RefCell<Vec<crate::ProductSlot>>,
+    /// Model path of each object a Geometry CSV row authored (Systems, wet emitter and
+    /// mechanical ventilation rows) and the row's Name, so each product slot names its row.
+    slot_rows: RefCell<Vec<(String, String)>>,
     /// Element paths whose `solar_absorption_coeff` came from a colour.
     colour_coefficients: RefCell<Vec<String>>,
 }
@@ -1629,6 +1632,7 @@ impl JSONBuilder {
             product_settings: RefCell::default(),
             colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
+            slot_rows: RefCell::new(Vec::new()),
         };
 
         builder.index_templates();
@@ -1667,6 +1671,7 @@ impl JSONBuilder {
             product_settings: RefCell::default(),
             colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
+            slot_rows: RefCell::new(Vec::new()),
         };
         builder.index_templates();
         Ok(builder)
@@ -1699,8 +1704,13 @@ impl JSONBuilder {
 
     fn note_emitter_row(&self, system: &str, index: usize, row: &BTreeMap<String, Value>) {
         let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+        let path =
+            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]);
+        self.slot_rows
+            .borrow_mut()
+            .push((path.clone(), name.to_string()));
         self.csv_rows.borrow_mut().push((
-            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
+            path,
             format!("Wet Emitters row '{name}' (system '{system}')"),
         ));
     }
@@ -2195,7 +2205,21 @@ impl JSONBuilder {
                 &mut errors,
                 &mut notices,
             );
-            *self.product_slots.borrow_mut() = slots;
+            let rows = self.slot_rows.borrow();
+            *self.product_slots.borrow_mut() = slots
+                .into_iter()
+                .map(|slot| crate::ProductSlot {
+                    // The innermost authored object that holds the slot.
+                    row: rows
+                        .iter()
+                        .filter(|(path, _)| {
+                            slot.path == *path || slot.path.starts_with(&format!("{path}/"))
+                        })
+                        .max_by_key(|(path, _)| path.len())
+                        .map(|(_, row)| row.clone()),
+                    ..slot
+                })
+                .collect();
         }
         if self.profile.checks_party_wall_lining() {
             crate::epc_mappings::check_party_wall_lining(result, &mut errors);
@@ -4675,6 +4699,14 @@ impl JSONBuilder {
                         }
 
                         // Shared finalization projects and reports unsupported fields.
+                        self.slot_rows.borrow_mut().push((
+                            crate::json_pointer(&[
+                                "InfiltrationVentilation",
+                                "MechanicalVentilation",
+                                vent_name,
+                            ]),
+                            vent_name.to_string(),
+                        ));
                         mechanical_ventilation.insert(vent_name.to_string(), Value::Object(mv_obj));
                     }
                     // Read with the MechanicalVentilation row they name as parent_element.
@@ -7055,6 +7087,13 @@ impl JSONBuilder {
                         csv_owned.get("HotWaterSource").unwrap_or(&HashMap::new()),
                     );
                 }
+            }
+        }
+        for (section, names) in &csv_owned {
+            for (name, row) in names {
+                self.slot_rows
+                    .borrow_mut()
+                    .push((crate::json_pointer(&[section, name]), row.clone()));
             }
         }
         self.reconcile_zone_space_cool_system_references(

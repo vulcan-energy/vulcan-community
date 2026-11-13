@@ -82,8 +82,37 @@ export type GeometryProductCatalogueAdvancedHotWaterContext = Readonly<{
   ) => void;
 }>;
 
+/** A system that needs a product, as the selected target's conversion reports it. */
+export type GeometryProductSlot = Readonly<{
+  /** Model path of the system object in the converted model. */
+  path: string;
+  system_type: string;
+  product_id?: number | null;
+  /** `product`: picked on the element or by a model setting; `default`: chosen by a rule. */
+  source: 'product' | 'default';
+  label?: string | null;
+  /** How the product was chosen, or what the user must pick. */
+  rule: string;
+  technology_types: readonly string[];
+  /** The slot keeps a product when the element's own pick is removed. */
+  has_default?: boolean;
+  /** Name of the Geometry CSV row the system comes from. */
+  row?: string;
+}>;
+
+export type GeometryProductSlotContext = Readonly<{
+  slot: GeometryProductSlot;
+  element: Readonly<Record<string, unknown>>;
+  /** Merge a change into the element's existing extra_json. */
+  onPatchExtraJson(
+    update: (current: Record<string, unknown>) => Record<string, unknown>,
+  ): void;
+}>;
+
 export type GeometryProductCatalogueContribution = Readonly<{
   hasAppliedSystemData(extraJson: unknown): boolean;
+  /** The picker a product slot's source chip opens; without it the chip only informs. */
+  renderProductSlot?(context: GeometryProductSlotContext): ReactNode;
   prefetchSystemSource?(): void;
   renderSystemSource(context: GeometryProductCatalogueSystemContext): ReactNode;
   renderAdvancedHotWaterAction(

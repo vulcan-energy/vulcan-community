@@ -2577,6 +2577,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/ProductSlotChips.tsx",
+      "source_path": "packages/geometry-editor/src/components/ProductSlotChips.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/ResetFieldButton.tsx",
       "source_path": "packages/geometry-editor/src/components/ResetFieldButton.tsx",
       "license": "AGPL-3.0-only",

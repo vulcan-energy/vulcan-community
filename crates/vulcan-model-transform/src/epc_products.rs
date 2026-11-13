@@ -606,6 +606,8 @@ pub(crate) fn resolve_products(
                     label: None,
                     rule: "no rule".into(),
                     technology_types: vec![],
+                    has_default: false,
+                    row: None,
                 });
                 continue;
             };
@@ -630,6 +632,10 @@ pub(crate) fn resolve_products(
                     value.map(|id| (id, format!("model setting {setting}")))
                 }
                 _ => None,
+            };
+            let has_default = match &rule {
+                Rule::Auto { .. } => rule.candidates(db).len() == 1,
+                Rule::Pick { .. } => setting.is_some(),
             };
             let picked = object
                 .get("product_id")
@@ -731,6 +737,8 @@ pub(crate) fn resolve_products(
                 label,
                 rule: rule_text,
                 technology_types,
+                has_default,
+                row: None,
             });
         }
     }
@@ -1410,6 +1418,8 @@ pub(crate) mod tests {
             label: None,
             rule: String::new(),
             technology_types: vec![],
+            has_default: false,
+            row: None,
         };
         let model = |existing: bool| {
             json!({

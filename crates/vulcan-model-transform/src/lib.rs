@@ -444,6 +444,13 @@ pub struct ProductSlot {
     pub rule: String,
     /// The HEM Database technology types this slot accepts.
     pub technology_types: Vec<String>,
+    /// Whether the slot still has a product when the element's own pick is removed: a
+    /// single-product rule or a model setting.
+    #[serde(default)]
+    pub has_default: bool,
+    /// Name of the Geometry CSV row the system comes from, where one does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

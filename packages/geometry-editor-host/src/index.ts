@@ -65,6 +65,8 @@ export {
   type GeometryProductCatalogueAdvancedHotWaterContext,
   type GeometryProductCatalogueContribution,
   type GeometryProductCatalogueSystemContext,
+  type GeometryProductSlot,
+  type GeometryProductSlotContext,
 } from './inspectorContributions';
 
 export {

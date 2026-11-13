@@ -475,6 +475,7 @@ function areDormerThermalOverridesEqual(
 
 
 import { FieldValidationIndicator, ValidationIndicator, ValidationPill } from './ValidationIndicator';
+import { ProductSlotChips } from './ProductSlotChips';
 import { StandardCard } from './StandardCard';
 import { StandardInput } from './StandardInput';
 import { ResetFieldButton } from './ResetFieldButton';
@@ -4596,6 +4597,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               </div>
             )}
 
+            {selection.type === 'element' && !selection.isPlaceholder && selectedElement && (
+              <ProductSlotChips
+                element={selectedElement as unknown as Readonly<Record<string, unknown>> & { name?: string }}
+                productCatalogue={inspectorContributions.productCatalogue}
+                onPatchExtraJson={(update) => {
+                  const currentElement = getElementById(selection.id);
+                  commitExistingElementDraft({ extra_json: update({ ...readExtraJsonRecord(currentElement?.extra_json) }) });
+                }}
+              />
+            )}
             {(selection.type === 'element' || selection.type === 'global') && (
               <SelectedElementValidationRows
                 activeFilename={activeFilename}
