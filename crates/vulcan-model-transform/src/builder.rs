@@ -2112,7 +2112,17 @@ impl JSONBuilder {
                 &mut notices,
             );
             crate::epc_products::apply_weather_curves(result, db, &mut errors, &mut notices);
+            crate::epc_products::derive_zone_frac_convective(
+                result,
+                db,
+                &slots,
+                &mut errors,
+                &mut notices,
+            );
             *self.product_slots.borrow_mut() = slots;
+        }
+        if self.profile.checks_party_wall_lining() {
+            crate::epc_mappings::check_party_wall_lining(result, &mut errors);
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);

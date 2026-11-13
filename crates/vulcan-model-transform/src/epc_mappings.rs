@@ -32,6 +32,50 @@ fn notice(path: &str, message: String) -> SchemaOmission {
     }
 }
 
+/// Cavity types that take a lining type; every other cavity type must not state one
+/// (HEM Core 2.0.0a4 `BuildingElementPartyWall.validate_party_wall_lining_type`).
+const LINED_PARTY_WALL_CAVITIES: [&str; 3] =
+    ["filled_unsealed", "unfilled_sealed", "unfilled_unsealed"];
+
+/// A party wall's lining type must be stated for a lined cavity type and absent otherwise.
+/// Either mismatch is an error naming the wall; nothing is dropped.
+pub(crate) fn check_party_wall_lining(model: &Value, errors: &mut Vec<ValidationError>) {
+    for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
+        for (name, element) in zone_value["BuildingElement"]
+            .as_object()
+            .into_iter()
+            .flatten()
+        {
+            if element["type"] != "BuildingElementPartyWall" {
+                continue;
+            }
+            let cavity = element["party_wall_cavity_type"]
+                .as_str()
+                .unwrap_or_default();
+            let lining = element
+                .get("party_wall_lining_type")
+                .filter(|v| !v.is_null());
+            let lined = LINED_PARTY_WALL_CAVITIES.contains(&cavity);
+            let message = match (lined, lining) {
+                (true, None) => format!("Party wall '{name}' has cavity type {cavity}, which needs party_wall_lining_type. State the lining type."),
+                (false, Some(lining)) => format!("Party wall '{name}' states party_wall_lining_type {lining}, but its cavity type {cavity} takes none (only {} do). Remove the lining type or correct the cavity type.", LINED_PARTY_WALL_CAVITIES.join(", ")),
+                _ => continue,
+            };
+            errors.push(error(
+                "E_EPC_PARTY_WALL_LINING",
+                json_pointer(&[
+                    "Zone",
+                    zone,
+                    "BuildingElement",
+                    name,
+                    "party_wall_lining_type",
+                ]),
+                message,
+            ));
+        }
+    }
+}
+
 /// HEMIE Table 009.3 (also the FHS wrapper's `COLOUR_TO_SOLAR_ABSORPTION_MAP`).
 pub(crate) fn solar_absorption_coeff(colour: &str) -> Option<f64> {
     match colour {
@@ -703,5 +747,43 @@ mod tests {
             })
             .collect();
         assert_eq!(table, schema);
+    }
+
+    #[test]
+    fn a_party_wall_states_a_lining_type_exactly_when_its_cavity_takes_one() {
+        let wall = |cavity: &str, lining: Option<&str>| {
+            let mut wall =
+                json!({"type": "BuildingElementPartyWall", "party_wall_cavity_type": cavity});
+            if let Some(lining) = lining {
+                wall["party_wall_lining_type"] = json!(lining);
+            }
+            wall
+        };
+        let model = json!({"Zone": {"z": {"BuildingElement": {
+            "ok sealed": wall("filled_sealed", None),
+            "ok lined": wall("unfilled_sealed", Some("dry_lined")),
+            "extra": wall("filled_sealed", Some("dry_lined")),
+            "missing": wall("filled_unsealed", None),
+            "not a party wall": {"type": "BuildingElementOpaque", "party_wall_lining_type": "dry_lined"}
+        }}}});
+        let mut errors = Vec::new();
+        check_party_wall_lining(&model, &mut errors);
+        let found: Vec<_> = errors
+            .iter()
+            .map(|e| (e.path.as_str(), e.message.split(',').next().unwrap()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    "/Zone/z/BuildingElement/extra/party_wall_lining_type",
+                    "Party wall 'extra' states party_wall_lining_type \"dry_lined\""
+                ),
+                (
+                    "/Zone/z/BuildingElement/missing/party_wall_lining_type",
+                    "Party wall 'missing' has cavity type filled_unsealed"
+                ),
+            ]
+        );
     }
 }

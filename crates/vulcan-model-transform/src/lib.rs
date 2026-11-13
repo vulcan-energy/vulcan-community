@@ -228,6 +228,16 @@ impl ModelProfile {
             Self::Epc => true,
         }
     }
+
+    /// A party wall states `party_wall_lining_type` exactly when its cavity type takes one.
+    /// EPC differs: HEM Core 2.0.0a4 `BuildingElementPartyWall.validate_party_wall_lining_type`
+    /// (pydantic) rejects a lining type on any other cavity, which the JSON schema allows.
+    pub(crate) fn checks_party_wall_lining(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
 }
 
 /// Explicit converter contract; release labels never select translation rules implicitly.
