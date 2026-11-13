@@ -63,9 +63,11 @@ pub(crate) fn map_named_cold_appliances(model: &mut Value, contract: crate::Inpu
     }
 }
 
-/// Pinned Python a8/a9 add `1.0 * (width / 360.0)` per segment, in order, for a flat element
-/// (`ExternalConditions.diffuse_shading_reduction_factor`), and take `acos(2 * sum - 1)`: a sum
-/// that rounds above 1 raises a math domain error. Shading only lowers a segment's term, so the
+/// Pinned Python a8/a9 (hem_core `src/hem_core/external_conditions.py` at f2ab6cf7 and 918addad,
+/// `ExternalConditions.diffuse_shading_reduction_factor`) loop over `shading_segments` in input
+/// order with `f_sky_new += f_sky_front + f_sky_rear`. For a flat element `f_sky` is 1.0,
+/// `f_sky_front = f_sky * (deg_seg / 360.0)` and `f_sky_rear = 0.0`; then
+/// `acos((2.0 * f_sky_new) - 1.0)` raises a math domain error when the sum rounds above 1. Shading only lowers a segment's term, so the
 /// unshaded fold is the worst case. Only the sky reaching an a8/a9 model qualifies.
 pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: crate::InputContract) {
     if !contract.uses_exact_empty_shading_sectors {
@@ -94,9 +96,11 @@ pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: cra
     // the same shading, or splitting a segment into two that keep it, leaves every element's
     // result unchanged but changes the rounding. A merge that brings the sum to at most 1 is
     // taken, plain segments first; failing that, one pair merges and the search repeats. With
-    // nothing left to merge, one split is taken, again plain segments first.
+    // nothing left to merge, splits follow (never merged back): the first that fits, plain
+    // segments first, or else the one that lowers the sum most, until it fits or the cap.
     const MIN: usize = 8; // minItems and maxItems of a8/a9 `shading_segments`
     const MAX: usize = 36;
+    let mut splitting = false;
     loop {
         let Some(widths) = sectors.iter().map(width).collect::<Option<Vec<u64>>>() else {
             return;
@@ -111,7 +115,7 @@ pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: cra
         // Touching neighbours with the same fields apart from their arc.
         let merges = |shaded: bool| -> Vec<Change> {
             (0..sectors.len() - 1)
-                .filter(|&i| sectors.len() > MIN && plain(&sectors[i]) != shaded)
+                .filter(|&i| !splitting && sectors.len() > MIN && plain(&sectors[i]) != shaded)
                 .filter(|&i| sectors[i].get("end360") == sectors[i + 1].get("start360"))
                 .filter(|&i| arcless(&sectors[i]).eq(arcless(&sectors[i + 1])))
                 .map(Change::Merge)
@@ -124,15 +128,22 @@ pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: cra
                 .flat_map(|i| (1..widths[i]).map(move |left| Change::Split(i, left)))
                 .collect()
         };
-        let fits = |change: &Change| fold(&change.widths(&widths)) <= 1.0;
+        let sum = |change: &Change| fold(&change.widths(&widths));
+        let fits = |change: &Change| sum(change) <= 1.0;
         let merges: Vec<Change> = merges(false).into_iter().chain(merges(true)).collect();
+        let splits: Vec<Change> = splits(false).into_iter().chain(splits(true)).collect();
         let next = merges
             .iter()
             .copied()
             .find(fits)
             .or_else(|| merges.first().copied())
-            .or_else(|| splits(false).into_iter().find(fits))
-            .or_else(|| splits(true).into_iter().find(fits));
+            .or_else(|| splits.iter().copied().find(fits))
+            .or_else(|| {
+                splits
+                    .iter()
+                    .copied()
+                    .min_by(|a, b| sum(a).total_cmp(&sum(b)))
+            });
         // With no neutral change left, validation reports E_PYTHON_FHS_SKY_SUM.
         let Some(change) = next else { return };
         match change {
@@ -141,6 +152,7 @@ pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: cra
                 sectors[i]["end360"] = end;
             }
             Change::Split(i, left) => {
+                splitting = true;
                 let at = json!(sectors[i]["start360"].as_u64().unwrap() + left);
                 let mut tail = sectors[i].clone();
                 tail["start360"] = at.clone();
@@ -172,6 +184,7 @@ impl Change {
     }
 }
 
+/// `deg_seg` of `segment_angle_ranges` in the same Python function.
 fn width(sector: &Value) -> Option<u64> {
     let (from, to) = (
         sector.get("start360")?.as_u64()?,
@@ -184,11 +197,11 @@ fn width(sector: &Value) -> Option<u64> {
     })
 }
 
-/// Pinned Python a8/a9's order and arithmetic.
+/// `f_sky_new` for a flat element, in pinned Python a8/a9's order and arithmetic.
 fn fold(widths: &[u64]) -> f64 {
-    widths
-        .iter()
-        .fold(0.0, |sum, &width| sum + 1.0 * (width as f64 / 360.0))
+    widths.iter().fold(0.0, |sum, &width| {
+        sum + (1.0 * (width as f64 / 360.0) + 0.0)
+    })
 }
 
 /// An unshaded segment with no authored keys.
@@ -979,6 +992,70 @@ mod tests {
         map_target_unobstructed_shading(&mut rust, ConversionProfile::CurrentRustFhs);
         assert_eq!(rust, source);
     }
+    fn shading_by_degree(segments: &[Value]) -> Vec<Option<&Value>> {
+        segments
+            .iter()
+            .flat_map(|s| {
+                let (from, to) = (
+                    s["start360"].as_u64().unwrap(),
+                    s["end360"].as_u64().unwrap(),
+                );
+                (from..to).map(move |_| s.get("shading"))
+            })
+            .collect()
+    }
+
+    /// Seeded random whole-degree skies of 8 to 36 segments: every degree keeps its shading,
+    /// the count stays in the schema's 8..=36, and below the cap the flat-sky sum is at most 1.
+    #[test]
+    fn random_skies_keep_shading_and_sum_to_at_most_one() {
+        let mut seed: u64 = 0x5eed;
+        let mut next = |bound: u64| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) % bound
+        };
+        let kinds = [
+            None,
+            Some(json!([{"type":"obstacle","height":1,"distance":10}])),
+            Some(json!([{"type":"obstacle","height":2,"distance":10}])),
+        ];
+        let contract = crate::ConversionProfile::PythonFhsA9.input_contract();
+        for _ in 0..3000 {
+            let count = 8 + next(29) as usize;
+            let mut cuts = std::collections::BTreeSet::from([0, 360]);
+            while cuts.len() < count + 1 {
+                cuts.insert(1 + next(359));
+            }
+            let cuts: Vec<u64> = cuts.into_iter().collect();
+            let sectors: Vec<Value> = cuts
+                .windows(2)
+                .map(|pair| {
+                    let mut s = json!({"start360": pair[0], "end360": pair[1]});
+                    if let Some(shading) = &kinds[next(3) as usize] {
+                        s["shading"] = shading.clone();
+                    }
+                    s
+                })
+                .collect();
+            let mut model = json!({"ExternalConditions":{"shading_segments": sectors.clone()}});
+            map_contract_unobstructed_shading(&mut model, contract);
+            let out = model["ExternalConditions"]["shading_segments"]
+                .as_array()
+                .unwrap();
+            assert_eq!(
+                shading_by_degree(out),
+                shading_by_degree(&sectors),
+                "{sectors:?}"
+            );
+            assert!((8..=36).contains(&out.len()), "{sectors:?}");
+            if out.len() < 36 {
+                assert!(flat_sky_sum(out).unwrap() <= 1.0, "{sectors:?}");
+            }
+        }
+    }
+
     /// Every obstacle window, and a spread of pairs of windows, on a 10-degree grid: every
     /// degree keeps its shading and the flat-sky sum Python a8/a9 take acos of stays at most 1.
     #[test]
@@ -1008,19 +1085,11 @@ mod tests {
                     .as_array()
                     .unwrap();
                 // Every degree keeps its shading.
-                fn by_degree(segments: &[Value]) -> Vec<Option<&Value>> {
-                    segments
-                        .iter()
-                        .flat_map(|s| {
-                            let (from, to) = (
-                                s["start360"].as_u64().unwrap(),
-                                s["end360"].as_u64().unwrap(),
-                            );
-                            (from..to).map(move |_| s.get("shading"))
-                        })
-                        .collect()
-                }
-                assert_eq!(by_degree(out), by_degree(&sectors), "{first:?} {second:?}");
+                assert_eq!(
+                    shading_by_degree(out),
+                    shading_by_degree(&sectors),
+                    "{first:?} {second:?}"
+                );
                 assert!((8..=36).contains(&out.len()));
                 let total = flat_sky_sum(out).unwrap();
                 assert!(total <= 1.0, "{first:?} {second:?}: {total}");
