@@ -30,7 +30,7 @@ import { INLINE_FIELD_NOTE_STYLE } from './elementForms/formPrimitives';
 type Field<P> = (
   | { key: keyof P; label: string; kind: 'number'; unit?: string }
   | { key: keyof P; label: string; kind: 'choice'; options: Array<{ value: string; label: string }> }
-) & { shown?: (p: P) => boolean };
+) & { shown?: (p: P) => boolean; note?: string };
 
 const BAY_FIELDS: Field<BayParameters>[] = [
   { key: 'centre', label: 'Opening centre from wall start', kind: 'number', unit: 'm' },
@@ -51,6 +51,7 @@ const CONSERVATORY_FIELDS: Field<ConservatoryParameters>[] = [
     kind: 'choice',
     options: [{ value: '', label: 'Choose…' }, ...['corridor', 'garage', 'roof void', 'stairwell'].map((v) => ({ value: v, label: v[0].toUpperCase() + v.slice(1) }))],
     shown: (p) => p.conservatoryType === 'unheated',
+    note: 'HEMIE has no conservatory type yet; pick the closest.',
   },
   { key: 'centre', label: 'Centre from wall start', kind: 'number', unit: 'm' },
   { key: 'width', label: 'Width', kind: 'number', unit: 'm' },
@@ -141,6 +142,7 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
               size="md"
             />
           )}
+          {field.note ? <div style={INLINE_FIELD_NOTE_STYLE}>{field.note}</div> : null}
         </FieldRow>
       ))}
       {problem ? <div style={INLINE_FIELD_NOTE_STYLE} role="alert">{problem}</div> : null}
