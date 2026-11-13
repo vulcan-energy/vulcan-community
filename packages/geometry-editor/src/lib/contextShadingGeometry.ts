@@ -123,7 +123,7 @@ const NON_EXTERNAL_WALL_TYPES = new Set<string>([
 // Wall lines and floor edges are drawn separately, so allow a small drafting offset.
 const WALL_ON_EDGE_TOLERANCE_M = 0.05;
 
-/** True when a non-external wall's plan line lies along the edge and covers most of it. */
+/** True when a wall's plan line lies along the edge and covers most of it. */
 function edgeCarriesWall([a, b]: Segment, wall: readonly PlanPoint[]): boolean {
   const length = Math.hypot(b.x - a.x, b.y - a.y);
   const ux = (b.x - a.x) / length;
@@ -132,6 +132,17 @@ function edgeCarriesWall([a, b]: Segment, wall: readonly PlanPoint[]): boolean {
   if (ends.some((p) => Math.abs((p.x - a.x) * uy - (p.y - a.y) * ux) > WALL_ON_EDGE_TOLERANCE_M)) return false;
   const [t0, t1] = ends.map((p) => (p.x - a.x) * ux + (p.y - a.y) * uy).sort((x, y) => x - y);
   return Math.min(t1, length) - Math.max(t0, 0) > length / 2;
+}
+
+/** True when a party wall of `elements` lies along an edge of the footprint `coords`, either covering most of it. */
+export function partyWallOnFootprint(
+  elements: readonly Pick<Element, 'type' | 'coordinates'>[],
+  coords: readonly PlanPoint[],
+): boolean {
+  const edges = faces(coords);
+  return elements.some((wall) => wall.type === 'BuildingElementPartyWall' && (wall.coordinates?.length ?? 0) >= 2 &&
+    edges.some((edge) => edgeCarriesWall(edge, wall.coordinates) ||
+      edgeCarriesWall([wall.coordinates[0], wall.coordinates[wall.coordinates.length - 1]], edge)));
 }
 
 /**

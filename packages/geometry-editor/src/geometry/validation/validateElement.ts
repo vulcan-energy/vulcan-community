@@ -1855,7 +1855,7 @@ export const validateElementCore = (
         if (parent && contextElement.coordinates && parent.coordinates && context.calculateContextShadingDistance) {
           const derivedDistance = context.calculateContextShadingDistance(contextElement, parent);
           if (!(derivedDistance > 0)) {
-            issues.push(geo('Distance must be greater than 0: the object is not in front of an external wall of the dwelling', 'distance'));
+            issues.push(geo(`Distance is ${derivedDistance} m, and HEM needs a distance above 0. FHS guidance 2.3.1 measures it perpendicular from the dwelling's closest external wall to the object's closest face.`, 'distance'));
           }
         } else {
           issues.push(geo('Missing parent or coordinates', 'parent_element'));

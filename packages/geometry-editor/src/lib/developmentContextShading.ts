@@ -7,6 +7,7 @@ import { roundToTwoDecimals } from '../geometry/constants';
 import polygonClipping, { type Polygon } from 'polygon-clipping';
 import { calculatePolygonArea } from './polygonSync';
 import {
+  partyWallOnFootprint,
   calculateContextShadingAngularRangeFromCoordinates,
   calculateContextShadingDistanceFromCoordinates,
 } from './contextShadingGeometry';
@@ -712,8 +713,15 @@ export function syncDevelopmentContextShadingElements(
           Math.abs(sourceVertical.baseM - activeVertical.baseM) <= SAME_FLOOR_TOLERANCE_M;
         const overlappingFootprint =
           boundsOverlapArea(activeParent.bounds, sourceFootprint.bounds) > FOOTPRINT_OVERLAP_TOLERANCE_M2;
+        // A neighbour attached across a party wall is in HEM through that wall, not as shading.
+        const attached =
+          sourceVertical.topM > activeVertical.baseM && activeVertical.topM > sourceVertical.baseM &&
+          (partyWallOnFootprint(activeElements, sourceFootprint.element.coordinates) ||
+            partyWallOnFootprint(model.elements, activeParent.element.coordinates));
         if (overlappingFootprint) {
           if (sameFloor) skippedSameFloorOverlapCount++;
+        } else if (attached) {
+          // Left out on purpose; nothing to count.
         } else if (!sourceVertical.heightKnown) {
           skippedUnknownHeightCount++;
         } else {
