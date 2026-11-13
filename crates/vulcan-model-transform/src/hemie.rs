@@ -42,6 +42,9 @@ const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
 const UNUSED_WINDOW_HEAT_CAPACITY: f64 = 0.0;
 const SETTING: &str = "HEMIE_";
 
+#[path = "hemie_systems.rs"]
+mod systems;
+
 fn error(path: String, message: String) -> ValidationError {
     ValidationError {
         code: "E_EPC_HEMIE".into(),
@@ -891,6 +894,7 @@ pub(crate) fn map_existing_building(
         notices: Vec::new(),
         model: &snapshot,
     };
+    systems::check_vents(&mut ctx);
     let converted = convert(&mut ctx, csv);
     if !ctx.settings.missing.is_empty() {
         ctx.errors.push(error("/Metadata".into(), format!("An existing-building EPC needs these model settings, which the Metadata section does not state: {}.", ctx.settings.missing.iter().cloned().collect::<Vec<_>>().join("; "))));
@@ -900,7 +904,8 @@ pub(crate) fn map_existing_building(
         errors.append(&mut ctx.errors);
         return;
     }
-    let (geometry, ventilation) = converted.expect("checked");
+    let (mut geometry, ventilation) = converted.expect("checked");
+    systems::mechanical_ventilation(&snapshot, csv, schema, &mut geometry, errors, notices);
     let documented: Vec<String> = std::mem::take(&mut ctx.constructions.documented)
         .into_iter()
         .collect();
@@ -920,35 +925,8 @@ pub(crate) fn map_existing_building(
     notices.push(notice("/Zone", "The existing-building EPC takes its geometry from the storey outlines. HEMIE derives thermal bridges (from the age band), internal walls and floors, lighting and window shading itself, so the model's own are not used.".into()));
     model["Zone"] = geometry;
     model["InfiltrationVentilation"] = ventilation;
-    // DESNZ-defined: with HEMIE Geometry, the heating systems that name their zone take the one
-    // zone Geometry makes, so they are given in their HEMIE form, which has no zone. Fields the
-    // HEMIE form does not take are reported as schema omissions.
-    if let Some(systems) = model
-        .get_mut("SpaceHeatSystem")
-        .and_then(Value::as_object_mut)
-    {
-        for (name, system) in systems.iter_mut() {
-            let definition = match system.get("type").and_then(Value::as_str) {
-                Some("WetDistribution") => "SpaceHeatSystemWetDistribution",
-                Some("ElecStorageHeater") => "SpaceHeatSystemElectricStorageHeaterProduct",
-                _ => continue,
-            };
-            let mut hemie = system.clone();
-            hemie.as_object_mut().expect("system").remove("Zone");
-            hemie["model_type"] = json!("hemie");
-            let branch = json!({
-                "$ref": format!("#/$defs/hem_epc_orchestrator__models__hemie__{definition}"),
-                "$defs": schema["$defs"],
-            });
-            if let Ok((projected, omitted)) = crate::finalization::project_model(&hemie, &branch) {
-                *system = projected;
-                notices.extend(omitted.into_iter().map(|mut o| {
-                    o.path = format!("{}{}", json_pointer(&["SpaceHeatSystem", name]), o.path);
-                    o
-                }));
-            }
-        }
-    }
+    // DESNZ-defined: with HEMIE Geometry, systems take their HEMIE form, which has no zone.
+    systems::map_systems(model, schema, errors, notices);
 }
 
 fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
@@ -1311,7 +1289,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                     "party_or_sheltered_door"
                 };
                 let key = ctx.construction(door_type, &[opening], &[]);
-                door.push(json!({"width": opening.num("width"), "height": opening.num("height"), "construction": key}));
+                let mut d = json!({"width": opening.num("width"), "height": opening.num("height"), "construction": key});
+                if let Some(vents) = systems::host_vents(ctx, opening.name) {
+                    d["mechanical_vents"] = vents;
+                }
+                door.push(d);
             }
         }
         if kind == Kind::External || !win.is_empty() || !door.is_empty() {
@@ -1324,6 +1306,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
     }
     passive_vents(ctx, csv, &mut hemie_walls);
+    systems::wall_vents(ctx, &mut hemie_walls);
 
     // Roofs and floors per part.
     let room_walls_refs: Vec<&El> = room_walls.clone();
@@ -1562,6 +1545,9 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
     if !vents.is_empty() {
         w["passive_vents"] = Value::Array(vents);
     }
+    if let Some(vents) = systems::host_vents(ctx, e.name) {
+        w["mechanical_vents"] = vents;
+    }
     // Derived from the model: Vulcan's security_risk flag.
     if let Some(risk) = e.get("security_risk").and_then(Value::as_bool) {
         w["is_security_risk"] = json!(risk);
@@ -1618,7 +1604,9 @@ fn roof_windows(
         .filter(|w| hosts.iter().any(|h| w.host() == Some(h.name)))
         .filter_map(|w| {
             placed.insert(w.name.to_string());
-            window(ctx, w, true)
+            let mut value = window(ctx, w, true)?;
+            systems::no_roof_window_vents(ctx, w.name, &mut value);
+            Some(value)
         })
         .collect()
 }
@@ -2076,6 +2064,8 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
                     _ => ctx.errors.push(error(path, format!("Vent '{name}' is more than {TOL} m from every storey wall or has no area. HEMIE places each passive vent in a wall."))),
                 }
             }
+            // Mechanical ventilation and its vents: `systems`.
+            Some("MechanicalVentilation" | "MechanicalVentilationTerminal" | "MechanicalVentilationDuctwork") => {}
             other => ctx.errors.push(error(path, format!("Ventilation '{name}' ({}) is not converted for an existing-building EPC yet. Remove it to run this model.", other.unwrap_or("no type")))),
         }
     }
