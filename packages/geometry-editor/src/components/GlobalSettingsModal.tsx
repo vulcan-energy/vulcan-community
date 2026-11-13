@@ -533,7 +533,7 @@ export function GlobalSettingsModal({
   const showKitchenHood = targetFieldAvailability(targetRoot, ["KitchenExtractorHoodExternal"]) !== "absent";
   const showBuildingLength = targetFieldAvailability(targetRoot, ["BuildingLength"]) !== "absent";
   const showBuildingWidth = targetFieldAvailability(targetRoot, ["BuildingWidth"]) !== "absent";
-  const { requiredMetadataRows } = useTargetRules();
+  const { requiredMetadataRows, storeyBuildTypes } = useTargetRules();
   const requiredRows = useMemo(() => new Set(requiredMetadataRows), [requiredMetadataRows]);
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
@@ -1022,7 +1022,7 @@ export function GlobalSettingsModal({
       { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
       targetRoot,
       defaultsJson,
-      requiredMetadataRows,
+      { requiredMetadataRows, storeyBuildTypes },
     ));
     const bedroomCountIssue = fhsBedroomCountIssue(
       complianceSettings.NumberOfBedrooms
@@ -1037,7 +1037,7 @@ export function GlobalSettingsModal({
       issues.push("Storeys in dwelling must be at least 1.");
     }
     if (
-      buildTypeHasStoreyRows(targetRoot, shownBuildType) &&
+      buildTypeHasStoreyRows(targetRoot, shownBuildType, storeyBuildTypes) &&
       typeof complianceSettings.storeys_in_building === "number"
     ) {
       if (complianceSettings.storeys_in_building < 1) {
@@ -1066,6 +1066,7 @@ export function GlobalSettingsModal({
     targetRoot,
     defaultsJson,
     requiredMetadataRows,
+    storeyBuildTypes,
     zones,
   ]);
 
@@ -1878,7 +1879,7 @@ export function GlobalSettingsModal({
                               };
                               const nextEffectiveBuildType =
                                 next ?? suggestedBuildType;
-                              if (nextEffectiveBuildType !== undefined && !buildTypeHasStoreyRows(targetRoot, nextEffectiveBuildType)) {
+                              if (nextEffectiveBuildType !== undefined && !buildTypeHasStoreyRows(targetRoot, nextEffectiveBuildType, storeyBuildTypes)) {
                                 patch.storey_of_dwelling = undefined;
                                 patch.storeys_in_building = undefined;
                               }
@@ -2053,7 +2054,7 @@ export function GlobalSettingsModal({
                             )}
                         </div>
 
-                        {buildTypeHasStoreyRows(targetRoot, shownBuildType) && (
+                        {buildTypeHasStoreyRows(targetRoot, shownBuildType, storeyBuildTypes) && (
                           <>
                             {showStoreyOfDwelling && (
                             <div

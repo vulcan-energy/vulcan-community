@@ -2935,7 +2935,7 @@ const withPrecomputedDefaultsLookup = (
         ? absentMetadataRowFill(
           { ...state, complianceSettings, elements: Object.values(state.elementsById) },
           defaultsJson,
-          targetRules(schemaPort, complianceSettings).requiredMetadataRows,
+          targetRules(schemaPort, complianceSettings),
           metadataFillRoot(schemaPort),
         )
         : { patch: {} };
@@ -7733,7 +7733,7 @@ const createGeometryState = (
         { ...state, elements },
         schemaPort.availability === 'available' ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null,
         state.defaultsLoading ? undefined : state.defaultsJson,
-        targetRules(schemaPort, state.complianceSettings).requiredMetadataRows,
+        targetRules(schemaPort, state.complianceSettings),
       ));
     }
 

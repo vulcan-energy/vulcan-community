@@ -9,6 +9,7 @@ import type {
   Zone,
 } from '../geometry/types';
 import type { GeometryState } from '../stores/geometryStore';
+import type { TargetRules } from '../../../geometry-editor-host/src/schemaPort';
 import { resolveEffectiveDwellingDetails, resolveEffectiveVentilationBaseHeight } from './effectiveDwellingDetails';
 import { targetFieldAccepts, targetFieldAvailability, targetFieldEnum } from './schemaCache';
 import { resolveBuildingElementPitch } from '../geometry/derivePitchFromGeometry';
@@ -515,6 +516,9 @@ const count = (value: number | undefined) => (finiteNumber(value) === undefined 
 const num = (value: number | undefined) => (finiteNumber(value) === undefined ? undefined : String(value));
 const text = (value: string | undefined) => (value ? value : undefined);
 
+/** The target rules the metadata rows follow. */
+export type MetadataTargetRules = Pick<TargetRules, 'requiredMetadataRows' | 'storeyBuildTypes'>;
+
 export type MetadataRowInputs = Pick<GeometryState, 'zones' | 'elementsById' | 'spaceLabelsById' | 'spaceLabelIds' | 'complianceSettings'> & {
   floors: Floor[];
   elements: Element[];
@@ -533,9 +537,9 @@ export function targetBuildTypes(targetRoot: unknown): readonly string[] {
 /**
  * Whether a build type takes the flat-only rows (storey of dwelling, storeys in building): the
  * types the target schema's General conditions require them for, where it states them (FHS: `flat`);
- * otherwise every type but `house` (HEM:EPC: a maisonette is a flat for these inputs).
+ * otherwise the target's `storeyBuildTypes` (TargetRules).
  */
-export function buildTypeHasStoreyRows(targetRoot: unknown, buildType: string | undefined): boolean {
+export function buildTypeHasStoreyRows(targetRoot: unknown, buildType: string | undefined, storeyBuildTypes: readonly string[]): boolean {
   if (!buildType) return false;
   const record = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
   const root = record(targetRoot);
@@ -551,7 +555,7 @@ export function buildTypeHasStoreyRows(targetRoot: unknown, buildType: string | 
     const condition = record(record(record(node?.if)?.properties)?.build_type);
     return [condition?.const, ...(Array.isArray(condition?.enum) ? condition.enum : [])].filter((type) => typeof type === 'string');
   });
-  return stated.length ? stated.includes(buildType) : buildType !== 'house';
+  return (stated.length ? stated : storeyBuildTypes).includes(buildType);
 }
 
 /**
@@ -559,7 +563,7 @@ export function buildTypeHasStoreyRows(targetRoot: unknown, buildType: string | 
  * or space labels give (a build type only where the target takes it, see targetBuildTypes). Rows
  * that do not apply (flat-only rows on a house) are left out.
  */
-function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown): Array<[string, string | undefined]> {
+function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown, storeyBuildTypes: readonly string[]): Array<[string, string | undefined]> {
   const compliance = state.complianceSettings;
   const dd = resolveEffectiveDwellingDetails({
     zones: state.zones as Zone[],
@@ -608,7 +612,7 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
     ['General_built_form', num(compliance.built_form)],
     ['General_storeys_in_dwelling', count(dd.storeysInDwelling)],
   ];
-  if (buildTypeHasStoreyRows(targetRoot, buildType)) {
+  if (buildTypeHasStoreyRows(targetRoot, buildType, storeyBuildTypes)) {
     rows.push(['General_storey_of_dwelling', count(dd.storeyOfDwelling)], ['General_storeys_in_building', num(compliance.storeys_in_building)]);
   }
   rows.push(...TARGET_INPUT_ROWS.map((key): [string, string | undefined] => [key, bool(compliance[key])]));
@@ -621,10 +625,10 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
  * the file has blank stays blank and blocks (E066), a row the file lacks takes the converter's
  * value or none (absentMetadataRowFill), and a setting a Systems row sets is left to that row.
  */
-export function metadataRowValues(state: MetadataRowInputs, targetRoot: unknown): Array<[string, string | undefined]> {
+export function metadataRowValues(state: MetadataRowInputs, targetRoot: unknown, storeyBuildTypes: readonly string[]): Array<[string, string | undefined]> {
   const entered = state.complianceSettings as Record<string, unknown>;
   const fileDecides = new Set([...Object.keys(state.complianceSettings.unreadMetadataRows ?? {}), ...(state.complianceSettings.absentMetadataRows ?? [])]);
-  return enteredOrDerivedRowValues(state, targetRoot).map(([key, value]) => [key,
+  return enteredOrDerivedRowValues(state, targetRoot, storeyBuildTypes).map(([key, value]) => [key,
     entered[metadataSettingKey(key)] === undefined && (fileDecides.has(key) || systemsRowSetsMetadataInput(state.elements, key)) ? undefined : value]);
 }
 
@@ -652,7 +656,7 @@ function templateMetadataValue(defaults: unknown, key: string): unknown {
  *
  * A row the file lacks takes that value even where the geometry or space labels give another, and
  * so does a row the save would otherwise leave out. A blank row is not filled (the converter blocks
- * it), nor a row a Systems row sets, nor a row in `requiredRows`: the target requires the user to
+ * it), nor a row a Systems row sets, nor a row in `rules.requiredMetadataRows`: the target requires the user to
  * state it, so no defaults value stands in, nor a row the user emptied (`clearedValueRows`). Filled rows leave `absentMetadataRows`, so later defaults never
  * replace a value the user has since edited, and join `initialValueRows`, so a target switch can drop
  * them (withoutTargetInitialValues). `notice` is undefined when the save adds no row.
@@ -664,18 +668,19 @@ function templateMetadataValue(defaults: unknown, key: string): unknown {
 export function absentMetadataRowFill(
   state: MetadataRowInputs,
   defaults: unknown,
-  requiredRows: readonly string[],
+  rules: MetadataTargetRules,
   targetRoot: unknown,
 ): { patch: Record<string, unknown>; notice?: string } | undefined {
   if (targetRoot === null) return undefined;
+  const { storeyBuildTypes } = rules;
   const settings = state.complianceSettings;
-  const required = new Set(requiredRows);
+  const required = new Set(rules.requiredMetadataRows);
   const patch: Record<string, unknown> = {};
   const sources = new Map<string, string>();
   const blank = new Set(Object.keys(settings.unreadMetadataRows ?? {}));
   const absent = new Set(settings.absentMetadataRows);
   const cleared = new Set(settings.clearedValueRows);
-  for (const [key, value] of metadataRowValues(state, targetRoot)) {
+  for (const [key, value] of metadataRowValues(state, targetRoot, storeyBuildTypes)) {
     if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
       || required.has(key) || cleared.has(metadataSettingKey(key)) || systemsRowSetsMetadataInput(state.elements, key)) continue;
     const template = templateMetadataValue(defaults, key);
@@ -686,7 +691,7 @@ export function absentMetadataRowFill(
       ? 'the converter\'s value for a missing row'
       : 'from the defaults file');
   }
-  const added = metadataRowValues({ ...state, complianceSettings: { ...settings, ...patch } }, targetRoot)
+  const added = metadataRowValues({ ...state, complianceSettings: { ...settings, ...patch } }, targetRoot, storeyBuildTypes)
     .flatMap(([key, value]) => (value !== undefined && absent.has(key)
       ? [`${METADATA_INPUT_LABELS[key] ?? key} ${value} (${sources.get(key) ?? (key.startsWith('NumberOf') ? 'from space labels' : 'from the geometry')})`]
       : []));
@@ -750,7 +755,7 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
 /**
  * One issue per model-input metadata row the save would leave out although the target's schema
  * takes it (or no schema says otherwise): the file had the row blank, the user cleared a value, or
- * no defaults value exists for a value the schema requires. A row in `requiredRows` (the target's
+ * no defaults value exists for a value the schema requires. A row in `rules.requiredMetadataRows` (the target's
  * `requiredMetadataRows`) is an issue whenever it is unset. `defaults` is undefined while the
  * defaults are still loading, when only blank rows are known to be unset.
  */
@@ -758,9 +763,10 @@ export function unsetMetadataInputIssues(
   state: MetadataRowInputs,
   targetRoot: unknown,
   defaults: unknown,
-  requiredRows: readonly string[] = [],
+  rules: MetadataTargetRules,
 ): string[] {
-  const required = new Set(requiredRows);
+  const required = new Set(rules.requiredMetadataRows);
+  const { storeyBuildTypes } = rules;
   const unread = state.complianceSettings.unreadMetadataRows ?? {};
   // A cell the editor cannot hold that the target's schema takes (an HEM:EPC built form as
   // build_type) is saved as in the file and is no issue.
@@ -768,14 +774,14 @@ export function unsetMetadataInputIssues(
     && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) === 'available'
     && targetFieldAccepts(targetRoot, metadataSchemaPath(key), unread[key])));
   const blank = new Set(Object.keys(unread));
-  const derived = new Map(enteredOrDerivedRowValues(state, targetRoot));
+  const derived = new Map(enteredOrDerivedRowValues(state, targetRoot, storeyBuildTypes));
   // The value the editor can work out, as a hint; the user enters it so the save writes it.
   const hint = (key: string) => {
     const value = derived.get(key);
     if (value === undefined) return '';
     return key.startsWith('NumberOf') ? ` Space labels show ${value}.` : ` The geometry gives ${value}.`;
   };
-  return metadataRowValues(state, targetRoot).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && !accepted.has(key)
+  return metadataRowValues(state, targetRoot, storeyBuildTypes).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && !accepted.has(key)
       && !systemsRowSetsMetadataInput(state.elements, key)
       && (required.has(key) || (!TARGET_INPUT_ROW_SET.has(key)
         && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'

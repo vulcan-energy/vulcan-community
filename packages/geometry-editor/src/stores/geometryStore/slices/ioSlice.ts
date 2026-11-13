@@ -1057,7 +1057,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // blank or unreadable is written as it was, which the converter blocks; leaving it out would let
     // the converter take the defaults template's value instead.
     const unreadRows = compliance.unreadMetadataRows ?? {};
-    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements }, metadataFillRoot(options.schemaPort))) {
+    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements }, metadataFillRoot(options.schemaPort), targetRules(options.schemaPort, state.complianceSettings).storeyBuildTypes)) {
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
@@ -2402,7 +2402,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       ? absentMetadataRowFill(
         { ...loaded, elements: Object.values(loaded.elementsById) },
         loaded.defaultsJson,
-        targetRules(options.schemaPort, loaded.complianceSettings).requiredMetadataRows,
+        targetRules(options.schemaPort, loaded.complianceSettings),
         metadataFillRoot(options.schemaPort),
       )
       : undefined;
@@ -2444,10 +2444,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   function followTarget(): void {
     const state = get();
     const root = metadataFillRoot(options.schemaPort);
-    const required = targetRules(options.schemaPort, state.complianceSettings).requiredMetadataRows;
-    const settings = withoutTargetInitialValues(state.complianceSettings, required, root);
+    const rules = targetRules(options.schemaPort, state.complianceSettings);
+    const settings = withoutTargetInitialValues(state.complianceSettings, rules.requiredMetadataRows, root);
     const fill = state.loadAwaitsDefaults && state.defaultsJson && !state.defaultsLoading
-      ? absentMetadataRowFill({ ...state, complianceSettings: settings, elements: Object.values(state.elementsById) }, state.defaultsJson, required, root)
+      ? absentMetadataRowFill({ ...state, complianceSettings: settings, elements: Object.values(state.elementsById) }, state.defaultsJson, rules, root)
       : undefined;
     if (!fill && settings === state.complianceSettings) return;
     set({

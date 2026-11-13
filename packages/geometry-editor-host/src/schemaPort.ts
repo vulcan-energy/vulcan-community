@@ -57,6 +57,11 @@ export interface TargetRules {
    * DESNZ-defined default in the converter, which the battery form shows.
    */
   batteryGridInputs: boolean;
+  /**
+   * Build types that take the storey of dwelling and storeys in building rows, where the
+   * target's schema states no condition for them.
+   */
+  storeyBuildTypes: readonly string[];
 }
 
 export interface GeometrySchemaPropertyValidation {
@@ -145,6 +150,7 @@ export function targetRules(
     hemDatabaseProducts: false,
     requiredMetadataRows: [],
     batteryGridInputs: false,
+    storeyBuildTypes: ['flat'],
     ...port?.targetRules?.(modelSettings),
   };
 }
