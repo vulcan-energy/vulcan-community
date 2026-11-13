@@ -2212,7 +2212,11 @@ impl JSONBuilder {
             crate::epc_mappings::apply_desnz_defaults(result, &mut errors, &mut notices);
         }
         if self.profile.checks_system_catalogue() {
-            crate::epc_mappings::check_system_catalogue(result, &mut errors);
+            let db = self
+                .product_database
+                .as_ref()
+                .expect("transform_geometry_csv sets the product database for this profile");
+            crate::epc_mappings::check_system_catalogue(result, db, &mut errors);
         }
         if self.profile.checks_party_wall_lining() {
             crate::epc_mappings::check_element_fields(result, &self.schema, &mut errors);

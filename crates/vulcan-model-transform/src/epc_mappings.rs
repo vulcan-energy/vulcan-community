@@ -622,39 +622,87 @@ pub(crate) fn check_primary_pipework(
     }
 }
 
+/// A field the named entry must have: its own field, the same fact in its product's row, and
+/// the value.
+type Need = (&'static str, &'static str, &'static str);
+
+/// Cooling from a heat pump: an air-to-air one for split air cooling, air-to-water for fan coils
+/// (HEM Core 2.0.0a4 `cooling_heat_pump` raises for any other).
+const AIR_COOLING: &[Need] = &[
+    ("type", "", "HeatPump"),
+    ("source_type", "sourceType", "OutsideAir"),
+    ("sink_type", "sinkType", "Air"),
+];
+const FAN_COIL_COOLING: &[Need] = &[
+    ("type", "", "HeatPump"),
+    ("source_type", "sourceType", "OutsideAir"),
+    ("sink_type", "sinkType", "Water"),
+];
+
 /// References between full-input systems that the JSON schema cannot check: the referring
-/// section, the reference's pointer inside a system, the section it names, and the type the
-/// named entry must have. A meta system's members are checked as well.
-const SYSTEM_REFERENCES: [(&str, &str, &str, Option<&str>); 4] = [
+/// section, the referring system's type (None: any), the reference's pointer inside it, the
+/// section it names, and what the named entry must be. A meta system's members are checked
+/// as well.
+const SYSTEM_REFERENCES: [(&str, Option<&str>, &str, &str, &[Need]); 7] = [
     (
         "SpaceHeatSystem",
-        "/HeatSourceWarmAir",
-        "/HeatSourceWarmAir",
         None,
+        "/HeatSourceWarmAir",
+        "/HeatSourceWarmAir",
+        &[],
     ),
     (
         "SpaceHeatSystem",
+        Some("WarmAir"),
+        "/HeatSource/name",
+        "/HeatSourceWet",
+        &[],
+    ),
+    (
+        "SpaceHeatSystem",
+        None,
         "/FlueConfig/PassiveDuct",
         "/InfiltrationVentilation/PassiveDucts",
-        None,
+        &[],
     ),
     (
         "HeatSourceWet",
+        None,
         "/integrated_space_heat_system/FlueConfig/PassiveDuct",
         "/InfiltrationVentilation/PassiveDucts",
-        None,
+        &[],
     ),
     (
         "SpaceCoolSystem",
+        Some("HeatPumpAirCooling"),
         "/HeatSourceWet",
         "/HeatSourceWet",
-        Some("HeatPump"),
+        AIR_COOLING,
+    ),
+    (
+        "SpaceCoolSystem",
+        Some("HeatPumpFanCoilCooling"),
+        "/HeatSourceWet",
+        "/HeatSourceWet",
+        FAN_COIL_COOLING,
+    ),
+    // A cooling system of any other type names no heat source; this catches a dangling one.
+    (
+        "SpaceCoolSystem",
+        None,
+        "/HeatSourceWet",
+        "/HeatSourceWet",
+        &[],
     ),
 ];
 
 /// The system catalogue's fail-loud rules: a system type the converter cannot express is an
 /// error naming it, and a reference between systems must name an entry of the right type.
-pub(crate) fn check_system_catalogue(model: &Value, errors: &mut Vec<ValidationError>) {
+pub(crate) fn check_system_catalogue(
+    model: &Value,
+    db: &crate::epc_products::ProductDatabase,
+    errors: &mut Vec<ValidationError>,
+) {
     for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
         for (name, element) in zone_value["BuildingElement"]
             .as_object()
@@ -683,24 +731,50 @@ pub(crate) fn check_system_catalogue(model: &Value, errors: &mut Vec<ValidationE
             format!("Combustion appliance '{name}' has no HEM:EPC input. Model the fire or stove as a room heater (CombustionRoomHeater) whose FlueConfig names a passive duct, and remove the Combustion Appliances row."),
         ));
     }
-    for (section, field, target, kind) in SYSTEM_REFERENCES {
+    for (section, kind, field, target, needs) in SYSTEM_REFERENCES {
         for (name, system) in model[section].as_object().into_iter().flatten() {
+            let system_kind = system["type"].as_str().unwrap_or_default();
+            if kind.is_some_and(|kind| kind != system_kind) {
+                continue;
+            }
             let Some(reference) = system.pointer(field).and_then(Value::as_str) else {
                 continue;
             };
-            let found = model
-                .pointer(target)
-                .and_then(|entries| entries.get(reference));
-            let message = match (found, kind) {
-                (None, _) => format!("{section} '{name}' names {} '{reference}', but the model has no such entry in {}. Add it or correct the name.", &field[1..], &target[1..]),
-                (Some(entry), Some(kind)) if entry["type"] != kind => format!("{section} '{name}' takes its {} from '{reference}', which is a {}, not a {kind}. Name a {kind}.", &field[1..], entry["type"].as_str().unwrap_or("system of no type")),
-                _ => continue,
+            let field_name = &field[1..];
+            let path = format!("{}{field}", json_pointer(&[section, name]));
+            let Some(entry) = model.pointer(target).and_then(|e| e.get(reference)) else {
+                errors.push(error("E_EPC_SYSTEM_REFERENCE", path, format!("{section} '{name}' names {field_name} '{reference}', but the model has no such entry in {}. Add it or correct the name.", &target[1..])));
+                continue;
             };
-            errors.push(error(
-                "E_EPC_SYSTEM_REFERENCE",
-                format!("{}{field}", json_pointer(&[section, name])),
-                message,
-            ));
+            let product = entry["product_id"]
+                .as_u64()
+                .and_then(|id| db.products.get(&id));
+            // The product's row is the fact; the authored field stands in when there is none.
+            let found: Vec<&str> = needs
+                .iter()
+                .map(|(own, product_field, _)| {
+                    product
+                        .and_then(|p| p.fields.get(*product_field))
+                        .map(String::as_str)
+                        .or_else(|| entry[*own].as_str())
+                        .unwrap_or("none")
+                })
+                .collect();
+            if needs
+                .iter()
+                .zip(&found)
+                .any(|(need, found)| need.2 != *found)
+            {
+                let list = |values: Vec<&str>| {
+                    needs
+                        .iter()
+                        .zip(values)
+                        .map(|(need, value)| format!("{} {value}", need.0))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                errors.push(error("E_EPC_SYSTEM_REFERENCE", path, format!("{section} '{name}' ({system_kind}) takes its {field_name} from '{reference}', which has {}; it needs {}. Name a heat source that has.", list(found.clone()), list(needs.iter().map(|n| n.2).collect()))));
+            }
         }
     }
     for section in ["SpaceHeatSystem", "SpaceCoolSystem"] {
