@@ -621,7 +621,9 @@ impl Ctx<'_> {
             .filter_map(|e| e.num("u_value"))
             .map(|u| u.to_string())
             .collect();
-        if u_values.len() > 1 {
+        if construction_type == "party_wall" {
+            // DESNZ-defined: a party wall's resistance is fixed; only its cavity and lining count.
+        } else if u_values.len() > 1 {
             self.errors.push(error(first.path(), format!("HEMIE gives {} one construction, but their U-values differ ({}). Give them one U-value, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), u_values.into_iter().collect::<Vec<_>>().join(", "))));
         } else if let Some(u) = first.num("u_value") {
             c.insert("u_value".into(), json!(u));
@@ -949,16 +951,26 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let levels: BTreeSet<i64> = walls.iter().map(|(w, _)| w.level).collect();
     let top_level = *levels.iter().next_back().expect("walls");
 
-    // Rule: a top floor under heated slopes with knee walls or gables is a room in roof, not a
-    // storey (derived from the model).
-    let roof_room = (top_level > 0
+    // Rule: gables and knee walls on a floor under heated slopes are a room in the roof, not a
+    // storey; a gable has a sloped top, a knee wall does not (derived from the model). ours: with
+    // gables only (slopes down to the floor) it is a vaulted ceiling, which HEMIE does not take.
+    let heated_above = top_level > 0
         && planes
             .iter()
-            .any(|p| heated(p) && (p.level == top_level || p.level == top_level + 1))
-        && walls
-            .iter()
-            .any(|(w, k)| w.level == top_level && (*k == Kind::Sheltered || w.has_profile())))
-    .then_some(top_level);
+            .any(|p| heated(p) && (p.level == top_level || p.level == top_level + 1));
+    let top_walls: Vec<&El> = walls
+        .iter()
+        .filter(|(w, _)| w.level == top_level)
+        .map(|(w, _)| *w)
+        .collect();
+    let has_gables = top_walls.iter().any(|w| w.has_profile());
+    let has_knee_walls = top_walls.iter().any(|w| !w.has_profile());
+    let roof_room = (heated_above && has_gables && has_knee_walls).then_some(top_level);
+    if heated_above && has_gables && !has_knee_walls {
+        let roof = planes.iter().find(|p| heated(p)).expect("heated");
+        ctx.errors.push(error(roof.path(), format!("Roof '{}' is a heated pitched roof whose floor has gables but no knee walls (a vaulted ceiling). HEMIE has no vaulted roof type; draw the room's knee walls, or mark the roof as unheated if a loft is above.", roof.name)));
+        return None;
+    }
     let storey_levels: Vec<i64> = levels
         .iter()
         .copied()
@@ -1253,6 +1265,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     // Derived from the model: HEMIE's floor total_area is the ground floor area of the whole dwelling.
     let ground_total: f64 = grounds.iter().filter_map(|g| g.num("area")).sum();
     let mut building_parts = Map::new();
+    // ours: part names; the reference part is "Main".
     let names: Vec<String> = (0..parts.len())
         .map(|i| {
             if i == 0 {
@@ -1346,8 +1359,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
         building_parts.insert(names[pi].clone(), Value::Object(bp));
     }
+    // Only once everything else converted: an earlier failure leaves openings unplaced.
     for opening in windows.iter().chain(&doors) {
-        if !placed.contains(opening.name) {
+        if ctx.errors.is_empty() && !placed.contains(opening.name) {
             ctx.errors.push(error(opening.path(), format!("'{}' is not in a storey wall, roof room or roof the converter places. Link it to the wall or roof it sits in.", opening.name)));
         }
     }
@@ -1379,7 +1393,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         Value::Object(std::mem::take(&mut ctx.constructions.by_name)),
     );
 
-    let ventilation = infiltration(ctx, csv, full_ventilation);
+    let ventilation = infiltration(ctx, full_ventilation);
     if !ctx.errors.is_empty() {
         return None;
     }
@@ -1400,6 +1414,14 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
     };
     let key = ctx.construction("window", &[e], &extra);
     let mut w = json!({"width": e.num("width"), "height": e.num("height"), "window_sections": sections, "construction": key});
+    // Derived from the model: background vents drawn in this window.
+    let vents: Vec<Value> = window_vents(ctx.settings.csv, e.name)
+        .filter_map(|row| row.get("area_cm2")?.as_f64())
+        .map(|area| json!({"area": area}))
+        .collect();
+    if !vents.is_empty() {
+        w["passive_vents"] = Value::Array(vents);
+    }
     // Derived from the model: Vulcan's security_risk flag.
     if let Some(risk) = e.get("security_risk").and_then(Value::as_bool) {
         w["is_security_risk"] = json!(risk);
@@ -1517,7 +1539,7 @@ fn roof(
                 return None;
             }
             _ => {
-                // ours (interim until DESNZ decides on hipped roofs): a hipped roof is dual pitch.
+                // ours (interim): HEMIE has no hipped roof, so a hipped roof is dual pitch.
                 ctx.notices.push(notice("/Zone", format!("The roof of building part '{part}' is hipped ({} slopes). HEMIE has no hipped roof, so it is entered as dual pitch at its measured pitch.", sides.len())));
                 "dual"
             }
@@ -1796,9 +1818,29 @@ fn dormer<'e>(
     )
 }
 
-/// Background vents become passive vents in the wall they sit in (derived from the model).
+fn window_vents<'r>(csv: &'r Rows, window: &'r str) -> impl Iterator<Item = &'r Row> {
+    csv.get("Ventilation Systems")
+        .into_iter()
+        .flatten()
+        .filter(move |row| row.get("parent_element").and_then(Value::as_str) == Some(window))
+}
+
+/// Background vents become passive vents in the wall they sit in (derived from the model); a
+/// vent drawn in a window goes with that window.
 fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
+    let windows: BTreeSet<&str> = elements(csv)
+        .iter()
+        .filter(|e| e.ty == "BuildingElementTransparent")
+        .map(|e| e.name)
+        .collect();
     for row in csv.get("Ventilation Systems").into_iter().flatten() {
+        if row
+            .get("parent_element")
+            .and_then(Value::as_str)
+            .is_some_and(|host| windows.contains(host))
+        {
+            continue;
+        }
         let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
         let path = json_pointer(&["InfiltrationVentilation", name]);
         match row.get("Type").and_then(Value::as_str) {
@@ -1826,7 +1868,7 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
 
 /// The HEMIE InfiltrationVentilation Geometry needs: the model's ventilation inputs, and its air
 /// test or, without one, the leakage-estimate inputs from the settings.
-fn infiltration(ctx: &mut Ctx, _csv: &Rows, full: &Value) -> Option<Value> {
+fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
     let mut iv = Map::new();
     iv.insert("model_type".into(), json!("hemie"));
     // Derived from the model (Metadata or the target defaults, reported by the full input).
