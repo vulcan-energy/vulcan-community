@@ -129,6 +129,10 @@ const UNIT_ALIASES = new Map<string, string>([
   ['kj/m².k', 'kJ/m²·K'],
   ['kj/m²k', 'kJ/m²·K'],
   ['kelvin', 'K'],
+  ['kwh/m^2/yr', 'kWh/m²/yr'],
+  ['kwh/m2/yr', 'kWh/m²/yr'],
+  ['kgco2/m2/yr', 'kgCO₂/m²/yr'],
+  ['kwh/yr', 'kWh/yr'],
 ]);
 
 /** Format a unit spelling for display. This never converts the associated value. */
