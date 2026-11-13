@@ -77,10 +77,18 @@ fn to_form(
     let mut valid = true;
     for e in validator.iter_errors(&projected) {
         valid = false;
-        for (at, message) in leaves(&e) {
+        for (at, message, required) in leaves(&e) {
+            let fix = if required {
+                " There is no default; state it on its row."
+            } else {
+                ""
+            };
             errors.push(error(
                 format!("{path}{at}"),
-                format!("'{}' in its existing-building (HEMIE) form: {message}. There is no default; state it on its row.", path.rsplit('/').next().unwrap_or(path)),
+                format!(
+                    "'{}' in its existing-building (HEMIE) form: {message}.{fix}",
+                    path.rsplit('/').next().unwrap_or(path)
+                ),
             ));
         }
     }
@@ -89,8 +97,9 @@ fn to_form(
 
 /// The errors inside an `anyOf`, leaving out the branches the value is not even the type of
 /// (an optional object's `null` branch), so the message names the missing field.
-fn leaves(e: &jsonschema::ValidationError) -> Vec<(String, String)> {
-    use jsonschema::error::ValidationErrorKind::{AnyOf, Type};
+/// Each leaf is (instance path, message, whether a required field is missing).
+fn leaves(e: &jsonschema::ValidationError) -> Vec<(String, String, bool)> {
+    use jsonschema::error::ValidationErrorKind::{AnyOf, Required, Type};
     if let AnyOf { context } = e.kind() {
         let found: Vec<_> = context
             .iter()
@@ -103,7 +112,11 @@ fn leaves(e: &jsonschema::ValidationError) -> Vec<(String, String)> {
             return found;
         }
     }
-    vec![(e.instance_path().to_string(), e.to_string())]
+    vec![(
+        e.instance_path().to_string(),
+        e.to_string(),
+        matches!(e.kind(), Required { .. }),
+    )]
 }
 
 /// The HEMIE definition for a system `type` in `section`, if the schema has one.
@@ -186,6 +199,8 @@ fn tank_descriptors(
             "standing loss, efficiency class or install year"
         });
         applied.push("install year unknown");
+    } else if buffer && year && pump {
+        errors.push(error(path.into(), "The buffer tank states both its pump power and its install year. HEMIE takes the install year only in place of the pump power: remove the install year, and give the standing loss or efficiency class if it is unknown.".into()));
     } else if !year && !loss {
         // The buffer tank's pump power and its install year are alternatives (HEMIE code).
         errors.push(error(path.into(), "The buffer tank states its pump power but no standing loss, efficiency class or install year, and HEMIE takes the install year only in place of the pump power. State its standing loss or efficiency class.".into()));
@@ -584,6 +599,12 @@ mod tests {
         ));
         assert_eq!(errors.len(), 1, "{errors:#?}");
         assert_eq!(errors[0].path, "/HeatSourceWet/hp/BufferTank");
+        let (_, errors, _) = run(heat_pump(json!({"volume": 100, "daily_losses": 1.0,
+            "pump_power_at_flow_rate": 0.05, "installation_year": "unknown"})));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0]
+            .message
+            .contains("both its pump power and its install year"));
     }
 
     fn ventilation(rows: &[&str]) -> Rows {
