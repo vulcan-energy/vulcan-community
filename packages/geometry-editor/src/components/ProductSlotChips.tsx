@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import React, { useState } from 'react';
-import type {
-  GeometryProductCatalogueContribution,
-  GeometryProductSlot,
-  GeometryProductSlotContext,
+import {
+  productTechnologyLabel,
+  type GeometryProductCatalogueContribution,
+  type GeometryProductSlot,
+  type GeometryProductSlotContext,
 } from '../../../geometry-editor-host/src/inspectorContributions';
 import { useGeometryStore } from '../stores/geometryStore';
 import { ValidationPill } from './ValidationIndicator';
@@ -16,7 +17,7 @@ const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 function productSlotChip(slot: GeometryProductSlot): { text: string; title: string; missing: boolean } {
   if (slot.product_id == null) {
     return {
-      text: slot.technology_types.length ? `Pick a product: ${slot.technology_types.join(' or ')}` : 'Product needed',
+      text: slot.technology_types.length ? `Pick a product: ${slot.technology_types.map(productTechnologyLabel).join(' or ')}` : 'Product needed',
       title: `${sentence(slot.rule)}.`,
       missing: true,
     };

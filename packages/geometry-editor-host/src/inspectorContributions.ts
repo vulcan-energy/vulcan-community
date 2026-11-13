@@ -100,6 +100,50 @@ export type GeometryProductSlot = Readonly<{
   row?: string;
 }>;
 
+/** Plain words for the HEM Database technology types, for chips and pickers. */
+const PRODUCT_TECHNOLOGY_LABELS: Readonly<Record<string, string>> = {
+  'Air Powered Showers': 'Air-powered shower',
+  'Air Source Heat Pump': 'Air source heat pump',
+  'Booster Heat Pump': 'Booster heat pump',
+  'Centralised MEV': 'Centralised MEV',
+  'Centralised MV': 'Centralised MV',
+  'Centralised MVHR': 'Centralised MVHR',
+  'Column Radiator': 'Column radiator',
+  'Combi Boiler': 'Combi boiler',
+  'Convector Radiator': 'Convector radiator',
+  'Cooker boiler': 'Cooker boiler',
+  'Decentralised MEV': 'Decentralised MEV',
+  'Direct Electric': 'Direct electric heater',
+  'Electric Battery': 'Electric battery',
+  'Electric Boiler': 'Electric boiler',
+  'Exhaust Air MEV Heat Pump': 'Exhaust air heat pump (MEV)',
+  'Exhaust Air MVHR Heat Pump': 'Exhaust air heat pump (MVHR)',
+  'Exhaust Air Mixed Heat Pump': 'Exhaust air heat pump (mixed)',
+  'Fan Coils': 'Fan coil',
+  'Flue Gas Heat Recovery System': 'Flue gas heat recovery',
+  'Ground Source Heat Pump': 'Ground source heat pump',
+  'Heat Battery DryCore': 'Dry-core heat battery',
+  'Heat Battery PCM': 'PCM heat battery',
+  'Heat Interface Unit': 'Heat interface unit',
+  'Heat Network': 'Heat network',
+  'Hot Water Only Heat Pump': 'Hot-water-only heat pump',
+  'Hybrid Heat Pump': 'Hybrid heat pump',
+  'Instantaneous WWHRS': 'Instantaneous WWHRS',
+  'Primary Thermal Store': 'Primary thermal store',
+  'Regular Boiler': 'Regular boiler',
+  'Room Heater': 'Room heater',
+  'Smart Hot Water Tank': 'Smart hot water tank',
+  'Solar Thermal': 'Solar thermal collector',
+  'Solid Fuel Boiler': 'Solid fuel boiler',
+  'Storage Heaters': 'Storage heater',
+  UnderfloorHeating: 'Underfloor heating',
+  'Warm Air Heaters': 'Warm air heater',
+  'Water Source Heat Pump': 'Water source heat pump',
+};
+
+/** A technology type in plain words; a type this table lacks shows as the data names it. */
+export const productTechnologyLabel = (type: string): string => PRODUCT_TECHNOLOGY_LABELS[type] ?? type;
+
 export type GeometryProductSlotContext = Readonly<{
   slot: GeometryProductSlot;
   element: Readonly<Record<string, unknown>>;

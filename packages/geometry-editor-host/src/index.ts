@@ -67,6 +67,7 @@ export {
   type GeometryProductCatalogueSystemContext,
   type GeometryProductSlot,
   type GeometryProductSlotContext,
+  productTechnologyLabel,
 } from './inspectorContributions';
 
 export {

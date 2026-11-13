@@ -52,7 +52,7 @@ it('shows a picked product as Product', () => {
 
 it('shows a needed pick as an error naming what to pick, and informs only without a picker', () => {
   renderChips('Heat pump', [slot('Heat pump', { product_id: null, rule: 'pick the heat-pump size' })], false);
-  const chip = screen.getByRole('button', { name: 'Pick a product: Air Source Heat Pump' });
+  const chip = screen.getByRole('button', { name: 'Pick a product: Air source heat pump' });
   expect(chip.title).toBe('Pick the heat-pump size.');
   fireEvent.click(chip);
   expect(screen.queryByText(/picker for/)).toBeNull();
