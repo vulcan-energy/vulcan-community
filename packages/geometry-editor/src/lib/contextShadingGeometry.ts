@@ -134,6 +134,12 @@ function edgeCarriesWall([a, b]: Segment, wall: readonly PlanPoint[]): boolean {
   return Math.min(t1, length) - Math.max(t0, 0) > length / 2;
 }
 
+/** True when an edge of one footprint lies along an edge of the other: the two touch in plan. */
+export function footprintsTouch(a: readonly PlanPoint[], b: readonly PlanPoint[]): boolean {
+  const bEdges = faces(b);
+  return faces(a).some((edge) => bEdges.some((other) => edgeCarriesWall(edge, other) || edgeCarriesWall(other, edge)));
+}
+
 /** True when a party wall of `elements` lies along an edge of the footprint `coords`, either covering most of it. */
 export function partyWallOnFootprint(
   elements: readonly Pick<Element, 'type' | 'coordinates'>[],
