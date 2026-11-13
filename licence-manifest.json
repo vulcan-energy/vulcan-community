@@ -118,12 +118,12 @@
     {
       "path": "data/defaults/defaults_template_epc.json",
       "source_path": "data/defaults/defaults_template_epc.json",
-      "source_sha256": "d17ea4e7d0427b1905e0b58021e9686f51f5d69979281400bc0e950617923504",
+      "source_sha256": "013887e7fcab4da448d8147a0446642dcb78a2c9b40eaa1a903618478a0e1604",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
-      "provenance": "data/defaults/defaults_template.json plus the HEM:EPC fields its schema adds; the coil rates follow the DESNZ Orchestrator demo DESN-H-End-02-HP-MVHR",
-      "required_action": "Preserve this exact reviewed hash; it may differ from data/defaults/defaults_template.json only by HEM:EPC fields."
+      "provenance": "data/defaults/defaults_template.json plus the HEM:EPC fields its schema adds, minus the values HEM:EPC requires the user to state (element colours, the ecodesign min_flow_temp)",
+      "required_action": "Preserve this exact reviewed hash; it may differ from data/defaults/defaults_template.json only by HEM:EPC fields and the removed user inputs."
     },
     {
       "path": "data/schemas/core-input.schema.json",

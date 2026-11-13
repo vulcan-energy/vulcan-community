@@ -229,6 +229,29 @@ impl ModelProfile {
         }
     }
 
+    /// Metadata rows the model must state: an absent row is an error, never the template's
+    /// value. EPC differs: User Inputs Guidance EPC 05 and EPC 11 mark these inputs required.
+    pub(crate) fn required_metadata_rows(self) -> &'static [&'static str] {
+        match self {
+            Self::Core | Self::Fhs => &[],
+            Self::Epc => &[
+                "PartGcompliance",
+                "HasElectricitySmartMeter",
+                "NumberOfBedrooms",
+                "NumberOfWetRooms",
+                "HeatingControlType",
+                "IsExistingBuilding",
+                "Ventilation_altitude",
+                "Ventilation_shield_class",
+                "Ventilation_terrain_class",
+                "Ventilation_noise_nuisance",
+                "AirPermeability_test_pressure",
+                "AirPermeability_test_result",
+                "AirPermeability_ventilation_zone_height",
+            ],
+        }
+    }
+
     /// A party wall states `party_wall_lining_type` exactly when its cavity type takes one.
     /// EPC differs: HEM Core 2.0.0a4 `BuildingElementPartyWall.validate_party_wall_lining_type`
     /// (pydantic) rejects a lining type on any other cavity, which the JSON schema allows.

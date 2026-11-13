@@ -2041,24 +2041,13 @@ impl JSONBuilder {
         let mut errors = Vec::new();
         let mut notices = Vec::new();
         if self.profile.states_appliance_presence() {
-            crate::epc_mappings::map_appliances(
-                result,
-                csv_data,
-                &self.defaults,
-                &mut errors,
-                &mut notices,
-            );
+            crate::epc_mappings::map_appliances(result, csv_data, &mut errors);
         }
         if self.profile.lists_pv_panels() {
             crate::epc_mappings::map_pv_panels(result);
         }
         if self.profile.states_cylinder_coil_and_tank_controls() {
-            crate::epc_mappings::map_cylinder_coils(
-                result,
-                &self.defaults,
-                &mut errors,
-                &mut notices,
-            );
+            crate::epc_mappings::map_cylinder_coils(result, &mut errors);
         }
         if self.profile.references_products() {
             crate::epc_mappings::report_ventilation_defaults(result, csv_data, &mut notices);
@@ -2123,6 +2112,9 @@ impl JSONBuilder {
         }
         if self.profile.checks_party_wall_lining() {
             crate::epc_mappings::check_party_wall_lining(result, &mut errors);
+        }
+        if self.profile.uses_solar_absorption_coeff() {
+            crate::epc_mappings::check_solar_absorption(result, &mut errors);
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
@@ -5109,6 +5101,7 @@ impl JSONBuilder {
             .filter(|row| is_infiltration_ventilation_row(row))
             .filter_map(|row| row.get("extra_json"))
             .collect();
+        let mut missing = Vec::new();
         let used: Vec<String> = METADATA_INPUT_FIELD_NAMES
             .iter()
             .filter(|name| !present.contains(**name))
@@ -5130,12 +5123,23 @@ impl JSONBuilder {
                 {
                     return None;
                 }
+                if self.profile.required_metadata_rows().contains(name) {
+                    missing.push(*name);
+                    return None;
+                }
                 Some(match result.pointer(&pointer)? {
                     Value::String(text) => format!("{name} {text}"),
                     value => format!("{name} {value}"),
                 })
             })
             .collect();
+        if !missing.is_empty() {
+            self.push_non_fatal(
+                "E_EPC_REQUIRED_INPUT",
+                "/Metadata",
+                &format!("HEM:EPC requires these inputs and the Metadata section has no row for them: {}. Add each row with its value.", missing.join(", ")),
+            );
+        }
         if !used.is_empty() {
             self.schema_omissions
                 .borrow_mut()

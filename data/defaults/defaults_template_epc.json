@@ -210,14 +210,7 @@
       }
     }
   },
-  "Appliances": {
-    "Oven": {
-      "EnergySupply": "mains elec"
-    },
-    "Hobs": {
-      "EnergySupply": "mains elec"
-    }
-  },
+  "Appliances": {},
   "ColdWaterSource": {
     "mains water": {
       "start_day": 0,
@@ -9200,9 +9193,7 @@
           "name": "hp",
           "temp_flow_limit_upper": 65,
           "heater_position": 0.1,
-          "thermostat_position": 0.33,
-          "primary_flow_rate": 10.0,
-          "heat_transfer_rate_W_per_K": 300.0
+          "thermostat_position": 0.33
         }
       },
       "primary_pipework": [
@@ -9254,8 +9245,7 @@
       "ecodesign_controller": {
         "ecodesign_control_class": 2,
         "min_outdoor_temp": -4,
-        "max_outdoor_temp": 20,
-        "min_flow_temp": 30
+        "max_outdoor_temp": 20
       },
       "design_flow_temp": 55,
       "Zone": "zone 1"
@@ -9391,7 +9381,6 @@
         "roof 0": {
           "type": "BuildingElementOpaque",
           "is_unheated_pitched_roof": true,
-          "colour": "Intermediate",
           "u_value": 0.19,
           "areal_heat_capacity": "Medium",
           "mass_distribution_class": "IE: Mass divided over internal and external side",
@@ -9404,7 +9393,6 @@
         },
         "wall 0": {
           "type": "BuildingElementOpaque",
-          "colour": "Intermediate",
           "u_value": 0.18,
           "areal_heat_capacity": "Medium",
           "mass_distribution_class": "IE: Mass divided over internal and external side",
@@ -9418,7 +9406,6 @@
         "external door": {
           "type": "BuildingElementOpaque",
           "is_external_door": true,
-          "colour": "Intermediate",
           "u_value": 1,
           "areal_heat_capacity": "Medium",
           "mass_distribution_class": "IE: Mass divided over internal and external side",

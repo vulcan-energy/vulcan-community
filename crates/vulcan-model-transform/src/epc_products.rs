@@ -710,9 +710,12 @@ pub(crate) fn resolve_products(
     slots
 }
 
-/// An ecodesign class with weather compensation (II, III, VI, VII) takes a curve from the
-/// product data unless the model states its own. DESNZ-defined (EPC 06, 6.3.2.4): boiler with
-/// UFH 2, boiler with radiators 7, heat pump with UFH 1, heat pump with radiators 5.
+/// An ecodesign class with weather compensation (II, III, VI, VII) needs its curve: either
+/// `weather_comp_a`, `_b`, `_c` with `min_flow_temp`, or a `weather_compensation_curve_id`
+/// without `min_flow_temp` (the curve sets it). New build must state one (Input Requirements:
+/// full information). Existing build with neither takes DESNZ's curve for its heat source and
+/// emitters, DESNZ-defined (EPC 06, 6.3.2.4): boiler with UFH 2, boiler with radiators 7, heat
+/// pump with UFH 1, heat pump with radiators 5.
 pub(crate) fn apply_weather_curves(
     model: &mut Value,
     db: &ProductDatabase,
@@ -720,6 +723,7 @@ pub(crate) fn apply_weather_curves(
     notices: &mut Vec<SchemaOmission>,
 ) {
     let heat_sources = model["HeatSourceWet"].clone();
+    let existing = model["IsExistingBuilding"] == true;
     let Some(systems) = model
         .get_mut("SpaceHeatSystem")
         .and_then(Value::as_object_mut)
@@ -749,12 +753,44 @@ pub(crate) fn apply_weather_curves(
         };
         let class = controller
             .get("ecodesign_control_class")
-            .and_then(Value::as_u64);
-        if !matches!(class, Some(2 | 3 | 6 | 7))
-            || controller.contains_key("weather_compensation_curve_id")
-            || controller.contains_key("weather_comp_a")
-        {
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        if !matches!(class, 2 | 3 | 6 | 7) {
             continue;
+        }
+        let path = format!("/SpaceHeatSystem/{name}/ecodesign_controller");
+        let curve_id = controller
+            .get("weather_compensation_curve_id")
+            .and_then(Value::as_u64);
+        let has_min = controller.contains_key("min_flow_temp");
+        let comps = ["weather_comp_a", "weather_comp_b", "weather_comp_c"]
+            .iter()
+            .filter(|k| controller.contains_key(**k))
+            .count();
+        let required = |why: &str| {
+            error("E_WEATHER_CURVE_REQUIRED", path.clone(), format!("'{name}' has ecodesign class {class} (weather compensation), {why} State weather_comp_a, weather_comp_b, weather_comp_c and min_flow_temp, or pick a weather_compensation_curve_id, on its ecodesign controller."))
+        };
+        match (curve_id, comps, has_min) {
+            (Some(_), _, true) | (Some(_), 1.., _) => {
+                errors.push(error("E_WEATHER_CURVE_CONFLICT", path.clone(), format!("'{name}' picks weather compensation curve {} and also states min_flow_temp or weather_comp values. The curve sets them: remove them, or remove the curve.", curve_id.unwrap_or_default())));
+                continue;
+            }
+            (Some(id), 0, false) => {
+                if !db.weather_curves.contains_key(&id) {
+                    errors.push(error("E_WEATHER_CURVE_REQUIRED", path.clone(), format!("'{name}' picks weather compensation curve {id}, which the pinned HEM Database does not have (1 to {}).", db.weather_curves.len())));
+                }
+                continue;
+            }
+            (None, 3, true) => continue,
+            (None, 1.., _) => {
+                errors.push(required("and states only part of its curve."));
+                continue;
+            }
+            (None, 0, _) if !existing => {
+                errors.push(required("and a new-build EPC must state its curve."));
+                continue;
+            }
+            (None, _, _) => {}
         }
         let emitter = match emitters.iter().map(String::as_str).collect::<Vec<_>>()[..] {
             ["radiator"] => "radiators",
@@ -767,7 +803,7 @@ pub(crate) fn apply_weather_curves(
             ("HeatPump", "UFH") => 1,
             ("HeatPump", "radiators") => 5,
             _ => {
-                errors.push(error("E_WEATHER_CURVE_REQUIRED", format!("/SpaceHeatSystem/{name}/ecodesign_controller"), format!("'{name}' has ecodesign class {} (weather compensation), and DESNZ gives a curve only for a boiler or heat pump with radiators or with UFH alone. State weather_comp_a, weather_comp_b, weather_comp_c and min_flow_temp, or weather_compensation_curve_id.", class.unwrap_or_default())));
+                errors.push(required("and DESNZ gives a curve only for a boiler or heat pump with radiators or with UFH alone."));
                 continue;
             }
         };
@@ -777,7 +813,7 @@ pub(crate) fn apply_weather_curves(
             .map(|t| format!(" The curve sets the minimum flow temperature, so the authored min_flow_temp {t} is not sent."))
             .unwrap_or_default();
         controller.insert("weather_compensation_curve_id".into(), json!(curve));
-        notices.push(notice(&format!("/SpaceHeatSystem/{name}/ecodesign_controller"), format!("'{name}' has ecodesign class {} (weather compensation), so it uses weather compensation curve {curve} (gradient {gradient}), DESNZ's curve for a {} with {emitter}.{replaced}", class.unwrap_or_default(), if source == "Boiler" { "boiler" } else { "heat pump" })));
+        notices.push(notice(&path, format!("'{name}' has ecodesign class {class} (weather compensation) and states no curve, so this existing building uses weather compensation curve {curve} (gradient {gradient}), DESNZ's curve for a {} with {emitter}.{replaced}", if source == "Boiler" { "boiler" } else { "heat pump" })));
     }
 }
 
@@ -1177,16 +1213,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn weather_compensation_takes_desnz_curve_for_source_and_emitters() {
+    fn an_existing_building_with_no_curve_takes_desnz_curve_for_source_and_emitters() {
         let wet = |source: &str, emitter: &str, controller: Value| json!({"type": "WetDistribution", "HeatSource": {"name": source}, "emitters": [{"wet_emitter_type": emitter}], "ecodesign_controller": controller});
         let mut model = json!({
+            "IsExistingBuilding": true,
             "HeatSourceWet": {"hp": {"type": "HeatPump"}, "b": {"type": "Boiler"}, "hiu": {"type": "HIU"}},
             "SpaceHeatSystem": {
                 "hp rads": wet("hp", "radiator", json!({"ecodesign_control_class": 2, "min_flow_temp": 30})),
                 "hp ufh": wet("hp", "ufh", json!({"ecodesign_control_class": 3})),
                 "b rads": wet("b", "radiator", json!({"ecodesign_control_class": 6})),
                 "b ufh": wet("b", "ufh", json!({"ecodesign_control_class": 7})),
-                "stated": wet("hp", "radiator", json!({"ecodesign_control_class": 2, "weather_comp_a": 1})),
+                "stated": wet("hp", "radiator", json!({"ecodesign_control_class": 2, "weather_comp_a": 1, "weather_comp_b": 1, "weather_comp_c": 1, "min_flow_temp": 25})),
                 "no comp": wet("hp", "radiator", json!({"ecodesign_control_class": 1})),
                 "hiu": wet("hiu", "radiator", json!({"ecodesign_control_class": 2}))
             }
@@ -1212,8 +1249,9 @@ pub(crate) mod tests {
             .is_none());
         assert!(notices
             .iter()
-            .any(|n| n.message.contains("curve 5 (gradient 1.2)")
-                && n.message.contains("authored min_flow_temp 30 is not sent")));
+            .any(|n| n.message.contains(
+                "this existing building uses weather compensation curve 5 (gradient 1.2)"
+            ) && n.message.contains("authored min_flow_temp 30 is not sent")));
         assert_eq!(
             errors
                 .iter()
@@ -1224,6 +1262,48 @@ pub(crate) mod tests {
                 "/SpaceHeatSystem/hiu/ecodesign_controller"
             )]
         );
+    }
+
+    #[test]
+    fn a_new_building_states_its_curve_or_fails() {
+        let wet = |controller: Value| json!({"type": "WetDistribution", "HeatSource": {"name": "hp"}, "emitters": [{"wet_emitter_type": "radiator"}], "ecodesign_controller": controller});
+        let mut model = json!({
+            "IsExistingBuilding": false,
+            "HeatSourceWet": {"hp": {"type": "HeatPump"}},
+            "SpaceHeatSystem": {
+                "picked": wet(json!({"ecodesign_control_class": 2, "weather_compensation_curve_id": 4})),
+                "stated": wet(json!({"ecodesign_control_class": 2, "weather_comp_a": 1, "weather_comp_b": 1, "weather_comp_c": 1, "min_flow_temp": 25})),
+                "none": wet(json!({"ecodesign_control_class": 2})),
+                "both": wet(json!({"ecodesign_control_class": 2, "weather_compensation_curve_id": 4, "min_flow_temp": 25})),
+                "part": wet(json!({"ecodesign_control_class": 2, "weather_comp_a": 1, "min_flow_temp": 25})),
+                "unknown": wet(json!({"ecodesign_control_class": 2, "weather_compensation_curve_id": 99}))
+            }
+        });
+        let (mut errors, mut notices) = (Vec::new(), Vec::new());
+        apply_weather_curves(&mut model, &db(), &mut errors, &mut notices);
+        assert!(notices.is_empty());
+        assert_eq!(
+            model["SpaceHeatSystem"]["both"]["ecodesign_controller"]["min_flow_temp"],
+            25
+        );
+        let got: Vec<_> = errors
+            .iter()
+            .map(|e| (e.code.as_str(), e.path.split('/').nth(2).unwrap()))
+            .collect();
+        let mut got = got;
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                ("E_WEATHER_CURVE_CONFLICT", "both"),
+                ("E_WEATHER_CURVE_REQUIRED", "none"),
+                ("E_WEATHER_CURVE_REQUIRED", "part"),
+                ("E_WEATHER_CURVE_REQUIRED", "unknown"),
+            ]
+        );
+        assert!(errors[0]
+            .message
+            .contains("a new-build EPC must state its curve"));
     }
 
     #[test]

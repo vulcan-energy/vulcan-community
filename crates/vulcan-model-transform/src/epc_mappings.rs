@@ -86,15 +86,9 @@ pub(crate) fn solar_absorption_coeff(colour: &str) -> Option<f64> {
     }
 }
 
-/// Appliance rows give presence; `Oven` and `Hobs` take the row's `EnergySupply`, else the
-/// target defaults' `Appliances.<key>.EnergySupply`.
-pub(crate) fn map_appliances(
-    model: &mut Value,
-    csv: &Rows,
-    defaults: &Value,
-    errors: &mut Vec<ValidationError>,
-    notices: &mut Vec<SchemaOmission>,
-) {
+/// Appliance rows give presence; `Oven` and `Hobs` take the row's `EnergySupply`, which EPC
+/// requires (User Inputs Guidance EPC 09): a missing one is an error, never a template value.
+pub(crate) fn map_appliances(model: &mut Value, csv: &Rows, errors: &mut Vec<ValidationError>) {
     let rows: Vec<&BTreeMap<String, Value>> = csv.get("Appliances").into_iter().flatten().collect();
     fn key_of<'r>(row: &&'r BTreeMap<String, Value>) -> Option<&'r str> {
         row.get("appliancekey").and_then(Value::as_str)
@@ -110,32 +104,21 @@ pub(crate) fn map_appliances(
         "has_separate_fridge_or_freezer".into(),
         json!(has(&["Fridge", "Freezer"])),
     );
-    let mut from_defaults = Vec::new();
     for key in ["Oven", "Hobs"] {
         let authored = rows
             .iter()
             .filter(|row| key_of(row) == Some(key))
             .find_map(|row| row.get("extra_json")?.get("EnergySupply")?.as_str());
-        let supply = authored.or_else(|| {
-            let supply = defaults
-                .pointer(&format!("/Appliances/{key}/EnergySupply"))?
-                .as_str();
-            from_defaults.push(format!("{key} {}", supply?));
-            supply
-        });
-        match supply {
+        match authored {
             Some(supply) => {
                 appliances.insert(key.into(), json!({ "EnergySupply": supply }));
             }
             None => errors.push(error(
                 "E_EPC_COOKING_SUPPLY",
                 format!("/Appliances/{key}"),
-                format!("State the energy supply of the {key}: give its Appliances row an EnergySupply. The target defaults have none."),
+                format!("State the energy supply of the {key}: add an Appliances row '{key}' with an EnergySupply. HEM:EPC requires it and there is no default."),
             )),
         }
-    }
-    if !from_defaults.is_empty() {
-        notices.push(notice("/Appliances", format!("No Appliances row states the cooking energy supply, so the model uses the target defaults: {}. Add Oven and Hobs rows with an EnergySupply to state them.", from_defaults.join(", "))));
     }
     model["Appliances"] = Value::Object(appliances);
 }
@@ -215,24 +198,9 @@ pub(crate) fn report_ventilation_defaults(
 
 const COIL_FIELDS: [&str; 2] = ["primary_flow_rate", "heat_transfer_rate_W_per_K"];
 
-/// Thermostat positions move into `tank_controls`. A wet coil without its flow and heat
-/// transfer rates takes them from the target defaults' cylinder coil.
-pub(crate) fn map_cylinder_coils(
-    model: &mut Value,
-    defaults: &Value,
-    errors: &mut Vec<ValidationError>,
-    notices: &mut Vec<SchemaOmission>,
-) {
-    let default_coil = defaults
-        .get("HotWaterSource")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|sources| sources.values())
-        .filter_map(|source| source.get("HeatSource")?.as_object())
-        .flat_map(|heat_sources| heat_sources.values())
-        .find(|heat_source| {
-            heat_source.get("type").and_then(Value::as_str) == Some("HeatSourceWet")
-        });
+/// Thermostat positions move into `tank_controls`. A wet coil must state its flow and heat
+/// transfer rates; a missing one is an error naming the cylinder, never a template value.
+pub(crate) fn map_cylinder_coils(model: &mut Value, errors: &mut Vec<ValidationError>) {
     let Some(sources) = model
         .get_mut("HotWaterSource")
         .and_then(Value::as_object_mut)
@@ -259,30 +227,42 @@ pub(crate) fn map_cylinder_coils(
                     continue;
                 }
                 let path = json_pointer(&["HotWaterSource", source_name, "HeatSource", name]);
-                let mut used = Vec::new();
-                for field in COIL_FIELDS {
-                    if heat_source.contains_key(field) {
-                        continue;
-                    }
-                    match default_coil.and_then(|coil| coil.get(field)) {
-                        Some(value) => {
-                            used.push(format!("{field} {value}"));
-                            heat_source.insert(field.into(), value.clone());
-                        }
-                        None => errors.push(error(
-                            "E_EPC_CYLINDER_COIL",
-                            format!("{path}/{field}"),
-                            format!("State the cylinder coil's {field} on the hot water cylinder system. The target defaults have none."),
-                        )),
-                    }
-                }
-                if !used.is_empty() {
-                    notices.push(notice(&path, format!("The cylinder coil '{name}' does not state {}, so the model uses the target defaults: {}. Add them to the cylinder's system to state them.", COIL_FIELDS.join(" and "), used.join(", "))));
+                for field in COIL_FIELDS
+                    .into_iter()
+                    .filter(|f| !heat_source.contains_key(*f))
+                {
+                    errors.push(error(
+                        "E_EPC_CYLINDER_COIL",
+                        format!("{path}/{field}"),
+                        format!("Cylinder '{source_name}': state its coil's {field} (heat source '{name}') on the cylinder's Systems row. There is no default."),
+                    ));
                 }
             }
         }
         if !controls.is_empty() && !source.contains_key("tank_controls") {
             source.insert("tank_controls".into(), Value::Array(controls));
+        }
+    }
+}
+
+/// Every opaque element states `solar_absorption_coeff` (EPC requires it): authored, or from
+/// an authored colour. A missing one is an error naming the element.
+pub(crate) fn check_solar_absorption(model: &Value, errors: &mut Vec<ValidationError>) {
+    for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
+        for (name, element) in zone_value["BuildingElement"]
+            .as_object()
+            .into_iter()
+            .flatten()
+        {
+            if element["type"] == "BuildingElementOpaque"
+                && element.get("solar_absorption_coeff").is_none()
+            {
+                errors.push(error(
+                    "E_EPC_SOLAR_ABSORPTION",
+                    json_pointer(&["Zone", zone, "BuildingElement", name, "solar_absorption_coeff"]),
+                    format!("Element '{name}' needs its surface colour (Light, Intermediate or Dark) or solar_absorption_coeff. There is no default."),
+                ));
+            }
         }
     }
 }
