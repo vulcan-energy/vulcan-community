@@ -134,6 +134,17 @@
       "required_action": "Pin the exact upstream revision and preserve its MIT copyright and notice."
     },
     {
+      "path": "data/schemas/hem_epc_orchestrator_input.schema.json",
+      "source_path": "data/schemas/hem_epc_orchestrator_input.schema.json",
+      "source_sha256": "c53135e01f2cfa37b4fcd00e76afb1346ed9fe67d5fab2646041dfa268598ad9",
+      "license": "MIT",
+      "rights_status": "approved",
+      "source": "HEM:EPC Orchestrator 0.13.2a0, src/hem_epc_orchestrator/schemas/hem_epc_orchestrator_input.json",
+      "source_revision": "993463233ad0c416e83c4de3b84889280d3c4619",
+      "provenance": "Exact copy of the HEM:EPC Orchestrator input schema at tag 0.13.2a0 (the DESNZ release set of 12 November 2026)",
+      "required_action": "Pin the exact upstream revision and preserve its MIT Crown Copyright notice (LICENSES/MIT-HEM-EPC-Orchestrator.txt)."
+    },
+    {
       "path": "data/junction_psi_defaults/table_3_7_default_psi.csv",
       "source_path": "data/junction_psi_defaults/table_3_7_default_psi.csv",
       "source_sha256": "a1ef0f2e7617a947939d5602de75303baa1cc9fbabd32a4781a1c980e8bb7cb1",
@@ -283,6 +294,15 @@
       "source": "https://github.com/communitiesuk/epb-hem-wrapper-fhs",
       "source_revision": "dd5ba73a19674d631da59b4924bb7dc2833fbb3b",
       "provenance": "Copy of the upstream LICENSE.md at source_revision (identical apart from a trailing newline) (added upstream after the pinned hem_fhs_upstream revision); reproduced for data/schemas/input_fhs.schema.json"
+    },
+    {
+      "path": "LICENSES/MIT-HEM-EPC-Orchestrator.txt",
+      "source_path": "LICENSES/MIT-HEM-EPC-Orchestrator.txt",
+      "license": "MIT",
+      "rights_status": "approved",
+      "source": "HEM:EPC Orchestrator 0.13.2a0, LICENCE.txt",
+      "source_revision": "993463233ad0c416e83c4de3b84889280d3c4619",
+      "provenance": "Exact copy of the upstream LICENCE.txt at source_revision; reproduced for data/schemas/hem_epc_orchestrator_input.schema.json"
     },
     {
       "path": "LICENSES/OGL-UK-3.0.txt",
