@@ -4597,7 +4597,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               </div>
             )}
 
-            {selection.type === 'element' && !selection.isPlaceholder && selectedElement && (
+            {/* System rows are 'global' selections. */}
+            {(selection.type === 'element' || selection.type === 'global') && !selection.isPlaceholder && selectedElement && (
               <ProductSlotChips
                 element={selectedElement as unknown as Readonly<Record<string, unknown>> & { name?: string }}
                 productCatalogue={inspectorContributions.productCatalogue}
