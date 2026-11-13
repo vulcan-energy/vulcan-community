@@ -178,6 +178,16 @@ function floorWallThickness(
     : { thicknessM: 0, source: 'none' };
 }
 
+export type ContextShadingDistanceDetails = {
+  /** Rounded to 2 dp: the value stored and sent to HEM. */
+  distance: number;
+  thickness: ContextShadingWallThickness;
+  /** On the closest external wall's outside-face line, perpendicular from `to`. */
+  from: PlanPoint;
+  /** Midpoint of the object's closest face. `from`–`to` is the measured distance. */
+  to: PlanPoint;
+};
+
 /**
  * DESNZ-defined distance (FHS guidance 2.3.1): the horizontal distance from the outside face at
  * the midpoint of the dwelling's closest external wall to the midpoint of the shading object's
@@ -189,13 +199,14 @@ function floorWallThickness(
  * wall element's construction layers, else `floorWallThickness`. The closest face is the one
  * nearest the wall; between faces that meet at the nearest corner, the one whose midpoint is
  * nearer the facade line. A result of 0 or less means the object is beside the dwelling, not
- * in front of an external wall. Also returns the chosen wall's thickness and its source.
+ * in front of an external wall. Also returns the chosen wall's thickness and its source, and
+ * the two plan points measured between, for drawing.
  */
 export function contextShadingDistanceDetails(
   contextShading: Pick<ContextShading, 'coordinates'>,
   parentElement: Pick<Element, 'coordinates'> & { thickness_walls?: number; floorId?: string },
   elements: readonly ModelElement[],
-): { distance: number; thickness: ContextShadingWallThickness } | null {
+): ContextShadingDistanceDetails | null {
   if (!contextShading.coordinates?.length || (parentElement.coordinates?.length ?? 0) < 3) return null;
   const ring = openRing(parentElement.coordinates);
   const twiceArea = ring.reduce((sum, a, i) => {
@@ -215,7 +226,7 @@ export function contextShadingDistanceDetails(
   const objectFaces = faces(contextShading.coordinates);
   const objectCenter = getPlanCenter(contextShading.coordinates)!;
 
-  let best: { gap: number; facing: number; distance: number; thickness: ContextShadingWallThickness } | null = null;
+  let best: { gap: number; facing: number; distance: number; thickness: ContextShadingWallThickness; to: PlanPoint; normal: PlanPoint } | null = null;
   for (const edge of faces(ring)) {
     const [a, b] = edge;
     const length = Math.hypot(b.x - a.x, b.y - a.y);
@@ -234,23 +245,31 @@ export function contextShadingDistanceDetails(
     const wall: Segment = [{ x: a.x + n.x * t, y: a.y + n.y * t }, { x: b.x + n.x * t, y: b.y + n.y * t }];
     const wallMid = midpoint(wall);
     const perpendicular = (p: PlanPoint) => (p.x - wallMid.x) * n.x + (p.y - wallMid.y) * n.y;
-    let face: { gap: number; offset: number; distance: number } | null = null;
+    let face: { gap: number; offset: number; distance: number; mid: PlanPoint } | null = null;
     for (const candidate of objectFaces) {
       const gap = segmentDistance(wall, candidate);
-      const distance = perpendicular(midpoint(candidate));
+      const mid = midpoint(candidate);
+      const distance = perpendicular(mid);
       const offset = Math.abs(distance);
       if (!face || gap < face.gap - 1e-9 || (gap < face.gap + 1e-9 && offset < face.offset)) {
-        face = { gap, offset, distance };
+        face = { gap, offset, distance, mid };
       }
     }
     if (!face) continue;
     // Ties go to the facade that faces the object most squarely.
     const facing = perpendicular(objectCenter) / (Math.hypot(objectCenter.x - wallMid.x, objectCenter.y - wallMid.y) || 1);
     if (!best || face.gap < best.gap - 1e-9 || (face.gap < best.gap + 1e-9 && facing > best.facing)) {
-      best = { gap: face.gap, facing, distance: face.distance, thickness };
+      best = { gap: face.gap, facing, distance: face.distance, thickness, to: face.mid, normal: n };
     }
   }
-  return best && { distance: roundToTwoDecimals(best.distance), thickness: best.thickness };
+  if (!best) return null;
+  const { to, normal, distance } = best;
+  return {
+    distance: roundToTwoDecimals(distance),
+    thickness: best.thickness,
+    from: { x: to.x - normal.x * distance, y: to.y - normal.y * distance },
+    to,
+  };
 }
 
 export function calculateContextShadingDistanceFromCoordinates(

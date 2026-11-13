@@ -74,13 +74,19 @@ describe('context shading distance (FHS guidance 2.3.1)', () => {
       } },
     } as never;
     const ground = { name: 'Ground', type: 'BuildingElementGround', thickness_walls: 0.3, coordinates: floor.coordinates } as never;
+    // The drawing's points: the block's south-face midpoint and its foot on the north wall's outside face.
     expect(contextShadingDistanceDetails(block, { ...floor, thickness_walls: 0.2 }, [layered]))
-      .toEqual({ distance: 3.65, thickness: { thicknessM: 0.35, source: 'wall_layers', name: 'North wall' } });
+      .toEqual({
+        distance: 3.65,
+        thickness: { thicknessM: 0.35, source: 'wall_layers', name: 'North wall' },
+        from: { x: 3, y: 6.35 },
+        to: { x: 3, y: 10 },
+      });
     expect(contextShadingDistanceDetails(block, { ...floor, thickness_walls: 0.2 }, []))
-      .toEqual({ distance: 3.8, thickness: { thicknessM: 0.2, source: 'floor' } });
+      .toMatchObject({ distance: 3.8, thickness: { thicknessM: 0.2, source: 'floor' } });
     const upper = { coordinates: floor.coordinates.map((p) => ({ ...p, z: 1 })) };
     expect(contextShadingDistanceDetails(block, upper, [ground]))
-      .toEqual({ distance: 3.7, thickness: { thicknessM: 0.3, source: 'ground_floor', name: 'Ground' } });
+      .toMatchObject({ distance: 3.7, thickness: { thicknessM: 0.3, source: 'ground_floor', name: 'Ground' } });
     expect(contextShadingDistanceDetails(block, upper, [])?.thickness).toEqual({ thicknessM: 0, source: 'none' });
   });
 
