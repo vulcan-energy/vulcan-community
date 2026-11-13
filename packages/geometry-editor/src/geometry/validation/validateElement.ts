@@ -9,6 +9,7 @@ import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
+import { resolveContextShadingWallThickness } from '../../lib/contextShadingGeometry';
 import { elementSchemaTakesField, simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
 import {
@@ -1855,7 +1856,13 @@ export const validateElementCore = (
         if (parent && contextElement.coordinates && parent.coordinates && context.calculateContextShadingDistance) {
           const derivedDistance = context.calculateContextShadingDistance(contextElement, parent);
           if (!(derivedDistance > 0)) {
-            issues.push(geo(`Distance is ${derivedDistance} m, and HEM needs a distance above 0. FHS guidance 2.3.1 measures it perpendicular from the dwelling's closest external wall to the object's closest face.`, 'distance'));
+            issues.push(geo(`Distance is ${derivedDistance} m: the object is level with or behind the facade of the dwelling's closest external wall (for example beside it, or beyond a party wall), not in front of it. HEM needs a distance above 0. FHS guidance 2.3.1 measures it perpendicular from that wall to the object's closest face.`, 'distance'));
+          }
+          const thickness = resolveContextShadingWallThickness(parent, Object.values(elementsById));
+          if (!thickness) {
+            issues.push(geo(`No external wall thickness for ${parent.name || 'the parent floor'}, so the distance is measured from the internal wall line. Enter thickness_walls on the ground floor.`, 'parent_element'));
+          } else if (thickness.groundFloorName !== undefined) {
+            warnings.push(geo(`Distance measured from the outside wall face, using the ${thickness.thicknessM} m wall thickness of ground floor ${thickness.groundFloorName}.`, 'distance'));
           }
         } else {
           issues.push(geo('Missing parent or coordinates', 'parent_element'));

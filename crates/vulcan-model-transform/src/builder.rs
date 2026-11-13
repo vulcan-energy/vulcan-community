@@ -4147,21 +4147,29 @@ impl JSONBuilder {
                 count - usize::from(wraps)
             };
             let shaded_count = shaded(&segments);
-            if shaded_count > 18 || segments.len() > 36 {
+            if shaded_count > 18 {
                 self.push_non_fatal(
                     "E027",
                     "/Context Shading",
-                    &format!("Context Shading makes {shaded_count} shaded segments in {} segments. DESNZ FHS guidance 2.3.3 allows at most 18 shaded segments (36 in all, an arc across north counting twice). Combine neighbouring objects of similar height into one.", segments.len()),
+                    &format!("Context Shading makes {shaded_count} shaded segments. FHS guidance 2.3.3 allows at most 18. Combine neighbouring objects of similar height into one."),
                 );
             }
-            // The schema needs at least 8 segments. Splitting a segment keeps its shading, so the
-            // result does not change.
+            let (min_segments, max_segments) = self.shading_segment_limits();
+            if let Some(max) = max_segments.filter(|max| segments.len() > *max) {
+                self.push_non_fatal(
+                    "E027",
+                    "/Context Shading",
+                    &format!("Context Shading makes {} segments, shaded and unshaded, and this HEM version's schema takes at most {max}. An arc across north counts twice. Combine neighbouring objects of similar height into one.", segments.len()),
+                );
+            }
+            // The schema may need a minimum number of segments. Splitting a segment keeps its
+            // shading, so the result does not change.
             let split = |segments: &mut Vec<(u32, u32, Vec<Value>)>, i: usize, at: u32| {
                 let tail = (at, segments[i].1, segments[i].2.clone());
                 segments[i].1 = at;
                 segments.insert(i + 1, tail);
             };
-            while segments.len() < 8 {
+            while segments.len() < min_segments.unwrap_or(1) {
                 let i = (0..segments.len())
                     .max_by_key(|&i| (segments[i].1 - segments[i].0, std::cmp::Reverse(i)))
                     .unwrap();
@@ -4184,7 +4192,9 @@ impl JSONBuilder {
                         sky(&trial) <= 1.0
                     });
                 match fix {
-                    Some((i, at)) if segments.len() < 36 => split(&mut segments, i, at),
+                    Some((i, at)) if max_segments.is_none_or(|max| segments.len() < max) => {
+                        split(&mut segments, i, at)
+                    }
                     _ => self.push_non_fatal(
                         "E027",
                         "/Context Shading",
@@ -4227,6 +4237,28 @@ impl JSONBuilder {
         }
 
         Ok(())
+    }
+
+    /// `minItems` and `maxItems` of `shading_segments` in the target schema.
+    fn shading_segment_limits(&self) -> (Option<usize>, Option<usize>) {
+        fn find(value: &Value) -> Option<&Value> {
+            match value {
+                Value::Object(map) => map
+                    .get("shading_segments")
+                    .filter(|v| v.get("type").and_then(Value::as_str) == Some("array"))
+                    .or_else(|| map.values().find_map(find)),
+                Value::Array(items) => items.iter().find_map(find),
+                _ => None,
+            }
+        }
+        let definition = find(&self.schema);
+        let limit = |key: &str| {
+            definition
+                .and_then(|d| d.get(key))
+                .and_then(Value::as_u64)
+                .map(|n| n as usize)
+        };
+        (limit("minItems"), limit("maxItems"))
     }
 
     fn read_context_shading_angle(
@@ -14132,6 +14164,24 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
         );
         let (_, errors) = build(&rows[..18], rust);
         assert!(errors.is_empty(), "{errors:?}");
+        // 18 objects that start after north leave an unshaded segment at each end: 37 segments,
+        // one more than the FHS schema takes, though the shaded limit holds.
+        let rows: Vec<String> = (0..18)
+            .map(|i| {
+                format!(
+                    "S{i},ContextShading,obstacle,{},{},5,7",
+                    i * 18 + 1,
+                    i * 18 + 10
+                )
+            })
+            .collect();
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let (_, errors) = build(&rows, rust);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.starts_with("Context Shading makes 37 segments, shaded and unshaded, and this HEM version's schema takes at most 36."),
+            "{errors:?}"
+        );
 
         // Python a8/a9 take acos of the flat-sky sum: the segments keep it at most 1.
         for profile in [

@@ -7,8 +7,6 @@ import { roundToTwoDecimals } from '../geometry/constants';
 import polygonClipping, { type Polygon } from 'polygon-clipping';
 import { calculatePolygonArea } from './polygonSync';
 import {
-  footprintsTouch,
-  partyWallOnFootprint,
   calculateContextShadingAngularRangeFromCoordinates,
   calculateContextShadingDistanceFromCoordinates,
 } from './contextShadingGeometry';
@@ -714,16 +712,8 @@ export function syncDevelopmentContextShadingElements(
           Math.abs(sourceVertical.baseM - activeVertical.baseM) <= SAME_FLOOR_TOLERANCE_M;
         const overlappingFootprint =
           boundsOverlapArea(activeParent.bounds, sourceFootprint.bounds) > FOOTPRINT_OVERLAP_TOLERANCE_M2;
-        // A neighbour in the same building (a shared party wall, or footprints that touch, as for
-        // a flat diagonally above) is in HEM through party elements, not as shading.
-        const attached =
-          footprintsTouch(activeParent.element.coordinates, sourceFootprint.element.coordinates) ||
-          partyWallOnFootprint(activeElements, sourceFootprint.element.coordinates) ||
-          partyWallOnFootprint(model.elements, activeParent.element.coordinates);
         if (overlappingFootprint) {
           if (sameFloor) skippedSameFloorOverlapCount++;
-        } else if (attached) {
-          // Left out on purpose; nothing to count.
         } else if (!sourceVertical.heightKnown) {
           skippedUnknownHeightCount++;
         } else {
@@ -734,7 +724,7 @@ export function syncDevelopmentContextShadingElements(
             id: existing?.id ?? generatedElementId(key),
             name,
             parent: activeParent.element,
-            activeElements,
+          activeElements,
             sourceModel: model,
             sourceFootprint,
             sourceVertical,
@@ -766,7 +756,7 @@ export function syncDevelopmentContextShadingElements(
           id: existing?.id ?? generatedElementId(key),
           name,
           parent: activeParent.element,
-            activeElements,
+          activeElements,
           sourceModel: model,
           sourceElementId: sourceContext.id,
           sourceKind: 'explicit_context_shading',
@@ -786,6 +776,11 @@ export function syncDevelopmentContextShadingElements(
     }
   }
 
+  // HEM takes only a distance above 0 (FHS guidance 2.3.1 gives 0 or less for an object beside
+  // the dwelling), so a generated object without one is left out; every other one is kept.
+  for (const [key, target] of targets) {
+    if (!(target.distance > 0)) targets.delete(key);
+  }
   for (const [key, target] of targets) {
     const existing = existingGenerated.get(key);
     const elementToWrite: ContextShading = {

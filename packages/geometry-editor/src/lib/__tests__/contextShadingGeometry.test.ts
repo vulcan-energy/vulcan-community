@@ -7,6 +7,7 @@ import {
   calculateContextShadingAngularRangeFromCoordinates,
   calculateContextShadingDistanceFromCoordinates,
   rederiveContextShadingFromDrawing,
+  resolveContextShadingWallThickness,
 } from '../contextShadingGeometry';
 
 // 10 x 6 m floor drawn on the internal wall faces.
@@ -40,10 +41,35 @@ describe('context shading distance (FHS guidance 2.3.1)', () => {
       const wall = { type, coordinates: [{ x: 10.01, y: 6 }, { x: 10.01, y: 0 }] } as never;
       // The east edge is not external, so the closest external wall is the south one; the
       // object is beside that facade, not in front of it.
-      expect(calculateContextShadingDistanceFromCoordinates(east, floor, [wall])).toBe(-1.5);
+      expect(calculateContextShadingDistanceFromCoordinates(east, floor, [wall])).toBe(-1);
     }
     const external = { type: 'BuildingElementOpaque', coordinates: [{ x: 10, y: 0 }, { x: 10, y: 6 }] } as never;
     expect(calculateContextShadingDistanceFromCoordinates(east, floor, [external])).toBe(3);
+  });
+
+  it('ignores a horizontal ceiling to an adjacent space, and walls on another storey', () => {
+    const house = { coordinates: [{ x: 0, y: 0, z: 0 }, { x: 8, y: 0, z: 0 }, { x: 8, y: 8, z: 0 }, { x: 0, y: 8, z: 0 }], thickness_walls: 0.3 };
+    const west = { coordinates: [{ x: -10, y: 2 }, { x: -8, y: 2 }, { x: -8, y: 6 }, { x: -10, y: 6 }] };
+    expect(calculateContextShadingDistanceFromCoordinates(west, house, [])).toBe(7.7);
+    const ceiling = { type: 'BuildingElementAdjacentConditionedSpace', pitch: 0, coordinates: house.coordinates } as never;
+    expect(calculateContextShadingDistanceFromCoordinates(west, house, [ceiling])).toBe(7.7);
+    const groundFloorPartyWall = { type: 'BuildingElementPartyWall', coordinates: [{ x: 0, y: 8, z: 0 }, { x: 0, y: 0, z: 0 }] } as never;
+    const upper = { ...house, coordinates: house.coordinates.map((p) => ({ ...p, z: 1 })) };
+    expect(calculateContextShadingDistanceFromCoordinates(west, upper, [groundFloorPartyWall])).toBe(7.7);
+  });
+
+  it('takes the face nearest the wall, then measures from its midpoint', () => {
+    const square = { coordinates: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }], thickness_walls: 0.3 };
+    const longBlock = { coordinates: [{ x: 15, y: 5 }, { x: 20, y: 5 }, { x: 20, y: 45 }, { x: 15, y: 45 }] };
+    expect(calculateContextShadingDistanceFromCoordinates(longBlock, square, [])).toBe(4.7);
+  });
+
+  it('uses the ground floor wall thickness under an upper floor', () => {
+    const upper = { coordinates: floor.coordinates.map((p) => ({ ...p, z: 1 })) };
+    const ground = { name: 'Ground', type: 'BuildingElementGround', thickness_walls: 0.3, coordinates: floor.coordinates } as never;
+    expect(resolveContextShadingWallThickness(upper, [ground])).toEqual({ thicknessM: 0.3, groundFloorName: 'Ground' });
+    expect(calculateContextShadingDistanceFromCoordinates(block, upper, [ground])).toBe(3.7);
+    expect(resolveContextShadingWallThickness(upper, [])).toBeNull();
   });
 
   it('keeps the angles at the floor area centroid', () => {

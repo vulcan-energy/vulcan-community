@@ -3,6 +3,7 @@
 
 import { roundToTwoDecimals } from '../geometry/constants';
 import type { ContextShading, Element } from '../geometry/types';
+import { isPointInPolygon2D } from './pointInPolygon';
 
 type PlanPoint = { x: number; y: number };
 
@@ -114,6 +115,15 @@ function pointSegmentDistance(p: PlanPoint, [a, b]: Segment): number {
 
 const midpoint = ([a, b]: Segment): PlanPoint => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
+// ponytail: endpoint distances only, so crossing segments do not read 0; a shading object
+// drawn through the dwelling is already wrong input.
+function segmentDistance(s: Segment, t: Segment): number {
+  return Math.min(
+    pointSegmentDistance(s[0], t), pointSegmentDistance(s[1], t),
+    pointSegmentDistance(t[0], s), pointSegmentDistance(t[1], s),
+  );
+}
+
 /** Wall types whose far side is not outside air, so they are never the closest external wall. */
 const NON_EXTERNAL_WALL_TYPES = new Set<string>([
   'BuildingElementPartyWall',
@@ -123,32 +133,39 @@ const NON_EXTERNAL_WALL_TYPES = new Set<string>([
 // Wall lines and floor edges are drawn separately, so allow a small drafting offset.
 const WALL_ON_EDGE_TOLERANCE_M = 0.05;
 
-/** True when a wall's plan line lies along the edge and covers most of it. */
+type ModelElement = Pick<Element, 'type' | 'coordinates'> & { pitch?: number; floorId?: string; thickness_walls?: number; name?: string };
+
+/** True when every vertex of a wall lies on the edge's line and the wall covers most of the edge. */
 function edgeCarriesWall([a, b]: Segment, wall: readonly PlanPoint[]): boolean {
   const length = Math.hypot(b.x - a.x, b.y - a.y);
   const ux = (b.x - a.x) / length;
   const uy = (b.y - a.y) / length;
-  const ends = [wall[0], wall[wall.length - 1]];
-  if (ends.some((p) => Math.abs((p.x - a.x) * uy - (p.y - a.y) * ux) > WALL_ON_EDGE_TOLERANCE_M)) return false;
-  const [t0, t1] = ends.map((p) => (p.x - a.x) * ux + (p.y - a.y) * uy).sort((x, y) => x - y);
-  return Math.min(t1, length) - Math.max(t0, 0) > length / 2;
+  if (wall.some((p) => Math.abs((p.x - a.x) * uy - (p.y - a.y) * ux) > WALL_ON_EDGE_TOLERANCE_M)) return false;
+  const along = wall.map((p) => (p.x - a.x) * ux + (p.y - a.y) * uy);
+  return Math.min(Math.max(...along), length) - Math.max(Math.min(...along), 0) > length / 2;
 }
 
-/** True when an edge of one footprint lies along an edge of the other: the two touch in plan. */
-export function footprintsTouch(a: readonly PlanPoint[], b: readonly PlanPoint[]): boolean {
-  const bEdges = faces(b);
-  return faces(a).some((edge) => bEdges.some((other) => edgeCarriesWall(edge, other) || edgeCarriesWall(other, edge)));
-}
+const storeyOf = (element: { floorId?: string; coordinates?: readonly { z?: number }[] }) =>
+  element.floorId?.trim() || String(Math.floor(element.coordinates?.[0]?.z ?? 0));
 
-/** True when a party wall of `elements` lies along an edge of the footprint `coords`, either covering most of it. */
-export function partyWallOnFootprint(
-  elements: readonly Pick<Element, 'type' | 'coordinates'>[],
-  coords: readonly PlanPoint[],
-): boolean {
-  const edges = faces(coords);
-  return elements.some((wall) => wall.type === 'BuildingElementPartyWall' && (wall.coordinates?.length ?? 0) >= 2 &&
-    edges.some((edge) => edgeCarriesWall(edge, wall.coordinates) ||
-      edgeCarriesWall([wall.coordinates[0], wall.coordinates[wall.coordinates.length - 1]], edge)));
+/** A vertical wall: a plan line, or an element pitched within 10 degrees of vertical. */
+const isVerticalWall = (element: ModelElement) =>
+  element.coordinates.length === 2 || (Number.isFinite(element.pitch) && Math.abs(element.pitch! - 90) <= 10);
+
+/**
+ * The external wall thickness used to move the floor's internal edges to the outside face: the
+ * floor's own `thickness_walls`, otherwise that of a ground floor under it. Null when the model
+ * gives neither, so callers can report it.
+ */
+export function resolveContextShadingWallThickness(
+  parentElement: Pick<Element, 'coordinates'> & { thickness_walls?: number },
+  elements: readonly ModelElement[],
+): { thicknessM: number; groundFloorName?: string } | null {
+  if (Number.isFinite(parentElement.thickness_walls)) return { thicknessM: parentElement.thickness_walls! };
+  const centre = getPlanCenter(parentElement.coordinates);
+  const ground = centre && elements.find((element) => element.type === 'BuildingElementGround' &&
+    Number.isFinite(element.thickness_walls) && isPointInPolygon2D(centre, element.coordinates));
+  return ground ? { thicknessM: ground.thickness_walls!, groundFloorName: ground.name || 'unnamed' } : null;
 }
 
 /**
@@ -156,16 +173,18 @@ export function partyWallOnFootprint(
  * the midpoint of the dwelling's closest external wall to the midpoint of the shading object's
  * closest face, measured perpendicular to that facade.
  *
- * The parent floor's edges stand in for the walls. An edge under a party wall or a wall to an
- * adjacent space is not external and is skipped. Edges are drawn on the internal wall faces,
- * so each moves out by the floor's `thickness_walls` when the model gives it. "Closest" is
- * judged by the face midpoint's distance to the wall. A result of 0 or less means the object
- * is beside the dwelling, not in front of an external wall.
+ * The parent floor's edges stand in for the walls. An edge under a vertical party wall or wall
+ * to an adjacent space on the floor's own storey is not external and is skipped. Edges are
+ * drawn on the internal wall faces, so each moves out by the wall thickness
+ * (`resolveContextShadingWallThickness`; the internal line when there is none, which
+ * validation reports). The closest face is the one nearest the wall; between faces that meet
+ * at the nearest corner, the one whose midpoint is nearer the facade line. A result of 0 or
+ * less means the object is beside the dwelling, not in front of an external wall.
  */
 export function calculateContextShadingDistanceFromCoordinates(
   contextShading: Pick<ContextShading, 'coordinates'>,
-  parentElement: Pick<Element, 'coordinates'> & { thickness_walls?: number },
-  elements: readonly Pick<Element, 'type' | 'coordinates'>[],
+  parentElement: Pick<Element, 'coordinates'> & { thickness_walls?: number; floorId?: string },
+  elements: readonly ModelElement[],
 ): number {
   if (!contextShading.coordinates?.length || (parentElement.coordinates?.length ?? 0) < 3) return 0;
   const ring = openRing(parentElement.coordinates);
@@ -174,10 +193,12 @@ export function calculateContextShadingDistanceFromCoordinates(
     return sum + a.x * b.y - b.x * a.y;
   }, 0);
   const winding = Math.sign(twiceArea);
-  const thickness = Number.isFinite(parentElement.thickness_walls) ? parentElement.thickness_walls! : 0;
+  const thickness = resolveContextShadingWallThickness(parentElement, elements)?.thicknessM ?? 0;
+  const storey = storeyOf(parentElement);
   const nonExternalWalls = elements.flatMap((element) =>
-    NON_EXTERNAL_WALL_TYPES.has(element.type) && (element.coordinates?.length ?? 0) >= 2 ? [element.coordinates] : []);
-  const faceMidpoints = faces(contextShading.coordinates).map(midpoint);
+    NON_EXTERNAL_WALL_TYPES.has(element.type) && (element.coordinates?.length ?? 0) >= 2 &&
+    isVerticalWall(element) && storeyOf(element) === storey ? [element.coordinates] : []);
+  const objectFaces = faces(contextShading.coordinates);
   const objectCenter = getPlanCenter(contextShading.coordinates)!;
 
   let best: { gap: number; facing: number; distance: number } | null = null;
@@ -193,9 +214,16 @@ export function calculateContextShadingDistanceFromCoordinates(
     ];
     const wallMid = midpoint(wall);
     const perpendicular = (p: PlanPoint) => (p.x - wallMid.x) * n.x + (p.y - wallMid.y) * n.y;
-    const face = faceMidpoints
-      .map((mid) => ({ gap: pointSegmentDistance(mid, wall), distance: perpendicular(mid) }))
-      .reduce((x, y) => (y.gap < x.gap ? y : x));
+    let face: { gap: number; offset: number; distance: number } | null = null;
+    for (const candidate of objectFaces) {
+      const gap = segmentDistance(wall, candidate);
+      const distance = perpendicular(midpoint(candidate));
+      const offset = Math.abs(distance);
+      if (!face || gap < face.gap - 1e-9 || (gap < face.gap + 1e-9 && offset < face.offset)) {
+        face = { gap, offset, distance };
+      }
+    }
+    if (!face) continue;
     // Ties go to the facade that faces the object most squarely.
     const facing = perpendicular(objectCenter) / (Math.hypot(objectCenter.x - wallMid.x, objectCenter.y - wallMid.y) || 1);
     if (!best || face.gap < best.gap - 1e-9 || (face.gap < best.gap + 1e-9 && facing > best.facing)) {
