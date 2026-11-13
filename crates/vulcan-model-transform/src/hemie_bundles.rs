@@ -1138,6 +1138,32 @@ mod tests {
     }
 
     #[test]
+    fn a_mono_roof_room_takes_a_flat_ceiling_between_its_slope_and_high_wall() {
+        // One slope from the south knee wall up to y 4, then a flat ceiling to the north wall.
+        let csv = flat_roof_room(4.0, (4.0, 6.0), (6.0, 6.0))
+            .lines()
+            .filter(|l| !l.starts_with("Slope N,"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace(
+                "\nCeiling,",
+                &format!(
+                    "\n{}\n{}\nCeiling,",
+                    wall("Knee S", 2, [0.0, 0.0], [8.0, 0.0], 1.0),
+                    wall("High N", 2, [8.0, 6.0], [0.0, 6.0], 2.3)
+                ),
+            );
+        let (model, errors, _) = run(&csv);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let room = &model["Zone"]["building_parts"]["Main"]["roof"];
+        assert_eq!(room["pitch_type"], "mono");
+        assert!(
+            (room["ceiling_width"].as_f64().unwrap() - 2.0).abs() < 1e-9,
+            "{room:#}"
+        );
+    }
+
+    #[test]
     fn a_flat_section_beside_the_slopes_stops_and_is_named() {
         // Slopes meet at y 3 to 5; the flat plane is beyond the north slope, not under the ridge.
         let (_, errors, _) = run(&flat_roof_room(3.0, (5.0, 6.0), (3.0, 5.0)));

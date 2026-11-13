@@ -2109,8 +2109,8 @@ fn room_in_roof(
     let width = along(&mut walls.iter().flat_map(|w| w.pts.clone()), u);
     let length = along(&mut walls.iter().flat_map(|w| w.pts.clone()), v);
     let full_width = along(&mut top_ring.iter().copied(), u);
-    // Derived from the model: a flat plane lying between the heated slopes, under the ridge, is
-    // the room's flat ceiling. DESNZ-defined: a roof with a flat section anywhere else is not
+    // Derived from the model: a flat plane lying between the heated slopes, under the ridge, or
+    // in a mono room between the slope and its high wall, is the room's flat ceiling. DESNZ-defined: a roof with a flat section anywhere else is not
     // covered.
     let across = |e: &El| {
         let values: Vec<f64> = e.pts.iter().map(|p| dot(*p, u)).collect();
@@ -2121,10 +2121,13 @@ fn room_in_roof(
     };
     for c in &ceilings {
         let (lo, hi) = across(c);
-        let between = heated.iter().any(|h| across(h).1 <= lo + TOL)
-            && heated.iter().any(|h| across(h).0 >= hi - TOL);
+        let slope_below = heated.iter().any(|h| across(h).1 <= lo + TOL);
+        let slope_above = heated.iter().any(|h| across(h).0 >= hi - TOL);
+        // Mono (HEMIE's single-slope form): the ceiling runs from the slope to the high wall.
+        let wall_at = |x: f64| knees.iter().any(|k| (across(k).0 - x).abs() <= TOL);
+        let between = (slope_below && (slope_above || wall_at(hi))) || (slope_above && wall_at(lo));
         if !between {
-            ctx.errors.push(error(c.path(), format!("Flat roof '{}' is part of the room in the roof but is not a flat ceiling between its two slopes. A roof room with a flat section elsewhere cannot be entered: make the flat part the roof of its own building part, or draw it as slopes.", c.name)));
+            ctx.errors.push(error(c.path(), format!("Flat roof '{}' is part of the room in the roof but is not a flat ceiling between its two slopes, or between its one slope and its high wall. A roof room with a flat section elsewhere cannot be entered: make the flat part the roof of its own building part, or draw it as slopes.", c.name)));
             return None;
         }
     }
