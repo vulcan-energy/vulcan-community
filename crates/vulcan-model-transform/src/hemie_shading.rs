@@ -151,7 +151,7 @@ pub struct HemieShading {
 
 const LEVELS: [&str; 5] = ["Very heavy", "Heavy", "Moderate", "Light", "Very light"];
 const NAMES: [&str; 4] = ["Front", "Right", "Back", "Left"];
-const SHADING_PATH: &str = "/ExternalConditions/shading_segments";
+const SHADING_POINTER: &str = "/ExternalConditions/shading_segments";
 
 /// Plain words for a level: HEMIE's "Moderate" is the guidance's "Average".
 fn plain(level: &str) -> &str {
@@ -314,7 +314,7 @@ pub(super) fn distant(
         });
         if stated.contains_key(*key) && turned {
             let name = NAMES[k];
-            notices.push(notice(&format!("{SHADING_PATH}/{name}"), format!("Front door changed: check the stated band of {name}. It is relative to the front door, so it now faces another compass direction. Choose it again, or reset it to the drawing.")));
+            notices.push(notice(&format!("{SHADING_POINTER}/{name}"), format!("Front door changed: check the stated band of {name}. It is relative to the front door, so it now faces another compass direction. Choose it again, or reset it to the drawing.")));
         }
     }
 
@@ -323,7 +323,7 @@ pub(super) fn distant(
     let mut described = Vec::new();
     for (k, key) in SEGMENTS.iter().enumerate() {
         let name = NAMES[k];
-        let path = format!("{SHADING_PATH}/{name}");
+        let path = format!("{SHADING_POINTER}/{name}");
         let centre = centre(k);
         let cuts = cuts(&objects, centre);
         let inside: Vec<&Object> = objects
@@ -411,7 +411,7 @@ pub(super) fn distant(
         });
     }
     notices.push(notice(
-        SHADING_PATH,
+        SHADING_POINTER,
         format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.", described.join("; ")),
     ));
     Some((
