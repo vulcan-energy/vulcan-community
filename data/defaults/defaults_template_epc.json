@@ -9236,6 +9236,11 @@
       },
       "mechvent_mvhr": {
         "vent_type": "MVHR"
+      },
+      "mechvent_positive_input_ventilation": {
+        "vent_type": "Positive input ventilation",
+        "sup_air_flw_ctrl": "ODA",
+        "sup_air_temp_ctrl": "NO_CTRL"
       }
     }
   },

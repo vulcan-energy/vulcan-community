@@ -225,8 +225,9 @@ const NAME_KEYED_LEVELS: &[(&str, &[&[&str]])] = &[
     ("SpaceCoolSystem", &[&[]]),
     ("SpaceHeatSystem", &[&[]]),
     ("WWHRS", &[&[]]),
-    // HEM:EPC only: a warm-air heater, named by the user.
+    // HEM:EPC only: a warm-air heater and an unconditioned zone, named by the user.
     ("HeatSourceWarmAir", &[&[]]),
+    ("ZoneUnconditioned", &[&[]]),
     // These two are fixed-field objects at the root; the appliance maps hanging off them are what
     // the user names.
     (
@@ -4365,6 +4366,14 @@ impl JSONBuilder {
                             )
                         })?;
 
+                        if vt == "Positive input ventilation"
+                            && !self.profile.checks_system_catalogue()
+                        {
+                            return Err(BuildError::new(
+                                "E009",
+                                &format!("Ventilation Systems row '{vent_name}' has vent_type 'Positive input ventilation', which only a HEM:EPC target converts. Pick Intermittent MEV, Centralised continuous MEV, Decentralised continuous MEV or MVHR."),
+                            ));
+                        }
                         let m = default_mechvent_map.ok_or_else(|| {
                             BuildError::new(
                                 "E027",
@@ -5415,7 +5424,9 @@ impl JSONBuilder {
                 {
                     return None;
                 }
-                if self.profile.required_metadata_rows().contains(name) {
+                if self.profile.required_metadata_rows().contains(name)
+                    || self.profile.desnz_default_rows().contains(name)
+                {
                     return None;
                 }
                 Some(match result.pointer(&pointer)? {
@@ -5425,7 +5436,12 @@ impl JSONBuilder {
             })
             .collect();
         let existing = result.get("IsExistingBuilding") == Some(&Value::Bool(true));
-        for name in self.profile.required_metadata_rows() {
+        for name in self
+            .profile
+            .required_metadata_rows()
+            .iter()
+            .chain(self.profile.desnz_default_rows())
+        {
             let pointer = if let Some(key) = name.strip_prefix("AirPermeability_") {
                 format!("/InfiltrationVentilation/Leaks/{key}")
             } else if let Some(key) = name.strip_prefix("Ventilation_") {
@@ -5439,11 +5455,12 @@ impl JSONBuilder {
             if present.contains(*name) || stated_by_systems {
                 continue;
             }
-            if existing
-                && self
-                    .profile
-                    .existing_building_optional_rows()
-                    .contains(name)
+            if self.profile.desnz_default_rows().contains(name)
+                || existing
+                    && self
+                        .profile
+                        .existing_building_optional_rows()
+                        .contains(name)
             {
                 let (parent, key) = pointer.rsplit_once('/').expect("a pointer");
                 if let Some(object) = result.pointer_mut(parent).and_then(Value::as_object_mut) {
@@ -7061,14 +7078,16 @@ impl JSONBuilder {
                                     );
                                 }
                             }
-                            "HeatSourceWarmAir" if self.profile.checks_system_catalogue() => {
+                            "HeatSourceWarmAir" | "ZoneUnconditioned"
+                                if self.profile.checks_system_catalogue() =>
+                            {
                                 if let Some(extra_json) =
                                     row.get("extra_json").and_then(|v| v.as_object())
                                 {
                                     Self::merge_wrapped_system_fragment(
                                         result_obj,
                                         extra_json,
-                                        "HeatSourceWarmAir",
+                                        subcategory,
                                     );
                                 }
                             }
@@ -12989,6 +13008,24 @@ fan,MechanicalVentilation,Intermittent MEV,1.5,180,90,"{""unsupported_authored_f
             data["Ventilation Systems"][0]["extra_json"]["unsupported_authored_field"],
             42
         );
+    }
+
+    #[test]
+    fn positive_input_ventilation_fails_naming_the_row_outside_epc() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Default Zone,Zone,100,50,2.5,FALSE
+
+Ventilation Systems
+Name,Type,vent_type,extra_json
+loft unit,MechanicalVentilation,Positive input ventilation,"{}"
+"#;
+        let data = CSVParser::new().parse_csv(csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let error = builder.build_json(&data).expect_err("FHS has no PIV");
+        assert_eq!(error.code, "E009");
+        assert!(error.message.contains("'loft unit'"), "{}", error.message);
     }
 
     #[test]

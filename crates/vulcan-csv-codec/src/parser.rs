@@ -374,6 +374,8 @@ impl CSVParser {
                             "Centralised continuous MEV",
                             "Decentralised continuous MEV",
                             "MVHR",
+                            // HEM:EPC only: the converter rejects it for other targets.
+                            "Positive input ventilation",
                         ];
                         if !valid_vent_types.contains(&vent_type.as_str()) {
                             return Err(ParseError {

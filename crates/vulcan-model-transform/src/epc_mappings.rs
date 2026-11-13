@@ -456,7 +456,8 @@ pub(crate) fn apply_desnz_defaults(
         .to_string();
     // DESNZ-defined (EPC 11 11.3.3): an existing building may give its base storey instead, and
     // HEMIE estimates the base height from it.
-    let base_storey = (model.get("IsExistingBuilding") == Some(&Value::Bool(true)))
+    let new_build = model.get("IsExistingBuilding") != Some(&Value::Bool(true));
+    let base_storey = (!new_build)
         .then(|| model["General"]["storey_of_dwelling"].as_i64())
         .flatten();
     if let Some(ventilation) = model
@@ -486,6 +487,12 @@ pub(crate) fn apply_desnz_defaults(
             } else {
                 errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: add the Metadata row Ventilation_ventilation_zone_base_height. An existing building may give its base storey instead (General_storey_of_dwelling).", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
             }
+        }
+        // Absent: the builder removed the template's value (`desnz_default_rows`). HEMIE
+        // applies its own default on an existing building.
+        if new_build && ventilation.get("noise_nuisance").is_none_or(Value::is_null) {
+            ventilation.insert("noise_nuisance".into(), json!(false));
+            notices.push(notice("/InfiltrationVentilation/noise_nuisance", "No Metadata row states Ventilation_noise_nuisance, so the model uses noise_nuisance false (No), DESNZ's default. Add the row to state it.".to_string()));
         }
         if let Some(area) = ventilation.get("Leaks").and_then(|l| l.get("env_area")) {
             notices.push(notice("/InfiltrationVentilation/Leaks/env_area", format!("The envelope area {area} m² is derived from the drawn elements that separate the dwelling from outside, other dwellings and unheated spaces.")));
@@ -724,14 +731,41 @@ pub(crate) fn check_system_catalogue(
             .flatten()
         {
             let kind = element["type"].as_str().unwrap_or_default();
-            if kind.ends_with("AdjacentUnconditionedZone") {
+            if !kind.ends_with("AdjacentUnconditionedZone") {
+                continue;
+            }
+            let path = json_pointer(&["Zone", zone, "BuildingElement", name]);
+            let named = element["ZoneUnconditioned"].as_str().unwrap_or_default();
+            if model["IsExistingBuilding"] == true {
+                // HEMIE Geometry has no element next to an unconditioned zone.
                 errors.push(error(
                     "E_EPC_UNSUPPORTED_SYSTEM",
-                    json_pointer(&["Zone", zone, "BuildingElement", name]),
-                    format!("Element '{name}' ({kind}) is next to an unconditioned zone, which Vulcan cannot state yet (HEM:EPC ZoneUnconditioned). Draw it as BuildingElementAdjacentUnconditionedSpace_Simple with the unheated space's thermal resistance."),
+                    path,
+                    format!("Element '{name}' ({kind}) is next to an unconditioned zone, which an existing building's HEMIE input cannot state. Draw it as BuildingElementAdjacentUnconditionedSpace_Simple with the unheated space's thermal resistance."),
+                ));
+            } else if model["ZoneUnconditioned"].get(named).is_none() {
+                errors.push(error(
+                    "E_EPC_SYSTEM_REFERENCE",
+                    format!("{path}/ZoneUnconditioned"),
+                    format!("Element '{name}' ({kind}) names ZoneUnconditioned '{named}', but the model has no such unconditioned zone. Add a Systems row with subcategory ZoneUnconditioned that defines it, or correct the name."),
                 ));
             }
         }
+    }
+    // ponytail: a defect of the pinned Orchestrator 0.13.2a0, which passes
+    // coeff_ventilation_unconditioned_zone to the wrapper even when unset; drop on a re-pin
+    // that fixes it.
+    for (name, _) in model["ZoneUnconditioned"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(_, zone)| zone["method"] == "Direct")
+    {
+        errors.push(error(
+            "E_EPC_UNSUPPORTED_SYSTEM",
+            json_pointer(&["ZoneUnconditioned", name, "method"]),
+            format!("Unconditioned zone '{name}' uses method Direct, which this HEM:EPC target rejects. Use method Calculated and state the zone's envelope in building_element."),
+        ));
     }
     for name in model["InfiltrationVentilation"]["CombustionAppliances"]
         .as_object()
