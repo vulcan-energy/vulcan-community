@@ -82,8 +82,93 @@ export type GeometryProductCatalogueAdvancedHotWaterContext = Readonly<{
   ) => void;
 }>;
 
+export type GeometryProductCandidate = Readonly<{
+  id: number;
+  label: string;
+  technology_type: string;
+  radiator_type?: string;
+  height?: string;
+}>;
+
+/** A system that needs a product, as the selected target's conversion reports it. */
+export type GeometryProductSlot = Readonly<{
+  /** Model path of the system object in the converted model. */
+  path: string;
+  system_type: string;
+  product_id?: number | null;
+  /** `product`: picked on the element or by a model setting; `default`: chosen by a rule. */
+  source: 'product' | 'default';
+  label?: string | null;
+  /** How the product was chosen, or what the user must pick. */
+  rule: string;
+  technology_types: readonly string[];
+  /** What the slot falls back to when the element's own pick is removed. */
+  default_source?: 'single_product' | 'model_setting' | null;
+  /** Every product the slot accepts; radiators carry their type and height. */
+  candidates: readonly GeometryProductCandidate[];
+  /** Name of the Geometry CSV row the system comes from. */
+  row?: string;
+  /** Model path of that row's own object; `path` is below it. */
+  row_path?: string;
+}>;
+
+/** Plain words for the HEM Database technology types, for chips and pickers. */
+const PRODUCT_TECHNOLOGY_LABELS: Readonly<Record<string, string>> = {
+  'Air Powered Showers': 'Air-powered shower',
+  'Air Source Heat Pump': 'Air source heat pump',
+  'Booster Heat Pump': 'Booster heat pump',
+  'Centralised MEV': 'Centralised MEV',
+  'Centralised MV': 'Centralised MV',
+  'Centralised MVHR': 'Centralised MVHR',
+  'Column Radiator': 'Column radiator',
+  'Combi Boiler': 'Combi boiler',
+  'Convector Radiator': 'Convector radiator',
+  'Cooker boiler': 'Cooker boiler',
+  'Decentralised MEV': 'Decentralised MEV',
+  'Direct Electric': 'Direct electric heater',
+  'Electric Battery': 'Electric battery',
+  'Electric Boiler': 'Electric boiler',
+  'Exhaust Air MEV Heat Pump': 'Exhaust air heat pump (MEV)',
+  'Exhaust Air MVHR Heat Pump': 'Exhaust air heat pump (MVHR)',
+  'Exhaust Air Mixed Heat Pump': 'Exhaust air heat pump (mixed)',
+  'Fan Coils': 'Fan coil',
+  'Flue Gas Heat Recovery System': 'Flue gas heat recovery',
+  'Ground Source Heat Pump': 'Ground source heat pump',
+  'Heat Battery DryCore': 'Dry-core heat battery',
+  'Heat Battery PCM': 'PCM heat battery',
+  'Heat Interface Unit': 'Heat interface unit',
+  'Heat Network': 'Heat network',
+  'Hot Water Only Heat Pump': 'Hot-water-only heat pump',
+  'Hybrid Heat Pump': 'Hybrid heat pump',
+  'Instantaneous WWHRS': 'Instantaneous WWHRS',
+  'Primary Thermal Store': 'Primary thermal store',
+  'Regular Boiler': 'Regular boiler',
+  'Room Heater': 'Room heater',
+  'Smart Hot Water Tank': 'Smart hot water tank',
+  'Solar Thermal': 'Solar thermal collector',
+  'Solid Fuel Boiler': 'Solid fuel boiler',
+  'Storage Heaters': 'Storage heater',
+  UnderfloorHeating: 'Underfloor heating',
+  'Warm Air Heaters': 'Warm air heater',
+  'Water Source Heat Pump': 'Water source heat pump',
+};
+
+/** A technology type in plain words; a type this table lacks shows as the data names it. */
+export const productTechnologyLabel = (type: string): string => PRODUCT_TECHNOLOGY_LABELS[type] ?? type;
+
+export type GeometryProductSlotContext = Readonly<{
+  slot: GeometryProductSlot;
+  element: Readonly<Record<string, unknown>>;
+  /** Merge a change into the element's existing extra_json. */
+  onPatchExtraJson(
+    update: (current: Record<string, unknown>) => Record<string, unknown>,
+  ): void;
+}>;
+
 export type GeometryProductCatalogueContribution = Readonly<{
   hasAppliedSystemData(extraJson: unknown): boolean;
+  /** The picker a product slot's source chip opens; without it the chip only informs. */
+  renderProductSlot?(context: GeometryProductSlotContext): ReactNode;
   prefetchSystemSource?(): void;
   renderSystemSource(context: GeometryProductCatalogueSystemContext): ReactNode;
   renderAdvancedHotWaterAction(

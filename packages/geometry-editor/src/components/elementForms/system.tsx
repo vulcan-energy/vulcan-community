@@ -829,7 +829,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
       requestSystemUiMode,
       handlePcdbSystemApply,
     } = state;
-    const { elementType, renderFieldLabel, elementsById, productCatalogue, renderSpaceHeatSystemEmitterManager } = ctx;
+    const { elementType, renderFieldLabel, elementsById, productCatalogue, hemDatabaseProducts, systemHasProductSlot, renderSpaceHeatSystemEmitterManager } = ctx;
 
     return (
       <>
@@ -858,7 +858,9 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
           </div>
         ) : null}
 
-        {!productCatalogue || systemUiMode === 'presets' ? (
+        {systemHasProductSlot ? (
+          systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null
+        ) : !productCatalogue || systemUiMode === 'presets' ? (
           <>
             {renderFieldLabel('Category:', elementType)}
             <div className="element-input">
@@ -875,19 +877,24 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
                 size="md"
               />
             </div>
-            {renderFieldLabel('Preset:', elementType)}
-            <div className="element-input">
-              <StandardDropdown
-                value={systemPreset}
-                onChange={handleSystemPresetChange}
-                options={systemPresetDropdownOptions}
-                placeholder={systemPresetOptions.length === 0 ? 'Loading…' : 'Select preset…'}
-                variant="ghost"
-                size="md"
-              />
-            </div>
+            {/* The sample presets are FHS inputs; a HEM Database products target takes none. */}
+            {hemDatabaseProducts ? null : (
+              <>
+                {renderFieldLabel('Preset:', elementType)}
+                <div className="element-input">
+                  <StandardDropdown
+                    value={systemPreset}
+                    onChange={handleSystemPresetChange}
+                    options={systemPresetDropdownOptions}
+                    placeholder={systemPresetOptions.length === 0 ? 'Loading…' : 'Select preset…'}
+                    variant="ghost"
+                    size="md"
+                  />
+                </div>
+              </>
+            )}
             {systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null}
-            {systemSourceFromStore === 'custom' ? (
+            {systemSourceFromStore === 'custom' && !hemDatabaseProducts ? (
               <div className="element-editor-note">
                 {systemPreset
                   ? `Custom system. Started from ${selectedSystemPresetLabel}; edits are saved in this model.`

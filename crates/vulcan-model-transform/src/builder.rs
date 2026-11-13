@@ -1567,6 +1567,10 @@ pub struct JSONBuilder {
     /// The model's product settings (Metadata rows), read once per build.
     product_settings: RefCell<crate::epc_products::Settings>,
     product_slots: RefCell<Vec<crate::ProductSlot>>,
+    product_candidates: RefCell<BTreeMap<String, Vec<crate::ProductCandidate>>>,
+    /// Model path of each object a Geometry CSV row authored (Systems, wet emitter and
+    /// mechanical ventilation rows) and the row's Name, so each product slot names its row.
+    slot_rows: RefCell<Vec<(String, String)>>,
     /// Element paths whose `solar_absorption_coeff` came from a colour.
     colour_coefficients: RefCell<Vec<String>>,
 }
@@ -1582,6 +1586,10 @@ impl JSONBuilder {
 
     pub fn take_product_slots(&self) -> Vec<crate::ProductSlot> {
         std::mem::take(&mut *self.product_slots.borrow_mut())
+    }
+
+    pub fn take_product_candidates(&self) -> BTreeMap<String, Vec<crate::ProductCandidate>> {
+        std::mem::take(&mut *self.product_candidates.borrow_mut())
     }
 
     /// Top-level property names the active schema accepts. Used to reject unknown
@@ -1629,6 +1637,8 @@ impl JSONBuilder {
             product_settings: RefCell::default(),
             colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
+            product_candidates: RefCell::default(),
+            slot_rows: RefCell::new(Vec::new()),
         };
 
         builder.index_templates();
@@ -1667,6 +1677,8 @@ impl JSONBuilder {
             product_settings: RefCell::default(),
             colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
+            product_candidates: RefCell::default(),
+            slot_rows: RefCell::new(Vec::new()),
         };
         builder.index_templates();
         Ok(builder)
@@ -1699,8 +1711,13 @@ impl JSONBuilder {
 
     fn note_emitter_row(&self, system: &str, index: usize, row: &BTreeMap<String, Value>) {
         let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+        let path =
+            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]);
+        self.slot_rows
+            .borrow_mut()
+            .push((path.clone(), name.to_string()));
         self.csv_rows.borrow_mut().push((
-            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
+            path,
             format!("Wet Emitters row '{name}' (system '{system}')"),
         ));
     }
@@ -2186,6 +2203,7 @@ impl JSONBuilder {
                 &settings,
                 &mut errors,
                 &mut notices,
+                &mut self.product_candidates.borrow_mut(),
             );
             crate::epc_products::apply_weather_curves(result, db, &mut errors, &mut notices);
             crate::epc_products::derive_zone_frac_convective(
@@ -2195,7 +2213,26 @@ impl JSONBuilder {
                 &mut errors,
                 &mut notices,
             );
-            *self.product_slots.borrow_mut() = slots;
+            let rows = self.slot_rows.borrow();
+            *self.product_slots.borrow_mut() = slots
+                .into_iter()
+                .map(|slot| {
+                    // The innermost authored object that holds the slot.
+                    let (row_path, row) = rows
+                        .iter()
+                        .filter(|(path, _)| {
+                            slot.path == *path || slot.path.starts_with(&format!("{path}/"))
+                        })
+                        .max_by_key(|(path, _)| path.len())
+                        .cloned()
+                        .unzip();
+                    crate::ProductSlot {
+                        row,
+                        row_path,
+                        ..slot
+                    }
+                })
+                .collect();
         }
         if self.profile.checks_party_wall_lining() {
             crate::epc_mappings::check_party_wall_lining(result, &mut errors);
@@ -4675,6 +4712,14 @@ impl JSONBuilder {
                         }
 
                         // Shared finalization projects and reports unsupported fields.
+                        self.slot_rows.borrow_mut().push((
+                            crate::json_pointer(&[
+                                "InfiltrationVentilation",
+                                "MechanicalVentilation",
+                                vent_name,
+                            ]),
+                            vent_name.to_string(),
+                        ));
                         mechanical_ventilation.insert(vent_name.to_string(), Value::Object(mv_obj));
                     }
                     // Read with the MechanicalVentilation row they name as parent_element.
@@ -7054,6 +7099,27 @@ impl JSONBuilder {
                         &heat_source_wet_row_first_keys,
                         csv_owned.get("HotWaterSource").unwrap_or(&HashMap::new()),
                     );
+                }
+            }
+        }
+        // Flat cells name their entry after the row (`csv_owned`); wrapped cells name each
+        // `{"<section>": {"<name>": …}}` entry themselves, whichever merge path takes them.
+        let mut rows = self.slot_rows.borrow_mut();
+        for (section, names) in &csv_owned {
+            for (name, row) in names {
+                rows.push((crate::json_pointer(&[section, name]), row.clone()));
+            }
+        }
+        for row in csv_data.get("Systems").into_iter().flatten() {
+            let (Some(row_name), Some(cell)) = (
+                row.get("Name").and_then(Value::as_str),
+                row.get("extra_json").and_then(Value::as_object),
+            ) else {
+                continue;
+            };
+            for (section, entries) in cell {
+                for name in entries.as_object().into_iter().flat_map(|e| e.keys()) {
+                    rows.push((crate::json_pointer(&[section, name]), row_name.to_string()));
                 }
             }
         }

@@ -6,7 +6,9 @@
 //! `productDataSha256`); the converter reads them here and never holds a copy of its own.
 
 use crate::finalization::SchemaOmission;
-use crate::{json_pointer, ProductSlot, ProductSource, ValidationError};
+use crate::{
+    json_pointer, DefaultSource, ProductCandidate, ProductSlot, ProductSource, ValidationError,
+};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
@@ -539,6 +541,15 @@ impl Rule {
         }
     }
 
+    /// Names the rule's products: its tables and filter.
+    fn key(&self) -> String {
+        let tables = self.tables().join("+");
+        match self.filter() {
+            Some((field, value)) => format!("{tables} {field}={value}"),
+            None => tables,
+        }
+    }
+
     /// Products of the rule's tables that have its filter.
     pub(crate) fn candidates<'a>(&'a self, db: &'a ProductDatabase) -> Vec<&'a Product> {
         db.products
@@ -557,6 +568,7 @@ pub(crate) fn resolve_products(
     settings: &Settings,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
+    candidates: &mut BTreeMap<String, Vec<ProductCandidate>>,
 ) -> Vec<ProductSlot> {
     let snapshot = model.clone();
     let mut slots = Vec::new();
@@ -606,6 +618,10 @@ pub(crate) fn resolve_products(
                     label: None,
                     rule: "no rule".into(),
                     technology_types: vec![],
+                    default_source: None,
+                    candidates: None,
+                    row: None,
+                    row_path: None,
                 });
                 continue;
             };
@@ -631,6 +647,38 @@ pub(crate) fn resolve_products(
                 }
                 _ => None,
             };
+            let accepted = rule.candidates(db);
+            let default_source = match &rule {
+                Rule::Auto { .. } if accepted.len() == 1 => Some(DefaultSource::SingleProduct),
+                Rule::Pick { .. }
+                    if setting
+                        .as_ref()
+                        .is_some_and(|(id, _)| accepted.iter().any(|p| p.id == *id)) =>
+                {
+                    Some(DefaultSource::ModelSetting)
+                }
+                _ => None,
+            };
+            let key = rule.key();
+            candidates.entry(key.clone()).or_insert_with(|| {
+                accepted
+                    .iter()
+                    .map(|p| {
+                        let radiator = |f: &str| {
+                            (p.table == "ConvectorRadiator")
+                                .then(|| p.fields.get(f).cloned())
+                                .flatten()
+                        };
+                        ProductCandidate {
+                            id: p.id,
+                            label: p.label.clone(),
+                            technology_type: p.technology_type.clone(),
+                            radiator_type: radiator("type"),
+                            height: radiator("height"),
+                        }
+                    })
+                    .collect()
+            });
             let picked = object
                 .get("product_id")
                 .and_then(Value::as_u64)
@@ -731,6 +779,10 @@ pub(crate) fn resolve_products(
                 label,
                 rule: rule_text,
                 technology_types,
+                default_source,
+                candidates: Some(key),
+                row: None,
+                row_path: None,
             });
         }
     }
@@ -1152,7 +1204,14 @@ pub(crate) mod tests {
         settings: &Settings,
     ) -> (Vec<ProductSlot>, Vec<ValidationError>, Vec<SchemaOmission>) {
         let (mut errors, mut notices) = (Vec::new(), Vec::new());
-        let slots = resolve_products(model, &db(), settings, &mut errors, &mut notices);
+        let slots = resolve_products(
+            model,
+            &db(),
+            settings,
+            &mut errors,
+            &mut notices,
+            &mut BTreeMap::new(),
+        );
         (slots, errors, notices)
     }
 
@@ -1410,6 +1469,10 @@ pub(crate) mod tests {
             label: None,
             rule: String::new(),
             technology_types: vec![],
+            default_source: None,
+            candidates: None,
+            row: None,
+            row_path: None,
         };
         let model = |existing: bool| {
             json!({

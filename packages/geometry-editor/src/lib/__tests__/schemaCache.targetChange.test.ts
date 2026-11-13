@@ -120,7 +120,7 @@ describe('elementTypeAvailability', () => {
 
   it('hides a type the host excludes, with its reason, and offers nothing else before the schema loads', () => {
     const excluding = port('fhs', null, { targetRules: () => ({
-      modelValidityChecks: true, fhsInputRules: true, buildingRegulationsChecks: false, hiddenFields: {},
+      modelValidityChecks: true, fhsInputRules: true, buildingRegulationsChecks: false, hiddenFields: {}, hemDatabaseProducts: false,
       excludedElementTypes: { Lighting: { reason: 'Not used by this target.' } },
     }) });
     expect(elementTypeAvailability(excluding, 'Lighting', {})).toEqual({ available: false, reason: 'Not used by this target.' });

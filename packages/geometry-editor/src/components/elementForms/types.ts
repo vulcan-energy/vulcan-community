@@ -292,6 +292,11 @@ export interface ElementFormRenderCtx {
    * System-only consumer (not-yet-extracted module), nullable because the host
    * may not provide one. */
   productCatalogue: GeometryProductCatalogueContribution | null;
+  /** The selected System row has a product slot: its picker chooses the system's product, so
+   * the sample Category and Preset do not show. */
+  systemHasProductSlot: boolean;
+  /** The target's systems take HEM Database products: the FHS sample presets do not show. */
+  hemDatabaseProducts: boolean;
   /** Orchestrator-owned System<->WetEmitter cross-creation bridge (slice-5
    * brief decision (f).1, CONSERVATIVE option): renders WetEmitter's
    * space-heat-system dropdown, including the "Create new SpaceHeatSystem..."

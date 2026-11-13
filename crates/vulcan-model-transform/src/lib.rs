@@ -428,6 +428,30 @@ pub enum ProductSource {
     Default,
 }
 
+/// What a slot falls back to without the element's own pick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultSource {
+    /// The only product of its kind in the pinned data.
+    SingleProduct,
+    /// A valid model setting (Metadata row).
+    ModelSetting,
+}
+
+/// A product a slot accepts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProductCandidate {
+    pub id: u64,
+    /// Brand, model name and qualifier.
+    pub label: String,
+    pub technology_type: String,
+    /// A radiator's type and height (mm).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radiator_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<String>,
+}
+
 /// A system that needs a HEM Database product, as the converted model holds it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProductSlot {
@@ -444,6 +468,19 @@ pub struct ProductSlot {
     pub rule: String,
     /// The HEM Database technology types this slot accepts.
     pub technology_types: Vec<String>,
+    /// What the slot falls back to when the element's own pick is removed, if anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_source: Option<DefaultSource>,
+    /// Key in [`TransformOutput::product_candidates`] of every product the slot accepts, for a
+    /// picker; slots with the same rule share one list. None when the slot has no rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidates: Option<String>,
+    /// Name of the Geometry CSV row the system comes from, where one does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row: Option<String>,
+    /// Model path of that row's own object: the slot's object sits at `path` below it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -454,6 +491,9 @@ pub struct TransformOutput {
     pub version_metadata: VersionMetadata,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub product_slots: Vec<ProductSlot>,
+    /// The products each product rule accepts, keyed as [`ProductSlot::candidates`] names them.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub product_candidates: std::collections::BTreeMap<String, Vec<ProductCandidate>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -573,6 +613,7 @@ pub fn transform_geometry_csv(
         schema_omissions,
         version_metadata: request.version_metadata,
         product_slots: builder.take_product_slots(),
+        product_candidates: builder.take_product_candidates(),
     })
 }
 

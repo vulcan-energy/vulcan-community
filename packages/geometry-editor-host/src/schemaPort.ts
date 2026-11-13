@@ -41,6 +41,11 @@ export interface TargetRules {
   excludedElementTypes: Readonly<Record<string, { reason: string }>>;
   /** Field keys hidden per element type. */
   hiddenFields: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Systems take HEM Database products, which the product slot picker chooses. The host's other
+   * product sources, such as a sample/catalogue source switch, do not apply.
+   */
+  hemDatabaseProducts: boolean;
 }
 
 export interface GeometrySchemaPropertyValidation {
@@ -59,8 +64,8 @@ export interface GeometrySchemaPort {
   getRevision?(): number;
   /** The selected target needs thermal-bridge records even where its schema accepts a total. */
   requiresDetailedThermalBridges?(): boolean;
-  /** The selected target's rules for these model settings; undefined keeps the defaults of {@link targetRules}. */
-  targetRules?(modelSettings: Readonly<Record<string, unknown>>): TargetRules | undefined;
+  /** The selected target's rules for these model settings; a rule it leaves out keeps the default of {@link targetRules}. */
+  targetRules?(modelSettings: Readonly<Record<string, unknown>>): Partial<TargetRules> | undefined;
   /** The selected target's model type; undefined when the host has no target catalogue. */
   targetSchemaMode?(): GeometrySchemaMode | undefined;
   preload(mode: GeometrySchemaMode): Promise<void>;
@@ -111,21 +116,23 @@ export function targetSchemaMode(port?: GeometrySchemaPort): GeometrySchemaMode 
 }
 
 /**
- * The host's rules, else the defaults: model-validity checks run for every target, the FHS
- * input rules and Building Regulations checks for an FHS target, and nothing is excluded or hidden.
+ * The host's rules over the defaults: model-validity checks run for every target, the FHS input
+ * rules and Building Regulations checks for an FHS target, nothing is excluded or hidden, and
+ * products come from the host's own sources.
  */
 export function targetRules(
   port: GeometrySchemaPort | undefined,
   modelSettings: Readonly<Record<string, unknown>>,
 ): TargetRules {
-  return port?.targetRules?.(modelSettings)
-    ?? {
-      modelValidityChecks: true,
-      fhsInputRules: targetSchemaMode(port) === 'fhs',
-      buildingRegulationsChecks: targetSchemaMode(port) === 'fhs',
-      excludedElementTypes: {},
-      hiddenFields: {},
-    };
+  return {
+    modelValidityChecks: true,
+    fhsInputRules: targetSchemaMode(port) === 'fhs',
+    buildingRegulationsChecks: targetSchemaMode(port) === 'fhs',
+    excludedElementTypes: {},
+    hiddenFields: {},
+    hemDatabaseProducts: false,
+    ...port?.targetRules?.(modelSettings),
+  };
 }
 
 function unavailable(operation: string): never {

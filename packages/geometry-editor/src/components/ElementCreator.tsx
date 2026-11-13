@@ -129,7 +129,7 @@ import {
   isElementFloorControlledByParent,
 } from '../lib/parentControlledFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
-import { useTargetValidationFlags } from '../hooks/useTargetRules';
+import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -475,6 +475,7 @@ function areDormerThermalOverridesEqual(
 
 
 import { FieldValidationIndicator, ValidationIndicator, ValidationPill } from './ValidationIndicator';
+import { ProductSlotChips } from './ProductSlotChips';
 import { StandardCard } from './StandardCard';
 import { StandardInput } from './StandardInput';
 import { ResetFieldButton } from './ResetFieldButton';
@@ -952,7 +953,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const evidenceBridge = useContext(GeometryInspectorEvidenceContext);
   const DetailedJunctionControl =
     inspectorContributions.detailedJunctionSolver?.Control;
-  const productCatalogue = inspectorContributions.productCatalogue;
+  const { hemDatabaseProducts } = useTargetRules();
+  // On a target whose systems take HEM Database products, the product slot picker is the only
+  // product source: the host's sample/catalogue source switch does not apply.
+  const productCatalogue = hemDatabaseProducts ? null : inspectorContributions.productCatalogue;
+  const productSlots = useGeometryStore((s) => s.targetValidation?.productSlots);
 
   useEffect(() => {
     const handle = window.setTimeout(prefetchAdvancedFieldsEditor, 250);
@@ -4124,6 +4129,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       },
       renderMvhrDuctAndTerminalManager,
       productCatalogue,
+      hemDatabaseProducts,
+      systemHasProductSlot: !!selectedElement?.name && !!productSlots?.some((slot) => slot.row === selectedElement.name),
       renderSpaceHeatSystemPicker,
       renderSpaceHeatSystemEmitterManager,
       // Wall-family generic derived render values — Adjacent-like's first
@@ -4596,6 +4603,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               </div>
             )}
 
+            {/* System rows are 'global' selections. */}
+            {(selection.type === 'element' || selection.type === 'global') && !selection.isPlaceholder && selectedElement && (
+              <ProductSlotChips
+                element={selectedElement as unknown as Readonly<Record<string, unknown>> & { name?: string }}
+                productCatalogue={inspectorContributions.productCatalogue}
+                onPatchExtraJson={(update) => {
+                  const currentElement = getElementById(selection.id);
+                  commitExistingElementDraft({ extra_json: update({ ...readExtraJsonRecord(currentElement?.extra_json) }) });
+                }}
+              />
+            )}
             {(selection.type === 'element' || selection.type === 'global') && (
               <SelectedElementValidationRows
                 activeFilename={activeFilename}
