@@ -10,6 +10,7 @@ import {
   isWetDistributionSpaceHeatSystem,
   spaceHeatSystemUsesHeatSourceWet,
   updateSpaceHeatSystemHeatSourceNameInExtraJson,
+  withoutPresetPrimaryPipework,
 } from '../systemEditorUtils';
 
 describe('systemEditorUtils SpaceHeatSystem preset shaping', () => {
@@ -304,4 +305,17 @@ it('remaps only matching circuits without mutating source data or controls', () 
   expect(remapSpaceHeatSystemHeatSourceInExtraJson(extra, 'missing', 'new')).toBeNull();
   expect(updateSpaceHeatSystemHeatSourceNameInExtraJson(extra, 'first', 'new').SpaceHeatSystem).toMatchObject({ first: { HeatSource: { name: 'new', temp_flow_limit_upper: 65 } } });
   expect(first.HeatSource.name).toBe('old');
+});
+
+it('a cylinder preset applied in the editor leaves primary pipework to the drawn rows', () => {
+  const pipe = { location: 'internal', length: 3 };
+  const preset = {
+    HotWaterSource: { 'hw cylinder': { type: 'StorageTank', volume: 80, primary_pipework: [pipe] } },
+  };
+  expect(withoutPresetPrimaryPipework(preset)).toEqual({
+    HotWaterSource: { 'hw cylinder': { type: 'StorageTank', volume: 80 } },
+  });
+  expect(preset.HotWaterSource['hw cylinder'].primary_pipework).toEqual([pipe]);
+  const heatSource = { HeatSourceWet: { hp: { type: 'HeatPump' } } };
+  expect(withoutPresetPrimaryPipework(heatSource)).toEqual(heatSource);
 });

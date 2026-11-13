@@ -133,6 +133,7 @@ import {
   systemExtraJsonIsMeaningfulSampleSide,
   type SystemElementSource,
   uiModeForSystemSource,
+  withoutPresetPrimaryPipework,
 } from '../systemEditorUtils';
 import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } from './types';
 
@@ -508,7 +509,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
         const raw = await ctx.workspaceResourcePort.readText(
           `input/batch_parameters/${dir}/${nextPreset}.json`,
         );
-        const parsedRaw = JSON.parse(raw) as Record<string, unknown>;
+        const parsedRaw = withoutPresetPrimaryPipework(JSON.parse(raw) as Record<string, unknown>);
         const selectedElement =
           selection?.id && !selection.isPlaceholder && (selection.type === 'element' || selection.type === 'global')
             ? ctx.getElementById(selection.id)
@@ -633,7 +634,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
       const raw = await ctx.workspaceResourcePort.readText(
         `input/batch_parameters/${dir}/${first}.json`,
       );
-      const nextExtraJson = JSON.parse(raw);
+      const nextExtraJson = withoutPresetPrimaryPipework(JSON.parse(raw) as Record<string, unknown>);
       commitSystemSelectionUpdate({
         source: 'presets',
         subcategory: systemSubcategory,
