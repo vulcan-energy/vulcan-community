@@ -354,6 +354,7 @@ impl ConversionProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VersionMetadata {
     pub hem_core_version: String,
     /// Version of the wrapper the input runs through (FHS or EPC).
