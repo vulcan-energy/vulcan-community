@@ -2724,7 +2724,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               const measuredFrom = worldToCanvas(measured.from, scale, panOffset, canvasCenter);
               const measuredTo = worldToCanvas(measured.to, scale, panOffset, canvasCenter);
               const distanceColor = measured.distance > 0 ? canvasInteractionPalette.guide : canvasInteractionPalette.warningGuide;
-              const distanceLabel = `${measured.distance.toFixed(1)}m${measured.thickness.source === 'none' ? ' (internal line)' : ''}`;
+              const distanceLabel = `${measured.distance.toFixed(2)}m${measured.thickness.source === 'none' ? ' (internal line)' : ''}`;
 
               // Calculate angles in real-time using current coordinates
               const { calculateShadingAngularRange } = geometryStore.getState();
