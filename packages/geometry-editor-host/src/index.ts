@@ -65,6 +65,7 @@ export {
   type GeometryProductCatalogueAdvancedHotWaterContext,
   type GeometryProductCatalogueContribution,
   type GeometryProductCatalogueSystemContext,
+  type GeometryProductCandidate,
   type GeometryProductSlot,
   type GeometryProductSlotContext,
   productTechnologyLabel,

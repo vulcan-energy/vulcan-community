@@ -12,7 +12,7 @@ afterEach(cleanup);
 
 const slot = (row: string, slot: Partial<GeometryProductSlot>): GeometryProductSlot => ({
   path: `/HeatSourceWet/${row}`, system_type: 'HeatPump', source: 'product', rule: 'picked on the element',
-  technology_types: ['Air Source Heat Pump'], row, ...slot,
+  technology_types: ['Air Source Heat Pump'], candidates: [], row, ...slot,
 });
 
 function renderChips(name: string, slots: GeometryProductSlot[] | undefined, withPicker = true) {

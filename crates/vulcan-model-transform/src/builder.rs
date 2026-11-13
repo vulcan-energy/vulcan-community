@@ -7089,11 +7089,25 @@ impl JSONBuilder {
                 }
             }
         }
+        // Flat cells name their entry after the row (`csv_owned`); wrapped cells name each
+        // `{"<section>": {"<name>": …}}` entry themselves, whichever merge path takes them.
+        let mut rows = self.slot_rows.borrow_mut();
         for (section, names) in &csv_owned {
             for (name, row) in names {
-                self.slot_rows
-                    .borrow_mut()
-                    .push((crate::json_pointer(&[section, name]), row.clone()));
+                rows.push((crate::json_pointer(&[section, name]), row.clone()));
+            }
+        }
+        for row in csv_data.get("Systems").into_iter().flatten() {
+            let (Some(row_name), Some(cell)) = (
+                row.get("Name").and_then(Value::as_str),
+                row.get("extra_json").and_then(Value::as_object),
+            ) else {
+                continue;
+            };
+            for (section, entries) in cell {
+                for name in entries.as_object().into_iter().flat_map(|e| e.keys()) {
+                    rows.push((crate::json_pointer(&[section, name]), row_name.to_string()));
+                }
             }
         }
         self.reconcile_zone_space_cool_system_references(

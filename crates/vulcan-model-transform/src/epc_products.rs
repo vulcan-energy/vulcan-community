@@ -6,7 +6,9 @@
 //! `productDataSha256`); the converter reads them here and never holds a copy of its own.
 
 use crate::finalization::SchemaOmission;
-use crate::{json_pointer, ProductSlot, ProductSource, ValidationError};
+use crate::{
+    json_pointer, DefaultSource, ProductCandidate, ProductSlot, ProductSource, ValidationError,
+};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
@@ -606,7 +608,8 @@ pub(crate) fn resolve_products(
                     label: None,
                     rule: "no rule".into(),
                     technology_types: vec![],
-                    has_default: false,
+                    default_source: None,
+                    candidates: vec![],
                     row: None,
                 });
                 continue;
@@ -633,10 +636,35 @@ pub(crate) fn resolve_products(
                 }
                 _ => None,
             };
-            let has_default = match &rule {
-                Rule::Auto { .. } => rule.candidates(db).len() == 1,
-                Rule::Pick { .. } => setting.is_some(),
+            let accepted = rule.candidates(db);
+            let default_source = match &rule {
+                Rule::Auto { .. } if accepted.len() == 1 => Some(DefaultSource::SingleProduct),
+                Rule::Pick { .. }
+                    if setting
+                        .as_ref()
+                        .is_some_and(|(id, _)| accepted.iter().any(|p| p.id == *id)) =>
+                {
+                    Some(DefaultSource::ModelSetting)
+                }
+                _ => None,
             };
+            let candidates: Vec<ProductCandidate> = accepted
+                .iter()
+                .map(|p| {
+                    let radiator = |f: &str| {
+                        (p.table == "ConvectorRadiator")
+                            .then(|| p.fields.get(f).cloned())
+                            .flatten()
+                    };
+                    ProductCandidate {
+                        id: p.id,
+                        label: p.label.clone(),
+                        technology_type: p.technology_type.clone(),
+                        radiator_type: radiator("type"),
+                        height: radiator("height"),
+                    }
+                })
+                .collect();
             let picked = object
                 .get("product_id")
                 .and_then(Value::as_u64)
@@ -737,7 +765,8 @@ pub(crate) fn resolve_products(
                 label,
                 rule: rule_text,
                 technology_types,
-                has_default,
+                default_source,
+                candidates,
                 row: None,
             });
         }
@@ -1418,7 +1447,8 @@ pub(crate) mod tests {
             label: None,
             rule: String::new(),
             technology_types: vec![],
-            has_default: false,
+            default_source: None,
+            candidates: vec![],
             row: None,
         };
         let model = |existing: bool| {

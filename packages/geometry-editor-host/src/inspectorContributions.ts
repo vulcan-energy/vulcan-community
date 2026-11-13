@@ -82,6 +82,14 @@ export type GeometryProductCatalogueAdvancedHotWaterContext = Readonly<{
   ) => void;
 }>;
 
+export type GeometryProductCandidate = Readonly<{
+  id: number;
+  label: string;
+  technology_type: string;
+  radiator_type?: string;
+  height?: string;
+}>;
+
 /** A system that needs a product, as the selected target's conversion reports it. */
 export type GeometryProductSlot = Readonly<{
   /** Model path of the system object in the converted model. */
@@ -94,8 +102,10 @@ export type GeometryProductSlot = Readonly<{
   /** How the product was chosen, or what the user must pick. */
   rule: string;
   technology_types: readonly string[];
-  /** The slot keeps a product when the element's own pick is removed. */
-  has_default?: boolean;
+  /** What the slot falls back to when the element's own pick is removed. */
+  default_source?: 'single_product' | 'model_setting' | null;
+  /** Every product the slot accepts; radiators carry their type and height. */
+  candidates: readonly GeometryProductCandidate[];
   /** Name of the Geometry CSV row the system comes from. */
   row?: string;
 }>;
