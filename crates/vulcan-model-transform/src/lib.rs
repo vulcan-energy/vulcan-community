@@ -281,6 +281,18 @@ impl ModelProfile {
             Self::Epc => true,
         }
     }
+
+    /// Systems the converter cannot express fail naming each one, and references between
+    /// systems must name an entry that exists. EPC differs: its full input has system types
+    /// (unconditioned zones, warm-air heaters, flues, heat-pump cooling) whose references the
+    /// JSON schema cannot check, and no combustion appliance input. A `HeatSourceWarmAir`
+    /// Systems row routes only here: no other schema has warm-air heaters.
+    pub(crate) fn checks_system_catalogue(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
 }
 
 /// Explicit converter contract; release labels never select translation rules implicitly.
