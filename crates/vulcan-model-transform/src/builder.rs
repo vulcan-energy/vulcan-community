@@ -3741,6 +3741,9 @@ impl JSONBuilder {
                             "env_area".to_string(),
                             json_number(calculated_env_area, "env_area (sum of element areas)")?,
                         );
+                    } else if self.profile.references_products() {
+                        // EPC: the envelope area is derived or stated, never the template's.
+                        leaks_obj.remove("env_area");
                     }
                 }
             }
@@ -5324,12 +5327,16 @@ impl JSONBuilder {
         // A Metadata input with no row keeps the template value, or the FHS default above. Every
         // other Metadata merge (ventilation, air permeability) only writes present rows, so the
         // model already holds the value each absent setting will use.
-        let present: HashSet<String> = csv_data
-            .get("Metadata")
-            .into_iter()
-            .flatten()
-            .filter_map(|row| extract_metadata_field(row).0)
-            .collect();
+        // A row counts only with a value: a blank row is E066 and must not keep the template's.
+        let mut present: HashSet<String> = HashSet::new();
+        let mut blank: HashSet<String> = HashSet::new();
+        for row in csv_data.get("Metadata").into_iter().flatten() {
+            match extract_metadata_field(row) {
+                (Some(name), Some(_)) => present.insert(name),
+                (Some(name), None) => blank.insert(name),
+                _ => false,
+            };
+        }
         // A Systems InfiltrationVentilation fragment is wrapped in its root key, so a model
         // pointer finds the setting in it. The merge takes only that key from the fragment.
         let systems_fragments: Vec<&Value> = csv_data
@@ -5342,7 +5349,7 @@ impl JSONBuilder {
         let mut missing = Vec::new();
         let used: Vec<String> = METADATA_INPUT_FIELD_NAMES
             .iter()
-            .filter(|name| !present.contains(**name))
+            .filter(|name| !present.contains(**name) && !blank.contains(**name))
             .filter_map(|name| {
                 let pointer = if let Some(key) = name.strip_prefix("General_") {
                     format!("/General/{key}")
@@ -5395,7 +5402,7 @@ impl JSONBuilder {
                 if let Some(object) = result.pointer_mut(parent).and_then(Value::as_object_mut) {
                     object.remove(key);
                 }
-            } else {
+            } else if !blank.contains(*name) {
                 missing.push(*name);
             }
         }
