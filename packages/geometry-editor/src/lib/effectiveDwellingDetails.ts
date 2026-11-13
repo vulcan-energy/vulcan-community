@@ -47,7 +47,7 @@ export interface EffectiveDwellingDetailsInputs {
     NumberOfSanitaryAccommodations: number;
     storeys_in_dwelling: number;
     storey_of_dwelling: number;
-    build_type: 'house' | 'flat';
+    build_type: string;
     GroundFloorArea: number;
     BuildingLength: number;
     BuildingWidth: number;
@@ -97,7 +97,7 @@ export interface EffectiveDwellingDetails {
   // Form (from geometry derivation when no override).
   storeysInDwelling: number | undefined;
   storeyOfDwelling: number | undefined;
-  buildType: 'house' | 'flat' | undefined;
+  buildType: string | undefined;
   groundFloorAreaM2: number | undefined;
   buildingLengthM: number | undefined;
   buildingWidthM: number | undefined;

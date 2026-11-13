@@ -22,7 +22,7 @@ export interface FloorAreaContribution {
 }
 
 export interface DwellingDetailsSuggestion {
-  buildType?: 'flat' | 'house';
+  buildType?: string;
   storeysInDwelling?: number;
   storeyOfDwelling?: number;
   contributingFloorLevels: number[];
@@ -552,7 +552,7 @@ export function calculateSuggestedVentilationBaseHeight(
   elements: Element[],
   floors?: Floor[],
   options: {
-    buildType?: 'flat' | 'house';
+    buildType?: string;
     storeyOfDwelling?: number;
     storeysInDwelling?: number;
     ventilationZoneHeight?: number;

@@ -33,6 +33,7 @@ import {
   globalSettingsFieldSection,
   METADATA_INPUT_LABELS,
   type TargetInputRow,
+  targetBuildTypes,
 } from "../lib/globalSettingsValidation";
 import {
   DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH,
@@ -498,6 +499,12 @@ async function listJsonFilesRecursively(
   return files;
 }
 
+/** `semi_detached_end_terrace` as "Semi detached end terrace". */
+const buildTypeLabel = (type: string) => {
+  const words = type.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 export function GlobalSettingsModal({
   isOpen,
   onClose,
@@ -757,7 +764,13 @@ export function GlobalSettingsModal({
     complianceSettings.unreadMetadataRows?.General_build_type || undefined;
   const effectiveBuildType =
     complianceSettings.build_type ?? dwellingDetailsSuggestion.buildType;
-  const shownBuildType = complianceSettings.build_type ?? fileBuildType ?? effectiveBuildType;
+  // The target's build types; the geometry's suggestion only where the target takes it.
+  const buildTypes = targetBuildTypes(targetRoot);
+  const suggestedBuildType =
+    dwellingDetailsSuggestion.buildType && buildTypes.includes(dwellingDetailsSuggestion.buildType)
+      ? dwellingDetailsSuggestion.buildType
+      : undefined;
+  const shownBuildType = complianceSettings.build_type ?? fileBuildType ?? suggestedBuildType;
   const effectiveStoreysInDwelling =
     complianceSettings.storeys_in_dwelling ??
     dwellingDetailsSuggestion.storeysInDwelling;
@@ -1830,7 +1843,7 @@ export function GlobalSettingsModal({
                                   "General_build_type",
                                   dwellingDetailsSuggestion.explanation
                                 )}
-                                {effectiveBuildType && (
+                                {shownBuildType && (
                                   <span
                                     style={{
                                       fontSize: 11,
@@ -1853,18 +1866,18 @@ export function GlobalSettingsModal({
                               const next =
                                 value === ""
                                   ? undefined
-                                  : (value as "flat" | "house");
+                                  : value;
                               const patch: Parameters<
                                 typeof setComplianceSettings
                               >[0] = {
                                 build_type:
-                                  next === dwellingDetailsSuggestion.buildType
+                                  next === suggestedBuildType
                                     ? undefined
                                     : next,
                               };
                               const nextEffectiveBuildType =
-                                next ?? dwellingDetailsSuggestion.buildType;
-                              if (nextEffectiveBuildType === "house") {
+                                next ?? suggestedBuildType;
+                              if (nextEffectiveBuildType !== undefined && nextEffectiveBuildType !== "flat") {
                                 patch.storey_of_dwelling = undefined;
                                 patch.storeys_in_building = undefined;
                               }
@@ -1879,13 +1892,12 @@ export function GlobalSettingsModal({
                             options={[
                               {
                                 value: "",
-                                label: dwellingDetailsSuggestion.buildType
-                                  ? `Auto (${dwellingDetailsSuggestion.buildType})`
+                                label: suggestedBuildType
+                                  ? `Auto (${suggestedBuildType})`
                                   : "Select build type...",
                               },
-                              { value: "house", label: "House" },
-                              { value: "flat", label: "Flat" },
-                              ...(fileBuildType && !complianceSettings.build_type
+                              ...buildTypes.map((type) => ({ value: type, label: buildTypeLabel(type) })),
+                              ...(fileBuildType && !complianceSettings.build_type && !buildTypes.includes(fileBuildType)
                                 ? [{ value: fileBuildType, label: fileBuildType }]
                                 : []),
                             ]}
@@ -1894,14 +1906,14 @@ export function GlobalSettingsModal({
                             size="md"
                           />
                           {isBuildTypeManual &&
-                            dwellingDetailsSuggestion.buildType && (
+                            suggestedBuildType && (
                               <ResetFieldButton
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
                                   setComplianceSettings({
                                     build_type: undefined,
-                                    ...(dwellingDetailsSuggestion.buildType ===
+                                    ...(suggestedBuildType ===
                                     "house"
                                       ? {
                                           storey_of_dwelling: undefined,
@@ -1910,7 +1922,7 @@ export function GlobalSettingsModal({
                                       : {}),
                                   });
                                 }}
-                                title={`Reset to suggested build type (${dwellingDetailsSuggestion.buildType})`}
+                                title={`Reset to suggested build type (${suggestedBuildType})`}
                                 ariaLabel="Reset build type to suggested value"
                                 align="input-row"
                               />

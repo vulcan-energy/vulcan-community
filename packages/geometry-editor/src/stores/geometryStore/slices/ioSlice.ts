@@ -172,6 +172,8 @@ export interface IoSlice {
   loadAwaitsDefaults: boolean;
   /** The rows the last loaded file lacks that the defaults filled (absentMetadataRowFill); load UIs show it as a notice. */
   lateLoadNotice: string | null;
+  /** Stops following the schema port. A host calls it when a store it made for one task ends. */
+  dispose: () => void;
 }
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], IoSlice>;
 export type IoSliceOptions = Readonly<{
@@ -855,6 +857,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   csvUpgradeRequested: false,
   loadAwaitsDefaults: false,
   lateLoadNotice: null,
+  dispose: () => unsubscribeSchema?.(),
   requestCsvUpgrade: () => {
     if (get().sourceCsvVersion < CURRENT_VULCAN_CSV_VERSION) set({ csvUpgradeRequested: true });
   },
@@ -1054,7 +1057,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // blank or unreadable is written as it was, which the converter blocks; leaving it out would let
     // the converter take the defaults template's value instead.
     const unreadRows = compliance.unreadMetadataRows ?? {};
-    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements })) {
+    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements }, metadataFillRoot(options.schemaPort))) {
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
@@ -2452,8 +2455,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       ...(fill ? { loadAwaitsDefaults: false, ...(fill.notice ? { lateLoadNotice: fill.notice } : {}) } : {}),
     });
   }
-  // ponytail: never unsubscribed; a store lives as long as its editor. Add a dispose when stores are discarded at runtime.
-  options.schemaPort.subscribe?.(followTarget);
+  const unsubscribeSchema = options.schemaPort.subscribe?.(followTarget);
 
   return slice;
   };

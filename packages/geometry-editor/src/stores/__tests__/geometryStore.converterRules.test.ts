@@ -490,3 +490,47 @@ it('keeps a build type the editor cannot hold and reports it only where the targ
   expect(check(fhs)).toEqual({ issue: true, saved: true });
   expect(check(epc)).toEqual({ issue: false, saved: true });
 });
+
+// A row the user empties stays empty: no later fill (a target switch reruns it) puts the defaults back.
+it('never refills a row the user cleared', () => {
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+  store.setState({ defaultsJson: { General: { build_type: 'house', storeys_in_dwelling: 1 } }, defaultsLoading: false } as never);
+  expect(store.getState().complianceSettings.PartO_active_cooling_required).toBe(false);
+  store.getState().setComplianceSettings({ PartO_active_cooling_required: undefined });
+  store.getState().setTargetBundleId('other');
+  expect(store.getState().complianceSettings.PartO_active_cooling_required).toBeUndefined();
+  store.getState().setComplianceSettings({ PartO_active_cooling_required: true });
+  expect(store.getState().complianceSettings.PartO_active_cooling_required).toBe(true);
+});
+
+// The geometry gives `house`, which HEM:EPC does not take: the row stays empty and is asked for.
+it('derives the build type only where the target takes the derived value', () => {
+  const fhs = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  const epc = structuredClone(fhs);
+  epc.properties.General.properties.build_type = { enum: ['detached', 'flat'] };
+  const check = (root: unknown) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...canonicalGeometrySchemaPort, getRootSchema: () => root as never } });
+    store.getState().loadFromCSV(sample);
+    // Auto: the build type follows the geometry, as on a new model.
+    store.getState().setComplianceSettings({ build_type: undefined });
+    store.setState({ defaultsJson: { General: { build_type: 'house', storeys_in_dwelling: 1 } }, defaultsLoading: false } as never);
+    const state = store.getState();
+    return {
+      saved: /\nGeneral_build_type,([^,]*),/.exec(state.generateCSV({ allowUnresolvedMigration: true }))?.[1] ?? null,
+      unset: state.collectAllGeometryWarnings().criticalIssues.some((text) => text.includes('Build type is not set')),
+    };
+  };
+  expect(check(fhs)).toEqual({ saved: 'house', unset: false });
+  expect(check(epc)).toEqual({ saved: null, unset: true });
+});
+
+it('stops following the schema port once disposed', () => {
+  const listeners = new Set<() => void>();
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+    ...canonicalGeometrySchemaPort,
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+  } });
+  expect(listeners.size).toBe(1);
+  store.getState().dispose();
+  expect(listeners.size).toBe(0);
+});

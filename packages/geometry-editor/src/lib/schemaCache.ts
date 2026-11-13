@@ -2471,6 +2471,13 @@ function targetFieldNode(root: unknown, path: readonly string[]): unknown {
   return node;
 }
 
+/** The string values the target's schema lists for a root-path field; undefined when it lists none or no schema is loaded. */
+export function targetFieldEnum(root: unknown, path: readonly string[]): string[] | undefined {
+  if (targetFieldAvailability(root, path) !== 'available') return undefined;
+  const node = dereferenceSchemaNodeInRoot(targetFieldNode(root, path) as SchemaNode, root);
+  return isRecord(node) && Array.isArray(node.enum) ? node.enum.filter((value): value is string => typeof value === 'string') : undefined;
+}
+
 /** False when the target's schema (as {@link targetFieldAvailability} reads it) lacks the field or rejects the value. */
 export function targetFieldAccepts(root: unknown, path: readonly string[], value: unknown): boolean {
   if (targetFieldAvailability(root, path) === 'unknown') return true;

@@ -57,7 +57,7 @@ export interface ComplianceSlice {
     Appliances_has_dishwasher?: boolean;
     Appliances_has_separate_fridge_or_freezer?: boolean;
     /** FHS General.build_type. Undefined means use geometry-derived suggestion when available. */
-    build_type?: 'flat' | 'house';
+    build_type?: string;
     /** Explicit SAP 10.2 Built-Form code. Never inferred or defaulted from geometry. */
     built_form?: SapBuiltFormCode;
     /** FHS General.storeys_in_dwelling. Undefined means use geometry-derived suggestion when available. */
@@ -78,6 +78,8 @@ export interface ComplianceSlice {
      * whose schema rejects it starts it empty instead (withoutTargetInitialValues).
      */
     initialValueRows?: string[];
+    /** Settings the user emptied and has not set since: no defaults fill puts a value back. */
+    clearedValueRows?: string[];
   };
   setComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
   replaceComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
@@ -128,6 +130,11 @@ export const createComplianceSlice: GeometryStoreSlice = (set) => ({
       // A row the user sets is no longer an initial value.
       const initial = state.complianceSettings.initialValueRows?.filter((key) => !(key in settings));
       if (initial) newSettings.initialValueRows = initial;
+      const patch = settings as Record<string, unknown>;
+      const cleared = Object.keys(patch).filter((key) => patch[key] === undefined);
+      const kept = (state.complianceSettings.clearedValueRows ?? []).filter((key) => !(key in patch));
+      if (cleared.length || kept.length) newSettings.clearedValueRows = [...kept, ...cleared];
+      else delete newSettings.clearedValueRows;
 
       // Spreading `key: undefined` leaves the key present with value undefined.
       // For any field the caller explicitly set to undefined, drop the key so

@@ -195,7 +195,7 @@ export type ComplianceSettings = {
   Appliances_has_dryer?: boolean;
   Appliances_has_dishwasher?: boolean;
   Appliances_has_separate_fridge_or_freezer?: boolean;
-  build_type?: 'flat' | 'house';
+  build_type?: string;
   built_form?: SapBuiltFormCode;
   storeys_in_dwelling?: number;
   storey_of_dwelling?: number;
