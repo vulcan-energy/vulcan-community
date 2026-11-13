@@ -116,6 +116,16 @@
       "required_action": "Preserve this exact reviewed hash and verify public FHS preflight in the clean export."
     },
     {
+      "path": "data/defaults/defaults_template_epc.json",
+      "source_path": "data/defaults/defaults_template_epc.json",
+      "source_sha256": "d17ea4e7d0427b1905e0b58021e9686f51f5d69979281400bc0e950617923504",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "provenance": "data/defaults/defaults_template.json plus the HEM:EPC fields its schema adds; the coil rates follow the DESNZ Orchestrator demo DESN-H-End-02-HP-MVHR",
+      "required_action": "Preserve this exact reviewed hash; it may differ from data/defaults/defaults_template.json only by HEM:EPC fields."
+    },
+    {
       "path": "data/schemas/core-input.schema.json",
       "source_path": "data/schemas/core-input.schema.json",
       "source_sha256": "b245a756208d6ce68aa434ae2d2536e0f177b5507fac775773450c15a3527e7e",
@@ -132,6 +142,17 @@
       "rights_status": "approved",
       "provenance": "Exact copy of hem_fhs_upstream/schema/input_fhs.schema.json",
       "required_action": "Pin the exact upstream revision and preserve its MIT copyright and notice."
+    },
+    {
+      "path": "data/schemas/hem_epc_orchestrator_input.schema.json",
+      "source_path": "data/schemas/hem_epc_orchestrator_input.schema.json",
+      "source_sha256": "c53135e01f2cfa37b4fcd00e76afb1346ed9fe67d5fab2646041dfa268598ad9",
+      "license": "MIT",
+      "rights_status": "approved",
+      "source": "HEM:EPC Orchestrator 0.13.2a0, src/hem_epc_orchestrator/schemas/hem_epc_orchestrator_input.json",
+      "source_revision": "993463233ad0c416e83c4de3b84889280d3c4619",
+      "provenance": "Exact copy of the HEM:EPC Orchestrator input schema at tag 0.13.2a0 (the DESNZ release set of 12 November 2026)",
+      "required_action": "Pin the exact upstream revision and preserve its MIT Crown Copyright notice (LICENSES/MIT-HEM-EPC-Orchestrator.txt)."
     },
     {
       "path": "data/junction_psi_defaults/table_3_7_default_psi.csv",
@@ -283,6 +304,15 @@
       "source": "https://github.com/communitiesuk/epb-hem-wrapper-fhs",
       "source_revision": "dd5ba73a19674d631da59b4924bb7dc2833fbb3b",
       "provenance": "Copy of the upstream LICENSE.md at source_revision (identical apart from a trailing newline) (added upstream after the pinned hem_fhs_upstream revision); reproduced for data/schemas/input_fhs.schema.json"
+    },
+    {
+      "path": "LICENSES/MIT-HEM-EPC-Orchestrator.txt",
+      "source_path": "LICENSES/MIT-HEM-EPC-Orchestrator.txt",
+      "license": "MIT",
+      "rights_status": "approved",
+      "source": "HEM:EPC Orchestrator 0.13.2a0, LICENCE.txt",
+      "source_revision": "993463233ad0c416e83c4de3b84889280d3c4619",
+      "provenance": "Exact copy of the upstream LICENCE.txt at source_revision; reproduced for data/schemas/hem_epc_orchestrator_input.schema.json"
     },
     {
       "path": "LICENSES/OGL-UK-3.0.txt",

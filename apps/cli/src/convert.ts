@@ -54,7 +54,7 @@ export async function convertCsv(csvArg: string, options: ConvertOptions): Promi
     profile,
     version_metadata: {
       hem_core_version: wasm.hem_core_version(),
-      ...(profile === 'fhs' ? { fhs_wrapper_version: wasm.fhs_wrapper_version() } : {}),
+      ...(profile === 'fhs' ? { wrapper_version: wasm.fhs_wrapper_version() } : {}),
     },
   }))) as ConvertResponse;
 }

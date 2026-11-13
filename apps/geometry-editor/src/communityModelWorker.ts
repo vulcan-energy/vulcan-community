@@ -88,7 +88,7 @@ async function build(input: CommunityModelBuildInput): Promise<CommunityModelBui
     version_metadata: {
       hem_core_version: hem_core_version(),
       ...(input.profile === 'fhs'
-        ? { fhs_wrapper_version: fhs_wrapper_version() }
+        ? { wrapper_version: fhs_wrapper_version() }
         : {}),
     },
   });

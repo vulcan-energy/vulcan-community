@@ -14,6 +14,7 @@ pub mod error {
 pub mod parser {
     pub use vulcan_csv_codec::parser::*;
 }
+mod epc_mappings;
 pub mod finalization;
 pub mod preflight_diagnostics;
 mod schema_validation;
@@ -30,79 +31,200 @@ use std::collections::BTreeSet;
 pub enum ModelProfile {
     Core,
     Fhs,
+    /// HEM:EPC full input (new build), validated against the HEM:EPC Orchestrator input
+    /// schema (`data/schemas/hem_epc_orchestrator_input.schema.json`, Orchestrator 0.13.2a0).
+    Epc,
 }
 
 /// Each question a profile answers. Exhaustive matches only: a new profile must
-/// answer every question here before the crate compiles.
+/// answer every question here before the crate compiles. EPC evidence cites the
+/// vendored Orchestrator schema (`$defs/...`) and the EPC wrapper 0.13.2 source.
 impl ModelProfile {
-    /// Input runs through the FHS wrapper, so it needs FHS wrapper version metadata
-    /// and may use the Python FHS (physical-opening) converter contracts.
-    pub fn requires_fhs_wrapper_version(self) -> bool {
+    /// Input runs through a wrapper (FHS or EPC), so the request must carry that
+    /// wrapper's version. EPC: the Orchestrator runs EPC wrapper 0.13.2.
+    pub fn requires_wrapper_version(self) -> bool {
         match self {
             Self::Core => false,
-            Self::Fhs => true,
+            Self::Fhs | Self::Epc => true,
         }
     }
 
     /// Merged JSON must also parse as the HEM engine's own `Input` (E049).
+    /// EPC: the input is wrapper input for Core 2.0, not the pinned engine's `Input`.
     pub(crate) fn parses_as_core_engine_input(self) -> bool {
         match self {
             Self::Core => true,
-            Self::Fhs => false,
+            Self::Fhs | Self::Epc => false,
         }
     }
 
-    /// The input schema allows one zone, so CSV zones are consolidated into the first.
+    /// CSV zones are consolidated into the first.
+    /// FHS: the input schema allows one zone. EPC differs: `Zone` is a map and
+    /// `ZoneProcessingOrder` orders several heated zones (wrapper `models/input.py`),
+    /// but per-zone living/rest areas and the processing order have no Vulcan source
+    /// yet, so EPC consolidates as FHS does until they do.
     pub(crate) fn consolidates_to_single_zone(self) -> bool {
         match self {
             Self::Core => false,
-            Self::Fhs => true,
+            Self::Fhs | Self::Epc => true,
+        }
+    }
+
+    /// Merging several CSV zones changes results, so it is reported. FHS: the schema allows
+    /// one zone, so merging is the input's meaning. EPC differs: it accepts several zones.
+    pub(crate) fn reports_zone_consolidation(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
         }
     }
 
     /// Zones carry `livingroom_area` + `restofdwelling_area` and no `area`, `height`
-    /// or `temp_setpnt_init`.
+    /// or `temp_setpnt_init`. EPC: `$defs/Zone` requires both areas and has no `area`.
     pub(crate) fn zone_uses_living_and_rest_areas(self) -> bool {
         match self {
             Self::Core => false,
-            Self::Fhs => true,
+            Self::Fhs | Self::Epc => true,
         }
     }
 
     /// A transparent element with no positive `area` gets width × height as its area.
+    /// EPC: `$defs/BuildingElementTransparent` has no `area`.
     pub(crate) fn derives_transparent_area_from_dimensions(self) -> bool {
         match self {
             Self::Core => true,
-            Self::Fhs => false,
+            Self::Fhs | Self::Epc => false,
         }
     }
 
-    /// `orientation360` and `pitch` must be integers.
+    /// `orientation360` and `pitch` must be integers. EPC differs from FHS: every
+    /// EPC `orientation360` and `pitch` is `"type": "number"`.
     pub(crate) fn requires_integer_orientation_and_pitch(self) -> bool {
         match self {
-            Self::Core => false,
+            Self::Core | Self::Epc => false,
             Self::Fhs => true,
         }
     }
 
     /// Hot-water source and wet heat plant come only from authored `Systems` rows,
     /// never from defaults-template entries. This also repoints a hot-water source's
-    /// missing wet heat source reference to the first wet heat source.
+    /// missing wet heat source reference to the first wet heat source. EPC: every
+    /// system needs a HEM Database product, which a template entry cannot carry.
     pub(crate) fn requires_authored_heating_systems(self) -> bool {
         match self {
             Self::Core => false,
+            Self::Fhs | Self::Epc => true,
+        }
+    }
+
+    /// Output takes the wrapper family's shared field shapes: `metadata.hem_core_version`,
+    /// the cold-water source chosen in CSV Metadata, the enum `test_pressure`, and
+    /// wrapper cleanup of Core-only root keys, building elements and energy supplies.
+    /// EPC: `$defs/Metadata`, `$defs/TestPressure`, no root `SimulationTime`/`InternalGains`/`Control`.
+    pub(crate) fn uses_wrapper_field_shapes(self) -> bool {
+        match self {
+            Self::Core => false,
+            Self::Fhs | Self::Epc => true,
+        }
+    }
+
+    /// Root `ColdWaterSource` is an object keyed by the source name (`{"mains water": {}}`).
+    /// EPC differs: `$defs/ColdWaterSource` is the bare string enum.
+    pub(crate) fn keys_cold_water_source_by_name(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => true,
+            Self::Epc => false,
+        }
+    }
+
+    /// Every wet heat source states `is_heat_network` (false unless authored).
+    /// EPC differs: only its HIU and DirectFeed definitions declare it, and require it, so it
+    /// is authored on those systems and never inserted.
+    pub(crate) fn wet_heat_sources_state_is_heat_network(self) -> bool {
+        match self {
+            Self::Core | Self::Epc => false,
             Self::Fhs => true,
         }
     }
 
-    /// Output takes the FHS wrapper's field shapes: `InputMetadata`, implicit root
-    /// booleans, metadata cold-water source, enum test pressure, `is_heat_network` on
-    /// wet heat sources, and FHS cleanup of root keys, building elements, energy
-    /// supplies and ventilation.
-    pub(crate) fn requires_fhs_wrapper_fields(self) -> bool {
+    /// `InfiltrationVentilation.cross_vent_possible` is kept. FHS removes it; EPC differs:
+    /// its InfiltrationVentilation requires it.
+    pub(crate) fn keeps_cross_vent_possible(self) -> bool {
         match self {
-            Self::Core => false,
-            Self::Fhs => true,
+            Self::Core | Self::Epc => true,
+            Self::Fhs => false,
+        }
+    }
+
+    /// Root booleans whose absent Metadata row means `false` (the Geometry CSV contract).
+    /// EPC differs: it has neither FHS field, and its own root booleans
+    /// (`IsExistingBuilding`, `HasElectricitySmartMeter`) come from Metadata or the
+    /// target's defaults, never from a code constant.
+    pub(crate) fn implicit_false_root_booleans(self) -> &'static [&'static str] {
+        match self {
+            Self::Core | Self::Epc => &[],
+            Self::Fhs => &[
+                "KitchenExtractorHoodExternal",
+                "PartO_active_cooling_required",
+            ],
+        }
+    }
+
+    /// `General.build_type` is the built form (`detached`, `semi_detached_end_terrace`,
+    /// `mid_terrace`, ...), derived from party walls unless Metadata states a schema value.
+    /// EPC differs: `$defs/BuildType` replaces the FHS `house`/`flat`.
+    pub(crate) fn derives_build_type_from_party_walls(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// A PV system lists its arrays in `panels[]`; inverter fields stay on the system.
+    /// EPC differs: `$defs/PhotovoltaicSystemWithPanels`.
+    pub(crate) fn lists_pv_panels(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// Opaque elements state `solar_absorption_coeff`, not `colour`. EPC differs:
+    /// `$defs/BuildingElementOpaque` requires the coefficient and has no `colour`.
+    pub(crate) fn uses_solar_absorption_coeff(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// Appliances are presence flags (`has_dryer`, `has_dishwasher`,
+    /// `has_separate_fridge_or_freezer`) plus `Oven` and `Hobs` with an energy supply.
+    /// EPC differs: `$defs/Appliances`, `$defs/CookingAppliance`.
+    pub(crate) fn states_appliance_presence(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// A cylinder's wet coil states `primary_flow_rate` and `heat_transfer_rate_W_per_K`,
+    /// and its thermostat sits in `tank_controls`. EPC differs:
+    /// `$defs/epc_wrapper__models__hot_water__TankHeatSourceWetServiceWaterRegular`, `$defs/TankControl`.
+    pub(crate) fn states_cylinder_coil_and_tank_controls(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// Systems reference HEM Database products (`product_id`), filled through
+    /// `TransformRequest::product_references`. EPC differs: 46 schema definitions require
+    /// `product_id`; the Orchestrator substitutes each product record before the wrapper runs.
+    pub(crate) fn references_products(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
         }
     }
 }
@@ -119,6 +241,8 @@ pub enum ConversionProfile {
     PhysicalOpeningFullPartitionV1,
     #[serde(rename = "physical_opening_full_partition_party_wall_u_v1")]
     PhysicalOpeningFullPartitionPartyWallUV1,
+    /// HEM:EPC full input as the Orchestrator 0.13.2a0 schema defines it.
+    EpcFullInputV1,
 }
 
 /// Input meaning, independent of the implementation language and release label.
@@ -154,6 +278,9 @@ impl ConversionProfile {
             Self::PythonFhsA9 | Self::PhysicalOpeningFullPartitionPartyWallUV1 => {
                 (true, true, false)
             }
+            // `window_part_list` is required and party walls take only
+            // `thermal_resistance_construction` (no `u_value_whole_wall`).
+            Self::EpcFullInputV1 => (true, false, false),
         };
         InputContract {
             elements: if physical_openings {
@@ -175,8 +302,14 @@ impl ConversionProfile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionMetadata {
     pub hem_core_version: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fhs_wrapper_version: Option<String>,
+    /// Version of the wrapper the input runs through (FHS or EPC). The alias accepts the
+    /// former wire name until every host sends `wrapper_version`.
+    #[serde(
+        default,
+        alias = "fhs_wrapper_version",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub wrapper_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,6 +321,27 @@ pub struct TransformRequest {
     #[serde(default)]
     pub conversion_profile: ConversionProfile,
     pub version_metadata: VersionMetadata,
+    /// Product seam: HEM Database product IDs keyed by `ProductSlot::key`. A product picker
+    /// or a default-product resolver fills it; the transform never invents an ID. A key no
+    /// system has is an error. Ignored unless the profile references products.
+    #[serde(default, skip_serializing_if = "ProductReferences::is_empty")]
+    pub product_references: ProductReferences,
+}
+
+pub type ProductReferences = std::collections::BTreeMap<String, u64>;
+
+/// A system that needs a HEM Database product, as the converted model holds it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProductSlot {
+    /// The key for `TransformRequest::product_references`: the model path, with an emitter's
+    /// array index replaced by its Wet Emitters row name so reordering rows moves nothing.
+    pub key: String,
+    /// Model path of the system object in the converted model.
+    pub path: String,
+    /// The system's own type (`type`, or `wet_emitter_type` for an emitter).
+    pub system_type: String,
+    /// The product the slot carries, if any. None means the model is invalid.
+    pub product_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +350,8 @@ pub struct TransformOutput {
     pub validation: ValidationResult,
     pub schema_omissions: Vec<finalization::SchemaOmission>,
     pub version_metadata: VersionMetadata,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub product_slots: Vec<ProductSlot>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -260,6 +416,7 @@ pub fn transform_geometry_csv(
     )
     .map_err(|error| TransformError::Schema(error.to_string()))?;
     builder.set_conversion_profile(request.conversion_profile);
+    builder.set_product_references(request.product_references.clone());
     let model = builder
         .build_json(&csv_data)
         .map_err(TransformError::Build)?;
@@ -275,6 +432,18 @@ pub fn transform_geometry_csv(
     let validation_model = clone_for_hem_validation(&model);
     let mut schema_errors = finalized.validation.errors;
     builder.name_csv_rows(&mut schema_errors);
+    // An EPC mapping error (`E_EPC_*`) explains a value it left out on purpose; the schema's
+    // "required" error for the same field would only repeat it. Other converter errors keep
+    // their schema errors, so FHS and Core validation is unchanged.
+    schema_errors.retain(|schema_error| {
+        let missing = (schema_error.keyword.as_deref() == Some("required"))
+            .then(|| schema_error.message.split('"').nth(1))
+            .flatten()
+            .map(|field| json_pointer_child(&schema_error.path, field));
+        !errors
+            .iter()
+            .any(|error| error.code.starts_with("E_EPC_") && Some(&error.path) == missing.as_ref())
+    });
     errors.extend(schema_errors);
     errors.extend(validate_target_input(
         &model,
@@ -293,6 +462,7 @@ pub fn transform_geometry_csv(
         validation,
         schema_omissions,
         version_metadata: request.version_metadata,
+        product_slots: builder.take_product_slots(),
     })
 }
 
@@ -340,6 +510,10 @@ pub fn validate_target_input(
     errors
 }
 
+fn json_pointer_child(path: &str, key: &str) -> String {
+    format!("{path}{}", json_pointer(&[key]))
+}
+
 /// RFC 6901 pointer from raw segments (names may contain '/' or '~').
 pub(crate) fn json_pointer(segments: &[&str]) -> String {
     segments
@@ -349,12 +523,21 @@ pub(crate) fn json_pointer(segments: &[&str]) -> String {
 }
 
 fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
-    if request.conversion_profile.input_contract().elements
-        == ElementInputConvention::PhysicalOpeningFullPartition
-        && !request.profile.requires_fhs_wrapper_version()
+    if (request.profile == ModelProfile::Epc)
+        != (request.conversion_profile == ConversionProfile::EpcFullInputV1)
     {
         return Err(TransformError::InvalidRequest(
-            "Physical-opening/full-partition conversion requires the FHS profile.".into(),
+            "The EPC model profile and the EPC full-input conversion profile are used together."
+                .into(),
+        ));
+    }
+    if request.conversion_profile.input_contract().elements
+        == ElementInputConvention::PhysicalOpeningFullPartition
+        && !request.profile.requires_wrapper_version()
+    {
+        return Err(TransformError::InvalidRequest(
+            "Physical-opening/full-partition conversion requires a wrapper profile (FHS or EPC)."
+                .into(),
         ));
     }
     let required_python_version = match request.conversion_profile {
@@ -363,13 +546,14 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
         ConversionProfile::CurrentRustFhs
         | ConversionProfile::DividedOpeningHalfPartitionV1
         | ConversionProfile::PhysicalOpeningFullPartitionV1
-        | ConversionProfile::PhysicalOpeningFullPartitionPartyWallUV1 => None,
+        | ConversionProfile::PhysicalOpeningFullPartitionPartyWallUV1
+        | ConversionProfile::EpcFullInputV1 => None,
     };
     if let Some(version) = required_python_version {
         if request.version_metadata.hem_core_version != version
-            || request.version_metadata.fhs_wrapper_version.as_deref() != Some(version)
+            || request.version_metadata.wrapper_version.as_deref() != Some(version)
         {
-            return Err(TransformError::InvalidRequest(format!("The selected Python conversion profile requires matching core and FHS wrapper {version} metadata.")));
+            return Err(TransformError::InvalidRequest(format!("The selected Python conversion profile requires matching core and wrapper {version} metadata.")));
         }
     }
     let mut missing = Vec::new();
@@ -385,15 +569,15 @@ fn validate_request(request: &TransformRequest) -> Result<(), TransformError> {
     if request.version_metadata.hem_core_version.trim().is_empty() {
         missing.push("HEM core version");
     }
-    if request.profile.requires_fhs_wrapper_version()
+    if request.profile.requires_wrapper_version()
         && request
             .version_metadata
-            .fhs_wrapper_version
+            .wrapper_version
             .as_deref()
             .map(str::trim)
             .is_none_or(str::is_empty)
     {
-        missing.push("FHS wrapper version");
+        missing.push("wrapper version");
     }
     if missing.is_empty() {
         Ok(())
