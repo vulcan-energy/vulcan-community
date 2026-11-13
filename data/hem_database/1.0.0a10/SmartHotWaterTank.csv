@@ -1,0 +1,2 @@
+ID,productID,pump_power,usable_temp,daily_losses,volume,heater_position,max_flow_rate_pump_l_per_min,heat_exchanger_surface_area,dataType,Heat_Source
+56,900056,0.04,51,2.42,120,0.8,19,0.54,illustrative_conservative,Main Heating System

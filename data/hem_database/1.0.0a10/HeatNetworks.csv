@@ -1,0 +1,2 @@
+ID,productID,heatNetworkId,communityHeatNetworkVersionNumber,status,dbEntryUpdated,communityHeatNetworkName,descriptionOfNetwork,validityEndDate,postcodeOfThePrimaryEnergyCentre,serviceProvision,dataSource,year,numberOfsubheatNetworks,boosterHeatPump,tempDistributionHeatNetwork,heatSource1,percentageOfHeat1,heatSource2,percentageOfHeat2,heatSource3,percentageOfHeat3,dataType
+8,210008,8,1,0,2026-07-22 16:00:00,dummy,dummy,2027-07-22 16:00:00,E10 5ZA,1,3,2026,1,TRUE,25,mains elec,100,,,,,illustrative_conservative

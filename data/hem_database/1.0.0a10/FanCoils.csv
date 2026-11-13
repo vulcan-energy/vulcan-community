@@ -1,0 +1,2 @@
+ID,productID,numberOfFanSpeeds,numberOfTestPointDeltaT,fracConvective,fuel,dataType
+7,310000,6,3,1,electricity,illustrative_conservative

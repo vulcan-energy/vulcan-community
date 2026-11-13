@@ -1,0 +1,35 @@
+ID,productID,wet_emitter_type,systemName,systemType,floorFinishResistance,pipeCentres,structuralFloorMaterial,depthOfFloorStructuralMaterial,floorFinishCompatibility,systemPerformanceFactor,equivalentSpecificThermalMass,convectiveHeatingRadiation,dataType
+2021,1000000,ufh,Standard screed floor,in-screed,0.009,200,Sand and Cement Screed,65,Tiles,4.19,119.4,,illustrative_conservative
+2031,1000001,ufh,lightweight aluminium foil faced wood panel systems,floating floor,0.009,200,P5 Chipboard,22,Tiles,1.87,59.7,,illustrative_conservative
+2041,1000002,ufh,Standard screed floor,overlay floor,0.009,150,Leveller,22,Tiles,5.24,150.4,,illustrative_conservative
+2051,1000003,ufh,lightweight aluminium foil faced wood panel systems,overlay floor,0.009,150,P5 Chipboard,22,Tiles,2.11,128.8,,illustrative_conservative
+2061,1000004,ufh,Standard screed floor,in-slab,0.009,300,Concrete,100,Tiles,3.57,222,,illustrative_conservative
+2071,1000005,ufh,Low section panel systems,overlay floor,0.009,200,P5 Chipboard,22,Tiles,1.09,126.3,,illustrative_conservative
+2022,1000006,ufh,Standard screed floor,in-screed,0.014,200,Sand and Cement Screed,65,Stone,4.11,124.5,,illustrative_conservative
+2032,1000007,ufh,lightweight aluminium foil faced wood panel systems,floating floor,0.014,200,P5 Chipboard,22,Stone,1.86,61.7,,illustrative_conservative
+2042,1000008,ufh,Standard screed floor,overlay floor,0.014,150,Leveller,22,Stone,5.12,157.1,,illustrative_conservative
+2052,1000009,ufh,lightweight aluminium foil faced wood panel systems,overlay floor,0.014,150,P5 Chipboard,22,Stone,2.1,132.1,,illustrative_conservative
+2062,1000010,ufh,Standard screed floor,in-slab,0.014,300,Concrete,100,Stone,3.52,229.2,,illustrative_conservative
+2072,1000011,ufh,Low section panel systems,overlay floor,0.014,200,P5 Chipboard,22,Stone,1.09,128.6,,illustrative_conservative
+2023,1000012,ufh,Standard screed floor,in-screed,0.019,200,Sand and Cement Screed,65,Acoustic Vinyl,4.04,129.8,,illustrative_conservative
+2033,1000013,ufh,lightweight aluminium foil faced wood panel systems,floating floor,0.019,200,P5 Chipboard,22,Acoustic Vinyl,1.85,63.8,,illustrative_conservative
+2043,1000014,ufh,Standard screed floor,overlay floor,0.019,150,Leveller,22,Acoustic Vinyl,5,163.9,,illustrative_conservative
+2053,1000015,ufh,lightweight aluminium foil faced wood panel systems,overlay floor,0.019,150,P5 Chipboard,22,Acoustic Vinyl,2.08,135.7,,illustrative_conservative
+2063,1000016,ufh,Standard screed floor,in-slab,0.019,300,Concrete,100,Acoustic Vinyl,3.47,236.7,,illustrative_conservative
+2073,1000017,ufh,Low section panel systems,overlay floor,0.019,200,P5 Chipboard,22,Acoustic Vinyl,1.08,131.2,,illustrative_conservative
+2024,1000018,ufh,Standard screed floor,in-screed,0.075,200,Sand and Cement Screed,65,Carpet Tile,3.31,193.1,,illustrative_conservative
+2044,1000019,ufh,Standard screed floor,overlay floor,0.075,150,Leveller,22,Carpet Tile,3.93,247.7,,illustrative_conservative
+2064,1000020,ufh,Standard screed floor,in-slab,0.075,300,Concrete,100,Carpet Tile,2.99,338.5,,illustrative_conservative
+2074,1000021,ufh,Low section panel systems,overlay floor,0.075,200,P5 Chipboard,22,Carpet Tile,1.04,178.8,,illustrative_conservative
+2025,1000022,ufh,Standard screed floor,in-screed,0.083,200,Sand and Cement Screed,65,Laminate,3.22,202.8,,illustrative_conservative
+2045,1000023,ufh,Standard screed floor,overlay floor,0.083,150,Leveller,22,Laminate,3.81,260.9,,illustrative_conservative
+2065,1000024,ufh,Standard screed floor,in-slab,0.083,300,Concrete,100,Laminate,2.93,355.8,,illustrative_conservative
+2075,1000025,ufh,Low section panel systems,overlay floor,0.083,200,P5 Chipboard,22,Laminate,1.04,188.3,,illustrative_conservative
+2026,1000026,ufh,Standard screed floor,in-screed,0.162,200,Sand and Cement Screed,65,Wood,2.45,308.7,,illustrative_conservative
+2046,1000027,ufh,Standard screed floor,overlay floor,0.162,150,Leveller,22,Wood,2.89,406.2,,illustrative_conservative
+2066,1000028,ufh,Standard screed floor,in-slab,0.162,300,Concrete,100,Wood,2.41,562.1,,illustrative_conservative
+2076,1000029,ufh,Low section panel systems,overlay floor,0.162,200,P5 Chipboard,22,Wood,0.98,320,,illustrative_conservative
+2027,1000030,ufh,Standard screed floor,in-screed,0.225,200,Sand and Cement Screed,65,Carpet,2.05,405.5,,illustrative_conservative
+2047,1000031,ufh,Standard screed floor,overlay floor,0.225,150,Leveller,22,Carpet,2.43,542.5,,illustrative_conservative
+2067,1000032,ufh,Standard screed floor,in-slab,0.225,300,Concrete,100,Carpet,2.12,773.6,,illustrative_conservative
+2077,1000033,ufh,Low section panel systems,overlay floor,0.225,200,P5 Chipboard,22,Carpet,0.94,473.5,,illustrative_conservative

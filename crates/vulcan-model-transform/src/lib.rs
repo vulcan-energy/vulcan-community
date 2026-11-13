@@ -15,6 +15,7 @@ pub mod parser {
     pub use vulcan_csv_codec::parser::*;
 }
 mod epc_mappings;
+pub mod epc_products;
 pub mod finalization;
 pub mod preflight_diagnostics;
 mod schema_validation;

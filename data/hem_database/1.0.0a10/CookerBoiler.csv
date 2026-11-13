@@ -1,0 +1,5 @@
+ID,productID,fuel,condensing,flueType,fan,powerBottomRange,powerTopRange,caseLossAtFullOutput,fullOutputPower,outputPowerToWater,ignition,burnerControl,auxElecFull,auxElecStandby,efficiencyFullLoad,efficiencyPartLoad,dataType
+1001,810001,heating_oil,condensing,1,2,23.65,23.65,1,23.65,NULL,1,1,0.175,0.001,0.82559,0.82745,illustrative_conservative
+1000,810000,heating_oil,Non-condensing,1,2,29.3,29.3,0.47,29.3,28.83,1,1,0.886,0.22,0.73114,0.72186,illustrative_conservative
+1002,810002,mains_gas,Non-condensing,1,2,25.4,25.4,0.88,25.4,24.52,1,1,0.886,0.22,0.69372,0.70483,illustrative_conservative
+1003,810003,mains_gas,condensing,1,2,25.4,25.4,0.88,25.4,24.52,1,1,0.886,0.22,0.69372,0.70483,illustrative_conservative

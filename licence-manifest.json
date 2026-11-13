@@ -155,6 +155,16 @@
       "required_action": "Pin the exact upstream revision and preserve its MIT Crown Copyright notice (LICENSES/MIT-HEM-EPC-Orchestrator.txt)."
     },
     {
+      "path": "data/hem_database/1.0.0a10/**",
+      "source_path": "data/hem_database/1.0.0a10/**",
+      "license": "MIT",
+      "rights_status": "approved",
+      "source": "HEM Database client 1.0.0a10, data/*.csv (70 files)",
+      "source_revision": "9eeb026dd52a612197b5552ca113d8121fa72679",
+      "provenance": "Exact copies of the HEM Database client's illustrative product CSVs at source_revision, the product data the HEM:EPC 0.13.2 target pins (bundleDataSha256 d0acf4ebf050e80f3dc576ffbb1295ebeb1176e9fd4a9ec1d151a9e8f4df7457)",
+      "required_action": "Keep the directory byte-identical to the pinned product data and preserve its MIT Crown Copyright notice (LICENSES/MIT-HEM-Database-Client.txt)."
+    },
+    {
       "path": "data/junction_psi_defaults/table_3_7_default_psi.csv",
       "source_path": "data/junction_psi_defaults/table_3_7_default_psi.csv",
       "source_sha256": "a1ef0f2e7617a947939d5602de75303baa1cc9fbabd32a4781a1c980e8bb7cb1",
@@ -313,6 +323,15 @@
       "source": "HEM:EPC Orchestrator 0.13.2a0, LICENCE.txt",
       "source_revision": "993463233ad0c416e83c4de3b84889280d3c4619",
       "provenance": "Exact copy of the upstream LICENCE.txt at source_revision; reproduced for data/schemas/hem_epc_orchestrator_input.schema.json"
+    },
+    {
+      "path": "LICENSES/MIT-HEM-Database-Client.txt",
+      "source_path": "LICENSES/MIT-HEM-Database-Client.txt",
+      "license": "MIT",
+      "rights_status": "approved",
+      "source": "HEM Database client 1.0.0a10, LICENCE.txt",
+      "source_revision": "9eeb026dd52a612197b5552ca113d8121fa72679",
+      "provenance": "Exact copy of the upstream LICENCE.txt at source_revision; reproduced for data/hem_database/1.0.0a10/"
     },
     {
       "path": "LICENSES/OGL-UK-3.0.txt",

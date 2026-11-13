@@ -1,0 +1,2 @@
+ID,productID,type,battery_type,EnergySupply,electricity_circ_pump,electricity_standby,pwr_in,rated_power_instant,heat_storage_capacity,fan_pwr,setpoint_temp_water,dataType
+2,800001,HeatBattery,dry_core,electricity,0,0.011,8.5,14,36,71,54,illustrative_conservative

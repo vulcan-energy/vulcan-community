@@ -1,0 +1,5 @@
+ID,productID,collector_type,power_pump,power_pump_control,peak_collector_efficiency,incidence_angle_modifier,first_order_hlc,second_order_hlc,dataType
+1,950000,Unglazed collector,0.05,0.005,0.8,1,15,0,illustrative_conservative
+2,950001,Glazed collector,0.05,0.005,0.8,0.94,3.5,0,illustrative_conservative
+3,950002,Evacuated tubular circular absorber,0.05,0.005,0.8,1,1.8,0,illustrative_conservative
+4,950003,Evacuated tubular flat absorber,0.05,0.005,0.8,0.97,1.8,0,illustrative_conservative

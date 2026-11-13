@@ -1,0 +1,2 @@
+ID,heatNetworkId,productID,subheatNetworkName,distributionLossFactor,pumpingElectricalEnergyPerSubheatNetwork,pumpingEnergyFactor,carbonDioxideIntesityOfHeat,carbonDioxideIntesityOfHeatIncludingOutOfScopeEmission,primaryEnergyFactorOfHeat,costOfHeat
+115,8,210008,Default New Connection,1.21,0,0.04,0.282,0.282,1.07,4.14

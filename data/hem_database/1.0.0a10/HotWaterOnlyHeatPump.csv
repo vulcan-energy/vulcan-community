@@ -1,0 +1,2 @@
+ID,productID,fuel,heatPumpType,vesselType,integral,testVesselVolume,testVesselHeatLoss,declaredVesselVolume,declaredVesselHeatLoss,declaredVesselHeatExchangerArea,sourceType,heatTransferRateWPerK,dataType
+100000,693013,electricity,HeatPump_HWOnly,Separate limiting characteristics,0,227,2.536,207,2.454,0.583,AirSource,291.5,illustrative_conservative

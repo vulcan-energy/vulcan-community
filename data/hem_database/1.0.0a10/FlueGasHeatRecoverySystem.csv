@@ -1,0 +1,2 @@
+ID,productID,v_store,h_store,h_water,m_store,m_water,temp_store_init,time_step_substep,applicable_boiler_types,integral_only,heat_store,close_coupled_heat_store_loss_rate,direct_total_heat_recovered,power_consumption,photovoltaic_module,cable_loss,dataType
+90030,70030,0,12380.22,4190,7.1,2.1,20,60,RCSK,0,2,0,0.0648,0,0,0,illustrative_conservative

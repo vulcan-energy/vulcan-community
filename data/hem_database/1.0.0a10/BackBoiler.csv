@@ -1,0 +1,6 @@
+ID,productID,roomHeaterID,rated_power_water,energy_supply_aux,power_circ_pump,dataType
+1,820602,2,2,0,0.013,illustrative_conservative
+2,820604,4,2.52,0,0.013,illustrative_conservative
+3,820606,6,1.6,0,0.013,illustrative_conservative
+4,820632,31,2.5,0,0.013,illustrative_conservative
+5,820662,37,2.5,0,0.013,illustrative_conservative

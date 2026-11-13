@@ -1,0 +1,2 @@
+ID,productID,HIUtype,HeatLoss,VWART70,VWART55,ElectricityConsumption,MaxPowerForWater55,MaxPowerForWater70,powerCircPump,dataType
+9,410000,1,0.9689,31.9,36.3,0.0792,52.87,75.34,0,illustrative_conservative

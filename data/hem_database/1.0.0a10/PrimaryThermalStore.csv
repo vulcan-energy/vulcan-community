@@ -1,0 +1,4 @@
+ID,productID,volume,daily_losses,appliance_type,dhw_heat_transfer_rate_W_per_K,dataType
+1,690216,100,1.61,CPSU,770,illustrative_conservative
+2,690217,50,1.02,PrimaryStorageCombi,770,illustrative_conservative
+3,690218,150,2.11,NULL,1020,illustrative_conservative

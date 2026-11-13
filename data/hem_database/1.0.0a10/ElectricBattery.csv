@@ -1,0 +1,2 @@
+ID,productID,capacity,charge_discharge_efficiency_round_trip,minimum_charge_rate_one_way_trip,maximum_charge_rate_one_way_trip,maximum_discharge_rate_one_way_trip,has_inverter,dataType
+8,70007,3.84,0.846,1.920,3.840,3.840,True,illustrative_conservative

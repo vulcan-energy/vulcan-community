@@ -1,0 +1,9 @@
+ID,boilerType,condensing,fuel,efficiencyFullLoad,efficiencyPartLoad,auxElecFull,auxElecPart,auxElecStandby,powerTopRange,modulationLoad,electricityCircPump
+1,Combi,Condensing,mains_gas,0.874,0.96,0.17,0.02,0.009,24,0.3,0.013
+2,Combi,Non-condensing,mains_gas,0.806,0.777,0.17,0.02,0.009,24,0.3,0.013
+3,Combi,Condensing,LPG,0.892,0.97,0.17,0.02,0.009,24,0.3,0.013
+4,Combi,Non-condensing,LPG,0.824,0.796,0.17,0.02,0.009,24,0.3,0.013
+5,Regular,Condensing,mains_gas,0.873,0.954,0.15,0.02,0.009,24,0.3,0.013
+6,Regular,Non-condensing,mains_gas,0.789,0.776,0.15,0.02,0.009,17,0.3,0.013
+7,Regular,Condensing,LPG,0.895,0.968,0.15,0.02,0.009,24,0.3,0.013
+8,Regular,Non-condensing,LPG,0.804,0.798,0.15,0.02,0.009,21,0.3,0.013

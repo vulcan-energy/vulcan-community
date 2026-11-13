@@ -1,0 +1,4 @@
+ID,parentID,productID,configuration,flowRate,flowRate2,specificFanPower,specificFanPower2,flowRate3,specificFanPower3
+1,1,692002,1,13,8,0.38,0.34,13,0.8
+2,1,692002,2,13,8,0.44,0.32,13,0.8
+3,1,692002,3,13,8,0.36,0.42,13,0.8
