@@ -1,0 +1,2 @@
+ID,productID,fuel,fuel_aux,flueType,fanAssistance,fanPosition,integralFan,condensing,waterPump,minimumFiringRate,ratedMaxOutput,efficiencyFullLoad,efficiencyPartLoad,specificFanPower,volumetricAirFlowrate,volumetricAirFlowrateMax,electricalPowerWhileFiring,electricalPowerWhileNotFiring,modulating_control,dataType
+13,220012,mains_gas,electricity,room-sealed,fan,upstream,yes,condensing,no,3.496,7.04,0.68288,0.69008,0.768,963.6,553.2,963.6,9.6,true,illustrative_conservative

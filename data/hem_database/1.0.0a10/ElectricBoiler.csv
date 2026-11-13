@@ -1,0 +1,4 @@
+ID,productID,ratedPower,electricityCircPump,auxElecStandby,efficiency,dataType
+1,690213,6,0.013,0.010,1,illustrative_conservative
+2,690214,9,0.013,0.010,1,illustrative_conservative
+3,690215,12,0.013,0.010,1,illustrative_conservative

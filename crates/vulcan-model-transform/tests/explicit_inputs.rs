@@ -31,7 +31,7 @@ Living,Zone,100,40
 fn transform_uses_caller_selected_profile_and_version_metadata() {
     let output = transform_geometry_csv(TransformRequest {
         conversion_profile: Default::default(),
-        product_references: Default::default(),
+        product_data: Default::default(),
         csv: MINIMAL_CSV.to_string(),
         schema_json: MINIMAL_SCHEMA.to_string(),
         defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.to_string(),
@@ -53,7 +53,7 @@ fn transform_uses_caller_selected_profile_and_version_metadata() {
 fn transform_rejects_missing_caller_supplied_content() {
     let error = transform_geometry_csv(TransformRequest {
         conversion_profile: Default::default(),
-        product_references: Default::default(),
+        product_data: Default::default(),
         csv: String::new(),
         schema_json: MINIMAL_SCHEMA.to_string(),
         defaults_json: "{}".to_string(),
@@ -76,7 +76,7 @@ fn python_conversion_profiles_reject_mismatched_engine_wrapper_metadata() {
         defaults_json: "{}".into(),
         profile: ModelProfile::Fhs,
         conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
-        product_references: Default::default(),
+        product_data: Default::default(),
         version_metadata: VersionMetadata {
             hem_core_version: "1.0.0a9".into(),
             wrapper_version: Some("1.0.0a8".into()),
@@ -126,7 +126,7 @@ fn canonical_profiles_preserve_legacy_output_and_accept_independent_versions() {
             defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
             profile: ModelProfile::Fhs,
             conversion_profile: legacy,
-            product_references: Default::default(),
+            product_data: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: version.into(),
                 wrapper_version: Some(version.into()),
@@ -163,7 +163,7 @@ fn physical_opening_contracts_require_fhs_but_divided_contracts_keep_core_suppor
             defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
             profile: ModelProfile::Core,
             conversion_profile,
-            product_references: Default::default(),
+            product_data: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "caller-core".into(),
                 wrapper_version: None,
@@ -206,7 +206,7 @@ Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0
         defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
         profile: ModelProfile::Fhs,
         conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
-        product_references: Default::default(),
+        product_data: Default::default(),
         version_metadata: VersionMetadata {
             hem_core_version: "1.0.0a8".into(),
             wrapper_version: Some("1.0.0a8".into()),
@@ -258,7 +258,7 @@ Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0
             defaults_json: defaults_json.into(),
             profile: ModelProfile::Fhs,
             conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
-            product_references: Default::default(),
+            product_data: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "1.0.0a8".into(),
                 wrapper_version: Some("1.0.0a8".into()),
@@ -310,7 +310,7 @@ IV,Living,System,InfiltrationVentilation,\"{\"\"InfiltrationVentilation\"\":{\"\
             defaults_json: defaults.into(),
             profile: ModelProfile::Fhs,
             conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
-            product_references: Default::default(),
+            product_data: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "1.0.0a8".into(),
                 wrapper_version: Some("1.0.0a8".into()),
@@ -362,7 +362,7 @@ Wall,Living,BuildingElementOpaque,10,{pitch},180,{u_value},2.5,4,0
             defaults_json: read("defaults/defaults_template.json"),
             profile: ModelProfile::Fhs,
             conversion_profile: Default::default(),
-            product_references: Default::default(),
+            product_data: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "1.0.0a7".into(),
                 wrapper_version: Some("1.0.0a7".into()),
@@ -399,7 +399,7 @@ fn derived_numbers_that_overflow_fail_with_e055_instead_of_panicking() {
             defaults_json: read("defaults/defaults_template.json"),
             profile,
             conversion_profile: Default::default(),
-            product_references: Default::default(),
+            product_data: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "1.0.0a7".into(),
                 wrapper_version: wrapper,
@@ -472,7 +472,7 @@ Unset,Living,BuildingElementTransparent,1.2,90,1,1.2,3.6,1.2,,0.5,"2,0,1|3,0,1",
             defaults_json: DEFAULTS_TEMPLATE.into(),
             profile: ModelProfile::Fhs,
             conversion_profile,
-            product_references: Default::default(),
+            product_data: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: version.into(),
                 wrapper_version: Some(version.into()),

@@ -1184,6 +1184,12 @@ const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "General_storeys_in_building",
     "IsExistingBuilding",
     "HasElectricitySmartMeter",
+    crate::epc_products::RADIATOR_SETTING,
+    crate::epc_products::UFH_SETTING,
+    crate::epc_products::RADIATOR_LENGTH_SETTING,
+    "Appliances_has_dryer",
+    "Appliances_has_dishwasher",
+    "Appliances_has_separate_fridge_or_freezer",
 ];
 
 /// Metadata rows that set a model input. A present row with no value is E066: it must never
@@ -1493,11 +1499,13 @@ pub struct JSONBuilder {
     csv_rows: RefCell<Vec<(String, String)>>,
     /// Exact upstream core version supplied by the host for FHS input metadata.
     hem_core_version: String,
-    /// Host-supplied HEM Database products by system model path (see `ProductSlot`).
-    product_references: crate::ProductReferences,
+    /// The target's HEM Database products, for profiles that reference them.
+    product_database: Option<crate::epc_products::ProductDatabase>,
+    /// The model's product settings (Metadata rows), read once per build.
+    product_settings: RefCell<crate::epc_products::Settings>,
     product_slots: RefCell<Vec<crate::ProductSlot>>,
-    /// Stable product key of each built emitter: its system and Wet Emitters row name.
-    emitter_keys: RefCell<BTreeMap<String, String>>,
+    /// Element paths whose `solar_absorption_coeff` came from a colour.
+    colour_coefficients: RefCell<Vec<String>>,
 }
 
 impl JSONBuilder {
@@ -1505,8 +1513,8 @@ impl JSONBuilder {
         self.input_contract = profile.input_contract();
     }
 
-    pub fn set_product_references(&mut self, references: crate::ProductReferences) {
-        self.product_references = references;
+    pub fn set_product_database(&mut self, database: crate::epc_products::ProductDatabase) {
+        self.product_database = Some(database);
     }
 
     pub fn take_product_slots(&self) -> Vec<crate::ProductSlot> {
@@ -1554,9 +1562,10 @@ impl JSONBuilder {
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
-            product_references: Default::default(),
+            product_database: None,
+            product_settings: RefCell::default(),
+            colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
-            emitter_keys: RefCell::new(BTreeMap::new()),
         };
 
         builder.index_templates();
@@ -1591,9 +1600,10 @@ impl JSONBuilder {
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
             hem_core_version: version_metadata.hem_core_version.clone(),
-            product_references: Default::default(),
+            product_database: None,
+            product_settings: RefCell::default(),
+            colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
-            emitter_keys: RefCell::new(BTreeMap::new()),
         };
         builder.index_templates();
         Ok(builder)
@@ -1626,10 +1636,6 @@ impl JSONBuilder {
 
     fn note_emitter_row(&self, system: &str, index: usize, row: &BTreeMap<String, Value>) {
         let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
-        self.emitter_keys.borrow_mut().insert(
-            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
-            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", name]),
-        );
         self.csv_rows.borrow_mut().push((
             crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
             format!("Wet Emitters row '{name}' (system '{system}')"),
@@ -1955,9 +1961,22 @@ impl JSONBuilder {
         let csv_data = &sanitized_csv_data;
 
         self.parse_cold_water_source_from_metadata(csv_data);
+        if self.profile.references_products() {
+            let mut errors = Vec::new();
+            *self.product_settings.borrow_mut() = crate::epc_products::Settings::read(
+                |name| metadata_field_value(csv_data, name),
+                &mut errors,
+            );
+            self.non_fatal_errors.borrow_mut().extend(errors);
+        }
         for row in csv_data.get("Metadata").into_iter().flatten() {
             if let (Some(name), None) = extract_metadata_field(row) {
-                if METADATA_INPUT_FIELD_NAMES.contains(&name.as_str()) {
+                let epc_input = self.profile.references_products()
+                    && (crate::epc_products::SETTING_ROWS.contains(&name.as_str())
+                        || crate::epc_mappings::APPLIANCE_PRESENCE
+                            .iter()
+                            .any(|(_, row, _)| *row == name));
+                if METADATA_INPUT_FIELD_NAMES.contains(&name.as_str()) || epc_input {
                     self.push_non_fatal(
                         "E066",
                         "Metadata",
@@ -1984,21 +2003,18 @@ impl JSONBuilder {
         // Consolidate zones for FHS schema (FHS only supports single zone)
         // This must happen after build_zone_structure but before process_root_level_sections
         // so that systems and elements are processed correctly
-        if self.profile.consolidates_to_single_zone() {
-            let zones: Vec<String> = result["Zone"]
-                .as_object()
-                .map(|zones| zones.keys().cloned().collect())
-                .unwrap_or_default();
+        let zones: Vec<String> = result["Zone"]
+            .as_object()
+            .map(|zones| zones.keys().cloned().collect())
+            .unwrap_or_default();
+        if self.profile.rejects_several_zones() && zones.len() > 1 {
+            self.push_non_fatal(
+                "E_EPC_MULTI_ZONE",
+                "/Zone",
+                &format!("The model has several zones ({}). HEM:EPC needs the order in which they are heated (ZoneProcessingOrder), which Vulcan cannot state yet, and zones are never merged. Model the dwelling as one zone.", zones.join(", ")),
+            );
+        } else if self.profile.consolidates_to_single_zone() {
             self.consolidate_zones_for_fhs(&mut result)?;
-            if zones.len() > 1 && self.profile.reports_zone_consolidation() {
-                self.schema_omissions
-                    .borrow_mut()
-                    .push(crate::finalization::SchemaOmission {
-                        code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
-                        path: "/Zone".into(),
-                        message: format!("The zones {} are merged into one. The target accepts several zones, but the converter does not yet give each its own areas and heating order, so results can differ from a model with separate zones.", zones.join(", ")),
-                    });
-            }
         }
 
         // Process root-level sections (includes merge_ventilation_systems, merge_water_pipework, merge_wet_emitters)
@@ -2034,27 +2050,31 @@ impl JSONBuilder {
         let mut errors = Vec::new();
         let mut notices = Vec::new();
         if self.profile.states_appliance_presence() {
-            crate::epc_mappings::map_appliances(
-                result,
-                csv_data,
-                &self.defaults,
-                &mut errors,
-                &mut notices,
-            );
+            let presence = crate::epc_mappings::APPLIANCE_PRESENCE.map(|(_, row, _)| {
+                let present = csv_data
+                    .get("Metadata")
+                    .into_iter()
+                    .flatten()
+                    .any(|r| r.get("Field").and_then(Value::as_str) == Some(row));
+                let value = metadata_field_value(csv_data, row)
+                    .and_then(|v| self.csv_bool_non_fatal(Some(&v), row, "Metadata"));
+                (present, value)
+            });
+            crate::epc_mappings::map_appliances(result, csv_data, presence, &mut errors);
         }
         if self.profile.lists_pv_panels() {
             crate::epc_mappings::map_pv_panels(result);
         }
         if self.profile.states_cylinder_coil_and_tank_controls() {
-            crate::epc_mappings::map_cylinder_coils(
+            crate::epc_mappings::map_cylinder_coils(result, &mut errors);
+        }
+        if self.profile.references_products() {
+            crate::epc_mappings::report_ventilation_defaults(
                 result,
-                &self.defaults,
+                csv_data,
                 &mut errors,
                 &mut notices,
             );
-        }
-        if self.profile.references_products() {
-            crate::epc_mappings::report_ventilation_defaults(result, csv_data, &mut notices);
         }
         if self.profile.derives_build_type_from_party_walls() {
             let stated = csv_data.get("Metadata").into_iter().flatten().any(|row| {
@@ -2092,13 +2112,45 @@ impl JSONBuilder {
             }
         }
         if self.profile.references_products() {
-            let slots = crate::epc_mappings::apply_product_references(
+            let settings = self.product_settings.borrow().clone();
+            let db = self
+                .product_database
+                .as_ref()
+                .expect("transform_geometry_csv sets the product database for this profile");
+            let slots = crate::epc_products::resolve_products(
                 result,
-                &self.product_references,
-                &self.emitter_keys.borrow(),
+                db,
+                &settings,
                 &mut errors,
+                &mut notices,
+            );
+            crate::epc_products::apply_weather_curves(result, db, &mut errors, &mut notices);
+            crate::epc_products::derive_zone_frac_convective(
+                result,
+                db,
+                &slots,
+                &mut errors,
+                &mut notices,
             );
             *self.product_slots.borrow_mut() = slots;
+        }
+        if self.profile.checks_party_wall_lining() {
+            crate::epc_mappings::check_party_wall_lining(result, &mut errors);
+        }
+        if self.profile.uses_solar_absorption_coeff() {
+            crate::epc_mappings::check_solar_absorption(
+                result,
+                &self.colour_coefficients.borrow(),
+                &mut errors,
+                &mut notices,
+            );
+        }
+        if self.profile.references_products() {
+            crate::epc_mappings::apply_desnz_defaults(result, &mut errors, &mut notices);
+        }
+        if self.profile.checks_party_wall_lining() {
+            crate::epc_mappings::check_element_fields(result, &self.schema, &mut errors);
+            crate::epc_mappings::check_primary_pipework(result, &self.schema, &mut errors);
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
@@ -2275,6 +2327,14 @@ impl JSONBuilder {
                 if let Some(restofdwelling_area) = zone_row.get("restofdwelling_area") {
                     if !restofdwelling_area.is_null() {
                         zone_obj["restofdwelling_area"] = restofdwelling_area.clone();
+                    }
+                }
+                if self.profile.states_zone_convective_fraction() {
+                    if let Some(fraction) = zone_row
+                        .get("frac_convective_heating")
+                        .filter(|v| v.is_number())
+                    {
+                        zone_obj["frac_convective_heating"] = fraction.clone();
                     }
                 }
                 // Process height: store it in zone object, and if volume is missing, calculate volume = floor_area * height
@@ -2673,10 +2733,18 @@ impl JSONBuilder {
                         if self.profile.uses_solar_absorption_coeff() {
                             // The authored colour wins over the template's; an authored
                             // coefficient wins over both and is merged below.
+                            let authored_coeff = element_row
+                                .get("solar_absorption_coeff")
+                                .is_some_and(|v| !v.is_null() && v != "")
+                                || element_row
+                                    .get("extra_json")
+                                    .and_then(|extra| extra.get("solar_absorption_coeff"))
+                                    .is_some();
                             let colour = element_row
                                 .get("extra_json")
                                 .and_then(|extra| extra.get("colour"))
                                 .or_else(|| obj.get("colour"))
+                                .filter(|_| !authored_coeff)
                                 .cloned();
                             if let Some(colour) = colour {
                                 match colour
@@ -2687,6 +2755,14 @@ impl JSONBuilder {
                                         obj.insert(
                                             "solar_absorption_coeff".to_string(),
                                             serde_json::json!(coeff),
+                                        );
+                                        self.colour_coefficients.borrow_mut().push(
+                                            crate::json_pointer(&[
+                                                "Zone",
+                                                zone_name,
+                                                "BuildingElement",
+                                                element_name,
+                                            ]),
                                         );
                                     }
                                     None => self.push_non_fatal(
@@ -4646,6 +4722,7 @@ impl JSONBuilder {
         if let Some(section_data) = csv_data.get("Water Pipework") {
             // Group pipework by type (primary vs distribution)
             let mut primary_pipework = Vec::new();
+            let mut primary_rows = Vec::new();
             let mut distribution_pipework = Vec::new();
             for pipe_row in section_data {
                 let pipework_type = pipe_row
@@ -4691,6 +4768,13 @@ impl JSONBuilder {
                 );
                 if pipework_type == "primary" {
                     primary_pipework.push(Value::Object(pipe_obj));
+                    primary_rows.push(
+                        pipe_row
+                            .get("Name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    );
                 } else {
                     distribution_pipework.push(Value::Object(pipe_obj));
                 }
@@ -4699,13 +4783,27 @@ impl JSONBuilder {
             if !primary_pipework.is_empty() {
                 if let Some(hot_water_source) = result.get_mut("HotWaterSource") {
                     if let Some(hws_obj) = hot_water_source.as_object_mut() {
-                        for (_, system_data) in hws_obj {
+                        for (system_name, system_data) in hws_obj {
                             if let Some(system_obj) = system_data.as_object_mut() {
                                 if system_obj.get("type").and_then(|v| v.as_str())
                                     == Some("hw cylinder")
                                     || system_obj.get("type").and_then(|v| v.as_str())
                                         == Some("StorageTank")
                                 {
+                                    // EPC errors on a drawn pipe name its row.
+                                    if self.profile.references_products() {
+                                        for (i, row) in primary_rows.iter().enumerate() {
+                                            self.csv_rows.borrow_mut().push((
+                                                crate::json_pointer(&[
+                                                    "HotWaterSource",
+                                                    system_name,
+                                                    "primary_pipework",
+                                                    &i.to_string(),
+                                                ]),
+                                                format!("Water Pipework row '{row}'"),
+                                            ));
+                                        }
+                                    }
                                     system_obj.insert(
                                         "primary_pipework".to_string(),
                                         Value::Array(primary_pipework.clone()),
@@ -5085,6 +5183,7 @@ impl JSONBuilder {
             .filter(|row| is_infiltration_ventilation_row(row))
             .filter_map(|row| row.get("extra_json"))
             .collect();
+        let mut missing = Vec::new();
         let used: Vec<String> = METADATA_INPUT_FIELD_NAMES
             .iter()
             .filter(|name| !present.contains(**name))
@@ -5106,12 +5205,37 @@ impl JSONBuilder {
                 {
                     return None;
                 }
+                if self.profile.required_metadata_rows().contains(name) {
+                    return None;
+                }
                 Some(match result.pointer(&pointer)? {
                     Value::String(text) => format!("{name} {text}"),
                     value => format!("{name} {value}"),
                 })
             })
             .collect();
+        for name in self.profile.required_metadata_rows() {
+            let pointer = if let Some(key) = name.strip_prefix("AirPermeability_") {
+                format!("/InfiltrationVentilation/Leaks/{key}")
+            } else if let Some(key) = name.strip_prefix("Ventilation_") {
+                format!("/InfiltrationVentilation/{key}")
+            } else {
+                format!("/{name}")
+            };
+            let stated_by_systems = systems_fragments
+                .iter()
+                .any(|fragment| fragment.pointer(&pointer).is_some_and(|v| !v.is_null()));
+            if !present.contains(*name) && !stated_by_systems {
+                missing.push(*name);
+            }
+        }
+        if !missing.is_empty() {
+            self.push_non_fatal(
+                "E_EPC_REQUIRED_INPUT",
+                "/Metadata",
+                &format!("HEM:EPC requires these inputs and the Metadata section has no row for them: {}. Add each row with its value.", missing.join(", ")),
+            );
+        }
         if !used.is_empty() {
             self.schema_omissions
                 .borrow_mut()
@@ -6448,7 +6572,14 @@ impl JSONBuilder {
 
                         // Older presets may contain legacy battery/grid-charging fields that are
                         // not part of current input schemas; strip them during CSV->JSON build.
-                        battery.remove("grid_charging_possible");
+                        if !self.profile.keeps_battery_grid_charging() {
+                            battery.remove("grid_charging_possible");
+                        } else {
+                            // EPC's only EnergySupply battery kind (the schema's constant).
+                            battery
+                                .entry("type".to_string())
+                                .or_insert_with(|| Value::String("stationary".into()));
+                        }
 
                         // Parse extra_json for battery properties (override defaults)
                         if let Some(extra_json) = row.get("extra_json").and_then(|v| v.as_object())
@@ -6462,7 +6593,9 @@ impl JSONBuilder {
                                     continue;
                                 }
                                 // Ignore legacy grid charging fields not present in current schemas.
-                                if key == "grid_charging_possible" {
+                                if key == "grid_charging_possible"
+                                    && !self.profile.keeps_battery_grid_charging()
+                                {
                                     continue;
                                 }
                                 if key == "threshold_charges"
@@ -7402,12 +7535,14 @@ impl JSONBuilder {
                         .get("Name")
                         .and_then(Value::as_str)
                         .unwrap_or_default();
-                    let effective_length = effective_length.ok_or_else(|| {
-                        BuildError::new(
-                            "E047",
-                            &format!("Wet Emitters row '{name}': a product radiator requires its 'length'."),
-                        )
-                    })?;
+                    let effective_length = effective_length.unwrap_or_else(|| {
+                        let (length, notice) = self
+                            .product_settings
+                            .borrow()
+                            .radiator_length(name, unit_number);
+                        self.schema_omissions.borrow_mut().push(notice);
+                        length
+                    });
                     for key in ["c", "c_per_m", "n", "thermal_mass", "thermal_mass_per_m"] {
                         if number(key).is_some() {
                             self.schema_omissions.borrow_mut().push(

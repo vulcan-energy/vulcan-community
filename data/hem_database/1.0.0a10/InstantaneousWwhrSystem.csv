@@ -1,0 +1,4 @@
+ID,productID,electricityConsumption,utilisationFactor,numberOfFlowRates,pipeLength,heatExchangerLength,heatExchangerDryWeight,heatExchangerVolumeOfWater,heatExchangerWetWeight,heatExchangerColdWaterConnection,heatExchangerWasteConnection,dataType
+203,83000,NULL,0.8839,5,3,10,11.65,1.73,13.38,20.94,70.31,illustrative_conservative
+204,83001,NULL,0.901,5,3,2.27,6.55,0.84,7.39,17.01,50.43,illustrative_conservative
+205,83002,NULL,0.9334,5,3,2.43,5.33,0.68,6.01,15.8,46.94,illustrative_conservative

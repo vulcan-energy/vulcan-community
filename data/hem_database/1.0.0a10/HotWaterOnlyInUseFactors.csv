@@ -1,0 +1,6 @@
+ID,vesselType,in_use_factor_mismatch
+1,Integral,0.95
+2,Separate fixed characteristics,0.95
+3,Separate limiting characteristics,0.95
+4,Separate but does not meet criteria,0.6
+5,Unspecified,0.6

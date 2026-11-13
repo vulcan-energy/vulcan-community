@@ -1,0 +1,5 @@
+ID,productID,fuel,sourceType,serviceProvision,sinkType,backupControlType,modulatingControl,standardRatingCapacity20C,standardRatingCapacity35C,standardRatingCapacity55C,minimumModulationRate20,minimumModulationRate35,minimumModulationRate55,variableTempControl,powerStandby,powerCrankcaseHeater,powerOff,powerMaximumBackup,vesselType,vesselVolume,vesselHeatLoss,vesselHeatExchangerArea,primaryFlowRate,heatTransferRateWPerK,powerHeatingCirculationPump,powerHeatingWarmAirFan,integratedDhwSystem,dataType
+100000,693000,electricity,OutsideAir,3,Air,None,1,NULL,NULL,NULL,0.5,,,0,0.018,0,0.018,NULL,NULL,NULL,NULL,NULL,,,NULL,0.013,,illustrative_conservative
+100001,693001,electricity,OutsideAir,5,Water,None,1,NULL,NULL,NULL,,0.5,0.5,1,0.024,0,0.007,NULL,NULL,NULL,NULL,NULL,,,0.013,NULL,,illustrative_conservative
+100002,693002,electricity,OutsideAir,5,Water,None,1,NULL,NULL,NULL,,0.5,0.5,1,0.024,0,0.007,NULL,NULL,NULL,NULL,NULL,,,0.013,NULL,,illustrative_conservative
+100003,693003,electricity,OutsideAir,5,Water,None,1,NULL,NULL,NULL,,0.5,0.5,1,0.024,0,0.007,NULL,NULL,NULL,NULL,NULL,,,0.013,NULL,,illustrative_conservative

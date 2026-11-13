@@ -1,0 +1,15 @@
+ID,heatPumpCategory,sinkType,powerMax,timeConstantOnOffOperation,maximumReturnTemp,minimumSourceTemp,minimumDifferenceTemp,powerHeatingCircPump,powerHeatingWarmAirFan,powerSourceCircPump,mixedMaximumTemperature,mixedMinimumTemperature,backup_ctrl_type
+1,Air Source,Water,,140,70,-10,0,0.013,,0,,,
+2,Air Source,Air,,140,70,-10,0,,0.013,0,,,
+3,ExhaustAirMEV,Water,,140,70,-10,0,0.013,,0,,,
+4,ExhaustAirMEV,Air,,140,70,-10,0,,0.013,0,,,
+5,ExhaustAirMVHR,Water,,140,70,-10,0,0.013,,0,,,
+6,ExhaustAirMVHR,Air,,140,70,-10,0,,0.013,0,,,
+7,ExhaustAirMixed,Water,,140,70,-10,0,0.013,,0,0,10,
+8,ExhaustAirMixed,Air,,140,70,-10,0,,0.013,0,0,10,
+9,Water,Water,,140,70,-10,0,0.013,,0.09,,,
+10,Water,Air,,140,70,-10,0,,0.013,0.09,,,
+11,Ground,Water,,140,70,-10,0,0.013,,0.36,,,
+12,Ground,Air,,140,70,-10,0,,0.013,0.36,,,
+13,Domestic Hot Water,,3,,,,,,,,,,
+14,Hybrid,,,,,,,,,,,,Substitute

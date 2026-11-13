@@ -8,7 +8,7 @@
 
 use crate::finalization::SchemaOmission;
 use crate::target_mappings::TARGET_INPUT_WARNING;
-use crate::{json_pointer, ProductReferences, ProductSlot, ValidationError};
+use crate::{json_pointer, ValidationError};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
@@ -32,7 +32,53 @@ fn notice(path: &str, message: String) -> SchemaOmission {
     }
 }
 
-/// HEMIE Table 009.3 (also the FHS wrapper's `COLOUR_TO_SOLAR_ABSORPTION_MAP`).
+/// Cavity types that take a lining type; every other cavity type must not state one
+/// (HEM Core 2.0.0a4 `BuildingElementPartyWall.validate_party_wall_lining_type`).
+const LINED_PARTY_WALL_CAVITIES: [&str; 3] =
+    ["filled_unsealed", "unfilled_sealed", "unfilled_unsealed"];
+
+/// A party wall's lining type must be stated for a lined cavity type and absent otherwise.
+/// Either mismatch is an error naming the wall; nothing is dropped.
+pub(crate) fn check_party_wall_lining(model: &Value, errors: &mut Vec<ValidationError>) {
+    for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
+        for (name, element) in zone_value["BuildingElement"]
+            .as_object()
+            .into_iter()
+            .flatten()
+        {
+            if element["type"] != "BuildingElementPartyWall" {
+                continue;
+            }
+            let cavity = element["party_wall_cavity_type"]
+                .as_str()
+                .unwrap_or_default();
+            let lining = element
+                .get("party_wall_lining_type")
+                .filter(|v| !v.is_null());
+            let lined = LINED_PARTY_WALL_CAVITIES.contains(&cavity);
+            let message = match (lined, lining) {
+                (true, None) => format!("Party wall '{name}' has cavity type {cavity}, which needs party_wall_lining_type. State the lining type."),
+                (false, Some(lining)) if cavity.is_empty() => format!("Party wall '{name}' states party_wall_lining_type {lining} but no party_wall_cavity_type. State the cavity type."),
+                (false, Some(lining)) => format!("Party wall '{name}' states party_wall_lining_type {lining}, but its cavity type {cavity} takes none (only {} do). Remove the lining type or correct the cavity type.", LINED_PARTY_WALL_CAVITIES.join(", ")),
+                _ => continue,
+            };
+            errors.push(error(
+                "E_EPC_PARTY_WALL_LINING",
+                json_pointer(&[
+                    "Zone",
+                    zone,
+                    "BuildingElement",
+                    name,
+                    "party_wall_lining_type",
+                ]),
+                message,
+            ));
+        }
+    }
+}
+
+/// DESNZ-defined colour to solar absorption map (also the FHS wrapper's
+/// `COLOUR_TO_SOLAR_ABSORPTION_MAP`).
 pub(crate) fn solar_absorption_coeff(colour: &str) -> Option<f64> {
     match colour {
         "Light" => Some(0.3),
@@ -42,14 +88,32 @@ pub(crate) fn solar_absorption_coeff(colour: &str) -> Option<f64> {
     }
 }
 
-/// Appliance rows give presence; `Oven` and `Hobs` take the row's `EnergySupply`, else the
-/// target defaults' `Appliances.<key>.EnergySupply`.
+/// The appliance presence fields, the Metadata row that states each, and the Appliances keys
+/// that show one is drawn. Presence is a required assessor input (DESNZ-defined): a missing
+/// row is an error, never "absent".
+pub(crate) const APPLIANCE_PRESENCE: [(&str, &str, &[&str]); 3] = [
+    ("has_dryer", "Appliances_has_dryer", &["Clothes_drying"]),
+    (
+        "has_dishwasher",
+        "Appliances_has_dishwasher",
+        &["Dishwasher"],
+    ),
+    (
+        "has_separate_fridge_or_freezer",
+        "Appliances_has_separate_fridge_or_freezer",
+        &["Fridge", "Freezer"],
+    ),
+];
+
+/// Appliance presence comes from Metadata rows, checked against drawn Appliances rows; `Oven` and `Hobs` take the row's `EnergySupply`, which EPC
+/// requires (DESNZ-defined): a missing one is an error, never a template value.
+/// `presence` holds, per `APPLIANCE_PRESENCE` row, whether its Metadata row is present and the
+/// value the shared CSV boolean parser read (None for a value it already reported).
 pub(crate) fn map_appliances(
     model: &mut Value,
     csv: &Rows,
-    defaults: &Value,
+    presence: [(bool, Option<bool>); 3],
     errors: &mut Vec<ValidationError>,
-    notices: &mut Vec<SchemaOmission>,
 ) {
     let rows: Vec<&BTreeMap<String, Value>> = csv.get("Appliances").into_iter().flatten().collect();
     fn key_of<'r>(row: &&'r BTreeMap<String, Value>) -> Option<&'r str> {
@@ -60,38 +124,43 @@ pub(crate) fn map_appliances(
             .any(|row| key_of(row).is_some_and(|k| keys.contains(&k)))
     };
     let mut appliances = Map::new();
-    appliances.insert("has_dryer".into(), json!(has(&["Clothes_drying"])));
-    appliances.insert("has_dishwasher".into(), json!(has(&["Dishwasher"])));
-    appliances.insert(
-        "has_separate_fridge_or_freezer".into(),
-        json!(has(&["Fridge", "Freezer"])),
-    );
-    let mut from_defaults = Vec::new();
+    for ((field, row, keys), (present, value)) in APPLIANCE_PRESENCE.into_iter().zip(presence) {
+        let drawn = has(keys);
+        if !present {
+            errors.push(error(
+                "E_EPC_APPLIANCE_PRESENCE",
+                format!("/Appliances/{field}"),
+                format!("HEM:EPC requires the appliance spaces to be stated: add the Metadata row '{row}' with TRUE or FALSE."),
+            ));
+            continue;
+        }
+        match value {
+            None => {}
+            Some(false) if drawn => errors.push(error(
+                "E_EPC_APPLIANCE_PRESENCE",
+                "/Metadata".into(),
+                format!("Metadata row '{row}' is FALSE, but the plan has a {} appliance. Correct one of them.", keys.join(" or ")),
+            )),
+            Some(present) => {
+                appliances.insert(field.into(), json!(present));
+            }
+        }
+    }
     for key in ["Oven", "Hobs"] {
         let authored = rows
             .iter()
             .filter(|row| key_of(row) == Some(key))
             .find_map(|row| row.get("extra_json")?.get("EnergySupply")?.as_str());
-        let supply = authored.or_else(|| {
-            let supply = defaults
-                .pointer(&format!("/Appliances/{key}/EnergySupply"))?
-                .as_str();
-            from_defaults.push(format!("{key} {}", supply?));
-            supply
-        });
-        match supply {
+        match authored {
             Some(supply) => {
                 appliances.insert(key.into(), json!({ "EnergySupply": supply }));
             }
             None => errors.push(error(
                 "E_EPC_COOKING_SUPPLY",
                 format!("/Appliances/{key}"),
-                format!("State the energy supply of the {key}: give its Appliances row an EnergySupply. The target defaults have none."),
+                format!("State the energy supply of the {key}: add an Appliances row '{key}' with an EnergySupply. HEM:EPC requires it and there is no default."),
             )),
         }
-    }
-    if !from_defaults.is_empty() {
-        notices.push(notice("/Appliances", format!("No Appliances row states the cooking energy supply, so the model uses the target defaults: {}. Add Oven and Hobs rows with an EnergySupply to state them.", from_defaults.join(", "))));
     }
     model["Appliances"] = Value::Object(appliances);
 }
@@ -129,14 +198,14 @@ pub(crate) fn map_pv_panels(model: &mut Value) {
     }
 }
 
-const VENTILATION_DEFAULT_FIELDS: [&str; 3] =
-    ["installation_type", "sup_air_flw_ctrl", "sup_air_temp_ctrl"];
+const VENTILATION_DEFAULT_FIELDS: [&str; 2] = ["sup_air_flw_ctrl", "sup_air_temp_ctrl"];
 
 /// Mechanical ventilation fields EPC adds come from the target defaults' template for the
 /// system's `vent_type` unless its Ventilation Systems row states them; report each one used.
 pub(crate) fn report_ventilation_defaults(
     model: &Value,
     csv: &Rows,
+    errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
 ) {
     let Some(systems) = model
@@ -157,6 +226,37 @@ pub(crate) fn report_ventilation_defaults(
                     || row.get("extra_json").and_then(|e| e.get(field)).is_some()
             })
         };
+        // A continuous system's installation type is a required assessor input (no default).
+        let continuous = !matches!(
+            system.get("vent_type").and_then(Value::as_str),
+            Some("Intermittent MEV" | "Positive input ventilation")
+        );
+        if continuous
+            && !system
+                .as_object()
+                .is_some_and(|s| s.contains_key("installation_type"))
+        {
+            errors.push(error(
+                "E_EPC_VENTILATION_INSTALLATION",
+                json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name, "installation_type"]),
+                format!("Ventilation system '{name}': state its installation_type (installation_scheme or no_installation_scheme) on its Ventilation Systems row. There is no default."),
+            ));
+        }
+        // A stopped intermittent extract fan leaks; its back-draught protection and diameter
+        // are assessor inputs with no default (DESNZ-defined).
+        let intermittent =
+            system.get("vent_type").and_then(Value::as_str) == Some("Intermittent MEV");
+        if intermittent
+            && system
+                .get("leakage_when_stopped")
+                .is_none_or(Value::is_null)
+        {
+            errors.push(error(
+                "E_EPC_FAN_LEAKAGE",
+                json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name, "leakage_when_stopped"]),
+                format!("Intermittent extract fan '{name}': state leakage_when_stopped with its back_draught_protection (internal damper, external terminal or none) and diameter (100 mm or 150 mm) on its Ventilation Systems row. There is no default."),
+            ));
+        }
         let used: Vec<String> = VENTILATION_DEFAULT_FIELDS
             .iter()
             .filter(|field| !authored(field))
@@ -171,24 +271,9 @@ pub(crate) fn report_ventilation_defaults(
 
 const COIL_FIELDS: [&str; 2] = ["primary_flow_rate", "heat_transfer_rate_W_per_K"];
 
-/// Thermostat positions move into `tank_controls`. A wet coil without its flow and heat
-/// transfer rates takes them from the target defaults' cylinder coil.
-pub(crate) fn map_cylinder_coils(
-    model: &mut Value,
-    defaults: &Value,
-    errors: &mut Vec<ValidationError>,
-    notices: &mut Vec<SchemaOmission>,
-) {
-    let default_coil = defaults
-        .get("HotWaterSource")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|sources| sources.values())
-        .filter_map(|source| source.get("HeatSource")?.as_object())
-        .flat_map(|heat_sources| heat_sources.values())
-        .find(|heat_source| {
-            heat_source.get("type").and_then(Value::as_str) == Some("HeatSourceWet")
-        });
+/// Thermostat positions move into `tank_controls`. A wet coil must state its flow and heat
+/// transfer rates; a missing one is an error naming the cylinder, never a template value.
+pub(crate) fn map_cylinder_coils(model: &mut Value, errors: &mut Vec<ValidationError>) {
     let Some(sources) = model
         .get_mut("HotWaterSource")
         .and_then(Value::as_object_mut)
@@ -215,30 +300,324 @@ pub(crate) fn map_cylinder_coils(
                     continue;
                 }
                 let path = json_pointer(&["HotWaterSource", source_name, "HeatSource", name]);
-                let mut used = Vec::new();
-                for field in COIL_FIELDS {
-                    if heat_source.contains_key(field) {
-                        continue;
-                    }
-                    match default_coil.and_then(|coil| coil.get(field)) {
-                        Some(value) => {
-                            used.push(format!("{field} {value}"));
-                            heat_source.insert(field.into(), value.clone());
-                        }
-                        None => errors.push(error(
-                            "E_EPC_CYLINDER_COIL",
-                            format!("{path}/{field}"),
-                            format!("State the cylinder coil's {field} on the hot water cylinder system. The target defaults have none."),
-                        )),
-                    }
-                }
-                if !used.is_empty() {
-                    notices.push(notice(&path, format!("The cylinder coil '{name}' does not state {}, so the model uses the target defaults: {}. Add them to the cylinder's system to state them.", COIL_FIELDS.join(" and "), used.join(", "))));
+                for field in COIL_FIELDS
+                    .into_iter()
+                    .filter(|f| !heat_source.contains_key(*f))
+                {
+                    errors.push(error(
+                        "E_EPC_CYLINDER_COIL",
+                        format!("{path}/{field}"),
+                        format!("Cylinder '{source_name}': state its coil's {field} (heat source '{name}') on the cylinder's Systems row. There is no default."),
+                    ));
                 }
             }
         }
         if !controls.is_empty() && !source.contains_key("tank_controls") {
             source.insert("tank_controls".into(), Value::Array(controls));
+        }
+    }
+}
+
+/// Every opaque element states `solar_absorption_coeff` (EPC requires it). A new build must
+/// author the coefficient; the colour-to-coefficient map (HEMIE) applies only to an existing
+/// building. `from_colour` lists the element paths whose coefficient came from a colour.
+pub(crate) fn check_solar_absorption(
+    model: &mut Value,
+    from_colour: &[String],
+    errors: &mut Vec<ValidationError>,
+    notices: &mut Vec<SchemaOmission>,
+) {
+    let existing = model["IsExistingBuilding"] == true;
+    for (zone, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
+        for (name, element) in zone_value["BuildingElement"]
+            .as_object_mut()
+            .into_iter()
+            .flatten()
+        {
+            let path = json_pointer(&["Zone", zone, "BuildingElement", name]);
+            let from_a_colour = from_colour.contains(&path);
+            if existing && from_a_colour {
+                notices.push(notice(&format!("{path}/solar_absorption_coeff"), format!("Element '{name}' takes solar_absorption_coeff {} from its colour (DESNZ's map for an existing building).", element["solar_absorption_coeff"])));
+            }
+            if !existing && from_a_colour {
+                if let Some(element) = element.as_object_mut() {
+                    element.remove("solar_absorption_coeff");
+                }
+            }
+            if element["type"] == "BuildingElementOpaque"
+                && element.get("solar_absorption_coeff").is_none()
+            {
+                let message = match (existing, from_a_colour) {
+                    (false, true) => format!("Element '{name}' gives a colour, which only an existing building may use. A new build states solar_absorption_coeff."),
+                    (false, false) => format!("Element '{name}' needs its solar_absorption_coeff. There is no default."),
+                    (true, _) => format!("Element '{name}' needs its solar_absorption_coeff or its surface colour (Light, Intermediate or Dark). There is no default."),
+                };
+                errors.push(error(
+                    "E_EPC_SOLAR_ABSORPTION",
+                    format!("{path}/solar_absorption_coeff"),
+                    message,
+                ));
+            }
+        }
+    }
+}
+
+/// DESNZ's defaults for HEM:EPC inputs, each applied only when the input is absent and
+/// reported; values the converter works out from the model are reported too.
+/// - Battery: location outside, age 5 years, grid charging possible, no grid export
+///   (DESNZ-defined).
+/// - Wet distribution: no variable flow, and then a design flow rate of 0.06 L/s
+///   (DESNZ-defined).
+/// - Ventilation zone base height: 0 m for a house, bungalow or park home (DESNZ-defined);
+///   any other built form must state it.
+/// - Envelope area: always derived from the drawn elements, reported.
+/// - Window shading: a window with no drawn shading has none, derived from the drawing and
+///   reported.
+pub(crate) fn apply_desnz_defaults(
+    model: &mut Value,
+    errors: &mut Vec<ValidationError>,
+    notices: &mut Vec<SchemaOmission>,
+) {
+    for (supply, value) in model["EnergySupply"].as_object_mut().into_iter().flatten() {
+        let Some(battery) = value
+            .get_mut("ElectricBattery")
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        let mut used = Vec::new();
+        for (field, default) in [
+            ("battery_location", json!("outside")),
+            ("battery_age", json!(5)),
+            ("grid_charging_possible", json!(true)),
+            ("grid_exporting_possible", json!(false)),
+        ] {
+            if !battery.contains_key(field) {
+                used.push(format!("{field} {default}"));
+                battery.insert(field.into(), default);
+            }
+        }
+        if !used.is_empty() {
+            notices.push(notice(&json_pointer(&["EnergySupply", supply, "ElectricBattery"]), format!("The battery on '{supply}' does not state {}, so it uses DESNZ's defaults. State them on its row to change them.", used.join(", "))));
+        }
+    }
+    for (name, system) in model["SpaceHeatSystem"]
+        .as_object_mut()
+        .into_iter()
+        .flatten()
+    {
+        let Some(system) = system
+            .as_object_mut()
+            .filter(|s| s.get("type") == Some(&json!("WetDistribution")))
+        else {
+            continue;
+        };
+        let mut used = Vec::new();
+        if !system.contains_key("variable_flow") {
+            system.insert("variable_flow".into(), json!(false));
+            used.push("variable_flow false".to_string());
+        }
+        if system["variable_flow"] == false && !system.contains_key("design_flow_rate") {
+            system.insert("design_flow_rate".into(), json!(0.06));
+            used.push("design_flow_rate 0.06".to_string());
+        }
+        if !used.is_empty() {
+            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses DESNZ's defaults. State them on its Systems row to change them.", used.join(" and "))));
+        }
+    }
+    let mut unshaded = Vec::new();
+    for (zone, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
+        for (name, element) in zone_value["BuildingElement"]
+            .as_object_mut()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(element) = element.as_object_mut().filter(|e| {
+                e.get("type") == Some(&json!("BuildingElementTransparent"))
+                    && !e.contains_key("shading")
+            }) {
+                element.insert("shading".into(), json!([]));
+                unshaded.push(format!("{zone}/{name}"));
+            }
+        }
+    }
+    if !unshaded.is_empty() {
+        notices.push(notice(
+            "/Zone",
+            format!(
+                "No shading is drawn for {}, so they have none. Draw Window Shading to add it.",
+                unshaded.join(", ")
+            ),
+        ));
+    }
+    let build_type = model["General"]["build_type"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    if let Some(ventilation) = model
+        .get_mut("InfiltrationVentilation")
+        .and_then(Value::as_object_mut)
+    {
+        // Stated by a Metadata row or a Systems InfiltrationVentilation row: both are merged
+        // into the model before this runs, and the EPC template carries no value.
+        if ventilation
+            .get("ventilation_zone_base_height")
+            .is_none_or(Value::is_null)
+        {
+            let path = "/InfiltrationVentilation/ventilation_zone_base_height";
+            if [
+                "detached",
+                "semi_detached_end_terrace",
+                "mid_terrace",
+                "bungalow",
+                "park home",
+            ]
+            .contains(&build_type.as_str())
+            {
+                ventilation.insert("ventilation_zone_base_height".into(), json!(0));
+                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, DESNZ's default for a dwelling at ground level. Add the row to state it.")));
+            } else {
+                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: add the Metadata row Ventilation_ventilation_zone_base_height.", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
+            }
+        }
+        if let Some(area) = ventilation.get("Leaks").and_then(|l| l.get("env_area")) {
+            notices.push(notice("/InfiltrationVentilation/Leaks/env_area", format!("The envelope area {area} m² is derived from the drawn elements that separate the dwelling from outside, other dwellings and unheated spaces.")));
+        }
+    }
+}
+
+/// Each building element states every field its schema definition requires, named in one
+/// error per element: there is no template value. The definition is the target schema's own
+/// for the element's `type` (and `floor_type`, for ground floors).
+pub(crate) fn check_element_fields(
+    model: &Value,
+    schema: &Value,
+    errors: &mut Vec<ValidationError>,
+) {
+    let defs = schema["$defs"].as_object();
+    for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
+        for (name, element) in zone_value["BuildingElement"]
+            .as_object()
+            .into_iter()
+            .flatten()
+        {
+            let Some(element) = element.as_object() else {
+                continue;
+            };
+            let def = defs.into_iter().flatten().map(|(_, def)| def).find(|def| {
+                let properties = def["properties"].as_object();
+                properties.is_some_and(|properties| {
+                    properties.get("type").and_then(|t| t.get("const")) == element.get("type")
+                        && properties.iter().filter(|(key, _)| *key != "type").all(
+                            |(key, property)| {
+                                property
+                                    .get("const")
+                                    .is_none_or(|c| element.get(key).is_none_or(|v| v == c))
+                            },
+                        )
+                }) && !def
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .is_some_and(|r| r.iter().any(|f| f == "model_type"))
+            });
+            let Some(def) = def else {
+                continue;
+            };
+            let mut missing: Vec<String> = def["required"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter(|field| !element.contains_key(*field))
+                // A field another check already named has its own error.
+                .filter(|field| {
+                    let path = json_pointer(&["Zone", zone, "BuildingElement", name, field]);
+                    !errors.iter().any(|e| e.path == path)
+                })
+                .map(str::to_string)
+                .collect();
+            // Alternatives (`oneOf`/`anyOf` of `required` lists), at the top or in `allOf`.
+            let parts = std::iter::once(def).chain(def["allOf"].as_array().into_iter().flatten());
+            for part in parts {
+                for key in ["oneOf", "anyOf"] {
+                    let groups: Vec<Vec<&str>> = part[key]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|group| group["required"].as_array())
+                        .map(|r| r.iter().filter_map(Value::as_str).collect())
+                        .collect();
+                    if !groups.is_empty()
+                        && !groups
+                            .iter()
+                            .any(|g| g.iter().all(|f| element.contains_key(*f)))
+                    {
+                        missing.push(format!(
+                            "one of {}",
+                            groups
+                                .iter()
+                                .map(|g| g.join(" + "))
+                                .collect::<Vec<_>>()
+                                .join(" or ")
+                        ));
+                    }
+                }
+            }
+            if !missing.is_empty() {
+                let kind = element
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                errors.push(error(
+                    "E_EPC_REQUIRED_INPUT",
+                    json_pointer(&["Zone", zone, "BuildingElement", name]),
+                    format!(
+                        "Element '{name}' ({kind}) needs {}. HEM:EPC has no default for them.",
+                        missing.join(", ")
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+/// Each drawn primary pipe states every field the target schema's pipe definition requires,
+/// named in one error per pipe (the builder names its Water Pipework row): the EPC template
+/// has no pipe values.
+pub(crate) fn check_primary_pipework(
+    model: &Value,
+    schema: &Value,
+    errors: &mut Vec<ValidationError>,
+) {
+    let required: Vec<&str> = schema["$defs"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .find(|(name, _)| name.ends_with("input_output__input__WaterPipework"))
+        .and_then(|(_, def)| def["required"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    for (cylinder, source) in model["HotWaterSource"].as_object().into_iter().flatten() {
+        for (i, pipe) in source["primary_pipework"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            let missing: Vec<&str> = required
+                .iter()
+                .copied()
+                .filter(|field| pipe.get(*field).is_none_or(Value::is_null))
+                .collect();
+            if !missing.is_empty() {
+                errors.push(error(
+                    "E_EPC_REQUIRED_INPUT",
+                    json_pointer(&["HotWaterSource", cylinder, "primary_pipework", &i.to_string()]),
+                    format!("This primary pipe of cylinder '{cylinder}' needs {}. HEM:EPC has no default for them.", missing.join(", ")),
+                ));
+            }
         }
     }
 }
@@ -376,10 +755,10 @@ pub(crate) fn build_type_from_party_walls(
 /// One place EPC requires a HEM Database product: the model path, the discriminator values
 /// whose definition requires `product_id` (`None`: every object there), and the values of a
 /// field that select an inline definition with no product instead.
-struct SlotRule {
-    path: &'static [&'static str],
-    requires: Option<(&'static str, &'static [&'static str])>,
-    inline: Option<(&'static str, &'static [&'static str])>,
+pub(crate) struct SlotRule {
+    pub path: &'static [&'static str],
+    pub requires: Option<(&'static str, &'static [&'static str])>,
+    pub inline: Option<(&'static str, &'static [&'static str])>,
 }
 
 const fn slot(
@@ -397,7 +776,7 @@ const fn slot(
 /// lists `product_id`, at the model path that reaches it. `slot_table_matches_the_schema`
 /// fails when the vendored schema and this table differ. Not listed: `MixerShower`, whose
 /// inline definition stays valid (`ShowerMixerProduct` is an alternative, not a requirement).
-const PRODUCT_SLOTS: &[SlotRule] = &[
+pub(crate) const PRODUCT_SLOTS: &[SlotRule] = &[
     slot(
         &["HeatSourceWet", "*"],
         Some((
@@ -481,7 +860,7 @@ const PRODUCT_SLOTS: &[SlotRule] = &[
     ),
 ];
 
-fn collect<'a>(
+pub(crate) fn collect<'a>(
     value: &'a mut Value,
     pattern: &[&str],
     path: Vec<String>,
@@ -509,83 +888,6 @@ fn collect<'a>(
         next.push(key);
         collect(child, rest, next, out);
     }
-}
-
-/// Product seam: each system EPC requires a product for takes the ID the host supplied for
-/// its key, else keeps an authored `product_id`. A system with neither, and a supplied key no
-/// system has, are errors; no default and no ID is invented here. `keys` gives the stable key
-/// of a model path whose last segment is an array index (a Wet Emitters row name); every
-/// other slot's key is its model path.
-pub(crate) fn apply_product_references(
-    model: &mut Value,
-    references: &ProductReferences,
-    keys: &BTreeMap<String, String>,
-    errors: &mut Vec<ValidationError>,
-) -> Vec<ProductSlot> {
-    let mut slots = Vec::new();
-    for rule in PRODUCT_SLOTS {
-        let mut found = Vec::new();
-        collect(model, rule.path, Vec::new(), &mut found);
-        for (segments, system) in found {
-            let Some(object) = system.as_object_mut() else {
-                continue;
-            };
-            let field = |field: &str| {
-                object
-                    .get(field)
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-            };
-            if rule
-                .requires
-                .is_some_and(|(f, values)| !values.contains(&field(f)))
-                || rule
-                    .inline
-                    .is_some_and(|(f, values)| values.contains(&field(f)))
-            {
-                continue;
-            }
-            let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
-            let path = json_pointer(&segments);
-            let key = keys.get(&path).cloned().unwrap_or_else(|| path.clone());
-            let system_type = ["type", "wet_emitter_type", "vent_type"]
-                .iter()
-                .map(|f| field(f))
-                .find(|v| !v.is_empty())
-                .unwrap_or("system")
-                .to_string();
-            let product_id = references
-                .get(&key)
-                .copied()
-                .or_else(|| object.get("product_id").and_then(Value::as_u64));
-            match product_id {
-                Some(id) => {
-                    object.insert("product_id".into(), json!(id));
-                }
-                None => errors.push(error(
-                    "E_PRODUCT_REQUIRED",
-                    path.clone(),
-                    format!("'{}' ({system_type}) needs a HEM Database product. Pick its product; the converter never invents a product ID.", key.rsplit('/').next().unwrap_or_default()),
-                )),
-            }
-            slots.push(ProductSlot {
-                key,
-                path,
-                system_type,
-                product_id,
-            });
-        }
-    }
-    for key in references.keys() {
-        if !slots.iter().any(|slot| &slot.key == key) {
-            errors.push(error(
-                "E_PRODUCT_REFERENCE_UNMATCHED",
-                key.clone(),
-                format!("A product was supplied for '{key}', but no system there needs one. Remove it or move it to the system it belongs to."),
-            ));
-        }
-    }
-    slots
 }
 
 #[cfg(test)]
@@ -675,61 +977,6 @@ mod tests {
         assert!(build_type_from_party_walls(&walls_only, &allowed)
             .unwrap_err()
             .contains("plan line"));
-    }
-
-    #[test]
-    fn product_slots_fill_from_the_seam_or_fail() {
-        let mut model = json!({
-            "HeatSourceWet": {"hp": {"type": "HeatPump", "EnergySupply": "mains elec"}},
-            "SpaceHeatSystem": {"rads": {"type": "WetDistribution", "emitters": [
-                {"wet_emitter_type": "radiator", "length": 1.0},
-                {"wet_emitter_type": "radiator", "length": 2.0}
-            ]}},
-            "InfiltrationVentilation": {"MechanicalVentilation": {
-                "cmev": {"vent_type": "Centralised continuous MEV"},
-                "imev": {"vent_type": "Intermittent MEV"}
-            }}
-        });
-        // Emitters are keyed by row name, so reordering them cannot move a product.
-        let keys = BTreeMap::from([
-            (
-                "/SpaceHeatSystem/rads/emitters/0".into(),
-                "/SpaceHeatSystem/rads/emitters/Hall".into(),
-            ),
-            (
-                "/SpaceHeatSystem/rads/emitters/1".into(),
-                "/SpaceHeatSystem/rads/emitters/Bed".into(),
-            ),
-        ]);
-        let references = ProductReferences::from([
-            ("/HeatSourceWet/hp".into(), 693001),
-            ("/SpaceHeatSystem/rads/emitters/Bed".into(), 650000),
-            ("/HeatSourceWet/gone".into(), 1),
-        ]);
-        let mut errors = Vec::new();
-        let slots = apply_product_references(&mut model, &references, &keys, &mut errors);
-        assert_eq!(model["HeatSourceWet"]["hp"]["product_id"], 693001);
-        assert_eq!(
-            model["SpaceHeatSystem"]["rads"]["emitters"][1]["product_id"],
-            650000
-        );
-        let found: Vec<_> = errors
-            .iter()
-            .map(|e| (e.code.as_str(), e.path.as_str()))
-            .collect();
-        assert_eq!(
-            found,
-            [
-                ("E_PRODUCT_REQUIRED", "/SpaceHeatSystem/rads/emitters/0"),
-                (
-                    "E_PRODUCT_REQUIRED",
-                    "/InfiltrationVentilation/MechanicalVentilation/cmev"
-                ),
-                ("E_PRODUCT_REFERENCE_UNMATCHED", "/HeatSourceWet/gone"),
-            ]
-        );
-        assert!(errors[0].message.contains("'Hall' (radiator)"));
-        assert_eq!(slots.len(), 4);
     }
 
     /// Paths of the full-input definitions that require `product_id`, with the `type` (or
@@ -835,5 +1082,43 @@ mod tests {
             })
             .collect();
         assert_eq!(table, schema);
+    }
+
+    #[test]
+    fn a_party_wall_states_a_lining_type_exactly_when_its_cavity_takes_one() {
+        let wall = |cavity: &str, lining: Option<&str>| {
+            let mut wall =
+                json!({"type": "BuildingElementPartyWall", "party_wall_cavity_type": cavity});
+            if let Some(lining) = lining {
+                wall["party_wall_lining_type"] = json!(lining);
+            }
+            wall
+        };
+        let model = json!({"Zone": {"z": {"BuildingElement": {
+            "ok sealed": wall("filled_sealed", None),
+            "ok lined": wall("unfilled_sealed", Some("dry_lined")),
+            "extra": wall("filled_sealed", Some("dry_lined")),
+            "missing": wall("filled_unsealed", None),
+            "not a party wall": {"type": "BuildingElementOpaque", "party_wall_lining_type": "dry_lined"}
+        }}}});
+        let mut errors = Vec::new();
+        check_party_wall_lining(&model, &mut errors);
+        let found: Vec<_> = errors
+            .iter()
+            .map(|e| (e.path.as_str(), e.message.split(',').next().unwrap()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    "/Zone/z/BuildingElement/extra/party_wall_lining_type",
+                    "Party wall 'extra' states party_wall_lining_type \"dry_lined\""
+                ),
+                (
+                    "/Zone/z/BuildingElement/missing/party_wall_lining_type",
+                    "Party wall 'missing' has cavity type filled_unsealed"
+                ),
+            ]
+        );
     }
 }

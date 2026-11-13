@@ -1,0 +1,7 @@
+ID,productID,boilerID,fuel,condensing,mountingPosition,flueType,boilerLocation,fan,ignition,pilotLightPower,gainsFraction,burner,powerTopRange,powerBottomRange,efficiencyFullLoad,efficiencyPartLoad,erPSpaceEfficiencyClass,erPSpaceEfficiencyPerc,auxElecFull,auxElecPart,auxElecStandby,compatibleControls,modulationLoad,electricityCircPump,heatLossStandby,dataType
+100001,690205,,mains_gas,condensing,wall,room-sealed,internal,fan,no,NULL,NULL,variable,24,24,0.873,0.954,A,93,0.15,0.0194,0.009,0000,0.3,0.013,80,illustrative_conservative
+100002,690206,,mains_gas,Non-condensing,wall,room-sealed,internal,no fan,no,NULL,NULL,on-off,16.9,14.7,0.789,0.776,NULL,NULL,0.15,0.02,0.009,0000,0.3,0.013,NULL,illustrative_conservative
+100003,690207,,LPG_bulk,Non-condensing,wall,room-sealed,internal,fan,no,NULL,NULL,on-off,21.4,19,0.804,0.798,NULL,NULL,0.16,0.02,0.006,0000,0.3,0.013,NULL,illustrative_conservative
+100004,690208,,LPG_bulk,condensing,wall,room-sealed,internal,fan,no,NULL,NULL,variable,24.5,24.2,0.895,0.968,A,92,0.155,0.02,0.01,0000,0.3,0.013,NULL,illustrative_conservative
+100005,690209,,heating_oil,Non-condensing,floor,room-sealed,internal,fan,no,NULL,NULL,on-off,26.37,20.5,0.825,0.837,NULL,NULL,0.15,0.02,0.009,0000,0.3,0.013,NULL,illustrative_conservative
+100006,690210,,heating_oil,condensing,floor,room-sealed,internal,fan,no,NULL,NULL,variable,26,20.5,0.895,0.926,A,92,0.23,0.02,0.009,0000,0.3,0.013,NULL,illustrative_conservative

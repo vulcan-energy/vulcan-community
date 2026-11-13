@@ -1,0 +1,13 @@
+ID,Gradient,max_outdoor_temp,min_flow_temp,min_outdoor_temp,weather_comp_a,weather_comp_b,weather_comp_c,dataType
+1,0.4,20,20,-15,-0.0025,-0.330,28.281,illustrative_aggregated
+2,0.6,20,20,-15,-0.0037,-0.495,32.421,illustrative_aggregated
+3,0.8,20,20,-15,-0.0049,-0.660,36.561,illustrative_aggregated
+4,1,20,20,-15,-0.0061,-0.825,40.701,illustrative_aggregated
+5,1.2,20,20,-15,-0.0074,-0.990,44.842,illustrative_aggregated
+6,1.5,20,20,-15,-0.0092,-1.2375,51.052,illustrative_aggregated
+7,1.8,20,20,-15,-0.0110,-1.485,57.262,illustrative_aggregated
+8,2.1,20,20,-15,-0.0129,-1.7325,63.473,illustrative_aggregated
+9,2.5,20,20,-15,-0.0153,-2.0625,71.753,illustrative_aggregated
+10,3,20,20,-15,-0.0184,-2.475,82.104,illustrative_aggregated
+11,3.5,20,20,-15,-0.0214,-2.8875,92.455,illustrative_aggregated
+12,4,20,20,-15,-0.0245,-3.300,102.805,illustrative_aggregated

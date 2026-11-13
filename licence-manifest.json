@@ -118,12 +118,12 @@
     {
       "path": "data/defaults/defaults_template_epc.json",
       "source_path": "data/defaults/defaults_template_epc.json",
-      "source_sha256": "d17ea4e7d0427b1905e0b58021e9686f51f5d69979281400bc0e950617923504",
+      "source_sha256": "74b9ba82d181c9a53651aeb910854ed4aa56ea9ca12716acce6b9fdb5e62b421",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
-      "provenance": "data/defaults/defaults_template.json plus the HEM:EPC fields its schema adds; the coil rates follow the DESNZ Orchestrator demo DESN-H-End-02-HP-MVHR",
-      "required_action": "Preserve this exact reviewed hash; it may differ from data/defaults/defaults_template.json only by HEM:EPC fields."
+      "provenance": "data/defaults/defaults_template.json plus the HEM:EPC fields its schema adds, minus the values HEM:EPC requires the user to state (element values beyond the type selectors, wet distribution and ventilation system values, the battery, primary pipework, export capability, cross ventilation)",
+      "required_action": "Preserve this exact reviewed hash; it may differ from data/defaults/defaults_template.json only by HEM:EPC fields and the removed user inputs."
     },
     {
       "path": "data/schemas/core-input.schema.json",
@@ -153,6 +153,16 @@
       "source_revision": "993463233ad0c416e83c4de3b84889280d3c4619",
       "provenance": "Exact copy of the HEM:EPC Orchestrator input schema at tag 0.13.2a0 (the DESNZ release set of 12 November 2026)",
       "required_action": "Pin the exact upstream revision and preserve its MIT Crown Copyright notice (LICENSES/MIT-HEM-EPC-Orchestrator.txt)."
+    },
+    {
+      "path": "data/hem_database/1.0.0a10/**",
+      "source_path": "data/hem_database/1.0.0a10/**",
+      "license": "MIT",
+      "rights_status": "approved",
+      "source": "HEM Database client 1.0.0a10, data/*.csv (70 files)",
+      "source_revision": "9eeb026dd52a612197b5552ca113d8121fa72679",
+      "provenance": "Exact copies of the HEM Database client's illustrative product CSVs at source_revision, the product data the HEM:EPC 0.13.2 target pins (bundleDataSha256 d0acf4ebf050e80f3dc576ffbb1295ebeb1176e9fd4a9ec1d151a9e8f4df7457)",
+      "required_action": "Keep the directory byte-identical to the pinned product data and preserve its MIT Crown Copyright notice (LICENSES/MIT-HEM-Database-Client.txt)."
     },
     {
       "path": "data/junction_psi_defaults/table_3_7_default_psi.csv",
@@ -313,6 +323,15 @@
       "source": "HEM:EPC Orchestrator 0.13.2a0, LICENCE.txt",
       "source_revision": "993463233ad0c416e83c4de3b84889280d3c4619",
       "provenance": "Exact copy of the upstream LICENCE.txt at source_revision; reproduced for data/schemas/hem_epc_orchestrator_input.schema.json"
+    },
+    {
+      "path": "LICENSES/MIT-HEM-Database-Client.txt",
+      "source_path": "LICENSES/MIT-HEM-Database-Client.txt",
+      "license": "MIT",
+      "rights_status": "approved",
+      "source": "HEM Database client 1.0.0a10, LICENCE.txt",
+      "source_revision": "9eeb026dd52a612197b5552ca113d8121fa72679",
+      "provenance": "Exact copy of the upstream LICENCE.txt at source_revision; reproduced for data/hem_database/1.0.0a10/"
     },
     {
       "path": "LICENSES/OGL-UK-3.0.txt",

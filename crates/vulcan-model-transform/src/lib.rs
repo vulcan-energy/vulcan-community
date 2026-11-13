@@ -15,6 +15,7 @@ pub mod parser {
     pub use vulcan_csv_codec::parser::*;
 }
 mod epc_mappings;
+pub mod epc_products;
 pub mod finalization;
 pub mod preflight_diagnostics;
 mod schema_validation;
@@ -58,11 +59,10 @@ impl ModelProfile {
         }
     }
 
-    /// CSV zones are consolidated into the first.
-    /// FHS: the input schema allows one zone. EPC differs: `Zone` is a map and
-    /// `ZoneProcessingOrder` orders several heated zones (wrapper `models/input.py`),
-    /// but per-zone living/rest areas and the processing order have no Vulcan source
-    /// yet, so EPC consolidates as FHS does until they do.
+    /// CSV zones are consolidated into the first. FHS: the input schema allows one zone.
+    /// EPC: true, but nothing is ever merged: several zones are rejected before consolidation
+    /// (`rejects_several_zones`), so with its one zone this only sends every wet emitter to
+    /// that zone, as for FHS.
     pub(crate) fn consolidates_to_single_zone(self) -> bool {
         match self {
             Self::Core => false,
@@ -70,9 +70,10 @@ impl ModelProfile {
         }
     }
 
-    /// Merging several CSV zones changes results, so it is reported. FHS: the schema allows
-    /// one zone, so merging is the input's meaning. EPC differs: it accepts several zones.
-    pub(crate) fn reports_zone_consolidation(self) -> bool {
+    /// Several CSV zones are an error naming them, never merged. EPC: `Zone` is a map, but a
+    /// model with more than one heated zone needs `ZoneProcessingOrder` (EPC wrapper
+    /// `models/input.py`), which has no Vulcan source yet.
+    pub(crate) fn rejects_several_zones(self) -> bool {
         match self {
             Self::Core | Self::Fhs => false,
             Self::Epc => true,
@@ -218,10 +219,63 @@ impl ModelProfile {
         }
     }
 
-    /// Systems reference HEM Database products (`product_id`), filled through
-    /// `TransformRequest::product_references`. EPC differs: 46 schema definitions require
+    /// Systems reference HEM Database products (`product_id`), resolved from
+    /// `TransformRequest::product_data` (`epc_products`). EPC differs: 46 schema definitions require
     /// `product_id`; the Orchestrator substitutes each product record before the wrapper runs.
     pub(crate) fn references_products(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// Metadata rows the model must state: an absent row is an error, never the template's
+    /// value. EPC differs: DESNZ marks these inputs required.
+    pub(crate) fn required_metadata_rows(self) -> &'static [&'static str] {
+        match self {
+            Self::Core | Self::Fhs => &[],
+            Self::Epc => &[
+                "PartGcompliance",
+                "HasElectricitySmartMeter",
+                "NumberOfBedrooms",
+                "NumberOfWetRooms",
+                "HeatingControlType",
+                "IsExistingBuilding",
+                "ColdWaterSource",
+                "Ventilation_cross_vent_possible",
+                "Ventilation_altitude",
+                "Ventilation_shield_class",
+                "Ventilation_terrain_class",
+                "Ventilation_noise_nuisance",
+                "AirPermeability_test_pressure",
+                "AirPermeability_test_result",
+                "AirPermeability_ventilation_zone_height",
+            ],
+        }
+    }
+
+    /// A zone row may state `frac_convective_heating`. EPC differs: the wrapper's zone model
+    /// requires it for a heated zone.
+    pub(crate) fn states_zone_convective_fraction(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// A battery keeps an authored `grid_charging_possible`. FHS and Core strip it as a legacy
+    /// field their schemas lack. EPC differs: its battery requires it.
+    pub(crate) fn keeps_battery_grid_charging(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// A party wall states `party_wall_lining_type` exactly when its cavity type takes one.
+    /// EPC differs: HEM Core 2.0.0a4 `BuildingElementPartyWall.validate_party_wall_lining_type`
+    /// (pydantic) rejects a lining type on any other cavity, which the JSON schema allows.
+    pub(crate) fn checks_party_wall_lining(self) -> bool {
         match self {
             Self::Core | Self::Fhs => false,
             Self::Epc => true,
@@ -321,27 +375,39 @@ pub struct TransformRequest {
     #[serde(default)]
     pub conversion_profile: ConversionProfile,
     pub version_metadata: VersionMetadata,
-    /// Product seam: HEM Database product IDs keyed by `ProductSlot::key`. A product picker
-    /// or a default-product resolver fills it; the transform never invents an ID. A key no
-    /// system has is an error. Ignored unless the profile references products.
-    #[serde(default, skip_serializing_if = "ProductReferences::is_empty")]
-    pub product_references: ProductReferences,
+    /// The HEM Database product CSVs the target pins, keyed by file name (for example
+    /// `ProductIdentification.csv`). The host passes its target's verified bytes; a profile
+    /// that references products fails without them. Ignored by every other profile.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub product_data: epc_products::ProductData,
 }
 
-pub type ProductReferences = std::collections::BTreeMap<String, u64>;
+/// Where a slot's product came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductSource {
+    /// Picked by the user: on the element, or by a model setting.
+    Product,
+    /// Chosen by a rule on this conversion; never stored on the element.
+    Default,
+}
 
 /// A system that needs a HEM Database product, as the converted model holds it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProductSlot {
-    /// The key for `TransformRequest::product_references`: the model path, with an emitter's
-    /// array index replaced by its Wet Emitters row name so reordering rows moves nothing.
-    pub key: String,
     /// Model path of the system object in the converted model.
     pub path: String,
-    /// The system's own type (`type`, or `wet_emitter_type` for an emitter).
+    /// The system's own type (`type`, `wet_emitter_type` or `vent_type`).
     pub system_type: String,
     /// The product the slot carries, if any. None means the model is invalid.
     pub product_id: Option<u64>,
+    pub source: ProductSource,
+    /// The product's brand, model name and qualifier.
+    pub label: Option<String>,
+    /// How the product was chosen, or what the user must pick.
+    pub rule: String,
+    /// The HEM Database technology types this slot accepts.
+    pub technology_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -416,7 +482,15 @@ pub fn transform_geometry_csv(
     )
     .map_err(|error| TransformError::Schema(error.to_string()))?;
     builder.set_conversion_profile(request.conversion_profile);
-    builder.set_product_references(request.product_references.clone());
+    if request.profile.references_products() {
+        if request.product_data.is_empty() {
+            return Err(TransformError::InvalidRequest("This target references HEM Database products, but the request has no product data. Prepare the model through its pinned target.".into()));
+        }
+        builder.set_product_database(
+            epc_products::ProductDatabase::parse(&request.product_data)
+                .map_err(TransformError::InvalidRequest)?,
+        );
+    }
     let model = builder
         .build_json(&csv_data)
         .map_err(TransformError::Build)?;

@@ -1,0 +1,2 @@
+ID,productID,type,original_flowrate,inuse_factor,flowrate,allow_low_flowrate,dataType
+2,700002,AirPoweredShower,8,1,8,TRUE,illustrative_conservative

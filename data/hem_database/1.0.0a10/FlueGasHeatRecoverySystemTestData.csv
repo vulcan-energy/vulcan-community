@@ -1,0 +1,2 @@
+ID,parentID,productID,h_loss,h_charge_sh,h_charge_hw,h_discharge,temp_flue,temp_diff_approach,rms_residual_cooling,rms_residual_charging,rms_residual_discharge,passes_rms_criterion_cooling,passes_rms_criterion_charging,passes_rms_criterion_discharge,temp_diff_approach_derived_from_data,temp_diff_approach_tail_temp_store_range,sensitivity_band_perturbation,sensitivity_band_h_charge_hw_min,sensitivity_band_h_charge_hw_max,sensitivity_band_h_discharge_min,sensitivity_band_h_discharge_max
+90100,90030,70030,1.9992050837,4.6920051,30.47238,343.40297827,40.904671536,5,,,,,,,,,,,,,
