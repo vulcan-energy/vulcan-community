@@ -714,7 +714,7 @@ function applyContextShadingCreationDerivations(
   );
   updateRecord.start_angle = roundToTwoDecimals(angles.start_angle);
   updateRecord.end_angle = roundToTwoDecimals(angles.end_angle);
-  updateRecord.distance = calculateContextShadingDistanceFromCoordinates(draft, parent);
+  updateRecord.distance = calculateContextShadingDistanceFromCoordinates(draft, parent, Object.values(state.elementsById));
 }
 
 function applyNewContextShadingElementDerivations(
@@ -751,7 +751,7 @@ function applyNewContextShadingElementDerivations(
     contextElement.end_angle = roundToTwoDecimals(angles.end_angle);
   }
   if (typeof contextElement.distance !== 'number' || !Number.isFinite(contextElement.distance) || contextElement.distance <= 0) {
-    contextElement.distance = calculateContextShadingDistanceFromCoordinates(contextElement, parent);
+    contextElement.distance = calculateContextShadingDistanceFromCoordinates(contextElement, parent, allElements);
   }
 }
 
@@ -7551,9 +7551,9 @@ const createGeometryState = (
     return calculateContextShadingAngularRangeFromCoordinates(contextShading, parentElement, globalOffsetDeg);
   },
 
-  // Calculate ContextShading distance from center to parent center
+  // DESNZ-defined ContextShading distance (FHS guidance 2.3.1) from the drawing
   calculateContextShadingDistance: (contextShading: ContextShading, parentElement: Element) => {
-    return calculateContextShadingDistanceFromCoordinates(contextShading, parentElement);
+    return calculateContextShadingDistanceFromCoordinates(contextShading, parentElement, Object.values(get().elementsById));
   },
 
   syncDevelopmentContextShading: ({ projectId, activeStem, contextModels }) => {
