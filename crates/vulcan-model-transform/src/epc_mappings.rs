@@ -295,7 +295,7 @@ pub(crate) fn build_type_from_party_walls(
     for row in csv.values().flatten() {
         let points = plan_points(row);
         let ty = row.get("Type").and_then(Value::as_str).unwrap_or_default();
-        if points.len() == 2 && matches!(ty, "BuildingElementOpaque" | "BuildingElementPartyWall") {
+        if points.len() == 2 && ty == "BuildingElementOpaque" {
             midpoints.push([
                 (points[0][0] + points[1][0]) / 2.0,
                 (points[0][1] + points[1][1]) / 2.0,
@@ -330,6 +330,11 @@ pub(crate) fn build_type_from_party_walls(
         walls.push((
             [-dy / length, dx / length],
             [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0],
+        ));
+    }
+    if midpoints.is_empty() && !walls.is_empty() {
+        return Err(state(
+            "No wall has a plan line, so the sides the party walls are on cannot be found.".into(),
         ));
     }
     let n = midpoints.len().max(1) as f64;
@@ -662,6 +667,14 @@ mod tests {
             .unwrap_err()
             .contains("bungalow"));
         assert!(build_type_from_party_walls(&rows(vec!["1,2,0"], "2"), &allowed).is_err());
+        // No exposed wall gives a centre, so the sides cannot be found.
+        let walls_only = Rows::from([(
+            "Non-Exposed Elements".into(),
+            vec![party("-25.7,-6.47,0|-25.7,2.43,0")],
+        )]);
+        assert!(build_type_from_party_walls(&walls_only, &allowed)
+            .unwrap_err()
+            .contains("plan line"));
     }
 
     #[test]

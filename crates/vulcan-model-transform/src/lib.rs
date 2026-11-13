@@ -432,6 +432,18 @@ pub fn transform_geometry_csv(
     let validation_model = clone_for_hem_validation(&model);
     let mut schema_errors = finalized.validation.errors;
     builder.name_csv_rows(&mut schema_errors);
+    // An EPC mapping error (`E_EPC_*`) explains a value it left out on purpose; the schema's
+    // "required" error for the same field would only repeat it. Other converter errors keep
+    // their schema errors, so FHS and Core validation is unchanged.
+    schema_errors.retain(|schema_error| {
+        let missing = (schema_error.keyword.as_deref() == Some("required"))
+            .then(|| schema_error.message.split('"').nth(1))
+            .flatten()
+            .map(|field| json_pointer_child(&schema_error.path, field));
+        !errors
+            .iter()
+            .any(|error| error.code.starts_with("E_EPC_") && Some(&error.path) == missing.as_ref())
+    });
     errors.extend(schema_errors);
     errors.extend(validate_target_input(
         &model,
@@ -496,6 +508,10 @@ pub fn validate_target_input(
         }
     }
     errors
+}
+
+fn json_pointer_child(path: &str, key: &str) -> String {
+    format!("{path}{}", json_pointer(&[key]))
 }
 
 /// RFC 6901 pointer from raw segments (names may contain '/' or '~').

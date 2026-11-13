@@ -2070,16 +2070,24 @@ impl JSONBuilder {
                         notices.push(crate::finalization::SchemaOmission {
                             code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
                             path: "/General/build_type".into(),
-                            message: format!("The Metadata section has no General_build_type row, so the model uses {build_type}, derived from party walls on {sides} side(s) of the dwelling. Add the row to state it, for example for a park home."),
+                            message: format!("The Metadata section states no EPC built form ('house' or no General_build_type row), so the model uses {build_type}, derived from party walls on {sides} side(s) of the dwelling. Add the row to state it, for example for a park home."),
                         });
                     }
-                    Err(message) => errors.push(ValidationError {
-                        code: "E_EPC_BUILD_TYPE".into(),
-                        path: "/General/build_type".into(),
-                        message,
-                        schema_path: None,
-                        keyword: None,
-                    }),
+                    Err(message) => {
+                        // The template's FHS value would add a second, misleading error.
+                        if let Some(general) =
+                            result.get_mut("General").and_then(Value::as_object_mut)
+                        {
+                            general.remove("build_type");
+                        }
+                        errors.push(ValidationError {
+                            code: "E_EPC_BUILD_TYPE".into(),
+                            path: "/General/build_type".into(),
+                            message,
+                            schema_path: None,
+                            keyword: None,
+                        })
+                    }
                 }
             }
         }
