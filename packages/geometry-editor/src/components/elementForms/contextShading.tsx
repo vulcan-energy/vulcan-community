@@ -58,6 +58,8 @@ export interface ContextShadingFormState {
     globalOrientationOffset?: number,
   ) => { start_angle: number; end_angle: number };
   calculateContextShadingDistance: (contextShading: ContextShading, parent: Element) => number;
+  /** Rows in stated distant shading quadrants only, which the conversion does not use. */
+  unusedNames: readonly string[] | undefined;
 }
 
 function useFormState(ctx: ElementFormStateCtx): ContextShadingFormState {
@@ -67,6 +69,7 @@ function useFormState(ctx: ElementFormStateCtx): ContextShadingFormState {
   const calculateContextShadingAngles = useGeometryStore((s) => s.calculateContextShadingAngles);
   const calculateShadingAngularRange = useGeometryStore((s) => s.calculateShadingAngularRange);
   const calculateContextShadingDistance = useGeometryStore((s) => s.calculateContextShadingDistance);
+  const unusedNames = useGeometryStore((s) => s.targetValidation?.distantShading?.unused_objects);
 
   return {
     contextShadingType,
@@ -80,6 +83,7 @@ function useFormState(ctx: ElementFormStateCtx): ContextShadingFormState {
     calculateContextShadingAngles,
     calculateShadingAngularRange,
     calculateContextShadingDistance,
+    unusedNames,
   };
 }
 
@@ -131,6 +135,7 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
       calculateContextShadingAngles,
       calculateShadingAngularRange,
       calculateContextShadingDistance,
+      unusedNames,
     } = state;
     const {
       elementType,
@@ -147,8 +152,14 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
       getGlobalOrientationOffset,
     } = ctx;
 
+    const selectedName = selection?.id ? getElementById(selection.id)?.name : undefined;
     return (
       <>
+        {selectedName && unusedNames?.includes(selectedName) && (
+          <div className="element-editor-note" role="note">
+            This quadrant&apos;s band is stated, so this object doesn&apos;t change it. Reset the quadrant to use the drawing.
+          </div>
+        )}
         {renderFieldLabel('Shading Type:', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs(['shadingType', 'shading_type'])}>
           <StandardDropdown

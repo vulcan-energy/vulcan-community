@@ -475,6 +475,8 @@ export interface ValidationContext {
   complianceSettings?: GlobalSettingsShape;
   numberOfBedrooms?: number;
   calculateContextShadingDistance?: (contextElement: ContextShading, parent: Element) => number;
+  /** Context Shading names the target's conversion does not use (wholly in stated quadrants). */
+  unusedContextShading?: readonly string[];
   defaultsLoading?: boolean;
   /** Defaults resolver owned by the current editor document. */
   defaultsLookup?: DefaultsLookup;
@@ -1843,11 +1845,14 @@ export const validateElementCore = (
       if (contextElement.shading_type !== 'obstacle' && contextElement.shading_type !== 'overhang') {
         issues.push(geo('Shading Type is required', 'shading_type'));
       }
-      if (typeof contextElement.height !== 'number' || !Number.isFinite(contextElement.height) || contextElement.height <= 0) {
+      // Wholly in stated distant shading quadrants it changes nothing, so its size is not checked.
+      const unused = context.unusedContextShading?.includes(contextElement.name) ?? false;
+      if (!unused && (typeof contextElement.height !== 'number' || !Number.isFinite(contextElement.height) || contextElement.height <= 0)) {
         issues.push(geo('Height must be greater than 0', 'height'));
       }
       // The converter leaves out a row with a blank angle or distance (E027).
       for (const [field, label] of [['start_angle', 'Start Angle'], ['end_angle', 'End Angle'], ['distance', 'Distance']] as const) {
+        if (unused && field === 'distance') continue;
         if (!Number.isFinite(contextElement[field])) issues.push(geo(`${label} is required`, field));
       }
       // Distance is derived from geometry - calculate it rather than checking stored value
@@ -1855,13 +1860,13 @@ export const validateElementCore = (
         const parent = Object.values(elementsById).find(e => e.name === contextElement.parent_element);
         if (parent && contextElement.coordinates && parent.coordinates && context.calculateContextShadingDistance) {
           const derivedDistance = context.calculateContextShadingDistance(contextElement, parent);
-          if (!(derivedDistance > 0)) {
+          if (!(derivedDistance > 0) && !unused) {
             issues.push(geo(`Distance is ${derivedDistance} m: the object is level with or behind the facade of the dwelling's closest external wall (for example beside it, or beyond a party wall), not in front of it. HEM needs a distance above 0. Vulcan measures it at right angles from the nearest external wall to the obstacle's nearest face.`, 'distance'));
           }
           // A warning, never blocking: before the thickness rule the distance ran from the internal line.
           // A thickness the model gives (wall layers, floor, ground floor) needs no message.
           const thickness = contextShadingDistanceDetails(contextElement, parent, Object.values(elementsById))?.thickness;
-          if (thickness?.source === 'none') {
+          if (thickness?.source === 'none' && !unused) {
             warnings.push(geo('No wall thickness in the model (no construction layers on the closest external wall, no thickness_walls on the floor or the ground floor), so the distance is measured from the internal wall line.', 'distance'));
           }
         } else {

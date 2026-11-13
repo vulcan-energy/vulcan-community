@@ -9,6 +9,8 @@ import type { Element, Floor } from '../../geometry/types';
 import { createGeometryStore } from '../../stores/geometryStore';
 import { unavailableGeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import {
+  closeShadingKindOf,
+  closeShadingOptions,
   buildAddWindowOpeningPatch,
   windowOpeningBulkEditBlocked,
   windowPartsCopyBlocked,
@@ -348,5 +350,20 @@ describe('3D window overlay', () => {
       currentFloorZ: 0,
     }) as unknown as Array<{ windowVentilation?: unknown }>;
     expect(primitive.windowVentilation).toMatchObject({ free_area_height: 0.5, max_window_open_area: 0.4 });
+  });
+});
+
+describe('window close shading', () => {
+  it('a drawn overhang picks the canopy band by its size; the kind stays a choice', () => {
+    const values = (depth?: number) => closeShadingOptions('overhang', depth).map((option) => option.value);
+    expect(values(0.6)).toEqual(['common roof', 'common open porch', 'small fixed canopy', 'balcony']);
+    expect(values(2)).toEqual(['common roof', 'common open porch', 'large canopy', 'balcony']);
+    expect(values()).toEqual(['common roof', 'common open porch', 'small fixed canopy', 'large canopy', 'balcony']);
+  });
+
+  it('maps drawn Window Shading types to the window field beside them', () => {
+    expect(closeShadingKindOf('sidefinleft')).toBe('side_fin_left');
+    expect(closeShadingKindOf('')).toBe('obstacle');
+    expect(closeShadingKindOf('reveal')).toBeUndefined();
   });
 });

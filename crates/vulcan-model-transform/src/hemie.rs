@@ -24,6 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod parts;
 #[path = "hemie_shading.rs"]
 mod shading;
+pub use shading::{HemieQuadrant, HemieShading};
 
 type Row = BTreeMap<String, Value>;
 type Rows = BTreeMap<String, Vec<Row>>;
@@ -890,7 +891,7 @@ pub(crate) fn map_existing_building(
     schema: &Value,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
-) {
+) -> Option<shading::HemieShading> {
     let snapshot = model.clone();
     let mut ctx = Ctx {
         settings: Settings {
@@ -910,17 +911,12 @@ pub(crate) fn map_existing_building(
     notices.append(&mut ctx.notices);
     if !ctx.errors.is_empty() || converted.is_none() {
         errors.append(&mut ctx.errors);
-        return;
+        return None;
     }
     let (mut geometry, ventilation) = converted.expect("checked");
     systems::mechanical_ventilation(&snapshot, csv, schema, &mut geometry, errors, notices);
-    match shading::distant(&ctx.settings, &geometry, notices) {
-        Ok(segments) => model["ExternalConditions"]["shading_segments"] = segments,
-        Err(e) => {
-            errors.push(e);
-            return;
-        }
-    }
+    let (segments, shading) = shading::distant(&ctx.settings, &geometry, errors, notices)?;
+    model["ExternalConditions"]["shading_segments"] = segments;
     let documented: Vec<String> = std::mem::take(&mut ctx.constructions.documented)
         .into_iter()
         .collect();
@@ -942,6 +938,7 @@ pub(crate) fn map_existing_building(
     model["InfiltrationVentilation"] = ventilation;
     // DESNZ-defined: with HEMIE Geometry, systems take their HEMIE form, which has no zone.
     systems::map_systems(model, schema, errors, notices);
+    Some(shading)
 }
 
 fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {

@@ -3534,9 +3534,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       selectionScope: contribution?.selectionScope?.() ?? '',
       select: (id) => selectCanvasDecoration(contributionId, id),
       clearSelection: () => setSelectedCanvasDecoration(null),
+      drawElementType,
     };
   }, [canvasCenter, canvasDecorationContributions, canInteractWithCanvasDecorations, canvasInteractionPalette, currentFloorZ,
-    activeCanvasDecoration, drawingCanvasPalette, panOffset, scale, selectCanvasDecoration]);
+    activeCanvasDecoration, drawingCanvasPalette, panOffset, scale, selectCanvasDecoration, drawElementType]);
 
   const requestSelectedCanvasDecorationDelete = useCallback(() => {
     if (!activeCanvasDecoration) return false;

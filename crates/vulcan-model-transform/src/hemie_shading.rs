@@ -3,8 +3,9 @@
 
 //! HEMIE shading for existing buildings. HEMIE takes categories, not measured objects:
 //! - Distant shading: four 90° segments centred on the reference orientation (segment 1) and
-//!   clockwise from it, each with a level of sky blocked and whether the roof is shaded. The
-//!   `HEMIE_distant_shading` setting states them, else they are derived from Context Shading.
+//!   clockwise from it, each with a level of sky blocked and whether the roof is shaded. Per
+//!   segment: the `HEMIE_distant_shading` setting's stated level, else the level the drawn
+//!   Context Shading gives, else very light (nothing drawn).
 //! - Close shading: a category per kind on each window (`overhang`, `side_fin_left`,
 //!   `side_fin_right`, `obstacle`), stated on the window row. A measured Window Shading row
 //!   needs the category of its kind. Reveals are not sent (see `NO_REVEAL`).
@@ -12,6 +13,7 @@
 use super::{error, notice, quoted, Ctx, El, Settings, SETTING, STOREY_GAP};
 use crate::finalization::SchemaOmission;
 use crate::ValidationError;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 /// HEMIE's segment keys, segment 1 to 4.
@@ -113,32 +115,103 @@ fn blocked(objects: &[Object], centre: f64) -> f64 {
         / 90.0
 }
 
-/// HEMIE's distant shading input, from the setting or the Context Shading drawn around
-/// `geometry` (the HEMIE Geometry input).
+/// One distant shading segment as converted, for the editor's quadrant view.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HemieQuadrant {
+    /// HEMIE's segment key, which the stated setting is keyed by.
+    pub key: String,
+    /// "Front", "Right", "Back" or "Left", as seen looking out of the front door.
+    pub name: String,
+    /// Bearing of the segment's centre (°).
+    pub centre: f64,
+    /// The level sent, and where it comes from: "stated", "drawn" or "none" (nothing drawn).
+    pub shading_fraction: String,
+    pub source: String,
+    /// The level the drawing gives; absent when nothing is drawn in the segment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawn: Option<String>,
+    /// Roof shading sent, and its source as for the level.
+    pub roof_shading: bool,
+    pub roof_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawn_roof: Option<bool>,
+}
+
+/// An existing building's distant shading as converted, for the editor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct HemieShading {
+    /// The bearing segment 1 faces: out of the front-door wall (°).
+    pub reference_orientation: f64,
+    pub quadrants: Vec<HemieQuadrant>,
+    /// Context Shading rows wholly in stated segments: they change nothing sent, so the editor
+    /// fades them and their own issues are not raised.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_objects: Vec<String>,
+}
+
+const LEVELS: [&str; 5] = ["Very heavy", "Heavy", "Moderate", "Light", "Very light"];
+const NAMES: [&str; 4] = ["Front", "Right", "Back", "Left"];
+const SHADING_PATH: &str = "/ExternalConditions/shading_segments";
+
+/// Plain words for a level: HEMIE's "Moderate" is the guidance's "Average".
+fn plain(level: &str) -> &str {
+    if level == "Moderate" {
+        "Average"
+    } else {
+        level
+    }
+}
+
+/// The stated segments: `HEMIE_distant_shading`, a JSON object keyed by HEMIE's segment keys,
+/// each with an optional `shading_fraction` and `roof_shading`, and the `reference_orientation`
+/// they were stated against (the front door then).
+fn stated(settings: &Settings) -> Result<Map<String, Value>, ValidationError> {
+    let field = format!("{SETTING}distant_shading");
+    let Some(raw) = settings.raw(&field) else {
+        return Ok(Map::new());
+    };
+    let parsed = match raw {
+        Value::String(s) => serde_json::from_str::<Map<String, Value>>(s).ok(),
+        Value::Object(map) => Some(map.clone()),
+        _ => None,
+    };
+    let valid = parsed.filter(|map| {
+        map.iter().all(|(key, value)| {
+            (key == "reference_orientation" && value.is_number())
+                || SEGMENTS.contains(&key.as_str())
+                    && value.as_object().is_some_and(|v| {
+                        v.iter().all(|(k, x)| match k.as_str() {
+                            "shading_fraction" => x.as_str().is_some_and(|l| LEVELS.contains(&l)),
+                            "roof_shading" => x.is_boolean(),
+                            _ => false,
+                        })
+                    })
+        })
+    });
+    valid.ok_or_else(|| error("/Metadata".into(), format!("The stated distant shading ({field}) is malformed. Choose each stated band again on the canvas, or give a JSON object keyed by segment, for example {{\"{}\": {{\"shading_fraction\": \"Light\"}}}}, with levels {}.", SEGMENTS[0], LEVELS.join(", "))))
+}
+
+/// HEMIE's distant shading input and the editor's view of it. Per segment, the level and roof
+/// shading are each the stated value, else what the Context Shading drawn around `geometry`
+/// gives, else very light and not shaded (nothing drawn). Notices name each segment's source,
+/// and warn where a stated value is far from the drawing or the front door has moved since.
 pub(super) fn distant(
     settings: &Settings,
     geometry: &Value,
+    errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
-) -> Result<Value, ValidationError> {
+) -> Option<(Value, HemieShading)> {
+    let stated = match stated(settings) {
+        Ok(stated) => stated,
+        Err(e) => {
+            errors.push(e);
+            return None;
+        }
+    };
     let rows = settings
         .csv
         .get("Context Shading")
         .map_or(&[][..], Vec::as_slice);
-    let field = format!("{SETTING}distant_shading");
-    if let Some(stated) = settings.raw(&field) {
-        let parsed = match stated {
-            Value::String(s) => serde_json::from_str::<Map<String, Value>>(s).ok(),
-            Value::Object(map) => Some(map.clone()),
-            _ => None,
-        };
-        let Some(segments) = parsed else {
-            return Err(error("/Metadata".into(), format!("The model setting {field} is malformed. Give a JSON object of HEMIE's four segments, for example {{\"{}\": {{\"shading_fraction\": \"Light\", \"roof_shading\": false}}, …}}.", SEGMENTS[0])));
-        };
-        if !rows.is_empty() {
-            notices.push(notice("/ExternalConditions/shading_segments", format!("The model setting {field} states the distant shading, so the Context Shading rows are not used.")));
-        }
-        return Ok(json!({"model_type": "hemie", "DwellingShadingSegments": segments}));
-    }
 
     // Measured from the lowest storey (DESNZ-defined): the ventilation zone base height, or as
     // HEMIE takes it from the base storey.
@@ -161,13 +234,29 @@ pub(super) fn distant(
             ceilings.iter().sum::<f64>() + STOREY_GAP * (ceilings.len() as f64 - 1.0)
         })
         .fold(0.0, f64::max);
-    // As HEMIE centres the segments: on the whole degrees of the reference orientation.
-    let reference = geometry["reference_orientation"]
+    let orientation = geometry["reference_orientation"]
         .as_f64()
-        .expect("Geometry states its reference orientation")
-        .trunc();
+        .expect("Geometry states its reference orientation");
+    // As HEMIE centres the segments: on the whole degrees of the reference orientation.
+    let reference = orientation.trunc();
+    let centre = |k: usize| (reference + 90.0 * k as f64).rem_euclid(360.0);
+    let in_segment = |start: f64, end: f64, k: usize| {
+        let probe = Object {
+            name: "",
+            start,
+            end,
+            angle: 0.0,
+            overhang: false,
+            height: 0.0,
+        };
+        cuts(std::slice::from_ref(&probe), centre(k))
+            .windows(2)
+            .any(|w| probe.covers((w[0] + w[1]) / 2.0))
+    };
+    let is_stated = |k: usize| stated.contains_key(SEGMENTS[k]);
 
     let mut objects = Vec::new();
+    let mut unused = Vec::new();
     for row in rows {
         let name = text(row, &["Name"]).unwrap_or_default();
         let kind = text(row, &["shading_type", "Type"]);
@@ -178,9 +267,21 @@ pub(super) fn distant(
         ) else {
             continue; // the full-input converter reports the row (E027)
         };
-        let (Some(height), Some(distance)) = (num(row, &["height"]), num(row, &["distance"]))
-        else {
-            return Err(error(super::json_pointer(&["Context Shading", name]), format!("Context Shading row '{name}' has no height or distance, which HEMIE's distant shading is measured from. Give both.")));
+        // A row wholly in stated segments changes nothing sent (its drawn level is still shown),
+        // so its own issues are not raised.
+        let wholly_stated = (0..4).filter(|&k| in_segment(start, end, k)).all(is_stated);
+        if wholly_stated {
+            unused.push(name.to_string());
+        }
+        let (Some(height), Some(distance)) = (
+            num(row, &["height"]),
+            num(row, &["distance"]).filter(|d| *d > 0.0),
+        ) else {
+            if wholly_stated {
+                continue;
+            }
+            errors.push(error(super::json_pointer(&["Context Shading", name]), format!("Context Shading row '{name}' has no height, or no distance above 0, which distant shading is measured from. Give both, or state the band of each quadrant it lies in.")));
+            continue;
         };
         // DESNZ-defined: objects below the lowest storey are ignored, an overhang as well as an
         // obstacle.
@@ -198,46 +299,117 @@ pub(super) fn distant(
         });
     }
 
+    // The stated values face the front door they were stated against.
+    let stated_against = stated.get("reference_orientation").and_then(Value::as_f64);
+    let any_stated = (0..4).any(is_stated);
+    if any_stated && stated_against.is_none_or(|r| (r - orientation).abs() > 0.5) {
+        notices.push(notice(SHADING_PATH, "Front door changed: check the stated shading bands. They are relative to the front door, so they now face other compass directions. Choose each stated band again, or reset it to the drawing.".into()));
+    }
+
     let mut segments = Map::new();
+    let mut quadrants = Vec::new();
     let mut described = Vec::new();
     for (k, key) in SEGMENTS.iter().enumerate() {
-        let centre = (reference + 90.0 * k as f64).rem_euclid(360.0);
+        let name = NAMES[k];
+        let path = format!("{SHADING_PATH}/{name}");
+        let centre = centre(k);
+        let cuts = cuts(&objects, centre);
+        let inside: Vec<&Object> = objects
+            .iter()
+            .filter(|o| cuts.windows(2).any(|w| o.covers((w[0] + w[1]) / 2.0)))
+            .collect();
         let fraction = blocked(&objects, centre);
+        let drawn = (!inside.is_empty()).then(|| level(fraction).to_string());
         // ours: the roof is shaded when an object in the segment rises above the dwelling, as
         // HEMIE's unshaded-roof object stops at the dwelling height.
-        let cuts = cuts(&objects, centre);
-        let tall: Vec<&str> = objects
+        let tall: Vec<&str> = inside
             .iter()
             .filter(|o| o.height > dwelling_height)
-            .filter(|o| cuts.windows(2).any(|w| o.covers((w[0] + w[1]) / 2.0)))
             .map(|o| o.name)
             .collect();
-        let shading = level(fraction);
+        let drawn_roof = drawn.is_some().then_some(!tall.is_empty());
+        let given = stated.get(*key);
+        let given_level = given.and_then(|g| g["shading_fraction"].as_str());
+        let given_roof = given.and_then(|g| g["roof_shading"].as_bool());
+
+        let (shading, source) = match (given_level, &drawn) {
+            (Some(l), _) => (l.to_string(), "stated"),
+            (None, Some(d)) => (d.clone(), "drawn"),
+            // DESNZ-defined: open sky is very light.
+            (None, None) => ("Very light".to_string(), "none"),
+        };
+        let (roof, roof_source) = match (given_roof, drawn_roof) {
+            (Some(r), _) => (r, "stated"),
+            (None, Some(r)) => (r, "drawn"),
+            (None, None) => (false, "none"),
+        };
+        if let (Some(l), Some(d)) = (given_level, &drawn) {
+            let rank = |x: &str| LEVELS.iter().position(|y| *y == x).expect("level");
+            if rank(l).abs_diff(rank(d)) >= 2 {
+                notices.push(notice(&path, format!("{name}: stated {}, the drawing gives {}. Check the band or reset to the drawing.", plain(l), plain(d))));
+            }
+        }
+        if let (Some(r), Some(d)) = (given_roof, drawn_roof) {
+            if r != d {
+                let says = |shaded: bool| {
+                    if shaded {
+                        "roof shaded"
+                    } else {
+                        "roof not shaded"
+                    }
+                };
+                notices.push(notice(&path, format!("{name}: stated {}, the drawing gives {}. Check roof shading or reset it to the drawing.", says(r), says(d))));
+            }
+        }
+        if source == "none" {
+            notices.push(notice(&path, format!("{name}: Very light assumed (nothing drawn). Draw what shades this side, or choose its band.")));
+        }
         segments.insert(
             (*key).into(),
-            json!({"shading_fraction": shading, "roof_shading": !tall.is_empty()}),
+            json!({"shading_fraction": shading, "roof_shading": roof}),
         );
         described.push(format!(
-            "segment {} ({centre:.0}°) {:.0}% {shading}, roof {}",
-            k + 1,
-            fraction * 100.0,
-            if tall.is_empty() {
-                "not shaded".to_string()
-            } else {
-                format!("shaded by {}", quoted(&tall))
-            }
+            "{name} ({:.0}–{:.0}°) {}, {}; roof {}, {}",
+            (centre - 45.0).rem_euclid(360.0),
+            (centre + 45.0).rem_euclid(360.0),
+            plain(&shading),
+            match source {
+                "drawn" => format!("from drawing ({:.0}% of the sky blocked)", fraction * 100.0),
+                "none" => "nothing drawn".to_string(),
+                s => s.to_string(),
+            },
+            if roof { "shaded" } else { "not shaded" },
+            match (roof_source, tall.is_empty()) {
+                ("drawn", false) => format!("from drawing ({})", quoted(&tall)),
+                ("drawn", true) => "from drawing".to_string(),
+                ("none", _) => "nothing drawn".to_string(),
+                (s, _) => s.to_string(),
+            },
         ));
+        quadrants.push(HemieQuadrant {
+            key: (*key).into(),
+            name: name.into(),
+            centre,
+            shading_fraction: shading,
+            source: source.into(),
+            drawn,
+            roof_shading: roof,
+            roof_source: roof_source.into(),
+            drawn_roof,
+        });
     }
-    let source = if objects.is_empty() {
-        "No Context Shading rises above the lowest storey, so each segment is open sky".to_string()
-    } else {
-        format!("HEMIE's distant shading is derived from the Context Shading as the share of sky blocked from {base:.2} m (the lowest storey), with the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m")
-    };
     notices.push(notice(
-        "/ExternalConditions/shading_segments",
-        format!("{source}: {}.", described.join("; ")),
+        SHADING_PATH,
+        format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.", described.join("; ")),
     ));
-    Ok(json!({"model_type": "hemie", "DwellingShadingSegments": segments}))
+    Some((
+        json!({"model_type": "hemie", "DwellingShadingSegments": segments}),
+        HemieShading {
+            reference_orientation: orientation,
+            quadrants,
+            unused_objects: unused,
+        },
+    ))
 }
 
 /// The HEMIE field for a measured Window Shading type, and the categories it takes.
@@ -323,13 +495,42 @@ mod tests {
             "building_parts": {"Main": {"storeys": [{"ceiling_height": 2.5}, {"ceiling_height": 2.5}]}}})
     }
 
-    fn derive(rows: &[&str], reference: f64) -> (Value, Vec<SchemaOmission>) {
-        derive_from(rows, reference, 0.0)
+    struct Out {
+        segments: Value,
+        shading: HemieShading,
+        errors: Vec<ValidationError>,
+        notices: Vec<String>,
     }
 
-    fn derive_from(rows: &[&str], reference: f64, base: f64) -> (Value, Vec<SchemaOmission>) {
+    impl Out {
+        fn level(&self, k: usize) -> &str {
+            self.segments[SEGMENTS[k]]["shading_fraction"]
+                .as_str()
+                .unwrap()
+        }
+        fn roof(&self, k: usize) -> bool {
+            self.segments[SEGMENTS[k]]["roof_shading"]
+                .as_bool()
+                .unwrap()
+        }
+        fn notice(&self, text: &str) -> bool {
+            self.notices.iter().any(|n| n.contains(text))
+        }
+    }
+
+    /// Context Shading rows (Name, Type, shading_type, start, end, distance, height) around a
+    /// dwelling 5.25 m high; `stated` is the `HEMIE_distant_shading` JSON, or "".
+    fn derive_all(rows: &[&str], reference: f64, base: f64, stated: &str) -> Out {
+        let metadata = if stated.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "Metadata,,\nHEMIE_distant_shading,\"{}\"\n\n",
+                stated.replace('"', "\"\"")
+            )
+        };
         let text = format!(
-            "Context Shading\nName,Type,shading_type,start_angle,end_angle,distance,height\n{}\n",
+            "{metadata}Context Shading\nName,Type,shading_type,start_angle,end_angle,distance,height\n{}\n",
             rows.join("\n")
         );
         let csv = crate::parser::CSVParser::new()
@@ -339,59 +540,216 @@ mod tests {
             csv: &csv,
             missing: Default::default(),
         };
-        let mut notices = Vec::new();
-        let value = distant(&settings, &geometry(reference, base), &mut notices).expect("derived");
-        (value["DwellingShadingSegments"].clone(), notices)
+        let (mut errors, mut notices) = (Vec::new(), Vec::new());
+        let (value, shading) = distant(
+            &settings,
+            &geometry(reference, base),
+            &mut errors,
+            &mut notices,
+        )
+        .unwrap_or_default();
+        Out {
+            segments: value["DwellingShadingSegments"].clone(),
+            shading,
+            errors,
+            notices: notices.into_iter().map(|n| n.message).collect(),
+        }
+    }
+
+    fn derive(rows: &[&str], reference: f64) -> Out {
+        derive_all(rows, reference, 0.0, "")
     }
 
     #[test]
     fn a_full_width_obstacle_blocks_its_angle_over_90_degrees() {
-        // 10 m high at 10 m: 45° of 90°, half the sky, across the whole south segment.
-        let (s, _) = derive(&["Block,ContextShading,obstacle,135,225,10,10"], 180.0);
-        assert_eq!(s[SEGMENTS[0]]["shading_fraction"], "Moderate");
+        // 10 m high at 10 m: 45° of 90°, half the sky, across the whole front (south) segment.
+        let out = derive(&["Block,ContextShading,obstacle,135,225,10,10"], 180.0);
+        assert_eq!(out.level(0), "Moderate");
         // It rises above the 5.25 m dwelling, so the roof is shaded.
-        assert_eq!(s[SEGMENTS[0]]["roof_shading"], true);
-        for key in &SEGMENTS[1..] {
-            assert_eq!(
-                s[*key],
-                json!({"shading_fraction": "Very light", "roof_shading": false})
-            );
+        assert!(out.roof(0));
+        for k in 1..4 {
+            assert_eq!((out.level(k), out.roof(k)), ("Very light", false));
         }
+        assert_eq!(out.shading.quadrants[0].source, "drawn");
+        assert!(out.notice("Front (135–225°) Average, from drawing (50% of the sky blocked); roof shaded, from drawing ('Block')"), "{:?}", out.notices);
     }
 
     #[test]
     fn a_narrow_obstacle_counts_for_its_share_of_the_segment() {
         // 45° high over 60° of the 90° segment: a third of the sky.
-        let (s, notices) = derive(&["Block,ContextShading,obstacle,330,30,10,10"], 0.0);
-        assert_eq!(s[SEGMENTS[0]]["shading_fraction"], "Light");
-        assert!(
-            notices[0].message.contains("segment 1 (0°) 33% Light"),
-            "{notices:?}"
-        );
+        let out = derive(&["Block,ContextShading,obstacle,330,30,10,10"], 0.0);
+        assert_eq!(out.level(0), "Light");
         // A low wall shades the walls only.
-        let (s, _) = derive(&["Wall,ContextShading,obstacle,135,225,8,3"], 180.0);
-        assert_eq!(s[SEGMENTS[0]]["roof_shading"], false);
-        // Segments follow the reference orientation clockwise: east is segment 2 from north.
-        let (s, _) = derive(&["Hill,ContextShading,obstacle,45,135,100,1000"], 0.0);
-        assert_eq!(s[SEGMENTS[1]]["shading_fraction"], "Very heavy");
+        assert!(!derive(&["Wall,ContextShading,obstacle,135,225,8,3"], 180.0).roof(0));
+        // Segments follow the reference orientation clockwise: east is the right from north.
+        let out = derive(&["Hill,ContextShading,obstacle,45,135,100,1000"], 0.0);
+        assert_eq!(
+            (out.level(1), out.shading.quadrants[1].name.as_str()),
+            ("Very heavy", "Right")
+        );
     }
 
     #[test]
     fn an_overhang_blocks_the_sky_above_it_and_objects_below_the_storey_are_ignored() {
-        let (s, _) = derive(&["Canopy,ContextShading,overhang,135,225,10,10"], 180.0);
-        assert_eq!(s[SEGMENTS[0]]["shading_fraction"], "Moderate");
-        let (s, notices) = derive(&["Fence,ContextShading,obstacle,135,225,3,0"], 180.0);
-        assert_eq!(s[SEGMENTS[0]]["shading_fraction"], "Very light");
-        assert!(notices[0]
-            .message
-            .starts_with("No Context Shading rises above"));
+        assert_eq!(
+            derive(&["Canopy,ContextShading,overhang,135,225,10,10"], 180.0).level(0),
+            "Moderate"
+        );
+        assert_eq!(
+            derive(&["Fence,ContextShading,obstacle,135,225,3,0"], 180.0).level(0),
+            "Very light"
+        );
         // A canopy below an upper-floor flat shades nothing above its lowest storey.
-        let (s, _) = derive_from(
+        let out = derive_all(
             &["Canopy,ContextShading,overhang,135,225,2,2.5"],
             180.0,
             3.0,
+            "",
         );
-        assert_eq!(s[SEGMENTS[0]]["shading_fraction"], "Very light");
+        assert_eq!(out.level(0), "Very light");
+    }
+
+    #[test]
+    fn segments_centre_on_the_whole_degrees_of_the_reference() {
+        let out = derive(&[], 180.7);
+        assert_eq!(out.shading.quadrants[0].centre, 180.0);
+        assert_eq!(out.shading.reference_orientation, 180.7);
+    }
+
+    #[test]
+    fn a_stated_level_wins_per_segment_and_the_drawn_one_is_kept_for_the_editor() {
+        let stated = r#"{"reference_orientation":180,"shading_segment_reference_orientation":{"shading_fraction":"Light"},"reference_segment_reference_orientation_plus_90":{"shading_fraction":"Heavy","roof_shading":true}}"#;
+        let out = derive_all(
+            &["Block,ContextShading,obstacle,135,225,10,10"],
+            180.0,
+            0.0,
+            stated,
+        );
+        let q = &out.shading.quadrants;
+        assert_eq!(
+            (out.level(0), q[0].source.as_str(), q[0].drawn.as_deref()),
+            ("Light", "stated", Some("Moderate"))
+        );
+        // The roof is not stated in front, so the drawing gives it.
+        assert_eq!((out.roof(0), q[0].roof_source.as_str()), (true, "drawn"));
+        assert_eq!(
+            (
+                out.level(1),
+                out.roof(1),
+                q[1].source.as_str(),
+                q[1].drawn.as_deref()
+            ),
+            ("Heavy", true, "stated", None)
+        );
+        assert_eq!(
+            (q[2].source.as_str(), out.level(2), q[2].centre),
+            ("none", "Very light", 0.0)
+        );
+        assert!(
+            out.notice("Right (225–315°) Heavy, stated; roof shaded, stated"),
+            "{:?}",
+            out.notices
+        );
+    }
+
+    #[test]
+    fn a_malformed_statement_fails() {
+        for bad in [
+            r#"{"shading_segment_reference_orientation":{"shading_fraction":"Average"}}"#,
+            r#"{"front":{"shading_fraction":"Light"}}"#,
+        ] {
+            let out = derive_all(&[], 0.0, 0.0, bad);
+            assert!(
+                out.errors
+                    .iter()
+                    .any(|e| e.message.contains("is malformed")),
+                "{:?}",
+                out.errors
+            );
+        }
+    }
+
+    #[test]
+    fn a_stated_band_two_or_more_from_the_drawing_is_a_warning() {
+        let stated = |level: &str| {
+            format!(
+                r#"{{"reference_orientation":180,"shading_segment_reference_orientation":{{"shading_fraction":"{level}"}}}}"#
+            )
+        };
+        // The drawing gives Heavy (a 30 m wall at 10 m, 72° of 90°).
+        let rows = ["Wall,ContextShading,obstacle,135,225,10,30"];
+        let out = derive_all(&rows, 180.0, 0.0, &stated("Very light"));
+        assert!(out.notice("Front: stated Very light, the drawing gives Heavy. Check the band or reset to the drawing."), "{:?}", out.notices);
+        let out = derive_all(&rows, 180.0, 0.0, &stated("Moderate"));
+        assert!(!out.notice("Front: stated"), "{:?}", out.notices);
+    }
+
+    #[test]
+    fn stated_roof_shading_that_differs_from_the_drawing_is_a_warning() {
+        let stated = r#"{"reference_orientation":180,"shading_segment_reference_orientation":{"roof_shading":false}}"#;
+        let out = derive_all(
+            &["Tower,ContextShading,obstacle,135,225,10,30"],
+            180.0,
+            0.0,
+            stated,
+        );
+        assert!(!out.roof(0));
+        assert_eq!(out.shading.quadrants[0].drawn_roof, Some(true));
+        assert!(
+            out.notice("Front: stated roof not shaded, the drawing gives roof shaded."),
+            "{:?}",
+            out.notices
+        );
+    }
+
+    #[test]
+    fn a_moved_front_door_warns_until_the_bands_are_stated_again() {
+        let stated = |r: f64| {
+            format!(
+                r#"{{"reference_orientation":{r},"shading_segment_reference_orientation":{{"shading_fraction":"Light"}}}}"#
+            )
+        };
+        let out = derive_all(&[], 90.0, 0.0, &stated(180.0));
+        assert!(
+            out.notice("Front door changed: check the stated shading bands."),
+            "{:?}",
+            out.notices
+        );
+        let out = derive_all(&[], 90.0, 0.0, &stated(90.0));
+        assert!(!out.notice("Front door changed"));
+        // With nothing stated there is nothing to check.
+        assert!(!derive(&[], 90.0).notice("Front door changed"));
+    }
+
+    #[test]
+    fn nothing_drawn_and_nothing_stated_assumes_very_light() {
+        let out = derive(&[], 180.0);
+        for name in NAMES {
+            assert!(
+                out.notice(&format!("{name}: Very light assumed (nothing drawn).")),
+                "{:?}",
+                out.notices
+            );
+        }
+    }
+
+    #[test]
+    fn an_object_wholly_in_stated_segments_raises_no_issue() {
+        let rows = [
+            "NoHeight,ContextShading,obstacle,150,210,10,",
+            "Zero,ContextShading,obstacle,150,250,0,5",
+        ];
+        let out = derive(&rows, 180.0);
+        assert_eq!(out.errors.len(), 2, "{:?}", out.errors);
+        assert!(out.errors[0]
+            .message
+            .contains("'NoHeight' has no height, or no distance above 0"));
+        // Front stated: NoHeight lies wholly in it and is unused; Zero crosses into the right.
+        let stated = r#"{"reference_orientation":180,"shading_segment_reference_orientation":{"shading_fraction":"Light"}}"#;
+        let out = derive_all(&rows, 180.0, 0.0, stated);
+        assert_eq!(out.errors.len(), 1, "{:?}", out.errors);
+        assert!(out.errors[0].path.ends_with("/Zero"));
+        assert_eq!(out.shading.unused_objects, vec!["NoHeight".to_string()]);
     }
 
     #[test]

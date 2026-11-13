@@ -33,6 +33,8 @@ export type CanvasDecorationContext = Readonly<{
   selectionScope: string;
   select(id: string): void;
   clearSelection(): void;
+  /** The element type chosen in the draw toolbar. */
+  drawElementType: string;
 }>;
 
 export type CanvasDecorationDetailsContext = Readonly<{
