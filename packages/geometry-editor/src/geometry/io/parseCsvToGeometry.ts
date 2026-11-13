@@ -53,7 +53,7 @@ import { ingestGeometryTabularSections, NUMBER_CELL } from './ingestGeometryTabu
 import { normalizeCsvConstructionProvenance } from './csvSemanticMigration';
 import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
 import { shiftPhysicalPartHeight } from '../../lib/windowOpenings';
-import { METADATA_INPUT_LABELS, metadataSettingKey } from '../../lib/globalSettingsValidation';
+import { METADATA_INPUT_LABELS, metadataSettingKey, TARGET_INPUT_ROW_SET, type TargetInputRow } from '../../lib/globalSettingsValidation';
 import { PRODUCT_SETTING_ROWS, type ProductSettingRow } from '../../stores/geometryStore/slices/complianceSlice';
 
 export const VULCAN_CSV_VERSION_METADATA_KEY = 'VulcanCsvVersion';
@@ -188,7 +188,14 @@ export type ComplianceSettings = {
   NumberOfBathrooms?: number;
   NumberOfSanitaryAccommodations?: number;
   KitchenExtractorHoodExternal?: boolean;
-  build_type?: 'flat' | 'house';
+  /** Metadata rows only some targets take (TARGET_INPUT_ROWS); unset means the file has no row. */
+  HasElectricitySmartMeter?: boolean;
+  IsExistingBuilding?: boolean;
+  Ventilation_cross_vent_possible?: boolean;
+  Appliances_has_dryer?: boolean;
+  Appliances_has_dishwasher?: boolean;
+  Appliances_has_separate_fridge_or_freezer?: boolean;
+  build_type?: string;
   built_form?: SapBuiltFormCode;
   storeys_in_dwelling?: number;
   storey_of_dwelling?: number;
@@ -644,6 +651,12 @@ export const parseCsvToGeometry = (
       const value = line.split(',')[1]?.trim().toUpperCase();
       // Anything but TRUE or FALSE (blank included) stays unset and is reported; it is not \"no\".
       if (value === 'TRUE' || value === 'FALSE') complianceSettings.KitchenExtractorHoodExternal = value === 'TRUE';
+      continue;
+    }
+    if (hostMetadataKey && TARGET_INPUT_ROW_SET.has(hostMetadataKey)) {
+      const value = metadataFields[1]?.trim().toUpperCase();
+      // Anything but TRUE or FALSE (blank included) stays unset and is reported; it is not \"no\".
+      if (value === 'TRUE' || value === 'FALSE') complianceSettings[hostMetadataKey as TargetInputRow] = value === 'TRUE';
       continue;
     }
     if (line.startsWith('General_build_type,')) {

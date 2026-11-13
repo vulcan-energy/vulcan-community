@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode, thermalBridgingAcceptsTotal, elementTypeAvailability, resolveElementSubschemaForProfile } from '../schemaCache';
+import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode, applianceRequiresEnergySupply, thermalBridgingAcceptsTotal, elementTypeAvailability, resolveElementSubschemaForProfile } from '../schemaCache';
 import { ELEMENT_TYPE_ORDER } from '../elementTypeMetadata';
 import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import { ensureRootSchema, getAjvInstance, resetGeometrySchemaValidators } from '../ajvCache';
@@ -35,6 +35,48 @@ describe('target-scoped schema caches', () => {
       expect(getApplianceKeysForMode(true)).toEqual(['Clothes_washing', 'Fridge-Freezer', 'Kettle']);
     },
   );
+  it('reads appliances that are named properties, and which need an energy supply', async () => {
+    const root = {
+      type: 'object',
+      properties: { Appliances: { $ref: '#/$defs/Appliances' } },
+      $defs: {
+        Appliances: { type: 'object', properties: {
+          has_dryer: { type: 'boolean' },
+          Oven: { $ref: '#/$defs/CookingAppliance' },
+          Dishwasher: { anyOf: [{ $ref: '#/$defs/Loaded' }, { type: 'null' }] },
+        } },
+        CookingAppliance: { type: 'object', properties: { EnergySupply: { type: 'string' } }, required: ['EnergySupply'] },
+        Loaded: { type: 'object', properties: { loadshifting: { type: 'object' } } },
+      },
+    };
+    configureGeometrySchemaAssetSource({ loadText: async () => JSON.stringify(root) });
+    await preloadFHSSchema();
+    expect(getApplianceKeysForMode(true)).toEqual(['Oven', 'Dishwasher']);
+    expect(applianceRequiresEnergySupply(root, 'Oven')).toBe(true);
+    expect(applianceRequiresEnergySupply(root, 'Dishwasher')).toBe(false);
+    expect(applianceRequiresEnergySupply({ properties: { Appliances: { patternProperties: { 'Oven|Hobs': { enum: ['Default'] } } } } }, 'Oven')).toBe(false);
+    expect(applianceRequiresEnergySupply(null, 'Oven')).toBe(false);
+  });
+  it('resolves Core-shaped sections behind pydantic unions (HEM:EPC full input)', () => {
+    const root = {
+      type: 'object',
+      properties: {
+        OnSiteGeneration: { anyOf: [{ type: 'object', additionalProperties: { anyOf: [{ $ref: '#/$defs/PvWithPanels' }] } }, { type: 'null' }] },
+        InfiltrationVentilation: { anyOf: [{ $ref: '#/$defs/EpcInfiltrationVentilation' }] },
+      },
+      $defs: {
+        PvWithPanels: { type: 'object', properties: { inverter_type: { type: 'string' }, panels: { type: 'array' } } },
+        EpcInfiltrationVentilation: { type: 'object', properties: { Vents: { anyOf: [{ additionalProperties: { $ref: '#/$defs/Vent' } }, { type: 'null' }] } } },
+        Vent: { type: 'object', properties: { area_cm2: { type: 'number' } } },
+        ElectricityFuelProperties: { properties: { ElectricBattery: { anyOf: [{ $ref: '#/$defs/BatteryProduct' }, { type: 'null' }] } } },
+        BatteryProduct: { type: 'object', properties: { product_id: { type: 'integer' }, battery_age: { type: 'number' } } },
+      },
+    };
+    const keys = (type: string) => Object.keys(resolveElementSubschemaForProfile(root, 'core', type)?.properties ?? {});
+    expect(keys('OnSiteGeneration')).toEqual(['inverter_type', 'panels']);
+    expect(keys('Vents')).toEqual(['area_cm2']);
+    expect(keys('ElectricBattery')).toEqual(['product_id', 'battery_age']);
+  });
   it('notifies mounted consumers on invalidation and successful load only', async () => {
     const revisions: number[] = [];
     const unsubscribe = subscribeGeometrySchema(() => revisions.push(getGeometrySchemaRevision()));

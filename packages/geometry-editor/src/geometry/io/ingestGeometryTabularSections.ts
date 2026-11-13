@@ -709,7 +709,7 @@ export function ingestGeometryTabularSections(
           } else if (rowType === 'ElectricBattery') {
             const parsedExtraJson = parseExtraJson(V(d, 'extra_json'), V(d, 'Name')) || {};
             const extraJson = { ...(parsedExtraJson as Record<string, unknown>) };
-            delete extraJson.grid_charging_possible;
+            // grid_charging_possible stays as typed: the converter drops it for a target without it.
             delete extraJson.threshold_charges;
             delete extraJson.threshold_prices;
             delete extraJson.tariff;

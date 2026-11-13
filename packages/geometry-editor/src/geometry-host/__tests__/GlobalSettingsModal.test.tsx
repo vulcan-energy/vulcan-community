@@ -77,6 +77,47 @@ describe("GlobalSettingsModal target rules", () => {
   });
 });
 
+describe("GlobalSettingsModal target-required rows", () => {
+  const renderWith = (requiredMetadataRows?: readonly string[]) => {
+    const store = createGeometryStore();
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={{ ...canonicalGeometrySchemaPort, ...(requiredMetadataRows ? { targetRules: () => ({ requiredMetadataRows }) } : {}) }}
+        workspaceResourcePort={createResources()}
+      >
+        <GeometryStoreProvider store={store}>
+          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="Ventilation_altitude" />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    return store;
+  };
+  const epcOnly = ["Existing building", "Electricity smart meter", "Has a clothes dryer", "Has a dishwasher", "Has a separate fridge or freezer", "Cross ventilation possible"];
+
+  it("shows no target-only row when the target requires none", async () => {
+    renderWith();
+    await screen.findByLabelText("Shield Class");
+    for (const label of epcOnly) expect(screen.queryByText(label)).not.toBeInTheDocument();
+    expect(screen.getByText(/Noise nuisance/)).toBeInTheDocument();
+  });
+
+  it("asks for each required row as an empty Yes/No choice and saves the pick", async () => {
+    const user = userEvent.setup();
+    const store = renderWith(["HasElectricitySmartMeter", "IsExistingBuilding", "Appliances_has_dryer", "Appliances_has_dishwasher",
+      "Appliances_has_separate_fridge_or_freezer", "Ventilation_cross_vent_possible", "Ventilation_noise_nuisance", "PartGcompliance"]);
+    await screen.findByLabelText("Shield Class");
+    await user.click(screen.getByText("Dwelling Details"));
+    for (const label of epcOnly) expect(screen.getByLabelText(label)).toHaveValue("");
+    // Required booleans with no default are choices, never an unticked box that reads as "no".
+    expect(screen.getByLabelText("Noise nuisance")).toHaveValue("");
+    expect(screen.getByLabelText("Part G Compliance")).toHaveValue("TRUE");
+    await user.selectOptions(screen.getByLabelText("Electricity smart meter"), "No");
+    await user.selectOptions(screen.getByLabelText("Cross ventilation possible"), "Yes");
+    expect(store.getState().complianceSettings).toMatchObject({ HasElectricitySmartMeter: false, Ventilation_cross_vent_possible: true });
+    expect(screen.getAllByText(/Existing building is not set/).length).toBeGreaterThan(0);
+  });
+});
+
 describe("GlobalSettingsModal", () => {
   it("uses one public modal for defaults and every core global-values section", async () => {
     const user = userEvent.setup();

@@ -158,6 +158,8 @@ export function collectModelAuthoringNumericFields(
   if (!schema || !root) return [];
 
   const fields = new Map<string, ModelAuthoringNumericField>();
+  // The standard form owns a base field; Advanced Fields renders none of its contents.
+  const baseFields = new Set(schemaPort.getBaseFieldsForElementType(configuration.elementType));
 
   const visitNode = (
     node: GeometrySchemaNode,
@@ -186,7 +188,7 @@ export function collectModelAuthoringNumericFields(
         const key = [configuration.mode, configuration.elementType, configuration.subtype ?? '', nextPath].join('|');
         fields.set(key, { configuration, propertyPath: nextPath, presentation });
       }
-      visitNode(effectiveSchema, nextPath, nextStack, depth + 1);
+      if (!(propertyPath === '' && baseFields.has(propertyKey))) visitNode(effectiveSchema, nextPath, nextStack, depth + 1);
     }
 
     for (const [pattern, patternSchema] of childEntries(node.patternProperties)) {

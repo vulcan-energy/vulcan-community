@@ -155,16 +155,25 @@ export function getSchemaObjectForMode(useFHSSchema: boolean): SchemaNode | null
   return useFHSSchema ? getFHSSchemaObject() : getSchemaObject();
 }
 
+/** The root `Appliances` schema with its `$ref` followed. */
+function rootAppliancesSchema(root: unknown): SchemaNode | undefined {
+  const appliances = isRecord(root) && isRecord(root.properties) ? root.properties.Appliances : undefined;
+  return isRecord(appliances) ? dereferenceSchemaNodeInRoot(appliances, root) as SchemaNode : undefined;
+}
+
 /**
- * Returns appliance keys from the active root schema `Appliances.patternProperties`.
+ * Returns appliance keys from the active root schema: `Appliances.patternProperties`, or else its
+ * named properties that are appliances (not TRUE or FALSE presence fields).
  * Example schema pattern key:
  *   "Clothes_washing|Clothes_drying|Dishwasher|Fridge|..."
  */
 export function getApplianceKeysForMode(useFHSSchema: boolean): string[] {
-  const root = getSchemaObjectForMode(useFHSSchema);
-  const appliances = root?.properties?.Appliances;
+  const appliances = rootAppliancesSchema(getSchemaObjectForMode(useFHSSchema));
   const patternProps = appliances?.patternProperties;
-  if (!patternProps) return [];
+  if (!patternProps) {
+    return Object.entries(appliances?.properties ?? {})
+      .flatMap(([key, property]) => (isRecord(property) && property.type === 'boolean' ? [] : [key]));
+  }
 
   const keys = new Set<string>();
   for (const patternKey of Object.keys(patternProps)) {
@@ -176,6 +185,12 @@ export function getApplianceKeysForMode(useFHSSchema: boolean): string[] {
     }
   }
   return [...keys];
+}
+
+/** Whether the target's schema has the appliance state its energy supply. */
+export function applianceRequiresEnergySupply(root: unknown, applianceKey: string): boolean {
+  const entry = rootAppliancesSchema(root)?.properties?.[applianceKey];
+  return isRecord(entry) && Array.isArray(entry.required) && entry.required.includes('EnergySupply');
 }
 
 /**
@@ -526,6 +541,33 @@ function unwrapAdditionalProperties(node: unknown): SchemaNode | null {
   return isSchemaNode(schemaNode.additionalProperties) ? schemaNode.additionalProperties : schemaNode;
 }
 
+/**
+ * A section as an object schema: `$ref` followed, a map's value taken, and a union reduced to its
+ * first object branch. Pydantic schemas (Core, HEM:EPC full input) write `X | None` and
+ * `dict[str, X] | None` as `anyOf`.
+ */
+function sectionObjectSchema(root: SchemaNode, node: unknown): SchemaNode | null {
+  let current = resolveRefChain(root, node);
+  for (let depth = 0; current && !current.properties && depth < 8; depth += 1) {
+    const branches: unknown[] = isSchemaNode(current.additionalProperties)
+      ? [current.additionalProperties]
+      : [...(Array.isArray(current.anyOf) ? current.anyOf : []), ...(Array.isArray(current.oneOf) ? current.oneOf : [])];
+    let next: SchemaNode | null = null;
+    for (const branch of branches) {
+      next = resolveRefChain(root, branch);
+      if (next && next.type !== 'null') break;
+      next = null;
+    }
+    current = next;
+  }
+  return current?.properties ? current : null;
+}
+
+/** Core and HEM:EPC `InfiltrationVentilation`: the root section, else `$defs.InfiltrationVentilation`. */
+function coreInfiltrationVentilationSchema(schema: SchemaNode): SchemaNode | null {
+  return sectionObjectSchema(schema, schema.properties?.InfiltrationVentilation) ?? schema.$defs?.InfiltrationVentilation ?? null;
+}
+
 function getDefsZoneDef(schema: SchemaNode): SchemaNode | undefined {
   return schema?.$defs?.['Zone'] || schema?.$defs?.['ZoneFHS'];
 }
@@ -621,7 +663,7 @@ function getCoreBuildingElementContainerSchema(schema: SchemaNode): SchemaNode |
 }
 
 function resolveCoreMechanicalVentilationBaseSchema(schema: SchemaNode, schemaKey: string): SchemaNode | null {
-  const mechVentProp = schema?.properties?.['InfiltrationVentilation']?.properties?.['MechanicalVentilation'];
+  const mechVentProp = coreInfiltrationVentilationSchema(schema)?.properties?.['MechanicalVentilation'];
   if (mechVentProp?.anyOf && Array.isArray(mechVentProp.anyOf)) {
     const anyOfEntry = mechVentProp.anyOf.find((entry) => isSchemaNode(entry.additionalProperties));
     const additionalProperties = isSchemaNode(anyOfEntry?.additionalProperties)
@@ -746,7 +788,9 @@ function mergeFhsWetEmitterItemPropertiesForSubtype(
  * or with no subtype the union of every variant's properties (nothing required).
  */
 function resolveCoreWetEmitterItemSubschema(schema: SchemaNode, subtype?: string): SchemaNode | null {
-  const items = asSchemaNode(schema.$defs?.SpaceHeatSystemWetDistribution?.properties?.emitters?.items);
+  // HEM:EPC qualifies the full-input definition's name.
+  const wetDistribution = schema.$defs?.SpaceHeatSystemWetDistribution ?? schema.$defs?.hem_epc_orchestrator__models__epc__SpaceHeatSystemWetDistribution;
+  const items = asSchemaNode(wetDistribution?.properties?.emitters?.items);
   const mapped = subtype ? items?.discriminator?.mapping?.[subtype] : undefined;
   const variants = (mapped ? [{ $ref: mapped }] : Array.isArray(items?.oneOf) ? items.oneOf : [])
     .map((variant) => resolveRefNode(schema, variant))
@@ -1322,7 +1366,7 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
       baseSchema = resolveCoreMechanicalVentilationBaseSchema(schema, schemaKey);
     } else if (schemaKey === 'Vents' || schemaKey === 'CombustionAppliances') {
       // Core declares these under $defs.InfiltrationVentilation.properties, as maps of a $ref.
-      baseSchema = resolveRefNode(schema, unwrapAdditionalProperties(schema.$defs?.InfiltrationVentilation?.properties?.[schemaKey]));
+      baseSchema = resolveRefNode(schema, unwrapAdditionalProperties(coreInfiltrationVentilationSchema(schema)?.properties?.[schemaKey]));
     } else {
       // For other element types, prefer $defs entry when available
       baseSchema = schema.$defs[schemaKey];
@@ -1332,6 +1376,10 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
     // root-level sections rather than $defs entries.
     if (!baseSchema && schema.properties && schema.properties[schemaKey]) {
       baseSchema = schema.properties[schemaKey];
+    }
+    // HEM:EPC declares the battery only on the electricity supply.
+    if (!baseSchema && elementType === 'ElectricBattery') {
+      baseSchema = schema.$defs?.ElectricityFuelProperties?.properties?.ElectricBattery ?? null;
     }
   }
 
@@ -1693,6 +1741,8 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
     }
   }
 
+  if (!baseSchema.properties) baseSchema = sectionObjectSchema(schema, baseSchema) ?? baseSchema;
+
   // For other schemas, create a minimal schema with $defs
   // Ensure we always return an object with properties (even if empty)
   const result: SchemaNode = {
@@ -1814,7 +1864,9 @@ export function getBaseFieldsForElementType(elementType: string): string[] {
       'height',
       'width',
       'area',
-      'zoneId'
+      'zoneId',
+      // A schema that lists a system's panels: the converter writes this row as its panel.
+      'panels',
     ],
     // ElectricBattery: main capacity/efficiency/location flags in primary UI;
     // all detailed timing/threshold/tariff fields in Advanced Fields.
@@ -2325,6 +2377,16 @@ export function getStrictestIntegerKeysForElementType(elementType: string, subty
 
 export type TargetFieldAvailability = 'available' | 'absent' | 'unknown';
 
+/**
+ * False only when the target's resolved schema for the element type lists fields and this is not
+ * one: a HEM:EPC battery is a HEM Database product, which states its own capacity and efficiency.
+ */
+export function elementSchemaTakesField(port: GeometrySchemaPort, elementType: string, key: string): boolean {
+  if (port.availability !== 'available') return true;
+  const properties = port.getElementSubschema(targetSchemaMode(port), elementType)?.properties;
+  return !isRecord(properties) || Object.keys(properties).length === 0 || key in properties;
+}
+
 function schemaNodeAcceptsNumber(node: unknown, root: unknown): boolean {
   if (!isRecord(node)) return false;
   const resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
@@ -2397,10 +2459,28 @@ function findFieldInSchemaBranches(node: unknown, key: string, root: unknown): u
  */
 export function targetFieldAvailability(root: unknown, path: readonly string[]): TargetFieldAvailability {
   if (!isRecord(root) || !isRecord(root.properties) || !isRecord(root.properties.General)) return 'unknown';
+  return targetFieldNode(root, path) === undefined ? 'absent' : 'available';
+}
+
+function targetFieldNode(root: unknown, path: readonly string[]): unknown {
   let node: unknown = root;
   for (const key of path) {
     node = findFieldInSchemaBranches(node, key, root);
-    if (node === undefined) return 'absent';
+    if (node === undefined) return undefined;
   }
-  return 'available';
+  return node;
+}
+
+/** The string values the target's schema lists for a root-path field; undefined when it lists none or no schema is loaded. */
+export function targetFieldEnum(root: unknown, path: readonly string[]): string[] | undefined {
+  if (targetFieldAvailability(root, path) !== 'available') return undefined;
+  const node = dereferenceSchemaNodeInRoot(targetFieldNode(root, path) as SchemaNode, root);
+  return isRecord(node) && Array.isArray(node.enum) ? node.enum.filter((value): value is string => typeof value === 'string') : undefined;
+}
+
+/** False when the target's schema (as {@link targetFieldAvailability} reads it) lacks the field or rejects the value. */
+export function targetFieldAccepts(root: unknown, path: readonly string[], value: unknown): boolean {
+  if (targetFieldAvailability(root, path) === 'unknown') return true;
+  const node = targetFieldNode(root, path);
+  return isSchemaNode(node) && validateValueAgainstPropertyNode(root as SchemaNode, node, 'Metadata', path.join('.'), value).valid;
 }

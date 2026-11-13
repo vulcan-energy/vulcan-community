@@ -1381,6 +1381,13 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'fancoil_test_data | Fancoil test data | textbox | 0.01 | - | - | no-tip',
     'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
   ],
+  'core/OnSiteGeneration [every subtype]': [
+    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'inverter_is_inside | Inverter Is Inside | checkbox | - | - | - | tip',
+    'inverter_peak_power_ac | Inverter Peak Power AC | textbox | 0 | - | - | tip',
+    'inverter_peak_power_dc | Inverter Peak Power DC | textbox | 0 | - | - | tip',
+    'inverter_type | Inverter Type | select | - | - | - | tip',
+  ],
   'core/Vents [every subtype]': [
     'pressure_difference_ref | Pressure Difference Ref | textbox | 0 | - | - | tip',
   ],
@@ -1398,7 +1405,7 @@ describe('R4.6b-1 standing invariant: what every Advanced Fields row actually re
     // Floors would let this pass vacuously; these are the exact populations the pinned
     // inventory below was captured from, so they are equalities.
     expect(routesSwept).toBe(674);
-    expect(routesWithRows).toBe(387);
+    expect(routesWithRows).toBe(402);
 
     expect(inventory).toEqual(EXPECTED_RENDERED_ROWS);
   });
@@ -2031,13 +2038,18 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     }
   });
 
-  it('config 8 -- OnSiteGeneration, Core (base-field filtering, zero fields) and FHS (real flat fields)', () => {
-    // Core: subschema.properties is EMPTY after base-field filtering (every property
-    // is a base field -- verified directly). Zero rows; confirms the degenerate case
-    // holds (no stray control, no crash).
+  it('config 8 -- OnSiteGeneration, Core (system fields; the row is its panel) and FHS (real flat fields)', () => {
+    // Core: the PV system behind its `anyOf` union, with `panels` a base field (the row is
+    // the panel): the system's supply and inverter fields.
     assertDirectCharacterization(
       { elementType: 'OnSiteGeneration', useFHSSchema: false, extraJson: {} },
-      [],
+      [
+        row('EnergySupply', 'Energy Supply', TEXT(null)),
+        row('inverter_is_inside', 'Inverter Is Inside', CHECKBOX),
+        row('inverter_peak_power_ac', 'Inverter Peak Power AC', TEXT('0', '0')),
+        row('inverter_peak_power_dc', 'Inverter Peak Power DC', TEXT('0', '0')),
+        row('inverter_type', 'Inverter Type', SELECT),
+      ],
     );
     cleanup();
 

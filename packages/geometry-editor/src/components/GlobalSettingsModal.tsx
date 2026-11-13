@@ -31,6 +31,10 @@ import {
   collectGlobalSettingsWarnings,
   fhsBedroomCountIssue,
   globalSettingsFieldSection,
+  METADATA_INPUT_LABELS,
+  type TargetInputRow,
+  targetBuildTypes,
+  buildTypeHasStoreyRows,
 } from "../lib/globalSettingsValidation";
 import {
   DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH,
@@ -64,6 +68,7 @@ import { StandardInput } from "./StandardInput";
 import { Tooltip } from "./Tooltip";
 import { ValidationIndicator, ValidationPill } from "./ValidationIndicator";
 import { useKeyedState } from "../hooks/useKeyedState";
+import { useTargetRules } from "../hooks/useTargetRules";
 
 export type GlobalSettingsDefaultsCompatibility = DefaultsCompatibility;
 
@@ -183,6 +188,28 @@ function DefaultsDuplicateIcon() {
       <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
+  );
+}
+
+type RequiredYesNoKey = TargetInputRow | "PartGcompliance" | "Ventilation_noise_nuisance";
+const APPLIANCE_ROWS = ["Appliances_has_dryer", "Appliances_has_dishwasher", "Appliances_has_separate_fridge_or_freezer"] as const;
+
+/** A TRUE or FALSE row the target requires: empty until the user picks, never a box that reads as "no". */
+function RequiredYesNo({ label, value, onChange }: {
+  label: ReactNode;
+  value: boolean | undefined;
+  onChange: (value: boolean | undefined) => void;
+}) {
+  return (
+    <StandardDropdown
+      label={label}
+      value={value === undefined ? "" : value ? "TRUE" : "FALSE"}
+      onChange={(next) => onChange(next === "" ? undefined : next === "TRUE")}
+      options={[{ value: "TRUE", label: "Yes" }, { value: "FALSE", label: "No" }]}
+      placeholder="Select..."
+      variant="ghost"
+      size="md"
+    />
   );
 }
 
@@ -473,6 +500,12 @@ async function listJsonFilesRecursively(
   return files;
 }
 
+/** `semi_detached_end_terrace` as "Semi detached end terrace". */
+const buildTypeLabel = (type: string) => {
+  const words = type.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 export function GlobalSettingsModal({
   isOpen,
   onClose,
@@ -496,8 +529,12 @@ export function GlobalSettingsModal({
     [targetRoot],
   );
   const showGroundFloorArea = targetFieldAvailability(targetRoot, ["GroundFloorArea"]) !== "absent";
+  const showPartOCooling = targetFieldAvailability(targetRoot, ["PartO_active_cooling_required"]) !== "absent";
+  const showKitchenHood = targetFieldAvailability(targetRoot, ["KitchenExtractorHoodExternal"]) !== "absent";
   const showBuildingLength = targetFieldAvailability(targetRoot, ["BuildingLength"]) !== "absent";
   const showBuildingWidth = targetFieldAvailability(targetRoot, ["BuildingWidth"]) !== "absent";
+  const { requiredMetadataRows, storeyBuildTypes } = useTargetRules();
+  const requiredRows = useMemo(() => new Set(requiredMetadataRows), [requiredMetadataRows]);
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -581,6 +618,11 @@ export function GlobalSettingsModal({
     hardcodedExtra,
     useFHSSchema
   );
+  const requiredYesNoProps = (key: RequiredYesNoKey, label = METADATA_INPUT_LABELS[key] ?? key) => ({
+    label: complianceFieldLabel(label, key),
+    value: complianceSettings[key],
+    onChange: (value: boolean | undefined) => setComplianceSettings({ [key]: value }),
+  });
   const complianceFieldUnit = (paramId: string, label = paramId) => {
     const presentation = complianceFieldPresentation(paramId, label);
     return presentation.unit.status === "resolved" ? presentation.unit.display : undefined;
@@ -718,8 +760,18 @@ export function GlobalSettingsModal({
     () => calculateDwellingDetailsSuggestion(Object.values(elementsById)),
     [elementsById]
   );
+  // A file's build type the editor cannot hold (an HEM:EPC built form) is shown and saved as is.
+  const fileBuildType =
+    complianceSettings.unreadMetadataRows?.General_build_type || undefined;
   const effectiveBuildType =
     complianceSettings.build_type ?? dwellingDetailsSuggestion.buildType;
+  // The target's build types; the geometry's suggestion only where the target takes it.
+  const buildTypes = targetBuildTypes(targetRoot);
+  const suggestedBuildType =
+    dwellingDetailsSuggestion.buildType && buildTypes.includes(dwellingDetailsSuggestion.buildType)
+      ? dwellingDetailsSuggestion.buildType
+      : undefined;
+  const shownBuildType = complianceSettings.build_type ?? fileBuildType ?? suggestedBuildType;
   const effectiveStoreysInDwelling =
     complianceSettings.storeys_in_dwelling ??
     dwellingDetailsSuggestion.storeysInDwelling;
@@ -970,6 +1022,7 @@ export function GlobalSettingsModal({
       { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
       targetRoot,
       defaultsJson,
+      { requiredMetadataRows, storeyBuildTypes },
     ));
     const bedroomCountIssue = fhsBedroomCountIssue(
       complianceSettings.NumberOfBedrooms
@@ -984,7 +1037,7 @@ export function GlobalSettingsModal({
       issues.push("Storeys in dwelling must be at least 1.");
     }
     if (
-      effectiveBuildType === "flat" &&
+      buildTypeHasStoreyRows(targetRoot, shownBuildType, storeyBuildTypes) &&
       typeof complianceSettings.storeys_in_building === "number"
     ) {
       if (complianceSettings.storeys_in_building < 1) {
@@ -1004,7 +1057,7 @@ export function GlobalSettingsModal({
     return issues;
   }, [
     complianceSettings,
-    effectiveBuildType,
+    shownBuildType,
     effectiveStoreysInDwelling,
     elementsById,
     floors,
@@ -1012,6 +1065,8 @@ export function GlobalSettingsModal({
     spaceLabelsById,
     targetRoot,
     defaultsJson,
+    requiredMetadataRows,
+    storeyBuildTypes,
     zones,
   ]);
 
@@ -1720,7 +1775,7 @@ export function GlobalSettingsModal({
                         marginBottom: "var(--spacing-sm)",
                       }}
                     >
-                      Configure dwelling-level details used by the FHS
+                      Configure dwelling-level details used by the
                       calculation. Some values can be suggested from geometry,
                       but you can override them where needed.
                     </div>
@@ -1761,7 +1816,7 @@ export function GlobalSettingsModal({
                             lineHeight: 1.45,
                           }}
                         >
-                          Dwelling form is exported to FHS <code>General</code>.
+                          Dwelling form is exported to <code>General</code>.
                           Auto suggestions count distinct floor levels with
                           ground-contact floors or pitch-180 walkable floor
                           polygons; pitch-0 roof/ceiling surfaces and line walls
@@ -1790,68 +1845,77 @@ export function GlobalSettingsModal({
                                   "General_build_type",
                                   dwellingDetailsSuggestion.explanation
                                 )}
-                                {effectiveBuildType && (
+                                {shownBuildType && (
                                   <span
                                     style={{
                                       fontSize: 11,
                                       fontWeight: 400,
-                                      color: isBuildTypeManual
+                                      color: isBuildTypeManual || fileBuildType
                                         ? "var(--text-warning)"
                                         : "var(--text-muted)",
                                     }}
                                   >
-                                    {isBuildTypeManual
+                                    {isBuildTypeManual || fileBuildType
                                       ? "(manual override)"
                                       : "(auto)"}
                                   </span>
                                 )}
                               </div>
                             }
-                            value={effectiveBuildType || ""}
+                            value={shownBuildType || ""}
                             onChange={(value) => {
+                              if (value === shownBuildType) return;
                               const next =
                                 value === ""
                                   ? undefined
-                                  : (value as "flat" | "house");
+                                  : value;
                               const patch: Parameters<
                                 typeof setComplianceSettings
                               >[0] = {
                                 build_type:
-                                  next === dwellingDetailsSuggestion.buildType
+                                  next === suggestedBuildType
                                     ? undefined
                                     : next,
                               };
                               const nextEffectiveBuildType =
-                                next ?? dwellingDetailsSuggestion.buildType;
-                              if (nextEffectiveBuildType === "house") {
+                                next ?? suggestedBuildType;
+                              if (nextEffectiveBuildType !== undefined && !buildTypeHasStoreyRows(targetRoot, nextEffectiveBuildType, storeyBuildTypes)) {
                                 patch.storey_of_dwelling = undefined;
                                 patch.storeys_in_building = undefined;
+                              }
+                              // The user's choice replaces the file's build type.
+                              if (fileBuildType) {
+                                const unread = { ...complianceSettings.unreadMetadataRows };
+                                delete unread.General_build_type;
+                                patch.unreadMetadataRows = unread;
                               }
                               setComplianceSettings(patch);
                             }}
                             options={[
                               {
                                 value: "",
-                                label: dwellingDetailsSuggestion.buildType
-                                  ? `Auto (${dwellingDetailsSuggestion.buildType})`
+                                label: suggestedBuildType
+                                  ? `Auto (${suggestedBuildType})`
                                   : "Select build type...",
                               },
-                              { value: "house", label: "House" },
-                              { value: "flat", label: "Flat" },
+                              ...buildTypes.map((type) => ({ value: type, label: buildTypeLabel(type) })),
+                              ...(fileBuildType && !complianceSettings.build_type && !buildTypes.includes(fileBuildType)
+                                ? [{ value: fileBuildType, label: fileBuildType }]
+                                : []),
                             ]}
                             placeholder="Select build type..."
                             variant="ghost"
                             size="md"
                           />
                           {isBuildTypeManual &&
-                            dwellingDetailsSuggestion.buildType && (
+                            suggestedBuildType && (
                               <ResetFieldButton
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
                                   setComplianceSettings({
                                     build_type: undefined,
-                                    ...(dwellingDetailsSuggestion.buildType ===
+                                    ...(suggestedBuildType ===
                                     "house"
                                       ? {
                                           storey_of_dwelling: undefined,
@@ -1860,7 +1924,7 @@ export function GlobalSettingsModal({
                                       : {}),
                                   });
                                 }}
-                                title={`Reset to suggested build type (${dwellingDetailsSuggestion.buildType})`}
+                                title={`Reset to suggested build type (${suggestedBuildType})`}
                                 ariaLabel="Reset build type to suggested value"
                                 align="input-row"
                               />
@@ -1990,7 +2054,7 @@ export function GlobalSettingsModal({
                             )}
                         </div>
 
-                        {effectiveBuildType === "flat" && (
+                        {buildTypeHasStoreyRows(targetRoot, shownBuildType, storeyBuildTypes) && (
                           <>
                             {showStoreyOfDwelling && (
                             <div
@@ -2118,6 +2182,7 @@ export function GlobalSettingsModal({
                         )}
                       </div>
 
+                      {showPartOCooling && (
                       <div
                         style={{
                           marginTop: "var(--spacing-sm)",
@@ -2156,6 +2221,7 @@ export function GlobalSettingsModal({
                           )}
                         </label>
                       </div>
+                      )}
 
                       <div
                         style={{
@@ -2495,6 +2561,9 @@ export function GlobalSettingsModal({
                         size="md"
                       />
 
+                      {requiredRows.has("IsExistingBuilding") && <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />}
+                      {requiredRows.has("HasElectricitySmartMeter") && <RequiredYesNo {...requiredYesNoProps("HasElectricitySmartMeter")} />}
+                      {requiredRows.has("PartGcompliance") ? <RequiredYesNo {...requiredYesNoProps("PartGcompliance", "Part G Compliance")} /> : (
                       <label
                         style={{
                           display: "flex",
@@ -2522,6 +2591,9 @@ export function GlobalSettingsModal({
                           "Part G Compliance"
                         )}
                       </label>
+                      )}
+                      {APPLIANCE_ROWS.flatMap((key) => (requiredRows.has(key) ? [<RequiredYesNo key={key} {...requiredYesNoProps(key)} />] : []))}
+                      {showKitchenHood && (
                       <label
                         style={{
                           display: "flex",
@@ -2552,6 +2624,7 @@ export function GlobalSettingsModal({
                           "Kitchen hood"
                         )}
                       </label>
+                      )}
                     </div>
                   </div>
                 )}
@@ -3035,6 +3108,8 @@ export function GlobalSettingsModal({
                       )}
                     </div>
 
+                    {requiredRows.has("Ventilation_noise_nuisance") ? <RequiredYesNo {...requiredYesNoProps("Ventilation_noise_nuisance", "Noise nuisance")} /> : (
+                    <>
                     <div
                       style={{
                         display: "flex",
@@ -3084,6 +3159,9 @@ export function GlobalSettingsModal({
                     >
                       Whether external noise limits window opening for cooling
                     </div>
+                    </>
+                    )}
+                    {requiredRows.has("Ventilation_cross_vent_possible") && <RequiredYesNo {...requiredYesNoProps("Ventilation_cross_vent_possible")} />}
                   </div>
                 )}
               </div>

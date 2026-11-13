@@ -13,7 +13,10 @@
 
 import { useState } from 'react';
 import type { Element } from '../../geometry/types';
+import { applianceRequiresEnergySupply } from '../../lib/schemaCache';
+import { useGeometryStore } from '../../stores/geometryStore';
 import { StandardDropdown } from '../StandardDropdown';
+import { readExtraJsonRecord } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
 type ApplianceElement = Extract<Element, { type: 'Appliance' }>;
@@ -22,13 +25,29 @@ export interface ApplianceFormState {
   applianceKey: string;
   setApplianceKey: (value: string) => void;
   applianceKeyOptions: readonly string[];
+  /** `extra_json.EnergySupply`, asked for only where the target's schema requires it (HEM:EPC cooking). */
+  energySupply: string;
+  setEnergySupply: (value: string) => void;
+  requiresEnergySupply: (applianceKey: string) => boolean;
+  energySupplyNames: readonly string[];
 }
 
 function useFormState(ctx: ElementFormStateCtx): ApplianceFormState {
   const [applianceKey, setApplianceKey] = useState<string>('');
-
-
-  return { applianceKey, setApplianceKey, applianceKeyOptions: ctx.applianceKeyOptions };
+  const [energySupply, setEnergySupply] = useState<string>('');
+  // The model's supplies are the defaults file's EnergySupply entries.
+  const defaultsJson = useGeometryStore((s) => s.defaultsJson);
+  const supplies = readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply);
+  const root = ctx.schemaPort.availability === 'available' ? ctx.schemaPort.getRootSchema(ctx.schemaMode) : null;
+  return {
+    applianceKey,
+    setApplianceKey,
+    applianceKeyOptions: ctx.applianceKeyOptions,
+    energySupply,
+    setEnergySupply,
+    requiresEnergySupply: (key) => applianceRequiresEnergySupply(root, key),
+    energySupplyNames: Object.keys(supplies),
+  };
 }
 
 export const applianceFormModule: ElementFormModule<ApplianceFormState> = {
@@ -38,23 +57,29 @@ export const applianceFormModule: ElementFormModule<ApplianceFormState> = {
   hydrate(state, element) {
     if (element.type !== 'Appliance') return;
     state.setApplianceKey(element.appliancekey ?? '');
+    const supply = readExtraJsonRecord(element.extra_json).EnergySupply;
+    state.setEnergySupply(typeof supply === 'string' ? supply : '');
   },
 
   reset(state) {
     state.setApplianceKey('');
+    state.setEnergySupply('');
   },
 
   buildElementData(state, ctx) {
+    const extra = readExtraJsonRecord(ctx.baseData.extra_json);
     return {
       ...ctx.baseData,
+      ...(state.energySupply ? { extra_json: { ...extra, EnergySupply: state.energySupply } } : {}),
       appliancekey: state.applianceKey || undefined,
       zoneId: undefined // Global object
     } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {
-    const { applianceKey, setApplianceKey, applianceKeyOptions } = state;
-    const { elementType, renderFieldLabel, registerBaseFieldRefs, commitExistingElementDraft } = ctx;
+    const { applianceKey, setApplianceKey, applianceKeyOptions, energySupply, setEnergySupply, energySupplyNames } = state;
+    const { elementType, renderFieldLabel, registerBaseFieldRefs, commitExistingElementDraft, selection, getElementById } = ctx;
+    const supplyLabel = state.requiresEnergySupply(applianceKey) ? renderFieldLabel('Energy supply:', elementType, 'EnergySupply') : null;
     return (
       <>
         {renderFieldLabel('Appliance Key:', elementType)}
@@ -76,6 +101,30 @@ export const applianceFormModule: ElementFormModule<ApplianceFormState> = {
             size="md"
           />
         </div>
+        {supplyLabel && (
+          <>
+            {supplyLabel}
+            <div className="element-input" ref={registerBaseFieldRefs('EnergySupply')}>
+              <StandardDropdown
+                value={energySupply}
+                onChange={(value) => {
+                  setEnergySupply(value);
+                  const extra = { ...readExtraJsonRecord(selection ? getElementById(selection.id)?.extra_json : undefined) };
+                  if (value) extra.EnergySupply = value;
+                  else delete extra.EnergySupply;
+                  commitExistingElementDraft({ extra_json: Object.keys(extra).length ? extra : undefined } as Partial<Element>);
+                }}
+                options={[
+                  ...(energySupply && !energySupplyNames.includes(energySupply) ? [{ value: energySupply, label: energySupply }] : []),
+                  ...energySupplyNames.map((name) => ({ value: name, label: name })),
+                ]}
+                placeholder="Select energy supply"
+                variant="ghost"
+                size="md"
+              />
+            </div>
+          </>
+        )}
       </>
     );
   },

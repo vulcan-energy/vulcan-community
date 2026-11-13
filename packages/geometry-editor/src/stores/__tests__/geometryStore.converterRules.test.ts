@@ -47,6 +47,8 @@ type Case = {
   /** Text the load notices must contain, or must not contain. */
   notice?: string;
   noNotice?: string;
+  /** Load for a target whose rules require these Metadata rows (an EPC target). */
+  requires?: readonly string[];
 };
 
 const replace = (from: string, to: string) => (csv: string) => {
@@ -69,8 +71,38 @@ const kitchen = (zone: string, type: string, keepCoords = true) => (csv: string)
 
 const appendSection = (text: string) => (csv: string) => `${csv.trimEnd()}\n\n${text}\n`;
 const noFloorAreaExtra = (csv: string) => csv.replace('""emitter_floor_area"":8.89,', '');
+const EPC_ROW_CELLS: ReadonlyArray<readonly [string, string]> = [
+  ['HasElectricitySmartMeter', 'TRUE'], ['IsExistingBuilding', 'FALSE'], ['Ventilation_cross_vent_possible', 'FALSE'],
+  ['Appliances_has_dryer', 'FALSE'], ['Appliances_has_dishwasher', 'TRUE'], ['Appliances_has_separate_fridge_or_freezer', 'FALSE'],
+];
+const EPC_ROWS = EPC_ROW_CELLS.map(([key]) => key);
+const withMetadata = (rows: ReadonlyArray<readonly [string, string]>) => (csv: string) =>
+  csv.replace('Metadata,,,,,,,,,,,,,\n', `Metadata,,,,,,,,,,,,,\n${rows.map(([k, v]) => `${k},${v},,,,,,,,,,,,,\n`).join('')}`);
 
 const CASES: Case[] = [
+  // HEM:EPC inputs: Metadata rows the target requires, saved as typed. FHS models never write them.
+  { name: 'EPC rows save as typed', requires: EPC_ROWS, edit: withMetadata(EPC_ROW_CELLS), defaults: true,
+    allows: ['Electricity smart meter is not set', 'Has a dishwasher is not set', 'Cross ventilation possible is not set'],
+    saves: Object.fromEntries(EPC_ROW_CELLS.map(([key, value]) => [`Metadata|${key}`, value])) },
+  { name: 'EPC rows also save as typed for an FHS target', edit: withMetadata(EPC_ROW_CELLS),
+    saves: Object.fromEntries(EPC_ROW_CELLS.map(([key, value]) => [`Metadata|${key}`, value])) },
+  { name: 'an FHS model writes no EPC row and needs none', defaults: true, edit: (csv) => csv,
+    allows: ['Electricity smart meter', 'Existing building', 'Cross ventilation possible', 'clothes dryer'],
+    saves: Object.fromEntries(EPC_ROW_CELLS.map(([key]) => [`Metadata|${key}`, null])) },
+  // An absent required row has no default: the defaults file's value never fills it.
+  { name: 'EPC rows absent block and stay unset', requires: [...EPC_ROWS, 'Ventilation_altitude'], defaults: true,
+    edit: (csv) => csv.replace(/^Ventilation_altitude,.*\n/m, ''),
+    blocks: ['Electricity smart meter is not set', 'Existing building is not set', 'Cross ventilation possible is not set',
+      'Has a clothes dryer is not set', 'Has a dishwasher is not set', 'Has a separate fridge or freezer is not set', 'Altitude (m) is not set'],
+    saves: { 'Metadata|HasElectricitySmartMeter': null, 'Metadata|Ventilation_altitude': null } },
+  // A battery's grid charging is saved as typed; the converter drops it for a target without it.
+  { name: 'battery grid charging saves as typed',
+    edit: replace('Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json\n',
+      'Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json\nBattery,Zone 1,ElectricBattery,ElectricBattery,,,"1,1,0","{""capacity"":5,""grid_charging_possible"":false,""battery_age"":2}"\n'),
+    saves: { 'Systems|Battery|extra_json': '{"grid_charging_possible":false,"battery_age":2,"_name_auto_sync":false,"capacity":5}' } },
+  { name: 'an EPC row set in the editor saves', requires: EPC_ROWS, edit: (csv) => csv,
+    then: (store) => store.getState().setComplianceSettings({ HasElectricitySmartMeter: false, Appliances_has_dishwasher: true }),
+    saves: { 'Metadata|HasElectricitySmartMeter': 'FALSE', 'Metadata|Appliances_has_dishwasher': 'TRUE', 'Metadata|IsExistingBuilding': null } },
   // Converter: unit_number is a whole number of 1 or more, or blank (E055 otherwise), on every emitter.
   { name: 'radiator unit_number 0.5', edit: radiator('0.5'), blocks: ['Radiator|unit_number'], saves: { 'Wet Emitters|Radiator|unit_number': '0.5' } },
   { name: 'radiator unit_number 1.5', edit: radiator('1.5'), blocks: ['Radiator|unit_number'], saves: { 'Wet Emitters|Radiator|unit_number': '1.5' } },
@@ -278,7 +310,11 @@ const CASES: Case[] = [
 ];
 
 function load(c: Case) {
-  const schemaPort = c.targetHost ? { ...canonicalGeometrySchemaPort, targetSchemaMode: () => 'fhs' as const } : canonicalGeometrySchemaPort;
+  const schemaPort = {
+    ...canonicalGeometrySchemaPort,
+    ...(c.targetHost || c.requires ? { targetSchemaMode: () => 'fhs' as const } : {}),
+    ...(c.requires ? { targetRules: () => ({ requiredMetadataRows: c.requires! }) } : {}),
+  };
   const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort });
   const { warnings } = store.getState().loadFromCSV(c.edit(sample));
   if (c.defaults) store.setState({ defaultsJson: defaults, defaultsLoading: false } as never);
@@ -343,4 +379,184 @@ it('asks for a party wall lining only for the cavity types the target lists', ()
     __setFHSSchemaObjectForTests(plain);
     __setSchemaObjectForTests(plain);
   }
+});
+
+// A new model's FHS initial values stand only where the target does not require the user to state them.
+it('drops the initial values a newly selected target requires, keeping what the user set', () => {
+  let rules: { requiredMetadataRows: string[] } | undefined;
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...canonicalGeometrySchemaPort, targetRules: () => rules } });
+  store.getState().setComplianceSettings({ NumberOfBedrooms: 3 });
+  rules = { requiredMetadataRows: ['PartGcompliance', 'NumberOfBedrooms', 'HeatingControlType'] };
+  store.getState().setTargetBundleId('epc');
+  const settings = store.getState().complianceSettings;
+  expect(settings.PartGcompliance).toBeUndefined();
+  expect(settings.HeatingControlType).toBeUndefined();
+  expect(settings.NumberOfBedrooms).toBe(3);
+  expect(settings.ColdWaterSource).toBe('mains water');
+
+  rules = undefined;
+  store.getState().clearAll();
+  store.getState().setTargetBundleId('fhs');
+  expect(store.getState().complianceSettings).toMatchObject({ PartGcompliance: true, HeatingControlType: 'SeparateTempControl', NumberOfBedrooms: 1 });
+});
+
+// Defaults fill a row only where the target's schema takes the value: HEM:EPC has no Part O or
+// cooker hood row and no `house` build type.
+it('fills rows from the defaults only with values the target schema takes', () => {
+  const fill = (root: unknown) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...canonicalGeometrySchemaPort, getRootSchema: () => root as never } });
+    store.setState({ defaultsJson: { General: { build_type: 'house', storeys_in_dwelling: 1 } }, defaultsLoading: false } as never);
+    const { build_type, PartO_active_cooling_required, KitchenExtractorHoodExternal } = store.getState().complianceSettings;
+    return { build_type, PartO_active_cooling_required, KitchenExtractorHoodExternal };
+  };
+  expect(fill(JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'))))
+    .toEqual({ build_type: 'house', PartO_active_cooling_required: false, KitchenExtractorHoodExternal: false });
+  expect(fill({ properties: { General: { properties: { build_type: { enum: ['detached', 'flat'] } } } } }))
+    .toEqual({ build_type: undefined, PartO_active_cooling_required: undefined, KitchenExtractorHoodExternal: undefined });
+});
+
+// A new model filled from the FHS defaults template, then switched to a target that requires the
+// EPC rows: no defaults value stands in for a row the user must state, nor for a value the target's
+// schema rejects. The schema arrives after the switch; the editor waits for it.
+it('a target switch drops the defaults values the target requires or rejects, unless the user typed them', () => {
+  const template = JSON.parse(fixture('data/defaults/defaults_template.json'));
+  const fhs = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  const epc = { properties: { General: { properties: { build_type: { enum: ['detached', 'flat'] }, storeys_in_dwelling: { type: 'integer' } } } } };
+  const target: { rules?: { requiredMetadataRows: string[] } } = {};
+  let root: unknown = fhs;
+  let schemaArrives = () => {};
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+    ...canonicalGeometrySchemaPort,
+    targetRules: () => target.rules,
+    getRootSchema: () => root as never,
+    subscribe: (listener) => { schemaArrives = listener; return () => {}; },
+  } });
+  store.setState({ defaultsJson: template, defaultsLoading: false } as never);
+  expect(store.getState().complianceSettings).toMatchObject({ Ventilation_altitude: 30, build_type: 'house', PartO_active_cooling_required: false });
+  store.getState().setComplianceSettings({ Ventilation_terrain_class: 'Suburban' } as never);
+
+  target.rules = { requiredMetadataRows: [
+    'PartGcompliance', 'NumberOfBedrooms', 'NumberOfWetRooms', 'HeatingControlType', 'ColdWaterSource',
+    'Ventilation_altitude', 'Ventilation_shield_class', 'Ventilation_terrain_class', 'Ventilation_noise_nuisance',
+    'AirPermeability_test_pressure', 'AirPermeability_test_result', 'AirPermeability_ventilation_zone_height',
+  ] };
+  root = null;
+  store.getState().setTargetBundleId('epc');
+  const dropped = ['Ventilation_altitude', 'Ventilation_shield_class', 'Ventilation_noise_nuisance',
+    'AirPermeability_test_pressure', 'AirPermeability_test_result', 'AirPermeability_ventilation_zone_height', 'PartGcompliance'];
+  const settings = () => store.getState().complianceSettings as Record<string, unknown>;
+  for (const key of dropped) expect(settings()[key], key).toBeUndefined();
+  expect(settings().Ventilation_terrain_class).toBe('Suburban');
+
+  root = epc;
+  schemaArrives();
+  for (const key of [...dropped, 'build_type', 'PartO_active_cooling_required', 'KitchenExtractorHoodExternal']) expect(settings()[key], key).toBeUndefined();
+  expect(settings().Ventilation_terrain_class).toBe('Suburban');
+  expect(settings().storeys_in_dwelling).toBe(1);
+});
+
+// With the target's schema not yet loaded the defaults fill waits for it, so no value goes in unchecked.
+it('fills from the defaults only once the target schema is known', () => {
+  let root: unknown = null;
+  let schemaArrives = () => {};
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+    ...canonicalGeometrySchemaPort,
+    getRootSchema: () => root as never,
+    subscribe: (listener) => { schemaArrives = listener; return () => {}; },
+  } });
+  store.setState({ defaultsJson: { General: { build_type: 'house', storeys_in_dwelling: 1 } }, defaultsLoading: false } as never);
+  expect(store.getState().complianceSettings.build_type).toBeUndefined();
+  root = { properties: { General: { properties: { build_type: { enum: ['detached', 'flat'] }, storeys_in_dwelling: { type: 'integer' } } } } };
+  schemaArrives();
+  expect(store.getState().complianceSettings.build_type).toBeUndefined();
+  expect(store.getState().complianceSettings.storeys_in_dwelling).toBe(1);
+});
+
+// HEM:EPC takes a built form as build_type; the editor holds only house or flat. A file's value is
+// kept, and it is an issue only where the target's schema rejects it.
+it('keeps a build type the editor cannot hold and reports it only where the target rejects it', () => {
+  const fhs = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  const epc = structuredClone(fhs);
+  epc.properties.General.properties.build_type = { enum: ['detached', 'flat'] };
+  const check = (root: unknown) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...canonicalGeometrySchemaPort, getRootSchema: () => root as never } });
+    store.getState().loadFromCSV(replace('General_build_type,house,', 'General_build_type,detached,')(sample));
+    const state = store.getState();
+    return {
+      issue: state.collectAllGeometryWarnings().criticalIssues.some((text) => text.includes("Build type is 'detached'")),
+      saved: state.generateCSV({ allowUnresolvedMigration: true }).includes('\nGeneral_build_type,detached,'),
+    };
+  };
+  expect(check(fhs)).toEqual({ issue: true, saved: true });
+  expect(check(epc)).toEqual({ issue: false, saved: true });
+});
+
+// A row the user empties stays empty: no later fill (a target switch reruns it) puts the defaults back.
+it('never refills a row the user cleared', () => {
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+  store.setState({ defaultsJson: { General: { build_type: 'house', storeys_in_dwelling: 1 } }, defaultsLoading: false } as never);
+  expect(store.getState().complianceSettings.PartO_active_cooling_required).toBe(false);
+  store.getState().setComplianceSettings({ PartO_active_cooling_required: undefined });
+  store.getState().setTargetBundleId('other');
+  expect(store.getState().complianceSettings.PartO_active_cooling_required).toBeUndefined();
+  store.getState().setComplianceSettings({ PartO_active_cooling_required: true });
+  expect(store.getState().complianceSettings.PartO_active_cooling_required).toBe(true);
+});
+
+// The geometry gives `house`, which HEM:EPC does not take: the row stays empty and is asked for.
+it('derives the build type only where the target takes the derived value', () => {
+  const fhs = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  const epc = structuredClone(fhs);
+  epc.properties.General.properties.build_type = { enum: ['detached', 'flat'] };
+  const check = (root: unknown) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...canonicalGeometrySchemaPort, getRootSchema: () => root as never } });
+    store.getState().loadFromCSV(sample);
+    // Auto: the build type follows the geometry, as on a new model.
+    store.getState().setComplianceSettings({ build_type: undefined });
+    store.setState({ defaultsJson: { General: { build_type: 'house', storeys_in_dwelling: 1 } }, defaultsLoading: false } as never);
+    const state = store.getState();
+    return {
+      saved: /\nGeneral_build_type,([^,]*),/.exec(state.generateCSV({ allowUnresolvedMigration: true }))?.[1] ?? null,
+      unset: state.collectAllGeometryWarnings().criticalIssues.some((text) => text.includes('Build type is not set')),
+    };
+  };
+  expect(check(fhs)).toEqual({ saved: 'house', unset: false });
+  expect(check(epc)).toEqual({ saved: null, unset: true });
+});
+
+it('stops following the schema port once disposed', () => {
+  const listeners = new Set<() => void>();
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+    ...canonicalGeometrySchemaPort,
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+  } });
+  expect(listeners.size).toBe(1);
+  store.getState().dispose();
+  expect(listeners.size).toBe(0);
+});
+
+// A maisonette is a flat for the storey rows; a detached house is not. A schema that states the
+// build types needing them (FHS: `flat`) decides; otherwise the target's storeyBuildTypes do.
+it('writes the storey rows for each build type the target treats as a flat', () => {
+  const fhs = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  const unstated = structuredClone(fhs);
+  delete unstated.properties.General.if;
+  delete unstated.properties.General.then;
+  unstated.properties.General.properties.build_type = { enum: ['detached', 'maisonette', 'flat'] };
+  unstated.properties.General.properties.storey_of_dwelling = { type: 'integer' };
+  const saves = (root: unknown, buildType: string) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+      ...canonicalGeometrySchemaPort,
+      getRootSchema: () => root as never,
+      targetRules: () => ({ storeyBuildTypes: ['flat', 'maisonette'] }),
+    } });
+    store.getState().loadFromCSV(sample);
+    store.getState().setComplianceSettings({ build_type: buildType, storey_of_dwelling: 2 });
+    return store.getState().generateCSV({ allowUnresolvedMigration: true }).includes('\nGeneral_storey_of_dwelling,2,');
+  };
+  expect(saves(unstated, 'maisonette')).toBe(true);
+  expect(saves(unstated, 'detached')).toBe(false);
+  expect(saves(fhs, 'flat')).toBe(true);
+  expect(saves(fhs, 'house')).toBe(false);
+  expect(saves(fhs, 'maisonette')).toBe(false);
 });

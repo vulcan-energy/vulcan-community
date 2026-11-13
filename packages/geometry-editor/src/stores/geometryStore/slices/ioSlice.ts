@@ -28,7 +28,7 @@ import {
 import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionRows';
 import { derivePvDimensionsFromCoords } from '../../../lib/pvPanelFootprint';
 import { BUILDING_ALIASES } from '../../../geometry/io/ingestGeometryTabularSections';
-import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues } from '../../../lib/globalSettingsValidation';
+import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues, withoutTargetInitialValues } from '../../../lib/globalSettingsValidation';
 import { csvModelProfile } from '../../../geometry/io/modelSchemaProfile';
 import {
   encodeGuideOverlayMetadataValue,
@@ -52,7 +52,7 @@ import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGe
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
-import type { GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
+import { targetRules, targetSchemaMode, type GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import type { GeometryWorkspaceResourcePort } from '../../../../../geometry-editor-host/src/workspaceResourcePort';
 import {
   alignHostedSlopedPanelToHostOrientation,
@@ -165,10 +165,15 @@ export interface IoSlice {
   setLastSavedCsv: (csv: string | null) => void;
   /** Internal cancellation hook used by document-boundary reset actions. */
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => void;
-  /** True from a load that ended before its defaults arrived until they arrive. */
+  /**
+   * True while the defaults fill waits: from a load that ended before its defaults arrived, or from
+   * defaults or a target switch that came before the target's schema, until both are at hand.
+   */
   loadAwaitsDefaults: boolean;
   /** The rows the last loaded file lacks that the defaults filled (absentMetadataRowFill); load UIs show it as a notice. */
   lateLoadNotice: string | null;
+  /** Stops following the schema port. A host calls it when a store it made for one task ends. */
+  dispose: () => void;
 }
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], IoSlice>;
 export type IoSliceOptions = Readonly<{
@@ -825,6 +830,10 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
     : [];
 };
 
+/** The target's root schema for the defaults fill: null until it loads, undefined for a host with no schema. */
+export const metadataFillRoot = (port: GeometrySchemaPort): unknown =>
+  port.availability === 'available' ? port.getRootSchema(targetSchemaMode(port)) : undefined;
+
 export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   // Scheduling belongs to this store instance. Separate editor stores must not
   // cancel or version one another's pending defaults reads.
@@ -848,6 +857,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   csvUpgradeRequested: false,
   loadAwaitsDefaults: false,
   lateLoadNotice: null,
+  dispose: () => unsubscribeSchema?.(),
   requestCsvUpgrade: () => {
     if (get().sourceCsvVersion < CURRENT_VULCAN_CSV_VERSION) set({ csvUpgradeRequested: true });
   },
@@ -866,8 +876,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       targetBundleId,
       csvValidationCache: {},
       targetValidation: null,
+      // The new target may take a defaults value the old one did not.
+      loadAwaitsDefaults: true,
       complianceSettings: { ...state.complianceSettings, scenariosBaseModelEnabled: false },
     });
+    // The host selects the port's target before it sets the pin, so these are the new target's rules.
+    followTarget();
   },
   getCsvMigrationIssues: () => csvMigrationIssues(Object.values(get().elementsById), get().sourceCsvVersion),
   resolveCsvUValueInterpretation: (ids, meaning) => set(state => ({ elementsById: Object.fromEntries(Object.entries(state.elementsById).map(([id, element]) => [id, ids.includes(id) ? resolveCsvUValueMeaning(element, meaning) : element])) })),
@@ -1043,7 +1057,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // blank or unreadable is written as it was, which the converter blocks; leaving it out would let
     // the converter take the defaults template's value instead.
     const unreadRows = compliance.unreadMetadataRows ?? {};
-    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements })) {
+    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements }, metadataFillRoot(options.schemaPort), targetRules(options.schemaPort, state.complianceSettings).storeyBuildTypes)) {
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
@@ -1717,7 +1731,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         const zone = element.zoneId ? currentState.getZoneById(element.zoneId) : undefined;
         const zoneName = zone ? zone.name : '';
         const extraJson = encodePromotedExtraJsonFields(element);
-        delete extraJson.grid_charging_possible;
         delete extraJson.threshold_charges;
         delete extraJson.threshold_prices;
         delete extraJson.tariff;
@@ -2383,10 +2396,18 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Defaults kept from before the load (keepUnchangedDefaults) fill the rows this file lacks now;
     // defaults read for the file fill them when they arrive (withPrecomputedDefaultsLookup). Both
     // use absentMetadataRowFill and give the notice as lateLoadNotice.
+    // A target schema not yet loaded defers the fill to followTarget.
     const loaded = get();
-    if (loaded.defaultsJson && !loaded.defaultsLoading) {
-      const { patch, notice } = absentMetadataRowFill({ ...loaded, elements: Object.values(loaded.elementsById) }, loaded.defaultsJson);
-      set({ complianceSettings: { ...loaded.complianceSettings, ...patch }, loadAwaitsDefaults: false, lateLoadNotice: notice ?? null });
+    const fill = loaded.defaultsJson && !loaded.defaultsLoading
+      ? absentMetadataRowFill(
+        { ...loaded, elements: Object.values(loaded.elementsById) },
+        loaded.defaultsJson,
+        targetRules(options.schemaPort, loaded.complianceSettings),
+        metadataFillRoot(options.schemaPort),
+      )
+      : undefined;
+    if (fill) {
+      set({ complianceSettings: { ...loaded.complianceSettings, ...fill.patch }, loadAwaitsDefaults: false, lateLoadNotice: fill.notice ?? null });
     } else {
       set({ loadAwaitsDefaults: true, lateLoadNotice: null });
     }
@@ -2414,6 +2435,27 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed)], upgraded };
   }
+
+  /**
+   * Brings the values the user has not typed in line with the selected target: drops those it
+   * requires the user to state or its schema rejects (withoutTargetInitialValues), then runs a
+   * waiting defaults fill. Without the target's schema the fill and the schema check wait for it.
+   */
+  function followTarget(): void {
+    const state = get();
+    const root = metadataFillRoot(options.schemaPort);
+    const rules = targetRules(options.schemaPort, state.complianceSettings);
+    const settings = withoutTargetInitialValues(state.complianceSettings, rules.requiredMetadataRows, root);
+    const fill = state.loadAwaitsDefaults && state.defaultsJson && !state.defaultsLoading
+      ? absentMetadataRowFill({ ...state, complianceSettings: settings, elements: Object.values(state.elementsById) }, state.defaultsJson, rules, root)
+      : undefined;
+    if (!fill && settings === state.complianceSettings) return;
+    set({
+      complianceSettings: fill ? { ...settings, ...fill.patch } : settings,
+      ...(fill ? { loadAwaitsDefaults: false, ...(fill.notice ? { lateLoadNotice: fill.notice } : {}) } : {}),
+    });
+  }
+  const unsubscribeSchema = options.schemaPort.subscribe?.(followTarget);
 
   return slice;
   };

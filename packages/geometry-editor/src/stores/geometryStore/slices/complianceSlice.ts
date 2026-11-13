@@ -49,8 +49,15 @@ export interface ComplianceSlice {
     NumberOfBathrooms?: number;
     NumberOfSanitaryAccommodations?: number;
     KitchenExtractorHoodExternal?: boolean;
+    /** Metadata rows only some targets take (TARGET_INPUT_ROWS); unset means the file has no row. */
+    HasElectricitySmartMeter?: boolean;
+    IsExistingBuilding?: boolean;
+    Ventilation_cross_vent_possible?: boolean;
+    Appliances_has_dryer?: boolean;
+    Appliances_has_dishwasher?: boolean;
+    Appliances_has_separate_fridge_or_freezer?: boolean;
     /** FHS General.build_type. Undefined means use geometry-derived suggestion when available. */
-    build_type?: 'flat' | 'house';
+    build_type?: string;
     /** Explicit SAP 10.2 Built-Form code. Never inferred or defaulted from geometry. */
     built_form?: SapBuiltFormCode;
     /** FHS General.storeys_in_dwelling. Undefined means use geometry-derived suggestion when available. */
@@ -65,6 +72,14 @@ export interface ComplianceSlice {
     productSettings?: Partial<Record<ProductSettingRow, string>>;
     /** Model-input rows the loaded file lacks and the defaults have not yet filled. */
     absentMetadataRows?: string[];
+    /**
+     * Settings a new model holds at their FHS initial value, and rows filled from the defaults, that
+     * the user has not set since. A target that requires one (TargetRules.requiredMetadataRows) or
+     * whose schema rejects it starts it empty instead (withoutTargetInitialValues).
+     */
+    initialValueRows?: string[];
+    /** Settings the user emptied and has not set since: no defaults fill puts a value back. */
+    clearedValueRows?: string[];
   };
   setComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
   replaceComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
@@ -83,6 +98,7 @@ const FHS_COMPLIANCE_DEFAULTS: Partial<GeometryState['complianceSettings']> = {
 
 export const createInitialComplianceSettings = (): GeometryState['complianceSettings'] => ({
   ...FHS_COMPLIANCE_DEFAULTS,
+  initialValueRows: Object.keys(FHS_COMPLIANCE_DEFAULTS),
 });
 
 function deleteExplicitUndefined(
@@ -111,6 +127,14 @@ export const createComplianceSlice: GeometryStoreSlice = (set) => ({
   setComplianceSettings: (settings) => {
     set((state) => {
       const newSettings: Record<string, unknown> = { ...state.complianceSettings, ...settings };
+      // A row the user sets is no longer an initial value.
+      const initial = state.complianceSettings.initialValueRows?.filter((key) => !(key in settings));
+      if (initial) newSettings.initialValueRows = initial;
+      const patch = settings as Record<string, unknown>;
+      const cleared = Object.keys(patch).filter((key) => patch[key] === undefined);
+      const kept = (state.complianceSettings.clearedValueRows ?? []).filter((key) => !(key in patch));
+      if (cleared.length || kept.length) newSettings.clearedValueRows = [...kept, ...cleared];
+      else delete newSettings.clearedValueRows;
 
       // Spreading `key: undefined` leaves the key present with value undefined.
       // For any field the caller explicitly set to undefined, drop the key so
