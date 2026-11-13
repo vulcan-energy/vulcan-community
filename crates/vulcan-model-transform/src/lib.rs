@@ -70,6 +70,15 @@ impl ModelProfile {
         }
     }
 
+    /// Merging several CSV zones changes results, so it is reported. FHS: the schema allows
+    /// one zone, so merging is the input's meaning. EPC differs: it accepts several zones.
+    pub(crate) fn reports_zone_consolidation(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
     /// Zones carry `livingroom_area` + `restofdwelling_area` and no `area`, `height`
     /// or `temp_setpnt_init`. EPC: `$defs/Zone` requires both areas and has no `area`.
     pub(crate) fn zone_uses_living_and_rest_areas(self) -> bool {
@@ -129,8 +138,8 @@ impl ModelProfile {
     }
 
     /// Every wet heat source states `is_heat_network` (false unless authored).
-    /// EPC differs: its heat-source definitions (for example `$defs/HeatPumpProduct`)
-    /// declare no `is_heat_network`.
+    /// EPC differs: only its HIU and DirectFeed definitions declare it, and require it, so it
+    /// is authored on those systems and never inserted.
     pub(crate) fn wet_heat_sources_state_is_heat_network(self) -> bool {
         match self {
             Self::Core | Self::Epc => false,
@@ -312,10 +321,9 @@ pub struct TransformRequest {
     #[serde(default)]
     pub conversion_profile: ConversionProfile,
     pub version_metadata: VersionMetadata,
-    /// Product seam: HEM Database product IDs keyed by the model path of the system that
-    /// needs one (a `ProductSlot::path`). A product picker or a default-product resolver
-    /// fills it; the transform never invents an ID. Ignored unless the profile references
-    /// products.
+    /// Product seam: HEM Database product IDs keyed by `ProductSlot::key`. A product picker
+    /// or a default-product resolver fills it; the transform never invents an ID. A key no
+    /// system has is an error. Ignored unless the profile references products.
     #[serde(default, skip_serializing_if = "ProductReferences::is_empty")]
     pub product_references: ProductReferences,
 }
@@ -325,7 +333,10 @@ pub type ProductReferences = std::collections::BTreeMap<String, u64>;
 /// A system that needs a HEM Database product, as the converted model holds it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProductSlot {
-    /// Model path of the system object; the key for `TransformRequest::product_references`.
+    /// The key for `TransformRequest::product_references`: the model path, with an emitter's
+    /// array index replaced by its Wet Emitters row name so reordering rows moves nothing.
+    pub key: String,
+    /// Model path of the system object in the converted model.
     pub path: String,
     /// The system's own type (`type`, or `wet_emitter_type` for an emitter).
     pub system_type: String,

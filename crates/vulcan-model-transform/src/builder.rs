@@ -1236,7 +1236,9 @@ fn is_infiltration_ventilation_row(row: &BTreeMap<String, Value>) -> bool {
 
 /// The (field name, field value) pair of a parsed Metadata row: the codec keys the first cell
 /// `Field` and the second `Value`. A name that is not a known Metadata field is ignored.
-fn extract_metadata_field(row: &BTreeMap<String, Value>) -> (Option<String>, Option<Value>) {
+pub(crate) fn extract_metadata_field(
+    row: &BTreeMap<String, Value>,
+) -> (Option<String>, Option<Value>) {
     let name = row
         .get("Field")
         .and_then(Value::as_str)
@@ -1494,6 +1496,8 @@ pub struct JSONBuilder {
     /// Host-supplied HEM Database products by system model path (see `ProductSlot`).
     product_references: crate::ProductReferences,
     product_slots: RefCell<Vec<crate::ProductSlot>>,
+    /// Stable product key of each built emitter: its system and Wet Emitters row name.
+    emitter_keys: RefCell<BTreeMap<String, String>>,
 }
 
 impl JSONBuilder {
@@ -1552,6 +1556,7 @@ impl JSONBuilder {
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
             product_references: Default::default(),
             product_slots: RefCell::new(Vec::new()),
+            emitter_keys: RefCell::new(BTreeMap::new()),
         };
 
         builder.index_templates();
@@ -1588,6 +1593,7 @@ impl JSONBuilder {
             hem_core_version: version_metadata.hem_core_version.clone(),
             product_references: Default::default(),
             product_slots: RefCell::new(Vec::new()),
+            emitter_keys: RefCell::new(BTreeMap::new()),
         };
         builder.index_templates();
         Ok(builder)
@@ -1620,6 +1626,10 @@ impl JSONBuilder {
 
     fn note_emitter_row(&self, system: &str, index: usize, row: &BTreeMap<String, Value>) {
         let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+        self.emitter_keys.borrow_mut().insert(
+            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
+            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", name]),
+        );
         self.csv_rows.borrow_mut().push((
             crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
             format!("Wet Emitters row '{name}' (system '{system}')"),
@@ -1975,7 +1985,20 @@ impl JSONBuilder {
         // This must happen after build_zone_structure but before process_root_level_sections
         // so that systems and elements are processed correctly
         if self.profile.consolidates_to_single_zone() {
+            let zones: Vec<String> = result["Zone"]
+                .as_object()
+                .map(|zones| zones.keys().cloned().collect())
+                .unwrap_or_default();
             self.consolidate_zones_for_fhs(&mut result)?;
+            if zones.len() > 1 && self.profile.reports_zone_consolidation() {
+                self.schema_omissions
+                    .borrow_mut()
+                    .push(crate::finalization::SchemaOmission {
+                        code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
+                        path: "/Zone".into(),
+                        message: format!("The zones {} are merged into one. The target accepts several zones, but the converter does not yet give each its own areas and heating order, so results can differ from a model with separate zones.", zones.join(", ")),
+                    });
+            }
         }
 
         // Process root-level sections (includes merge_ventilation_systems, merge_water_pipework, merge_wet_emitters)
@@ -2030,14 +2053,25 @@ impl JSONBuilder {
                 &mut notices,
             );
         }
+        if self.profile.references_products() {
+            crate::epc_mappings::report_ventilation_defaults(result, csv_data, &mut notices);
+        }
         if self.profile.derives_build_type_from_party_walls() {
             let stated = csv_data.get("Metadata").into_iter().flatten().any(|row| {
                 matches!(extract_metadata_field(row), (Some(name), Some(value)) if name == "General_build_type" && value.as_str() != Some("house"))
             });
             if !stated {
-                match crate::epc_mappings::build_type_from_party_walls(csv_data) {
-                    Ok(build_type) => {
+                match crate::epc_mappings::build_type_from_party_walls(
+                    csv_data,
+                    &self.schema_build_types(),
+                ) {
+                    Ok((build_type, sides)) => {
                         result["General"]["build_type"] = Value::String(build_type.into());
+                        notices.push(crate::finalization::SchemaOmission {
+                            code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
+                            path: "/General/build_type".into(),
+                            message: format!("The Metadata section has no General_build_type row, so the model uses {build_type}, derived from party walls on {sides} side(s) of the dwelling. Add the row to state it, for example for a park home."),
+                        });
                     }
                     Err(message) => errors.push(ValidationError {
                         code: "E_EPC_BUILD_TYPE".into(),
@@ -2053,6 +2087,7 @@ impl JSONBuilder {
             let slots = crate::epc_mappings::apply_product_references(
                 result,
                 &self.product_references,
+                &self.emitter_keys.borrow(),
                 &mut errors,
             );
             *self.product_slots.borrow_mut() = slots;
@@ -7355,9 +7390,27 @@ impl JSONBuilder {
                 if self.profile.references_products() {
                     // The product gives the output and thermal mass; only the installed
                     // length (`$defs/WetEmitterRadiatorProduct`) is a site input.
+                    let name = emitter_row
+                        .get("Name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
                     let effective_length = effective_length.ok_or_else(|| {
-                        BuildError::new("E047", "A product radiator requires its 'length'")
+                        BuildError::new(
+                            "E047",
+                            &format!("Wet Emitters row '{name}': a product radiator requires its 'length'."),
+                        )
                     })?;
+                    for key in ["c", "c_per_m", "n", "thermal_mass", "thermal_mass_per_m"] {
+                        if number(key).is_some() {
+                            self.schema_omissions.borrow_mut().push(
+                                crate::finalization::SchemaOmission {
+                                    code: "TARGET_FIELD_OMITTED".into(),
+                                    path: crate::json_pointer(&["Wet Emitters", name, key]),
+                                    message: format!("Wet Emitters row '{name}': {key} is not used, because the radiator's HEM Database product gives it; the authored source is preserved."),
+                                },
+                            );
+                        }
+                    }
                     put(&mut emitter_obj, "length", Some(effective_length))?;
                     if let Some(id) = emitter_data.get("product_id").filter(|v| v.is_u64()) {
                         emitter_obj.insert("product_id".to_string(), id.clone());
@@ -8464,7 +8517,10 @@ impl JSONBuilder {
     }
 
     /// Resolve a $ref in the schema
-    /// `General.build_type` values the target schema allows (FHS: `flat`, `house`).
+    /// `General.build_type` values the target schema allows (FHS: `flat`, `house`). A schema
+    /// with no `General` (Core) keeps the Geometry CSV contract's own `flat`/`house`, since
+    /// the row is product metadata there. A `General` whose `build_type` has no enum allows
+    /// nothing, so every row value is reported rather than passed through.
     fn schema_build_types(&self) -> Vec<String> {
         let resolve = |node: &Value| -> Option<Value> {
             match node.get("$ref").and_then(Value::as_str) {
@@ -8472,14 +8528,15 @@ impl JSONBuilder {
                 None => Some(node.clone()),
             }
         };
-        self.schema
-            .pointer("/properties/General")
+        let Some(general) = self.schema.pointer("/properties/General").and_then(resolve) else {
+            return vec!["flat".into(), "house".into()];
+        };
+        general
+            .pointer("/properties/build_type")
             .and_then(resolve)
-            .and_then(|general| general.pointer("/properties/build_type").cloned())
-            .and_then(|build_type| resolve(&build_type))
             .and_then(|build_type| build_type.get("enum").cloned())
             .and_then(|values| serde_json::from_value(values).ok())
-            .unwrap_or_else(|| vec!["flat".into(), "house".into()])
+            .unwrap_or_default()
     }
 
     fn resolve_schema_ref(&self, ref_path: &str) -> Option<&Value> {
