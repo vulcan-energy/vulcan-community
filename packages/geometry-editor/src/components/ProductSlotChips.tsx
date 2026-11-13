@@ -51,21 +51,14 @@ export function ProductSlotChips({ element, productCatalogue, onPatchExtraJson }
       <div className="element-editor-pill-row">
         {own.map((slot) => {
           const chip = productSlotChip(slot);
-          const toggle = canPick ? () => setOpen(open === slot.path ? null : slot.path) : undefined;
-          return chip.missing ? (
-            <ValidationPill key={slot.path} message={chip.text} title={chip.title} variant="error" onClick={toggle} />
-          ) : (
-            <button
+          return (
+            <ValidationPill
               key={slot.path}
-              type="button"
-              className="element-editor-status-chip"
+              message={chip.text}
               title={chip.title}
-              aria-expanded={canPick ? open === slot.path : undefined}
-              onClick={toggle}
-              style={{ fontFamily: 'inherit', cursor: canPick ? 'pointer' : 'default' }}
-            >
-              {chip.text}
-            </button>
+              variant={chip.missing ? 'error' : 'info'}
+              onClick={canPick ? () => setOpen(open === slot.path ? null : slot.path) : undefined}
+            />
           );
         })}
       </div>
