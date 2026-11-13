@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! HEMIE bundles for existing buildings (EPC 04): bay windows, non-separated conservatories and
+//! HEMIE bundles for existing buildings: bay windows, non-separated conservatories and
 //! the box-in-roof check. Each is derived from the drawing wherever the drawing carries it; what
 //! the drawing cannot show is an element value with no default:
 //! - a bay's walls state `bay_window: true` (the drawing cannot tell a bay from a small
 //!   extension);
 //! - a conservatory's ground floor states `conservatory`: `non-separated` converts, while
-//!   `separated` and `unheated` stop, as DESNZ excludes them (EPC 04 4.3.1).
+//!   `separated` and `unheated` stop, as DESNZ excludes them.
 //!
 //! Each rule states its source as `hemie.rs` does.
 
@@ -15,12 +15,12 @@ use super::*;
 
 const BAY_FLAG: &str = "bay_window";
 /// DESNZ-defined: conservatory wall glazing opens closed, half opening (top) or third opening
-/// (top) only (EPC 04 Table 4.3.2.1).
+/// (top) only.
 const CONSERVATORY_WALL_WINDOW_TYPES: [&str; 3] =
     ["closed", "half opening top", "top third opening"];
 
 // ---------------------------------------------------------------------------------------------
-// Bay windows (EPC 04 4.5)
+// Bay windows
 
 /// A bay drawn as three walls in a storey outline: two sides and a front facet.
 pub(super) struct Bay<'a> {
@@ -84,7 +84,7 @@ pub(super) fn bays<'a>(ctx: &mut Ctx, els: &'a [El<'a>]) -> Vec<Bay<'a>> {
             .filter(|f| f.pts.iter().all(|p| shared(f, *p)))
             .collect();
         let ([front], 3) = (fronts.as_slice(), group.len()) else {
-            ctx.errors.push(error(path, format!("The bay walls {names} are not two sides and a front joined end to end. HEMIE takes a bay as a front facet between two side facets (EPC 04 4.5.3).")));
+            ctx.errors.push(error(path, format!("The bay walls {names} are not two sides and a front joined end to end. Draw the bay as three walls joined end to end: a side, the front and a side.")));
             continue;
         };
         let ends: Vec<P> = group
@@ -132,22 +132,26 @@ pub(super) fn bays<'a>(ctx: &mut Ctx, els: &'a [El<'a>]) -> Vec<Bay<'a>> {
                         (w, Some(chord))
                     }
                     _ => {
-                        ctx.errors.push(error(path, format!("The bay walls {names} do not start and end on one straight wall line. A bay projects from one external wall (EPC 04 4.5.1).")));
+                        ctx.errors.push(error(path, format!("The bay walls {names} do not start and end on one straight wall line. Start and end the bay on the line of the external wall it projects from.")));
                         continue;
                     }
                 }
             }
         };
         if wall_kind(parent) != Some(Kind::External) {
-            ctx.errors.push(error(path, format!("The bay walls {names} project from '{}', which is not an external wall. DESNZ covers bays on external walls only (EPC 04 4.5.1).", parent.name)));
+            ctx.errors.push(error(path, format!("The bay walls {names} project from '{}', which is not an external wall. Draw the bay on an external wall, or remove bay_window from these walls.", parent.name)));
             continue;
         }
-        // DESNZ-defined: only bays that start at the base of the parent wall (EPC 04 4.5.1).
-        if group.iter().any(|f| {
-            (f.num("base_height").unwrap_or(0.0) - parent.num("base_height").unwrap_or(0.0)).abs()
-                > TOL
-        }) {
-            ctx.errors.push(error(path, format!("The bay walls {names} start above the base of '{}'. DESNZ does not cover a projection that starts above the base of its wall, such as an oriel (EPC 04 4.5.1).", parent.name)));
+        // DESNZ-defined: only bays that start at the base of the parent wall.
+        let bases: Option<Vec<f64>> = group
+            .iter()
+            .chain([&parent])
+            .map(|w| ctx.need(w, "base_height"))
+            .collect();
+        let Some(bases) = bases else { continue };
+        let parent_base = bases[bases.len() - 1];
+        if bases.iter().any(|b| (b - parent_base).abs() > TOL) {
+            ctx.errors.push(error(path, format!("The bay walls {names} start above the base of '{}'. A projection that starts above the base of its wall, such as an oriel, cannot be entered: draw the bay from the wall's base, or remove bay_window from these walls.", parent.name)));
             continue;
         }
         // HEMIE's bay is symmetric: a front parallel to the opening, sides tapering equally.
@@ -162,7 +166,7 @@ pub(super) fn bays<'a>(ctx: &mut Ctx, els: &'a [El<'a>]) -> Vec<Bay<'a>> {
             || (taper_a - taper_b).abs() > TOL
             || taper_a < -TOL
         {
-            ctx.errors.push(error(path, format!("The bay walls {names} are not symmetric about the bay's centre, with the front parallel to the wall and no wider than the opening (within {TOL} m). HEMIE takes a bay with two equal sides (EPC 04 4.5.3).")));
+            ctx.errors.push(error(path, format!("The bay walls {names} are not symmetric. Redraw them with two equal sides and the front parallel to the wall and no wider than the opening (within {TOL} m).")));
             continue;
         }
         out.push(Bay {
@@ -217,7 +221,12 @@ pub(super) fn attach_bays(
             mid(front.pts[0], front.pts[1]),
             &parts[walls[wi].part].storeys[walls[wi].storey],
         ) {
-            ctx.errors.push(error(front.path(), format!("The bay walls {names} point into the storey, not out of it. A bay projects outside its wall (EPC 04 4.5.1).")));
+            ctx.errors.push(error(
+                front.path(),
+                format!(
+                    "The bay walls {names} point into the storey. Draw the bay outside its wall."
+                ),
+            ));
             continue;
         }
         if let Some(d) = doors
@@ -227,7 +236,7 @@ pub(super) fn attach_bays(
             ctx.errors.push(error(
                 d.path(),
                 format!(
-                    "Door '{}' is in a bay wall. HEMIE's bay holds windows only (EPC 04 4.5.2).",
+                    "Door '{}' is in a bay wall, which holds windows only. Move the door to another wall.",
                     d.name
                 ),
             ));
@@ -241,7 +250,14 @@ pub(super) fn attach_bays(
                 .collect()
         };
         let [front_window] = hosted(front)[..] else {
-            ctx.errors.push(error(front.path(), format!("Bay front '{}' has {} windows. HEMIE's bay has one front window (EPC 04 Table 4.5.2).", front.name, hosted(front).len())));
+            ctx.errors.push(error(
+                front.path(),
+                format!(
+                    "Bay front '{}' has {} windows. Give the bay front exactly one window.",
+                    front.name,
+                    hosted(front).len()
+                ),
+            ));
             continue;
         };
         let mut bay_value = Map::new();
@@ -250,7 +266,7 @@ pub(super) fn attach_bays(
             continue;
         };
         bay_value.insert("front_window".into(), w);
-        // DESNZ-defined: one side window serves both sides, or none (EPC 04 Table 4.5.2).
+        // DESNZ-defined: one side window serves both sides, or none.
         match (&hosted(side_a)[..], &hosted(side_b)[..]) {
             ([], []) => {}
             ([x], [y]) => {
@@ -258,17 +274,17 @@ pub(super) fn attach_bays(
                 placed.insert(y.name.to_string());
                 let (wx, wy) = (window(ctx, x, true), window(ctx, y, true));
                 if wx != wy {
-                    ctx.errors.push(error(x.path(), format!("Bay side windows '{}' and '{}' differ. HEMIE gives both sides of a bay one window (EPC 04 Table 4.5.2); make them the same.", x.name, y.name)));
+                    ctx.errors.push(error(x.path(), format!("Bay side windows '{}' and '{}' differ. Both sides of a bay share one window: make them the same.", x.name, y.name)));
                     continue;
                 }
                 bay_value.insert("side_window".into(), wx.expect("checked"));
             }
             _ => {
-                ctx.errors.push(error(side_a.path(), format!("The bay sides '{}' and '{}' do not each have one window, or both none. HEMIE gives both sides of a bay one window, or none (EPC 04 Table 4.5.2).", side_a.name, side_b.name)));
+                ctx.errors.push(error(side_a.path(), format!("The bay sides '{}' and '{}' do not each have one window. Give both sides the same window, or neither a window.", side_a.name, side_b.name)));
                 continue;
             }
         }
-        // Derived from the model: the measurements of EPC 04 Table 4.5.3.
+        // Derived from the model: the bay's depth, front width, opening width and height.
         let along = unit(sub(bay.b, bay.a));
         let front_mid = mid(front.pts[0], front.pts[1]);
         bay_value.insert(
@@ -282,14 +298,19 @@ pub(super) fn attach_bays(
             continue;
         };
         if heights.iter().any(|h| (h - heights[1]).abs() > TOL) {
-            ctx.errors.push(error(front.path(), format!("The bay walls {names} have different heights. HEMIE gives a bay one wall height (EPC 04 Table 4.5.3).")));
+            ctx.errors.push(error(
+                front.path(),
+                format!(
+                    "The bay walls {names} have different heights. Give the bay walls one height."
+                ),
+            ));
             continue;
         }
         // Derived from the model, as for storey walls: the drawn wall runs from floor to the
         // floor or roof above, and the ceiling is the storey gap below that.
         bay_value.insert("bay_height".into(), json!(heights[1] - STOREY_GAP));
         // DESNZ-defined: with no construction of their own, the bay walls take the parent
-        // wall's (EPC 04 Table 4.5.2).
+        // wall's.
         if bay.facets.iter().any(|f| {
             [
                 "u_value",
@@ -303,14 +324,23 @@ pub(super) fn attach_bays(
             bay_value.insert("wall_construction".into(), json!(key));
         }
         // Derived from the model: a roof drawn over the bay on its top storey; none where the
-        // storey above covers it (EPC 04 4.5.3). Its type follows the drawn planes; HEMIE
+        // storey above covers it. Its type follows the drawn planes; HEMIE
         // simplifies a pitched bay roof to one 35° slope facing the wall (DESNZ-defined).
         let top = bays
             .iter()
             .filter(|o| o.poly == bay.poly || inside(centroid(&bay.poly), &o.poly))
             .map(|o| o.level)
             .max();
-        if top == Some(bay.level) {
+        if top != Some(bay.level) {
+            // A roof drawn over a lower bay of a stack, outside the top bay, is not entered.
+            let higher: Vec<&Bay> = bays.iter().filter(|o| o.level > bay.level).collect();
+            if let Some(p) = planes.iter().find(|p| {
+                let c = centroid(&p.pts);
+                inside(c, &bay.poly) && !higher.iter().any(|o| inside(c, &o.poly))
+            }) {
+                ctx.errors.push(error(p.path(), format!("Roof '{}' is over the bay {names}, which has a bay above it. Only the top bay of a stack has a roof: delete this roof or draw it over the top bay.", p.name)));
+            }
+        } else {
             let over: Vec<&El> = planes
                 .iter()
                 .copied()
@@ -322,7 +352,7 @@ pub(super) fn attach_bays(
                 (f, n) if f == n => Some("mini_flat_roof"),
                 (0, _) => Some("mini_pitched_roof"),
                 _ => {
-                    ctx.errors.push(error(over[0].path(), format!("The bay roof {} is part flat and part pitched. HEMIE's bay roof is flat or pitched (EPC 04 4.5.3).", quoted(&over.iter().map(|p| p.name).collect::<Vec<_>>()))));
+                    ctx.errors.push(error(over[0].path(), format!("The bay roof {} is part flat and part pitched. Draw the bay roof all flat or all pitched.", quoted(&over.iter().map(|p| p.name).collect::<Vec<_>>()))));
                     continue;
                 }
             };
@@ -338,7 +368,7 @@ pub(super) fn attach_bays(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Conservatories (EPC 04 4.3)
+// Conservatories
 
 /// Which building parts are non-separated conservatories: their ground floor says so.
 pub(super) fn conservatories(
@@ -358,22 +388,21 @@ pub(super) fn conservatories(
             match g.text("conservatory") {
                 None => false,
                 Some("non-separated") => {
-                    // DESNZ-defined: a conservatory is one storey on a slab or suspended floor
-                    // (EPC 04 4.3.3).
+                    // DESNZ-defined: a conservatory is one storey on a slab or suspended floor.
                     if part.top > 0 {
-                        ctx.errors.push(error(g.path(), format!("Conservatory '{name}' has {} storeys. HEMIE models a conservatory as a single storey (EPC 04 4.3.3).", part.top + 1)));
+                        ctx.errors.push(error(g.path(), format!("Conservatory '{name}' has {} storeys. A conservatory is a single storey: draw it on floor 0 only.", part.top + 1)));
                     }
                     if !matches!(g.text("floor_type"), Some("Slab_no_edge_insulation" | "Slab_edge_insulation" | "Suspended_floor")) {
-                        ctx.errors.push(error(g.path(), format!("Conservatory floor '{}' is not a slab or suspended floor. DESNZ allows only those for a conservatory (EPC 04 4.3.3).", g.name)));
+                        ctx.errors.push(error(g.path(), format!("Conservatory floor '{}' is not a slab or suspended floor. Give it one of those floor types.", g.name)));
                     }
                     true
                 }
                 Some("separated") => {
-                    ctx.errors.push(error(g.path(), format!("'{}' is the floor of a separated conservatory. DESNZ leaves a separated conservatory out of the assessment (EPC 04 4.3.1): delete it from the model.", g.name)));
+                    ctx.errors.push(error(g.path(), format!("'{}' is the floor of a separated conservatory, which is not part of the assessment. Delete the conservatory from the model.", g.name)));
                     false
                 }
                 Some("unheated") => {
-                    ctx.errors.push(error(g.path(), format!("'{}' is the floor of an unheated conservatory. DESNZ does not enter one as a building part (EPC 04 4.3.1): delete it, and make the wall it borders a sheltered wall.", g.name)));
+                    ctx.errors.push(error(g.path(), format!("'{}' is the floor of an unheated conservatory, which is not a building part. Delete it, and make the wall it borders a sheltered wall.", g.name)));
                     false
                 }
                 Some(other) => {
@@ -412,7 +441,7 @@ fn glazing(
         }
         [t] if allowed.is_none_or(|a| a.contains(t)) => t.to_string(),
         _ => {
-            ctx.errors.push(error(owner.path(), format!("The glazing {names} of conservatory element '{}' opens as {}. HEMIE gives a conservatory wall or roof one opening type{}.", owner.name, quoted(&types.into_iter().collect::<Vec<_>>()), allowed.map(|a| format!(": {}", quoted(a))).unwrap_or_default())));
+            ctx.errors.push(error(owner.path(), format!("The glazing {names} of conservatory element '{}' opens as {}. A conservatory wall or roof takes one opening type{}: give all its glazing the same one.", owner.name, quoted(&types.into_iter().collect::<Vec<_>>()), allowed.map(|a| format!(": {}", quoted(a))).unwrap_or_default())));
             return None;
         }
     };
@@ -439,7 +468,7 @@ fn glazing(
 
 fn defaulted_notice(ctx: &mut Ctx, part: &str, defaulted: Vec<String>) {
     if !defaulted.is_empty() {
-        ctx.notices.push(notice("/Zone", format!("{part}: the glazing of {} states no opening type, so it takes DESNZ's default, closed (EPC 04 Tables 4.3.2.1, 4.3.2.2).", quoted(&defaulted.iter().map(String::as_str).collect::<Vec<_>>()))));
+        ctx.notices.push(notice("/Zone", format!("{part}: the glazing of {} states no opening type, so it opens as closed, the default.", quoted(&defaulted.iter().map(String::as_str).collect::<Vec<_>>()))));
     }
 }
 
@@ -480,7 +509,8 @@ pub(super) fn conservatory_walls(
             .copied()
             .filter(|w| w.host() == Some(source.name) && nearest(w) == Some(wi))
             .collect();
-        // DESNZ-defined: solid doors are not entered in a conservatory wall (EPC 04 4.3.3).
+        // DESNZ-defined: solid doors are not entered in a conservatory wall. A Vulcan door
+        // row carries no glazing; a glazed door is drawn as a window and counts as glazing.
         for d in doors
             .iter()
             .filter(|d| d.host() == Some(source.name) && nearest(d) == Some(wi))
@@ -503,10 +533,10 @@ pub(super) fn conservatory_walls(
         let Some(height) = ctx.need(source, "height") else {
             continue;
         };
-        // Derived from the model: the glazed share of the drawn wall (EPC 04 4.3.3).
+        // Derived from the model: the glazed share of the drawn wall.
         let fraction = area / (dist(walls[wi].a, walls[wi].b) * height);
         if fraction <= 0.0 || fraction > 1.0 + 1e-9 {
-            ctx.errors.push(error(source.path(), format!("Conservatory wall '{}' is {:.0}% glazed. DESNZ makes each conservatory wall glazed, above 0 and up to 100% (EPC 04 Table 4.3.2.1).", source.name, fraction * 100.0)));
+            ctx.errors.push(error(source.path(), format!("Conservatory wall '{}' is {:.0}% glazed. A conservatory wall must be glazed, above 0% and up to 100%: add or resize its windows.", source.name, fraction * 100.0)));
             continue;
         }
         let fraction = fraction.min(1.0);
@@ -549,11 +579,11 @@ pub(super) fn conservatory_walls(
     }
     defaulted_notice(ctx, "Conservatory walls", defaulted);
     if !solid_doors.is_empty() {
-        ctx.notices.push(notice("/Zone", format!("The doors {} are in conservatory walls. DESNZ does not enter solid doors there; draw a glazed door as a window (EPC 04 4.3.3).", quoted(&solid_doors.iter().map(String::as_str).collect::<Vec<_>>()))));
+        ctx.notices.push(notice("/Zone", format!("The doors {} are in conservatory walls and carry no glazing, so they are not entered. Draw a glazed door as a window.", quoted(&solid_doors.iter().map(String::as_str).collect::<Vec<_>>()))));
     }
 }
 
-/// A conservatory's roof (EPC 04 Tables 4.3.2.2). Derived from the model: type, slopes and
+/// A conservatory's roof. Derived from the model: type, slopes and
 /// glazing from the drawn planes and their rooflights; length and width are left to HEMIE, from
 /// the footprint (DESNZ default).
 #[allow(clippy::too_many_arguments)]
@@ -579,7 +609,7 @@ pub(super) fn conservatory_roof(
         .filter(|p| p.num("pitch") == Some(0.0))
         .count();
     if flat != 0 && flat != planes.len() {
-        ctx.errors.push(error(first.path(), format!("Conservatory '{part}' has flat and pitched roof planes. HEMIE gives a conservatory one flat or pitched roof (EPC 04 4.3.2.2).")));
+        ctx.errors.push(error(first.path(), format!("Conservatory '{part}' has flat and pitched roof planes. Draw its roof all flat or all pitched.")));
         return None;
     }
     let lights: Vec<&El> = windows
@@ -598,7 +628,7 @@ pub(super) fn conservatory_roof(
     // Derived from the model: the glazed share of the drawn roof.
     let fraction = glazed / area;
     if fraction <= 0.0 || fraction > 1.0 + 1e-9 {
-        ctx.errors.push(error(first.path(), format!("The roof of conservatory '{part}' is {:.0}% glazed. DESNZ makes a conservatory roof glazed, above 0 and up to 100% (EPC 04 Table 4.3.2.2).", fraction * 100.0)));
+        ctx.errors.push(error(first.path(), format!("The roof of conservatory '{part}' is {:.0}% glazed. A conservatory roof must be glazed, above 0% and up to 100%: add or resize its rooflights.", fraction * 100.0)));
         return None;
     }
     let fraction = fraction.min(1.0);
@@ -631,8 +661,8 @@ pub(super) fn conservatory_roof(
         [_] => "mono",
         [a, b] if bearing_gap(*a, *b) > 135.0 => "dual",
         _ => {
-            // DESNZ-defined: one, or two opposite, slopes (EPC 04 4.1.3, 4.3.2.2).
-            ctx.errors.push(error(first.path(), format!("The roof of conservatory '{part}' has {} slopes that are not one slope or two opposite ones. HEMIE takes a mono or dual pitched conservatory roof (EPC 04 4.3.2.2).", sides.len())));
+            // DESNZ-defined: one, or two opposite, slopes.
+            ctx.errors.push(error(first.path(), format!("The roof of conservatory '{part}' has {} slopes. Draw it flat, as one slope, or as two opposite slopes.", sides.len())));
             return None;
         }
     };
@@ -663,10 +693,11 @@ pub(super) fn conservatory_roof(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Box in the roof (EPC 04 4.4.1)
+// Box in the roof
 
-/// DESNZ-defined: a box-shaped room set within a pitched roof is not covered. Derived from the
-/// model: the top floor stands clear of the outline below, under an unheated pitched roof.
+/// DESNZ-defined: a box-shaped room set within a pitched roof is not covered. Ours (E21): how
+/// a box room is recognised, a top floor standing clear of the outline below under an unheated
+/// pitched roof.
 pub(super) fn box_in_roof(
     ctx: &mut Ctx,
     rings: &[Vec<P>],
@@ -685,7 +716,7 @@ pub(super) fn box_in_roof(
             && inside_or_on(centroid(top), &p.pts)
     });
     if clear && under_roof {
-        ctx.errors.push(error(top_walls[0].path(), format!("The top floor ({}) is a room set inside a pitched roof, clear of the walls below: a box in the roof. DESNZ does not cover box-in-roof rooms (EPC 04 4.4.1).", quoted(&top_walls.iter().map(|w| w.name).collect::<Vec<_>>()))));
+        ctx.errors.push(error(top_walls[0].path(), format!("The top floor ({}) is a room set inside a pitched roof, clear of the walls below: a box in the roof, which cannot be entered. Draw it as a room in the roof with its slopes, gables and knee walls, or as a storey.", quoted(&top_walls.iter().map(|w| w.name).collect::<Vec<_>>()))));
     }
     clear && under_roof
 }
@@ -964,7 +995,7 @@ mod tests {
         assert_eq!(roof["is_external_right_gable_wall"], false);
         assert!(notices
             .iter()
-            .any(|n| n.message.contains("DESNZ's default, closed")));
+            .any(|n| n.message.contains("opens as closed, the default")));
         assert!(parts["Main"].get("is_non_separated_conservatory").is_none());
     }
 
@@ -1038,13 +1069,22 @@ mod tests {
         assert!(dormers[0].get("roof_pitch").is_none());
     }
 
-    #[test]
-    fn a_flat_ceiling_in_a_roof_room_is_its_ceiling_width() {
-        let exposed = vec![
+    /// A roof room with heated slopes south and north (y extents) and a flat plane, drawn with
+    /// truncated gables on a floor at 5.6 m, under a flat plane at 7.9 m.
+    fn flat_roof_room(slope_s: f64, flat: (f64, f64), slope_n: (f64, f64)) -> String {
+        let truncated = |name: &str, x: f64| {
+            format!(
+                "{name},Z,BuildingElementOpaque,1,90,1,0,0,5.6,FALSE,FALSE,,\"{x},0,2|{x},6,2\",\"{{\"\"geometry_face\"\":{{\"\"top_profile\"\":[{{\"\"h\"\":0}},{{\"\"h\"\":2.3}},{{\"\"h\"\":2.3}},{{\"\"h\"\":0}}]}}}}\""
+            )
+        };
+        let mut all = box_walls(&BOX, &[0, 1]);
+        all.extend([
+            truncated("G W", 0.0),
+            truncated("G E", 8.0),
             plane(
                 "Slope S",
                 2,
-                &[[0.0, 0.0], [8.0, 0.0], [8.0, 2.5], [0.0, 2.5]],
+                &[[0.0, 0.0], [8.0, 0.0], [8.0, slope_s], [0.0, slope_s]],
                 40.0,
                 180.0,
                 false,
@@ -1052,7 +1092,12 @@ mod tests {
             plane(
                 "Slope N",
                 2,
-                &[[0.0, 3.5], [8.0, 3.5], [8.0, 6.0], [0.0, 6.0]],
+                &[
+                    [0.0, slope_n.0],
+                    [8.0, slope_n.0],
+                    [8.0, slope_n.1],
+                    [0.0, slope_n.1],
+                ],
                 40.0,
                 0.0,
                 false,
@@ -1060,13 +1105,19 @@ mod tests {
             plane(
                 "Ceiling",
                 2,
-                &[[0.0, 2.5], [8.0, 2.5], [8.0, 3.5], [0.0, 3.5]],
+                &[[0.0, flat.0], [8.0, flat.0], [8.0, flat.1], [0.0, flat.1]],
                 0.0,
                 0.0,
                 false,
-            ),
-        ];
-        let (model, errors, _) = run(&room_in_roof(exposed));
+            )
+            .replace(",5.6,FALSE,", ",7.9,FALSE,"),
+        ]);
+        csv(&settings(), &all, &ground(&BOX))
+    }
+
+    #[test]
+    fn a_flat_ceiling_in_a_roof_room_is_its_ceiling_width_and_height() {
+        let (model, errors, _) = run(&flat_roof_room(2.5, (2.5, 3.5), (3.5, 6.0)));
         assert!(errors.is_empty(), "{errors:#?}");
         let room = &model["Zone"]["building_parts"]["Main"]["roof"];
         assert_eq!(room["roof_type"], "Room In Roof");
@@ -1074,10 +1125,27 @@ mod tests {
             (room["ceiling_width"].as_f64().unwrap() - 1.0).abs() < 1e-9,
             "{room:#}"
         );
-        // DESNZ: the surfaces above a flat ceiling take the unheated pitched roof construction.
+        // The highest point is the flat ceiling: 7.9 m over a floor at 5.6 m.
+        assert!(
+            (room["maximum_ceiling_height"].as_f64().unwrap() - 2.3).abs() < 1e-9,
+            "{room:#}"
+        );
+        // The surfaces above a flat ceiling take the unheated pitched roof construction.
         assert_eq!(
             room["unheated_pitched_roof_construction"],
             "unheated_pitched_roof"
+        );
+    }
+
+    #[test]
+    fn a_flat_section_beside_the_slopes_stops_and_is_named() {
+        // Slopes meet at y 3 to 5; the flat plane is beyond the north slope, not under the ridge.
+        let (_, errors, _) = run(&flat_roof_room(3.0, (5.0, 6.0), (3.0, 5.0)));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(
+            errors[0].message.contains("Flat roof 'Ceiling'"),
+            "{}",
+            errors[0].message
         );
     }
 }

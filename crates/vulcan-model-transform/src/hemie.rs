@@ -2078,7 +2078,7 @@ fn room_in_roof(
         .iter()
         .filter(|p| p.num("pitch") != Some(0.0))
         .partition(|p| p.flag("is_unheated_pitched_roof"));
-    // Derived from the model: a flat plane in a roof room is its flat ceiling below the ridge.
+    // Flat planes in a roof room: the flat ceiling under the ridge (checked below).
     let ceilings: Vec<&El> = planes
         .iter()
         .copied()
@@ -2109,12 +2109,31 @@ fn room_in_roof(
     let width = along(&mut walls.iter().flat_map(|w| w.pts.clone()), u);
     let length = along(&mut walls.iter().flat_map(|w| w.pts.clone()), v);
     let full_width = along(&mut top_ring.iter().copied(), u);
+    // Derived from the model: a flat plane lying between the heated slopes, under the ridge, is
+    // the room's flat ceiling. DESNZ-defined: a roof with a flat section anywhere else is not
+    // covered.
+    let across = |e: &El| {
+        let values: Vec<f64> = e.pts.iter().map(|p| dot(*p, u)).collect();
+        (
+            values.iter().copied().fold(f64::MAX, f64::min),
+            values.iter().copied().fold(f64::MIN, f64::max),
+        )
+    };
+    for c in &ceilings {
+        let (lo, hi) = across(c);
+        let between = heated.iter().any(|h| across(h).1 <= lo + TOL)
+            && heated.iter().any(|h| across(h).0 >= hi - TOL);
+        if !between {
+            ctx.errors.push(error(c.path(), format!("Flat roof '{}' is part of the room in the roof but is not a flat ceiling between its two slopes. A roof room with a flat section elsewhere cannot be entered: make the flat part the roof of its own building part, or draw it as slopes.", c.name)));
+            return None;
+        }
+    }
     let ceiling_width = if ceilings.is_empty() {
         0.0
     } else {
         along(&mut ceilings.iter().flat_map(|c| c.pts.clone()), u)
     };
-    let Some(max_height) = gables
+    let Some(gable_top) = gables
         .iter()
         .filter_map(|g| g.top_height())
         .reduce(f64::max)
@@ -2125,6 +2144,18 @@ fn room_in_roof(
                 .into(),
         ));
         return None;
+    };
+    // Derived from the model: the room's highest point is its flat ceiling, measured from the
+    // room's floor, else the top of its gables (the ridge).
+    let max_height = if ceilings.is_empty() {
+        gable_top
+    } else {
+        let floor = ctx.need(gables[0], "base_height");
+        let tops: Option<Vec<f64>> = ceilings
+            .iter()
+            .map(|c| ctx.need(c, "base_height"))
+            .collect();
+        tops?.into_iter().fold(f64::MIN, f64::max) - floor?
     };
     // DESNZ-defined: the mean knee wall height, zero with no knee walls.
     let knee_heights: Vec<Option<f64>> = knees.iter().map(|k| ctx.need(k, "height")).collect();
@@ -2234,7 +2265,7 @@ fn room_in_roof(
     let key = ctx.construction("heated_pitched_roof", &heated, &[]);
     roof.insert("heated_pitched_roof_construction".into(), json!(key));
     // DESNZ-defined: the surfaces above a flat ceiling or behind a void take the unheated
-    // pitched roof construction (EPC 04 4.4.5).
+    // pitched roof construction.
     let unheated: Vec<&El> = unheated.into_iter().chain(ceilings).collect();
     if !unheated.is_empty() {
         let key = ctx.construction("unheated_pitched_roof", &unheated, &[]);
@@ -2322,7 +2353,21 @@ fn dormer<'e>(
         measured(pitch_key).map(|p| json!(p))
     };
     let (Some(pitch), Some(height)) = (pitch, measured("frontWallHeight")) else {
-        ctx.errors.push(error(anchor.path(), format!("Dormer '{}' does not state its roof pitch ({pitch_key}) or front wall height (frontWallHeight). Open the dormer and set them.", anchor.name)));
+        let mut missing = Vec::new();
+        if pitch_type != "flat" && measured(pitch_key).is_none() {
+            missing.push(format!("roof pitch ({pitch_key})"));
+        }
+        if measured("frontWallHeight").is_none() {
+            missing.push("front wall height (frontWallHeight)".to_string());
+        }
+        ctx.errors.push(error(
+            anchor.path(),
+            format!(
+                "Dormer '{}' does not state its {}. Open the dormer and set it.",
+                anchor.name,
+                missing.join(" or ")
+            ),
+        ));
         return None;
     };
     let width = ctx.need(anchor, "width");
