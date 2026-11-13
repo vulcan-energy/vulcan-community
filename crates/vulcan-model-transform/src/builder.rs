@@ -2443,7 +2443,7 @@ impl JSONBuilder {
                     self.push_non_fatal(
                         "E_EPC_THERMAL_BRIDGING",
                         &crate::json_pointer(&["Zone", zone_name, "ThermalBridging"]),
-                        &format!("Zone '{zone_name}' uses simplified thermal bridging (0.2 x exposed area), which HEM:EPC does not take. Turn it off and add the thermal bridges: calculated junction details, junctions from an accredited database, or the DESNZ-defined default psi values."),
+                        &format!("Zone '{zone_name}' uses simplified thermal bridging (0.2 x exposed area), which HEM:EPC does not take. Turn it off and add the thermal bridges: calculated junction details, junctions from an accredited database, or the Table 3.7 default psi values."),
                     );
                 } else if simplified {
                     // Calculate total exposed area (Exposed Elements + Window Elements)

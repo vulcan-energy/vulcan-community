@@ -2239,24 +2239,25 @@ export function GlobalSettingsModal({
                           const comparisonMessages = row.comparisonFieldKey
                             ? comparisonGlobalFieldIndicators[row.comparisonFieldKey]
                             : undefined;
-                          const derived = dwellingRoomCounts
-                            ? Math.max(
-                                0,
-                                Math.round(dwellingRoomCounts[row.field] ?? 0)
-                              )
-                            : 0;
+                          // Undefined for an assessor input: the labels give it no value.
+                          const labelCount = dwellingRoomCounts?.[row.field];
+                          const derived =
+                            labelCount === undefined
+                              ? undefined
+                              : Math.max(0, Math.round(labelCount));
                           const stored = complianceSettings[row.field];
                           const hasLabelled =
                             dwellingCountSpaceLabelMismatchState.hasLabelledFootprintsInPrimary;
                           const showSource =
                             hasLabelled &&
+                            derived !== undefined &&
                             typeof stored === "number" &&
                             Number.isFinite(stored);
                           const mismatch =
                             dwellingCountSpaceLabelMismatchState.mismatches.find(
                               (m) => m.field === row.field
                             );
-                          const isManual = !!mismatch;
+                          const isManual = !!mismatch && derived !== undefined;
                           return (
                             <div
                               key={row.field}

@@ -43,7 +43,7 @@ export interface TargetRules {
   hiddenFields: Readonly<Record<string, readonly string[]>>;
   /** Model inputs the assessor enters: the editor derives no value for them, for example from space labels. */
   assessorInputs: readonly string[];
-  /** The living area stays on the living room's storey, and a dwelling with no living room takes its largest public room. */
+  /** The living area stays on the living room's storey. Space labels with no living room, or living rooms on several storeys, raise an issue that names the fix. */
   singleStoreyLivingArea: boolean;
 }
 
