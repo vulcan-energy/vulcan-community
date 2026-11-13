@@ -2150,6 +2150,7 @@ impl JSONBuilder {
         }
         if self.profile.checks_party_wall_lining() {
             crate::epc_mappings::check_element_fields(result, &self.schema, &mut errors);
+            crate::epc_mappings::check_primary_pipework(result, &self.schema, &mut errors);
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
@@ -4721,6 +4722,7 @@ impl JSONBuilder {
         if let Some(section_data) = csv_data.get("Water Pipework") {
             // Group pipework by type (primary vs distribution)
             let mut primary_pipework = Vec::new();
+            let mut primary_rows = Vec::new();
             let mut distribution_pipework = Vec::new();
             for pipe_row in section_data {
                 let pipework_type = pipe_row
@@ -4766,6 +4768,13 @@ impl JSONBuilder {
                 );
                 if pipework_type == "primary" {
                     primary_pipework.push(Value::Object(pipe_obj));
+                    primary_rows.push(
+                        pipe_row
+                            .get("Name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    );
                 } else {
                     distribution_pipework.push(Value::Object(pipe_obj));
                 }
@@ -4774,13 +4783,27 @@ impl JSONBuilder {
             if !primary_pipework.is_empty() {
                 if let Some(hot_water_source) = result.get_mut("HotWaterSource") {
                     if let Some(hws_obj) = hot_water_source.as_object_mut() {
-                        for (_, system_data) in hws_obj {
+                        for (system_name, system_data) in hws_obj {
                             if let Some(system_obj) = system_data.as_object_mut() {
                                 if system_obj.get("type").and_then(|v| v.as_str())
                                     == Some("hw cylinder")
                                     || system_obj.get("type").and_then(|v| v.as_str())
                                         == Some("StorageTank")
                                 {
+                                    // EPC errors on a drawn pipe name its row.
+                                    if self.profile.references_products() {
+                                        for (i, row) in primary_rows.iter().enumerate() {
+                                            self.csv_rows.borrow_mut().push((
+                                                crate::json_pointer(&[
+                                                    "HotWaterSource",
+                                                    system_name,
+                                                    "primary_pipework",
+                                                    &i.to_string(),
+                                                ]),
+                                                format!("Water Pipework row '{row}'"),
+                                            ));
+                                        }
+                                    }
                                     system_obj.insert(
                                         "primary_pipework".to_string(),
                                         Value::Array(primary_pipework.clone()),

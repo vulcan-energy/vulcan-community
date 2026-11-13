@@ -581,6 +581,47 @@ pub(crate) fn check_element_fields(
     }
 }
 
+/// Each drawn primary pipe states every field the target schema's pipe definition requires,
+/// named in one error per pipe (the builder names its Water Pipework row): the EPC template
+/// has no pipe values.
+pub(crate) fn check_primary_pipework(
+    model: &Value,
+    schema: &Value,
+    errors: &mut Vec<ValidationError>,
+) {
+    let required: Vec<&str> = schema["$defs"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .find(|(name, _)| name.ends_with("input_output__input__WaterPipework"))
+        .and_then(|(_, def)| def["required"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    for (cylinder, source) in model["HotWaterSource"].as_object().into_iter().flatten() {
+        for (i, pipe) in source["primary_pipework"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            let missing: Vec<&str> = required
+                .iter()
+                .copied()
+                .filter(|field| pipe.get(*field).is_none_or(Value::is_null))
+                .collect();
+            if !missing.is_empty() {
+                errors.push(error(
+                    "E_EPC_REQUIRED_INPUT",
+                    json_pointer(&["HotWaterSource", cylinder, "primary_pipework", &i.to_string()]),
+                    format!("This primary pipe of cylinder '{cylinder}' needs {}. HEM:EPC has no default for them.", missing.join(", ")),
+                ));
+            }
+        }
+    }
+}
+
 fn plan_points(row: &BTreeMap<String, Value>) -> Vec<[f64; 2]> {
     row.get("coords")
         .and_then(Value::as_str)
