@@ -164,7 +164,7 @@ fn plain(level: &str) -> &str {
 
 /// The stated segments: `HEMIE_distant_shading`, a JSON object keyed by HEMIE's segment keys,
 /// each with an optional `shading_fraction` and `roof_shading`, and the `reference_orientation`
-/// they were stated against (the front door then).
+/// that segment was stated against (the front door then).
 fn stated(settings: &Settings) -> Result<Map<String, Value>, ValidationError> {
     let field = format!("{SETTING}distant_shading");
     let Some(raw) = settings.raw(&field) else {
@@ -177,15 +177,15 @@ fn stated(settings: &Settings) -> Result<Map<String, Value>, ValidationError> {
     };
     let valid = parsed.filter(|map| {
         map.iter().all(|(key, value)| {
-            (key == "reference_orientation" && value.is_number())
-                || SEGMENTS.contains(&key.as_str())
-                    && value.as_object().is_some_and(|v| {
-                        v.iter().all(|(k, x)| match k.as_str() {
-                            "shading_fraction" => x.as_str().is_some_and(|l| LEVELS.contains(&l)),
-                            "roof_shading" => x.is_boolean(),
-                            _ => false,
-                        })
+            SEGMENTS.contains(&key.as_str())
+                && value.as_object().is_some_and(|v| {
+                    v.iter().all(|(k, x)| match k.as_str() {
+                        "shading_fraction" => x.as_str().is_some_and(|l| LEVELS.contains(&l)),
+                        "roof_shading" => x.is_boolean(),
+                        "reference_orientation" => x.is_number(),
+                        _ => false,
                     })
+                })
         })
     });
     valid.ok_or_else(|| error("/Metadata".into(), format!("The stated distant shading ({field}) is malformed. Choose each stated band again on the canvas, or give a JSON object keyed by segment, for example {{\"{}\": {{\"shading_fraction\": \"Light\"}}}}, with levels {}.", SEGMENTS[0], LEVELS.join(", "))))
@@ -269,7 +269,9 @@ pub(super) fn distant(
         };
         // A row wholly in stated segments changes nothing sent (its drawn level is still shown),
         // so its own issues are not raised.
-        let wholly_stated = (0..4).filter(|&k| in_segment(start, end, k)).all(is_stated);
+        // A row in no segment (start = end) is not wholly stated: its issues are still raised.
+        let mut covered = (0..4).filter(|&k| in_segment(start, end, k)).peekable();
+        let wholly_stated = covered.peek().is_some() && covered.all(is_stated);
         if wholly_stated {
             unused.push(name.to_string());
         }
@@ -299,11 +301,21 @@ pub(super) fn distant(
         });
     }
 
-    // The stated values face the front door they were stated against.
-    let stated_against = stated.get("reference_orientation").and_then(Value::as_f64);
-    let any_stated = (0..4).any(is_stated);
-    if any_stated && stated_against.is_none_or(|r| (r - orientation).abs() > 0.5) {
-        notices.push(notice(SHADING_PATH, "Front door changed: check the stated shading bands. They are relative to the front door, so they now face other compass directions. Choose each stated band again, or reset it to the drawing.".into()));
+    // Each stated segment faces the front door it was stated against: warn on each one the
+    // front door has turned from since (by more than half a degree, either way round).
+    for (k, key) in SEGMENTS.iter().enumerate() {
+        let against = stated
+            .get(*key)
+            .and_then(|v| v.get("reference_orientation"))
+            .and_then(Value::as_f64);
+        let turned = against.is_none_or(|r| {
+            let d = (r - orientation).rem_euclid(360.0);
+            d.min(360.0 - d) > 0.5
+        });
+        if stated.contains_key(*key) && turned {
+            let name = NAMES[k];
+            notices.push(notice(&format!("{SHADING_PATH}/{name}"), format!("Front door changed: check the stated band of {name}. It is relative to the front door, so it now faces another compass direction. Choose it again, or reset it to the drawing.")));
+        }
     }
 
     let mut segments = Map::new();
@@ -638,7 +650,7 @@ mod tests {
 
     #[test]
     fn a_stated_level_wins_per_segment_and_the_drawn_one_is_kept_for_the_editor() {
-        let stated = r#"{"reference_orientation":180,"shading_segment_reference_orientation":{"shading_fraction":"Light"},"reference_segment_reference_orientation_plus_90":{"shading_fraction":"Heavy","roof_shading":true}}"#;
+        let stated = r#"{"shading_segment_reference_orientation":{"shading_fraction":"Light","reference_orientation":180},"reference_segment_reference_orientation_plus_90":{"shading_fraction":"Heavy","roof_shading":true,"reference_orientation":180}}"#;
         let out = derive_all(
             &["Block,ContextShading,obstacle,135,225,10,10"],
             180.0,
@@ -693,7 +705,7 @@ mod tests {
     fn a_stated_band_two_or_more_from_the_drawing_is_a_warning() {
         let stated = |level: &str| {
             format!(
-                r#"{{"reference_orientation":180,"shading_segment_reference_orientation":{{"shading_fraction":"{level}"}}}}"#
+                r#"{{"shading_segment_reference_orientation":{{"shading_fraction":"{level}","reference_orientation":180}}}}"#
             )
         };
         // The drawing gives Heavy (a 30 m wall at 10 m, 72° of 90°).
@@ -706,7 +718,7 @@ mod tests {
 
     #[test]
     fn stated_roof_shading_that_differs_from_the_drawing_is_a_warning() {
-        let stated = r#"{"reference_orientation":180,"shading_segment_reference_orientation":{"roof_shading":false}}"#;
+        let stated = r#"{"shading_segment_reference_orientation":{"roof_shading":false,"reference_orientation":180}}"#;
         let out = derive_all(
             &["Tower,ContextShading,obstacle,135,225,10,30"],
             180.0,
@@ -723,22 +735,50 @@ mod tests {
     }
 
     #[test]
-    fn a_moved_front_door_warns_until_the_bands_are_stated_again() {
-        let stated = |r: f64| {
+    fn a_moved_front_door_warns_on_each_band_until_it_is_stated_again() {
+        // Front and Back stated against the front door at 180°; Right confirmed at 90°.
+        let stated = |front: f64| {
             format!(
-                r#"{{"reference_orientation":{r},"shading_segment_reference_orientation":{{"shading_fraction":"Light"}}}}"#
+                r#"{{"shading_segment_reference_orientation":{{"shading_fraction":"Light","reference_orientation":{front}}},"reference_segment_reference_orientation_plus_90":{{"shading_fraction":"Heavy","reference_orientation":90}},"reference_segment_reference_orientation_plus_180":{{"roof_shading":true,"reference_orientation":180}}}}"#
             )
         };
         let out = derive_all(&[], 90.0, 0.0, &stated(180.0));
         assert!(
-            out.notice("Front door changed: check the stated shading bands."),
+            out.notice("Front door changed: check the stated band of Front."),
             "{:?}",
             out.notices
         );
+        assert!(out.notice("Front door changed: check the stated band of Back."));
+        assert!(!out.notice("Front door changed: check the stated band of Right."));
+        // Choosing Front again confirms Front only: Back still warns.
         let out = derive_all(&[], 90.0, 0.0, &stated(90.0));
-        assert!(!out.notice("Front door changed"));
+        assert!(!out.notice("Front door changed: check the stated band of Front."));
+        assert!(out.notice("Front door changed: check the stated band of Back."));
+        // Bearings compare either way round north.
+        let near = r#"{"shading_segment_reference_orientation":{"shading_fraction":"Light","reference_orientation":359.9}}"#;
+        assert!(!derive_all(&[], 0.1, 0.0, near).notice("Front door changed"));
+        // A band with no front door recorded is checked too.
+        let bare = r#"{"shading_segment_reference_orientation":{"shading_fraction":"Light"}}"#;
+        assert!(derive_all(&[], 90.0, 0.0, bare)
+            .notice("Front door changed: check the stated band of Front."));
         // With nothing stated there is nothing to check.
         assert!(!derive(&[], 90.0).notice("Front door changed"));
+    }
+
+    #[test]
+    fn an_object_in_no_segment_is_not_wholly_stated() {
+        let stated = r#"{"shading_segment_reference_orientation":{"shading_fraction":"Light","reference_orientation":180},"reference_segment_reference_orientation_plus_90":{"shading_fraction":"Light","reference_orientation":180},"reference_segment_reference_orientation_plus_180":{"shading_fraction":"Light","reference_orientation":180},"reference_segment_reference_orientation_plus_270":{"shading_fraction":"Light","reference_orientation":180}}"#;
+        let out = derive_all(
+            &["Post,ContextShading,obstacle,200,200,,"],
+            180.0,
+            0.0,
+            stated,
+        );
+        assert!(
+            out.shading.unused_objects.is_empty(),
+            "{:?}",
+            out.shading.unused_objects
+        );
     }
 
     #[test]
@@ -765,7 +805,7 @@ mod tests {
             .message
             .contains("'NoHeight' has no height, or no distance above 0"));
         // Front stated: NoHeight lies wholly in it and is unused; Zero crosses into the right.
-        let stated = r#"{"reference_orientation":180,"shading_segment_reference_orientation":{"shading_fraction":"Light"}}"#;
+        let stated = r#"{"shading_segment_reference_orientation":{"shading_fraction":"Light","reference_orientation":180}}"#;
         let out = derive_all(&rows, 180.0, 0.0, stated);
         assert_eq!(out.errors.len(), 1, "{:?}", out.errors);
         assert!(out.errors[0].path.ends_with("/Zero"));

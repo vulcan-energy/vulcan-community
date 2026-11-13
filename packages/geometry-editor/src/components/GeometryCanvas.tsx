@@ -3477,8 +3477,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     () => (editorContributions.canvasDecorations ?? []).filter(item => item.isAvailable?.() !== false),
     [editorContributions.canvasDecorations],
   );
-  const decorationsUnblocked = viewMode === '2d'
+  const canInteractWithCanvasDecorations = viewMode === '2d'
     && !zenMode
+    && drawMode === 'none'
     && !isCanvasPanning
     && !overlayMoveMode
     && !overlayCalibrateMode
@@ -3488,25 +3489,18 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     && !zoneDeleteModal.isOpen
     && !elementDeleteModal.isOpen
     && !thermalBridgePreview.active;
-  const canInteractWithCanvasDecorations = decorationsUnblocked && drawMode === 'none';
-  // A decoration that opts in stays selectable while a shape tool is chosen, until its first point.
-  const drawStarted = drawPoints.length > 0;
-  const canSelectCanvasDecoration = useCallback((contribution: CanvasDecorationContribution | undefined) =>
-    canInteractWithCanvasDecorations
-    || (decorationsUnblocked && contribution?.selectableWhileDrawing === true && !drawStarted),
-  [canInteractWithCanvasDecorations, decorationsUnblocked, drawStarted]);
   const selectedCanvasDecorationContribution = selectedCanvasDecoration
     ? canvasDecorationContributions.find(item => item.id === selectedCanvasDecoration.contributionId)
     : undefined;
   const activeCanvasDecoration = selectedCanvasDecoration
-    && canSelectCanvasDecoration(selectedCanvasDecorationContribution)
+    && canInteractWithCanvasDecorations
     && selectedCanvasDecorationContribution !== undefined
     && selectedCanvasDecorationContribution?.isAvailable?.() !== false
     && selectedCanvasDecoration.scope === (selectedCanvasDecorationContribution?.selectionScope?.() ?? '')
     ? selectedCanvasDecoration : null;
   const selectCanvasDecoration = useCallback((contributionId: string, id: string) => {
+    if (!canInteractWithCanvasDecorations) return;
     const contribution = canvasDecorationContributions.find(item => item.id === contributionId);
-    if (!canSelectCanvasDecoration(contribution)) return;
     if (contribution?.isAvailable?.() === false) return;
     clearElementSelection();
     setSelectedElementIds([]);
@@ -3514,7 +3508,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setSelectedCanvasDecoration({ contributionId, id, floorZ: currentFloorZ,
       scope: contribution?.selectionScope?.() ?? '', confirmDeleteRequested: false });
     setActivePanel('details');
-  }, [canSelectCanvasDecoration, canvasDecorationContributions, clearElementSelection, currentFloorZ, setActivePanel, setSelectedElementIds, setSelection]);
+  }, [canInteractWithCanvasDecorations, canvasDecorationContributions, clearElementSelection, currentFloorZ, setActivePanel, setSelectedElementIds, setSelection]);
 
   const replaceCanvasDecorationSelection = useCallback((contributionId: string, id: string) => {
     const contribution = canvasDecorationContributions.find(item => item.id === contributionId);
@@ -3535,15 +3529,19 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         label: drawingCanvasPalette.tooltipText,
         labelBackground: drawingCanvasPalette.tooltipBg,
       },
-      canSelect: canSelectCanvasDecoration(contribution),
+      canSelect: canInteractWithCanvasDecorations,
       selectedId: activeCanvasDecoration?.contributionId === contributionId ? activeCanvasDecoration.id : null,
       selectionScope: contribution?.selectionScope?.() ?? '',
       select: (id) => selectCanvasDecoration(contributionId, id),
       clearSelection: () => setSelectedCanvasDecoration(null),
       drawElementType,
     };
-  }, [canvasCenter, canvasDecorationContributions, canSelectCanvasDecoration, canvasInteractionPalette, currentFloorZ,
+  }, [canvasCenter, canvasDecorationContributions, canInteractWithCanvasDecorations, canvasInteractionPalette, currentFloorZ,
     activeCanvasDecoration, drawingCanvasPalette, panOffset, scale, selectCanvasDecoration, drawElementType]);
+
+  const renderCanvasDecorations = (below: boolean) => canvasDecorationContributions
+    .filter((contribution) => !!contribution.belowGeometry === below)
+    .map((contribution) => <React.Fragment key={contribution.id}>{contribution.render(canvasDecorationContext(contribution.id))}</React.Fragment>);
 
   const requestSelectedCanvasDecorationDelete = useCallback(() => {
     if (!activeCanvasDecoration) return false;
@@ -6431,13 +6429,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return ids;
   }, [elementCanvasData, rendererHighlightedIds]);
 
+  // Context Shading in stated distant shading quadrants changes nothing sent: faded, the inspector says why.
+  const unusedContextShading = useMemo(() => new Set(targetValidation?.distantShading?.unused_objects), [targetValidation]);
   const elementPreviewOpacity = useCallback((element: Element) => (
     !thermalBridgePreview.active || (thermalBridgePreview.kind === 'duct'
       ? element.type === 'MechanicalVentilationDuctwork' || element.type === 'MechanicalVentilationTerminal'
       : thermalBridgePreview.kind === 'pipe' ? element.type === 'WaterPipework'
       : element.type === 'ThermalBridgeLinear' || element.type === 'ThermalBridgePoint')
       ? 1 : thermalBridgePreview.highlightedHostIds.has(element.id) ? 0.85 : 0.35
-  ), [thermalBridgePreview.active, thermalBridgePreview.kind, thermalBridgePreview.highlightedHostIds]);
+  ) * (element.type === 'ContextShading' && unusedContextShading.has(element.name) ? 0.4 : 1),
+  [thermalBridgePreview.active, thermalBridgePreview.kind, thermalBridgePreview.highlightedHostIds, unusedContextShading]);
 
   const buildElementRendererNodes = useCallback((rows: typeof sortedElementCanvasData) => {
     return rows.map(({ element, canvasCoords }) => {
@@ -7051,6 +7052,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               contextFloorElementRendererNodes
             )}
           </Layer>
+
+          {canvasDecorationContributions.some((contribution) => contribution.belowGeometry) && (
+            <Layer name="host-canvas-decorations-below" listening={canInteractWithCanvasDecorations}>
+              {renderCanvasDecorations(true)}
+            </Layer>
+          )}
 
           <Layer name="main-geometry-layer" listening={!thermalBridgePreview.active}>
             {/* Overlap halos sit under the lines they mark; the panel message explains them. */}
@@ -8121,11 +8128,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
           </Layer>
 
-          {canvasDecorationContributions.length > 0 && (
-            <Layer name="host-canvas-decorations" listening={canvasDecorationContributions.some((contribution) => canSelectCanvasDecoration(contribution))}>
-              {canvasDecorationContributions.map((contribution: CanvasDecorationContribution) => {
-                return <Group key={contribution.id} listening={canSelectCanvasDecoration(contribution)}>{contribution.render(canvasDecorationContext(contribution.id))}</Group>;
-              })}
+          {canvasDecorationContributions.some((contribution) => !contribution.belowGeometry) && (
+            <Layer name="host-canvas-decorations" listening={canInteractWithCanvasDecorations}>
+              {renderCanvasDecorations(false)}
             </Layer>
           )}
 
@@ -9439,7 +9444,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         const showSingle =
           (selection?.type === 'element' || selection?.type === 'global' || selection?.type === 'zone' || selection?.type === 'dormer') &&
           (selectedElementIds.length <= 1 || selectionRepresentsSingleDormer);
-        const showCanvasDecoration = Boolean(activeCanvasDecoration && selectedCanvasDecorationContribution?.renderDetails);
+        const showCanvasDecoration = Boolean(activeCanvasDecoration && canInteractWithCanvasDecorations && selectedCanvasDecorationContribution?.renderDetails);
         const showMulti = selectedElementIds.length > 1 && !selectionRepresentsSingleDormer;
         const show = showSingle || showMulti || showCanvasDecoration || (!!spaceLabellerOpen && !!spaceLabellerZoneId);
         if (!show) return null;

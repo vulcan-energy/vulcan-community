@@ -54,8 +54,8 @@ export type CanvasDecorationContribution = Readonly<{
   /** Screen-reader and keyboard route for canvas marks that are otherwise drawn to a bitmap layer. */
   renderAccessibility?(context: CanvasDecorationContext): ReactNode;
   renderDetails?(context: CanvasDecorationDetailsContext): ReactNode;
-  /** Selectable while a shape tool is chosen, until the drawing's first point. */
-  selectableWhileDrawing?: boolean;
+  /** Drawn under the plan's elements, which take the clicks where both are. */
+  belowGeometry?: boolean;
 }>;
 
 export type GeometryEditorContributions<
