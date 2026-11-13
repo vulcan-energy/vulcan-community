@@ -272,16 +272,6 @@ impl ModelProfile {
         }
     }
 
-    /// A cylinder's authored `primary_pipework` is never replaced by drawn Water Pipework rows
-    /// or removed when there are none; authored and drawn pipework together are an error.
-    /// FHS and Core replace it (unchanged here). EPC differs: authored values win.
-    pub(crate) fn keeps_authored_primary_pipework(self) -> bool {
-        match self {
-            Self::Core | Self::Fhs => false,
-            Self::Epc => true,
-        }
-    }
-
     /// A party wall states `party_wall_lining_type` exactly when its cavity type takes one.
     /// EPC differs: HEM Core 2.0.0a4 `BuildingElementPartyWall.validate_party_wall_lining_type`
     /// (pydantic) rejects a lining type on any other cavity, which the JSON schema allows.

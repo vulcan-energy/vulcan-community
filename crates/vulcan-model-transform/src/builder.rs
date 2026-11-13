@@ -4771,23 +4771,16 @@ impl JSONBuilder {
                 }
             }
             // Handle primary pipework (in HotWaterSource)
-            let mut conflicts = Vec::new();
             if !primary_pipework.is_empty() {
                 if let Some(hot_water_source) = result.get_mut("HotWaterSource") {
                     if let Some(hws_obj) = hot_water_source.as_object_mut() {
-                        for (system_name, system_data) in hws_obj {
+                        for (_, system_data) in hws_obj {
                             if let Some(system_obj) = system_data.as_object_mut() {
                                 if system_obj.get("type").and_then(|v| v.as_str())
                                     == Some("hw cylinder")
                                     || system_obj.get("type").and_then(|v| v.as_str())
                                         == Some("StorageTank")
                                 {
-                                    if self.profile.keeps_authored_primary_pipework()
-                                        && system_obj.contains_key("primary_pipework")
-                                    {
-                                        conflicts.push(system_name.clone());
-                                        continue;
-                                    }
                                     system_obj.insert(
                                         "primary_pipework".to_string(),
                                         Value::Array(primary_pipework.clone()),
@@ -4797,13 +4790,6 @@ impl JSONBuilder {
                         }
                     }
                 }
-            }
-            for name in conflicts {
-                self.push_non_fatal(
-                    "E_EPC_PIPEWORK_CONFLICT",
-                    &crate::json_pointer(&["HotWaterSource", &name, "primary_pipework"]),
-                    &format!("Cylinder '{name}' states primary_pipework on its Systems row and the plan also draws primary Water Pipework. Keep one of them."),
-                );
             }
             // Handle distribution pipework (in HotWaterDemand.Distribution)
             if !distribution_pipework.is_empty() {
@@ -4823,10 +4809,7 @@ impl JSONBuilder {
                     hwd_obj.remove("Distribution");
                 }
             }
-            if let Some(hot_water_source) = result
-                .get_mut("HotWaterSource")
-                .filter(|_| !self.profile.keeps_authored_primary_pipework())
-            {
+            if let Some(hot_water_source) = result.get_mut("HotWaterSource") {
                 if let Some(hws_obj) = hot_water_source.as_object_mut() {
                     for (_, system_data) in hws_obj {
                         if let Some(system_obj) = system_data.as_object_mut() {
