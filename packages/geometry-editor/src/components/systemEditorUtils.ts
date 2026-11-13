@@ -20,6 +20,23 @@ export const SYSTEM_SUBCATEGORY_LABELS: Record<string, string> = {
   SpaceHeatSystem: 'Space heating',
 };
 
+/**
+ * A cylinder preset's `primary_pipework` serves batch scenarios. In the editor, primary pipework is
+ * the drawn Water Pipework rows, and the converter fails (E067) when a Systems row states pipework
+ * the drawing contradicts, so a preset applied here carries none.
+ */
+export function withoutPresetPrimaryPipework(preset: Record<string, unknown>): Record<string, unknown> {
+  const sources = preset.HotWaterSource;
+  if (!sources || typeof sources !== 'object' || Array.isArray(sources)) return preset;
+  const stripped = Object.fromEntries(Object.entries(sources).map(([name, source]) => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return [name, source];
+    const rest = { ...(source as Record<string, unknown>) };
+    delete rest.primary_pipework;
+    return [name, rest];
+  }));
+  return { ...preset, HotWaterSource: stripped };
+}
+
 export function systemExtraJsonHasPcdb(extra: unknown): boolean {
   if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return false;
   const pc = (extra as Record<string, unknown>)._pcdb;

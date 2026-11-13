@@ -278,6 +278,62 @@ fn strip_ui_only_extra_json_section(
     strip_ui_only_extra_json_object(section, &mut Vec::new(), map)
 }
 
+/// Each HotWaterSource entry whose Systems row states `primary_pipework`: entry name -> (row
+/// name, whether the row holds a preset the editor applied). Routes rows as `merge_systems` does.
+fn systems_primary_pipework(
+    csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+) -> BTreeMap<String, (String, bool)> {
+    let mut stated = BTreeMap::new();
+    for row in csv_data.get("Systems").into_iter().flatten() {
+        let route = ["Type", "system_type", "subcategory"]
+            .into_iter()
+            .find_map(|key| row.get(key)?.as_str());
+        let (Some("System"), Some(name), Some(extra_json)) = (
+            route,
+            row.get("Name").and_then(Value::as_str),
+            row.get("extra_json").and_then(Value::as_object),
+        ) else {
+            continue;
+        };
+        let entries = match row.get("subcategory").and_then(Value::as_str) {
+            Some("HotWaterSource") => csv_row_entries("HotWaterSource", name, extra_json),
+            Some("HeatSourceWet") if extra_json.contains_key("HeatSourceWet") => {
+                match extra_json.get("HotWaterSource").and_then(Value::as_object) {
+                    Some(map) => strip_ui_only_extra_json_section("HotWaterSource", map),
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+        let preset = extra_json
+            .get(crate::parser::SYSTEM_SOURCE_MARKER)
+            .and_then(Value::as_str)
+            == Some("presets");
+        for (entry, value) in entries {
+            if value.get("primary_pipework").is_some() {
+                stated.insert(entry, (name.to_string(), preset));
+            }
+        }
+    }
+    stated
+}
+
+/// JSON equality that reads 6 and 6.0 as the same number, as the engine does.
+fn same_json(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| same_json(x, y))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(k, v)| y.get(k).is_some_and(|w| same_json(v, w)))
+        }
+        _ => a == b,
+    }
+}
+
 /// Merges a Systems row's `entries` into `section`: CSV rows replace the defaults' entries but
 /// combine with each other by name (one dwelling can carry a DHW heat pump plus a warm-air one,
 /// or a cylinder plus a PointOfUse heater). `owned` records, per section, each name rows have
@@ -4779,41 +4835,7 @@ impl JSONBuilder {
                     distribution_pipework.push(Value::Object(pipe_obj));
                 }
             }
-            // Handle primary pipework (in HotWaterSource)
-            if !primary_pipework.is_empty() {
-                if let Some(hot_water_source) = result.get_mut("HotWaterSource") {
-                    if let Some(hws_obj) = hot_water_source.as_object_mut() {
-                        for (system_name, system_data) in hws_obj {
-                            if let Some(system_obj) = system_data.as_object_mut() {
-                                if system_obj.get("type").and_then(|v| v.as_str())
-                                    == Some("hw cylinder")
-                                    || system_obj.get("type").and_then(|v| v.as_str())
-                                        == Some("StorageTank")
-                                {
-                                    // EPC errors on a drawn pipe name its row.
-                                    if self.profile.references_products() {
-                                        for (i, row) in primary_rows.iter().enumerate() {
-                                            self.csv_rows.borrow_mut().push((
-                                                crate::json_pointer(&[
-                                                    "HotWaterSource",
-                                                    system_name,
-                                                    "primary_pipework",
-                                                    &i.to_string(),
-                                                ]),
-                                                format!("Water Pipework row '{row}'"),
-                                            ));
-                                        }
-                                    }
-                                    system_obj.insert(
-                                        "primary_pipework".to_string(),
-                                        Value::Array(primary_pipework.clone()),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            self.attach_primary_pipework(result, csv_data, primary_pipework, primary_rows);
             // Handle distribution pipework (in HotWaterDemand.Distribution)
             if !distribution_pipework.is_empty() {
                 if let Some(hot_water_demand) = result.get_mut("HotWaterDemand") {
@@ -4832,17 +4854,110 @@ impl JSONBuilder {
                     hwd_obj.remove("Distribution");
                 }
             }
-            if let Some(hot_water_source) = result.get_mut("HotWaterSource") {
-                if let Some(hws_obj) = hot_water_source.as_object_mut() {
-                    for (_, system_data) in hws_obj {
-                        if let Some(system_obj) = system_data.as_object_mut() {
-                            system_obj.remove("primary_pipework");
-                        }
-                    }
-                }
-            }
+            // Defaults' pipework goes; a Systems row's own pipework stays (see below).
+            self.attach_primary_pipework(result, csv_data, Vec::new(), Vec::new());
         }
         Ok(())
+    }
+
+    /// Settles each tank-shaped HotWaterSource entry's `primary_pipework` from its two sources: the
+    /// entry's own field on its Systems row, and the drawn primary Water Pipework rows (`drawn`,
+    /// from rows `drawn_rows`). Authored data is never replaced or removed silently:
+    ///
+    /// - stated on the Systems row only: kept;
+    /// - drawn only: the drawn rows;
+    /// - both: they must agree, else E067 names the entry, its Systems row and the drawn rows, and
+    ///   the stated value stays;
+    /// - neither, or only the defaults template's: no primary pipework, when the CSV has no Water
+    ///   Pipework section. A section with distribution rows only leaves the entry as it is.
+    ///
+    /// Older editor builds copied a cylinder preset's `primary_pipework` onto the row when the
+    /// preset was applied, hidden from the form, so it was never the user's input: the drawn
+    /// rows were. Such a row (`_system_source: presets`) would now fail E067 against its own
+    /// drawing, so its copy is dropped with a W_TARGET_INPUT notice instead. That is what those
+    /// CSVs always meant (drawn rows won; no Water Pipework section meant none), so their results
+    /// do not change. The one exception is a section with distribution rows only, which used to
+    /// keep the copy silently and now drops it, with the same notice. A copy on a row the user
+    /// has since edited (`custom`) cannot be told from authored data, so it is E067.
+    fn attach_primary_pipework(
+        &self,
+        result: &mut Value,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+        drawn: Vec<Value>,
+        drawn_rows: Vec<String>,
+    ) {
+        let section_present = csv_data.contains_key("Water Pipework");
+        let stated = systems_primary_pipework(csv_data);
+        let Some(hws_obj) = result
+            .get_mut("HotWaterSource")
+            .and_then(Value::as_object_mut)
+        else {
+            return;
+        };
+        for (name, system_data) in hws_obj {
+            let Some(system_obj) = system_data.as_object_mut() else {
+                continue;
+            };
+            let tank_shaped = matches!(
+                system_obj.get("type").and_then(Value::as_str),
+                Some("hw cylinder" | "StorageTank")
+            );
+            let pointer = crate::json_pointer(&["HotWaterSource", name, "primary_pipework"]);
+            match stated.get(name.as_str()) {
+                Some((row, true)) => {
+                    self.schema_omissions
+                        .borrow_mut()
+                        .push(crate::finalization::SchemaOmission {
+                            code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
+                            path: pointer,
+                            message: format!(
+                                "Systems row '{row}' carries a hidden copy of its preset's primary pipework, which an older Vulcan saved. The model uses the drawn primary Water Pipework rows instead{}. Draw the primary pipework to state it.",
+                                if drawn.is_empty() { " (none are drawn)" } else { "" }
+                            ),
+                        });
+                }
+                Some((row, false)) => {
+                    let agrees = system_obj
+                        .get("primary_pipework")
+                        .is_some_and(|own| same_json(own, &Value::Array(drawn.clone())));
+                    if tank_shaped && !drawn.is_empty() && !agrees {
+                        self.push_non_fatal(
+                            "E067",
+                            &pointer,
+                            &format!(
+                                "Cylinder '{name}' states primary_pipework on Systems row '{row}', and primary Water Pipework rows {} are drawn with different values. Keep one of them.",
+                                drawn_rows
+                                    .iter()
+                                    .map(|r| format!("'{r}'"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
+                    }
+                    continue;
+                }
+                None => {}
+            }
+            if tank_shaped && !drawn.is_empty() {
+                // EPC errors on a drawn pipe name its row.
+                if self.profile.references_products() {
+                    for (i, row) in drawn_rows.iter().enumerate() {
+                        self.csv_rows.borrow_mut().push((
+                            crate::json_pointer(&[
+                                "HotWaterSource",
+                                name,
+                                "primary_pipework",
+                                &i.to_string(),
+                            ]),
+                            format!("Water Pipework row '{row}'"),
+                        ));
+                    }
+                }
+                system_obj.insert("primary_pipework".into(), Value::Array(drawn.clone()));
+            } else if !section_present || stated.contains_key(name.as_str()) {
+                system_obj.remove("primary_pipework");
+            }
+        }
     }
 
     fn normalize_cold_water_source(raw: &str) -> Option<&'static str> {

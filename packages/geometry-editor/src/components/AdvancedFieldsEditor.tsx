@@ -103,6 +103,7 @@ import {
   firstRecordEntry,
   resolveHeatSourceWetReferenceName,
   SYSTEM_SUBCATEGORY_TO_DIR,
+  withoutPresetPrimaryPipework,
 } from './systemEditorUtils';
 import type { SchemaNode } from '../lib/schemaTypes';
 import {
@@ -1480,7 +1481,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         const raw = await workspaceResourcePort.readText(
           `input/batch_parameters/${systemSampleDirectory}/${systemSamplePreset}.json`,
         );
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const parsed = withoutPresetPrimaryPipework(JSON.parse(raw) as Record<string, unknown>);
         const heatSourceWetNames = heatSourceWetNamesForBaselineSig
           ? heatSourceWetNamesForBaselineSig.split('|')
           : [];

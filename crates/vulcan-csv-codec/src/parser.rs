@@ -9,6 +9,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 /// element as a party floor. The merge consumes it and never writes it to the model.
 pub const PARTY_ELEMENT_MARKER: &str = "_vulcan_ui_party_element";
 
+/// The editor's record of where a Systems row's values came from (`presets`, `pcdb`, `custom`).
+/// The merge reads it to recognise a preset's hidden `primary_pipework` copy in older CSVs and
+/// never writes it to the model.
+pub const SYSTEM_SOURCE_MARKER: &str = "_system_source";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserState {
     Initial,
@@ -311,10 +316,13 @@ impl CSVParser {
 
         // Try to parse as JSON first
         if let Ok(mut json_value) = serde_json::from_str::<Value>(trimmed) {
-            // `_`-prefixed keys are Vulcan UI metadata (e.g. `_system_source`). They live
-            // in the saved CSV only; the merged dwelling JSON must contain pure HEM input.
+            // `_`-prefixed keys are Vulcan UI metadata. They live in the saved CSV only; the
+            // merged dwelling JSON must contain pure HEM input. The two markers the merge reads
+            // pass through and the merge drops them.
             if let Some(obj) = json_value.as_object_mut() {
-                obj.retain(|k, _| !k.starts_with('_') || k == PARTY_ELEMENT_MARKER);
+                obj.retain(|k, _| {
+                    !k.starts_with('_') || k == PARTY_ELEMENT_MARKER || k == SYSTEM_SOURCE_MARKER
+                });
             }
             return Ok(json_value);
         }
