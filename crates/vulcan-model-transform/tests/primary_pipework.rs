@@ -256,3 +256,45 @@ fn a_hidden_preset_copy_equal_to_the_drawn_rows_needs_no_notice() {
         }
     }
 }
+
+#[test]
+fn a_hidden_preset_copy_with_distribution_rows_only_is_ignored_with_a_notice() {
+    let distribution =
+        "\nWater Pipework\nName,Type,length,location,pipework_type,coords,extra_json\n\
+        Branch,WaterPipework,4,internal,distribution,,\n";
+    let csv = csv(
+        Some(AUTHORED_LENGTH),
+        Some("presets"),
+        "heat_pump_cylinder",
+        None,
+    ) + distribution;
+    for (label, output) in convert_all(&csv) {
+        assert_eq!(lengths(&output), None, "{label}");
+        let notice = notice(&output).unwrap_or_else(|| panic!("{label}: no notice"));
+        assert!(
+            notice.message.contains("(none are drawn)"),
+            "{label}: {}",
+            notice.message
+        );
+    }
+}
+
+/// A HeatSourceWet row can carry its cylinder too (`systems_primary_pipework`'s second route).
+#[test]
+fn a_hidden_preset_copy_on_a_heat_source_rows_cylinder_gives_way_to_drawn_rows() {
+    let csv = csv(Some(AUTHORED_LENGTH), Some("presets"), "hp", Some(DRAWN_LENGTH))
+        .replace(
+            "Tank,Living,System,HotWaterSource,",
+            "Tank,Living,System,HeatSourceWet,",
+        )
+        .replace(
+            "{\"\"HotWaterSource\"\":",
+            "{\"\"HeatSourceWet\"\":{\"\"hp\"\":{\"\"type\"\":\"\"HeatPump\"\"}},\"\"HotWaterSource\"\":",
+        );
+    assert!(csv.contains("HeatSourceWet,hp"), "{csv}");
+    for (label, output) in convert_all(&csv) {
+        assert_eq!(lengths(&output), Some(vec![DRAWN_LENGTH]), "{label}");
+        assert!(!codes(&output).contains(&"E067".into()), "{label}");
+        assert!(notice(&output).is_some(), "{label}");
+    }
+}

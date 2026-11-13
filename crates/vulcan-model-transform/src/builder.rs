@@ -4921,7 +4921,7 @@ impl JSONBuilder {
                             code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
                             path: pointer,
                             message: format!(
-                                "Systems row '{row}' carries a hidden copy of its preset's primary pipework, which an older Vulcan saved and nobody could edit. The model uses the drawn primary Water Pipework rows instead{}. Draw the primary pipework to state it.",
+                                "{name}: primary_pipework on preset-marked Systems row '{row}' is ignored; the drawn Water Pipework rows are used{}.",
                                 if drawn.is_empty() { " (none are drawn)" } else { "" }
                             ),
                         });
