@@ -22,3 +22,13 @@ it('reads the pin from the Metadata rows only, and identical repeats are not a c
   expect(pinOf('Metadata,,\nVulcanCsvVersion,3\n\nZone,,\nName,Type,volume,floor_area,height,simplified thermal bridging\nZone 1,Zone,10,4,2.5,FALSE\n\nLighting,,\nName,Zone,efficacy,count,power,base_height,coords,extra_json\nTargetBundleId,Zone 1,,,,,,\n')).toBeUndefined();
   expect(() => pinOf(`Metadata,,\nTargetBundleId,${id},\nTargetBundleId,other,\n`)).toThrow('conflicting TargetBundleId');
 });
+
+it('keeps the product settings rows as typed through load and save', () => {
+  const store = createGeometryStore({ defaultDefaultsPath: null });
+  store.getState().loadFromCSV('Metadata,,\nProduct_radiator,650047,\nProduct_radiator_length,Large,\nProduct_ufh,,\n');
+  expect(store.getState().complianceSettings.productSettings).toEqual({ Product_radiator: '650047', Product_radiator_length: 'Large', Product_ufh: '' });
+  const csv = store.getState().generateCSV({ allowUnresolvedMigration: true });
+  expect(csv).toMatch(/^Product_radiator,650047,/m);
+  expect(csv).toMatch(/^Product_radiator_length,Large,/m);
+  expect(csv).toMatch(/^Product_ufh,,/m);
+});

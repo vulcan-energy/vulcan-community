@@ -54,6 +54,7 @@ import { normalizeCsvConstructionProvenance } from './csvSemanticMigration';
 import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
 import { shiftPhysicalPartHeight } from '../../lib/windowOpenings';
 import { METADATA_INPUT_LABELS, metadataSettingKey } from '../../lib/globalSettingsValidation';
+import { PRODUCT_SETTING_ROWS, type ProductSettingRow } from '../../stores/geometryStore/slices/complianceSlice';
 
 export const VULCAN_CSV_VERSION_METADATA_KEY = 'VulcanCsvVersion';
 export const LEGACY_VULCAN_CSV_VERSION = 1;
@@ -197,6 +198,8 @@ export type ComplianceSettings = {
    * value the converter accepts (E055, E026), and ScenariosBaseModelEnabled when not TRUE or FALSE. Never filled; the save writes the cell back as it was.
    */
   unreadMetadataRows?: Record<string, string>;
+  /** Product settings (PRODUCT_SETTING_ROWS) as typed. */
+  productSettings?: Partial<Record<ProductSettingRow, string>>;
   /** Model-input rows the file lacks: they take the value the converter uses for an absent row. */
   absentMetadataRows?: string[];
 };
@@ -319,6 +322,7 @@ export const parseCsvToGeometry = (
   let detectedDetailedBridgePsiProfileLabel: string | undefined;
   const complianceSettings: ComplianceSettings = {};
   const metadataRowsInFile = new Set<string>();
+  const productSettingRows = new Set<string>(PRODUCT_SETTING_ROWS);
   const modelInputCells: Record<string, string> = {};
   // A finite number as the converter reads a cell; anything else leaves the setting unread.
   // ScenariosBaseModelEnabled: TRUE or FALSE in any case; other text stays unset and saves as typed.
@@ -342,6 +346,10 @@ export const parseCsvToGeometry = (
     if (hostMetadataKey && hostDocumentMetadataKeys.has(hostMetadataKey)) {
       const value = metadataFields[1]?.trim();
       if (value) detectedHostDocumentMetadata[hostMetadataKey] = value;
+      continue;
+    }
+    if (productSettingRows.has(hostMetadataKey ?? '')) {
+      (complianceSettings.productSettings ??= {})[hostMetadataKey as ProductSettingRow] = metadataFields[1]?.trim() ?? '';
       continue;
     }
     if (line.startsWith('GlobalOrientationOffset,')) {

@@ -1032,6 +1032,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
+    for (const [key, cell] of Object.entries(compliance.productSettings ?? {})) {
+      lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
+    }
     // Only a host with no target catalogue (the community editor) keeps the community CLI's core mode.
     if (!options.schemaPort.targetSchemaMode && csvModelProfile(state.targetBundleId, compliance.complianceValidationCell) === 'core') {
       lines.push('ComplianceValidationEnabled,FALSE,,,,,,,,,,,,,');

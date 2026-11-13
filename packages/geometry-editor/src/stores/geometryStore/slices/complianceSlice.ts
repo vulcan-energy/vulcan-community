@@ -5,6 +5,10 @@ import type { StateCreator } from 'zustand';
 import type { GeometryState } from '../../geometryStore';
 import type { SapBuiltFormCode } from '../../../geometry/types';
 
+/** Model-level product settings: Metadata rows a target that uses products reads. Kept as typed. */
+export const PRODUCT_SETTING_ROWS = ['Product_radiator', 'Product_ufh', 'Product_radiator_length'] as const;
+export type ProductSettingRow = (typeof PRODUCT_SETTING_ROWS)[number];
+
 export interface ComplianceSlice {
   complianceSettings: {
     PartO_active_cooling_required?: boolean;
@@ -57,6 +61,8 @@ export interface ComplianceSlice {
     storeys_in_building?: number;
     /** Model-input rows the loaded file has with a blank or unreadable value, by row, as in the file (see parseCsvToGeometry). */
     unreadMetadataRows?: Record<string, string>;
+    /** Product settings (PRODUCT_SETTING_ROWS) as typed; the converter checks them. */
+    productSettings?: Partial<Record<ProductSettingRow, string>>;
     /** Model-input rows the loaded file lacks and the defaults have not yet filled. */
     absentMetadataRows?: string[];
   };
