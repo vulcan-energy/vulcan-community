@@ -356,13 +356,8 @@ impl ConversionProfile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionMetadata {
     pub hem_core_version: String,
-    /// Version of the wrapper the input runs through (FHS or EPC). The alias accepts the
-    /// former wire name until every host sends `wrapper_version`.
-    #[serde(
-        default,
-        alias = "fhs_wrapper_version",
-        skip_serializing_if = "Option::is_none"
-    )]
+    /// Version of the wrapper the input runs through (FHS or EPC).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrapper_version: Option<String>,
 }
 
