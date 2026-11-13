@@ -17,6 +17,7 @@ pub mod parser {
 mod epc_mappings;
 pub mod epc_products;
 pub mod finalization;
+mod hemie;
 pub mod preflight_diagnostics;
 mod schema_validation;
 mod target_mappings;
@@ -288,6 +289,16 @@ impl ModelProfile {
     /// JSON schema cannot check, and no combustion appliance input. A `HeatSourceWarmAir`
     /// Systems row routes only here: no other schema has warm-air heaters.
     pub(crate) fn checks_system_catalogue(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// A model stating `IsExistingBuilding` converts its zone to HEMIE Geometry and its
+    /// ventilation to the HEMIE input Geometry needs. EPC differs: existing-building EPCs use
+    /// HEMIE Geometry, which forces HEMIE InfiltrationVentilation (`hemie.rs`).
+    pub(crate) fn converts_existing_buildings_to_hemie(self) -> bool {
         match self {
             Self::Core | Self::Fhs => false,
             Self::Epc => true,
