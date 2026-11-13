@@ -60,13 +60,13 @@ impl ModelProfile {
     }
 
     /// CSV zones are consolidated into the first. FHS: the input schema allows one zone.
-    /// EPC never consolidates: see `rejects_several_zones`.
+    /// EPC: true, but nothing is ever merged: several zones are rejected before consolidation
+    /// (`rejects_several_zones`), so with its one zone this only sends every wet emitter to
+    /// that zone, as for FHS.
     pub(crate) fn consolidates_to_single_zone(self) -> bool {
         match self {
             Self::Core => false,
-            Self::Fhs => true,
-            // A single EPC zone needs no consolidation; several are rejected first.
-            Self::Epc => true,
+            Self::Fhs | Self::Epc => true,
         }
     }
 
@@ -230,7 +230,7 @@ impl ModelProfile {
     }
 
     /// Metadata rows the model must state: an absent row is an error, never the template's
-    /// value. EPC differs: User Inputs Guidance EPC 05 and EPC 11 mark these inputs required.
+    /// value. EPC differs: DESNZ marks these inputs required.
     pub(crate) fn required_metadata_rows(self) -> &'static [&'static str] {
         match self {
             Self::Core | Self::Fhs => &[],
@@ -241,6 +241,8 @@ impl ModelProfile {
                 "NumberOfWetRooms",
                 "HeatingControlType",
                 "IsExistingBuilding",
+                "ColdWaterSource",
+                "Ventilation_cross_vent_possible",
                 "Ventilation_altitude",
                 "Ventilation_shield_class",
                 "Ventilation_terrain_class",
@@ -255,6 +257,25 @@ impl ModelProfile {
     /// A zone row may state `frac_convective_heating`. EPC differs: the wrapper's zone model
     /// requires it for a heated zone.
     pub(crate) fn states_zone_convective_fraction(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// A battery keeps an authored `grid_charging_possible`. FHS and Core strip it as a legacy
+    /// field their schemas lack. EPC differs: its battery requires it.
+    pub(crate) fn keeps_battery_grid_charging(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// A cylinder's authored `primary_pipework` is never replaced by drawn Water Pipework rows
+    /// or removed when there are none; authored and drawn pipework together are an error.
+    /// FHS and Core replace it (unchanged here). EPC differs: authored values win.
+    pub(crate) fn keeps_authored_primary_pipework(self) -> bool {
         match self {
             Self::Core | Self::Fhs => false,
             Self::Epc => true,

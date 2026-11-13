@@ -1971,7 +1971,12 @@ impl JSONBuilder {
         }
         for row in csv_data.get("Metadata").into_iter().flatten() {
             if let (Some(name), None) = extract_metadata_field(row) {
-                if METADATA_INPUT_FIELD_NAMES.contains(&name.as_str()) {
+                let epc_input = self.profile.references_products()
+                    && (crate::epc_products::SETTING_ROWS.contains(&name.as_str())
+                        || crate::epc_mappings::APPLIANCE_PRESENCE
+                            .iter()
+                            .any(|(_, row, _)| *row == name));
+                if METADATA_INPUT_FIELD_NAMES.contains(&name.as_str()) || epc_input {
                     self.push_non_fatal(
                         "E066",
                         "Metadata",
@@ -2045,7 +2050,17 @@ impl JSONBuilder {
         let mut errors = Vec::new();
         let mut notices = Vec::new();
         if self.profile.states_appliance_presence() {
-            crate::epc_mappings::map_appliances(result, csv_data, &mut errors);
+            let presence = crate::epc_mappings::APPLIANCE_PRESENCE.map(|(_, row, _)| {
+                let present = csv_data
+                    .get("Metadata")
+                    .into_iter()
+                    .flatten()
+                    .any(|r| r.get("Field").and_then(Value::as_str) == Some(row));
+                let value = metadata_field_value(csv_data, row)
+                    .and_then(|v| self.csv_bool_non_fatal(Some(&v), row, "Metadata"));
+                (present, value)
+            });
+            crate::epc_mappings::map_appliances(result, csv_data, presence, &mut errors);
         }
         if self.profile.lists_pv_panels() {
             crate::epc_mappings::map_pv_panels(result);
@@ -2127,7 +2142,14 @@ impl JSONBuilder {
                 result,
                 &self.colour_coefficients.borrow(),
                 &mut errors,
+                &mut notices,
             );
+        }
+        if self.profile.references_products() {
+            crate::epc_mappings::apply_desnz_defaults(result, csv_data, &mut errors, &mut notices);
+        }
+        if self.profile.checks_party_wall_lining() {
+            crate::epc_mappings::check_element_fields(result, &self.schema, &mut errors);
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
@@ -4749,16 +4771,23 @@ impl JSONBuilder {
                 }
             }
             // Handle primary pipework (in HotWaterSource)
+            let mut conflicts = Vec::new();
             if !primary_pipework.is_empty() {
                 if let Some(hot_water_source) = result.get_mut("HotWaterSource") {
                     if let Some(hws_obj) = hot_water_source.as_object_mut() {
-                        for (_, system_data) in hws_obj {
+                        for (system_name, system_data) in hws_obj {
                             if let Some(system_obj) = system_data.as_object_mut() {
                                 if system_obj.get("type").and_then(|v| v.as_str())
                                     == Some("hw cylinder")
                                     || system_obj.get("type").and_then(|v| v.as_str())
                                         == Some("StorageTank")
                                 {
+                                    if self.profile.keeps_authored_primary_pipework()
+                                        && system_obj.contains_key("primary_pipework")
+                                    {
+                                        conflicts.push(system_name.clone());
+                                        continue;
+                                    }
                                     system_obj.insert(
                                         "primary_pipework".to_string(),
                                         Value::Array(primary_pipework.clone()),
@@ -4768,6 +4797,13 @@ impl JSONBuilder {
                         }
                     }
                 }
+            }
+            for name in conflicts {
+                self.push_non_fatal(
+                    "E_EPC_PIPEWORK_CONFLICT",
+                    &crate::json_pointer(&["HotWaterSource", &name, "primary_pipework"]),
+                    &format!("Cylinder '{name}' states primary_pipework on its Systems row and the plan also draws primary Water Pipework. Keep one of them."),
+                );
             }
             // Handle distribution pipework (in HotWaterDemand.Distribution)
             if !distribution_pipework.is_empty() {
@@ -4787,7 +4823,10 @@ impl JSONBuilder {
                     hwd_obj.remove("Distribution");
                 }
             }
-            if let Some(hot_water_source) = result.get_mut("HotWaterSource") {
+            if let Some(hot_water_source) = result
+                .get_mut("HotWaterSource")
+                .filter(|_| !self.profile.keeps_authored_primary_pipework())
+            {
                 if let Some(hws_obj) = hot_water_source.as_object_mut() {
                     for (_, system_data) in hws_obj {
                         if let Some(system_obj) = system_data.as_object_mut() {
@@ -5161,7 +5200,6 @@ impl JSONBuilder {
                     return None;
                 }
                 if self.profile.required_metadata_rows().contains(name) {
-                    missing.push(*name);
                     return None;
                 }
                 Some(match result.pointer(&pointer)? {
@@ -5170,6 +5208,21 @@ impl JSONBuilder {
                 })
             })
             .collect();
+        for name in self.profile.required_metadata_rows() {
+            let pointer = if let Some(key) = name.strip_prefix("AirPermeability_") {
+                format!("/InfiltrationVentilation/Leaks/{key}")
+            } else if let Some(key) = name.strip_prefix("Ventilation_") {
+                format!("/InfiltrationVentilation/{key}")
+            } else {
+                format!("/{name}")
+            };
+            let stated_by_systems = systems_fragments
+                .iter()
+                .any(|fragment| fragment.pointer(&pointer).is_some_and(|v| !v.is_null()));
+            if !present.contains(*name) && !stated_by_systems {
+                missing.push(*name);
+            }
+        }
         if !missing.is_empty() {
             self.push_non_fatal(
                 "E_EPC_REQUIRED_INPUT",
@@ -6513,7 +6566,14 @@ impl JSONBuilder {
 
                         // Older presets may contain legacy battery/grid-charging fields that are
                         // not part of current input schemas; strip them during CSV->JSON build.
-                        battery.remove("grid_charging_possible");
+                        if !self.profile.keeps_battery_grid_charging() {
+                            battery.remove("grid_charging_possible");
+                        } else {
+                            // EPC's only EnergySupply battery kind (the schema's constant).
+                            battery
+                                .entry("type".to_string())
+                                .or_insert_with(|| Value::String("stationary".into()));
+                        }
 
                         // Parse extra_json for battery properties (override defaults)
                         if let Some(extra_json) = row.get("extra_json").and_then(|v| v.as_object())
@@ -6527,7 +6587,9 @@ impl JSONBuilder {
                                     continue;
                                 }
                                 // Ignore legacy grid charging fields not present in current schemas.
-                                if key == "grid_charging_possible" {
+                                if key == "grid_charging_possible"
+                                    && !self.profile.keeps_battery_grid_charging()
+                                {
                                     continue;
                                 }
                                 if key == "threshold_charges"

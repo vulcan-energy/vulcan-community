@@ -118,11 +118,11 @@
     {
       "path": "data/defaults/defaults_template_epc.json",
       "source_path": "data/defaults/defaults_template_epc.json",
-      "source_sha256": "87981c8427dcfe7425b0f2b7fb13c3f94cbc973cbc551e3843aa2b2f2dedbdd3",
+      "source_sha256": "74b9ba82d181c9a53651aeb910854ed4aa56ea9ca12716acce6b9fdb5e62b421",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
-      "provenance": "data/defaults/defaults_template.json plus the HEM:EPC fields its schema adds, minus the values HEM:EPC requires the user to state (element colours, the ecodesign min_flow_temp, ventilation installation types)",
+      "provenance": "data/defaults/defaults_template.json plus the HEM:EPC fields its schema adds, minus the values HEM:EPC requires the user to state (element values beyond the type selectors, wet distribution and ventilation system values, the battery, primary pipework, export capability, cross ventilation)",
       "required_action": "Preserve this exact reviewed hash; it may differ from data/defaults/defaults_template.json only by HEM:EPC fields and the removed user inputs."
     },
     {

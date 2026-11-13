@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 
 pub type ProductData = BTreeMap<String, String>;
 
+/// The key under which a child row records the table it came from.
+pub const CHILD_TABLE: &str = "_table";
+
 type Row = BTreeMap<String, String>;
 
 /// One `ProductIdentification` row joined to its technology table row and that row's
@@ -108,6 +111,9 @@ impl ProductDatabase {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(" ");
+            if products.contains_key(&id) {
+                return Err(format!("ProductIdentification lists product {id} twice."));
+            }
             products.insert(
                 id,
                 Product {
@@ -147,6 +153,8 @@ impl ProductDatabase {
                     )
                 })?;
                 if child {
+                    let mut row = row;
+                    row.insert(CHILD_TABLE.into(), name.to_string());
                     product.children.push(row);
                 } else if product.table.is_empty() {
                     product.table = name.to_string();
@@ -161,8 +169,14 @@ impl ProductDatabase {
         }
         let weather_curves = table("WeatherCompensationCurve")?
             .into_iter()
-            .filter_map(|row| Some((row["ID"].parse().ok()?, row["Gradient"].parse().ok()?)))
-            .collect();
+            .map(|row| match (row["ID"].parse(), row["Gradient"].parse()) {
+                (Ok(id), Ok(gradient)) => Ok((id, gradient)),
+                _ => Err(format!(
+                    "WeatherCompensationCurve row '{}' has no numeric ID and Gradient.",
+                    row["ID"]
+                )),
+            })
+            .collect::<Result<_, String>>()?;
         Ok(Self {
             products,
             weather_curves,
@@ -186,9 +200,10 @@ impl ProductDatabase {
 pub(crate) const RADIATOR_SETTING: &str = "Product_radiator";
 pub(crate) const UFH_SETTING: &str = "Product_ufh";
 pub(crate) const RADIATOR_LENGTH_SETTING: &str = "Product_radiator_length";
+pub(crate) const SETTING_ROWS: [&str; 3] = [RADIATOR_SETTING, UFH_SETTING, RADIATOR_LENGTH_SETTING];
 
-/// Radiator length descriptors and lengths (m). DESNZ-defined (EPC 06, 6.3.2.1); medium is
-/// DESNZ's default descriptor.
+/// Radiator length descriptors and lengths (m), DESNZ-defined; medium is DESNZ's default
+/// descriptor.
 const RADIATOR_LENGTHS: [(&str, f64); 3] = [("small", 0.6), ("medium", 0.9), ("large", 1.2)];
 
 #[derive(Debug, Default, Clone)]
@@ -377,11 +392,16 @@ pub(crate) fn rule(
                 setting: None,
             })
         }
-        ("HeatSourceWet/*", "BackBoiler") => no_row_type(&["RoomHeater"], "back boiler"),
+        ("HeatSourceWet/*", "BackBoiler") => Some(Rule::Pick {
+            tables: &["RoomHeater"],
+            filter: Some((CHILD_TABLE, "BackBoiler".into())),
+            ask: "Vulcan has no back boiler system yet, so there is no default; pick its room heater with back boiler on the row".into(),
+            setting: None,
+        }),
         ("HeatSourceWet/*", "DirectElectricBoiler") => no_row_type(&["ElectricBoiler"], "electric boiler"),
         ("HeatSourceWet/*", "SolidFuelBoiler") => no_row_type(&["SolidFuelBoiler"], "solid-fuel boiler"),
         ("HeatSourceWet/*", "PrimaryThermalStore") => no_row_type(&["PrimaryThermalStore"], "primary thermal store"),
-        // Single product for the type (DESNZ also names it, EPC 06, 6.2.3.1).
+        // Single product for the type (DESNZ also names it).
         ("HeatSourceWet/*", "HIU") => auto("HeatInterfaceUnit"),
         // Single product for each battery type.
         ("HeatSourceWet/*", "HeatBattery") => match text(system, "battery_type") {
@@ -411,7 +431,7 @@ pub(crate) fn rule(
         ("SpaceHeatSystem/*", "ElecStorageHeater") => pick(&["StorageHeater"], "pick the storage heater product: high heat retention or standard, and its capacity"),
         // Single product for the type.
         ("SpaceHeatSystem/*", "InstantElecHeater") => auto("DirectElectricHeaters"),
-        // DESNZ-defined (EPC 06, 6.3.2.3: the default product) and single product.
+        // DESNZ-defined (the default product) and single product.
         ("SpaceHeatSystem/*/emitters/*", "fancoil") => auto("FanCoils"),
         // DESNZ: radiators are always illustrative and categorised by type and height; the
         // assessor records both, so there is no default.
@@ -618,18 +638,25 @@ pub(crate) fn resolve_products(
                 .or(setting);
             let (product_id, source, label, rule_text) = if let Some((id, how)) = picked {
                 match db.products.get(&id) {
-                    Some(product) if rule.tables().contains(&product.table.as_str()) => (
-                        Some(id),
-                        ProductSource::Product,
-                        Some(product.label.clone()),
-                        how,
-                    ),
+                    Some(product)
+                        if rule.tables().contains(&product.table.as_str())
+                            && rule.filter().is_none_or(|(f, v)| product.has(f, v)) =>
+                    {
+                        (
+                            Some(id),
+                            ProductSource::Product,
+                            Some(product.label.clone()),
+                            how,
+                        )
+                    }
                     found => {
                         let is = found.map_or("not in the pinned HEM Database".to_string(), |p| {
-                            format!(
-                                "a {} ({}), which this system cannot use",
-                                p.technology_type, p.label
-                            )
+                            let need = rule
+                                .filter()
+                                .filter(|_| rule.tables().contains(&p.table.as_str()))
+                                .map(|(f, v)| format!(" without {f} {v}, which this system needs"))
+                                .unwrap_or_else(|| ", which this system cannot use".into());
+                            format!("a {} ({}){need}", p.technology_type, p.label)
                         });
                         errors.push(error(
                             "E_PRODUCT_INVALID",
@@ -707,15 +734,24 @@ pub(crate) fn resolve_products(
             });
         }
     }
+    for (setting, value) in [
+        (RADIATOR_SETTING, settings.radiator),
+        (UFH_SETTING, settings.ufh),
+    ] {
+        let rule = format!("model setting {setting}");
+        if let Some(id) = value.filter(|_| !slots.iter().any(|slot| slot.rule == rule)) {
+            notices.push(notice("/Metadata", format!("Metadata row {setting} names product {id}, but no emitter takes it: every matching emitter has its own product, or the model has none. Remove the row or check the emitters.")));
+        }
+    }
     slots
 }
 
 /// An ecodesign class with weather compensation (II, III, VI, VII) needs its curve: either
 /// `weather_comp_a`, `_b`, `_c` with `min_flow_temp`, or a `weather_compensation_curve_id`
-/// without `min_flow_temp` (the curve sets it). New build must state one (Input Requirements:
-/// full information). Existing build with neither takes DESNZ's curve for its heat source and
-/// emitters, DESNZ-defined (EPC 06, 6.3.2.4): boiler with UFH 2, boiler with radiators 7, heat
-/// pump with UFH 1, heat pump with radiators 5.
+/// without `min_flow_temp` (the curve sets it). New build must state one (DESNZ: full
+/// information). Existing build with neither takes DESNZ's curve for its heat source and
+/// emitters, DESNZ-defined: boiler with UFH 2, boiler with radiators 7, heat pump with UFH 1,
+/// heat pump with radiators 5.
 pub(crate) fn apply_weather_curves(
     model: &mut Value,
     db: &ProductDatabase,
@@ -1421,5 +1457,57 @@ pub(crate) mod tests {
         assert_eq!(existing["Zone"]["b"]["frac_convective_heating"], 0.82);
         assert_eq!(errors, ["/Zone/d/frac_convective_heating"]);
         assert!(notices.iter().any(|n| n.message.contains("HEMIE's rule")));
+    }
+
+    #[test]
+    fn a_pick_must_match_the_rules_subclass_not_only_its_table() {
+        let mut model = json!({
+            "EnergySupply": {"mains gas": {"fuel": "mains_gas"}},
+            "HeatSourceWet": {
+                "a2a on water": {"type": "HeatPump", "source_type": "OutsideAir", "sink_type": "Water", "product_id": 693000},
+                "oil on gas": {"type": "Boiler", "EnergySupply": "mains gas", "product_id": 690209},
+                "gas on gas": {"type": "Boiler", "EnergySupply": "mains gas", "product_id": 690205},
+                "no back boiler": {"type": "BackBoiler", "product_id": 820601},
+                "back boiler": {"type": "BackBoiler", "product_id": 820602}
+            },
+            "WWHRS": {"w": {"type": "WWHRS_Instantaneous", "product_id": 83000}},
+            "HotWaterDemand": {"Shower": {"s": {"WWHRS": "w", "WWHRS_configuration": "B"}}}
+        });
+        let (slots, errors, _) = resolve(&mut model, &Settings::default());
+        let invalid: Vec<&str> = errors
+            .iter()
+            .filter(|e| e.code == "E_PRODUCT_INVALID")
+            .map(|e| e.path.as_str())
+            .collect();
+        assert_eq!(
+            invalid,
+            [
+                "/HeatSourceWet/a2a on water",
+                "/HeatSourceWet/oil on gas",
+                "/HeatSourceWet/no back boiler",
+                "/WWHRS/w"
+            ]
+        );
+        assert!(errors[0].message.contains("without sinkType Water"));
+        let ok = |path: &str| slots.iter().find(|s| s.path == path).unwrap().product_id;
+        assert_eq!(ok("/HeatSourceWet/gas on gas"), Some(690205));
+        assert_eq!(ok("/HeatSourceWet/back boiler"), Some(820602));
+    }
+
+    #[test]
+    fn duplicate_ids_and_unreadable_curves_are_loader_errors() {
+        let mut data = pinned();
+        let pi = data["ProductIdentification.csv"].clone();
+        let first = pi.lines().nth(1).unwrap().to_string();
+        data.insert("ProductIdentification.csv".into(), format!("{pi}\n{first}"));
+        assert!(ProductDatabase::parse(&data).unwrap_err().contains("twice"));
+        let mut data = pinned();
+        data.insert(
+            "WeatherCompensationCurve.csv".into(),
+            "ID,Gradient\n1,steep\n".into(),
+        );
+        assert!(ProductDatabase::parse(&data)
+            .unwrap_err()
+            .contains("WeatherCompensationCurve"));
     }
 }

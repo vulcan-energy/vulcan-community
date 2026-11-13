@@ -58,6 +58,7 @@ pub(crate) fn check_party_wall_lining(model: &Value, errors: &mut Vec<Validation
             let lined = LINED_PARTY_WALL_CAVITIES.contains(&cavity);
             let message = match (lined, lining) {
                 (true, None) => format!("Party wall '{name}' has cavity type {cavity}, which needs party_wall_lining_type. State the lining type."),
+                (false, Some(lining)) if cavity.is_empty() => format!("Party wall '{name}' states party_wall_lining_type {lining} but no party_wall_cavity_type. State the cavity type."),
                 (false, Some(lining)) => format!("Party wall '{name}' states party_wall_lining_type {lining}, but its cavity type {cavity} takes none (only {} do). Remove the lining type or correct the cavity type.", LINED_PARTY_WALL_CAVITIES.join(", ")),
                 _ => continue,
             };
@@ -76,7 +77,8 @@ pub(crate) fn check_party_wall_lining(model: &Value, errors: &mut Vec<Validation
     }
 }
 
-/// HEMIE Table 009.3 (also the FHS wrapper's `COLOUR_TO_SOLAR_ABSORPTION_MAP`).
+/// DESNZ-defined colour to solar absorption map (also the FHS wrapper's
+/// `COLOUR_TO_SOLAR_ABSORPTION_MAP`).
 pub(crate) fn solar_absorption_coeff(colour: &str) -> Option<f64> {
     match colour {
         "Light" => Some(0.3),
@@ -87,8 +89,8 @@ pub(crate) fn solar_absorption_coeff(colour: &str) -> Option<f64> {
 }
 
 /// The appliance presence fields, the Metadata row that states each, and the Appliances keys
-/// that show one is drawn. Presence is a required assessor input (User Inputs Guidance EPC
-/// 09): a missing row is an error, never "absent".
+/// that show one is drawn. Presence is a required assessor input (DESNZ-defined): a missing
+/// row is an error, never "absent".
 pub(crate) const APPLIANCE_PRESENCE: [(&str, &str, &[&str]); 3] = [
     ("has_dryer", "Appliances_has_dryer", &["Clothes_drying"]),
     (
@@ -104,8 +106,15 @@ pub(crate) const APPLIANCE_PRESENCE: [(&str, &str, &[&str]); 3] = [
 ];
 
 /// Appliance presence comes from Metadata rows, checked against drawn Appliances rows; `Oven` and `Hobs` take the row's `EnergySupply`, which EPC
-/// requires (User Inputs Guidance EPC 09): a missing one is an error, never a template value.
-pub(crate) fn map_appliances(model: &mut Value, csv: &Rows, errors: &mut Vec<ValidationError>) {
+/// requires (DESNZ-defined): a missing one is an error, never a template value.
+/// `presence` holds, per `APPLIANCE_PRESENCE` row, whether its Metadata row is present and the
+/// value the shared CSV boolean parser read (None for a value it already reported).
+pub(crate) fn map_appliances(
+    model: &mut Value,
+    csv: &Rows,
+    presence: [(bool, Option<bool>); 3],
+    errors: &mut Vec<ValidationError>,
+) {
     let rows: Vec<&BTreeMap<String, Value>> = csv.get("Appliances").into_iter().flatten().collect();
     fn key_of<'r>(row: &&'r BTreeMap<String, Value>) -> Option<&'r str> {
         row.get("appliancekey").and_then(Value::as_str)
@@ -115,25 +124,18 @@ pub(crate) fn map_appliances(model: &mut Value, csv: &Rows, errors: &mut Vec<Val
             .any(|row| key_of(row).is_some_and(|k| keys.contains(&k)))
     };
     let mut appliances = Map::new();
-    let stated = |name: &str| {
-        csv.get("Metadata").into_iter().flatten().find_map(|row| {
-            (row.get("Field").and_then(Value::as_str) == Some(name)).then(|| row.get("Value"))?
-        })
-    };
-    let mut missing = Vec::new();
-    for (field, row, keys) in APPLIANCE_PRESENCE {
+    for ((field, row, keys), (present, value)) in APPLIANCE_PRESENCE.into_iter().zip(presence) {
         let drawn = has(keys);
-        let value = match stated(row) {
-            Some(Value::Bool(b)) => Some(*b),
-            Some(Value::String(t)) => match t.trim().to_ascii_uppercase().as_str() {
-                "TRUE" => Some(true),
-                "FALSE" => Some(false),
-                _ => None,
-            },
-            _ => None,
-        };
+        if !present {
+            errors.push(error(
+                "E_EPC_APPLIANCE_PRESENCE",
+                format!("/Appliances/{field}"),
+                format!("HEM:EPC requires the appliance spaces to be stated: add the Metadata row '{row}' with TRUE or FALSE."),
+            ));
+            continue;
+        }
         match value {
-            None => missing.push(row),
+            None => {}
             Some(false) if drawn => errors.push(error(
                 "E_EPC_APPLIANCE_PRESENCE",
                 "/Metadata".into(),
@@ -143,13 +145,6 @@ pub(crate) fn map_appliances(model: &mut Value, csv: &Rows, errors: &mut Vec<Val
                 appliances.insert(field.into(), json!(present));
             }
         }
-    }
-    if !missing.is_empty() {
-        errors.push(error(
-            "E_EPC_APPLIANCE_PRESENCE",
-            "/Metadata".into(),
-            format!("HEM:EPC requires the appliance spaces to be stated, and the Metadata section has no TRUE or FALSE row for: {}. Add each row.", missing.join(", ")),
-        ));
     }
     for key in ["Oven", "Hobs"] {
         let authored = rows
@@ -248,7 +243,7 @@ pub(crate) fn report_ventilation_defaults(
             ));
         }
         // A stopped intermittent extract fan leaks; its back-draught protection and diameter
-        // are assessor inputs with no default. DESNZ-defined (HEM Core V2 note VEN020).
+        // are assessor inputs with no default (DESNZ-defined).
         let intermittent =
             system.get("vent_type").and_then(Value::as_str) == Some("Intermittent MEV");
         if intermittent
@@ -330,6 +325,7 @@ pub(crate) fn check_solar_absorption(
     model: &mut Value,
     from_colour: &[String],
     errors: &mut Vec<ValidationError>,
+    notices: &mut Vec<SchemaOmission>,
 ) {
     let existing = model["IsExistingBuilding"] == true;
     for (zone, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
@@ -340,6 +336,9 @@ pub(crate) fn check_solar_absorption(
         {
             let path = json_pointer(&["Zone", zone, "BuildingElement", name]);
             let from_a_colour = from_colour.contains(&path);
+            if existing && from_a_colour {
+                notices.push(notice(&format!("{path}/solar_absorption_coeff"), format!("Element '{name}' takes solar_absorption_coeff {} from its colour (DESNZ's map for an existing building).", element["solar_absorption_coeff"])));
+            }
             if !existing && from_a_colour {
                 if let Some(element) = element.as_object_mut() {
                     element.remove("solar_absorption_coeff");
@@ -357,6 +356,227 @@ pub(crate) fn check_solar_absorption(
                     "E_EPC_SOLAR_ABSORPTION",
                     format!("{path}/solar_absorption_coeff"),
                     message,
+                ));
+            }
+        }
+    }
+}
+
+/// DESNZ's defaults for HEM:EPC inputs, each applied only when the input is absent and
+/// reported; values the converter works out from the model are reported too.
+/// - Battery: location outside, age 5 years, grid charging possible, no grid export
+///   (DESNZ-defined).
+/// - Wet distribution: no variable flow, and then a design flow rate of 0.06 L/s
+///   (DESNZ-defined).
+/// - Ventilation zone base height: 0 m for a house, bungalow or park home (DESNZ-defined);
+///   any other built form must state it.
+/// - Envelope area: always derived from the drawn elements, reported.
+/// - Window shading: a window with no drawn shading has none, derived from the drawing and
+///   reported.
+pub(crate) fn apply_desnz_defaults(
+    model: &mut Value,
+    csv: &Rows,
+    errors: &mut Vec<ValidationError>,
+    notices: &mut Vec<SchemaOmission>,
+) {
+    let stated = |name: &str| {
+        csv.get("Metadata")
+            .into_iter()
+            .flatten()
+            .any(|row| row.get("Field").and_then(Value::as_str) == Some(name))
+    };
+    for (supply, value) in model["EnergySupply"].as_object_mut().into_iter().flatten() {
+        let Some(battery) = value
+            .get_mut("ElectricBattery")
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        let mut used = Vec::new();
+        for (field, default) in [
+            ("battery_location", json!("outside")),
+            ("battery_age", json!(5)),
+            ("grid_charging_possible", json!(true)),
+            ("grid_exporting_possible", json!(false)),
+        ] {
+            if !battery.contains_key(field) {
+                used.push(format!("{field} {default}"));
+                battery.insert(field.into(), default);
+            }
+        }
+        if !used.is_empty() {
+            notices.push(notice(&json_pointer(&["EnergySupply", supply, "ElectricBattery"]), format!("The battery on '{supply}' does not state {}, so it uses DESNZ's defaults. State them on its row to change them.", used.join(", "))));
+        }
+    }
+    for (name, system) in model["SpaceHeatSystem"]
+        .as_object_mut()
+        .into_iter()
+        .flatten()
+    {
+        let Some(system) = system
+            .as_object_mut()
+            .filter(|s| s.get("type") == Some(&json!("WetDistribution")))
+        else {
+            continue;
+        };
+        let mut used = Vec::new();
+        if !system.contains_key("variable_flow") {
+            system.insert("variable_flow".into(), json!(false));
+            used.push("variable_flow false".to_string());
+        }
+        if system["variable_flow"] == false && !system.contains_key("design_flow_rate") {
+            system.insert("design_flow_rate".into(), json!(0.06));
+            used.push("design_flow_rate 0.06".to_string());
+        }
+        if !used.is_empty() {
+            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses DESNZ's defaults. State them on its Systems row to change them.", used.join(" and "))));
+        }
+    }
+    let mut unshaded = Vec::new();
+    for (zone, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
+        for (name, element) in zone_value["BuildingElement"]
+            .as_object_mut()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(element) = element.as_object_mut().filter(|e| {
+                e.get("type") == Some(&json!("BuildingElementTransparent"))
+                    && !e.contains_key("shading")
+            }) {
+                element.insert("shading".into(), json!([]));
+                unshaded.push(format!("{zone}/{name}"));
+            }
+        }
+    }
+    if !unshaded.is_empty() {
+        notices.push(notice(
+            "/Zone",
+            format!(
+                "No shading is drawn for {}, so they have none. Draw Window Shading to add it.",
+                unshaded.join(", ")
+            ),
+        ));
+    }
+    let build_type = model["General"]["build_type"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    if let Some(ventilation) = model
+        .get_mut("InfiltrationVentilation")
+        .and_then(Value::as_object_mut)
+    {
+        if !stated("Ventilation_ventilation_zone_base_height") {
+            let path = "/InfiltrationVentilation/ventilation_zone_base_height";
+            if [
+                "detached",
+                "semi_detached_end_terrace",
+                "mid_terrace",
+                "bungalow",
+                "park home",
+            ]
+            .contains(&build_type.as_str())
+            {
+                ventilation.insert("ventilation_zone_base_height".into(), json!(0));
+                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, DESNZ's default for a dwelling at ground level. Add the row to state it.")));
+            } else {
+                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: add the Metadata row Ventilation_ventilation_zone_base_height.", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
+            }
+        }
+        if let Some(area) = ventilation.get("Leaks").and_then(|l| l.get("env_area")) {
+            notices.push(notice("/InfiltrationVentilation/Leaks/env_area", format!("The envelope area {area} m² is derived from the drawn elements that separate the dwelling from outside, other dwellings and unheated spaces.")));
+        }
+    }
+}
+
+/// Each building element states every field its schema definition requires, named in one
+/// error per element: there is no template value. The definition is the target schema's own
+/// for the element's `type` (and `floor_type`, for ground floors).
+pub(crate) fn check_element_fields(
+    model: &Value,
+    schema: &Value,
+    errors: &mut Vec<ValidationError>,
+) {
+    let defs = schema["$defs"].as_object();
+    for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
+        for (name, element) in zone_value["BuildingElement"]
+            .as_object()
+            .into_iter()
+            .flatten()
+        {
+            let Some(element) = element.as_object() else {
+                continue;
+            };
+            let def = defs.into_iter().flatten().map(|(_, def)| def).find(|def| {
+                let properties = def["properties"].as_object();
+                properties.is_some_and(|properties| {
+                    properties.get("type").and_then(|t| t.get("const")) == element.get("type")
+                        && properties.iter().filter(|(key, _)| *key != "type").all(
+                            |(key, property)| {
+                                property
+                                    .get("const")
+                                    .is_none_or(|c| element.get(key).is_none_or(|v| v == c))
+                            },
+                        )
+                }) && !def
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .is_some_and(|r| r.iter().any(|f| f == "model_type"))
+            });
+            let Some(def) = def else {
+                continue;
+            };
+            let mut missing: Vec<String> = def["required"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter(|field| !element.contains_key(*field))
+                // A field another check already named has its own error.
+                .filter(|field| {
+                    let path = json_pointer(&["Zone", zone, "BuildingElement", name, field]);
+                    !errors.iter().any(|e| e.path == path)
+                })
+                .map(str::to_string)
+                .collect();
+            // Alternatives (`oneOf`/`anyOf` of `required` lists), at the top or in `allOf`.
+            let parts = std::iter::once(def).chain(def["allOf"].as_array().into_iter().flatten());
+            for part in parts {
+                for key in ["oneOf", "anyOf"] {
+                    let groups: Vec<Vec<&str>> = part[key]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|group| group["required"].as_array())
+                        .map(|r| r.iter().filter_map(Value::as_str).collect())
+                        .collect();
+                    if !groups.is_empty()
+                        && !groups
+                            .iter()
+                            .any(|g| g.iter().all(|f| element.contains_key(*f)))
+                    {
+                        missing.push(format!(
+                            "one of {}",
+                            groups
+                                .iter()
+                                .map(|g| g.join(" + "))
+                                .collect::<Vec<_>>()
+                                .join(" or ")
+                        ));
+                    }
+                }
+            }
+            if !missing.is_empty() {
+                let kind = element
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                errors.push(error(
+                    "E_EPC_REQUIRED_INPUT",
+                    json_pointer(&["Zone", zone, "BuildingElement", name]),
+                    format!(
+                        "Element '{name}' ({kind}) needs {}. HEM:EPC has no default for them.",
+                        missing.join(", ")
+                    ),
                 ));
             }
         }
