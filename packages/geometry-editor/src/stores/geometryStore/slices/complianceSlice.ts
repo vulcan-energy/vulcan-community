@@ -80,6 +80,8 @@ export interface ComplianceSlice {
     initialValueRows?: string[];
     /** Settings the user emptied and has not set since: no defaults fill puts a value back. */
     clearedValueRows?: string[];
+    /** The `HEMIE_` model settings (Metadata rows) by row, as typed; the converter reads them. */
+    hemieSettings?: Record<string, string>;
   };
   setComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;
   replaceComplianceSettings: (settings: Partial<ComplianceSlice['complianceSettings']>) => void;

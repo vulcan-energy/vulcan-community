@@ -32,3 +32,15 @@ it('keeps the product settings rows as typed through load and save', () => {
   expect(csv).toMatch(/^Product_radiator_length,Large,/m);
   expect(csv).toMatch(/^Product_ufh,,/m);
 });
+
+it('keeps the HEMIE_ model settings as typed through load and save', () => {
+  const store = createGeometryStore({ defaultDefaultsPath: null });
+  store.getState().loadFromCSV('Metadata,,\nHEMIE_age_band,D\nHEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}"\n');
+  expect(store.getState().complianceSettings.hemieSettings).toEqual({
+    HEMIE_age_band: 'D',
+    HEMIE_construction_external_wall: '{"wall_construction_type":"cavity"}',
+  });
+  const csv = store.getState().generateCSV({ allowUnresolvedMigration: true });
+  expect(csv).toMatch(/^HEMIE_age_band,D,/m);
+  expect(csv).toMatch(/^HEMIE_construction_external_wall,"\{""wall_construction_type"":""cavity""\}",/m);
+});

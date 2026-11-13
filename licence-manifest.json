@@ -4178,6 +4178,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/lib/__tests__/hemieFabric.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/hemieFabric.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/__tests__/hostedDescendantCascade.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/hostedDescendantCascade.test.ts",
       "license": "AGPL-3.0-only",
@@ -5076,6 +5084,14 @@
     {
       "path": "packages/geometry-editor/src/lib/heatSourceWetNamesFromProject.ts",
       "source_path": "packages/geometry-editor/src/lib/heatSourceWetNamesFromProject.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/hemieFabric.ts",
+      "source_path": "packages/geometry-editor/src/lib/hemieFabric.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

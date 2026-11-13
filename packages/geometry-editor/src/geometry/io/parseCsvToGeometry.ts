@@ -209,6 +209,8 @@ export type ComplianceSettings = {
   productSettings?: Partial<Record<ProductSettingRow, string>>;
   /** Model-input rows the file lacks: they take the value the converter uses for an absent row. */
   absentMetadataRows?: string[];
+  /** The `HEMIE_` model settings by row, as typed. */
+  hemieSettings?: Record<string, string>;
 };
 
 function parseAirPermeabilityTestPressure(
@@ -357,6 +359,10 @@ export const parseCsvToGeometry = (
     }
     if (productSettingRows.has(hostMetadataKey ?? '')) {
       (complianceSettings.productSettings ??= {})[hostMetadataKey as ProductSettingRow] = metadataFields[1]?.trim() ?? '';
+      continue;
+    }
+    if (hostMetadataKey?.startsWith('HEMIE_')) {
+      (complianceSettings.hemieSettings ??= {})[hostMetadataKey] = metadataFields[1]?.trim() ?? '';
       continue;
     }
     if (line.startsWith('GlobalOrientationOffset,')) {

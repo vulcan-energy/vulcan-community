@@ -118,6 +118,33 @@ describe("GlobalSettingsModal target-required rows", () => {
   });
 });
 
+describe("GlobalSettingsModal border postcode", () => {
+  it.each([
+    ["CH4 1AA", true, true],
+    ["MK40 1AA", true, false],
+    ["CH4 1AA", false, false],
+  ])("asks the nation for %s under construction bands %s: %s", async (postcode, constructionBands, asked) => {
+    const store = createGeometryStore();
+    store.getState().setPropertyPostcode(postcode);
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={{ ...canonicalGeometrySchemaPort, targetRules: () => ({ constructionBands }) }}
+        workspaceResourcePort={createResources()}
+      >
+        <GeometryStoreProvider store={store}>
+          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="Postcode" />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    await screen.findByLabelText("Property postcode");
+    expect(screen.queryByLabelText("Nation") !== null).toBe(asked);
+    if (!asked) return;
+    expect(screen.getByLabelText("Nation")).toHaveValue("");
+    await userEvent.selectOptions(screen.getByLabelText("Nation"), "Wales");
+    expect(store.getState().complianceSettings.hemieSettings).toEqual({ HEMIE_nation: "Wales" });
+  });
+});
+
 describe("GlobalSettingsModal", () => {
   it("uses one public modal for defaults and every core global-values section", async () => {
     const user = userEvent.setup();
