@@ -1854,8 +1854,8 @@ export const validateElementCore = (
         const parent = Object.values(elementsById).find(e => e.name === contextElement.parent_element);
         if (parent && contextElement.coordinates && parent.coordinates && context.calculateContextShadingDistance) {
           const derivedDistance = context.calculateContextShadingDistance(contextElement, parent);
-          if (derivedDistance === 0) {
-            issues.push(geo('Distance 0 (derived)', 'distance'));
+          if (!(derivedDistance > 0)) {
+            issues.push(geo('Distance must be greater than 0: draw the object clear of the dwelling\'s external walls', 'distance'));
           }
         } else {
           issues.push(geo('Missing parent or coordinates', 'parent_element'));

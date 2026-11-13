@@ -9,11 +9,10 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 /// Pinned Python a8/a9 sum each sector's `width / 360` for a flat element no obstacle reaches,
-/// then take acos of it: 36 * (10/360) rounds above 1 and fails. Only the converter's own
+/// then take acos of it: 36 * (10/360) rounds above 1 and fails. Only the converter's own empty
 /// 10-degree grid qualifies: never touch authored keys, empty authored lists or invalid arcs.
-/// An empty sky becomes eight exact 45-degree sectors. A shaded sky keeps every boundary where
-/// shading changes and merges the rest up to the 45-degree lines; merging sectors with the same
-/// shading leaves every per-sector result proportional, and these widths keep the sum at most 1.
+/// It becomes eight exact 45-degree sectors. A shaded sky already follows each object's own
+/// arc, and the builder keeps its sum at most 1 there.
 pub fn map_target_unobstructed_shading(model: &mut Value, profile: crate::ConversionProfile) {
     map_contract_unobstructed_shading(model, profile.input_contract());
 }
@@ -79,57 +78,17 @@ pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: cra
     };
     let on_grid = sectors.len() == 36
         && sectors.iter().enumerate().all(|(i, sector)| {
-            let shading_ok = match sector.get("shading") {
-                None => true,
-                Some(Value::Array(objects)) => !objects.is_empty(),
-                Some(_) => false,
-            };
             sector.as_object().is_some_and(|fields| {
                 fields
                     .keys()
-                    .all(|key| matches!(key.as_str(), "start360" | "end360" | "shading"))
-            }) && shading_ok
-                && sector.get("start360").and_then(Value::as_u64) == Some((i * 10) as u64)
+                    .all(|key| matches!(key.as_str(), "start360" | "end360"))
+            }) && sector.get("start360").and_then(Value::as_u64) == Some((i * 10) as u64)
                 && sector.get("end360").and_then(Value::as_u64) == Some(((i + 1) * 10) as u64)
         });
-    if !on_grid {
-        return;
-    }
-    if sectors.iter().all(|sector| sector.get("shading").is_none()) {
+    if on_grid {
         *sectors = (0..8)
             .map(|i| json!({"start360":i*45,"end360":(i+1)*45}))
             .collect();
-        return;
-    }
-    let mut merged: Vec<Value> = Vec::new();
-    for sector in sectors.iter() {
-        let (start, end) = (
-            sector["start360"].as_u64().unwrap(),
-            sector["end360"].as_u64().unwrap(),
-        );
-        // A 45-degree line inside this sector splits it; the halves share its shading.
-        let pieces = match (start / 45 + 1) * 45 {
-            line if line < end => vec![(start, line), (line, end)],
-            _ => vec![(start, end)],
-        };
-        for (from, to) in pieces {
-            match merged.last_mut() {
-                Some(last) if from % 45 != 0 && last.get("shading") == sector.get("shading") => {
-                    last["end360"] = json!(to);
-                }
-                _ => {
-                    let mut piece = sector.clone();
-                    piece["start360"] = json!(from);
-                    piece["end360"] = json!(to);
-                    merged.push(piece);
-                }
-            }
-        }
-    }
-    // ponytail: shading that changes at nearly every 10 degrees needs more than the schema's 36
-    // sectors here; the grid is kept and the Python run fails loudly for a flat element.
-    if merged.len() <= 36 {
-        *sectors = merged;
     }
 }
 
@@ -901,47 +860,6 @@ mod tests {
         let mut rust = source.clone();
         map_target_unobstructed_shading(&mut rust, ConversionProfile::CurrentRustFhs);
         assert_eq!(rust, source);
-    }
-    /// The flat-element sum Python a8/a9 take acos of, for every obstacle window and every pair
-    /// of windows on the converter's 10-degree grid.
-    #[test]
-    fn shaded_sector_widths_never_sum_above_one() {
-        let windows: Vec<(usize, usize)> = (0..36)
-            .flat_map(|a| (a + 1..=36).map(move |b| (a, b)))
-            .collect();
-        let obstacle = json!([{"type":"obstacle","height":1,"distance":10}]);
-        let other = json!([{"type":"obstacle","height":2,"distance":10}]);
-        let contract = crate::ConversionProfile::PythonFhsA9.input_contract();
-        for (i, first) in windows.iter().enumerate() {
-            for second in windows.iter().skip(i).step_by(7).chain([first]) {
-                let sectors: Vec<Value> = (0..36)
-                    .map(|k| {
-                        let mut s = json!({"start360": k * 10, "end360": (k + 1) * 10});
-                        if (first.0..first.1).contains(&k) {
-                            s["shading"] = obstacle.clone();
-                        } else if (second.0..second.1).contains(&k) {
-                            s["shading"] = other.clone();
-                        }
-                        s
-                    })
-                    .collect();
-                let mut model = json!({"ExternalConditions":{"shading_segments": sectors}});
-                map_contract_unobstructed_shading(&mut model, contract);
-                let out = model["ExternalConditions"]["shading_segments"]
-                    .as_array()
-                    .unwrap();
-                let mut total = 0.0;
-                let mut at = 0;
-                for s in out {
-                    assert_eq!(s["start360"].as_u64(), Some(at));
-                    at = s["end360"].as_u64().unwrap();
-                    total += 1.0 * ((at - s["start360"].as_u64().unwrap()) as f64 / 360.0);
-                }
-                assert_eq!(at, 360);
-                assert!((8..=36).contains(&out.len()));
-                assert!(total <= 1.0, "{first:?} {second:?}: {total}");
-            }
-        }
     }
     use super::*;
     fn map(source: Value, output: Value) -> (Value, Vec<ValidationError>) {
