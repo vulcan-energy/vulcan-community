@@ -4163,44 +4163,16 @@ impl JSONBuilder {
                 );
             }
             // The schema may need a minimum number of segments. Splitting a segment keeps its
-            // shading, so the result does not change.
-            let split = |segments: &mut Vec<(u32, u32, Vec<Value>)>, i: usize, at: u32| {
-                let tail = (at, segments[i].1, segments[i].2.clone());
-                segments[i].1 = at;
-                segments.insert(i + 1, tail);
-            };
+            // shading, so the result does not change. `map_contract_unobstructed_shading` keeps
+            // the pinned Python a8/a9 flat-sky sum at most 1.
             while segments.len() < min_segments.unwrap_or(1) {
                 let i = (0..segments.len())
                     .max_by_key(|&i| (segments[i].1 - segments[i].0, std::cmp::Reverse(i)))
                     .unwrap();
                 let at = segments[i].0 + (segments[i].1 - segments[i].0) / 2;
-                split(&mut segments, i, at);
-            }
-            // Pinned Python a8/a9 take acos of the flat-sky sum of `width / 360`, which rounding
-            // can push above 1. One neutral split brings it back.
-            let sky = |segments: &[(u32, u32, Vec<Value>)]| {
-                segments
-                    .iter()
-                    .fold(0.0, |sum, (from, to, _)| sum + f64::from(to - from) / 360.0)
-            };
-            if self.input_contract.uses_exact_empty_shading_sectors && sky(&segments) > 1.0 {
-                let fix = (0..segments.len())
-                    .flat_map(|i| (segments[i].0 + 1..segments[i].1).map(move |at| (i, at)))
-                    .find(|&(i, at)| {
-                        let mut trial = segments.clone();
-                        split(&mut trial, i, at);
-                        sky(&trial) <= 1.0
-                    });
-                match fix {
-                    Some((i, at)) if max_segments.is_none_or(|max| segments.len() < max) => {
-                        split(&mut segments, i, at)
-                    }
-                    _ => self.push_non_fatal(
-                        "E027",
-                        "/Context Shading",
-                        "Context Shading segments sum to more than the whole sky in this HEM version's arithmetic. Move one object's angle by 1 degree.",
-                    ),
-                }
+                let tail = (at, segments[i].1, segments[i].2.clone());
+                segments[i].1 = at;
+                segments.insert(i + 1, tail);
             }
             let shading_segments: Vec<Value> = segments
                 .into_iter()
@@ -14103,6 +14075,10 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
             builder
                 .process_root_level_sections(&mut result, &data)
                 .unwrap();
+            crate::target_mappings::map_contract_unobstructed_shading(
+                &mut result,
+                builder.input_contract,
+            );
             let segments: Vec<(u64, u64, usize)> = result["ExternalConditions"]["shading_segments"]
                 .as_array()
                 .unwrap()
