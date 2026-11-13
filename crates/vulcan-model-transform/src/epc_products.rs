@@ -1591,6 +1591,10 @@ pub(crate) mod tests {
             label: None,
             rule: String::new(),
             technology_types: vec![],
+            default_source: None,
+            candidates: None,
+            row: None,
+            row_path: None,
         }];
         let (mut errors, mut notices) = (Vec::new(), Vec::new());
         derive_zone_frac_convective(&mut model, &db(), &slots, &mut errors, &mut notices);

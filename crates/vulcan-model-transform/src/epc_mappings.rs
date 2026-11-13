@@ -454,7 +454,7 @@ pub(crate) fn apply_desnz_defaults(
         .as_str()
         .unwrap_or_default()
         .to_string();
-    // DESNZ-defined (EPC 11 11.3.3): an existing building may give its base storey instead, and
+    // DESNZ-defined: an existing building may give its base storey instead, and
     // HEMIE estimates the base height from it.
     let new_build = model.get("IsExistingBuilding") != Some(&Value::Bool(true));
     let base_storey = (!new_build)
@@ -766,6 +766,35 @@ pub(crate) fn check_system_catalogue(
             json_pointer(&["ZoneUnconditioned", name, "method"]),
             format!("Unconditioned zone '{name}' uses method Direct, which this HEM:EPC target rejects. Use method Calculated and state the zone's envelope in building_element."),
         ));
+    }
+    // A room heater whose product has auxiliary power states the supply for it: the wrapper
+    // rejects one without (`validate_power_aux_needs_supply`).
+    for (name, system) in model["SpaceHeatSystem"].as_object().into_iter().flatten() {
+        let aux_power = system["product_id"]
+            .as_u64()
+            .and_then(|id| db.products.get(&id))
+            .filter(|product| product.table == "RoomHeater")
+            .is_some_and(|product| {
+                [
+                    "power_aux_burner_w",
+                    "power_aux_blower_w",
+                    "power_aux_standby_w",
+                ]
+                .iter()
+                .any(|f| {
+                    product
+                        .fields
+                        .get(*f)
+                        .is_some_and(|v| !v.is_empty() && v != "NULL")
+                })
+            });
+        if aux_power && system["EnergySupply_aux"].as_str().is_none() {
+            errors.push(error(
+                "E_EPC_REQUIRED_INPUT",
+                json_pointer(&["SpaceHeatSystem", name, "EnergySupply_aux"]),
+                format!("Room heater '{name}': its product has auxiliary power, so state EnergySupply_aux on its Systems row."),
+            ));
+        }
     }
     for name in model["InfiltrationVentilation"]["CombustionAppliances"]
         .as_object()

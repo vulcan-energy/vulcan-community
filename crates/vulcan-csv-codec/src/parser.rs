@@ -380,8 +380,7 @@ impl CSVParser {
                         if !valid_vent_types.contains(&vent_type.as_str()) {
                             return Err(ParseError {
                                 code: "E009".to_string(),
-                                message: format!("Invalid vent_type '{}' for MechanicalVentilation. Must be one of: {}", 
-                                    vent_type, valid_vent_types.join(", ")),
+                                message: format!("Invalid vent_type '{vent_type}' for MechanicalVentilation. Must be one of: Intermittent MEV, Centralised continuous MEV, Decentralised continuous MEV, MVHR, or for a HEM:EPC target Positive input ventilation"),
                                 line_number: self.current_line_number,
                                 section: Some(section.to_string()),
                                 field: Some("vent_type".to_string()),

@@ -266,9 +266,8 @@ impl ModelProfile {
     }
 
     /// Required rows an existing building may leave out, DESNZ-defined: with no air test HEMIE
-    /// estimates the leakage (EPC 05 5.3.1) and shield class follows the terrain class (EPC 11
-    /// Table 11.7.2). An absent row removes the template's value, so only a stated value
-    /// reaches HEMIE.
+    /// estimates the leakage and shield class follows the terrain class. An absent row removes
+    /// the template's value, so only a stated value reaches HEMIE.
     pub(crate) fn existing_building_optional_rows(self) -> &'static [&'static str] {
         match self {
             Self::Core | Self::Fhs => &[],

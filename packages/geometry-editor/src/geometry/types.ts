@@ -372,7 +372,7 @@ export interface Vents extends BaseElement {
 
 export interface MechanicalVentilation extends BaseElement {
   type: 'MechanicalVentilation';
-  vent_type: 'Intermittent MEV' | 'Centralised continuous MEV' | 'Decentralised continuous MEV' | 'MVHR';
+  vent_type: 'Intermittent MEV' | 'Centralised continuous MEV' | 'Decentralised continuous MEV' | 'MVHR' | 'Positive input ventilation';
   // Override zoneId to be optional for global objects
   zoneId?: string; // Not required for global objects
 }
