@@ -20,11 +20,14 @@ use crate::{json_pointer, ValidationError};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[path = "hemie_parts.rs"]
+mod parts;
+
 type Row = BTreeMap<String, Value>;
 type Rows = BTreeMap<String, Vec<Row>>;
 type P = [f64; 2];
 
-/// ours, decided by Baz (13 November): plan tolerance (m) for joining wall ends, matching walls to outline edges and stacking
+/// ours: plan tolerance (m) for joining wall ends, matching walls to outline edges and stacking
 /// one floor's outline on the floor below.
 const TOL: f64 = 0.1;
 /// DESNZ-defined: the height between storeys, and between a storey and a roof room, that is in
@@ -33,7 +36,7 @@ const STOREY_GAP: f64 = 0.25;
 /// DESNZ-defined: a room in the roof's common walls are under this height (m) for at least half
 /// their length; otherwise the floor is a storey.
 const COMMON_WALL_HEIGHT: f64 = 1.8;
-/// ours, decided by Baz (13 November): how far a roof plane may overhang the building part it covers (m).
+/// ours: how far a roof plane may overhang the building part it covers (m).
 const EAVES: f64 = 0.6;
 /// DESNZ-defined: heated pitched roof areal heat capacity when the element states none (J/m².K).
 const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
@@ -322,16 +325,6 @@ fn faces(rings: &[Vec<P>]) -> Result<Vec<Vec<P>>, String> {
             di[1].atan2(di[0]).total_cmp(&dj[1].atan2(dj[0]))
         });
     }
-    let mut reached = vec![false; nodes.len()];
-    let mut stack = vec![0];
-    while let Some(n) = stack.pop() {
-        if !std::mem::replace(&mut reached[n], true) {
-            stack.extend(&around[n]);
-        }
-    }
-    if reached.iter().any(|r| !r) {
-        return Err("An upper floor's outline touches no outline below it, so the building part under it would have a hole.".into());
-    }
     let mut seen = BTreeSet::new();
     let mut found = Vec::new();
     for &(u, v) in &links {
@@ -355,6 +348,17 @@ fn faces(rings: &[Vec<P>]) -> Result<Vec<Vec<P>>, String> {
             if signed_area(&face) > EPS {
                 found.push(face);
             }
+        }
+    }
+    // Outlines that touch no other are separate building parts, unless one lies inside
+    // another's: the part around it would have a hole, which a HEMIE floorplan cannot.
+    for (i, outer) in found.iter().enumerate() {
+        if found
+            .iter()
+            .enumerate()
+            .any(|(j, face)| i != j && inside(interior_point(face), outer))
+        {
+            return Err("A floor's outline lies inside another floor's outline without touching it, so the building part around it would have a hole.".into());
         }
     }
     Ok(found)
@@ -792,6 +796,8 @@ struct HemieWall<'a> {
 
 struct Part {
     poly: Vec<P>,
+    /// The lowest and highest floors over this plan cell.
+    bottom: usize,
     top: usize,
     storeys: Vec<Vec<P>>,
     ceilings: Vec<f64>,
@@ -954,11 +960,6 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             } else {
                 walls.push((e, kind));
             }
-        } else if e.ty == "BuildingElementOpaque"
-            && e.num("pitch").is_some_and(|p| p > 90.0)
-            && e.level != 0
-        {
-            ctx.errors.push(error(e.path(), format!("'{}' is an exposed floor. The existing-building converter does not take floors above outside air yet.", e.name)));
         }
     }
     if walls.is_empty() {
@@ -967,6 +968,14 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             "The model has no wall lines, so it has no storey outline for HEMIE.".into(),
         ));
         return None;
+    }
+    // A basement drawn as a floor: its walls are not storey walls; the floor above is storey 0.
+    let Ok(basement) = parts::basement_storey(ctx, &els, &walls) else {
+        return None;
+    };
+    let first = basement.as_ref().map_or(0, |b| b.level + 1);
+    if let Some(b) = &basement {
+        walls.retain(|(w, _)| w.level != b.level);
     }
     let planes: Vec<&El> = els.iter().filter(|e| is_plane(e)).collect();
     let heated =
@@ -1009,9 +1018,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     if storey_levels
         .iter()
         .enumerate()
-        .any(|(i, l)| *l != i as i64)
+        .any(|(i, l)| *l != i as i64 + first)
     {
-        ctx.errors.push(error("/Zone".into(), format!("The floors with walls are {storey_levels:?}. HEMIE storeys start at floor 0 and follow one another.")));
+        ctx.errors.push(error("/Zone".into(), format!("The floors with walls are {storey_levels:?}. HEMIE storeys start at floor {first} and follow one another.")));
         return None;
     }
     let on_level = |level: i64| -> Vec<&El> {
@@ -1022,7 +1031,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             .collect()
     };
 
-    // One outline per storey; each sits over the one below (rule: floors drawn side by side stop).
+    // One outline per storey. Ours, following DESNZ's model: where a floor is not over the floor
+    // below (overhanging or drawn beside it), that area is its own building part, with its own
+    // base height and an exposed floor.
     let mut rings: Vec<Vec<P>> = Vec::new();
     for &level in &storey_levels {
         let mut ring = match ring_of_walls(&on_level(level)) {
@@ -1035,14 +1046,6 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         };
         if let Some(lower) = rings.last() {
             snap_onto(&mut ring, lower);
-            if !inside_or_on(centroid(&ring), lower) {
-                ctx.errors.push(error(on_level(level)[0].path(), format!("Floor {level} is drawn beside floor {}, not over it (its centre is more than {TOL} m outside floor {}). Move floor {level} over the floor below; HEMIE stacks storeys in one plan.", level - 1, level - 1)));
-                return None;
-            }
-            if let Some(p) = ring.iter().find(|p| !inside_or_on(**p, lower)) {
-                ctx.errors.push(error(on_level(level)[0].path(), format!("Floor {level} overhangs floor {} by more than {TOL} m at ({:.2}, {:.2}). The existing-building converter does not take overhanging storeys yet.", level - 1, p[0], p[1])));
-                return None;
-            }
         }
         rings.push(ring);
     }
@@ -1057,7 +1060,8 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
     }
 
-    // Building parts: one per column of storeys, so each has one roof (derived from the model).
+    // Building parts: one per column of storeys, so each has one roof (ours; HEMIE also allows
+    // parts stacked on one another, 0.25 m apart).
     let cells = match faces(&rings) {
         Ok(cells) => cells,
         Err(message) => {
@@ -1065,25 +1069,34 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             return None;
         }
     };
-    let mut parts: Vec<Part> = cells
-        .into_iter()
-        .map(|poly| {
-            let p = interior_point(&poly);
-            let top = (0..rings.len())
-                .rev()
-                .find(|&k| inside(p, &rings[k]))
-                .unwrap_or(0);
-            Part {
+    let mut parts: Vec<Part> = Vec::new();
+    for poly in cells {
+        let p = interior_point(&poly);
+        match parts::column(p, &rings) {
+            None => {} // a courtyard: inside no floor
+            Some(Ok((bottom, top))) => parts.push(Part {
                 poly,
+                bottom,
                 top,
                 storeys: Vec::new(),
                 ceilings: Vec::new(),
+            }),
+            Some(Err(gaps)) => {
+                let above = *gaps.last().expect("a gap") as i64 + 1 + first;
+                let missing: Vec<String> = gaps
+                    .iter()
+                    .map(|g| (*g as i64 + first).to_string())
+                    .collect();
+                ctx.errors.push(error(on_level(above)[0].path(), format!("Floor {above} is over a lower floor with no floor {} between them, around ({:.2}, {:.2}). A building part's storeys stack one on another; draw the missing floors there, or move the floor above.", missing.join(" or "), p[0], p[1])));
             }
-        })
-        .collect();
-    // ours: parts in order of storeys, then footprint. DESNZ-defined (EPC 11 11.3.3, EPC 02
-    // 2.5.3): the part with the front door is the reference part, and its ground storey's
-    // footprint starts with the front-door wall.
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    // ours: parts in order of storeys, then footprint. DESNZ-defined: the part with the front
+    // door is the reference part, and its ground storey's footprint starts with the front-door
+    // wall.
     parts.sort_by(|a, b| {
         b.top
             .cmp(&a.top)
@@ -1093,23 +1106,31 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         .iter()
         .filter(|e| e.ty == "BuildingElementOpaque" && e.flag("is_external_door"))
         .collect();
-    let front = front_door(ctx, &doors)?;
-    let Some(front_wall) = walls
-        .iter()
-        .map(|(w, _)| *w)
-        .find(|w| front.host() == Some(w.name) && w.level == 0)
-    else {
-        ctx.errors.push(error(front.path(), format!("Front door '{}' is not in a wall of floor 0. The reference building part's ground storey starts with the front-door wall; link the door to its wall.", front.name)));
-        return None;
-    };
-    let reference = (0..parts.len())
-        .min_by(|&i, &j| {
-            boundary_dist(front.plan_mid(), &parts[i].poly)
-                .total_cmp(&boundary_dist(front.plan_mid(), &parts[j].poly))
-        })
-        .expect("parts");
-    let reference = parts.remove(reference);
-    parts.insert(0, reference);
+    // A missing front door is an error, but the conversion continues so that one pass names
+    // everything the model lacks.
+    let front = front_door(ctx, &doors);
+    let front_wall = front.and_then(|front| {
+        let wall = walls
+            .iter()
+            .map(|(w, _)| *w)
+            .find(|w| front.host() == Some(w.name) && w.level == first);
+        if wall.is_none() {
+            ctx.errors.push(error(front.path(), format!("Front door '{}' is not in a wall of floor {first}. The reference building part's ground storey starts with the front-door wall; link the door to its wall.", front.name)));
+        }
+        wall
+    });
+    // The reference part is on the lowest floor: its lowest storey holds the front door.
+    if let Some(front) = front {
+        let reference = (0..parts.len())
+            .filter(|&i| parts[i].bottom == 0)
+            .min_by(|&i, &j| {
+                boundary_dist(front.plan_mid(), &parts[i].poly)
+                    .total_cmp(&boundary_dist(front.plan_mid(), &parts[j].poly))
+            })
+            .expect("parts");
+        let reference = parts.remove(reference);
+        parts.insert(0, reference);
+    }
 
     // ours: part names; the reference part is "Main".
     let names: Vec<String> = (0..parts.len())
@@ -1125,12 +1146,15 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     // Storey outlines and their walls.
     let mut hemie_walls: Vec<HemieWall> = Vec::new();
     let mut used: BTreeSet<&str> = BTreeSet::new();
+    let mut low: Vec<&El> = Vec::new();
     for pi in 0..parts.len() {
-        for s in 0..=parts[pi].top {
-            let level_walls = on_level(s as i64);
+        let bottom = parts[pi].bottom;
+        for s in bottom..=parts[pi].top {
+            let level = s as i64 + first;
+            let level_walls = on_level(level);
             let (mut ring, mut carried) =
                 merge_edges(with_wall_ends(&parts[pi].poly, &level_walls), &level_walls);
-            if pi == 0 && s == 0 {
+            if let (0, true, Some(front), Some(front_wall)) = (pi, s == bottom, front, front_wall) {
                 let m = front.plan_mid();
                 let Some(first) = (0..ring.len())
                     .filter(|&i| carried[i].is_some_and(|w| w.name == front_wall.name))
@@ -1158,6 +1182,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                         let Some(h) = ctx.need(w, "height") else {
                             continue;
                         };
+                        if h <= STOREY_GAP && !low.iter().any(|x: &&El| x.name == w.name) {
+                            low.push(w);
+                        }
                         lengths += dist(a, b);
                         height_sum += h * dist(a, b);
                         heights.insert(format!("{h}"));
@@ -1168,11 +1195,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                             .expect("wall");
                         let mut value = Map::new();
                         value.insert("wall_type".into(), json!(kind.wall_type()));
-                        value.insert("storey_index".into(), json!(s));
+                        value.insert("storey_index".into(), json!(s - bottom));
                         value.insert("floorplan_index".into(), json!(i));
                         hemie_walls.push(HemieWall {
                             part: pi,
-                            storey: s,
+                            storey: level as usize,
                             a,
                             b,
                             source: w,
@@ -1180,17 +1207,20 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                         });
                     }
                     None => {
+                        // An edge with no wall is shared with a part that has a storey there.
                         let shared = parts.iter().enumerate().any(|(pj, other)| {
-                            pj != pi && boundary_dist(mid(a, b), &other.poly) <= TOL
+                            pj != pi
+                                && (other.bottom..=other.top).contains(&s)
+                                && boundary_dist(mid(a, b), &other.poly) <= TOL
                         });
                         if !shared {
-                            ctx.errors.push(error("/Zone".into(), format!("Floor {s} has no wall within {TOL} m of its outline between ({:.2}, {:.2}) and ({:.2}, {:.2}). Draw the wall there.", a[0], a[1], b[0], b[1])));
+                            ctx.errors.push(error("/Zone".into(), format!("Floor {level} has no wall within {TOL} m of its outline between ({:.2}, {:.2}) and ({:.2}, {:.2}). Draw the wall there.", a[0], a[1], b[0], b[1])));
                         }
                     }
                 }
             }
             if carried.iter().all(Option::is_none) {
-                ctx.errors.push(error("/Zone".into(), format!("Building part '{}' has no walls on floor {s}: floor {} does not sit on the floor below. HEMIE needs each storey stacked on the one below.", names[pi], s + 1)));
+                ctx.errors.push(error("/Zone".into(), format!("Building part '{}' has no walls on floor {level}: floor {} does not sit on the floor below. HEMIE needs each storey stacked on the one below.", names[pi], level + 1)));
                 continue;
             }
             if lengths == 0.0 {
@@ -1199,22 +1229,32 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             // ours: one ceiling height per storey, the length-weighted mean of its walls.
             let storey_height = height_sum / lengths;
             if heights.len() > 1 {
-                ctx.notices.push(notice("/Zone", format!("The walls of floor {s} have heights {}. HEMIE takes one ceiling height per storey of a building part, so it uses their length-weighted mean, {storey_height:.3} m.", heights.into_iter().collect::<Vec<_>>().join(", "))));
+                ctx.notices.push(notice("/Zone", format!("The walls of floor {level} have heights {}. HEMIE takes one ceiling height per storey of a building part, so it uses their length-weighted mean, {storey_height:.3} m.", heights.into_iter().collect::<Vec<_>>().join(", "))));
             }
             // DESNZ-defined: HEMIE puts the storey gap above every storey's ceiling, the top one
             // included (the roof sits a gap above it). Derived from the model: a Vulcan wall runs
             // from its floor to the next floor or to the roof, so the ceiling height is the wall
             // height less the gap on every storey.
-            parts[pi].ceilings.push(storey_height - STOREY_GAP);
+            parts[pi]
+                .ceilings
+                .push(parts::round_ceiling(storey_height - STOREY_GAP));
             parts[pi].storeys.push(ring);
         }
+    }
+    for w in low {
+        ctx.errors.push(error(w.path(), format!("'{}' has height {} m. HEMIE takes a storey's ceiling height from its walls, which run from the floor to the floor or roof above; give the wall its height, more than the {STOREY_GAP} m storey gap.", w.name, w.num("height").unwrap_or_default())));
     }
     for (w, _) in &walls {
         if Some(w.level) != roof_room && !used.contains(w.name) {
             ctx.errors.push(error(w.path(), format!("'{}' is more than {TOL} m from the outline of floor {}. HEMIE walls are edges of the storey outline; delete it or join it to the outline.", w.name, w.level)));
         }
     }
-    if !ctx.errors.is_empty() {
+    // Stop only where a part lacks a storey; other errors so far leave the parts whole, so the
+    // floors and roofs are still checked and one pass names everything the model lacks.
+    if parts
+        .iter()
+        .any(|p| p.storeys.len() != p.top - p.bottom + 1)
+    {
         return None;
     }
 
@@ -1312,7 +1352,8 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let room_walls_refs: Vec<&El> = room_walls.clone();
     let dormers: Vec<&El> = els.iter().filter(|e| e.bundle().is_some()).collect();
     let mut roofs: Vec<Vec<&El>> = vec![Vec::new(); parts.len()];
-    for plane in &planes {
+    let party_ceilings: Vec<&El> = els.iter().filter(|e| parts::is_party_ceiling(e)).collect();
+    for plane in planes.iter().chain(&party_ceilings) {
         let c = centroid(&plane.pts);
         let part = (0..parts.len())
             .find(|&i| inside(c, &parts[i].poly))
@@ -1350,6 +1391,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         .collect();
     // Derived from the model: HEMIE's floor total_area is the ground floor area of the whole dwelling.
     let ground_total: f64 = grounds.iter().filter_map(|g| g.num("area")).sum();
+    let mut floors_used = BTreeSet::new();
     let mut building_parts = Map::new();
     for (pi, part) in parts.iter().enumerate() {
         let storeys: Vec<Value> = part
@@ -1369,44 +1411,27 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         let mut bp = Map::new();
         bp.insert("storeys".into(), Value::Array(storeys));
         bp.insert("walls".into(), Value::Array(part_walls));
-        let interior = interior_point(&part.poly);
-        let ground = grounds
-            .iter()
-            .find(|g| g.pts.len() >= 3 && inside(interior, &g.pts));
-        // Derived from the model: a floor drawn over outside air on floor 0.
-        let exposed = els.iter().find(|e| {
-            e.ty == "BuildingElementOpaque"
-                && e.level == 0
-                && e.num("pitch").is_some_and(|p| p > 90.0)
-                && e.pts.len() >= 3
-                && inside(interior, &e.pts)
-        });
-        match (ground, exposed) {
-            (Some(g), _) => {
-                if let Some(floor) = floor(ctx, g, ground_total) {
-                    bp.insert("floor".into(), floor);
-                }
-            }
-            (None, Some(e)) => {
-                let key = ctx.construction("above_external_area_floor", &[e], &[]);
-                bp.insert(
-                    "floor".into(),
-                    json!({"floor_type": "not next to ground (external)", "construction": key}),
-                );
-            }
-            (None, None) => ctx.errors.push(error(
-                "/Zone".into(),
-                format!(
-                    "Building part '{}' has no ground floor drawn under it. Draw its ground floor.",
-                    names[pi]
-                ),
-            )),
+        let floor_of = parts::PartFloor {
+            name: &names[pi],
+            bottom: part.bottom,
+            level: part.bottom as i64 + first,
+            point: interior_point(&part.poly),
+            ring: &part.storeys[0],
+            basement: basement.as_ref(),
+        };
+        if let Some(floor) = parts::part_floor(ctx, &els, &floor_of, ground_total, &mut floors_used)
+        {
+            bp.insert("floor".into(), floor);
         }
         let top_ring = part.storeys.last().expect("storey").clone();
-        let roof = if Some(pi) == room_part {
+        let (ceilings, planes): (Vec<&El>, Vec<&El>) =
+            roofs[pi].iter().partition(|e| parts::is_party_ceiling(e));
+        let roof = if !ceilings.is_empty() {
+            parts::party_ceiling_roof(ctx, &ceilings, &planes)
+        } else if Some(pi) == room_part {
             room_in_roof(
                 ctx,
-                &roofs[pi],
+                &planes,
                 &room_walls_refs,
                 &dormers,
                 &windows,
@@ -1417,7 +1442,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         } else {
             roof(
                 ctx,
-                &roofs[pi],
+                &planes,
                 &windows,
                 &names[pi],
                 &top_ring,
@@ -1430,6 +1455,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
         building_parts.insert(names[pi].clone(), Value::Object(bp));
     }
+    parts::unused_floors(ctx, &els, &floors_used);
     // Only once everything else converted: an earlier failure leaves openings unplaced.
     for opening in windows.iter().chain(&doors) {
         if ctx.errors.is_empty() && !placed.contains(opening.name) {
@@ -1454,7 +1480,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     geometry.insert("reference_building_part".into(), json!(names[0]));
     geometry.insert("reference_orientation".into(), json!(reference_orientation));
     let full_ventilation = &model["InfiltrationVentilation"];
-    // DESNZ-defined (EPC 11 11.3.3): the base height, or else the base storey, from which HEMIE
+    // DESNZ-defined: the base height, or else the base storey, from which HEMIE
     // estimates it.
     match (
         full_ventilation
@@ -1470,6 +1496,21 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
         (None, None) => ctx.errors.push(error("/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or base storey, which HEMIE Geometry needs. Add the Metadata row Ventilation_ventilation_zone_base_height or General_storey_of_dwelling.".into())),
     }
+    // DESNZ-defined: a part's base height defaults to the dwelling's; a part that starts higher
+    // states its own. With no dwelling base the error is already reported, so 0 stands in.
+    let dwelling = parts::dwelling_base(&geometry);
+    let bases = match parts::base_heights(&parts, dwelling.unwrap_or(0.0)) {
+        Ok(bases) => bases,
+        Err(i) => {
+            ctx.errors.push(error("/Zone".into(), format!("Building part '{}' starts on floor {}, but no building part has a storey on floor {} to carry it. Draw the floor below it.", names[i], parts[i].bottom as i64 + first, parts[i].bottom as i64 + first - 1)));
+            return None;
+        }
+    };
+    for (pi, part) in parts.iter().enumerate() {
+        if part.bottom > 0 {
+            building_parts[&names[pi]]["base_height"] = json!(bases[pi]);
+        }
+    }
     geometry.insert("building_parts".into(), Value::Object(building_parts));
     geometry.insert(
         "constructions".into(),
@@ -1479,7 +1520,12 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     // As HEMIE derives the dwelling height: the tallest part's storeys and the gaps between them.
     let dwelling_height = parts
         .iter()
-        .map(|p| p.ceilings.iter().sum::<f64>() + STOREY_GAP * (p.ceilings.len() as f64 - 1.0))
+        .zip(&bases)
+        .map(|(p, base)| {
+            base - dwelling.unwrap_or(0.0)
+                + p.ceilings.iter().sum::<f64>()
+                + STOREY_GAP * (p.ceilings.len() as f64 - 1.0)
+        })
         .fold(0.0, f64::max);
     let ventilation = infiltration(ctx, full_ventilation, dwelling_height);
     if !ctx.errors.is_empty() {
@@ -1664,7 +1710,7 @@ fn roof(
                 return None;
             }
             _ => {
-                // ours, decided by Baz (13 November): HEMIE has no hipped roof, so a hipped roof
+                // ours: HEMIE has no hipped roof, so a hipped roof
                 // is dual pitch, reported.
                 ctx.notices.push(notice(
                     "/Zone",
@@ -1678,7 +1724,7 @@ fn roof(
         };
         let main = &measured[largest(&measured)];
         let (slope_orientation, _) = slope(top_ring, main.orientation, orient);
-        // ours, decided by Baz (13 November): one pitch per roof, the area-weighted mean of its
+        // ours: one pitch per roof, the area-weighted mean of its
         // planes, reported.
         let (area, weighted) = measured
             .iter()
@@ -1708,7 +1754,7 @@ fn roof(
     } else {
         ctx.errors.push(error(
             "/Zone".into(),
-            format!("Building part '{part}' has no roof drawn over it. Draw its roof."),
+            format!("Building part '{part}' has no roof or party ceiling drawn over it. Draw its roof, or the party ceiling of a flat with a dwelling above."),
         ));
         None
     };
@@ -1961,7 +2007,7 @@ fn dormer<'e>(
         Some("mono-pitch") => ("mono", "dormerRoofPitch"),
         // Derived from the model: a gable-fronted dormer has two slopes either side of a ridge.
         Some("gable-front") => ("dual", "gableRoofPitch"),
-        // ours, decided by Baz (13 November): HEMIE has no hipped dormer, so a hip dormer is
+        // ours: HEMIE has no hipped dormer, so a hip dormer is
         // dual pitch, reported.
         Some("hip") => {
             ctx.notices.push(notice(
@@ -2078,7 +2124,7 @@ fn infiltration(ctx: &mut Ctx, full: &Value, dwelling_height: f64) -> Option<Val
     iv.insert("model_type".into(), json!("hemie"));
     // The assessor's values: an existing building's absent shield class, noise nuisance and air
     // test rows leave no template value in the model (`existing_building_optional_rows`).
-    // DESNZ-defined (EPC 11 Tables 11.7.2, 11.4.2): HEMIE takes shield class from the terrain
+    // DESNZ-defined: HEMIE takes shield class from the terrain
     // class and noise nuisance as No; the other three are required.
     for (key, required) in [
         ("cross_vent_possible", true),
@@ -2115,7 +2161,7 @@ fn infiltration(ctx: &mut Ctx, full: &Value, dwelling_height: f64) -> Option<Val
             }
         }
     } else {
-        // DESNZ-defined (EPC 05 5.4): with no air test, HEMIE estimates the leakage; the zone
+        // DESNZ-defined: with no air test, HEMIE estimates the leakage; the zone
         // height is the dwelling height HEMIE derives from the storeys.
         out.insert("ventilation_zone_height".into(), json!(dwelling_height));
         ctx.notices.push(notice("/InfiltrationVentilation/Leaks", format!("No air test is stated, so HEMIE estimates the air leakage, with ventilation zone height {dwelling_height:.2} m from the storeys.")));
@@ -2154,21 +2200,21 @@ fn infiltration(ctx: &mut Ctx, full: &Value, dwelling_height: f64) -> Option<Val
 mod tests {
     use super::*;
 
-    const HEADER: &str = "Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json";
-    const SETTINGS: &str = r#"IsExistingBuilding,TRUE
+    pub(super) const HEADER: &str = "Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json";
+    pub(super) const SETTINGS: &str = r#"IsExistingBuilding,TRUE
 HEMIE_age_band,D
 HEMIE_region,England
 HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}"
 HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
 
-    fn wall(name: &str, level: i64, a: P, b: P, height: f64) -> String {
+    pub(super) fn wall(name: &str, level: i64, a: P, b: P, height: f64) -> String {
         format!(
             "{name},Z,BuildingElementOpaque,1,90,1,{height},0,0,FALSE,FALSE,,\"{},{},{level}|{},{},{level}\",",
             a[0], a[1], b[0], b[1]
         )
     }
 
-    fn plane(
+    pub(super) fn plane(
         name: &str,
         level: i64,
         pts: &[P],
@@ -2188,7 +2234,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     /// The walls of a box from `corners`, one per edge, on each listed floor.
-    fn box_walls(corners: &[P], levels: &[i64]) -> Vec<String> {
+    pub(super) fn box_walls(corners: &[P], levels: &[i64]) -> Vec<String> {
         levels
             .iter()
             .flat_map(|&level| {
@@ -2205,9 +2251,9 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .collect()
     }
 
-    const BOX: [P; 4] = [[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]];
+    pub(super) const BOX: [P; 4] = [[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]];
 
-    fn ground(corners: &[P]) -> String {
+    pub(super) fn ground(corners: &[P]) -> String {
         let coords: Vec<String> = corners
             .iter()
             .map(|p| format!("{},{},0", p[0], p[1]))
@@ -2215,7 +2261,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         format!("Ground Elements\nName,Zone,Type,area,floor_type,coords\nFloor,Z,BuildingElementGround,48,Slab_no_edge_insulation,\"{}\"", coords.join("|"))
     }
 
-    fn gable_roof() -> Vec<String> {
+    pub(super) fn gable_roof() -> Vec<String> {
         vec![
             plane(
                 "Roof S",
@@ -2237,7 +2283,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     /// The model with its front door in the middle of W00, the south wall of floor 0.
-    fn csv(settings: &str, exposed: &[String], extra: &str) -> String {
+    pub(super) fn csv(settings: &str, exposed: &[String], extra: &str) -> String {
         format!(
             "Metadata,,\n{settings}\n\nZone,,\nName,Type\nZ,Zone\n\nExposed Elements\n{HEADER}\n{}\n{}\n\n{extra}\n",
             exposed.join("\n"),
@@ -2245,14 +2291,14 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         )
     }
 
-    fn door(name: &str, host: &str, a: P, b: P) -> String {
+    pub(super) fn door(name: &str, host: &str, a: P, b: P) -> String {
         format!(
             "{name},Z,BuildingElementOpaque,2,90,1,2,0,0,FALSE,TRUE,{host},\"{},{},0|{},{},0\",",
             a[0], a[1], b[0], b[1]
         )
     }
 
-    fn full_input() -> Value {
+    pub(super) fn full_input() -> Value {
         json!({
             "Zone": {"Z": {"livingroom_area": 20.0, "restofdwelling_area": 76.0}},
             "General": {"build_type": "detached"},
@@ -2262,11 +2308,14 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         })
     }
 
-    fn run(text: &str) -> (Value, Vec<ValidationError>, Vec<SchemaOmission>) {
+    pub(super) fn run(text: &str) -> (Value, Vec<ValidationError>, Vec<SchemaOmission>) {
         run_on(text, full_input())
     }
 
-    fn run_on(text: &str, mut model: Value) -> (Value, Vec<ValidationError>, Vec<SchemaOmission>) {
+    pub(super) fn run_on(
+        text: &str,
+        mut model: Value,
+    ) -> (Value, Vec<ValidationError>, Vec<SchemaOmission>) {
         let rows = crate::parser::CSVParser::new()
             .parse_csv(text)
             .expect("csv");
@@ -2321,26 +2370,6 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         // An open outline names the walls at its open ends.
         let open = ring_of_walls(&refs[..3]).unwrap_err();
         assert!(open.contains("'W00'") && open.contains("'W02'"), "{open}");
-    }
-
-    #[test]
-    fn a_floor_drawn_beside_the_floor_below_stops_and_is_named() {
-        let mut exposed = box_walls(&BOX, &[0]);
-        let beside: Vec<P> = BOX.iter().map(|p| [p[0] + 20.0, p[1]]).collect();
-        exposed.extend(box_walls(&beside, &[1]));
-        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
-        assert_eq!(errors.len(), 1, "{errors:#?}");
-        assert!(
-            errors[0]
-                .message
-                .contains("Floor 1 is drawn beside floor 0"),
-            "{}",
-            errors[0].message
-        );
-        assert!(errors[0].path.ends_with("/W10"));
-        assert!(errors[0]
-            .message
-            .contains("more than 0.1 m outside floor 0"));
     }
 
     #[test]
@@ -2545,9 +2574,13 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         exposed.extend(box_walls(&BOX, &[1]));
         exposed.extend(gable_roof());
         let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&l)));
-        assert_eq!(errors.len(), 1, "{errors:#?}");
-        assert!(errors[0].path.ends_with("/W01"));
-        assert!(errors[0].message.contains("does not state its height"));
+        let w01: Vec<_> = errors.iter().filter(|e| e.path.ends_with("/W01")).collect();
+        assert_eq!(w01.len(), 1, "{errors:#?}");
+        assert!(w01[0].message.contains("does not state its height"));
+        // The conversion goes on, naming the extension's missing roof in the same pass.
+        assert!(errors
+            .iter()
+            .any(|e| e.message.contains("'Extension 1' has no roof")));
     }
 
     #[test]
@@ -2654,7 +2687,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .as_object_mut()
             .unwrap()
             .remove("ventilation_zone_base_height");
-        model["General"]["storey_of_dwelling"] = json!(2);
+        model["General"]["storey_of_dwelling"] = json!(0);
         let (model, errors, notices) = run_on(&text, model);
         assert!(errors.is_empty(), "{errors:#?}");
         let leaks = &model["InfiltrationVentilation"]["Leaks"];
@@ -2665,7 +2698,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert!(leaks.get("test_result").is_none());
         // Two storeys of 2.55 m and the gap between them.
         assert!((leaks["ventilation_zone_height"].as_f64().unwrap() - 5.35).abs() < 1e-9);
-        assert_eq!(model["Zone"]["base_storey_of_dwelling"], 2);
+        assert_eq!(model["Zone"]["base_storey_of_dwelling"], 0);
         assert!(model["InfiltrationVentilation"]
             .get("shield_class")
             .is_none());
