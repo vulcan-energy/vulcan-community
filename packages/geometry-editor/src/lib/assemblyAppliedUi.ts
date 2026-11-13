@@ -85,6 +85,12 @@ function sameFabricValue(field: string, a: unknown, b: unknown): boolean {
  * assembly's own value is an override, and the override removes `vulcan_assembly_v1` so the
  * element has one unambiguous fabric source. Writing the assembly's value back (reset, or a fresh
  * apply that brings its own envelope) keeps it. Returns `nextExtra` itself when nothing is removed.
+ *
+ * An overridden U also removes the assembly's `thermal_resistance_construction` (unless the same
+ * edit sets it): the converter keeps R and drops U when both are present, and the party-wall and
+ * half-construction mappings derive R from U only when R is absent. The other values stay, now as
+ * entered values: an overridden R already wins over U, whole-wall U is an input independent of R,
+ * and areal heat capacity and mass class are independent of both.
  */
 export function dropAssemblyEnvelopeOnFabricOverride(
   elementType: string,
@@ -94,12 +100,18 @@ export function dropAssemblyEnvelopeOnFabricOverride(
   const envelope = nextExtra.vulcan_assembly_v1;
   if (!envelope || typeof envelope !== 'object') return nextExtra;
   const prev = prevExtra && typeof prevExtra === 'object' ? (prevExtra as Record<string, unknown>) : {};
-  const overridden = Object.entries(ASSEMBLY_FABRIC_FIELDS).some(([field, assemblyValue]) =>
+  const changed = (field: string) => !sameFabricValue(field, prev[field], nextExtra[field]);
+  const overridden = Object.entries(ASSEMBLY_FABRIC_FIELDS).flatMap(([field, assemblyValue]) =>
     !(field === 'u_value' && elementType === 'BuildingElementGround')
-    && !sameFabricValue(field, prev[field], nextExtra[field])
-    && !sameFabricValue(field, assemblyValue(envelope as Record<string, unknown>), nextExtra[field]));
-  if (!overridden) return nextExtra;
+    && changed(field)
+    && !sameFabricValue(field, assemblyValue(envelope as Record<string, unknown>), nextExtra[field])
+      ? [field]
+      : []);
+  if (overridden.length === 0) return nextExtra;
   const rest = { ...nextExtra };
   delete rest.vulcan_assembly_v1;
+  if (overridden.includes('u_value') && !changed('thermal_resistance_construction')) {
+    delete rest.thermal_resistance_construction;
+  }
   return rest;
 }

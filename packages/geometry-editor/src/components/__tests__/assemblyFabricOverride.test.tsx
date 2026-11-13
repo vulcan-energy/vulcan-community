@@ -120,7 +120,31 @@ describe('assembly versus U-value edits', () => {
     edit(store, '0.16');
     await waitFor(() => expect(extra(store).u_value).toBe(0.16));
     expect(extra(store).vulcan_assembly_v1).toBeUndefined();
-    expect(extra(store).thermal_resistance_construction).toBe(5);
+    // With R left behind the converter would drop the user's U (hem-target-core target_contracts).
+    expect(extra(store).thermal_resistance_construction).toBeUndefined();
+  });
+
+  it('an R, whole-wall U or mass override keeps the other values as entered values', () => {
+    const cases: Array<[string, Record<string, unknown>, Record<string, unknown>]> = [
+      ['BuildingElementOpaque', { thermal_resistance_construction: 4 }, { u_value: 0.18, thermal_resistance_construction: 4 }],
+      ['BuildingElementPartyWall', { u_value_whole_wall: 0.3 }, { u_value: 0.18, thermal_resistance_construction: 5 }],
+      ['BuildingElementOpaque', { mass_distribution_class: 'I: Mass concentrated at internal side' }, { u_value: 0.18, thermal_resistance_construction: 5 }],
+    ];
+    for (const [type, edit, kept] of cases) {
+      const store = storeWith({ ...wall(), type } as Element);
+      store.getState().updateElement('wall', { extra_json: { ...extra(store), ...edit } });
+      expect(extra(store).vulcan_assembly_v1, type).toBeUndefined();
+      expect(extra(store), type).toMatchObject(kept);
+    }
+  });
+
+  it('a party-wall half U override removes the assembly R, so the converter derives R from the U', () => {
+    const store = storeWith({ ...wall(), type: 'BuildingElementPartyWall' } as Element);
+    store.getState().updateElement('wall', {
+      extra_json: { ...extra(store), u_value: 0.4, u_value_interpretation: 'half_construction', u_value_interpreted_value: 0.4 },
+    });
+    expect(extra(store).thermal_resistance_construction).toBeUndefined();
+    expect(extra(store).vulcan_assembly_v1).toBeUndefined();
   });
 
   it('writing the assembly value back, or a non-fabric edit, keeps the envelope', () => {
