@@ -225,6 +225,8 @@ const NAME_KEYED_LEVELS: &[(&str, &[&[&str]])] = &[
     ("SpaceCoolSystem", &[&[]]),
     ("SpaceHeatSystem", &[&[]]),
     ("WWHRS", &[&[]]),
+    // HEM:EPC only: a warm-air heater, named by the user.
+    ("HeatSourceWarmAir", &[&[]]),
     // These two are fixed-field objects at the root; the appliance maps hanging off them are what
     // the user names.
     (
@@ -2208,6 +2210,9 @@ impl JSONBuilder {
         }
         if self.profile.references_products() {
             crate::epc_mappings::apply_desnz_defaults(result, &mut errors, &mut notices);
+        }
+        if self.profile.checks_system_catalogue() {
+            crate::epc_mappings::check_system_catalogue(result, &mut errors);
         }
         if self.profile.checks_party_wall_lining() {
             crate::epc_mappings::check_element_fields(result, &self.schema, &mut errors);
@@ -6960,6 +6965,17 @@ impl JSONBuilder {
                                 {
                                     Self::merge_wrapped_system_fragment(
                                         result_obj, extra_json, "WWHRS",
+                                    );
+                                }
+                            }
+                            "HeatSourceWarmAir" if self.profile.checks_system_catalogue() => {
+                                if let Some(extra_json) =
+                                    row.get("extra_json").and_then(|v| v.as_object())
+                                {
+                                    Self::merge_wrapped_system_fragment(
+                                        result_obj,
+                                        extra_json,
+                                        "HeatSourceWarmAir",
                                     );
                                 }
                             }

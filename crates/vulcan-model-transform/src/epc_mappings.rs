@@ -622,6 +622,109 @@ pub(crate) fn check_primary_pipework(
     }
 }
 
+/// References between full-input systems that the JSON schema cannot check: the referring
+/// section, the reference's pointer inside a system, the section it names, and the type the
+/// named entry must have. A meta system's members are checked as well.
+const SYSTEM_REFERENCES: [(&str, &str, &str, Option<&str>); 4] = [
+    (
+        "SpaceHeatSystem",
+        "/HeatSourceWarmAir",
+        "/HeatSourceWarmAir",
+        None,
+    ),
+    (
+        "SpaceHeatSystem",
+        "/FlueConfig/PassiveDuct",
+        "/InfiltrationVentilation/PassiveDucts",
+        None,
+    ),
+    (
+        "HeatSourceWet",
+        "/integrated_space_heat_system/FlueConfig/PassiveDuct",
+        "/InfiltrationVentilation/PassiveDucts",
+        None,
+    ),
+    (
+        "SpaceCoolSystem",
+        "/HeatSourceWet",
+        "/HeatSourceWet",
+        Some("HeatPump"),
+    ),
+];
+
+/// The system catalogue's fail-loud rules: a system type the converter cannot express is an
+/// error naming it, and a reference between systems must name an entry of the right type.
+pub(crate) fn check_system_catalogue(model: &Value, errors: &mut Vec<ValidationError>) {
+    for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
+        for (name, element) in zone_value["BuildingElement"]
+            .as_object()
+            .into_iter()
+            .flatten()
+        {
+            let kind = element["type"].as_str().unwrap_or_default();
+            if kind.ends_with("AdjacentUnconditionedZone") {
+                errors.push(error(
+                    "E_EPC_UNSUPPORTED_SYSTEM",
+                    json_pointer(&["Zone", zone, "BuildingElement", name]),
+                    format!("Element '{name}' ({kind}) is next to an unconditioned zone, which Vulcan cannot state yet (HEM:EPC ZoneUnconditioned). Draw it as BuildingElementAdjacentUnconditionedSpace_Simple with the unheated space's thermal resistance."),
+                ));
+            }
+        }
+    }
+    for name in model["InfiltrationVentilation"]["CombustionAppliances"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, _)| name)
+    {
+        errors.push(error(
+            "E_EPC_UNSUPPORTED_SYSTEM",
+            json_pointer(&["InfiltrationVentilation", "CombustionAppliances", name]),
+            format!("Combustion appliance '{name}' has no HEM:EPC input. Model the fire or stove as a room heater (CombustionRoomHeater) whose FlueConfig names a passive duct, and remove the Combustion Appliances row."),
+        ));
+    }
+    for (section, field, target, kind) in SYSTEM_REFERENCES {
+        for (name, system) in model[section].as_object().into_iter().flatten() {
+            let Some(reference) = system.pointer(field).and_then(Value::as_str) else {
+                continue;
+            };
+            let found = model
+                .pointer(target)
+                .and_then(|entries| entries.get(reference));
+            let message = match (found, kind) {
+                (None, _) => format!("{section} '{name}' names {} '{reference}', but the model has no such entry in {}. Add it or correct the name.", &field[1..], &target[1..]),
+                (Some(entry), Some(kind)) if entry["type"] != kind => format!("{section} '{name}' takes its {} from '{reference}', which is a {}, not a {kind}. Name a {kind}.", &field[1..], entry["type"].as_str().unwrap_or("system of no type")),
+                _ => continue,
+            };
+            errors.push(error(
+                "E_EPC_SYSTEM_REFERENCE",
+                format!("{}{field}", json_pointer(&[section, name])),
+                message,
+            ));
+        }
+    }
+    for section in ["SpaceHeatSystem", "SpaceCoolSystem"] {
+        let systems = &model[section];
+        for (name, system) in systems.as_object().into_iter().flatten() {
+            for (i, member) in system["members"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                let reference = member[section].as_str().unwrap_or_default();
+                if systems.get(reference).is_none() {
+                    errors.push(error(
+                        "E_EPC_SYSTEM_REFERENCE",
+                        json_pointer(&[section, name, "members", &i.to_string(), section]),
+                        format!("{section} '{name}' (meta) has member '{reference}', but the model has no such {section}. Add it or correct the name."),
+                    ));
+                }
+            }
+        }
+    }
+}
+
 fn plan_points(row: &BTreeMap<String, Value>) -> Vec<[f64; 2]> {
     row.get("coords")
         .and_then(Value::as_str)
