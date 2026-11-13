@@ -969,15 +969,14 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         ));
         return None;
     }
-    // A basement drawn as floor 0: its walls are not storey walls, and floor 1 is storey 0.
-    let (first, basement_depth) = match parts::basement_storey(ctx, &els, &walls) {
-        Err(()) => return None,
-        Ok(Some(depth)) => {
-            walls.retain(|(w, _)| w.level != 0);
-            (1, Some(depth))
-        }
-        Ok(None) => (0, None),
+    // A basement drawn as a floor: its walls are not storey walls; the floor above is storey 0.
+    let Ok(basement) = parts::basement_storey(ctx, &els, &walls) else {
+        return None;
     };
+    let first = basement.as_ref().map_or(0, |b| b.level + 1);
+    if let Some(b) = &basement {
+        walls.retain(|(w, _)| w.level != b.level);
+    }
     let planes: Vec<&El> = els.iter().filter(|e| is_plane(e)).collect();
     let heated =
         |p: &&El| p.num("pitch").is_some_and(|x| x > 0.0) && !p.flag("is_unheated_pitched_roof");
@@ -1116,7 +1115,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             .map(|(w, _)| *w)
             .find(|w| front.host() == Some(w.name) && w.level == first);
         if wall.is_none() {
-            ctx.errors.push(error(front.path(), format!("Front door '{}' is not in a wall of floor 0. The reference building part's ground storey starts with the front-door wall; link the door to its wall.", front.name)));
+            ctx.errors.push(error(front.path(), format!("Front door '{}' is not in a wall of floor {first}. The reference building part's ground storey starts with the front-door wall; link the door to its wall.", front.name)));
         }
         wall
     });
@@ -1416,10 +1415,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             name: &names[pi],
             bottom: part.bottom,
             level: part.bottom as i64 + first,
-            first,
             point: interior_point(&part.poly),
             ring: &part.storeys[0],
-            basement_depth,
+            basement: basement.as_ref(),
         };
         if let Some(floor) = parts::part_floor(ctx, &els, &floor_of, ground_total, &mut floors_used)
         {

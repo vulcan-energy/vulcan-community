@@ -89,61 +89,84 @@ pub(super) fn base_heights(parts: &[Part], dwelling: f64) -> Result<Vec<f64>, us
     Ok(bases.into_iter().map(|b| b.expect("every part")).collect())
 }
 
-/// Floor 0 drawn as a basement: its walls start below the ground and a basement floor is under
-/// it, as the editor draws one. DESNZ-defined: a basement is one floor element under the lowest
-/// storey above it, never a storey, and HEMIE derives its walls from its depth and perimeter.
-/// So floor 0's walls are not storey walls and the storeys start at floor 1 (derived from the
-/// model). Returns the depth the walls show, or `Err` when the drawing contradicts itself.
+/// A basement drawn as a floor of its own, under the lowest storey above the ground.
+pub(super) struct Basement {
+    /// The drawn floor: -1 as the editor numbers floors (canvas floor -1 is basement 1), or 0 in
+    /// models drawn with the basement on the ground floor and its walls starting below the ground.
+    pub level: i64,
+    /// Depth of the basement floor below the ground, from its walls' base height.
+    pub depth: Option<f64>,
+}
+
+/// The basement drawn as a floor of its own: walls on floor -1, or walls on floor 0 that start
+/// below the ground, over a basement floor on that floor. DESNZ-defined: a basement is one floor
+/// element under the lowest storey above it, never a storey, and HEMIE has no basement wall: it
+/// takes the basement walls' U-value and thickness from that storey's external walls. So the
+/// basement's walls are not storey walls, and the storeys start on the floor above (derived from
+/// the model). `Err` when the drawing contradicts itself or cannot be entered.
 pub(super) fn basement_storey(
     ctx: &mut Ctx,
     els: &[El],
     walls: &[(&El, Kind)],
-) -> Result<Option<f64>, ()> {
-    let floor0: Vec<&El> = walls
-        .iter()
-        .filter(|(w, _)| w.level == 0)
-        .map(|(w, _)| *w)
-        .collect();
-    let below: Vec<&El> = floor0
-        .iter()
-        .copied()
-        .filter(|w| w.num("base_height").is_some_and(|b| b < 0.0))
-        .collect();
-    if below.is_empty() {
+) -> Result<Option<Basement>, ()> {
+    let on = |level: i64| -> Vec<&El> {
+        walls
+            .iter()
+            .filter(|(w, _)| w.level == level)
+            .map(|(w, _)| *w)
+            .collect()
+    };
+    let starts_below = |w: &&El| w.num("base_height").is_some_and(|b| b < 0.0);
+    let level = if !on(-1).is_empty() {
+        -1
+    } else if on(0).iter().any(starts_below) {
+        0
+    } else {
         return Ok(None);
-    }
+    };
+    let floor = on(level);
     let names = |list: &[&El]| quoted(&list.iter().map(|w| w.name).collect::<Vec<_>>());
     let basement = els.iter().find(|e| {
         horizontal(e, "BuildingElementGround")
-            && e.level == 0
+            && e.level == level
             && matches!(
                 e.text("floor_type"),
                 Some("Heated_basement" | "Unheated_basement")
             )
     });
     let Some(basement) = basement else {
-        ctx.errors.push(error(below[0].path(), format!("Walls {} on floor 0 start below the ground, but floor 0 has no basement floor. Give floor 0's ground floor a basement floor type, or make the walls start at the ground.", names(&below))));
+        ctx.errors.push(error(floor[0].path(), format!("Walls {} on floor {level} are below the ground, but floor {level} has no basement floor. Give floor {level}'s ground floor a basement floor type, or draw the walls on the ground floor.", names(&floor))));
         return Err(());
     };
-    let at_ground: Vec<&El> = floor0
-        .iter()
-        .copied()
-        .filter(|w| !below.iter().any(|b| b.name == w.name))
-        .collect();
-    if !at_ground.is_empty() {
+    let at_ground: Vec<&El> = floor.iter().copied().filter(|w| !starts_below(w)).collect();
+    if level == 0 && !at_ground.is_empty() {
+        let below: Vec<&El> = floor.iter().copied().filter(starts_below).collect();
         ctx.errors.push(error(at_ground[0].path(), format!("Floor 0 is basement '{}' (walls {} start below the ground), but walls {} start at or above it. Give every wall of the basement its base below the ground.", basement.name, names(&below), names(&at_ground))));
         return Err(());
     }
-    if walls.iter().all(|(w, _)| w.level == 0) {
-        ctx.errors.push(error(basement.path(), format!("Floor 0 is basement '{}' and the model has no storey above it. HEMIE enters a basement as the floor of the lowest storey above the ground; draw that storey.", basement.name)));
+    if walls.iter().all(|(w, _)| w.level <= level) {
+        ctx.errors.push(error(basement.path(), format!("Floor {level} is basement '{}' and the model has no storey above it. HEMIE enters a basement as the floor of the lowest storey above the ground; draw that storey.", basement.name)));
         return Err(());
     }
-    let depth = below
+    let openings: Vec<&El> = els
+        .iter()
+        .filter(|e| {
+            (e.ty == "BuildingElementTransparent" || e.flag("is_external_door"))
+                && floor.iter().any(|w| e.host() == Some(w.name))
+        })
+        .collect();
+    if !openings.is_empty() {
+        ctx.errors.push(error(openings[0].path(), format!("Windows or doors {} are in walls of basement '{}'. HEMIE has no basement walls, so it cannot take openings in them; remove them, or draw the basement as a storey.", names(&openings), basement.name)));
+        return Err(());
+    }
+    let depth = floor
         .iter()
         .filter_map(|w| w.num("base_height"))
-        .fold(0.0, f64::min);
-    ctx.notices.push(notice(&basement.path(), format!("Floor 0 is basement '{}'. HEMIE enters it as the floor of floor 1 and derives its walls from its depth and perimeter, so the walls {} are not storey walls, and floor 1 is HEMIE's storey 0.", basement.name, names(&floor0))));
-    Ok(Some(-depth))
+        .filter(|b| *b < 0.0)
+        .reduce(f64::min)
+        .map(|b| -b);
+    ctx.notices.push(notice(&basement.path(), format!("Floor {level} is basement '{}'. HEMIE enters it as the floor of floor {}, its storey 0, and takes the basement walls' U-value and thickness from that storey's external walls, so the constructions of walls {} are not used.", basement.name, level + 1, names(&floor))));
+    Ok(Some(Basement { level, depth }))
 }
 
 /// The dwelling's base height above the ground: the stated ventilation zone base height, or
@@ -195,13 +218,11 @@ pub(super) fn party_ceiling_roof(ctx: &mut Ctx, ceilings: &[&El], planes: &[&El]
 pub(super) struct PartFloor<'p> {
     pub name: &'p str,
     pub bottom: usize,
-    /// The drawn floor of the part's lowest storey, and of the dwelling's lowest storey.
+    /// The drawn floor of the part's lowest storey.
     pub level: i64,
-    pub first: i64,
     pub point: P,
     pub ring: &'p [P],
-    /// Depth of a basement drawn as floor 0, from its walls' base height.
-    pub basement_depth: Option<f64>,
+    pub basement: Option<&'p Basement>,
 }
 
 /// The floor under a building part's lowest storey, by what is drawn there (derived from the
@@ -217,7 +238,9 @@ pub(super) fn part_floor<'e>(
     let under: Vec<&El> = els
         .iter()
         .filter(|e| {
-            ((horizontal(e, "BuildingElementGround") && e.level == part.level - part.first)
+            // A part on the dwelling's lowest storey also takes the basement floor under it.
+            let basement = part.bottom == 0 && part.basement.is_some_and(|b| b.level == e.level);
+            ((horizontal(e, "BuildingElementGround") && (e.level == part.level || basement))
                 || (is_raised_floor(e) && e.level == part.level))
                 && inside(part.point, &e.pts)
         })
@@ -301,7 +324,7 @@ fn ground_floor(ctx: &mut Ctx, g: &El, part: &PartFloor, ground_total: f64) -> O
     for key in fields {
         // A fully underground basement's walls are 0 m above the ground.
         let drawn = (key == "depth_basement_floor")
-            .then_some(part.basement_depth)
+            .then(|| part.basement.and_then(|b| b.depth))
             .flatten();
         match g
             .num(key)
@@ -569,7 +592,7 @@ mod tests {
         assert_eq!(floor["floor_above_basement_area"], 48.0);
         assert!(notices
             .iter()
-            .any(|n| n.message.contains("floor 1 is HEMIE's storey 0")));
+            .any(|n| n.message.contains("floor of floor 1, its storey 0")));
     }
 
     #[test]
@@ -579,7 +602,81 @@ mod tests {
         let (_, errors, _) = run(&text);
         assert_eq!(errors.len(), 1, "{errors:#?}");
         assert!(
-            errors[0].message.contains("Walls 'W00', 'W01', 'W02', 'W03' on floor 0 start below the ground, but floor 0 has no basement floor"),
+            errors[0].message.contains("Walls 'W00', 'W01', 'W02', 'W03' on floor 0 are below the ground, but floor 0 has no basement floor"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    /// A heated basement as the editor writes it (geometry editor `generateCSV`): floor F0
+    /// "Basement 1" is canvas floor -1, and the walls take the base height the editor's reset
+    /// gives walls on a basement floor (`basementExternalWallBaseHeightTargetM`, minus the depth).
+    const EDITOR_BASEMENT_WALLS: &str = r#"B0,Z,BuildingElementOpaque,20,90,8,2.5,,-2.5,,FALSE,,"0.000,0.000,-1.000|8.000,0.000,-1.000","{""_name_auto_sync"":false}"
+B1,Z,BuildingElementOpaque,15,90,6,2.5,,-2.5,,FALSE,,"8.000,0.000,-1.000|8.000,6.000,-1.000","{""_name_auto_sync"":false}"
+B2,Z,BuildingElementOpaque,20,90,8,2.5,,-2.5,,FALSE,,"8.000,6.000,-1.000|0.000,6.000,-1.000","{""_name_auto_sync"":false}"
+B3,Z,BuildingElementOpaque,15,90,6,2.5,,-2.5,,FALSE,,"0.000,6.000,-1.000|0.000,0.000,-1.000","{""_name_auto_sync"":false}""#;
+    const EDITOR_BASEMENT_FLOOR: &str = r#"Ground Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,total_area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,base_height,parent_element,coords,extra_json
+Basement floor,Z,BuildingElementGround,48,,,,,Heated_basement,2.5,,,,"0.000,0.000,-1.000|8.000,0.000,-1.000|8.000,6.000,-1.000|0.000,6.000,-1.000","{""_name_auto_sync"":false}""#;
+
+    fn editor_basement_below(extra: &[String], floor: &str) -> String {
+        let mut exposed = vec![EDITOR_BASEMENT_WALLS.to_string()];
+        exposed.extend(box_walls(&BOX, &[0]));
+        exposed.push(plane("Roof", 1, &BOX, 0.0, 0.0, false));
+        exposed.extend_from_slice(extra);
+        csv(SETTINGS, &exposed, floor)
+    }
+
+    #[test]
+    fn the_editors_basement_on_floor_minus_1_is_the_floor_of_storey_0() {
+        let (model, errors, notices) = run(&editor_basement_below(&[], EDITOR_BASEMENT_FLOOR));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let main = &model["Zone"]["building_parts"]["Main"];
+        assert_eq!(main["storeys"].as_array().unwrap().len(), 1);
+        assert_eq!(main["walls"].as_array().unwrap().len(), 4);
+        let floor = &main["floor"];
+        assert_eq!(floor["floor_type"], "heated basement");
+        assert_eq!(floor["depth_basement_floor"], 2.5);
+        assert_eq!(floor["floor_above_basement_area"], 48.0);
+        assert!(notices.iter().any(|n| n
+            .message
+            .contains("so the constructions of walls 'B0', 'B1', 'B2', 'B3' are not used")));
+    }
+
+    #[test]
+    fn basement_depth_comes_from_the_walls_when_the_floor_states_none() {
+        let floor = EDITOR_BASEMENT_FLOOR.replace(",Heated_basement,2.5,", ",Heated_basement,,");
+        let (model, errors, _) = run(&editor_basement_below(&[], &floor));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(
+            model["Zone"]["building_parts"]["Main"]["floor"]["depth_basement_floor"],
+            2.5
+        );
+    }
+
+    #[test]
+    fn a_window_in_a_basement_wall_fails_naming_it() {
+        let window =
+            "Light well,Z,BuildingElementTransparent,1,90,1,1,,-1.5,,FALSE,B0,\"2,0,-1|3,0,-1\","
+                .to_string();
+        let (_, errors, _) = run(&editor_basement_below(&[window], EDITOR_BASEMENT_FLOOR));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(
+            errors[0].message.contains(
+                "Windows or doors 'Light well' are in walls of basement 'Basement floor'"
+            ),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn walls_on_floor_minus_1_with_no_basement_floor_fail_naming_them() {
+        let floor = EDITOR_BASEMENT_FLOOR.replace(",Heated_basement,", ",Slab_no_edge_insulation,");
+        let (_, errors, _) = run(&editor_basement_below(&[], &floor));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(
+            errors[0].message.contains("Walls 'B0', 'B1', 'B2', 'B3' on floor -1 are below the ground, but floor -1 has no basement floor"),
             "{}",
             errors[0].message
         );
