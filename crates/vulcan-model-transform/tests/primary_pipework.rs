@@ -41,8 +41,9 @@ fn csv_cell(value: &Value) -> String {
     format!("\"{}\"", value.to_string().replace('"', "\"\""))
 }
 
-/// `source` is the row's `_system_source` marker; `None` writes no marker.
-fn csv(authored: Option<f64>, source: Option<&str>, drawn: Option<f64>) -> String {
+/// `source` is the row's `_system_source` marker (`None` writes none) and `preset` its
+/// `system_preset` cell. A row with neither is hand-written: its pipework is authored.
+fn csv(authored: Option<f64>, source: Option<&str>, preset: &str, drawn: Option<f64>) -> String {
     let mut cylinder = json!({
         "type": "StorageTank", "volume": 150, "daily_losses": 1.5, "init_temp": 55,
         "ColdWaterSource": "mains water",
@@ -59,7 +60,7 @@ fn csv(authored: Option<f64>, source: Option<&str>, drawn: Option<f64>) -> Strin
     let mut text = format!(
         "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,40\n\n\
          Systems\nName,Zone,Type,subcategory,system_preset,coords,extra_json\n\
-         Tank,Living,System,HotWaterSource,heat_pump_cylinder,,{}\n",
+         Tank,Living,System,HotWaterSource,{preset},,{}\n",
         csv_cell(&extra)
     );
     if let Some(length) = drawn {
@@ -146,7 +147,7 @@ fn codes(output: &TransformOutput) -> Vec<String> {
 
 #[test]
 fn authored_primary_pipework_without_drawn_rows_is_kept() {
-    for (label, output) in convert_all(&csv(Some(AUTHORED_LENGTH), Some("custom"), None)) {
+    for (label, output) in convert_all(&csv(Some(AUTHORED_LENGTH), None, "", None)) {
         assert_eq!(lengths(&output), Some(vec![AUTHORED_LENGTH]), "{label}");
         assert!(!codes(&output).contains(&"E067".into()), "{label}");
     }
@@ -154,7 +155,7 @@ fn authored_primary_pipework_without_drawn_rows_is_kept() {
 
 #[test]
 fn authored_and_drawn_primary_pipework_that_differ_fail_naming_both() {
-    for (label, output) in convert_all(&csv(Some(AUTHORED_LENGTH), None, Some(DRAWN_LENGTH))) {
+    for (label, output) in convert_all(&csv(Some(AUTHORED_LENGTH), None, "", Some(DRAWN_LENGTH))) {
         let error = output
             .validation
             .errors
@@ -172,7 +173,7 @@ fn authored_and_drawn_primary_pipework_that_differ_fail_naming_both() {
 
 #[test]
 fn authored_and_drawn_primary_pipework_that_agree_convert() {
-    for (label, output) in convert_all(&csv(Some(DRAWN_LENGTH), None, Some(DRAWN_LENGTH))) {
+    for (label, output) in convert_all(&csv(Some(DRAWN_LENGTH), None, "", Some(DRAWN_LENGTH))) {
         assert_eq!(lengths(&output), Some(vec![DRAWN_LENGTH]), "{label}");
         assert!(!codes(&output).contains(&"E067".into()), "{label}");
     }
@@ -180,7 +181,12 @@ fn authored_and_drawn_primary_pipework_that_agree_convert() {
 
 #[test]
 fn drawn_rows_are_the_source_when_nothing_is_authored() {
-    for (label, output) in convert_all(&csv(None, Some("presets"), Some(DRAWN_LENGTH))) {
+    for (label, output) in convert_all(&csv(
+        None,
+        Some("presets"),
+        "heat_pump_cylinder",
+        Some(DRAWN_LENGTH),
+    )) {
         assert_eq!(lengths(&output), Some(vec![DRAWN_LENGTH]), "{label}");
         assert!(
             !output.schema_omissions.iter().any(|n| n.path == PATH),
@@ -189,38 +195,64 @@ fn drawn_rows_are_the_source_when_nothing_is_authored() {
     }
 }
 
-/// CSVs saved before the editor stopped copying the preset's pipework onto the cylinder.
+/// The editor's markings of a row it wrote. It never let anyone author the cylinder's
+/// `primary_pipework`, so on any of these rows that field is a hidden preset copy (older saves):
+/// `presets`, `custom` (any Advanced Fields edit), and an unmarked row with a `system_preset`
+/// (saved before the marker existed).
+const EDITOR_ROWS: [(Option<&str>, &str); 3] = [
+    (Some("presets"), "heat_pump_cylinder"),
+    (Some("custom"), ""),
+    (None, "heat_pump_cylinder"),
+];
+
+fn notice(
+    output: &TransformOutput,
+) -> Option<&vulcan_model_transform::finalization::SchemaOmission> {
+    output.schema_omissions.iter().find(|n| n.path == PATH)
+}
+
 #[test]
-fn a_legacy_preset_copy_gives_way_to_drawn_rows_with_a_notice() {
-    for (label, output) in convert_all(&csv(
-        Some(AUTHORED_LENGTH),
-        Some("presets"),
-        Some(DRAWN_LENGTH),
-    )) {
-        assert_eq!(lengths(&output), Some(vec![DRAWN_LENGTH]), "{label}");
-        assert!(!codes(&output).contains(&"E067".into()), "{label}");
-        let notice = output
-            .schema_omissions
-            .iter()
-            .find(|n| n.path == PATH)
-            .unwrap_or_else(|| panic!("{label}: no notice in {:?}", output.schema_omissions));
-        assert_eq!(notice.code, "W_TARGET_INPUT", "{label}");
-        assert!(
-            notice.message.contains("Tank"),
-            "{label}: {}",
-            notice.message
-        );
+fn a_hidden_preset_copy_gives_way_to_drawn_rows_with_a_notice() {
+    for (source, preset) in EDITOR_ROWS {
+        let csv = csv(Some(AUTHORED_LENGTH), source, preset, Some(DRAWN_LENGTH));
+        for (label, output) in convert_all(&csv) {
+            let label = format!("{label} {source:?} '{preset}'");
+            assert_eq!(lengths(&output), Some(vec![DRAWN_LENGTH]), "{label}");
+            assert!(!codes(&output).contains(&"E067".into()), "{label}");
+            let notice = notice(&output).unwrap_or_else(|| panic!("{label}: no notice"));
+            assert_eq!(notice.code, "W_TARGET_INPUT", "{label}");
+            assert!(
+                notice.message.contains("'Tank'"),
+                "{label}: {}",
+                notice.message
+            );
+        }
     }
 }
 
 #[test]
-fn a_legacy_preset_copy_without_drawn_rows_is_ignored_with_a_notice() {
-    for (label, output) in convert_all(&csv(Some(AUTHORED_LENGTH), Some("presets"), None)) {
-        assert_eq!(lengths(&output), None, "{label}");
-        assert!(
-            output.schema_omissions.iter().any(|n| n.path == PATH),
-            "{label}: {:?}",
-            output.schema_omissions
-        );
+fn a_hidden_preset_copy_without_drawn_rows_is_ignored_with_a_notice() {
+    for (source, preset) in EDITOR_ROWS {
+        for (label, output) in convert_all(&csv(Some(AUTHORED_LENGTH), source, preset, None)) {
+            let label = format!("{label} {source:?} '{preset}'");
+            assert_eq!(lengths(&output), None, "{label}");
+            assert!(
+                notice(&output).is_some(),
+                "{label}: {:?}",
+                output.schema_omissions
+            );
+        }
+    }
+}
+
+#[test]
+fn a_hidden_preset_copy_equal_to_the_drawn_rows_needs_no_notice() {
+    for (source, preset) in EDITOR_ROWS {
+        for (label, output) in
+            convert_all(&csv(Some(DRAWN_LENGTH), source, preset, Some(DRAWN_LENGTH)))
+        {
+            assert_eq!(lengths(&output), Some(vec![DRAWN_LENGTH]), "{label}");
+            assert!(notice(&output).is_none(), "{label}: {:?}", notice(&output));
+        }
     }
 }

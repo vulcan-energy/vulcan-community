@@ -279,7 +279,11 @@ fn strip_ui_only_extra_json_section(
 }
 
 /// Each HotWaterSource entry whose Systems row states `primary_pipework`: entry name -> (row
-/// name, whether the row holds a preset the editor applied). Routes rows as `merge_systems` does.
+/// name, whether the editor wrote the row). Routes rows as `merge_systems` does. The editor never
+/// let anyone author this field, so on a row it wrote the value is a hidden preset copy: a row
+/// with any `_system_source` (`presets`, `pcdb`, or `custom` after an Advanced Fields edit) or a
+/// `system_preset` (rows saved before the marker existed). Only a row with neither, a hand-written
+/// or API CSV, authors it.
 fn systems_primary_pipework(
     csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
 ) -> BTreeMap<String, (String, bool)> {
@@ -305,13 +309,14 @@ fn systems_primary_pipework(
             }
             _ => continue,
         };
-        let preset = extra_json
-            .get(crate::parser::SYSTEM_SOURCE_MARKER)
-            .and_then(Value::as_str)
-            == Some("presets");
+        let editor = extra_json.contains_key(crate::parser::SYSTEM_SOURCE_MARKER)
+            || row
+                .get("system_preset")
+                .and_then(Value::as_str)
+                .is_some_and(|preset| !preset.trim().is_empty());
         for (entry, value) in entries {
             if value.get("primary_pipework").is_some() {
-                stated.insert(entry, (name.to_string(), preset));
+                stated.insert(entry, (name.to_string(), editor));
             }
         }
     }
@@ -4873,12 +4878,12 @@ impl JSONBuilder {
     ///
     /// Older editor builds copied a cylinder preset's `primary_pipework` onto the row when the
     /// preset was applied, hidden from the form, so it was never the user's input: the drawn
-    /// rows were. Such a row (`_system_source: presets`) would now fail E067 against its own
-    /// drawing, so its copy is dropped with a W_TARGET_INPUT notice instead. That is what those
-    /// CSVs always meant (drawn rows won; no Water Pipework section meant none), so their results
-    /// do not change. The one exception is a section with distribution rows only, which used to
-    /// keep the copy silently and now drops it, with the same notice. A copy on a row the user
-    /// has since edited (`custom`) cannot be told from authored data, so it is E067.
+    /// rows were. On a row the editor wrote (see [`systems_primary_pipework`]) the copy would now
+    /// fail E067 against its own drawing, or come back to life when nothing is drawn, so it is
+    /// dropped with a W_TARGET_INPUT notice instead (none when it equals the drawn rows). That is
+    /// what those CSVs always meant (drawn rows won; no Water Pipework section meant none), so
+    /// their results do not change. The one exception is a section with distribution rows only,
+    /// which used to keep the copy silently and now drops it, with the same notice.
     fn attach_primary_pipework(
         &self,
         result: &mut Value,
@@ -4904,14 +4909,19 @@ impl JSONBuilder {
             );
             let pointer = crate::json_pointer(&["HotWaterSource", name, "primary_pipework"]);
             match stated.get(name.as_str()) {
-                Some((row, true)) => {
+                Some((row, true))
+                    if tank_shaped
+                        && !(system_obj
+                            .get("primary_pipework")
+                            .is_some_and(|copy| same_json(copy, &Value::Array(drawn.clone())))) =>
+                {
                     self.schema_omissions
                         .borrow_mut()
                         .push(crate::finalization::SchemaOmission {
                             code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
                             path: pointer,
                             message: format!(
-                                "Systems row '{row}' carries a hidden copy of its preset's primary pipework, which an older Vulcan saved. The model uses the drawn primary Water Pipework rows instead{}. Draw the primary pipework to state it.",
+                                "Systems row '{row}' carries a hidden copy of its preset's primary pipework, which an older Vulcan saved and nobody could edit. The model uses the drawn primary Water Pipework rows instead{}. Draw the primary pipework to state it.",
                                 if drawn.is_empty() { " (none are drawn)" } else { "" }
                             ),
                         });
@@ -4936,7 +4946,8 @@ impl JSONBuilder {
                     }
                     continue;
                 }
-                None => {}
+                // An editor copy equal to the drawn rows, or on a non-tank entry: nothing to say.
+                _ => {}
             }
             if tank_shaped && !drawn.is_empty() {
                 // EPC errors on a drawn pipe name its row.
