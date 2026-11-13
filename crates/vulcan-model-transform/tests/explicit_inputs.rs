@@ -497,3 +497,9 @@ Unset,Living,BuildingElementTransparent,1.2,90,1,1.2,3.6,1.2,,0.5,"2,0,1|3,0,1",
         );
     }
 }
+
+#[test]
+fn version_metadata_rejects_the_retired_fhs_wrapper_version_key() {
+    let json = r#"{"hem_core_version":"1","fhs_wrapper_version":"1"}"#;
+    assert!(serde_json::from_str::<VersionMetadata>(json).is_err());
+}

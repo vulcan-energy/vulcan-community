@@ -52,7 +52,7 @@ fn caller_supplied_fhs_model_converts_and_passes_upstream_preflight() {
         "profile": "fhs",
         "version_metadata": {
             "hem_core_version": hem_core_version(),
-            "fhs_wrapper_version": fhs_wrapper_version(),
+            "wrapper_version": fhs_wrapper_version(),
         },
     });
     let conversion: Value =
