@@ -156,6 +156,7 @@ import {
   getDormerBundleMetadata,
   getDormerBundleName,
   getDormerThermalOverrideExtraJson,
+  dormerThermalOverrideAfterEdit,
   isDormerAnchorElement,
   isDormerBundleNameManual,
   type DormerBundleRole,
@@ -485,7 +486,7 @@ import { PresetDropdown } from './PresetDropdown';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { LazyInlineFallback, LazyModalFallback } from './LazyModuleFallback';
 import type { AssemblyElementMode, VulcanAssemblyV1Envelope } from '../lib/assemblyTypes';
-import { dropAssemblyEnvelopeOnFabricOverride, parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
+import { parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
 import type { BundledAssemblyLibrary } from '../lib/assemblyLibrary';
 import { Tooltip } from './Tooltip';
 import { createElementCreatorFieldPresentationResolver } from './elementCreatorFieldPresentation';
@@ -3411,12 +3412,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const commitDormerThermalSectionChanges = (
     sectionKey: DormerThermalSectionKey,
     updatedData: Partial<Element> & { extra_json?: Record<string, unknown> },
+    representative: Element | null,
   ) => {
     if (!selectedDormerMetadata || !selection?.id || !selectedIsDormerAnchor) return;
     const currentOverride = selectedDormerMetadata.thermal_overrides[sectionKey];
-    // Overrides bypass updateElement (regenerateDormerAnchor), so apply its assembly rule here.
-    const sanitized = getDormerThermalOverrideExtraJson(updatedData.extra_json);
-    const nextOverride = sanitized && dropAssemblyEnvelopeOnFabricOverride(String(updatedData.type), currentOverride, sanitized);
+    const nextOverride = dormerThermalOverrideAfterEdit(
+      String(updatedData.type),
+      currentOverride,
+      representative?.extra_json as Record<string, unknown> | undefined,
+      updatedData.extra_json,
+    );
     if (areDormerThermalOverridesEqual(currentOverride, nextOverride)) {
       return;
     }
@@ -3856,6 +3861,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 commitDormerThermalSectionChanges(
                   sectionKey,
                   updatedData as Partial<Element> & { extra_json?: Record<string, unknown> },
+                  element,
                 );
               }}
               collapsible={false}
@@ -5333,8 +5339,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   );
                   const prev = { ...(metadataOverride ?? fallbackOverride ?? {}) } as Record<string, unknown>;
                   commitDormerThermalSectionChanges(dormerAssemblySection, {
+                    type: dormerAssemblyRepresentative.type,
                     extra_json: { ...prev, ...patch },
-                  });
+                  }, dormerAssemblyRepresentative);
                   return;
                 }
                 const el = getElementById(selection.id);

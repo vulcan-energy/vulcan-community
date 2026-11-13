@@ -4,7 +4,8 @@
 import { arealHeatCapacityJPerM2KFromBand } from './assemblyCalculator';
 import type { FhsMassDistributionClass } from './assemblyMassHeuristic';
 import { toFhsMassDistributionClass } from './assemblyMassHeuristic';
-import type { VulcanAssemblyV1Envelope } from './assemblyTypes';
+import { shouldUseHeatedAdjacentHalfConstructionFabric } from './assemblyMaterialFabric';
+import type { AssemblyElementMode, VulcanAssemblyV1Envelope } from './assemblyTypes';
 
 /** Short labels aligned with HEM-TP-07 / BS EN ISO 52016-1 mass distribution classes. */
 export const MASS_CLASS_MEANINGS: Record<'D' | 'I' | 'E' | 'IE' | 'M', string> = {
@@ -64,6 +65,11 @@ const ASSEMBLY_FABRIC_FIELDS: Record<string, (e: Record<string, unknown>) => unk
   thermal_resist_insul: (e) => e.thermalResistanceGroundInsulation_m2K_W,
   areal_heat_capacity: (e) => e.arealHeatCapacityWrittenToElement_J_m2K,
   mass_distribution_class: (e) => e.massDistributionClass,
+  // The partition and party-wall mappings read R as half or full construction by this basis.
+  construction_basis: (e) =>
+    shouldUseHeatedAdjacentHalfConstructionFabric(
+      (e.assemblySnapshot as { elementMode: AssemblyElementMode }).elementMode,
+    ) ? 'half' : 'full',
 };
 
 function comparableFabricValue(field: string, value: unknown): unknown {
@@ -83,11 +89,13 @@ function sameFabricValue(field: string, a: unknown, b: unknown): boolean {
 /**
  * An applied assembly makes its fabric values derived. Changing one of them to anything but the
  * assembly's own value is an override, and the override removes `vulcan_assembly_v1` so the
- * element has one unambiguous fabric source. Writing the assembly's value back (reset, or a fresh
- * apply that brings its own envelope) keeps it. Returns `nextExtra` itself when nothing is removed.
+ * element has one unambiguous fabric source. An atomic write of the assembly's own value (Reset to
+ * assembly, or a fresh apply that brings its own envelope) keeps it; a field committed keystroke
+ * by keystroke has already overridden on the first differing keystroke, so typing the value back
+ * does not restore the assembly. Returns `nextExtra` itself when nothing is removed.
  *
- * An overridden U also removes the assembly's `thermal_resistance_construction` (unless the same
- * edit sets it): the converter keeps R and drops U when both are present, and the party-wall and
+ * An overridden U that is a number also removes the assembly's `thermal_resistance_construction`
+ * (unless the same edit sets it; clearing U leaves R as the source): the converter keeps R and drops U when both are present, and the party-wall and
  * half-construction mappings derive R from U only when R is absent. The other values stay, now as
  * entered values: an overridden R already wins over U, whole-wall U is an input independent of R,
  * and areal heat capacity and mass class are independent of both.
@@ -110,7 +118,11 @@ export function dropAssemblyEnvelopeOnFabricOverride(
   if (overridden.length === 0) return nextExtra;
   const rest = { ...nextExtra };
   delete rest.vulcan_assembly_v1;
-  if (overridden.includes('u_value') && !changed('thermal_resistance_construction')) {
+  if (
+    overridden.includes('u_value')
+    && typeof comparableFabricValue('u_value', rest.u_value) === 'number'
+    && !changed('thermal_resistance_construction')
+  ) {
     delete rest.thermal_resistance_construction;
   }
   return rest;

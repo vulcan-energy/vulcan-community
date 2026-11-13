@@ -22,6 +22,7 @@ import { createGeometryStore, GeometryStoreProvider, type GeometryStoreApi } fro
 import type { Element } from '../../geometry/types';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
 import { MultiSelectPanel } from '../MultiSelectPanel';
+import { dormerThermalOverrideAfterEdit } from '../../lib/dormerGeometry';
 
 beforeAll(async () => {
   configureGeometrySchemaAssetSource({
@@ -168,5 +169,35 @@ describe('assembly versus U-value edits', () => {
     expect(extra(store).vulcan_assembly_v1).toEqual(envelope);
     store.getState().updateElement('wall', { extra_json: { ...extra(store), thermal_resistance_floor_construction: 4 } });
     expect(extra(store).vulcan_assembly_v1).toBeUndefined();
+  });
+
+  it('clearing U drops the envelope but keeps R as the source', () => {
+    const store = storeWith({ ...wall(), type: 'BuildingElementPartyWall' } as Element);
+    const withoutU = { ...extra(store) };
+    delete withoutU.u_value;
+    store.getState().updateElement('wall', { extra_json: withoutU });
+    expect(extra(store).vulcan_assembly_v1).toBeUndefined();
+    expect(extra(store).thermal_resistance_construction).toBe(5);
+  });
+
+  it('changing construction_basis away from the assembly basis drops the envelope', () => {
+    const halfEnvelope = { ...envelope, assemblySnapshot: { ...envelope.assemblySnapshot, elementMode: 'BuildingElementPartyWall' } };
+    const store = storeWith({
+      ...wall(), type: 'BuildingElementPartyWall',
+      extra_json: { u_value: 0.18, thermal_resistance_construction: 5, construction_basis: 'half', vulcan_assembly_v1: halfEnvelope },
+    } as Element);
+    store.getState().updateElement('wall', { extra_json: { ...extra(store), construction_basis: 'full' } });
+    expect(extra(store).vulcan_assembly_v1).toBeUndefined();
+  });
+
+  it('dormer: an unrelated edit compares against the representative values the section rendered', () => {
+    const representative = { u_value: 0.25, thermal_resistance_construction: 5, vulcan_assembly_v1: envelope };
+    const next = dormerThermalOverrideAfterEdit('BuildingElementOpaque', undefined, representative, {
+      ...representative, colour: 'Dark',
+    });
+    expect(next).toMatchObject({ thermal_resistance_construction: 5, vulcan_assembly_v1: envelope });
+    expect(dormerThermalOverrideAfterEdit('BuildingElementOpaque', undefined, representative, {
+      ...representative, u_value: 0.3,
+    })).toEqual({ u_value: 0.3 });
   });
 });
