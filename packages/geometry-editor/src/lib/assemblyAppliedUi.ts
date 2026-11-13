@@ -66,10 +66,12 @@ const ASSEMBLY_FABRIC_FIELDS: Record<string, (e: Record<string, unknown>) => unk
   areal_heat_capacity: (e) => e.arealHeatCapacityWrittenToElement_J_m2K,
   mass_distribution_class: (e) => e.massDistributionClass,
   // The partition and party-wall mappings read R as half or full construction by this basis.
-  construction_basis: (e) =>
-    shouldUseHeatedAdjacentHalfConstructionFabric(
-      (e.assemblySnapshot as { elementMode: AssemblyElementMode }).elementMode,
-    ) ? 'half' : 'full',
+  // An envelope without a snapshot mode has no known basis, so any basis edit counts as an override.
+  construction_basis: (e) => {
+    const mode = (e.assemblySnapshot as { elementMode?: AssemblyElementMode } | undefined)?.elementMode;
+    if (mode === undefined) return undefined;
+    return shouldUseHeatedAdjacentHalfConstructionFabric(mode) ? 'half' : 'full';
+  },
 };
 
 function comparableFabricValue(field: string, value: unknown): unknown {
