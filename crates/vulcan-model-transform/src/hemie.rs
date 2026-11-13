@@ -1877,3 +1877,405 @@ fn infiltration(ctx: &mut Ctx, _csv: &Rows, full: &Value) -> Option<Value> {
     iv.insert("Leaks".into(), Value::Object(out));
     Some(Value::Object(iv))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HEADER: &str = "Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json";
+    const SETTINGS: &str = r#"IsExistingBuilding,TRUE
+HEMIE_age_band,D
+HEMIE_region,England
+HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#;
+
+    fn wall(name: &str, level: i64, a: P, b: P, height: f64) -> String {
+        format!(
+            "{name},Z,BuildingElementOpaque,1,90,1,{height},0,0,FALSE,FALSE,,\"{},{},{level}|{},{},{level}\",",
+            a[0], a[1], b[0], b[1]
+        )
+    }
+
+    fn plane(
+        name: &str,
+        level: i64,
+        pts: &[P],
+        pitch: f64,
+        orientation: f64,
+        unheated: bool,
+    ) -> String {
+        let coords: Vec<String> = pts
+            .iter()
+            .map(|p| format!("{},{},{level}", p[0], p[1]))
+            .collect();
+        let flag = if unheated { "TRUE" } else { "FALSE" };
+        format!(
+            "{name},Z,BuildingElementOpaque,10,{pitch},1,1,{orientation},5.6,{flag},FALSE,,\"{}\",",
+            coords.join("|")
+        )
+    }
+
+    /// The walls of a box from `corners`, one per edge, on each listed floor.
+    fn box_walls(corners: &[P], levels: &[i64]) -> Vec<String> {
+        levels
+            .iter()
+            .flat_map(|&level| {
+                (0..corners.len()).map(move |i| {
+                    wall(
+                        &format!("W{level}{i}"),
+                        level,
+                        corners[i],
+                        corners[(i + 1) % corners.len()],
+                        2.8,
+                    )
+                })
+            })
+            .collect()
+    }
+
+    const BOX: [P; 4] = [[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]];
+
+    fn ground(corners: &[P]) -> String {
+        let coords: Vec<String> = corners
+            .iter()
+            .map(|p| format!("{},{},0", p[0], p[1]))
+            .collect();
+        format!("Ground Elements\nName,Zone,Type,area,floor_type,coords\nFloor,Z,BuildingElementGround,48,Slab_no_edge_insulation,\"{}\"", coords.join("|"))
+    }
+
+    fn gable_roof() -> Vec<String> {
+        vec![
+            plane(
+                "Roof S",
+                2,
+                &[[0.0, 0.0], [8.0, 0.0], [8.0, 3.0], [0.0, 3.0]],
+                40.0,
+                180.0,
+                true,
+            ),
+            plane(
+                "Roof N",
+                2,
+                &[[0.0, 3.0], [8.0, 3.0], [8.0, 6.0], [0.0, 6.0]],
+                40.0,
+                0.0,
+                true,
+            ),
+        ]
+    }
+
+    fn csv(settings: &str, exposed: &[String], extra: &str) -> String {
+        format!(
+            "Metadata,,\n{settings}\n\nZone,,\nName,Type\nZ,Zone\n\nExposed Elements\n{HEADER}\n{}\n\n{extra}\n",
+            exposed.join("\n")
+        )
+    }
+
+    fn run(text: &str) -> (Value, Vec<ValidationError>, Vec<SchemaOmission>) {
+        let rows = crate::parser::CSVParser::new()
+            .parse_csv(text)
+            .expect("csv");
+        let mut model = json!({
+            "Zone": {"Z": {"livingroom_area": 20.0, "restofdwelling_area": 76.0}},
+            "General": {"build_type": "detached"},
+            "NumberOfHabitableRooms": 3,
+            "InfiltrationVentilation": {"cross_vent_possible": false, "terrain_class": "Suburban", "altitude": 0, "ventilation_zone_base_height": 0,
+                "Leaks": {"test_pressure": "Standard", "test_result": 5, "env_area": 200, "ventilation_zone_height": 5.6}}
+        });
+        let (mut errors, mut notices) = (Vec::new(), Vec::new());
+        map_existing_building(&mut model, &rows, &json!({}), &mut errors, &mut notices);
+        (model, errors, notices)
+    }
+
+    fn house(exposed_extra: Vec<String>) -> String {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(exposed_extra);
+        csv(SETTINGS, &exposed, &ground(&BOX))
+    }
+
+    #[test]
+    fn a_two_storey_box_is_one_part_with_anticlockwise_storeys() {
+        let (model, errors, _) = run(&house(gable_roof()));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let main = &model["Zone"]["building_parts"]["Main"];
+        assert_eq!(
+            model["Zone"]["building_parts"].as_object().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            main["storeys"][0]["floorplan"],
+            "LINEARRING (0 0, 8 0, 8 6, 0 6, 0 0)"
+        );
+        // The first edge faces south.
+        assert_eq!(model["Zone"]["reference_orientation"], 180.0);
+        // The storey gap is left out below a storey, not at the top.
+        assert!((main["storeys"][0]["ceiling_height"].as_f64().unwrap() - 2.55).abs() < 1e-9);
+        assert_eq!(main["storeys"][1]["ceiling_height"], 2.8);
+        assert_eq!(main["walls"].as_array().unwrap().len(), 8);
+        assert_eq!(main["roof"]["pitch_type"], "dual");
+        assert_eq!(main["floor"]["total_area"], 48.0);
+        assert_eq!(model["InfiltrationVentilation"]["Leaks"]["test_result"], 5);
+    }
+
+    #[test]
+    fn walls_drawn_clockwise_still_give_an_anticlockwise_ring() {
+        let corners: Vec<P> = BOX.iter().rev().copied().collect();
+        let walls = box_walls(&corners, &[0]);
+        let rows = crate::parser::CSVParser::new()
+            .parse_csv(&csv(SETTINGS, &walls, ""))
+            .unwrap();
+        let els = elements(&rows);
+        let refs: Vec<&El> = els.iter().collect();
+        let ring = ring_of_walls(&refs).unwrap();
+        assert!(signed_area(&ring) > 0.0);
+        // An open outline names the walls at its open ends.
+        let open = ring_of_walls(&refs[..3]).unwrap_err();
+        assert!(open.contains("'W00'") && open.contains("'W02'"), "{open}");
+    }
+
+    #[test]
+    fn a_floor_drawn_beside_the_floor_below_stops_and_is_named() {
+        let mut exposed = box_walls(&BOX, &[0]);
+        let beside: Vec<P> = BOX.iter().map(|p| [p[0] + 20.0, p[1]]).collect();
+        exposed.extend(box_walls(&beside, &[1]));
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(
+            errors[0]
+                .message
+                .contains("Floor 1 is drawn beside floor 0"),
+            "{}",
+            errors[0].message
+        );
+        assert!(errors[0].path.ends_with("/W10"));
+    }
+
+    #[test]
+    fn a_lower_storey_larger_than_the_one_above_is_its_own_part() {
+        // An L-shaped ground floor under a box: the column split gives the box part with two
+        // storeys and a one-storey extension sharing an edge with no wall.
+        let l: [P; 6] = [
+            [0.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 9.0],
+            [5.0, 9.0],
+            [5.0, 6.0],
+            [0.0, 6.0],
+        ];
+        let mut exposed = box_walls(&l, &[0]);
+        exposed.extend(box_walls(&BOX, &[1]));
+        exposed.extend(gable_roof());
+        exposed.push(plane(
+            "Flat",
+            1,
+            &[[5.0, 6.0], [8.0, 6.0], [8.0, 9.0], [5.0, 9.0]],
+            0.0,
+            0.0,
+            false,
+        ));
+        let (model, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&l)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let parts = &model["Zone"]["building_parts"];
+        assert_eq!(parts["Main"]["storeys"].as_array().unwrap().len(), 2);
+        let extension = &parts["Extension 1"];
+        assert_eq!(
+            extension["storeys"][0]["floorplan"],
+            "LINEARRING (8 9, 5 9, 5 6, 8 6, 8 9)"
+        );
+        // Three walls; the edge shared with the main part has none.
+        assert_eq!(extension["walls"].as_array().unwrap().len(), 3);
+        assert_eq!(extension["roof"]["roof_type"], "Unknown Flat");
+        // The main part's ground storey keeps the vertex where the extension starts.
+        let ring = parts["Main"]["storeys"][0]["floorplan"].as_str().unwrap();
+        assert!(ring.contains("5 6"), "{ring}");
+    }
+
+    #[test]
+    fn slope_orientation_comes_from_the_ring_not_the_plane() {
+        // The planes' own orientations are 7 degrees off the drawing; the slope takes the ring's.
+        let roof = vec![
+            plane(
+                "Roof S",
+                2,
+                &[[0.0, 0.0], [8.0, 0.0], [8.0, 3.0], [0.0, 3.0]],
+                40.0,
+                173.0,
+                true,
+            ),
+            plane(
+                "Roof N",
+                2,
+                &[[0.0, 3.0], [8.0, 3.0], [8.0, 6.0], [0.0, 6.0]],
+                40.0,
+                353.0,
+                true,
+            ),
+        ];
+        let (model, errors, _) = run(&house(roof));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let slope = model["Zone"]["building_parts"]["Main"]["roof"]["slope_orientation"]
+            .as_f64()
+            .unwrap();
+        assert!(slope == 180.0 || slope == 0.0, "{slope}");
+    }
+
+    #[test]
+    fn a_hipped_roof_is_dual_pitch_with_a_notice() {
+        let roof = vec![
+            plane(
+                "Hip S",
+                2,
+                &[[0.0, 0.0], [8.0, 0.0], [5.0, 3.0], [3.0, 3.0]],
+                40.0,
+                180.0,
+                true,
+            ),
+            plane(
+                "Hip E",
+                2,
+                &[[8.0, 0.0], [8.0, 6.0], [5.0, 3.0]],
+                40.0,
+                90.0,
+                true,
+            ),
+            plane(
+                "Hip N",
+                2,
+                &[[8.0, 6.0], [0.0, 6.0], [3.0, 3.0], [5.0, 3.0]],
+                40.0,
+                0.0,
+                true,
+            ),
+            plane(
+                "Hip W",
+                2,
+                &[[0.0, 6.0], [0.0, 0.0], [3.0, 3.0]],
+                40.0,
+                270.0,
+                true,
+            ),
+        ];
+        let (model, errors, notices) = run(&house(roof));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(
+            model["Zone"]["building_parts"]["Main"]["roof"]["pitch_type"],
+            "dual"
+        );
+        assert!(notices
+            .iter()
+            .any(|n| n.message.contains("hipped (4 slopes)")));
+    }
+
+    #[test]
+    fn a_vaulted_ceiling_fails_naming_the_roof() {
+        let roof = vec![
+            plane(
+                "Vault S",
+                2,
+                &[[0.0, 0.0], [8.0, 0.0], [8.0, 3.0], [0.0, 3.0]],
+                40.0,
+                180.0,
+                false,
+            ),
+            plane(
+                "Vault N",
+                2,
+                &[[0.0, 3.0], [8.0, 3.0], [8.0, 6.0], [0.0, 6.0]],
+                40.0,
+                0.0,
+                false,
+            ),
+        ];
+        let (_, errors, _) = run(&house(roof));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0].message.contains("vaulted ceiling"));
+        assert!(errors[0].path.ends_with("/Vault S"));
+    }
+
+    #[test]
+    fn a_pitched_roof_over_a_non_rectangular_part_gets_a_notice() {
+        let l: [P; 6] = [
+            [0.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 9.0],
+            [5.0, 9.0],
+            [5.0, 6.0],
+            [0.0, 6.0],
+        ];
+        let mut exposed = box_walls(&l, &[0]);
+        exposed.push(plane("Roof", 1, &l, 30.0, 180.0, true));
+        let (_, errors, notices) = run(&csv(SETTINGS, &exposed, &ground(&l)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert!(
+            notices
+                .iter()
+                .any(|n| n.message.contains("is not rectangular")),
+            "{notices:#?}"
+        );
+    }
+
+    #[test]
+    fn missing_settings_are_listed_in_one_error() {
+        let text = house(gable_roof())
+            .replace("HEMIE_age_band,D\n", "")
+            .replace(
+                r#"HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#,
+                "",
+            );
+        let (_, errors, _) = run(&text);
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(errors[0].path, "/Metadata");
+        assert!(errors[0].message.contains("HEMIE_age_band"));
+        assert!(errors[0]
+            .message
+            .contains("HEMIE_construction_external_wall with wall_construction_type"));
+    }
+
+    #[test]
+    fn element_values_overlay_the_construction_setting() {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed[0] = exposed[0].replace("\",", "\",\"{\"\"u_value\"\":0.45}\"");
+        exposed.push(
+            "PW,Z,BuildingElementPartyWall,1,90,1,2.8,0,0,FALSE,FALSE,,\"8,0,0|8,6,0\",\"{\"\"party_wall_cavity_type\"\":\"\"unfilled_unsealed\"\",\"\"party_wall_lining_type\"\":\"\"wet_plaster\"\"}\"".into(),
+        );
+        exposed.retain(|w| !w.starts_with("W01,"));
+        exposed.extend(gable_roof());
+        let (model, errors, notices) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let constructions = &model["Zone"]["constructions"];
+        assert_eq!(
+            constructions["external_wall"]["wall_construction_type"],
+            "cavity"
+        );
+        assert_eq!(constructions["external_wall"]["u_value"], 0.45);
+        assert!(constructions["external_wall 2"].get("u_value").is_none());
+        assert_eq!(
+            constructions["party_wall"],
+            json!({"construction_type": "party_wall", "party_wall_type": "unfilled_cavity", "cavity_seal_type": "unsealed", "party_wall_lining_type": "wet_plaster"})
+        );
+        assert!(notices.iter().any(|n| n.message.contains("W00 (U 0.45)")));
+    }
+
+    #[test]
+    fn min_rectangle_and_edge_orientation_follow_hemie() {
+        // A box turned 30 degrees: the rectangle's edges keep the ring's bearings.
+        let (s, c) = 30f64.to_radians().sin_cos();
+        let ring: Vec<P> = BOX
+            .iter()
+            .map(|p| [p[0] * c - p[1] * s, p[0] * s + p[1] * c])
+            .collect();
+        let rect = min_rectangle(&ring);
+        assert!((signed_area(&rect) - 48.0).abs() < 1e-9);
+        let reference = sub(ring[1], ring[0]);
+        let reference_orientation = outward_bearing(ring[0], ring[1]);
+        for i in 0..4 {
+            let edge = sub(ring[(i + 1) % 4], ring[i]);
+            let expected = outward_bearing(ring[i], ring[(i + 1) % 4]);
+            assert!(
+                bearing_gap(
+                    edge_orientation(reference_orientation, reference, edge),
+                    expected
+                ) < 1e-9
+            );
+        }
+    }
+}
