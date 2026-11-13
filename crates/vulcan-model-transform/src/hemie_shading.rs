@@ -414,16 +414,28 @@ pub(super) fn distant(
 
 /// The HEMIE field for a measured Window Shading type, and the categories it takes.
 const KINDS: [(&str, &str, &str); 4] = [
-    ("overhang", "overhang", "common roof, common open porch, small fixed canopy, small veranda, large canopy, extended or balcony"),
-    ("sidefinleft", "side_fin_left", "opaque, frosted glass or bars"),
-    ("sidefinright", "side_fin_right", "opaque, frosted glass or bars"),
-    ("object", "obstacle", "front balcony facade"),
+    (
+        "overhang",
+        "overhang",
+        "roof eaves overhang, open porch, canopy or veranda, or balcony above",
+    ),
+    (
+        "sidefinleft",
+        "side_fin_left",
+        "opaque, frosted glass or bars",
+    ),
+    (
+        "sidefinright",
+        "side_fin_right",
+        "opaque, frosted glass or bars",
+    ),
+    ("object", "obstacle", "balcony front"),
 ];
 
 /// Why no reveal is sent: HEMIE 0.18.1's only reveal category ("deep window") expands to a
 /// window shading object of type "reveal", which the EPC wrapper's preprocessing rejects (it
 /// does not ask HEM Core to expand reveals).
-const NO_REVEAL: &str = "HEMIE's reveal category does not run in this release (the EPC wrapper rejects a reveal), so no reveal is sent";
+const NO_REVEAL: &str = "the reveal category does not run in this release (the EPC calculation rejects a reveal), so no reveal is sent";
 
 /// The window's close-shading categories. Stated categories are the assessor's; a measured
 /// Window Shading row needs the category of its kind (what the feature is: a canopy or a
@@ -466,7 +478,7 @@ pub(super) fn close(ctx: &mut Ctx, e: &El, w: &mut Value) {
             ctx.errors.push(error(
                 e.path(),
                 format!(
-                    "Window '{}' has Window Shading of type '{kind}', which HEMIE does not take.",
+                    "Window '{}' has Window Shading of type '{kind}', which the existing-building EPC does not take.",
                     e.name
                 ),
             ));
@@ -474,7 +486,15 @@ pub(super) fn close(ctx: &mut Ctx, e: &El, w: &mut Value) {
         };
         match w.get(*field) {
             Some(stated) => shown.push(format!("{measured} → stated {field} {stated}")),
-            None => ctx.errors.push(error(e.path(), format!("Window '{}' has a measured {measured}. HEMIE takes its category, not its size: give the window its {field} ({choices}).", e.name))),
+            None => {
+                let what = match *field {
+                    "side_fin_left" => "left side fin",
+                    "side_fin_right" => "right side fin",
+                    "obstacle" => "balcony front",
+                    other => other,
+                };
+                ctx.errors.push(error(e.path(), format!("Window '{}' has a drawn {measured}. Choose what it is in the window's {what} field ({choices}); its size alone does not say.", e.name)))
+            }
         }
     }
     if !shown.is_empty() {
@@ -802,7 +822,7 @@ mod tests {
         assert!(window_of(&model).get("reveal").is_none());
         assert!(notices.iter().any(|n| n
             .message
-            .contains("reveal 0.2 m deep: HEMIE's reveal category does not run")));
+            .contains("reveal 0.2 m deep: the reveal category does not run")));
         let (_, errors, _) = run(&window_house(r#","reveal":"deep window""#, ""));
         assert!(
             errors
@@ -817,8 +837,8 @@ mod tests {
         let (_, errors, _) = run(&window_house("", "C,Z,overhang,W1,0.6,,0.1,"));
         assert!(
             errors.iter().any(|e| e.path == "/Zone/Z/BuildingElement/W1"
-                && e.message.contains("measured overhang 0.6 m deep")
-                && e.message.contains("give the window its overhang")),
+                && e.message.contains("drawn overhang 0.6 m deep")
+                && e.message.contains("the window's overhang field")),
             "{errors:#?}"
         );
         let (model, errors, notices) = run(&window_house(

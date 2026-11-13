@@ -136,7 +136,7 @@ export function renderCloseShadingFields({ windowName, kinds, elementsById, upda
       <div className="element-input" style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-xs)' }}>
         <StandardDropdown aria-label={`${windowName} ${label.toLowerCase()}`} value={stated} placeholder={placeholder}
           options={closeShadingOptions(kind, depth)} onChange={(value) => write(kind, value)} variant="ghost" size="md" />
-        {stated && <ResetFieldButton onClick={() => write(kind, undefined)} title="Clear" ariaLabel={`Clear the window ${label.toLowerCase()}`} align="inline" />}
+        {stated && <ResetFieldButton onClick={() => write(kind, undefined)} label="Clear" title="Clear" ariaLabel={`Clear the window ${label.toLowerCase()}`} align="inline" />}
       </div>
     </div>;
   });
