@@ -1184,6 +1184,9 @@ const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "General_storeys_in_building",
     "IsExistingBuilding",
     "HasElectricitySmartMeter",
+    crate::epc_products::RADIATOR_SETTING,
+    crate::epc_products::UFH_SETTING,
+    crate::epc_products::RADIATOR_LENGTH_SETTING,
 ];
 
 /// Metadata rows that set a model input. A present row with no value is E066: it must never
@@ -1493,11 +1496,11 @@ pub struct JSONBuilder {
     csv_rows: RefCell<Vec<(String, String)>>,
     /// Exact upstream core version supplied by the host for FHS input metadata.
     hem_core_version: String,
-    /// Host-supplied HEM Database products by system model path (see `ProductSlot`).
-    product_references: crate::ProductReferences,
+    /// The target's HEM Database products, for profiles that reference them.
+    product_database: Option<crate::epc_products::ProductDatabase>,
+    /// The model's product settings (Metadata rows), read once per build.
+    product_settings: RefCell<crate::epc_products::Settings>,
     product_slots: RefCell<Vec<crate::ProductSlot>>,
-    /// Stable product key of each built emitter: its system and Wet Emitters row name.
-    emitter_keys: RefCell<BTreeMap<String, String>>,
 }
 
 impl JSONBuilder {
@@ -1505,8 +1508,8 @@ impl JSONBuilder {
         self.input_contract = profile.input_contract();
     }
 
-    pub fn set_product_references(&mut self, references: crate::ProductReferences) {
-        self.product_references = references;
+    pub fn set_product_database(&mut self, database: crate::epc_products::ProductDatabase) {
+        self.product_database = Some(database);
     }
 
     pub fn take_product_slots(&self) -> Vec<crate::ProductSlot> {
@@ -1554,9 +1557,9 @@ impl JSONBuilder {
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
-            product_references: Default::default(),
+            product_database: None,
+            product_settings: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
-            emitter_keys: RefCell::new(BTreeMap::new()),
         };
 
         builder.index_templates();
@@ -1591,9 +1594,9 @@ impl JSONBuilder {
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
             hem_core_version: version_metadata.hem_core_version.clone(),
-            product_references: Default::default(),
+            product_database: None,
+            product_settings: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
-            emitter_keys: RefCell::new(BTreeMap::new()),
         };
         builder.index_templates();
         Ok(builder)
@@ -1626,10 +1629,6 @@ impl JSONBuilder {
 
     fn note_emitter_row(&self, system: &str, index: usize, row: &BTreeMap<String, Value>) {
         let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
-        self.emitter_keys.borrow_mut().insert(
-            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
-            crate::json_pointer(&["SpaceHeatSystem", system, "emitters", name]),
-        );
         self.csv_rows.borrow_mut().push((
             crate::json_pointer(&["SpaceHeatSystem", system, "emitters", &index.to_string()]),
             format!("Wet Emitters row '{name}' (system '{system}')"),
@@ -1955,6 +1954,14 @@ impl JSONBuilder {
         let csv_data = &sanitized_csv_data;
 
         self.parse_cold_water_source_from_metadata(csv_data);
+        if self.profile.references_products() {
+            let mut errors = Vec::new();
+            *self.product_settings.borrow_mut() = crate::epc_products::Settings::read(
+                |name| metadata_field_value(csv_data, name),
+                &mut errors,
+            );
+            self.non_fatal_errors.borrow_mut().extend(errors);
+        }
         for row in csv_data.get("Metadata").into_iter().flatten() {
             if let (Some(name), None) = extract_metadata_field(row) {
                 if METADATA_INPUT_FIELD_NAMES.contains(&name.as_str()) {
@@ -2092,12 +2099,19 @@ impl JSONBuilder {
             }
         }
         if self.profile.references_products() {
-            let slots = crate::epc_mappings::apply_product_references(
+            let settings = self.product_settings.borrow().clone();
+            let db = self
+                .product_database
+                .as_ref()
+                .expect("transform_geometry_csv sets the product database for this profile");
+            let slots = crate::epc_products::resolve_products(
                 result,
-                &self.product_references,
-                &self.emitter_keys.borrow(),
+                db,
+                &settings,
                 &mut errors,
+                &mut notices,
             );
+            crate::epc_products::apply_weather_curves(result, db, &mut errors, &mut notices);
             *self.product_slots.borrow_mut() = slots;
         }
         self.name_csv_rows(&mut errors);
@@ -7402,12 +7416,14 @@ impl JSONBuilder {
                         .get("Name")
                         .and_then(Value::as_str)
                         .unwrap_or_default();
-                    let effective_length = effective_length.ok_or_else(|| {
-                        BuildError::new(
-                            "E047",
-                            &format!("Wet Emitters row '{name}': a product radiator requires its 'length'."),
-                        )
-                    })?;
+                    let effective_length = effective_length.unwrap_or_else(|| {
+                        let (length, notice) = self
+                            .product_settings
+                            .borrow()
+                            .radiator_length(name, unit_number);
+                        self.schema_omissions.borrow_mut().push(notice);
+                        length
+                    });
                     for key in ["c", "c_per_m", "n", "thermal_mass", "thermal_mass_per_m"] {
                         if number(key).is_some() {
                             self.schema_omissions.borrow_mut().push(

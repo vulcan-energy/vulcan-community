@@ -8,7 +8,7 @@
 
 use crate::finalization::SchemaOmission;
 use crate::target_mappings::TARGET_INPUT_WARNING;
-use crate::{json_pointer, ProductReferences, ProductSlot, ValidationError};
+use crate::{json_pointer, ValidationError};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
@@ -376,10 +376,10 @@ pub(crate) fn build_type_from_party_walls(
 /// One place EPC requires a HEM Database product: the model path, the discriminator values
 /// whose definition requires `product_id` (`None`: every object there), and the values of a
 /// field that select an inline definition with no product instead.
-struct SlotRule {
-    path: &'static [&'static str],
-    requires: Option<(&'static str, &'static [&'static str])>,
-    inline: Option<(&'static str, &'static [&'static str])>,
+pub(crate) struct SlotRule {
+    pub path: &'static [&'static str],
+    pub requires: Option<(&'static str, &'static [&'static str])>,
+    pub inline: Option<(&'static str, &'static [&'static str])>,
 }
 
 const fn slot(
@@ -397,7 +397,7 @@ const fn slot(
 /// lists `product_id`, at the model path that reaches it. `slot_table_matches_the_schema`
 /// fails when the vendored schema and this table differ. Not listed: `MixerShower`, whose
 /// inline definition stays valid (`ShowerMixerProduct` is an alternative, not a requirement).
-const PRODUCT_SLOTS: &[SlotRule] = &[
+pub(crate) const PRODUCT_SLOTS: &[SlotRule] = &[
     slot(
         &["HeatSourceWet", "*"],
         Some((
@@ -481,7 +481,7 @@ const PRODUCT_SLOTS: &[SlotRule] = &[
     ),
 ];
 
-fn collect<'a>(
+pub(crate) fn collect<'a>(
     value: &'a mut Value,
     pattern: &[&str],
     path: Vec<String>,
@@ -509,83 +509,6 @@ fn collect<'a>(
         next.push(key);
         collect(child, rest, next, out);
     }
-}
-
-/// Product seam: each system EPC requires a product for takes the ID the host supplied for
-/// its key, else keeps an authored `product_id`. A system with neither, and a supplied key no
-/// system has, are errors; no default and no ID is invented here. `keys` gives the stable key
-/// of a model path whose last segment is an array index (a Wet Emitters row name); every
-/// other slot's key is its model path.
-pub(crate) fn apply_product_references(
-    model: &mut Value,
-    references: &ProductReferences,
-    keys: &BTreeMap<String, String>,
-    errors: &mut Vec<ValidationError>,
-) -> Vec<ProductSlot> {
-    let mut slots = Vec::new();
-    for rule in PRODUCT_SLOTS {
-        let mut found = Vec::new();
-        collect(model, rule.path, Vec::new(), &mut found);
-        for (segments, system) in found {
-            let Some(object) = system.as_object_mut() else {
-                continue;
-            };
-            let field = |field: &str| {
-                object
-                    .get(field)
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-            };
-            if rule
-                .requires
-                .is_some_and(|(f, values)| !values.contains(&field(f)))
-                || rule
-                    .inline
-                    .is_some_and(|(f, values)| values.contains(&field(f)))
-            {
-                continue;
-            }
-            let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
-            let path = json_pointer(&segments);
-            let key = keys.get(&path).cloned().unwrap_or_else(|| path.clone());
-            let system_type = ["type", "wet_emitter_type", "vent_type"]
-                .iter()
-                .map(|f| field(f))
-                .find(|v| !v.is_empty())
-                .unwrap_or("system")
-                .to_string();
-            let product_id = references
-                .get(&key)
-                .copied()
-                .or_else(|| object.get("product_id").and_then(Value::as_u64));
-            match product_id {
-                Some(id) => {
-                    object.insert("product_id".into(), json!(id));
-                }
-                None => errors.push(error(
-                    "E_PRODUCT_REQUIRED",
-                    path.clone(),
-                    format!("'{}' ({system_type}) needs a HEM Database product. Pick its product; the converter never invents a product ID.", key.rsplit('/').next().unwrap_or_default()),
-                )),
-            }
-            slots.push(ProductSlot {
-                key,
-                path,
-                system_type,
-                product_id,
-            });
-        }
-    }
-    for key in references.keys() {
-        if !slots.iter().any(|slot| &slot.key == key) {
-            errors.push(error(
-                "E_PRODUCT_REFERENCE_UNMATCHED",
-                key.clone(),
-                format!("A product was supplied for '{key}', but no system there needs one. Remove it or move it to the system it belongs to."),
-            ));
-        }
-    }
-    slots
 }
 
 #[cfg(test)]
@@ -675,61 +598,6 @@ mod tests {
         assert!(build_type_from_party_walls(&walls_only, &allowed)
             .unwrap_err()
             .contains("plan line"));
-    }
-
-    #[test]
-    fn product_slots_fill_from_the_seam_or_fail() {
-        let mut model = json!({
-            "HeatSourceWet": {"hp": {"type": "HeatPump", "EnergySupply": "mains elec"}},
-            "SpaceHeatSystem": {"rads": {"type": "WetDistribution", "emitters": [
-                {"wet_emitter_type": "radiator", "length": 1.0},
-                {"wet_emitter_type": "radiator", "length": 2.0}
-            ]}},
-            "InfiltrationVentilation": {"MechanicalVentilation": {
-                "cmev": {"vent_type": "Centralised continuous MEV"},
-                "imev": {"vent_type": "Intermittent MEV"}
-            }}
-        });
-        // Emitters are keyed by row name, so reordering them cannot move a product.
-        let keys = BTreeMap::from([
-            (
-                "/SpaceHeatSystem/rads/emitters/0".into(),
-                "/SpaceHeatSystem/rads/emitters/Hall".into(),
-            ),
-            (
-                "/SpaceHeatSystem/rads/emitters/1".into(),
-                "/SpaceHeatSystem/rads/emitters/Bed".into(),
-            ),
-        ]);
-        let references = ProductReferences::from([
-            ("/HeatSourceWet/hp".into(), 693001),
-            ("/SpaceHeatSystem/rads/emitters/Bed".into(), 650000),
-            ("/HeatSourceWet/gone".into(), 1),
-        ]);
-        let mut errors = Vec::new();
-        let slots = apply_product_references(&mut model, &references, &keys, &mut errors);
-        assert_eq!(model["HeatSourceWet"]["hp"]["product_id"], 693001);
-        assert_eq!(
-            model["SpaceHeatSystem"]["rads"]["emitters"][1]["product_id"],
-            650000
-        );
-        let found: Vec<_> = errors
-            .iter()
-            .map(|e| (e.code.as_str(), e.path.as_str()))
-            .collect();
-        assert_eq!(
-            found,
-            [
-                ("E_PRODUCT_REQUIRED", "/SpaceHeatSystem/rads/emitters/0"),
-                (
-                    "E_PRODUCT_REQUIRED",
-                    "/InfiltrationVentilation/MechanicalVentilation/cmev"
-                ),
-                ("E_PRODUCT_REFERENCE_UNMATCHED", "/HeatSourceWet/gone"),
-            ]
-        );
-        assert!(errors[0].message.contains("'Hall' (radiator)"));
-        assert_eq!(slots.len(), 4);
     }
 
     /// Paths of the full-input definitions that require `product_id`, with the `type` (or

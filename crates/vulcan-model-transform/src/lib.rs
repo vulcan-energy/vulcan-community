@@ -219,8 +219,8 @@ impl ModelProfile {
         }
     }
 
-    /// Systems reference HEM Database products (`product_id`), filled through
-    /// `TransformRequest::product_references`. EPC differs: 46 schema definitions require
+    /// Systems reference HEM Database products (`product_id`), resolved from
+    /// `TransformRequest::product_data` (`epc_products`). EPC differs: 46 schema definitions require
     /// `product_id`; the Orchestrator substitutes each product record before the wrapper runs.
     pub(crate) fn references_products(self) -> bool {
         match self {
@@ -322,27 +322,39 @@ pub struct TransformRequest {
     #[serde(default)]
     pub conversion_profile: ConversionProfile,
     pub version_metadata: VersionMetadata,
-    /// Product seam: HEM Database product IDs keyed by `ProductSlot::key`. A product picker
-    /// or a default-product resolver fills it; the transform never invents an ID. A key no
-    /// system has is an error. Ignored unless the profile references products.
-    #[serde(default, skip_serializing_if = "ProductReferences::is_empty")]
-    pub product_references: ProductReferences,
+    /// The HEM Database product CSVs the target pins, keyed by file name (for example
+    /// `ProductIdentification.csv`). The host passes its target's verified bytes; a profile
+    /// that references products fails without them. Ignored by every other profile.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub product_data: epc_products::ProductData,
 }
 
-pub type ProductReferences = std::collections::BTreeMap<String, u64>;
+/// Where a slot's product came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductSource {
+    /// Picked by the user: on the element, or by a model setting.
+    Product,
+    /// Chosen by a rule on this conversion; never stored on the element.
+    Default,
+}
 
 /// A system that needs a HEM Database product, as the converted model holds it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProductSlot {
-    /// The key for `TransformRequest::product_references`: the model path, with an emitter's
-    /// array index replaced by its Wet Emitters row name so reordering rows moves nothing.
-    pub key: String,
     /// Model path of the system object in the converted model.
     pub path: String,
-    /// The system's own type (`type`, or `wet_emitter_type` for an emitter).
+    /// The system's own type (`type`, `wet_emitter_type` or `vent_type`).
     pub system_type: String,
     /// The product the slot carries, if any. None means the model is invalid.
     pub product_id: Option<u64>,
+    pub source: ProductSource,
+    /// The product's brand, model name and qualifier.
+    pub label: Option<String>,
+    /// How the product was chosen, or what the user must pick.
+    pub rule: String,
+    /// The HEM Database technology types this slot accepts.
+    pub technology_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -417,7 +429,15 @@ pub fn transform_geometry_csv(
     )
     .map_err(|error| TransformError::Schema(error.to_string()))?;
     builder.set_conversion_profile(request.conversion_profile);
-    builder.set_product_references(request.product_references.clone());
+    if request.profile.references_products() {
+        if request.product_data.is_empty() {
+            return Err(TransformError::InvalidRequest("This target references HEM Database products, but the request has no product data. Prepare the model through its pinned target.".into()));
+        }
+        builder.set_product_database(
+            epc_products::ProductDatabase::parse(&request.product_data)
+                .map_err(TransformError::InvalidRequest)?,
+        );
+    }
     let model = builder
         .build_json(&csv_data)
         .map_err(TransformError::Build)?;
