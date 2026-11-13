@@ -99,6 +99,7 @@ export function dropAssemblyEnvelopeOnFabricOverride(
     && !sameFabricValue(field, prev[field], nextExtra[field])
     && !sameFabricValue(field, assemblyValue(envelope as Record<string, unknown>), nextExtra[field]));
   if (!overridden) return nextExtra;
-  const { vulcan_assembly_v1: _dropped, ...rest } = nextExtra;
+  const rest = { ...nextExtra };
+  delete rest.vulcan_assembly_v1;
   return rest;
 }
