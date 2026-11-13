@@ -31,13 +31,14 @@ Living,Zone,100,40
 fn transform_uses_caller_selected_profile_and_version_metadata() {
     let output = transform_geometry_csv(TransformRequest {
         conversion_profile: Default::default(),
+        product_references: Default::default(),
         csv: MINIMAL_CSV.to_string(),
         schema_json: MINIMAL_SCHEMA.to_string(),
         defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.to_string(),
         profile: ModelProfile::Fhs,
         version_metadata: VersionMetadata {
             hem_core_version: "caller-core-version".to_string(),
-            fhs_wrapper_version: Some("caller-fhs-version".to_string()),
+            wrapper_version: Some("caller-fhs-version".to_string()),
         },
     })
     .expect("explicit-input transform should return a work-in-progress model");
@@ -52,13 +53,14 @@ fn transform_uses_caller_selected_profile_and_version_metadata() {
 fn transform_rejects_missing_caller_supplied_content() {
     let error = transform_geometry_csv(TransformRequest {
         conversion_profile: Default::default(),
+        product_references: Default::default(),
         csv: String::new(),
         schema_json: MINIMAL_SCHEMA.to_string(),
         defaults_json: "{}".to_string(),
         profile: ModelProfile::Core,
         version_metadata: VersionMetadata {
             hem_core_version: "caller-core-version".to_string(),
-            fhs_wrapper_version: None,
+            wrapper_version: None,
         },
     })
     .expect_err("empty CSV must fail loudly");
@@ -74,15 +76,16 @@ fn python_conversion_profiles_reject_mismatched_engine_wrapper_metadata() {
         defaults_json: "{}".into(),
         profile: ModelProfile::Fhs,
         conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
+        product_references: Default::default(),
         version_metadata: VersionMetadata {
             hem_core_version: "1.0.0a9".into(),
-            fhs_wrapper_version: Some("1.0.0a8".into()),
+            wrapper_version: Some("1.0.0a8".into()),
         },
     })
     .unwrap_err();
     assert!(error
         .to_string()
-        .contains("matching core and FHS wrapper 1.0.0a8"));
+        .contains("matching core and wrapper 1.0.0a8"));
 }
 
 #[test]
@@ -123,9 +126,10 @@ fn canonical_profiles_preserve_legacy_output_and_accept_independent_versions() {
             defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
             profile: ModelProfile::Fhs,
             conversion_profile: legacy,
+            product_references: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: version.into(),
-                fhs_wrapper_version: Some(version.into()),
+                wrapper_version: Some(version.into()),
             },
         };
         let old = transform_geometry_csv(request.clone()).unwrap();
@@ -136,7 +140,7 @@ fn canonical_profiles_preserve_legacy_output_and_accept_independent_versions() {
         assert_eq!(old.validation, new.validation);
         neutral.version_metadata = VersionMetadata {
             hem_core_version: "future-core".into(),
-            fhs_wrapper_version: Some("independent-wrapper".into()),
+            wrapper_version: Some("independent-wrapper".into()),
         };
         assert!(transform_geometry_csv(neutral).is_ok());
     }
@@ -159,9 +163,10 @@ fn physical_opening_contracts_require_fhs_but_divided_contracts_keep_core_suppor
             defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
             profile: ModelProfile::Core,
             conversion_profile,
+            product_references: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "caller-core".into(),
-                fhs_wrapper_version: None,
+                wrapper_version: None,
             },
         });
         if matches!(
@@ -181,7 +186,7 @@ fn physical_opening_contracts_require_fhs_but_divided_contracts_keep_core_suppor
             assert!(result
                 .unwrap_err()
                 .to_string()
-                .contains("requires the FHS profile"));
+                .contains("requires a wrapper profile"));
         }
     }
 }
@@ -201,9 +206,10 @@ Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0
         defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
         profile: ModelProfile::Fhs,
         conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
+        product_references: Default::default(),
         version_metadata: VersionMetadata {
             hem_core_version: "1.0.0a8".into(),
-            fhs_wrapper_version: Some("1.0.0a8".into()),
+            wrapper_version: Some("1.0.0a8".into()),
         },
     })
     .unwrap();
@@ -252,9 +258,10 @@ Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0
             defaults_json: defaults_json.into(),
             profile: ModelProfile::Fhs,
             conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
+            product_references: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "1.0.0a8".into(),
-                fhs_wrapper_version: Some("1.0.0a8".into()),
+                wrapper_version: Some("1.0.0a8".into()),
             },
         })
         .unwrap()
@@ -303,9 +310,10 @@ IV,Living,System,InfiltrationVentilation,\"{\"\"InfiltrationVentilation\"\":{\"\
             defaults_json: defaults.into(),
             profile: ModelProfile::Fhs,
             conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
+            product_references: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "1.0.0a8".into(),
-                fhs_wrapper_version: Some("1.0.0a8".into()),
+                wrapper_version: Some("1.0.0a8".into()),
             },
         })
         .unwrap()
@@ -354,9 +362,10 @@ Wall,Living,BuildingElementOpaque,10,{pitch},180,{u_value},2.5,4,0
             defaults_json: read("defaults/defaults_template.json"),
             profile: ModelProfile::Fhs,
             conversion_profile: Default::default(),
+            product_references: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "1.0.0a7".into(),
-                fhs_wrapper_version: Some("1.0.0a7".into()),
+                wrapper_version: Some("1.0.0a7".into()),
             },
         })
     };
@@ -390,9 +399,10 @@ fn derived_numbers_that_overflow_fail_with_e055_instead_of_panicking() {
             defaults_json: read("defaults/defaults_template.json"),
             profile,
             conversion_profile: Default::default(),
+            product_references: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: "1.0.0a7".into(),
-                fhs_wrapper_version: wrapper,
+                wrapper_version: wrapper,
             },
         })
     };
@@ -462,9 +472,10 @@ Unset,Living,BuildingElementTransparent,1.2,90,1,1.2,3.6,1.2,,0.5,"2,0,1|3,0,1",
             defaults_json: DEFAULTS_TEMPLATE.into(),
             profile: ModelProfile::Fhs,
             conversion_profile,
+            product_references: Default::default(),
             version_metadata: VersionMetadata {
                 hem_core_version: version.into(),
-                fhs_wrapper_version: Some(version.into()),
+                wrapper_version: Some(version.into()),
             },
         })
         .unwrap();

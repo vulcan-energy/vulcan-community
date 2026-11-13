@@ -1200,7 +1200,7 @@ mod tests {
     fn a8_version() -> crate::VersionMetadata {
         crate::VersionMetadata {
             hem_core_version: "1.0.0a8".into(),
-            fhs_wrapper_version: Some("1.0.0a8".into()),
+            wrapper_version: Some("1.0.0a8".into()),
         }
     }
     #[test]

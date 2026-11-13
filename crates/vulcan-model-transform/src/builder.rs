@@ -1167,6 +1167,7 @@ const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "Ventilation_altitude",
     "Ventilation_ventilation_zone_base_height",
     "Ventilation_noise_nuisance",
+    "Ventilation_cross_vent_possible",
     "BuildingLength",
     "BuildingWidth",
     "NumberOfHotTappedRooms",
@@ -1181,6 +1182,8 @@ const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "General_storeys_in_dwelling",
     "General_storey_of_dwelling",
     "General_storeys_in_building",
+    "IsExistingBuilding",
+    "HasElectricitySmartMeter",
 ];
 
 /// Metadata rows that set a model input. A present row with no value is E066: it must never
@@ -1200,6 +1203,7 @@ const METADATA_INPUT_FIELD_NAMES: &[&str] = &[
     "Ventilation_altitude",
     "Ventilation_ventilation_zone_base_height",
     "Ventilation_noise_nuisance",
+    "Ventilation_cross_vent_possible",
     "BuildingLength",
     "BuildingWidth",
     "NumberOfHotTappedRooms",
@@ -1213,6 +1217,8 @@ const METADATA_INPUT_FIELD_NAMES: &[&str] = &[
     "General_storeys_in_dwelling",
     "General_storey_of_dwelling",
     "General_storeys_in_building",
+    "IsExistingBuilding",
+    "HasElectricitySmartMeter",
 ];
 
 const COLD_WATER_SOURCE_MAINS: &str = "mains water";
@@ -1485,11 +1491,22 @@ pub struct JSONBuilder {
     csv_rows: RefCell<Vec<(String, String)>>,
     /// Exact upstream core version supplied by the host for FHS input metadata.
     hem_core_version: String,
+    /// Host-supplied HEM Database products by system model path (see `ProductSlot`).
+    product_references: crate::ProductReferences,
+    product_slots: RefCell<Vec<crate::ProductSlot>>,
 }
 
 impl JSONBuilder {
     pub fn set_conversion_profile(&mut self, profile: crate::ConversionProfile) {
         self.input_contract = profile.input_contract();
+    }
+
+    pub fn set_product_references(&mut self, references: crate::ProductReferences) {
+        self.product_references = references;
+    }
+
+    pub fn take_product_slots(&self) -> Vec<crate::ProductSlot> {
+        std::mem::take(&mut *self.product_slots.borrow_mut())
     }
 
     /// Top-level property names the active schema accepts. Used to reject unknown
@@ -1533,6 +1550,8 @@ impl JSONBuilder {
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
+            product_references: Default::default(),
+            product_slots: RefCell::new(Vec::new()),
         };
 
         builder.index_templates();
@@ -1567,6 +1586,8 @@ impl JSONBuilder {
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
             hem_core_version: version_metadata.hem_core_version.clone(),
+            product_references: Default::default(),
+            product_slots: RefCell::new(Vec::new()),
         };
         builder.index_templates();
         Ok(builder)
@@ -1960,10 +1981,11 @@ impl JSONBuilder {
         // Process root-level sections (includes merge_ventilation_systems, merge_water_pipework, merge_wet_emitters)
         self.process_root_level_sections(&mut result, csv_data)?;
 
-        if self.profile.requires_fhs_wrapper_fields() {
-            self.apply_fhs_cold_water_source(&mut result);
-            self.sanitize_fhs_output(&mut result);
+        if self.profile.uses_wrapper_field_shapes() {
+            self.apply_wrapper_cold_water_source(&mut result);
+            self.sanitize_wrapper_output(&mut result);
         }
+        self.apply_epc_field_shapes(&mut result, csv_data);
 
         crate::target_mappings::map_contract_unobstructed_shading(&mut result, self.input_contract);
         crate::target_mappings::map_flat_exhaust_position(&mut result, self.input_contract);
@@ -1979,7 +2001,68 @@ impl JSONBuilder {
         Ok(result)
     }
 
-    fn sanitize_fhs_output(&self, result: &mut Value) {
+    /// EPC full-input shapes, each behind its capability question, before schema projection
+    /// drops the fields they move.
+    fn apply_epc_field_shapes(
+        &self,
+        result: &mut Value,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+    ) {
+        let mut errors = Vec::new();
+        let mut notices = Vec::new();
+        if self.profile.states_appliance_presence() {
+            crate::epc_mappings::map_appliances(
+                result,
+                csv_data,
+                &self.defaults,
+                &mut errors,
+                &mut notices,
+            );
+        }
+        if self.profile.lists_pv_panels() {
+            crate::epc_mappings::map_pv_panels(result);
+        }
+        if self.profile.states_cylinder_coil_and_tank_controls() {
+            crate::epc_mappings::map_cylinder_coils(
+                result,
+                &self.defaults,
+                &mut errors,
+                &mut notices,
+            );
+        }
+        if self.profile.derives_build_type_from_party_walls() {
+            let stated = csv_data.get("Metadata").into_iter().flatten().any(|row| {
+                matches!(extract_metadata_field(row), (Some(name), Some(value)) if name == "General_build_type" && value.as_str() != Some("house"))
+            });
+            if !stated {
+                match crate::epc_mappings::build_type_from_party_walls(csv_data) {
+                    Ok(build_type) => {
+                        result["General"]["build_type"] = Value::String(build_type.into());
+                    }
+                    Err(message) => errors.push(ValidationError {
+                        code: "E_EPC_BUILD_TYPE".into(),
+                        path: "/General/build_type".into(),
+                        message,
+                        schema_path: None,
+                        keyword: None,
+                    }),
+                }
+            }
+        }
+        if self.profile.references_products() {
+            let slots = crate::epc_mappings::apply_product_references(
+                result,
+                &self.product_references,
+                &mut errors,
+            );
+            *self.product_slots.borrow_mut() = slots;
+        }
+        self.name_csv_rows(&mut errors);
+        self.non_fatal_errors.borrow_mut().extend(errors);
+        self.schema_omissions.borrow_mut().extend(notices);
+    }
+
+    fn sanitize_wrapper_output(&self, result: &mut Value) {
         if let Some(root) = result.as_object_mut() {
             root.remove("temp_internal_air_static_calcs");
             root.remove("SimulationTime");
@@ -2009,7 +2092,9 @@ impl JSONBuilder {
                 .get_mut("InfiltrationVentilation")
                 .and_then(|v| v.as_object_mut())
             {
-                infiltration.remove("cross_vent_possible");
+                if !self.profile.keeps_cross_vent_possible() {
+                    infiltration.remove("cross_vent_possible");
+                }
                 infiltration.remove("cross_vent_factor");
             }
         }
@@ -2542,6 +2627,39 @@ impl JSONBuilder {
                         ] {
                             clear_csv_owned_seed_fields(obj, element_row, section);
                         }
+                        if self.profile.uses_solar_absorption_coeff() {
+                            // The authored colour wins over the template's; an authored
+                            // coefficient wins over both and is merged below.
+                            let colour = element_row
+                                .get("extra_json")
+                                .and_then(|extra| extra.get("colour"))
+                                .or_else(|| obj.get("colour"))
+                                .cloned();
+                            if let Some(colour) = colour {
+                                match colour
+                                    .as_str()
+                                    .and_then(crate::epc_mappings::solar_absorption_coeff)
+                                {
+                                    Some(coeff) => {
+                                        obj.insert(
+                                            "solar_absorption_coeff".to_string(),
+                                            serde_json::json!(coeff),
+                                        );
+                                    }
+                                    None => self.push_non_fatal(
+                                        "E055",
+                                        &crate::json_pointer(&[
+                                            "Zone",
+                                            zone_name,
+                                            "BuildingElement",
+                                            element_name,
+                                            "colour",
+                                        ]),
+                                        &format!("Element '{element_name}' colour {colour} must be Light, Intermediate or Dark."),
+                                    ),
+                                }
+                            }
+                        }
                         if !allowed_building_element_props.is_empty() {
                             obj.retain(|k, _| allowed_building_element_props.contains(k));
                         } else {
@@ -2709,7 +2827,7 @@ impl JSONBuilder {
                         }
                     }
 
-                    if self.profile.requires_fhs_wrapper_fields() {
+                    if self.profile.uses_wrapper_field_shapes() {
                         if let Some(element_obj_map) = element_obj.as_object_mut() {
                             self.normalize_building_element_for_fhs(
                                 element_obj_map,
@@ -3259,7 +3377,7 @@ impl JSONBuilder {
                 .ok_or_else(|| {
                     BuildError::new("E038", &format!("EnergySupply '{name}' is not an object"))
                 })?;
-            if self.profile.requires_fhs_wrapper_fields() {
+            if self.profile.uses_wrapper_field_shapes() {
                 Self::clean_energy_supply_entry_for_fhs(entry);
             }
         }
@@ -3422,7 +3540,7 @@ impl JSONBuilder {
         // This is done here instead of in merge_compliance_settings to ensure it happens after calculate_leaks_areas
         self.merge_air_permeability_from_metadata(result, csv_data)?;
 
-        if self.profile.requires_fhs_wrapper_fields() {
+        if self.profile.uses_wrapper_field_shapes() {
             self.merge_input_metadata(result)?;
         }
 
@@ -4382,7 +4500,7 @@ impl JSONBuilder {
                 // Clear default vents and mechanical ventilation
                 inf_map.insert("Vents".to_string(), Value::Object(serde_json::Map::new()));
                 inf_map.remove("MechanicalVentilation");
-                if self.profile.requires_fhs_wrapper_fields() {
+                if !self.profile.keeps_cross_vent_possible() {
                     inf_map.remove("cross_vent_possible");
                 }
                 inf_map.remove("cross_vent_factor");
@@ -4633,27 +4751,25 @@ impl JSONBuilder {
     }
 
     fn effective_cold_water_source(&self) -> &str {
-        if self.profile.requires_fhs_wrapper_fields() {
+        if self.profile.uses_wrapper_field_shapes() {
             self.cold_water_source.as_str()
         } else {
             COLD_WATER_SOURCE_DEFAULT
         }
     }
 
-    fn apply_fhs_cold_water_source(&self, result: &mut Value) {
-        if !self.profile.requires_fhs_wrapper_fields() {
-            return;
-        }
-
+    fn apply_wrapper_cold_water_source(&self, result: &mut Value) {
         let source = self.effective_cold_water_source().to_string();
         let Some(root) = result.as_object_mut() else {
             return;
         };
 
-        root.insert(
-            "ColdWaterSource".to_string(),
-            serde_json::json!({ source.clone(): {} }),
-        );
+        let root_source = if self.profile.keys_cold_water_source_by_name() {
+            serde_json::json!({ source.clone(): {} })
+        } else {
+            Value::String(source.clone())
+        };
+        root.insert("ColdWaterSource".to_string(), root_source);
 
         for (key, value) in root.iter_mut() {
             if key == "ColdWaterSource" {
@@ -4734,29 +4850,33 @@ impl JSONBuilder {
                             }
                         } else if name == "General_build_type" {
                             if let Some(str_val) = val.as_str() {
-                                match str_val {
-                                    "flat" | "house" => {
-                                        let general = result_obj
-                                            .entry("General".to_string())
-                                            .or_insert_with(|| serde_json::json!({}));
-                                        if let Some(general_obj) = general.as_object_mut() {
-                                            general_obj.insert(
-                                                "build_type".to_string(),
-                                                serde_json::Value::String(str_val.to_string()),
-                                            );
-                                        }
-                                    }
-                                    "" => {}
-                                    other => {
-                                        self.push_non_fatal(
-                                            "E055",
-                                            "Metadata",
-                                            &format!(
-                                                "'General_build_type' must be 'flat' or 'house', \
-                                                 got '{other}'"
-                                            ),
+                                let allowed = self.schema_build_types();
+                                // A deriving profile reads the generic `house` as "derive the
+                                // built form from the party walls" (`apply_epc_field_shapes`).
+                                let derive = str_val == "house"
+                                    && self.profile.derives_build_type_from_party_walls();
+                                if str_val.is_empty() || derive {
+                                } else if allowed.iter().any(|v| v == str_val) {
+                                    let general = result_obj
+                                        .entry("General".to_string())
+                                        .or_insert_with(|| serde_json::json!({}));
+                                    if let Some(general_obj) = general.as_object_mut() {
+                                        general_obj.insert(
+                                            "build_type".to_string(),
+                                            serde_json::Value::String(str_val.to_string()),
                                         );
                                     }
+                                } else {
+                                    let quoted: Vec<String> =
+                                        allowed.iter().map(|v| format!("'{v}'")).collect();
+                                    self.push_non_fatal(
+                                        "E055",
+                                        "Metadata",
+                                        &format!(
+                                            "'General_build_type' must be {}, got '{str_val}'",
+                                            quoted.join(" or ")
+                                        ),
+                                    );
                                 }
                             }
                         } else if name == "General_built_form" {
@@ -4820,6 +4940,8 @@ impl JSONBuilder {
                         else if name == "PartO_active_cooling_required"
                             || name == "PartGcompliance"
                             || name == "KitchenExtractorHoodExternal"
+                            || name == "IsExistingBuilding"
+                            || name == "HasElectricitySmartMeter"
                         {
                             if let Some(bool_val) =
                                 self.csv_bool_non_fatal(Some(&val), &name, "Metadata")
@@ -4900,7 +5022,7 @@ impl JSONBuilder {
             }
         }
 
-        self.apply_fhs_implicit_false_root_booleans(result);
+        self.apply_implicit_false_root_booleans(result);
 
         // A Metadata input with no row keeps the template value, or the FHS default above. Every
         // other Metadata merge (ventilation, air permeability) only writes present rows, so the
@@ -4963,12 +5085,8 @@ impl JSONBuilder {
         Ok(())
     }
 
-    /// When using the FHS schema, ensure required root booleans exist by inserting `false` when
-    /// CSV metadata did not set them.
-    fn apply_fhs_implicit_false_root_booleans(&self, result: &mut Value) {
-        if !self.profile.requires_fhs_wrapper_fields() {
-            return;
-        }
+    /// Insert `false` for each root boolean the profile defaults when CSV metadata did not set it.
+    fn apply_implicit_false_root_booleans(&self, result: &mut Value) {
         // The documented default for an ABSENT Metadata row (see the Geometry CSV contract); a
         // blank row is E066. It stays in code, not the template: pinned preparation requires the
         // workspace template to match the published bundle byte for byte, and edited workspace
@@ -4976,17 +5094,8 @@ impl JSONBuilder {
         let Some(root) = result.as_object_mut() else {
             return;
         };
-        if !root.contains_key("KitchenExtractorHoodExternal") {
-            root.insert(
-                "KitchenExtractorHoodExternal".to_string(),
-                serde_json::Value::Bool(false),
-            );
-        }
-        if !root.contains_key("PartO_active_cooling_required") {
-            root.insert(
-                "PartO_active_cooling_required".to_string(),
-                serde_json::Value::Bool(false),
-            );
+        for key in self.profile.implicit_false_root_booleans() {
+            root.entry(key.to_string()).or_insert(Value::Bool(false));
         }
     }
 
@@ -5038,7 +5147,7 @@ impl JSONBuilder {
 
                             if let Some(leaks_obj) = leaks.as_object_mut() {
                                 if leaks_field_name == "test_pressure" {
-                                    if self.profile.requires_fhs_wrapper_fields() {
+                                    if self.profile.uses_wrapper_field_shapes() {
                                         match &val {
                                             Value::String(s) => {
                                                 leaks_obj.insert(
@@ -5124,6 +5233,7 @@ impl JSONBuilder {
                 "Ventilation_altitude",
                 "Ventilation_ventilation_zone_base_height",
                 "Ventilation_noise_nuisance",
+                "Ventilation_cross_vent_possible",
             ]
             .iter()
             .cloned()
@@ -5167,7 +5277,7 @@ impl JSONBuilder {
                                         }
                                     }
                                 }
-                                "noise_nuisance" => {
+                                "noise_nuisance" | "cross_vent_possible" => {
                                     if let Some(bool_val) = self.csv_bool_non_fatal(
                                         Some(&val),
                                         name,
@@ -6755,7 +6865,7 @@ impl JSONBuilder {
         &self,
         heat_source_wet: &mut serde_json::Map<String, Value>,
     ) {
-        if !self.profile.requires_fhs_wrapper_fields() {
+        if !self.profile.wet_heat_sources_state_is_heat_network() {
             return;
         }
         for entry in heat_source_wet.values_mut() {
@@ -7242,7 +7352,17 @@ impl JSONBuilder {
                 // dropped rather than written into the merged JSON.
                 let is_per_metre = number("c_per_m").is_some() || length.is_some();
 
-                if is_per_metre {
+                if self.profile.references_products() {
+                    // The product gives the output and thermal mass; only the installed
+                    // length (`$defs/WetEmitterRadiatorProduct`) is a site input.
+                    let effective_length = effective_length.ok_or_else(|| {
+                        BuildError::new("E047", "A product radiator requires its 'length'")
+                    })?;
+                    put(&mut emitter_obj, "length", Some(effective_length))?;
+                    if let Some(id) = emitter_data.get("product_id").filter(|v| v.is_u64()) {
+                        emitter_obj.insert("product_id".to_string(), id.clone());
+                    }
+                } else if is_per_metre {
                     let c_per_m = number("c_per_m").ok_or_else(|| {
                         BuildError::new(
                             "E047",
@@ -7257,9 +7377,12 @@ impl JSONBuilder {
                 } else {
                     put(&mut emitter_obj, "c", number("c").map(times_units))?;
                 }
-                put(&mut emitter_obj, "n", number("n"))?;
+                if !self.profile.references_products() {
+                    put(&mut emitter_obj, "n", number("n"))?;
+                }
 
-                if is_per_metre {
+                if self.profile.references_products() {
+                } else if is_per_metre {
                     put(
                         &mut emitter_obj,
                         "thermal_mass_per_m",
@@ -8341,6 +8464,24 @@ impl JSONBuilder {
     }
 
     /// Resolve a $ref in the schema
+    /// `General.build_type` values the target schema allows (FHS: `flat`, `house`).
+    fn schema_build_types(&self) -> Vec<String> {
+        let resolve = |node: &Value| -> Option<Value> {
+            match node.get("$ref").and_then(Value::as_str) {
+                Some(reference) => self.resolve_schema_ref(reference).cloned(),
+                None => Some(node.clone()),
+            }
+        };
+        self.schema
+            .pointer("/properties/General")
+            .and_then(resolve)
+            .and_then(|general| general.pointer("/properties/build_type").cloned())
+            .and_then(|build_type| resolve(&build_type))
+            .and_then(|build_type| build_type.get("enum").cloned())
+            .and_then(|values| serde_json::from_value(values).ok())
+            .unwrap_or_else(|| vec!["flat".into(), "house".into()])
+    }
+
     fn resolve_schema_ref(&self, ref_path: &str) -> Option<&Value> {
         // Remove the #/$defs/ prefix
         if let Some(def_name) = ref_path.strip_prefix("#/$defs/") {
@@ -8351,11 +8492,15 @@ impl JSONBuilder {
     }
 
     fn get_zone_schema(&self) -> Option<&Value> {
-        let zone_additional_props = self
-            .schema
-            .get("properties")?
-            .get("Zone")?
-            .get("additionalProperties")?;
+        let zone = self.schema.get("properties")?.get("Zone")?;
+        // A schema may offer the zone map beside another Zone form (EPC: `anyOf` with HEMIE
+        // `Geometry`); the zone map is the branch with `additionalProperties`.
+        let zone_additional_props = zone.get("additionalProperties").or_else(|| {
+            zone.get("anyOf")?
+                .as_array()?
+                .iter()
+                .find_map(|branch| branch.get("additionalProperties"))
+        })?;
 
         if let Some(zone_ref) = zone_additional_props.get("$ref").and_then(|v| v.as_str()) {
             self.resolve_schema_ref(zone_ref)
@@ -10316,7 +10461,7 @@ mod schema_cleanup_tests {
         let builder =
             JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
 
-        builder.sanitize_fhs_output(&mut json);
+        builder.sanitize_wrapper_output(&mut json);
         builder
             .cleanup_against_schema(&mut json)
             .expect("Cleanup should succeed");

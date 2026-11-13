@@ -37,10 +37,35 @@ pub struct FinalizedModel {
     pub validation: ValidationResult,
 }
 
+thread_local! {
+    /// The compiled validator of the schema finalized most recently on this thread, keyed by
+    /// its content hash. A target schema (EPC: 623 KB) is compiled once, not per model.
+    static VALIDATOR: RefCell<Option<(u64, std::rc::Rc<jsonschema::Validator>)>> =
+        const { RefCell::new(None) };
+}
+
+fn schema_hash(schema: &Value) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    schema.to_string().hash(&mut hasher);
+    hasher.finish()
+}
+
 pub fn finalize_model(candidate: &Value, schema: &Value) -> Result<FinalizedModel, String> {
     let (model, omissions) = project_model(candidate, schema)?;
     let schema = normalized_schema_document(schema.clone());
-    let validator = jsonschema::validator_for(&schema).map_err(|e| e.to_string())?;
+    let key = schema_hash(&schema);
+    let validator = VALIDATOR.with(|cache| -> Result<_, String> {
+        let mut cache = cache.borrow_mut();
+        if let Some((cached, validator)) = cache.as_ref() {
+            if *cached == key {
+                return Ok(validator.clone());
+            }
+        }
+        let validator =
+            std::rc::Rc::new(jsonschema::validator_for(&schema).map_err(|e| e.to_string())?);
+        *cache = Some((key, validator.clone()));
+        Ok(validator)
+    })?;
     let validation_model = clone_for_hem_validation(&model);
     let errors = validator
         .iter_errors(&validation_model)
@@ -89,9 +114,7 @@ pub fn project_model(
     schema: &Value,
 ) -> Result<(Value, Vec<SchemaOmission>), String> {
     let schema = normalized_schema_document(schema.clone());
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    schema.to_string().hash(&mut hasher);
-    let schema_key = hasher.finish();
+    let schema_key = schema_hash(&schema);
     CONDITIONS.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.0 != schema_key {
@@ -156,12 +179,25 @@ fn compatible(
     root: &Value,
     depth: usize,
 ) -> Result<bool, String> {
+    compatible_with(schema, instance, root, depth, false)
+}
+
+/// `strict` also requires each required `const` discriminator to be present and every
+/// value of a map to suit the map's value schema. Only the tie-break for alternatives
+/// that remain after presence uses it (EPC: a full-input map beside a HEMIE map).
+fn compatible_with(
+    schema: &Value,
+    instance: &Value,
+    root: &Value,
+    depth: usize,
+    strict: bool,
+) -> Result<bool, String> {
     if depth > 128 {
         return Err("Schema reference nesting exceeds 128".into());
     }
     let resolved = resolve(schema, root)?;
     if !std::ptr::eq(resolved, schema) {
-        return compatible(resolved, instance, root, depth + 1);
+        return compatible_with(resolved, instance, root, depth + 1, strict);
     }
     if let Some(kind) = schema.get("type").and_then(Value::as_str) {
         let matches = match kind {
@@ -187,6 +223,28 @@ fn compatible(
                 }
                 // Enumerations can constrain ordinary declared inputs, not just
                 // discriminators. Invalid enum values must remain validation errors.
+            } else if strict
+                && definition.get("const").is_some()
+                && schema
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .is_some_and(|required| required.iter().any(|r| r == key))
+            {
+                return Ok(false);
+            }
+        }
+    }
+    if strict {
+        if let (Some(values), Some(value_schema)) = (
+            instance.as_object(),
+            schema.get("additionalProperties").filter(|v| v.is_object()),
+        ) {
+            if schema.get("properties").is_none() {
+                for value in values.values() {
+                    if !compatible_with(value_schema, value, root, depth + 1, true)? {
+                        return Ok(false);
+                    }
+                }
             }
         }
     }
@@ -194,7 +252,7 @@ fn compatible(
         if let Some(branches) = schema.get(keyword).and_then(Value::as_array) {
             let mut any = false;
             for branch in branches {
-                any |= compatible(branch, instance, root, depth + 1)?;
+                any |= compatible_with(branch, instance, root, depth + 1, strict)?;
             }
             if !any {
                 return Ok(false);
@@ -237,6 +295,17 @@ fn selected_branches<'a>(
         // its validation result. Only presence distinguishes structural alternatives.
         if !with_required.is_empty() {
             selected = with_required;
+        }
+    }
+    if selected.len() > 1 {
+        let mut strict = Vec::new();
+        for branch in &selected {
+            if compatible_with(branch, instance, root, depth + 1, true)? {
+                strict.push(*branch);
+            }
+        }
+        if !strict.is_empty() {
+            selected = strict;
         }
     }
     Ok(selected)

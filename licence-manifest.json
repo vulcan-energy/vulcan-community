@@ -116,6 +116,16 @@
       "required_action": "Preserve this exact reviewed hash and verify public FHS preflight in the clean export."
     },
     {
+      "path": "data/defaults/defaults_template_epc.json",
+      "source_path": "data/defaults/defaults_template_epc.json",
+      "source_sha256": "d17ea4e7d0427b1905e0b58021e9686f51f5d69979281400bc0e950617923504",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "provenance": "data/defaults/defaults_template.json plus the HEM:EPC fields its schema adds; the coil rates follow the DESNZ Orchestrator demo DESN-H-End-02-HP-MVHR",
+      "required_action": "Preserve this exact reviewed hash; it may differ from data/defaults/defaults_template.json only by HEM:EPC fields."
+    },
+    {
       "path": "data/schemas/core-input.schema.json",
       "source_path": "data/schemas/core-input.schema.json",
       "source_sha256": "b245a756208d6ce68aa434ae2d2536e0f177b5507fac775773450c15a3527e7e",
