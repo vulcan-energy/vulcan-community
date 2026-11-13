@@ -7,7 +7,7 @@ import {
   calculateContextShadingAngularRangeFromCoordinates,
   calculateContextShadingDistanceFromCoordinates,
   rederiveContextShadingFromDrawing,
-  resolveContextShadingWallThickness,
+  contextShadingDistanceDetails,
 } from '../contextShadingGeometry';
 
 // 10 x 6 m floor drawn on the internal wall faces.
@@ -64,12 +64,24 @@ describe('context shading distance (FHS guidance 2.3.1)', () => {
     expect(calculateContextShadingDistanceFromCoordinates(longBlock, square, [])).toBe(4.7);
   });
 
-  it('uses the ground floor wall thickness under an upper floor', () => {
-    const upper = { coordinates: floor.coordinates.map((p) => ({ ...p, z: 1 })) };
+  it('moves each wall out by its own layers, else the floor, else the ground floor below', () => {
+    const layered = {
+      name: 'North wall', type: 'BuildingElementOpaque', pitch: 90,
+      coordinates: [{ x: 10, y: 6, z: 0 }, { x: 0, y: 6, z: 0 }],
+      extra_json: { vulcan_assembly_v1: {
+        schemaVersion: 1, assemblyId: 'a', appliedAt: '2026-11-13T00:00:00Z', thermalResistanceConstruction_m2K_W: 2.5,
+        assemblySnapshot: { layers: [{ kind: 'solid', materialId: 'm', thickness_m: 0.35 }] },
+      } },
+    } as never;
     const ground = { name: 'Ground', type: 'BuildingElementGround', thickness_walls: 0.3, coordinates: floor.coordinates } as never;
-    expect(resolveContextShadingWallThickness(upper, [ground])).toEqual({ thicknessM: 0.3, groundFloorName: 'Ground' });
-    expect(calculateContextShadingDistanceFromCoordinates(block, upper, [ground])).toBe(3.7);
-    expect(resolveContextShadingWallThickness(upper, [])).toBeNull();
+    expect(contextShadingDistanceDetails(block, { ...floor, thickness_walls: 0.2 }, [layered]))
+      .toEqual({ distance: 3.65, thickness: { thicknessM: 0.35, source: 'wall_layers', name: 'North wall' } });
+    expect(contextShadingDistanceDetails(block, { ...floor, thickness_walls: 0.2 }, []))
+      .toEqual({ distance: 3.8, thickness: { thicknessM: 0.2, source: 'floor' } });
+    const upper = { coordinates: floor.coordinates.map((p) => ({ ...p, z: 1 })) };
+    expect(contextShadingDistanceDetails(block, upper, [ground]))
+      .toEqual({ distance: 3.7, thickness: { thicknessM: 0.3, source: 'ground_floor', name: 'Ground' } });
+    expect(contextShadingDistanceDetails(block, upper, [])?.thickness).toEqual({ thicknessM: 0, source: 'none' });
   });
 
   it('keeps the angles at the floor area centroid', () => {

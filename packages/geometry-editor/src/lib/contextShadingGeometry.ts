@@ -4,6 +4,7 @@
 import { roundToTwoDecimals } from '../geometry/constants';
 import type { ContextShading, Element } from '../geometry/types';
 import { isPointInPolygon2D } from './pointInPolygon';
+import { assemblyTotalThicknessMFromOpaqueElement } from './groundSuspendedFabricSync';
 
 type PlanPoint = { x: number; y: number };
 
@@ -152,20 +153,29 @@ const storeyOf = (element: { floorId?: string; coordinates?: readonly { z?: numb
 const isVerticalWall = (element: ModelElement) =>
   element.coordinates.length === 2 || (Number.isFinite(element.pitch) && Math.abs(element.pitch! - 90) <= 10);
 
+/** Where the outside-face offset of the closest external wall came from. */
+export type ContextShadingWallThickness =
+  | { thicknessM: number; source: 'wall_layers'; name: string }
+  | { thicknessM: number; source: 'floor' }
+  | { thicknessM: number; source: 'ground_floor'; name: string }
+  | { thicknessM: 0; source: 'none' };
+
 /**
- * The external wall thickness used to move the floor's internal edges to the outside face: the
- * floor's own `thickness_walls`, otherwise that of a ground floor under it. Null when the model
- * gives neither, so callers can report it.
+ * The floor-level fallback when the wall itself has no construction layers: the floor's own
+ * `thickness_walls`, otherwise that of a ground floor under it, otherwise none (the internal
+ * line, which validation reports).
  */
-export function resolveContextShadingWallThickness(
+function floorWallThickness(
   parentElement: Pick<Element, 'coordinates'> & { thickness_walls?: number },
   elements: readonly ModelElement[],
-): { thicknessM: number; groundFloorName?: string } | null {
-  if (Number.isFinite(parentElement.thickness_walls)) return { thicknessM: parentElement.thickness_walls! };
+): ContextShadingWallThickness {
+  if (Number.isFinite(parentElement.thickness_walls)) return { thicknessM: parentElement.thickness_walls!, source: 'floor' };
   const centre = getPlanCenter(parentElement.coordinates);
   const ground = centre && elements.find((element) => element.type === 'BuildingElementGround' &&
     Number.isFinite(element.thickness_walls) && isPointInPolygon2D(centre, element.coordinates));
-  return ground ? { thicknessM: ground.thickness_walls!, groundFloorName: ground.name || 'unnamed' } : null;
+  return ground
+    ? { thicknessM: ground.thickness_walls!, source: 'ground_floor', name: ground.name || 'unnamed' }
+    : { thicknessM: 0, source: 'none' };
 }
 
 /**
@@ -175,43 +185,53 @@ export function resolveContextShadingWallThickness(
  *
  * The parent floor's edges stand in for the walls. An edge under a vertical party wall or wall
  * to an adjacent space on the floor's own storey is not external and is skipped. Edges are
- * drawn on the internal wall faces, so each moves out by the wall thickness
- * (`resolveContextShadingWallThickness`; the internal line when there is none, which
- * validation reports). The closest face is the one nearest the wall; between faces that meet
- * at the nearest corner, the one whose midpoint is nearer the facade line. A result of 0 or
- * less means the object is beside the dwelling, not in front of an external wall.
+ * drawn on the internal wall faces, so each moves out by its wall's thickness: the external
+ * wall element's construction layers, else `floorWallThickness`. The closest face is the one
+ * nearest the wall; between faces that meet at the nearest corner, the one whose midpoint is
+ * nearer the facade line. A result of 0 or less means the object is beside the dwelling, not
+ * in front of an external wall. Also returns the chosen wall's thickness and its source.
  */
-export function calculateContextShadingDistanceFromCoordinates(
+export function contextShadingDistanceDetails(
   contextShading: Pick<ContextShading, 'coordinates'>,
   parentElement: Pick<Element, 'coordinates'> & { thickness_walls?: number; floorId?: string },
   elements: readonly ModelElement[],
-): number {
-  if (!contextShading.coordinates?.length || (parentElement.coordinates?.length ?? 0) < 3) return 0;
+): { distance: number; thickness: ContextShadingWallThickness } | null {
+  if (!contextShading.coordinates?.length || (parentElement.coordinates?.length ?? 0) < 3) return null;
   const ring = openRing(parentElement.coordinates);
   const twiceArea = ring.reduce((sum, a, i) => {
     const b = ring[(i + 1) % ring.length];
     return sum + a.x * b.y - b.x * a.y;
   }, 0);
   const winding = Math.sign(twiceArea);
-  const thickness = resolveContextShadingWallThickness(parentElement, elements)?.thicknessM ?? 0;
+  const fallback = floorWallThickness(parentElement, elements);
   const storey = storeyOf(parentElement);
-  const nonExternalWalls = elements.flatMap((element) =>
-    NON_EXTERNAL_WALL_TYPES.has(element.type) && (element.coordinates?.length ?? 0) >= 2 &&
-    isVerticalWall(element) && storeyOf(element) === storey ? [element.coordinates] : []);
+  const nonExternalWalls: ModelElement[] = [];
+  const externalWalls: ModelElement[] = [];
+  for (const element of elements) {
+    if ((element.coordinates?.length ?? 0) < 2 || !isVerticalWall(element) || storeyOf(element) !== storey) continue;
+    if (NON_EXTERNAL_WALL_TYPES.has(element.type)) nonExternalWalls.push(element);
+    else if (element.type === 'BuildingElementOpaque') externalWalls.push(element);
+  }
   const objectFaces = faces(contextShading.coordinates);
   const objectCenter = getPlanCenter(contextShading.coordinates)!;
 
-  let best: { gap: number; facing: number; distance: number } | null = null;
+  let best: { gap: number; facing: number; distance: number; thickness: ContextShadingWallThickness } | null = null;
   for (const edge of faces(ring)) {
     const [a, b] = edge;
     const length = Math.hypot(b.x - a.x, b.y - a.y);
-    if (length === 0 || nonExternalWalls.some((wall) => edgeCarriesWall(edge, wall))) continue;
+    if (length === 0 || nonExternalWalls.some((wall) => edgeCarriesWall(edge, wall.coordinates))) continue;
+    let thickness = fallback;
+    for (const wall of externalWalls) {
+      const layersM = edgeCarriesWall(edge, wall.coordinates) ? assemblyTotalThicknessMFromOpaqueElement(wall as Element) : null;
+      if (layersM != null) {
+        thickness = { thicknessM: layersM, source: 'wall_layers', name: wall.name || 'unnamed' };
+        break;
+      }
+    }
     // Outward normal: right of the edge direction for an anticlockwise ring.
     const n = { x: (winding * (b.y - a.y)) / length, y: (winding * (a.x - b.x)) / length };
-    const wall: Segment = [
-      { x: a.x + n.x * thickness, y: a.y + n.y * thickness },
-      { x: b.x + n.x * thickness, y: b.y + n.y * thickness },
-    ];
+    const t = thickness.thicknessM;
+    const wall: Segment = [{ x: a.x + n.x * t, y: a.y + n.y * t }, { x: b.x + n.x * t, y: b.y + n.y * t }];
     const wallMid = midpoint(wall);
     const perpendicular = (p: PlanPoint) => (p.x - wallMid.x) * n.x + (p.y - wallMid.y) * n.y;
     let face: { gap: number; offset: number; distance: number } | null = null;
@@ -227,10 +247,18 @@ export function calculateContextShadingDistanceFromCoordinates(
     // Ties go to the facade that faces the object most squarely.
     const facing = perpendicular(objectCenter) / (Math.hypot(objectCenter.x - wallMid.x, objectCenter.y - wallMid.y) || 1);
     if (!best || face.gap < best.gap - 1e-9 || (face.gap < best.gap + 1e-9 && facing > best.facing)) {
-      best = { gap: face.gap, facing, distance: face.distance };
+      best = { gap: face.gap, facing, distance: face.distance, thickness };
     }
   }
-  return best ? roundToTwoDecimals(best.distance) : 0;
+  return best && { distance: roundToTwoDecimals(best.distance), thickness: best.thickness };
+}
+
+export function calculateContextShadingDistanceFromCoordinates(
+  contextShading: Pick<ContextShading, 'coordinates'>,
+  parentElement: Pick<Element, 'coordinates'> & { thickness_walls?: number; floorId?: string },
+  elements: readonly ModelElement[],
+): number {
+  return contextShadingDistanceDetails(contextShading, parentElement, elements)?.distance ?? 0;
 }
 
 /**
