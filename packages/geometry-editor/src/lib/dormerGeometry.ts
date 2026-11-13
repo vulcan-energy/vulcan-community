@@ -10,6 +10,7 @@ import type {
 import { getOpaqueHostBaseElevationAlignedWith3D } from './geometry3dMapper';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
 import { calculatePolygonArea } from './polygonSync';
+import { dropAssemblyEnvelopeOnFabricOverride } from './assemblyAppliedUi';
 import { reverseProfiledLineFace, type ProfileLineFace } from './profileLineFace';
 import {
   computeSlopedPolygonInwardNormal2D,
@@ -298,6 +299,22 @@ export function getDormerThermalOverrideExtraJson(
   extraJson: Record<string, unknown> | undefined | null,
 ): Record<string, unknown> | undefined {
   return sanitizeDormerThermalExtraJson(extraJson);
+}
+
+/**
+ * A dormer thermal section's next override after an edit. Overrides bypass `updateElement`
+ * (they regenerate the bundle), so the assembly override rule runs here, against the base the
+ * section rendered: the stored override, or the representative member's own values.
+ */
+export function dormerThermalOverrideAfterEdit(
+  elementType: string,
+  currentOverride: Record<string, unknown> | undefined,
+  representativeExtraJson: Record<string, unknown> | undefined,
+  editedExtraJson: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const edited = sanitizeDormerThermalExtraJson(editedExtraJson);
+  const base = currentOverride ?? sanitizeDormerThermalExtraJson(representativeExtraJson);
+  return edited && dropAssemblyEnvelopeOnFabricOverride(elementType, base, edited);
 }
 
 function calculatePlanarFaceArea3D(points: Array<{ x: number; y: number; z: number }>): number {

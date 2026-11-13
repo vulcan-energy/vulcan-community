@@ -1962,29 +1962,24 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     });
   }, [activeElementIds, buildPerElementPatches, updateElement]);
 
+  // An edit to a fabric value an applied assembly owns removes the envelope in `updateElement`.
   const applyExtraJsonPatches = useCallback((
     patches: Record<string, Record<string, unknown>>,
-    options?: { clearAssemblyEnvelope?: boolean },
   ) => {
     const entries = Object.entries(patches).filter(([, patch]) => Object.keys(patch).length > 0);
     if (entries.length === 0) return;
     entries.forEach(([id, patch], index) => {
       const el = elementsById[id];
       if (!el) return;
-      const nextExtra = { ...extraJsonRecord(el), ...patch };
-      if (options?.clearAssemblyEnvelope) {
-        delete nextExtra.vulcan_assembly_v1;
-      }
-      updateElement(id, { extra_json: nextExtra }, index < entries.length - 1);
+      updateElement(id, { extra_json: { ...extraJsonRecord(el), ...patch } }, index < entries.length - 1);
     });
   }, [elementsById, updateElement]);
 
   const applyExtraJsonChoice = useCallback((
     buildPatch: (el: Element) => Record<string, unknown> | null,
-    options?: { clearAssemblyEnvelope?: boolean },
     targetIds: string[] = activeElementIds,
   ) => {
-    applyExtraJsonPatches(buildPerElementPatches(targetIds, buildPatch), options);
+    applyExtraJsonPatches(buildPerElementPatches(targetIds, buildPatch));
   }, [activeElementIds, applyExtraJsonPatches, buildPerElementPatches]);
 
   const commitElementNumber = useCallback((
@@ -2010,30 +2005,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       applyExtraJsonPatches(buildPerElementPatches(targetIds, (el) => buildPatch(el, value)));
     });
   }, [activeElementIds, applyExtraJsonPatches, buildPerElementPatches, withValidLiveNumber]);
-
-  const commitManualScopeExtraJsonNumber = useCallback((
-    fieldKey: string,
-    targetIds: string[],
-    raw: string,
-    bounds: LiveNumberBounds | undefined,
-    buildPatch: (el: Element, value: number) => Record<string, unknown> | null,
-  ) => {
-    withValidLiveNumber(fieldKey, raw, bounds, (value) => {
-      applyExtraJsonPatches(
-        buildPerElementPatches(targetIds, (el) => buildPatch(el, value)),
-        { clearAssemblyEnvelope: true },
-      );
-    });
-  }, [applyExtraJsonPatches, buildPerElementPatches, withValidLiveNumber]);
-
-  const applyManualScopeExtraJsonChoice = useCallback((
-    targetIds: string[],
-    buildPatch: (el: Element) => Record<string, unknown> | null,
-  ) => {
-    applyExtraJsonPatches(buildPerElementPatches(targetIds, buildPatch), {
-      clearAssemblyEnvelope: true,
-    });
-  }, [applyExtraJsonPatches, buildPerElementPatches]);
 
   const buildTransparentLivePatch = useCallback((
     el: Element,
@@ -2301,13 +2272,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     return {
       value: liveNumberValue(fieldKey, summary, targetIds.length > 0),
       onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
-        commitManualScopeExtraJsonNumber(
-          fieldKey,
-          targetIds,
-          e.target.value,
-          bounds,
-          buildPatch,
-        ),
+        commitExtraJsonNumber(fieldKey, e.target.value, bounds, buildPatch, targetIds),
       onBlur: () => clearLiveDraft(fieldKey),
       placeholder: liveNumberPlaceholder(summary, true, fallbackPlaceholder),
       min: bounds?.min,
@@ -2404,10 +2369,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           onChange={(e) => {
             const value = e.target.value;
             if (!value) return;
-            applyManualScopeExtraJsonChoice(
-              targetIds,
-              (el) => buildPatch(el, value),
-            );
+            applyExtraJsonChoice((el) => buildPatch(el, value), targetIds);
           }}
         >
           <option value="">{placeholder}</option>
@@ -3002,7 +2964,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               opaqueColourSummary,
               activeOpaqueSurfaceIds.length > 0,
               COLOUR_OPTIONS,
-              (value) => applyExtraJsonChoice((el) => (isOpaque(el) ? { colour: value } : null), undefined, activeOpaqueSurfaceIds),
+              (value) => applyExtraJsonChoice((el) => (isOpaque(el) ? { colour: value } : null), activeOpaqueSurfaceIds),
             )}
           </div>
         )}
@@ -3072,7 +3034,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               partyWallLiningTypeSummary,
               wallDimensionIds.length > 0,
               PARTY_WALL_LINING_OPTIONS,
-              (value) => applyExtraJsonChoice((el) => (isPartyWall(el) ? { party_wall_lining_type: value } : null), undefined, wallDimensionIds),
+              (value) => applyExtraJsonChoice((el) => (isPartyWall(el) ? { party_wall_lining_type: value } : null), wallDimensionIds),
               undefined,
               wallDimensionIds,
             )}
@@ -3236,7 +3198,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           (value) =>
             applyExtraJsonChoice((el) =>
               isTransparent(el) ? { security_risk: value === 'true' } : null,
-              undefined,
               activeWindowSurfaceIds,
             ),
           undefined,

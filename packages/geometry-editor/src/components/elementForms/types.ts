@@ -43,11 +43,11 @@ export interface OnSiteHostDerivation {
   derived: { base_height?: number; pitch?: number; orientation360?: number };
 }
 
-/** Bindings onto orchestrator state the wall family (BuildingElementOpaque/
- * Transparent/Ground/PartyWall/Adjacent) still owns directly — it is not extracted
- * into a module yet. WindowShading, ContextShading, and Vents share pieces of this
- * state with the wall family and MUST read/write it only through these bindings;
- * the orchestrator remains the sole owner of the underlying state. Captured once by
+/** Bindings onto the wall family's shared state (BuildingElementOpaque/
+ * Transparent/Ground/PartyWall/Adjacent), owned by useWallSharedFormState
+ * (wallShared.tsx); the derived wall values come from useWallFamilyFormState
+ * (wallFamily.tsx). WindowShading, ContextShading, and Vents share pieces of this
+ * state with the wall family and MUST read/write it only through these bindings. Captured once by
  * a module's useFormState (which does receive ctx) and carried in its returned
  * state so hydrate/reset/buildElementData/renderPanel (which mostly don't) can
  * still reach it — the same passthrough precedent as OnSiteGeneration's

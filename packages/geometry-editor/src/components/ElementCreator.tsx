@@ -7,8 +7,6 @@ import './FilesDropdownPrimitives.css';
 import './ElementCreator.css';
 import { useShallow } from 'zustand/react/shallow';
 import { roundToTwoDecimals } from '../geometry/constants';
-import { normalizeHorizontalAdjacentPlanPitch } from '../geometry/adjacentPlanPitch';
-import { calculatePolygonArea } from '../lib/polygonSync';
 import {
   useGeometryStore,
   useGeometryStoreApi,
@@ -46,13 +44,13 @@ import { buildingElementGroundFormModule } from './elementForms/buildingElementG
 import { adjacentLikeElementFormModule } from './elementForms/adjacentLikeElement';
 import { buildingElementTransparentFormModule } from './elementForms/buildingElementTransparent';
 import { buildingElementOpaqueFormModule } from './elementForms/buildingElementOpaque';
+import { useWallFamilyFormState } from './elementForms/wallFamily';
 import { useDormerBundleEditor } from './DormerBundleEditor';
 import {
   useDecimalInput,
   decimalInputProps,
   readExtraJsonRecord,
   readFiniteNumber,
-  parseLiveDecimalInput,
   formatToTwoDecimals,
   INLINE_FIELD_NOTE_STYLE,
 } from './elementForms/formPrimitives';
@@ -75,23 +73,10 @@ import { ELEMENT_TYPE_ORDER } from '../lib/elementTypeMetadata';
 import { collectHeatSourceWetNamesFromProject } from '../lib/heatSourceWetNamesFromProject';
 import { generateUniqueElementName } from '../lib/elementAutoNaming';
 import {
-  getAreaBasedElementExportGeometry,
-  getElementGrossArea,
-  getTransparentExportMidHeight,
   ADJACENT_LIKE_ELEMENT_TYPES,
   isAdjacentLikeElement,
-  type AdjacentLikeElement,
 } from '../lib/elementArea';
-import {
-  deriveSlopedElementDimensions,
-  getPolygonScalarDimensionSemantics,
-} from '../lib/slopedElementDimensions';
-import {
-  getUnheatedPitchedRoofCeilingElevationM,
-  mergeUnheatedPitchedRoofCeilingElevationExtraJson,
-} from '../lib/unheatedPitchedRoofCeiling';
-import { readProfiledLineFace, type ProfilePoint } from '../lib/profileLineFace';
-import { deriveWallEdgeFromRoofs, wallLeavesRoofsAtM } from '../lib/wallEdgeFromRoofs';
+import { getPolygonScalarDimensionSemantics } from '../lib/slopedElementDimensions';
 import {
   listElementPresetOptions,
 } from '../geometry/parameterLibraryCatalog';
@@ -143,7 +128,6 @@ import {
   getParentControlledFloorZ,
   isElementFloorControlledByParent,
 } from '../lib/parentControlledFloor';
-import { WallShapeRows, type WallShapeCommit } from './WallShapeRows';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { useTargetValidationFlags } from '../hooks/useTargetRules';
 import {
@@ -172,6 +156,7 @@ import {
   getDormerBundleMetadata,
   getDormerBundleName,
   getDormerThermalOverrideExtraJson,
+  dormerThermalOverrideAfterEdit,
   isDormerAnchorElement,
   isDormerBundleNameManual,
   type DormerBundleRole,
@@ -663,19 +648,6 @@ function readViewerElevationValue(element: Element): number | '' {
 // types like Vents/MechanicalVentilation via DOMAIN_ELEVATION_FIELD_TYPES) —
 // verified it has no wall-exclusive shape, so it stays here rather than
 // moving alongside the adjacent-like trio.
-
-type AreaBasedExportElement =
-  | BuildingElementOpaque
-  | BuildingElementTransparent
-  | AdjacentLikeElement;
-
-function isAreaBasedExportElement(element: Element): element is AreaBasedExportElement {
-  return (
-    element.type === 'BuildingElementOpaque'
-    || element.type === 'BuildingElementTransparent'
-    || isAdjacentLikeElement(element)
-  );
-}
 
 // PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES moved to elementForms/
 // adjacentLikeElement.tsx (slice-6 brief STAGE 2) — grep-verified its only
@@ -1554,10 +1526,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const [assemblyCalculatorOpen, setAssemblyCalculatorOpen] = useState(false);
   /** When set, assembly modal edits this dormer thermal part (see `assemblyInitialSnapshot` after dormer helpers). */
   const [dormerAssemblySection, setDormerAssemblySection] = useState<DormerThermalSectionKey | null>(null);
-  const [wallShapeOpen, setWallShapeOpen] = useKeyedState(
-    selection?.id ?? 'none',
-    false,
-  );
   // selectedParentElementValue/parentElement/setParentElement now live in
   // elementForms/wallShared.tsx (wallShared.parentElement/setParentElement).
   // selectedDormerType/dormerDepth/dormerRoofIsUnheatedPitchedRoof moved to
@@ -3444,10 +3412,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const commitDormerThermalSectionChanges = (
     sectionKey: DormerThermalSectionKey,
     updatedData: Partial<Element> & { extra_json?: Record<string, unknown> },
+    representative: Element | null,
   ) => {
     if (!selectedDormerMetadata || !selection?.id || !selectedIsDormerAnchor) return;
-    const nextOverride = getDormerThermalOverrideExtraJson(updatedData.extra_json);
     const currentOverride = selectedDormerMetadata.thermal_overrides[sectionKey];
+    const nextOverride = dormerThermalOverrideAfterEdit(
+      String(updatedData.type),
+      currentOverride,
+      representative?.extra_json as Record<string, unknown> | undefined,
+      updatedData.extra_json,
+    );
     if (areDormerThermalOverridesEqual(currentOverride, nextOverride)) {
       return;
     }
@@ -3632,120 +3606,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // new ElementFormRenderCtx.flipElementOrientation (this store action
   // can't be reconstructed generically — see types.ts).
 
-  useEffect(() => {
-    if (!selectedElement || (selection?.type !== 'element' && selection?.type !== 'global')) return;
-    if (
-      selectedElement.type !== 'BuildingElementOpaque' &&
-      selectedElement.type !== 'BuildingElementTransparent' &&
-      !isAdjacentLikeElement(selectedElement)
-    ) {
-      return;
-    }
-
-    const width =
-      typeof selectedElement.width === 'number'
-        ? roundToTwoDecimals(selectedElement.width)
-        : (selectedElement.width ?? '');
-    const height =
-      typeof selectedElement.height === 'number'
-        ? roundToTwoDecimals(selectedElement.height)
-        : (selectedElement.height ?? '');
-    const area =
-      typeof selectedElement.area === 'number'
-        ? roundToTwoDecimals(selectedElement.area)
-        : (selectedElement.area ?? '');
-    wallShared.widthInputSetValueRef.current(width);
-    wallShared.heightInputSetValueRef.current(height);
-    wallShared.areaInputSetValueRef.current(area);
-  // wallShared.*SetValueRef are stable ref objects (useRef never changes identity)
-  // — listing them is a no-op for when this effect re-runs, but satisfies
-  // exhaustive-deps, which (unlike a same-component useRef) can't verify
-  // stability through a property access on another hook's return value.
-  }, [
-    selection?.id,
-    selection?.type,
-    selectedElement,
-    wallShared.areaInputSetValueRef,
-    wallShared.heightInputSetValueRef,
-    wallShared.widthInputSetValueRef,
-  ]);
-
-  // Surface-facing control must read pitch from the store (`selectedElement`), not only local
-  // `pitch` state — they can diverge, which made re-picking 0 a no-op and mis-saved CSV.
-  const horizontalPolygonControlPitch = useMemo(() => {
-    if (selection?.type !== 'element' || !selectedElement) return wallShared.pitch;
-    if (!isAdjacentLikeElement(selectedElement) || getElementShape(selectedElement) !== 'polygon') {
-      return wallShared.pitch;
-    }
-    const p = (selectedElement as { pitch?: number }).pitch;
-    if (typeof p === 'number' && Number.isFinite(p)) {
-      return Math.round(p);
-    }
-    return wallShared.pitch;
-  }, [selection?.type, selectedElement, wallShared.pitch]);
-
-  // 90° is the wall/line default; a flat horizontal polygon must be 0 or 180. Heal to match parse/export.
-  useLayoutEffect(() => {
-    if (selection?.type !== 'element' || !selection.id) return;
-    const el = getElementById(selection.id);
-    if (!el || !isAdjacentLikeElement(el)) return;
-    if (getElementShape(el) !== 'polygon') return;
-    const p = (el as { pitch?: number }).pitch;
-    if (typeof p !== 'number' || !Number.isFinite(p)) return;
-    const coords = (el as { coordinates?: Array<{ x: number; y: number; z: number }> }).coordinates;
-    const healed = normalizeHorizontalAdjacentPlanPitch(p, coords);
-    if (healed !== undefined && healed !== p) {
-      updateElement(el.id, { pitch: healed });
-    }
-  }, [selection?.id, selection?.type, getElementById, updateElement, selectedElement, selectedElementV]);
-
-  const derivedPolygonArea = useMemo((): number => {
-    if (!selectedElement?.coordinates || selectedElement.coordinates.length < 3) return 0;
-    try { return roundToTwoDecimals(calculatePolygonArea(selectedElement.coordinates)); } catch { return 0; }
-  }, [selectedElement]);
-
-  // derivedGroundArea/derivedGroundEffectiveArea/derivedGroundShapePerimeter/
-  // groundPerimeterDetails/groundPerimeterManual/derivedGroundPerimeter/
-  // groundPerimeterBreakdownText/resetGroundPerimeterToAuto and the
-  // U-value/extra_json autofill sync effect now live inside
-  // buildingElementGroundFormState (elementForms/buildingElementGround.tsx,
-  // slice-6 brief Stage 1) — the orchestrator reads
-  // buildingElementGroundFormState.derivedGroundArea/derivedGroundPerimeter
-  // directly wherever still needed below (same precedent as
-  // systemFormState.systemSubcategory / wetEmitterFormState.subcategory).
-
-  const liveWidthValue = parseLiveDecimalInput(wallShared.widthInput.inputValue);
-  const liveHeightValue = parseLiveDecimalInput(wallShared.heightInput.inputValue);
-  const liveRectArea = useMemo(
-    () => roundToTwoDecimals(liveWidthValue * liveHeightValue),
-    [liveWidthValue, liveHeightValue],
-  );
-  const selectedSlopedDimensions = useMemo(() => {
-    if (!selectedElement || selectedShape !== 'sloped-polygon') return null;
-    if (
-      selectedElement.type !== 'BuildingElementOpaque' &&
-      selectedElement.type !== 'BuildingElementTransparent' &&
-      !ADJACENT_LIKE_ELEMENT_TYPES.includes(selectedElement.type)
-    ) {
-      return null;
-    }
-    return deriveSlopedElementDimensions(
-      { ...selectedElement, pitch: wallShared.pitch },
-      geometryStore.getState().globalOrientationOffset,
-    );
-  }, [selectedElement, selectedShape, wallShared.pitch, geometryStore]);
-  const selectedSlopedDimensionNotes = useMemo(() => {
-    if (!selectedElement || !selectedSlopedDimensions) return null;
-    const semantics = getPolygonScalarDimensionSemantics(
-      selectedElement.coordinates,
-      selectedSlopedDimensions.width,
-    );
-    if (!isOrientationPitchAxis(selectedElement) && !semantics?.usesEquivalentWidth) return null;
-    return {
-      width: 'Width is equivalent: surface area divided by height, preserving area for tapered shapes.',
-      height: 'Height is the true up-slope length of this sloped shape.',
-    };
-  }, [selectedElement, selectedSlopedDimensions]);
   const selectedPvDimensionNotes = useMemo(() => {
     if (!selectedElement || selectedElement.type !== 'OnSiteGeneration') return null;
     const pitchValue = typeof selectedElement.pitch === 'number' ? selectedElement.pitch : wallShared.pitch;
@@ -3761,38 +3621,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       height: 'Height is equivalent: plan footprint area divided by low-edge width, then pitch-corrected.',
     };
   }, [selectedElement, wallShared.pitch]);
-  const showSlopedWidthReset =
-    !!selectedSlopedDimensions &&
-    !!selectedElement &&
-    (selectedElement as { _widthUserOverride?: boolean })._widthUserOverride === true &&
-    Math.abs(liveWidthValue - selectedSlopedDimensions.width) > 0.01;
-  const showSlopedHeightReset =
-    !!selectedSlopedDimensions &&
-    !!selectedElement &&
-    (selectedElement as { _heightUserOverride?: boolean })._heightUserOverride === true &&
-    Math.abs(liveHeightValue - selectedSlopedDimensions.height) > 0.01;
-  const resetSlopedWidthToCanvas = useCallback(() => {
-    if (!selectedSlopedDimensions) return;
-    wallShared.widthInput.setValue(selectedSlopedDimensions.width);
-    commitExistingElementDraftRef.current({
-      width: selectedSlopedDimensions.width,
-      _widthUserOverride: false,
-    } as Partial<Element>);
-  }, [selectedSlopedDimensions, wallShared.widthInput]);
-  const resetSlopedHeightToCanvas = useCallback(() => {
-    if (!selectedSlopedDimensions) return;
-    wallShared.heightInput.setValue(selectedSlopedDimensions.height);
-    commitExistingElementDraftRef.current({
-      height: selectedSlopedDimensions.height,
-      _heightUserOverride: false,
-    } as Partial<Element>);
-  }, [selectedSlopedDimensions, wallShared.heightInput]);
-  // selectedSlopedTransparentNeedsRebuild/showSlopedTransparentRebuildOpening/
-  // rebuildSelectedSlopedTransparentOpening now live inline inside
-  // buildingElementTransparentFormState's renderPanel (elementForms/
-  // buildingElementTransparent.tsx, slice-6 brief STAGE 3), computed from
-  // ElementFormRenderCtx.selectedSlopedDimensions (which stays here — see
-  // types.ts, it's not Transparent-exclusive).
   const selectedFieldValidationByKey = useMemo(() => {
     const result = new Map<string, { message: string; variant: 'error' | 'warning' }>();
     if (!selectedElement) return result;
@@ -3815,119 +3643,32 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return selectedFieldValidationByKey.get(fieldName) ?? null;
   };
 
-  // selectedOpaqueAreaSummary/canMarkUnheatedPitchedRoof/canMarkExternalDoor
-  // moved to elementForms/buildingElementOpaque.tsx (slice-6 brief STAGE 4)
-  // — all three Opaque-exclusive (decision 7), computed inline in that
-  // module's renderPanel (no new ctx surface needed: elementsById is
-  // already generic, and the state.pitch/elementType/selectedShape reads
-  // are all already threaded).
-  //
-  // unheatedPitchedRoofCeilingElevationSuggestion (below) STAYS here,
-  // unchanged — it needs `floors`, which no module holds (same "computed
-  // orchestrator-side, threaded as a plain render-time value" precedent as
-  // onSiteHostDerivation/selectedPvDimensionNotes) — now exposed to Opaque's
-  // module via ElementFormRenderCtx.unheatedPitchedRoofCeilingElevationSuggestion.
-  const unheatedPitchedRoofCeilingElevationSuggestion = useMemo(() => {
-    if (!selectedElement || selectedElement.type !== 'BuildingElementOpaque') return null;
-    const draftRoof = {
-      ...selectedElement,
-      pitch: wallShared.pitch,
-      base_height: typeof wallShared.baseHeightInput.value === 'number'
-        ? wallShared.baseHeightInput.value
-        : selectedElement.base_height,
-      is_unheated_pitched_roof: true,
-      extra_json: mergeUnheatedPitchedRoofCeilingElevationExtraJson(selectedElement.extra_json, ''),
-    } as BuildingElementOpaque;
-    return getUnheatedPitchedRoofCeilingElevationM(
-      draftRoof,
-      allElements,
-      withEffectiveStoreyHeights(floors, allElements),
-    );
-  }, [selectedElement, wallShared.pitch, wallShared.baseHeightInput.value, allElements, floors]);
-
-  const canUseWallShape = useMemo(() => {
-    if (!selectedElement || selectedShape !== 'line') return false;
-    const t = selectedElement.type;
-    if (
-      t !== 'BuildingElementOpaque'
-      && t !== 'BuildingElementTransparent'
-      && !ADJACENT_LIKE_ELEMENT_TYPES.includes(t)
-    ) {
-      return false;
-    }
-    if (selectedIsDormerAnchor) return false;
-    const ex = selectedElement.extra_json;
-    if (ex && typeof ex === 'object' && !Array.isArray(ex) && (ex as Record<string, unknown>).dormer_bundle) {
-      return false;
-    }
-    if (ex && typeof ex === 'object' && !Array.isArray(ex)) {
-      const gf = (ex as Record<string, unknown>).geometry_face;
-      if (gf && typeof gf === 'object' && gf !== null && !Array.isArray(gf)) {
-        if ((gf as Record<string, unknown>).kind === 'planar-face-3d') return false;
-      }
-    }
-    return true;
-  }, [selectedElement, selectedShape, selectedIsDormerAnchor]);
-
-  const selectedWallFace = useMemo(
-    () => (canUseWallShape && selectedElement ? readProfiledLineFace(selectedElement.extra_json) : null),
-    [canUseWallShape, selectedElement],
-  );
-
-  const fitWallEdgeToRoofs = useCallback(
-    (edge: 'top' | 'bottom', limit: ProfilePoint[]) => (selectedElement
-      ? deriveWallEdgeFromRoofs(
-        selectedElement,
-        allElements,
-        withEffectiveStoreyHeights(floors, allElements),
-        geometryStore.getState().globalOrientationOffset,
-        edge,
-        limit,
-      )
-      : null),
-    [selectedElement, allElements, floors, geometryStore],
-  );
-
-  /** Commits a wall shape edit: a profiled face with its synced scalars, or a plain height. */
-  const applyWallShape = useCallback(
-    (next: WallShapeCommit) => {
-      if (!isExistingElementSelection()) return;
-      const el = getElementById(selection.id);
-      if (!el) return;
-      const extra: Record<string, unknown> =
-        el.extra_json && typeof el.extra_json === 'object' && !Array.isArray(el.extra_json)
-          ? { ...(el.extra_json as Record<string, unknown>) }
-          : {};
-      if ('face' in next) extra.geometry_face = next.face;
-      else delete extra.geometry_face;
-      const draft = { ...el, extra_json: extra, ...('flatHeight' in next ? { height: next.flatHeight } : {}) } as Element;
-      if (!isAreaBasedExportElement(draft)) return;
-      const globalOrientationOffset = geometryStore.getState().globalOrientationOffset;
-      const exp = getAreaBasedElementExportGeometry(draft, globalOrientationOffset);
-      const patch: Partial<Element> = {
-        extra_json: extra,
-        width: exp.width,
-        height: exp.height,
-        area: roundToTwoDecimals(getElementGrossArea(draft, globalOrientationOffset)),
-      };
-      const midHeight = draft.type === 'BuildingElementTransparent'
-        ? getTransparentExportMidHeight(draft as BuildingElementTransparent, globalOrientationOffset)
-        : undefined;
-      commitExistingElementDraftRef.current(midHeight === undefined ? patch : { ...patch, mid_height: midHeight } as Partial<Element>);
-      wallShared.widthInput.setValue(exp.width);
-      wallShared.heightInput.setValue(exp.height);
-      if (midHeight !== undefined) buildingElementTransparentFormState.midHeightInput.setValue(midHeight);
-    },
-    [
-      selection,
-      isExistingElementSelection,
-      getElementById,
-      wallShared.widthInput,
-      wallShared.heightInput,
-      buildingElementTransparentFormState.midHeightInput,
-      geometryStore,
-    ],
-  );
+  const {
+    horizontalPolygonControlPitch,
+    derivedPolygonArea,
+    liveWidthValue,
+    liveHeightValue,
+    liveRectArea,
+    selectedSlopedDimensions,
+    unheatedPitchedRoofCeilingElevationSuggestion,
+    renderLinearDimensionsFields,
+  } = useWallFamilyFormState({
+    selection,
+    selectedElement,
+    selectedShape,
+    wallShared,
+    transparentMidHeightInput: buildingElementTransparentFormState.midHeightInput,
+    getElementById,
+    updateElement,
+    geometryStore,
+    allElements,
+    floors,
+    commitExistingElementDraftRef,
+    elementType,
+    renderFieldLabel,
+    fieldUnit,
+    getFieldValidationState,
+  });
 
   const buildNewElementData = (): Partial<Element> => {
     const viewerElevationPatch =
@@ -4120,6 +3861,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 commitDormerThermalSectionChanges(
                   sectionKey,
                   updatedData as Partial<Element> & { extra_json?: Record<string, unknown> },
+                  element,
                 );
               }}
               collapsible={false}
@@ -4138,22 +3880,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       </details>
     );
   };
-
-  const wallShapeAvailable = canUseWallShape && isExistingElementSelection();
-  // A wall with a stored face keeps the section open: collapsing it would hide its shape.
-  const wallShapeExpanded = wallShapeAvailable && (wallShapeOpen || !!selectedWallFace);
-  const wallShapeToggle =
-    wallShapeAvailable && !selectedWallFace ? (
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm element-editor-input-action"
-        onClick={() => setWallShapeOpen((open) => !open)}
-        aria-expanded={wallShapeExpanded}
-        style={{ whiteSpace: 'nowrap', alignSelf: 'center' }}
-      >
-        Shape
-      </button>
-    ) : null;
 
   const applyHostedParentElement = useCallback(
     (value: string, emptyParentValue: string | null) => {
@@ -4205,115 +3931,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       updateElement,
     ],
   );
-
-  const renderLinearDimensionsFields = (
-    fieldRef: (fieldKey: string) => (el: HTMLDivElement | null) => void,
-    options: { widthStep: string; heightStep: string; includeWallShape?: boolean },
-  ) => {
-    const widthValidation = getFieldValidationState('width', liveWidthValue);
-    const heightValidation = getFieldValidationState('height', liveHeightValue);
-    const heightField = (
-      <>
-        <StandardInput
-          {...decimalInputProps(wallShared.heightInput)}
-          unit={fieldUnit('height')}
-          step={options.heightStep}
-          min="0"
-          variant="ghost"
-          size="md"
-          className="flex-1"
-        />
-        {showSlopedHeightReset ? (
-          <ResetFieldButton
-            align="inline"
-            title={`Use shape-calculated sloped height (${selectedSlopedDimensions?.height ?? ''} m)`}
-            ariaLabel="Use shape calculated height"
-            label="Use shape calculated"
-            onClick={resetSlopedHeightToCanvas}
-          />
-        ) : null}
-        {options.includeWallShape ? wallShapeToggle : null}
-        <FieldValidationIndicator
-          hasIssue={!!heightValidation}
-          issue={heightValidation?.message}
-          variant={heightValidation?.variant}
-        />
-      </>
-    );
-    return (
-      <>
-        {renderFieldLabel('Width (m):', elementType, 'width')}
-        <div
-          className="element-input"
-          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-          ref={fieldRef('width')}
-        >
-          <StandardInput
-            {...decimalInputProps(wallShared.widthInput)}
-            unit={fieldUnit('width')}
-            step={options.widthStep}
-            min="0"
-            variant="ghost"
-            size="md"
-            className="flex-1"
-          />
-          {showSlopedWidthReset ? (
-            <ResetFieldButton
-              align="inline"
-              title={`Use shape-calculated sloped width (${selectedSlopedDimensions?.width ?? ''} m)`}
-              ariaLabel="Use shape calculated width"
-              label="Use shape calculated"
-              onClick={resetSlopedWidthToCanvas}
-            />
-          ) : null}
-          <FieldValidationIndicator
-            hasIssue={!!widthValidation}
-            issue={widthValidation?.message}
-            variant={widthValidation?.variant}
-          />
-        </div>
-        {selectedSlopedDimensionNotes?.width ? (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
-            {selectedSlopedDimensionNotes.width}
-          </div>
-        ) : null}
-        {options.includeWallShape && wallShapeExpanded && selectedElement ? (
-          <WallShapeRows
-            key={selectedElement.id}
-            widthM={Math.hypot(
-              selectedElement.coordinates[1].x - selectedElement.coordinates[0].x,
-              selectedElement.coordinates[1].y - selectedElement.coordinates[0].y,
-            )}
-            face={selectedWallFace}
-            height={(selectedElement as { height?: number }).height ?? 0}
-            topRef={fieldRef('height')}
-            roofModes={selectedElement.type !== 'BuildingElementTransparent'}
-            fitRoof={fitWallEdgeToRoofs}
-            roofEndsAtM={wallLeavesRoofsAtM(selectedElement, allElements)}
-            onCommit={applyWallShape}
-          >
-            {heightField}
-          </WallShapeRows>
-        ) : (
-          <>
-            {renderFieldLabel('Height (m):', elementType, 'height')}
-            <div
-              className="element-input"
-              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-              ref={fieldRef('height')}
-            >
-              {heightField}
-            </div>
-          </>
-        )}
-        {selectedSlopedDimensionNotes?.height ? (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
-            {selectedSlopedDimensionNotes.height}
-          </div>
-        ) : null}
-      </>
-    );
-  };
 
   // MVHR duct/terminal manager cluster (selectedMvhrUnit, select/create/draw
   // helpers, the manager render function, MVHR_MANAGER_* styles) moved to
@@ -5722,8 +5339,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   );
                   const prev = { ...(metadataOverride ?? fallbackOverride ?? {}) } as Record<string, unknown>;
                   commitDormerThermalSectionChanges(dormerAssemblySection, {
+                    type: dormerAssemblyRepresentative.type,
                     extra_json: { ...prev, ...patch },
-                  });
+                  }, dormerAssemblyRepresentative);
                   return;
                 }
                 const el = getElementById(selection.id);

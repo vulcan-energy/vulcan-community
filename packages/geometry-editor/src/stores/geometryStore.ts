@@ -30,6 +30,7 @@ import {
 } from '../lib/slopedElementDimensions';
 import { getExactSnappedVertices, getWallSupportedSnappedVertices, planServiceLineEndpointWelds } from '../lib/snapUtils';
 import { isVulcanUiPartyFloorElement } from '../lib/assemblyMaterialFabric';
+import { dropAssemblyEnvelopeOnFabricOverride } from '../lib/assemblyAppliedUi';
 import { coerceElementToStrictestNumericTyping } from '../lib/schemaCoercion';
 import { cloneJsonValue, jsonValuesEqual } from '../lib/jsonTypes';
 import {
@@ -5488,6 +5489,9 @@ const createGeometryState = (
       const normalizedUpdates: Partial<Element> = { ...updates };
       rejectHeightEditOnProfiledFace(prevElement, updates);
       if (prevElement.nonNumericCells) normalizedUpdates.nonNumericCells = uneditedNonNumericCells(prevElement, updates);
+      if (updates.extra_json) {
+        normalizedUpdates.extra_json = dropAssemblyEnvelopeOnFabricOverride(prevElement.type, prevElement.extra_json, updates.extra_json);
+      }
       if (prevElement.type === 'BuildingElementTransparent' && Object.prototype.hasOwnProperty.call(updates, 'extra_json')) {
         // Advanced-field edits replace extra_json, including unchanged automatic values.
         // Only a changed value or removal records new security-risk intent.
