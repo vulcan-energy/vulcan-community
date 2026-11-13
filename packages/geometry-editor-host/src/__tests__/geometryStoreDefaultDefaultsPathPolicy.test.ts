@@ -79,6 +79,23 @@ describe('geometry store default defaults-path policy', () => {
     expect(store.getState().defaultsPath).toBeUndefined();
   });
 
+  it("uses a pinned target's standard defaults, which follow the pin; a model's own file stays", () => {
+    const store = createGeometryStore({
+      defaultsPathForTarget: (id) => (id === 'epc' ? 'input/defaults/epc.json' : undefined),
+    });
+    store.getState().loadFromCSV('Metadata,,,,\nTargetBundleId,epc,,,\nZone,,,,\n');
+    expect(store.getState().generateCSV()).toContain('DefaultsPath,input/defaults/epc.json,');
+
+    store.getState().setTargetBundleId('fhs');
+    expect(store.getState().defaultsPath).toBe(DEFAULT_DEFAULTS_PATH);
+    store.getState().setTargetBundleId('epc');
+    expect(store.getState().defaultsPath).toBe('input/defaults/epc.json');
+
+    store.getState().setDefaultsPath('input/defaults/mine.json');
+    store.getState().setTargetBundleId('fhs');
+    expect(store.getState().defaultsPath).toBe('input/defaults/mine.json');
+  });
+
   it('keepUnchangedDefaults skips re-reading unchanged defaults and psi tables; default loads still re-read', async () => {
     const csv = [
       'Metadata,,,,,,,,,,,,,',

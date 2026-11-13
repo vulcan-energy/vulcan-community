@@ -129,7 +129,7 @@ import {
   isElementFloorControlledByParent,
 } from '../lib/parentControlledFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
-import { useTargetValidationFlags } from '../hooks/useTargetRules';
+import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -953,7 +953,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const evidenceBridge = useContext(GeometryInspectorEvidenceContext);
   const DetailedJunctionControl =
     inspectorContributions.detailedJunctionSolver?.Control;
-  const productCatalogue = inspectorContributions.productCatalogue;
+  const { hemDatabaseProducts } = useTargetRules();
+  // On a target whose systems take HEM Database products, the product slot picker is the only
+  // product source: the host's sample/catalogue source switch does not apply.
+  const productCatalogue = hemDatabaseProducts ? null : inspectorContributions.productCatalogue;
+  const productSlots = useGeometryStore((s) => s.targetValidation?.productSlots);
 
   useEffect(() => {
     const handle = window.setTimeout(prefetchAdvancedFieldsEditor, 250);
@@ -4125,6 +4129,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       },
       renderMvhrDuctAndTerminalManager,
       productCatalogue,
+      systemHasProductSlot: !!selectedElement?.name && !!productSlots?.some((slot) => slot.row === selectedElement.name),
       renderSpaceHeatSystemPicker,
       renderSpaceHeatSystemEmitterManager,
       // Wall-family generic derived render values — Adjacent-like's first

@@ -2869,6 +2869,13 @@ export interface CreateGeometryStoreOptions {
    * means the host has no implicit workspace defaults resource.
    */
   defaultDefaultsPath?: string | null;
+  /**
+   * Workspace path of a pinned target's own standard defaults, used in place of
+   * defaultDefaultsPath for a document pinned to it; undefined (or an unknown pin) keeps
+   * defaultDefaultsPath. A document on its target's standard defaults moves to the new
+   * target's when the pin changes.
+   */
+  defaultsPathForTarget?: (targetBundleId: string) => string | undefined;
   initialNamingPreferences?: NamingPreferences;
   modelSchemaProfilePort?: GeometryModelSchemaProfilePort;
   schemaPort?: GeometrySchemaPort;
@@ -3169,6 +3176,7 @@ const createGeometryState = (
   },
   ...createIoSlice({
     defaultDefaultsPath,
+    defaultsPathForTarget: options.defaultsPathForTarget,
     hostDocumentMetadataKeys,
     modelSchemaProfilePort,
     schemaPort,

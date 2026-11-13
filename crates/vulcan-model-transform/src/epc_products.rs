@@ -541,6 +541,15 @@ impl Rule {
         }
     }
 
+    /// Names the rule's products: its tables and filter.
+    fn key(&self) -> String {
+        let tables = self.tables().join("+");
+        match self.filter() {
+            Some((field, value)) => format!("{tables} {field}={value}"),
+            None => tables,
+        }
+    }
+
     /// Products of the rule's tables that have its filter.
     pub(crate) fn candidates<'a>(&'a self, db: &'a ProductDatabase) -> Vec<&'a Product> {
         db.products
@@ -559,6 +568,7 @@ pub(crate) fn resolve_products(
     settings: &Settings,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
+    candidates: &mut BTreeMap<String, Vec<ProductCandidate>>,
 ) -> Vec<ProductSlot> {
     let snapshot = model.clone();
     let mut slots = Vec::new();
@@ -609,7 +619,7 @@ pub(crate) fn resolve_products(
                     rule: "no rule".into(),
                     technology_types: vec![],
                     default_source: None,
-                    candidates: vec![],
+                    candidates: None,
                     row: None,
                 });
                 continue;
@@ -648,23 +658,26 @@ pub(crate) fn resolve_products(
                 }
                 _ => None,
             };
-            let candidates: Vec<ProductCandidate> = accepted
-                .iter()
-                .map(|p| {
-                    let radiator = |f: &str| {
-                        (p.table == "ConvectorRadiator")
-                            .then(|| p.fields.get(f).cloned())
-                            .flatten()
-                    };
-                    ProductCandidate {
-                        id: p.id,
-                        label: p.label.clone(),
-                        technology_type: p.technology_type.clone(),
-                        radiator_type: radiator("type"),
-                        height: radiator("height"),
-                    }
-                })
-                .collect();
+            let key = rule.key();
+            candidates.entry(key.clone()).or_insert_with(|| {
+                accepted
+                    .iter()
+                    .map(|p| {
+                        let radiator = |f: &str| {
+                            (p.table == "ConvectorRadiator")
+                                .then(|| p.fields.get(f).cloned())
+                                .flatten()
+                        };
+                        ProductCandidate {
+                            id: p.id,
+                            label: p.label.clone(),
+                            technology_type: p.technology_type.clone(),
+                            radiator_type: radiator("type"),
+                            height: radiator("height"),
+                        }
+                    })
+                    .collect()
+            });
             let picked = object
                 .get("product_id")
                 .and_then(Value::as_u64)
@@ -766,7 +779,7 @@ pub(crate) fn resolve_products(
                 rule: rule_text,
                 technology_types,
                 default_source,
-                candidates,
+                candidates: Some(key),
                 row: None,
             });
         }
@@ -1189,7 +1202,14 @@ pub(crate) mod tests {
         settings: &Settings,
     ) -> (Vec<ProductSlot>, Vec<ValidationError>, Vec<SchemaOmission>) {
         let (mut errors, mut notices) = (Vec::new(), Vec::new());
-        let slots = resolve_products(model, &db(), settings, &mut errors, &mut notices);
+        let slots = resolve_products(
+            model,
+            &db(),
+            settings,
+            &mut errors,
+            &mut notices,
+            &mut BTreeMap::new(),
+        );
         (slots, errors, notices)
     }
 
@@ -1448,7 +1468,7 @@ pub(crate) mod tests {
             rule: String::new(),
             technology_types: vec![],
             default_source: None,
-            candidates: vec![],
+            candidates: None,
             row: None,
         };
         let model = |existing: bool| {

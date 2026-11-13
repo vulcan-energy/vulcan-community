@@ -1567,6 +1567,7 @@ pub struct JSONBuilder {
     /// The model's product settings (Metadata rows), read once per build.
     product_settings: RefCell<crate::epc_products::Settings>,
     product_slots: RefCell<Vec<crate::ProductSlot>>,
+    product_candidates: RefCell<BTreeMap<String, Vec<crate::ProductCandidate>>>,
     /// Model path of each object a Geometry CSV row authored (Systems, wet emitter and
     /// mechanical ventilation rows) and the row's Name, so each product slot names its row.
     slot_rows: RefCell<Vec<(String, String)>>,
@@ -1585,6 +1586,10 @@ impl JSONBuilder {
 
     pub fn take_product_slots(&self) -> Vec<crate::ProductSlot> {
         std::mem::take(&mut *self.product_slots.borrow_mut())
+    }
+
+    pub fn take_product_candidates(&self) -> BTreeMap<String, Vec<crate::ProductCandidate>> {
+        std::mem::take(&mut *self.product_candidates.borrow_mut())
     }
 
     /// Top-level property names the active schema accepts. Used to reject unknown
@@ -1632,6 +1637,7 @@ impl JSONBuilder {
             product_settings: RefCell::default(),
             colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
+            product_candidates: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
 
@@ -1671,6 +1677,7 @@ impl JSONBuilder {
             product_settings: RefCell::default(),
             colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
+            product_candidates: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
         builder.index_templates();
@@ -2196,6 +2203,7 @@ impl JSONBuilder {
                 &settings,
                 &mut errors,
                 &mut notices,
+                &mut self.product_candidates.borrow_mut(),
             );
             crate::epc_products::apply_weather_curves(result, db, &mut errors, &mut notices);
             crate::epc_products::derive_zone_frac_convective(

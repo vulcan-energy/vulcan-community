@@ -471,9 +471,10 @@ pub struct ProductSlot {
     /// What the slot falls back to when the element's own pick is removed, if anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_source: Option<DefaultSource>,
-    /// Every product the slot accepts, for a picker. Empty when the slot has no rule.
-    #[serde(default)]
-    pub candidates: Vec<ProductCandidate>,
+    /// Key in [`TransformOutput::product_candidates`] of every product the slot accepts, for a
+    /// picker; slots with the same rule share one list. None when the slot has no rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidates: Option<String>,
     /// Name of the Geometry CSV row the system comes from, where one does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub row: Option<String>,
@@ -487,6 +488,9 @@ pub struct TransformOutput {
     pub version_metadata: VersionMetadata,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub product_slots: Vec<ProductSlot>,
+    /// The products each product rule accepts, keyed as [`ProductSlot::candidates`] names them.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub product_candidates: std::collections::BTreeMap<String, Vec<ProductCandidate>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -606,6 +610,7 @@ pub fn transform_geometry_csv(
         schema_omissions,
         version_metadata: request.version_metadata,
         product_slots: builder.take_product_slots(),
+        product_candidates: builder.take_product_candidates(),
     })
 }
 

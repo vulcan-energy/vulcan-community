@@ -829,7 +829,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
       requestSystemUiMode,
       handlePcdbSystemApply,
     } = state;
-    const { elementType, renderFieldLabel, elementsById, productCatalogue, renderSpaceHeatSystemEmitterManager } = ctx;
+    const { elementType, renderFieldLabel, elementsById, productCatalogue, systemHasProductSlot, renderSpaceHeatSystemEmitterManager } = ctx;
 
     return (
       <>
@@ -858,7 +858,9 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
           </div>
         ) : null}
 
-        {!productCatalogue || systemUiMode === 'presets' ? (
+        {systemHasProductSlot ? (
+          systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null
+        ) : !productCatalogue || systemUiMode === 'presets' ? (
           <>
             {renderFieldLabel('Category:', elementType)}
             <div className="element-input">

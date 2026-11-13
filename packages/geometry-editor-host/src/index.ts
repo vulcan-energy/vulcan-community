@@ -86,6 +86,7 @@ export {
 } from './canvasEvidenceContribution';
 
 export {
+  defaultTargetRules,
   targetRules,
   targetSchemaMode,
   unavailableGeometrySchemaPort,

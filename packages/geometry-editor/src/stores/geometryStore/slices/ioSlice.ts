@@ -173,6 +173,7 @@ export interface IoSlice {
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], IoSlice>;
 export type IoSliceOptions = Readonly<{
   defaultDefaultsPath: string | undefined;
+  defaultsPathForTarget: ((targetBundleId: string) => string | undefined) | undefined;
   modelSchemaProfilePort: GeometryModelSchemaProfilePort;
   schemaPort: GeometrySchemaPort;
   workspaceResourcePort: GeometryWorkspaceResourcePort;
@@ -832,6 +833,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     defaultsRetryTimers: new Set(),
   };
   let knownIds = emptyKnownIds();
+  /** The defaults a document pinned to `targetBundleId` uses when it names none. */
+  const standardDefaultsPath = (targetBundleId: string | undefined) =>
+    (targetBundleId && options.defaultsPathForTarget?.(targetBundleId)) || options.defaultDefaultsPath;
 
   return (set, get) => {
   const slice: IoSlice = {
@@ -847,7 +851,14 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   setTargetBundleId: (targetBundleId) => {
     const state = get();
     if (state.targetBundleId === targetBundleId) return;
+    const standard = (id: string | undefined) => {
+      const path = standardDefaultsPath(id);
+      return path && normalizeDefaultsPathForMetadata(path);
+    };
+    // Standard defaults follow the target; a model's own defaults file stays.
+    const onStandardDefaults = state.defaultsPath === standard(state.targetBundleId);
     set({
+      ...(onStandardDefaults ? { defaultsPath: standard(targetBundleId) } : {}),
       targetBundleId,
       csvValidationCache: {},
       targetValidation: null,
@@ -931,7 +942,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       );
       lines.push(`SchemaProfile,${modelSchemaProfile},,,,,,,,,,,,,`);
     }
-    const rawDefaultsPath = state.defaultsPath?.trim() || options.defaultDefaultsPath;
+    const rawDefaultsPath = state.defaultsPath?.trim() || standardDefaultsPath(state.targetBundleId);
     if (rawDefaultsPath) {
       const effectiveDefaultsPath = normalizeDefaultsPathForMetadata(rawDefaultsPath);
       lines.push(`DefaultsPath,${effectiveDefaultsPath},,,,,,,,,,,,,`);
@@ -1812,7 +1823,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       // Use the CSV's explicit path, or the embedding host's configured default.
       // Community supplies its one starter defaults_template.json resource;
       // other hosts retain their historic workspace defaults.
-      const rawFromCsv = metadata.defaultsPath?.trim() || options.defaultDefaultsPath;
+      const rawFromCsv = metadata.defaultsPath?.trim() || standardDefaultsPath(metadata.targetBundleId);
       const pathsToTry = rawFromCsv ? defaultsReadPathAttempts(rawFromCsv) : [];
       const defaultsPathForStore = rawFromCsv
         ? normalizeDefaultsPathForMetadata(rawFromCsv)

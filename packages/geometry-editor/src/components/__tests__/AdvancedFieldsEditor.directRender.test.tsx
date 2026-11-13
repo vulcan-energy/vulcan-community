@@ -1409,7 +1409,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     const schemaPort = {
       ...canonicalGeometrySchemaPort,
       targetRules: () => ({
-        modelValidityChecks: true, fhsInputRules: true, buildingRegulationsChecks: true, excludedElementTypes: {},
+        modelValidityChecks: true, fhsInputRules: true, buildingRegulationsChecks: true, hemDatabaseProducts: false, excludedElementTypes: {},
         hiddenFields: { ElectricBattery: ['battery_age'] },
       }),
     };
