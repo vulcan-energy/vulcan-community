@@ -2226,6 +2226,8 @@ impl JSONBuilder {
             && result.get("IsExistingBuilding") == Some(&Value::Bool(true))
         {
             // HEMIE Geometry replaces the full-input zone, so its element checks do not apply.
+            // An element HEMIE cannot hold (the catalogue's unsupported systems) still fails:
+            // HEMIE takes no wall next to an unconditioned zone, so it would drop it unsaid.
             let full_zone = |path: &str| path.starts_with("/Zone/");
             self.non_fatal_errors
                 .borrow_mut()
@@ -2233,7 +2235,7 @@ impl JSONBuilder {
             self.schema_omissions
                 .borrow_mut()
                 .retain(|o| !full_zone(&o.path));
-            errors.retain(|e| !full_zone(&e.path));
+            errors.retain(|e| e.code == "E_EPC_UNSUPPORTED_SYSTEM" || !full_zone(&e.path));
             notices.retain(|o| !full_zone(&o.path));
             crate::hemie::map_existing_building(
                 result,
