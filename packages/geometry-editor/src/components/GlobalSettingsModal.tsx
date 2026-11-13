@@ -34,6 +34,7 @@ import {
   METADATA_INPUT_LABELS,
   type TargetInputRow,
   targetBuildTypes,
+  buildTypeHasStoreyRows,
 } from "../lib/globalSettingsValidation";
 import {
   DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH,
@@ -1036,7 +1037,7 @@ export function GlobalSettingsModal({
       issues.push("Storeys in dwelling must be at least 1.");
     }
     if (
-      effectiveBuildType === "flat" &&
+      buildTypeHasStoreyRows(targetRoot, shownBuildType) &&
       typeof complianceSettings.storeys_in_building === "number"
     ) {
       if (complianceSettings.storeys_in_building < 1) {
@@ -1056,7 +1057,7 @@ export function GlobalSettingsModal({
     return issues;
   }, [
     complianceSettings,
-    effectiveBuildType,
+    shownBuildType,
     effectiveStoreysInDwelling,
     elementsById,
     floors,
@@ -1877,7 +1878,7 @@ export function GlobalSettingsModal({
                               };
                               const nextEffectiveBuildType =
                                 next ?? suggestedBuildType;
-                              if (nextEffectiveBuildType !== undefined && nextEffectiveBuildType !== "flat") {
+                              if (nextEffectiveBuildType !== undefined && !buildTypeHasStoreyRows(targetRoot, nextEffectiveBuildType)) {
                                 patch.storey_of_dwelling = undefined;
                                 patch.storeys_in_building = undefined;
                               }
@@ -2052,7 +2053,7 @@ export function GlobalSettingsModal({
                             )}
                         </div>
 
-                        {effectiveBuildType === "flat" && (
+                        {buildTypeHasStoreyRows(targetRoot, shownBuildType) && (
                           <>
                             {showStoreyOfDwelling && (
                             <div

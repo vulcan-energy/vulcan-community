@@ -534,3 +534,25 @@ it('stops following the schema port once disposed', () => {
   store.getState().dispose();
   expect(listeners.size).toBe(0);
 });
+
+// A maisonette is a flat for the storey rows. A schema that states the build types needing them
+// (FHS: `flat`) decides; one that does not gives them to every type but `house`.
+it('writes the storey rows for each build type the target treats as a flat', () => {
+  const fhs = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  const unstated = structuredClone(fhs);
+  delete unstated.properties.General.if;
+  delete unstated.properties.General.then;
+  unstated.properties.General.properties.build_type = { enum: ['detached', 'maisonette', 'flat'] };
+  unstated.properties.General.properties.storey_of_dwelling = { type: 'integer' };
+  const saves = (root: unknown, buildType: string) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...canonicalGeometrySchemaPort, getRootSchema: () => root as never } });
+    store.getState().loadFromCSV(sample);
+    store.getState().setComplianceSettings({ build_type: buildType, storey_of_dwelling: 2 });
+    return store.getState().generateCSV({ allowUnresolvedMigration: true }).includes('\nGeneral_storey_of_dwelling,2,');
+  };
+  expect(saves(unstated, 'maisonette')).toBe(true);
+  expect(saves(unstated, 'detached')).toBe(true);
+  expect(saves(fhs, 'flat')).toBe(true);
+  expect(saves(fhs, 'house')).toBe(false);
+  expect(saves(fhs, 'maisonette')).toBe(false);
+});

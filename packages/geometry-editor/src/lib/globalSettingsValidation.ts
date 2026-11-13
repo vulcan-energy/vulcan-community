@@ -525,7 +525,33 @@ export type MetadataRowInputs = Pick<GeometryState, 'zones' | 'elementsById' | '
  * schema is loaded. The geometry's build type stands only where the list has it.
  */
 export function targetBuildTypes(targetRoot: unknown): readonly string[] {
-  return targetFieldEnum(targetRoot, ['General', 'build_type']) ?? ['house', 'flat'];
+  // House first, as FHS always listed it.
+  return [...(targetFieldEnum(targetRoot, ['General', 'build_type']) ?? ['house', 'flat'])]
+    .sort((a, b) => Number(b === 'house') - Number(a === 'house'));
+}
+
+/**
+ * Whether a build type takes the flat-only rows (storey of dwelling, storeys in building): the
+ * types the target schema's General conditions require them for, where it states them (FHS: `flat`);
+ * otherwise every type but `house` (HEM:EPC: a maisonette is a flat for these inputs).
+ */
+export function buildTypeHasStoreyRows(targetRoot: unknown, buildType: string | undefined): boolean {
+  if (!buildType) return false;
+  const record = (value: unknown) => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
+  const root = record(targetRoot);
+  const deref = (node: Record<string, unknown> | undefined) => {
+    const ref = typeof node?.$ref === 'string' ? node.$ref.split('/').pop() : undefined;
+    return ref ? record(record(root?.$defs)?.[ref]) : node;
+  };
+  const general = deref(record(record(root?.properties)?.General));
+  const conditions = [general, ...(Array.isArray(general?.allOf) ? general.allOf.map(record) : [])];
+  const stated = conditions.flatMap((node) => {
+    const required = record(node?.then)?.required;
+    if (!Array.isArray(required) || !required.some((key) => key === 'storey_of_dwelling' || key === 'storeys_in_building')) return [];
+    const condition = record(record(record(node?.if)?.properties)?.build_type);
+    return [condition?.const, ...(Array.isArray(condition?.enum) ? condition.enum : [])].filter((type) => typeof type === 'string');
+  });
+  return stated.length ? stated.includes(buildType) : buildType !== 'house';
 }
 
 /**
@@ -542,6 +568,7 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
     spaceLabelIds: state.spaceLabelIds,
     complianceSettings: compliance,
   });
+  const buildType = compliance.build_type ?? (dd.buildType && targetBuildTypes(targetRoot).includes(dd.buildType) ? dd.buildType : undefined);
   const derivedGFA = calculateGroundFloorArea(state.elements);
   const derivedVentHeight = calculateSuggestedVentilationHeight(state.elements, state.floors);
   const rows: Array<[string, string | undefined]> = [
@@ -577,11 +604,11 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
     ['NumberOfBathrooms', count(dd.bathrooms)],
     ['NumberOfSanitaryAccommodations', count(dd.sanitaryAccommodations)],
     ['KitchenExtractorHoodExternal', bool(compliance.KitchenExtractorHoodExternal)],
-    ['General_build_type', text(compliance.build_type ?? (dd.buildType && targetBuildTypes(targetRoot).includes(dd.buildType) ? dd.buildType : undefined))],
+    ['General_build_type', text(buildType)],
     ['General_built_form', num(compliance.built_form)],
     ['General_storeys_in_dwelling', count(dd.storeysInDwelling)],
   ];
-  if (dd.buildType === 'flat') {
+  if (buildTypeHasStoreyRows(targetRoot, buildType)) {
     rows.push(['General_storey_of_dwelling', count(dd.storeyOfDwelling)], ['General_storeys_in_building', num(compliance.storeys_in_building)]);
   }
   rows.push(...TARGET_INPUT_ROWS.map((key): [string, string | undefined] => [key, bool(compliance[key])]));
