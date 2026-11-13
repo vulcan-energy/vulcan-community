@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { arealHeatCapacityJPerM2KFromBand } from './assemblyCalculator';
 import type { FhsMassDistributionClass } from './assemblyMassHeuristic';
 import { toFhsMassDistributionClass } from './assemblyMassHeuristic';
 import type { VulcanAssemblyV1Envelope } from './assemblyTypes';
@@ -48,4 +49,56 @@ export function parseVulcanAssemblyV1FromExtraJson(extra: unknown): VulcanAssemb
   }
 
   return normalized as unknown as VulcanAssemblyV1Envelope;
+}
+
+/**
+ * The fabric fields an applied assembly owns, each with the value the assembly wrote. A field the
+ * envelope has no value for (e.g. `u_value_whole_wall`) is still owned: any edit to it overrides.
+ * Ground U is left out: it is computed from the floor model, not written by the assembly.
+ */
+const ASSEMBLY_FABRIC_FIELDS: Record<string, (e: Record<string, unknown>) => unknown> = {
+  u_value: (e) => e.uValueWrittenToElement_W_m2K,
+  u_value_whole_wall: () => undefined,
+  thermal_resistance_construction: (e) => e.thermalResistanceConstruction_m2K_W,
+  thermal_resistance_floor_construction: (e) => e.thermalResistanceConstruction_m2K_W,
+  thermal_resist_insul: (e) => e.thermalResistanceGroundInsulation_m2K_W,
+  areal_heat_capacity: (e) => e.arealHeatCapacityWrittenToElement_J_m2K,
+  mass_distribution_class: (e) => e.massDistributionClass,
+};
+
+function comparableFabricValue(field: string, value: unknown): unknown {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (field === 'areal_heat_capacity') return arealHeatCapacityJPerM2KFromBand(value) ?? value;
+  if (field === 'mass_distribution_class') return toFhsMassDistributionClass(String(value)) ?? value;
+  const n = typeof value === 'number' ? value : Number(String(value).trim());
+  return Number.isFinite(n) ? n : value;
+}
+
+function sameFabricValue(field: string, a: unknown, b: unknown): boolean {
+  const x = comparableFabricValue(field, a);
+  const y = comparableFabricValue(field, b);
+  return typeof x === 'number' && typeof y === 'number' ? Math.abs(x - y) <= 1e-6 : x === y;
+}
+
+/**
+ * An applied assembly makes its fabric values derived. Changing one of them to anything but the
+ * assembly's own value is an override, and the override removes `vulcan_assembly_v1` so the
+ * element has one unambiguous fabric source. Writing the assembly's value back (reset, or a fresh
+ * apply that brings its own envelope) keeps it. Returns `nextExtra` itself when nothing is removed.
+ */
+export function dropAssemblyEnvelopeOnFabricOverride(
+  elementType: string,
+  prevExtra: unknown,
+  nextExtra: Record<string, unknown>,
+): Record<string, unknown> {
+  const envelope = nextExtra.vulcan_assembly_v1;
+  if (!envelope || typeof envelope !== 'object') return nextExtra;
+  const prev = prevExtra && typeof prevExtra === 'object' ? (prevExtra as Record<string, unknown>) : {};
+  const overridden = Object.entries(ASSEMBLY_FABRIC_FIELDS).some(([field, assemblyValue]) =>
+    !(field === 'u_value' && elementType === 'BuildingElementGround')
+    && !sameFabricValue(field, prev[field], nextExtra[field])
+    && !sameFabricValue(field, assemblyValue(envelope as Record<string, unknown>), nextExtra[field]));
+  if (!overridden) return nextExtra;
+  const { vulcan_assembly_v1: _dropped, ...rest } = nextExtra;
+  return rest;
 }

@@ -112,18 +112,37 @@ function editMultiSelectU(store: GeometryStoreApi, value: string) {
 }
 
 describe('assembly versus U-value edits', () => {
-  it('single element: a U override keeps the assembly envelope (current behaviour)', async () => {
+  it.each([
+    ['single element', editSingleElementU],
+    ['multi-select', editMultiSelectU],
+  ])('%s: a U override clears the assembly envelope', async (_surface, edit) => {
     const store = storeWith(wall());
-    editSingleElementU(store, '0.16');
+    edit(store, '0.16');
     await waitFor(() => expect(extra(store).u_value).toBe(0.16));
+    expect(extra(store).vulcan_assembly_v1).toBeUndefined();
+    expect(extra(store).thermal_resistance_construction).toBe(5);
+  });
+
+  it('writing the assembly value back, or a non-fabric edit, keeps the envelope', () => {
+    const element = wall();
+    element.extra_json = { ...element.extra_json, u_value: 0.2 };
+    const store = storeWith(element);
+    const { updateElement } = store.getState();
+    updateElement('wall', { extra_json: { ...extra(store), solar_absorption_coeff: 0.4 } });
+    expect(extra(store).vulcan_assembly_v1).toEqual(envelope);
+    updateElement('wall', { extra_json: { ...extra(store), u_value: 0.18 } });
     expect(extra(store).vulcan_assembly_v1).toEqual(envelope);
   });
 
-  it('multi-select: a U override clears the assembly envelope', async () => {
-    const store = storeWith(wall());
-    editMultiSelectU(store, '0.16');
-    await waitFor(() => expect(extra(store).u_value).toBe(0.16));
+  it('a computed ground U does not clear the ground assembly', () => {
+    const ground = {
+      ...wall(), id: 'wall', type: 'BuildingElementGround',
+      extra_json: { u_value: 0.2, thermal_resistance_floor_construction: 5, vulcan_assembly_v1: envelope },
+    } as Element;
+    const store = storeWith(ground);
+    store.getState().updateElement('wall', { extra_json: { ...extra(store), u_value: 0.15 } });
+    expect(extra(store).vulcan_assembly_v1).toEqual(envelope);
+    store.getState().updateElement('wall', { extra_json: { ...extra(store), thermal_resistance_floor_construction: 4 } });
     expect(extra(store).vulcan_assembly_v1).toBeUndefined();
   });
-
 });

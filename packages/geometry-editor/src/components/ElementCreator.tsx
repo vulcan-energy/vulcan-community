@@ -501,7 +501,7 @@ import { PresetDropdown } from './PresetDropdown';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { LazyInlineFallback, LazyModalFallback } from './LazyModuleFallback';
 import type { AssemblyElementMode, VulcanAssemblyV1Envelope } from '../lib/assemblyTypes';
-import { parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
+import { dropAssemblyEnvelopeOnFabricOverride, parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
 import type { BundledAssemblyLibrary } from '../lib/assemblyLibrary';
 import { Tooltip } from './Tooltip';
 import { createElementCreatorFieldPresentationResolver } from './elementCreatorFieldPresentation';
@@ -3446,8 +3446,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     updatedData: Partial<Element> & { extra_json?: Record<string, unknown> },
   ) => {
     if (!selectedDormerMetadata || !selection?.id || !selectedIsDormerAnchor) return;
-    const nextOverride = getDormerThermalOverrideExtraJson(updatedData.extra_json);
     const currentOverride = selectedDormerMetadata.thermal_overrides[sectionKey];
+    // Overrides bypass updateElement (regenerateDormerAnchor), so apply its assembly rule here.
+    const sanitized = getDormerThermalOverrideExtraJson(updatedData.extra_json);
+    const nextOverride = sanitized && dropAssemblyEnvelopeOnFabricOverride(String(updatedData.type), currentOverride, sanitized);
     if (areDormerThermalOverridesEqual(currentOverride, nextOverride)) {
       return;
     }
