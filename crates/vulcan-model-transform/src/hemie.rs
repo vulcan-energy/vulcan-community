@@ -23,7 +23,7 @@ type Row = BTreeMap<String, Value>;
 type Rows = BTreeMap<String, Vec<Row>>;
 type P = [f64; 2];
 
-/// ours: plan tolerance (m) for joining wall ends, matching walls to outline edges and stacking
+/// ours, decided by Baz (13 November): plan tolerance (m) for joining wall ends, matching walls to outline edges and stacking
 /// one floor's outline on the floor below.
 const TOL: f64 = 0.1;
 /// DESNZ-defined: the height between storeys, and between a storey and a roof room, that is in
@@ -32,7 +32,7 @@ const STOREY_GAP: f64 = 0.25;
 /// DESNZ-defined: a room in the roof's common walls are under this height (m) for at least half
 /// their length; otherwise the floor is a storey.
 const COMMON_WALL_HEIGHT: f64 = 1.8;
-/// ours: how far a roof plane may overhang the building part it covers (m).
+/// ours, decided by Baz (13 November): how far a roof plane may overhang the building part it covers (m).
 const EAVES: f64 = 0.6;
 /// DESNZ-defined: heated pitched roof areal heat capacity when the element states none (J/m².K).
 const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
@@ -252,7 +252,7 @@ fn ring_of_walls(walls: &[&El]) -> Result<Vec<P>, String> {
         .collect();
     if !open.is_empty() {
         return Err(format!(
-            "The walls {} do not join end to end into one closed outline. Join the wall ends so each corner has exactly two walls.",
+            "The walls {} do not join end to end into one closed outline (ends more than {TOL} m apart). Join the wall ends so each corner has exactly two walls.",
             quoted(&open)
         ));
     }
@@ -1057,11 +1057,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         if let Some(lower) = rings.last() {
             snap_onto(&mut ring, lower);
             if !inside_or_on(centroid(&ring), lower) {
-                ctx.errors.push(error(on_level(level)[0].path(), format!("Floor {level} is drawn beside floor {}, not over it. Move floor {level} over the floor below; HEMIE stacks storeys in one plan.", level - 1)));
+                ctx.errors.push(error(on_level(level)[0].path(), format!("Floor {level} is drawn beside floor {}, not over it (its centre is more than {TOL} m outside floor {}). Move floor {level} over the floor below; HEMIE stacks storeys in one plan.", level - 1, level - 1)));
                 return None;
             }
             if let Some(p) = ring.iter().find(|p| !inside_or_on(**p, lower)) {
-                ctx.errors.push(error(on_level(level)[0].path(), format!("Floor {level} overhangs floor {} at ({:.2}, {:.2}). The existing-building converter does not take overhanging storeys yet.", level - 1, p[0], p[1])));
+                ctx.errors.push(error(on_level(level)[0].path(), format!("Floor {level} overhangs floor {} by more than {TOL} m at ({:.2}, {:.2}). The existing-building converter does not take overhanging storeys yet.", level - 1, p[0], p[1])));
                 return None;
             }
         }
@@ -1073,7 +1073,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             .iter()
             .find(|w| !w.pts.iter().all(|p| inside_or_on(*p, top)))
         {
-            ctx.errors.push(error(w.path(), format!("Floor {level} (the room in the roof) is not over floor {}: '{}' lies outside it. Move floor {level} over the floor below.", level - 1, w.name)));
+            ctx.errors.push(error(w.path(), format!("Floor {level} (the room in the roof) is not over floor {}: '{}' lies more than {TOL} m outside it. Move floor {level} over the floor below.", level - 1, w.name)));
             return None;
         }
     }
@@ -1164,7 +1164,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                             pj != pi && boundary_dist(mid(a, b), &other.poly) <= TOL
                         });
                         if !shared {
-                            ctx.errors.push(error("/Zone".into(), format!("Floor {s} has no wall between ({:.2}, {:.2}) and ({:.2}, {:.2}) of its outline. Draw the wall there.", a[0], a[1], b[0], b[1])));
+                            ctx.errors.push(error("/Zone".into(), format!("Floor {s} has no wall within {TOL} m of its outline between ({:.2}, {:.2}) and ({:.2}, {:.2}). Draw the wall there.", a[0], a[1], b[0], b[1])));
                         }
                     }
                 }
@@ -1191,7 +1191,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     }
     for (w, _) in &walls {
         if Some(w.level) != roof_room && !used.contains(w.name) {
-            ctx.errors.push(error(w.path(), format!("'{}' is not on the outline of floor {}. HEMIE walls are edges of the storey outline; delete it or join it to the outline.", w.name, w.level)));
+            ctx.errors.push(error(w.path(), format!("'{}' is more than {TOL} m from the outline of floor {}. HEMIE walls are edges of the storey outline; delete it or join it to the outline.", w.name, w.level)));
         }
     }
     if !ctx.errors.is_empty() {
@@ -1308,7 +1308,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             None => ctx.errors.push(error(
                 plane.path(),
                 format!(
-                    "Roof '{}' covers no storey. Move it over the storeys it covers.",
+                    "Roof '{}' covers no storey and is more than {EAVES} m from every storey outline. Move it over the storeys it covers.",
                     plane.name
                 ),
             )),
@@ -1597,17 +1597,40 @@ fn roof(
                 return None;
             }
             _ => {
-                // ours (interim): HEMIE has no hipped roof, so a hipped roof is dual pitch.
-                ctx.notices.push(notice("/Zone", format!("The roof of building part '{part}' is hipped ({} slopes). HEMIE has no hipped roof, so it is entered as dual pitch at its measured pitch.", sides.len())));
+                // ours, decided by Baz (13 November): HEMIE has no hipped roof, so a hipped roof
+                // is dual pitch, reported.
+                ctx.notices.push(notice(
+                    "/Zone",
+                    format!(
+                        "{part}: hipped roof converted to dual pitch (approximation; {} slopes).",
+                        sides.len()
+                    ),
+                ));
                 "dual"
             }
         };
         let main = &measured[largest(&measured)];
         let (slope_orientation, _) = slope(top_ring, main.orientation, orient);
-        // ours: one pitch per roof, the area-weighted mean of its planes.
+        // ours, decided by Baz (13 November): one pitch per roof, the area-weighted mean of its
+        // planes, reported.
         let (area, weighted) = measured
             .iter()
             .fold((0.0, 0.0), |(a, w), m| (a + m.area, w + m.area * m.pitch));
+        if measured.len() > 1 {
+            let planes: Vec<String> = pitched
+                .iter()
+                .zip(&measured)
+                .map(|(p, m)| format!("'{}' {}° over {} m²", p.name, m.pitch, m.area))
+                .collect();
+            ctx.notices.push(notice(
+                "/Zone",
+                format!(
+                    "{part}: roof pitch {:.1}°, the area-weighted mean of {}.",
+                    weighted / area,
+                    planes.join(", ")
+                ),
+            ));
+        }
         rectangularity_notice(ctx, part, top_ring);
         let key = ctx.construction("unheated_pitched_roof", &pitched, &[]);
         // ours: Vulcan does not record cold or warm, so it is Unknown.
@@ -1871,8 +1894,18 @@ fn dormer<'e>(
         Some("mono-pitch") => ("mono", "dormerRoofPitch"),
         // Derived from the model: a gable-fronted dormer has two slopes either side of a ridge.
         Some("gable-front") => ("dual", "gableRoofPitch"),
-        // ours (interim): HEMIE has no hipped dormer, so a hip dormer is dual pitch.
-        Some("hip") => ("dual", "gableRoofPitch"),
+        // ours, decided by Baz (13 November): HEMIE has no hipped dormer, so a hip dormer is
+        // dual pitch, reported.
+        Some("hip") => {
+            ctx.notices.push(notice(
+                &anchor.path(),
+                format!(
+                    "{}: hip dormer converted to dual pitch (approximation).",
+                    anchor.name
+                ),
+            ));
+            ("dual", "gableRoofPitch")
+        }
         other => {
             ctx.errors.push(error(
                 anchor.path(),
@@ -1961,7 +1994,7 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
                         let list = w.value.entry("passive_vents").or_insert_with(|| json!([]));
                         list.as_array_mut().expect("array").push(json!({"area": area}));
                     }
-                    _ => ctx.errors.push(error(path, format!("Vent '{name}' is not on a storey wall or has no area. HEMIE places each passive vent in a wall."))),
+                    _ => ctx.errors.push(error(path, format!("Vent '{name}' is more than {TOL} m from every storey wall or has no area. HEMIE places each passive vent in a wall."))),
                 }
             }
             other => ctx.errors.push(error(path, format!("Ventilation '{name}' ({}) is not converted for an existing-building EPC yet. Remove it to run this model.", other.unwrap_or("no type")))),
@@ -2202,6 +2235,9 @@ HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#;
             errors[0].message
         );
         assert!(errors[0].path.ends_with("/W10"));
+        assert!(errors[0]
+            .message
+            .contains("more than 0.1 m outside floor 0"));
     }
 
     #[test]
@@ -2317,7 +2353,11 @@ HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#;
         );
         assert!(notices
             .iter()
-            .any(|n| n.message.contains("hipped (4 slopes)")));
+            .any(|n| n.message
+                == "Main: hipped roof converted to dual pitch (approximation; 4 slopes)."));
+        assert!(notices.iter().any(|n| n.message.starts_with(
+            "Main: roof pitch 40.0°, the area-weighted mean of 'Hip S' 40° over 10 m²"
+        )));
     }
 
     /// A gable wall on the roof room's floor: a wall with a sloped top profile.
