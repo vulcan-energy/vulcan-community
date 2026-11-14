@@ -144,7 +144,7 @@ pub(crate) fn map_contract_unobstructed_shading(model: &mut Value, contract: cra
                     .copied()
                     .min_by(|a, b| sum(a).total_cmp(&sum(b)))
             });
-        // With no neutral change left, validation reports E_PYTHON_FHS_SKY_SUM.
+        // With no neutral change left, validation reports E_SKY_SUM.
         let Some(change) = next else { return };
         match change {
             Change::Merge(i) => {
@@ -1376,6 +1376,15 @@ mod tests {
         .is_empty());
     }
     #[test]
+    fn epc_takes_a_hot_water_source_under_any_name() {
+        assert!(crate::validate_target_input(
+            &json!({"HotWaterSource":{"custom cylinder":{"type":"PointOfUse"}}}),
+            crate::ConversionProfile::EpcFullInputV1,
+            &a8_version(),
+        )
+        .is_empty());
+    }
+    #[test]
     fn python_fhs_requires_main_hot_water_name_without_rejecting_point_of_use() {
         for profile in [
             crate::ConversionProfile::PythonFhsA8,
@@ -1384,7 +1393,7 @@ mod tests {
             let model = json!({"HotWaterSource":{}});
             let errors = crate::validate_target_input(&model, profile, &a8_version());
             assert_eq!(errors.len(), 1);
-            assert_eq!(errors[0].code, "E_PYTHON_FHS_HOT_WATER_SOURCE");
+            assert_eq!(errors[0].code, "E_FHS_HOT_WATER_SOURCE");
             assert_eq!(errors[0].path, "/HotWaterSource/hw cylinder");
             assert!(crate::validate_target_input(
                 &json!({"HotWaterSource":{"hw cylinder":{"type":"PointOfUse"}}}),
