@@ -13,12 +13,18 @@ import { StandardDropdown } from './StandardDropdown';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { useGeometryStore } from '../stores/geometryStore';
 import type { BuildErrorItem } from '../types/buildErrors';
-import { resolveIssueTarget, type IssueTarget } from '../lib/issueTarget';
+import { issuePathSegments, resolveIssueTarget, type IssueTarget } from '../lib/issueTarget';
 import { displayBuildErrorRows as toDisplayBuildErrorRows, type DisplayBuildError } from '../lib/buildErrorDisplay';
 import type { GeometryDocumentHostPort } from '../../../geometry-document/src';
 import './GlobalButtonSystem.css';
 import './FilenameBar.css';
 import { csvMigrationIssues, type UValueInterpretation, type CsvMigrationIssue } from '../geometry/io/csvSemanticMigration';
+
+/** A Metadata row lives in Global Settings: the host opens it at that field. */
+const metadataRowOf = (path?: string) => {
+  const [section, row] = issuePathSegments(path);
+  return section === 'Metadata' ? row : undefined;
+};
 
 export type FilenameBarActionContext = Readonly<{
   documentHost: GeometryDocumentHostPort;
@@ -402,6 +408,10 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const displayedBuildErrorCount = displayBuildErrorRows.length;
   // Non-blocking items only (severity 'warning'), such as a load notice: the chip says so.
   const onlyNotices = buildErrorItems.length > 0 && buildErrorItems.every((item) => item.severity === 'warning');
+  const openSettingsField = useCallback((field: string) => {
+    window.dispatchEvent(new CustomEvent('open-global-settings', { detail: { field } }));
+    closeSaveErrorDropdown();
+  }, [closeSaveErrorDropdown]);
   const goToIssueTarget = useCallback((target: IssueTarget) => {
     if (target.elementId) {
       const z = elementsById[target.elementId]?.coordinates?.[0]?.z;
@@ -597,7 +607,8 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
             <div className="save-error-details">
               <div className="save-error-rows">
                 {displayBuildErrorRows.map((error) => {
-                  const canNavigate = !!(error.target.elementId || error.target.zoneId);
+                  const settingsField = metadataRowOf(error.item.path);
+                  const canNavigate = !!(error.target.elementId || error.target.zoneId || settingsField);
                   return (
                   <div
                     className="save-error-row"
@@ -609,7 +620,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
                         <button
                           type="button"
                           className="save-error-details save-error-details-button"
-                          onClick={() => goToIssueTarget(error.target)}
+                          onClick={() => (settingsField ? openSettingsField(settingsField) : goToIssueTarget(error.target))}
                           title="Go to this input"
                         >
                           {error.userMessage}

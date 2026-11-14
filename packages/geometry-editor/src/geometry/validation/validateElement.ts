@@ -11,6 +11,7 @@ import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { contextShadingDistanceDetails } from '../../lib/contextShadingGeometry';
 import { elementSchemaTakesField, simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
+import { conservatoryGlazingOpeningType, isConservatoryGlazing } from '../../lib/hemieBundles';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
 import {
   targetRules,
@@ -1020,6 +1021,94 @@ function roofFootprintIssueWarnings(
     .flatMap((issue) => (roof.id === element.id || issue.wallNames.includes(element.name) ? [roofFootprintIssueMessage(roof.name, issue)] : [])));
 }
 
+const HOST_WALL_TOLERANCE_M = 0.05;
+
+/**
+ * Whether a roof vertex lies outside the walls' plan outline, taken as the convex hull of the wall ends.
+ * ponytail: an L-shaped house hides an overhang in its re-entrant corner; use the wall loop if that shows up.
+ */
+function roofOverhangsWalls(roof: Element['coordinates'], wallEnds: Element['coordinates']): boolean {
+  if (wallEnds.length < 6) return false;
+  const pts = wallEnds.map((p) => ({ x: p.x, y: p.y })).sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (list: typeof pts) => {
+    const out: typeof pts = [];
+    for (const p of list) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop();
+      out.push(p);
+    }
+    return out.slice(0, -1);
+  };
+  const hull = [...half(pts), ...half([...pts].reverse())];
+  return roof.some((p) => hull.some((a, i) => {
+    const b = hull[(i + 1) % hull.length];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    // Outside this edge, by more than the tolerance (hull is counter-clockwise).
+    return length > 0 && cross(a, b, p) / length < -HOST_WALL_TOLERANCE_M;
+  }));
+}
+
+const HOT_WATER_OUTLET_SECTION: Record<string, string> = {
+  OtherWaterUseDetails: 'Other', MixerShower: 'Shower', InstantElecShower: 'Shower', Bath: 'Bath',
+};
+
+/**
+ * What the target's schema says of an outlet's fields: every node named for the field anywhere in
+ * the outlet's section (its `$ref`s, branches and conditions followed). Undefined when it cannot say.
+ */
+function hotWaterOutletFields(
+  port: GeometrySchemaPort,
+  subcategory: string | undefined,
+): { takes(field: string): boolean; defaults(field: string): boolean } | undefined {
+  const section = subcategory ? HOT_WATER_OUTLET_SECTION[subcategory] : undefined;
+  if (!section || port.availability !== 'available') return undefined;
+  const root = port.getRootSchema(targetSchemaMode(port)) as Record<string, any> | null; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const start = root?.properties?.HotWaterDemand;
+  if (!root || !start) return undefined;
+  const nodes = new Map<string, any[]>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const seen = new Set<unknown>();
+  const walk = (node: any): void => { // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!node || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    if (typeof node.$ref === 'string') walk(root.$defs?.[node.$ref.split('/').pop()!]);
+    for (const [key, value] of Object.entries(node.properties ?? {})) nodes.set(key, [...(nodes.get(key) ?? []), value]);
+    for (const key of ['anyOf', 'oneOf', 'allOf'] as const) if (Array.isArray(node[key])) node[key].forEach(walk);
+    for (const key of ['additionalProperties', 'then', 'else'] as const) walk(node[key]);
+    Object.values(node.properties ?? {}).forEach((child) => { if (child !== node.properties) walk(child); });
+  };
+  // The node that holds the section's properties, through `$ref` and `anyOf` wrappers (EPC allows null).
+  const withProperties = (node: any, depth = 0): any => { // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!node || depth > 8) return undefined;
+    if (typeof node.$ref === 'string') return withProperties(root.$defs?.[node.$ref.split('/').pop()!], depth + 1);
+    if (node.properties) return node;
+    for (const key of ['anyOf', 'oneOf'] as const) {
+      for (const branch of node[key] ?? []) { const found = withProperties(branch, depth + 1); if (found) return found; }
+    }
+    return undefined;
+  };
+  walk(withProperties(start)?.properties?.[section]);
+  return {
+    takes: (field) => nodes.has(field),
+    defaults: (field) => (nodes.get(field) ?? []).some((node) => node?.default !== undefined),
+  };
+}
+
+/** Whether both ends of a straight opening lie on the straight host wall; other shapes are not judged. */
+function isOnHostWall(opening: Element['coordinates'] | undefined, wall: Element['coordinates'] | undefined): boolean {
+  if (opening?.length !== 2 || wall?.length !== 2) return true;
+  const [a, b] = wall;
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  if (length === 0) return true;
+  const tx = (b.x - a.x) / length;
+  const ty = (b.y - a.y) / length;
+  return opening.every((p) => {
+    const along = (p.x - a.x) * tx + (p.y - a.y) * ty;
+    const across = Math.abs(-(p.x - a.x) * ty + (p.y - a.y) * tx);
+    return across <= HOST_WALL_TOLERANCE_M && along >= -HOST_WALL_TOLERANCE_M && along <= length + HOST_WALL_TOLERANCE_M;
+  });
+}
+
 export const validateElementCore = (
   element: Element,
   context: ValidationContext,
@@ -1063,6 +1152,11 @@ export const validateElementCore = (
   const defaultsLoading = context.defaultsLoading || false;
   const schemaPort = context.schemaPort;
   const junctionPsiWorkspaceByType = context.junctionPsiWorkspaceByType;
+  // A field the target hides or makes optional is no hard rule here: the converter supplies it.
+  const leftToTarget = (type: string, field: string): boolean => {
+    const rules = targetRules(schemaPort, context.complianceSettings ?? {});
+    return !!rules.hiddenFields[type]?.includes(field) || !!rules.optionalFields[type]?.includes(field);
+  };
   const partFFindings = context.partFFindings;
   const appendPartFIssuesForElement = (elementId: string): void => {
     if (!partFFindings) return;
@@ -1170,6 +1264,29 @@ export const validateElementCore = (
     }
   }
 
+  // An opening drawn off its host wall: the user moves it or changes its host (it is never moved for them).
+  if (elementsById && element.parent_element && (element.type === 'BuildingElementTransparent'
+    || (element.type === 'BuildingElementOpaque' && (element as BuildingElementOpaque).is_external_door))) {
+    const host = Object.values(elementsById).find((candidate) => candidate.name === element.parent_element
+      && candidate.zoneId === element.zoneId && candidate.id !== element.id);
+    if (host && !isOnHostWall(element.coordinates, host.coordinates)) {
+      // Only an existing-building conversion uses the host link for position; elsewhere it changes no result.
+      (targetRules(schemaPort, context.complianceSettings ?? {}).constructionBands ? issues : warnings)
+        .push(geo('Not on its host wall: move it onto the wall or change its host.', 'parent_element'));
+    }
+  }
+
+  // A roof drawn past the walls is a drawing error: eaves overhang is not roof area, and nothing clips it.
+  if (elementsById && element.type === 'BuildingElementOpaque' && typeof element.pitch === 'number'
+    && element.pitch <= HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG && (element.coordinates?.length ?? 0) >= 3) {
+    const wallEnds = Object.values(elementsById).flatMap((candidate) => (candidate.type === 'BuildingElementOpaque'
+      && candidate.zoneId === element.zoneId && candidate.coordinates?.length === 2
+      && !(candidate as BuildingElementOpaque).is_external_door ? candidate.coordinates : []));
+    if (roofOverhangsWalls(element.coordinates, wallEnds)) {
+      warnings.push(geo('The roof extends past the walls. Draw the roof to the walls: an eaves overhang is not roof area.', 'coordinates'));
+    }
+  }
+
   // Type-specific validation
   switch (element.type) {
     case 'BuildingElementOpaque': {
@@ -1264,8 +1381,13 @@ export const validateElementCore = (
         }
       }
       // Window-specific checks (only for transparent elements)
-      if (!isPositiveFiniteNumber(el.frame_area_fraction)) {
+      if (!isPositiveFiniteNumber(el.frame_area_fraction) && !leftToTarget(el.type, 'frame_area_fraction')) {
         issues.push(geo('Frame Area Fraction is required and must be greater than 0', 'frame_area_fraction'));
+      }
+      // HEMIE gives an opening type no default (DESNZ-defined); a conservatory window is closed unless stated.
+      if (targetRules(schemaPort, context.complianceSettings ?? {}).constructionBands
+        && !conservatoryGlazingOpeningType(el) && !(elementsById && isConservatoryGlazing(el, elementsById))) {
+        issues.push(geo('Opening type is not set. Choose how this window opens.', 'window_sections'));
       }
       issues.push(...validateWindowOpenings(
         el,
@@ -1415,7 +1537,8 @@ export const validateElementCore = (
         }
       }
 
-      if (element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' && !element.isPlaceholder) {
+      if (element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' && !element.isPlaceholder
+        && !leftToTarget(element.type, 'thermal_resistance_unconditioned_space')) {
         const unheated = element as BuildingElementAdjacentUnconditionedSpace_Simple;
         const ru = unheated.extra_json?.thermal_resistance_unconditioned_space;
         if (typeof ru !== 'number' || !Number.isFinite(ru) || ru <= 0) {
@@ -1428,7 +1551,7 @@ export const validateElementCore = (
         } else if (ru > 3) {
           warnings.push(
             fhs(
-              'R_u is above the HEM FHS schema maximum (3 m²·K/W). Lower inputs or the value before export — JSON schema validation will reject higher values.',
+              'R_u is above the schema maximum (3 m²·K/W). Lower the value before export: the schema rejects higher values.',
               'thermal_resistance_unconditioned_space',
             ),
           );
@@ -1438,7 +1561,7 @@ export const validateElementCore = (
         const extra = adjacentElement.extra_json ?? {};
         const cavityType = extra.party_wall_cavity_type;
         if (typeof cavityType !== 'string' || cavityType.trim() === '') {
-          issues.push(schema('Party wall cavity type must be set', 'party_wall_cavity_type'));
+          if (!leftToTarget(element.type, 'party_wall_cavity_type')) issues.push(schema('Party wall cavity type must be set', 'party_wall_cavity_type'));
         } else {
           const layers = elementAssemblyLayers(adjacentElement);
           if (layers.length > 0) {
@@ -1510,6 +1633,7 @@ export const validateElementCore = (
           }
         }
         if (
+          complianceValidationEnabled &&
           !isWorkspacePsi &&
           !isApportionedPsi &&
           typeof junctionType === 'string' &&
@@ -1789,10 +1913,15 @@ export const validateElementCore = (
 
     case 'HotWaterDemand': {
       const hotWaterElement = element as HotWaterDemand;
+      // The target's own outlet schema decides what is required: a field it defaults is optional,
+      // and one it lacks is never asked for.
+      const outletFields = hotWaterOutletFields(schemaPort, hotWaterElement.subcategory);
+      const outletDefaults = (field: string) => outletFields?.defaults(field) ?? false;
+      const outletTakes = (field: string) => outletFields?.takes(field) ?? true;
       if (!hotWaterElement.subcategory) {
         issues.push(geo('Outlet Type is required', 'subcategory'));
       }
-      if (hotWaterElement.subcategory === 'Bath' && (!hotWaterElement.size || hotWaterElement.size === 0)) {
+      if (hotWaterElement.subcategory === 'Bath' && !outletDefaults('size') && (!hotWaterElement.size || hotWaterElement.size === 0)) {
         issues.push(geo('Size cannot be 0', 'size'));
       }
       if (
@@ -1809,14 +1938,15 @@ export const validateElementCore = (
       if (
         hotWaterElement.subcategory !== 'InstantElecShower' &&
         hotWaterElement.subcategory !== 'Bath' &&
+        !outletDefaults('flowrate') &&
         (!hotWaterElement.flowrate || hotWaterElement.flowrate === 0)
       ) {
         issues.push(geo('Flowrate cannot be 0', 'flowrate'));
       }
-      if (hotWaterElement.subcategory === 'MixerShower' && typeof hotWaterElement.allow_low_flowrate !== 'boolean') {
+      if (hotWaterElement.subcategory === 'MixerShower' && outletTakes('allow_low_flowrate') && typeof hotWaterElement.allow_low_flowrate !== 'boolean') {
         issues.push(geo('Choose Yes or No for Air Pressure Shower', 'allow_low_flowrate'));
       }
-      if (hotWaterElement.subcategory === 'InstantElecShower' && (!hotWaterElement.rated_power || hotWaterElement.rated_power === 0)) {
+      if (hotWaterElement.subcategory === 'InstantElecShower' && !outletDefaults('rated_power') && (!hotWaterElement.rated_power || hotWaterElement.rated_power === 0)) {
         issues.push(geo('Rated Power cannot be 0', 'rated_power'));
       }
 
@@ -1836,12 +1966,12 @@ export const validateElementCore = (
       }
       if (hotWaterElement.subcategory === 'InstantElecShower' && hotWaterElement.rated_power !== undefined) {
         if (hotWaterElement.rated_power > 30) {
-          issues.push(geo('Rated Power cannot exceed 30 W', 'rated_power'));
+          issues.push(geo('Rated Power cannot exceed 30 kW', 'rated_power'));
         }
       }
 
       // FHS wrapper-specific validations (orange warnings - stricter than schema)
-      if (hotWaterElement.subcategory === 'MixerShower' && hotWaterElement.flowrate !== undefined) {
+      if (complianceValidationEnabled && hotWaterElement.subcategory === 'MixerShower' && hotWaterElement.flowrate !== undefined) {
         if (hotWaterElement.flowrate < 8.0) {
           warnings.push(fhs('FHS: Shower ≥8 L/min', 'flowrate'));
         }

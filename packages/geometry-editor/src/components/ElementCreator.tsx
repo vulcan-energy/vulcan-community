@@ -956,7 +956,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const evidenceBridge = useContext(GeometryInspectorEvidenceContext);
   const DetailedJunctionControl =
     inspectorContributions.detailedJunctionSolver?.Control;
-  const { hemDatabaseProducts, constructionBands } = useTargetRules();
+  const { hemDatabaseProducts, constructionBands, zoneAreaSplit } = useTargetRules();
   // On a target whose systems take HEM Database products, the product slot picker is the only
   // product source: the host's sample/catalogue source switch does not apply.
   const productCatalogue = hemDatabaseProducts ? null : inspectorContributions.productCatalogue;
@@ -1263,7 +1263,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     && (
       (primaryFhsZoneId ? selection.id === primaryFhsZoneId : zones.every((zone) => zone.isPlaceholder))
     );
-  const showFhsAreaSplit = useFHSSchema && isPrimaryFhsZoneSelection;
+  const showFhsAreaSplit = zoneAreaSplit && isPrimaryFhsZoneSelection;
   const showFhsPrimaryZoneNote = useFHSSchema && selection?.type === 'zone' && !isPrimaryFhsZoneSelection;
   const treatedAreaLabelMismatch = useMemo(() => {
     if (selection?.type !== 'zone' || !showFhsAreaSplit) return null;
@@ -5042,7 +5042,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   />
                   <div style={INLINE_FIELD_NOTE_STYLE}>Floor area × height. To reach a specific volume, change Height.</div>
                 </div>
-                {(targetAcceptsThermalBridgingTotal || simplifiedThermalBridging) && <>
+                {!constructionBands && (targetAcceptsThermalBridgingTotal || simplifiedThermalBridging) && <>
                 <div className="element-label">
                   Simplified Thermal Bridging
                 </div>

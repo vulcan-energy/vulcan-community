@@ -182,7 +182,12 @@ const filterDisplayBuildErrors = (errors: DisplayBuildError[]) => {
     }
   }
 
+  // A converter error says why the converted input is wrong: the schema's own "none of the
+  // alternatives match" row at the top of a section (an existing building's Zone or Geometry) adds only noise.
+  const converterFailed = errors.some((error) => !isSchemaKeywordError(error.item) && !error.item.severity);
   return errors.filter((error) => {
+    if (converterFailed && isSchemaKeywordError(error.item) && error.pathSegments.length <= 1
+      && (error.item.keyword === 'anyOf' || error.item.keyword === 'oneOf')) return false;
     if (!isNoisyUnexpectedPropertiesError(error)) return true;
     return !concreteErrorParents.has(error.pathSegments.join('/'));
   });

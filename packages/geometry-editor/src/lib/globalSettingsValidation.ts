@@ -420,7 +420,7 @@ const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
 /** Where a CSV Metadata key is edited in Global Settings; null when it is not. */
 export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSection | null {
   if (key.startsWith("DefaultAssembly")) return "defaults";
-  if (key === "TargetBundleId" || key === "IsExistingBuilding") return "target";
+  if (key === "TargetBundleId" || key === "IsExistingBuilding" || key.startsWith("HEMIE_")) return "target";
   if (key.startsWith("AirPermeability_test_")) return "airTightness";
   if (key.startsWith("Ventilation_") || key === "AirPermeability_ventilation_zone_height") return "ventilation";
   if (key === "JunctionPsiDefaultsPath" || key.startsWith("DetailedBridgePsiProfile")) return "thermalBridging";
@@ -516,7 +516,7 @@ const num = (value: number | undefined) => (finiteNumber(value) === undefined ? 
 const text = (value: string | undefined) => (value ? value : undefined);
 
 /** The target rules the metadata rows follow. */
-export type MetadataTargetRules = Pick<TargetRules, 'requiredMetadataRows' | 'storeyBuildTypes'> & Partial<Pick<TargetRules, 'desnzDefaultRows'>>;
+export type MetadataTargetRules = Pick<TargetRules, 'requiredMetadataRows' | 'storeyBuildTypes'> & Partial<Pick<TargetRules, 'desnzDefaultRows' | 'derivedMetadataRows'>>;
 
 export type MetadataRowInputs = Pick<GeometryState, 'zones' | 'elementsById' | 'spaceLabelsById' | 'spaceLabelIds' | 'complianceSettings'> & {
   floors: Floor[];
@@ -675,7 +675,7 @@ export function absentMetadataRowFill(
   const settings = state.complianceSettings;
   const required = new Set(rules.requiredMetadataRows);
   // Unset, a DESNZ-default row takes DESNZ's value in the converter, never the template's.
-  const desnzDefault = new Set(Object.keys(rules.desnzDefaultRows ?? {}));
+  const desnzDefault = new Set([...Object.keys(rules.desnzDefaultRows ?? {}), ...(rules.derivedMetadataRows ?? [])]);
   const patch: Record<string, unknown> = {};
   const sources = new Map<string, string>();
   const blank = new Set(Object.keys(settings.unreadMetadataRows ?? {}));
@@ -782,7 +782,7 @@ export function unsetMetadataInputIssues(
     if (value === undefined) return '';
     return key.startsWith('NumberOf') ? ` Space labels show ${value}.` : ` The geometry gives ${value}.`;
   };
-  const desnzDefault = new Set(Object.keys(rules.desnzDefaultRows ?? {}));
+  const desnzDefault = new Set([...Object.keys(rules.desnzDefaultRows ?? {}), ...(rules.derivedMetadataRows ?? [])]);
   return metadataRowValues(state, targetRoot, storeyBuildTypes).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && !accepted.has(key)
       && !desnzDefault.has(key)
       && !systemsRowSetsMetadataInput(state.elements, key)
