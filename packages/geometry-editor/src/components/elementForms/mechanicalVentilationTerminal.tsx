@@ -69,6 +69,8 @@
 import { useState } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import type { Element } from '../../geometry/types';
+import { useGeometryStore } from '../../stores/geometryStore';
+import { isExistingBuilding } from '../../lib/windowOpenings';
 import { getParentByName } from '../../lib/parentOrientation';
 import { defaultMvhrTerminalZ, deriveMechanicalVentilationTerminalPosition, isMvhrTerminalHost } from '../../lib/mvhrDuctwork';
 import { MVHR_TERMINAL_ROLES } from '../../lib/mvhrRoles';
@@ -113,6 +115,8 @@ export interface MechanicalVentilationTerminalFormState {
    * eligible host by name — see module header comment. */
   getCurrentTerminal: () => Element | undefined;
   findEligibleHost: (hostName: string) => Element | undefined;
+  /** An existing building places each vent in its host element, at a stated position in it. */
+  existingBuilding: boolean;
   /** A new terminal's height on the selected storey (its base + the default terminal height). */
   defaultTerminalZ: number;
 }
@@ -120,6 +124,7 @@ export interface MechanicalVentilationTerminalFormState {
 function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFormState {
   const [terminalType, setTerminalType] = useState<'' | 'intake' | 'exhaust'>('');
   const [hostElement, setHostElement] = useState<string>('');
+  const existingBuilding = useGeometryStore(isExistingBuilding);
 
   const isExistingElementSelection = (): boolean =>
     !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
@@ -175,6 +180,7 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFo
     setTerminalType,
     hostElement,
     setHostElement,
+    existingBuilding,
     commitMvhrTerminalMidHeightAirFlowPath,
     mvhrTerminalMidHeightAirFlowPathInput,
     commitMvhrTerminalManualPositionField,
@@ -258,6 +264,7 @@ export const mechanicalVentilationTerminalFormModule: ElementFormModule<Mechanic
       setTerminalType,
       hostElement,
       setHostElement,
+      existingBuilding,
       mvhrTerminalMidHeightAirFlowPathInput,
       mvhrTerminalOrientationInput,
       mvhrTerminalPitchInput,
@@ -367,6 +374,25 @@ export const mechanicalVentilationTerminalFormModule: ElementFormModule<Mechanic
             size="md"
           />
         </div>
+        {existingBuilding && selection && (() => {
+          const current = getElementById(selection.id) as { extra_json?: Record<string, unknown> } | undefined;
+          return (
+            <>
+              {renderFieldLabel('Position in host:', elementType, 'vent_position')}
+              <div className="element-input" ref={registerBaseFieldRefs('vent_position')}>
+                <StandardDropdown
+                  value={String(current?.extra_json?.vent_position ?? '')}
+                  onChange={(value) => updateElement(selection.id, {
+                    extra_json: { ...current?.extra_json, vent_position: value || undefined },
+                  } as Partial<Element>)}
+                  options={[{ value: '', label: 'Middle (default)' }, { value: 'bottom', label: 'Bottom' }, { value: 'middle', label: 'Middle' }, { value: 'top', label: 'Top' }]}
+                  variant="ghost"
+                  size="md"
+                />
+              </div>
+            </>
+          );
+        })()}
         {usesManualExternalPosition && (
           <>
             {renderFieldLabel('External orientation (degrees):', elementType, 'orientation360')}

@@ -1020,6 +1020,10 @@ function roofFootprintIssueWarnings(
     .flatMap((issue) => (roof.id === element.id || issue.wallNames.includes(element.name) ? [roofFootprintIssueMessage(roof.name, issue)] : [])));
 }
 
+/** An existing-building model: the EPC conversion reads categories and defaults where a new build reads drawn detail. */
+const isExistingBuildingContext = (context: ValidationContext): boolean =>
+  (context.complianceSettings as { IsExistingBuilding?: boolean } | undefined)?.IsExistingBuilding === true;
+
 export const validateElementCore = (
   element: Element,
   context: ValidationContext,
@@ -1298,7 +1302,8 @@ export const validateElementCore = (
             candidate.zoneId === el.zoneId &&
             candidate.parent_element === el.name,
         );
-        if (!hasAttachedShading) {
+        // An existing building takes close shading as categories on the window, not drawn reveals.
+        if (!hasAttachedShading && !isExistingBuildingContext(context)) {
           warnings.push(geo('Consider adding shading, most windows have reveals', 'shading'));
         }
       }
@@ -1545,10 +1550,13 @@ export const validateElementCore = (
         issues.push(geo('Shading Type is required', 'shading_type'));
         break;
       }
-      const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, targetSchemaMode(schemaPort));
+      const existingBuilding = isExistingBuildingContext(context);
+      const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, targetSchemaMode(schemaPort), existingBuilding);
       if (allowedShadingTypes && !allowedShadingTypes.includes(shadingElement.shading_type)) {
         const windowName = shadingElement.parent_element?.trim();
-        issues.push(geo(shadingElement.shading_type === 'reveal'
+        issues.push(geo(shadingElement.shading_type === 'reveal' && existingBuilding
+          ? `A reveal is not used on an existing building. Remove it, or set the window's overhang and side fins.`
+          : shadingElement.shading_type === 'reveal'
           ? `Reveal shading${windowName ? ` on window ${windowName}` : ''} does not run on this HEM version. Enter an overhang and two side fins.`
           : `Shading Type ${shadingElement.shading_type} does not run on this HEM version. Choose another type.`, 'shading_type'));
         break;
@@ -1935,7 +1943,9 @@ export const validateElementCore = (
       if (mechVentElement.vent_type === 'MVHR' && elementsById) {
         const ducts = linkedMvhrDucts(mechVentElement.name);
         const unitPoint = networkPoint3(mechVentElement, effectiveFloors());
-        if (ducts.length === 0) {
+        // An existing building takes MVHR ductwork as the target default, so drawn ducts are not needed.
+        const takesDrawnDucts = !isExistingBuildingContext(context);
+        if (takesDrawnDucts && ducts.length === 0) {
           issues.push(
             (complianceValidationEnabled ? fhs : geo)('MVHR needs linked ductwork', 'vent_type'),
           );
@@ -1943,10 +1953,10 @@ export const validateElementCore = (
         const missingRoles = MVHR_DUCT_ROLES.filter(
           (role) => !ducts.some((duct) => duct.duct_type === role),
         );
-        if (missingRoles.length > 0) {
+        if (takesDrawnDucts && missingRoles.length > 0) {
           warnings.push(geo(`Missing MVHR duct roles: ${missingRoles.join(', ')}`));
         }
-        collectMvhrDuctTopologyWarnings(ducts, { unitPoint }).forEach((warning) => {
+        if (takesDrawnDucts) collectMvhrDuctTopologyWarnings(ducts, { unitPoint }).forEach((warning) => {
           warnings.push(geo(warning.message));
         });
 
@@ -2238,10 +2248,25 @@ export const validateElementCore = (
         elementData,
         schemaSubtype,
       );
-      const allRequiredFields = [...new Set([...requiredFields, ...conditionalRequiredFields])];
       const reportedFields = new Set(issues.map((issue) => issue.fieldKey));
       const rules = targetRules(schemaPort, context.complianceSettings ?? {});
       const hiddenFields = new Set([...(rules.hiddenFields[element.type] ?? []), ...(rules.optionalFields[element.type] ?? [])]);
+      // A schema that takes the U-value or the thermal resistance, not both (`oneOf`): one message, not a "required" on one of them.
+      const takesUOrR = Array.isArray(activeSubschema.allOf)
+        && activeSubschema.allOf.some((block) => !block?.if && Array.isArray(block?.oneOf)
+          && block.oneOf.some((branch: { required?: string[] }) => branch.required?.includes('thermal_resistance_construction')));
+      const stated = (field: string) => {
+        const value = elementData[field] ?? extraJson[field];
+        return value !== undefined && value !== null && value !== '';
+      };
+      let allRequiredFields = [...new Set([...requiredFields, ...conditionalRequiredFields])];
+      if (takesUOrR) {
+        allRequiredFields = allRequiredFields.filter((field) => field !== 'thermal_resistance_construction');
+        const both = stated('u_value') && stated('thermal_resistance_construction');
+        const neither = !stated('u_value') && !stated('thermal_resistance_construction') && !hiddenFields.has('u_value')
+          && !(context.defaultsLookup?.hasDefaultValue ?? hasDefaultValue)('u_value', element.type, activeSubschema as unknown as { properties?: Record<string, { default?: unknown } | undefined> }, undefined, opaqueFabricVariant);
+        if (both || neither) issues.push(issueFactory('State the U-value or the thermal resistance (one, not both).', 'u_value'));
+      }
       // Construction bands: a heat capacity band the element's construction has no value for.
       const heatCapacity = elementData.areal_heat_capacity ?? extraJson.areal_heat_capacity;
       if (rules.constructionBands && typeof heatCapacity === 'string') {

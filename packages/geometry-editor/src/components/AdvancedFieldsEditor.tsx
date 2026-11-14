@@ -106,6 +106,7 @@ import {
   withoutPresetPrimaryPipework,
 } from './systemEditorUtils';
 import type { SchemaNode } from '../lib/schemaTypes';
+import { WINDOW_SHADING_TYPE_LABELS } from '../lib/windowOpenings';
 import {
   emptyGeometryInspectorContributions,
   unavailableGeometryWorkspaceResourcePort,
@@ -114,14 +115,6 @@ import {
 } from '../../../geometry-editor-host/src';
 
 const EXTRA_JSON_UI_KEY_SET = new Set<string>(EXTRA_JSON_UI_KEYS);
-
-const WINDOW_SHADING_TYPE_LABELS: Record<WindowShading['shading_type'], string> = {
-  object: 'Object',
-  overhang: 'Overhang',
-  sidefinright: 'Right fin',
-  sidefinleft: 'Left fin',
-  reveal: 'Reveal',
-};
 
 const EMPTY_ADVANCED_FIELDS: Record<string, unknown> = Object.freeze({});
 const MVHR_FIXED_ENERGY_SUPPLY = 'mains elec' as const;
@@ -810,7 +803,8 @@ interface AdvancedFieldsEditorProps {
   inspectorContributions?: GeometryInspectorContributions;
   workspaceResourcePort?: GeometryWorkspaceResourcePort;
   /** The areal heat capacity bands this element may state; none offers a number only. Absent: the schema's. */
-  arealHeatCapacityBands?: readonly string[];
+  /** Under construction bands: the bands the element takes; null when the converter takes no heat capacity from it. */
+  arealHeatCapacityBands?: readonly string[] | null;
 }
 
 const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
@@ -1087,20 +1081,16 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       forbiddenFieldKeys(fullSchema, advancedFieldsData, getActiveRootSchema()).forEach((key) => delete advancedProperties[key]);
     }
 
-    // a8/a9 accept a class or a number; offer the classes. A saved number stays visible.
-    const arealClasses = advancedProperties.areal_heat_capacity?.anyOf?.find((branch) => Array.isArray(branch.enum));
-    if (arealHeatCapacityBands && advancedProperties.areal_heat_capacity) {
-      // Construction bands: a number, or only the bands this element's construction takes.
+    // a8/a9 accept a class or a number: the control offers the classes and a number box.
+    // Construction bands: a number, or only the bands this element's construction takes.
+    if (arealHeatCapacityBands === null) delete advancedProperties.areal_heat_capacity;
+    else if (arealHeatCapacityBands && advancedProperties.areal_heat_capacity) {
       const arealNode: SchemaNode = { ...advancedProperties.areal_heat_capacity };
       delete arealNode.anyOf;
       const number: SchemaNode = { type: 'number', exclusiveMinimum: 0 };
       advancedProperties.areal_heat_capacity = arealHeatCapacityBands.length
         ? { ...arealNode, anyOf: [{ type: 'string', enum: [...arealHeatCapacityBands] }, number] }
         : { ...arealNode, ...number };
-    } else if (arealClasses) {
-      const arealNode = { ...advancedProperties.areal_heat_capacity, enum: arealClasses.enum };
-      delete arealNode.anyOf;
-      advancedProperties.areal_heat_capacity = arealNode;
     }
 
     // a8/a9: the converter overwrites this value, so an input here has no effect.

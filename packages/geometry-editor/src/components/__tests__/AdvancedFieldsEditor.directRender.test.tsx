@@ -84,12 +84,14 @@ function ControlledHarness({
   useFHSSchema,
   initialCurrentData,
   onChange,
+  arealHeatCapacityBands,
 }: {
   elementType: string;
   subtype?: string;
   useFHSSchema: boolean;
   initialCurrentData: Record<string, unknown>;
   onChange: (data: Record<string, unknown>) => void;
+  arealHeatCapacityBands?: readonly string[];
 }) {
   const [currentData, setCurrentData] = React.useState<Record<string, unknown>>(initialCurrentData);
   return (
@@ -104,6 +106,7 @@ function ControlledHarness({
       }}
       collapsible={false}
       useFHSSchema={useFHSSchema}
+      arealHeatCapacityBands={arealHeatCapacityBands}
     />
   );
 }
@@ -116,6 +119,7 @@ type MountArgs = {
   currentDataExtra?: Record<string, unknown>;
   onChange?: ReturnType<typeof vi.fn>;
   schemaPort?: typeof canonicalGeometrySchemaPort;
+  arealHeatCapacityBands?: readonly string[];
 };
 
 function renderEditor({
@@ -126,6 +130,7 @@ function renderEditor({
   currentDataExtra = {},
   onChange = vi.fn(),
   schemaPort = canonicalGeometrySchemaPort,
+  arealHeatCapacityBands,
 }: MountArgs) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   const utils = render(
@@ -140,6 +145,7 @@ function renderEditor({
           useFHSSchema={useFHSSchema}
           initialCurrentData={{ type: elementType, ...currentDataExtra, extra_json: extraJson }}
           onChange={onChange}
+          arealHeatCapacityBands={arealHeatCapacityBands}
         />
       </GeometryStoreProvider>
     </GeometryEditorServicePortsProvider>,
@@ -1392,10 +1398,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'pressure_difference_ref | Pressure Difference Ref | textbox | 0 | - | - | tip',
   ],
   // Core names its window shading item WindowShadingObject (FHS: WindowShading).
-  'core/WindowShading [every subtype]': [
-    'type | Type | select | - | - | - | tip',
-    'distance | Distance | textbox | 0 | - | - | tip',
-  ],
 };
 
 describe('R4.6b-1 standing invariant: what every Advanced Fields row actually renders', () => {
@@ -1405,7 +1407,7 @@ describe('R4.6b-1 standing invariant: what every Advanced Fields row actually re
     // Floors would let this pass vacuously; these are the exact populations the pinned
     // inventory below was captured from, so they are equalities.
     expect(routesSwept).toBe(674);
-    expect(routesWithRows).toBe(402);
+    expect(routesWithRows).toBe(387);
 
     expect(inventory).toEqual(EXPECTED_RENDERED_ROWS);
   });
@@ -1434,6 +1436,26 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       expect(input).toHaveAttribute('min', '0');
       expect(input.getAttribute('data-exclusive-minimum')).toBe(key.startsWith('maximum_') ? '0' : null);
     }
+  });
+
+  it('areal heat capacity offers only the bands the construction takes or a number, and saves a number as a number', () => {
+    const onChange = vi.fn();
+    const { container } = renderEditor({
+      elementType: 'BuildingElementOpaque',
+      subtype: 'wall',
+      useFHSSchema: false,
+      extraJson: {},
+      arealHeatCapacityBands: ['Very light', 'Light', 'Medium'],
+      onChange,
+    });
+    const select = within(fieldRow(container, 'areal_heat_capacity')).getByRole('combobox') as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual(expect.arrayContaining(['Very light', 'Light', 'Medium', 'Number (J/m²·K)']));
+    expect(select.options.length).toBe(5);
+    fireEvent.change(select, { target: { value: 'number' } });
+    const input = within(container.querySelectorAll<HTMLElement>('[data-field-key="areal_heat_capacity"]')[1]).getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '90000' } });
+    const saved = onChange.mock.calls.at(-1)![0].extra_json.areal_heat_capacity;
+    expect(saved).toBe(90000);
   });
 
   it('config 2 -- BuildingElementOpaque, wall, Core and FHS + interaction characterization (number-entry / unset)', async () => {

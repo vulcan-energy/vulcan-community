@@ -323,7 +323,7 @@ export function createDefaultsLookup(defaults: unknown | null): DefaultsLookup {
     },
     getMechVentDefaultByVentType: getMechVentDefaultByVentTypeForDefaults,
     hasDefaultValue: (fieldName, elementType, subschema, subtype, opaqueFabricVariant) => {
-      if (subschema?.properties?.[fieldName]?.default !== undefined) return true;
+      if (subschema?.properties?.[fieldName]?.default != null) return true;
 
       const cacheKey = `${fieldName}:${elementType || ''}:${subtype || ''}:${opaqueFabricVariant || ''}`;
       const cached = hasValueCache.get(cacheKey);
@@ -400,7 +400,7 @@ export function hasDefaultValue(
   opaqueFabricVariant?: OpaqueFabricVariant,
 ): boolean {
   // Check schema default first (faster, synchronous)
-  if (subschema?.properties?.[fieldName]?.default !== undefined) {
+  if (subschema?.properties?.[fieldName]?.default != null) {
     return true;
   }
 

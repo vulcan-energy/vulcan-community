@@ -1014,7 +1014,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const selectedId = selection?.id;
   const arealHeatCapacityBands = useMemo(() => {
     const element = selectedId ? elementsById[selectedId] : undefined;
-    return constructionBands && element ? hemieHeatCapacityBands(hemieConstructionType(element, allElements)) : undefined;
+    // null: the converter takes no heat capacity from this element, so the field is not offered.
+    return constructionBands && element ? hemieHeatCapacityBands(hemieConstructionType(element, allElements)) ?? null : undefined;
   }, [constructionBands, selectedId, elementsById, allElements]);
 
   const latestElementsByIdRef = useRef(elementsById);
