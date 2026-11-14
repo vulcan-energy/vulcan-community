@@ -184,7 +184,7 @@ import {
 import { hydrateWallSharedFields } from './wallShared';
 import { renderWallPitchField } from './wallPitchField';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
-import { renderCloseShadingFields } from './windowShading';
+import { CloseShadingFields } from './CloseShadingFields';
 import { isExistingBuilding } from '../../lib/windowOpenings';
 import { useGeometryStore } from '../../stores/geometryStore';
 import {
@@ -840,9 +840,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             size="md"
           />
         </div>
-        {selectedElement?.name && state.closeShadingExisting && renderCloseShadingFields({
-          windowName: selectedElement.name, elementsById: ctx.elementsById, updateElement: ctx.updateElement,
-        })}
+        {selectedElement?.name && state.closeShadingExisting && (
+          <CloseShadingFields windowName={selectedElement.name} elementsById={ctx.elementsById} updateElement={ctx.updateElement} />
+        )}
       </>
     );
   },

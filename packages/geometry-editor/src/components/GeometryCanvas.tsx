@@ -224,7 +224,6 @@ import {
   resetCanvasPanelPosition,
   setCanvasPanelPosition,
   type CanvasDecorationContext,
-  type CanvasDecorationContribution,
   type CanvasPanelPosition,
   type CanvasPanelPositions,
   type GeometryEditorContributions,
@@ -3539,9 +3538,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   }, [canvasCenter, canvasDecorationContributions, canInteractWithCanvasDecorations, canvasInteractionPalette, currentFloorZ,
     activeCanvasDecoration, drawingCanvasPalette, panOffset, scale, selectCanvasDecoration, drawElementType]);
 
-  const renderCanvasDecorations = (below: boolean) => canvasDecorationContributions
-    .filter((contribution) => !!contribution.belowGeometry === below)
-    .map((contribution) => <React.Fragment key={contribution.id}>{contribution.render(canvasDecorationContext(contribution.id))}</React.Fragment>);
+  const canvasDecorationNodes = (below: boolean) => canvasDecorationContributions
+    .flatMap((contribution) => (!!contribution.belowGeometry === below
+      ? [<React.Fragment key={contribution.id}>{contribution.render(canvasDecorationContext(contribution.id))}</React.Fragment>]
+      : []));
+
+  const decorationsBelow = canvasDecorationNodes(true);
+  const decorationsAbove = canvasDecorationNodes(false);
 
   const requestSelectedCanvasDecorationDelete = useCallback(() => {
     if (!activeCanvasDecoration) return false;
@@ -7055,7 +7058,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
           {canvasDecorationContributions.some((contribution) => contribution.belowGeometry) && (
             <Layer name="host-canvas-decorations-below" listening={canInteractWithCanvasDecorations}>
-              {renderCanvasDecorations(true)}
+              {decorationsBelow}
             </Layer>
           )}
 
@@ -8130,7 +8133,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
           {canvasDecorationContributions.some((contribution) => !contribution.belowGeometry) && (
             <Layer name="host-canvas-decorations" listening={canInteractWithCanvasDecorations}>
-              {renderCanvasDecorations(false)}
+              {decorationsAbove}
             </Layer>
           )}
 
