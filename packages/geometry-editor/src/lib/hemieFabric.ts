@@ -61,13 +61,23 @@ export function postcodeRegion(postcode: string | undefined, statedNation?: stri
  */
 export const FABRIC_PRESET_TYPES: ReadonlySet<string> = new Set(['BuildingElementOpaque', 'BuildingElementTransparent']);
 
+/**
+ * Rows older files carry that the converter no longer reads (`RETIRED_SETTINGS` in `hemie.rs`):
+ * a load drops each one and says what to do instead.
+ */
+export const HEMIE_RETIRED_ROWS: Readonly<Record<string, string>> = {
+  HEMIE_region: 'the region now comes from the postcode. For a postcode area that spans two nations, choose the Nation under the Postcode in Dwelling Details.',
+  HEMIE_front_door: 'mark the front door on the door itself.',
+  HEMIE_infiltration_properties: 'an existing building needs an air test. Enter the air test result in Global Settings.',
+};
+
 /** The door element flag that marks the front door; one door only. */
 export const HEMIE_FRONT_DOOR = 'is_front_door';
 export const hemieConstructionSetting = (constructionType: string): string => `HEMIE_construction_${constructionType}`;
 
 /**
  * The construction fields offered per construction type: those the converter needs a value for,
- * heat capacity (optional on a door), the roof's insulation location, and the outside colour (a stated solar absorption coefficient
+ * the roof's insulation location, and the outside colour (a stated solar absorption coefficient
  * wins over it). An element may override them (see `ELEMENT_OVERRIDE_KEYS` and
  * `takes_outside_surface` in `hemie.rs`).
  */

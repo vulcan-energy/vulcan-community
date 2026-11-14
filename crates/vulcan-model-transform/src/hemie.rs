@@ -51,7 +51,7 @@ const UNUSED_WINDOW_HEAT_CAPACITY: f64 = 0.0;
 const SETTING: &str = "HEMIE_";
 /// Metadata rows older saved files carry that the converter no longer reads, with the fix.
 const RETIRED_SETTINGS: [(&str, &str); 3] = [
-    ("HEMIE_region", "The region comes from the postcode. Remove the row. For a postcode area that spans two nations, choose the Nation under the Postcode in Global Settings."),
+    ("HEMIE_region", "The region comes from the postcode. Remove the row. For a postcode area that spans two nations, choose the Nation under the Postcode in Dwelling Details."),
     ("HEMIE_front_door", "Remove the row and mark the front door on the door itself."),
     ("HEMIE_infiltration_properties", "An existing building needs an air test. Remove the row and enter the air test result in Global Settings."),
 ];
@@ -726,8 +726,21 @@ impl Ctx<'_> {
             }
         }
         if takes_outside_surface(construction_type) {
-            if let Some(colour) = self.agreed(elements, "colour") {
-                c.insert("colour".into(), colour.clone());
+            match self.agreed(elements, "colour") {
+                Some(colour)
+                    if ["Light", "Intermediate", "Dark"]
+                        .contains(&colour.as_str().unwrap_or_default()) =>
+                {
+                    c.insert("colour".into(), colour.clone());
+                }
+                Some(colour) => self.errors.push(error(
+                    first.path(),
+                    format!(
+                        "'{}' has colour {colour}. Use Light, Intermediate or Dark.",
+                        first.name
+                    ),
+                )),
+                None => {}
             }
             if let Some(coeff) = self.agreed(elements, "solar_absorption_coeff") {
                 c.insert("solar_absorption_coefficient".into(), coeff.clone());
@@ -816,7 +829,7 @@ impl Ctx<'_> {
                 c.insert("party_wall_lining_type".into(), json!(lining));
             }
         }
-        if let Some(capacity) = first.num("areal_heat_capacity") {
+        if let Some(capacity) = self.heat_capacity(elements) {
             c.insert("areal_heat_capacity".into(), json!(capacity));
         }
         for (key, value) in extra {
@@ -862,6 +875,24 @@ impl Ctx<'_> {
             self.errors.push(error(elements[0].path(), format!("The existing-building EPC gives {} one {field}, but they state different values ({}). Give them one {field}, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), values.into_iter().collect::<Vec<_>>().join(", "))));
         }
         elements[0].get(key)
+    }
+
+    /// The elements' areal heat capacity, alike on each (see `agreed`): a number in J/m2.K, or
+    /// a band at HEM:EPC's band values (DESNZ-defined). Anything else fails, naming the element.
+    fn heat_capacity(&mut self, elements: &[&El]) -> Option<f64> {
+        let value = self.agreed(elements, "areal_heat_capacity")?;
+        let capacity = value.as_f64().or_else(|| match value.as_str()? {
+            "Very light" => Some(240_000.0),
+            "Light" => Some(450_000.0),
+            "Medium" => Some(650_000.0),
+            "Heavy" => Some(850_000.0),
+            "Very heavy" => Some(1_350_000.0),
+            _ => None,
+        });
+        if capacity.is_none() {
+            self.errors.push(error(elements[0].path(), format!("'{}' has areal heat capacity {value}. Give a number in J/m²·K, or Very light, Light, Medium, Heavy or Very heavy.", elements[0].name)));
+        }
+        capacity
     }
 
     /// The value with the elements' own age band, which HEMIE takes over its building part's
@@ -919,8 +950,11 @@ impl Ctx<'_> {
                     json!(HEATED_PITCHED_ROOF_HEAT_CAPACITY),
                 );
             }
-            // A door's areal heat capacity left unstated takes HEMIE's own default (50,000
-            // J/m2.K, DESNZ-defined in HEMIE's door construction; plan question E34).
+            // The pinned HEM:EPC schema requires a door's areal heat capacity (later HEMIE
+            // releases default it; plan question E34), so the door setting states it.
+            "external_door" | "party_or_sheltered_door" if !has(c, "areal_heat_capacity") => {
+                need("areal_heat_capacity")
+            }
             _ => {}
         }
     }
@@ -3460,6 +3494,41 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert_eq!(
             missing_setting_message("HEMIE_construction_window", &fields),
             "The window fabric default states no areal heat capacity (for a window in a party or sheltered wall). Choose it in Global Settings > Defaults > Fabric, or on each window element."
+        );
+    }
+
+    #[test]
+    fn a_heat_capacity_band_takes_its_value_and_unknown_values_stop() {
+        let text = house(gable_roof()).replace(
+            "\"3.5,0,0|4.5,0,0\",",
+            "\"3.5,0,0|4.5,0,0\",\"{\"\"areal_heat_capacity\"\":\"\"Heavy\"\"}\"",
+        );
+        let (model, errors, _) = run(&text);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let constructions = model["Zone"]["constructions"].as_object().unwrap();
+        assert!(
+            constructions
+                .values()
+                .any(|c| c["construction_type"] == "external_door"
+                    && c["areal_heat_capacity"] == 850_000.0),
+            "{constructions:#?}"
+        );
+        let (_, errors, _) = run(&text.replace("Heavy", "Blue"));
+        assert!(
+            errors.iter().any(|e| e
+                .message
+                .contains("'Front' has areal heat capacity \"Blue\"")),
+            "{errors:#?}"
+        );
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed[0] = exposed[0].replace("\",", "\",\"{\"\"colour\"\":\"\"Blue\"\"}\"");
+        exposed.extend(gable_roof());
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message == "'W00' has colour \"Blue\". Use Light, Intermediate or Dark."),
+            "{errors:#?}"
         );
     }
 

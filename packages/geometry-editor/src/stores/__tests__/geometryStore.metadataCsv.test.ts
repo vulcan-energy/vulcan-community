@@ -33,6 +33,39 @@ it('keeps the product settings rows as typed through load and save', () => {
   expect(csv).toMatch(/^Product_ufh,,/m);
 });
 
+it('drops a retired HEMIE_ row on load and says what to do instead', () => {
+  const store = createGeometryStore({ defaultDefaultsPath: null });
+  const { warnings } = store.getState().loadFromCSV('Metadata,,\nHEMIE_age_band,D\nHEMIE_region,England\n');
+  expect(store.getState().complianceSettings.hemieSettings).toEqual({ HEMIE_age_band: 'D' });
+  expect(warnings).toContain('HEMIE_region removed: the region now comes from the postcode. For a postcode area that spans two nations, choose the Nation under the Postcode in Dwelling Details.');
+  expect(store.getState().generateCSV({ allowUnresolvedMigration: true })).not.toMatch(/^HEMIE_region,/m);
+});
+
+it('keeps a numeric areal heat capacity through save and reload on a target that takes numbers', () => {
+  const csv = `Metadata,,
+TargetBundleId,epc-target
+
+Zone,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Exposed Elements,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Door,Living,BuildingElementOpaque,2,90,1,2,180,0,FALSE,TRUE,,"0,0,0|1,0,0","{""areal_heat_capacity"":20000}"
+`;
+  const capacity = (numeric: boolean) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, numericArealHeatCapacityForTarget: (id) => numeric && id === 'epc-target' });
+    store.getState().loadFromCSV(csv);
+    const saved = store.getState().generateCSV({ allowUnresolvedMigration: true });
+    store.getState().loadFromCSV(saved);
+    const door = Object.values(store.getState().elementsById).find((e) => e.name === 'Door');
+    return (door?.extra_json as Record<string, unknown> | undefined)?.areal_heat_capacity ?? (door as unknown as Record<string, unknown>)?.areal_heat_capacity;
+  };
+  expect(capacity(true)).toBe(20000);
+  // An FHS target reads bands only, so the load snaps to the nearest one.
+  expect(capacity(false)).toBe('Very light');
+});
+
 it('keeps the HEMIE_ model settings as typed through load and save', () => {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   store.getState().loadFromCSV('Metadata,,\nHEMIE_age_band,D\nHEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}"\n');

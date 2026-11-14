@@ -490,7 +490,7 @@ pub(super) fn attach_bays(
                 "areal_heat_capacity",
             ]
             .iter()
-            .any(|k| f.num(k).is_some())
+            .any(|k| f.get(k).is_some())
         }) {
             let key = ctx.construction("external_wall", &bay.facets, &[]);
             bay_value.insert("wall_construction".into(), json!(key));
