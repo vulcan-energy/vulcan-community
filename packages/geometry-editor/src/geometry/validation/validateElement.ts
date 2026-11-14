@@ -55,7 +55,7 @@ import type {
   ElectricBattery,
   System,
 } from '../types';
-import type { MissingElement, ValidationResult, ValidationIssue, ValidationSource } from './types';
+import { withHostFindings, type HostValidationFindings, type MissingElement, type ValidationResult, type ValidationIssue, type ValidationSource } from './types';
 import { validateZone } from './validateZone';
 import {
   detectMissingElements,
@@ -496,6 +496,8 @@ export interface ValidationContext {
   partFFindings?: readonly PartFFinding[];
   /** Precomputed floor-stack warnings for model-wide validation callers. */
   floorStackWarningElementIds?: ReadonlySet<string>;
+  /** Issues the host adds for a task the user chose to run. */
+  hostFindings?: HostValidationFindings | null;
 }
 
 function jsonSchemaPropertyIsBoolean(
@@ -2704,8 +2706,10 @@ export const validateElementCore = (
     ...item,
     message: prefix ? `${prefix}${item.message}` : item.message,
   });
-  const prefixedIssues = issues.map(withPrefix);
-  const prefixedWarnings = warnings.map(withPrefix);
+  const host = context.hostFindings;
+  const withHost = withHostFindings(issues, warnings, host?.elements?.[element.id], host?.blockingWarnings);
+  const prefixedIssues = withHost.issues.map(withPrefix);
+  const prefixedWarnings = withHost.warnings.map(withPrefix);
 
   const deduplicateByFieldKey = (items: ValidationIssue[]): ValidationIssue[] => {
     const sourcePriority: Record<ValidationSource, number> = { geometry: 0, schema: 1, fhs: 2 };

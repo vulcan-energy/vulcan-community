@@ -255,6 +255,7 @@ function SpaceLabelCompactRow({
   const removeSpaceLabel = useGeometryStore((s) => s.removeSpaceLabel);
   const spaceLabellerSelectedLabelId = useGeometryStore((s) => s.spaceLabellerSelectedLabelId);
   const setSpaceLabellerSelectedLabelId = useGeometryStore((s) => s.setSpaceLabellerSelectedLabelId);
+  const focusField = useGeometryStore((s) => (s.spaceLabellerSelectedLabelId === label.id ? s.spaceLabellerFocusField : null));
   const roomTypeSelectRef = useRef<HTMLSelectElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const isRowSelected = spaceLabellerSelectedLabelId === label.id;
@@ -278,10 +279,16 @@ function SpaceLabelCompactRow({
   });
   const HostFields = spaceLabelFields?.render;
 
-  // A selection made elsewhere (for example on the plan) brings its row into view.
+  // A selection made elsewhere (for example on the plan) brings its row into view, and its field
+  // when one is named. Host fields mark their control's wrapper with data-host-field-key.
   useLayoutEffect(() => {
-    if (isRowSelected) rowRef.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [isRowSelected]);
+    if (!isRowSelected) return;
+    rowRef.current?.scrollIntoView?.({ block: 'nearest' });
+    if (focusField) {
+      rowRef.current?.querySelector<HTMLElement>(`[data-host-field-key="${CSS.escape(focusField.fieldKey)}"]`)
+        ?.querySelector<HTMLElement>('input, select, textarea')?.focus();
+    }
+  }, [isRowSelected, focusField]);
 
   useLayoutEffect(() => {
     if (!expandForRoomTypeId || expandForRoomTypeId !== label.id) return;

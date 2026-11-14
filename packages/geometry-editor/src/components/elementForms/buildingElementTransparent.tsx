@@ -542,6 +542,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       renderLinearDimensionsFields,
       applyHostedParentElement,
       elementZoneId,
+      openingFields,
     } = ctx;
 
     // ElementCreator's getCurrentElementData has one OTHER call site (the
@@ -758,6 +759,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
         <div style={INLINE_FIELD_NOTE_STYLE}>
           Suggested from width x free area height (capped by total window area).
         </div>
+        {openingFields}
         </>}
         {openingNote ? <div style={INLINE_FIELD_NOTE_STYLE}>{openingNote}</div> : null}
         {selectedElement?.type === 'BuildingElementTransparent' && isConservatoryGlazing(selectedElement, ctx.elementsById) ? (

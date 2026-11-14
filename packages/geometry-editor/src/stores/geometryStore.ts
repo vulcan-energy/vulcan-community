@@ -121,7 +121,7 @@ import {
   remapZoneSpaceLabelsFromInference,
 } from '../lib/spaceInference/remapInferredSpaceLabels';
 import { detectMissingElements as detectMissingElementsCore } from '../geometry/validation/detectMissingElements';
-import type { MissingElement, ValidationResult } from '../geometry/validation/types';
+import type { HostValidationFindings, MissingElement, ValidationResult } from '../geometry/validation/types';
 import type { TargetValidation } from '../types/buildErrors';
 // Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
 // remove or relocate these re-exports without a paired web/ PR.
@@ -1523,7 +1523,9 @@ export interface GeometryState extends
   spaceLabellerZoneId: string | null;
   /** Footprint selected for canvas highlight + panel sync (only meaningful while labeller open). */
   spaceLabellerSelectedLabelId: string | null;
-  setSpaceLabellerSelectedLabelId: (id: string | null) => void;
+  /** A field of the selected label to focus, e.g. a host field; a new object asks again. */
+  spaceLabellerFocusField: { fieldKey: string } | null;
+  setSpaceLabellerSelectedLabelId: (id: string | null, focusFieldKey?: string) => void;
   openSpaceLabeller: (zoneId: string) => void;
   closeSpaceLabeller: () => void;
   /** Quantized wall-segment fingerprint per zone — avoids re-infer when fabric unchanged. */
@@ -1706,6 +1708,9 @@ export interface GeometryState extends
    */
   targetValidation: TargetValidation | null;
   setTargetValidation: (validation: TargetValidation | null) => void;
+  /** Issues the host adds for a task the user chose to run; null when it adds none. Live display only: Save and lodgement do not read them. */
+  hostValidationFindings: HostValidationFindings | null;
+  setHostValidationFindings: (findings: HostValidationFindings | null) => void;
   getCSVValidation: (filename: string) => {
     warnings: string[];
     criticalIssues: string[];
@@ -2838,6 +2843,7 @@ const validateElementForState = (
         : undefined,
     linearThermalBridgeIssues,
     partFFindings,
+    hostFindings: state.hostValidationFindings,
   });
 };
 
@@ -3156,6 +3162,7 @@ const createGeometryState = (
   spaceLabellerOpen: false,
   spaceLabellerZoneId: null,
   spaceLabellerSelectedLabelId: null,
+  spaceLabellerFocusField: null,
   spaceInferenceWallPrintByZone: {},
 
   canvasViewResetKey: 0,
@@ -4984,7 +4991,10 @@ const createGeometryState = (
 
   setSpaceLabelsOverlayExpanded: (value) => set({ spaceLabelsOverlayExpanded: value }),
 
-  setSpaceLabellerSelectedLabelId: (id) => set({ spaceLabellerSelectedLabelId: id }),
+  setSpaceLabellerSelectedLabelId: (id, focusFieldKey) => set({
+    spaceLabellerSelectedLabelId: id,
+    spaceLabellerFocusField: focusFieldKey ? { fieldKey: focusFieldKey } : null,
+  }),
 
   openSpaceLabeller: (zoneId) =>
     set((state) => ({
@@ -7616,6 +7626,8 @@ const createGeometryState = (
 
   targetValidation: null,
   setTargetValidation: (targetValidation) => set({ targetValidation }),
+  hostValidationFindings: null,
+  setHostValidationFindings: (hostValidationFindings) => set({ hostValidationFindings }),
 
   getCSVValidation: (filename: string) => {
     const state = get();

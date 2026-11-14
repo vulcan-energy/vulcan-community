@@ -62,6 +62,25 @@ describe('canonical floor-stack validation', () => {
     }));
   });
 
+  it('shows a host blocking warning as an error, with the host issues, and nothing more', () => {
+    const elements = [
+      wall('lower-wall', 'floor-0', 0, 2),
+      wall('upper-wall', 'floor-1', 1, 2, 4),
+    ];
+    const hostFindings = {
+      elements: { 'lower-wall': [{ message: 'No equivalent area.', fieldKey: 'x', source: 'geometry' as const }] },
+      blockingWarnings: ['Floor geometry may overlap or separate.'],
+    };
+
+    const result = validateElementCore(elements[0], { ...validationContext(elements), hostFindings });
+
+    expect(result.warnings.map((w) => w.fieldKey)).not.toContain('floor_stack');
+    expect(result.issues.map((i) => i.message)).toEqual(expect.arrayContaining([
+      expect.stringContaining('Floor geometry may overlap or separate.'),
+      expect.stringContaining('No equivalent area.'),
+    ]));
+  });
+
   it('warns on the affected walls when adjacent storeys overlap', () => {
     const elements = [
       wall('lower-wall', 'floor-0', 0, 5),

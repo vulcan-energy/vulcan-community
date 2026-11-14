@@ -211,6 +211,14 @@ export type GeometryInspectorElementFieldsContribution = Readonly<{
   render: ComponentType<GeometryInspectorElementFieldsContext>;
 }>;
 
+/**
+ * Host fields shown on a glazed element directly under Max Window Open Area. A field marks
+ * its row with `data-host-field-key` so validation rows can focus it.
+ */
+export type GeometryInspectorOpeningFieldsContribution = Readonly<{
+  render: ComponentType<GeometryInspectorElementFieldsContext>;
+}>;
+
 export type GeometrySpaceLabelFieldsContext = Readonly<{
   /** The Space Labeller row this field belongs to. */
   label: Readonly<{ id: string; name: string; room_type: string; extra_json?: Record<string, unknown> }>;
@@ -230,6 +238,7 @@ export type GeometryInspectorContributions = Readonly<{
   productCatalogue: GeometryProductCatalogueContribution | null;
   constructionDetails: GeometryConstructionDetailsContribution | null;
   elementFields: GeometryInspectorElementFieldsContribution | null;
+  openingFields: GeometryInspectorOpeningFieldsContribution | null;
   spaceLabelFields: GeometrySpaceLabelFieldsContribution | null;
 }>;
 
@@ -242,6 +251,7 @@ export function defineGeometryInspectorContributions(
     productCatalogue: contributions.productCatalogue ?? null,
     constructionDetails: contributions.constructionDetails ?? null,
     elementFields: contributions.elementFields ?? null,
+    openingFields: contributions.openingFields ?? null,
     spaceLabelFields: contributions.spaceLabelFields ?? null,
   });
 }

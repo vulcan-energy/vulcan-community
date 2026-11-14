@@ -360,6 +360,17 @@ it('opens a new document with no issues', () => {
   expect(state.collectAllGeometryWarnings().criticalIssues).toEqual([]);
 });
 
+// Host findings are for the editor's live display only; Save and lodgement read the document's own checks.
+it('leaves host findings out of the issues Save reads', () => {
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+  store.getState().loadFromCSV(sample);
+  const element = Object.values(store.getState().elementsById).find((e) => !e.isPlaceholder)!;
+  store.getState().setHostValidationFindings({ elements: { [element.id]: [{ message: 'Host only.', fieldKey: 'host', source: 'geometry' }] } });
+  const state = store.getState();
+  expect(state.validateElement(element, state.elementsById).issues.map((i) => i.message).join(' ')).toContain('Host only.');
+  expect(state.collectAllGeometryWarnings().criticalIssues.join(' ')).not.toContain('Host only.');
+});
+
 // HEM a9 guards the party wall lining condition with `required: [party_wall_cavity_type]` beside
 // its `anyOf`. The converter asks for a lining only for the three listed cavity types.
 it('asks for a party wall lining only for the cavity types the target lists', () => {
