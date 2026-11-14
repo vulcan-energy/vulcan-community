@@ -231,7 +231,7 @@ import {
 import type { GeometryCanvas3DProps } from './canvas/GeometryCanvas3D';
 import { useElementCategoryGhost } from '../hooks/useElementCategoryGhost';
 import { useTargetRules } from '../hooks/useTargetRules';
-import { FABRIC_PRESET_TYPES, hemieFabricGroups } from '../lib/hemieFabric';
+import { FABRIC_PRESET_TYPES, hemieFabricGroups, statedBuildType } from '../lib/hemieFabric';
 import { useHiddenElementIds } from '../hooks/useHiddenElementIds';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { elementIsHiddenFromView } from '../lib/elementCategoryVisibility';
@@ -5652,6 +5652,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             existingBundleNames,
             floors,
             globalOrientationOffset: geometryStore.getState().globalOrientationOffset,
+            omitFrameAreaFraction: constructionBands,
           });
 
           if (!draft) {
@@ -6523,9 +6524,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   ) * (element.type === 'ContextShading' && unusedContextShading.has(element.name) ? 0.4 : 1),
   [thermalBridgePreview.active, thermalBridgePreview.kind, thermalBridgePreview.highlightedHostIds, unusedContextShading]);
 
+  const buildType = statedBuildType(complianceSettings);
   const fabricGroups = useMemo(
-    () => (constructionBands && colourByFabric ? hemieFabricGroups(Object.values(elementsById), complianceSettings.hemieSettings) : []),
-    [constructionBands, colourByFabric, elementsById, complianceSettings.hemieSettings],
+    () => (constructionBands && colourByFabric ? hemieFabricGroups(Object.values(elementsById), complianceSettings.hemieSettings, buildType) : []),
+    [constructionBands, colourByFabric, elementsById, complianceSettings.hemieSettings, buildType],
   );
   const fabricColouring = useMemo(
     () => (constructionBands ? { on: colourByFabric, onToggle: () => setColourByFabric((on) => !on) } : undefined),
@@ -9699,6 +9701,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     'GeometryCanvas.details.multiSelect',
                     <MultiSelectPanel
                       selectedElementIds={selectedElementIds}
+                      inspectorContributions={inspectorContributions}
                       workspaceResourcePort={workspaceResourcePort}
                       externalDetailCatalogue={externalDetailCatalogue}
                       onDelete={() => {

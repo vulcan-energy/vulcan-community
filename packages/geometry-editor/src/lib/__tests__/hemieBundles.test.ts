@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { BuildingElementGround, BuildingElementOpaque, Element } from '../../geometry/types';
 import {
   BAY_DEFAULTS,
+  bayParameters,
   bayParametersProblem,
   CONSERVATORY_DEFAULTS,
   buildBayBundleDraft,
@@ -68,8 +69,19 @@ describe('bay bundle', () => {
   });
 
   it('refuses side windows on sides too short for them', () => {
-    expect(bayParametersProblem(host(), { ...BAY_DEFAULTS, centre: 3, depth: 0.15, sideAngle: 90 })).toMatch(/too short for side windows/);
-    expect(bayParametersProblem(host(), { ...BAY_DEFAULTS, centre: 3, depth: 0.15, sideAngle: 90, sideWindows: false })).toBeNull();
+    expect(bayParametersProblem(host(), { ...BAY_DEFAULTS, centre: 3, depth: 0.15, frontWidth: 2 })).toMatch(/too short for side windows/);
+    expect(bayParametersProblem(host(), { ...BAY_DEFAULTS, centre: 3, depth: 0.15, frontWidth: 2, sideWindows: false })).toBeNull();
+    expect(bayParametersProblem(host(), { ...BAY_DEFAULTS, centre: 3, frontWidth: 2.1 })).toMatch(/front width/);
+  });
+
+  it('takes a front width, from a side angle on a bay saved with one, and a lower bay wall height', () => {
+    const { frontWidth, ...saved } = BAY_DEFAULTS;
+    expect(bayParameters({ ...saved, centre: 3, sideAngle: 45 } as never).frontWidth).toBe(frontWidth);
+    expect(bayParameters({ ...saved, centre: 3, sideAngle: 90 } as never).frontWidth).toBe(2);
+    const low = buildBayBundleDraft({ host: host(), parameters: { ...BAY_DEFAULTS, centre: 3, wallHeight: 2.4 }, existingNames: [], globalOrientationOffset: 0 });
+    expect(role(low.members, 'front-wall').updates.height).toBe(2.4);
+    expect(role(low.members, 'roof').updates.base_height).toBe(2.4);
+    expect(bayParametersProblem(host(), { ...BAY_DEFAULTS, centre: 3, wallHeight: 3 })).toMatch(/bay wall height/);
   });
 
   it('has no floor over a lower bay', () => {

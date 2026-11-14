@@ -130,7 +130,7 @@ import {
 } from '../lib/parentControlledFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
-import { FABRIC_PRESET_TYPES, hemieConstructionType, hemieHeatCapacityBands } from '../lib/hemieFabric';
+import { FABRIC_PRESET_TYPES, hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../lib/hemieFabric';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -1012,10 +1012,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const allElements = useMemo(() => Object.values(elementsById) as Element[], [elementsById]);
   // Under construction bands, only the heat capacity bands this element's construction takes.
   const selectedId = selection?.id;
+  const buildType = statedBuildType(modelSettings);
   const arealHeatCapacityBands = useMemo(() => {
     const element = selectedId ? elementsById[selectedId] : undefined;
-    return constructionBands && element ? hemieHeatCapacityBands(hemieConstructionType(element, allElements)) : undefined;
-  }, [constructionBands, selectedId, elementsById, allElements]);
+    return constructionBands && element ? hemieHeatCapacityBands(hemieConstructionType(element, allElements, buildType)) : undefined;
+  }, [constructionBands, selectedId, elementsById, allElements, buildType]);
 
   const latestElementsByIdRef = useRef(elementsById);
   useEffect(() => {

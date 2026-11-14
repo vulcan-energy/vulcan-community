@@ -77,7 +77,7 @@ pub(super) fn left_out<'a>(ctx: &mut Ctx, els: &[El<'a>]) -> BTreeSet<&'a str> {
             Some(s @ ("separated" | "unheated")) => s,
             other => {
                 if said.insert(t.id) {
-                    ctx.errors.push(error(e.path(), format!("Conservatory '{}' has type {}. Give it non-separated, separated or unheated.", t.id, other.map_or("none".into(), |o| format!("'{o}'")))));
+                    ctx.errors.push(error("CONSERVATORY", e.path(), format!("Conservatory '{}' has type {}. Give it non-separated, separated or unheated.", t.id, other.map_or("none".into(), |o| format!("'{o}'")))));
                 }
                 continue;
             }
@@ -111,7 +111,8 @@ pub(super) fn left_out<'a>(ctx: &mut Ctx, els: &[El<'a>]) -> BTreeSet<&'a str> {
 /// Separated, the host wall stays as drawn. Reads the members of every conservatory, so it
 /// takes the elements before `left_out`. Returns the host walls replaced, their pieces (each with
 /// its unheated space type when sheltered), and the non-separated conservatory floors (each its
-/// own building part).
+/// own building part), and the windows and doors in a non-separated span, which are inside the
+/// dwelling and not entered (DESNZ-defined, as the span; DESNZ question E49; reported).
 #[allow(clippy::type_complexity)]
 pub(super) fn conservatory_hosts<'a>(
     ctx: &mut Ctx,
@@ -120,8 +121,10 @@ pub(super) fn conservatory_hosts<'a>(
     BTreeSet<&'a str>,
     Vec<(El<'a>, Option<&'a str>)>,
     Vec<Vec<P>>,
+    BTreeSet<&'a str>,
 ) {
     let (mut hosts, mut pieces, mut floors) = (BTreeSet::new(), Vec::new(), Vec::new());
+    let mut inside = BTreeSet::new();
     let ids: BTreeMap<&str, Option<&str>> = els
         .iter()
         .filter_map(|e| {
@@ -141,14 +144,14 @@ pub(super) fn conservatory_hosts<'a>(
             member(els, id, "right-wall"),
             member(els, id, "floor"),
         ) else {
-            ctx.errors.push(error("/Zone".into(), format!("Conservatory '{id}' has lost a side wall or its floor. Place the conservatory again from its host wall.")));
+            ctx.errors.push(error("CONSERVATORY", "/Zone".into(), format!("Conservatory '{id}' has lost a side wall or its floor. Place the conservatory again from its host wall.")));
             continue;
         };
         let t = tag(left).expect("member");
         let host_name = t.host;
         let space = if unheated {
             let Some(space) = t.adjacent_space_type else {
-                ctx.errors.push(error(left.path(), format!("Unheated conservatory '{id}' does not state what unheated space '{host_name}' borders. Choose corridor, garage, roof void or stairwell on the conservatory.")));
+                ctx.errors.push(error("CONSERVATORY", left.path(), format!("Unheated conservatory '{id}' does not state what unheated space '{host_name}' borders. Choose corridor, garage, roof void or stairwell on the conservatory.")));
                 continue;
             };
             Some(space)
@@ -159,19 +162,21 @@ pub(super) fn conservatory_hosts<'a>(
             .iter()
             .find(|e| e.name == host_name && wall_kind(e).is_some() && tag(e).is_none())
         else {
-            ctx.errors.push(error(left.path(), format!("The host wall '{host_name}' of conservatory '{id}' is not a wall of the model. Place the conservatory again from a wall.")));
+            ctx.errors.push(error("CONSERVATORY", left.path(), format!("The host wall '{host_name}' of conservatory '{id}' is not a wall of the model. Place the conservatory again from a wall.")));
             continue;
         };
         let (Some((a, _)), Some((b, _))) = (side_ends(left, host), side_ends(right, host)) else {
-            ctx.errors.push(error(left.path(), format!("The side walls '{}' and '{}' of conservatory '{id}' do not each start on its host wall '{host_name}'. Place the conservatory again from that wall.", left.name, right.name)));
+            ctx.errors.push(error("CONSERVATORY", left.path(), format!("The side walls '{}' and '{}' of conservatory '{id}' do not each start on its host wall '{host_name}'. Place the conservatory again from that wall.", left.name, right.name)));
             continue;
         };
         let (p, q) = (host.pts[0], host.pts[1]);
         let along = |x: P| dot(sub(x, p), unit(sub(q, p)));
         let (lo, hi) = if along(a) <= along(b) { (a, b) } else { (b, a) };
-        if let Some(o) = covered_opening(els, host, lo, hi).filter(|_| !unheated) {
-            ctx.errors.push(error(o.path(), format!("'{}' is in the part of '{}' that conservatory '{id}' adjoins, which is inside the dwelling. Delete it, or move it to a conservatory wall.", o.name, host.name)));
-            continue;
+        if !unheated {
+            for o in covered_openings(els, host, lo, hi) {
+                inside.insert(o.name);
+                ctx.notices.push(notice(&o.path(), format!("'{}' is in the part of '{}' that conservatory '{id}' adjoins, which is inside the dwelling, so it is not entered.", o.name, host.name)));
+            }
         }
         hosts.insert(host.name);
         let mut spans = vec![(p, lo, None), (hi, q, None)];
@@ -200,19 +205,24 @@ pub(super) fn conservatory_hosts<'a>(
             floors.push(floor.pts.clone());
         }
     }
-    (hosts, pieces, floors)
+    (hosts, pieces, floors, inside)
 }
 
-/// A window or door of `host` whose middle lies between `lo` and `hi` along it.
-fn covered_opening<'s, 'e>(els: &'s [El<'e>], host: &El, lo: P, hi: P) -> Option<&'s El<'e>> {
+/// The windows and doors of `host` whose middle lies between `lo` and `hi` along it.
+fn covered_openings<'s, 'e: 's>(
+    els: &'s [El<'e>],
+    host: &'s El,
+    lo: P,
+    hi: P,
+) -> impl Iterator<Item = &'s El<'e>> + 's {
     let (p, q) = (host.pts[0], host.pts[1]);
-    let along = |x: P| dot(sub(x, p), unit(sub(q, p)));
+    let along = move |x: P| dot(sub(x, p), unit(sub(q, p)));
     let (lo, hi) = if along(lo) <= along(hi) {
         (lo, hi)
     } else {
         (hi, lo)
     };
-    els.iter().find(|o| {
+    els.iter().filter(move |o| {
         o.host() == Some(host.name)
             && (o.ty == "BuildingElementTransparent" || o.flag("is_external_door"))
             && o.pts.len() >= 2
@@ -255,6 +265,7 @@ pub(super) fn bays<'a>(ctx: &mut Ctx, els: &'a [El<'a>]) -> Vec<Bay<'a>> {
             member(els, id, "right-wall"),
         ) else {
             ctx.errors.push(error(
+                "BAY",
                 "/Zone".into(),
                 format!(
                     "Bay '{id}' has lost one of its walls. Place the bay again from its host wall."
@@ -274,7 +285,7 @@ pub(super) fn bays<'a>(ctx: &mut Ctx, els: &'a [El<'a>]) -> Vec<Bay<'a>> {
                 == 1
         };
         if group.iter().any(|f| f.pts.len() != 2) || !joined(side_a) || !joined(side_b) {
-            ctx.errors.push(error(path, format!("The bay walls {names} are not two sides and a front joined end to end. Place the bay again from its host wall.")));
+            ctx.errors.push(error("BAY", path, format!("The bay walls {names} are not two sides and a front joined end to end. Place the bay again from its host wall.")));
             continue;
         }
         let free = |side: &El| {
@@ -298,17 +309,17 @@ pub(super) fn bays<'a>(ctx: &mut Ctx, els: &'a [El<'a>]) -> Vec<Bay<'a>> {
                 && on_line(w, a)
                 && on_line(w, b)
         }) else {
-            ctx.errors.push(error(path, format!("The bay walls {names} do not start and end on their host wall '{host}'. Place the bay again on that wall.")));
+            ctx.errors.push(error("BAY", path, format!("The bay walls {names} do not start and end on their host wall '{host}'. Place the bay again on that wall.")));
             continue;
         };
         if wall_kind(parent) != Some(Kind::External) {
-            ctx.errors.push(error(path, format!("The bay walls {names} project from '{}', which is not an external wall. Place the bay on an external wall.", parent.name)));
+            ctx.errors.push(error("BAY", path, format!("The bay walls {names} project from '{}', which is not an external wall. Place the bay on an external wall.", parent.name)));
             continue;
         }
         // HEMIE builds the bay's glazing from the bay alone: an opening left in the covered
         // part of the parent wall would count twice.
-        if let Some(o) = covered_opening(els, parent, a, b) {
-            ctx.errors.push(error(o.path(), format!("'{}' is in the part of '{}' that bay {names} covers. Delete it, or move it to a bay wall.", o.name, parent.name)));
+        if let Some(o) = covered_openings(els, parent, a, b).next() {
+            ctx.errors.push(error("BAY", o.path(), format!("'{}' is in the part of '{}' that bay {names} covers. Delete it, or move it to a bay wall.", o.name, parent.name)));
             continue;
         }
         // DESNZ-defined: only bays that start at the base of the parent wall.
@@ -320,7 +331,7 @@ pub(super) fn bays<'a>(ctx: &mut Ctx, els: &'a [El<'a>]) -> Vec<Bay<'a>> {
         let Some(bases) = bases else { continue };
         let parent_base = bases[bases.len() - 1];
         if bases.iter().any(|b| (b - parent_base).abs() > TOL) {
-            ctx.errors.push(error(path, format!("The bay walls {names} start above the base of '{}'. A projection that starts above the base of its wall, such as an oriel, cannot be entered: give the bay walls the wall's base height.", parent.name)));
+            ctx.errors.push(error("BAY", path, format!("The bay walls {names} start above the base of '{}'. A projection that starts above the base of its wall, such as an oriel, cannot be entered: give the bay walls the wall's base height.", parent.name)));
             continue;
         }
         // HEMIE's bay is symmetric: a front parallel to the opening, sides tapering equally.
@@ -335,7 +346,7 @@ pub(super) fn bays<'a>(ctx: &mut Ctx, els: &'a [El<'a>]) -> Vec<Bay<'a>> {
             || (taper_a - taper_b).abs() > TOL
             || taper_a < -TOL
         {
-            ctx.errors.push(error(path, format!("The bay walls {names} are not symmetric. Give the bay two equal sides, with the front parallel to the wall and no wider than the opening (within {TOL} m).")));
+            ctx.errors.push(error("BAY", path, format!("The bay walls {names} are not symmetric. Give the bay two equal sides, with the front parallel to the wall and no wider than the opening (within {TOL} m).")));
             continue;
         }
         out.push(Bay {
@@ -377,6 +388,7 @@ pub(super) fn attach_bays(
                 && seg_dist(bay.b, w.a, w.b) <= TOL
         }) else {
             ctx.errors.push(error(
+                "BAY",
                 front.path(),
                 format!(
                     "The bay walls {names} are not on one edge of the storey outline of '{}'.",
@@ -390,6 +402,7 @@ pub(super) fn attach_bays(
             &parts[walls[wi].part].storeys[walls[wi].storey],
         ) {
             ctx.errors.push(error(
+                "BAY",
                 front.path(),
                 format!(
                     "The bay walls {names} point into the storey. Draw the bay outside its wall."
@@ -401,7 +414,7 @@ pub(super) fn attach_bays(
             .iter()
             .find(|d| bay.facets.iter().any(|f| d.host() == Some(f.name)))
         {
-            ctx.errors.push(error(
+            ctx.errors.push(error("BAY", 
                 d.path(),
                 format!(
                     "Door '{}' is in a bay wall, which holds windows only. Move the door to another wall.",
@@ -419,6 +432,7 @@ pub(super) fn attach_bays(
         };
         let [front_window] = hosted(front)[..] else {
             ctx.errors.push(error(
+                "BAY",
                 front.path(),
                 format!(
                     "Bay front '{}' has {} windows. Give the bay front exactly one window.",
@@ -442,13 +456,13 @@ pub(super) fn attach_bays(
                 placed.insert(y.name.to_string());
                 let (wx, wy) = (window(ctx, x, true), window(ctx, y, true));
                 if wx != wy {
-                    ctx.errors.push(error(x.path(), format!("Bay side windows '{}' and '{}' differ. Both sides of a bay share one window: make them the same.", x.name, y.name)));
+                    ctx.errors.push(error("BAY", x.path(), format!("Bay side windows '{}' and '{}' differ. Both sides of a bay share one window: make them the same.", x.name, y.name)));
                     continue;
                 }
                 bay_value.insert("side_window".into(), wx.expect("checked"));
             }
             _ => {
-                ctx.errors.push(error(side_a.path(), format!("The bay sides '{}' and '{}' do not each have one window. Give both sides the same window, or neither a window.", side_a.name, side_b.name)));
+                ctx.errors.push(error("BAY", side_a.path(), format!("The bay sides '{}' and '{}' do not each have one window. Give both sides the same window, or neither a window.", side_a.name, side_b.name)));
                 continue;
             }
         }
@@ -467,6 +481,7 @@ pub(super) fn attach_bays(
         };
         if heights.iter().any(|h| (h - heights[1]).abs() > TOL) {
             ctx.errors.push(error(
+                "BAY",
                 front.path(),
                 format!(
                     "The bay walls {names} have different heights. Give the bay walls one height."
@@ -510,7 +525,7 @@ pub(super) fn attach_bays(
                 let c = centroid(&p.pts);
                 inside(c, &bay.poly) && !higher.iter().any(|o| inside(c, &o.poly))
             }) {
-                ctx.errors.push(error(p.path(), format!("Roof '{}' is over the bay {names}, which has a bay above it. Only the top bay of a stack has a roof: delete this roof or draw it over the top bay.", p.name)));
+                ctx.errors.push(error("BAY", p.path(), format!("Roof '{}' is over the bay {names}, which has a bay above it. Only the top bay of a stack has a roof: delete this roof or draw it over the top bay.", p.name)));
             }
         } else {
             let over: Vec<&El> = planes
@@ -524,7 +539,7 @@ pub(super) fn attach_bays(
                 (f, n) if f == n => Some("mini_flat_roof"),
                 (0, _) => Some("mini_pitched_roof"),
                 _ => {
-                    ctx.errors.push(error(over[0].path(), format!("The bay roof {} is part flat and part pitched. Draw the bay roof all flat or all pitched.", quoted(&over.iter().map(|p| p.name).collect::<Vec<_>>()))));
+                    ctx.errors.push(error("BAY", over[0].path(), format!("The bay roof {} is part flat and part pitched. Draw the bay roof all flat or all pitched.", quoted(&over.iter().map(|p| p.name).collect::<Vec<_>>()))));
                     continue;
                 }
             };
@@ -565,10 +580,10 @@ pub(super) fn conservatories(
             };
             // DESNZ-defined: a conservatory is one storey on a slab or suspended floor.
             if part.top > 0 {
-                ctx.errors.push(error(g.path(), format!("Conservatory '{name}' has {} storeys. A conservatory is a single storey: draw nothing over it.", part.top + 1)));
+                ctx.errors.push(error("CONSERVATORY", g.path(), format!("Conservatory '{name}' has {} storeys. A conservatory is a single storey: draw nothing over it.", part.top + 1)));
             }
             if !matches!(g.text("floor_type"), Some("Slab_no_edge_insulation" | "Slab_edge_insulation" | "Suspended_floor")) {
-                ctx.errors.push(error(g.path(), format!("Conservatory floor '{}' is not a slab or suspended floor. Give it one of those floor types.", g.name)));
+                ctx.errors.push(error("CONSERVATORY", g.path(), format!("Conservatory floor '{}' is not a slab or suspended floor. Give it one of those floor types.", g.name)));
             }
             true
         })
@@ -602,7 +617,7 @@ fn glazing(
         }
         [t] if allowed.is_none_or(|a| a.contains(t)) => t.to_string(),
         _ => {
-            ctx.errors.push(error(owner.path(), format!("The glazing {names} of conservatory element '{}' opens as {}. A conservatory wall or roof takes one opening type{}: give all its glazing the same one.", owner.name, quoted(&types.into_iter().collect::<Vec<_>>()), allowed.map(|a| format!(": {}", quoted(a))).unwrap_or_default())));
+            ctx.errors.push(error("CONSERVATORY", owner.path(), format!("The glazing {names} of conservatory element '{}' opens as {}. A conservatory wall or roof takes one opening type{}: give all its glazing the same one.", owner.name, quoted(&types.into_iter().collect::<Vec<_>>()), allowed.map(|a| format!(": {}", quoted(a))).unwrap_or_default())));
             return None;
         }
     };
@@ -611,7 +626,7 @@ fn glazing(
         .filter_map(|w| w.get("security_risk")?.as_bool())
         .collect();
     if risks.len() > 1 {
-        ctx.errors.push(error(
+        ctx.errors.push(error("CONSERVATORY", 
             owner.path(),
             format!(
                 "The glazing {names} of '{}' differs in security risk. The existing-building EPC gives it one.",
@@ -706,7 +721,7 @@ pub(super) fn conservatory_walls(
         let dwarf = bases[1..].iter().copied().fold(f64::INFINITY, f64::min) - bases[0];
         let fraction = ((height - dwarf) / height).max(0.0);
         if fraction <= 0.0 || fraction > 1.0 + 1e-9 {
-            ctx.errors.push(error(source.path(), format!("Conservatory wall '{}' is {:.0}% glazed. A conservatory wall must be glazed, above 0% and up to 100%: add or resize its windows.", source.name, fraction * 100.0)));
+            ctx.errors.push(error("CONSERVATORY", source.path(), format!("Conservatory wall '{}' is {:.0}% glazed. A conservatory wall must be glazed, above 0% and up to 100%: add or resize its windows.", source.name, fraction * 100.0)));
             continue;
         }
         let fraction = fraction.min(1.0);
@@ -721,7 +736,7 @@ pub(super) fn conservatory_walls(
             })
             .collect();
         if shades.iter().any(|v| *v != shades[0]) {
-            ctx.errors.push(error(source.path(), format!("The glazing {} of conservatory wall '{}' differs in close shading (overhang, side fins, obstacle). The existing-building EPC glazes a conservatory wall as one element: give its glazing the same close shading.", quoted(&glazed.iter().map(|w| w.name).collect::<Vec<_>>()), source.name)));
+            ctx.errors.push(error("CONSERVATORY", source.path(), format!("The glazing {} of conservatory wall '{}' differs in close shading (overhang, side fins, obstacle). The existing-building EPC glazes a conservatory wall as one element: give its glazing the same close shading.", quoted(&glazed.iter().map(|w| w.name).collect::<Vec<_>>()), source.name)));
             continue;
         }
         let value = &mut walls[wi].value;
@@ -743,7 +758,7 @@ pub(super) fn conservatory_walls(
                 Some(space) => {
                     walls[wi].value.insert("adjacent_space_type".into(), json!(space));
                 }
-                None => ctx.errors.push(error(source.path(), format!("Sheltered conservatory wall '{}' does not state the unheated space it borders. Give it an adjacent_space_type.", source.name))),
+                None => ctx.errors.push(error("CONSERVATORY", source.path(), format!("Sheltered conservatory wall '{}' does not state the unheated space it borders. Choose its unheated space type.", source.name))),
             }
         }
         let extra = if kind == Kind::External {
@@ -789,6 +804,7 @@ pub(super) fn conservatory_roof(
 ) -> Option<Value> {
     let Some(first) = planes.first() else {
         ctx.errors.push(error(
+            "CONSERVATORY",
             "/Zone".into(),
             format!("Conservatory '{part}' has no roof drawn over it. Draw its roof."),
         ));
@@ -799,7 +815,7 @@ pub(super) fn conservatory_roof(
         .filter(|p| p.num("pitch") == Some(0.0))
         .count();
     if flat != 0 && flat != planes.len() {
-        ctx.errors.push(error(first.path(), format!("Conservatory '{part}' has flat and pitched roof planes. Draw its roof all flat or all pitched.")));
+        ctx.errors.push(error("CONSERVATORY", first.path(), format!("Conservatory '{part}' has flat and pitched roof planes. Draw its roof all flat or all pitched.")));
         return None;
     }
     let lights: Vec<&El> = windows
@@ -812,7 +828,7 @@ pub(super) fn conservatory_roof(
         let mut shade = json!({});
         shading::close(ctx, w, &mut shade);
         if shade.as_object().is_some_and(|o| !o.is_empty()) {
-            ctx.errors.push(error(w.path(), format!("Rooflight '{}' of conservatory '{part}' states close shading. An existing building's conservatory roof takes none: remove it.", w.name)));
+            ctx.errors.push(error("CONSERVATORY", w.path(), format!("Rooflight '{}' of conservatory '{part}' states close shading. An existing building's conservatory roof takes none: remove it.", w.name)));
         }
     }
     let mut defaulted = Vec::new();
@@ -833,7 +849,7 @@ pub(super) fn conservatory_roof(
     // Derived from the model: the glazed share of the drawn roof.
     let fraction = glazed / area;
     if fraction <= 0.0 || fraction > 1.0 + 1e-9 {
-        ctx.errors.push(error(first.path(), format!("The roof of conservatory '{part}' is {:.0}% glazed. A conservatory roof must be glazed, above 0% and up to 100%: add or resize its rooflights.", fraction * 100.0)));
+        ctx.errors.push(error("CONSERVATORY", first.path(), format!("The roof of conservatory '{part}' is {:.0}% glazed. A conservatory roof must be glazed, above 0% and up to 100%: add or resize its rooflights.", fraction * 100.0)));
         return None;
     }
     let fraction = fraction.min(1.0);
@@ -870,7 +886,7 @@ pub(super) fn conservatory_roof(
         [a, b] if bearing_gap(*a, *b) > 135.0 => "dual",
         _ => {
             // DESNZ-defined: one, or two opposite, slopes.
-            ctx.errors.push(error(first.path(), format!("The roof of conservatory '{part}' has {} slopes. Draw it flat, as one slope, or as two opposite slopes.", sides.len())));
+            ctx.errors.push(error("CONSERVATORY", first.path(), format!("The roof of conservatory '{part}' has {} slopes. Draw it flat, as one slope, or as two opposite slopes.", sides.len())));
             return None;
         }
     };
@@ -930,7 +946,7 @@ pub(super) fn box_in_roof(
             && inside_or_on(centroid(top), &p.pts)
     });
     if clear && under_roof {
-        ctx.errors.push(error(top_walls[0].path(), format!("The top floor ({}) is a room set inside a pitched roof, clear of the walls below: a box in the roof, which cannot be entered. Draw it as a room in the roof with its slopes, gables and knee walls, or as a storey.", quoted(&top_walls.iter().map(|w| w.name).collect::<Vec<_>>()))));
+        ctx.errors.push(error("ROOF", top_walls[0].path(), format!("The top floor ({}) is a room set inside a pitched roof, clear of the walls below: a box in the roof, which cannot be entered. Draw it as a room in the roof with its slopes, gables and knee walls, or as a storey.", quoted(&top_walls.iter().map(|w| w.name).collect::<Vec<_>>()))));
     }
     clear && under_roof
 }
@@ -1302,6 +1318,30 @@ mod tests {
 
     fn conservatory_part(model: &Value) -> &Value {
         &model["Zone"]["building_parts"]["Extension 1"]
+    }
+
+    #[test]
+    fn a_door_into_a_non_separated_conservatory_is_inside_the_dwelling_and_left_out() {
+        let text = conservatory_house("non-separated", &[0, 1]).replace(
+            "\n\nGround Elements",
+            &format!(
+                "\n{}\n\nGround Elements",
+                door("Patio", "W02", [5.0, 6.0], [3.0, 6.0])
+            ),
+        );
+        let (model, errors, notices) = run(&text);
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert!(notices.iter().any(|n| n.path.ends_with("/Patio")
+            && n.message
+                .contains("inside the dwelling, so it is not entered")));
+        let doors = model["Zone"]["building_parts"]["Main"]["walls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|w| w["doors"].as_array())
+            .flatten()
+            .count();
+        assert_eq!(doors, 1, "only the front door");
     }
 
     #[test]

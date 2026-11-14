@@ -72,17 +72,19 @@ export const HEMIE_RETIRED_ROWS: Readonly<Record<string, string>> = {
 };
 
 const HEAT_CAPACITY_BANDS = ['Very light', 'Light', 'Medium', 'Heavy', 'Very heavy'] as const;
+const BANDED = new Set(['external_wall', 'sheltered_wall', 'party_wall', 'suspended_floor', 'not_edge_insulated_ground_attached_floor',
+  'edge_insulated_ground_attached_floor', 'unheated_basement_floor', 'above_external_area_floor']);
+const NUMBER_ONLY = new Set(['heated_basement_floor', 'heated_pitched_roof', 'window', 'external_door', 'party_or_sheltered_door',
+  'park_home_wall', 'park_home_floor', 'park_home_flat_roof', 'park_home_pitched_roof']);
 /**
- * The areal heat capacity bands an existing building's element may state, by the construction
- * type it takes (`Ctx::heat_capacity` in `hemie.rs`; keep the two in step): walls and floors all
- * five, roofs Very light to Medium, doors and windows none (a number only). Undefined for an
- * element the converter takes no construction heat capacity from.
+ * What an existing building's element may state as its areal heat capacity, by its construction
+ * type (`heat_capacity_rule` in `hemie.rs`; keep the two in step): the bands (or a number), [] for
+ * a number only, undefined when it takes none (the converter sets it from the type, or a party
+ * floor or ceiling).
  */
 export function hemieHeatCapacityBands(constructionType: string | undefined): readonly string[] | undefined {
-  if (!constructionType || constructionType === 'party_floor' || constructionType === 'party_ceiling') return undefined;
-  if (['external_wall', 'sheltered_wall', 'party_wall'].includes(constructionType) || constructionType.endsWith('_floor')) return HEAT_CAPACITY_BANDS;
-  if (constructionType.endsWith('_roof')) return HEAT_CAPACITY_BANDS.slice(0, 3);
-  return [];
+  if (!constructionType) return undefined;
+  return BANDED.has(constructionType) ? HEAT_CAPACITY_BANDS : NUMBER_ONLY.has(constructionType) ? [] : undefined;
 }
 
 /**
@@ -101,22 +103,34 @@ export const hemieConstructionSetting = (constructionType: string): string => `H
 
 /**
  * The construction fields offered per construction type: those the converter needs a value for,
- * the roof's insulation location, and the outside colour (a stated solar absorption coefficient
- * wins over it). An element may override them (see `ELEMENT_OVERRIDE_KEYS` and
- * `takes_outside_surface` in `hemie.rs`).
+ * the simpler insulation inputs (retrofit insulation, insulation thickness, the roof's insulation
+ * location), and the outside colour (a stated solar absorption coefficient wins over it). An
+ * element may override them (see `Ctx::construction` in `hemie.rs`).
  */
 export const HEMIE_CONSTRUCTION_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  external_wall: ['wall_construction_type', 'colour'],
-  sheltered_wall: ['wall_construction_type'],
+  external_wall: ['wall_construction_type', 'retrofit_insulation', 'colour'],
+  sheltered_wall: ['wall_construction_type', 'retrofit_insulation'],
   window: ['glazing_type', 'frame_material', 'glazing_gap', 'areal_heat_capacity'],
   external_door: ['areal_heat_capacity', 'colour'],
   party_or_sheltered_door: ['areal_heat_capacity'],
-  flat_roof: ['insulation_location', 'colour'],
-  unheated_pitched_roof: ['insulation_location', 'colour'],
-  heated_pitched_roof: ['colour'],
-  above_external_area_floor: ['colour'],
+  flat_roof: ['insulation_location', 'insulation_thickness', 'colour'],
+  unheated_pitched_roof: ['insulation_location', 'insulation_thickness', 'colour'],
+  heated_pitched_roof: ['insulation_thickness', 'colour'],
+  mini_flat_roof: ['insulation_location', 'insulation_thickness', 'colour'],
+  mini_pitched_roof: ['insulation_location', 'insulation_thickness', 'colour'],
+  suspended_floor: ['insulation_thickness'],
+  not_edge_insulated_ground_attached_floor: ['insulation_thickness'],
+  edge_insulated_ground_attached_floor: ['insulation_thickness'],
+  heated_basement_floor: ['insulation_thickness'],
+  unheated_basement_floor: ['insulation_thickness'],
+  above_external_area_floor: ['insulation_thickness', 'colour'],
+  above_internal_unconditioned_area_floor: ['insulation_thickness'],
   party_floor: ['construction_weight'],
   party_ceiling: ['construction_weight'],
+  park_home_wall: ['colour'],
+  park_home_floor: ['colour'],
+  park_home_flat_roof: ['colour'],
+  park_home_pitched_roof: ['colour'],
 };
 
 /**
@@ -125,7 +139,8 @@ export const HEMIE_CONSTRUCTION_FIELDS: Readonly<Record<string, readonly string[
  */
 export const HEMIE_ELEMENT_KEYS = [
   'age_band', HEMIE_FRONT_DOOR, 'wall_construction_type', 'glazing_type', 'frame_material', 'glazing_gap',
-  'insulation_location', 'construction_weight',
+  'insulation_location', 'construction_weight', 'retrofit_insulation', 'insulation_thickness', 'adjacent_space_type',
+  'basement_depth_descriptor', 'basement_air_volume',
 ] as const;
 
 /** The existing-building fields an element holds in its extra_json. */
@@ -134,7 +149,9 @@ export function hemieLeftoverKeys(element: Element): string[] {
   return HEMIE_ELEMENT_KEYS.filter((key) => extra[key] !== undefined && extra[key] !== null && extra[key] !== '');
 }
 
-const UNITS: Readonly<Record<string, string>> = { glazing_gap: 'mm', areal_heat_capacity: 'J/m²·K' };
+const UNITS: Readonly<Record<string, string>> = { glazing_gap: 'mm', insulation_thickness: 'mm', areal_heat_capacity: 'J/m²·K', basement_air_volume: 'm³' };
+/** A flat roof's insulation location, as the converter takes it: at the joists is a cold roof, above them a warm roof. */
+const FLAT_ROOF_LOCATIONS: Readonly<Record<string, string>> = { at_joists: 'At joists (cold roof)', above_joists: 'Above joists (warm roof)' };
 const words = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, ' ');
 
 /** "External wall": a construction type as people read it. */
@@ -145,8 +162,14 @@ export function hemieFieldLabel(field: string): string {
   return UNITS[field] ? `${words(field)} (${UNITS[field]})` : words(field);
 }
 
-/** "12 mm", "Wood or PVC": a construction field's value with its unit. */
-export function hemieValueLabel(field: string, value: unknown): string {
+/** "12 mm", "Wood or PVC", "Yes": a construction field's value with its unit, for the construction type when given. */
+export function hemieValueLabel(field: string, value: unknown, constructionType?: string): string {
+  if (field === 'glazing_gap' && value === 16) return '16 mm or more';
+  if (field === 'insulation_location' && (constructionType === 'flat_roof' || constructionType === 'mini_flat_roof')) {
+    const label = FLAT_ROOF_LOCATIONS[String(value)];
+    if (label) return label;
+  }
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return typeof value === 'number' ? `${value}${UNITS[field] ? ` ${UNITS[field]}` : ''}` : words(String(value));
 }
 
@@ -173,12 +196,90 @@ function hostWall(element: Element, elements: readonly Element[]): Element | und
   return host === undefined ? undefined : elements.find((other) => other.name === host);
 }
 
+const level = (element: Element) => Math.round(element.coordinates?.[0]?.z ?? 0);
+const planePitch = (element: Element) => {
+  const pitch = hemieElementValue(element, 'pitch');
+  return element.type === 'BuildingElementOpaque' && (element.coordinates?.length ?? 0) >= 3 && !element.extra_json?.dormer_bundle
+    && typeof pitch === 'number' && pitch < 90 ? pitch : undefined;
+};
+const hasProfile = (element: Element) => Boolean((hemieElementValue(element, 'geometry_face') as { top_profile?: unknown } | undefined)?.top_profile);
+
+/** A bay bundle's roof plane: the converter gives it a bay roof construction. */
+function isBayRoof(element: Element): boolean {
+  const tag = element.extra_json?.hemie_bundle as { kind?: string; role?: string } | undefined;
+  return tag?.kind === 'bay' && tag.role === 'roof';
+}
+
+/**
+ * The top storey's level when it is a room in the roof, as `hemie.rs` decides it: heated slopes
+ * over it, a gable among its walls, and its plain external walls under the common wall height for
+ * at least half their length.
+ */
+function roomInRoofLevel(elements: readonly Element[]): number | undefined {
+  const walls = elements.filter((element) => (element.coordinates?.length ?? 0) === 2 && hemieElementValue(element, 'is_external_door') !== true
+    && !element.extra_json?.dormer_bundle
+    && ['BuildingElementOpaque', 'BuildingElementPartyWall', 'BuildingElementAdjacentUnconditionedSpace_Simple'].includes(element.type));
+  if (!walls.length) return undefined;
+  const top = Math.max(...walls.map(level));
+  const heatedAbove = top > 0 && elements.some((plane) => (planePitch(plane) ?? 0) > 0
+    && hemieElementValue(plane, 'is_unheated_pitched_roof') !== true && (level(plane) === top || level(plane) === top + 1));
+  const topWalls = walls.filter((wall) => level(wall) === top);
+  let common = 0;
+  let low = 0;
+  for (const wall of topWalls) {
+    if (wall.type !== 'BuildingElementOpaque' || hasProfile(wall)) continue;
+    const [a, b] = wall.coordinates;
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    common += length;
+    if (Number(hemieElementValue(wall, 'height')) < COMMON_WALL_HEIGHT) low += length;
+  }
+  return heatedAbove && topWalls.some(hasProfile) && low >= common / 2 ? top : undefined;
+}
+const COMMON_WALL_HEIGHT = 1.8;
+
+/**
+ * A flat plane over a room in the roof: the ceiling under the ridge, which takes the unheated
+ * pitched roof construction.
+ */
+function isRoomInRoofCeiling(element: Element, elements: readonly Element[]): boolean {
+  const room = roomInRoofLevel(elements);
+  // ponytail: by level, where the converter takes the planes over the room's building part; a flat roof
+  // at that level over another part counts too. Match the converter's plan test if models need it.
+  return planePitch(element) !== undefined && room !== undefined && (level(element) === room || level(element) === room + 1);
+}
+
+/** The build type that gives the main walls, ground floor and roof the park home constructions. */
+export const PARK_HOME = 'park home';
+
+/** The build type the model states: the one chosen in Global Settings, else the file's. */
+export function statedBuildType(settings: { build_type?: string; unreadMetadataRows?: Record<string, string> } | undefined): string | undefined {
+  return settings?.build_type ?? settings?.unreadMetadataRows?.General_build_type;
+}
+
 /**
  * The construction type the converter gives an element, as `hemie.rs` maps it (wall lines by
- * element type, roof planes by pitch, ground floors by floor type, party floors and ceilings,
- * windows, doors by their wall); undefined for an element it takes no construction from.
+ * element type, roof planes by pitch, a bay's roof, a room in the roof's flat ceiling, ground
+ * floors by floor type, floors over an unheated space, party floors and ceilings, windows, doors
+ * by their wall; on a park home, its main walls, ground floor and roof); undefined for an element
+ * it takes no construction from.
  */
-export function hemieConstructionType(element: Element, elements: readonly Element[] = []): string | undefined {
+export function hemieConstructionType(element: Element, elements: readonly Element[] = [], buildType?: string): string | undefined {
+  const type = hemieBaseConstructionType(element, elements);
+  // A bay's or dormer's elements keep their own constructions.
+  if (buildType !== PARK_HOME || element.extra_json?.dormer_bundle || element.extra_json?.hemie_bundle) return type;
+  switch (type) {
+    case 'external_wall':
+      return level(element) === roomInRoofLevel(elements) ? type : 'park_home_wall';
+    case 'flat_roof':
+      return 'park_home_flat_roof';
+    case 'unheated_pitched_roof':
+      return isRoomInRoofCeiling(element, elements) ? type : 'park_home_pitched_roof';
+    default:
+      return element.type === 'BuildingElementGround' ? 'park_home_floor' : type;
+  }
+}
+
+function hemieBaseConstructionType(element: Element, elements: readonly Element[]): string | undefined {
   const pitch = hemieElementValue(element, 'pitch');
   const line = (element.coordinates?.length ?? 0) === 2;
   switch (element.type) {
@@ -187,7 +288,8 @@ export function hemieConstructionType(element: Element, elements: readonly Eleme
     case 'BuildingElementPartyWall':
       return line ? 'party_wall' : undefined;
     case 'BuildingElementAdjacentUnconditionedSpace_Simple':
-      return line ? 'sheltered_wall' : undefined;
+      if (line) return 'sheltered_wall';
+      return typeof pitch === 'number' && pitch > 90 ? 'above_internal_unconditioned_area_floor' : undefined;
     case 'BuildingElementGround':
       return GROUND_FLOOR_CONSTRUCTIONS[String(hemieElementValue(element, 'floor_type'))];
     case 'BuildingElementAdjacentConditionedSpace':
@@ -201,7 +303,8 @@ export function hemieConstructionType(element: Element, elements: readonly Eleme
       }
       if (line) return 'external_wall';
       if (typeof pitch !== 'number') return undefined;
-      if (pitch === 0) return 'flat_roof';
+      if (isBayRoof(element)) return pitch === 0 ? 'mini_flat_roof' : 'mini_pitched_roof';
+      if (pitch === 0) return isRoomInRoofCeiling(element, elements) ? 'unheated_pitched_roof' : 'flat_roof';
       if (pitch > 90) return 'above_external_area_floor';
       if (pitch < 90) return hemieElementValue(element, 'is_unheated_pitched_roof') === true ? 'unheated_pitched_roof' : 'heated_pitched_roof';
       return undefined;
@@ -238,8 +341,9 @@ export function hemieFabric(
   element: Element,
   settings: Readonly<Record<string, string>> | undefined,
   elements: readonly Element[] = [],
+  buildType?: string,
 ): HemieFabric | undefined {
-  const constructionType = hemieConstructionType(element, elements);
+  const constructionType = hemieConstructionType(element, elements, buildType);
   if (!constructionType) return undefined;
   const model = parseHemieConstruction(settings?.[hemieConstructionSetting(constructionType)]) ?? {};
   const values: Record<string, unknown> = {};
@@ -265,7 +369,12 @@ export function hemieFabricLabel(fabric: HemieFabric): string {
   const type = hemieConstructionTypeLabel(fabric.constructionType);
   if (fabric.entered) return `${type} · Entered U-value`;
   return [type, fabric.band ? `Band ${fabric.band}` : 'No band', ...Object.entries(fabric.values)
-    .flatMap(([key, value]) => (key === 'areal_heat_capacity' ? [] : [hemieValueLabel(key, value)]))].join(' · ');
+    .flatMap(([key, value]) => {
+      if (key === 'areal_heat_capacity' || value === false) return [];
+      if (key === 'retrofit_insulation') return ['Retrofit insulation'];
+      const label = hemieValueLabel(key, value, fabric.constructionType);
+      return [key === 'insulation_thickness' ? `Insulation ${label}` : label];
+    })].join(' · ');
 }
 
 /** Distinct colours that read on both canvas themes; entered U-values are grey. */
@@ -275,10 +384,10 @@ const ENTERED_COLOUR = '#9ca3af';
 export type HemieFabricGroup = Readonly<{ label: string; color: string; ids: readonly string[] }>;
 
 /** Elements grouped by fabric label, largest group first, each with its colour. */
-export function hemieFabricGroups(elements: readonly Element[], settings: Readonly<Record<string, string>> | undefined): HemieFabricGroup[] {
+export function hemieFabricGroups(elements: readonly Element[], settings: Readonly<Record<string, string>> | undefined, buildType?: string): HemieFabricGroup[] {
   const byLabel = new Map<string, string[]>();
   for (const element of elements) {
-    const fabric = hemieFabric(element, settings, elements);
+    const fabric = hemieFabric(element, settings, elements, buildType);
     if (!fabric) continue;
     const label = hemieFabricLabel(fabric);
     byLabel.set(label, [...(byLabel.get(label) ?? []), element.id]);

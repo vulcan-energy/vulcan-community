@@ -188,7 +188,7 @@ fn stated(settings: &Settings) -> Result<Map<String, Value>, ValidationError> {
                 })
         })
     });
-    valid.ok_or_else(|| error("/Metadata".into(), format!("The stated distant shading ({field}) is malformed. Choose each stated band again on the canvas, or give a JSON object keyed by segment, for example {{\"{}\": {{\"shading_fraction\": \"Light\"}}}}, with levels {}.", SEGMENTS[0], LEVELS.join(", "))))
+    valid.ok_or_else(|| error("SHADING", "/Metadata".into(), format!("The stated distant shading ({field}) is malformed. Choose each stated band again on the canvas, or give a JSON object keyed by segment, for example {{\"{}\": {{\"shading_fraction\": \"Light\"}}}}, with levels {}.", SEGMENTS[0], LEVELS.join(", "))))
 }
 
 /// HEMIE's distant shading input and the editor's view of it. Per segment, the level and roof
@@ -282,7 +282,7 @@ pub(super) fn distant(
             if wholly_stated {
                 continue;
             }
-            errors.push(error(super::json_pointer(&["Context Shading", name]), format!("Context Shading row '{name}' has no height, or no distance above 0, which distant shading is measured from. Give both, or state the band of each quadrant it lies in.")));
+            errors.push(error("SHADING", super::json_pointer(&["Context Shading", name]), format!("Context Shading row '{name}' has no height, or no distance above 0, which distant shading is measured from. Give both, or state the band of each quadrant it lies in.")));
             continue;
         };
         // DESNZ-defined: objects below the lowest storey are ignored, an overhang as well as an
@@ -460,6 +460,7 @@ pub(super) fn close(ctx: &mut Ctx, e: &El, w: &mut Value) {
     }
     if let Some(stated) = e.get("reveal") {
         ctx.errors.push(error(
+            "SHADING",
             e.path(),
             format!(
                 "Window '{}' states reveal {stated}. {NO_REVEAL}: remove the reveal category.",
@@ -487,7 +488,7 @@ pub(super) fn close(ctx: &mut Ctx, e: &El, w: &mut Value) {
             continue;
         }
         let Some((_, field, choices)) = KINDS.iter().find(|(k, _, _)| *k == kind) else {
-            ctx.errors.push(error(
+            ctx.errors.push(error("SHADING", 
                 e.path(),
                 format!(
                     "Window '{}' has Window Shading of type '{kind}', which the existing-building EPC does not take.",
@@ -505,7 +506,7 @@ pub(super) fn close(ctx: &mut Ctx, e: &El, w: &mut Value) {
                     "obstacle" => "balcony front",
                     other => other,
                 };
-                ctx.errors.push(error(e.path(), format!("Window '{}' has a drawn {measured}. Choose what it is in the window's {what} field ({choices}); its size alone does not say.", e.name)))
+                ctx.errors.push(error("SHADING", e.path(), format!("Window '{}' has a drawn {measured}. Choose what it is in the window's {what} field ({choices}); its size alone does not say.", e.name)))
             }
         }
     }

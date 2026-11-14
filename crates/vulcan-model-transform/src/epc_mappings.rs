@@ -109,6 +109,15 @@ pub(crate) const APPLIANCE_PRESENCE: [(&str, &str, &[&str]); 3] = [
 /// requires (DESNZ-defined): a missing one is an error, never a template value.
 /// `presence` holds, per `APPLIANCE_PRESENCE` row, whether its Metadata row is present and the
 /// value the shared CSV boolean parser read (None for a value it already reported).
+/// The Global Settings label of an appliance presence row.
+fn appliance_label(row: &str) -> &'static str {
+    match row {
+        "Appliances_has_dryer" => "Has a clothes dryer",
+        "Appliances_has_dishwasher" => "Has a dishwasher",
+        _ => "Has a separate fridge or freezer",
+    }
+}
+
 pub(crate) fn map_appliances(
     model: &mut Value,
     csv: &Rows,
@@ -130,7 +139,7 @@ pub(crate) fn map_appliances(
             errors.push(error(
                 "E_EPC_APPLIANCE_PRESENCE",
                 format!("/Appliances/{field}"),
-                format!("HEM:EPC requires the appliance spaces to be stated: add the Metadata row '{row}' with TRUE or FALSE."),
+                format!("HEM:EPC needs to know whether the dwelling has space for this appliance. Choose Yes or No in Global Settings > Dwelling Details ({}).", appliance_label(row)),
             ));
             continue;
         }
@@ -139,7 +148,7 @@ pub(crate) fn map_appliances(
             Some(false) if drawn => errors.push(error(
                 "E_EPC_APPLIANCE_PRESENCE",
                 "/Metadata".into(),
-                format!("Metadata row '{row}' is FALSE, but the plan has a {} appliance. Correct one of them.", keys.join(" or ")),
+                format!("{} is No in Global Settings > Dwelling Details, but the plan has a {} appliance. Correct one of them.", appliance_label(row), keys.join(" or ").replace('_', " ").to_lowercase()),
             )),
             Some(present) => {
                 appliances.insert(field.into(), json!(present));
@@ -516,7 +525,7 @@ pub(crate) fn apply_desnz_defaults(
                 system["design_outdoor_air_flow_rate"] = json!(flow);
                 notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses the default estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
             }
-            None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on its row, or the Metadata row NumberOfBedrooms."))),
+            None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on the system, or the number of bedrooms in Global Settings > Dwelling Details."))),
         }
     }
     let mut unshaded = Vec::new();
@@ -551,7 +560,7 @@ pub(crate) fn apply_desnz_defaults(
     // DESNZ-defined: an existing building may give its base storey instead, and
     // HEMIE estimates the base height from it.
     let new_build = model.get("IsExistingBuilding") != Some(&Value::Bool(true));
-    let storey = model["General"]["storey_of_dwelling"].as_i64();
+    let storey = crate::hemie::base_storey(model);
     let base_storey = (!new_build).then_some(storey).flatten();
     if let Some(ventilation) = model
         .get_mut("InfiltrationVentilation")
@@ -574,22 +583,22 @@ pub(crate) fn apply_desnz_defaults(
             .contains(&build_type.as_str())
             {
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, the default for a dwelling at ground level. Add the row to state it.")));
+                notices.push(notice(path, format!("No ventilation zone base height is given, so this {build_type} uses 0 m, the default for a dwelling at ground level. Give it in Global Settings > Ventilation Environment to state it.")));
             } else if storey == Some(0) {
                 // DESNZ-defined: a ground-floor flat or maisonette also defaults to 0 m.
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this ground-floor {build_type} uses 0 m, the default (General_storey_of_dwelling 0). Add the row to state it.")));
+                notices.push(notice(path, format!("No ventilation zone base height is given, so this ground-floor {build_type} uses 0 m, the default. Give it in Global Settings > Ventilation Environment to state it.")));
             } else if let Some(storey) = base_storey {
-                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so the existing-building EPC estimates it from the base storey, {storey} (General_storey_of_dwelling).")));
+                notices.push(notice(path, format!("No ventilation zone base height is given, so the existing-building EPC estimates it from the storey of dwelling, {}.", storey + 1)));
             } else {
-                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: add the Metadata row Ventilation_ventilation_zone_base_height. An existing building may give its base storey instead (General_storey_of_dwelling).", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
+                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: give it in Global Settings > Ventilation Environment. An existing building may give its storey of dwelling instead, in Dwelling Details.", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
             }
         }
         // Absent: the builder removed the template's value (`desnz_default_rows`). HEMIE
         // applies its own default on an existing building.
         if new_build && ventilation.get("noise_nuisance").is_none_or(Value::is_null) {
             ventilation.insert("noise_nuisance".into(), json!(false));
-            notices.push(notice("/InfiltrationVentilation/noise_nuisance", "No Metadata row states Ventilation_noise_nuisance, so the model uses noise_nuisance false (No), the default. Add the row to state it.".to_string()));
+            notices.push(notice("/InfiltrationVentilation/noise_nuisance", "No noise nuisance is given, so the model uses No, the default. Give it in Global Settings > Ventilation Environment to state it.".to_string()));
         }
         if let Some(area) = ventilation
             .get("Leaks")
@@ -952,10 +961,21 @@ pub(crate) fn check_system_catalogue(
             let Some(reference) = system.pointer(field).and_then(Value::as_str) else {
                 continue;
             };
-            let field_name = &field[1..];
+            // The reference in words: the last named part of its path.
+            let field_name = match field
+                .trim_end_matches("/name")
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+            {
+                "HeatSourceWarmAir" => "warm air heat source",
+                "HeatSource" | "HeatSourceWet" => "heat source",
+                "PassiveDuct" => "flue duct",
+                other => other,
+            };
             let path = format!("{}{field}", json_pointer(&[section, name]));
             let Some(entry) = model.pointer(target).and_then(|e| e.get(reference)) else {
-                errors.push(error("E_EPC_SYSTEM_REFERENCE", path, format!("{section} '{name}' names {field_name} '{reference}', but the model has no such entry in {}. Add it or correct the name.", &target[1..])));
+                errors.push(error("E_EPC_SYSTEM_REFERENCE", path, format!("'{name}' names {field_name} '{reference}', but the model has no {field_name} of that name. Add it or correct the name.")));
                 continue;
             };
             let product = entry["product_id"]
@@ -1057,7 +1077,8 @@ pub(crate) fn build_type_from_party_walls(
     csv: &Rows,
     allowed: &[String],
 ) -> Result<(&'static str, usize), String> {
-    let state = |why: String| format!("{why} State General_build_type in the Metadata section.");
+    let state =
+        |why: String| format!("{why} Choose the build type in Global Settings > Dwelling Details.");
     let mut walls = Vec::new();
     let mut midpoints = Vec::new();
     for row in csv.values().flatten() {

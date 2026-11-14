@@ -213,6 +213,13 @@ const PARTY_WALL_CAVITY_OPTIONS = [
   { value: 'defined_resistance', label: 'Defined resistance' },
 ];
 
+/** The cavity types whose party wall takes a lining (the schema's conditional requirement). */
+export const PARTY_WALL_LINING_CAVITY_TYPES: ReadonlySet<string> = new Set(['unfilled_unsealed', 'unfilled_sealed', 'filled_unsealed']);
+export const PARTY_WALL_LINING_OPTIONS = [
+  { value: 'wet_plaster', label: 'Wet plaster' },
+  { value: 'dry_lined', label: 'Dry lined' },
+] as const;
+
 export function getPartyWallCavityFields(port: GeometrySchemaPort, mode: GeometrySchemaMode) {
   const properties = port.availability === 'available'
     ? port.getElementSubschema(mode, 'BuildingElementPartyWall')?.properties as Record<string, unknown> | undefined : undefined;

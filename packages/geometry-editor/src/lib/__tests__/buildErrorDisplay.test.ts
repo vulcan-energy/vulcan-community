@@ -72,9 +72,20 @@ describe('displayBuildErrorRows', () => {
 
   it('places an existing-building fabric row where Global Settings shows it', () => {
     const [row] = displayBuildErrorRows(
-      [{ source: 'schema', code: 'E_EPC_HEMIE', path: '/Metadata/HEMIE_construction_external_wall', message: 'The external wall fabric default states no wall construction type.' }],
+      [{ source: 'schema', code: 'E_EPC_HEMIE_SETTINGS', path: '/Metadata/HEMIE_construction_external_wall', message: 'The external wall fabric default states no wall construction type.' }],
       (path) => resolveIssueTarget(path, model),
     );
     expect(row?.location).toBe('Global Settings > Defaults > Fabric > External wall');
+  });
+
+  it('places air test, ventilation and dwelling rows where Global Settings shows them', () => {
+    const location = (path: string) => displayBuildErrorRows(
+      [{ source: 'schema', code: 'E_EPC_HEMIE_AIR_TEST', path, message: 'm' }],
+      (p) => resolveIssueTarget(p, model),
+    )[0]?.location;
+    expect(location('/InfiltrationVentilation/Leaks')).toBe('Global Settings > Air Tightness');
+    expect(location('/InfiltrationVentilation/ventilation_zone_base_height')).toBe('Global Settings > Ventilation Environment');
+    expect(location('/InfiltrationVentilation/Leaks/ventilation_zone_height')).toBe('Global Settings > Ventilation Environment');
+    expect(location('/Metadata/NumberOfBedrooms')).toBe('Global Settings > Dwelling Details');
   });
 });
