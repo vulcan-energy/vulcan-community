@@ -66,7 +66,7 @@ import {
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import type { GeometryInspectorContributions } from '../../../geometry-editor-host/src/inspectorContributions';
-import { hemieConstructionType, hemieHeatCapacityBands } from '../lib/hemieFabric';
+import { hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../lib/hemieFabric';
 import { useTargetRules } from '../hooks/useTargetRules';
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
 import { useKeyedState } from '../hooks/useKeyedState';
@@ -1622,14 +1622,15 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   // Under construction bands, only the heat capacity bands every target's construction takes;
   // none (a door or window among them, or one that takes no heat capacity) leaves it to each element.
   const { constructionBands } = useTargetRules();
+  const buildType = useGeometryStore((s) => statedBuildType(s.complianceSettings));
   const arealBandOptions = useMemo(() => {
     if (!constructionBands) return AREAL_HEAT_CAPACITY_ENUM;
     const all = Object.values(elementsById) as Element[];
     return constructionTargetElements.reduce<readonly string[]>((allowed, el) => {
-      const bands = hemieHeatCapacityBands(hemieConstructionType(el, all)) ?? [];
+      const bands = hemieHeatCapacityBands(hemieConstructionType(el, all, buildType)) ?? [];
       return allowed.filter((band) => bands.includes(band));
     }, AREAL_HEAT_CAPACITY_ENUM);
-  }, [constructionBands, constructionTargetElements, elementsById]);
+  }, [constructionBands, constructionTargetElements, elementsById, buildType]);
   // Under construction bands, the host's element fields for active elements of one construction
   // type: shown with the extra_json values they share; a change applies to each (one undo step).
   const ElementFieldsRenderer = inspectorContributions?.elementFields?.render;
@@ -1637,13 +1638,14 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     if (!constructionBands || !ElementFieldsRenderer || activeElements.length < 2) return null;
     if (!inspectorContributions?.elementFields?.elementTypes.includes(activeElements[0]!.type)) return null;
     const all = Object.values(elementsById) as Element[];
-    const types = new Set(activeElements.map((el) => hemieConstructionType(el, all)));
+    const types = new Set(activeElements.map((el) => hemieConstructionType(el, all, buildType)));
     if (types.size !== 1 || types.has(undefined)) return null;
     const [first, ...rest] = activeElements;
-    const shared = Object.entries(extraJsonRecord(first!)).filter(([key, value]) =>
-      rest.every((el) => extraJsonValuesEqual(extraJsonRecord(el)[key], value)));
-    return { ...first!, extra_json: Object.fromEntries(shared) } as Element;
-  }, [ElementFieldsRenderer, activeElements, constructionBands, elementsById, inspectorContributions]);
+    const shared = Object.fromEntries(Object.entries(extraJsonRecord(first!)).filter(([key, value]) =>
+      rest.every((el) => extraJsonValuesEqual(extraJsonRecord(el)[key], value))));
+    const mixed = [...new Set(activeElements.flatMap((el) => Object.keys(extraJsonRecord(el))))].filter((key) => !(key in shared));
+    return { element: { ...first!, extra_json: shared } as Element, mixed };
+  }, [ElementFieldsRenderer, activeElements, buildType, constructionBands, elementsById, inspectorContributions]);
   const patchActiveExtraJson = useCallback((update: (current: Record<string, unknown>) => Record<string, unknown>) => {
     const patches: Record<string, Record<string, unknown>> = {};
     for (const el of activeElements) {
@@ -3863,7 +3865,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
 
         {sharedFabricElement && ElementFieldsRenderer && (
           <div className="multi-select-field-group">
-            <ElementFieldsRenderer multiple element={sharedFabricElement as unknown as Readonly<Record<string, unknown>>} onPatchExtraJson={patchActiveExtraJson} />
+            <ElementFieldsRenderer multiple mixed={sharedFabricElement.mixed} element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>} onPatchExtraJson={patchActiveExtraJson} />
           </div>
         )}
 

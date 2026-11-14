@@ -136,7 +136,7 @@ import {
 } from '../../lib/mvhrDuctwork';
 import { MVHR_DUCT_ROLES, isMvhrDuctRole, isMvhrTerminalRole } from '../../lib/mvhrRoles';
 import { getHemieBundle, hemieBundleHostProblem } from '../../lib/hemieBundles';
-import { hemieConstructionType, hemieHeatCapacityBands } from '../../lib/hemieFabric';
+import { hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../../lib/hemieFabric';
 
 // ---------------- Module-level pure helpers ----------------
 // Hoisted from inside `validateElementCore` because they have no closure state. Available to
@@ -2245,7 +2245,7 @@ export const validateElementCore = (
       // Construction bands: a heat capacity band the element's construction has no value for.
       const heatCapacity = elementData.areal_heat_capacity ?? extraJson.areal_heat_capacity;
       if (rules.constructionBands && typeof heatCapacity === 'string') {
-        const bands = hemieHeatCapacityBands(hemieConstructionType(element, Object.values(elementsById ?? {})));
+        const bands = hemieHeatCapacityBands(hemieConstructionType(element, Object.values(elementsById ?? {}), statedBuildType(context.complianceSettings)));
         if (bands && !bands.includes(heatCapacity)) {
           issues.push(schema(bands.length
             ? `Areal heat capacity '${heatCapacity}' does not apply here. Choose ${bands.slice(0, -1).join(', ')} or ${bands[bands.length - 1]}, or enter a number in J/m²·K.`

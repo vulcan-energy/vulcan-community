@@ -598,12 +598,8 @@ pub fn transform_geometry_csv(
     // An EPC mapping error (`E_EPC_*`) explains a value it left out on purpose; the schema's
     // "required" error for the same field would only repeat it. Other converter errors keep
     // their schema errors, so FHS and Core validation is unchanged.
-    // A failed existing-building conversion leaves the full-input zone in place; its schema
-    // errors are about an input that is not used, so the conversion errors stand alone.
-    let hemie_failed = errors.iter().any(|e| e.code.starts_with("E_EPC_HEMIE_"));
     schema_errors.retain(|schema_error| {
-        if hemie_failed && (schema_error.path == "/Zone" || schema_error.path.starts_with("/Zone/"))
-        {
+        if is_unused_full_input(&model, request.profile, &schema_error.path) {
             return false;
         }
         let missing = (schema_error.keyword.as_deref() == Some("required"))
@@ -694,6 +690,46 @@ pub fn validate_target_input(
         }
     }
     errors
+}
+
+/// A failed existing-building conversion leaves the full-input zone and ventilation in place;
+/// their schema errors are about inputs that are not used, so the conversion errors stand
+/// alone. A converted zone keeps its schema errors.
+fn is_unused_full_input(model: &Value, profile: ModelProfile, path: &str) -> bool {
+    profile.converts_existing_buildings_to_hemie()
+        && model["IsExistingBuilding"] == true
+        && model["Zone"]["model_type"] != "hemie"
+        && ["/Zone", "/InfiltrationVentilation"]
+            .iter()
+            .any(|root| path == *root || path.starts_with(&format!("{root}/")))
+}
+
+#[cfg(test)]
+mod unused_full_input_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn only_an_unconverted_existing_building_hides_zone_and_ventilation_errors() {
+        let unconverted = json!({"IsExistingBuilding": true, "Zone": {"Zone 1": {}}});
+        let converted = json!({"IsExistingBuilding": true, "Zone": {"model_type": "hemie"}});
+        let new_build = json!({"IsExistingBuilding": false, "Zone": {"Zone 1": {}}});
+        let epc = ModelProfile::Epc;
+        assert!(is_unused_full_input(&unconverted, epc, "/Zone/Zone 1/area"));
+        assert!(is_unused_full_input(
+            &unconverted,
+            epc,
+            "/InfiltrationVentilation"
+        ));
+        assert!(!is_unused_full_input(
+            &unconverted,
+            epc,
+            "/HeatSourceWet/hp"
+        ));
+        assert!(!is_unused_full_input(&unconverted, epc, "/ZoneX"));
+        assert!(!is_unused_full_input(&converted, epc, "/Zone/storeys"));
+        assert!(!is_unused_full_input(&new_build, epc, "/Zone/Zone 1/area"));
+    }
 }
 
 fn json_pointer_child(path: &str, key: &str) -> String {

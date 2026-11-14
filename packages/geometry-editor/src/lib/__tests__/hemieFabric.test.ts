@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFabricGroups, hemieFabricLabel, hemieFieldLabel, hemieLeftoverKeys, hemieValueLabel, postcodeBorderArea, postcodeOutsideArea, postcodeRegion } from '../hemieFabric';
+import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFabricGroups, hemieFabricLabel, hemieFieldLabel, hemieLeftoverKeys, hemieValueLabel, postcodeBorderArea, postcodeOutsideArea, postcodeRegion, statedBuildType } from '../hemieFabric';
 
 const line = [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }];
 const plane = [...line, { x: 4, y: 4, z: 0 }];
@@ -31,6 +31,17 @@ it('maps elements to the construction type the converter gives them', () => {
   const bayRoof = { type: 'BuildingElementOpaque', coordinates: plane, extra_json: { hemie_bundle: { kind: 'bay', role: 'roof' } } };
   expect(hemieConstructionType(el({ ...bayRoof, pitch: 0 }))).toBe('mini_flat_roof');
   expect(hemieConstructionType(el({ ...bayRoof, pitch: 35 }))).toBe('mini_pitched_roof');
+});
+
+it('gives a park home its main walls, ground floor and roof the park home constructions', () => {
+  const park = (fields: Record<string, unknown>) => hemieConstructionType(el(fields), [], 'park home');
+  expect(park({ type: 'BuildingElementOpaque', pitch: 90 })).toBe('park_home_wall');
+  expect(park({ type: 'BuildingElementGround', coordinates: plane, floor_type: 'Suspended_floor' })).toBe('park_home_floor');
+  expect(park({ type: 'BuildingElementOpaque', coordinates: plane, pitch: 0 })).toBe('park_home_flat_roof');
+  expect(park({ type: 'BuildingElementOpaque', coordinates: plane, pitch: 35, is_unheated_pitched_roof: true })).toBe('park_home_pitched_roof');
+  expect(park({ type: 'BuildingElementOpaque', coordinates: plane, pitch: 0, extra_json: { hemie_bundle: { kind: 'bay', role: 'roof' } } })).toBe('mini_flat_roof');
+  expect(park({ type: 'BuildingElementTransparent' })).toBe('window');
+  expect(statedBuildType({ unreadMetadataRows: { General_build_type: 'park home' } })).toBe('park home');
 });
 
 it("gives a room in the roof's flat ceiling the unheated pitched roof construction", () => {
@@ -142,9 +153,10 @@ it('offers each construction type the areal heat capacity the converter takes', 
     }
   }
   // The `_ =>` arm: a number only; party floors and ceilings take no heat capacity.
-  for (const type of ['heated_basement_floor', 'heated_pitched_roof', 'window', 'external_door', 'party_or_sheltered_door']) {
+  for (const type of ['heated_basement_floor', 'heated_pitched_roof', 'window', 'external_door', 'party_or_sheltered_door',
+    'park_home_wall', 'park_home_floor', 'park_home_flat_roof', 'park_home_pitched_roof']) {
     expect(arms.some(({ types }) => types.includes(type)), type).toBe(false);
     expect(hemieHeatCapacityBands(type), type).toEqual([]);
   }
-  for (const type of ['party_floor', 'party_ceiling', 'park_home_wall', undefined]) expect(hemieHeatCapacityBands(type)).toBeUndefined();
+  for (const type of ['party_floor', 'party_ceiling', undefined]) expect(hemieHeatCapacityBands(type)).toBeUndefined();
 });

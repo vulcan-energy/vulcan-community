@@ -758,7 +758,7 @@ pub(super) fn conservatory_walls(
                 Some(space) => {
                     walls[wi].value.insert("adjacent_space_type".into(), json!(space));
                 }
-                None => ctx.errors.push(error("CONSERVATORY", source.path(), format!("Sheltered conservatory wall '{}' does not state the unheated space it borders. Give it an adjacent_space_type.", source.name))),
+                None => ctx.errors.push(error("CONSERVATORY", source.path(), format!("Sheltered conservatory wall '{}' does not state the unheated space it borders. Choose its unheated space type.", source.name))),
             }
         }
         let extra = if kind == Kind::External {
