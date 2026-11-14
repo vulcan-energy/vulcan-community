@@ -88,7 +88,7 @@ fn to_form(
             errors.push(error(
                 format!("{path}{at}"),
                 format!(
-                    "'{}' in its existing-building (HEMIE) form: {message}.{fix}",
+                    "'{}' in its existing-building form: {message}.{fix}",
                     path.rsplit('/').next().unwrap_or(path)
                 ),
             ));
@@ -184,7 +184,7 @@ fn tank_descriptors(
                     applied.push("volume descriptor Inaccessible");
                 }
                 [_] => {}
-                _ => errors.push(error(path.into(), format!("The tank states its size more than once ({}). HEMIE takes one: keep the most specific.", sizes.join(", ")))),
+                _ => errors.push(error(path.into(), format!("The tank states its size more than once ({}). The existing-building EPC takes one: keep the most specific.", sizes.join(", ")))),
             }
         }
     }
@@ -202,16 +202,16 @@ fn tank_descriptors(
         });
         applied.push("install year unknown");
     } else if buffer && year && pump {
-        errors.push(error(path.into(), "The buffer tank states both its pump power and its install year. HEMIE takes the install year only in place of the pump power: remove the install year, and give the standing loss or efficiency class if it is unknown.".into()));
+        errors.push(error(path.into(), "The buffer tank states both its pump power and its install year. The existing-building EPC takes the install year only in place of the pump power: remove the install year, and give the standing loss or efficiency class if it is unknown.".into()));
     } else if !year && !loss {
         // The buffer tank's pump power and its install year are alternatives (HEMIE code).
-        errors.push(error(path.into(), "The buffer tank states its pump power but no standing loss, efficiency class or install year, and HEMIE takes the install year only in place of the pump power. State its standing loss or efficiency class.".into()));
+        errors.push(error(path.into(), "The buffer tank states its pump power but no standing loss, efficiency class or install year, and the existing-building EPC takes the install year only in place of the pump power. State its standing loss or efficiency class.".into()));
     }
     if !applied.is_empty() {
         notices.push(notice(
             path,
             format!(
-                "The tank states no {}, so HEMIE takes the DESNZ default: {}.",
+                "The tank states no {}, so it uses the default: {}.",
                 missing.join(" and no "),
                 applied.join(", ")
             ),
@@ -339,7 +339,7 @@ pub(super) fn check_vents(ctx: &mut Ctx) {
             Some("bottom" | "middle" | "top") => {}
             Some(other) => ctx.errors.push(error(path.clone(), format!("Vent '{}' has vent_position '{other}'. Give bottom, middle or top.", vent.name))),
             // DESNZ-defined: a vent's position in its element defaults to middle.
-            None => ctx.notices.push(notice(&path, format!("Vent '{}' states no vent_position, so HEMIE takes the DESNZ default: the middle of its element.", vent.name))),
+            None => ctx.notices.push(notice(&path, format!("Vent '{}' states no vent_position, so it uses the default: the middle of its element.", vent.name))),
         }
         if let Some(host) = vent.host() {
             if els.iter().filter(|e| e.name == host).count() > 1 {
@@ -374,7 +374,7 @@ pub(super) fn no_roof_window_vents(ctx: &mut Ctx, window: &str, value: &mut Valu
         return;
     };
     for name in vents.keys() {
-        ctx.errors.push(error(json_pointer(&[VENTILATION, name]), format!("Vent '{name}' is in roof window '{window}'. HEMIE takes no mechanical vents in roof windows; name the wall, window or door it vents through.")));
+        ctx.errors.push(error(json_pointer(&[VENTILATION, name]), format!("Vent '{name}' is in roof window '{window}'. The existing-building EPC takes no mechanical vents in roof windows; name the wall, window or door it vents through.")));
     }
 }
 
@@ -465,7 +465,7 @@ pub(super) fn mechanical_ventilation(
         }
     }
     if !out.is_empty() {
-        notices.push(notice(MV, "HEMIE places each mechanical vent in its host element and takes the vent's height, orientation and pitch from it; the heights and directions stated on the Ventilation Systems rows are not used. HEMIE also takes MVHR ductwork as its default.".into()));
+        notices.push(notice(MV, "The existing-building EPC places each mechanical vent in its host element and takes the vent's height, orientation and pitch from it; the heights and directions stated on the Ventilation Systems rows are not used. It also takes MVHR ductwork as its default.".into()));
         geometry["mechanical_ventilation_system"] = Value::Object(out);
     }
 }
@@ -528,7 +528,7 @@ mod tests {
         assert_eq!(hw["installation_year"], "unknown");
         assert!(notices
             .iter()
-            .any(|n| n.path == "/HotWaterSource/hw" && n.message.contains("DESNZ default")));
+            .any(|n| n.path == "/HotWaterSource/hw" && n.message.contains("uses the default")));
         // A stated descriptor is kept, and no default is added.
         let (model, _, _) = run(
             json!({"HotWaterSource": {"hw": tank(json!({"tank_volume_category": "Large", "energy_efficiency_class": "C"}))}}),

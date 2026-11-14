@@ -231,7 +231,7 @@ import {
 import type { GeometryCanvas3DProps } from './canvas/GeometryCanvas3D';
 import { useElementCategoryGhost } from '../hooks/useElementCategoryGhost';
 import { useTargetRules } from '../hooks/useTargetRules';
-import { hemieFabricGroups } from '../lib/hemieFabric';
+import { FABRIC_PRESET_TYPES, hemieFabricGroups } from '../lib/hemieFabric';
 import { useHiddenElementIds } from '../hooks/useHiddenElementIds';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { elementIsHiddenFromView } from '../lib/elementCategoryVisibility';
@@ -1814,9 +1814,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       window.removeEventListener('blur', handleMouseUp);
     };
   }, [endCanvasPanGesture]);
-  const presetOptionsResetKey = PRESET_DRAW_TYPES.has(drawElementType)
-    ? drawElementType
-    : 'unsupported';
+  const { constructionBands } = useTargetRules();
+  const presetsOffered = PRESET_DRAW_TYPES.has(drawElementType) && !(constructionBands && FABRIC_PRESET_TYPES.has(drawElementType));
+  const presetOptionsResetKey = presetsOffered ? drawElementType : 'unsupported';
   const emptyElementPresetOptions = useMemo<
     Array<{ value: string; label: string; source: 'system' | 'user' }>
   >(() => [], []);
@@ -1827,7 +1827,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   // Build preset options by scanning files. The manifest only marks library-owned files.
   useEffect(() => {
-    if (!PRESET_DRAW_TYPES.has(drawElementType)) {
+    if (!presetsOffered) {
       setElementPresetOptions([]);
       setDrawPreset('');
       setDrawPresetData(null);
@@ -1850,6 +1850,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return () => { cancelled = true; };
   }, [
     drawElementType,
+    presetsOffered,
     PRESET_DRAW_TYPES,
     setDrawPreset,
     setDrawPresetData,
@@ -2333,7 +2334,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const setBundledAssemblyLibraryLoading = useGeometryStore((s) => s.setBundledAssemblyLibraryLoading);
   const setBundledAssemblyLibraryError = useGeometryStore((s) => s.setBundledAssemblyLibraryError);
   const { elementCategoryGhostState, toggleCategoryGhost } = useElementCategoryGhost();
-  const { constructionBands } = useTargetRules();
   const [colourByFabric, setColourByFabric] = useState(false);
   const { hiddenElementIds, toggleElementsHidden, unhideElement } = useHiddenElementIds(
     documentFileName,
@@ -8922,6 +8922,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       {fabricGroups.length > 0 && (
         // Its own card at the canvas's lower left, clear of the panels; an entry selects its elements.
         <div className="glass-panel fabric-legend" role="region" aria-label="Colour by fabric">
+          <div className="fabric-legend-title">Colour by fabric</div>
           {fabricGroups.map((group) => (
             <button
               key={group.label}

@@ -1022,8 +1022,8 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'minimum_charge_rate_one_way_trip | Minimum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
   ],
   'core/MechanicalVentilation [every subtype]': [
-    'Control | Control | textbox | - | - | "example" | tip',
-    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'Control | Control | textbox | - | - | - | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | - | tip',
     'SFP | SFP | textbox | 0 | - | - | tip',
     'SFP_in_use_factor | SFP In Use Factor | textbox | 1 | - | - | tip',
     'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
@@ -1054,8 +1054,8 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'BufferTank | hp · Buffer Tank | textbox | - | - | {"daily_losses":1,"pump_fixed_flow_rate":1,"pump_power_at_flow_rate":1,"volume":1} | tip',
     'eahp_mixed_max_temp | hp · EAHP Mixed Max Temperature | textbox | -273.15 | - | - | tip',
     'eahp_mixed_min_temp | hp · EAHP Mixed Min Temperature | textbox | -273.15 | - | - | tip',
-    'EnergySupply | hp · Energy Supply | textbox | - | - | "example" | tip',
-    'EnergySupply_heat_network | hp · Energy Supply Heat Network | textbox | - | - | "example" | tip',
+    'EnergySupply | hp · Energy Supply | textbox | - | - | - | tip',
+    'EnergySupply_heat_network | hp · Energy Supply Heat Network | textbox | - | - | - | tip',
     'min_modulation_rate_20 | hp · Min Modulation Rate 20 | textbox | 0 | 1 | - | tip',
     'min_modulation_rate_35 | hp · Min Modulation Rate 35 | textbox | 0 | 1 | - | tip',
     'min_modulation_rate_55 | hp · Min Modulation Rate 55 | textbox | 0 | 1 | - | tip',
@@ -1090,9 +1090,9 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'ach_max_static_calcs | ACH Maximum Static Calcs | textbox | 0 | - | - | tip',
     'ach_min_static_calcs | ACH Minimum Static Calcs | textbox | 0 | - | - | tip',
     'altitude | Altitude | textbox | - | - | - | tip',
-    'Control_VentAdjustMax | Control Vent Adjust Max | textbox | - | - | "example" | no-tip',
-    'Control_VentAdjustMin | Control Vent Adjust Min | textbox | - | - | "example" | no-tip',
-    'Control_WindowAdjust | Control Window Adjust | textbox | - | - | "example" | no-tip',
+    'Control_VentAdjustMax | Control Vent Adjust Max | textbox | - | - | - | no-tip',
+    'Control_VentAdjustMin | Control Vent Adjust Min | textbox | - | - | - | no-tip',
+    'Control_WindowAdjust | Control Window Adjust | textbox | - | - | - | no-tip',
     'cross_vent_possible | Cross Vent Possible | checkbox | - | - | - | no-tip',
     'env_area | Leaks · Env Area | textbox | 0 | - | - | tip',
     'test_pressure | Leaks · Test Pressure | textbox | 0 | - | - | tip',
@@ -1204,14 +1204,14 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   'fhs/MechanicalVentilation [-]': [
     'design_zone_cooling_covered_by_mech_vent | Design Zone Cooling Covered By Mech Vent | textbox | - | - | - | tip',
     'design_zone_heating_covered_by_mech_vent | Design Zone Heating Covered By Mech Vent | textbox | - | - | - | tip',
-    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | - | tip',
     'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
     'SFP_in_use_factor | SFP In Use Factor | textbox | 1 | - | - | tip',
   ],
   'fhs/MechanicalVentilation [Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door fancoil floor radiator roof ufh wall]': [
     'design_zone_cooling_covered_by_mech_vent | Design Zone Cooling Covered By Mech Vent | textbox | - | - | - | tip',
     'design_zone_heating_covered_by_mech_vent | Design Zone Heating Covered By Mech Vent | textbox | - | - | - | tip',
-    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | - | tip',
     'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
     'SFP_in_use_factor | SFP In Use Factor | textbox | 1 | - | - | tip',
     'mid_height_air_flow_path | Mid Height Air Flow Path | textbox | 1 | 60 | - | tip',
@@ -1228,7 +1228,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'fhs/OnSiteGeneration [every subtype]': [
     'ventilation_strategy | Ventilation Strategy | select | - | - | - | tip',
-    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | - | tip',
     'shading | Shading | textbox | - | - | [{"type":null,"distance":0}] | tip',
     'inverter_peak_power_dc | Inverter Peak Power DC | textbox | 0 | - | - | tip',
     'inverter_peak_power_ac | Inverter Peak Power AC | textbox | 0 | - | - | tip',
@@ -1243,13 +1243,13 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'electricity_full_load | boiler · Electricity Full Load | textbox | 0 | 1 | - | tip',
     'electricity_part_load | boiler · Electricity Part Load | textbox | 0 | 1 | - | tip',
     'electricity_standby | boiler · Electricity Standby | textbox | 0 | 0.1 | - | tip',
-    'EnergySupply | boiler · Energy Supply | textbox | - | - | "example" | tip',
-    'EnergySupply_aux | boiler · Energy Supply Aux | textbox | - | - | "example" | no-tip',
+    'EnergySupply | boiler · Energy Supply | textbox | - | - | - | tip',
+    'EnergySupply_aux | boiler · Energy Supply Aux | textbox | - | - | - | no-tip',
     'is_heat_network | boiler · Is Heat Network | checkbox | - | - | - | tip',
     'modulation_load | boiler · Modulation Load | textbox | 0.1 | 1 | - | tip',
     'rated_power | boiler · Rated Power | textbox | 0 | - | - | tip',
     'backup_ctrl_type | hp · Backup Ctrl Type | select | - | - | - | tip',
-    'EnergySupply | hp · Energy Supply | textbox | - | - | "example" | tip',
+    'EnergySupply | hp · Energy Supply | textbox | - | - | - | tip',
     'is_heat_network | hp · Is Heat Network | checkbox | - | - | - | tip',
     'min_modulation_rate_20 | hp · Min Modulation Rate 20 | textbox | 0 | 1 | - | tip',
     'min_modulation_rate_35 | hp · Min Modulation Rate 35 | textbox | 0 | 1 | - | tip',
@@ -1303,7 +1303,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'advanced_start | Advanced Start | textbox | - | - | - | tip',
     'cooling_capacity | Cooling Capacity | textbox | 0 | - | - | tip',
     'efficiency | Efficiency | textbox | 0 | 25 | - | tip',
-    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | - | tip',
     'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
     'temp_setback | Temp Setback | textbox | - | - | - | tip',
   ],
@@ -1382,7 +1382,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
   ],
   'core/OnSiteGeneration [every subtype]': [
-    'EnergySupply | Energy Supply | textbox | - | - | "example" | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | - | tip',
     'inverter_is_inside | Inverter Is Inside | checkbox | - | - | - | tip',
     'inverter_peak_power_ac | Inverter Peak Power AC | textbox | 0 | - | - | tip',
     'inverter_peak_power_dc | Inverter Peak Power DC | textbox | 0 | - | - | tip',
@@ -1675,7 +1675,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       extraJson: { ...baseExtraJson, areal_heat_capacity: 'Bogus' },
     });
     const invalidRow = fieldRow(invalidContainer, 'areal_heat_capacity');
-    expect(invalidRow.textContent).toContain('must be equal to one of the allowed values');
+    expect(invalidRow.textContent).toContain('Choose one of: Very light, Light, Medium, Heavy, Very heavy.');
     for (const input of invalidContainer.querySelectorAll('input')) {
       expect(input).not.toHaveAttribute('data-exclusive-minimum');
     }
@@ -3166,7 +3166,7 @@ describe('System Advanced Fields: per-property validation descends the subtype w
       for (const [label, value] of NON_NUMERIC_SHAPES) {
         const result = check(mode, 'InfiltrationVentilation', 'ach_max_static_calcs', value);
         expect(result.valid, `${mode}: ${label} must be rejected`).toBe(false);
-        expect(result.errors?.join(' ')).toContain('must be number');
+        expect(result.errors?.join(' ')).toContain('Enter a number.');
       }
     });
 
@@ -3192,7 +3192,7 @@ describe('System Advanced Fields: per-property validation descends the subtype w
         // the descent sees through the wrapper, so both reject the array.
         const rejected = check(mode, 'InfiltrationVentilation', 'MechanicalVentilation', []);
         expect(rejected.valid).toBe(false);
-        expect(rejected.errors?.join(' ')).toContain('must be object');
+        expect(rejected.errors?.join(' ')).toContain('Enter a group of values.');
         // THIS map's entries are `additionalProperties` with no `minProperties`, so an empty map
         // is a legitimate value here. Not a general rule about maps -- see the `Other` case below.
         expect(check(mode, 'InfiltrationVentilation', 'MechanicalVentilation', {})).toEqual({ valid: true });
@@ -3202,7 +3202,7 @@ describe('System Advanced Fields: per-property validation descends the subtype w
     it.each(['core', 'fhs'] as const)('%s: HotWaterDemand.Bath rejects [] and accepts an object', (mode) => {
       const rejected = check(mode, 'HotWaterDemand', 'Bath', []);
       expect(rejected.valid).toBe(false);
-      expect(rejected.errors?.join(' ')).toContain('must be object');
+      expect(rejected.errors?.join(' ')).toContain('Enter a group of values.');
       // `Bath` carries no `minProperties` on either profile.
       expect(check(mode, 'HotWaterDemand', 'Bath', {})).toEqual({ valid: true });
     });

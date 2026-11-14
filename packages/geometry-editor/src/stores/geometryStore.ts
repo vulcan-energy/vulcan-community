@@ -2884,6 +2884,11 @@ export interface CreateGeometryStoreOptions {
    * target's when the pin changes.
    */
   defaultsPathForTarget?: (targetBundleId: string) => string | undefined;
+  /**
+   * True when a pinned target takes a number for areal heat capacity, so a load keeps an
+   * element's number instead of snapping it to the nearest band (which loses it).
+   */
+  numericArealHeatCapacityForTarget?: (targetBundleId: string | undefined) => boolean;
   initialNamingPreferences?: NamingPreferences;
   modelSchemaProfilePort?: GeometryModelSchemaProfilePort;
   schemaPort?: GeometrySchemaPort;
@@ -3194,6 +3199,7 @@ const createGeometryState = (
   ...createIoSlice({
     defaultDefaultsPath,
     defaultsPathForTarget: options.defaultsPathForTarget,
+    numericArealHeatCapacityForTarget: options.numericArealHeatCapacityForTarget,
     hostDocumentMetadataKeys,
     modelSchemaProfilePort,
     schemaPort,

@@ -44,7 +44,7 @@ Wall (E),Zone 1,BuildingElementOpaque,17.09,,7.12,2.4,90,0,FALSE,FALSE,,"4.740,-
 Wall (N),Zone 1,BuildingElementOpaque,22.97,,11.08,2.4,0,0,FALSE,FALSE,,"4.740,2.460,0.000|-6.340,2.460,0.000",0.6,Medium,IE: Mass divided over internal and external side,0.18,
 Wall (W),Zone 1,BuildingElementOpaque,13.47,,7.12,2.4,270,0,FALSE,FALSE,,"-6.340,2.460,0.000|-6.340,-4.660,0.000",0.6,Medium,IE: Mass divided over internal and external side,0.18,
 Flat Roof,Zone 1,BuildingElementOpaque,78.89,0,8.88,8.88,0,2.4,FALSE,FALSE,,"-6.340,2.460,1.000|4.740,2.460,1.000|4.740,-4.660,1.000|-6.340,-4.660,1.000",0.6,Medium,IE: Mass divided over internal and external side,0.19,
-Front Door,Zone 1,BuildingElementOpaque,2,90,1,2,90,0,FALSE,TRUE,Wall (E),"4.740,-1.000,0.000|4.740,0.000,0.000",0.6,Medium,IE: Mass divided over internal and external side,1.0,
+Front Door,Zone 1,BuildingElementOpaque,2,90,1,2,90,0,FALSE,TRUE,Wall (E),"4.740,-1.000,0.000|4.740,0.000,0.000",0.6,50000,IE: Mass divided over internal and external side,1.0,
 
 Window Elements,,,,,,,,,,,,,,
 Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,g_value,security_risk,u_value,extra_json

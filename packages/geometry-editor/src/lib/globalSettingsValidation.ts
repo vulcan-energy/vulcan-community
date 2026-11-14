@@ -49,7 +49,7 @@ export function parseDimensionOverride(raw: string): number | undefined {
  * schema-valid and survives all the way to the run, surfacing as an opaque
  * `[fhs_preflight]` failure at save time. Catch it in the editor instead.
  *
- * A bedsit counts as one bedroom (HEM-FHS guidance, Dwelling Details §2.2.4).
+ * A bedsit counts as one bedroom (DESNZ-defined).
  *
  * Returns `undefined` when the count is unset or non-finite — "missing" is a
  * separate required-field issue, not an invalid value.
@@ -516,7 +516,7 @@ const num = (value: number | undefined) => (finiteNumber(value) === undefined ? 
 const text = (value: string | undefined) => (value ? value : undefined);
 
 /** The target rules the metadata rows follow. */
-export type MetadataTargetRules = Pick<TargetRules, 'requiredMetadataRows' | 'storeyBuildTypes'>;
+export type MetadataTargetRules = Pick<TargetRules, 'requiredMetadataRows' | 'storeyBuildTypes'> & Partial<Pick<TargetRules, 'desnzDefaultRows'>>;
 
 export type MetadataRowInputs = Pick<GeometryState, 'zones' | 'elementsById' | 'spaceLabelsById' | 'spaceLabelIds' | 'complianceSettings'> & {
   floors: Floor[];
@@ -655,7 +655,7 @@ function templateMetadataValue(defaults: unknown, key: string): unknown {
  *
  * A row the file lacks takes that value even where the geometry or space labels give another, and
  * so does a row the save would otherwise leave out. A blank row is not filled (the converter blocks
- * it), nor a row a Systems row sets, nor a row in `rules.requiredMetadataRows`: the target requires the user to
+ * it), nor a row a Systems row sets, nor a DESNZ-default row (`rules.desnzDefaultRows`), nor a row in `rules.requiredMetadataRows`: the target requires the user to
  * state it, so no defaults value stands in, nor a row the user emptied (`clearedValueRows`). Filled rows leave `absentMetadataRows`, so later defaults never
  * replace a value the user has since edited, and join `initialValueRows`, so a target switch can drop
  * them (withoutTargetInitialValues). `notice` is undefined when the save adds no row.
@@ -674,6 +674,8 @@ export function absentMetadataRowFill(
   const { storeyBuildTypes } = rules;
   const settings = state.complianceSettings;
   const required = new Set(rules.requiredMetadataRows);
+  // Unset, a DESNZ-default row takes DESNZ's value in the converter, never the template's.
+  const desnzDefault = new Set(Object.keys(rules.desnzDefaultRows ?? {}));
   const patch: Record<string, unknown> = {};
   const sources = new Map<string, string>();
   const blank = new Set(Object.keys(settings.unreadMetadataRows ?? {}));
@@ -681,7 +683,7 @@ export function absentMetadataRowFill(
   const cleared = new Set(settings.clearedValueRows);
   for (const [key, value] of metadataRowValues(state, targetRoot, storeyBuildTypes)) {
     if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
-      || required.has(key) || cleared.has(metadataSettingKey(key)) || systemsRowSetsMetadataInput(state.elements, key)) continue;
+      || required.has(key) || desnzDefault.has(key) || cleared.has(metadataSettingKey(key)) || systemsRowSetsMetadataInput(state.elements, key)) continue;
     const template = templateMetadataValue(defaults, key);
     // A target that lacks the field, or does not take the value (HEM:EPC has no `house` build type), gets no fill.
     if (template === undefined || !targetFieldAccepts(targetRoot, metadataSchemaPath(key), template)) continue;
@@ -780,7 +782,9 @@ export function unsetMetadataInputIssues(
     if (value === undefined) return '';
     return key.startsWith('NumberOf') ? ` Space labels show ${value}.` : ` The geometry gives ${value}.`;
   };
+  const desnzDefault = new Set(Object.keys(rules.desnzDefaultRows ?? {}));
   return metadataRowValues(state, targetRoot, storeyBuildTypes).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && !accepted.has(key)
+      && !desnzDefault.has(key)
       && !systemsRowSetsMetadataInput(state.elements, key)
       && (required.has(key) || (!TARGET_INPUT_ROW_SET.has(key)
         && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'

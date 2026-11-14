@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { hemieConstructionType, hemieFabric, hemieFabricGroups, hemieFabricLabel, hemieFieldLabel, hemieLeftoverKeys, hemieValueLabel, postcodeBorderArea, postcodeOutsideArea, postcodeRegion } from '../hemieFabric';
+import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFabricGroups, hemieFabricLabel, hemieFieldLabel, hemieLeftoverKeys, hemieValueLabel, postcodeBorderArea, postcodeOutsideArea, postcodeRegion } from '../hemieFabric';
 
 const line = [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }];
 const plane = [...line, { x: 4, y: 4, z: 0 }];
@@ -94,4 +96,17 @@ it('derives the region from the postcode area, and asks it in a border area', ()
   expect(postcodeRegion('CH5 1AA', 'Wales')).toBe('Wales');
   expect(postcodeRegion('MK40 1AA', 'Wales')).toBe('England');
   for (const malformed of ['', 'MK40', 'XX1 1AA', 'M1X 1AA1', undefined]) expect(postcodeRegion(malformed)).toBeUndefined();
+});
+
+it('offers each construction type only the heat capacity bands the converter has a value for', () => {
+  // The converter's class tables (`Ctx::heat_capacity`): their lengths are the bands it takes.
+  const rust = readFileSync(join(import.meta.dirname, '../../../../../crates/vulcan-model-transform/src/hemie.rs'), 'utf8');
+  const length = (table: string) => Number(new RegExp(`const ${table}: \\[f64; (\\d)\\]`).exec(rust)?.[1]);
+  expect(hemieHeatCapacityBands('external_wall')).toHaveLength(length('WALL'));
+  expect(hemieHeatCapacityBands('suspended_floor')).toHaveLength(length('FLOOR'));
+  expect(hemieHeatCapacityBands('flat_roof')).toEqual(['Very light', 'Light', 'Medium']);
+  expect(hemieHeatCapacityBands('flat_roof')).toHaveLength(length('ROOF'));
+  expect(hemieHeatCapacityBands('external_door')).toEqual([]);
+  expect(hemieHeatCapacityBands('window')).toEqual([]);
+  expect(hemieHeatCapacityBands(undefined)).toBeUndefined();
 });

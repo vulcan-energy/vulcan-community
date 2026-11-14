@@ -772,7 +772,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
                   extra_json: withConservatoryGlazingOpeningType(selectedElement, value || null),
                 })}
                 options={[
-                  { value: '', label: 'Closed (DESNZ default)' },
+                  { value: '', label: 'Closed (default)' },
                   { value: 'closed', label: 'Closed' },
                   { value: 'half opening top', label: 'Half opening (top)' },
                   { value: 'top third opening', label: 'Third opening (top)' },

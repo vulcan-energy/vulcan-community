@@ -63,7 +63,7 @@ it.each([['Dishwasher', epcRoot], ['Oven', fhsRoot]])('asks no energy supply for
   expect(screen.queryByText(/Energy supply/)).not.toBeInTheDocument();
 });
 
-// The battery inputs a target takes, each showing the DESNZ-defined default the converter applies.
+// The battery inputs a target takes, each showing the default the converter applies.
 const battery = { id: 'battery', type: 'ElectricBattery', name: 'Battery', coordinates: [{ x: 1, y: 1, z: 0 }] } as Element;
 
 it('asks for battery age, grid charging and export where the target takes them', async () => {
@@ -71,10 +71,10 @@ it('asks for battery age, grid charging and export where the target takes them',
     targetRules: () => ({ batteryGridInputs: true }),
     getElementSubschema: () => ({ properties: { product_id: {}, battery_age: {}, battery_location: {} } }) as never,
   });
-  expect(screen.getByPlaceholderText('5 (DESNZ-defined default)')).toHaveValue('');
-  const charging = screen.getByText('Yes (DESNZ-defined default)').closest('select')!;
-  expect(screen.getByText('No (DESNZ-defined default)')).toBeInTheDocument();
-  expect(screen.getByText('Outside (DESNZ-defined default)')).toBeInTheDocument();
+  expect(screen.getByPlaceholderText('5 (default)')).toHaveValue('');
+  const charging = screen.getByText('Yes (default)').closest('select')!;
+  expect(screen.getByText('No (default)')).toBeInTheDocument();
+  expect(screen.getByText('Outside (default)')).toBeInTheDocument();
   expect(store.getState().validateElement(battery, store.getState().elementsById).issues.map((i) => i.fieldKey)).not.toContain('battery_location');
   // A HEM Database battery product states its own capacity and efficiency.
   const keys = store.getState().validateElement(battery, store.getState().elementsById).issues.map((i) => i.fieldKey);
@@ -89,6 +89,6 @@ it('asks for no battery grid input on a target without them', () => {
   const store = renderGlobal(battery, {});
   expect(store.getState().validateElement(battery, store.getState().elementsById).issues.map((i) => i.fieldKey))
     .toEqual(expect.arrayContaining(['battery_location', 'capacity', 'charge_discharge_efficiency_round_trip']));
-  expect(screen.queryByText(/DESNZ-defined default/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/\(default\)/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Grid Charging/)).not.toBeInTheDocument();
 });

@@ -179,6 +179,7 @@ export type GeometryStoreSlice = StateCreator<GeometryState, [], [], IoSlice>;
 export type IoSliceOptions = Readonly<{
   defaultDefaultsPath: string | undefined;
   defaultsPathForTarget: ((targetBundleId: string) => string | undefined) | undefined;
+  numericArealHeatCapacityForTarget: ((targetBundleId: string | undefined) => boolean) | undefined;
   modelSchemaProfilePort: GeometryModelSchemaProfilePort;
   schemaPort: GeometrySchemaPort;
   workspaceResourcePort: GeometryWorkspaceResourcePort;
@@ -1811,6 +1812,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels, metadata, warnings: parseWarnings } =
       parseCsvToGeometry(csvContent, {
         hostDocumentMetadataKeys: options.hostDocumentMetadataKeys,
+        numericArealHeatCapacityForTarget: options.numericArealHeatCapacityForTarget,
         assignIds: replace
           ? ({ zones, elements, spaceLabels }) => reuseKnownIds(get(), knownIds, zones, elements, spaceLabels)
           : undefined,

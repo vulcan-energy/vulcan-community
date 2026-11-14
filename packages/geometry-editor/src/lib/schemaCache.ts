@@ -1988,6 +1988,36 @@ function coerceValueToSchemaType(value: unknown, expectedTypes: string[]): unkno
   return value;
 }
 
+const TYPE_WORDS: Readonly<Record<string, string>> = {
+  number: 'a number', integer: 'a whole number', string: 'text', boolean: 'yes or no', object: 'a group of values', array: 'a list',
+};
+
+/**
+ * The schema errors in words, one per cause: a union's own "no branch matched" and a "null"
+ * branch's type error only repeat the cause the other branches give.
+ */
+function readableSchemaErrors(errors: readonly { keyword: string; params: Record<string, unknown>; message?: string }[]): string[] {
+  const causes = errors.filter((e) => !['anyOf', 'oneOf'].includes(e.keyword) && !(e.keyword === 'type' && e.params.type === 'null'));
+  return [...new Set((causes.length ? causes : errors).map(readableSchemaError))];
+}
+
+/** One schema error in words, with the fix: never the validator's own text. */
+function readableSchemaError(error: { keyword: string; params: Record<string, unknown>; message?: string }): string {
+  const p = error.params;
+  switch (error.keyword) {
+    case 'additionalProperties': return `'${String(p.additionalProperty)}' is not an input here. Remove it.`;
+    case 'required': return `'${String(p.missingProperty)}' is missing. Add it.`;
+    case 'enum': return `Choose one of: ${(p.allowedValues as unknown[]).map(String).join(', ')}.`;
+    case 'unevaluatedProperties': return `'${String(p.unevaluatedProperty)}' is not an input here. Remove it.`;
+    case 'type': return `Enter ${String(p.type).split(',').map((t) => TYPE_WORDS[t] ?? t).join(' or ')}.`;
+    case 'minimum': case 'exclusiveMinimum': case 'maximum': case 'exclusiveMaximum': {
+      const words = { '>=': 'at least', '>': 'more than', '<=': 'at most', '<': 'less than' } as Record<string, string>;
+      return `Enter a value of ${words[String(p.comparison)] ?? String(p.comparison)} ${String(p.limit)}.`;
+    }
+    default: return error.message ? `This value is not accepted: it ${error.message}.` : 'This value is not accepted.';
+  }
+}
+
 /**
  * Compile-and-validate core, shared by the direct `subschema.properties[key]` lookup and by
  * the System wrapper descent ({@link validateSystemSubtypePropertyValue}). One compile path and
@@ -2051,7 +2081,7 @@ export function validateValueAgainstPropertyNode(
     }
     const ok = validate({ v: coercedValue });
     if (ok) return { valid: true };
-    const errs = (validate.errors || []).map((e) => e.message || 'invalid');
+    const errs = readableSchemaErrors(validate.errors || []);
     return { valid: false, errors: errs };
   } catch (e) {
     return { valid: false, errors: [String(e)] };
@@ -2206,7 +2236,7 @@ export function validatePropertyValue(elementType: string, key: string, value: u
         const n = Number(value);
         if (!Number.isNaN(n) && /^\s*-?\d+(\.\d+)?\s*$/.test(value)) return { valid: true };
       }
-      return { valid: false, errors: ['must be number'] };
+      return { valid: false, errors: ['Enter a number.'] };
     }
     return { valid: true };
   }

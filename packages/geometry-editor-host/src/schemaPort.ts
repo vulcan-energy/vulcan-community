@@ -42,8 +42,13 @@ export interface TargetRules {
   /** Field keys hidden per element type. */
   hiddenFields: Readonly<Record<string, readonly string[]>>;
   /**
+   * Field keys the schema requires that this target does not, per element type: the converter
+   * supplies them (for example from construction bands), and an element may still state one.
+   */
+  optionalFields: Readonly<Record<string, readonly string[]>>;
+  /**
    * Systems take HEM Database products, which the product slot picker chooses. The host's other
-   * product sources, such as a sample/catalogue source switch, do not apply.
+   * product sources, such as a sample/catalogue source switch and element presets, do not apply.
    */
   hemDatabaseProducts: boolean;
   /**
@@ -52,6 +57,11 @@ export interface TargetRules {
    * `HasElectricitySmartMeter`) only when it is listed here.
    */
   requiredMetadataRows: readonly string[];
+  /**
+   * Metadata rows that take a DESNZ-defined default when unset, with that default as the user
+   * reads it. Global Settings offers the row unset, with the default as its placeholder.
+   */
+  desnzDefaultRows: Readonly<Record<string, string>>;
   /**
    * A battery states its age, grid charging and grid export; each one left unset takes a
    * DESNZ-defined default in the converter, which the battery form shows.
@@ -156,8 +166,10 @@ export function targetRules(
     buildingRegulationsChecks: targetSchemaMode(port) === 'fhs',
     excludedElementTypes: {},
     hiddenFields: {},
+    optionalFields: {},
     hemDatabaseProducts: false,
     requiredMetadataRows: [],
+    desnzDefaultRows: {},
     batteryGridInputs: false,
     storeyBuildTypes: ['flat'],
     constructionBands: false,

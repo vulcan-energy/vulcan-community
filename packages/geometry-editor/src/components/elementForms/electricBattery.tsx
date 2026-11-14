@@ -167,7 +167,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
               { value: 'inside', label: 'Inside' },
               { value: 'outside', label: 'Outside' }
             ]}
-            placeholder={gridInputs ? 'Outside (DESNZ-defined default)' : undefined}
+            placeholder={gridInputs ? 'Outside (default)' : undefined}
             variant="ghost"
             size="md"
           />
@@ -183,7 +183,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
                   const value = event.target.value.trim();
                   commitExtra('battery_age', value === '' || !Number.isFinite(Number(value)) ? undefined : Number(value));
                 }}
-                placeholder="5 (DESNZ-defined default)"
+                placeholder="5 (default)"
                 min="0"
                 variant="ghost"
                 size="md"
@@ -196,7 +196,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
                 value={yesNo(extra.grid_charging_possible)}
                 onChange={(value) => commitExtra('grid_charging_possible', value === '' ? undefined : value === 'TRUE')}
                 options={YES_NO}
-                placeholder="Yes (DESNZ-defined default)"
+                placeholder="Yes (default)"
                 variant="ghost"
                 size="md"
               />
@@ -207,7 +207,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
                 value={yesNo(extra.grid_exporting_possible)}
                 onChange={(value) => commitExtra('grid_exporting_possible', value === '' ? undefined : value === 'TRUE')}
                 options={YES_NO}
-                placeholder="No (DESNZ-defined default)"
+                placeholder="No (default)"
                 variant="ghost"
                 size="md"
               />

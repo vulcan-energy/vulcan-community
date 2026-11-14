@@ -3,6 +3,7 @@
 
 import { toFhsMassDistributionClass } from '../../lib/assemblyMassHeuristic';
 import { arealHeatCapacityBandFromJPerM2K } from '../../lib/assemblyCalculator';
+import { HEMIE_RETIRED_ROWS } from '../../lib/hemieFabric';
 import type { ExternalDetailProfileLink } from '../../lib/assemblyTypes';
 import {
   parseSchemaProfileMetadata,
@@ -270,6 +271,8 @@ export type ParsedCsvGeometry = {
 
 export type ParseCsvToGeometryOptions = Readonly<{
   hostDocumentMetadataKeys?: readonly string[];
+  /** See `CreateGeometryStoreOptions.numericArealHeatCapacityForTarget`; absent, numbers snap to bands. */
+  numericArealHeatCapacityForTarget?: (targetBundleId: string | undefined) => boolean;
   /**
    * Replaces freshly minted ids (in place) before anything links by id, so
    * thermal-bridge host links resolve to the assigned ids. Used by Undo/Redo.
@@ -331,6 +334,7 @@ export const parseCsvToGeometry = (
   let detectedDetailedBridgePsiProfileLabel: string | undefined;
   const complianceSettings: ComplianceSettings = {};
   const metadataRowsInFile = new Set<string>();
+  const retiredRows: string[] = [];
   const productSettingRows = new Set<string>(PRODUCT_SETTING_ROWS);
   const modelInputCells: Record<string, string> = {};
   // A finite number as the converter reads a cell; anything else leaves the setting unread.
@@ -359,6 +363,10 @@ export const parseCsvToGeometry = (
     }
     if (productSettingRows.has(hostMetadataKey ?? '')) {
       (complianceSettings.productSettings ??= {})[hostMetadataKey as ProductSettingRow] = metadataFields[1]?.trim() ?? '';
+      continue;
+    }
+    if (hostMetadataKey && hostMetadataKey in HEMIE_RETIRED_ROWS) {
+      retiredRows.push(`${hostMetadataKey} removed: ${HEMIE_RETIRED_ROWS[hostMetadataKey]}`);
       continue;
     }
     if (hostMetadataKey?.startsWith('HEMIE_')) {
@@ -699,7 +707,8 @@ export const parseCsvToGeometry = (
     if (settingValues[metadataSettingKey(key)] === undefined) (complianceSettings.unreadMetadataRows ??= {})[key] = cell;
   }
 
-  const warnings: string[] = [];
+  const warnings: string[] = [...retiredRows];
+  const keepNumericHeatCapacity = options.numericArealHeatCapacityForTarget?.(targetBundleId) === true;
   const parseExtraJson = (jsonString: string, elementName?: string): Record<string, unknown> | undefined => {
     if (!jsonString || jsonString.trim() === '') return undefined;
     try {
@@ -708,7 +717,7 @@ export const parseCsvToGeometry = (
         parsed.mass_distribution_class =
           toFhsMassDistributionClass(parsed.mass_distribution_class) ?? parsed.mass_distribution_class;
       }
-      if (typeof parsed.areal_heat_capacity === 'number') {
+      if (typeof parsed.areal_heat_capacity === 'number' && !keepNumericHeatCapacity) {
         parsed.areal_heat_capacity =
           arealHeatCapacityBandFromJPerM2K(parsed.areal_heat_capacity) ?? parsed.areal_heat_capacity;
       }

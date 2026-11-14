@@ -55,23 +55,66 @@ export function postcodeRegion(postcode: string | undefined, statedNation?: stri
   if (WALES_AREAS.has(area)) return 'Wales';
   return ENGLAND_AREAS.has(area) ? 'England' : undefined;
 }
+/**
+ * Under construction bands (`TargetRules.constructionBands`) a fabric preset's U-value would be
+ * a documented U-value over the bands, so these types take no preset there.
+ */
+export const FABRIC_PRESET_TYPES: ReadonlySet<string> = new Set(['BuildingElementOpaque', 'BuildingElementTransparent']);
+
+/**
+ * Rows older files carry that the converter no longer reads (`RETIRED_SETTINGS` in `hemie.rs`):
+ * a load drops each one and says what to do instead.
+ */
+export const HEMIE_RETIRED_ROWS: Readonly<Record<string, string>> = {
+  HEMIE_region: 'the region now comes from the postcode. For a postcode area that spans two nations, choose the Nation under the Postcode in Dwelling Details.',
+  HEMIE_front_door: 'mark the front door on the door itself.',
+  HEMIE_infiltration_properties: 'an existing building needs an air test. Enter the air test result in Global Settings.',
+};
+
+const HEAT_CAPACITY_BANDS = ['Very light', 'Light', 'Medium', 'Heavy', 'Very heavy'] as const;
+/**
+ * The areal heat capacity bands an existing building's element may state, by the construction
+ * type it takes (`Ctx::heat_capacity` in `hemie.rs`; keep the two in step): walls and floors all
+ * five, roofs Very light to Medium, doors and windows none (a number only). Undefined for an
+ * element the converter takes no construction heat capacity from.
+ */
+export function hemieHeatCapacityBands(constructionType: string | undefined): readonly string[] | undefined {
+  if (!constructionType || constructionType === 'party_floor' || constructionType === 'party_ceiling') return undefined;
+  if (['external_wall', 'sheltered_wall', 'party_wall'].includes(constructionType) || constructionType.endsWith('_floor')) return HEAT_CAPACITY_BANDS;
+  if (constructionType.endsWith('_roof')) return HEAT_CAPACITY_BANDS.slice(0, 3);
+  return [];
+}
+
+/**
+ * The placeholder of a construction setting field with no default: the pinned HEM:EPC schema
+ * requires a door's areal heat capacity, and a window's in a party or sheltered wall.
+ */
+export function hemieRequiredPlaceholder(constructionType: string, field: string): string | undefined {
+  if (field !== 'areal_heat_capacity') return undefined;
+  if (constructionType.endsWith('_door')) return 'Required, no default';
+  return constructionType === 'window' ? 'Required in a party or sheltered wall' : undefined;
+}
+
 /** The door element flag that marks the front door; one door only. */
 export const HEMIE_FRONT_DOOR = 'is_front_door';
 export const hemieConstructionSetting = (constructionType: string): string => `HEMIE_construction_${constructionType}`;
 
 /**
  * The construction fields offered per construction type: those the converter needs a value for,
- * and the roof's insulation location. An element may override the text ones (see
- * `ELEMENT_OVERRIDE_KEYS` in `hemie.rs`).
+ * the roof's insulation location, and the outside colour (a stated solar absorption coefficient
+ * wins over it). An element may override them (see `ELEMENT_OVERRIDE_KEYS` and
+ * `takes_outside_surface` in `hemie.rs`).
  */
 export const HEMIE_CONSTRUCTION_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  external_wall: ['wall_construction_type'],
+  external_wall: ['wall_construction_type', 'colour'],
   sheltered_wall: ['wall_construction_type'],
-  window: ['glazing_type', 'frame_material', 'glazing_gap'],
-  external_door: ['areal_heat_capacity'],
+  window: ['glazing_type', 'frame_material', 'glazing_gap', 'areal_heat_capacity'],
+  external_door: ['areal_heat_capacity', 'colour'],
   party_or_sheltered_door: ['areal_heat_capacity'],
-  flat_roof: ['insulation_location'],
-  unheated_pitched_roof: ['insulation_location'],
+  flat_roof: ['insulation_location', 'colour'],
+  unheated_pitched_roof: ['insulation_location', 'colour'],
+  heated_pitched_roof: ['colour'],
+  above_external_area_floor: ['colour'],
   party_floor: ['construction_weight'],
   party_ceiling: ['construction_weight'],
 };

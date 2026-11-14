@@ -130,6 +130,7 @@ import {
 } from '../lib/parentControlledFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
+import { FABRIC_PRESET_TYPES, hemieConstructionType, hemieHeatCapacityBands } from '../lib/hemieFabric';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -955,7 +956,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const evidenceBridge = useContext(GeometryInspectorEvidenceContext);
   const DetailedJunctionControl =
     inspectorContributions.detailedJunctionSolver?.Control;
-  const { hemDatabaseProducts } = useTargetRules();
+  const { hemDatabaseProducts, constructionBands } = useTargetRules();
   // On a target whose systems take HEM Database products, the product slot picker is the only
   // product source: the host's sample/catalogue source switch does not apply.
   const productCatalogue = hemDatabaseProducts ? null : inspectorContributions.productCatalogue;
@@ -1009,6 +1010,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     (s) => selection?.id ? (s.elementsById[selection.id]?._v ?? 0) : -1
   );
   const allElements = useMemo(() => Object.values(elementsById) as Element[], [elementsById]);
+  // Under construction bands, only the heat capacity bands this element's construction takes.
+  const selectedId = selection?.id;
+  const arealHeatCapacityBands = useMemo(() => {
+    const element = selectedId ? elementsById[selectedId] : undefined;
+    return constructionBands && element ? hemieHeatCapacityBands(hemieConstructionType(element, allElements)) : undefined;
+  }, [constructionBands, selectedId, elementsById, allElements]);
 
   const latestElementsByIdRef = useRef(elementsById);
   useEffect(() => {
@@ -4343,7 +4350,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={handleResetName}
                 >
-                  Reset to auto
+                  {/* Icon only, as the field reset buttons draw it: the name keeps the row's width. */}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <polyline points="23,4 23,10 17,10" stroke="currentColor" strokeWidth="2" />
+                    <polyline points="1,20 1,14 7,14" stroke="currentColor" strokeWidth="2" />
+                    <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" stroke="currentColor" strokeWidth="2" />
+                  </svg>
                 </button>
               ) : null}
               <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('name', elementName)} issue={getFieldValidationIssue('name', elementName) || undefined} />
@@ -4491,8 +4503,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               )}
             </div>
 
-            {/* Element preset selector – shown for Opaque/Transparent types */}
-            {PRESET_ELEMENT_TYPES.includes(elementType) && elementPresetOptions.length > 0 && (
+            {/* Element preset selector – Opaque/Transparent/PV types; banded fabric takes no fabric preset */}
+            {PRESET_ELEMENT_TYPES.includes(elementType) && !(constructionBands && FABRIC_PRESET_TYPES.has(elementType)) && elementPresetOptions.length > 0 && (
               <div className="element-editor-row">
                 <div className="element-label">Preset:</div>
                 <div className="element-editor-control">
@@ -5235,6 +5247,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           subtype={getElementSubtype()}
                           currentData={getCurrentElementData()}
                           onChange={handleAdvancedFieldsChange}
+                          arealHeatCapacityBands={arealHeatCapacityBands}
                           collapsible={false}
                           fieldIndicators={comparisonFieldIndicators}
                           evidenceFieldKeys={evidenceBridge.linkedFieldKeys}

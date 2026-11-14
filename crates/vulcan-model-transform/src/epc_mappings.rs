@@ -337,7 +337,7 @@ pub(crate) fn check_solar_absorption(
             let path = json_pointer(&["Zone", zone, "BuildingElement", name]);
             let from_a_colour = from_colour.contains(&path);
             if existing && from_a_colour {
-                notices.push(notice(&format!("{path}/solar_absorption_coeff"), format!("Element '{name}' takes solar_absorption_coeff {} from its colour (DESNZ's map for an existing building).", element["solar_absorption_coeff"])));
+                notices.push(notice(&format!("{path}/solar_absorption_coeff"), format!("Element '{name}' takes solar_absorption_coeff {} from its colour (the default colour map for an existing building).", element["solar_absorption_coeff"])));
             }
             if !existing && from_a_colour {
                 if let Some(element) = element.as_object_mut() {
@@ -348,9 +348,9 @@ pub(crate) fn check_solar_absorption(
                 && element.get("solar_absorption_coeff").is_none()
             {
                 let message = match (existing, from_a_colour) {
-                    (false, true) => format!("Element '{name}' gives a colour, which only an existing building may use. A new build states solar_absorption_coeff."),
-                    (false, false) => format!("Element '{name}' needs its solar_absorption_coeff. There is no default."),
-                    (true, _) => format!("Element '{name}' needs its solar_absorption_coeff or its surface colour (Light, Intermediate or Dark). There is no default."),
+                    (false, true) => format!("Element '{name}' gives a colour, which only an existing building may use. A new build states its solar absorption coefficient."),
+                    (false, false) => format!("Element '{name}' needs its solar absorption coefficient. There is no default."),
+                    (true, _) => format!("Element '{name}' needs its solar absorption coefficient or its surface colour (Light, Intermediate or Dark). There is no default."),
                 };
                 errors.push(error(
                     "E_EPC_SOLAR_ABSORPTION",
@@ -402,7 +402,7 @@ pub(crate) fn apply_desnz_defaults(
             }
         }
         if !used.is_empty() {
-            notices.push(notice(&json_pointer(&["EnergySupply", supply, "ElectricBattery"]), format!("The battery on '{supply}' does not state {}, so it uses DESNZ's defaults. State them on its row to change them.", used.join(", "))));
+            notices.push(notice(&json_pointer(&["EnergySupply", supply, "ElectricBattery"]), format!("The battery on '{supply}' does not state {}, so it uses the defaults. State them on its row to change them.", used.join(", "))));
         }
     }
     let heat_source_types: BTreeMap<String, String> = model["HeatSourceWet"]
@@ -484,7 +484,7 @@ pub(crate) fn apply_desnz_defaults(
             }
         }
         if !used.is_empty() {
-            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses DESNZ's defaults. State them on its Systems row to change them.", used.join(", "))));
+            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses the defaults. State them on its Systems row to change them.", used.join(", "))));
         }
     }
     // DESNZ-defined: an unstated design outdoor air flow rate is the greater of 13 l/s plus
@@ -514,7 +514,7 @@ pub(crate) fn apply_desnz_defaults(
             Some(rate) => {
                 let flow = rate.max(0.3 * area) * 3.6;
                 system["design_outdoor_air_flow_rate"] = json!(flow);
-                notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses DESNZ's estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
+                notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses the default estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
             }
             None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on its row, or the Metadata row NumberOfBedrooms."))),
         }
@@ -574,13 +574,13 @@ pub(crate) fn apply_desnz_defaults(
             .contains(&build_type.as_str())
             {
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, DESNZ's default for a dwelling at ground level. Add the row to state it.")));
+                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, the default for a dwelling at ground level. Add the row to state it.")));
             } else if storey == Some(0) {
                 // DESNZ-defined: a ground-floor flat or maisonette also defaults to 0 m.
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this ground-floor {build_type} uses 0 m, DESNZ's default (General_storey_of_dwelling 0). Add the row to state it.")));
+                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this ground-floor {build_type} uses 0 m, the default (General_storey_of_dwelling 0). Add the row to state it.")));
             } else if let Some(storey) = base_storey {
-                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so HEMIE estimates it from the base storey, {storey} (General_storey_of_dwelling).")));
+                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so the existing-building EPC estimates it from the base storey, {storey} (General_storey_of_dwelling).")));
             } else {
                 errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: add the Metadata row Ventilation_ventilation_zone_base_height. An existing building may give its base storey instead (General_storey_of_dwelling).", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
             }
@@ -589,7 +589,7 @@ pub(crate) fn apply_desnz_defaults(
         // applies its own default on an existing building.
         if new_build && ventilation.get("noise_nuisance").is_none_or(Value::is_null) {
             ventilation.insert("noise_nuisance".into(), json!(false));
-            notices.push(notice("/InfiltrationVentilation/noise_nuisance", "No Metadata row states Ventilation_noise_nuisance, so the model uses noise_nuisance false (No), DESNZ's default. Add the row to state it.".to_string()));
+            notices.push(notice("/InfiltrationVentilation/noise_nuisance", "No Metadata row states Ventilation_noise_nuisance, so the model uses noise_nuisance false (No), the default. Add the row to state it.".to_string()));
         }
         if let Some(area) = ventilation
             .get("Leaks")
@@ -688,12 +688,21 @@ pub(crate) fn check_element_fields(
                     json_pointer(&["Zone", zone, "BuildingElement", name]),
                     format!(
                         "Element '{name}' ({kind}) needs {}. HEM:EPC has no default for them.",
-                        missing.join(", ")
+                        field_words(&missing)
                     ),
                 ));
             }
         }
     }
+}
+
+/// Schema field names as words for a message: "internal diameter (mm)".
+fn field_words<S: AsRef<str>>(fields: &[S]) -> String {
+    fields
+        .iter()
+        .map(|f| f.as_ref().replace("_mm", " (mm)").replace('_', " "))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Each drawn primary pipe states every field the target schema's pipe definition requires,
@@ -730,7 +739,7 @@ pub(crate) fn check_primary_pipework(
                 errors.push(error(
                     "E_EPC_REQUIRED_INPUT",
                     json_pointer(&["HotWaterSource", cylinder, "primary_pipework", &i.to_string()]),
-                    format!("This primary pipe of cylinder '{cylinder}' needs {}. HEM:EPC has no default for them.", missing.join(", ")),
+                    format!("This primary pipe of cylinder '{cylinder}' needs {}. HEM:EPC has no default for them.", field_words(&missing)),
                 ));
             }
         }
@@ -842,7 +851,7 @@ pub(crate) fn check_system_catalogue(
                 errors.push(error(
                     "E_EPC_UNSUPPORTED_SYSTEM",
                     path,
-                    format!("Element '{name}' ({kind}) is next to an unconditioned zone, which an existing building's HEMIE input cannot state. Draw it as BuildingElementAdjacentUnconditionedSpace_Simple with the unheated space's thermal resistance."),
+                    format!("Element '{name}' ({kind}) is next to an unconditioned zone, which an existing building's EPC input cannot state. Draw it as BuildingElementAdjacentUnconditionedSpace_Simple with the unheated space's thermal resistance."),
                 ));
             } else if model["ZoneUnconditioned"].get(named).is_none() {
                 errors.push(error(

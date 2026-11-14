@@ -11,7 +11,7 @@ import type { GeometrySchemaParameterInfo } from '../../../geometry-editor-host/
 export function formatSchemaInfoForTooltip(info: GeometrySchemaParameterInfo): React.ReactNode {
   const parts: React.ReactNode[] = [];
 
-  // Source indicator: JSON schema text vs HEM/FHS guidance summaries (see HEM_FHS_Guidance/Dwelling Details.pdf)
+  // Source indicator: JSON schema text vs DESNZ-defined input summaries
   const sourceLabel =
     info.source === 'hem_guidance' || (typeof info.jsonPath === 'string' && info.jsonPath.startsWith('#/hardcoded/'))
       ? 'HEM Guidance'

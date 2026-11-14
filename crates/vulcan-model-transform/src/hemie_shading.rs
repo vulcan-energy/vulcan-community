@@ -153,7 +153,7 @@ const LEVELS: [&str; 5] = ["Very heavy", "Heavy", "Moderate", "Light", "Very lig
 const NAMES: [&str; 4] = ["Front", "Right", "Back", "Left"];
 const SHADING_POINTER: &str = "/ExternalConditions/shading_segments";
 
-/// Plain words for a level: HEMIE's "Moderate" is the guidance's "Average".
+/// Plain words for a level, DESNZ-defined: HEMIE's "Moderate" reads "Average".
 fn plain(level: &str) -> &str {
     if level == "Moderate" {
         "Average"

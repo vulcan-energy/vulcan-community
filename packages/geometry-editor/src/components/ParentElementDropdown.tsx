@@ -8,6 +8,7 @@ import React from 'react';
 import type { ElementType } from '../geometry/types';
 import { useGeometryStore } from '../stores/geometryStore';
 import { StandardDropdown } from './StandardDropdown';
+import { ELEMENT_TYPE_COMPACT_LABELS } from '../lib/elementTypeMetadata';
 
 interface ParentElementDropdownProps {
   value: string;
@@ -39,7 +40,7 @@ export const ParentElementDropdown: React.FC<ParentElementDropdownProps> = ({
             { value: '', label: placeholder },
             ...availableParents.map((parent) => ({
               value: parent.name,
-              label: `${parent.name || '(Unnamed)'} (${parent.type === 'BuildingElementOpaque' ? 'Opaque' : parent.type})`
+              label: `${parent.name || '(Unnamed)'} (${ELEMENT_TYPE_COMPACT_LABELS[parent.type as ElementType] ?? parent.type})`
             }))
           ]}
           variant="ghost"

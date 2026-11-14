@@ -197,11 +197,16 @@ function DefaultsDuplicateIcon() {
 type RequiredYesNoKey = TargetInputRow | "PartGcompliance" | "Ventilation_noise_nuisance";
 const APPLIANCE_ROWS = ["Appliances_has_dryer", "Appliances_has_dishwasher", "Appliances_has_separate_fridge_or_freezer"] as const;
 
+/** An issue as Global Settings itself shows it: no pointer back to Global Settings. */
+const inGlobalSettingsWords = (issue: string) =>
+  issue.replace(/^Global Settings: /, "").replace(" Enter it in Global Settings.", " Enter it below.");
+
 /** A TRUE or FALSE row the target requires: empty until the user picks, never a box that reads as "no". */
-function RequiredYesNo({ label, value, onChange }: {
+function RequiredYesNo({ label, value, onChange, placeholder = "Select..." }: {
   label: ReactNode;
   value: boolean | undefined;
   onChange: (value: boolean | undefined) => void;
+  placeholder?: string;
 }) {
   return (
     <StandardDropdown
@@ -209,7 +214,7 @@ function RequiredYesNo({ label, value, onChange }: {
       value={value === undefined ? "" : value ? "TRUE" : "FALSE"}
       onChange={(next) => onChange(next === "" ? undefined : next === "TRUE")}
       options={[{ value: "TRUE", label: "Yes" }, { value: "FALSE", label: "No" }]}
-      placeholder="Select..."
+      placeholder={placeholder}
       variant="ghost"
       size="md"
     />
@@ -537,7 +542,7 @@ export function GlobalSettingsModal({
   const showKitchenHood = targetFieldAvailability(targetRoot, ["KitchenExtractorHoodExternal"]) !== "absent";
   const showBuildingLength = targetFieldAvailability(targetRoot, ["BuildingLength"]) !== "absent";
   const showBuildingWidth = targetFieldAvailability(targetRoot, ["BuildingWidth"]) !== "absent";
-  const { requiredMetadataRows, storeyBuildTypes } = useTargetRules();
+  const { requiredMetadataRows, storeyBuildTypes, desnzDefaultRows } = useTargetRules();
   const requiredRows = useMemo(() => new Set(requiredMetadataRows), [requiredMetadataRows]);
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
@@ -1029,7 +1034,7 @@ export function GlobalSettingsModal({
       { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
       targetRoot,
       defaultsJson,
-      { requiredMetadataRows, storeyBuildTypes },
+      { requiredMetadataRows, storeyBuildTypes, desnzDefaultRows },
     ));
     const bedroomCountIssue = fhsBedroomCountIssue(
       complianceSettings.NumberOfBedrooms
@@ -1059,9 +1064,10 @@ export function GlobalSettingsModal({
       }
     }
     if (complianceSettings.ColdWaterSource === undefined) {
-      issues.push("Cold water source is not set. Enter it in Global Settings.");
+      issues.push("Global Settings: Cold water source is not set. Enter it in Global Settings.");
     }
-    return issues;
+    // One message per setting: a required row is also an unset model-input row.
+    return [...new Set(issues)];
   }, [
     complianceSettings,
     shownBuildType,
@@ -1074,6 +1080,7 @@ export function GlobalSettingsModal({
     defaultsJson,
     requiredMetadataRows,
     storeyBuildTypes,
+    desnzDefaultRows,
     zones,
   ]);
 
@@ -1346,7 +1353,7 @@ export function GlobalSettingsModal({
                 {settingsTabIndicator ? (
                   <ValidationIndicator
                     hasIssues
-                    issues={settingsTabIndicator.issues}
+                    issues={settingsTabIndicator.issues.map(inGlobalSettingsWords)}
                     size="small"
                     variant={settingsTabIndicator.variant}
                   />
@@ -1771,7 +1778,7 @@ export function GlobalSettingsModal({
                 />
                 <GlobalSettingsSectionValidationStrip
                   expanded={complianceSettingsExpanded}
-                  errorIssues={fhsComplianceRequiredIssues}
+                  errorIssues={fhsComplianceRequiredIssues.map(inGlobalSettingsWords)}
                   warningIssues={globalSettingsWarningIssues}
                   infoIssues={complianceComparisonIssues}
                 />
@@ -2423,6 +2430,8 @@ export function GlobalSettingsModal({
                                 }}
                                 min="0"
                                 step="1"
+                                // Unset, the save writes the space-label count: show it.
+                                placeholder={dwellingRoomCounts ? String(derived) : undefined}
                                 variant="ghost"
                                 size="md"
                               />
@@ -2702,9 +2711,8 @@ export function GlobalSettingsModal({
                         marginBottom: "var(--spacing-sm)",
                       }}
                     >
-                      These settings will be merged into
-                      InfiltrationVentilation.Leaks in the JSON output. Env Area
-                      is automatically calculated from building element areas.
+                      The air test of the dwelling. The envelope area comes from
+                      the element areas.
                     </div>
 
                     <StandardDropdown
@@ -3142,7 +3150,10 @@ export function GlobalSettingsModal({
                       )}
                     </div>
 
-                    {requiredRows.has("Ventilation_noise_nuisance") ? <RequiredYesNo {...requiredYesNoProps("Ventilation_noise_nuisance", "Noise nuisance")} /> : (
+                    {requiredRows.has("Ventilation_noise_nuisance") || desnzDefaultRows.Ventilation_noise_nuisance ? (
+                      <RequiredYesNo {...requiredYesNoProps("Ventilation_noise_nuisance", "Noise nuisance")}
+                        placeholder={desnzDefaultRows.Ventilation_noise_nuisance && `${desnzDefaultRows.Ventilation_noise_nuisance} (default)`} />
+                    ) : (
                     <>
                     <div
                       style={{

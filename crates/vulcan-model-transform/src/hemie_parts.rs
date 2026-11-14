@@ -145,7 +145,7 @@ pub(super) fn basement_storey(
         return Err(());
     }
     if walls.iter().all(|(w, _)| w.level <= level) {
-        ctx.errors.push(error(basement.path(), format!("Floor {level} is basement '{}' and the model has no storey above it. HEMIE enters a basement as the floor of the lowest storey above the ground; draw that storey.", basement.name)));
+        ctx.errors.push(error(basement.path(), format!("Floor {level} is basement '{}' and the model has no storey above it. The existing-building EPC enters a basement as the floor of the lowest storey above the ground; draw that storey.", basement.name)));
         return Err(());
     }
     let openings: Vec<&El> = els
@@ -156,7 +156,7 @@ pub(super) fn basement_storey(
         })
         .collect();
     if !openings.is_empty() {
-        ctx.errors.push(error(openings[0].path(), format!("Windows or doors {} are in walls of basement '{}'. HEMIE has no basement walls, so it cannot take openings in them; remove them, or draw the basement as a storey.", names(&openings), basement.name)));
+        ctx.errors.push(error(openings[0].path(), format!("Windows or doors {} are in walls of basement '{}'. The existing-building EPC has no basement walls, so it cannot take openings in them; remove them, or draw the basement as a storey.", names(&openings), basement.name)));
         return Err(());
     }
     let depth = floor
@@ -165,7 +165,7 @@ pub(super) fn basement_storey(
         .filter(|b| *b < 0.0)
         .reduce(f64::min)
         .map(|b| -b);
-    ctx.notices.push(notice(&basement.path(), format!("Floor {level} is basement '{}'. HEMIE enters it as the floor of floor {}, its storey 0, and takes the basement walls' U-value and thickness from that storey's external walls, so the constructions of walls {} are not used.", basement.name, level + 1, names(&floor))));
+    ctx.notices.push(notice(&basement.path(), format!("Floor {level} is basement '{}'. The existing-building EPC enters it as the floor of floor {}, its storey 0, and takes the basement walls' U-value and thickness from that storey's external walls, so the constructions of walls {} are not used.", basement.name, level + 1, names(&floor))));
     Ok(Some(Basement { level, depth }))
 }
 
@@ -202,7 +202,7 @@ fn party_construction(ctx: &mut Ctx, construction_type: &str, elements: &[&El]) 
     }
     if !c.contains_key("construction_weight") {
         let e = elements[0];
-        ctx.notices.push(notice(&e.path(), format!("'{}' states no construction weight, so HEMIE takes a light (timber) party floor or ceiling.", e.name)));
+        ctx.notices.push(notice(&e.path(), format!("'{}' states no construction weight, so the existing-building EPC takes a light (timber) party floor or ceiling.", e.name)));
     }
     ctx.constructions.add(c)
 }
@@ -212,7 +212,7 @@ fn party_construction(ctx: &mut Ctx, construction_type: &str, elements: &[&El]) 
 pub(super) fn party_ceiling_roof(ctx: &mut Ctx, ceilings: &[&El], planes: &[&El]) -> Option<Value> {
     let first = ceilings.first()?;
     if let Some(plane) = planes.first() {
-        ctx.errors.push(error(first.path(), format!("Party ceiling '{}' and roof '{}' cover one building part. HEMIE gives each building part one roof; draw them over separate parts or remove one.", first.name, plane.name)));
+        ctx.errors.push(error(first.path(), format!("Party ceiling '{}' and roof '{}' cover one building part. The existing-building EPC gives each building part one roof; draw them over separate parts or remove one.", first.name, plane.name)));
         return None;
     }
     let key = party_construction(ctx, "party_ceiling", ceilings);
@@ -265,7 +265,7 @@ pub(super) fn part_floor<'e>(
             );
         }
         many => {
-            ctx.errors.push(error(many[0].path(), format!("Building part '{name}' has floors {} under it. HEMIE gives each building part one floor; draw one floor under it.", quoted(&many.iter().map(|e| e.name).collect::<Vec<_>>()))));
+            ctx.errors.push(error(many[0].path(), format!("Building part '{name}' has floors {} under it. The existing-building EPC gives each building part one floor; draw one floor under it.", quoted(&many.iter().map(|e| e.name).collect::<Vec<_>>()))));
             return None;
         }
     };
@@ -361,7 +361,7 @@ fn ground_floor(ctx: &mut Ctx, g: &El, part: &PartFloor, ground_total: f64) -> O
         ctx.notices.push(notice(
             &g.path(),
             format!(
-                "Basement '{}' states no {}, so HEMIE takes its defaults for a {} basement.",
+                "Basement '{}' states no {}, so it uses the defaults for a {} basement.",
                 g.name,
                 defaulted.join(" or "),
                 descriptor.as_deref().unwrap_or("partially underground")
@@ -377,7 +377,7 @@ pub(super) fn unused_floors(ctx: &mut Ctx, els: &[El], used: &BTreeSet<&str>) {
         .iter()
         .filter(|e| is_raised_floor(e) && !used.contains(e.name))
     {
-        ctx.errors.push(error(e.path(), format!("Floor '{}' on floor {} is under no building part's lowest storey. HEMIE gives each building part one floor, under its lowest storey; move it under the storey it carries or delete it.", e.name, e.level)));
+        ctx.errors.push(error(e.path(), format!("Floor '{}' on floor {} is under no building part's lowest storey. The existing-building EPC gives each building part one floor, under its lowest storey; move it under the storey it carries or delete it.", e.name, e.level)));
     }
 }
 
@@ -519,9 +519,9 @@ mod tests {
         );
         let (_, errors, _) = run_on(&text, flat_model(2));
         assert!(
-            errors.iter().any(|e| e
-                .message
-                .contains("HEMIE gives 'Ceiling A', 'Ceiling B' one construction weight")),
+            errors.iter().any(|e| e.message.contains(
+                "The existing-building EPC gives 'Ceiling A', 'Ceiling B' one construction weight"
+            )),
             "{errors:#?}"
         );
     }
@@ -570,7 +570,7 @@ mod tests {
         assert_eq!(floor["basement_depth_descriptor"], "fully underground");
         assert!(floor.get("height_basement_walls").is_none());
         assert!(notices.iter().any(|n| n.message.contains(
-            "states no height_basement_walls or basement_air_volume, so HEMIE takes its defaults for a fully underground basement"
+            "states no height_basement_walls or basement_air_volume, so it uses the defaults for a fully underground basement"
         )));
     }
 

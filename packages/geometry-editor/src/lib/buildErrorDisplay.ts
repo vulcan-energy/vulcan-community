@@ -4,6 +4,7 @@
 import type { ValidationIssue, ValidationResult } from '../geometry/validation/types';
 import type { BuildErrorItem, TargetValidation } from '../types/buildErrors';
 import { issuePathSegments, resolveIssueTarget, type IssueTarget } from './issueTarget';
+import { HEMIE_NATION, hemieConstructionTypeLabel } from './hemieFabric';
 
 export type DisplayBuildError = {
   item: BuildErrorItem;
@@ -39,6 +40,16 @@ const buildErrorLocation = (path?: string) => {
     return {
       location: zone,
       field: segments[zoneIdx + 2],
+    };
+  }
+
+  // The existing-building fabric rows, where the editor shows them.
+  if (segments[0] === 'Metadata' && segments[1]?.startsWith('HEMIE_')) {
+    const constructionType = segments[1].match(/^HEMIE_construction_(.+)$/)?.[1];
+    return {
+      location: segments[1] === HEMIE_NATION
+        ? 'Global Settings > Dwelling Details'
+        : `Global Settings > Defaults > Fabric${constructionType ? ` > ${hemieConstructionTypeLabel(constructionType)}` : ''}`,
     };
   }
 
@@ -134,7 +145,7 @@ const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => 
   } else if (item.message.includes("schemas listed in the 'oneOf' keyword") || keyword === 'oneOf' || keyword === 'anyOf') {
     userMessage = fieldLabel
       ? `${fieldLabel} does not match an allowed option.`
-      : 'Choose a supported option for these settings.';
+      : `${compactPathLabel(pathSegments)} matches none of the forms this HEM version takes. Check its type and the inputs it states.`;
   } else if (unexpectedFields || keyword === 'unevaluatedProperties' || keyword === 'additionalProperties') {
     userMessage = unexpectedFields
       ? `Remove fields not allowed here: ${unexpectedFields}.`
@@ -229,7 +240,9 @@ export const targetValidationIssues = (
       ? { map: elements, id: elementId }
       : zoneId && row.pathSegments[2] !== 'BuildingElement' ? { map: zones, id: zoneId } : undefined;
     if (!owner) continue;
-    const message = row.userMessage.startsWith(hem) ? row.userMessage : `${hem}: ${row.userMessage}`;
+    // One version prefix: the target's, over any inner engine-version prefix.
+    const text = row.userMessage.replace(/^HEM [^\s:]+: /, '');
+    const message = text.startsWith(hem) ? text : `${hem}: ${text}`;
     owner.map.set(owner.id, [...(owner.map.get(owner.id) ?? []), { message, fieldKey, source: 'schema', ...(row.item.severity === 'warning' && { warning: true }) }]);
   }
   return { elements, zones };
@@ -241,7 +254,9 @@ export type TargetIssue = ValidationIssue & { warning?: boolean };
 /** Adds target issues to a live validation result without copying when there are none. */
 export const withTargetIssues = (validation: ValidationResult, issues: readonly TargetIssue[] | undefined): ValidationResult => {
   if (!issues?.length) return validation;
-  const errors = issues.filter((issue) => !issue.warning);
+  // A field the editor already flags shows its own message once.
+  const flagged = new Set(validation.issues.flatMap((issue) => (issue.fieldKey ? [issue.fieldKey] : [])));
+  const errors = issues.filter((issue) => !issue.warning && !(issue.fieldKey && flagged.has(issue.fieldKey)));
   const warnings = issues.filter((issue) => issue.warning);
   return {
     ...validation,

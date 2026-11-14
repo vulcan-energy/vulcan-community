@@ -33,6 +33,18 @@ describe('targetValidationIssues', () => {
     expect(withTargetIssues(clean, [{ message: 'x', source: 'schema' }])).toMatchObject({ hasIssues: true, issues: [{ message: 'x' }] });
   });
 
+  it('shows a field the editor already flags once, and one version prefix', () => {
+    const local = { hasIssues: true, issues: [{ message: 'U-value required', fieldKey: 'u_value', source: 'schema' as const }], hasWarnings: false, warnings: [] };
+    const { elements } = targetValidationIssues({
+      hemVersion: '0.13.2',
+      items: [
+        { source: 'schema', code: 'E_TARGET_INPUT', path: '/Zone/Zone 1/BuildingElement/Party Wall/u_value', message: 'needs its u_value.' },
+        { source: 'schema', code: 'E_TARGET_INPUT', path: '/Zone/Zone 1/BuildingElement/Party Wall', message: 'HEM 2.0.0a4: Check the wall.' },
+      ],
+    }, model);
+    expect(withTargetIssues(local, elements.get('pw')).issues.map((issue) => issue.message)).toEqual(['U-value required', 'HEM 0.13.2: Check the wall.']);
+  });
+
   it('keeps a target warning a warning: it neither blocks nor absorbs the element errors', () => {
     const { elements } = targetValidationIssues({
       hemVersion: '1.0.0a8',
@@ -56,5 +68,13 @@ describe('displayBuildErrorRows', () => {
       (path) => resolveIssueTarget(path, model),
     );
     expect(row).toMatchObject({ userMessage: 'Add at least one light to this zone.', target: { zoneId: 'z1' } });
+  });
+
+  it('places an existing-building fabric row where Global Settings shows it', () => {
+    const [row] = displayBuildErrorRows(
+      [{ source: 'schema', code: 'E_EPC_HEMIE', path: '/Metadata/HEMIE_construction_external_wall', message: 'The external wall fabric default states no wall construction type.' }],
+      (path) => resolveIssueTarget(path, model),
+    );
+    expect(row?.location).toBe('Global Settings > Defaults > Fabric > External wall');
   });
 });

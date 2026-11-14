@@ -49,6 +49,7 @@ import {
   NumberControl,
   TextControl,
   WindowPartListControl,
+  schemaIsJsonLike,
   validateAdvancedFieldPrimitive,
 } from './jsonformsRenderers';
 
@@ -698,6 +699,18 @@ function renderControlForProperty(args: {
 
   if (elementType === 'System' && leafKey === 'test_data_EN14825' && isRecord(resolved.items)) {
     return <SystemPerformanceTable key={path} args={args} />;
+  }
+
+  // A plant whose schema is a union the editor has no form for (HEM:EPC's product-shaped plants):
+  // no text box over an object; the inputs are kept as saved, and a mismatch reads in words.
+  if (elementType === 'System' && isRecord(value) && !schemaIsJsonLike(resolved)) {
+    const check = validateValueAgainstPropertyNode(schema, resolved, elementType, leafKey, value);
+    return (
+      <div key={path} style={{ fontSize: 12 }}>
+        <p style={{ color: 'var(--text-secondary)', margin: 0 }}>{label}: {Object.keys(value).length} inputs, kept as saved. This target has no form for them yet.</p>
+        {!check.valid && check.errors?.[0] && <div className="standard-input-error-text">{check.errors[0]}</div>}
+      </div>
+    );
   }
 
   // A schema `const` allows one value: offer only that value, and lock it once it is set.
