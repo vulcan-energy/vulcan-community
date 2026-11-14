@@ -477,6 +477,10 @@ pub(super) fn attach_bays(
         // Derived from the model, as for storey walls: the drawn wall runs from floor to the
         // floor or roof above, and the ceiling is the storey gap below that.
         bay_value.insert("bay_height".into(), json!(heights[1] - STOREY_GAP));
+        // Derived from the model: the bay walls' own age band, which HEMIE takes over the part's.
+        if let Some(band) = ctx.agreed(&bay.facets, "age_band") {
+            bay_value.insert("age_band".into(), band.clone());
+        }
         // DESNZ-defined: with no construction of their own, the bay walls take the parent
         // wall's.
         if bay.facets.iter().any(|f| {
@@ -724,6 +728,9 @@ pub(super) fn conservatory_walls(
         if let Some(Value::Object(shade)) = shades.into_iter().next() {
             value.extend(shade);
         }
+        if let Some(band) = source.get("age_band") {
+            value.insert("age_band".into(), band.clone());
+        }
         value.insert("wall_type".into(), json!("conservatory"));
         value.insert("wall_exposure_type".into(), json!(kind.wall_type()));
         value.insert("glazing_fraction".into(), json!(fraction));
@@ -835,7 +842,10 @@ pub(super) fn conservatory_roof(
         &lights,
         &[("areal_heat_capacity", json!(UNUSED_WINDOW_HEAT_CAPACITY))],
     );
-    let mut roof = json!({"glazing_fraction": fraction, "window_type": window_type, "glazing_construction": key});
+    let mut roof = ctx.with_age_band(
+        planes,
+        json!({"glazing_fraction": fraction, "window_type": window_type, "glazing_construction": key}),
+    );
     let opaque_type = if flat > 0 {
         "flat_roof"
     } else {
@@ -1044,6 +1054,35 @@ mod tests {
         // HEMIE adds the bay's footprint itself: the main floor stays the drawn outline, and the
         // dwelling's ground floor total includes the bay floor.
         assert_eq!(main["floor"]["total_area"], 49.02, "{}", main["floor"]);
+    }
+
+    #[test]
+    fn bundle_members_keep_their_own_age_band() {
+        let banded = |text: String, kind: &str| {
+            text.replace(
+                &format!(r#"""hemie_bundle"":{{""kind"":""{kind}"""#),
+                &format!(r#"""age_band"":""K"",""hemie_bundle"":{{""kind"":""{kind}"""#),
+            )
+        };
+        let (model, errors, _) = run(&banded(bay_house(&[]), "bay"));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let bay = model["Zone"]["building_parts"]["Main"]["walls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|w| w.get("bay_window").cloned())
+            .expect("bay");
+        assert_eq!(bay["age_band"], "K", "{bay}");
+        let (model, errors, _) = run(&banded(
+            conservatory_house("non-separated", &[0, 1]),
+            "conservatory",
+        ));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let c = conservatory_part(&model);
+        assert_eq!(c["roof"]["age_band"], "K", "{}", c["roof"]);
+        for w in c["walls"].as_array().unwrap() {
+            assert_eq!(w["age_band"], "K", "{w}");
+        }
     }
 
     #[test]
@@ -1523,6 +1562,15 @@ mod tests {
             1.0,
             SECTIONS,
         ));
+        let exposed_with_band: Vec<String> = exposed
+            .iter()
+            .map(|r| {
+                r.replace(
+                    r#""{""dormer_bundle"""#,
+                    r#""{""age_band"":""K"",""dormer_bundle"""#,
+                )
+            })
+            .collect();
         let (model, errors, _) = run(&room_in_roof(exposed));
         assert!(errors.is_empty(), "{errors:#?}");
         let room = &model["Zone"]["building_parts"]["Main"]["roof"];
@@ -1536,6 +1584,18 @@ mod tests {
         assert_eq!(dormers.len(), 1, "{room:#}");
         assert_eq!(dormers[0]["roof_pitch_type"], "flat");
         assert!(dormers[0].get("roof_pitch").is_none());
+        // The dormer keeps its own age band.
+        let (model, errors, _) = run(&room_in_roof(exposed_with_band));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let room = &model["Zone"]["building_parts"]["Main"]["roof"];
+        let banded = [
+            "dormers_in_slope_orientation",
+            "dormers_opposite_slope_orientation",
+        ]
+        .iter()
+        .flat_map(|k| room[*k].as_array().unwrap())
+        .any(|d| d["age_band"] == "K");
+        assert!(banded, "{room:#}");
     }
 
     /// A roof room with heated slopes south and north (y extents) and a flat plane, drawn with
