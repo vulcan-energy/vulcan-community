@@ -38,9 +38,10 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch; the toolchain input selects nightly
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch; the toolchain input pins the nightly
         with:
-          toolchain: nightly
+          # Keep equal to wasm_toolchain in scripts/build-model-wasm.sh.
+          toolchain: nightly-2026-05-22
           components: rust-src
           targets: wasm32-unknown-unknown
 

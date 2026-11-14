@@ -50,13 +50,13 @@ the hook.
 
 The editor requires Node.js 22.19 or newer with npm (the lockfile is tested
 with npm 10.9.3), plus a POSIX shell with `grep`. Building its local model WASM
-also requires `cargo`, `rustc` and `rustup` using a nightly Rust toolchain, the
-`rust-src` component, the `wasm32-unknown-unknown` target, and `wasm-pack`.
-Install and select those Rust prerequisites from the repository root:
+also requires `cargo`, `rustc` and `rustup` with the pinned nightly Rust
+toolchain, the `rust-src` component, the `wasm32-unknown-unknown` target, and
+`wasm-pack`. The build script selects the pinned toolchain itself. Install the
+Rust prerequisites:
 
 ```bash
-rustup toolchain install nightly --component rust-src --target wasm32-unknown-unknown
-rustup override set nightly
+rustup toolchain install nightly-2026-05-22 --profile minimal --component rust-src --target wasm32-unknown-unknown
 cargo install wasm-pack --version 0.14.0 --locked
 ```
 

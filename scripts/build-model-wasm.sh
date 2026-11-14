@@ -18,21 +18,17 @@ for command_name in cargo grep node rustc rustup wasm-pack; do
     fi
 done
 
-if ! cargo --version | grep -q -- '-nightly'; then
-    echo "The Community WASM build requires a nightly Cargo toolchain." >&2
-    echo "Run 'rustup override set nightly' from the repository root." >&2
+# The pinned Rust toolchain. -Z build-std needs a nightly. Keep it equal to
+# toolchain: in .github/workflows/wasm-build.yml.
+wasm_toolchain="nightly-2026-05-22"
+# Check before selecting it, so rustup cannot auto-install a toolchain without rust-src.
+if ! rustup component list --toolchain "$wasm_toolchain" --installed 2>/dev/null | grep -qx "rust-src" || \
+   ! rustup target list --toolchain "$wasm_toolchain" --installed 2>/dev/null | grep -qx "wasm32-unknown-unknown"; then
+    echo "The Community WASM build requires $wasm_toolchain with rust-src and wasm32-unknown-unknown. Install it with:" >&2
+    echo "  rustup toolchain install $wasm_toolchain --profile minimal --component rust-src --target wasm32-unknown-unknown" >&2
     exit 1
 fi
-if ! rustup component list --installed | grep -qx "rust-src"; then
-    echo "The Community WASM build requires the rust-src component." >&2
-    echo "Run 'rustup component add rust-src --toolchain nightly'." >&2
-    exit 1
-fi
-if ! rustup target list --installed | grep -qx "wasm32-unknown-unknown"; then
-    echo "The Community WASM build requires the wasm32-unknown-unknown target." >&2
-    echo "Run 'rustup target add wasm32-unknown-unknown --toolchain nightly'." >&2
-    exit 1
-fi
+export RUSTUP_TOOLCHAIN="$wasm_toolchain"
 
 generated_parent="$(dirname "$output_dir")"
 expected_output_dir="$community_root/apps/geometry-editor/src/generated/model-wasm"
@@ -68,6 +64,11 @@ fi
 build_tmp_root="${TMPDIR:-/tmp}"
 build_tmp_root="${build_tmp_root%/}"
 wasm_rustflags='-C target-feature=+atomics,+bulk-memory,+simd128,+nontrapping-fptoint,+sign-ext,+extended-const --cfg getrandom_backend="wasm_js"'
+# Newer rustc no longer gives +atomics a shared, imported memory with exported
+# TLS symbols; the Rayon pool needs them, and wasm-bindgen needs __heap_base.
+wasm_rustflags+=' -C link-arg=--shared-memory -C link-arg=--import-memory -C link-arg=--max-memory=1073741824'
+wasm_rustflags+=' -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align'
+wasm_rustflags+=' -C link-arg=--export=__tls_base -C link-arg=--export=__heap_base'
 
 # Cargo's target-specific RUSTFLAGS variable is whitespace-delimited. Reject an
 # unsupported checkout/toolchain path instead of silently producing an
