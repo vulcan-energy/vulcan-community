@@ -253,6 +253,12 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'number',
     units: 'm',
   },
+  // HEM:EPC states each radiator's own length.
+  'core:WetEmitter:length': {
+    description: 'Length of the radiator (unit: m).',
+    type: 'number',
+    units: 'm',
+  },
   'WetEmitter:n': {
     description:
       'Radiator: exponent n in the catalogue characteristic equation (BS EN 442 style). Separate from HEM “Number of elements”, i.e. how many radiators/fancoils share this spec — use Unit number for that count.',
@@ -1262,6 +1268,15 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     description: 'Whether the ductwork surface is reflective (boolean). Reflective surfaces reduce radiative heat transfer.',
     type: 'boolean',
   },
+  // Decentralised extract fans state the room they serve; plant states whether it is inside the heated space.
+  'MechanicalVentilation:location': {
+    description: 'The room the extract fan serves: kitchen, other wet rooms or other.',
+    type: 'string',
+  },
+  'System:location': {
+    description: 'Where the unit is: "internal" (inside the heated space) or "external" (outside it).',
+    type: 'string',
+  },
   // WaterPipework
   'location': {
     description: 'Location of the water pipework: "internal" (within heated space) or "external" (outside heated space). Internal pipework contributes to internal gains, external has heat losses.',
@@ -1582,7 +1597,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'boolean',
   },
   'Global:General_build_type': {
-    description: '**Dwelling details — build type:** whether the assessed dwelling is a house or a flat. Vulcan can suggest this from floor geometry: ground-contact floor geometry suggests house; floor geometry without ground contact suggests flat.',
+    description: '**Dwelling details — build type:** the kind of dwelling, for example a house, flat or maisonette. Vulcan can suggest house or flat from floor geometry: a floor in contact with the ground suggests a house; no ground-contact floor suggests a flat.',
     type: 'string',
   },
   'Global:General_built_form': {
@@ -1657,7 +1672,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'boolean',
   },
   'Global:NumberOfBedrooms': {
-    description: 'Number of bedrooms — number of rooms in the dwelling excluding the primary living area and any wet rooms or utility rooms.',
+    description: 'Number of bedrooms: the rooms that contain a permanent bed.',
     type: 'integer',
     unitSemantic: 'unitless',
     modelAuthoring: true,
@@ -1669,11 +1684,11 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     modelAuthoring: true,
   },
   HeatingControlType: {
-    description: 'SAP-style heating control (temperature vs time+temperature). Required when FHS validation is on.',
+    description: 'How the heating is controlled in the living area and the rest of the dwelling: separate temperature control, or separate time and temperature control.',
     type: 'string',
   },
   PartGcompliance: {
-    description: 'Enables Part G domestic hot water checks in the compliance pathway.',
+    description: 'Sets the hot water demand assumption for the dwelling: whether the Part G water efficiency design applies.',
     type: 'boolean',
   },
 };
