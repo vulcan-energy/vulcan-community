@@ -118,6 +118,8 @@ import { listCategoryJsonOptions, type WorkspaceSnippetOption } from '../../geom
 import { syncSpaceHeatSystemZoneNameInExtraJson } from '../../lib/spaceHeatSystemSync';
 import { collectHeatSourceWetNamesFromProject } from '../../lib/heatSourceWetNamesFromProject';
 import { useKeyedState } from '../../hooks/useKeyedState';
+import { systemPlantTypes, withSystemPlantType } from '../../lib/systemSchemaFlatten';
+import { readRecord } from '../../lib/jsonTypes';
 import { StandardDropdown } from '../StandardDropdown';
 import {
   buildSpaceHeatSystemSampleBaselineExtraJson,
@@ -143,7 +145,39 @@ import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } fro
 export type PendingSystemAction =
   | { kind: 'source'; target: 'presets' | 'pcdb' }
   | { kind: 'subcategory'; value: string }
+  | { kind: 'type'; value: string }
   | { kind: 'preset'; value: string };
+
+/** Readable names for the schema's plant types; a type not listed shows its exact value. */
+const SYSTEM_TYPE_LABELS: Record<string, string> = {
+  AirConditioning: 'Air conditioning',
+  BackBoiler: 'Back boiler',
+  Boiler: 'Boiler',
+  CombiBoiler: 'Combi boiler',
+  CombustionRoomHeater: 'Combustion room heater',
+  DirectElectricBoiler: 'Direct electric boiler',
+  DirectFeed: 'Direct feed',
+  DryElectricUnderfloorHeating: 'Dry electric underfloor heating',
+  ElecStorageHeater: 'Electric storage heater',
+  HIU: 'Heat interface unit',
+  HeatBattery: 'Heat battery',
+  HeatPump: 'Heat pump',
+  HeatPumpAirCooling: 'Heat pump, air cooling',
+  HeatPumpFanCoilCooling: 'Heat pump, fan coil cooling',
+  HeatPump_HWOnly: 'Heat pump, hot water only',
+  InstantElecHeater: 'Instant electric heater',
+  PointOfUse: 'Point of use',
+  PrimaryThermalStore: 'Primary thermal store',
+  SmartHotWaterTank: 'Smart hot water tank',
+  SolidFuelBoiler: 'Solid fuel boiler',
+  StorageTank: 'Hot water cylinder',
+  WarmAir: 'Warm air',
+  WarmAirDistribution: 'Warm air distribution',
+  WetDistribution: 'Wet distribution',
+};
+
+/** Types whose schema requires an entry the editor has no category to create (a warm-air heat source). */
+const TYPES_NEEDING_AN_UNCREATABLE_ENTRY = new Set(['WarmAirDistribution']);
 
 export function formatSystemPresetName(preset: string): string {
   return preset.replace(/_/g, ' ');
@@ -195,6 +229,12 @@ export interface SystemFormState {
   handleSystemPresetChange: (value: string) => void;
   requestSystemUiMode: (target: 'presets' | 'pcdb') => void;
   handlePcdbSystemApply: (payload: { subcategory: string; extraJson: Record<string, unknown> }) => void;
+  /** The plant types the target schema gives this category, with the plant's current type. */
+  systemTypeOptions: Array<{ value: string; label: string }>;
+  systemPlantType: string;
+  handleSystemTypeChange: (type: string) => void;
+  /** The type is offered only for a row holding no plant or one. */
+  systemPlantCount: number;
 }
 
 function useFormState(ctx: ElementFormStateCtx): SystemFormState {
@@ -677,6 +717,41 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     ],
   );
 
+  const systemTypeOptions = useMemo(() => {
+    if (!isSystemElementType || !systemSubcategory || ctx.schemaPort.availability !== 'available') return [];
+    return systemPlantTypes(ctx.schemaPort.getRootSchema(ctx.schemaMode), systemSubcategory)
+      .flatMap((value) => (TYPES_NEEDING_AN_UNCREATABLE_ENTRY.has(value) ? [] : [{ value, label: SYSTEM_TYPE_LABELS[value] ?? value }]));
+  }, [isSystemElementType, systemSubcategory, ctx.schemaPort, ctx.schemaMode]);
+
+  // The row holds one plant, named for the row. A row with several plants keeps them: no type is offered.
+  const selectedPlants = readRecord(readRecord(selectedSystemElementFull?.extra_json)[systemSubcategory]);
+  const plantCount = Object.keys(selectedPlants).length;
+  const systemPlantType = plantCount === 1 ? String(readRecord(Object.values(selectedPlants)[0]).type ?? '') : '';
+
+  const applySystemTypeChange = useCallback((type: string) => {
+    const element = selectedSystemElementFull;
+    if (!element) return;
+    const extraJson = withSystemPlantType(element.extra_json, systemSubcategory, element.name, type);
+    if (!extraJson) return;
+    commitSystemSelectionUpdate({
+      source: 'custom',
+      subcategory: systemSubcategory,
+      extraJson,
+      reason: 'system-type-change',
+    });
+  }, [selectedSystemElementFull, systemSubcategory, commitSystemSelectionUpdate]);
+
+  const handleSystemTypeChange = useCallback((type: string) => {
+    if (!selectedSystemElementFull || !type || type === systemPlantType || plantCount > 1) return;
+    const [, existing] = Object.entries(readRecord(readRecord(selectedSystemElementFull.extra_json)[systemSubcategory]))[0] ?? [];
+    // Another type's inputs do not carry over: ask before clearing a plant that has any.
+    if (existing && Object.keys(readRecord(existing)).some((key) => key !== 'type')) {
+      setPendingSystemAction({ kind: 'type', value: type });
+      return;
+    }
+    applySystemTypeChange(type);
+  }, [selectedSystemElementFull, systemSubcategory, systemPlantType, plantCount, applySystemTypeChange]);
+
   const confirmSystemSourceSwitch = useCallback(() => {
     const action = pendingSystemAction;
     setPendingSystemAction(null);
@@ -693,6 +768,10 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
       applySystemSubcategoryChange(action.value);
       return;
     }
+    if (action.kind === 'type') {
+      applySystemTypeChange(action.value);
+      return;
+    }
     void applySystemPresetChange(action.value);
   }, [
     pendingSystemAction,
@@ -700,6 +779,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     applyFirstSamplePresetAfterPcdb,
     applySystemSubcategoryChange,
     applySystemPresetChange,
+    applySystemTypeChange,
   ]);
 
   // Update preset options when subcategory changes. The workspace files are
@@ -763,6 +843,10 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     handleSystemPresetChange,
     requestSystemUiMode,
     handlePcdbSystemApply,
+    systemTypeOptions,
+    systemPlantType,
+    handleSystemTypeChange,
+    systemPlantCount: plantCount,
   };
 }
 
@@ -828,9 +912,15 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
       handleSystemPresetChange,
       requestSystemUiMode,
       handlePcdbSystemApply,
+      systemTypeOptions,
+      systemPlantType,
+      handleSystemTypeChange,
+      systemPlantCount,
     } = state;
     const { elementType, renderFieldLabel, elementsById, productCatalogue, hemDatabaseProducts, systemHasProductSlot, renderSpaceHeatSystemEmitterManager } = ctx;
 
+    // Products take no sample preset, so the type is chosen here.
+    const showType = !!(hemDatabaseProducts && systemPlantCount <= 1 && systemSubcategory && selectedSystemElementFull && systemTypeOptions.length);
     return (
       <>
         {productCatalogue ? (
@@ -859,7 +949,17 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
         ) : null}
 
         {systemHasProductSlot ? (
-          systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null
+          <>
+            {showType ? (
+          <>
+            <div className="element-label">Type:</div>
+            <div className="element-input">
+              <StandardDropdown value={systemPlantType} onChange={handleSystemTypeChange} options={systemTypeOptions} placeholder="Select type…" variant="ghost" size="md" />
+            </div>
+          </>
+        ) : null}
+            {systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null}
+          </>
         ) : !productCatalogue || systemUiMode === 'presets' ? (
           <>
             {renderFieldLabel('Category:', elementType)}
@@ -877,6 +977,14 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
                 size="md"
               />
             </div>
+            {showType ? (
+          <>
+            <div className="element-label">Type:</div>
+            <div className="element-input">
+              <StandardDropdown value={systemPlantType} onChange={handleSystemTypeChange} options={systemTypeOptions} placeholder="Select type…" variant="ghost" size="md" />
+            </div>
+          </>
+        ) : null}
             {/* The sample presets are FHS inputs; a HEM Database products target takes none. */}
             {hemDatabaseProducts ? null : (
               <>
