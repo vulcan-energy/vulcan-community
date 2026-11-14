@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import React, { useCallback, useMemo } from 'react';
-import { StandardDropdown } from './StandardDropdown';
 import { StandardInput } from './StandardInput';
 import { renderFieldLabelWithTooltip } from './jsonformsRenderers';
 import { ResolvedFieldLabel } from './ResolvedFieldLabel';
@@ -51,89 +50,63 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
     [onChange, setForm],
   );
 
-  const dimLabel =
-    form.orientation === 'vertical'
-      ? 'Depth (m)'
-      : form.orientation === 'horizontal'
-        ? 'Width (m)'
-        : 'Width / depth (m)';
-
   const compact = Boolean(flat);
-  const resistancePresentation = resolveFieldPresentation({
-    mode: schemaMode,
-    propertyKey: 'edge_thermal_resistance',
-    elementType,
-    subtype: 'Slab_edge_insulation',
-    label: 'Edge thermal resistance (m²·K/W)',
-  }, schemaPort);
-  const dimensionPropertyKey = form.orientation === 'vertical' ? 'depth' : 'width';
-  const dimensionPresentation = resolveFieldPresentation({
-    mode: schemaMode,
-    propertyKey: dimensionPropertyKey,
-    elementType,
-    subtype: 'Slab_edge_insulation',
-    label: dimLabel,
-  }, schemaPort);
+  const segment = (type: 'horizontal' | 'vertical') => {
+    const dimLabel = type === 'vertical' ? 'Depth (m)' : 'Width (m)';
+    const resistancePresentation = resolveFieldPresentation({
+      mode: schemaMode,
+      propertyKey: 'edge_thermal_resistance',
+      elementType,
+      subtype: 'Slab_edge_insulation',
+      label: 'Edge thermal resistance (m²·K/W)',
+    }, schemaPort);
+    const dimensionPresentation = resolveFieldPresentation({
+      mode: schemaMode,
+      propertyKey: type === 'vertical' ? 'depth' : 'width',
+      elementType,
+      subtype: 'Slab_edge_insulation',
+      label: dimLabel,
+    }, schemaPort);
+    return (
+      <div key={type}>
+        <div style={{ margin: ROW_MARGIN(compact), fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
+          {type === 'vertical' ? 'Vertical edge insulation' : 'Horizontal edge insulation'}
+        </div>
+        <div style={{ margin: ROW_MARGIN(compact) }}>
+          <StandardInput
+            label={<ResolvedFieldLabel presentation={resistancePresentation} useFHSSchema={schemaMode === 'fhs'} />}
+            type="number"
+            unit={fieldUnitForAdornment(resistancePresentation)}
+            step="any"
+            size="md"
+            variant="ghost"
+            value={form[type].edgeThermalResistance}
+            onChange={(e) => apply({ ...form, [type]: { ...form[type], edgeThermalResistance: e.target.value } })}
+          />
+        </div>
+        <div style={{ margin: ROW_MARGIN(compact) }}>
+          <StandardInput
+            label={<ResolvedFieldLabel presentation={dimensionPresentation} useFHSSchema={schemaMode === 'fhs'} />}
+            type="number"
+            unit={fieldUnitForAdornment(dimensionPresentation)}
+            step="any"
+            size="md"
+            variant="ghost"
+            value={form[type].widthOrDepth}
+            onChange={(e) => apply({ ...form, [type]: { ...form[type], widthOrDepth: e.target.value } })}
+          />
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div data-field-key="edge_insulation" style={{ width: '100%' }}>
-      <div style={{ margin: ROW_MARGIN(compact) }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
-          {renderFieldLabelWithTooltip('Edge Insulation', elementType)}
-        </div>
-        <StandardDropdown
-          label={
-            <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
-              Orientation
-            </span>
-          }
-          value={form.orientation}
-          onChange={(v) => {
-            const orientation = v === 'horizontal' || v === 'vertical' ? v : '';
-            apply({
-              ...form,
-              orientation,
-              ...(orientation === '' ? { edgeThermalResistance: '', widthOrDepth: '' } : {}),
-            });
-          }}
-          options={[
-            { value: '', label: '—' },
-            { value: 'horizontal', label: 'Horizontal' },
-            { value: 'vertical', label: 'Vertical' },
-          ]}
-          placeholder=""
-          size="md"
-          variant="ghost"
-        />
+      <div style={{ display: 'flex', alignItems: 'center', margin: ROW_MARGIN(compact) }}>
+        {renderFieldLabelWithTooltip('Edge Insulation', elementType)}
       </div>
-
-      <div style={{ margin: ROW_MARGIN(compact) }}>
-        <StandardInput
-          label={<ResolvedFieldLabel presentation={resistancePresentation} useFHSSchema={schemaMode === 'fhs'} />}
-          type="number"
-          unit={fieldUnitForAdornment(resistancePresentation)}
-          step="any"
-          size="md"
-          variant="ghost"
-          disabled={!form.orientation}
-          value={form.edgeThermalResistance}
-          onChange={(e) => apply({ ...form, edgeThermalResistance: e.target.value })}
-        />
-      </div>
-
-      <div style={{ margin: ROW_MARGIN(compact) }}>
-        <StandardInput
-          label={<ResolvedFieldLabel presentation={dimensionPresentation} useFHSSchema={schemaMode === 'fhs'} />}
-          type="number"
-          unit={fieldUnitForAdornment(dimensionPresentation)}
-          step="any"
-          size="md"
-          variant="ghost"
-          disabled={!form.orientation}
-          value={form.widthOrDepth}
-          onChange={(e) => apply({ ...form, widthOrDepth: e.target.value })}
-        />
-      </div>
+      {segment('horizontal')}
+      {segment('vertical')}
     </div>
   );
 };

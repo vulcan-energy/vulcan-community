@@ -2505,6 +2505,8 @@ export const validateElementCore = (
           (Array.isArray(fs.enum) && fs.enum.length > 0);
 
         if (!hasConstraints) continue;
+        // An existing building takes a basement wall height of 0 (a basement wholly below ground).
+        if (field === 'height_basement_walls' && fieldValue === 0 && isExistingBuildingContext(context)) continue;
 
         const v = schemaPort.validateProperty(
           schemaMode,

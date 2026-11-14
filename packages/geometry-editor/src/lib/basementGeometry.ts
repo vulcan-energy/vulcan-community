@@ -14,6 +14,11 @@ function finitePositiveNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
+/** The wall height above ground can be 0 (a basement wholly below ground). */
+function finiteNonNegativeNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 export function isBasementGroundElement(g: BuildingElementGround): boolean {
   return g.floor_type === 'Heated_basement' || g.floor_type === 'Unheated_basement';
 }
@@ -29,12 +34,12 @@ export function readBasementDepthFloorM(g: BuildingElementGround): number | null
 
 export function readUnheatedBasementWallHeightAboveGroundM(g: BuildingElementGround): number | null {
   if (g.floor_type !== 'Unheated_basement') return null;
-  const direct = finitePositiveNumber((g as { height_basement_walls?: unknown }).height_basement_walls);
+  const direct = finiteNonNegativeNumber((g as { height_basement_walls?: unknown }).height_basement_walls);
   if (direct !== null) return direct;
   const extra = g.extra_json && typeof g.extra_json === 'object' && !Array.isArray(g.extra_json)
     ? (g.extra_json as Record<string, unknown>)
     : undefined;
-  return finitePositiveNumber(extra?.height_basement_walls);
+  return finiteNonNegativeNumber(extra?.height_basement_walls);
 }
 
 /** Upper surface of the basement floor, measured relative to external ground level. */

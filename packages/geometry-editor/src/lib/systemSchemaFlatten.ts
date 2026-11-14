@@ -399,6 +399,37 @@ function selectPlantVariant(node: unknown, instanceData: unknown, root?: unknown
   };
 }
 
+/**
+ * The optional object parts `flattenSystemSubtypePlantSchemas` leaves out because the plant JSON lacks
+ * them (for example a heat pump's `BufferTank`), so the editor can offer to add each one.
+ */
+export function listAbsentOptionalPlantParts(
+  subschema: Record<string, unknown>,
+  subtype: string,
+  plantDataMap?: Record<string, unknown> | null,
+  fullRoot?: unknown,
+  existingBuilding = false,
+): { plant: string; part: string; title: string }[] {
+  const inner = (subschema.properties as Record<string, unknown> | undefined)?.[subtype] as Record<string, unknown> | undefined;
+  const plantProps = inner?.properties as Record<string, unknown> | undefined;
+  if (!plantProps || !plantDataMap) return [];
+  const out: { plant: string; part: string; title: string }[] = [];
+  for (const [plant, v] of Object.entries(plantProps)) {
+    const raw = plantDataMap[plant];
+    const plantInstance = plantInstanceForFlatten(subtype, raw);
+    if (!isRecord(plantInstance)) continue;
+    const selected = plantVariantForFlatten(v, raw, plantInstance, fullRoot, existingBuilding);
+    const flat = flattenIfThenAllOfProperties(cloneForFlatten(selected), plantInstance, fullRoot) as Record<string, unknown>;
+    const kept = readRecord((omitAbsentOptionalObjectPropertiesFromSchema(flat, plantInstance) as Record<string, unknown>).properties);
+    for (const [part, sch] of Object.entries(readRecord(flat.properties))) {
+      if (part in kept || part in plantInstance) continue;
+      const title = readRecord(sch).title;
+      out.push({ plant, part, title: typeof title === 'string' ? title : part.replace(/_/g, ' ') });
+    }
+  }
+  return out;
+}
+
 /** Deep-flatten each plant schema under `properties[subtype].properties` using live plant JSON. */
 export function flattenSystemSubtypePlantSchemas(
   subschema: Record<string, unknown>,
