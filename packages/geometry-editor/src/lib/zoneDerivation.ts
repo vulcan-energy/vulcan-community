@@ -634,7 +634,9 @@ export function calculateSuggestedVentilationBaseHeight(
 export function getMaxLineWallHeightOnFloor(floorZIndex: number, elements: Element[]): number {
   let max = 0;
   for (const el of elements) {
-    if (!isVerticalLineWall(el)) continue;
+    // A bay or conservatory wall does not set the storey: its profiled top (exported as its
+    // mean height) can rise above the storey, and a conservatory has walls of its own height.
+    if (!isVerticalLineWall(el) || getHemieBundle(el)) continue;
     const z = Math.floor(el.coordinates[0]?.z ?? 0);
     if (z !== floorZIndex) continue;
     const h = (el as { height?: unknown }).height;

@@ -107,7 +107,7 @@ pub(super) fn left_out<'a>(ctx: &mut Ctx, els: &[El<'a>]) -> BTreeSet<&'a str> {
 /// A conservatory's host wall, split where the conservatory adjoins it. Non-separated, that span
 /// is internal, between two parts of the dwelling (DESNZ-defined: a conservatory wall is an
 /// edge not shared with another building part), so it is left out. Unheated, the span is a
-/// sheltered wall with the unheated space type the bundle states (DESNZ-defined, EPC 04 4.3.1).
+/// sheltered wall with the unheated space type the bundle states (DESNZ-defined).
 /// Separated, the host wall stays as drawn. Reads the members of every conservatory, so it
 /// takes the elements before `left_out`. Returns the host walls replaced, their pieces (each with
 /// its unheated space type when sheltered), and the non-separated conservatory floors (each its
@@ -169,14 +169,7 @@ pub(super) fn conservatory_hosts<'a>(
         let (p, q) = (host.pts[0], host.pts[1]);
         let along = |x: P| dot(sub(x, p), unit(sub(q, p)));
         let (lo, hi) = if along(a) <= along(b) { (a, b) } else { (b, a) };
-        if let Some(o) = els.iter().find(|o| {
-            !unheated
-                && o.host() == Some(host.name)
-                && (o.ty == "BuildingElementTransparent" || o.flag("is_external_door"))
-                && o.pts.len() >= 2
-                && (along(o.plan_mid()) - along(lo)) > TOL
-                && (along(hi) - along(o.plan_mid())) > TOL
-        }) {
+        if let Some(o) = covered_opening(els, host, lo, hi).filter(|_| !unheated) {
             ctx.errors.push(error(o.path(), format!("'{}' is in the part of '{}' that conservatory '{id}' adjoins, which is inside the dwelling. Delete it, or move it to a conservatory wall.", o.name, host.name)));
             continue;
         }
@@ -208,6 +201,24 @@ pub(super) fn conservatory_hosts<'a>(
         }
     }
     (hosts, pieces, floors)
+}
+
+/// A window or door of `host` whose middle lies between `lo` and `hi` along it.
+fn covered_opening<'s, 'e>(els: &'s [El<'e>], host: &El, lo: P, hi: P) -> Option<&'s El<'e>> {
+    let (p, q) = (host.pts[0], host.pts[1]);
+    let along = |x: P| dot(sub(x, p), unit(sub(q, p)));
+    let (lo, hi) = if along(lo) <= along(hi) {
+        (lo, hi)
+    } else {
+        (hi, lo)
+    };
+    els.iter().find(|o| {
+        o.host() == Some(host.name)
+            && (o.ty == "BuildingElementTransparent" || o.flag("is_external_door"))
+            && o.pts.len() >= 2
+            && (along(o.plan_mid()) - along(lo)) > TOL
+            && (along(hi) - along(o.plan_mid())) > TOL
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -292,6 +303,12 @@ pub(super) fn bays<'a>(ctx: &mut Ctx, els: &'a [El<'a>]) -> Vec<Bay<'a>> {
         };
         if wall_kind(parent) != Some(Kind::External) {
             ctx.errors.push(error(path, format!("The bay walls {names} project from '{}', which is not an external wall. Place the bay on an external wall.", parent.name)));
+            continue;
+        }
+        // HEMIE builds the bay's glazing from the bay alone: an opening left in the covered
+        // part of the parent wall would count twice.
+        if let Some(o) = covered_opening(els, parent, a, b) {
+            ctx.errors.push(error(o.path(), format!("'{}' is in the part of '{}' that bay {names} covers. Delete it, or move it to a bay wall.", o.name, parent.name)));
             continue;
         }
         // DESNZ-defined: only bays that start at the base of the parent wall.
@@ -599,11 +616,17 @@ fn glazing(
         ));
         return None;
     }
-    let area = glazing
-        .iter()
-        .map(|w| w.num("width").unwrap_or(0.0) * w.num("height").unwrap_or(0.0))
-        .sum();
+    let area = glazed_area(ctx, glazing)?;
     Some((window_type, risks.into_iter().next(), area))
+}
+
+/// The summed width × height of the glazing; a missing measurement is an error.
+fn glazed_area(ctx: &mut Ctx, glazing: &[&El]) -> Option<f64> {
+    let areas: Option<Vec<f64>> = glazing
+        .iter()
+        .map(|w| Some(ctx.need(w, "width")? * ctx.need(w, "height")?))
+        .collect();
+    Some(areas?.iter().sum())
 }
 
 fn defaulted_notice(ctx: &mut Ctx, part: &str, defaulted: Vec<String>) {
@@ -656,7 +679,7 @@ pub(super) fn conservatory_walls(
         for w in &glazed {
             placed.insert(w.name.to_string());
         }
-        let Some((window_type, risk, area)) = glazing(
+        let Some((window_type, risk, _)) = glazing(
             ctx,
             &glazed,
             Some(&CONSERVATORY_WALL_WINDOW_TYPES),
@@ -668,15 +691,39 @@ pub(super) fn conservatory_walls(
         let Some(height) = ctx.eaves(source) else {
             continue;
         };
-        // Derived from the model: the glazed share of the drawn wall up to its eaves. HEMIE
-        // applies the fraction to that rectangle and builds any gable above it separately.
-        let fraction = area / (dist(walls[wi].a, walls[wi].b) * height);
+        let bases: Option<Vec<f64>> = std::iter::once(source)
+            .chain(glazed.iter().copied())
+            .map(|e| ctx.need(e, "base_height"))
+            .collect();
+        let Some(bases) = bases else { continue };
+        // DESNZ-defined: the glazed share of the wall's height to its eaves; the opaque part is
+        // the dwarf wall below the glazing, so the glazing runs from its lowest sill to the eaves
+        // across the whole wall. HEMIE builds any gable above the eaves separately.
+        let dwarf = bases[1..].iter().copied().fold(f64::INFINITY, f64::min) - bases[0];
+        let fraction = ((height - dwarf) / height).max(0.0);
         if fraction <= 0.0 || fraction > 1.0 + 1e-9 {
             ctx.errors.push(error(source.path(), format!("Conservatory wall '{}' is {:.0}% glazed. A conservatory wall must be glazed, above 0% and up to 100%: add or resize its windows.", source.name, fraction * 100.0)));
             continue;
         }
         let fraction = fraction.min(1.0);
+        // HEMIE takes the close shading of a conservatory wall's glazing on the wall, as one
+        // glazed element: its windows take the same.
+        let shades: Vec<Value> = glazed
+            .iter()
+            .map(|w| {
+                let mut v = json!({});
+                shading::close(ctx, w, &mut v);
+                v
+            })
+            .collect();
+        if shades.iter().any(|v| *v != shades[0]) {
+            ctx.errors.push(error(source.path(), format!("The glazing {} of conservatory wall '{}' differs in close shading (overhang, side fins, obstacle). HEMIE glazes a conservatory wall as one element: give its glazing the same close shading.", quoted(&glazed.iter().map(|w| w.name).collect::<Vec<_>>()), source.name)));
+            continue;
+        }
         let value = &mut walls[wi].value;
+        if let Some(Value::Object(shade)) = shades.into_iter().next() {
+            value.extend(shade);
+        }
         value.insert("wall_type".into(), json!("conservatory"));
         value.insert("wall_exposure_type".into(), json!(kind.wall_type()));
         value.insert("glazing_fraction".into(), json!(fraction));
@@ -755,6 +802,11 @@ pub(super) fn conservatory_roof(
         .collect();
     for w in &lights {
         placed.insert(w.name.to_string());
+        let mut shade = json!({});
+        shading::close(ctx, w, &mut shade);
+        if shade.as_object().is_some_and(|o| !o.is_empty()) {
+            ctx.errors.push(error(w.path(), format!("Rooflight '{}' of conservatory '{part}' states close shading. HEMIE's conservatory roof takes none: remove it.", w.name)));
+        }
     }
     let mut defaulted = Vec::new();
     let (window_type, _, glazed) = glazing(ctx, &lights, None, &mut defaulted, first)?;
@@ -763,11 +815,12 @@ pub(super) fn conservatory_roof(
     // Derived from the model: a plane's area is exported net of its rooflights, so the drawn
     // plane is that area plus theirs.
     for (m, plane) in measured.iter_mut().zip(planes) {
-        m.area += lights
+        let hosted: Vec<&El> = lights
             .iter()
+            .copied()
             .filter(|w| w.host() == Some(plane.name))
-            .map(|w| w.num("width").unwrap_or(0.0) * w.num("height").unwrap_or(0.0))
-            .sum::<f64>();
+            .collect();
+        m.area += glazed_area(ctx, &hosted)?;
     }
     let area: f64 = measured.iter().map(|m| m.area).sum();
     // Derived from the model: the glazed share of the drawn roof.
@@ -846,7 +899,7 @@ pub(super) fn conservatory_roof(
 // ---------------------------------------------------------------------------------------------
 // Box in the roof
 
-/// DESNZ-defined: a box-shaped room set within a pitched roof is not covered. Ours (E21): how
+/// DESNZ-defined: a box-shaped room set within a pitched roof is not covered. Ours (E29): how
 /// a box room is recognised, a top floor standing clear of the outline below under an unheated
 /// pitched roof.
 pub(super) fn box_in_roof(
@@ -1029,6 +1082,28 @@ mod tests {
     }
 
     #[test]
+    fn a_window_in_the_wall_a_bay_covers_stops_and_is_named() {
+        let covered = [opening(
+            "Hidden",
+            "W00",
+            0,
+            [5.5, 0.0],
+            [6.5, 0.0],
+            1.0,
+            1.2,
+            SECTIONS,
+        )];
+        let (_, errors, _) = run(&bay_house(&covered));
+        // The bay is not entered, so its roof is then a second roof of the part.
+        assert!(
+            errors.iter().any(|e| e.path.ends_with("/Hidden")
+                && e.message.contains("'Hidden'")
+                && e.message.contains("covers")),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
     fn equal_bay_side_windows_are_the_side_window() {
         let sides = [
             opening(
@@ -1089,35 +1164,44 @@ mod tests {
                     r#"{""geometry_face"":{""top_profile"":[{""h"":2.4},{""h"":3.2}]},""hemie_bundle"""#,
                 ).as_str(),
         );
-        exposed.push(opening(
-            "CW E",
-            "C E",
-            0,
-            [6.0, 7.0],
-            [6.0, 8.0],
-            2.0,
+        exposed.push(sill(
+            0.6,
+            opening(
+                "CW E",
+                "C E",
+                0,
+                [6.0, 7.0],
+                [6.0, 8.0],
+                2.0,
+                1.2,
+                &glazing("right-glazing"),
+            ),
+        ));
+        exposed.push(sill(
+            0.6,
+            opening(
+                "CW N",
+                "C N",
+                0,
+                [5.0, 9.0],
+                [3.0, 9.0],
+                3.0,
+                1.6,
+                &glazing("front-glazing"),
+            ),
+        ));
+        exposed.push(sill(
             1.2,
-            &glazing("right-glazing"),
-        ));
-        exposed.push(opening(
-            "CW N",
-            "C N",
-            0,
-            [5.0, 9.0],
-            [3.0, 9.0],
-            3.0,
-            1.6,
-            &glazing("front-glazing"),
-        ));
-        exposed.push(opening(
-            "CW W",
-            "C W",
-            0,
-            [2.0, 8.0],
-            [2.0, 7.0],
-            2.4,
-            1.8,
-            &glazing("left-glazing"),
+            opening(
+                "CW W",
+                "C W",
+                0,
+                [2.0, 8.0],
+                [2.0, 7.0],
+                2.4,
+                1.8,
+                &glazing("left-glazing"),
+            ),
         ));
         // Its area is net of the 3 m² rooflight, as the editor exports it.
         exposed.push(
@@ -1155,6 +1239,11 @@ mod tests {
         csv(&settings(), &exposed, &ground)
     }
 
+    /// An opening row with its base `height` above the floor in place of 1 m.
+    fn sill(height: f64, row: String) -> String {
+        row.replacen(",0,1,FALSE,", &format!(",0,{height},FALSE,"), 1)
+    }
+
     fn conservatory_part(model: &Value) -> &Value {
         &model["Zone"]["building_parts"]["Extension 1"]
     }
@@ -1181,7 +1270,9 @@ mod tests {
             .collect();
         let mut sorted = fractions.clone();
         sorted.sort_by(f64::total_cmp);
-        for (got, want) in sorted.iter().zip([1.0 / 3.0, 0.5, 0.6]) {
+        // DESNZ: the glazed share of the wall height, glazing from its sill to the eaves: a
+        // 0.6 m dwarf wall in a 2.4 m wall is 0.75, whatever the glazing's width.
+        for (got, want) in sorted.iter().zip([0.5, 0.75, 0.75]) {
             assert!((got - want).abs() < 1e-9, "{fractions:?}");
         }
         let roof = &c["roof"];
@@ -1208,6 +1299,59 @@ mod tests {
             .filter(|w| w["storey_index"] == 0)
             .count();
         assert_eq!(ground_walls, 5, "{main}");
+    }
+
+    #[test]
+    fn a_fully_glazed_conservatory_roof_has_a_glazing_fraction_of_one() {
+        // The rooflight is the whole plane, so the plane's exported net area is 0.
+        let csv: String = conservatory_house("non-separated", &[0, 1])
+            .lines()
+            .map(|l| {
+                if l.starts_with("C roof,") {
+                    l.replacen(",7,", ",0,", 1)
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (model, errors, _) = run(&csv);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let roof = &conservatory_part(&model)["roof"];
+        assert_eq!(roof["glazing_fraction"], 1.0);
+        assert!(roof.get("opaque_construction").is_none());
+    }
+
+    #[test]
+    fn conservatory_glazing_close_shading_is_on_its_wall() {
+        let with_overhang = |l: &str| {
+            l.replacen(
+                r#"{""hemie_bundle"""#,
+                r#"{""overhang"":""roof eaves overhang"",""hemie_bundle"""#,
+                1,
+            )
+        };
+        let csv: String = conservatory_house("non-separated", &[0, 1])
+            .lines()
+            .map(|l| {
+                if l.starts_with("CW N,") {
+                    with_overhang(l)
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (model, errors, _) = run(&csv);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let shaded: Vec<&Value> = conservatory_part(&model)["walls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|w| w.get("overhang").is_some())
+            .collect();
+        assert_eq!(shaded.len(), 1);
+        assert_eq!(shaded[0]["overhang"], "roof eaves overhang");
     }
 
     #[test]
@@ -1315,7 +1459,7 @@ mod tests {
                 // The host wall stays one external wall.
                 assert_eq!(ground.len(), 4, "{ground:#?}");
             } else {
-                // DESNZ (EPC 04 4.3.1): the host wall is sheltered where the unheated
+                // DESNZ-defined: the host wall is sheltered where the unheated
                 // conservatory adjoins it, with the space type the bundle states.
                 assert_eq!(ground.len(), 6, "{ground:#?}");
                 let shelt: Vec<&&Value> = ground

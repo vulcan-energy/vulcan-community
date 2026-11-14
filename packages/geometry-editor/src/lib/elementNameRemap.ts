@@ -162,6 +162,10 @@ const collectElementReferenceNames = (element: Element): Set<string> => {
         addArray(bundleObj[key]);
       }
     }
+    const hemie = (extraJson as Record<string, unknown>).hemie_bundle;
+    if (hemie && typeof hemie === 'object' && !Array.isArray(hemie)) {
+      add((hemie as Record<string, unknown>).host_wall);
+    }
   }
 
   return names;
@@ -286,6 +290,14 @@ export const remapElementNameReferences = (
       patch.extra_json = {
         ...extraObj,
         dormer_bundle: bundle,
+      } as Element['extra_json'];
+    }
+    const hemie = extraObj.hemie_bundle as Record<string, unknown> | undefined;
+    const hostWall = hemie && typeof hemie === 'object' ? resolveName(hemie.host_wall, renameMap) : undefined;
+    if (hemie && hostWall !== hemie.host_wall) {
+      patch.extra_json = {
+        ...(patch.extra_json ?? extraObj),
+        hemie_bundle: { ...hemie, host_wall: hostWall },
       } as Element['extra_json'];
     }
   }

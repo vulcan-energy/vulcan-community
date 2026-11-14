@@ -6,7 +6,7 @@
 // fabric, a window's opening type) stays.
 
 import { useState, type ReactNode } from 'react';
-import type { BuildingElementOpaque, Element, ElementDraft } from '../geometry/types';
+import type { Element, ElementDraft } from '../geometry/types';
 import { useGeometryStore, useGeometryStoreApi } from '../stores/geometryStore';
 import {
   bayParametersProblem,
@@ -18,7 +18,7 @@ import {
   getHemieBundleMembers,
   groundFloorUnderWall,
   hemieBundleHostProblem,
-  isHemieBundleHost,
+  hemieBundleHost,
   planBundleUpdate,
   type BayParameters,
   type ConservatoryParameters,
@@ -70,9 +70,7 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
   // Typed but not yet committed values, over the saved parameters.
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const draft = { ...(tag.parameters as unknown as Record<string, unknown>), ...edits };
-  const host = Object.values(elementsById).find((element) => element.name === tag.host_wall && isHemieBundleHost(element)) as
-    | BuildingElementOpaque
-    | undefined;
+  const host = hemieBundleHost(anchor, Object.values(elementsById));
   const isBay = tag.kind === 'bay';
   const fields = (isBay ? BAY_FIELDS : CONSERVATORY_FIELDS) as Field<Record<string, unknown>>[];
   const parameters = draft as unknown as BayParameters & ConservatoryParameters;
@@ -117,7 +115,7 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
 
   return (
     <>
-      {fields.filter((field) => !field.shown || field.shown(draft)).map((field) => (
+      {fields.flatMap((field) => field.shown && !field.shown(draft) ? [] : [(
         <FieldRow key={String(field.key)} label={`${field.label}:`}>
           {field.kind === 'choice' ? (
             <StandardDropdown
@@ -144,7 +142,7 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
           )}
           {field.note ? <div style={INLINE_FIELD_NOTE_STYLE}>{field.note}</div> : null}
         </FieldRow>
-      ))}
+      )])}
       {problem ? <div style={INLINE_FIELD_NOTE_STYLE} role="alert">{problem}</div> : null}
       {host && hostProblem ? (
         <>

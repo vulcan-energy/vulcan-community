@@ -207,11 +207,13 @@ function polygon(points: V[], z: number) {
   return points.map(([x, y]) => ({ x, y, z }));
 }
 
-/** A rooflight over most of a roof plane: across the plane, `inset` in from each edge. */
+/**
+ * A rooflight over the whole roof plane: a conservatory roof is glazed throughout unless the user
+ * resizes its glazing, and its glazing fraction is the glazed share of the plane.
+ */
 function rooflight(
   eavesA: V,
   eavesB: V,
-  up: V,
   run: number,
   pitch: number,
   eaves: number,
@@ -219,26 +221,18 @@ function rooflight(
   level: number,
   extra: Record<string, unknown>,
 ) {
-  const across = Math.hypot(eavesB[0] - eavesA[0], eavesB[1] - eavesA[1]);
-  const u: V = [(eavesB[0] - eavesA[0]) / across, (eavesB[1] - eavesA[1]) / across];
-  const tan = Math.tan((pitch * Math.PI) / 180);
-  const slope = run / Math.cos((pitch * Math.PI) / 180);
-  const low = add(eavesA, scale(up, WINDOW_INSET));
-  const width = round3(across - 2 * WINDOW_INSET);
-  const height = round3(slope - 2 * WINDOW_INSET / Math.cos((pitch * Math.PI) / 180));
-  const p = add(low, scale(u, WINDOW_INSET));
-  const q = add(low, scale(u, across - WINDOW_INSET));
-  const base = round3(eaves + WINDOW_INSET * tan);
+  const width = round3(Math.hypot(eavesB[0] - eavesA[0], eavesB[1] - eavesA[1]));
+  const height = round3(run / Math.cos((pitch * Math.PI) / 180));
   return {
-    coordinates: [{ x: p[0], y: p[1], z: level }, { x: q[0], y: q[1], z: level }],
+    coordinates: [{ x: eavesA[0], y: eavesA[1], z: level }, { x: eavesB[0], y: eavesB[1], z: level }],
     width,
     height,
     area: round3(width * height),
     pitch,
     orientation360,
-    base_height: base,
+    base_height: round3(eaves),
     free_area_height: height,
-    mid_height: round3(base + (height / 2) * Math.sin((pitch * Math.PI) / 180)),
+    mid_height: round3(eaves + (height / 2) * Math.sin((pitch * Math.PI) / 180)),
     max_window_open_area: round3(width * height),
     extra_json: extra,
   };
@@ -251,6 +245,8 @@ function profile(high: number, low: number, rising: boolean) {
     bottom_profile: [{ t: 0, h: 0 }, { t: 1, h: 0 }],
   };
 }
+
+const FLOOR_FIELDS = ['floor_type', 'depth_basement_floor', 'thickness_walls'] as const;
 
 /** The floor fields a bay or conservatory floor takes from the dwelling's ground floor. */
 function floorFieldsFrom(ground: BuildingElementGround | null | undefined): Record<string, unknown> {
@@ -286,6 +282,8 @@ export function bayParametersProblem(host: BuildingElementOpaque, p: BayParamete
   if (!(p.sideAngle > 0 && p.sideAngle <= 90)) return 'Give the side angle between 1° and 90° (90° is square).';
   if (p.openingWidth - 2 * taper < MIN_FACET) return `The sides meet before the front: make the opening wider, the bay shallower or the side angle steeper (front at least ${MIN_FACET} m).`;
   if (p.centre - p.openingWidth / 2 < -1e-6 || p.centre + p.openingWidth / 2 > f.length + 1e-6) return `The opening runs past the ends of '${host.name}' (${roundToTwoDecimals(f.length)} m long).`;
+  const side = p.depth / Math.sin((p.sideAngle * Math.PI) / 180);
+  if (p.sideWindows && side <= 2 * WINDOW_INSET) return `The sides are ${roundToTwoDecimals(side)} m, too short for side windows: make the bay deeper or turn the side windows off.`;
   if (p.sillHeight + p.windowHeight > host.height) return `The windows reach above the bay walls (${host.height} m): lower the sill or the window height.`;
   return null;
 }
@@ -477,16 +475,16 @@ export function buildConservatoryBundleDraft(input: BundleDraftInput<Conservator
     },
   });
   const cos = Math.cos((pitch * Math.PI) / 180);
-  // Each roof plane: its eaves edge first (a sloped plane falls across its first edge), the
-  // direction up the slope, and its run from the eaves.
+  // Each roof plane: its eaves edge first (a sloped plane falls across its first edge) and its
+  // run from the eaves.
   const ridgeHost = c;
   const ridgeFront = add(c, scale(f.n, p.depth));
-  const planes: Array<{ suffix: string; label: string; pts: V[]; up: V; run: number }> = dual
+  const planes: Array<{ suffix: string; label: string; pts: V[]; run: number }> = dual
     ? [
-      { suffix: '', label: 'left', pts: [a, fa, ridgeFront, ridgeHost], up: f.t, run: p.width / 2 },
-      { suffix: '-2', label: 'right', pts: [fb, b, ridgeHost, ridgeFront], up: scale(f.t, -1), run: p.width / 2 },
+      { suffix: '', label: 'left', pts: [a, fa, ridgeFront, ridgeHost], run: p.width / 2 },
+      { suffix: '-2', label: 'right', pts: [fb, b, ridgeHost, ridgeFront], run: p.width / 2 },
     ]
-    : [{ suffix: '', label: '', pts: [fa, fb, b, a], up: scale(f.n, -1), run: p.depth }];
+    : [{ suffix: '', label: '', pts: [fa, fb, b, a], run: p.depth }];
   for (const plane of planes) {
     const [e0, e1] = plane.pts;
     const along = Math.hypot(e1[0] - e0[0], e1[1] - e0[1]);
@@ -515,8 +513,7 @@ export function buildConservatoryBundleDraft(input: BundleDraftInput<Conservator
       type: 'BuildingElementTransparent',
       name: name(`roof-glazing${plane.suffix}`, `roof glazing${plane.label ? ` ${plane.label}` : ''}`),
       parent_element: roofName,
-      // Rooflight from the eaves up the slope.
-      updates: rooflight(e0, e1, plane.up, plane.run, pitch, f.base + H, orientation360, f.level + 1, tag(`roof-glazing${plane.suffix}`)),
+      updates: rooflight(e0, e1, plane.run, pitch, f.base + H, orientation360, f.level + 1, tag(`roof-glazing${plane.suffix}`)),
     });
   }
   return { bundleId, members };
@@ -538,15 +535,21 @@ export function planBundleUpdate(existing: Element[], draft: HemieBundleDraft): 
       continue;
     }
     byRole.delete(member.role);
-    // Keep what the user set on the element (its fabric, opening type); the bundle owns the
-    // geometry, its tag, the wall profile and the netted opening.
+    // Keep what the user set on the element (its fabric, opening type, a floor's type); the
+    // bundle owns the geometry, its tag, the wall profile and the netted opening. A new floor
+    // takes its type and fabric from the ground floor; an existing one keeps its own.
     const authored = { ...current.extra_json };
     delete authored.geometry_face;
     delete authored.parent_netting_area;
+    delete authored.hemie_bundle;
+    const updates: Record<string, unknown> = { ...member.updates };
+    for (const key of FLOOR_FIELDS) {
+      if (key in current) delete updates[key];
+    }
     update[current.id] = {
-      ...member.updates,
+      ...updates,
       parent_element: member.parent_element,
-      extra_json: { ...authored, ...member.updates.extra_json },
+      extra_json: { ...member.updates.extra_json, ...authored, hemie_bundle: member.updates.extra_json.hemie_bundle },
     };
   }
   return { update, add, remove: [...byRole.values()].map((element) => element.id) };
@@ -585,8 +588,18 @@ export function groundFloorUnderWall(host: BuildingElementOpaque, elements: Elem
     && isPointInPolygon2D({ x: inside[0], y: inside[1] }, element.coordinates)) as BuildingElementGround | undefined) ?? null;
 }
 
-
 const ON_HOST_TOL = 0.01;
+
+/**
+ * The anchor's host wall: by the bundle's `host_wall`, else by the anchor's parent (a rename
+ * remaps the parent, so a bundle saved before `host_wall` was remapped still finds its wall).
+ */
+export function hemieBundleHost(anchor: Element, elements: Iterable<Element>): BuildingElementOpaque | null {
+  const tag = getHemieBundle(anchor);
+  const all = [...elements];
+  const named = (name: unknown) => all.find((element) => element.name === name && isHemieBundleHost(element));
+  return (named(tag?.host_wall) ?? named(anchor.parent_element) ?? null) as BuildingElementOpaque | null;
+}
 
 /**
  * Why a bundle no longer fits its host wall, or null: the host is gone, or a side wall no longer
@@ -598,8 +611,9 @@ export function hemieBundleHostProblem(anchor: Element, elements: Iterable<Eleme
   if (!tag || tag.role !== 'front-wall') return null;
   const all = [...elements];
   const label = tag.kind === 'bay' ? 'bay' : 'conservatory';
-  const host = all.find((element) => element.name === tag.host_wall && isHemieBundleHost(element));
+  const host = hemieBundleHost(anchor, all);
   if (!host) return `Its host wall '${tag.host_wall}' is gone. Delete the ${label} and place it again.`;
+  if (host.name !== tag.host_wall) return `Its host wall '${tag.host_wall}' is now '${host.name}'. Choose Place again to attach the ${label} to it.`;
   const [A, B] = host.coordinates;
   const onHost = (p: { x: number; y: number }) => {
     const dx = B.x - A.x;

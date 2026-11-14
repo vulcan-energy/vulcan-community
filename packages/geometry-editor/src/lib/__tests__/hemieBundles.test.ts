@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import type { BuildingElementOpaque, Element } from '../../geometry/types';
+import type { BuildingElementGround, BuildingElementOpaque, Element } from '../../geometry/types';
 import {
   BAY_DEFAULTS,
+  bayParametersProblem,
   CONSERVATORY_DEFAULTS,
   buildBayBundleDraft,
   buildConservatoryBundleDraft,
@@ -13,6 +14,8 @@ import {
   hemieBundleHostProblem,
   planBundleUpdate,
 } from '../hemieBundles';
+import { getMaxLineWallHeightOnFloor } from '../zoneDerivation';
+import { createGeometryStore } from '../../stores/geometryStore';
 
 /** A south-facing wall, west to east, on floor `level`. */
 const host = (level = 0): BuildingElementOpaque => ({
@@ -64,6 +67,11 @@ describe('bay bundle', () => {
     });
   });
 
+  it('refuses side windows on sides too short for them', () => {
+    expect(bayParametersProblem(host(), { ...BAY_DEFAULTS, centre: 3, depth: 0.15, sideAngle: 90 })).toMatch(/too short for side windows/);
+    expect(bayParametersProblem(host(), { ...BAY_DEFAULTS, centre: 3, depth: 0.15, sideAngle: 90, sideWindows: false })).toBeNull();
+  });
+
   it('has no floor over a lower bay', () => {
     const upper = buildBayBundleDraft({
       host: host(1),
@@ -80,9 +88,11 @@ describe('bay bundle', () => {
       id: `m${i}`, name: m.name, type: m.type, parent_element: m.parent_element, ...m.updates,
     })) as unknown as Element[];
     members[3].extra_json = { ...members[3].extra_json, window_sections: [{ window_type: 'closed' }] };
+    Object.assign(members[6], { floor_type: 'Suspended_floor', extra_json: { ...members[6].extra_json, u_value: 0.5 } });
     const next = buildBayBundleDraft({
       host: host(),
       parameters: { ...BAY_DEFAULTS, centre: 3, sideWindows: false, roof: 'pitched' },
+      groundFloor: { floor_type: 'Slab_no_edge_insulation', extra_json: { u_value: 0.2 } } as unknown as BuildingElementGround,
       existingNames: [],
       globalOrientationOffset: 0,
       bundleId: draft.bundleId,
@@ -95,6 +105,8 @@ describe('bay bundle', () => {
     expect(plan.update.m3.extra_json).toMatchObject({ window_sections: [{ window_type: 'closed' }] });
     expect(plan.update.m1.extra_json).toHaveProperty('geometry_face');
     expect(plan.update.m7).toMatchObject({ pitch: 35 });
+    expect(plan.update.m6).not.toHaveProperty('floor_type');
+    expect(plan.update.m6.extra_json).toMatchObject({ u_value: 0.5, hemie_bundle: { role: 'floor' } });
   });
 });
 
@@ -122,6 +134,8 @@ describe('conservatory bundle', () => {
     const roof = role(members, 'roof');
     expect(roof.updates).toMatchObject({ pitch: 20, orientation360: 180, base_height: 2.4 });
     expect(role(members, 'roof-glazing')).toMatchObject({ parent_element: 'Conservatory 1 roof' });
+    // Glazed throughout: the rooflight is the whole plane.
+    expect(role(members, 'roof-glazing').updates).toMatchObject({ width: roof.updates.width, height: roof.updates.height });
     // The lean-to's sides rise to the wall: a profiled top, highest at the host.
     expect(role(members, 'left-wall').updates.extra_json.geometry_face).toMatchObject({
       top_profile: [{ t: 0, h: 2.4 + 1.092 }, { t: 1, h: 2.4 }],
@@ -164,5 +178,40 @@ describe('conservatory bundle', () => {
     const moved = { ...host(), coordinates: [{ x: 0, y: -1, z: 0 }, { x: 6, y: -1, z: 0 }] };
     expect(hemieBundleHostProblem(anchor, [moved, ...members])).toMatch(/no longer sits on its host wall 'Wall \(S\)'/);
     expect(hemieBundleHostProblem(anchor, members)).toMatch(/is gone/);
+  });
+});
+
+describe('bundle walls after a CSV round trip', () => {
+  it('leave the storey height at the host wall height', () => {
+    const source = createGeometryStore({ defaultDefaultsPath: null });
+    source.getState().addZone({ name: 'Dwelling', floorArea: 36, height: 2.8, volume: 100.8 });
+    const zoneId = source.getState().zones[0]!.id;
+    const wall = { ...host(), zoneId };
+    const bay = buildBayBundleDraft({
+      host: wall,
+      parameters: { ...BAY_DEFAULTS, centre: 1.5, roof: 'pitched' },
+      existingNames: [wall.name],
+      globalOrientationOffset: 0,
+    });
+    const conservatory = buildConservatoryBundleDraft({
+      host: wall,
+      parameters: { ...CONSERVATORY_DEFAULTS, centre: 4.5, wallHeight: 2.8 },
+      existingNames: [wall.name],
+      globalOrientationOffset: 0,
+    });
+    source.getState().addElements([
+      wall,
+      ...[...bay.members, ...conservatory.members].map((m) => ({
+        ...m.updates, name: m.name, type: m.type, zoneId, parent_element: m.parent_element,
+      })),
+    ] as never);
+
+    const loaded = createGeometryStore({ defaultDefaultsPath: null });
+    loaded.getState().loadFromCSV(source.getState().generateCSV({ allowUnresolvedMigration: true }));
+    const elements = Object.values(loaded.getState().elementsById);
+    // The profiled side walls come back with their mean height, above the host's.
+    const side = elements.find((element) => element.name === 'Conservatory 1 left side')!;
+    expect(side.height).toBeGreaterThan(2.8);
+    expect(getMaxLineWallHeightOnFloor(0, elements)).toBe(2.8);
   });
 });

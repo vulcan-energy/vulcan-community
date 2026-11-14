@@ -1277,7 +1277,14 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 match wall {
                     Some(w) => {
                         used.insert(w.name);
-                        let Some(h) = ctx.eaves(w) else {
+                        // A conservatory wall runs to its eaves; a gable above them is the
+                        // roof's. Other walls keep their stated height.
+                        let h = if bundles::tag(w).is_some() {
+                            ctx.eaves(w)
+                        } else {
+                            ctx.need(w, "height")
+                        };
+                        let Some(h) = h else {
                             continue;
                         };
                         if h <= STOREY_GAP && !low.iter().any(|x: &&El| x.name == w.name) {
