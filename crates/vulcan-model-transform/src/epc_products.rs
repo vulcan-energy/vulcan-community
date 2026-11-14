@@ -378,6 +378,8 @@ pub(crate) fn rule(
     match (pattern, kind) {
         // Our interpretation would be needed to tell condensing from non-condensing, so the
         // user picks (question to Baz). The candidates listed follow the model's own facts.
+        // A range cooker boiler is a regular boiler's product: the Orchestrator substitutes a
+        // CookerBoiler into `Boiler` and takes its pilot light from the product.
         ("HeatSourceWet/*", "Boiler") => {
             let combi = model["HotWaterSource"].as_object().into_iter().flatten().any(|(_, source)| {
                 source["type"] == "CombiBoiler" && source["HeatSourceWet"] == name
@@ -388,8 +390,8 @@ pub(crate) fn rule(
                 .unwrap_or_default()
                 .to_string();
             Some(Rule::Pick {
-                tables: if combi { &["CombiBoiler"] } else { &["RegularBoiler"] },
-                ask: format!("pick the {} boiler product, condensing or non-condensing", if combi { "combi" } else { "regular" }),
+                tables: if combi { &["CombiBoiler"] } else { &["RegularBoiler", "CookerBoiler"] },
+                ask: format!("pick the {} product, condensing or non-condensing", if combi { "combi boiler" } else { "regular or range cooker boiler" }),
                 filter: Some(("fuel", fuel)),
                 setting: None,
             })
@@ -906,12 +908,36 @@ pub(crate) fn apply_weather_curves(
 }
 
 /// The convective fraction each product table gives the system it is substituted into.
-const FRAC_CONVECTIVE_FIELDS: [(&str, &str); 4] = [
+const FRAC_CONVECTIVE_FIELDS: [(&str, &str); 5] = [
     ("ConvectorRadiator", "convectiveHeatingRadiation"),
     ("UnderFloorHeating", "convectiveHeatingRadiation"),
     ("FanCoils", "fracConvective"),
     ("StorageHeater", "frac_convective"),
+    ("RoomHeater", "frac_convective"),
 ];
+
+/// The convective fraction the EPC wrapper gives an instant electric heater for each
+/// `convective_type` (the assessor picks the type, not the fraction).
+const CONVECTIVE_TYPE_FRACTIONS: [(&str, f64); 5] = [
+    ("Air heating (convectors, fan coils etc.)", 0.95),
+    (
+        "Free heating surface (radiators, radiant panels etc.)",
+        0.70,
+    ),
+    (
+        "Floor heating, low temperature radiant tube heaters, luminous heaters, wood stoves",
+        0.50,
+    ),
+    (
+        "Wall heating, radiant ceiling panels, accumulation stoves",
+        0.35,
+    ),
+    ("Ceiling heating, radiant ceiling electric heating", 0.20),
+];
+
+/// The EPC wrapper's fixed convective fraction for a warm-air distribution system, which has
+/// no input for it.
+const WARM_AIR_DISTRIBUTION_FRACTION: f64 = 0.95;
 
 /// Each heated zone states `frac_convective_heating` (the EPC wrapper's zone model requires
 /// it). A value on the Zone row wins. Otherwise it is derived and reported:
@@ -920,7 +946,9 @@ const FRAC_CONVECTIVE_FIELDS: [(&str, &str); 4] = [
 /// - new build: the convective fraction every emitter of the zone's heating systems shares.
 ///   Emitters that differ, or none, leave it required: an error names the zone.
 ///
-/// An emitter's fraction is the one its product gives, else its own authored `frac_convective`.
+/// An emitter's fraction is the one its product gives, else its own authored `frac_convective`,
+/// else the wrapper's value for its `convective_type` (instant electric heater) or its type
+/// (warm-air distribution).
 pub(crate) fn derive_zone_frac_convective(
     model: &mut Value,
     db: &ProductDatabase,
@@ -970,11 +998,27 @@ pub(crate) fn derive_zone_frac_convective(
                     format!("product {}", product.id),
                 ))
             });
-        Some(from_product.or_else(|| {
-            object["frac_convective"]
-                .as_f64()
-                .map(|f| (f, "authored".to_string()))
-        }))
+        Some(
+            from_product
+                .or_else(|| {
+                    object["frac_convective"]
+                        .as_f64()
+                        .map(|f| (f, "authored".to_string()))
+                })
+                .or_else(|| {
+                    let kind = object["convective_type"].as_str()?;
+                    let (_, f) = CONVECTIVE_TYPE_FRACTIONS.iter().find(|(t, _)| *t == kind)?;
+                    Some((*f, format!("convective_type '{kind}'")))
+                })
+                .or_else(|| {
+                    (object["type"] == "WarmAirDistribution").then(|| {
+                        (
+                            WARM_AIR_DISTRIBUTION_FRACTION,
+                            "the EPC wrapper's fixed value for warm-air distribution".to_string(),
+                        )
+                    })
+                }),
+        )
     };
     for (zone, zone_value) in zones {
         let names: Vec<String> = match &zone_value["SpaceHeatSystem"] {
@@ -1024,9 +1068,13 @@ pub(crate) fn derive_zone_frac_convective(
                         found[0].as_ref().unwrap().1
                     )
                 } else {
+                    let mut sources: Vec<&str> =
+                        found.iter().flatten().map(|(_, s)| s.as_str()).collect();
+                    sources.dedup();
                     format!(
-                        "the fraction all {} emitter(s) of its heating systems share",
-                        found.len()
+                        "the fraction all {} emitter(s) of its heating systems share ({})",
+                        found.len(),
+                        sources.join(", ")
                     )
                 };
                 notices.push(notice(&zone_path, format!("Zone '{zone}' takes frac_convective_heating {value}, derived by {rule}. State frac_convective_heating on the Zone row to change it.")));
@@ -1520,6 +1568,66 @@ pub(crate) mod tests {
         assert_eq!(existing["Zone"]["b"]["frac_convective_heating"], 0.82);
         assert_eq!(errors, ["/Zone/d/frac_convective_heating"]);
         assert!(notices.iter().any(|n| n.message.contains("HEMIE's rule")));
+    }
+
+    #[test]
+    fn room_heaters_warm_air_and_dry_ufh_derive_the_zone_convective_fraction() {
+        let mut model = json!({
+            "IsExistingBuilding": false,
+            "SpaceHeatSystem": {
+                "stove": {"type": "CombustionRoomHeater", "product_id": 820601},
+                "panel": {"type": "InstantElecHeater", "convective_type": "Free heating surface (radiators, radiant panels etc.)"},
+                "ducted": {"type": "WarmAirDistribution", "HeatSourceWarmAir": "heater"},
+                "hp air": {"type": "WarmAir", "frac_convective": 0.9},
+                "ufh": {"type": "DryElectricUnderfloorHeating", "frac_convective": 0.3}
+            },
+            "Zone": {"stove": {"SpaceHeatSystem": "stove"}, "panel": {"SpaceHeatSystem": "panel"}, "ducted": {"SpaceHeatSystem": "ducted"}, "hp air": {"SpaceHeatSystem": "hp air"}, "ufh": {"SpaceHeatSystem": "ufh"}}
+        });
+        let slots = vec![ProductSlot {
+            path: "/SpaceHeatSystem/stove".into(),
+            system_type: "CombustionRoomHeater".into(),
+            product_id: Some(820601),
+            source: ProductSource::Product,
+            label: None,
+            rule: String::new(),
+            technology_types: vec![],
+            default_source: None,
+            candidates: None,
+            row: None,
+            row_path: None,
+        }];
+        let (mut errors, mut notices) = (Vec::new(), Vec::new());
+        derive_zone_frac_convective(&mut model, &db(), &slots, &mut errors, &mut notices);
+        assert!(errors.is_empty(), "{errors:?}");
+        let zone = |name: &str| model["Zone"][name]["frac_convective_heating"].clone();
+        assert_eq!(zone("stove"), 0.7);
+        assert_eq!(zone("panel"), 0.7);
+        assert_eq!(zone("ducted"), 0.95);
+        assert_eq!(zone("hp air"), 0.9);
+        assert_eq!(zone("ufh"), 0.3);
+        let said = |zone: &str| {
+            notices
+                .iter()
+                .find(|n| n.path == format!("/Zone/{zone}/frac_convective_heating"))
+                .unwrap()
+                .message
+                .clone()
+        };
+        assert!(
+            said("stove").contains("product 820601"),
+            "{}",
+            said("stove")
+        );
+        assert!(
+            said("panel").contains("convective_type"),
+            "{}",
+            said("panel")
+        );
+        assert!(
+            said("ducted").contains("warm-air distribution"),
+            "{}",
+            said("ducted")
+        );
     }
 
     #[test]

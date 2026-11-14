@@ -247,7 +247,6 @@ impl ModelProfile {
                 "Ventilation_altitude",
                 "Ventilation_shield_class",
                 "Ventilation_terrain_class",
-                "Ventilation_noise_nuisance",
                 "AirPermeability_test_pressure",
                 "AirPermeability_test_result",
                 "AirPermeability_ventilation_zone_height",
@@ -255,16 +254,25 @@ impl ModelProfile {
         }
     }
 
+    /// Metadata rows whose absent value is DESNZ's default, never the template's: the template
+    /// value is removed, a new build takes DESNZ's value with a notice
+    /// (`epc_mappings::apply_desnz_defaults`), and HEMIE applies its own on an existing
+    /// building. EPC differs: noise nuisance defaults to No.
+    pub(crate) fn desnz_default_rows(self) -> &'static [&'static str] {
+        match self {
+            Self::Core | Self::Fhs => &[],
+            Self::Epc => &["Ventilation_noise_nuisance"],
+        }
+    }
+
     /// Required rows an existing building may leave out, DESNZ-defined: with no air test HEMIE
-    /// estimates the leakage (EPC 05 5.3.1), shield class follows the terrain class (EPC 11
-    /// Table 11.7.2) and noise nuisance is No (EPC 11 Table 11.4.2). An absent row removes the
-    /// template's value, so only a stated value reaches HEMIE.
+    /// estimates the leakage and shield class follows the terrain class. An absent row removes
+    /// the template's value, so only a stated value reaches HEMIE.
     pub(crate) fn existing_building_optional_rows(self) -> &'static [&'static str] {
         match self {
             Self::Core | Self::Fhs => &[],
             Self::Epc => &[
                 "Ventilation_shield_class",
-                "Ventilation_noise_nuisance",
                 "AirPermeability_test_pressure",
                 "AirPermeability_test_result",
                 "AirPermeability_ventilation_zone_height",
@@ -303,8 +311,9 @@ impl ModelProfile {
     /// Systems the converter cannot express fail naming each one, and references between
     /// systems must name an entry that exists. EPC differs: its full input has system types
     /// (unconditioned zones, warm-air heaters, flues, heat-pump cooling) whose references the
-    /// JSON schema cannot check, and no combustion appliance input. A `HeatSourceWarmAir`
-    /// Systems row routes only here: no other schema has warm-air heaters.
+    /// JSON schema cannot check, and no combustion appliance input. `HeatSourceWarmAir` and
+    /// `ZoneUnconditioned` Systems rows and the `Positive input ventilation` vent type route
+    /// only here: Vulcan converts them for no other schema.
     pub(crate) fn checks_system_catalogue(self) -> bool {
         match self {
             Self::Core | Self::Fhs => false,

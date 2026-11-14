@@ -749,6 +749,8 @@ export function ingestGeometryTabularSections(
               'Centralised continuous MEV',
               'Decentralised continuous MEV',
               'MVHR',
+              // HEM:EPC only; the converter rejects it for other targets.
+              'Positive input ventilation',
             ]);
             const ventType =
               csvVentType ??

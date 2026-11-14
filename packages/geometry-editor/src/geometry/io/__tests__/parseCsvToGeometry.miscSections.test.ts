@@ -591,6 +591,22 @@ Bath 1,HotWaterDemand,Bath,,180,,,"12.500,7.250,0.000"
     expect(elements.find((e) => e.type === 'HotWaterDemand' && e.name === 'Bath 1')).toBeDefined();
   });
 
+  it('keeps a positive input ventilation vent_type (HEM:EPC)', () => {
+    const csv = `
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Ventilation Systems,,,,,,,,,,,,,
+Name,Type,length,duct_type,parent_element,mid_height_air_flow_path,area_cm2,orientation360,pitch,vent_type,coords,extra_json
+Loft unit,MechanicalVentilation,,,,1.5,,0,90,Positive input ventilation,,"{}"
+`.trim();
+
+    const { elements } = parseCsvToGeometry(csv);
+    const piv = elements.find((e) => e.name === 'Loft unit') as { vent_type?: string } | undefined;
+    expect(piv?.vent_type).toBe('Positive input ventilation');
+  });
+
   it('preserves pitch 0° (facing up) — not coerced to 90 by `|| 90`', () => {
     const csv = `
 Metadata,,,,,,,,,,,,,
