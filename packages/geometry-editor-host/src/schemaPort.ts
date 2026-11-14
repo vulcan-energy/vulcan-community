@@ -63,6 +63,11 @@ export interface TargetRules {
    */
   desnzDefaultRows: Readonly<Record<string, string>>;
   /**
+   * Metadata rows the schema requires but the converter works out when unset (for example the
+   * built form from the party walls). An unset one is no issue and no defaults value fills it.
+   */
+  derivedMetadataRows: readonly string[];
+  /**
    * A battery states its age, grid charging and grid export; each one left unset takes a
    * DESNZ-defined default in the converter, which the battery form shows.
    */
@@ -78,6 +83,8 @@ export interface TargetRules {
    * fabric defaults replace the default assemblies, and the canvas can colour elements by fabric.
    */
   constructionBands: boolean;
+  /** The first zone states its living-room and rest-of-dwelling areas (the target's zone schema requires both). */
+  zoneAreaSplit: boolean;
   /** The bay window and conservatory bundles an existing building's HEMIE description takes. */
   hemieBundles: boolean;
 }
@@ -170,10 +177,12 @@ export function targetRules(
     hemDatabaseProducts: false,
     requiredMetadataRows: [],
     desnzDefaultRows: {},
+    derivedMetadataRows: [],
     batteryGridInputs: false,
     storeyBuildTypes: ['flat'],
     constructionBands: false,
     hemieBundles: false,
+    zoneAreaSplit: targetSchemaMode(port) === 'fhs',
     ...port?.targetRules?.(modelSettings),
   };
 }

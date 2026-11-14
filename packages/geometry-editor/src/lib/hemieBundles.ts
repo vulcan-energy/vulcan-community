@@ -566,6 +566,13 @@ export function isConservatoryGlazing(window: Element, elementsById: Record<stri
   return getHemieBundle(host)?.kind === 'conservatory';
 }
 
+/** HEMIE's opening types for a window (its schema `WindowType`). The DESNZ guidance gives no default. */
+export const WINDOW_OPENING_TYPES = [
+  'closed', 'full opening', 'half opening top', 'half opening vertical bottom', 'half opening vertical top',
+  'top third opening', 'sliding window', 'sliding glass door', 'hinged glass door',
+  'central dual air flow path', 'top dual air flow path', 'multi air flow path',
+] as const;
+
 export function conservatoryGlazingOpeningType(window: Element): string | null {
   const sections = window.extra_json?.window_sections;
   const first = Array.isArray(sections) ? (sections[0] as { window_type?: unknown } | undefined) : undefined;

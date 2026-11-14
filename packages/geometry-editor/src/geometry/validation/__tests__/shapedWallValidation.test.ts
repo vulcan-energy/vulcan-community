@@ -96,3 +96,36 @@ describe('a wall edge fitted to a roof', () => {
     expect(messages(validate(onRoof, [onRoof, roof(35)]).warnings)).toContain(warning);
   });
 });
+
+// Drawing errors: an opening off its host wall, and a roof past the walls.
+const text = (items: Array<{ message: string }>) => items.map((i) => i.message).join('\n');
+const wall = (id: string, a: [number, number], b: [number, number]) => ({
+  id, name: id, zoneId: 'z', type: 'BuildingElementOpaque', pitch: 90, width: 5, height: 2.5, base_height: 0,
+  coordinates: [{ x: a[0], y: a[1], z: 0 }, { x: b[0], y: b[1], z: 0 }],
+}) as unknown as Element;
+const boxWalls = [wall('w1', [0, 0], [5, 0]), wall('w2', [5, 0], [5, 4]), wall('w3', [5, 4], [0, 4]), wall('w4', [0, 4], [0, 0])];
+const offWindow = (y: number) => ({
+  id: 'win', name: 'win', zoneId: 'z', type: 'BuildingElementTransparent', pitch: 90, width: 1, height: 1, base_height: 1,
+  frame_area_fraction: 0.25, parent_element: 'w1',
+  coordinates: [{ x: 1, y, z: 0 }, { x: 2, y, z: 0 }],
+}) as unknown as Element;
+const roof = (over: number) => ({
+  id: 'roof', name: 'roof', zoneId: 'z', type: 'BuildingElementOpaque', pitch: 30, width: 5, height: 4, base_height: 2.5,
+  coordinates: [{ x: -over, y: 0, z: 2.5 }, { x: 5, y: 0, z: 2.5 }, { x: 5, y: 4, z: 2.5 }, { x: -over, y: 4, z: 2.5 }],
+}) as unknown as Element;
+
+describe('drawing errors', () => {
+  it('names an opening off its host wall', () => {
+    const off = offWindow(0.5);
+    expect(text(validate(off, [...boxWalls, off]).issues)).toContain('Not on its host wall');
+    const on = offWindow(0);
+    expect(text(validate(on, [...boxWalls, on]).issues)).not.toContain('Not on its host wall');
+  });
+
+  it('warns on a roof drawn past the walls', () => {
+    const past = roof(0.5);
+    expect(text(validate(past, [...boxWalls, past]).warnings)).toContain('Draw the roof to the walls');
+    const flush = roof(0);
+    expect(text(validate(flush, [...boxWalls, flush]).warnings)).not.toContain('Draw the roof to the walls');
+  });
+});

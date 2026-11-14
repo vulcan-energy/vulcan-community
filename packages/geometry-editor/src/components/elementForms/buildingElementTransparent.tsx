@@ -172,7 +172,7 @@ import { ParentElementDropdown } from '../ParentElementDropdown';
 import { ResetFieldButton } from '../ResetFieldButton';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
-import { conservatoryGlazingOpeningType, isConservatoryGlazing, withConservatoryGlazingOpeningType } from '../../lib/hemieBundles';
+import { WINDOW_OPENING_TYPES, conservatoryGlazingOpeningType, isConservatoryGlazing, withConservatoryGlazingOpeningType } from '../../lib/hemieBundles';
 import { CompactSegmentedControl } from '../WindowDetailControls';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import type { Element } from '../../geometry/types';
@@ -652,7 +652,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             size="md"
           />
         </div>
-        {!openingsInTable && <>
+        {!openingsInTable && !state.closeShadingExisting && <>
         {renderFieldLabel('Free Area Height (m):', elementType)}
         <div
           className="element-input"
@@ -762,20 +762,23 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
         {openingFields}
         </>}
         {openingNote ? <div style={INLINE_FIELD_NOTE_STYLE}>{openingNote}</div> : null}
-        {selectedElement?.type === 'BuildingElementTransparent' && isConservatoryGlazing(selectedElement, ctx.elementsById) ? (
+        {selectedElement?.type === 'BuildingElementTransparent' && (state.closeShadingExisting || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
           <>
             <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Opening type:</div>
-            <div className="element-input">
+            <div className="element-input" ref={registerBaseFieldRef('window_sections')}>
               <StandardDropdown
                 value={conservatoryGlazingOpeningType(selectedElement) ?? ''}
                 onChange={(value) => commitExistingElementDraft({
                   extra_json: withConservatoryGlazingOpeningType(selectedElement, value || null),
                 })}
-                options={[
+                options={isConservatoryGlazing(selectedElement, ctx.elementsById) ? [
                   { value: '', label: 'Closed (default)' },
                   { value: 'closed', label: 'Closed' },
                   { value: 'half opening top', label: 'Half opening (top)' },
                   { value: 'top third opening', label: 'Third opening (top)' },
+                ] : [
+                  { value: '', label: 'Choose...' },
+                  ...WINDOW_OPENING_TYPES.map((type) => ({ value: type, label: type.charAt(0).toUpperCase() + type.slice(1) })),
                 ]}
                 aria-label="Opening type"
                 variant="ghost"

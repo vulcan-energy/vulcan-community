@@ -95,6 +95,8 @@ export type GlobalSettingsModalProps = Readonly<{
   calculationTargetSection?: ReactNode;
   /** Host groups at the end of the Defaults tab, such as fabric and emitter defaults. */
   defaultsSection?: ReactNode;
+  /** The existing-building fabric defaults, shown directly after the Existing building row. */
+  fabricSection?: ReactNode;
   renderEvidencePill?: (fieldKey: string, label: string) => ReactNode;
   externalDetailProfileSection?: ReactNode;
   onIndicatorChange?: (indicator: GlobalSettingsIndicator | null) => void;
@@ -524,6 +526,7 @@ export function GlobalSettingsModal({
   evidenceSection,
   calculationTargetSection,
   defaultsSection,
+  fabricSection,
   renderEvidencePill = () => null,
   externalDetailProfileSection,
   onIndicatorChange,
@@ -532,7 +535,6 @@ export function GlobalSettingsModal({
   const schemaPort = useGeometrySchemaPort();
   const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null;
   // Dwelling fields show only where the target's root schema has them; no schema says nothing.
-  const showStoreyOfDwelling = targetFieldAvailability(targetRoot, ["General", "storey_of_dwelling"]) !== "absent";
   const roomCountRows = useMemo(
     () => ROOM_COUNT_COMPLIANCE_ROWS.filter((row) => targetFieldAvailability(targetRoot, [row.field]) !== "absent"),
     [targetRoot],
@@ -542,8 +544,14 @@ export function GlobalSettingsModal({
   const showKitchenHood = targetFieldAvailability(targetRoot, ["KitchenExtractorHoodExternal"]) !== "absent";
   const showBuildingLength = targetFieldAvailability(targetRoot, ["BuildingLength"]) !== "absent";
   const showBuildingWidth = targetFieldAvailability(targetRoot, ["BuildingWidth"]) !== "absent";
-  const { requiredMetadataRows, storeyBuildTypes, desnzDefaultRows } = useTargetRules();
+  const { requiredMetadataRows, storeyBuildTypes, desnzDefaultRows, derivedMetadataRows, fhsInputRules } = useTargetRules();
   const requiredRows = useMemo(() => new Set(requiredMetadataRows), [requiredMetadataRows]);
+  // HEM:EPC reads neither the SAP built form nor the thermal bridging settings of an existing building.
+  const epcTarget = requiredMetadataRows.includes("IsExistingBuilding");
+  // Dwelling fields show only where the target's root schema has them (no schema says nothing).
+  // HEM:EPC's schema states no storey row, but a flat or maisonette still takes one (`storeyBuildTypes`).
+  const showStoreyOfDwelling = epcTarget || targetFieldAvailability(targetRoot, ["General", "storey_of_dwelling"]) !== "absent";
+  const derivedRows = useMemo(() => new Set(derivedMetadataRows), [derivedMetadataRows]);
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -1034,7 +1042,7 @@ export function GlobalSettingsModal({
       { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
       targetRoot,
       defaultsJson,
-      { requiredMetadataRows, storeyBuildTypes, desnzDefaultRows },
+      { requiredMetadataRows, storeyBuildTypes, desnzDefaultRows, derivedMetadataRows },
     ));
     const bedroomCountIssue = fhsBedroomCountIssue(
       complianceSettings.NumberOfBedrooms
@@ -1081,6 +1089,7 @@ export function GlobalSettingsModal({
     requiredMetadataRows,
     storeyBuildTypes,
     desnzDefaultRows,
+    derivedMetadataRows,
     zones,
   ]);
 
@@ -1760,6 +1769,7 @@ export function GlobalSettingsModal({
                   <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />
                 </div>
               )}
+              {constructionBands ? fabricSection : null}
 
               {/* Evidence linking for global settings */}
               {evidenceSection}
@@ -1938,7 +1948,7 @@ export function GlobalSettingsModal({
                                 value: "",
                                 label: suggestedBuildType
                                   ? `Auto (${suggestedBuildType})`
-                                  : "Select build type...",
+                                  : derivedRows.has("General_build_type") ? "From the party walls" : "Select build type...",
                               },
                               ...buildTypes.map((type) => ({ value: type, label: buildTypeLabel(type) })),
                               ...(fileBuildType && !complianceSettings.build_type && !buildTypes.includes(fileBuildType)
@@ -1973,6 +1983,7 @@ export function GlobalSettingsModal({
                             )}
                         </div>
 
+                        {!epcTarget && (
                         <StandardDropdown
                           label={complianceFieldLabel(
                             "SAP built form",
@@ -2007,6 +2018,7 @@ export function GlobalSettingsModal({
                           variant="ghost"
                           size="md"
                         />
+                        )}
 
                         <div
                           style={{
@@ -2165,6 +2177,7 @@ export function GlobalSettingsModal({
                                   dwellingDetailsSuggestion.storeyOfDwelling?.toString() ||
                                   "Lowest occupied storey"
                                 }
+                                helperText={epcTarget ? "The ground floor is 1." : undefined}
                                 min="-50"
                                 max="199"
                                 step="1"
@@ -2743,8 +2756,8 @@ export function GlobalSettingsModal({
                         });
                       }}
                       options={[
-                        { value: "Standard", label: "Standard" },
-                        { value: "Pulse test only", label: "Pulse test only" },
+                        { value: "Standard", label: fhsInputRules ? "Standard" : "Blower door (50 Pa)" },
+                        { value: "Pulse test only", label: fhsInputRules ? "Pulse test only" : "Pulse (4 Pa)" },
                       ]}
                       placeholder="Select test pressure..."
                       variant="ghost"
@@ -2979,6 +2992,9 @@ export function GlobalSettingsModal({
                         )}
                     </div>
 
+                    {/* Where DESNZ derives shield class from the terrain class, terrain comes first. */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)" }}>
+                    <div style={{ order: requiredRows.has("Ventilation_terrain_class") ? 2 : 1 }}>
                     <StandardDropdown
                       label={<span data-field-key="Ventilation_shield_class">Shield Class</span>}
                       value={complianceSettings.Ventilation_shield_class || ""}
@@ -2992,7 +3008,7 @@ export function GlobalSettingsModal({
                         });
                       }}
                       options={[
-                        { value: "", label: "Normal (default)" },
+                        { value: "", label: derivedRows.has("Ventilation_shield_class") ? "From the terrain class" : requiredRows.has("Ventilation_shield_class") ? "Select shield class..." : "Normal (default)" },
                         { value: "Open", label: "Open" },
                         { value: "Normal", label: "Normal" },
                         { value: "Shielded", label: "Shielded" },
@@ -3002,6 +3018,8 @@ export function GlobalSettingsModal({
                       helperText="Wind exposure of the building facade"
                     />
 
+                    </div>
+                    <div style={{ order: requiredRows.has("Ventilation_terrain_class") ? 1 : 2 }}>
                     <StandardDropdown
                       label={<span data-field-key="Ventilation_terrain_class">Terrain Class</span>}
                       value={complianceSettings.Ventilation_terrain_class || ""}
@@ -3019,7 +3037,7 @@ export function GlobalSettingsModal({
                         });
                       }}
                       options={[
-                        { value: "", label: "Open Field (default)" },
+                        { value: "", label: requiredRows.has("Ventilation_terrain_class") ? "Select terrain class..." : "Open Field (default)" },
                         { value: "OpenWater", label: "Open Water" },
                         { value: "OpenField", label: "Open Field" },
                         { value: "Suburban", label: "Suburban" },
@@ -3030,6 +3048,8 @@ export function GlobalSettingsModal({
                       helperText="Surrounding terrain affecting wind speed profile"
                     />
 
+                    </div>
+                    </div>
                     <StandardInput
                       type="number"
                       unit={complianceFieldUnit("Ventilation_altitude", "Altitude (m)")}
@@ -3052,7 +3072,7 @@ export function GlobalSettingsModal({
                       step="1"
                       variant="ghost"
                       size="md"
-                      placeholder="30 (default)"
+                      placeholder={requiredRows.has("Ventilation_altitude") ? "Enter the altitude" : "30 (default)"}
                       helperText="Height above sea level (m)"
                     />
 
@@ -3212,6 +3232,7 @@ export function GlobalSettingsModal({
               </div>
 
               {/* Thermal Bridging Settings Section */}
+              {!constructionBands && (
               <div
                 data-field-section="thermalBridging"
                 style={{
@@ -3401,6 +3422,7 @@ export function GlobalSettingsModal({
                   </div>
                 )}
               </div>
+              )}
             </>
           )}
         </div>

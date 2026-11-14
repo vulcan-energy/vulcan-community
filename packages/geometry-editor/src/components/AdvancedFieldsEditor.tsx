@@ -1735,7 +1735,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const shouldRenderEdgeInsulationManually =
     elementType === 'BuildingElementGround' && subtype === 'Slab_edge_insulation';
 
-  const shouldRenderWindowTreatmentManually = elementType === 'BuildingElementTransparent';
+  const shouldRenderWindowTreatmentManually = elementType === 'BuildingElementTransparent' && !(hiddenFields[elementType] ?? []).includes('treatment');
 
   const shouldRenderFancoilTestDataManually =
     elementType === 'WetEmitter' &&
