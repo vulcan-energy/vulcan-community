@@ -1022,8 +1022,25 @@ mod tests {
 
     #[test]
     fn a_bay_bundle_is_a_bay_window_on_its_host_wall_with_a_flat_bay_roof() {
-        let (model, errors, _) = run(&bay_house(&[]));
+        let (model, errors, notices) = run(&bay_house(&[]));
         assert!(errors.is_empty(), "{errors:#?}");
+        // HEMIE insulates a bay roof only by its stated thickness.
+        assert!(notices.iter().any(|n| n
+            .message
+            .starts_with("Bay roof 'Bay roof' states no insulation thickness")));
+        // A thickness with no location is still no insulation to HEMIE, so it stops.
+        let thick = bay_house(&[]).replace(
+            "IsExistingBuilding,TRUE",
+            "IsExistingBuilding,TRUE\nHEMIE_construction_mini_flat_roof,\"{\"\"insulation_thickness\"\":100}\"",
+        );
+        let (_, errors, _) = run(&thick);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.path.ends_with("/Bay roof")
+                    && e.message.contains("no insulation location")),
+            "{errors:#?}"
+        );
         let main = &model["Zone"]["building_parts"]["Main"];
         assert_eq!(
             model["Zone"]["building_parts"].as_object().unwrap().len(),

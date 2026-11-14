@@ -487,22 +487,17 @@ pub(crate) fn apply_desnz_defaults(
             notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses DESNZ's defaults. State them on its Systems row to change them.", used.join(", "))));
         }
     }
-    // DESNZ-defined: an unstated design outdoor air flow rate is the greater of the bedroom
-    // rate and 0.3 l/s per m² of total floor area (13 l/s with one habitable room), in m³/h.
+    // DESNZ-defined: an unstated design outdoor air flow rate is the greater of 13 l/s plus
+    // 6 l/s per bedroom and 0.3 l/s per m² of total floor area, in m³/h.
     let area: f64 = model["Zone"]
         .as_object()
         .into_iter()
         .flatten()
         .filter_map(|(_, z)| z["area"].as_f64())
         .sum();
-    let by_rooms = match (
-        model["NumberOfBedrooms"].as_u64(),
-        model["NumberOfHabitableRooms"].as_u64(),
-    ) {
-        (_, Some(1)) => Some(13.0),
-        (Some(b), _) if b >= 1 => Some(19.0 + 6.0 * (b - 1) as f64),
-        _ => None,
-    };
+    let by_rooms = model["NumberOfBedrooms"]
+        .as_u64()
+        .map(|b| 13.0 + 6.0 * b as f64);
     for (name, system) in model["InfiltrationVentilation"]["MechanicalVentilation"]
         .as_object_mut()
         .into_iter()

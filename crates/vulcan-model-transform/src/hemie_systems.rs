@@ -428,7 +428,7 @@ pub(super) fn mechanical_ventilation(
         }
         let path = json_pointer(&[VENTILATION, vent.name]);
         errors.push(error(path, match vent.host() {
-            None => format!("Vent '{}' of '{}' names no parent element. An existing-building EPC places each mechanical vent in a wall, window or door, and takes its height, orientation and pitch from it: name that element.", vent.name, vent.system),
+            None => format!("Vent '{}' of '{}' does not name the wall, window or door it sits in. An existing-building EPC places each mechanical vent in one, and takes its height, orientation and pitch from it: name that element.", vent.name, vent.system),
             Some(host) => format!("Vent '{}' of '{}' is in '{host}', which is not a storey wall, window or door of the existing-building model. Name the wall, window or door it sits in.", vent.name, vent.system),
         }));
     }
