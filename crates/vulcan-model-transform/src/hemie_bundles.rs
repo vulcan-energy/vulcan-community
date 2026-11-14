@@ -1440,11 +1440,7 @@ mod tests {
                     r#""conservatory_type"":""unheated"""#,
                     r#""conservatory_type"":""unheated"",""adjacent_space_type"":""garage"""#,
                 )
-                .replacen(
-                    "HEMIE_region,England",
-                    &format!("HEMIE_region,England\n{sheltered}"),
-                    1,
-                );
+                .replacen("Postcode,", &format!("{sheltered}\nPostcode,"), 1);
             let (model, errors, notices) = run(&house);
             assert!(errors.is_empty(), "{status}: {errors:#?}");
             let parts = model["Zone"]["building_parts"].as_object().unwrap();
