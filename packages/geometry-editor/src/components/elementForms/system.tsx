@@ -145,6 +145,7 @@ import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } fro
 export type PendingSystemAction =
   | { kind: 'source'; target: 'presets' | 'pcdb' }
   | { kind: 'subcategory'; value: string }
+  | { kind: 'type'; value: string }
   | { kind: 'preset'; value: string };
 
 /** Readable names for the schema's plant types; a type not listed shows its exact value. */
@@ -721,22 +722,29 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
   const selectedPlants = readRecord(readRecord(selectedSystemElementFull?.extra_json)[systemSubcategory]);
   const systemPlantType = Object.values(selectedPlants).length === 1 ? String(readRecord(Object.values(selectedPlants)[0]).type ?? '') : '';
 
-  const handleSystemTypeChange = useCallback((type: string) => {
+  const applySystemTypeChange = useCallback((type: string) => {
     const element = selectedSystemElementFull;
-    if (!element || !type || type === systemPlantType) return;
+    if (!element) return;
     const extra = readRecord(element.extra_json);
-    const plants = readRecord(extra[systemSubcategory]);
-    const [existingKey, existing] = Object.entries(plants)[0] ?? [];
-    // Another type's inputs do not carry over: ask before clearing a plant that has any.
-    if (existing && Object.keys(readRecord(existing)).some((key) => key !== 'type')
-      && !window.confirm('Changing the type clears the other inputs of this system. Continue?')) return;
+    const [existingKey] = Object.entries(readRecord(extra[systemSubcategory]))[0] ?? [];
     commitSystemSelectionUpdate({
       source: 'custom',
       subcategory: systemSubcategory,
       extraJson: { ...extra, [systemSubcategory]: { [existingKey ?? element.name]: { type } } },
       reason: 'system-type-change',
     });
-  }, [selectedSystemElementFull, systemSubcategory, systemPlantType, commitSystemSelectionUpdate]);
+  }, [selectedSystemElementFull, systemSubcategory, commitSystemSelectionUpdate]);
+
+  const handleSystemTypeChange = useCallback((type: string) => {
+    if (!selectedSystemElementFull || !type || type === systemPlantType) return;
+    const [, existing] = Object.entries(readRecord(readRecord(selectedSystemElementFull.extra_json)[systemSubcategory]))[0] ?? [];
+    // Another type's inputs do not carry over: ask before clearing a plant that has any.
+    if (existing && Object.keys(readRecord(existing)).some((key) => key !== 'type')) {
+      setPendingSystemAction({ kind: 'type', value: type });
+      return;
+    }
+    applySystemTypeChange(type);
+  }, [selectedSystemElementFull, systemSubcategory, systemPlantType, applySystemTypeChange]);
 
   const confirmSystemSourceSwitch = useCallback(() => {
     const action = pendingSystemAction;
@@ -754,6 +762,10 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
       applySystemSubcategoryChange(action.value);
       return;
     }
+    if (action.kind === 'type') {
+      applySystemTypeChange(action.value);
+      return;
+    }
     void applySystemPresetChange(action.value);
   }, [
     pendingSystemAction,
@@ -761,6 +773,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     applyFirstSamplePresetAfterPcdb,
     applySystemSubcategoryChange,
     applySystemPresetChange,
+    applySystemTypeChange,
   ]);
 
   // Update preset options when subcategory changes. The workspace files are
@@ -899,22 +912,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
     const { elementType, renderFieldLabel, elementsById, productCatalogue, hemDatabaseProducts, systemHasProductSlot, renderSpaceHeatSystemEmitterManager } = ctx;
 
     // Products take no sample preset, so the type is chosen here.
-    const typeControl = hemDatabaseProducts && systemSubcategory && selectedSystemElementFull && systemTypeOptions.length ? (
-      <>
-        {renderFieldLabel('Type:', elementType)}
-        <div className="element-input">
-          <StandardDropdown
-            value={systemPlantType}
-            onChange={handleSystemTypeChange}
-            options={systemTypeOptions}
-            placeholder="Select type…"
-            variant="ghost"
-            size="md"
-          />
-        </div>
-      </>
-    ) : null;
-
+    const showType = !!(hemDatabaseProducts && systemSubcategory && selectedSystemElementFull && systemTypeOptions.length);
     return (
       <>
         {productCatalogue ? (
@@ -944,7 +942,14 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
 
         {systemHasProductSlot ? (
           <>
-            {typeControl}
+            {showType ? (
+          <>
+            <div className="element-label">Type:</div>
+            <div className="element-input">
+              <StandardDropdown value={systemPlantType} onChange={handleSystemTypeChange} options={systemTypeOptions} placeholder="Select type…" variant="ghost" size="md" />
+            </div>
+          </>
+        ) : null}
             {systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null}
           </>
         ) : !productCatalogue || systemUiMode === 'presets' ? (
@@ -964,7 +969,14 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
                 size="md"
               />
             </div>
-            {typeControl}
+            {showType ? (
+          <>
+            <div className="element-label">Type:</div>
+            <div className="element-input">
+              <StandardDropdown value={systemPlantType} onChange={handleSystemTypeChange} options={systemTypeOptions} placeholder="Select type…" variant="ghost" size="md" />
+            </div>
+          </>
+        ) : null}
             {/* The sample presets are FHS inputs; a HEM Database products target takes none. */}
             {hemDatabaseProducts ? null : (
               <>

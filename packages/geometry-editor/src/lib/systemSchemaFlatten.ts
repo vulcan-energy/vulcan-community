@@ -290,7 +290,9 @@ export function flattenIfThenAllOfProperties(
           ])),
         };
       } else {
-        next[k] = flattenIfThenAllOfProperties(v, childInstance, fullRoot);
+        // An optional object (`anyOf [object, null]`) gets its fields, not one JSON box.
+        const unwrapped = isRecord(v) ? unwrapNullableSchema(v) : v;
+        next[k] = flattenIfThenAllOfProperties(isRecord(unwrapped) && isRecord(unwrapped.properties) ? unwrapped : v, childInstance, fullRoot);
       }
     }
     out.properties = next;

@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { flattenSystemSubtypePlantSchemas, systemPlantTypes } from '../systemSchemaFlatten';
+import { __setSchemaObjectForTests, getBaseFieldsForElementType, getElementSubschemaForMode } from '../schemaCache';
 import { buildSystemAdvancedUischema } from '../systemAdvancedUischema';
 import epcSchema from '../../../../../data/schemas/hem_epc_orchestrator_input.schema.json';
 
@@ -43,5 +44,14 @@ describe('the types a system category offers', () => {
     expect(systemPlantTypes(root, 'SpaceHeatSystem')).toContain('WetDistribution');
     expect(systemPlantTypes(root, 'SpaceHeatSystem')).not.toContain('meta');
     expect(systemPlantTypes(root, 'SpaceCoolSystem')).toContain('AirConditioning');
+  });
+});
+
+describe('primary pipework on the EPC target', () => {
+  it('has the pipe fields a row must state', () => {
+    __setSchemaObjectForTests(epcSchema as never);
+    const fields = Object.keys(getElementSubschemaForMode(false, 'WaterPipework')?.properties ?? {});
+    expect(fields).toEqual(expect.arrayContaining(['external_diameter_mm', 'internal_diameter_mm', 'insulation_thickness_mm', 'insulation_thermal_conductivity', 'pipe_contents', 'surface_reflectivity']));
+    expect(getBaseFieldsForElementType('WaterPipework')).toContain('length');
   });
 });

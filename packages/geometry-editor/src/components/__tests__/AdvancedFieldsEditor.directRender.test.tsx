@@ -1131,8 +1131,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'modulation_load | boiler · Modulation Load | textbox | 0 | 1 | - | tip',
     'rated_power | boiler · Rated Power | textbox | 0 | - | - | tip',
     'backup_ctrl_type | hp · Backup Ctrl Type | select | - | - | - | tip',
-    'boiler | hp · Boiler | textbox | - | - | {"EnergySupply":"example","EnergySupply_aux":"example","boiler_location":"internal","efficiency_full_load":1,"efficiency_part_load":1.12,"electricity_circ_pump":0,"electricity_full_load":0,"electricity_part_load":0,"electricity_standby":0,"modulation_load":0,"rated_power":1,"cost_schedule_hybrid":{"cost_schedule_boiler":{},"cost_schedule_hp":{},"cost_schedule_start_day":0,"cost_schedule_time_series_step":1}} | tip',
-    'BufferTank | hp · Buffer Tank | textbox | - | - | {"daily_losses":1,"pump_fixed_flow_rate":1,"pump_power_at_flow_rate":1,"volume":1} | tip',
     'eahp_mixed_max_temp | hp · EAHP Mixed Max Temperature | textbox | -273.15 | - | - | tip',
     'eahp_mixed_min_temp | hp · EAHP Mixed Min Temperature | textbox | -273.15 | - | - | tip',
     'EnergySupply | hp · Energy Supply | textbox | - | - | - | tip',

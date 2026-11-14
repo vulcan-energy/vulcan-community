@@ -1273,6 +1273,17 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
     return null;
   }
 
+  // Core and EPC name no WaterPipework entry; a tank's `primary_pipework` item is the pipework a row authors.
+  if (elementType === 'WaterPipework' && !schema.$defs.WaterPipework) {
+    const tank = Object.values(schema.$defs).find((def) => isSchemaNode(def?.properties?.primary_pipework));
+    const alternatives = tank?.properties?.primary_pipework?.anyOf;
+    const arrayBranch = Array.isArray(alternatives) ? alternatives.find((branch) => branch?.items) : tank?.properties?.primary_pipework;
+    const item = arrayBranch?.items ? dereferenceSchemaNodeInRoot(arrayBranch.items, schema) as SchemaNode : null;
+    if (item?.properties) {
+      return { type: 'object', properties: item.properties, required: Array.isArray(item.required) ? item.required : [], $defs: schema.$defs };
+    }
+  }
+
   if (elementType === 'WetEmitter') {
     const fromShs = resolveFhsWetEmitterItemSubschema(schema, subtype) ?? resolveCoreWetEmitterItemSubschema(schema, subtype);
     if (fromShs) return fromShs;
