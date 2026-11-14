@@ -203,6 +203,11 @@ export type GeometryInspectorElementFieldsContext = Readonly<{
   onPatchExtraJson(
     update: (current: Record<string, unknown>) => Record<string, unknown>,
   ): void;
+  /**
+   * Several elements are selected: `element` holds the extra_json values they share, and a
+   * patch applies to each of them.
+   */
+  multiple?: boolean;
 }>;
 
 export type GeometryInspectorElementFieldsContribution = Readonly<{

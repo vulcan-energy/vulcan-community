@@ -135,17 +135,17 @@ pub(super) fn basement_storey(
             )
     });
     let Some(basement) = basement else {
-        ctx.errors.push(error(floor[0].path(), format!("Walls {} on floor {level} are below the ground, but floor {level} has no basement floor. Give floor {level}'s ground floor a basement floor type, or draw the walls on the ground floor.", names(&floor))));
+        ctx.errors.push(error("FLOOR", floor[0].path(), format!("Walls {} on floor {level} are below the ground, but floor {level} has no basement floor. Give floor {level}'s ground floor a basement floor type, or draw the walls on the ground floor.", names(&floor))));
         return Err(());
     };
     let at_ground: Vec<&El> = floor.iter().copied().filter(|w| !starts_below(w)).collect();
     if level == 0 && !at_ground.is_empty() {
         let below: Vec<&El> = floor.iter().copied().filter(starts_below).collect();
-        ctx.errors.push(error(at_ground[0].path(), format!("Floor 0 is basement '{}' (walls {} start below the ground), but walls {} start at or above it. Give every wall of the basement its base below the ground.", basement.name, names(&below), names(&at_ground))));
+        ctx.errors.push(error("FLOOR", at_ground[0].path(), format!("Floor 0 is basement '{}' (walls {} start below the ground), but walls {} start at or above it. Give every wall of the basement its base below the ground.", basement.name, names(&below), names(&at_ground))));
         return Err(());
     }
     if walls.iter().all(|(w, _)| w.level <= level) {
-        ctx.errors.push(error(basement.path(), format!("Floor {level} is basement '{}' and the model has no storey above it. The existing-building EPC enters a basement as the floor of the lowest storey above the ground; draw that storey.", basement.name)));
+        ctx.errors.push(error("FLOOR", basement.path(), format!("Floor {level} is basement '{}' and the model has no storey above it. The existing-building EPC enters a basement as the floor of the lowest storey above the ground; draw that storey.", basement.name)));
         return Err(());
     }
     let openings: Vec<&El> = els
@@ -156,7 +156,7 @@ pub(super) fn basement_storey(
         })
         .collect();
     if !openings.is_empty() {
-        ctx.errors.push(error(openings[0].path(), format!("Windows or doors {} are in walls of basement '{}'. The existing-building EPC has no basement walls, so it cannot take openings in them; remove them, or draw the basement as a storey.", names(&openings), basement.name)));
+        ctx.errors.push(error("FLOOR", openings[0].path(), format!("Windows or doors {} are in walls of basement '{}'. The existing-building EPC has no basement walls, so it cannot take openings in them; remove them, or draw the basement as a storey.", names(&openings), basement.name)));
         return Err(());
     }
     let depth = floor
@@ -212,7 +212,7 @@ fn party_construction(ctx: &mut Ctx, construction_type: &str, elements: &[&El]) 
 pub(super) fn party_ceiling_roof(ctx: &mut Ctx, ceilings: &[&El], planes: &[&El]) -> Option<Value> {
     let first = ceilings.first()?;
     if let Some(plane) = planes.first() {
-        ctx.errors.push(error(first.path(), format!("Party ceiling '{}' and roof '{}' cover one building part. The existing-building EPC gives each building part one roof; draw them over separate parts or remove one.", first.name, plane.name)));
+        ctx.errors.push(error("ROOF", first.path(), format!("Party ceiling '{}' and roof '{}' cover one building part. The existing-building EPC gives each building part one roof; draw them over separate parts or remove one.", first.name, plane.name)));
         return None;
     }
     let key = party_construction(ctx, "party_ceiling", ceilings);
@@ -254,7 +254,7 @@ pub(super) fn part_floor<'e>(
     let e = match under.as_slice() {
         [e] => *e,
         [] if part.bottom == 0 => {
-            ctx.errors.push(error("/Zone".into(), format!("Building part '{name}' has no ground floor drawn under it. Draw its ground floor, or the exposed, unheated-space or party floor under it.")));
+            ctx.errors.push(error("FLOOR", "/Zone".into(), format!("Building part '{name}' has no ground floor drawn under it. Draw its ground floor, or the exposed, unheated-space or party floor under it.")));
             return None;
         }
         [] => {
@@ -265,7 +265,7 @@ pub(super) fn part_floor<'e>(
             );
         }
         many => {
-            ctx.errors.push(error(many[0].path(), format!("Building part '{name}' has floors {} under it. The existing-building EPC gives each building part one floor; draw one floor under it.", quoted(&many.iter().map(|e| e.name).collect::<Vec<_>>()))));
+            ctx.errors.push(error("FLOOR", many[0].path(), format!("Building part '{name}' has floors {} under it. The existing-building EPC gives each building part one floor; draw one floor under it.", quoted(&many.iter().map(|e| e.name).collect::<Vec<_>>()))));
             return None;
         }
     };
@@ -280,7 +280,7 @@ pub(super) fn part_floor<'e>(
         }
         "BuildingElementAdjacentUnconditionedSpace_Simple" => {
             let Some(space) = e.text("adjacent_space_type") else {
-                ctx.errors.push(error(e.path(), format!("Floor '{}' is over an unheated space but does not state which. Give it an adjacent_space_type: corridor, garage, roof void or stairwell.", e.name)));
+                ctx.errors.push(error("FLOOR", e.path(), format!("Floor '{}' is over an unheated space but does not state which. Choose its unheated space type: corridor, garage, roof void or stairwell.", e.name)));
                 return None;
             };
             let key = ctx.construction("above_internal_unconditioned_area_floor", &[e], &[]);
@@ -298,11 +298,8 @@ pub(super) fn part_floor<'e>(
 
 fn ground_floor(ctx: &mut Ctx, g: &El, part: &PartFloor, ground_total: f64) -> Option<Value> {
     // Ours: a dwelling whose base storey is above the ground has no floor on the ground.
-    if let Some(storey) = ctx.model["General"]["storey_of_dwelling"]
-        .as_i64()
-        .filter(|s| *s > 0)
-    {
-        ctx.errors.push(error(g.path(), format!("Ground floor '{}' is on the ground, but the dwelling's base storey is {storey} (General_storey_of_dwelling). Draw the party floor, exposed floor or floor over an unheated space under the dwelling instead, or correct the base storey.", g.name)));
+    if let Some(storey) = super::base_storey(ctx.model).filter(|s| *s > 0) {
+        ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' is on the ground, but the storey of dwelling is {} (Global Settings > Dwelling Details; 1 is the ground storey). Draw the party floor, exposed floor or floor over an unheated space under the dwelling instead, or correct the storey of dwelling.", g.name, storey + 1)));
         return None;
     }
     let mut floor = floor(ctx, g, ground_total)?;
@@ -377,7 +374,7 @@ pub(super) fn unused_floors(ctx: &mut Ctx, els: &[El], used: &BTreeSet<&str>) {
         .iter()
         .filter(|e| is_raised_floor(e) && !used.contains(e.name))
     {
-        ctx.errors.push(error(e.path(), format!("Floor '{}' on floor {} is under no building part's lowest storey. The existing-building EPC gives each building part one floor, under its lowest storey; move it under the storey it carries or delete it.", e.name, e.level)));
+        ctx.errors.push(error("FLOOR", e.path(), format!("Floor '{}' on floor {} is under no building part's lowest storey. The existing-building EPC gives each building part one floor, under its lowest storey; move it under the storey it carries or delete it.", e.name, e.level)));
     }
 }
 
@@ -479,7 +476,7 @@ mod tests {
                 ),
             ),
         );
-        let (model, errors, notices) = run_on(&text, flat_model(2));
+        let (model, errors, notices) = run_on(&text, flat_model(3));
         assert!(errors.is_empty(), "{errors:#?}");
         let zone = &model["Zone"];
         assert_eq!(zone["base_storey_of_dwelling"], 2);
@@ -517,7 +514,7 @@ mod tests {
                 party_plane("Ceiling B", 1, 0.0, ""),
             ),
         );
-        let (_, errors, _) = run_on(&text, flat_model(2));
+        let (_, errors, _) = run_on(&text, flat_model(3));
         assert!(
             errors.iter().any(|e| e.message.contains(
                 "The existing-building EPC gives 'Ceiling A', 'Ceiling B' one construction weight"
@@ -537,10 +534,10 @@ mod tests {
                 party_plane("Party ceiling", 1, 0.0, "")
             ),
         );
-        let (_, errors, _) = run_on(&text, flat_model(2));
+        let (_, errors, _) = run_on(&text, flat_model(3));
         assert_eq!(errors.len(), 1, "{errors:#?}");
         assert!(errors[0].path.ends_with("/Floor"));
-        assert!(errors[0].message.contains("base storey is 2"));
+        assert!(errors[0].message.contains("storey of dwelling is 3"));
     }
 
     fn basement(floor_type: &str, extra: &str) -> String {

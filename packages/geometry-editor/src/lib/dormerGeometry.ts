@@ -1338,6 +1338,11 @@ export function buildDormerBundleDraft(params: {
   floors?: Floor[];
   thermalOverrides?: DormerThermalOverrides;
   globalOrientationOffset: number;
+  /**
+   * Existing-building fabric: the window states no frame area fraction, so its frame material
+   * sets it (a stated value overrides that).
+   */
+  omitFrameAreaFraction?: boolean;
 }): DormerBundleDraft | null {
   const {
     host,
@@ -1353,6 +1358,7 @@ export function buildDormerBundleDraft(params: {
     floors,
     thermalOverrides = {},
     globalOrientationOffset,
+    omitFrameAreaFraction = false,
   } = params;
 
   const requested: DormerPlacementDefaults = {
@@ -1786,7 +1792,8 @@ export function buildDormerBundleDraft(params: {
     pitch: 90,
     orientation360: windowGeometry.orientation360,
     base_height: resolved.windowBaseHeight,
-    frame_area_fraction: resolved.frameAreaFraction,
+    // Undefined clears a value an earlier draft wrote.
+    frame_area_fraction: omitFrameAreaFraction ? undefined : resolved.frameAreaFraction,
     free_area_height: resolved.windowHeight,
     mid_height: roundToThreeDecimals(resolved.windowBaseHeight + resolved.windowHeight / 2),
     max_window_open_area: windowArea,

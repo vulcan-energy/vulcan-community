@@ -858,11 +858,11 @@ pub(crate) fn apply_weather_curves(
             .filter(|k| controller.contains_key(**k))
             .count();
         let required = |why: &str| {
-            error("E_WEATHER_CURVE_REQUIRED", path.clone(), format!("'{name}' has ecodesign class {class} (weather compensation), {why} State weather_comp_a, weather_comp_b, weather_comp_c and min_flow_temp, or pick a weather_compensation_curve_id, on its ecodesign controller."))
+            error("E_WEATHER_CURVE_REQUIRED", path.clone(), format!("'{name}' has ecodesign class {class} (weather compensation), {why} Pick its weather compensation curve, or state the three curve coefficients and the minimum flow temperature, on its heating controls."))
         };
         match (curve_id, comps, has_min) {
             (Some(_), _, true) | (Some(_), 1.., _) => {
-                errors.push(error("E_WEATHER_CURVE_CONFLICT", path.clone(), format!("'{name}' picks weather compensation curve {} and also states min_flow_temp or weather_comp values. The curve sets them: remove them, or remove the curve.", curve_id.unwrap_or_default())));
+                errors.push(error("E_WEATHER_CURVE_CONFLICT", path.clone(), format!("'{name}' picks weather compensation curve {} and also states the minimum flow temperature or curve coefficients. The curve sets them: remove them, or remove the curve.", curve_id.unwrap_or_default())));
                 continue;
             }
             (Some(id), 0, false) => {
