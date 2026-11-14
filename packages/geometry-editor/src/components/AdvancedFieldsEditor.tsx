@@ -14,7 +14,7 @@ import {
 } from '../lib/systemAdvancedSchemaExpand';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
 import { isExistingBuilding } from '../lib/windowOpenings';
-import { flattenSystemSubtypePlantSchemas, forbiddenFieldKeys, forbiddenPlantKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
+import { flattenSystemSubtypePlantSchemas, listAbsentOptionalPlantParts, forbiddenFieldKeys, forbiddenPlantKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import { buildSystemAdvancedUischema, type AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
   collectHeatSourceWetNameLabelsFromProject,
@@ -68,7 +68,7 @@ import { roundToTwoDecimals } from '../geometry/constants';
 import type { BuildingElementTransparent, Element, System, WindowShading } from '../geometry/types';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { classifyOpaqueFabricVariantFromElement } from '../lib/opaqueFabricVariant';
-import { readRecord } from '../lib/jsonTypes';
+import { isRecord, readRecord } from '../lib/jsonTypes';
 import { DhwStorageHeatSourcePicker } from './DhwStorageHeatSourcePicker';
 import {
   WindowDetailChip,
@@ -1098,6 +1098,13 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       }
     }
 
+    // An existing building takes a basement wall height of 0 (a basement wholly below ground).
+    if (elementType === 'BuildingElementGround' && existingBuilding && advancedProperties.height_basement_walls) {
+      const limited = { ...advancedProperties.height_basement_walls, minimum: 0 } as Record<string, unknown>;
+      delete limited.exclusiveMinimum;
+      advancedProperties.height_basement_walls = limited as SchemaNode;
+    }
+
     // a8/a9 accept a class or a number: the control offers the classes and a number box.
     // Construction bands: a number, or only the bands this element's construction takes.
     if (arealHeatCapacityBands === null) delete advancedProperties.areal_heat_capacity;
@@ -1735,6 +1742,17 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       getActiveRootSchema,
     ],
   );
+
+  // Optional parts of a plant that its JSON lacks are not in the form, so offer to add each.
+  const absentPlantParts = useMemo(() => {
+    const root = getActiveRootSchema();
+    const full = elementType === 'System' && subtype && root ? getActiveElementSubschema(elementType, subtype) : null;
+    const plants = readRecord(advancedFieldsData)[subtype ?? ''];
+    if (!full || !isRecord(plants)) return [];
+    const expanded = expandSystemMergeMapSchemaForJsonForms(full as Record<string, unknown>, subtype!, plants);
+    const derefed = dereferenceSchemaNodeInRoot(expanded, root) as Record<string, unknown>;
+    return listAbsentOptionalPlantParts(derefed, subtype!, plants, root, existingBuilding);
+  }, [elementType, subtype, advancedFieldsData, existingBuilding, getActiveRootSchema, getActiveElementSubschema]);
 
   // ThermalBridgeLinear `junction_type` is rendered manually (with richer labels + ψ autofill).
   // In FHS schemas this field may be declared conditionally under `allOf/then` rather than
@@ -2473,6 +2491,25 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         extraJson={advancedFieldsData} subtype={subtype} useFHSSchema={useFHSSchema}
         elementsById={elementsById}
       />}
+
+      {elementType === 'System' && !isSystemPcdbMode && absentPlantParts.length > 0 && currentElementData?.type === 'System' && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: flat ? 10 : 'var(--spacing-md)' }}>
+          {absentPlantParts.map(({ plant, part, title }) => (
+            <button
+              key={`${plant}/${part}`}
+              type="button"
+              className="btn btn-nav btn-small"
+              onClick={() => {
+                const base = readExtraJsonRecord(currentData.extra_json);
+                const plants = readRecord(base[subtype!]);
+                onChange({ ...currentData, extra_json: { ...base, [subtype!]: { ...plants, [plant]: { ...readRecord(plants[plant]), [part]: {} } } } });
+              }}
+            >
+              {`Add ${title.toLowerCase()}${Object.keys(readRecord(readRecord(advancedFieldsData)[subtype!])).length > 1 ? ` to ${plant}` : ''}`}
+            </button>
+          ))}
+        </div>
+      )}
 
       {elementType === 'System' &&
         subtype === 'HotWaterSource' &&

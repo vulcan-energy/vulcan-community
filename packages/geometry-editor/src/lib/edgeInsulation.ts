@@ -3,52 +3,43 @@
 
 /**
  * Helpers for `edge_insulation` on BuildingElementGround (Slab_edge_insulation):
- * a JSON array of horizontal / vertical segment objects (we only edit the first entry in the UI).
+ * a JSON array with at most one horizontal and one vertical segment object.
  */
 
 export type EdgeInsulationOrientation = 'horizontal' | 'vertical';
 
-export interface EdgeInsulationFormValues {
-  orientation: '' | EdgeInsulationOrientation;
+export interface EdgeInsulationSegmentValues {
   edgeThermalResistance: string;
+  /** Width for a horizontal segment, depth for a vertical one. */
   widthOrDepth: string;
 }
+
+export interface EdgeInsulationFormValues {
+  horizontal: EdgeInsulationSegmentValues;
+  vertical: EdgeInsulationSegmentValues;
+}
+
+const emptySegment = (): EdgeInsulationSegmentValues => ({ edgeThermalResistance: '', widthOrDepth: '' });
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
 }
 
+const numStr = (x: unknown): string => (typeof x === 'number' && Number.isFinite(x) ? String(x) : '');
+
 /** Parse `extra_json.edge_insulation` into form strings (no defaults). */
 export function extraJsonEdgeInsulationToFormValues(value: unknown): EdgeInsulationFormValues {
-  if (value === null || value === undefined) {
-    return { orientation: '', edgeThermalResistance: '', widthOrDepth: '' };
+  const out: EdgeInsulationFormValues = { horizontal: emptySegment(), vertical: emptySegment() };
+  if (!Array.isArray(value)) return out;
+  for (const seg of value) {
+    if (!isRecord(seg)) continue;
+    if (seg.type === 'horizontal') {
+      out.horizontal = { edgeThermalResistance: numStr(seg.edge_thermal_resistance), widthOrDepth: numStr(seg.width) };
+    } else if (seg.type === 'vertical') {
+      out.vertical = { edgeThermalResistance: numStr(seg.edge_thermal_resistance), widthOrDepth: numStr(seg.depth) };
+    }
   }
-  if (!Array.isArray(value) || value.length === 0) {
-    return { orientation: '', edgeThermalResistance: '', widthOrDepth: '' };
-  }
-  const first = value[0];
-  if (!isRecord(first)) {
-    return { orientation: '', edgeThermalResistance: '', widthOrDepth: '' };
-  }
-  const t = first.type;
-  const r = first.edge_thermal_resistance;
-  if (t === 'horizontal') {
-    const w = first.width;
-    return {
-      orientation: 'horizontal',
-      edgeThermalResistance: typeof r === 'number' && Number.isFinite(r) ? String(r) : '',
-      widthOrDepth: typeof w === 'number' && Number.isFinite(w) ? String(w) : '',
-    };
-  }
-  if (t === 'vertical') {
-    const d = first.depth;
-    return {
-      orientation: 'vertical',
-      edgeThermalResistance: typeof r === 'number' && Number.isFinite(r) ? String(r) : '',
-      widthOrDepth: typeof d === 'number' && Number.isFinite(d) ? String(d) : '',
-    };
-  }
-  return { orientation: '', edgeThermalResistance: '', widthOrDepth: '' };
+  return out;
 }
 
 export type EdgeInsulationSerialized =
@@ -56,32 +47,21 @@ export type EdgeInsulationSerialized =
   | { ok: false; reason: 'incomplete' };
 
 /**
- * Turn form state into `extra_json.edge_insulation` (single-element array) or `null` when cleared.
- * Returns `ok: false` while orientation is chosen but numbers are not yet valid finite values.
+ * Turn form state into `extra_json.edge_insulation` (array of the filled segments) or `null` when
+ * both are empty. Returns `ok: false` while a segment is half filled or not a finite number.
  */
 export function formValuesToExtraJsonEdgeInsulation(v: EdgeInsulationFormValues): EdgeInsulationSerialized {
-  if (!v.orientation) {
-    return { ok: true, value: null };
+  const value: Record<string, unknown>[] = [];
+  for (const type of ['horizontal', 'vertical'] as const) {
+    const rStr = v[type].edgeThermalResistance.trim();
+    const dimStr = v[type].widthOrDepth.trim();
+    if (!rStr && !dimStr) continue;
+    // `Number('')` is 0 — treat empty fields as incomplete while the user is typing.
+    if (!rStr || !dimStr) return { ok: false, reason: 'incomplete' };
+    const r = Number(rStr);
+    const dim = Number(dimStr);
+    if (!Number.isFinite(r) || !Number.isFinite(dim)) return { ok: false, reason: 'incomplete' };
+    value.push({ type, edge_thermal_resistance: r, [type === 'horizontal' ? 'width' : 'depth']: dim });
   }
-  const rStr = v.edgeThermalResistance.trim();
-  const dimStr = v.widthOrDepth.trim();
-  // `Number('')` is 0 — treat empty fields as incomplete while the user is typing.
-  if (!rStr || !dimStr) {
-    return { ok: false, reason: 'incomplete' };
-  }
-  const r = Number(rStr);
-  const dim = Number(dimStr);
-  if (!Number.isFinite(r) || !Number.isFinite(dim)) {
-    return { ok: false, reason: 'incomplete' };
-  }
-  if (v.orientation === 'horizontal') {
-    return {
-      ok: true,
-      value: [{ type: 'horizontal', edge_thermal_resistance: r, width: dim }],
-    };
-  }
-  return {
-    ok: true,
-    value: [{ type: 'vertical', edge_thermal_resistance: r, depth: dim }],
-  };
+  return { ok: true, value: value.length ? value : null };
 }

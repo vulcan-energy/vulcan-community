@@ -651,7 +651,7 @@ function readViewerElevationValue(element: Element): number | '' {
 // verified it has no wall-exclusive shape, so it stays here rather than
 // moving alongside the adjacent-like trio.
 
-// PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES moved to elementForms/
+// PARTY_WALL_LINING_CAVITY_TYPES lives in lib/assemblyMaterialFabric.ts; its callers moved to elementForms/
 // adjacentLikeElement.tsx (slice-6 brief STAGE 2) — grep-verified its only
 // callers were both inside the adjacent-like renderAttributePanel case that
 // moved with it.
