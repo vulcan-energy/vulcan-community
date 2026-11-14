@@ -1523,7 +1523,9 @@ export interface GeometryState extends
   spaceLabellerZoneId: string | null;
   /** Footprint selected for canvas highlight + panel sync (only meaningful while labeller open). */
   spaceLabellerSelectedLabelId: string | null;
-  setSpaceLabellerSelectedLabelId: (id: string | null) => void;
+  /** A field of the selected label to focus, e.g. a host field; a new object asks again. */
+  spaceLabellerFocusField: { fieldKey: string } | null;
+  setSpaceLabellerSelectedLabelId: (id: string | null, focusFieldKey?: string) => void;
   openSpaceLabeller: (zoneId: string) => void;
   closeSpaceLabeller: () => void;
   /** Quantized wall-segment fingerprint per zone — avoids re-infer when fabric unchanged. */
@@ -1706,7 +1708,7 @@ export interface GeometryState extends
    */
   targetValidation: TargetValidation | null;
   setTargetValidation: (validation: TargetValidation | null) => void;
-  /** Issues the host adds for a task the user chose to run; null when it adds none. Not part of the document. */
+  /** Issues the host adds for a task the user chose to run; null when it adds none. Live display only: Save and lodgement do not read them. */
   hostValidationFindings: HostValidationFindings | null;
   setHostValidationFindings: (findings: HostValidationFindings | null) => void;
   getCSVValidation: (filename: string) => {
@@ -3160,6 +3162,7 @@ const createGeometryState = (
   spaceLabellerOpen: false,
   spaceLabellerZoneId: null,
   spaceLabellerSelectedLabelId: null,
+  spaceLabellerFocusField: null,
   spaceInferenceWallPrintByZone: {},
 
   canvasViewResetKey: 0,
@@ -4988,7 +4991,10 @@ const createGeometryState = (
 
   setSpaceLabelsOverlayExpanded: (value) => set({ spaceLabelsOverlayExpanded: value }),
 
-  setSpaceLabellerSelectedLabelId: (id) => set({ spaceLabellerSelectedLabelId: id }),
+  setSpaceLabellerSelectedLabelId: (id, focusFieldKey) => set({
+    spaceLabellerSelectedLabelId: id,
+    spaceLabellerFocusField: focusFieldKey ? { fieldKey: focusFieldKey } : null,
+  }),
 
   openSpaceLabeller: (zoneId) =>
     set((state) => ({
@@ -7682,7 +7688,6 @@ const createGeometryState = (
       linearThermalBridgeIssues,
       floorStackWarningElementIds,
       partFFindings,
-      hostFindings: state.hostValidationFindings,
     };
 
     // Validate all elements
@@ -7714,7 +7719,6 @@ const createGeometryState = (
       elementsById: state.elementsById,
       spaceInferenceWallPrintByZone: state.spaceInferenceWallPrintByZone,
       complianceValidationEnabled,
-      hostFindings: state.hostValidationFindings,
     });
     allWarnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     allCriticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));
