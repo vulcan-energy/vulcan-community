@@ -528,7 +528,15 @@ pub(crate) fn apply_desnz_defaults(
     env_area_stated: bool,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
+    derived: &mut Vec<crate::DerivedDefault>,
 ) {
+    let mut derive = |path: String, field: &str, value: Value| {
+        derived.push(crate::DerivedDefault {
+            path,
+            field: field.into(),
+            value,
+        })
+    };
     for (supply, value) in model["EnergySupply"].as_object_mut().into_iter().flatten() {
         let Some(battery) = value
             .get_mut("ElectricBattery")
@@ -615,6 +623,11 @@ pub(crate) fn apply_desnz_defaults(
             };
             if let (Some(temp), Some(emitter)) = (temp, &emitter) {
                 system.insert("design_flow_temp".into(), json!(temp));
+                derive(
+                    json_pointer(&["SpaceHeatSystem", name]),
+                    "design_flow_temp",
+                    json!(temp),
+                );
                 used.push(format!("design_flow_temp {temp} ({emitter})"));
             }
         }
@@ -627,6 +640,11 @@ pub(crate) fn apply_desnz_defaults(
             };
             if let (Some(diff), Some(source)) = (diff, &source) {
                 system.insert("temp_diff_emit_dsgn".into(), json!(diff));
+                derive(
+                    json_pointer(&["SpaceHeatSystem", name]),
+                    "temp_diff_emit_dsgn",
+                    json!(diff),
+                );
                 used.push(format!("temp_diff_emit_dsgn {diff} ({source})"));
             }
         }
@@ -661,6 +679,7 @@ pub(crate) fn apply_desnz_defaults(
             Some(rate) => {
                 let flow = rate.max(0.3 * area) * 3.6;
                 system["design_outdoor_air_flow_rate"] = json!(flow);
+                derive(path.clone(), "design_outdoor_air_flow_rate", json!(flow));
                 notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses the default estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
             }
             None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on the system, or the number of bedrooms in Global Settings > Dwelling Details."))),

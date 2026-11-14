@@ -1571,6 +1571,7 @@ pub struct JSONBuilder {
     product_candidates: RefCell<BTreeMap<String, Vec<crate::ProductCandidate>>>,
     hemie_shading: RefCell<Option<crate::HemieShading>>,
     provenance: RefCell<crate::hemie::Provenance>,
+    derived_defaults: RefCell<Vec<crate::DerivedDefault>>,
     /// Model path of each object a Geometry CSV row authored (Systems, wet emitter and
     /// mechanical ventilation rows) and the row's Name, so each product slot names its row.
     slot_rows: RefCell<Vec<(String, String)>>,
@@ -1597,6 +1598,17 @@ impl JSONBuilder {
 
     pub fn take_provenance(&self) -> crate::hemie::Provenance {
         self.provenance.take()
+    }
+
+    pub fn take_derived_defaults(&self) -> Vec<crate::DerivedDefault> {
+        self.derived_defaults.take()
+    }
+
+    pub fn weather_curves(&self) -> Vec<crate::WeatherCurve> {
+        self.product_database
+            .as_ref()
+            .map(crate::epc_products::weather_curves)
+            .unwrap_or_default()
     }
 
     pub fn take_product_candidates(&self) -> BTreeMap<String, Vec<crate::ProductCandidate>> {
@@ -1651,6 +1663,7 @@ impl JSONBuilder {
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
             provenance: RefCell::default(),
+            derived_defaults: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
 
@@ -1693,6 +1706,7 @@ impl JSONBuilder {
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
             provenance: RefCell::default(),
+            derived_defaults: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
         builder.index_templates();
@@ -2270,6 +2284,7 @@ impl JSONBuilder {
                 env_area_stated,
                 &mut errors,
                 &mut notices,
+                &mut self.derived_defaults.borrow_mut(),
             );
         }
         if self.profile.checks_system_catalogue() {

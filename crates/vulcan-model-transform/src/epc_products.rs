@@ -800,6 +800,34 @@ pub(crate) fn resolve_products(
     slots
 }
 
+/// DESNZ-defined: the curve an existing building with no curve takes, by heat source type and
+/// its one emitter type.
+const DEFAULT_WEATHER_CURVES: [(&str, &str, u64); 4] = [
+    ("Boiler", "ufh", 2),
+    ("Boiler", "radiator", 7),
+    ("HeatPump", "ufh", 1),
+    ("HeatPump", "radiator", 5),
+];
+
+/// The pinned curves, each with the systems it is the default for.
+pub(crate) fn weather_curves(db: &ProductDatabase) -> Vec<crate::WeatherCurve> {
+    db.weather_curves
+        .iter()
+        .map(|(id, gradient)| crate::WeatherCurve {
+            id: *id,
+            gradient: *gradient,
+            default_for: DEFAULT_WEATHER_CURVES
+                .iter()
+                .filter(|(_, _, curve)| curve == id)
+                .map(|(source, emitter, _)| crate::WeatherCurveDefault {
+                    heat_source_type: source.to_string(),
+                    wet_emitter_type: emitter.to_string(),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 /// An ecodesign class with weather compensation (II, III, VI, VII) needs its curve: either
 /// `weather_comp_a`, `_b`, `_c` with `min_flow_temp`, or a `weather_compensation_curve_id`
 /// without `min_flow_temp` (the curve sets it). New build must state one (DESNZ: full
@@ -882,20 +910,21 @@ pub(crate) fn apply_weather_curves(
             }
             (None, _, _) => {}
         }
-        let emitter = match emitters.iter().map(String::as_str).collect::<Vec<_>>()[..] {
-            ["radiator"] => "radiators",
-            ["ufh"] => "UFH",
-            _ => "",
+        let only = (emitters.len() == 1)
+            .then(|| emitters.iter().next())
+            .flatten();
+        let Some(curve) = DEFAULT_WEATHER_CURVES
+            .iter()
+            .find(|(s, e, _)| *s == source && Some(*e) == only.map(String::as_str))
+            .map(|(_, _, curve)| *curve)
+        else {
+            errors.push(required("and a default curve exists only for a boiler or heat pump with radiators or with UFH alone."));
+            continue;
         };
-        let curve = match (source.as_str(), emitter) {
-            ("Boiler", "UFH") => 2,
-            ("Boiler", "radiators") => 7,
-            ("HeatPump", "UFH") => 1,
-            ("HeatPump", "radiators") => 5,
-            _ => {
-                errors.push(required("and a default curve exists only for a boiler or heat pump with radiators or with UFH alone."));
-                continue;
-            }
+        let emitter = if only.map(String::as_str) == Some("ufh") {
+            "UFH"
+        } else {
+            "radiators"
         };
         let gradient = db.weather_curves[&curve];
         let replaced = controller
