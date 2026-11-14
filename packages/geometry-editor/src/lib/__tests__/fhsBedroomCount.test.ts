@@ -6,7 +6,7 @@
 // declares `minimum: 0`, so nothing rejects it before the run. Catch it in the
 // editor instead of surfacing an opaque preflight failure at save time.
 //
-// A bedsit counts as one bedroom (HEM-FHS guidance, Dwelling Details §2.2.4).
+// A bedsit counts as one bedroom (DESNZ-defined).
 
 import { describe, expect, it } from 'vitest';
 import { fhsBedroomCountIssue } from '../globalSettingsValidation';

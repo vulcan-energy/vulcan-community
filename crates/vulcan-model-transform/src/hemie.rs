@@ -49,6 +49,11 @@ const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
 /// walls; a window elsewhere carries this placeholder unless the glazing setting states one.
 const UNUSED_WINDOW_HEAT_CAPACITY: f64 = 0.0;
 const SETTING: &str = "HEMIE_";
+/// Metadata rows older saved files carry that the converter no longer reads, with the fix.
+const RETIRED_SETTINGS: [(&str, &str); 2] = [
+    ("HEMIE_region", "The region comes from the postcode. Remove the row, or set HEMIE_nation for a postcode area that spans two nations."),
+    ("HEMIE_front_door", "Remove the row and mark the front door on the door itself."),
+];
 /// Construction fields an element may state for itself, over the model's construction setting
 /// (derived from the model).
 const ELEMENT_OVERRIDE_KEYS: [&str; 5] = [
@@ -559,7 +564,9 @@ fn is_plane(e: &El) -> bool {
 
 struct Settings<'a> {
     csv: &'a Rows,
-    missing: BTreeSet<String>,
+    /// Model settings the conversion needs that the model does not state: each row, with the
+    /// fields it lacks (none: the row itself is absent or unreadable).
+    missing: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl<'a> Settings<'a> {
@@ -578,7 +585,7 @@ impl<'a> Settings<'a> {
             Some(Value::String(s)) => Some(s.clone()),
             Some(other) => Some(other.to_string()),
             None => {
-                self.missing.insert(format!("{field} ({what})"));
+                self.missing.entry(field).or_default().insert(what.into());
                 None
             }
         }
@@ -593,8 +600,7 @@ impl<'a> Settings<'a> {
             None => Some(Map::new()),
         };
         parsed.unwrap_or_else(|| {
-            self.missing
-                .insert(format!("{field} (a JSON object of construction fields)"));
+            self.missing.entry(field).or_default();
             Map::new()
         })
     }
@@ -848,7 +854,9 @@ impl Ctx<'_> {
         let mut need = |what: &str| {
             self.settings
                 .missing
-                .insert(format!("{setting} with {what}"));
+                .entry(setting.clone())
+                .or_default()
+                .insert(what.into());
         };
         match construction_type {
             // DESNZ-defined: a wall construction type is required when no layers are known.
@@ -872,10 +880,10 @@ impl Ctx<'_> {
                     && c.get("glazing_type").and_then(Value::as_str) != Some("single")
                     && !has(c, "glazing_gap")
                 {
-                    need("glazing_gap (not single glazing)");
+                    need("glazing_gap");
                 }
                 if !has(c, "areal_heat_capacity") {
-                    need("areal_heat_capacity (a window in a party or sheltered wall)");
+                    need("areal_heat_capacity");
                 }
             }
             "heated_pitched_roof" if !has(c, "areal_heat_capacity") => {
@@ -1005,7 +1013,7 @@ pub(crate) fn map_existing_building(
     let mut ctx = Ctx {
         settings: Settings {
             csv,
-            missing: BTreeSet::new(),
+            missing: BTreeMap::new(),
         },
         constructions: Constructions::default(),
         errors: Vec::new(),
@@ -1014,8 +1022,11 @@ pub(crate) fn map_existing_building(
     };
     systems::check_vents(&mut ctx);
     let converted = convert(&mut ctx, csv);
-    if !ctx.settings.missing.is_empty() {
-        ctx.errors.push(error("/Metadata".into(), format!("An existing-building EPC needs these model settings, which the Metadata section does not state: {}.", ctx.settings.missing.iter().cloned().collect::<Vec<_>>().join("; "))));
+    for (row, fields) in &ctx.settings.missing {
+        ctx.errors.push(error(
+            format!("/Metadata/{row}"),
+            missing_setting_message(row, fields),
+        ));
     }
     notices.append(&mut ctx.notices);
     if !ctx.errors.is_empty() || converted.is_none() {
@@ -1070,6 +1081,14 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         .and_then(|zones| zones.keys().next().cloned())
         .unwrap_or_default();
     let zone = &model["Zone"][&zone_name];
+    for (field, fix) in RETIRED_SETTINGS {
+        if ctx.settings.raw(field).is_some() {
+            ctx.errors.push(error(
+                format!("/Metadata/{field}"),
+                format!("{field} is no longer read. {fix}"),
+            ));
+        }
+    }
     let age_band = ctx.settings.text("age_band", "A to M");
     let region = region(ctx);
 
@@ -1830,6 +1849,26 @@ fn region(ctx: &mut Ctx) -> Option<String> {
             None
         }
     }
+}
+
+/// One missing model setting in the words of the editor's fabric defaults (Global Settings,
+/// Defaults, Fabric); a row with no editor field yet is named.
+fn missing_setting_message(row: &str, fields: &BTreeSet<String>) -> String {
+    const WHERE: &str = "Global Settings > Defaults > Fabric";
+    let words = |s: &str| s.replace('_', " ");
+    if row == format!("{SETTING}age_band") {
+        return format!("The fabric defaults state no age band. Choose it in {WHERE}.");
+    }
+    if let Some(t) = row.strip_prefix(&format!("{SETTING}construction_")) {
+        let t = words(t);
+        return if fields.is_empty() {
+            format!("The {t} fabric default cannot be read. Set it again in {WHERE}.")
+        } else {
+            let list: Vec<String> = fields.iter().map(|f| words(f)).collect();
+            format!("The {t} fabric default states no {}. Choose it in {WHERE}, or on each {t} element.", list.join(" or "))
+        };
+    }
+    format!("No air test is stated, so the leakage is estimated from the Metadata row {row}, which the model does not state. Enter the air test result in Global Settings, or add the row as a JSON object with number_of_open_fireplaces and the other leakage-estimate inputs.")
 }
 
 /// The front door: the door marked `is_front_door`, or the model's only door.
@@ -3291,6 +3330,17 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert!(notices.iter().any(|n| n
             .message
             .contains("Region Wales, as stated for postcode area CH")));
+        // A retired row fails loudly, naming the row and the fix.
+        for (field, fix) in [
+            ("HEMIE_region", "postcode"),
+            ("HEMIE_front_door", "front door"),
+        ] {
+            let (_, errors, _) =
+                run(&house(gable_roof()).replace("Postcode,", &format!("{field},x\nPostcode,")));
+            assert_eq!(errors.len(), 1, "{field}: {errors:#?}");
+            assert_eq!(errors[0].path, format!("/Metadata/{field}"));
+            assert!(errors[0].message.contains(fix), "{errors:#?}");
+        }
         // Elsewhere the nation comes from the postcode, whatever a stale stated nation says.
         let stale = house(gable_roof()).replace("Postcode,", "HEMIE_nation,Wales\nPostcode,");
         assert_eq!(run(&stale).0["Zone"]["region"], "England");
@@ -3323,7 +3373,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
-    fn missing_settings_are_listed_in_one_error() {
+    fn each_missing_setting_is_one_error_in_plain_words() {
         let text = house(gable_roof())
             .replace("HEMIE_age_band,I\n", "")
             .replace(
@@ -3331,12 +3381,20 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 "",
             );
         let (_, errors, _) = run(&text);
-        assert_eq!(errors.len(), 1, "{errors:#?}");
-        assert_eq!(errors[0].path, "/Metadata");
-        assert!(errors[0].message.contains("HEMIE_age_band"));
-        assert!(errors[0]
-            .message
-            .contains("HEMIE_construction_external_wall with wall_construction_type"));
+        assert_eq!(errors.len(), 2, "{errors:#?}");
+        assert_eq!(errors[0].path, "/Metadata/HEMIE_age_band");
+        assert!(errors[0].message.contains("state no age band"));
+        assert_eq!(errors[1].path, "/Metadata/HEMIE_construction_external_wall");
+        assert!(
+            errors[1]
+                .message
+                .contains("external wall fabric default states no wall construction type"),
+            "{errors:#?}"
+        );
+        assert!(
+            !errors.iter().any(|e| e.message.contains("HEMIE_")),
+            "{errors:#?}"
+        );
     }
 
     #[test]

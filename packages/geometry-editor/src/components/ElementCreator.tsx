@@ -4343,7 +4343,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={handleResetName}
                 >
-                  Reset to auto
+                  {/* Icon only, as the field reset buttons draw it: the name keeps the row's width. */}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <polyline points="23,4 23,10 17,10" stroke="currentColor" strokeWidth="2" />
+                    <polyline points="1,20 1,14 7,14" stroke="currentColor" strokeWidth="2" />
+                    <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" stroke="currentColor" strokeWidth="2" />
+                  </svg>
                 </button>
               ) : null}
               <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('name', elementName)} issue={getFieldValidationIssue('name', elementName) || undefined} />
@@ -4491,8 +4496,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               )}
             </div>
 
-            {/* Element preset selector – shown for Opaque/Transparent types */}
-            {PRESET_ELEMENT_TYPES.includes(elementType) && elementPresetOptions.length > 0 && (
+            {/* Element preset selector – Opaque/Transparent types; a HEM Database target takes none */}
+            {!hemDatabaseProducts && PRESET_ELEMENT_TYPES.includes(elementType) && elementPresetOptions.length > 0 && (
               <div className="element-editor-row">
                 <div className="element-label">Preset:</div>
                 <div className="element-editor-control">

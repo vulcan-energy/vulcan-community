@@ -76,7 +76,7 @@ function inlineLabelRow(primary: React.ReactNode, suffix: string): React.ReactNo
   );
 }
 
-/** Table 3.6.b row index → concise solar-blocking band (Low/Medium/High). */
+/** DESNZ-defined preset row index → concise solar-blocking band (Low/Medium/High). */
 function solarBlockageLabel(tier: 0 | 1 | 2): string {
   return tier === 0 ? 'Low' : tier === 1 ? 'Medium' : 'High';
 }

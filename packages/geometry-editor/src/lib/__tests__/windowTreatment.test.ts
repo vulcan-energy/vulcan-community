@@ -10,7 +10,7 @@ import {
 } from '../windowTreatment';
 
 describe('windowTreatment', () => {
-  it('looks up Table 3.6.b trans_red', () => {
+  it('looks up the DESNZ-defined trans_red', () => {
     expect(getTableTransRed('white_venetian', 0, 'inside')).toBe(0.25);
     expect(getTableTransRed('white_venetian', 0, 'outside')).toBe(0.1);
     expect(getTableTransRed('aluminium', 0, 'inside')).toBe(0.2);

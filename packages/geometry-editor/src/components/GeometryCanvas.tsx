@@ -1814,9 +1814,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       window.removeEventListener('blur', handleMouseUp);
     };
   }, [endCanvasPanGesture]);
-  const presetOptionsResetKey = PRESET_DRAW_TYPES.has(drawElementType)
-    ? drawElementType
-    : 'unsupported';
+  // A HEM Database target takes no element presets (`TargetRules.hemDatabaseProducts`).
+  const { hemDatabaseProducts } = useTargetRules();
+  const presetsOffered = !hemDatabaseProducts && PRESET_DRAW_TYPES.has(drawElementType);
+  const presetOptionsResetKey = presetsOffered ? drawElementType : 'unsupported';
   const emptyElementPresetOptions = useMemo<
     Array<{ value: string; label: string; source: 'system' | 'user' }>
   >(() => [], []);
@@ -1827,7 +1828,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   // Build preset options by scanning files. The manifest only marks library-owned files.
   useEffect(() => {
-    if (!PRESET_DRAW_TYPES.has(drawElementType)) {
+    if (!presetsOffered) {
       setElementPresetOptions([]);
       setDrawPreset('');
       setDrawPresetData(null);
@@ -1850,6 +1851,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return () => { cancelled = true; };
   }, [
     drawElementType,
+    presetsOffered,
     PRESET_DRAW_TYPES,
     setDrawPreset,
     setDrawPresetData,
@@ -8922,6 +8924,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       {fabricGroups.length > 0 && (
         // Its own card at the canvas's lower left, clear of the panels; an entry selects its elements.
         <div className="glass-panel fabric-legend" role="region" aria-label="Colour by fabric">
+          <div className="fabric-legend-title">Colour by fabric</div>
           {fabricGroups.map((group) => (
             <button
               key={group.label}

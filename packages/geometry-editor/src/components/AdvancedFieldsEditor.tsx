@@ -1210,7 +1210,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       );
     }
 
-    // Window `treatment`: use simplified control below (Table 3.6.b + schema fields).
+    // Window `treatment`: use simplified control below (DESNZ-defined presets + schema fields).
     if (elementType === 'BuildingElementTransparent' && advancedProperties.treatment) {
       delete advancedProperties.treatment;
     }

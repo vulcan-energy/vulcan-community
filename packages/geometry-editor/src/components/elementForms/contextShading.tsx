@@ -33,6 +33,7 @@ import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
 import { decimalInputProps, useIntegerInput, type NumericDraftInputBinding } from './formPrimitives';
 import { ADJACENT_LIKE_ELEMENT_TYPES } from '../../lib/elementArea';
+import { ELEMENT_TYPE_COMPACT_LABELS } from '../../lib/elementTypeMetadata';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
 type ContextShadingType = '' | 'obstacle' | 'overhang';
@@ -209,7 +210,7 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
               ...elementIds
                 .map(id => elementsById[id])
                 .filter(el => el && ['BuildingElementGround', 'BuildingElementOpaque', ...ADJACENT_LIKE_ELEMENT_TYPES].includes(el.type))
-                .map(el => ({ value: el!.name, label: `${el!.name} (${el!.type})` }))
+                .map(el => ({ value: el!.name, label: `${el!.name} (${ELEMENT_TYPE_COMPACT_LABELS[el!.type]})` }))
             ]}
             variant="ghost"
             size="md"

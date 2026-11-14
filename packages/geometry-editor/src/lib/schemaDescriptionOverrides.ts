@@ -11,7 +11,7 @@
  * - Some fields are UI/CSV-only and are intentionally *not* in the schema.
  *
  * This file is the **single location** for HEM/FHS guidance-aligned tooltip descriptions
- * (including summaries aligned with `HEM_FHS_Guidance/Dwelling Details.pdf` where noted).
+ * (DESNZ-defined input summaries).
  *
  * Policy:
  * - If schema provides a non-empty description: **use schema**
@@ -194,7 +194,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'subcategory_WetEmitter': {
     description:
-      'Type of heat emitter (wet): radiator, underfloor heating, or fan coil (HEM Emitters §5.4.2.1–2). Determines required inputs and how the circuit is described; full HEM intake also ties products to the PCDB.',
+      'Type of heat emitter (wet): radiator, underfloor heating, or fan coil. Determines required inputs and how the circuit is described; full HEM intake also ties products to the PCDB.',
     type: 'string',
   },
   'subcategory_HotWaterDemand': {
@@ -242,32 +242,32 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'area_WetEmitter': {
     description:
-      'Underfloor heating: gross heated floor area (m²) for this UFH entry. HEM Emitters §5.4.2.2 notes UFH uses total area rather than the same “number of elements” convention as radiators and fan coils.',
+      'Underfloor heating: gross heated floor area (m²) for this UFH entry. UFH uses total area rather than the same “number of elements” convention as radiators and fan coils.',
     type: 'number',
     units: 'm²',
   },
-  // FHS wet emitter item fields — `input_fhs` omits descriptions on `emitters[]` items; copy below is aligned to HEM_FHS_Guidance/Emitters.pdf (§5.4.x).
+  // FHS wet emitter item fields — `input_fhs` omits descriptions on `emitters[]` items; copy below follows the DESNZ-defined emitter inputs.
   'WetEmitter:length': {
     description:
-      'Standard radiator (§5.4.3.2): horizontal length of one panel. HEM text uses millimetres from PCDB sizing; this field is metres (mm ÷ 1000). For the c_per_m branch, Vulcan multiplies this by Unit number before sending total length to HEM. Towel radiators (§5.4.3.3): model as T10 and enter equivalent length from heat‑emitting area — not duct length or linear‑bridge geometry.',
+      'Standard radiator: horizontal length of one panel. HEM text uses millimetres from PCDB sizing; this field is metres (mm ÷ 1000). For the c_per_m branch, Vulcan multiplies this by Unit number before sending total length to HEM. Towel radiators: model as T10 and enter equivalent length from heat‑emitting area — not duct length or linear‑bridge geometry.',
     type: 'number',
     units: 'm',
   },
   'WetEmitter:n': {
     description:
-      'Radiator: exponent n in the catalogue characteristic equation (BS EN 442 style). Separate from HEM “Number of elements” (§5.4.2.2), i.e. how many radiators/fancoils share this spec — use Unit number for that count.',
+      'Radiator: exponent n in the catalogue characteristic equation (BS EN 442 style). Separate from HEM “Number of elements”, i.e. how many radiators/fancoils share this spec — use Unit number for that count.',
     type: 'number',
     unitSemantic: 'unitless',
   },
   'WetEmitter:c': {
     description:
-      'Radiator: overall characteristic constant c (dimensionless) paired with thermal_mass when heat output is not expressed per metre of panel length (alternative branch to length + c_per_m; see §5.4.3.2 and PCDB / catalogue data).',
+      'Radiator: overall characteristic constant c (dimensionless) paired with thermal_mass when heat output is not expressed per metre of panel length (alternative branch to length + c_per_m; see PCDB / catalogue data).',
     type: 'number',
     unitSemantic: 'unitless',
   },
   'WetEmitter:c_per_m': {
     description:
-      'Radiator: characteristic constant per metre of horizontal panel length — use with length and thermal_mass_per_m when catalogue data is per metre (§5.4.3.2 length of radiator).',
+      'Radiator: characteristic constant per metre of horizontal panel length — use with length and thermal_mass_per_m when catalogue data is per metre.',
     type: 'number',
     units: '1/m',
   },
@@ -285,13 +285,13 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'WetEmitter:frac_convective': {
     description:
-      'Convection fraction: portion of heat to the room delivered by convection (0–1); 1 means fully convective. Same idea as §5.4.1.2 for instant electric; for wet emitters see §5.4.2 general inputs (this value is per emitter item on the circuit). If left blank HEM applies a default by emitter type — radiator 0.4, UFH 0.43, fancoil 1.0 — so set it explicitly to keep emitters on the same circuit consistent.',
+      'Convection fraction: portion of heat to the room delivered by convection (0–1); 1 means fully convective. Same idea as for instant electric; for wet emitters this value is per emitter item on the circuit. If left blank HEM applies a default by emitter type — radiator 0.4, UFH 0.43, fancoil 1.0 — so set it explicitly to keep emitters on the same circuit consistent.',
     type: 'number',
     unitSemantic: 'fraction',
   },
   'WetEmitter:equivalent_specific_thermal_mass': {
     description:
-      'Underfloor heating: equivalent thermal mass per m² of heated floor (kJ/m²K). Part of the UFH thermal response together with system performance factor and floor area (§5.4.2 wet distribution; UFH area handling per §5.4.2.2 footnote).',
+      'Underfloor heating: equivalent thermal mass per m² of heated floor (kJ/m²K). Part of the UFH thermal response together with system performance factor and floor area.',
     type: 'number',
     units: 'kJ/m²K',
   },
@@ -303,19 +303,19 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'WetEmitter:emitter_floor_area': {
     description:
-      'Underfloor heating: gross heated floor area (m²) for this emitter object. The batch build maps the main Area field here; edit in Advanced only for an intentional override (§5.4.2.2 footnote on UFH total area vs element counts).',
+      'Underfloor heating: gross heated floor area (m²) for this emitter object. The batch build maps the main Area field here; edit in Advanced only for an intentional override.',
     type: 'number',
     units: 'm²',
   },
   'WetEmitter:n_units': {
     description:
-      'Fan coil: number of units of this specification in the zone (§5.4.2.2 “Number of elements” for fan coils). Prefer Unit number in the main form — it is merged into n_units on export.',
+      'Fan coil: number of units of this specification in the zone. Prefer Unit number in the main form — it is merged into n_units on export.',
     type: 'integer',
     unitSemantic: 'unitless',
   },
   'WetEmitter:fancoil_test_data': {
     description:
-      'Fan coil manufacturer test data (§5.4.3.4–5): temperature difference vs heat output points and fan power (W). Use the structured fields in Advanced — do not paste raw JSON. Full HEM intake normally selects fan coils from the PCDB.',
+      'Fan coil manufacturer test data: temperature difference vs heat output points and fan power (W). Use the structured fields in Advanced — do not paste raw JSON. Full HEM intake normally selects fan coils from the PCDB.',
     type: 'object',
   },
   'WetEmitter:fancoil:temperature_diff': {
@@ -325,7 +325,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'WetEmitter:unit_number': {
     description:
-      'Number of radiators or fan coil systems with this specification in the dwelling (HEM §5.4.2.2 “Number of elements”). Underfloor heating is described by total floor area instead of this count.',
+      'Number of radiators or fan coil systems with this specification in the dwelling. Underfloor heating is described by total floor area instead of this count.',
     type: 'number',
     unitSemantic: 'unitless',
   },
@@ -706,18 +706,18 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'wet_emitter_subcategory': {
     description:
-      'Wet heat emitter category: radiator, underfloor heating, or fan coil (HEM Emitters §5.4.2). Same role as subcategory on geometry rows.',
+      'Wet heat emitter category: radiator, underfloor heating, or fan coil. Same role as subcategory on geometry rows.',
     type: 'string',
   },
   'wet_emitter_area': {
     description:
-      'UFH gross heated floor area (m²) for this entry — HEM Emitters §5.4.2.2 (UFH uses total area; radiator/fancoil use element counts).',
+      'UFH gross heated floor area (m²) for this entry (UFH uses total area; radiator/fancoil use element counts).',
     type: 'number',
     units: 'm²',
   },
   'wet_emitter_unit_number': {
     description:
-      'Radiator/fancoil count for this specification (HEM §5.4.2.2 “Number of elements”). Distinct from radiator catalogue exponent n.',
+      'Radiator/fancoil count for this specification. Distinct from radiator catalogue exponent n.',
     type: 'number',
   },
   // MechanicalVentilationDuctwork - CSV reference field
@@ -1492,7 +1492,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'BuildingElementTransparent:treatment': {
     description:
-      'Blinds or curtains on this window (Home Energy Model section 3.6.4). When modelled as closed, they add extra thermal resistance (ΔR) and reduce solar gains. Use the table presets or enter custom values — not a generic “surface finish”.',
+      'Blinds or curtains on this window. When modelled as closed, they add extra thermal resistance (ΔR) and reduce solar gains. Use the table presets or enter custom values — not a generic “surface finish”.',
     type: 'array',
   },
   'BuildingElementTransparent:g_value': {
@@ -1512,7 +1512,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'label:Blinds / curtains': {
     description:
-      'Blinds or curtains for this glazing element. Controls solar transmittance reduction and extra thermal resistance when the treatment is closed, per HEM Table 3.6.b and `WindowTreatment` in the input schema.',
+      'Blinds or curtains for this glazing element. Controls solar transmittance reduction and extra thermal resistance when the treatment is closed, per the DESNZ-defined presets and `WindowTreatment` in the input schema.',
     type: 'array',
   },
   'treatment': {

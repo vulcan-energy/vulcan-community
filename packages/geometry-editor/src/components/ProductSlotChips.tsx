@@ -22,9 +22,10 @@ function productSlotChip(slot: GeometryProductSlot): { text: string; title: stri
       missing: true,
     };
   }
+  const name = slot.label ?? `Product ${slot.product_id}`;
   return {
-    text: slot.source === 'default' ? 'Default product' : 'Product',
-    title: `${slot.label ?? `Product ${slot.product_id}`}. ${sentence(slot.rule)}.`,
+    text: slot.source === 'default' ? `Default: ${name}` : name,
+    title: `${name}. ${sentence(slot.rule)}.`,
     missing: false,
   };
 }

@@ -38,7 +38,7 @@ it('renders nothing when the conversion reports no slot for the element', () => 
 
 it('names the source, gives the product and rule on hover, and opens the picker', () => {
   renderChips('Heat pump', [slot('Heat pump', { product_id: 600001, source: 'default', label: 'HEM Default MEV', rule: 'the only CentralisedMev product' })]);
-  const chip = screen.getByRole('button', { name: 'Default product' });
+  const chip = screen.getByRole('button', { name: 'Default: HEM Default MEV' });
   expect(chip.title).toBe('HEM Default MEV. The only CentralisedMev product.');
   expect(screen.queryByText(/picker for/)).toBeNull();
   fireEvent.click(chip);
@@ -47,7 +47,7 @@ it('names the source, gives the product and rule on hover, and opens the picker'
 
 it('shows a picked product as Product', () => {
   renderChips('Heat pump', [slot('Heat pump', { product_id: 693003, label: 'HEM Default ASHP 6kW' })]);
-  expect(screen.getByRole('button', { name: 'Product' }).title).toBe('HEM Default ASHP 6kW. Picked on the element.');
+  expect(screen.getByRole('button', { name: 'HEM Default ASHP 6kW' }).title).toBe('HEM Default ASHP 6kW. Picked on the element.');
 });
 
 it('shows a needed pick as an error naming what to pick, and informs only without a picker', () => {

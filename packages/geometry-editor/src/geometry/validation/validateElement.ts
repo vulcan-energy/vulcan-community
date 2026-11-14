@@ -1875,7 +1875,7 @@ export const validateElementCore = (
           // A thickness the model gives (wall layers, floor, ground floor) needs no message.
           const thickness = contextShadingDistanceDetails(contextElement, parent, Object.values(elementsById))?.thickness;
           if (thickness?.source === 'none' && !unused) {
-            warnings.push(geo('No wall thickness in the model (no construction layers on the closest external wall, no thickness_walls on the floor or the ground floor), so the distance is measured from the internal wall line.', 'distance'));
+            warnings.push(geo('The model gives no wall thickness, so the distance is measured from the inside of the wall. Add construction layers to the closest external wall, or a wall thickness to the ground floor.', 'distance'));
           }
         } else {
           issues.push(geo('Missing parent or coordinates', 'parent_element'));
@@ -2239,12 +2239,13 @@ export const validateElementCore = (
       );
       const allRequiredFields = [...new Set([...requiredFields, ...conditionalRequiredFields])];
       const reportedFields = new Set(issues.map((issue) => issue.fieldKey));
-      const hiddenFields = new Set(targetRules(schemaPort, context.complianceSettings ?? {}).hiddenFields[element.type] ?? []);
+      const rules = targetRules(schemaPort, context.complianceSettings ?? {});
+      const hiddenFields = new Set([...(rules.hiddenFields[element.type] ?? []), ...(rules.optionalFields[element.type] ?? [])]);
 
       for (const field of allRequiredFields) {
         // a8/a9: the converter always sets this value, and no form offers it.
         if (field === 'is_adjacent_space_within_dwelling') continue;
-        // The target hides it: the converter or another form supplies it.
+        // The target hides it or leaves it optional: the converter or another form supplies it.
         if (hiddenFields.has(field)) continue;
         // Check if field exists in element directly or in extra_json
         // Also check for null/undefined values (they count as missing)

@@ -920,7 +920,8 @@ function computeFieldPresentationState(args: {
  * row is a JSON blob edited as text. Read off the top-level `type` and off any
  * `anyOf`/`oneOf` branch, because HEM writes both shapes.
  */
-function schemaIsJsonLike(s: JsonRecord): boolean {
+// eslint-disable-next-line react-refresh/only-export-components -- schema predicate shared with DirectAdvancedFields.
+export function schemaIsJsonLike(s: JsonRecord): boolean {
   const types = schemaTypeList(s);
   const anyOf = schemaAlternatives(s, 'anyOf') ?? [];
   const oneOf = schemaAlternatives(s, 'oneOf') ?? [];
@@ -1985,7 +1986,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
           error={cfg.validateValue ? (localError ?? cfg.validateValue(data).errors?.[0]) : undefined}
           size="md"
           helperText={undefined}
-          placeholder={isBlank ? (defaultPlaceholder ?? examplePlaceholder) : undefined}
+          placeholder={isBlank ? (defaultPlaceholder ?? examplePlaceholderText(examplePlaceholder)) : undefined}
           className={isCustom ? 'custom-value' : ''}
         />
         {!cfg.validateValue && localError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{localError}</div>)}
@@ -2322,6 +2323,20 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
   );
 };
 
+/**
+ * A schema example as the input shows it: a text example without JSON quotes, and no made-up
+ * "example" for free text. The copy button keeps the JSON form.
+ */
+const examplePlaceholderText = (example: string | undefined): string | undefined => {
+  if (!example?.startsWith('"')) return example;
+  const text = JSON.parse(example) as string;
+  return text === 'example' ? undefined : text;
+};
+
+/** A snake_case enum value as words; any other value as written. */
+const enumValueWords = (value: string): string =>
+  /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(value) ? `${value[0].toUpperCase()}${value.slice(1).replace(/_/g, ' ')}` : value;
+
 export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, errors, schema, uischema, config, enabled }) => {
   const defaults = useDefaultValues();
   const defaultsLookup = useDefaultsLookup();
@@ -2368,8 +2383,8 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     const enumIsBoolean = fromEnum.length > 0 && fromEnum.every((v) => typeof v === 'boolean');
     options = fromEnum.map((v) => {
       const value = String(v);
-      // Use description for junction types, otherwise use value as label
-      let label = value;
+      // Use description for junction types, otherwise the value in words (`optimised_inverter`: "Optimised inverter")
+      let label = enumValueWords(value);
       if (isJunctionType) {
         const description = JUNCTION_TYPE_DESCRIPTIONS[value];
         if (description) {

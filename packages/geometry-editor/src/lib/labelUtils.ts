@@ -270,7 +270,7 @@ export function getSmartLabelPillTexts(
       pills.push(`${Math.round(start)}°-${Math.round(end)}°`);
     }
     if (Number.isFinite(distance) && distance > 0) {
-      pills.push(`${Number(distance).toFixed(1)}m`);
+      pills.push(`${Number(distance).toFixed(2)}m`);
     }
     return pills;
   }

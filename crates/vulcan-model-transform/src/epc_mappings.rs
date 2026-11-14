@@ -348,9 +348,9 @@ pub(crate) fn check_solar_absorption(
                 && element.get("solar_absorption_coeff").is_none()
             {
                 let message = match (existing, from_a_colour) {
-                    (false, true) => format!("Element '{name}' gives a colour, which only an existing building may use. A new build states solar_absorption_coeff."),
-                    (false, false) => format!("Element '{name}' needs its solar_absorption_coeff. There is no default."),
-                    (true, _) => format!("Element '{name}' needs its solar_absorption_coeff or its surface colour (Light, Intermediate or Dark). There is no default."),
+                    (false, true) => format!("Element '{name}' gives a colour, which only an existing building may use. A new build states its solar absorption coefficient."),
+                    (false, false) => format!("Element '{name}' needs its solar absorption coefficient. There is no default."),
+                    (true, _) => format!("Element '{name}' needs its solar absorption coefficient or its surface colour (Light, Intermediate or Dark). There is no default."),
                 };
                 errors.push(error(
                     "E_EPC_SOLAR_ABSORPTION",
@@ -688,12 +688,21 @@ pub(crate) fn check_element_fields(
                     json_pointer(&["Zone", zone, "BuildingElement", name]),
                     format!(
                         "Element '{name}' ({kind}) needs {}. HEM:EPC has no default for them.",
-                        missing.join(", ")
+                        field_words(&missing)
                     ),
                 ));
             }
         }
     }
+}
+
+/// Schema field names as words for a message: "internal diameter (mm)".
+fn field_words<S: AsRef<str>>(fields: &[S]) -> String {
+    fields
+        .iter()
+        .map(|f| f.as_ref().replace("_mm", " (mm)").replace('_', " "))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Each drawn primary pipe states every field the target schema's pipe definition requires,
@@ -730,7 +739,7 @@ pub(crate) fn check_primary_pipework(
                 errors.push(error(
                     "E_EPC_REQUIRED_INPUT",
                     json_pointer(&["HotWaterSource", cylinder, "primary_pipework", &i.to_string()]),
-                    format!("This primary pipe of cylinder '{cylinder}' needs {}. HEM:EPC has no default for them.", missing.join(", ")),
+                    format!("This primary pipe of cylinder '{cylinder}' needs {}. HEM:EPC has no default for them.", field_words(&missing)),
                 ));
             }
         }

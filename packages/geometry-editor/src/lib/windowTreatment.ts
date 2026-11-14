@@ -5,7 +5,7 @@ import { readRecord } from './jsonTypes';
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
 
 /**
- * HEM Table 3.6.b — solar transmittance reduction factors for curtains/blinds.
+ * DESNZ-defined solar transmittance reduction factors for curtains/blinds.
  * Maps to `WindowTreatment.trans_red` with `delta_r` and `controls` from the form.
  */
 
@@ -215,7 +215,7 @@ export function extraJsonToWindowTreatmentForm(
     if (ui.colouredKind) base.colouredKind = ui.colouredKind;
     const expected = getTableTransRed(ui.category, ui.tier, ui.mounting);
     if (ui.source === 'table' && expected !== undefined && Math.abs(expected - tr) > 1e-6) {
-      // Value differs from Table 3.6.b — treat as custom so it round-trips (use "Custom solar" to edit).
+      // Value differs from the DESNZ-defined presets — treat as custom so it round-trips (use "Custom solar" to edit).
       base.source = 'custom';
       base.custom_type = ty;
       base.custom_trans_red = String(tr);

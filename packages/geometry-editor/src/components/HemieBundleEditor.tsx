@@ -51,7 +51,7 @@ const CONSERVATORY_FIELDS: Field<ConservatoryParameters>[] = [
     kind: 'choice',
     options: [{ value: '', label: 'Choose…' }, ...['corridor', 'garage', 'roof void', 'stairwell'].map((v) => ({ value: v, label: v[0].toUpperCase() + v.slice(1) }))],
     shown: (p) => p.conservatoryType === 'unheated',
-    note: 'HEMIE has no conservatory type yet; pick the closest.',
+    note: 'There is no conservatory option. Pick the closest space type.',
   },
   { key: 'centre', label: 'Centre from wall start', kind: 'number', unit: 'm' },
   { key: 'width', label: 'Width', kind: 'number', unit: 'm' },
