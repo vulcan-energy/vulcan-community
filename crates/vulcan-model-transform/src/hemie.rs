@@ -2540,8 +2540,8 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
     }
 }
 
-/// The HEMIE InfiltrationVentilation Geometry needs: the model's ventilation inputs, and its air
-/// test or, without one, the leakage-estimate inputs from the settings.
+/// The HEMIE InfiltrationVentilation Geometry needs: the model's ventilation inputs and its air
+/// test. Without an air test the conversion stops (DESNZ question E17).
 fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
     let mut iv = Map::new();
     iv.insert("model_type".into(), json!("hemie"));
