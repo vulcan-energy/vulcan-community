@@ -1182,6 +1182,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       focusBaseField(baseKey);
       return;
     }
+    // Host-contributed fields mark their row; see GeometryInspectorOpeningFieldsContribution.
+    const hostField = document.querySelector<HTMLElement>(`[data-host-field-key="${CSS.escape(fieldKey)}"]`);
+    if (hostField) {
+      hostField.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      hostField.querySelector<HTMLElement>('input, select, textarea')?.focus();
+      return;
+    }
     setComparisonFocusRequest({ fieldKey, version: Date.now() });
   }, [baseFieldNodes, focusBaseField]);
 
@@ -3307,6 +3314,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     return getElementById(selection.id) ?? null;
   }, [selection?.id, getElementById, selectedElementV]);
   const ElementFieldsRenderer = inspectorContributions.elementFields?.render;
+  const OpeningFieldsRenderer = inspectorContributions.openingFields?.render;
 
   const selectedDormerMetadata = getDormerBundleMetadata(selectedElement);
   const selectedIsDormerAnchor = isDormerAnchorElement(selectedElement);
@@ -4133,6 +4141,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       },
       renderMvhrDuctAndTerminalManager,
       productCatalogue,
+      openingFields: OpeningFieldsRenderer && selection?.type === 'element' && selectedElement?.type === 'BuildingElementTransparent' ? (
+        <OpeningFieldsRenderer
+          element={selectedElement as unknown as Readonly<Record<string, unknown>>}
+          onPatchExtraJson={(update) => {
+            const currentElement = getElementById(selection.id);
+            commitExistingElementDraft({ extra_json: update({ ...readExtraJsonRecord(currentElement?.extra_json) }) });
+          }}
+        />
+      ) : null,
       hemDatabaseProducts,
       systemHasProductSlot: !!selectedElement?.name && !!productSlots?.some((slot) => slot.row === selectedElement.name),
       renderSpaceHeatSystemPicker,
