@@ -22,8 +22,10 @@ export interface BayParameters {
   centre: number;
   openingWidth: number;
   depth: number;
-  /** Angle of each side to the host wall: 90 is a square bay. */
-  sideAngle: number;
+  /** Width of the front facet (m): the opening width is a square bay. */
+  frontWidth: number;
+  /** Height of the bay walls (m); absent, the host wall's height. */
+  wallHeight?: number;
   roof: 'flat' | 'pitched' | 'none';
   sideWindows: boolean;
   sillHeight: number;
@@ -76,7 +78,7 @@ const MIN_FACET = 0.3;
 export const BAY_DEFAULTS: Omit<BayParameters, 'centre'> = {
   openingWidth: 2,
   depth: 0.6,
-  sideAngle: 45,
+  frontWidth: 0.8,
   roof: 'flat',
   sideWindows: true,
   sillHeight: 0.8,
@@ -274,17 +276,30 @@ export interface HemieBundleDraft {
   members: HemieBundleMemberDraft[];
 }
 
+/**
+ * A bay's saved parameters with a front width: a bay saved with a side angle (degrees to the
+ * host wall) gets the front width that angle gives.
+ */
+export function bayParameters(saved: BayParameters & { sideAngle?: number }): BayParameters {
+  if (typeof saved.frontWidth === 'number' || typeof saved.sideAngle !== 'number') return saved;
+  const { sideAngle, ...rest } = saved;
+  const taper = sideAngle >= 90 ? 0 : saved.depth / Math.tan((sideAngle * Math.PI) / 180);
+  return { ...rest, frontWidth: round3(saved.openingWidth - 2 * taper) };
+}
+
+const bayWallHeight = (host: BuildingElementOpaque, p: BayParameters) => (typeof p.wallHeight === 'number' ? p.wallHeight : host.height);
+
 /** Why these parameters cannot be drawn on this host, or null. */
 export function bayParametersProblem(host: BuildingElementOpaque, p: BayParameters): string | null {
   const f = hostFrame(host);
-  const taper = p.sideAngle >= 90 ? 0 : p.depth / Math.tan((p.sideAngle * Math.PI) / 180);
+  const H = bayWallHeight(host, p);
   if (!(p.depth > 0) || !(p.openingWidth > 0)) return 'Give the bay a depth and an opening width above 0.';
-  if (!(p.sideAngle > 0 && p.sideAngle <= 90)) return 'Give the side angle between 1° and 90° (90° is square).';
-  if (p.openingWidth - 2 * taper < MIN_FACET) return `The sides meet before the front: make the opening wider, the bay shallower or the side angle steeper (front at least ${MIN_FACET} m).`;
+  if (!(p.frontWidth >= MIN_FACET && p.frontWidth <= p.openingWidth)) return `Give the front width from ${MIN_FACET} m to the opening width (${roundToTwoDecimals(p.openingWidth)} m).`;
+  if (!(H > 0 && H <= host.height)) return `Give the bay wall height above 0 m and no more than the wall height (${host.height} m), or leave it blank.`;
   if (p.centre - p.openingWidth / 2 < -1e-6 || p.centre + p.openingWidth / 2 > f.length + 1e-6) return `The opening runs past the ends of '${host.name}' (${roundToTwoDecimals(f.length)} m long).`;
-  const side = p.depth / Math.sin((p.sideAngle * Math.PI) / 180);
+  const side = Math.hypot(p.depth, (p.openingWidth - p.frontWidth) / 2);
   if (p.sideWindows && side <= 2 * WINDOW_INSET) return `The sides are ${roundToTwoDecimals(side)} m, too short for side windows: make the bay deeper or turn the side windows off.`;
-  if (p.sillHeight + p.windowHeight > host.height) return `The windows reach above the bay walls (${host.height} m): lower the sill or the window height.`;
+  if (p.sillHeight + p.windowHeight > H) return `The windows reach above the bay walls (${H} m): lower the sill or the window height.`;
   return null;
 }
 
@@ -297,13 +312,13 @@ export function buildBayBundleDraft(input: BundleDraftInput<BayParameters>): Hem
   const tag = (role: string, extra: Partial<HemieBundleTag> = {}) => ({
     hemie_bundle: { kind: 'bay', bundle_id: bundleId, role, host_wall: host.name, ...extra },
   });
-  const taper = p.sideAngle >= 90 ? 0 : p.depth / Math.tan((p.sideAngle * Math.PI) / 180);
+  const taper = (p.openingWidth - p.frontWidth) / 2;
   const c = add(f.start, scale(f.t, p.centre));
   const a = add(c, scale(f.t, -p.openingWidth / 2));
   const b = add(c, scale(f.t, p.openingWidth / 2));
   const f0 = add(add(a, scale(f.t, taper)), scale(f.n, p.depth));
   const f1 = add(add(b, scale(f.t, -taper)), scale(f.n, p.depth));
-  const H = f.height;
+  const H = bayWallHeight(host, p);
   const rise = p.roof === 'pitched' ? round3(p.depth * Math.tan((BAY_ROOF_PITCH * Math.PI) / 180)) : 0;
   const sideExtra = (role: string, rising: boolean) => ({
     ...tag(role),

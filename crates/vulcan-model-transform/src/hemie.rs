@@ -66,7 +66,7 @@ const ELEMENT_OVERRIDE_KEYS: [&str; 5] = [
 ];
 /// Fields only this converter reads from an element row; no HEM input takes them, so the
 /// full-input build leaves them out of the HEM element.
-pub(crate) const ELEMENT_ONLY_KEYS: [&str; 8] = [
+pub(crate) const ELEMENT_ONLY_KEYS: [&str; 13] = [
     "age_band",
     "is_front_door",
     "wall_construction_type",
@@ -75,14 +75,35 @@ pub(crate) const ELEMENT_ONLY_KEYS: [&str; 8] = [
     "glazing_gap",
     "insulation_location",
     "construction_weight",
+    "retrofit_insulation",
+    "insulation_thickness",
+    "adjacent_space_type",
+    "basement_depth_descriptor",
+    "basement_air_volume",
 ];
 
 #[path = "hemie_systems.rs"]
 mod systems;
 
-fn error(path: String, message: String) -> ValidationError {
+/// A park home, whose walls, floor and roof take the park home types (DESNZ-defined).
+fn is_park_home(model: &Value) -> bool {
+    model["General"]["build_type"] == "park home"
+}
+
+/// The dwelling's base storey as the existing-building input counts it (0 for a house or a
+/// ground-floor flat, -1 for a basement flat), from the model's storey of dwelling, which counts
+/// the ground storey as 1 (derived from the model).
+pub(crate) fn base_storey(model: &Value) -> Option<i64> {
+    model["General"]["storey_of_dwelling"]
+        .as_i64()
+        .map(|storey| storey - 1)
+}
+
+/// An existing-building conversion error; `topic` makes its code (`E_EPC_HEMIE_<topic>`, within
+/// the telemetry's 32 characters), so reports can tell which input stops a conversion.
+fn error(topic: &str, path: String, message: String) -> ValidationError {
     ValidationError {
-        code: "E_EPC_HEMIE".into(),
+        code: format!("E_EPC_HEMIE_{topic}"),
         path,
         message,
         schema_path: None,
@@ -615,6 +636,8 @@ struct Constructions {
     stated_glazing: BTreeSet<String>,
     /// Party walls that state no cavity type: HEMIE takes it from the age band (DESNZ-defined).
     party_walls_by_age_band: BTreeSet<String>,
+    /// Elements whose stated heat capacity is set aside: their type sets it.
+    heat_capacity_set_aside: BTreeSet<String>,
 }
 
 impl Constructions {
@@ -653,6 +676,7 @@ impl Ctx<'_> {
     fn need(&mut self, e: &El, key: &str) -> Option<f64> {
         let value = e.num(key);
         let missing = error(
+            "WALLS",
             e.path(),
             format!(
                 "'{}' does not state its {key}, which the existing-building converter needs.",
@@ -700,8 +724,32 @@ impl Ctx<'_> {
         let mut c = self.settings.construction(construction_type);
         c.insert("construction_type".into(), json!(construction_type));
         let first = elements[0];
-        for key in ELEMENT_OVERRIDE_KEYS {
+        // A park home construction takes none of these (HEMIE rejects them).
+        let park_home = construction_type.starts_with("park_home");
+        for key in ELEMENT_OVERRIDE_KEYS.into_iter().filter(|_| !park_home) {
             if let Some(value) = self.agreed(elements, key) {
+                c.insert(key.into(), value.clone());
+            }
+        }
+        // Derived from the model: the simpler insulation inputs, on the construction types
+        // that take them (HEMIE rejects a field its construction type does not take).
+        let walls = matches!(construction_type, "external_wall" | "sheltered_wall");
+        let insulated = construction_type.ends_with("_floor")
+            && !construction_type.starts_with("party")
+            && !park_home
+            || matches!(
+                construction_type,
+                "flat_roof"
+                    | "unheated_pitched_roof"
+                    | "heated_pitched_roof"
+                    | "mini_flat_roof"
+                    | "mini_pitched_roof"
+            );
+        for (key, takes) in [
+            ("retrofit_insulation", walls),
+            ("insulation_thickness", insulated),
+        ] {
+            if let Some(value) = takes.then(|| self.agreed(elements, key)).flatten() {
                 c.insert(key.into(), value.clone());
             }
         }
@@ -717,6 +765,7 @@ impl Ctx<'_> {
                     c.insert("mass_distribution_class".into(), json!(full));
                 }
                 None => self.errors.push(error(
+                    "CONSTRUCTION",
                     first.path(),
                     format!(
                         "'{}' has mass distribution class {class}. Use I, E, IE, D or M.",
@@ -734,6 +783,7 @@ impl Ctx<'_> {
                     c.insert("colour".into(), colour.clone());
                 }
                 Some(colour) => self.errors.push(error(
+                    "CONSTRUCTION",
                     first.path(),
                     format!(
                         "'{}' has colour {colour}. Use Light, Intermediate or Dark.",
@@ -754,7 +804,7 @@ impl Ctx<'_> {
         if construction_type == "party_wall" {
             // DESNZ-defined: a party wall's resistance is fixed; only its cavity and lining count.
         } else if u_values.len() > 1 {
-            self.errors.push(error(first.path(), format!("The existing-building EPC gives {} one construction, but their U-values differ ({}). Give them one U-value, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), u_values.into_iter().collect::<Vec<_>>().join(", "))));
+            self.errors.push(error("CONSTRUCTION", first.path(), format!("The existing-building EPC gives {} one construction, but their U-values differ ({}). Give them one U-value, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), u_values.into_iter().collect::<Vec<_>>().join(", "))));
         } else if let Some(u) = first.num("u_value") {
             c.insert("u_value".into(), json!(u));
             self.constructions
@@ -810,7 +860,7 @@ impl Ctx<'_> {
                         "unfilled_sealed" => ("unfilled_cavity", "sealed"),
                         "unfilled_unsealed" => ("unfilled_cavity", "unsealed"),
                         other => {
-                            self.errors.push(error(first.path(), format!("Party wall '{}' has cavity type '{other}', which the existing-building EPC does not take. Use solid, or a filled or unfilled cavity that is sealed or unsealed.", first.name)));
+                            self.errors.push(error("PARTY_WALL", first.path(), format!("Party wall '{}' has cavity type '{other}', which the existing-building EPC does not take. Use solid, or a filled or unfilled cavity that is sealed or unsealed.", first.name)));
                             ("", "")
                         }
                     };
@@ -854,7 +904,7 @@ impl Ctx<'_> {
             // DESNZ-defined (HEMIE): a roof with no insulation location has no insulation, and
             // a stated thickness is then not used; `unknown` takes the age-band thickness.
             if stated("insulation_thickness") {
-                self.errors.push(error(first.path(), format!("{names} {verb} an insulation thickness but no insulation location, so the thickness would not be used. Give the insulation location, or 'unknown' if it is not known.")));
+                self.errors.push(error("CONSTRUCTION", first.path(), format!("{names} {verb} an insulation thickness but no insulation location, so the thickness would not be used. Give the insulation location, or 'unknown' if it is not known.")));
             } else {
                 self.notices.push(notice(&first.path(), format!("{names} {verb} no insulation location, so the existing-building EPC models no roof insulation. If the roof is insulated, give the location, or 'unknown' to take the age-band thickness.")));
             }
@@ -872,49 +922,64 @@ impl Ctx<'_> {
             .collect();
         if values.len() > 1 {
             let field = key.replace('_', " ");
-            self.errors.push(error(elements[0].path(), format!("The existing-building EPC gives {} one {field}, but they state different values ({}). Give them one {field}, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), values.into_iter().collect::<Vec<_>>().join(", "))));
+            self.errors.push(error("CONSTRUCTION", elements[0].path(), format!("The existing-building EPC gives {} one {field}, but they state different values ({}). Give them one {field}, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), values.into_iter().collect::<Vec<_>>().join(", "))));
         }
         elements[0].get(key)
     }
 
-    /// The elements' areal heat capacity, alike on each (see `agreed`): a number in J/m2.K, or
-    /// a band at HEM:EPC's per-type class values (DESNZ-defined). A band the construction type
-    /// has no value for, or anything else, fails naming the element.
+    /// The elements' areal heat capacity, alike on each (see `agreed`), as `heat_capacity_rule`
+    /// allows it: a number in J/m2.K, or a band at its class value. Anything else fails naming
+    /// the element; a number typed as text is read, with a notice.
     fn heat_capacity(&mut self, construction_type: &str, elements: &[&El]) -> Option<f64> {
-        const BANDS: [&str; 5] = ["Very light", "Light", "Medium", "Heavy", "Very heavy"];
-        const WALL: [f64; 5] = [240_000.0, 450_000.0, 650_000.0, 850_000.0, 1_350_000.0];
-        const FLOOR: [f64; 5] = [50_000.0, 175_000.0, 275_000.0, 375_000.0, 475_000.0];
-        const ROOF: [f64; 3] = [50_000.0, 60_000.0, 100_000.0];
-        let value = self.agreed(elements, "areal_heat_capacity")?;
-        if let Some(n) = value.as_f64() {
-            return Some(n);
+        let rule = heat_capacity_rule(construction_type);
+        if rule == HeatCapacity::Fixed {
+            // A full-input model states one for every element, so it is set aside, reported once
+            // for the model. Set aside before `agreed`: values that are not used need not agree.
+            for e in elements
+                .iter()
+                .filter(|e| e.get("areal_heat_capacity").is_some())
+            {
+                self.constructions
+                    .heat_capacity_set_aside
+                    .insert(e.name.to_string());
+            }
+            return None;
         }
-        let (table, takes): (Vec<f64>, &str) = match construction_type {
-            "external_wall" | "sheltered_wall" => (WALL.to_vec(), "Very light to Very heavy"),
-            "party_wall" => (
-                WALL.iter().map(|v| v / 2.0).collect(),
-                "Very light to Very heavy",
-            ),
-            // Party floors and ceilings take only a construction weight (`party_construction`).
-            t if t.ends_with("_floor") => (FLOOR.to_vec(), "Very light to Very heavy"),
-            t if t.ends_with("_roof") => (ROOF.to_vec(), "Very light, Light or Medium"),
-            _ => (Vec::new(), ""),
-        };
-        let band = value
-            .as_str()
-            .and_then(|b| BANDS.iter().position(|x| *x == b));
-        let capacity = band.and_then(|i| table.get(i).copied());
+        let value = self.agreed(elements, "areal_heat_capacity")?;
+        let e = elements[0];
+        let typed = value.as_str().and_then(|s| s.trim().parse::<f64>().ok());
+        if let Some(n) = typed {
+            self.notices.push(notice(&e.path(), format!("'{}' states its areal heat capacity as text, \"{}\". It is read as {n} J/m²·K.", e.name, value.as_str().unwrap_or_default())));
+        }
+        let capacity = value.as_f64().or(typed).or_else(|| {
+            let HeatCapacity::Bands(table) = rule else {
+                return None;
+            };
+            let band = HEAT_CAPACITY_BANDS
+                .iter()
+                .position(|x| Some(*x) == value.as_str())?;
+            table.get(band).copied()
+        });
         if capacity.is_none() {
-            let e = elements[0];
-            let fix = if takes.is_empty() {
-                "Enter a number in J/m²·K.".to_string()
-            } else {
-                format!("Enter a number in J/m²·K, or {takes}.")
+            let fix = match rule {
+                HeatCapacity::Bands(table) => format!(
+                    "Enter a number in J/m²·K, or {}.",
+                    if table.len() == 5 {
+                        "Very light to Very heavy"
+                    } else {
+                        "Very light, Light or Medium"
+                    }
+                ),
+                _ => "Enter a number in J/m²·K.".to_string(),
             };
             self.errors.push(error(
+                "CONSTRUCTION",
                 e.path(),
                 format!("'{}' has areal heat capacity {value}. {fix}", e.name),
             ));
+        }
+        if capacity.is_some() && construction_type == "heated_basement_floor" {
+            self.notices.push(notice(&e.path(), format!("'{}' states its areal heat capacity, so the existing-building EPC uses it in place of the value it derives for the basement's floor, walls and ceiling.", e.name)));
         }
         capacity
     }
@@ -981,6 +1046,45 @@ impl Ctx<'_> {
             }
             _ => {}
         }
+    }
+}
+
+const HEAT_CAPACITY_BANDS: [&str; 5] = ["Very light", "Light", "Medium", "Heavy", "Very heavy"];
+/// DESNZ-defined: the class values of walls, floors and party walls (half the wall values), J/m2.K.
+const WALL: [f64; 5] = [240_000.0, 450_000.0, 650_000.0, 850_000.0, 1_350_000.0];
+const PARTY_WALL: [f64; 5] = [120_000.0, 225_000.0, 325_000.0, 425_000.0, 675_000.0];
+const FLOOR: [f64; 5] = [50_000.0, 175_000.0, 275_000.0, 375_000.0, 475_000.0];
+
+/// What an element may state as its areal heat capacity, by its construction type.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum HeatCapacity {
+    /// A band at these class values, or a number.
+    Bands(&'static [f64; 5]),
+    /// A number only.
+    Number,
+    /// Nothing: the value is set from the type.
+    Fixed,
+}
+
+/// DESNZ-defined (HEMIE thermal mass method): walls and floors take a class or a number; a
+/// heated basement's value is derived, so it takes a number only; a floor over an unheated
+/// space and the roofs other than a heated pitched roof take no override; doors, windows and a
+/// heated pitched roof take a documented number. Keep `hemieHeatCapacityBands` in step.
+fn heat_capacity_rule(construction_type: &str) -> HeatCapacity {
+    match construction_type {
+        "external_wall" | "sheltered_wall" => HeatCapacity::Bands(&WALL),
+        "party_wall" => HeatCapacity::Bands(&PARTY_WALL),
+        "suspended_floor"
+        | "not_edge_insulated_ground_attached_floor"
+        | "edge_insulated_ground_attached_floor"
+        | "unheated_basement_floor"
+        | "above_external_area_floor" => HeatCapacity::Bands(&FLOOR),
+        "above_internal_unconditioned_area_floor"
+        | "flat_roof"
+        | "unheated_pitched_roof"
+        | "mini_flat_roof"
+        | "mini_pitched_roof" => HeatCapacity::Fixed,
+        _ => HeatCapacity::Number,
     }
 }
 
@@ -1097,7 +1201,31 @@ fn merge_edges<'e>(ring: Vec<P>, walls: &[&'e El<'e>]) -> (Vec<P>, Vec<Option<&'
 // Conversion
 
 /// Replace the full-input zone and ventilation with HEMIE inputs. Errors name the element.
+/// A conversion that stops always reports an error: the unconverted zone's own schema errors
+/// are hidden (`is_unused_full_input`), so a silent stop would let the model pass.
 pub(crate) fn map_existing_building(
+    model: &mut Value,
+    csv: &Rows,
+    schema: &Value,
+    errors: &mut Vec<ValidationError>,
+    notices: &mut Vec<SchemaOmission>,
+) -> Option<shading::HemieShading> {
+    let before = errors.len();
+    let shading = convert_existing_building(model, csv, schema, errors, notices);
+    report_silent_stop(shading.is_none(), before, errors);
+    shading
+}
+
+/// A stop (paths such as no building part found) that recorded no error since `before`.
+fn report_silent_stop(stopped: bool, before: usize, errors: &mut Vec<ValidationError>) {
+    if stopped && errors.len() == before {
+        errors.push(error("STOREYS", "/Zone".into(), STOPPED_UNSAID.into()));
+    }
+}
+
+const STOPPED_UNSAID: &str = "The existing building could not be built from the drawing: no building part has its storeys. Check that each floor sits over the floor below.";
+
+fn convert_existing_building(
     model: &mut Value,
     csv: &Rows,
     schema: &Value,
@@ -1119,6 +1247,7 @@ pub(crate) fn map_existing_building(
     let converted = convert(&mut ctx, csv);
     for (row, fields) in &ctx.settings.missing {
         ctx.errors.push(error(
+            "SETTINGS",
             format!("/Metadata/{row}"),
             missing_setting_message(row, fields),
         ));
@@ -1144,6 +1273,10 @@ pub(crate) fn map_existing_building(
     if !stated_glazing.is_empty() {
         notices.push(notice("/Zone/constructions", format!("These windows state their own values, which the existing-building EPC uses in place of those for their glazing type and frame material: {}.", stated_glazing.join(", "))));
     }
+    let set_aside = std::mem::take(&mut ctx.constructions.heat_capacity_set_aside);
+    if !set_aside.is_empty() {
+        notices.push(notice("/Zone/constructions", format!("The existing-building EPC sets the areal heat capacity of roofs and of floors over an unheated space from their type, so the value these elements state is not used: {}.", quoted(&set_aside.iter().map(String::as_str).collect::<Vec<_>>()))));
+    }
     let by_age_band = std::mem::take(&mut ctx.constructions.party_walls_by_age_band);
     if !by_age_band.is_empty() {
         notices.push(notice(
@@ -1165,10 +1298,10 @@ pub(crate) fn map_existing_building(
 fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let els = elements(csv);
     let left_out = bundles::left_out(ctx, &els);
-    let (hosts, pieces, conservatory_floors) = bundles::conservatory_hosts(ctx, &els);
+    let (hosts, pieces, conservatory_floors, internal) = bundles::conservatory_hosts(ctx, &els);
     let els: Vec<El> = els
         .into_iter()
-        .filter(|e| !left_out.contains(e.name))
+        .filter(|e| !left_out.contains(e.name) && !internal.contains(e.name))
         .collect();
     let model = ctx.model;
     let zone_name = model["Zone"]
@@ -1179,6 +1312,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     for (field, fix) in RETIRED_SETTINGS {
         if ctx.settings.raw(field).is_some() {
             ctx.errors.push(error(
+                "SETTINGS",
                 format!("/Metadata/{field}"),
                 format!("{field} is no longer read. {fix}"),
             ));
@@ -1199,16 +1333,16 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
         if let Some(kind) = wall_kind(e) {
             if e.num("pitch").is_some_and(|p| (p - 90.0).abs() > 1e-6) {
-                ctx.errors.push(error(e.path(), format!("'{}' is a leaning wall (pitch {}). The existing-building converter takes vertical walls only.", e.name, e.num("pitch").unwrap_or_default())));
+                ctx.errors.push(error("WALLS", e.path(), format!("'{}' is a leaning wall (pitch {}). The existing-building converter takes vertical walls only.", e.name, e.num("pitch").unwrap_or_default())));
             } else if e.text("parent_element").is_some() && bundles::tag(e).is_none() {
-                ctx.errors.push(error(e.path(), format!("'{}' is a wall inside another element, which the existing-building converter does not take. Draw it as a wall of the storey outline.", e.name)));
+                ctx.errors.push(error("WALLS", e.path(), format!("'{}' is a wall inside another element, which the existing-building converter does not take. Draw it as a wall of the storey outline.", e.name)));
             } else {
                 walls.push((e, kind));
             }
         }
     }
     if walls.is_empty() {
-        ctx.errors.push(error(
+        ctx.errors.push(error("WALLS", 
             "/Zone".into(),
             "The model has no wall lines, so it has no storey outline for the existing-building EPC.".into(),
         ));
@@ -1265,7 +1399,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         .enumerate()
         .any(|(i, l)| *l != i as i64 + first)
     {
-        ctx.errors.push(error("/Zone".into(), format!("The floors with walls are {storey_levels:?}. Existing-building storeys start at floor {first} and follow one another.")));
+        ctx.errors.push(error("STOREYS", "/Zone".into(), format!("The floors with walls are {storey_levels:?}. Existing-building storeys start at floor {first} and follow one another.")));
         return None;
     }
     let on_level = |level: i64| -> Vec<&El> {
@@ -1284,8 +1418,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         let mut ring = match ring_of_walls(&on_level(level)) {
             Ok(ring) => ring,
             Err(message) => {
-                ctx.errors
-                    .push(error("/Zone".into(), format!("Floor {level}: {message}")));
+                ctx.errors.push(error(
+                    "STOREYS",
+                    "/Zone".into(),
+                    format!("Floor {level}: {message}"),
+                ));
                 return None;
             }
         };
@@ -1300,7 +1437,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             .iter()
             .find(|w| !w.pts.iter().all(|p| inside_or_on(*p, top)))
         {
-            ctx.errors.push(error(w.path(), format!("Floor {level} (the room in the roof) is not over floor {}: '{}' lies more than {TOL} m outside it. Move floor {level} over the floor below.", level - 1, w.name)));
+            ctx.errors.push(error("STOREYS", w.path(), format!("Floor {level} (the room in the roof) is not over floor {}: '{}' lies more than {TOL} m outside it. Move floor {level} over the floor below.", level - 1, w.name)));
             return None;
         }
     }
@@ -1321,7 +1458,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let cells = match faces(&arrangement) {
         Ok(cells) => cells,
         Err(message) => {
-            ctx.errors.push(error("/Zone".into(), message));
+            ctx.errors.push(error("STOREYS", "/Zone".into(), message));
             return None;
         }
     };
@@ -1343,7 +1480,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                     .iter()
                     .map(|g| (*g as i64 + first).to_string())
                     .collect();
-                ctx.errors.push(error(on_level(above)[0].path(), format!("Floor {above} is over a lower floor with no floor {} between them, around ({:.2}, {:.2}). A building part's storeys stack one on another; draw the missing floors there, or move the floor above.", missing.join(" or "), p[0], p[1])));
+                ctx.errors.push(error("STOREYS", on_level(above)[0].path(), format!("Floor {above} is over a lower floor with no floor {} between them, around ({:.2}, {:.2}). A building part's storeys stack one on another; draw the missing floors there, or move the floor above.", missing.join(" or "), p[0], p[1])));
             }
         }
     }
@@ -1371,7 +1508,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             .map(|(w, _)| *w)
             .find(|w| front.host() == Some(w.name) && w.level == first);
         if wall.is_none() {
-            ctx.errors.push(error(front.path(), format!("Front door '{}' is not in a wall of floor {first}. The reference building part's ground storey starts with the front-door wall; link the door to its wall.", front.name)));
+            ctx.errors.push(error("FRONT_DOOR", front.path(), format!("Front door '{}' is not in a wall of floor {first}. The reference building part's ground storey starts with the front-door wall; link the door to its wall.", front.name)));
         }
         wall
     });
@@ -1424,7 +1561,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                         ))
                     })
                 else {
-                    ctx.errors.push(error(front.path(), format!("Front door '{}' is not on the ground outline of its building part. Link it to an outside wall of floor 0.", front.name)));
+                    ctx.errors.push(error("FRONT_DOOR", front.path(), format!("Front door '{}' is not on the ground outline of its building part. Link it to an outside wall of floor 0.", front.name)));
                     return None;
                 };
                 ring.rotate_left(first);
@@ -1475,13 +1612,13 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                                 && boundary_dist(mid(a, b), &other.poly) <= TOL
                         });
                         if !shared {
-                            ctx.errors.push(error("/Zone".into(), format!("Floor {level} has no wall within {TOL} m of its outline between ({:.2}, {:.2}) and ({:.2}, {:.2}). Draw the wall there.", a[0], a[1], b[0], b[1])));
+                            ctx.errors.push(error("STOREYS", "/Zone".into(), format!("Floor {level} has no wall within {TOL} m of its outline between ({:.2}, {:.2}) and ({:.2}, {:.2}). Draw the wall there.", a[0], a[1], b[0], b[1])));
                         }
                     }
                 }
             }
             if carried.iter().all(Option::is_none) {
-                ctx.errors.push(error("/Zone".into(), format!("Building part '{}' has no walls on floor {level}: floor {} does not sit on the floor below. The existing-building EPC needs each storey stacked on the one below.", names[pi], level + 1)));
+                ctx.errors.push(error("STOREYS", "/Zone".into(), format!("Building part '{}' has no walls on floor {level}: floor {} does not sit on the floor below. The existing-building EPC needs each storey stacked on the one below.", names[pi], level + 1)));
                 continue;
             }
             if lengths == 0.0 {
@@ -1506,11 +1643,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
     }
     for w in low {
-        ctx.errors.push(error(w.path(), format!("'{}' has height {} m. The existing-building EPC takes a storey's ceiling height from its walls, which run from the floor to the floor or roof above; give the wall its height, more than the {STOREY_GAP} m storey gap.", w.name, w.num("height").unwrap_or_default())));
+        ctx.errors.push(error("WALLS", w.path(), format!("'{}' has height {} m. The existing-building EPC takes a storey's ceiling height from its walls, which run from the floor to the floor or roof above; give the wall its height, more than the {STOREY_GAP} m storey gap.", w.name, w.num("height").unwrap_or_default())));
     }
     for (w, _) in &walls {
         if Some(w.level) != roof_room && !used.contains(w.name) {
-            ctx.errors.push(error(w.path(), format!("'{}' is more than {TOL} m from the outline of floor {}. Existing-building walls are edges of the storey outline; delete it or join it to the outline.", w.name, w.level)));
+            ctx.errors.push(error("WALLS", w.path(), format!("'{}' is more than {TOL} m from the outline of floor {}. Existing-building walls are edges of the storey outline; delete it or join it to the outline.", w.name, w.level)));
         }
     }
     // Stop only where a part lacks a storey; other errors so far leave the parts whole, so the
@@ -1547,7 +1684,17 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
         let source = hemie_walls[wi].source;
         let kind = wall_kind(source).expect("wall");
+        let park_home = is_park_home(ctx.model);
+        if park_home && kind != Kind::External {
+            ctx.errors.push(error("WALLS", source.path(), format!("'{}' is a party or sheltered wall, but the build type is park home, whose walls are all external. Draw it as an external wall, or correct the build type.", source.name)));
+        }
+        if park_home {
+            hemie_walls[wi]
+                .value
+                .insert("wall_type".into(), json!("park home"));
+        }
         let construction_type = match kind {
+            Kind::External if park_home => "park_home_wall",
             Kind::External => "external_wall",
             Kind::Party => "party_wall",
             Kind::Sheltered => "sheltered_wall",
@@ -1568,10 +1715,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 Some(space) => {
                     hemie_walls[wi].value.insert("adjacent_space_type".into(), json!(space));
                 }
-                None => ctx.errors.push(error(source.path(), format!("Sheltered wall '{}' does not state the unheated space it borders. Give it an adjacent_space_type: corridor, garage, roof void or stairwell.", source.name))),
+                None => ctx.errors.push(error("SHELTERED", source.path(), format!("Sheltered wall '{}' does not state the unheated space it borders. Choose its unheated space type: corridor, garage, roof void or stairwell.", source.name))),
             }
         }
         let (mut win, mut door) = (Vec::new(), Vec::new());
+        let mut on_edge: Vec<&El> = Vec::new();
         for opening in windows.iter().chain(&doors) {
             if opening.host() != Some(source.name) || opening.pts.len() < 2 {
                 continue;
@@ -1588,6 +1736,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 continue;
             }
             placed.insert(opening.name.to_string());
+            on_edge.push(opening);
             if opening.ty == "BuildingElementTransparent" {
                 if let Some(w) = window(ctx, opening, kind == Kind::External) {
                     win.push(w);
@@ -1608,6 +1757,22 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 }
                 door.push(d);
             }
+        }
+        // DESNZ-defined: the wall is its edge length by the storey's ceiling height, less its
+        // openings, and may not be negative. Openings drawn to the floor above (full-height
+        // glazing) exceed it; stop here, naming them, instead of failing in the run (DESNZ
+        // question E48). ponytail: a bay's opening, also netted from the wall, is not counted.
+        let w = &hemie_walls[wi];
+        let ceiling =
+            parts[w.part].ceilings[w.value["storey_index"].as_u64().unwrap_or(0) as usize];
+        let gross = dist(w.a, w.b) * ceiling;
+        let openings: f64 = on_edge
+            .iter()
+            .map(|o| o.num("width").unwrap_or(0.0) * o.num("height").unwrap_or(0.0))
+            .sum();
+        // A wall with no height is already an error.
+        if ceiling > 0.0 && openings > gross + 1e-6 {
+            ctx.errors.push(error("OPENING", source.path(), format!("The openings {} in '{}' are {openings:.2} m², more than the {gross:.2} m² of wall the existing-building EPC takes there ({:.2} m long by the {ceiling} m ceiling height, which leaves out the {STOREY_GAP} m floor zone). Make the openings smaller, or measure them to the ceiling.", quoted(&on_edge.iter().map(|o| o.name).collect::<Vec<_>>()), source.name, dist(w.a, w.b))));
         }
         if kind == Kind::External || !win.is_empty() || !door.is_empty() {
             hemie_walls[wi]
@@ -1651,7 +1816,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             });
         match part {
             Some(i) => roofs[i].push(plane),
-            None => ctx.errors.push(error(
+            None => ctx.errors.push(error("ROOF", 
                 plane.path(),
                 format!(
                     "Roof '{}' covers no storey and is more than {EAVES} m from every storey outline. Move it over the storeys it covers.",
@@ -1772,7 +1937,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     // Only once everything else converted: an earlier failure leaves openings unplaced.
     for opening in windows.iter().chain(&doors) {
         if ctx.errors.is_empty() && !placed.contains(opening.name) {
-            ctx.errors.push(error(opening.path(), format!("'{}' is not in a storey wall, roof room or roof the converter places. Link it to the wall or roof it sits in.", opening.name)));
+            ctx.errors.push(error("OPENING", opening.path(), format!("'{}' is not in a storey wall, roof room or roof the converter places. Link it to the wall or roof it sits in.", opening.name)));
         }
     }
 
@@ -1799,7 +1964,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         full_ventilation
             .get("ventilation_zone_base_height")
             .filter(|v| !v.is_null()),
-        model["General"]["storey_of_dwelling"].as_i64(),
+        base_storey(model),
     ) {
         (Some(height), _) => {
             geometry.insert("ventilation_zone_base_height".into(), height.clone());
@@ -1807,7 +1972,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         (None, Some(storey)) => {
             geometry.insert("base_storey_of_dwelling".into(), json!(storey));
         }
-        (None, None) => ctx.errors.push(error("/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or base storey, which the existing-building EPC needs. Add the Metadata row Ventilation_ventilation_zone_base_height or General_storey_of_dwelling.".into())),
+        (None, None) => ctx.errors.push(error("STOREYS", "/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or storey of dwelling, which the existing-building EPC needs. Give the ventilation zone base height in Global Settings > Ventilation Environment, or the storey of dwelling in Dwelling Details.".into())),
     }
     // DESNZ-defined: a part's base height defaults to the dwelling's; a part that starts higher
     // states its own. With no dwelling base the error is already reported, so 0 stands in.
@@ -1815,7 +1980,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let bases = match parts::base_heights(&parts, dwelling.unwrap_or(0.0)) {
         Ok(bases) => bases,
         Err(i) => {
-            ctx.errors.push(error("/Zone".into(), format!("Building part '{}' starts on floor {}, but no building part has a storey on floor {} to carry it. Draw the floor below it.", names[i], parts[i].bottom as i64 + first, parts[i].bottom as i64 + first - 1)));
+            ctx.errors.push(error("STOREYS", "/Zone".into(), format!("Building part '{}' starts on floor {}, but no building part has a storey on floor {} to carry it. Draw the floor below it.", names[i], parts[i].bottom as i64 + first, parts[i].bottom as i64 + first - 1)));
             return None;
         }
     };
@@ -1830,7 +1995,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         Value::Object(std::mem::take(&mut ctx.constructions.by_name)),
     );
 
-    let ventilation = infiltration(ctx, full_ventilation);
+    let ventilation = infiltration(ctx, full_ventilation, dwelling_height(&geometry, dwelling));
     if !ctx.errors.is_empty() {
         return None;
     }
@@ -1909,7 +2074,7 @@ fn region(ctx: &mut Ctx) -> Option<String> {
         .unwrap_or_default();
     let path = "/Metadata/Postcode".to_string();
     let Some((area, derived)) = postcode_region(postcode) else {
-        ctx.errors.push(error(path, if postcode.trim().is_empty() {
+        ctx.errors.push(error("POSTCODE", path, if postcode.trim().is_empty() {
             "The model has no postcode. The existing-building converter takes the region from it; give the Postcode in Dwelling Details.".into()
         } else {
             format!("Postcode '{postcode}' is not a postcode in England, Wales, Scotland or Northern Ireland, so the region is not known. Check the Postcode in Dwelling Details.")
@@ -1925,7 +2090,7 @@ fn region(ctx: &mut Ctx) -> Option<String> {
             return Some(region.into());
         }
         PostcodeNation::Outside => {
-            ctx.errors.push(error(path, format!("Postcode {area} is outside England, Wales, Scotland and Northern Ireland; HEM:EPC does not cover it.")));
+            ctx.errors.push(error("POSTCODE", path, format!("Postcode {area} is outside England, Wales, Scotland and Northern Ireland; HEM:EPC does not cover it.")));
             return None;
         }
         PostcodeNation::Border => {}
@@ -1940,7 +2105,7 @@ fn region(ctx: &mut Ctx) -> Option<String> {
             Some(nation.into())
         }
         stated => {
-            ctx.errors.push(error(format!("/Metadata/{field}"), format!("Postcode area {area} spans two nations{}. State the nation under the Postcode in Dwelling Details.", stated.map_or(String::new(), |s| format!(", and '{s}' is not England, Wales, Scotland or Northern Ireland")))));
+            ctx.errors.push(error("POSTCODE", format!("/Metadata/{field}"), format!("Postcode area {area} spans two nations{}. State the nation under the Postcode in Dwelling Details.", stated.map_or(String::new(), |s| format!(", and '{s}' is not England, Wales, Scotland or Northern Ireland")))));
             None
         }
     }
@@ -1951,9 +2116,6 @@ fn region(ctx: &mut Ctx) -> Option<String> {
 fn missing_setting_message(row: &str, fields: &BTreeSet<String>) -> String {
     const WHERE: &str = "Global Settings > Defaults > Fabric";
     let words = |s: &str| s.replace('_', " ");
-    if row == format!("{SETTING}age_band") {
-        return format!("The fabric defaults state no age band. Choose it in {WHERE}.");
-    }
     if let Some(t) = row.strip_prefix(&format!("{SETTING}construction_")) {
         let t = words(t);
         return if fields.is_empty() {
@@ -1972,7 +2134,9 @@ fn missing_setting_message(row: &str, fields: &BTreeSet<String>) -> String {
             format!("The {t} fabric default states no {}. Choose it in {WHERE}, or on each {t} element.", list.join(" or "))
         };
     }
-    format!("The model does not state the Metadata row {row}. Add it.")
+    // The other rows (the age band) are fabric defaults too.
+    let t = words(row.strip_prefix(SETTING).unwrap_or(row));
+    format!("The fabric defaults state no {t}. Choose it in {WHERE}.")
 }
 
 /// The front door: the door marked `is_front_door`, or the model's only door.
@@ -1990,15 +2154,16 @@ fn front_door<'e>(ctx: &mut Ctx, doors: &[&'e El<'e>]) -> Option<&'e El<'e>> {
             Some(only)
         }
         ([], []) => {
-            ctx.errors.push(error("/Zone".into(), "The model has no door. The reference building part is the one with the front door; draw the front door.".into()));
+            ctx.errors.push(error("FRONT_DOOR", "/Zone".into(), "The model has no door. The reference building part is the one with the front door; draw the front door.".into()));
             None
         }
         ([], many) => {
-            ctx.errors.push(error(many[0].path(), format!("The model has doors {}, and none is marked as the front door. Mark the front door.", names(many))));
+            ctx.errors.push(error("FRONT_DOOR", many[0].path(), format!("The model has doors {}, and none is marked as the front door. Mark the front door.", names(many))));
             None
         }
         (many, _) => {
             ctx.errors.push(error(
+                "FRONT_DOOR",
                 many[0].path(),
                 format!(
                     "Doors {} are each marked as the front door. Mark one door only.",
@@ -2013,7 +2178,7 @@ fn front_door<'e>(ctx: &mut Ctx, doors: &[&'e El<'e>]) -> Option<&'e El<'e>> {
 fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
     let Some(sections) = e.get("window_sections") else {
         // DESNZ-defined: the opening type has no default, so the window must state it.
-        ctx.errors.push(error(e.path(), format!("Window '{}' does not state its opening type. Give it window_sections, for example [{{\"window_type\": \"full opening\"}}].", e.name)));
+        ctx.errors.push(error("OPENING", e.path(), format!("Window '{}' does not state its opening type. Choose its opening type on the window.", e.name)));
         return None;
     };
     // ours: see UNUSED_WINDOW_HEAT_CAPACITY.
@@ -2034,7 +2199,7 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
             Some(area) => vents.push(json!({"area": area})),
             None => {
                 let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
-                ctx.errors.push(error(json_pointer(&["InfiltrationVentilation", name]), format!("Vent '{name}' in window '{}' has no area. The existing-building EPC gives each passive vent an area.", e.name)));
+                ctx.errors.push(error("VENT", json_pointer(&["InfiltrationVentilation", name]), format!("Vent '{name}' in window '{}' has no area. The existing-building EPC gives each passive vent an area.", e.name)));
             }
         }
     }
@@ -2054,6 +2219,13 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
 
 /// Derived from the model: the Vulcan ground floor type and the element's documented U-value.
 fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
+    if is_park_home(ctx.model) {
+        let key = ctx.construction("park_home_floor", &[g], &[]);
+        return Some(ctx.with_age_band(
+            &[g],
+            json!({"floor_type": "park home", "construction": key}),
+        ));
+    }
     let (floor_type, construction_type) = match g.text("floor_type") {
         Some("Slab_no_edge_insulation") => (
             "slab no edge insulation",
@@ -2067,11 +2239,19 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
         Some("Heated_basement") => ("heated basement", "heated_basement_floor"),
         Some("Unheated_basement") => ("unheated basement", "unheated_basement_floor"),
         other => {
-            ctx.errors.push(error(g.path(), format!("Ground floor '{}' has floor type {other:?}, which the existing-building converter does not map yet.", g.name)));
+            ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' has floor type {other:?}, which the existing-building converter does not map yet.", g.name)));
             return None;
         }
     };
-    let key = ctx.construction(construction_type, &[g], &[]);
+    let mut extra = Vec::new();
+    if construction_type == "edge_insulated_ground_attached_floor" {
+        match edge_insulation(g) {
+            Some(edge) => extra.push(("edge_insulation", edge)),
+            None if ctx.settings.construction(construction_type).contains_key("edge_insulation") => {}
+            None => ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' is a slab with edge insulation but states no edge insulation. Give its horizontal or vertical edge insulation.", g.name))),
+        }
+    }
+    let key = ctx.construction(construction_type, &[g], &extra);
     // HEMIE gives a solid or basement floor of bands A to H no insulation by default, so its
     // construction resistance is 0, which the Core input rejects (DESNZ question E12). Stop
     // here, naming the floor, instead of failing in the run.
@@ -2088,12 +2268,37 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
         && !insulated
         && band.as_deref().is_some_and(|b| ("A"..="H").contains(&b))
     {
-        ctx.errors.push(error(g.path(), format!("Ground floor '{}' (age band {}) states no insulation thickness. HEM:EPC cannot yet run a solid or basement floor of age band A to H with no insulation. If the floor has insulation, state its thickness.", g.name, band.unwrap_or_default())));
+        ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' (age band {}) states no insulation thickness. HEM:EPC cannot yet run a solid or basement floor of age band A to H with no insulation. If the floor has insulation, state its thickness.", g.name, band.unwrap_or_default())));
     }
     Some(ctx.with_age_band(
         &[g],
         json!({"floor_type": floor_type, "construction": key, "total_area": total_area}),
     ))
+}
+
+/// Derived from the model: the floor's edge insulation items (horizontal width, vertical depth,
+/// each with its thermal resistance) in the existing-building form; None when it states none.
+fn edge_insulation(g: &El) -> Option<Value> {
+    let mut edge = Map::new();
+    for item in g.get("edge_insulation")?.as_array()? {
+        let kind = item["type"].as_str().unwrap_or_default();
+        let size = if kind == "horizontal" {
+            "width"
+        } else {
+            "depth"
+        };
+        let mut value = Map::new();
+        if let Some(r) = item["edge_thermal_resistance"].as_f64() {
+            value.insert("thermal_resistance".into(), json!(r));
+        }
+        if let Some(v) = item[size].as_f64() {
+            value.insert(size.into(), json!(v));
+        }
+        if matches!(kind, "horizontal" | "vertical") {
+            edge.insert(kind.into(), Value::Object(value));
+        }
+    }
+    (!edge.is_empty()).then_some(Value::Object(edge))
 }
 
 /// The pitched roof's slope orientation: an edge orientation of the top storey's minimum
@@ -2147,26 +2352,31 @@ fn roof(
         .collect();
     if let Some(p) = heated.first() {
         // Rule: a heated pitched roof with no roof room (a vaulted ceiling) has no HEMIE form.
-        ctx.errors.push(error(p.path(), format!("Roof '{}' is a heated pitched roof over a storey (a vaulted ceiling). The existing-building EPC has no vaulted roof type; draw the room in the roof with its knee walls or gables, or mark the roof as unheated if a loft is above.", p.name)));
+        ctx.errors.push(error("ROOF", p.path(), format!("Roof '{}' is a heated pitched roof over a storey (a vaulted ceiling). The existing-building EPC has no vaulted roof type; draw the room in the roof with its knee walls or gables, or mark the roof as unheated if a loft is above.", p.name)));
         return None;
     }
     let result = if !flat.is_empty() && !pitched.is_empty() {
-        ctx.errors.push(error(flat[0].path(), format!("Building part '{part}' has flat roof '{}' and pitched roof '{}'. The existing-building EPC gives each building part one roof.", flat[0].name, pitched[0].name)));
+        ctx.errors.push(error("ROOF", flat[0].path(), format!("Building part '{part}' has flat roof '{}' and pitched roof '{}'. The existing-building EPC gives each building part one roof.", flat[0].name, pitched[0].name)));
         None
     } else if !flat.is_empty() {
-        let key = ctx.construction("flat_roof", &flat, &[]);
+        let (roof_type, construction_type) = if is_park_home(ctx.model) {
+            ("Park Home Flat", "park_home_flat_roof")
+        } else {
+            // ours: Vulcan does not record whether a flat roof is cold or warm, so it is Unknown.
+            ("Unknown Flat", "flat_roof")
+        };
+        let key = ctx.construction(construction_type, &flat, &[]);
         let lights = roof_windows(ctx, windows, &flat, placed);
-        // ours: Vulcan does not record whether a flat roof is cold or warm, so it is Unknown.
         Some(ctx.with_age_band(
             &flat,
-            json!({"roof_type": "Unknown Flat", "construction": key, "windows": lights}),
+            json!({"roof_type": roof_type, "construction": key, "windows": lights}),
         ))
     } else if !pitched.is_empty() {
         if windows
             .iter()
             .any(|w| pitched.iter().any(|p| w.host() == Some(p.name)))
         {
-            ctx.errors.push(error(pitched[0].path(), format!("Roof '{}' is unheated (a loft) and has a roof window. The existing-building EPC takes roof windows only in flat roofs, heated slopes and rooms in the roof.", pitched[0].name)));
+            ctx.errors.push(error("ROOF", pitched[0].path(), format!("Roof '{}' is unheated (a loft) and has a roof window. The existing-building EPC takes roof windows only in flat roofs, heated slopes and rooms in the roof.", pitched[0].name)));
             return None;
         }
         let measured = sloped_measurements(ctx, &pitched)?;
@@ -2181,7 +2391,7 @@ fn roof(
             [_] => "mono",
             [a, b] if bearing_gap(*a, *b) > 135.0 => "dual",
             [_, _] => {
-                ctx.errors.push(error(pitched[0].path(), format!("The pitched roof of building part '{part}' slopes two ways that are not opposite. The existing-building EPC takes mono or dual pitched roofs.")));
+                ctx.errors.push(error("ROOF", pitched[0].path(), format!("The pitched roof of building part '{part}' slopes two ways that are not opposite. The existing-building EPC takes mono or dual pitched roofs.")));
                 return None;
             }
             _ => {
@@ -2220,15 +2430,20 @@ fn roof(
             ));
         }
         rectangularity_notice(ctx, part, top_ring);
-        let key = ctx.construction("unheated_pitched_roof", &pitched, &[]);
-        // ours: Vulcan does not record cold or warm, so it is Unknown.
+        let (roof_type, construction_type) = if is_park_home(ctx.model) {
+            ("Park Home Pitched", "park_home_pitched_roof")
+        } else {
+            // ours: Vulcan does not record cold or warm, so it is Unknown.
+            ("Unknown Pitched (Unheated)", "unheated_pitched_roof")
+        };
+        let key = ctx.construction(construction_type, &pitched, &[]);
         Some(ctx.with_age_band(
             &pitched,
-            json!({"roof_type": "Unknown Pitched (Unheated)", "construction": key, "pitch_type": pitch_type,
+            json!({"roof_type": roof_type, "construction": key, "pitch_type": pitch_type,
             "slope_orientation": slope_orientation, "pitch": "Custom", "custom_pitch": weighted / area}),
         ))
     } else {
-        ctx.errors.push(error(
+        ctx.errors.push(error("ROOF", 
             "/Zone".into(),
             format!("Building part '{part}' has no roof or party ceiling drawn over it. Draw its roof, or the party ceiling of a flat with a dwelling above."),
         ));
@@ -2299,7 +2514,7 @@ fn room_in_roof(
         .filter(|p| p.num("pitch") == Some(0.0))
         .collect();
     if heated.is_empty() {
-        ctx.errors.push(error("/Zone".into(), "The room in the roof has no heated slope over it. Draw its heated roof slopes over the room.".into()));
+        ctx.errors.push(error("ROOM_IN_ROOF", "/Zone".into(), "The room in the roof has no heated slope over it. Draw its heated roof slopes over the room.".into()));
         return None;
     }
     let measured = sloped_measurements(ctx, &heated)?;
@@ -2341,7 +2556,7 @@ fn room_in_roof(
         let wall_at = |x: f64| knees.iter().any(|k| (across(k).0 - x).abs() <= TOL);
         let between = (slope_below && (slope_above || wall_at(hi))) || (slope_above && wall_at(lo));
         if !between {
-            ctx.errors.push(error(c.path(), format!("Flat roof '{}' is part of the room in the roof but is not a flat ceiling between its two slopes, or between its one slope and its high wall. A roof room with a flat section elsewhere cannot be entered: make the flat part the roof of its own building part, or draw it as slopes.", c.name)));
+            ctx.errors.push(error("ROOM_IN_ROOF", c.path(), format!("Flat roof '{}' is part of the room in the roof but is not a flat ceiling between its two slopes, or between its one slope and its high wall. A roof room with a flat section elsewhere cannot be entered: make the flat part the roof of its own building part, or draw it as slopes.", c.name)));
             return None;
         }
     }
@@ -2356,6 +2571,7 @@ fn room_in_roof(
         .reduce(f64::max)
     else {
         ctx.errors.push(error(
+            "ROOM_IN_ROOF",
             main.path(),
             "The room in the roof has no gable wall, so its height is not known. Draw its gables."
                 .into(),
@@ -2436,12 +2652,12 @@ fn room_in_roof(
     ) {
         ([l], [r]) => (*l, *r),
         ([], _) | (_, []) => {
-            ctx.errors.push(error(main.path(), "The room in the roof needs a gable wall at each end of the ridge. Draw both gables.".into()));
+            ctx.errors.push(error("ROOM_IN_ROOF", main.path(), "The room in the roof needs a gable wall at each end of the ridge. Draw both gables.".into()));
             return None;
         }
         (l, r) => {
             let end = if l.len() > 1 { l } else { r };
-            ctx.errors.push(error(end[0].path(), format!("The room in the roof has gables {} at one end of the ridge. The existing-building EPC takes one gable wall per end; draw it as one wall.", quoted(&end.iter().map(|g| g.name).collect::<Vec<_>>()))));
+            ctx.errors.push(error("ROOM_IN_ROOF", end[0].path(), format!("The room in the roof has gables {} at one end of the ridge. The existing-building EPC takes one gable wall per end; draw it as one wall.", quoted(&end.iter().map(|g| g.name).collect::<Vec<_>>()))));
             return None;
         }
     };
@@ -2452,7 +2668,7 @@ fn room_in_roof(
     }
     if knees.is_empty() && !both_sides {
         // HEMIE requires a mono-pitched room's back wall, which would be a knee wall here.
-        ctx.errors.push(error(main.path(), "The room in the roof slopes one way and has no wall under its high side. Draw that wall.".into()));
+        ctx.errors.push(error("ROOM_IN_ROOF", main.path(), "The room in the roof slopes one way and has no wall under its high side. Draw that wall.".into()));
         return None;
     }
     roof.insert(
@@ -2482,7 +2698,7 @@ fn room_in_roof(
             "back_wall"
         };
         if roof.contains_key(key) {
-            ctx.errors.push(error(knee.path(), format!("The room in the roof has more than one knee wall on one side ('{}'). The existing-building EPC takes one per side; draw it as one wall.", knee.name)));
+            ctx.errors.push(error("ROOM_IN_ROOF", knee.path(), format!("The room in the roof has more than one knee wall on one side ('{}'). The existing-building EPC takes one per side; draw it as one wall.", knee.name)));
             return None;
         }
         roof.insert(key.into(), room_wall(ctx, knee, placed));
@@ -2560,6 +2776,7 @@ fn dormer<'e>(
         }
         other => {
             ctx.errors.push(error(
+                "DORMER",
                 anchor.path(),
                 format!(
                     "Dormer '{}' has type {other:?}, which the converter does not map.",
@@ -2580,12 +2797,17 @@ fn dormer<'e>(
     let (Some(pitch), Some(height)) = (pitch, measured("frontWallHeight")) else {
         let mut missing = Vec::new();
         if pitch_type != "flat" && measured(pitch_key).is_none() {
-            missing.push(format!("roof pitch ({pitch_key})"));
+            missing.push(if pitch_key == "gableRoofPitch" {
+                "side roof pitch"
+            } else {
+                "dormer roof pitch"
+            });
         }
         if measured("frontWallHeight").is_none() {
-            missing.push("front wall height (frontWallHeight)".to_string());
+            missing.push("front wall height");
         }
         ctx.errors.push(error(
+            "DORMER",
             anchor.path(),
             format!(
                 "Dormer '{}' does not state its {}. Open the dormer and set it.",
@@ -2602,12 +2824,13 @@ fn dormer<'e>(
     );
     let (width, base) = (width?, anchor_base? - host_base?);
     if base < 0.0 {
-        ctx.errors.push(error(anchor.path(), format!("Dormer '{}' starts {:.2} m below the base of roof '{}'. The existing-building EPC measures a dormer up from the base of its roof slope; move the dormer up the roof.", anchor.name, -base, host.name)));
+        ctx.errors.push(error("DORMER", anchor.path(), format!("Dormer '{}' starts {:.2} m below the base of roof '{}'. The existing-building EPC measures a dormer up from the base of its roof slope; move the dormer up the roof.", anchor.name, -base, host.name)));
         return None;
     }
     let front_name = bundle["window_name"].as_str();
     let Some(front) = windows.iter().find(|w| Some(w.name) == front_name) else {
         ctx.errors.push(error(
+            "DORMER",
             anchor.path(),
             format!(
                 "Dormer '{}' has no front window. The existing-building EPC requires one.",
@@ -2673,19 +2896,44 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
                         let list = w.value.entry("passive_vents").or_insert_with(|| json!([]));
                         list.as_array_mut().expect("array").push(json!({"area": area}));
                     }
-                    _ => ctx.errors.push(error(path, format!("Vent '{name}' is more than {TOL} m from every storey wall or has no area. The existing-building EPC places each passive vent in a wall."))),
+                    _ => ctx.errors.push(error("VENT", path, format!("Vent '{name}' is more than {TOL} m from every storey wall or has no area. The existing-building EPC places each passive vent in a wall."))),
                 }
             }
             // Mechanical ventilation and its vents: `systems`.
             Some("MechanicalVentilation" | "MechanicalVentilationTerminal" | "MechanicalVentilationDuctwork") => {}
-            other => ctx.errors.push(error(path, format!("Ventilation '{name}' ({}) is not converted for an existing-building EPC yet. Remove it to run this model.", other.unwrap_or("no type")))),
+            other => ctx.errors.push(error("VENT", path, format!("Ventilation '{name}' ({}) is not converted for an existing-building EPC yet. Remove it to run this model.", other.unwrap_or("no type")))),
         }
     }
 }
 
 /// The HEMIE InfiltrationVentilation Geometry needs: the model's ventilation inputs and its air
 /// test. Without an air test the conversion stops (DESNZ question E17).
-fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
+/// Derived from the model: the height from the dwelling's base to the top of its highest heated
+/// storey or room in the roof, over every building part (DESNZ question E46 on roof rooms).
+fn dwelling_height(geometry: &Map<String, Value>, dwelling: Option<f64>) -> f64 {
+    geometry["building_parts"]
+        .as_object()
+        .into_iter()
+        .flat_map(|parts| parts.values())
+        .map(|part| {
+            let ceilings: Vec<f64> = part["storeys"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|s| s["ceiling_height"].as_f64())
+                .collect();
+            let base = part["base_height"]
+                .as_f64()
+                .map_or(0.0, |b| b - dwelling.unwrap_or(0.0));
+            let room = part["roof"]["maximum_ceiling_height"]
+                .as_f64()
+                .map_or(0.0, |h| STOREY_GAP + h);
+            base + ceilings.iter().sum::<f64>() + STOREY_GAP * (ceilings.len() as f64 - 1.0) + room
+        })
+        .fold(0.0, f64::max)
+}
+
+fn infiltration(ctx: &mut Ctx, full: &Value, drawn_height: f64) -> Option<Value> {
     let mut iv = Map::new();
     iv.insert("model_type".into(), json!("hemie"));
     // The assessor's values: an existing building's absent shield class, noise nuisance and air
@@ -2708,7 +2956,8 @@ fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
             None => ctx.notices.push(notice(
                 &format!("/InfiltrationVentilation/{key}"),
                 format!(
-                    "No Metadata row states Ventilation_{key}, so it uses the default: {}.",
+                    "No {} is given, so it uses the default: {}.",
+                    key.replace('_', " "),
                     if key == "shield_class" {
                         "from the terrain class"
                     } else {
@@ -2734,10 +2983,18 @@ fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
                 Some(v) => {
                     out.insert(key.into(), v.clone());
                 }
+                // Derived from the model when not stated; a stated height wins.
+                None if key == "ventilation_zone_height" => {
+                    let height = (drawn_height * 1000.0).round() / 1000.0;
+                    out.insert(key.into(), json!(height));
+                    ctx.notices.push(notice("/InfiltrationVentilation/Leaks/ventilation_zone_height", format!("No ventilation zone height is given, so the existing-building EPC uses the drawn height of the dwelling, {height} m. Give it in Global Settings > Ventilation Environment to state it.")));
+                }
                 None => ctx.errors.push(error(
+                    "AIR_TEST",
                     format!("/InfiltrationVentilation/Leaks/{key}"),
                     format!(
-                        "The air test states no {key}. Add the Metadata row AirPermeability_{key}."
+                        "The air test states no {}. Enter it in Global Settings > Air Tightness.",
+                        key.replace('_', " ")
                     ),
                 )),
             }
@@ -2746,7 +3003,7 @@ fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
         // DESNZ-defined: with no air test HEMIE estimates the leakage, but the Orchestrator
         // rejects every form of its inputs (DESNZ question E17): stop here instead of failing
         // in the run.
-        ctx.errors.push(error("/InfiltrationVentilation/Leaks".into(), "No air test is stated. HEM:EPC cannot yet run an existing building without one. Enter the air test result in Global Settings.".into()));
+        ctx.errors.push(error("AIR_TEST", "/InfiltrationVentilation/Leaks".into(), "No air test is stated. HEM:EPC cannot yet run an existing building without one. Enter the air test result in Global Settings.".into()));
     }
     // Derived from the model: the envelope area of the drawn elements. The schema requires it
     // although HEMIE Geometry can give it (E9).
@@ -2755,6 +3012,7 @@ fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
             out.insert("env_area".into(), v.clone());
         }
         None => ctx.errors.push(error(
+            "AIR_TEST",
             "/InfiltrationVentilation/Leaks/env_area".into(),
             "The model has no envelope area, which the existing-building input requires.".into(),
         )),
@@ -2898,6 +3156,111 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         let mut exposed = box_walls(&BOX, &[0, 1]);
         exposed.extend(exposed_extra);
         csv(SETTINGS, &exposed, &ground(&BOX))
+    }
+
+    #[test]
+    fn a_conversion_that_stops_unsaid_reports_one_error() {
+        let mut errors = Vec::new();
+        report_silent_stop(true, 0, &mut errors);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code, "E_EPC_HEMIE_STOREYS");
+        assert_eq!(errors[0].message, STOPPED_UNSAID);
+        // A stop that reported its own error, or a conversion that ran, adds nothing.
+        report_silent_stop(true, 0, &mut errors);
+        report_silent_stop(false, 1, &mut errors);
+        assert_eq!(errors.len(), 1);
+    }
+
+    #[test]
+    fn openings_larger_than_the_wall_below_the_ceiling_stop_naming_them() {
+        // 6 m by 2.6 m of glazing in a 6 m wall whose ceiling height is 2.55 m.
+        let glazing = "G,Z,BuildingElementTransparent,15.6,90,6,2.6,90,0,FALSE,FALSE,W01,\"8,0,0|8,6,0\",\"{\"\"window_sections\"\":[{\"\"window_type\"\":\"\"full opening\"\"}]}\"";
+        let (_, errors, _) = run(&house([gable_roof(), vec![glazing.into()]].concat()));
+        assert!(
+            errors.iter().any(|e| e.code == "E_EPC_HEMIE_OPENING"
+                && e.path.ends_with("/W01")
+                && e.message
+                    .starts_with("The openings 'G' in 'W01' are 15.60 m², more than the 15.30 m²")),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn with_no_ventilation_zone_height_the_drawn_height_is_used() {
+        let mut model = full_input();
+        model["InfiltrationVentilation"]["Leaks"]
+            .as_object_mut()
+            .unwrap()
+            .remove("ventilation_zone_height");
+        let (model, errors, notices) = run_on(&house(gable_roof()), model);
+        assert!(errors.is_empty(), "{errors:#?}");
+        // Two 2.55 m storeys and the 0.25 m between them; the loft is not heated.
+        assert_eq!(
+            model["InfiltrationVentilation"]["Leaks"]["ventilation_zone_height"],
+            5.35
+        );
+        assert!(notices
+            .iter()
+            .any(|n| n.path.ends_with("ventilation_zone_height")));
+    }
+
+    #[test]
+    fn a_slab_with_edge_insulation_takes_the_floors_edge_insulation() {
+        let edge = |extra: &str| {
+            ground(&BOX)
+                .replace("floor_type,coords", "floor_type,coords,extra_json")
+                .replace("Slab_no_edge_insulation", "Slab_edge_insulation")
+                .replace("|0,6,0\"", &format!("|0,6,0\",{extra}"))
+        };
+        let exposed = [box_walls(&BOX, &[0, 1]), gable_roof()].concat();
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &edge("")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.path.ends_with("/Floor")
+                    && e.message.contains("states no edge insulation")),
+            "{errors:#?}"
+        );
+        let stated = r#""{""edge_insulation"":[{""type"":""vertical"",""depth"":0.5,""edge_thermal_resistance"":1.2},{""type"":""horizontal"",""width"":1,""edge_thermal_resistance"":1}]}""#;
+        let (model, errors, _) = run(&csv(SETTINGS, &exposed, &edge(stated)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let key = model["Zone"]["building_parts"]["Main"]["floor"]["construction"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            model["Zone"]["constructions"][key]["edge_insulation"],
+            json!({"vertical": {"depth": 0.5, "thermal_resistance": 1.2}, "horizontal": {"width": 1.0, "thermal_resistance": 1.0}})
+        );
+    }
+
+    #[test]
+    fn a_park_home_takes_park_home_walls_floor_and_roof() {
+        let mut model = full_input();
+        model["General"]["build_type"] = json!("park home");
+        let mut exposed = box_walls(&BOX, &[0]);
+        exposed.push(plane("Roof", 1, &BOX, 0.0, 0.0, false));
+        let (model, errors, _) = run_on(&csv(SETTINGS, &exposed, &ground(&BOX)), model);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let main = &model["Zone"]["building_parts"]["Main"];
+        let constructions = &model["Zone"]["constructions"];
+        let construction =
+            |key: &Value| constructions[key.as_str().unwrap()]["construction_type"].clone();
+        assert!(main["walls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|w| w["wall_type"] == "park home"
+                && construction(&w["construction"]) == "park_home_wall"));
+        assert_eq!(main["floor"]["floor_type"], "park home");
+        assert_eq!(
+            construction(&main["floor"]["construction"]),
+            "park_home_floor"
+        );
+        assert_eq!(main["roof"]["roof_type"], "Park Home Flat");
+        assert_eq!(
+            construction(&main["roof"]["construction"]),
+            "park_home_flat_roof"
+        );
     }
 
     #[test]
@@ -3312,7 +3675,8 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .as_object_mut()
             .unwrap()
             .remove("ventilation_zone_base_height");
-        model["General"]["storey_of_dwelling"] = json!(0);
+        // The model counts the ground storey as 1; the existing-building input counts it as 0.
+        model["General"]["storey_of_dwelling"] = json!(1);
         // With an air test, the base storey stands for the base height.
         let (tested, errors, notices) = run_on(&house(gable_roof()), model.clone());
         assert!(errors.is_empty(), "{errors:#?}");
@@ -3550,23 +3914,34 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .replace("|0,6,0\"", &format!("|0,6,0\",{}", band("Medium")));
         let (model, errors, _) = run(&csv(
             SETTINGS,
-            &[exposed.clone(), roof("Light")].concat(),
+            &[exposed.clone(), gable_roof()].concat(),
             &floor,
         ));
         assert!(errors.is_empty(), "{errors:#?}");
         assert!(capacity(&model, "external_wall").contains(&json!(850_000.0)));
         assert_eq!(capacity(&model, "party_wall"), [json!(225_000.0)]);
-        assert_eq!(capacity(&model, "unheated_pitched_roof"), [json!(60_000.0)]);
+        assert_eq!(capacity(&model, "unheated_pitched_roof"), [Value::Null]);
         assert_eq!(
             capacity(&model, "not_edge_insulated_ground_attached_floor"),
             [json!(275_000.0)]
         );
-        // A roof has no Heavy value, and a door no band at all.
-        let (_, errors, _) = run(&csv(SETTINGS, &[exposed, roof("Heavy")].concat(), &floor));
-        assert!(
-            errors.iter().any(|e| e.message
-                == "'Roof S' has areal heat capacity \"Heavy\". Enter a number in J/m²·K, or Very light, Light or Medium."),
-            "{errors:#?}"
+        // A roof's stated heat capacity is set aside, reported, and need not agree; a number
+        // typed as text is read.
+        let typed = floor.replace("Medium", "300000");
+        let mut roofs = roof("Light");
+        roofs[1] = roofs[1].replace("Light", "Heavy");
+        let (model, errors, notices) = run(&csv(SETTINGS, &[exposed, roofs].concat(), &typed));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(capacity(&model, "unheated_pitched_roof"), [Value::Null]);
+        assert!(notices
+            .iter()
+            .any(|n| n.message.contains("is not used: 'Roof N', 'Roof S'")));
+        assert!(notices
+            .iter()
+            .any(|n| n.message.contains("as text, \"300000\"")));
+        assert_eq!(
+            capacity(&model, "not_edge_insulated_ground_attached_floor"),
+            [json!(300_000.0)]
         );
         let door = house(gable_roof()).replace(
             "\"3.5,0,0|4.5,0,0\",",

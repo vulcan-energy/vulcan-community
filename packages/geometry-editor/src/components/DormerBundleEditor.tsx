@@ -251,7 +251,7 @@ export function useDormerBundleEditor(args: {
   } = args;
   // A flat dormer is HEMIE's dormer roof type; elsewhere a dormer is plain geometry, where a
   // mono-pitch dormer at 0° draws the same roof.
-  const { hemieBundles } = useTargetRules();
+  const { hemieBundles, constructionBands } = useTargetRules();
 
   const selectedElement = selection.id ? getElementById(selection.id) ?? null : null;
   const selectedIsDormerAnchor = isDormerAnchorElement(selectedElement);
@@ -388,6 +388,7 @@ export function useDormerBundleEditor(args: {
       floors,
       thermalOverrides: overrides.thermalOverrides ?? metadata.thermal_overrides,
       globalOrientationOffset: geometryStore.getState().globalOrientationOffset,
+      omitFrameAreaFraction: constructionBands,
     });
 
     if (!draft) {
@@ -523,6 +524,7 @@ export function useDormerBundleEditor(args: {
           floors,
           thermalOverrides: metadata.thermal_overrides,
           globalOrientationOffset: geometryStore.getState().globalOrientationOffset,
+          omitFrameAreaFraction: constructionBands,
         }),
       )
       .find((draft): draft is NonNullable<typeof draft> => Boolean(draft));
@@ -830,18 +832,22 @@ export function useDormerBundleEditor(args: {
           size="md"
         />
       </div>
-      {renderFieldLabel('Window Frame Area Fraction:', 'BuildingElementTransparent', 'frame_area_fraction')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerFrameAreaFractionInput)}
-          unit={fieldUnit('frame_area_fraction', 'BuildingElementTransparent')}
-          step="0.01"
-          min="0"
-          max="1"
-          variant="ghost"
-          size="md"
-        />
-      </div>
+      {!constructionBands && (
+        <>
+          {renderFieldLabel('Window Frame Area Fraction:', 'BuildingElementTransparent', 'frame_area_fraction')}
+          <div className="element-input">
+            <StandardInput
+              {...decimalInputProps(dormerFrameAreaFractionInput)}
+              unit={fieldUnit('frame_area_fraction', 'BuildingElementTransparent')}
+              step="0.01"
+              min="0"
+              max="1"
+              variant="ghost"
+              size="md"
+            />
+          </div>
+        </>
+      )}
     </>
   );
 
