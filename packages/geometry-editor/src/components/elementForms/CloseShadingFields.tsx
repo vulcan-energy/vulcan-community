@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import type { Element } from '../../geometry/types';
 import { CLOSE_SHADING_KINDS, closeShadingOptions, type CloseShadingKind } from '../../lib/windowOpenings';
 import { ResetFieldButton } from '../ResetFieldButton';
