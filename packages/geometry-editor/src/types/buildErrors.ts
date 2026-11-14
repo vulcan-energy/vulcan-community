@@ -25,7 +25,17 @@ export type TargetValidation = {
   productSlots?: readonly GeometryProductSlot[];
   /** An existing building's distant shading as the target's conversion made it (EPC). */
   distantShading?: DistantShading;
+  /** The conversion's values for system fields, for pickers and placeholders (EPC). */
+  systemDefaults?: TargetSystemDefaults;
 };
+
+/** What the target's conversion offers or derives for system fields. */
+export type TargetSystemDefaults = Readonly<{
+  /** The curves a heating control may pick (`weather_compensation_curve_id`), each with the heat source and emitter types an existing building takes it for when it states none. */
+  weatherCurves: readonly Readonly<{ id: number; gradient: number; default_for: readonly Readonly<{ heat_source_type: string; wet_emitter_type: string }>[] }>[];
+  /** The default the conversion uses for a field the model leaves blank, by the system's model path (as product slots name it). */
+  derived: readonly Readonly<{ path: string; field: string; value: unknown }>[];
+}>;
 
 /** One of the four distant shading quadrants, as converted. */
 export type DistantShadingQuadrant = Readonly<{

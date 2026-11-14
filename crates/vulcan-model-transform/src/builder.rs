@@ -1570,6 +1570,8 @@ pub struct JSONBuilder {
     product_slots: RefCell<Vec<crate::ProductSlot>>,
     product_candidates: RefCell<BTreeMap<String, Vec<crate::ProductCandidate>>>,
     hemie_shading: RefCell<Option<crate::HemieShading>>,
+    provenance: RefCell<crate::hemie::Provenance>,
+    derived_defaults: RefCell<Vec<crate::DerivedDefault>>,
     /// Model path of each object a Geometry CSV row authored (Systems, wet emitter and
     /// mechanical ventilation rows) and the row's Name, so each product slot names its row.
     slot_rows: RefCell<Vec<(String, String)>>,
@@ -1592,6 +1594,21 @@ impl JSONBuilder {
 
     pub fn take_hemie_shading(&self) -> Option<crate::HemieShading> {
         self.hemie_shading.borrow_mut().take()
+    }
+
+    pub fn take_provenance(&self) -> crate::hemie::Provenance {
+        self.provenance.take()
+    }
+
+    pub fn take_derived_defaults(&self) -> Vec<crate::DerivedDefault> {
+        self.derived_defaults.take()
+    }
+
+    pub fn weather_curves(&self) -> Vec<crate::WeatherCurve> {
+        self.product_database
+            .as_ref()
+            .map(crate::epc_products::weather_curves)
+            .unwrap_or_default()
     }
 
     pub fn take_product_candidates(&self) -> BTreeMap<String, Vec<crate::ProductCandidate>> {
@@ -1645,6 +1662,8 @@ impl JSONBuilder {
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
+            provenance: RefCell::default(),
+            derived_defaults: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
 
@@ -1686,6 +1705,8 @@ impl JSONBuilder {
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
+            provenance: RefCell::default(),
+            derived_defaults: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
         builder.index_templates();
@@ -2263,6 +2284,7 @@ impl JSONBuilder {
                 env_area_stated,
                 &mut errors,
                 &mut notices,
+                &mut self.derived_defaults.borrow_mut(),
             );
         }
         if self.profile.checks_system_catalogue() {
@@ -2291,13 +2313,16 @@ impl JSONBuilder {
                 .retain(|o| !full_zone(&o.path));
             errors.retain(|e| e.code == "E_EPC_UNSUPPORTED_SYSTEM" || !full_zone(&e.path));
             notices.retain(|o| !full_zone(&o.path));
-            *self.hemie_shading.borrow_mut() = crate::hemie::map_existing_building(
+            if let Some((shading, provenance)) = crate::hemie::map_existing_building(
                 result,
                 csv_data,
                 &self.schema,
                 &mut errors,
                 &mut notices,
-            );
+            ) {
+                *self.hemie_shading.borrow_mut() = Some(shading);
+                *self.provenance.borrow_mut() = provenance;
+            }
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
@@ -4674,7 +4699,27 @@ impl JSONBuilder {
                         // template's ducts (they add heat losses the user never
                         // authored); the missing required `ductwork` surfaces as a
                         // schema validation error instead.
-                        if vt == "MVHR" && !ductwork.is_empty() {
+                        // An existing building's MVHR takes HEMIE's own ductwork (its system
+                        // form has none), so only a new build maps the drawn ducts.
+                        let existing = csv_data.get("Metadata").into_iter().flatten().any(|row| {
+                            let (name, value) = extract_metadata_field(row);
+                            name.as_deref() == Some("IsExistingBuilding")
+                                && value.is_some_and(|v| {
+                                    v == Value::Bool(true)
+                                        || v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("true"))
+                                })
+                        });
+                        if vt == "MVHR" && self.profile.references_products() && !existing {
+                            // The full input takes one ductwork descriptor, not a duct list.
+                            let (descriptor, notice) = crate::epc_mappings::mvhr_ductwork(
+                                vent_name,
+                                mv_obj.get("ductwork").and_then(Value::as_object),
+                                &ductwork,
+                                mv_obj.get("mvhr_location").and_then(Value::as_str),
+                            );
+                            mv_obj.insert("ductwork".to_string(), descriptor);
+                            self.schema_omissions.borrow_mut().extend(notice);
+                        } else if vt == "MVHR" && !ductwork.is_empty() {
                             mv_obj.insert("ductwork".to_string(), Value::Array(ductwork));
                         } else {
                             mv_obj.remove("ductwork");

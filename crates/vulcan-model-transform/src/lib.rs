@@ -495,6 +495,32 @@ pub struct ProductSlot {
     pub row_path: Option<String>,
 }
 
+/// A value the converter derives for an input the model leaves blank (DESNZ-defined), for the
+/// editor to show as the field's placeholder.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DerivedDefault {
+    /// Model path of the system, as [`ProductSlot::path`] names it.
+    pub path: String,
+    pub field: String,
+    pub value: Value,
+}
+
+/// A weather compensation curve of the pinned HEM Database, for a curve picker.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WeatherCurve {
+    /// The `weather_compensation_curve_id` a controller states.
+    pub id: u64,
+    pub gradient: f64,
+    /// The heat source and emitter types an existing building with no curve takes it for.
+    pub default_for: Vec<WeatherCurveDefault>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WeatherCurveDefault {
+    pub heat_source_type: String,
+    pub wet_emitter_type: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransformOutput {
     pub model: Value,
@@ -509,6 +535,15 @@ pub struct TransformOutput {
     /// An existing building's distant shading as converted, for the editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hemie_shading: Option<HemieShading>,
+    /// An existing building's converted nodes (JSON pointer) to the element or Metadata row each
+    /// comes from, for naming them in a run failure. Never part of the model.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub provenance: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_defaults: Vec<DerivedDefault>,
+    /// The pinned HEM Database's weather compensation curves, on a target that references products.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub weather_curves: Vec<WeatherCurve>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -582,9 +617,12 @@ pub fn transform_geometry_csv(
                 .map_err(TransformError::InvalidRequest)?,
         );
     }
-    let model = builder
+    let mut model = builder
         .build_json(&csv_data)
         .map_err(TransformError::Build)?;
+    if request.profile.references_products() {
+        epc_mappings::drop_mvhr_vent_type(&mut model);
+    }
 
     let mut schema_omissions = builder.take_schema_omissions();
     let schema: Value = serde_json::from_str(&request.schema_json)
@@ -633,6 +671,9 @@ pub fn transform_geometry_csv(
         product_slots: builder.take_product_slots(),
         product_candidates: builder.take_product_candidates(),
         hemie_shading: builder.take_hemie_shading(),
+        provenance: builder.take_provenance(),
+        derived_defaults: builder.take_derived_defaults(),
+        weather_curves: builder.weather_curves(),
     })
 }
 

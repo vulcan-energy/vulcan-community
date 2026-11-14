@@ -641,6 +641,8 @@ struct Constructions {
     party_walls_by_age_band: BTreeSet<String>,
     /// Elements whose stated heat capacity is set aside: their type sets it.
     heat_capacity_set_aside: BTreeSet<String>,
+    /// Constructions with a value from their elements, by key: the elements' paths.
+    from_elements: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Constructions {
@@ -888,6 +890,13 @@ impl Ctx<'_> {
         for (key, value) in extra {
             c.entry(*key).or_insert_with(|| value.clone());
         }
+        // Whether any value came from the elements rather than the model's setting.
+        let mut setting = self.settings.construction(construction_type);
+        setting.insert("construction_type".into(), json!(construction_type));
+        for (key, value) in extra {
+            setting.entry(*key).or_insert_with(|| value.clone());
+        }
+        let from_elements = c != setting;
         let stated = |key: &str| c.get(key).is_some_and(|v| !v.is_null());
         let names = quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>());
         let verb = if elements.len() > 1 {
@@ -913,7 +922,15 @@ impl Ctx<'_> {
             }
         }
         self.require(construction_type, &mut c);
-        self.constructions.add(c)
+        let key = self.constructions.add(c);
+        if from_elements {
+            self.constructions
+                .from_elements
+                .entry(key.clone())
+                .or_default()
+                .extend(elements.iter().map(|e| e.path()));
+        }
+        key
     }
 
     /// The value the elements state for a field, alike on each; HEMIE gives the group one
@@ -1206,17 +1223,44 @@ fn merge_edges<'e>(ring: Vec<P>, walls: &[&'e El<'e>]) -> (Vec<P>, Vec<Option<&'
 /// Replace the full-input zone and ventilation with HEMIE inputs. Errors name the element.
 /// A conversion that stops always reports an error: the unconverted zone's own schema errors
 /// are hidden (`is_unused_full_input`), so a silent stop would let the model pass.
+/// The converted model's existing-building nodes by JSON pointer, each to where the user
+/// authored it (an element or a Metadata row). It travels beside the model, never in it.
+pub type Provenance = BTreeMap<String, String>;
+
 pub(crate) fn map_existing_building(
     model: &mut Value,
     csv: &Rows,
     schema: &Value,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
-) -> Option<shading::HemieShading> {
+) -> Option<(shading::HemieShading, Provenance)> {
     let before = errors.len();
-    let shading = convert_existing_building(model, csv, schema, errors, notices);
-    report_silent_stop(shading.is_none(), before, errors);
-    shading
+    let converted = convert_existing_building(model, csv, schema, errors, notices);
+    report_silent_stop(converted.is_none(), before, errors);
+    converted
+}
+
+/// Marks a converted object with the pointer of the element it comes from, until
+/// `take_sources` moves the marks into the provenance table.
+const SOURCE: &str = "__vulcan_source";
+
+fn take_sources(value: &mut Value, path: &str, out: &mut Provenance) {
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::String(source)) = map.remove(SOURCE) {
+                out.insert(path.to_string(), source);
+            }
+            for (key, child) in map.iter_mut() {
+                take_sources(child, &format!("{path}{}", json_pointer(&[key])), out);
+            }
+        }
+        Value::Array(items) => {
+            for (i, child) in items.iter_mut().enumerate() {
+                take_sources(child, &format!("{path}/{i}"), out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// A stop (paths such as no building part found) that recorded no error since `before`.
@@ -1234,7 +1278,7 @@ fn convert_existing_building(
     schema: &Value,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
-) -> Option<shading::HemieShading> {
+) -> Option<(shading::HemieShading, Provenance)> {
     let snapshot = model.clone();
     let mut ctx = Ctx {
         settings: Settings {
@@ -1261,6 +1305,36 @@ fn convert_existing_building(
         return None;
     }
     let (mut geometry, ventilation) = converted.expect("checked");
+    let mut provenance = Provenance::new();
+    take_sources(&mut geometry, "/Zone", &mut provenance);
+    for (node, row) in [
+        ("/Zone/age_band", format!("/Metadata/{SETTING}age_band")),
+        ("/Zone/region", "/Metadata/Postcode".into()),
+    ] {
+        provenance.insert(node.into(), row);
+    }
+    // A construction is its setting row's, or its one element's when it takes element values;
+    // one shared by several elements with their own values names none.
+    let from_elements = std::mem::take(&mut ctx.constructions.from_elements);
+    for (key, construction) in geometry["constructions"].as_object().into_iter().flatten() {
+        let source = match from_elements.get(key) {
+            Some(elements) if elements.len() == 1 => elements.iter().next().cloned(),
+            Some(_) => None,
+            None => construction["construction_type"]
+                .as_str()
+                .map(|kind| format!("/Metadata/{SETTING}construction_{kind}")),
+        };
+        if let Some(source) = source {
+            provenance.insert(
+                format!("/Zone/constructions{}", json_pointer(&[key])),
+                source,
+            );
+        }
+    }
+    // The ventilation keeps the full input's paths, which name their Global Settings rows.
+    for node in ["/InfiltrationVentilation", "/InfiltrationVentilation/Leaks"] {
+        provenance.insert(node.into(), node.into());
+    }
     systems::mechanical_ventilation(&snapshot, csv, schema, &mut geometry, errors, notices);
     let (segments, shading) = shading::distant(&ctx.settings, &geometry, errors, notices)?;
     model["ExternalConditions"]["shading_segments"] = segments;
@@ -1295,7 +1369,7 @@ fn convert_existing_building(
     model["InfiltrationVentilation"] = ventilation;
     // DESNZ-defined: with HEMIE Geometry, systems take their HEMIE form, which has no zone.
     systems::map_systems(model, schema, errors, notices);
-    Some(shading)
+    Some((shading, provenance))
 }
 
 fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
@@ -1741,7 +1815,8 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             placed.insert(opening.name.to_string());
             on_edge.push(opening);
             if opening.ty == "BuildingElementTransparent" {
-                if let Some(w) = window(ctx, opening, kind == Kind::External) {
+                if let Some(mut w) = window(ctx, opening, kind == Kind::External) {
+                    w[SOURCE] = json!(opening.path());
                     win.push(w);
                 }
             } else {
@@ -1758,6 +1833,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 if let Some(vents) = systems::host_vents(ctx, opening.name) {
                     d["mechanical_vents"] = vents;
                 }
+                d[SOURCE] = json!(opening.path());
                 door.push(d);
             }
         }
@@ -1868,7 +1944,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         let part_walls: Vec<Value> = hemie_walls
             .iter()
             .filter(|w| w.part == pi)
-            .map(|w| Value::Object(w.value.clone()))
+            .map(|w| {
+                let mut value = w.value.clone();
+                value.insert(SOURCE.into(), json!(w.source.path()));
+                Value::Object(value)
+            })
             .collect();
         let mut bp = Map::new();
         if conservatory[pi] {
@@ -3143,6 +3223,34 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             "InfiltrationVentilation": {"cross_vent_possible": false, "terrain_class": "Suburban", "altitude": 0, "ventilation_zone_base_height": 0,
                 "Leaks": {"test_pressure": "Standard", "test_result": 5, "env_area": 200, "ventilation_zone_height": 5.6}}
         })
+    }
+
+    #[test]
+    fn a_construction_with_no_element_values_traces_to_its_setting_row() {
+        let rows = crate::parser::CSVParser::new()
+            .parse_csv(&house(gable_roof()))
+            .expect("csv");
+        let mut model = full_input();
+        let (mut errors, mut notices) = (Vec::new(), Vec::new());
+        let (_, provenance) =
+            map_existing_building(&mut model, &rows, &json!({}), &mut errors, &mut notices)
+                .expect("converts");
+        assert!(errors.is_empty(), "{errors:#?}");
+        let constructions = model["Zone"]["constructions"].as_object().unwrap();
+        let setting_only = constructions
+            .iter()
+            .find(|(_, c)| c.as_object().unwrap().len() <= 2)
+            .map(|(key, c)| {
+                (
+                    key.clone(),
+                    c["construction_type"].as_str().unwrap().to_string(),
+                )
+            });
+        let (key, kind) = setting_only.expect("a construction from its setting alone");
+        assert_eq!(
+            provenance[&format!("/Zone/constructions/{key}")],
+            format!("/Metadata/HEMIE_construction_{kind}")
+        );
     }
 
     pub(super) fn run(text: &str) -> (Value, Vec<ValidationError>, Vec<SchemaOmission>) {

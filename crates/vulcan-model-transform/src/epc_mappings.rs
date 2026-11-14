@@ -251,6 +251,17 @@ pub(crate) fn report_ventilation_defaults(
                 format!("Ventilation system '{name}': state its installation_type (installation_scheme or no_installation_scheme) on its Ventilation Systems row. There is no default."),
             ));
         }
+        // An MVHR's location (inside or outside the envelope) is an assessor input with no
+        // default (DESNZ-defined).
+        if system.get("vent_type").and_then(Value::as_str) == Some("MVHR")
+            && system.get("mvhr_location").is_none_or(Value::is_null)
+        {
+            errors.push(error(
+                "E_EPC_VENTILATION_MVHR_LOCATION",
+                json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name, "mvhr_location"]),
+                format!("MVHR '{name}': state its mvhr_location (inside or outside the insulated envelope) on its Ventilation Systems row. There is no default."),
+            ));
+        }
         // A stopped intermittent extract fan leaks; its back-draught protection and diameter
         // are assessor inputs with no default (DESNZ-defined).
         let intermittent =
@@ -275,6 +286,149 @@ pub(crate) fn report_ventilation_defaults(
             let path = json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name]);
             notices.push(notice(&path, format!("The ventilation system '{name}' does not state these settings, so the model uses the target defaults: {}. Add them to its Ventilation Systems row to state them.", used.join(", "))));
         }
+    }
+}
+
+/// An MVHR's drawn ducts as the full input's ductwork descriptor (an object, not the FHS list).
+/// Each descriptor field the drawing gives one value for is mapped from it; a field the system
+/// states in its own `ductwork` object keeps that value; every other field takes the
+/// DESNZ-defined default, and the notice names it.
+pub(crate) fn mvhr_ductwork(
+    name: &str,
+    stated: Option<&Map<String, Value>>,
+    ducts: &[Value],
+    location: Option<&str>,
+) -> (Value, Option<SchemaOmission>) {
+    let path = json_pointer(&[
+        "InfiltrationVentilation",
+        "MechanicalVentilation",
+        name,
+        "ductwork",
+    ]);
+    let mut out = stated.cloned().unwrap_or_default();
+    if ducts.is_empty() {
+        let notice = notice(&path, format!("The MVHR '{name}' has no drawn ducts, so its ductwork uses the defaults. Draw its ducts to change them."));
+        return (Value::Object(out), Some(notice));
+    }
+    // HEM counts only the intake and exhaust ducts of an MVHR inside the envelope, and only the
+    // supply and extract ducts of one outside it; the full input states only those lengths.
+    let counted: &[&str] = match location {
+        Some("inside") => &["intake", "exhaust"],
+        Some("outside") => &["supply", "extract"],
+        _ => &["intake", "exhaust", "supply", "extract"],
+    };
+    let ducts: Vec<&Value> = ducts
+        .iter()
+        .filter(|d| {
+            d["duct_type"]
+                .as_str()
+                .is_some_and(|t| counted.contains(&t))
+        })
+        .collect();
+    let mut set = |field: &str,
+                   value: Option<Value>,
+                   missing: &mut Vec<&'static str>,
+                   label: &'static str| {
+        if out.contains_key(field) {
+            return;
+        }
+        match value {
+            Some(value) => {
+                out.insert(field.into(), value);
+            }
+            None => missing.push(label),
+        }
+    };
+    let one = |values: Vec<Option<Value>>| -> Option<Value> {
+        let first = values.first()?.clone()?;
+        values
+            .iter()
+            .all(|v| v.as_ref() == Some(&first))
+            .then_some(first)
+    };
+    let mut missing = Vec::new();
+    for duct_type in counted {
+        let lengths: Vec<f64> = ducts
+            .iter()
+            .filter(|d| d["duct_type"] == *duct_type)
+            .filter_map(|d| d["length"].as_f64())
+            .collect();
+        let label = match *duct_type {
+            "intake" => "intake duct length",
+            "exhaust" => "exhaust duct length",
+            "supply" => "supply duct length",
+            _ => "extract duct length",
+        };
+        let length = (!lengths.is_empty()).then(|| json!(lengths.iter().sum::<f64>()));
+        set(&format!("{duct_type}_length"), length, &mut missing, label);
+    }
+    let shape = one(ducts
+        .iter()
+        .map(|d| d.get("cross_section_shape").cloned())
+        .collect());
+    // DESNZ-defined sizes: a rectangular duct's perimeter or a circular duct's external
+    // diameter, in mm.
+    let size = one(ducts
+        .iter()
+        .map(|d| {
+            let (field, sizes) = match d["cross_section_shape"].as_str()? {
+                "rectangular" => ("duct_perimeter_mm", [328.0, 528.0, 620.0]),
+                "circular" => ("external_diameter_mm", [100.0, 125.0, 150.0]),
+                _ => return None,
+            };
+            let mm = d[field].as_f64()?;
+            let index = sizes.iter().position(|s| *s == mm)?;
+            Some(json!(["small", "medium", "large"][index]))
+        })
+        .collect());
+    let insulated = one(ducts
+        .iter()
+        .map(|d| {
+            Some(json!(
+                d["insulation_thickness_mm"].as_f64().unwrap_or(0.0) > 0.0
+            ))
+        })
+        .collect());
+    set(
+        "cross_section_shape",
+        shape,
+        &mut missing,
+        "cross-section shape",
+    );
+    set("ductwork_size", size, &mut missing, "size");
+    set("insulation_present", insulated, &mut missing, "insulation");
+    let field = |key: &str| one(ducts.iter().map(|d| d.get(key).cloned()).collect());
+    set(
+        "insulation_thermal_conductivity",
+        field("insulation_thermal_conductivity"),
+        &mut missing,
+        "insulation thermal conductivity",
+    );
+    set(
+        "reflective",
+        field("reflective"),
+        &mut missing,
+        "reflective surface",
+    );
+    let notice = (!missing.is_empty()).then(|| {
+        notice(&path, format!("The MVHR '{name}' ductwork uses the default {}: its drawn ducts give no single value. Draw the missing ducts, or give the drawn ones one value, to change it.", missing.join(", ")))
+    });
+    (Value::Object(out), notice)
+}
+
+/// The full input's MVHR product states no `vent_type` (the product gives it), and only that
+/// field tells it from a product without heat recovery. Dropped last, once product slots and
+/// the existing-building conversion have read it.
+pub(crate) fn drop_mvhr_vent_type(model: &mut Value) {
+    for system in model
+        .pointer_mut("/InfiltrationVentilation/MechanicalVentilation")
+        .and_then(Value::as_object_mut)
+        .into_iter()
+        .flatten()
+        .filter_map(|(_, s)| s.as_object_mut())
+        .filter(|s| s.get("vent_type") == Some(&json!("MVHR")))
+    {
+        system.remove("vent_type");
     }
 }
 
@@ -390,7 +544,15 @@ pub(crate) fn apply_desnz_defaults(
     env_area_stated: bool,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
+    derived: &mut Vec<crate::DerivedDefault>,
 ) {
+    let mut derive = |path: String, field: &str, value: Value| {
+        derived.push(crate::DerivedDefault {
+            path,
+            field: field.into(),
+            value,
+        })
+    };
     for (supply, value) in model["EnergySupply"].as_object_mut().into_iter().flatten() {
         let Some(battery) = value
             .get_mut("ElectricBattery")
@@ -477,6 +639,11 @@ pub(crate) fn apply_desnz_defaults(
             };
             if let (Some(temp), Some(emitter)) = (temp, &emitter) {
                 system.insert("design_flow_temp".into(), json!(temp));
+                derive(
+                    json_pointer(&["SpaceHeatSystem", name]),
+                    "design_flow_temp",
+                    json!(temp),
+                );
                 used.push(format!("design_flow_temp {temp} ({emitter})"));
             }
         }
@@ -489,6 +656,11 @@ pub(crate) fn apply_desnz_defaults(
             };
             if let (Some(diff), Some(source)) = (diff, &source) {
                 system.insert("temp_diff_emit_dsgn".into(), json!(diff));
+                derive(
+                    json_pointer(&["SpaceHeatSystem", name]),
+                    "temp_diff_emit_dsgn",
+                    json!(diff),
+                );
                 used.push(format!("temp_diff_emit_dsgn {diff} ({source})"));
             }
         }
@@ -523,6 +695,7 @@ pub(crate) fn apply_desnz_defaults(
             Some(rate) => {
                 let flow = rate.max(0.3 * area) * 3.6;
                 system["design_outdoor_air_flow_rate"] = json!(flow);
+                derive(path.clone(), "design_outdoor_air_flow_rate", json!(flow));
                 notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses the default estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
             }
             None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on the system, or the number of bedrooms in Global Settings > Dwelling Details."))),
