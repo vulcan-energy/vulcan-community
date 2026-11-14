@@ -582,15 +582,12 @@ function bandsOrNumberShape(resolved: Record<string, unknown>): { bands: unknown
 }
 
 const NUMBER_CHOICE = 'number';
-const NUMERIC_TEXT = /^\d+(\.\d+)?$/;
 
 /** A dropdown of the bands plus a number choice, which opens a number input; a number is saved as a number. */
 function BandsOrNumberControl(props: DirectControlProps & { shape: { bands: unknown[]; number: Record<string, unknown> } }): React.ReactElement {
   const { shape, data, handleChange, schema, errors, ...rest } = props;
   const [numberChosen, setNumberChosen] = React.useState(false);
-  // An imported "90000" is a number typed as text: it shows as the number it is, and is saved as one on the next edit.
-  const importedNumber = typeof data === 'string' && NUMERIC_TEXT.test(data) ? Number(data) : undefined;
-  const number = importedNumber ?? data;
+  const number = data;
   const isNumber = numberChosen || typeof number === 'number';
   const { description, title } = schema as { description?: unknown; title?: unknown };
   return (

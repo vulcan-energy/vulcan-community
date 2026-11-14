@@ -717,6 +717,10 @@ export const parseCsvToGeometry = (
         parsed.mass_distribution_class =
           toFhsMassDistributionClass(parsed.mass_distribution_class) ?? parsed.mass_distribution_class;
       }
+      // A number typed as text ("90000") is the number it says, so display, validation and save agree.
+      if (typeof parsed.areal_heat_capacity === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(parsed.areal_heat_capacity)) {
+        parsed.areal_heat_capacity = Number(parsed.areal_heat_capacity);
+      }
       if (typeof parsed.areal_heat_capacity === 'number' && !keepNumericHeatCapacity) {
         parsed.areal_heat_capacity =
           arealHeatCapacityBandFromJPerM2K(parsed.areal_heat_capacity) ?? parsed.areal_heat_capacity;
