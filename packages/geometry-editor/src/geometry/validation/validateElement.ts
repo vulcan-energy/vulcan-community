@@ -1077,8 +1077,17 @@ function hotWaterOutletFields(
     for (const key of ['additionalProperties', 'then', 'else'] as const) walk(node[key]);
     Object.values(node.properties ?? {}).forEach((child) => { if (child !== node.properties) walk(child); });
   };
-  const resolve = (node: any): any => (typeof node?.$ref === 'string' ? root.$defs?.[node.$ref.split('/').pop()!] : node); // eslint-disable-line @typescript-eslint/no-explicit-any
-  walk(resolve(start)?.properties?.[section]);
+  // The node that holds the section's properties, through `$ref` and `anyOf` wrappers (EPC allows null).
+  const withProperties = (node: any, depth = 0): any => { // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!node || depth > 8) return undefined;
+    if (typeof node.$ref === 'string') return withProperties(root.$defs?.[node.$ref.split('/').pop()!], depth + 1);
+    if (node.properties) return node;
+    for (const key of ['anyOf', 'oneOf'] as const) {
+      for (const branch of node[key] ?? []) { const found = withProperties(branch, depth + 1); if (found) return found; }
+    }
+    return undefined;
+  };
+  walk(withProperties(start)?.properties?.[section]);
   return {
     takes: (field) => nodes.has(field),
     defaults: (field) => (nodes.get(field) ?? []).some((node) => node?.default !== undefined),
