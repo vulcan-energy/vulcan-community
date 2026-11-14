@@ -57,10 +57,11 @@ comes from the heat the water carries at that rate. The output line can bend whe
 reaches its maximum flow rate.
 
 The report suggests a lower design flow temperature, the lowest whole degree at which the
-radiators still give enough heat, when all of these are true: every heat source is a heat pump;
-the radiators are big enough; each heat pump is still big enough, and not too big, at the lower
-flow; the suggestion is at least 1 °C lower; and the design day runs the `design_flow_temp`
-setting (not a milder, weather-compensated design day). The suggestion then replaces the line
+radiators still give enough heat, when all of these are true: every heat source is a heat pump
+that serves only this system; the radiators are big enough; each heat pump is still big enough,
+and not too big, at the lower flow; the suggestion is at least 1 °C lower; it is not below 30 °C,
+the weather compensation lower limit (`min_flow_temp`) or the heat pump's lowest tested flow; and
+the design day runs the `design_flow_temp` setting (not a milder, weather-compensated design day). The suggestion then replaces the line
 that says where the radiators start to give enough heat.
 
 The report reads like the editor's sizing block. For the HEM:FHS demo model (a heat pump with a

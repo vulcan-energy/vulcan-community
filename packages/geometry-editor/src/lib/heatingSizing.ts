@@ -65,8 +65,10 @@ export interface SystemSizing {
    * the radiators are big enough, the design day runs the design_flow_temp setting (with weather
    * compensation: a design day at or below min_outdoor_temp, or a curve clamped at the setting; a
    * milder design day runs less than the setting, so the two are not the same thing), it is at
-   * least 1 °C below that flow, and every heat source is an outside air heat pump still big enough
-   * and not too big at it.
+   * least 1 °C below that flow, it is not below 30 °C (the chart's first flow), the weather
+   * compensation lower limit (min_flow_temp) or any heat pump's lowest tested flow, and every heat
+   * source is an outside air heat pump that serves only this system and is still big enough and
+   * not too big at it.
    */
   suggestedFlowC: number | null;
   notes: string[];
@@ -579,17 +581,31 @@ function sizeHeatSource(
 }
 
 /** SystemSizing.suggestedFlowC. */
-function suggestedFlow(s: SystemSizing, sources: Map<string, Json>, heatSources: Map<string, HeatSourceSizing>, coldestC: number): number | null {
+function suggestedFlow(
+  s: SystemSizing,
+  raw: Json,
+  sources: Map<string, Json>,
+  heatSources: Map<string, HeatSourceSizing>,
+  coldestC: number,
+): number | null {
   if (s.status !== 'ok' || s.verdict !== 'ok' || s.minFlowC === null || s.flowTempAtDesignC === null || s.designFlowTempC === null) return null;
   // Interpolation at exactly min_outdoor_temp can land a rounding error away from the setting.
   if (Math.abs(s.flowTempAtDesignC - s.designFlowTempC) > 1e-9) return null;
   const flowC = Math.ceil(s.minFlowC);
-  if (flowC > s.flowTempAtDesignC - 1 || s.heatSources.length === 0) return null;
+  if (flowC > s.flowTempAtDesignC - 1 || flowC < CURVE_MIN_FLOW_C || s.heatSources.length === 0) return null;
+  // Weather compensation (flowAtDesign) never runs below min_flow_temp.
+  const ctrl = obj(raw.ecodesign_controller);
+  const limit = [2, 3, 6, 7].includes(num(ctrl?.ecodesign_control_class) ?? 0) ? num(ctrl?.min_flow_temp) : null;
+  if (limit !== null && flowC < limit) return null;
   for (const name of s.heatSources) {
     const src = sources.get(name);
     const entry = heatSources.get(name);
     if (!src || str(src.type) !== 'HeatPump' || entry?.status !== 'ok' || entry.designLossKw === null) return null;
-    // ponytail: a heat pump serving several systems is judged at this system's lower flow alone.
+    // Another system it serves can keep the higher flow.
+    if (entry.systems.length > 1) return null;
+    // Below the lowest tested flow the capacity is a clamped extrapolation.
+    const tested = objects(src.test_data_EN14825).map((r) => num(r.design_flow_temp) ?? NaN);
+    if (flowC < Math.min(...tested)) return null;
     const range = heatPumpRange(src, flowC, coldestC);
     if ('reason' in range || range.maxKw < entry.designLossKw || (range.minKw !== null && range.minKw > entry.designLossKw)) return null;
   }
@@ -627,7 +643,7 @@ export function sizeHeating(model: Json, loss: DesignHeatLoss): HeatingSizing {
   const heatSources = sources.map(([name, src]) => sizeHeatSource(name, src, systems, sources, loss, sharedZones));
   const sourceByName = new Map(sources);
   const sizingByName = new Map(heatSources.map((h) => [h.name, h]));
-  for (const s of systems) s.sizing.suggestedFlowC = suggestedFlow(s.sizing, sourceByName, sizingByName, loss.coldestHourC);
+  for (const s of systems) s.sizing.suggestedFlowC = suggestedFlow(s.sizing, s.raw, sourceByName, sizingByName, loss.coldestHourC);
   return {
     coldestHourC: loss.coldestHourC,
     setpointC: loss.setpointC,

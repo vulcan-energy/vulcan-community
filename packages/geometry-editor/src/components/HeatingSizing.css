@@ -115,11 +115,11 @@
 .heating-sizing-chart__label--green { fill: var(--success-text); }
 .heating-sizing-chart__grid { stroke: var(--border-subtle); stroke-width: 1; stroke-opacity: 0.5; }
 .heating-sizing-chart__zone--red { fill: var(--validation-error); fill-opacity: 0.2; }
-.heating-sizing-chart__zone--green { fill: var(--success-text); fill-opacity: 0.2; }
+.heating-sizing-chart__zone--green { fill: var(--status-ok-fill); fill-opacity: 0.2; }
 .heating-sizing-chart__need { stroke: var(--text-secondary); stroke-width: 1.5; stroke-dasharray: 2 6; stroke-linecap: round; }
 .heating-sizing-chart__curve { stroke: var(--accent-primary); stroke-width: 2.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .heating-sizing-chart__leader { stroke: var(--text-muted); stroke-width: 1; stroke-linecap: round; }
-.heating-sizing-chart__dot--success { fill: var(--success-text); }
+.heating-sizing-chart__dot--success { fill: var(--status-ok-fill); }
 .heating-sizing-chart__dot--error { fill: var(--validation-error); }
 .heating-sizing-chart__dot { stroke: var(--bg-primary); stroke-width: 2; }
 .heating-sizing-chart__cross { fill: var(--bg-primary); stroke: var(--text-primary); stroke-width: 2; }

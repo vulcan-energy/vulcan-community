@@ -463,6 +463,34 @@ describe('sizeHeating: suggested lower flow', () => {
   it('none when the radiators are too small', () => {
     expect(suggested({ s: wet() }, undefined, 7)).toBeNull();
   });
+  it('none below the weather compensation lower limit (min_flow_temp), which the engine clamps to', () => {
+    // At -8 C both controllers run the 55 C setting, but would never run 51 C.
+    const limits = { ecodesign_control_class: 2, min_outdoor_temp: -5, max_outdoor_temp: 15, min_flow_temp: 52 };
+    expect(suggested({ s: wet({ ecodesign_controller: limits }) }, undefined, 5, -8)).toBeNull();
+    const curve = { ecodesign_control_class: 2, weather_comp_a: 0, weather_comp_b: 0, weather_comp_c: 60, min_flow_temp: 52 };
+    expect(suggested({ s: wet({ ecodesign_controller: curve }) }, undefined, 5, -8)).toBeNull();
+  });
+  it('none below the heat pump lowest tested design_flow_temp', () => {
+    const rows = [testRow('A', 52, 6, -7), testRow('A', 55, 6, -7)];
+    expect(suggested({ s: wet() }, { hp: heatPump({ test_data_EN14825: rows }) })).toBeNull();
+  });
+  it('none below the chart first flow (30 C)', () => {
+    // 0.5 kW is covered from 28.2 C; the heat pump is tested from 25 C and turns down far enough.
+    const hp = heatPump({
+      test_data_EN14825: [testRow('A', 25, 8, -7), testRow('A', 55, 6, -7)],
+      min_modulation_rate_35: 0.01,
+      min_modulation_rate_55: 0.01,
+    });
+    expect(suggested({ s: wet() }, { hp }, 0.5)).toBeNull();
+  });
+  it('none when a heat source of the system serves another system', () => {
+    const result = sizeHeating(
+      model({ s: wet(), t: wet({ Zone: 'zone 2' }) }),
+      loss({ 'zone 1': 2.5, 'zone 2': 2.5 }),
+    );
+    expect(result.heatSources[0].verdict).toBe('ok');
+    expect(result.systems.map((s) => s.suggestedFlowC)).toEqual([null, null]);
+  });
 });
 
 describe('sizeHeating: model shapes', () => {
