@@ -2713,7 +2713,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               if (!parentCenter) return null;
               const parentCenterCanvas = worldToCanvas(parentCenter, scale, panOffset, canvasCenter);
 
-              // The DESNZ-defined distance (FHS guidance 2.3.1), from the same function that stores
+              // The distance, from the same function that stores
               // it, using current coordinates (real-time during drag).
               const measured = contextShadingDistanceDetails(
                 { coordinates },

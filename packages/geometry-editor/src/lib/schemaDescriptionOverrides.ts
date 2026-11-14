@@ -785,7 +785,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'degrees',
   },
   'distance': {
-    description: 'Distance measurement. For ContextShading: horizontal distance from the outside face at the midpoint of the dwelling\'s closest external wall to the midpoint of the shading object\'s closest face, measured perpendicular to that facade (DESNZ-defined; FHS guidance 2.3.1; unit: m). Vulcan derives it from the drawing.',
+    description: 'Distance measurement. For ContextShading: distance measured at right angles from the nearest external wall to the obstacle\'s nearest face (unit: m). Vulcan derives it from the drawing.',
     type: 'number',
     units: 'm',
   },
@@ -814,7 +814,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'string',
   },
   'context_shading_distance': {
-    description: 'Horizontal distance from the outside face at the midpoint of the dwelling\'s closest external wall to the midpoint of the shading object\'s closest face, measured perpendicular to that facade (DESNZ-defined; FHS guidance 2.3.1; unit: m). Vulcan derives it from the drawing.',
+    description: 'Distance measured at right angles from the nearest external wall to the obstacle\'s nearest face (unit: m). Vulcan derives it from the drawing.',
     type: 'number',
     units: 'm',
   },

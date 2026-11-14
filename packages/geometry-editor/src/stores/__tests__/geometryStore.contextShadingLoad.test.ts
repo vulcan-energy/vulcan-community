@@ -7,7 +7,7 @@ import type { ContextShading } from '../../geometry/types';
 
 // A 10 x 6 floor whose east edge carries a bay-like vertex cluster: area centroid (5, 3),
 // vertex mean (~7.2, 3). The shading is a point due north of the area centroid, 17 m from
-// the north wall (FHS guidance 2.3.1).
+// the north wall.
 const csvWithShading = (startAngle: string, endAngle: string, distance: string) => `Metadata,,
 GlobalOrientationOffset,0,
 VulcanCsvVersion,3

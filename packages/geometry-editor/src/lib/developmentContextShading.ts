@@ -776,8 +776,7 @@ export function syncDevelopmentContextShadingElements(
     }
   }
 
-  // HEM takes only a distance above 0 (FHS guidance 2.3.1 gives 0 or less for an object beside
-  // the dwelling), so a generated object without one is left out; every other one is kept.
+  // HEM takes only a distance above 0 (an object beside the dwelling measures 0 or less), so a generated object without one is left out; every other one is kept.
   for (const [key, target] of targets) {
     if (!(target.distance > 0)) targets.delete(key);
   }

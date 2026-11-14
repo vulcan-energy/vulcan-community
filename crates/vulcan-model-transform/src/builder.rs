@@ -4088,7 +4088,7 @@ impl JSONBuilder {
                     obstacles.push((row, start, end, shading_type));
                 }
             }
-            // FHS guidance 2.3.3: each object shades its own arc, at any size. The schema takes
+            // Each object shades its own arc, at any size. The schema takes
             // whole degrees, and a segment may not cross north, so an arc across 0/360 is split.
             let mut arcs: Vec<(u32, u32, Value)> = Vec::new();
             for &(row, start, end, shading_type) in &obstacles {
@@ -4151,7 +4151,7 @@ impl JSONBuilder {
                 self.push_non_fatal(
                     "E027",
                     "/Context Shading",
-                    &format!("Context Shading makes {shaded_count} shaded segments. FHS guidance 2.3.3 allows at most 18. Combine neighbouring objects of similar height into one."),
+                    &format!("Context Shading makes {shaded_count} shaded segments. The model takes at most 18. Combine neighbouring objects of similar height into one."),
                 );
             }
             let (min_segments, max_segments) = self.shading_segment_limits();
@@ -14057,7 +14057,7 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
         );
     }
 
-    /// FHS guidance 2.3.3: each object shades its own start-to-end arc at any size, and the
+    /// Each object shades its own start-to-end arc at any size, and the
     /// model takes at most 18 shaded segments.
     #[test]
     fn context_shading_segments_follow_each_objects_own_arc() {
@@ -14126,7 +14126,7 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
         assert_eq!(&segments[..3], &[(0, 10, 1), (10, 20, 2), (20, 30, 1)]);
         assert_eq!(segments.last(), Some(&(350, 360, 1)));
 
-        // 19 separate objects exceed the 18 shaded segments the guidance allows.
+        // 19 separate objects exceed the 18 shaded segments the model takes.
         let rows: Vec<String> = (0..19)
             .map(|i| format!("S{i},ContextShading,obstacle,{},{},5,7", i * 18, i * 18 + 9))
             .collect();

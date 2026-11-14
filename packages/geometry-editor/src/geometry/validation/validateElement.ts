@@ -1856,7 +1856,7 @@ export const validateElementCore = (
         if (parent && contextElement.coordinates && parent.coordinates && context.calculateContextShadingDistance) {
           const derivedDistance = context.calculateContextShadingDistance(contextElement, parent);
           if (!(derivedDistance > 0)) {
-            issues.push(geo(`Distance is ${derivedDistance} m: the object is level with or behind the facade of the dwelling's closest external wall (for example beside it, or beyond a party wall), not in front of it. HEM needs a distance above 0. FHS guidance 2.3.1 measures it perpendicular from that wall to the object's closest face.`, 'distance'));
+            issues.push(geo(`Distance is ${derivedDistance} m: the object is level with or behind the facade of the dwelling's closest external wall (for example beside it, or beyond a party wall), not in front of it. HEM needs a distance above 0. Vulcan measures it at right angles from the nearest external wall to the obstacle's nearest face.`, 'distance'));
           }
           // A warning, never blocking: before the thickness rule the distance ran from the internal line.
           // A thickness the model gives (wall layers, floor, ground floor) needs no message.

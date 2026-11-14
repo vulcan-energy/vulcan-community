@@ -19,7 +19,7 @@ const block = {
   coordinates: [{ x: 2, y: 10 }, { x: 4, y: 10 }, { x: 4, y: 12 }, { x: 2, y: 12 }],
 };
 
-describe('context shading distance (FHS guidance 2.3.1)', () => {
+describe('context shading distance', () => {
   it('measures from the closest external wall to the closest face, perpendicular to the facade', () => {
     expect(calculateContextShadingDistanceFromCoordinates(block, floor, [])).toBe(4);
   });

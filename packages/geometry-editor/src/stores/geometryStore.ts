@@ -7551,7 +7551,7 @@ const createGeometryState = (
     return calculateContextShadingAngularRangeFromCoordinates(contextShading, parentElement, globalOffsetDeg);
   },
 
-  // DESNZ-defined ContextShading distance (FHS guidance 2.3.1) from the drawing
+  // ContextShading distance from the drawing
   calculateContextShadingDistance: (contextShading: ContextShading, parentElement: Element) => {
     return calculateContextShadingDistanceFromCoordinates(contextShading, parentElement, Object.values(get().elementsById));
   },

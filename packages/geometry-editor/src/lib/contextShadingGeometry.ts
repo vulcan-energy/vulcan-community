@@ -189,9 +189,7 @@ export type ContextShadingDistanceDetails = {
 };
 
 /**
- * DESNZ-defined distance (FHS guidance 2.3.1): the horizontal distance from the outside face at
- * the midpoint of the dwelling's closest external wall to the midpoint of the shading object's
- * closest face, measured perpendicular to that facade.
+ * Context shading distance, measured at right angles from the nearest external wall to the obstacle's nearest face.
  *
  * The parent floor's edges stand in for the walls. An edge under a vertical party wall or wall
  * to an adjacent space on the floor's own storey is not external and is skipped. Edges are
