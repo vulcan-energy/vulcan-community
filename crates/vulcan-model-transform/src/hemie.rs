@@ -1201,7 +1201,31 @@ fn merge_edges<'e>(ring: Vec<P>, walls: &[&'e El<'e>]) -> (Vec<P>, Vec<Option<&'
 // Conversion
 
 /// Replace the full-input zone and ventilation with HEMIE inputs. Errors name the element.
+/// A conversion that stops always reports an error: the unconverted zone's own schema errors
+/// are hidden (`is_unused_full_input`), so a silent stop would let the model pass.
 pub(crate) fn map_existing_building(
+    model: &mut Value,
+    csv: &Rows,
+    schema: &Value,
+    errors: &mut Vec<ValidationError>,
+    notices: &mut Vec<SchemaOmission>,
+) -> Option<shading::HemieShading> {
+    let before = errors.len();
+    let shading = convert_existing_building(model, csv, schema, errors, notices);
+    report_silent_stop(shading.is_none(), before, errors);
+    shading
+}
+
+/// A stop (paths such as no building part found) that recorded no error since `before`.
+fn report_silent_stop(stopped: bool, before: usize, errors: &mut Vec<ValidationError>) {
+    if stopped && errors.len() == before {
+        errors.push(error("STOREYS", "/Zone".into(), STOPPED_UNSAID.into()));
+    }
+}
+
+const STOPPED_UNSAID: &str = "The existing building could not be built from the drawing: no building part has its storeys. Check that each floor sits over the floor below.";
+
+fn convert_existing_building(
     model: &mut Value,
     csv: &Rows,
     schema: &Value,
@@ -3132,6 +3156,19 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         let mut exposed = box_walls(&BOX, &[0, 1]);
         exposed.extend(exposed_extra);
         csv(SETTINGS, &exposed, &ground(&BOX))
+    }
+
+    #[test]
+    fn a_conversion_that_stops_unsaid_reports_one_error() {
+        let mut errors = Vec::new();
+        report_silent_stop(true, 0, &mut errors);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code, "E_EPC_HEMIE_STOREYS");
+        assert_eq!(errors[0].message, STOPPED_UNSAID);
+        // A stop that reported its own error, or a conversion that ran, adds nothing.
+        report_silent_stop(true, 0, &mut errors);
+        report_silent_stop(false, 1, &mut errors);
+        assert_eq!(errors.len(), 1);
     }
 
     #[test]
