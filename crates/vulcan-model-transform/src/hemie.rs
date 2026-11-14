@@ -931,19 +931,22 @@ impl Ctx<'_> {
     /// allows it: a number in J/m2.K, or a band at its class value. Anything else fails naming
     /// the element; a number typed as text is read, with a notice.
     fn heat_capacity(&mut self, construction_type: &str, elements: &[&El]) -> Option<f64> {
-        let value = self.agreed(elements, "areal_heat_capacity")?;
-        let e = elements[0];
         let rule = heat_capacity_rule(construction_type);
         if rule == HeatCapacity::Fixed {
             // A full-input model states one for every element, so it is set aside, reported once
-            // for the model.
-            for e in elements {
+            // for the model. Set aside before `agreed`: values that are not used need not agree.
+            for e in elements
+                .iter()
+                .filter(|e| e.get("areal_heat_capacity").is_some())
+            {
                 self.constructions
                     .heat_capacity_set_aside
                     .insert(e.name.to_string());
             }
             return None;
         }
+        let value = self.agreed(elements, "areal_heat_capacity")?;
+        let e = elements[0];
         let typed = value.as_str().and_then(|s| s.trim().parse::<f64>().ok());
         if let Some(n) = typed {
             self.notices.push(notice(&e.path(), format!("'{}' states its areal heat capacity as text, \"{}\". It is read as {n} J/m²·K.", e.name, value.as_str().unwrap_or_default())));
@@ -2089,9 +2092,6 @@ fn region(ctx: &mut Ctx) -> Option<String> {
 fn missing_setting_message(row: &str, fields: &BTreeSet<String>) -> String {
     const WHERE: &str = "Global Settings > Defaults > Fabric";
     let words = |s: &str| s.replace('_', " ");
-    if row == format!("{SETTING}age_band") {
-        return format!("The fabric defaults state no age band. Choose it in {WHERE}.");
-    }
     if let Some(t) = row.strip_prefix(&format!("{SETTING}construction_")) {
         let t = words(t);
         return if fields.is_empty() {
@@ -2110,7 +2110,9 @@ fn missing_setting_message(row: &str, fields: &BTreeSet<String>) -> String {
             format!("The {t} fabric default states no {}. Choose it in {WHERE}, or on each {t} element.", list.join(" or "))
         };
     }
-    format!("The model does not state the setting {row}. Add it.")
+    // The other rows (the age band) are fabric defaults too.
+    let t = words(row.strip_prefix(SETTING).unwrap_or(row));
+    format!("The fabric defaults state no {t}. Choose it in {WHERE}.")
 }
 
 /// The front door: the door marked `is_front_door`, or the model's only door.
@@ -2771,10 +2773,14 @@ fn dormer<'e>(
     let (Some(pitch), Some(height)) = (pitch, measured("frontWallHeight")) else {
         let mut missing = Vec::new();
         if pitch_type != "flat" && measured(pitch_key).is_none() {
-            missing.push(format!("roof pitch ({pitch_key})"));
+            missing.push(if pitch_key == "gableRoofPitch" {
+                "side roof pitch"
+            } else {
+                "dormer roof pitch"
+            });
         }
         if measured("frontWallHeight").is_none() {
-            missing.push("front wall height (frontWallHeight)".to_string());
+            missing.push("front wall height");
         }
         ctx.errors.push(error(
             "DORMER",
@@ -3882,10 +3888,12 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             capacity(&model, "not_edge_insulated_ground_attached_floor"),
             [json!(275_000.0)]
         );
-        // A roof's stated heat capacity is set aside, reported; a number typed as text is read.
+        // A roof's stated heat capacity is set aside, reported, and need not agree; a number
+        // typed as text is read.
         let typed = floor.replace("Medium", "300000");
-        let (model, errors, notices) =
-            run(&csv(SETTINGS, &[exposed, roof("Light")].concat(), &typed));
+        let mut roofs = roof("Light");
+        roofs[1] = roofs[1].replace("Light", "Heavy");
+        let (model, errors, notices) = run(&csv(SETTINGS, &[exposed, roofs].concat(), &typed));
         assert!(errors.is_empty(), "{errors:#?}");
         assert_eq!(capacity(&model, "unheated_pitched_roof"), [Value::Null]);
         assert!(notices

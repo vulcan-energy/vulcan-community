@@ -208,6 +208,8 @@ export type GeometryInspectorElementFieldsContext = Readonly<{
    * patch applies to each of them.
    */
   multiple?: boolean;
+  /** With several elements selected, the extra_json keys whose values differ between them. */
+  mixed?: readonly string[];
 }>;
 
 export type GeometryInspectorElementFieldsContribution = Readonly<{
