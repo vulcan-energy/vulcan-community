@@ -9203,25 +9203,8 @@
     }
   },
   "InfiltrationVentilation": {
-    "shield_class": "Normal",
-    "terrain_class": "OpenField",
-    "altitude": 30,
-    "noise_nuisance": false,
-    "Vents": {
-      "vent1": {
-        "mid_height_air_flow_path": 1.5,
-        "area_cm2": 100,
-        "pressure_difference_ref": 20,
-        "orientation360": 180,
-        "pitch": 60
-      }
-    },
-    "Leaks": {
-      "ventilation_zone_height": 6,
-      "test_pressure": "Standard",
-      "test_result": 4,
-      "env_area": 220
-    },
+    "Vents": {},
+    "Leaks": {},
     "MechanicalVentilation": {
       "mechvent1": {
         "vent_type": "Centralised continuous MEV"

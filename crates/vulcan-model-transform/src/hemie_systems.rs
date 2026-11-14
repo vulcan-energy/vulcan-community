@@ -7,7 +7,9 @@
 //! Systems with no HEMIE form (boilers, heat batteries, ...) stay in their full form.
 //!
 //! Mechanical ventilation moves into HEMIE Geometry: each vent sits in the wall, window or door
-//! its Ventilation Systems row names as `host_element`, and HEMIE takes its height, orientation
+//! its Ventilation Systems row names as `host_element` (a terminal's row, whose
+//! `parent_element` is its system) or `parent_element` (a fan's own system row, as the editor
+//! writes it), and HEMIE takes its height, orientation
 //! and pitch from that element. A vent's `vent_position` (bottom, middle or top) defaults to
 //! middle (DESNZ-defined).
 
@@ -277,6 +279,17 @@ struct Vent<'r> {
     vent_type: &'r str,
 }
 
+impl<'r> Vent<'r> {
+    /// The wall, window or door the vent sits in.
+    fn host(&self) -> Option<&'r str> {
+        text(self.row, "host_element").or_else(|| {
+            (text(self.row, "Type") == Some("MechanicalVentilation"))
+                .then(|| text(self.row, "parent_element"))
+                .flatten()
+        })
+    }
+}
+
 fn vents(csv: &Rows) -> Vec<Vent<'_>> {
     let rows: Vec<&Row> = csv.get(VENTILATION).into_iter().flatten().collect();
     fn name(row: &Row) -> &str {
@@ -328,9 +341,9 @@ pub(super) fn check_vents(ctx: &mut Ctx) {
             // DESNZ-defined: a vent's position in its element defaults to middle.
             None => ctx.notices.push(notice(&path, format!("Vent '{}' states no vent_position, so HEMIE takes the DESNZ default: the middle of its element.", vent.name))),
         }
-        if let Some(host) = text(vent.row, "host_element") {
+        if let Some(host) = vent.host() {
             if els.iter().filter(|e| e.name == host).count() > 1 {
-                ctx.errors.push(error(path, format!("Vent '{}' names host_element '{host}', which more than one element is called. Rename one so the vent's element is unambiguous.", vent.name)));
+                ctx.errors.push(error(path, format!("Vent '{}' is in '{host}', which more than one element is called. Rename one so the vent's element is unambiguous.", vent.name)));
             }
         }
     }
@@ -340,7 +353,7 @@ pub(super) fn check_vents(ctx: &mut Ctx) {
 pub(super) fn host_vents(ctx: &mut Ctx, host: &str) -> Option<Value> {
     let mut out = Map::new();
     for vent in vents(ctx.settings.csv) {
-        if text(vent.row, "host_element") == Some(host) {
+        if vent.host() == Some(host) {
             let position = text(vent.row, "vent_position").unwrap_or("middle");
             out.insert(
                 vent.name.into(),
@@ -414,8 +427,8 @@ pub(super) fn mechanical_ventilation(
             continue;
         }
         let path = json_pointer(&[VENTILATION, vent.name]);
-        errors.push(error(path, match text(vent.row, "host_element") {
-            None => format!("Vent '{}' of '{}' names no host_element. An existing-building EPC places each mechanical vent in a wall, window or door, and takes its height, orientation and pitch from it: name that element.", vent.name, vent.system),
+        errors.push(error(path, match vent.host() {
+            None => format!("Vent '{}' of '{}' does not name the wall, window or door it sits in. An existing-building EPC places each mechanical vent in one, and takes its height, orientation and pitch from it: name that element.", vent.name, vent.system),
             Some(host) => format!("Vent '{}' of '{}' is in '{host}', which is not a storey wall, window or door of the existing-building model. Name the wall, window or door it sits in.", vent.name, vent.system),
         }));
     }

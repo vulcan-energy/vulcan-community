@@ -604,6 +604,8 @@ impl<'a> Settings<'a> {
 struct Constructions {
     by_name: Map<String, Value>,
     documented: BTreeSet<String>,
+    /// Windows that state their own g-value or frame area fraction.
+    stated_glazing: BTreeSet<String>,
     /// Party walls that state no cavity type: HEMIE takes it from the age band (DESNZ-defined).
     party_walls_by_age_band: BTreeSet<String>,
 }
@@ -727,10 +729,24 @@ impl Ctx<'_> {
                 .insert(format!("{} (U {u:.3} from R {r})", first.name));
         }
         if construction_type == "window" {
-            for key in ["g_value", "frame_area_fraction"] {
+            // DESNZ-defined: HEMIE takes the g-value and frame area fraction from the glazing
+            // type and frame material unless the window states its own.
+            let mut stated = Vec::new();
+            for (key, label) in [
+                ("g_value", "g-value"),
+                ("frame_area_fraction", "frame area fraction"),
+            ] {
                 if let Some(v) = first.num(key) {
                     c.insert(key.into(), json!(v));
+                    stated.push(format!("{label} {v}"));
                 }
+            }
+            if !stated.is_empty() {
+                self.constructions.stated_glazing.insert(format!(
+                    "{} ({})",
+                    first.name,
+                    stated.join(", ")
+                ));
             }
         }
         if construction_type == "party_wall" {
@@ -772,6 +788,30 @@ impl Ctx<'_> {
         }
         for (key, value) in extra {
             c.entry(*key).or_insert_with(|| value.clone());
+        }
+        let stated = |key: &str| c.get(key).is_some_and(|v| !v.is_null());
+        let names = quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>());
+        let verb = if elements.len() > 1 {
+            "state"
+        } else {
+            "states"
+        };
+        let mini = matches!(construction_type, "mini_flat_roof" | "mini_pitched_roof");
+        if mini && !stated("u_value") && !stated("insulation_thickness") {
+            // DESNZ-defined (HEMIE): a bay roof with no insulation thickness has no insulation,
+            // whatever its location.
+            self.notices.push(notice(&first.path(), format!("Bay roof {names} {verb} no insulation thickness, so HEMIE models no insulation. If it is insulated, give the thickness and the location.")));
+        } else if (mini || matches!(construction_type, "flat_roof" | "unheated_pitched_roof"))
+            && !stated("insulation_location")
+            && !stated("u_value")
+        {
+            // DESNZ-defined (HEMIE): a roof with no insulation location has no insulation, and
+            // a stated thickness is then not used; `unknown` takes the age-band thickness.
+            if stated("insulation_thickness") {
+                self.errors.push(error(first.path(), format!("{names} {verb} an insulation thickness but no insulation location, so the thickness would not be used. Give the insulation location, or 'unknown' if it is not known.")));
+            } else {
+                self.notices.push(notice(&first.path(), format!("{names} {verb} no insulation location, so HEMIE models no roof insulation. If the roof is insulated, give the location, or 'unknown' to take the age-band thickness.")));
+            }
         }
         self.require(construction_type, &mut c);
         self.constructions.add(c)
@@ -991,6 +1031,12 @@ pub(crate) fn map_existing_building(
         .collect();
     if !documented.is_empty() {
         notices.push(notice("/Zone/constructions", format!("These elements state their own U-value, so HEMIE takes it as a documented U-value from the element: {}. Lodgement needs evidence for each.", documented.join(", "))));
+    }
+    let stated_glazing: Vec<String> = std::mem::take(&mut ctx.constructions.stated_glazing)
+        .into_iter()
+        .collect();
+    if !stated_glazing.is_empty() {
+        notices.push(notice("/Zone/constructions", format!("These windows state their own values, which HEMIE uses in place of those for their glazing type and frame material: {}.", stated_glazing.join(", "))));
     }
     let by_age_band = std::mem::take(&mut ctx.constructions.party_walls_by_age_band);
     if !by_age_band.is_empty() {
@@ -1670,17 +1716,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         Value::Object(std::mem::take(&mut ctx.constructions.by_name)),
     );
 
-    // As HEMIE derives the dwelling height: the tallest part's storeys and the gaps between them.
-    let dwelling_height = parts
-        .iter()
-        .zip(&bases)
-        .map(|(p, base)| {
-            base - dwelling.unwrap_or(0.0)
-                + p.ceilings.iter().sum::<f64>()
-                + STOREY_GAP * (p.ceilings.len() as f64 - 1.0)
-        })
-        .fold(0.0, f64::max);
-    let ventilation = infiltration(ctx, full_ventilation, dwelling_height);
+    let ventilation = infiltration(ctx, full_ventilation);
     if !ctx.errors.is_empty() {
         return None;
     }
@@ -1893,6 +1929,24 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
         }
     };
     let key = ctx.construction(construction_type, &[g], &[]);
+    // HEMIE gives a solid or basement floor of bands A to H no insulation by default, so its
+    // construction resistance is 0, which the Core input rejects (DESNZ question E12). Stop
+    // here, naming the floor, instead of failing in the run.
+    let band = g.text("age_band").map(str::to_string).or_else(|| {
+        ctx.settings
+            .raw(&format!("{SETTING}age_band"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
+    let insulated = ctx.constructions.by_name[&key]
+        .get("insulation_thickness")
+        .is_some_and(|v| !v.is_null());
+    if floor_type != "suspended"
+        && !insulated
+        && band.as_deref().is_some_and(|b| ("A"..="H").contains(&b))
+    {
+        ctx.errors.push(error(g.path(), format!("Ground floor '{}' (age band {}) states no insulation thickness. HEM:EPC cannot yet run a solid or basement floor of age band A to H with no insulation (a DESNZ issue). If the floor has insulation, state its thickness.", g.name, band.unwrap_or_default())));
+    }
     Some(ctx.with_age_band(
         &[g],
         json!({"floor_type": floor_type, "construction": key, "total_area": total_area}),
@@ -2427,14 +2481,19 @@ fn dormer<'e>(
     if !pitch.is_null() {
         value["roof_pitch"] = pitch;
     }
-    Some(value)
+    Some(ctx.with_age_band(&[anchor], value))
 }
 
+/// The passive vents whose parent element is `window`; a fan there is a mechanical vent
+/// (`systems::host_vents`).
 fn window_vents<'r>(csv: &'r Rows, window: &'r str) -> impl Iterator<Item = &'r Row> {
     csv.get("Ventilation Systems")
         .into_iter()
         .flatten()
-        .filter(move |row| row.get("parent_element").and_then(Value::as_str) == Some(window))
+        .filter(move |row| {
+            row.get("Type").and_then(Value::as_str) == Some("Vents")
+                && row.get("parent_element").and_then(Value::as_str) == Some(window)
+        })
 }
 
 /// Background vents become passive vents in the wall they sit in (derived from the model); a
@@ -2446,10 +2505,11 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
         .map(|e| e.name)
         .collect();
     for row in csv.get("Ventilation Systems").into_iter().flatten() {
-        if row
-            .get("parent_element")
-            .and_then(Value::as_str)
-            .is_some_and(|host| windows.contains(host))
+        if row.get("Type").and_then(Value::as_str) == Some("Vents")
+            && row
+                .get("parent_element")
+                .and_then(Value::as_str)
+                .is_some_and(|host| windows.contains(host))
         {
             continue;
         }
@@ -2480,15 +2540,16 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
     }
 }
 
-/// The HEMIE InfiltrationVentilation Geometry needs: the model's ventilation inputs, and its air
-/// test or, without one, the leakage-estimate inputs from the settings.
-fn infiltration(ctx: &mut Ctx, full: &Value, dwelling_height: f64) -> Option<Value> {
+/// The HEMIE InfiltrationVentilation Geometry needs: the model's ventilation inputs and its air
+/// test. Without an air test the conversion stops (DESNZ question E17).
+fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
     let mut iv = Map::new();
     iv.insert("model_type".into(), json!("hemie"));
     // The assessor's values: an existing building's absent shield class, noise nuisance and air
     // test rows leave no template value in the model (`existing_building_optional_rows`).
     // DESNZ-defined: HEMIE takes shield class from the terrain
-    // class and noise nuisance as No; the other three are required.
+    // class and noise nuisance as No; the other three are required Metadata rows, whose absence
+    // the required-row check already names.
     for (key, required) in [
         ("cross_vent_possible", true),
         ("terrain_class", true),
@@ -2500,9 +2561,14 @@ fn infiltration(ctx: &mut Ctx, full: &Value, dwelling_height: f64) -> Option<Val
             Some(v) => {
                 iv.insert(key.into(), v.clone());
             }
-            None if required => ctx.errors.push(error(format!("/InfiltrationVentilation/{key}"), format!("The model states no {key}, which HEMIE requires. Add the Metadata row Ventilation_{key}."))),
+            None if required => {}
             None => ctx.notices.push(notice(&format!("/InfiltrationVentilation/{key}"), format!("No Metadata row states Ventilation_{key}, so HEMIE applies the DESNZ default: {}.", if key == "shield_class" { "from the terrain class" } else { "No" }))),
         }
+    }
+    // Derived from the model: passive ducts (chimneys, flues) in their full form, which the
+    // HEMIE form accepts.
+    if let Some(ducts) = full.get("PassiveDucts").filter(|v| !v.is_null()) {
+        iv.insert("PassiveDucts".into(), ducts.clone());
     }
     let leaks = &full["Leaks"];
     let stated = |key: &str| leaks.get(key).filter(|v| !v.is_null());
@@ -2524,25 +2590,10 @@ fn infiltration(ctx: &mut Ctx, full: &Value, dwelling_height: f64) -> Option<Val
             }
         }
     } else {
-        // DESNZ-defined: with no air test, HEMIE estimates the leakage; the zone
-        // height is the dwelling height HEMIE derives from the storeys.
-        out.insert("ventilation_zone_height".into(), json!(dwelling_height));
-        ctx.notices.push(notice("/InfiltrationVentilation/Leaks", format!("No air test is stated, so HEMIE estimates the air leakage, with ventilation zone height {dwelling_height:.2} m from the storeys.")));
-        let field = format!("{SETTING}infiltration_properties");
-        let parsed = ctx.settings.raw(&field).map(|v| match v {
-            Value::String(s) => serde_json::from_str::<Map<String, Value>>(s).ok(),
-            Value::Object(map) => Some(map.clone()),
-            _ => None,
-        });
-        match parsed {
-            Some(Some(properties)) => {
-                out.insert("infiltration_properties".into(), Value::Object(properties));
-            }
-            Some(None) => ctx.errors.push(error("/Metadata".into(), format!("The model setting {field} is malformed. Give a JSON object, for example {{\"number_of_open_fireplaces\": 0}}."))),
-            None => {
-                ctx.settings.missing.insert(format!("{field} (no air test: a JSON object with number_of_open_fireplaces and the other leakage-estimate inputs)"));
-            }
-        }
+        // DESNZ-defined: with no air test HEMIE estimates the leakage, but the Orchestrator
+        // rejects every form of its inputs (DESNZ question E17): stop here instead of failing
+        // in the run.
+        ctx.errors.push(error("/InfiltrationVentilation/Leaks".into(), "No air test is stated. HEM:EPC cannot yet run an existing building with no air test (a DESNZ issue), so only a dwelling with a measured air test runs now.".into()));
     }
     // Derived from the model: the envelope area of the drawn elements. The schema requires it
     // although HEMIE Geometry can give it (E9).
@@ -2565,7 +2616,7 @@ mod tests {
 
     pub(super) const HEADER: &str = "Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json";
     pub(super) const SETTINGS: &str = r#"IsExistingBuilding,TRUE
-HEMIE_age_band,D
+HEMIE_age_band,I
 Postcode,MK40 1AA
 HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}"
 HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
@@ -3102,35 +3153,62 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
-    fn with_no_air_test_hemie_estimates_the_leakage_and_takes_desnz_defaults() {
-        let text = house(gable_roof()).replace(
-            "IsExistingBuilding,TRUE",
-            "IsExistingBuilding,TRUE\nHEMIE_infiltration_properties,\"{\"\"number_of_open_fireplaces\"\":0}\"",
-        );
+    fn with_no_air_test_preparation_stops_and_desnz_defaults_are_reported() {
         let mut model = full_input();
-        model["InfiltrationVentilation"]["Leaks"] = json!({"env_area": 200});
         model["InfiltrationVentilation"]
             .as_object_mut()
             .unwrap()
             .remove("ventilation_zone_base_height");
         model["General"]["storey_of_dwelling"] = json!(0);
-        let (model, errors, notices) = run_on(&text, model);
+        // With an air test, the base storey stands for the base height.
+        let (tested, errors, notices) = run_on(&house(gable_roof()), model.clone());
         assert!(errors.is_empty(), "{errors:#?}");
-        let leaks = &model["InfiltrationVentilation"]["Leaks"];
-        assert_eq!(
-            leaks["infiltration_properties"],
-            json!({"number_of_open_fireplaces": 0})
-        );
-        assert!(leaks.get("test_result").is_none());
-        // Two storeys of 2.55 m and the gap between them.
-        assert!((leaks["ventilation_zone_height"].as_f64().unwrap() - 5.35).abs() < 1e-9);
-        assert_eq!(model["Zone"]["base_storey_of_dwelling"], 0);
-        assert!(model["InfiltrationVentilation"]
+        assert_eq!(tested["Zone"]["base_storey_of_dwelling"], 0);
+        assert!(tested["InfiltrationVentilation"]
             .get("shield_class")
             .is_none());
         for key in ["shield_class", "noise_nuisance"] {
             assert!(notices.iter().any(|n| n.path.ends_with(key)), "{key}");
         }
+        // No air test does not run yet (a DESNZ issue): one error says so, and nothing asks
+        // for the leakage-estimate inputs.
+        model["InfiltrationVentilation"]["Leaks"] = json!({"env_area": 200});
+        let (_, errors, _) = run_on(&house(gable_roof()), model);
+        assert!(
+            errors.len() == 1
+                && errors[0].path == "/InfiltrationVentilation/Leaks"
+                && errors[0].message.starts_with("No air test is stated."),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn an_uninsulated_slab_of_band_a_to_h_stops_naming_the_floor() {
+        let band_d = house(gable_roof()).replace("HEMIE_age_band,I", "HEMIE_age_band,D");
+        let (_, errors, _) = run(&band_d);
+        assert!(
+            errors.iter().any(|e| e.path.ends_with("/Floor")
+                && e.message
+                    .contains("Ground floor 'Floor' (age band D) states no insulation thickness")),
+            "{errors:#?}"
+        );
+        // A stated insulation thickness gives the floor a resistance, so it runs.
+        let insulated = band_d.replace(
+            "HEMIE_age_band,D",
+            "HEMIE_age_band,D\nHEMIE_construction_not_edge_insulated_ground_attached_floor,\"{\"\"insulation_thickness\"\":50}\"",
+        );
+        let (_, errors, _) = run(&insulated);
+        assert!(errors.is_empty(), "{errors:#?}");
+    }
+
+    #[test]
+    fn passive_ducts_stay_in_the_ventilation() {
+        let mut model = full_input();
+        let duct = json!({"Chimney": {"length": 6.0, "duct_speed_ref": 1.0}});
+        model["InfiltrationVentilation"]["PassiveDucts"] = duct.clone();
+        let (model, errors, _) = run_on(&house(gable_roof()), model);
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(model["InfiltrationVentilation"]["PassiveDucts"], duct);
     }
 
     #[test]
@@ -3247,7 +3325,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     #[test]
     fn missing_settings_are_listed_in_one_error() {
         let text = house(gable_roof())
-            .replace("HEMIE_age_band,D\n", "")
+            .replace("HEMIE_age_band,I\n", "")
             .replace(
                 r#"HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}""#,
                 "",
@@ -3284,6 +3362,97 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             json!({"construction_type": "party_wall", "party_wall_type": "unfilled_cavity", "cavity_seal_type": "unsealed", "party_wall_lining_type": "wet_plaster"})
         );
         assert!(notices.iter().any(|n| n.message.contains("W00 (U 0.45)")));
+    }
+
+    /// The house with window W1 in the south wall W00; `extra` is the window's extra_json.
+    fn window_house(extra: &str, sections: &str) -> String {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(gable_roof());
+        exposed.push(format!(
+            "W1,Z,BuildingElementTransparent,2,90,1,1.2,180,1,FALSE,FALSE,W00,\"1,0,0|2,0,0\",\"{{\"\"window_sections\"\":[{{\"\"window_type\"\":\"\"full opening\"\"}}]{}}}\"",
+            extra.replace('"', "\"\"")
+        ));
+        let settings = format!("{SETTINGS}\nHEMIE_construction_window,\"{{\"\"frame_material\"\":\"\"wood or PVC\"\",\"\"glazing_type\"\":\"\"single\"\",\"\"areal_heat_capacity\"\":0}}\"");
+        csv(
+            &settings,
+            &exposed,
+            &format!("{}\n\n{sections}", ground(&BOX)),
+        )
+    }
+
+    fn window_construction(model: &Value) -> Value {
+        let window = model["Zone"]["building_parts"]["Main"]["walls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|w| w["windows"].get(0).cloned())
+            .expect("window");
+        model["Zone"]["constructions"][window["construction"].as_str().unwrap()].clone()
+    }
+
+    #[test]
+    fn a_window_takes_hemies_glazing_and_frame_values_unless_it_states_them() {
+        let (model, errors, notices) = run(&window_house("", ""));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let c = window_construction(&model);
+        assert!(c.get("g_value").is_none() && c.get("frame_area_fraction").is_none());
+        assert!(!notices.iter().any(|n| n.message.contains("g-value")));
+        let (model, errors, notices) = run(&window_house(
+            r#","g_value":0.63,"frame_area_fraction":0.2"#,
+            "",
+        ));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let c = window_construction(&model);
+        assert_eq!(
+            (&c["g_value"], &c["frame_area_fraction"]),
+            (&json!(0.63), &json!(0.2))
+        );
+        assert!(
+            notices.iter().any(|n| n
+                .message
+                .contains("W1 (g-value 0.63, frame area fraction 0.2)")),
+            "{notices:#?}"
+        );
+    }
+
+    #[test]
+    fn a_roof_with_no_insulation_location_is_uninsulated_and_says_so() {
+        let (_, errors, notices) = run(&house(gable_roof()));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert!(
+            notices.iter().any(|n| n.message.contains("'Roof S', 'Roof N' state no insulation location, so HEMIE models no roof insulation")),
+            "{notices:#?}"
+        );
+        // A thickness with no location would be ignored, so it fails.
+        let text = house(gable_roof()).replace(
+            "IsExistingBuilding,TRUE",
+            "IsExistingBuilding,TRUE\nHEMIE_construction_unheated_pitched_roof,\"{\"\"insulation_thickness\"\":270}\"",
+        );
+        let (_, errors, _) = run(&text);
+        assert!(
+            errors.iter().any(|e| e.path.ends_with("/Roof S")
+                && e.message
+                    .contains("state an insulation thickness but no insulation location")),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn a_fan_whose_parent_element_is_a_window_is_a_mechanical_vent_in_it() {
+        let rows = "Ventilation Systems\nName,Type,parent_element,host_element,area_cm2,vent_type,coords,extra_json\nFan,MechanicalVentilation,W1,,,Intermittent MEV,,\nTrickle,Vents,W1,,40,,,";
+        let (model, errors, _) = run(&window_house("", rows));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let window = model["Zone"]["building_parts"]["Main"]["walls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|w| w["windows"].get(0).cloned())
+            .expect("window");
+        assert_eq!(window["passive_vents"], json!([{"area": 40.0}]));
+        assert_eq!(
+            window["mechanical_vents"]["Fan"]["vent_system"],
+            "Intermittent MEV"
+        );
     }
 
     #[test]

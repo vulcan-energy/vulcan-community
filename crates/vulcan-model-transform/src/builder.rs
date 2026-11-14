@@ -2254,7 +2254,16 @@ impl JSONBuilder {
             );
         }
         if self.profile.references_products() {
-            crate::epc_mappings::apply_desnz_defaults(result, &mut errors, &mut notices);
+            let env_area_stated = csv_data.get("Metadata").into_iter().flatten().any(|row| {
+                let (name, value) = extract_metadata_field(row);
+                name.as_deref() == Some("AirPermeability_env_area") && value.is_some()
+            });
+            crate::epc_mappings::apply_desnz_defaults(
+                result,
+                env_area_stated,
+                &mut errors,
+                &mut notices,
+            );
         }
         if self.profile.checks_system_catalogue() {
             let db = self
@@ -4544,9 +4553,16 @@ impl JSONBuilder {
 
                         // Validate base required fields from input_fhs.schema.json MechanicalVentilation.additionalProperties.required
                         // (Engine may accept extra keys with serde defaults; those are not listed as required in the FHS schema.)
+                        // HEM:EPC estimates an unstated design outdoor air flow rate
+                        // (`epc_mappings::apply_desnz_defaults`).
                         let required_fields =
                             ["vent_type", "EnergySupply", "design_outdoor_air_flow_rate"];
                         for field in &required_fields {
+                            if *field == "design_outdoor_air_flow_rate"
+                                && self.profile.references_products()
+                            {
+                                continue;
+                            }
                             if !mv_obj.contains_key(*field) {
                                 return Err(BuildError::new(
                                     "E040",
@@ -5546,8 +5562,9 @@ impl JSONBuilder {
                 .as_object_mut()
                 .ok_or_else(|| BuildError::new("E031", "Result JSON is not an object"))?;
 
-            // Known air permeability field names (env_area is calculated automatically, not set by user)
-            let air_permeability_fields: HashSet<&str> = [
+            // Known air permeability field names. env_area is calculated from the elements; HEM:EPC
+            // also takes it from the air test report (DESNZ-defined), which then wins.
+            let mut air_permeability_fields: HashSet<&str> = [
                 "AirPermeability_test_pressure",
                 "AirPermeability_test_result",
                 "AirPermeability_ventilation_zone_height",
@@ -5555,6 +5572,9 @@ impl JSONBuilder {
             .iter()
             .cloned()
             .collect();
+            if self.profile.references_products() {
+                air_permeability_fields.insert("AirPermeability_env_area");
+            }
 
             for row in metadata_rows {
                 let (field_name, field_value) = extract_metadata_field(row);

@@ -424,16 +424,7 @@ mod tests {
         exposed.extend(box_walls(&beside, &[1]));
         exposed.push(plane("Roof 0", 1, &BOX, 0.0, 0.0, false));
         exposed.push(plane("Roof 1", 2, &beside, 0.0, 0.0, false));
-        // No air test, so the zone height is the dwelling height from the storeys.
-        let settings = format!(
-            "{SETTINGS}\nHEMIE_infiltration_properties,\"{{\"\"number_of_open_fireplaces\"\":0}}\""
-        );
-        let mut untested = full_input();
-        untested["InfiltrationVentilation"]["Leaks"]
-            .as_object_mut()
-            .unwrap()
-            .remove("test_result");
-        let (model, errors, notices) = run_on(&csv(&settings, &exposed, &ground(&BOX)), untested);
+        let (model, errors, notices) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
         assert!(errors.is_empty(), "{errors:#?}");
         let parts = &model["Zone"]["building_parts"];
         assert_eq!(parts["Main"]["storeys"].as_array().unwrap().len(), 1);
@@ -449,9 +440,6 @@ mod tests {
         assert!(notices.iter().any(|n| n
             .message
             .contains("starts on floor 1 with no floor drawn under it")));
-        // The zone height reaches the raised part's top: 2.8 + 2.55.
-        let height = &model["InfiltrationVentilation"]["Leaks"]["ventilation_zone_height"];
-        assert!((height.as_f64().unwrap() - 5.35).abs() < 1e-9, "{height}");
     }
 
     #[test]

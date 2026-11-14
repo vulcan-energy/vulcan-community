@@ -367,14 +367,18 @@ pub(crate) fn check_solar_absorption(
 /// - Battery: location outside, age 5 years, grid charging possible, no grid export
 ///   (DESNZ-defined).
 /// - Wet distribution: no variable flow, and then a design flow rate of 0.06 L/s
+///   (DESNZ-defined), written as 3.6 because HEM reads `design_flow_rate` in L/min; the design
+///   flow temperature by emitter type and temperature difference by heat source type
 ///   (DESNZ-defined).
-/// - Ventilation zone base height: 0 m for a house, bungalow or park home (DESNZ-defined);
-///   any other built form must state it.
-/// - Envelope area: always derived from the drawn elements, reported.
+/// - Ventilation zone base height: 0 m for a house, bungalow or park home, or a dwelling whose
+///   base storey is the ground floor (DESNZ-defined); any other built form must state it.
+/// - Envelope area: from the air test report when stated, else derived from the drawn elements,
+///   reported.
 /// - Window shading: a window with no drawn shading has none, derived from the drawing and
 ///   reported.
 pub(crate) fn apply_desnz_defaults(
     model: &mut Value,
+    env_area_stated: bool,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
 ) {
@@ -401,6 +405,12 @@ pub(crate) fn apply_desnz_defaults(
             notices.push(notice(&json_pointer(&["EnergySupply", supply, "ElectricBattery"]), format!("The battery on '{supply}' does not state {}, so it uses DESNZ's defaults. State them on its row to change them.", used.join(", "))));
         }
     }
+    let heat_source_types: BTreeMap<String, String> = model["HeatSourceWet"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, source)| Some((name.clone(), source["type"].as_str()?.to_string())))
+        .collect();
     for (name, system) in model["SpaceHeatSystem"]
         .as_object_mut()
         .into_iter()
@@ -418,11 +428,95 @@ pub(crate) fn apply_desnz_defaults(
             used.push("variable_flow false".to_string());
         }
         if system["variable_flow"] == false && !system.contains_key("design_flow_rate") {
-            system.insert("design_flow_rate".into(), json!(0.06));
-            used.push("design_flow_rate 0.06".to_string());
+            system.insert("design_flow_rate".into(), json!(3.6));
+            used.push("design_flow_rate 3.6 (L/min)".to_string());
+        }
+        // DESNZ-defined: the design flow temperature by emitter type and the design temperature
+        // difference by heat source type, when every emitter or heat source agrees; otherwise
+        // the system states them.
+        let one = |values: Vec<Option<&str>>| -> Option<String> {
+            let first = values.first().copied().flatten()?;
+            values
+                .iter()
+                .all(|v| *v == Some(first))
+                .then(|| first.to_string())
+        };
+        let emitter = one(system["emitters"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|e| e["wet_emitter_type"].as_str())
+            .collect());
+        let sources: Vec<Option<&str>> = match &system["HeatSource"] {
+            Value::Array(items) => items.iter().collect(),
+            other => vec![other],
+        }
+        .into_iter()
+        .map(|s| {
+            s["name"]
+                .as_str()
+                .and_then(|n| heat_source_types.get(n))
+                .map(String::as_str)
+        })
+        .collect();
+        let source = one(sources);
+        if !system.contains_key("design_flow_temp") {
+            let temp = match emitter.as_deref() {
+                Some("radiator") => Some(55),
+                Some("fancoil" | "ufh") => Some(45),
+                _ => None,
+            };
+            if let (Some(temp), Some(emitter)) = (temp, &emitter) {
+                system.insert("design_flow_temp".into(), json!(temp));
+                used.push(format!("design_flow_temp {temp} ({emitter})"));
+            }
+        }
+        if !system.contains_key("temp_diff_emit_dsgn") {
+            let diff = match source.as_deref() {
+                Some("HeatPump") => Some(5),
+                Some("Boiler" | "HeatBattery" | "PrimaryThermalStore") => Some(10),
+                Some("HIU" | "DirectFeed") => Some(20),
+                _ => None,
+            };
+            if let (Some(diff), Some(source)) = (diff, &source) {
+                system.insert("temp_diff_emit_dsgn".into(), json!(diff));
+                used.push(format!("temp_diff_emit_dsgn {diff} ({source})"));
+            }
         }
         if !used.is_empty() {
-            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses DESNZ's defaults. State them on its Systems row to change them.", used.join(" and "))));
+            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses DESNZ's defaults. State them on its Systems row to change them.", used.join(", "))));
+        }
+    }
+    // DESNZ-defined: an unstated design outdoor air flow rate is the greater of 13 l/s plus
+    // 6 l/s per bedroom and 0.3 l/s per m² of total floor area, in m³/h.
+    let area: f64 = model["Zone"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(_, z)| z["area"].as_f64())
+        .sum();
+    let by_rooms = model["NumberOfBedrooms"]
+        .as_u64()
+        .map(|b| 13.0 + 6.0 * b as f64);
+    for (name, system) in model["InfiltrationVentilation"]["MechanicalVentilation"]
+        .as_object_mut()
+        .into_iter()
+        .flatten()
+    {
+        if system
+            .get("design_outdoor_air_flow_rate")
+            .is_some_and(|v| !v.is_null())
+        {
+            continue;
+        }
+        let path = json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name]);
+        match by_rooms {
+            Some(rate) => {
+                let flow = rate.max(0.3 * area) * 3.6;
+                system["design_outdoor_air_flow_rate"] = json!(flow);
+                notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses DESNZ's estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
+            }
+            None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on its row, or the Metadata row NumberOfBedrooms."))),
         }
     }
     let mut unshaded = Vec::new();
@@ -457,9 +551,8 @@ pub(crate) fn apply_desnz_defaults(
     // DESNZ-defined: an existing building may give its base storey instead, and
     // HEMIE estimates the base height from it.
     let new_build = model.get("IsExistingBuilding") != Some(&Value::Bool(true));
-    let base_storey = (!new_build)
-        .then(|| model["General"]["storey_of_dwelling"].as_i64())
-        .flatten();
+    let storey = model["General"]["storey_of_dwelling"].as_i64();
+    let base_storey = (!new_build).then_some(storey).flatten();
     if let Some(ventilation) = model
         .get_mut("InfiltrationVentilation")
         .and_then(Value::as_object_mut)
@@ -482,6 +575,10 @@ pub(crate) fn apply_desnz_defaults(
             {
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
                 notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, DESNZ's default for a dwelling at ground level. Add the row to state it.")));
+            } else if storey == Some(0) {
+                // DESNZ-defined: a ground-floor flat or maisonette also defaults to 0 m.
+                ventilation.insert("ventilation_zone_base_height".into(), json!(0));
+                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this ground-floor {build_type} uses 0 m, DESNZ's default (General_storey_of_dwelling 0). Add the row to state it.")));
             } else if let Some(storey) = base_storey {
                 notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so HEMIE estimates it from the base storey, {storey} (General_storey_of_dwelling).")));
             } else {
@@ -494,7 +591,11 @@ pub(crate) fn apply_desnz_defaults(
             ventilation.insert("noise_nuisance".into(), json!(false));
             notices.push(notice("/InfiltrationVentilation/noise_nuisance", "No Metadata row states Ventilation_noise_nuisance, so the model uses noise_nuisance false (No), DESNZ's default. Add the row to state it.".to_string()));
         }
-        if let Some(area) = ventilation.get("Leaks").and_then(|l| l.get("env_area")) {
+        if let Some(area) = ventilation
+            .get("Leaks")
+            .and_then(|l| l.get("env_area"))
+            .filter(|_| !env_area_stated)
+        {
             notices.push(notice("/InfiltrationVentilation/Leaks/env_area", format!("The envelope area {area} m² is derived from the drawn elements that separate the dwelling from outside, other dwellings and unheated spaces.")));
         }
     }
