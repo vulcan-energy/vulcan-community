@@ -4674,7 +4674,17 @@ impl JSONBuilder {
                         // template's ducts (they add heat losses the user never
                         // authored); the missing required `ductwork` surfaces as a
                         // schema validation error instead.
-                        if vt == "MVHR" && !ductwork.is_empty() {
+                        if vt == "MVHR" && self.profile.references_products() {
+                            // The full input takes one ductwork descriptor, not a duct list.
+                            let (descriptor, notice) = crate::epc_mappings::mvhr_ductwork(
+                                vent_name,
+                                mv_obj.get("ductwork").and_then(Value::as_object),
+                                &ductwork,
+                                mv_obj.get("mvhr_location").and_then(Value::as_str),
+                            );
+                            mv_obj.insert("ductwork".to_string(), descriptor);
+                            self.schema_omissions.borrow_mut().extend(notice);
+                        } else if vt == "MVHR" && !ductwork.is_empty() {
                             mv_obj.insert("ductwork".to_string(), Value::Array(ductwork));
                         } else {
                             mv_obj.remove("ductwork");

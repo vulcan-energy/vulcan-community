@@ -466,7 +466,7 @@ pub(super) fn mechanical_ventilation(
         }
     }
     if !out.is_empty() {
-        notices.push(notice(MV, "The existing-building EPC places each mechanical vent in its host element and takes the vent's height, orientation and pitch from it; the heights and directions stated on the Ventilation Systems rows are not used. It also takes MVHR ductwork as its default.".into()));
+        notices.push(notice(MV, "The existing-building EPC places each mechanical vent in its host element and takes the vent's height, orientation and pitch from it; the heights and directions stated on the Ventilation Systems rows are not used.".into()));
         geometry["mechanical_ventilation_system"] = Value::Object(out);
     }
 }

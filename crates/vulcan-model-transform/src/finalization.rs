@@ -308,6 +308,32 @@ fn selected_branches<'a>(
             selected = strict;
         }
     }
+    if selected.len() > 1 && instance.is_object() {
+        // Prefer the alternative that declares the most of the instance's fields (EPC: an
+        // MVHR product beside a product without heat recovery). A tie stays ambiguous.
+        let undeclared = |branch: &Value| -> Result<usize, String> {
+            let properties = resolve(branch, root)?.get("properties");
+            Ok(instance
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(key, _)| properties.and_then(|p| p.get(key.as_str())).is_none())
+                .count())
+        };
+        let counts = selected
+            .iter()
+            .map(|branch| undeclared(branch))
+            .collect::<Result<Vec<_>, _>>()?;
+        let fewest = counts.iter().copied().min().unwrap_or(0);
+        if counts.iter().filter(|c| **c == fewest).count() == 1 {
+            selected = selected
+                .into_iter()
+                .zip(counts)
+                .filter(|(_, c)| *c == fewest)
+                .map(|(branch, _)| branch)
+                .collect();
+        }
+    }
     Ok(selected)
 }
 
@@ -611,6 +637,13 @@ mod conditional_regressions {
         assert_eq!(output.model, source);
         assert!(!output.validation.is_valid);
         assert!(output.omissions.is_empty());
+    }
+    #[test]
+    fn the_variant_declaring_more_fields_is_chosen() {
+        let schema = json!({"anyOf":[{"properties":{"a":{"type":"number"}},"additionalProperties":false},{"properties":{"a":{"type":"number"},"b":{"type":"number"}},"additionalProperties":false}]});
+        let output = finalize_model(&json!({"a":1,"b":2,"kind":"x"}), &schema).unwrap();
+        assert_eq!(output.model, json!({"a":1,"b":2}));
+        assert!(output.validation.is_valid);
     }
     #[test]
     fn ambiguous_variants_never_become_valid_by_erasure() {
