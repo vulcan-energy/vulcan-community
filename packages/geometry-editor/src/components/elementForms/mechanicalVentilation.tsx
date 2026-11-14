@@ -79,6 +79,8 @@ const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
 };
 
 export interface MechanicalVentilationFormState {
+  /** Only a target whose schema declares a fan without heat recovery takes positive input ventilation. */
+  offersPositiveInputVentilation: boolean;
   ventType: string;
   setVentType: (value: string) => void;
   commitMechanicalVentilationPositionField: (
@@ -135,6 +137,8 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationFormState 
   );
 
   return {
+    offersPositiveInputVentilation: ctx.schemaPort.availability === 'available'
+      && !!(ctx.schemaPort.getRootSchema(ctx.schemaMode) as { $defs?: Record<string, unknown> } | null)?.$defs?.MechanicalVentilationWithoutHeatRecovery,
     ventType,
     setVentType,
     commitMechanicalVentilationPositionField,
@@ -220,6 +224,7 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
 
   renderPanel(state, ctx) {
     const {
+      offersPositiveInputVentilation,
       ventType,
       setVentType,
       commitMechanicalVentilationPositionField,
@@ -285,6 +290,7 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
               { value: 'Intermittent MEV', label: 'Intermittent MEV' },
               { value: 'Centralised continuous MEV', label: 'Centralised continuous MEV' },
               { value: 'Decentralised continuous MEV', label: 'Decentralised continuous MEV' },
+              ...(offersPositiveInputVentilation ? [{ value: 'Positive input ventilation', label: 'Positive input ventilation' }] : []),
               { value: 'MVHR', label: 'MVHR' }
             ]}
             variant="ghost"

@@ -582,12 +582,16 @@ function bandsOrNumberShape(resolved: Record<string, unknown>): { bands: unknown
 }
 
 const NUMBER_CHOICE = 'number';
+const NUMERIC_TEXT = /^\d+(\.\d+)?$/;
 
-/** A dropdown of the bands plus "Number", which opens a number input; a number is saved as a number. */
+/** A dropdown of the bands plus a number choice, which opens a number input; a number is saved as a number. */
 function BandsOrNumberControl(props: DirectControlProps & { shape: { bands: unknown[]; number: Record<string, unknown> } }): React.ReactElement {
   const { shape, data, handleChange, schema, errors, ...rest } = props;
   const [numberChosen, setNumberChosen] = React.useState(false);
-  const isNumber = numberChosen || typeof data === 'number';
+  // An imported "90000" is a number typed as text: it shows as the number it is, and is saved as one on the next edit.
+  const importedNumber = typeof data === 'string' && NUMERIC_TEXT.test(data) ? Number(data) : undefined;
+  const number = importedNumber ?? data;
+  const isNumber = numberChosen || typeof number === 'number';
   const { description, title } = schema as { description?: unknown; title?: unknown };
   return (
     <>
@@ -595,13 +599,18 @@ function BandsOrNumberControl(props: DirectControlProps & { shape: { bands: unkn
         {...rest}
         errors={errors}
         data={isNumber ? NUMBER_CHOICE : data}
-        schema={{ type: 'string', enum: [...shape.bands, NUMBER_CHOICE], ...(typeof description === 'string' ? { description } : {}), ...(typeof title === 'string' ? { title } : {}) }}
+        schema={{
+          type: 'string',
+          oneOf: [...shape.bands.map((band) => ({ const: band, title: String(band) })), { const: NUMBER_CHOICE, title: 'Number (J/m²·K)' }],
+          ...(typeof description === 'string' ? { description } : {}),
+          ...(typeof title === 'string' ? { title } : {}),
+        }}
         handleChange={(path, value) => {
           setNumberChosen(value === NUMBER_CHOICE);
           handleChange(path, value === NUMBER_CHOICE ? undefined : value);
         }}
       />
-      {isNumber && <NumberControl {...rest} errors={errors} data={data} handleChange={handleChange} schema={shape.number} label={`${props.label} (number)`} />}
+      {isNumber && <NumberControl {...rest} errors={errors} data={number} handleChange={handleChange} schema={shape.number} label={`${props.label} (number)`} />}
     </>
   );
 }
