@@ -118,6 +118,8 @@ import { listCategoryJsonOptions, type WorkspaceSnippetOption } from '../../geom
 import { syncSpaceHeatSystemZoneNameInExtraJson } from '../../lib/spaceHeatSystemSync';
 import { collectHeatSourceWetNamesFromProject } from '../../lib/heatSourceWetNamesFromProject';
 import { useKeyedState } from '../../hooks/useKeyedState';
+import { systemPlantTypes } from '../../lib/systemSchemaFlatten';
+import { readRecord } from '../../lib/jsonTypes';
 import { StandardDropdown } from '../StandardDropdown';
 import {
   buildSpaceHeatSystemSampleBaselineExtraJson,
@@ -144,6 +146,34 @@ export type PendingSystemAction =
   | { kind: 'source'; target: 'presets' | 'pcdb' }
   | { kind: 'subcategory'; value: string }
   | { kind: 'preset'; value: string };
+
+/** Readable names for the schema's plant types; a type not listed shows its exact value. */
+const SYSTEM_TYPE_LABELS: Record<string, string> = {
+  AirConditioning: 'Air conditioning',
+  BackBoiler: 'Back boiler',
+  Boiler: 'Boiler',
+  CombiBoiler: 'Combi boiler',
+  CombustionRoomHeater: 'Combustion room heater',
+  DirectElectricBoiler: 'Direct electric boiler',
+  DirectFeed: 'Direct feed',
+  DryElectricUnderfloorHeating: 'Dry electric underfloor heating',
+  ElecStorageHeater: 'Electric storage heater',
+  HIU: 'Heat interface unit',
+  HeatBattery: 'Heat battery',
+  HeatPump: 'Heat pump',
+  HeatPumpAirCooling: 'Heat pump, air cooling',
+  HeatPumpFanCoilCooling: 'Heat pump, fan coil cooling',
+  HeatPump_HWOnly: 'Heat pump, hot water only',
+  InstantElecHeater: 'Instant electric heater',
+  PointOfUse: 'Point of use',
+  PrimaryThermalStore: 'Primary thermal store',
+  SmartHotWaterTank: 'Smart hot water tank',
+  SolidFuelBoiler: 'Solid fuel boiler',
+  StorageTank: 'Hot water cylinder',
+  WarmAir: 'Warm air',
+  WarmAirDistribution: 'Warm air distribution',
+  WetDistribution: 'Wet distribution',
+};
 
 export function formatSystemPresetName(preset: string): string {
   return preset.replace(/_/g, ' ');
@@ -195,6 +225,10 @@ export interface SystemFormState {
   handleSystemPresetChange: (value: string) => void;
   requestSystemUiMode: (target: 'presets' | 'pcdb') => void;
   handlePcdbSystemApply: (payload: { subcategory: string; extraJson: Record<string, unknown> }) => void;
+  /** The plant types the target schema gives this category, with the plant's current type. */
+  systemTypeOptions: Array<{ value: string; label: string }>;
+  systemPlantType: string;
+  handleSystemTypeChange: (type: string) => void;
 }
 
 function useFormState(ctx: ElementFormStateCtx): SystemFormState {
@@ -677,6 +711,33 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     ],
   );
 
+  const systemTypeOptions = useMemo(() => {
+    if (!isSystemElementType || !systemSubcategory || ctx.schemaPort.availability !== 'available') return [];
+    return systemPlantTypes(ctx.schemaPort.getRootSchema(ctx.schemaMode), systemSubcategory)
+      .map((value) => ({ value, label: SYSTEM_TYPE_LABELS[value] ?? value }));
+  }, [isSystemElementType, systemSubcategory, ctx.schemaPort, ctx.schemaMode]);
+
+  // The row holds one plant, named for the row. A row with several plants keeps them: no type is offered.
+  const selectedPlants = readRecord(readRecord(selectedSystemElementFull?.extra_json)[systemSubcategory]);
+  const systemPlantType = Object.values(selectedPlants).length === 1 ? String(readRecord(Object.values(selectedPlants)[0]).type ?? '') : '';
+
+  const handleSystemTypeChange = useCallback((type: string) => {
+    const element = selectedSystemElementFull;
+    if (!element || !type || type === systemPlantType) return;
+    const extra = readRecord(element.extra_json);
+    const plants = readRecord(extra[systemSubcategory]);
+    const [existingKey, existing] = Object.entries(plants)[0] ?? [];
+    // Another type's inputs do not carry over: ask before clearing a plant that has any.
+    if (existing && Object.keys(readRecord(existing)).some((key) => key !== 'type')
+      && !window.confirm('Changing the type clears the other inputs of this system. Continue?')) return;
+    commitSystemSelectionUpdate({
+      source: 'custom',
+      subcategory: systemSubcategory,
+      extraJson: { ...extra, [systemSubcategory]: { [existingKey ?? element.name]: { type } } },
+      reason: 'system-type-change',
+    });
+  }, [selectedSystemElementFull, systemSubcategory, systemPlantType, commitSystemSelectionUpdate]);
+
   const confirmSystemSourceSwitch = useCallback(() => {
     const action = pendingSystemAction;
     setPendingSystemAction(null);
@@ -763,6 +824,9 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     handleSystemPresetChange,
     requestSystemUiMode,
     handlePcdbSystemApply,
+    systemTypeOptions,
+    systemPlantType,
+    handleSystemTypeChange,
   };
 }
 
@@ -828,8 +892,28 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
       handleSystemPresetChange,
       requestSystemUiMode,
       handlePcdbSystemApply,
+      systemTypeOptions,
+      systemPlantType,
+      handleSystemTypeChange,
     } = state;
     const { elementType, renderFieldLabel, elementsById, productCatalogue, hemDatabaseProducts, systemHasProductSlot, renderSpaceHeatSystemEmitterManager } = ctx;
+
+    // Products take no sample preset, so the type is chosen here.
+    const typeControl = hemDatabaseProducts && systemSubcategory && selectedSystemElementFull && systemTypeOptions.length ? (
+      <>
+        {renderFieldLabel('Type:', elementType)}
+        <div className="element-input">
+          <StandardDropdown
+            value={systemPlantType}
+            onChange={handleSystemTypeChange}
+            options={systemTypeOptions}
+            placeholder="Select type…"
+            variant="ghost"
+            size="md"
+          />
+        </div>
+      </>
+    ) : null;
 
     return (
       <>
@@ -859,7 +943,10 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
         ) : null}
 
         {systemHasProductSlot ? (
-          systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null
+          <>
+            {typeControl}
+            {systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null}
+          </>
         ) : !productCatalogue || systemUiMode === 'presets' ? (
           <>
             {renderFieldLabel('Category:', elementType)}
@@ -877,6 +964,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
                 size="md"
               />
             </div>
+            {typeControl}
             {/* The sample presets are FHS inputs; a HEM Database products target takes none. */}
             {hemDatabaseProducts ? null : (
               <>

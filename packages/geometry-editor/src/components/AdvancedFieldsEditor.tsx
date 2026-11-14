@@ -13,6 +13,7 @@ import {
   mergeSystemExtraJsonAfterJsonForms,
 } from '../lib/systemAdvancedSchemaExpand';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
+import { isExistingBuilding } from '../lib/windowOpenings';
 import { flattenSystemSubtypePlantSchemas, forbiddenFieldKeys, forbiddenPlantKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import { buildSystemAdvancedUischema, type AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
@@ -839,7 +840,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         : null,
     [schemaMode, schemaPort],
   );
-  const { hiddenFields } = useTargetRules();
+  const { hiddenFields, hemDatabaseProducts } = useTargetRules();
+  const existingBuilding = useGeometryStore(isExistingBuilding);
   // Fields Advanced does not show: those the standard form owns, and those the target hides.
   const getBaseFields = useCallback(
     (type: string): readonly string[] => [
@@ -1346,6 +1348,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             ? (systemSubtypePlantMapSlice as Record<string, unknown>)
             : null,
           rootFull,
+          existingBuilding,
         ) as typeof result;
       }
     }
@@ -1420,6 +1423,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     currentHotWaterCombiHeatSourceWetLink,
     projectHeatSourceWetLabels,
     projectHeatSourceWetNames,
+    existingBuilding,
   ]);
 
   const systemAdvancedUischema = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {
@@ -2022,7 +2026,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         advancedFieldsData as Record<string, unknown>,
         nextExtra as Record<string, unknown>,
         subtype,
-        plantSchemas ? (name, plant) => forbiddenPlantKeys(plantSchemas, subtype, name, plant, systemRoot) : undefined,
+        plantSchemas ? (name, plant) => forbiddenPlantKeys(plantSchemas, subtype, name, plant, systemRoot, existingBuilding) : undefined,
       );
       if (subtype === 'SpaceHeatSystem') {
         nextExtra = pruneSpaceHeatSystemUnusedWeatherCompensationValues(
@@ -2429,7 +2433,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         </div>
       )}
 
-      {elementType === 'System' && systemPlantTypes.length > 0 && (
+      {elementType === 'System' && !(hemDatabaseProducts && systemPlantTypes.length === 1) && systemPlantTypes.length > 0 && (
         <div style={{ marginBottom: flat ? '10px' : 'var(--spacing-md)' }}>
           {systemPlantTypes.map(({ plantKey, typeLabel }) => (
             <div key={plantKey} style={{ marginBottom: '8px' }}>
