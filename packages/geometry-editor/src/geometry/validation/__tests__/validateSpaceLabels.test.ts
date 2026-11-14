@@ -155,4 +155,16 @@ describe('validateSpaceLabels', () => {
 
     expect(r.warnings.some((w) => w.message.includes('not adjacent to a living room'))).toBe(false);
   });
+
+  it('adds host issues as errors on their label', () => {
+    const sl: SpaceLabel = {
+      id: 's1', name: 'Bedroom 1', zoneId: 'z1', storey: 0, room_type: 'bedroom',
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 3, y: 3, z: 0 }],
+    };
+    const r = validateSpaceLabels({ s1: sl }, ['s1'], {
+      zones,
+      hostFindings: { spaceLabels: { s1: [{ message: 'Bedroom 1: ceiling fan speed is not valid', fieldKey: 'fan', source: 'geometry' }] } },
+    });
+    expect(r.issues).toContainEqual(expect.objectContaining({ spaceLabelId: 's1', fieldKey: 'fan' }));
+  });
 });

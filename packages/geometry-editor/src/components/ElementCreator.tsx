@@ -803,19 +803,21 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
     sourceComparisonPort.getSnapshot,
     sourceComparisonPort.getSnapshot,
   );
-  const { selectedElement, elementsById, zones, activeCsvValidationInfo, targetValidation, validateElement } = useGeometryStore(
+  const { selectedElement, elementsById, zones, activeCsvValidationInfo, targetValidation, hostValidationFindings, validateElement } = useGeometryStore(
     useShallow((s) => ({
       selectedElement: s.elementsById[selectionId] ?? null,
       elementsById: s.elementsById,
       zones: s.zones,
       activeCsvValidationInfo: activeFilename ? s.csvValidationCache[activeFilename] : undefined,
       targetValidation: s.targetValidation,
+      hostValidationFindings: s.hostValidationFindings,
       validateElement: s.validateElement,
     })),
   );
 
   const validationRows = useMemo(() => {
     void sourceComparisonSnapshot.revision;
+    void hostValidationFindings; // validateElement reads it from the store
     if (!selectedElement) return null;
 
     const validation = withTargetIssues(
@@ -840,7 +842,7 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
     const comparisonInfoPillItems = sourceComparisonPort.elementInfo(selectedElement.id)?.items ?? [];
 
     return { validation, schemaIssues, comparisonInfoPillItems };
-  }, [activeCsvValidationInfo, activeFilename, elementsById, selectedElement, sourceComparisonPort, sourceComparisonSnapshot.revision, targetValidation, validateElement, zones]);
+  }, [activeCsvValidationInfo, activeFilename, elementsById, selectedElement, sourceComparisonPort, sourceComparisonSnapshot.revision, targetValidation, hostValidationFindings, validateElement, zones]);
 
   if (!selectedElement || !validationRows) return null;
   const { validation, schemaIssues, comparisonInfoPillItems } = validationRows;
@@ -996,6 +998,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const setSelectedElementIds = useGeometryStore((s) => s.setSelectedElementIds);
   const setCurrentFloorZ = useGeometryStore((s) => s.setCurrentFloorZ);
   const validateElement = useGeometryStore((s) => s.validateElement);
+  const hostValidationFindings = useGeometryStore((s) => s.hostValidationFindings);
   const defaultsLookup = useGeometryStore((s) => s.getDefaultsLookup());
   const resolvedSelectionContext = selectionContext ?? selection;
   // Stable version counter for the currently selected element.
@@ -3629,6 +3632,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const selectedFieldValidationByKey = useMemo(() => {
     const result = new Map<string, { message: string; variant: 'error' | 'warning' }>();
     if (!selectedElement) return result;
+    void hostValidationFindings; // validateElement reads it from the store
     const validation = validateElement(selectedElement, elementsById);
     for (const issue of validation.issues) {
       if (issue.fieldKey && !result.has(issue.fieldKey)) {
@@ -3641,7 +3645,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       }
     }
     return result;
-  }, [elementsById, selectedElement, validateElement]);
+  }, [elementsById, hostValidationFindings, selectedElement, validateElement]);
   const getFieldValidationState = (fieldName: string, value: unknown) => {
     const error = getFieldValidationIssue(fieldName, value);
     if (error) return { message: error, variant: 'error' as const };

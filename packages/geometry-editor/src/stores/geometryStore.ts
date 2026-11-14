@@ -121,7 +121,7 @@ import {
   remapZoneSpaceLabelsFromInference,
 } from '../lib/spaceInference/remapInferredSpaceLabels';
 import { detectMissingElements as detectMissingElementsCore } from '../geometry/validation/detectMissingElements';
-import type { MissingElement, ValidationResult } from '../geometry/validation/types';
+import type { HostValidationFindings, MissingElement, ValidationResult } from '../geometry/validation/types';
 import type { TargetValidation } from '../types/buildErrors';
 // Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
 // remove or relocate these re-exports without a paired web/ PR.
@@ -1706,6 +1706,9 @@ export interface GeometryState extends
    */
   targetValidation: TargetValidation | null;
   setTargetValidation: (validation: TargetValidation | null) => void;
+  /** Issues the host adds for a task the user chose to run; null when it adds none. Not part of the document. */
+  hostValidationFindings: HostValidationFindings | null;
+  setHostValidationFindings: (findings: HostValidationFindings | null) => void;
   getCSVValidation: (filename: string) => {
     warnings: string[];
     criticalIssues: string[];
@@ -2838,6 +2841,7 @@ const validateElementForState = (
         : undefined,
     linearThermalBridgeIssues,
     partFFindings,
+    hostFindings: state.hostValidationFindings,
   });
 };
 
@@ -7616,6 +7620,8 @@ const createGeometryState = (
 
   targetValidation: null,
   setTargetValidation: (targetValidation) => set({ targetValidation }),
+  hostValidationFindings: null,
+  setHostValidationFindings: (hostValidationFindings) => set({ hostValidationFindings }),
 
   getCSVValidation: (filename: string) => {
     const state = get();
@@ -7676,6 +7682,7 @@ const createGeometryState = (
       linearThermalBridgeIssues,
       floorStackWarningElementIds,
       partFFindings,
+      hostFindings: state.hostValidationFindings,
     };
 
     // Validate all elements
@@ -7707,6 +7714,7 @@ const createGeometryState = (
       elementsById: state.elementsById,
       spaceInferenceWallPrintByZone: state.spaceInferenceWallPrintByZone,
       complianceValidationEnabled,
+      hostFindings: state.hostValidationFindings,
     });
     allWarnings.push(...spaceLabelValidation.warnings.map((w) => w.message));
     allCriticalIssues.push(...spaceLabelValidation.issues.map((i) => i.message));

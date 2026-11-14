@@ -514,6 +514,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   const spaceLabelsById = useGeometryStore((s) => s.spaceLabelsById);
   const spaceLabelIds = useGeometryStore((s) => s.spaceLabelIds);
   const spaceInferenceWallPrintByZone = useGeometryStore((s) => s.spaceInferenceWallPrintByZone);
+  const hostValidationFindings = useGeometryStore((s) => s.hostValidationFindings);
   const detectMissingElementsThunk = useGeometryStore((s) => s.detectMissingElements);
   const storeZones = useGeometryStore((s) => s.zones);
   const setHoveredElementId = useGeometryStore((s) => s.setHoveredElementId);
@@ -710,6 +711,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
         elementsById,
         spaceInferenceWallPrintByZone,
         complianceValidationEnabled,
+        hostFindings: hostValidationFindings,
       });
       validations.set(zone.id, withTargetIssues({
         hasIssues: zoneValidation.hasIssues || spaceValidation.hasIssues,
@@ -725,6 +727,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     primaryFhsZoneId,
     complianceValidationEnabled,
     spaceInferenceWallPrintByZone,
+    hostValidationFindings,
     spaceLabelIds,
     spaceLabelsById,
     zoneTargetIssues,

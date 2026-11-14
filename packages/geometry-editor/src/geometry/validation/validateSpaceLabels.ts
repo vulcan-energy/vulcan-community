@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { SpaceLabel, Zone } from '../types';
-import type { ValidationIssue, ValidationResult } from './types';
+import { withHostFindings, type HostValidationFindings, type ValidationIssue, type ValidationResult } from './types';
 import {
   formatTreatedFloorAreaMismatch,
   getTreatedFloorAreaLabelMismatch,
@@ -24,6 +24,8 @@ export type SpaceLabelValidationContext = {
   elementsById?: Record<string, Element>;
   spaceInferenceWallPrintByZone?: Record<string, string>;
   complianceValidationEnabled?: boolean;
+  /** Issues the host adds for a task the user chose to run. */
+  hostFindings?: HostValidationFindings | null;
 };
 
 const ADJACENCY_EPS_M = 0.03;
@@ -260,10 +262,13 @@ export function validateSpaceLabels(
     if (mismatch) issues.push(warn(formatTreatedFloorAreaMismatch(mismatch)));
   }
 
+  const host = context.hostFindings;
+  const own = spaceLabelIds.flatMap((id) => (host?.spaceLabels?.[id] ?? []).map((issue) => ({ ...issue, spaceLabelId: id })));
+  const result = withHostFindings(issues, warnings, own, host?.blockingWarnings);
   return {
-    hasIssues: issues.length > 0,
-    issues,
-    hasWarnings: warnings.length > 0,
-    warnings,
+    hasIssues: result.issues.length > 0,
+    issues: result.issues,
+    hasWarnings: result.warnings.length > 0,
+    warnings: result.warnings,
   };
 }

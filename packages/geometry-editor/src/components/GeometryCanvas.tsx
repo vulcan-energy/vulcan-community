@@ -2021,7 +2021,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     canUndo, canRedo, complianceSettings,
     defaultsPath, defaultsJson, defaultsLoading, defaultsLookup, junctionPsiDefaultsPath, junctionPsiDefaultsMap,
     calculateContextShadingDistance,
-    canvasViewResetKey, csvValidationCache, targetValidation,
+    canvasViewResetKey, csvValidationCache, targetValidation, hostValidationFindings,
   } = useGeometryStore(
     useShallow((s) => ({
       zones: s.zones,
@@ -2057,6 +2057,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       calculateContextShadingDistance: s.calculateContextShadingDistance,
       csvValidationCache: s.csvValidationCache,
       targetValidation: s.targetValidation,
+      hostValidationFindings: s.hostValidationFindings,
     }))
   );
 
@@ -2704,9 +2705,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         defaults: defaultsJson,
         defaultsLookup,
       }).findings,
+      hostFindings: hostValidationFindings,
     };
   }, [
     calculateContextShadingDistance,
+    hostValidationFindings,
     complianceSettings,
     defaultsLoading,
     defaultsJson,
