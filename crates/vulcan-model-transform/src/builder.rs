@@ -1569,6 +1569,7 @@ pub struct JSONBuilder {
     product_settings: RefCell<crate::epc_products::Settings>,
     product_slots: RefCell<Vec<crate::ProductSlot>>,
     product_candidates: RefCell<BTreeMap<String, Vec<crate::ProductCandidate>>>,
+    hemie_shading: RefCell<Option<crate::HemieShading>>,
     /// Model path of each object a Geometry CSV row authored (Systems, wet emitter and
     /// mechanical ventilation rows) and the row's Name, so each product slot names its row.
     slot_rows: RefCell<Vec<(String, String)>>,
@@ -1587,6 +1588,10 @@ impl JSONBuilder {
 
     pub fn take_product_slots(&self) -> Vec<crate::ProductSlot> {
         std::mem::take(&mut *self.product_slots.borrow_mut())
+    }
+
+    pub fn take_hemie_shading(&self) -> Option<crate::HemieShading> {
+        self.hemie_shading.borrow_mut().take()
     }
 
     pub fn take_product_candidates(&self) -> BTreeMap<String, Vec<crate::ProductCandidate>> {
@@ -1639,6 +1644,7 @@ impl JSONBuilder {
             colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
+            hemie_shading: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
 
@@ -1679,6 +1685,7 @@ impl JSONBuilder {
             colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
+            hemie_shading: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
         builder.index_templates();
@@ -2275,7 +2282,7 @@ impl JSONBuilder {
                 .retain(|o| !full_zone(&o.path));
             errors.retain(|e| e.code == "E_EPC_UNSUPPORTED_SYSTEM" || !full_zone(&e.path));
             notices.retain(|o| !full_zone(&o.path));
-            crate::hemie::map_existing_building(
+            *self.hemie_shading.borrow_mut() = crate::hemie::map_existing_building(
                 result,
                 csv_data,
                 &self.schema,

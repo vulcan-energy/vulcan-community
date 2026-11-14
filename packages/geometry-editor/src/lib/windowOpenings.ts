@@ -347,3 +347,61 @@ export function shiftPhysicalPartHeight<T extends Record<string, unknown>>(part:
   if (midHeight === undefined) return part;
   return { ...part, mid_height: Math.round((midHeight + delta) * 1e9) / 1e9 };
 }
+
+// Close shading of a window on an existing-building EPC: one category per kind, stated on the
+// window. What a drawn Window Shading feature is (a canopy or a balcony, opaque or frosted) is
+// not in the drawing, so the conversion fails until the window states it.
+
+export type CloseShadingKind = 'overhang' | 'side_fin_left' | 'side_fin_right' | 'obstacle';
+
+/** Each kind, the Window Shading type drawn for it, and its label. */
+export const CLOSE_SHADING_KINDS: readonly { kind: CloseShadingKind; drawn: string; label: string }[] = [
+  { kind: 'overhang', drawn: 'overhang', label: 'Overhang' },
+  { kind: 'side_fin_left', drawn: 'sidefinleft', label: 'Left side fin' },
+  { kind: 'side_fin_right', drawn: 'sidefinright', label: 'Right side fin' },
+  { kind: 'obstacle', drawn: 'object', label: 'Balcony front' },
+];
+
+/** Overhangs smaller than this are small canopies or verandas, larger ones large canopies. */
+const LARGE_CANOPY_M = 1.5;
+const FINS = [
+  { value: 'opaque', label: 'Opaque' },
+  { value: 'frosted glass', label: 'Frosted glass' },
+  { value: 'bars', label: 'Bars' },
+];
+
+/** The categories a kind takes; a drawn overhang's size picks the canopy band. */
+export function closeShadingOptions(kind: CloseShadingKind, drawnDepth: number | undefined) {
+  if (kind === 'overhang') {
+    const canopies = drawnDepth === undefined
+      ? [
+        { value: 'small fixed canopy', label: `Small canopy or veranda (under ${LARGE_CANOPY_M} m)` },
+        { value: 'large canopy', label: `Large canopy or extended overhang (${LARGE_CANOPY_M} m or more)` },
+      ]
+      : [drawnDepth < LARGE_CANOPY_M
+        ? { value: 'small fixed canopy', label: `Small canopy or veranda (drawn ${drawnDepth} m)` }
+        : { value: 'large canopy', label: `Large canopy or extended overhang (drawn ${drawnDepth} m)` }];
+    return [
+      { value: 'common roof', label: 'Roof eaves overhang' },
+      { value: 'common open porch', label: 'Open porch' },
+      ...canopies,
+      { value: 'balcony', label: 'Balcony above' },
+    ];
+  }
+  if (kind === 'obstacle') return [{ value: 'front balcony facade', label: 'Balcony front (opaque)' }];
+  return FINS;
+}
+
+/** The kind a drawn Window Shading type is, if the window takes a category for it. */
+export function closeShadingKindOf(drawnType: string | undefined): CloseShadingKind | undefined {
+  return CLOSE_SHADING_KINDS.find((item) => item.drawn === (drawnType || 'object'))?.kind;
+}
+
+/** True on an existing-building model: only the EPC conversion reads this row. */
+export function isExistingBuilding(state: Readonly<{
+  complianceSettings: object;
+  hostDocumentMetadata: Readonly<Record<string, string>>;
+}>): boolean {
+  return (state.complianceSettings as { IsExistingBuilding?: boolean }).IsExistingBuilding === true
+    || state.hostDocumentMetadata.IsExistingBuilding?.trim().toUpperCase() === 'TRUE';
+}

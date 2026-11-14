@@ -33,6 +33,8 @@ export type CanvasDecorationContext = Readonly<{
   selectionScope: string;
   select(id: string): void;
   clearSelection(): void;
+  /** The element type chosen in the draw toolbar. */
+  drawElementType: string;
 }>;
 
 export type CanvasDecorationDetailsContext = Readonly<{
@@ -52,6 +54,8 @@ export type CanvasDecorationContribution = Readonly<{
   /** Screen-reader and keyboard route for canvas marks that are otherwise drawn to a bitmap layer. */
   renderAccessibility?(context: CanvasDecorationContext): ReactNode;
   renderDetails?(context: CanvasDecorationDetailsContext): ReactNode;
+  /** Drawn under the plan's elements, which take the clicks where both are. */
+  belowGeometry?: boolean;
 }>;
 
 export type GeometryEditorContributions<

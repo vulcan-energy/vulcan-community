@@ -184,6 +184,9 @@ import {
 import { hydrateWallSharedFields } from './wallShared';
 import { renderWallPitchField } from './wallPitchField';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
+import { CloseShadingFields } from './CloseShadingFields';
+import { isExistingBuilding } from '../../lib/windowOpenings';
+import { useGeometryStore } from '../../stores/geometryStore';
 import {
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
@@ -204,6 +207,8 @@ import type {
 // see that file's own comment.
 
 export interface BuildingElementTransparentFormState {
+  /** An existing-building model: the window's close-shading categories show. */
+  closeShadingExisting: boolean;
   /** The active schema's window parts are physical openings (a8/a9). */
   windowPartsPhysical: boolean;
   commitOpeningField: (field: WindowOpeningField) => (value: number | '') => void;
@@ -426,6 +431,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
   ]);
 
   return {
+    closeShadingExisting: useGeometryStore(isExistingBuilding),
     windowPartsPhysical,
     commitOpeningField,
     widthInput: ctx.shared.widthInput,
@@ -834,6 +840,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             size="md"
           />
         </div>
+        {selectedElement?.name && state.closeShadingExisting && (
+          <CloseShadingFields windowName={selectedElement.name} elementsById={ctx.elementsById} updateElement={ctx.updateElement} />
+        )}
       </>
     );
   },

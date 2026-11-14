@@ -22,6 +22,7 @@ pub mod preflight_diagnostics;
 mod schema_validation;
 mod target_mappings;
 pub use builder::add_builtin_energy_supplies;
+pub use hemie::{HemieQuadrant, HemieShading};
 pub use target_mappings::map_target_unobstructed_shading;
 
 use serde::{Deserialize, Serialize};
@@ -503,6 +504,9 @@ pub struct TransformOutput {
     /// The products each product rule accepts, keyed as [`ProductSlot::candidates`] names them.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub product_candidates: std::collections::BTreeMap<String, Vec<ProductCandidate>>,
+    /// An existing building's distant shading as converted, for the editor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hemie_shading: Option<HemieShading>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -623,6 +627,7 @@ pub fn transform_geometry_csv(
         version_metadata: request.version_metadata,
         product_slots: builder.take_product_slots(),
         product_candidates: builder.take_product_candidates(),
+        hemie_shading: builder.take_hemie_shading(),
     })
 }
 

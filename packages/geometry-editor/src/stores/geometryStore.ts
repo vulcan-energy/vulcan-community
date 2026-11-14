@@ -2829,6 +2829,7 @@ const validateElementForState = (
     complianceSettings: cs,
     numberOfBedrooms: cs?.NumberOfBedrooms,
     calculateContextShadingDistance: state.calculateContextShadingDistance,
+    unusedContextShading: state.targetValidation?.distantShading?.unused_objects,
     defaultsLoading: state.defaultsLoading,
     defaultsLookup,
     junctionPsiWorkspaceByType:
@@ -7662,6 +7663,7 @@ const createGeometryState = (
       complianceSettings: cs,
       numberOfBedrooms: cs?.NumberOfBedrooms,
       calculateContextShadingDistance: state.calculateContextShadingDistance,
+      unusedContextShading: state.targetValidation?.distantShading?.unused_objects,
       defaultsLoading: state.defaultsLoading,
       defaultsLookup: state.getDefaultsLookup(),
       junctionPsiWorkspaceByType:

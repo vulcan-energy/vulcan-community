@@ -15,9 +15,15 @@
 // windowShadingFormState.shadingType instead of a local variable.
 
 import { useState } from 'react';
+import { CloseShadingFields } from './CloseShadingFields';
 import type { Element } from '../../geometry/types';
 import { SHADING_TYPES } from '../../stores/geometryStore';
-import { allowedWindowShadingTypes } from '../../lib/windowOpenings';
+import {
+  allowedWindowShadingTypes,
+  closeShadingKindOf,
+  isExistingBuilding,
+} from '../../lib/windowOpenings';
+import { useGeometryStore } from '../../stores/geometryStore';
 import { useKeyedState } from '../../hooks/useKeyedState';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
@@ -54,6 +60,8 @@ export interface WindowShadingFormState {
   heightInput: NumericDraftInputBinding;
   /** Shared with the wall family and ContextShading — see heightInput above. */
   distanceInput: NumericDraftInputBinding;
+  /** An existing-building model: the linked window's close-shading category shows here. */
+  closeShadingExisting: boolean;
 }
 
 function useFormState(ctx: ElementFormStateCtx): WindowShadingFormState {
@@ -86,6 +94,7 @@ function useFormState(ctx: ElementFormStateCtx): WindowShadingFormState {
     transparencyInput,
     heightInput: ctx.shared.heightInput,
     distanceInput: ctx.shared.distanceInput,
+    closeShadingExisting: useGeometryStore(isExistingBuilding),
   };
 }
 
@@ -297,6 +306,10 @@ export const windowShadingFormModule: ElementFormModule<WindowShadingFormState> 
               <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('distance', distanceInput.value)} issue={getFieldValidationIssue('distance', distanceInput.value) || undefined} />
             </div>
           </>
+        )}
+        {/* The window's category for this drawn feature sits beside it. */}
+        {closeShadingKindOf(shadingType) && linkedWindow && state.closeShadingExisting && (
+          <CloseShadingFields windowName={linkedWindow} kinds={[closeShadingKindOf(shadingType)!]} elementsById={elementsById} updateElement={updateElement} />
         )}
       </>
     );

@@ -22,6 +22,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[path = "hemie_parts.rs"]
 mod parts;
+#[path = "hemie_shading.rs"]
+mod shading;
+pub use shading::{HemieQuadrant, HemieShading};
 
 type Row = BTreeMap<String, Value>;
 type Rows = BTreeMap<String, Vec<Row>>;
@@ -888,7 +891,7 @@ pub(crate) fn map_existing_building(
     schema: &Value,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
-) {
+) -> Option<shading::HemieShading> {
     let snapshot = model.clone();
     let mut ctx = Ctx {
         settings: Settings {
@@ -908,10 +911,12 @@ pub(crate) fn map_existing_building(
     notices.append(&mut ctx.notices);
     if !ctx.errors.is_empty() || converted.is_none() {
         errors.append(&mut ctx.errors);
-        return;
+        return None;
     }
     let (mut geometry, ventilation) = converted.expect("checked");
     systems::mechanical_ventilation(&snapshot, csv, schema, &mut geometry, errors, notices);
+    let (segments, shading) = shading::distant(&ctx.settings, &geometry, errors, notices)?;
+    model["ExternalConditions"]["shading_segments"] = segments;
     let documented: Vec<String> = std::mem::take(&mut ctx.constructions.documented)
         .into_iter()
         .collect();
@@ -928,11 +933,12 @@ pub(crate) fn map_existing_building(
             ),
         ));
     }
-    notices.push(notice("/Zone", "The existing-building EPC takes its geometry from the storey outlines. HEMIE derives thermal bridges (from the age band), internal walls and floors, lighting and window shading itself, so the model's own are not used.".into()));
+    notices.push(notice("/Zone", "The existing-building EPC takes its geometry from the storey outlines. HEMIE derives thermal bridges (from the age band), internal walls and floors and lighting itself, so the model's own are not used.".into()));
     model["Zone"] = geometry;
     model["InfiltrationVentilation"] = ventilation;
     // DESNZ-defined: with HEMIE Geometry, systems take their HEMIE form, which has no zone.
     systems::map_systems(model, schema, errors, notices);
+    Some(shading)
 }
 
 fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
@@ -1598,6 +1604,7 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
     if let Some(risk) = e.get("security_risk").and_then(Value::as_bool) {
         w["is_security_risk"] = json!(risk);
     }
+    shading::close(ctx, e, &mut w);
     Some(w)
 }
 
@@ -2324,7 +2331,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         (model, errors, notices)
     }
 
-    fn house(exposed_extra: Vec<String>) -> String {
+    pub(super) fn house(exposed_extra: Vec<String>) -> String {
         let mut exposed = box_walls(&BOX, &[0, 1]);
         exposed.extend(exposed_extra);
         csv(SETTINGS, &exposed, &ground(&BOX))

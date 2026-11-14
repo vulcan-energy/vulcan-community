@@ -224,7 +224,6 @@ import {
   resetCanvasPanelPosition,
   setCanvasPanelPosition,
   type CanvasDecorationContext,
-  type CanvasDecorationContribution,
   type CanvasPanelPosition,
   type CanvasPanelPositions,
   type GeometryEditorContributions,
@@ -3534,9 +3533,18 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       selectionScope: contribution?.selectionScope?.() ?? '',
       select: (id) => selectCanvasDecoration(contributionId, id),
       clearSelection: () => setSelectedCanvasDecoration(null),
+      drawElementType,
     };
   }, [canvasCenter, canvasDecorationContributions, canInteractWithCanvasDecorations, canvasInteractionPalette, currentFloorZ,
-    activeCanvasDecoration, drawingCanvasPalette, panOffset, scale, selectCanvasDecoration]);
+    activeCanvasDecoration, drawingCanvasPalette, panOffset, scale, selectCanvasDecoration, drawElementType]);
+
+  const canvasDecorationNodes = (below: boolean) => canvasDecorationContributions
+    .flatMap((contribution) => (!!contribution.belowGeometry === below
+      ? [<React.Fragment key={contribution.id}>{contribution.render(canvasDecorationContext(contribution.id))}</React.Fragment>]
+      : []));
+
+  const decorationsBelow = canvasDecorationNodes(true);
+  const decorationsAbove = canvasDecorationNodes(false);
 
   const requestSelectedCanvasDecorationDelete = useCallback(() => {
     if (!activeCanvasDecoration) return false;
@@ -6424,13 +6432,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return ids;
   }, [elementCanvasData, rendererHighlightedIds]);
 
+  // Context Shading in stated distant shading quadrants changes nothing sent: faded, the inspector says why.
+  const unusedContextShading = useMemo(() => new Set(targetValidation?.distantShading?.unused_objects), [targetValidation]);
   const elementPreviewOpacity = useCallback((element: Element) => (
     !thermalBridgePreview.active || (thermalBridgePreview.kind === 'duct'
       ? element.type === 'MechanicalVentilationDuctwork' || element.type === 'MechanicalVentilationTerminal'
       : thermalBridgePreview.kind === 'pipe' ? element.type === 'WaterPipework'
       : element.type === 'ThermalBridgeLinear' || element.type === 'ThermalBridgePoint')
       ? 1 : thermalBridgePreview.highlightedHostIds.has(element.id) ? 0.85 : 0.35
-  ), [thermalBridgePreview.active, thermalBridgePreview.kind, thermalBridgePreview.highlightedHostIds]);
+  ) * (element.type === 'ContextShading' && unusedContextShading.has(element.name) ? 0.4 : 1),
+  [thermalBridgePreview.active, thermalBridgePreview.kind, thermalBridgePreview.highlightedHostIds, unusedContextShading]);
 
   const buildElementRendererNodes = useCallback((rows: typeof sortedElementCanvasData) => {
     return rows.map(({ element, canvasCoords }) => {
@@ -7044,6 +7055,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               contextFloorElementRendererNodes
             )}
           </Layer>
+
+          {canvasDecorationContributions.some((contribution) => contribution.belowGeometry) && (
+            <Layer name="host-canvas-decorations-below" listening={canInteractWithCanvasDecorations}>
+              {decorationsBelow}
+            </Layer>
+          )}
 
           <Layer name="main-geometry-layer" listening={!thermalBridgePreview.active}>
             {/* Overlap halos sit under the lines they mark; the panel message explains them. */}
@@ -8114,11 +8131,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
           </Layer>
 
-          {canvasDecorationContributions.length > 0 && (
+          {canvasDecorationContributions.some((contribution) => !contribution.belowGeometry) && (
             <Layer name="host-canvas-decorations" listening={canInteractWithCanvasDecorations}>
-              {canvasDecorationContributions.map((contribution: CanvasDecorationContribution) => {
-                return <React.Fragment key={contribution.id}>{contribution.render(canvasDecorationContext(contribution.id))}</React.Fragment>;
-              })}
+              {decorationsAbove}
             </Layer>
           )}
 
