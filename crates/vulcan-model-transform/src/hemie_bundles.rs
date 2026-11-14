@@ -899,7 +899,7 @@ pub(super) fn conservatory_roof(
 // ---------------------------------------------------------------------------------------------
 // Box in the roof
 
-/// DESNZ-defined: a box-shaped room set within a pitched roof is not covered. Ours (E29): how
+/// DESNZ-defined: a box-shaped room set within a pitched roof is not covered. Ours (E30): how
 /// a box room is recognised, a top floor standing clear of the outline below under an unheated
 /// pitched roof.
 pub(super) fn box_in_roof(
