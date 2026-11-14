@@ -1570,6 +1570,7 @@ pub struct JSONBuilder {
     product_slots: RefCell<Vec<crate::ProductSlot>>,
     product_candidates: RefCell<BTreeMap<String, Vec<crate::ProductCandidate>>>,
     hemie_shading: RefCell<Option<crate::HemieShading>>,
+    provenance: RefCell<crate::hemie::Provenance>,
     /// Model path of each object a Geometry CSV row authored (Systems, wet emitter and
     /// mechanical ventilation rows) and the row's Name, so each product slot names its row.
     slot_rows: RefCell<Vec<(String, String)>>,
@@ -1592,6 +1593,10 @@ impl JSONBuilder {
 
     pub fn take_hemie_shading(&self) -> Option<crate::HemieShading> {
         self.hemie_shading.borrow_mut().take()
+    }
+
+    pub fn take_provenance(&self) -> crate::hemie::Provenance {
+        self.provenance.take()
     }
 
     pub fn take_product_candidates(&self) -> BTreeMap<String, Vec<crate::ProductCandidate>> {
@@ -1645,6 +1650,7 @@ impl JSONBuilder {
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
+            provenance: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
 
@@ -1686,6 +1692,7 @@ impl JSONBuilder {
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
+            provenance: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
         };
         builder.index_templates();
@@ -2291,13 +2298,16 @@ impl JSONBuilder {
                 .retain(|o| !full_zone(&o.path));
             errors.retain(|e| e.code == "E_EPC_UNSUPPORTED_SYSTEM" || !full_zone(&e.path));
             notices.retain(|o| !full_zone(&o.path));
-            *self.hemie_shading.borrow_mut() = crate::hemie::map_existing_building(
+            if let Some((shading, provenance)) = crate::hemie::map_existing_building(
                 result,
                 csv_data,
                 &self.schema,
                 &mut errors,
                 &mut notices,
-            );
+            ) {
+                *self.hemie_shading.borrow_mut() = Some(shading);
+                *self.provenance.borrow_mut() = provenance;
+            }
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);

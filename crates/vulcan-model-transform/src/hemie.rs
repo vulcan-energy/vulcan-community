@@ -1206,17 +1206,44 @@ fn merge_edges<'e>(ring: Vec<P>, walls: &[&'e El<'e>]) -> (Vec<P>, Vec<Option<&'
 /// Replace the full-input zone and ventilation with HEMIE inputs. Errors name the element.
 /// A conversion that stops always reports an error: the unconverted zone's own schema errors
 /// are hidden (`is_unused_full_input`), so a silent stop would let the model pass.
+/// The converted model's existing-building nodes by JSON pointer, each to where the user
+/// authored it (an element or a Metadata row). It travels beside the model, never in it.
+pub type Provenance = BTreeMap<String, String>;
+
 pub(crate) fn map_existing_building(
     model: &mut Value,
     csv: &Rows,
     schema: &Value,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
-) -> Option<shading::HemieShading> {
+) -> Option<(shading::HemieShading, Provenance)> {
     let before = errors.len();
-    let shading = convert_existing_building(model, csv, schema, errors, notices);
-    report_silent_stop(shading.is_none(), before, errors);
-    shading
+    let converted = convert_existing_building(model, csv, schema, errors, notices);
+    report_silent_stop(converted.is_none(), before, errors);
+    converted
+}
+
+/// Marks a converted object with the pointer of the element it comes from, until
+/// `take_sources` moves the marks into the provenance table.
+const SOURCE: &str = "__vulcan_source";
+
+fn take_sources(value: &mut Value, path: &str, out: &mut Provenance) {
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::String(source)) = map.remove(SOURCE) {
+                out.insert(path.to_string(), source);
+            }
+            for (key, child) in map.iter_mut() {
+                take_sources(child, &format!("{path}{}", json_pointer(&[key])), out);
+            }
+        }
+        Value::Array(items) => {
+            for (i, child) in items.iter_mut().enumerate() {
+                take_sources(child, &format!("{path}/{i}"), out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// A stop (paths such as no building part found) that recorded no error since `before`.
@@ -1234,7 +1261,7 @@ fn convert_existing_building(
     schema: &Value,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
-) -> Option<shading::HemieShading> {
+) -> Option<(shading::HemieShading, Provenance)> {
     let snapshot = model.clone();
     let mut ctx = Ctx {
         settings: Settings {
@@ -1261,6 +1288,27 @@ fn convert_existing_building(
         return None;
     }
     let (mut geometry, ventilation) = converted.expect("checked");
+    let mut provenance = Provenance::new();
+    take_sources(&mut geometry, "/Zone", &mut provenance);
+    for (node, row) in [
+        ("/Zone/age_band", format!("/Metadata/{SETTING}age_band")),
+        ("/Zone/region", "/Metadata/Postcode".into()),
+    ] {
+        provenance.insert(node.into(), row);
+    }
+    for (key, construction) in geometry["constructions"].as_object().into_iter().flatten() {
+        if let Some(kind) = construction["construction_type"].as_str() {
+            provenance.insert(
+                format!("/Zone/constructions{}", json_pointer(&[key])),
+                format!("/Metadata/{SETTING}construction_{kind}"),
+            );
+        }
+    }
+    // The ventilation keeps the full input's paths, which name their Global Settings rows.
+    provenance.insert(
+        "/InfiltrationVentilation".into(),
+        "/InfiltrationVentilation".into(),
+    );
     systems::mechanical_ventilation(&snapshot, csv, schema, &mut geometry, errors, notices);
     let (segments, shading) = shading::distant(&ctx.settings, &geometry, errors, notices)?;
     model["ExternalConditions"]["shading_segments"] = segments;
@@ -1295,7 +1343,7 @@ fn convert_existing_building(
     model["InfiltrationVentilation"] = ventilation;
     // DESNZ-defined: with HEMIE Geometry, systems take their HEMIE form, which has no zone.
     systems::map_systems(model, schema, errors, notices);
-    Some(shading)
+    Some((shading, provenance))
 }
 
 fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
@@ -1741,7 +1789,8 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             placed.insert(opening.name.to_string());
             on_edge.push(opening);
             if opening.ty == "BuildingElementTransparent" {
-                if let Some(w) = window(ctx, opening, kind == Kind::External) {
+                if let Some(mut w) = window(ctx, opening, kind == Kind::External) {
+                    w[SOURCE] = json!(opening.path());
                     win.push(w);
                 }
             } else {
@@ -1758,6 +1807,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 if let Some(vents) = systems::host_vents(ctx, opening.name) {
                     d["mechanical_vents"] = vents;
                 }
+                d[SOURCE] = json!(opening.path());
                 door.push(d);
             }
         }
@@ -1868,7 +1918,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         let part_walls: Vec<Value> = hemie_walls
             .iter()
             .filter(|w| w.part == pi)
-            .map(|w| Value::Object(w.value.clone()))
+            .map(|w| {
+                let mut value = w.value.clone();
+                value.insert(SOURCE.into(), json!(w.source.path()));
+                Value::Object(value)
+            })
             .collect();
         let mut bp = Map::new();
         if conservatory[pi] {

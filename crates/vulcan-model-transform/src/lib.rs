@@ -509,6 +509,10 @@ pub struct TransformOutput {
     /// An existing building's distant shading as converted, for the editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hemie_shading: Option<HemieShading>,
+    /// An existing building's converted nodes (JSON pointer) to the element or Metadata row each
+    /// comes from, for naming them in a run failure. Never part of the model.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub provenance: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -633,6 +637,7 @@ pub fn transform_geometry_csv(
         product_slots: builder.take_product_slots(),
         product_candidates: builder.take_product_candidates(),
         hemie_shading: builder.take_hemie_shading(),
+        provenance: builder.take_provenance(),
     })
 }
 
