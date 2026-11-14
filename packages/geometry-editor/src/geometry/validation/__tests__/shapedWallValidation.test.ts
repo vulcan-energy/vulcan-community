@@ -117,7 +117,7 @@ const roof = (over: number) => ({
 describe('drawing errors', () => {
   it('names an opening off its host wall', () => {
     const off = offWindow(0.5);
-    expect(text(validate(off, [...boxWalls, off]).issues)).toContain('Not on its host wall');
+    expect(text(validate(off, [...boxWalls, off]).warnings)).toContain('Not on its host wall');
     const on = offWindow(0);
     expect(text(validate(on, [...boxWalls, on]).issues)).not.toContain('Not on its host wall');
   });

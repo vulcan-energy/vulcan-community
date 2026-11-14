@@ -189,6 +189,7 @@ import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { CloseShadingFields } from './CloseShadingFields';
 import { isExistingBuilding } from '../../lib/windowOpenings';
 import { useGeometryStore } from '../../stores/geometryStore';
+import { useTargetRules } from '../../hooks/useTargetRules';
 import {
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
@@ -211,6 +212,8 @@ import type {
 export interface BuildingElementTransparentFormState {
   /** An existing-building model: the window's close-shading categories show. */
   closeShadingExisting: boolean;
+  /** The target takes an existing building's description: opening type is stated, FHS opening inputs are not. */
+  constructionBands: boolean;
   /** The active schema's window parts are physical openings (a8/a9). */
   windowPartsPhysical: boolean;
   commitOpeningField: (field: WindowOpeningField) => (value: number | '') => void;
@@ -434,6 +437,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
 
   return {
     closeShadingExisting: useGeometryStore(isExistingBuilding),
+    constructionBands: useTargetRules().constructionBands,
     windowPartsPhysical,
     commitOpeningField,
     widthInput: ctx.shared.widthInput,
@@ -652,7 +656,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             size="md"
           />
         </div>
-        {!openingsInTable && !state.closeShadingExisting && <>
+        {!openingsInTable && !state.constructionBands && <>
         {renderFieldLabel('Free Area Height (m):', elementType)}
         <div
           className="element-input"
@@ -762,7 +766,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
         {openingFields}
         </>}
         {openingNote ? <div style={INLINE_FIELD_NOTE_STYLE}>{openingNote}</div> : null}
-        {selectedElement?.type === 'BuildingElementTransparent' && (state.closeShadingExisting || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
+        {selectedElement?.type === 'BuildingElementTransparent' && (state.constructionBands || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
           <>
             <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Opening type:</div>
             <div className="element-input" ref={registerBaseFieldRef('window_sections')}>

@@ -1049,6 +1049,42 @@ function roofOverhangsWalls(roof: Element['coordinates'], wallEnds: Element['coo
   }));
 }
 
+const HOT_WATER_OUTLET_SECTION: Record<string, string> = {
+  OtherWaterUseDetails: 'Other', MixerShower: 'Shower', InstantElecShower: 'Shower', Bath: 'Bath',
+};
+
+/**
+ * What the target's schema says of an outlet's fields: every node named for the field anywhere in
+ * the outlet's section (its `$ref`s, branches and conditions followed). Undefined when it cannot say.
+ */
+function hotWaterOutletFields(
+  port: GeometrySchemaPort,
+  subcategory: string | undefined,
+): { takes(field: string): boolean; defaults(field: string): boolean } | undefined {
+  const section = subcategory ? HOT_WATER_OUTLET_SECTION[subcategory] : undefined;
+  if (!section || port.availability !== 'available') return undefined;
+  const root = port.getRootSchema(targetSchemaMode(port)) as Record<string, any> | null; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const start = root?.properties?.HotWaterDemand;
+  if (!root || !start) return undefined;
+  const nodes = new Map<string, any[]>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const seen = new Set<unknown>();
+  const walk = (node: any): void => { // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!node || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    if (typeof node.$ref === 'string') walk(root.$defs?.[node.$ref.split('/').pop()!]);
+    for (const [key, value] of Object.entries(node.properties ?? {})) nodes.set(key, [...(nodes.get(key) ?? []), value]);
+    for (const key of ['anyOf', 'oneOf', 'allOf'] as const) if (Array.isArray(node[key])) node[key].forEach(walk);
+    for (const key of ['additionalProperties', 'then', 'else'] as const) walk(node[key]);
+    Object.values(node.properties ?? {}).forEach((child) => { if (child !== node.properties) walk(child); });
+  };
+  const resolve = (node: any): any => (typeof node?.$ref === 'string' ? root.$defs?.[node.$ref.split('/').pop()!] : node); // eslint-disable-line @typescript-eslint/no-explicit-any
+  walk(resolve(start)?.properties?.[section]);
+  return {
+    takes: (field) => nodes.has(field),
+    defaults: (field) => (nodes.get(field) ?? []).some((node) => node?.default !== undefined),
+  };
+}
+
 /** Whether both ends of a straight opening lie on the straight host wall; other shapes are not judged. */
 function isOnHostWall(opening: Element['coordinates'] | undefined, wall: Element['coordinates'] | undefined): boolean {
   if (opening?.length !== 2 || wall?.length !== 2) return true;
@@ -1225,7 +1261,9 @@ export const validateElementCore = (
     const host = Object.values(elementsById).find((candidate) => candidate.name === element.parent_element
       && candidate.zoneId === element.zoneId && candidate.id !== element.id);
     if (host && !isOnHostWall(element.coordinates, host.coordinates)) {
-      issues.push(geo('Not on its host wall: move it onto the wall or change its host.', 'parent_element'));
+      // Only an existing-building conversion uses the host link for position; elsewhere it changes no result.
+      (targetRules(schemaPort, context.complianceSettings ?? {}).constructionBands ? issues : warnings)
+        .push(geo('Not on its host wall: move it onto the wall or change its host.', 'parent_element'));
     }
   }
 
@@ -1868,12 +1906,9 @@ export const validateElementCore = (
       const hotWaterElement = element as HotWaterDemand;
       // The target's own outlet schema decides what is required: a field it defaults is optional,
       // and one it lacks is never asked for.
-      const outletProperties = schemaPort.availability === 'available' && hotWaterElement.subcategory
-        ? (schemaPort.getElementSubschema(targetSchemaMode(schemaPort), 'HotWaterDemand', hotWaterElement.subcategory)?.properties as
-          Record<string, { default?: unknown } | undefined> | undefined)
-        : undefined;
-      const outletDefaults = (field: string) => outletProperties?.[field]?.default !== undefined;
-      const outletTakes = (field: string) => !outletProperties || field in outletProperties;
+      const outletFields = hotWaterOutletFields(schemaPort, hotWaterElement.subcategory);
+      const outletDefaults = (field: string) => outletFields?.defaults(field) ?? false;
+      const outletTakes = (field: string) => outletFields?.takes(field) ?? true;
       if (!hotWaterElement.subcategory) {
         issues.push(geo('Outlet Type is required', 'subcategory'));
       }
