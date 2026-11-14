@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import { flattenSystemSubtypePlantSchemas, systemPlantTypes } from '../systemSchemaFlatten';
+import { flattenSystemSubtypePlantSchemas, systemPlantTypes, withSystemPlantType } from '../systemSchemaFlatten';
 import { __setSchemaObjectForTests, getBaseFieldsForElementType, getElementSubschemaForMode } from '../schemaCache';
 import { buildSystemAdvancedUischema } from '../systemAdvancedUischema';
 import epcSchema from '../../../../../data/schemas/hem_epc_orchestrator_input.schema.json';
@@ -53,5 +53,18 @@ describe('primary pipework on the EPC target', () => {
     const fields = Object.keys(getElementSubschemaForMode(false, 'WaterPipework')?.properties ?? {});
     expect(fields).toEqual(expect.arrayContaining(['external_diameter_mm', 'internal_diameter_mm', 'insulation_thickness_mm', 'insulation_thermal_conductivity', 'pipe_contents', 'surface_reflectivity']));
     expect(getBaseFieldsForElementType('WaterPipework')).toContain('length');
+  });
+});
+
+describe('retyping a system row', () => {
+  it('replaces the one plant, and never a row that holds several', () => {
+    expect(withSystemPlantType({ HeatSourceWet: { a: { type: 'Boiler', product_id: 1 } } }, 'HeatSourceWet', 'row', 'HIU')).toEqual({ HeatSourceWet: { a: { type: 'HIU' } } });
+    expect(withSystemPlantType(null, 'HeatSourceWet', 'row', 'HIU')).toEqual({ HeatSourceWet: { row: { type: 'HIU' } } });
+    expect(withSystemPlantType({ HeatSourceWet: { a: { type: 'Boiler' }, b: { type: 'HeatPump' } } }, 'HeatSourceWet', 'row', 'HIU')).toBeNull();
+  });
+
+  it('offers a heat battery its battery type until it is stated', () => {
+    const { node } = flatPlant('HeatSourceWet', { type: 'HeatBattery' }, false);
+    expect(node.properties.battery_type).toMatchObject({ enum: expect.arrayContaining(['pcm', 'dry_core']) });
   });
 });

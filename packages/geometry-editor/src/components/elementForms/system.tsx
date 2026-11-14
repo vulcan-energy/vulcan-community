@@ -118,7 +118,7 @@ import { listCategoryJsonOptions, type WorkspaceSnippetOption } from '../../geom
 import { syncSpaceHeatSystemZoneNameInExtraJson } from '../../lib/spaceHeatSystemSync';
 import { collectHeatSourceWetNamesFromProject } from '../../lib/heatSourceWetNamesFromProject';
 import { useKeyedState } from '../../hooks/useKeyedState';
-import { systemPlantTypes } from '../../lib/systemSchemaFlatten';
+import { systemPlantTypes, withSystemPlantType } from '../../lib/systemSchemaFlatten';
 import { readRecord } from '../../lib/jsonTypes';
 import { StandardDropdown } from '../StandardDropdown';
 import {
@@ -176,6 +176,9 @@ const SYSTEM_TYPE_LABELS: Record<string, string> = {
   WetDistribution: 'Wet distribution',
 };
 
+/** Types whose schema requires an entry the editor has no category to create (a warm-air heat source). */
+const TYPES_NEEDING_AN_UNCREATABLE_ENTRY = new Set(['WarmAirDistribution']);
+
 export function formatSystemPresetName(preset: string): string {
   return preset.replace(/_/g, ' ');
 }
@@ -230,6 +233,8 @@ export interface SystemFormState {
   systemTypeOptions: Array<{ value: string; label: string }>;
   systemPlantType: string;
   handleSystemTypeChange: (type: string) => void;
+  /** The type is offered only for a row holding no plant or one. */
+  systemPlantCount: number;
 }
 
 function useFormState(ctx: ElementFormStateCtx): SystemFormState {
@@ -715,28 +720,29 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
   const systemTypeOptions = useMemo(() => {
     if (!isSystemElementType || !systemSubcategory || ctx.schemaPort.availability !== 'available') return [];
     return systemPlantTypes(ctx.schemaPort.getRootSchema(ctx.schemaMode), systemSubcategory)
-      .map((value) => ({ value, label: SYSTEM_TYPE_LABELS[value] ?? value }));
+      .flatMap((value) => (TYPES_NEEDING_AN_UNCREATABLE_ENTRY.has(value) ? [] : [{ value, label: SYSTEM_TYPE_LABELS[value] ?? value }]));
   }, [isSystemElementType, systemSubcategory, ctx.schemaPort, ctx.schemaMode]);
 
   // The row holds one plant, named for the row. A row with several plants keeps them: no type is offered.
   const selectedPlants = readRecord(readRecord(selectedSystemElementFull?.extra_json)[systemSubcategory]);
-  const systemPlantType = Object.values(selectedPlants).length === 1 ? String(readRecord(Object.values(selectedPlants)[0]).type ?? '') : '';
+  const plantCount = Object.keys(selectedPlants).length;
+  const systemPlantType = plantCount === 1 ? String(readRecord(Object.values(selectedPlants)[0]).type ?? '') : '';
 
   const applySystemTypeChange = useCallback((type: string) => {
     const element = selectedSystemElementFull;
     if (!element) return;
-    const extra = readRecord(element.extra_json);
-    const [existingKey] = Object.entries(readRecord(extra[systemSubcategory]))[0] ?? [];
+    const extraJson = withSystemPlantType(element.extra_json, systemSubcategory, element.name, type);
+    if (!extraJson) return;
     commitSystemSelectionUpdate({
       source: 'custom',
       subcategory: systemSubcategory,
-      extraJson: { ...extra, [systemSubcategory]: { [existingKey ?? element.name]: { type } } },
+      extraJson,
       reason: 'system-type-change',
     });
   }, [selectedSystemElementFull, systemSubcategory, commitSystemSelectionUpdate]);
 
   const handleSystemTypeChange = useCallback((type: string) => {
-    if (!selectedSystemElementFull || !type || type === systemPlantType) return;
+    if (!selectedSystemElementFull || !type || type === systemPlantType || plantCount > 1) return;
     const [, existing] = Object.entries(readRecord(readRecord(selectedSystemElementFull.extra_json)[systemSubcategory]))[0] ?? [];
     // Another type's inputs do not carry over: ask before clearing a plant that has any.
     if (existing && Object.keys(readRecord(existing)).some((key) => key !== 'type')) {
@@ -744,7 +750,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
       return;
     }
     applySystemTypeChange(type);
-  }, [selectedSystemElementFull, systemSubcategory, systemPlantType, applySystemTypeChange]);
+  }, [selectedSystemElementFull, systemSubcategory, systemPlantType, plantCount, applySystemTypeChange]);
 
   const confirmSystemSourceSwitch = useCallback(() => {
     const action = pendingSystemAction;
@@ -840,6 +846,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     systemTypeOptions,
     systemPlantType,
     handleSystemTypeChange,
+    systemPlantCount: plantCount,
   };
 }
 
@@ -908,11 +915,12 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
       systemTypeOptions,
       systemPlantType,
       handleSystemTypeChange,
+      systemPlantCount,
     } = state;
     const { elementType, renderFieldLabel, elementsById, productCatalogue, hemDatabaseProducts, systemHasProductSlot, renderSpaceHeatSystemEmitterManager } = ctx;
 
     // Products take no sample preset, so the type is chosen here.
-    const showType = !!(hemDatabaseProducts && systemSubcategory && selectedSystemElementFull && systemTypeOptions.length);
+    const showType = !!(hemDatabaseProducts && systemPlantCount <= 1 && systemSubcategory && selectedSystemElementFull && systemTypeOptions.length);
     return (
       <>
         {productCatalogue ? (
