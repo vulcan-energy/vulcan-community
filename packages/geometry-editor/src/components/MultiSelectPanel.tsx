@@ -76,6 +76,8 @@ import {
   classifyWindowOpenings,
   windowOpeningBulkEditBlocked,
   allowedWindowShadingTypes,
+  isExistingBuilding,
+  WINDOW_SHADING_TYPE_LABELS,
   windowPartsArePhysical,
   windowPartsCopyBlocked,
   windowPartsCopyColumns,
@@ -948,13 +950,8 @@ const BOOLEAN_SELECT_OPTIONS = [
   { value: 'true', label: 'True' },
   { value: 'false', label: 'False' },
 ] as const;
-const WINDOW_SHADING_TYPE_OPTIONS = [
-  { value: 'object', label: 'Obstacle' },
-  { value: 'overhang', label: 'Overhang' },
-  { value: 'sidefinleft', label: 'Left fin' },
-  { value: 'sidefinright', label: 'Right fin' },
-  { value: 'reveal', label: 'Reveal' },
-] as const;
+const WINDOW_SHADING_TYPE_OPTIONS = (Object.entries(WINDOW_SHADING_TYPE_LABELS) as [WindowShading['shading_type'], string][])
+  .map(([value, label]) => ({ value, label }));
 const COLOUR_OPTIONS = ['Light', 'Intermediate', 'Dark'].map((value) => ({ value, label: value }));
 const FLOOR_TYPE_OPTIONS = [
   { value: 'Heated_basement', label: 'Heated Basement' },
@@ -1099,7 +1096,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     rotateSelectedElements,
   } = useGeometryStore();
   const windowPartsPhysical = windowPartsArePhysical(schemaPort, schemaMode);
-  const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, schemaMode);
+  const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, schemaMode, useGeometryStore(isExistingBuilding));
   const windowShadingTypeOptions = allowedShadingTypes
     ? WINDOW_SHADING_TYPE_OPTIONS.filter(({ value }) => allowedShadingTypes.includes(value))
     : WINDOW_SHADING_TYPE_OPTIONS;

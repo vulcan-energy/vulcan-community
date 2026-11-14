@@ -662,6 +662,44 @@ function getCoreBuildingElementContainerSchema(schema: SchemaNode): SchemaNode |
     : null;
 }
 
+/**
+ * HEM:EPC declares mechanical ventilation as three shapes, and a vent type takes exactly one:
+ * MVHR is its own product shape; an intermittent fan or positive input ventilation has no
+ * product shape; a continuous extract system takes the product shape. Null for a schema that
+ * declares none of them (HEM Core and FHS), which keep their own handling.
+ */
+function resolveEpcMechanicalVentilationVariant(schema: SchemaNode, subtype: string | undefined): SchemaNode | null {
+  const defs = schema.$defs;
+  const product = defs?.MechanicalVentilationWithoutHeatRecoveryProduct;
+  const mvhr = defs?.MVHRProduct;
+  const fan = defs?.MechanicalVentilationWithoutHeatRecovery;
+  if (!subtype || !product || !mvhr || !fan) return null;
+  // `vent_position` is read for a vent hosted in a wall, window or door (not a drawn MVHR terminal).
+  const position = { $ref: '#/$defs/VentPosition', description: 'Where in its host element the vent sits.' };
+  if (subtype === 'MVHR') {
+    // The ductwork descriptor is the converter's (drawn ducts); no form edits that object.
+    const properties = { ...(mvhr.properties as Record<string, SchemaNode>) };
+    delete properties.ductwork;
+    return { type: 'object', properties, required: (mvhr.required ?? []).filter((key: string) => key !== 'ductwork'), $defs: defs };
+  }
+  if (subtype === 'Intermittent MEV' || subtype === 'Positive input ventilation') {
+    const properties: Record<string, SchemaNode> = { ...fan.properties, vent_position: position };
+    delete properties.vent_type;
+    // The target fills the supply-air controls; a stopped fan's leakage is stated only for an intermittent one.
+    delete properties.sup_air_flw_ctrl;
+    delete properties.sup_air_temp_ctrl;
+    const intermittent = subtype === 'Intermittent MEV';
+    if (!intermittent) delete properties.leakage_when_stopped;
+    return {
+      type: 'object',
+      properties,
+      required: ['EnergySupply', 'design_outdoor_air_flow_rate', ...(intermittent ? ['leakage_when_stopped'] : [])],
+      $defs: defs,
+    };
+  }
+  return { type: 'object', properties: { ...product.properties, vent_position: position }, required: [...(product.required ?? [])], $defs: defs };
+}
+
 function resolveCoreMechanicalVentilationBaseSchema(schema: SchemaNode, schemaKey: string): SchemaNode | null {
   const mechVentProp = coreInfiltrationVentilationSchema(schema)?.properties?.['MechanicalVentilation'];
   if (mechVentProp?.anyOf && Array.isArray(mechVentProp.anyOf)) {
@@ -1216,6 +1254,8 @@ export function getConditionalRequiredFieldsForMode(
   };
 
   for (const block of subschema.allOf) {
+    // A plain `oneOf` (U-value or thermal resistance) asks for one of its branches.
+    if (block && !block.if && Array.isArray(block.oneOf)) applyBlock(block);
     if (!block || !block.if) continue;
     if (conditionMatches(block.if)) {
       applyBlock(block.then);
@@ -1351,6 +1391,8 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
                     type: 'object',
                     properties: specificSchema.properties,
                     required: specificSchema.required || [],
+                    // Conditional requirements (a party wall's lining, a roof's flag, U or R) show while editing.
+                    ...(Array.isArray(specificSchema.allOf) ? { allOf: specificSchema.allOf } : {}),
                     $defs: schema.$defs
                   };
                 }
@@ -1467,6 +1509,8 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
   // Special handling for MechanicalVentilation - merge conditional properties from allOf blocks
   // This works for both Core and FHS schemas, making Advanced Fields show all relevant fields
   if (elementType === 'MechanicalVentilation' && baseSchema) {
+    const epcVariant = resolveEpcMechanicalVentilationVariant(schema, subtype);
+    if (epcVariant) return epcVariant;
     if (baseSchema.properties) {
       const mergedProps: Record<string, SchemaNode> = { ...baseSchema.properties };
       let mergedRequired: string[] = Array.isArray(baseSchema.required) ? [...baseSchema.required] : [];
@@ -1698,6 +1742,8 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
         // Only expose the properties of the exact subtype; do not bleed in union-level props like 'Type'
         properties: specificSchema.properties || {},
         required: specificSchema.required || [],
+        // Conditional requirements (a party wall's lining, a roof's flag, U or R) show while editing.
+        ...(Array.isArray(specificSchema.allOf) ? { allOf: specificSchema.allOf } : {}),
         $defs: schema.$defs // Include all definitions for reference resolution
       };
     }

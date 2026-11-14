@@ -1087,20 +1087,15 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       forbiddenFieldKeys(fullSchema, advancedFieldsData, getActiveRootSchema()).forEach((key) => delete advancedProperties[key]);
     }
 
-    // a8/a9 accept a class or a number; offer the classes. A saved number stays visible.
-    const arealClasses = advancedProperties.areal_heat_capacity?.anyOf?.find((branch) => Array.isArray(branch.enum));
+    // a8/a9 accept a class or a number: the control offers the classes and a number box.
+    // Construction bands: a number, or only the bands this element's construction takes.
     if (arealHeatCapacityBands && advancedProperties.areal_heat_capacity) {
-      // Construction bands: a number, or only the bands this element's construction takes.
       const arealNode: SchemaNode = { ...advancedProperties.areal_heat_capacity };
       delete arealNode.anyOf;
       const number: SchemaNode = { type: 'number', exclusiveMinimum: 0 };
       advancedProperties.areal_heat_capacity = arealHeatCapacityBands.length
         ? { ...arealNode, anyOf: [{ type: 'string', enum: [...arealHeatCapacityBands] }, number] }
         : { ...arealNode, ...number };
-    } else if (arealClasses) {
-      const arealNode = { ...advancedProperties.areal_heat_capacity, enum: arealClasses.enum };
-      delete arealNode.anyOf;
-      advancedProperties.areal_heat_capacity = arealNode;
     }
 
     // a8/a9: the converter overwrites this value, so an input here has no effect.

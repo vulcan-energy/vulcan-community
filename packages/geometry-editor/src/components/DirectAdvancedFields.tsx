@@ -572,6 +572,40 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
   </div>;
 }
 
+/** A value that is one of a few named bands or a number (a construction's areal heat capacity). */
+function bandsOrNumberShape(resolved: Record<string, unknown>): { bands: unknown[]; number: Record<string, unknown> } | null {
+  const options = Array.isArray(resolved.anyOf) ? (resolved.anyOf as Record<string, unknown>[]) : [];
+  if (options.length !== 2) return null;
+  const bands = options.find((option) => Array.isArray(option.enum) && option.enum.length > 0);
+  const number = options.find((option) => option.type === 'number');
+  return bands && number ? { bands: bands.enum as unknown[], number } : null;
+}
+
+const NUMBER_CHOICE = 'number';
+
+/** A dropdown of the bands plus "Number", which opens a number input; a number is saved as a number. */
+function BandsOrNumberControl(props: DirectControlProps & { shape: { bands: unknown[]; number: Record<string, unknown> } }): React.ReactElement {
+  const { shape, data, handleChange, schema, errors, ...rest } = props;
+  const [numberChosen, setNumberChosen] = React.useState(false);
+  const isNumber = numberChosen || typeof data === 'number';
+  const { description, title } = schema as { description?: unknown; title?: unknown };
+  return (
+    <>
+      <EnumControl
+        {...rest}
+        errors={errors}
+        data={isNumber ? NUMBER_CHOICE : data}
+        schema={{ type: 'string', enum: [...shape.bands, NUMBER_CHOICE], ...(typeof description === 'string' ? { description } : {}), ...(typeof title === 'string' ? { title } : {}) }}
+        handleChange={(path, value) => {
+          setNumberChosen(value === NUMBER_CHOICE);
+          handleChange(path, value === NUMBER_CHOICE ? undefined : value);
+        }}
+      />
+      {isNumber && <NumberControl {...rest} errors={errors} data={data} handleChange={handleChange} schema={shape.number} label={`${props.label} (number)`} />}
+    </>
+  );
+}
+
 function renderControlForProperty(args: {
   segments: string[];
   resolved: Record<string, unknown>;
@@ -719,6 +753,7 @@ function renderControlForProperty(args: {
     if (value === resolved.const) baseProps.uischema = { type: 'Control', scope, options: { readOnly: true } };
   }
 
+  const bandsOrNumber = bandsOrNumberShape(resolved);
   const control = pickDirectControl(baseProps.schema as Record<string, unknown>);
   const validation = validateAdvancedFieldPrimitive(
     baseProps.config,
@@ -757,6 +792,7 @@ function renderControlForProperty(args: {
   }
   const controlProps = { ...baseProps, errors };
 
+  if (bandsOrNumber) return <BandsOrNumberControl key={path} {...controlProps} shape={bandsOrNumber} />;
   switch (control) {
     case 'enum':
       return <EnumControl key={path} {...controlProps} />;
