@@ -349,6 +349,17 @@ export function systemPlantTypes(root: unknown, section: string): string[] {
   return [...new Set(types.filter((type): type is string => typeof type === 'string' && type !== 'meta'))];
 }
 
+/**
+ * The row's extra_json after its single plant takes `type` (the plant's other inputs do not carry over).
+ * A row holding several plants has no one plant to retype: null, so none is ever replaced.
+ */
+export function withSystemPlantType(extraJson: unknown, section: string, rowName: string, type: string): Record<string, unknown> | null {
+  const extra = readRecord(extraJson);
+  const plants = Object.keys(readRecord(extra[section]));
+  if (plants.length > 1) return null;
+  return { ...extra, [section]: { [plants[0] ?? rowName]: { type } } };
+}
+
 /** An existing-building (HEMIE) form is the one that carries `model_type`. */
 function isHemiePlantVariant(variant: Record<string, unknown>): boolean {
   return 'model_type' in readRecord(variant.properties);
@@ -371,6 +382,17 @@ function selectPlantVariant(node: unknown, instanceData: unknown, root?: unknown
   if (!match) return node;
   const properties = { ...readRecord(match.properties) };
   delete properties.model_type;
+  // Variants of one type that differ by a `const` the plant has not stated (a heat battery's `battery_type`):
+  // offer the choice, which then selects the variant.
+  const sameForm = pool.filter((variant) => isHemiePlantVariant(variant) === isHemiePlantVariant(match));
+  for (const [key, schema] of Object.entries(properties)) {
+    if (key === 'type' || instanceData[key] !== undefined || !isRecord(schema) || !('const' in schema)) continue;
+    const choices = sameForm.flatMap((variant) => {
+      const value = readRecord(readRecord(variant.properties)[key]).const;
+      return typeof value === 'string' ? [value] : [];
+    });
+    if (choices.length > 1) properties[key] = { type: 'string', enum: [...new Set(choices)], title: schema.title };
+  }
   return {
     ...node, ...match, oneOf: undefined, anyOf: undefined, properties,
     ...(Array.isArray(match.required) ? { required: match.required.filter((key) => key !== 'model_type') } : {}),

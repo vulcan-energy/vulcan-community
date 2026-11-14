@@ -1089,6 +1089,21 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       forbiddenFieldKeys(fullSchema, advancedFieldsData, getActiveRootSchema()).forEach((key) => delete advancedProperties[key]);
     }
 
+    // An existing building's pipework takes the existing-building limits (diameters).
+    if (elementType === 'WaterPipework' && existingBuilding) {
+      const rootSchema = getActiveRootSchema();
+      const hemie = Object.entries((rootSchema?.$defs ?? {}) as Record<string, SchemaNode>).find(([name]) => name.startsWith('hemie__') && name.endsWith('__WaterPipework'))?.[1];
+      for (const key of ['external_diameter_mm', 'internal_diameter_mm']) {
+        const limits = hemie?.properties?.[key];
+        if (limits && advancedProperties[key]) {
+          const { minimum, maximum } = limits as { minimum?: number; maximum?: number };
+          const limited = { ...advancedProperties[key], minimum, maximum } as Record<string, unknown>;
+          delete limited.exclusiveMinimum;
+          advancedProperties[key] = limited as SchemaNode;
+        }
+      }
+    }
+
     // a8/a9 accept a class or a number; offer the classes. A saved number stays visible.
     const arealClasses = advancedProperties.areal_heat_capacity?.anyOf?.find((branch) => Array.isArray(branch.enum));
     if (arealHeatCapacityBands && advancedProperties.areal_heat_capacity) {
