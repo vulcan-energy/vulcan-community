@@ -416,6 +416,22 @@ pub(crate) fn mvhr_ductwork(
     (Value::Object(out), notice)
 }
 
+/// The full input's MVHR product states no `vent_type` (the product gives it), and only that
+/// field tells it from a product without heat recovery. Dropped last, once product slots and
+/// the existing-building conversion have read it.
+pub(crate) fn drop_mvhr_vent_type(model: &mut Value) {
+    for system in model
+        .pointer_mut("/InfiltrationVentilation/MechanicalVentilation")
+        .and_then(Value::as_object_mut)
+        .into_iter()
+        .flatten()
+        .filter_map(|(_, s)| s.as_object_mut())
+        .filter(|s| s.get("vent_type") == Some(&json!("MVHR")))
+    {
+        system.remove("vent_type");
+    }
+}
+
 const COIL_FIELDS: [&str; 2] = ["primary_flow_rate", "heat_transfer_rate_W_per_K"];
 
 /// Thermostat positions move into `tank_controls`. A wet coil must state its flow and heat

@@ -617,9 +617,12 @@ pub fn transform_geometry_csv(
                 .map_err(TransformError::InvalidRequest)?,
         );
     }
-    let model = builder
+    let mut model = builder
         .build_json(&csv_data)
         .map_err(TransformError::Build)?;
+    if request.profile.references_products() {
+        epc_mappings::drop_mvhr_vent_type(&mut model);
+    }
 
     let mut schema_omissions = builder.take_schema_omissions();
     let schema: Value = serde_json::from_str(&request.schema_json)
