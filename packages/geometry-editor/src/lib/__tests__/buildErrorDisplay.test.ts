@@ -69,4 +69,12 @@ describe('displayBuildErrorRows', () => {
     );
     expect(row).toMatchObject({ userMessage: 'Add at least one light to this zone.', target: { zoneId: 'z1' } });
   });
+
+  it('places an existing-building fabric row where Global Settings shows it', () => {
+    const [row] = displayBuildErrorRows(
+      [{ source: 'schema', code: 'E_EPC_HEMIE', path: '/Metadata/HEMIE_construction_external_wall', message: 'The external wall fabric default states no wall construction type.' }],
+      (path) => resolveIssueTarget(path, model),
+    );
+    expect(row?.location).toBe('Global Settings > Defaults > Fabric > External wall');
+  });
 });

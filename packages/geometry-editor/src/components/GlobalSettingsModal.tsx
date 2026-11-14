@@ -197,11 +197,11 @@ function DefaultsDuplicateIcon() {
 type RequiredYesNoKey = TargetInputRow | "PartGcompliance" | "Ventilation_noise_nuisance";
 const APPLIANCE_ROWS = ["Appliances_has_dryer", "Appliances_has_dishwasher", "Appliances_has_separate_fridge_or_freezer"] as const;
 
-/** A TRUE or FALSE row the target requires: empty until the user picks, never a box that reads as "no". */
 /** An issue as Global Settings itself shows it: no pointer back to Global Settings. */
 const inGlobalSettingsWords = (issue: string) =>
   issue.replace(/^Global Settings: /, "").replace(" Enter it in Global Settings.", " Enter it below.");
 
+/** A TRUE or FALSE row the target requires: empty until the user picks, never a box that reads as "no". */
 function RequiredYesNo({ label, value, onChange, placeholder = "Select..." }: {
   label: ReactNode;
   value: boolean | undefined;
@@ -1353,7 +1353,7 @@ export function GlobalSettingsModal({
                 {settingsTabIndicator ? (
                   <ValidationIndicator
                     hasIssues
-                    issues={settingsTabIndicator.issues}
+                    issues={settingsTabIndicator.issues.map(inGlobalSettingsWords)}
                     size="small"
                     variant={settingsTabIndicator.variant}
                   />
@@ -3152,7 +3152,7 @@ export function GlobalSettingsModal({
 
                     {requiredRows.has("Ventilation_noise_nuisance") || desnzDefaultRows.Ventilation_noise_nuisance ? (
                       <RequiredYesNo {...requiredYesNoProps("Ventilation_noise_nuisance", "Noise nuisance")}
-                        placeholder={desnzDefaultRows.Ventilation_noise_nuisance && `${desnzDefaultRows.Ventilation_noise_nuisance} (DESNZ default)`} />
+                        placeholder={desnzDefaultRows.Ventilation_noise_nuisance && `${desnzDefaultRows.Ventilation_noise_nuisance} (default)`} />
                     ) : (
                     <>
                     <div

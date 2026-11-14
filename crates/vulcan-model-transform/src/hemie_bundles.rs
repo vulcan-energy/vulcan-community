@@ -614,7 +614,7 @@ fn glazing(
         ctx.errors.push(error(
             owner.path(),
             format!(
-                "The glazing {names} of '{}' differs in security risk. HEMIE gives it one.",
+                "The glazing {names} of '{}' differs in security risk. The existing-building EPC gives it one.",
                 owner.name
             ),
         ));
@@ -721,7 +721,7 @@ pub(super) fn conservatory_walls(
             })
             .collect();
         if shades.iter().any(|v| *v != shades[0]) {
-            ctx.errors.push(error(source.path(), format!("The glazing {} of conservatory wall '{}' differs in close shading (overhang, side fins, obstacle). HEMIE glazes a conservatory wall as one element: give its glazing the same close shading.", quoted(&glazed.iter().map(|w| w.name).collect::<Vec<_>>()), source.name)));
+            ctx.errors.push(error(source.path(), format!("The glazing {} of conservatory wall '{}' differs in close shading (overhang, side fins, obstacle). The existing-building EPC glazes a conservatory wall as one element: give its glazing the same close shading.", quoted(&glazed.iter().map(|w| w.name).collect::<Vec<_>>()), source.name)));
             continue;
         }
         let value = &mut walls[wi].value;
@@ -812,7 +812,7 @@ pub(super) fn conservatory_roof(
         let mut shade = json!({});
         shading::close(ctx, w, &mut shade);
         if shade.as_object().is_some_and(|o| !o.is_empty()) {
-            ctx.errors.push(error(w.path(), format!("Rooflight '{}' of conservatory '{part}' states close shading. HEMIE's conservatory roof takes none: remove it.", w.name)));
+            ctx.errors.push(error(w.path(), format!("Rooflight '{}' of conservatory '{part}' states close shading. An existing building's conservatory roof takes none: remove it.", w.name)));
         }
     }
     let mut defaulted = Vec::new();
@@ -901,7 +901,7 @@ pub(super) fn conservatory_roof(
     // HEMIE builds an exposed gable of a conservatory roof as wholly glazed, with no input for
     // its glazing; the drawing's gable glazing does not reach it.
     if left || right {
-        ctx.notices.push(notice("/Zone", format!("Conservatory '{part}': HEMIE treats the triangle of each exposed gable above the eaves as fully glazed, whatever is drawn there.")));
+        ctx.notices.push(notice("/Zone", format!("Conservatory '{part}': the existing-building EPC treats the triangle of each exposed gable above the eaves as fully glazed, whatever is drawn there.")));
     }
     Some(roof)
 }

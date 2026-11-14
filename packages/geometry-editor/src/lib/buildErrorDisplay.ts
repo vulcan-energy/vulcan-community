@@ -4,6 +4,7 @@
 import type { ValidationIssue, ValidationResult } from '../geometry/validation/types';
 import type { BuildErrorItem, TargetValidation } from '../types/buildErrors';
 import { issuePathSegments, resolveIssueTarget, type IssueTarget } from './issueTarget';
+import { HEMIE_NATION, hemieConstructionTypeLabel } from './hemieFabric';
 
 export type DisplayBuildError = {
   item: BuildErrorItem;
@@ -39,6 +40,16 @@ const buildErrorLocation = (path?: string) => {
     return {
       location: zone,
       field: segments[zoneIdx + 2],
+    };
+  }
+
+  // The existing-building fabric rows, where the editor shows them.
+  if (segments[0] === 'Metadata' && segments[1]?.startsWith('HEMIE_')) {
+    const constructionType = segments[1].match(/^HEMIE_construction_(.+)$/)?.[1];
+    return {
+      location: segments[1] === HEMIE_NATION
+        ? 'Global Settings > Dwelling Details'
+        : `Global Settings > Defaults > Fabric${constructionType ? ` > ${hemieConstructionTypeLabel(constructionType)}` : ''}`,
     };
   }
 

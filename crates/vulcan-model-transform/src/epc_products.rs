@@ -278,7 +278,7 @@ impl Settings {
         } else {
             String::new()
         };
-        let message = format!("Wet Emitters row '{row}' has no drawn length, so it uses {length} m{each}, DESNZ's length for a {descriptor} radiator ({source}).");
+        let message = format!("Wet Emitters row '{row}' has no drawn length, so it uses {length} m{each}, the default length for a {descriptor} radiator ({source}).");
         (
             length * units,
             notice(&json_pointer(&["Wet Emitters", row, "length"]), message),
@@ -893,7 +893,7 @@ pub(crate) fn apply_weather_curves(
             ("HeatPump", "UFH") => 1,
             ("HeatPump", "radiators") => 5,
             _ => {
-                errors.push(required("and DESNZ gives a curve only for a boiler or heat pump with radiators or with UFH alone."));
+                errors.push(required("and a default curve exists only for a boiler or heat pump with radiators or with UFH alone."));
                 continue;
             }
         };
@@ -903,7 +903,7 @@ pub(crate) fn apply_weather_curves(
             .map(|t| format!(" The curve sets the minimum flow temperature, so the authored min_flow_temp {t} is not sent."))
             .unwrap_or_default();
         controller.insert("weather_compensation_curve_id".into(), json!(curve));
-        notices.push(notice(&path, format!("'{name}' has ecodesign class {class} (weather compensation) and states no curve, so this existing building uses weather compensation curve {curve} (gradient {gradient}), DESNZ's curve for a {} with {emitter}.{replaced}", if source == "Boiler" { "boiler" } else { "heat pump" })));
+        notices.push(notice(&path, format!("'{name}' has ecodesign class {class} (weather compensation) and states no curve, so this existing building uses weather compensation curve {curve} (gradient {gradient}), the default curve for a {} with {emitter}.{replaced}", if source == "Boiler" { "boiler" } else { "heat pump" })));
     }
 }
 
@@ -1064,7 +1064,7 @@ pub(crate) fn derive_zone_frac_convective(
                 zone_value["frac_convective_heating"] = json!(value);
                 let rule = if existing {
                     format!(
-                        "HEMIE's rule: the first heating system's first emitter ({})",
+                        "the existing-building rule: the first heating system's first emitter ({})",
                         found[0].as_ref().unwrap().1
                     )
                 } else {
@@ -1382,16 +1382,16 @@ pub(crate) mod tests {
     fn a_radiator_with_no_length_takes_desnz_length_for_its_descriptor() {
         let (length, notice) = Settings::default().radiator_length("Hall", 1.0);
         assert_eq!(length, 0.9);
-        assert!(notice
-            .message
-            .contains("uses 0.9 m, DESNZ's length for a medium radiator (the default descriptor"));
+        assert!(notice.message.contains(
+            "uses 0.9 m, the default length for a medium radiator (the default descriptor"
+        ));
         let large = Settings {
             radiator_length: Some("large"),
             ..Settings::default()
         };
         let (length, notice) = large.radiator_length("Hall", 2.0);
         assert_eq!(length, 2.4);
-        assert!(notice.message.contains("1.2 m per unit, 2.4 m for 2 units, DESNZ's length for a large radiator (Metadata row Product_radiator_length)"));
+        assert!(notice.message.contains("1.2 m per unit, 2.4 m for 2 units, the default length for a large radiator (Metadata row Product_radiator_length)"));
     }
 
     #[test]
@@ -1567,7 +1567,9 @@ pub(crate) mod tests {
         let (existing, errors, notices) = run(true);
         assert_eq!(existing["Zone"]["b"]["frac_convective_heating"], 0.82);
         assert_eq!(errors, ["/Zone/d/frac_convective_heating"]);
-        assert!(notices.iter().any(|n| n.message.contains("HEMIE's rule")));
+        assert!(notices
+            .iter()
+            .any(|n| n.message.contains("the existing-building rule")));
     }
 
     #[test]

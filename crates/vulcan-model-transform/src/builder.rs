@@ -26,7 +26,7 @@ impl std::fmt::Display for BuildError {
 impl std::error::Error for BuildError {}
 
 /// HEM short letter codes and legacy values → FHS `#/$defs/MassDistributionClass` enum strings.
-fn coerce_mass_distribution_class_for_fhs(raw: &str) -> Option<String> {
+pub(crate) fn coerce_mass_distribution_class_for_fhs(raw: &str) -> Option<String> {
     let t = raw.trim();
     if t.is_empty() {
         return None;

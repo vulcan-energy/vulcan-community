@@ -231,7 +231,7 @@ import {
 import type { GeometryCanvas3DProps } from './canvas/GeometryCanvas3D';
 import { useElementCategoryGhost } from '../hooks/useElementCategoryGhost';
 import { useTargetRules } from '../hooks/useTargetRules';
-import { hemieFabricGroups } from '../lib/hemieFabric';
+import { FABRIC_PRESET_TYPES, hemieFabricGroups } from '../lib/hemieFabric';
 import { useHiddenElementIds } from '../hooks/useHiddenElementIds';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { elementIsHiddenFromView } from '../lib/elementCategoryVisibility';
@@ -1814,9 +1814,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       window.removeEventListener('blur', handleMouseUp);
     };
   }, [endCanvasPanGesture]);
-  // A HEM Database target takes no element presets (`TargetRules.hemDatabaseProducts`).
-  const { hemDatabaseProducts } = useTargetRules();
-  const presetsOffered = !hemDatabaseProducts && PRESET_DRAW_TYPES.has(drawElementType);
+  const { constructionBands } = useTargetRules();
+  const presetsOffered = PRESET_DRAW_TYPES.has(drawElementType) && !(constructionBands && FABRIC_PRESET_TYPES.has(drawElementType));
   const presetOptionsResetKey = presetsOffered ? drawElementType : 'unsupported';
   const emptyElementPresetOptions = useMemo<
     Array<{ value: string; label: string; source: 'system' | 'user' }>
@@ -2335,7 +2334,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const setBundledAssemblyLibraryLoading = useGeometryStore((s) => s.setBundledAssemblyLibraryLoading);
   const setBundledAssemblyLibraryError = useGeometryStore((s) => s.setBundledAssemblyLibraryError);
   const { elementCategoryGhostState, toggleCategoryGhost } = useElementCategoryGhost();
-  const { constructionBands } = useTargetRules();
   const [colourByFabric, setColourByFabric] = useState(false);
   const { hiddenElementIds, toggleElementsHidden, unhideElement } = useHiddenElementIds(
     documentFileName,

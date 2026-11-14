@@ -55,23 +55,32 @@ export function postcodeRegion(postcode: string | undefined, statedNation?: stri
   if (WALES_AREAS.has(area)) return 'Wales';
   return ENGLAND_AREAS.has(area) ? 'England' : undefined;
 }
+/**
+ * Under construction bands (`TargetRules.constructionBands`) a fabric preset's U-value would be
+ * a documented U-value over the bands, so these types take no preset there.
+ */
+export const FABRIC_PRESET_TYPES: ReadonlySet<string> = new Set(['BuildingElementOpaque', 'BuildingElementTransparent']);
+
 /** The door element flag that marks the front door; one door only. */
 export const HEMIE_FRONT_DOOR = 'is_front_door';
 export const hemieConstructionSetting = (constructionType: string): string => `HEMIE_construction_${constructionType}`;
 
 /**
  * The construction fields offered per construction type: those the converter needs a value for,
- * and the roof's insulation location. An element may override the text ones (see
- * `ELEMENT_OVERRIDE_KEYS` in `hemie.rs`).
+ * the roof's insulation location, and the outside colour (a stated solar absorption coefficient
+ * wins over it). An element may override them (see `ELEMENT_OVERRIDE_KEYS` and
+ * `takes_outside_surface` in `hemie.rs`).
  */
 export const HEMIE_CONSTRUCTION_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  external_wall: ['wall_construction_type'],
+  external_wall: ['wall_construction_type', 'colour'],
   sheltered_wall: ['wall_construction_type'],
-  window: ['glazing_type', 'frame_material', 'glazing_gap'],
-  external_door: ['areal_heat_capacity'],
+  window: ['glazing_type', 'frame_material', 'glazing_gap', 'areal_heat_capacity'],
+  external_door: ['areal_heat_capacity', 'colour'],
   party_or_sheltered_door: ['areal_heat_capacity'],
-  flat_roof: ['insulation_location'],
-  unheated_pitched_roof: ['insulation_location'],
+  flat_roof: ['insulation_location', 'colour'],
+  unheated_pitched_roof: ['insulation_location', 'colour'],
+  heated_pitched_roof: ['colour'],
+  above_external_area_floor: ['colour'],
   party_floor: ['construction_weight'],
   party_ceiling: ['construction_weight'],
 };

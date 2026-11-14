@@ -1512,7 +1512,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'label:Blinds / curtains': {
     description:
-      'Blinds or curtains for this glazing element. Controls solar transmittance reduction and extra thermal resistance when the treatment is closed, per the DESNZ-defined presets and `WindowTreatment` in the input schema.',
+      'Blinds or curtains for this glazing element. Controls solar transmittance reduction and extra thermal resistance when the treatment is closed. Choose a preset or enter the values.',
     type: 'array',
   },
   'treatment': {

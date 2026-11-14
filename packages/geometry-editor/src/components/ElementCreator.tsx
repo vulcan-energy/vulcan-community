@@ -130,6 +130,7 @@ import {
 } from '../lib/parentControlledFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
+import { FABRIC_PRESET_TYPES } from '../lib/hemieFabric';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -955,7 +956,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const evidenceBridge = useContext(GeometryInspectorEvidenceContext);
   const DetailedJunctionControl =
     inspectorContributions.detailedJunctionSolver?.Control;
-  const { hemDatabaseProducts } = useTargetRules();
+  const { hemDatabaseProducts, constructionBands } = useTargetRules();
   // On a target whose systems take HEM Database products, the product slot picker is the only
   // product source: the host's sample/catalogue source switch does not apply.
   const productCatalogue = hemDatabaseProducts ? null : inspectorContributions.productCatalogue;
@@ -4496,8 +4497,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               )}
             </div>
 
-            {/* Element preset selector – Opaque/Transparent types; a HEM Database target takes none */}
-            {!hemDatabaseProducts && PRESET_ELEMENT_TYPES.includes(elementType) && elementPresetOptions.length > 0 && (
+            {/* Element preset selector – Opaque/Transparent/PV types; banded fabric takes no fabric preset */}
+            {PRESET_ELEMENT_TYPES.includes(elementType) && !(constructionBands && FABRIC_PRESET_TYPES.has(elementType)) && elementPresetOptions.length > 0 && (
               <div className="element-editor-row">
                 <div className="element-label">Preset:</div>
                 <div className="element-editor-control">

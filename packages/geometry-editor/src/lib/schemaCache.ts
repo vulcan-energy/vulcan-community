@@ -2008,7 +2008,8 @@ function readableSchemaError(error: { keyword: string; params: Record<string, un
     case 'additionalProperties': return `'${String(p.additionalProperty)}' is not an input here. Remove it.`;
     case 'required': return `'${String(p.missingProperty)}' is missing. Add it.`;
     case 'enum': return `Choose one of: ${(p.allowedValues as unknown[]).map(String).join(', ')}.`;
-    case 'type': return `Enter ${TYPE_WORDS[String(p.type)] ?? String(p.type)}.`;
+    case 'unevaluatedProperties': return `'${String(p.unevaluatedProperty)}' is not an input here. Remove it.`;
+    case 'type': return `Enter ${String(p.type).split(',').map((t) => TYPE_WORDS[t] ?? t).join(' or ')}.`;
     case 'minimum': case 'exclusiveMinimum': case 'maximum': case 'exclusiveMaximum': {
       const words = { '>=': 'at least', '>': 'more than', '<=': 'at most', '<': 'less than' } as Record<string, string>;
       return `Enter a value of ${words[String(p.comparison)] ?? String(p.comparison)} ${String(p.limit)}.`;
@@ -2235,7 +2236,7 @@ export function validatePropertyValue(elementType: string, key: string, value: u
         const n = Number(value);
         if (!Number.isNaN(n) && /^\s*-?\d+(\.\d+)?\s*$/.test(value)) return { valid: true };
       }
-      return { valid: false, errors: ['must be number'] };
+      return { valid: false, errors: ['Enter a number.'] };
     }
     return { valid: true };
   }
