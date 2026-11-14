@@ -484,8 +484,7 @@ pub(crate) fn apply_desnz_defaults(
             }
         }
         if !used.is_empty() {
-<<<<<<< HEAD
-            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses DESNZ's defaults. State them on its Systems row to change them.", used.join(", "))));
+            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses the defaults. State them on its Systems row to change them.", used.join(", "))));
         }
     }
     // DESNZ-defined: an unstated design outdoor air flow rate is the greater of 13 l/s plus
@@ -515,12 +514,9 @@ pub(crate) fn apply_desnz_defaults(
             Some(rate) => {
                 let flow = rate.max(0.3 * area) * 3.6;
                 system["design_outdoor_air_flow_rate"] = json!(flow);
-                notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses DESNZ's estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
+                notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses the default estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
             }
             None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on its row, or the Metadata row NumberOfBedrooms."))),
-=======
-            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses the defaults. State them on its Systems row to change them.", used.join(" and "))));
->>>>>>> e63b6d5 (EPC review fixes: mass class, colour and solar absorption reach the construction)
         }
     }
     let mut unshaded = Vec::new();
@@ -578,15 +574,11 @@ pub(crate) fn apply_desnz_defaults(
             .contains(&build_type.as_str())
             {
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-<<<<<<< HEAD
-                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, DESNZ's default for a dwelling at ground level. Add the row to state it.")));
+                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, the default for a dwelling at ground level. Add the row to state it.")));
             } else if storey == Some(0) {
                 // DESNZ-defined: a ground-floor flat or maisonette also defaults to 0 m.
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this ground-floor {build_type} uses 0 m, DESNZ's default (General_storey_of_dwelling 0). Add the row to state it.")));
-=======
-                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this {build_type} uses 0 m, the default for a dwelling at ground level. Add the row to state it.")));
->>>>>>> e63b6d5 (EPC review fixes: mass class, colour and solar absorption reach the construction)
+                notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so this ground-floor {build_type} uses 0 m, the default (General_storey_of_dwelling 0). Add the row to state it.")));
             } else if let Some(storey) = base_storey {
                 notices.push(notice(path, format!("No Metadata row states Ventilation_ventilation_zone_base_height, so the existing-building EPC estimates it from the base storey, {storey} (General_storey_of_dwelling).")));
             } else {

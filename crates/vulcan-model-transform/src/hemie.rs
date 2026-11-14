@@ -50,9 +50,10 @@ const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
 const UNUSED_WINDOW_HEAT_CAPACITY: f64 = 0.0;
 const SETTING: &str = "HEMIE_";
 /// Metadata rows older saved files carry that the converter no longer reads, with the fix.
-const RETIRED_SETTINGS: [(&str, &str); 2] = [
+const RETIRED_SETTINGS: [(&str, &str); 3] = [
     ("HEMIE_region", "The region comes from the postcode. Remove the row. For a postcode area that spans two nations, choose the Nation under the Postcode in Global Settings."),
     ("HEMIE_front_door", "Remove the row and mark the front door on the door itself."),
+    ("HEMIE_infiltration_properties", "An existing building needs an air test. Remove the row and enter the air test result in Global Settings."),
 ];
 /// Construction fields an element may state for itself, over the model's construction setting
 /// (derived from the model).
@@ -832,7 +833,7 @@ impl Ctx<'_> {
         if mini && !stated("u_value") && !stated("insulation_thickness") {
             // DESNZ-defined (HEMIE): a bay roof with no insulation thickness has no insulation,
             // whatever its location.
-            self.notices.push(notice(&first.path(), format!("Bay roof {names} {verb} no insulation thickness, so HEMIE models no insulation. If it is insulated, give the thickness and the location.")));
+            self.notices.push(notice(&first.path(), format!("Bay roof {names} {verb} no insulation thickness, so the existing-building EPC models no insulation. If it is insulated, give the thickness and the location.")));
         } else if (mini || matches!(construction_type, "flat_roof" | "unheated_pitched_roof"))
             && !stated("insulation_location")
             && !stated("u_value")
@@ -842,7 +843,7 @@ impl Ctx<'_> {
             if stated("insulation_thickness") {
                 self.errors.push(error(first.path(), format!("{names} {verb} an insulation thickness but no insulation location, so the thickness would not be used. Give the insulation location, or 'unknown' if it is not known.")));
             } else {
-                self.notices.push(notice(&first.path(), format!("{names} {verb} no insulation location, so HEMIE models no roof insulation. If the roof is insulated, give the location, or 'unknown' to take the age-band thickness.")));
+                self.notices.push(notice(&first.path(), format!("{names} {verb} no insulation location, so the existing-building EPC models no roof insulation. If the roof is insulated, give the location, or 'unknown' to take the age-band thickness.")));
             }
         }
         self.require(construction_type, &mut c);
@@ -918,11 +919,8 @@ impl Ctx<'_> {
                     json!(HEATED_PITCHED_ROOF_HEAT_CAPACITY),
                 );
             }
-            // DESNZ gives no default for a door's areal heat capacity, and the full input holds
-            // only a category, so the door setting states it.
-            "external_door" | "party_or_sheltered_door" if !has(c, "areal_heat_capacity") => {
-                need("areal_heat_capacity")
-            }
+            // A door's areal heat capacity left unstated takes HEMIE's own default (50,000
+            // J/m2.K, DESNZ-defined in HEMIE's door construction; plan question E34).
             _ => {}
         }
     }
@@ -1086,7 +1084,7 @@ pub(crate) fn map_existing_building(
         .into_iter()
         .collect();
     if !stated_glazing.is_empty() {
-        notices.push(notice("/Zone/constructions", format!("These windows state their own values, which HEMIE uses in place of those for their glazing type and frame material: {}.", stated_glazing.join(", "))));
+        notices.push(notice("/Zone/constructions", format!("These windows state their own values, which the existing-building EPC uses in place of those for their glazing type and frame material: {}.", stated_glazing.join(", "))));
     }
     let by_age_band = std::mem::take(&mut ctx.constructions.party_walls_by_age_band);
     if !by_age_band.is_empty() {
@@ -1916,7 +1914,7 @@ fn missing_setting_message(row: &str, fields: &BTreeSet<String>) -> String {
             format!("The {t} fabric default states no {}. Choose it in {WHERE}, or on each {t} element.", list.join(" or "))
         };
     }
-    format!("No air test is stated, so the leakage is estimated from the Metadata row {row}, which the model does not state. Enter the air test result in Global Settings, or add the row as a JSON object with number_of_open_fireplaces and the other leakage-estimate inputs.")
+    format!("The model does not state the Metadata row {row}. Add it.")
 }
 
 /// The front door: the door marked `is_front_door`, or the model's only door.
@@ -2649,7 +2647,17 @@ fn infiltration(ctx: &mut Ctx, full: &Value) -> Option<Value> {
                 iv.insert(key.into(), v.clone());
             }
             None if required => {}
-            None => ctx.notices.push(notice(&format!("/InfiltrationVentilation/{key}"), format!("No Metadata row states Ventilation_{key}, so it uses the default: {}.", if key == "shield_class" { "from the terrain class" } else { "No" }))),
+            None => ctx.notices.push(notice(
+                &format!("/InfiltrationVentilation/{key}"),
+                format!(
+                    "No Metadata row states Ventilation_{key}, so it uses the default: {}.",
+                    if key == "shield_class" {
+                        "from the terrain class"
+                    } else {
+                        "No"
+                    }
+                ),
+            )),
         }
     }
     // Derived from the model: passive ducts (chimneys, flues) in their full form, which the
@@ -3382,6 +3390,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         for (field, fix) in [
             ("HEMIE_region", "postcode"),
             ("HEMIE_front_door", "front door"),
+            ("HEMIE_infiltration_properties", "air test"),
         ] {
             let (_, errors, _) =
                 run(&house(gable_roof()).replace("Postcode,", &format!("{field},x\nPostcode,")));
@@ -3544,7 +3553,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         let (_, errors, notices) = run(&house(gable_roof()));
         assert!(errors.is_empty(), "{errors:#?}");
         assert!(
-            notices.iter().any(|n| n.message.contains("'Roof S', 'Roof N' state no insulation location, so HEMIE models no roof insulation")),
+            notices.iter().any(|n| n.message.contains("'Roof S', 'Roof N' state no insulation location, so the existing-building EPC models no roof insulation")),
             "{notices:#?}"
         );
         // A thickness with no location would be ignored, so it fails.

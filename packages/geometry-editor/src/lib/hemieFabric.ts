@@ -67,7 +67,7 @@ export const hemieConstructionSetting = (constructionType: string): string => `H
 
 /**
  * The construction fields offered per construction type: those the converter needs a value for,
- * the roof's insulation location, and the outside colour (a stated solar absorption coefficient
+ * heat capacity (optional on a door), the roof's insulation location, and the outside colour (a stated solar absorption coefficient
  * wins over it). An element may override them (see `ELEMENT_OVERRIDE_KEYS` and
  * `takes_outside_surface` in `hemie.rs`).
  */
