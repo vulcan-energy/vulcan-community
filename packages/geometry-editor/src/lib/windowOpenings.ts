@@ -173,23 +173,45 @@ export function windowPartsArePhysical(
   return isRecord(items) && isRecord(items.properties) ? !(LEGACY_KEY in items.properties) : null;
 }
 
+/** Window Shading types as a person reads them, by CSV spelling. */
+export const WINDOW_SHADING_TYPE_LABELS: Readonly<Record<WindowShading['shading_type'], string>> = {
+  object: 'Obstacle',
+  overhang: 'Overhang',
+  sidefinleft: 'Left fin',
+  sidefinright: 'Right fin',
+  reveal: 'Reveal',
+};
+
 /**
  * Window Shading `Type` values the target's window `shading` accepts, in CSV spelling (the CSV
- * writes the schema's `obstacle` as `object`), or `null` with no schema.
+ * writes the schema's `obstacle` as `object`), or `null` with no schema. A schema that lists one
+ * shape per type (`items.anyOf`) gives the union. An existing building takes no reveal: the
+ * conversion reads categories, not drawn reveals.
  */
 export function allowedWindowShadingTypes(
   schemaPort: GeometrySchemaPort,
   mode: GeometrySchemaMode,
+  existingBuilding = false,
 ): readonly WindowShading['shading_type'][] | null {
   if (schemaPort.availability !== 'available') return null;
   const subschema = schemaPort.getElementSubschema(mode, 'BuildingElementTransparent');
   const shading = isRecord(subschema?.properties) ? subschema.properties.shading : undefined;
   if (!isRecord(shading)) return null;
-  const resolved = dereferenceSchemaNodeInRoot(shading, schemaPort.getRootSchema(mode) ?? subschema);
+  const root = schemaPort.getRootSchema(mode) ?? subschema;
+  const resolved = dereferenceSchemaNodeInRoot(shading, root);
   const items = isRecord(resolved) ? unwrapNullableSchema(resolved).items : undefined;
-  const type = isRecord(items) && isRecord(items.properties) ? items.properties.type : undefined;
-  if (!isRecord(type) || !Array.isArray(type.enum)) return null;
-  return type.enum.map((value) => (value === 'obstacle' ? 'object' : value) as WindowShading['shading_type']);
+  const shapes = isRecord(items) && Array.isArray(items.anyOf) ? items.anyOf : [items];
+  const values = new Set<unknown>();
+  for (const shape of shapes) {
+    const props = isRecord(shape) && isRecord(shape.properties) ? shape.properties : undefined;
+    const type = props ? dereferenceSchemaNodeInRoot(props.type, root) : undefined;
+    if (!isRecord(type)) continue;
+    if (Array.isArray(type.enum)) type.enum.forEach((value) => values.add(value));
+    else if (type.const !== undefined) values.add(type.const);
+  }
+  if (values.size === 0) return null;
+  if (existingBuilding) values.delete('reveal');
+  return [...values].map((value) => (value === 'obstacle' ? 'object' : value) as WindowShading['shading_type']);
 }
 
 /** True when part-level rows, not the three main-form inputs, are the place to edit the openings. */

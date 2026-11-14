@@ -69,6 +69,8 @@ import {
   readExtraJsonRecord,
   useDecimalInput,
 } from './formPrimitives';
+import { useGeometryStore } from '../../stores/geometryStore';
+import { isExistingBuilding } from '../../lib/windowOpenings';
 import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } from './types';
 
 const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
@@ -79,6 +81,10 @@ const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
 };
 
 export interface MechanicalVentilationFormState {
+  /** An existing building takes a hosted fan's height, orientation and pitch from its host element. */
+  existingBuilding: boolean;
+  /** Only a target whose schema declares a fan without heat recovery takes positive input ventilation. */
+  offersPositiveInputVentilation: boolean;
   ventType: string;
   setVentType: (value: string) => void;
   commitMechanicalVentilationPositionField: (
@@ -135,6 +141,9 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationFormState 
   );
 
   return {
+    existingBuilding: useGeometryStore(isExistingBuilding),
+    offersPositiveInputVentilation: ctx.schemaPort.availability === 'available'
+      && !!(ctx.schemaPort.getRootSchema(ctx.schemaMode) as { $defs?: Record<string, unknown> } | null)?.$defs?.MechanicalVentilationWithoutHeatRecovery,
     ventType,
     setVentType,
     commitMechanicalVentilationPositionField,
@@ -220,6 +229,8 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
 
   renderPanel(state, ctx) {
     const {
+      offersPositiveInputVentilation,
+      existingBuilding,
       ventType,
       setVentType,
       commitMechanicalVentilationPositionField,
@@ -285,6 +296,7 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
               { value: 'Intermittent MEV', label: 'Intermittent MEV' },
               { value: 'Centralised continuous MEV', label: 'Centralised continuous MEV' },
               { value: 'Decentralised continuous MEV', label: 'Decentralised continuous MEV' },
+              ...(offersPositiveInputVentilation ? [{ value: 'Positive input ventilation', label: 'Positive input ventilation' }] : []),
               { value: 'MVHR', label: 'MVHR' }
             ]}
             variant="ghost"
@@ -331,6 +343,8 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
                 selfId={selection?.type === 'element' ? selection.id : undefined}
               />
             </div>
+            {!existingBuilding && (
+              <>
             {renderFieldLabel('Mid Height Air Flow Path (m):', elementType, 'mid_height_air_flow_path')}
             <div className="element-input" ref={registerBaseFieldRefs(['mechanicalVentilationMidHeight', 'mid_height_air_flow_path'])}>
               <StandardInput
@@ -397,6 +411,8 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
                 </div>
               )}
             </div>
+              </>
+            )}
           </>
         )}
         {ventType === 'MVHR' ? renderMvhrDuctAndTerminalManager() : null}

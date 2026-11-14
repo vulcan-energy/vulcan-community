@@ -20,6 +20,7 @@ import type { Element } from '../../geometry/types';
 import { SHADING_TYPES } from '../../stores/geometryStore';
 import {
   allowedWindowShadingTypes,
+  WINDOW_SHADING_TYPE_LABELS,
   closeShadingKindOf,
   isExistingBuilding,
 } from '../../lib/windowOpenings';
@@ -84,17 +85,18 @@ function useFormState(ctx: ElementFormStateCtx): WindowShadingFormState {
   const depthInput = useDecimalInput('', ctx.commitElementNumericField('depth'), { commitOnChange: true });
   const transparencyInput = useDecimalInput('', ctx.commitElementNumericField('transparency'), { commitOnChange: true });
 
+  const closeShadingExisting = useGeometryStore(isExistingBuilding);
   return {
     linkedWindow,
     setLinkedWindow,
     shadingType,
     setShadingType,
-    allowedShadingTypes: allowedWindowShadingTypes(ctx.schemaPort, ctx.schemaMode),
+    allowedShadingTypes: allowedWindowShadingTypes(ctx.schemaPort, ctx.schemaMode, closeShadingExisting),
     depthInput,
     transparencyInput,
     heightInput: ctx.shared.heightInput,
     distanceInput: ctx.shared.distanceInput,
-    closeShadingExisting: useGeometryStore(isExistingBuilding),
+    closeShadingExisting,
   };
 }
 
@@ -227,7 +229,7 @@ export const windowShadingFormModule: ElementFormModule<WindowShadingFormState> 
             }}
             options={[
               { value: '', label: 'Select shading type' },
-              ...offeredShadingTypes.map(type => ({ value: type, label: type })),
+              ...offeredShadingTypes.map(type => ({ value: type, label: type === '' ? type : WINDOW_SHADING_TYPE_LABELS[type] })),
             ]}
             variant="ghost"
             size="md"

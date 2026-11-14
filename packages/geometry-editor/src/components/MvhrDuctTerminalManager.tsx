@@ -60,6 +60,7 @@
 // same precedent as elementForms/mechanicalVentilation.tsx's own duplicate of
 // INLINE_FIELD_NOTE_STYLE.
 
+import { isExistingBuilding } from '../lib/windowOpenings';
 import React, { useMemo, type ReactNode } from 'react';
 import type { IconNode } from 'lucide';
 import { Pencil, Plus, X as XIcon } from 'lucide';
@@ -382,7 +383,8 @@ export function useMvhrDuctTerminalManager(args: {
 
     return (
       <div style={MVHR_MANAGER_STYLE}>
-        <div style={MVHR_MANAGER_SECTION_STYLE}>
+        {/* An existing building takes MVHR ductwork as the target default. */}
+        {!isExistingBuilding(geometryStore.getState()) && <div style={MVHR_MANAGER_SECTION_STYLE}>
           <div style={MVHR_MANAGER_SECTION_HEADER_STYLE}>MVHR ductwork</div>
           {MVHR_DUCT_ROLES.map((role) => {
             const linkedDucts = ducts.filter((duct) => duct.parent_element === mvhrName && duct.duct_type === role);
@@ -421,7 +423,7 @@ export function useMvhrDuctTerminalManager(args: {
               </div>
             );
           })}
-        </div>
+        </div>}
 
         <div style={MVHR_MANAGER_SECTION_STYLE}>
           <div style={MVHR_MANAGER_SECTION_HEADER_STYLE}>MVHR terminals</div>
