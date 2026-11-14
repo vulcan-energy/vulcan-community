@@ -24,10 +24,6 @@ const SEGMENTS: [&str; 4] = [
     "reference_segment_reference_orientation_plus_270",
 ];
 
-/// DESNZ-defined (HEMIE code): the floor-to-floor height HEMIE gives each storey below the
-/// dwelling when it takes the base height from the base storey (2.2 m plus the storey gap).
-const STOREY_BELOW: f64 = 2.2 + STOREY_GAP;
-
 /// DESNZ-defined: the level for a fraction of sky blocked. Bands: very heavy over 90%, heavy
 /// 60–90%, average ("Moderate" in HEMIE) 40–60%, light 10–40%, very light under 10% (open sky
 /// included: there is no "none"). ours: a fraction on a shared bound takes the heavier level.
@@ -213,12 +209,10 @@ pub(super) fn distant(
         .get("Context Shading")
         .map_or(&[][..], Vec::as_slice);
 
-    // Measured from the lowest storey (DESNZ-defined): the ventilation zone base height, or as
-    // HEMIE takes it from the base storey.
+    // Measured from the lowest storey (DESNZ-defined): the ventilation zone base height.
     let base = geometry["ventilation_zone_base_height"]
         .as_f64()
-        .or_else(|| Some(geometry["base_storey_of_dwelling"].as_f64()? * STOREY_BELOW))
-        .expect("Geometry states a base height or base storey");
+        .expect("Geometry states a base height");
     // As HEMIE derives the dwelling height: the tallest part's storeys and the gaps between them.
     let dwelling_height = geometry["building_parts"]
         .as_object()
