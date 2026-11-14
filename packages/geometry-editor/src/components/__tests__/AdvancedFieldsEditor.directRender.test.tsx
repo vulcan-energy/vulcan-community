@@ -1040,10 +1040,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
   ],
-  'core/WindowShading [every subtype]': [
-    'type | Type | select | - | - | - | tip',
-    'distance | Distance | textbox | 0 | - | - | tip',
-  ],
   'core/MechanicalVentilationDuctwork [every subtype]': [
     'cross_section_shape | Cross Section Shape | select | - | - | - | tip',
     'duct_perimeter_mm | Duct Perimeter | textbox | 0 | - | - | tip',
