@@ -809,6 +809,8 @@ interface AdvancedFieldsEditorProps {
   focusFieldVersion?: number;
   inspectorContributions?: GeometryInspectorContributions;
   workspaceResourcePort?: GeometryWorkspaceResourcePort;
+  /** The areal heat capacity bands this element may state; none offers a number only. Absent: the schema's. */
+  arealHeatCapacityBands?: readonly string[];
 }
 
 const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
@@ -826,6 +828,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   focusFieldVersion,
   inspectorContributions = emptyGeometryInspectorContributions,
   workspaceResourcePort = unavailableGeometryWorkspaceResourcePort,
+  arealHeatCapacityBands,
 }) => {
   const schemaPort = useGeometrySchemaPort();
   const schemaMode = useFHSSchema ? 'fhs' : 'core';
@@ -1086,7 +1089,15 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
 
     // a8/a9 accept a class or a number; offer the classes. A saved number stays visible.
     const arealClasses = advancedProperties.areal_heat_capacity?.anyOf?.find((branch) => Array.isArray(branch.enum));
-    if (arealClasses) {
+    if (arealHeatCapacityBands && advancedProperties.areal_heat_capacity) {
+      // Construction bands: a number, or only the bands this element's construction takes.
+      const arealNode: SchemaNode = { ...advancedProperties.areal_heat_capacity };
+      delete arealNode.anyOf;
+      const number: SchemaNode = { type: 'number', exclusiveMinimum: 0 };
+      advancedProperties.areal_heat_capacity = arealHeatCapacityBands.length
+        ? { ...arealNode, anyOf: [{ type: 'string', enum: [...arealHeatCapacityBands] }, number] }
+        : { ...arealNode, ...number };
+    } else if (arealClasses) {
       const arealNode = { ...advancedProperties.areal_heat_capacity, enum: arealClasses.enum };
       delete arealNode.anyOf;
       advancedProperties.areal_heat_capacity = arealNode;
@@ -1390,6 +1401,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     return result as AdvancedFieldsSchema;
   }, [
     elementType,
+    arealHeatCapacityBands,
     subtype,
     useFHSSchema,
     getActiveElementSubschema,

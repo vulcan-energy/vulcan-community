@@ -829,7 +829,7 @@ impl Ctx<'_> {
                 c.insert("party_wall_lining_type".into(), json!(lining));
             }
         }
-        if let Some(capacity) = self.heat_capacity(elements) {
+        if let Some(capacity) = self.heat_capacity(construction_type, elements) {
             c.insert("areal_heat_capacity".into(), json!(capacity));
         }
         for (key, value) in extra {
@@ -878,19 +878,43 @@ impl Ctx<'_> {
     }
 
     /// The elements' areal heat capacity, alike on each (see `agreed`): a number in J/m2.K, or
-    /// a band at HEM:EPC's band values (DESNZ-defined). Anything else fails, naming the element.
-    fn heat_capacity(&mut self, elements: &[&El]) -> Option<f64> {
+    /// a band at HEM:EPC's per-type class values (DESNZ-defined). A band the construction type
+    /// has no value for, or anything else, fails naming the element.
+    fn heat_capacity(&mut self, construction_type: &str, elements: &[&El]) -> Option<f64> {
+        const BANDS: [&str; 5] = ["Very light", "Light", "Medium", "Heavy", "Very heavy"];
+        const WALL: [f64; 5] = [240_000.0, 450_000.0, 650_000.0, 850_000.0, 1_350_000.0];
+        const FLOOR: [f64; 5] = [50_000.0, 175_000.0, 275_000.0, 375_000.0, 475_000.0];
+        const ROOF: [f64; 3] = [50_000.0, 60_000.0, 100_000.0];
         let value = self.agreed(elements, "areal_heat_capacity")?;
-        let capacity = value.as_f64().or_else(|| match value.as_str()? {
-            "Very light" => Some(240_000.0),
-            "Light" => Some(450_000.0),
-            "Medium" => Some(650_000.0),
-            "Heavy" => Some(850_000.0),
-            "Very heavy" => Some(1_350_000.0),
-            _ => None,
-        });
+        if let Some(n) = value.as_f64() {
+            return Some(n);
+        }
+        let (table, takes): (Vec<f64>, &str) = match construction_type {
+            "external_wall" | "sheltered_wall" => (WALL.to_vec(), "Very light to Very heavy"),
+            "party_wall" => (
+                WALL.iter().map(|v| v / 2.0).collect(),
+                "Very light to Very heavy",
+            ),
+            // Party floors and ceilings take only a construction weight (`party_construction`).
+            t if t.ends_with("_floor") => (FLOOR.to_vec(), "Very light to Very heavy"),
+            t if t.ends_with("_roof") => (ROOF.to_vec(), "Very light, Light or Medium"),
+            _ => (Vec::new(), ""),
+        };
+        let band = value
+            .as_str()
+            .and_then(|b| BANDS.iter().position(|x| *x == b));
+        let capacity = band.and_then(|i| table.get(i).copied());
         if capacity.is_none() {
-            self.errors.push(error(elements[0].path(), format!("'{}' has areal heat capacity {value}. Give a number in J/m²·K, or Very light, Light, Medium, Heavy or Very heavy.", elements[0].name)));
+            let e = elements[0];
+            let fix = if takes.is_empty() {
+                "Enter a number in J/m²·K.".to_string()
+            } else {
+                format!("Enter a number in J/m²·K, or {takes}.")
+            };
+            self.errors.push(error(
+                e.path(),
+                format!("'{}' has areal heat capacity {value}. {fix}", e.name),
+            ));
         }
         capacity
     }
@@ -3498,28 +3522,66 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
-    fn a_heat_capacity_band_takes_its_value_and_unknown_values_stop() {
-        let text = house(gable_roof()).replace(
-            "\"3.5,0,0|4.5,0,0\",",
-            "\"3.5,0,0|4.5,0,0\",\"{\"\"areal_heat_capacity\"\":\"\"Heavy\"\"}\"",
-        );
-        let (model, errors, _) = run(&text);
-        assert!(errors.is_empty(), "{errors:#?}");
-        let constructions = model["Zone"]["constructions"].as_object().unwrap();
-        assert!(
-            constructions
+    fn a_heat_capacity_band_takes_its_construction_types_value() {
+        let band = |b: &str| format!("\"{{\"\"areal_heat_capacity\"\":\"\"{b}\"\"}}\"");
+        let capacity = |model: &Value, construction_type: &str| -> Vec<Value> {
+            model["Zone"]["constructions"]
+                .as_object()
+                .unwrap()
                 .values()
-                .any(|c| c["construction_type"] == "external_door"
-                    && c["areal_heat_capacity"] == 850_000.0),
-            "{constructions:#?}"
+                .filter(|c| c["construction_type"] == construction_type)
+                .map(|c| c["areal_heat_capacity"].clone())
+                .collect()
+        };
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed[0] = exposed[0].replace("\",", &format!("\",{}", band("Heavy")));
+        exposed.push(
+            "PW,Z,BuildingElementPartyWall,1,90,1,2.8,0,0,FALSE,FALSE,,\"8,0,0|8,6,0\",\"{\"\"party_wall_cavity_type\"\":\"\"solid\"\",\"\"areal_heat_capacity\"\":\"\"Light\"\"}\""
+        .into());
+        exposed.retain(|w| !w.starts_with("W01,"));
+        let roof = |b: &str| -> Vec<String> {
+            gable_roof()
+                .into_iter()
+                .map(|r| format!("{r}{}", band(b)))
+                .collect()
+        };
+        let floor = ground(&BOX)
+            .replace("floor_type,coords", "floor_type,coords,extra_json")
+            .replace("|0,6,0\"", &format!("|0,6,0\",{}", band("Medium")));
+        let (model, errors, _) = run(&csv(
+            SETTINGS,
+            &[exposed.clone(), roof("Light")].concat(),
+            &floor,
+        ));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert!(capacity(&model, "external_wall").contains(&json!(850_000.0)));
+        assert_eq!(capacity(&model, "party_wall"), [json!(225_000.0)]);
+        assert_eq!(capacity(&model, "unheated_pitched_roof"), [json!(60_000.0)]);
+        assert_eq!(
+            capacity(&model, "not_edge_insulated_ground_attached_floor"),
+            [json!(275_000.0)]
         );
-        let (_, errors, _) = run(&text.replace("Heavy", "Blue"));
+        // A roof has no Heavy value, and a door no band at all.
+        let (_, errors, _) = run(&csv(SETTINGS, &[exposed, roof("Heavy")].concat(), &floor));
         assert!(
-            errors.iter().any(|e| e
-                .message
-                .contains("'Front' has areal heat capacity \"Blue\"")),
+            errors.iter().any(|e| e.message
+                == "'Roof S' has areal heat capacity \"Heavy\". Enter a number in J/m²·K, or Very light, Light or Medium."),
             "{errors:#?}"
         );
+        let door = house(gable_roof()).replace(
+            "\"3.5,0,0|4.5,0,0\",",
+            &format!("\"3.5,0,0|4.5,0,0\",{}", band("Heavy")),
+        );
+        let (_, errors, _) = run(&door);
+        assert!(
+            errors.iter().any(|e| e.message
+                == "'Front' has areal heat capacity \"Heavy\". Enter a number in J/m²·K."),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn a_colour_other_than_light_intermediate_or_dark_stops() {
         let mut exposed = box_walls(&BOX, &[0, 1]);
         exposed[0] = exposed[0].replace("\",", "\",\"{\"\"colour\"\":\"\"Blue\"\"}\"");
         exposed.extend(gable_roof());

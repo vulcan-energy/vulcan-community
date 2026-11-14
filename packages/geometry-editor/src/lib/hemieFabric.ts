@@ -71,6 +71,30 @@ export const HEMIE_RETIRED_ROWS: Readonly<Record<string, string>> = {
   HEMIE_infiltration_properties: 'an existing building needs an air test. Enter the air test result in Global Settings.',
 };
 
+const HEAT_CAPACITY_BANDS = ['Very light', 'Light', 'Medium', 'Heavy', 'Very heavy'] as const;
+/**
+ * The areal heat capacity bands an existing building's element may state, by the construction
+ * type it takes (`Ctx::heat_capacity` in `hemie.rs`; keep the two in step): walls and floors all
+ * five, roofs Very light to Medium, doors and windows none (a number only). Undefined for an
+ * element the converter takes no construction heat capacity from.
+ */
+export function hemieHeatCapacityBands(constructionType: string | undefined): readonly string[] | undefined {
+  if (!constructionType || constructionType === 'party_floor' || constructionType === 'party_ceiling') return undefined;
+  if (['external_wall', 'sheltered_wall', 'party_wall'].includes(constructionType) || constructionType.endsWith('_floor')) return HEAT_CAPACITY_BANDS;
+  if (constructionType.endsWith('_roof')) return HEAT_CAPACITY_BANDS.slice(0, 3);
+  return [];
+}
+
+/**
+ * The placeholder of a construction setting field with no default: the pinned HEM:EPC schema
+ * requires a door's areal heat capacity, and a window's in a party or sheltered wall.
+ */
+export function hemieRequiredPlaceholder(constructionType: string, field: string): string | undefined {
+  if (field !== 'areal_heat_capacity') return undefined;
+  if (constructionType.endsWith('_door')) return 'Required, no default';
+  return constructionType === 'window' ? 'Required in a party or sheltered wall' : undefined;
+}
+
 /** The door element flag that marks the front door; one door only. */
 export const HEMIE_FRONT_DOOR = 'is_front_door';
 export const hemieConstructionSetting = (constructionType: string): string => `HEMIE_construction_${constructionType}`;

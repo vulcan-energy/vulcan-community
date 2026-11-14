@@ -65,6 +65,8 @@ import {
 } from '../../../geometry-editor-host/src/workspaceResourcePort';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import { hemieConstructionType, hemieHeatCapacityBands } from '../lib/hemieFabric';
+import { useTargetRules } from '../hooks/useTargetRules';
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { buildLightingPatch, getLightingFieldValue } from './elementForms/lighting';
@@ -1622,6 +1624,17 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     () => constructionTargetElements.map((el) => el.id),
     [constructionTargetElements],
   );
+  // Under construction bands, only the heat capacity bands every target's construction takes;
+  // none (a door or window among them) leaves heat capacity to each element.
+  const { constructionBands } = useTargetRules();
+  const arealBandOptions = useMemo(() => {
+    if (!constructionBands) return AREAL_HEAT_CAPACITY_ENUM;
+    const all = Object.values(elementsById) as Element[];
+    return constructionTargetElements.reduce<readonly string[]>((allowed, el) => {
+      const bands = hemieHeatCapacityBands(hemieConstructionType(el, all));
+      return bands ? allowed.filter((band) => bands.includes(band)) : allowed;
+    }, AREAL_HEAT_CAPACITY_ENUM);
+  }, [constructionBands, constructionTargetElements, elementsById]);
   const constructionFieldScopeKey = useMemo(() => {
     if (activeType === 'BuildingElementOpaque') return `opaque:${activeOpaqueSurfaceMode ?? 'all'}`;
     return activeConstructionScope ?? activeType ?? 'fabric';
@@ -3814,13 +3827,13 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               MASS_DISTRIBUTION_CLASS_ENUM.map((value) => ({ value, label: value })),
               (_el, value) => ({ mass_distribution_class: value }),
             )}
-            {renderManualSelectRow(
+            {arealBandOptions.length > 0 && renderManualSelectRow(
               constructionFieldScopeKey,
               constructionTargetIds,
               'areal',
               'Areal Heat Capacity',
               constructionArealSummary,
-              AREAL_HEAT_CAPACITY_ENUM.map((value) => ({ value, label: value })),
+              arealBandOptions.map((value) => ({ value, label: value })),
               (_el, value) => ({ areal_heat_capacity: value }),
             )}
           </div>
