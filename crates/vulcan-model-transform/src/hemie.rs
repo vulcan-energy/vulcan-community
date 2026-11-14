@@ -38,6 +38,9 @@ const TOL: f64 = 0.1;
 /// DESNZ-defined: the height between storeys, and between a storey and a roof room, that is in
 /// no storey's ceiling height (m).
 const STOREY_GAP: f64 = 0.25;
+/// DESNZ-defined (HEMIE code): the floor-to-floor height HEMIE gives each storey below the
+/// dwelling when it estimates the base height from the base storey (2.2 m plus the storey gap).
+const STOREY_BELOW: f64 = 2.2 + STOREY_GAP;
 /// DESNZ-defined: a room in the roof's common walls are under this height (m) for at least half
 /// their length; otherwise the floor is a storey.
 const COMMON_WALL_HEIGHT: f64 = 1.8;
@@ -1958,8 +1961,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     geometry.insert("reference_building_part".into(), json!(names[0]));
     geometry.insert("reference_orientation".into(), json!(reference_orientation));
     let full_ventilation = &model["InfiltrationVentilation"];
-    // DESNZ-defined: the base height, or else the base storey, from which HEMIE
-    // estimates it.
+    // DESNZ-defined: the base height, or else HEMIE's estimate from the base storey. The
+    // estimate is given as the height because the pinned Orchestrator drops a Geometry's
+    // base_storey_of_dwelling before HEMIE reads it.
     match (
         full_ventilation
             .get("ventilation_zone_base_height")
@@ -1970,13 +1974,18 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             geometry.insert("ventilation_zone_base_height".into(), height.clone());
         }
         (None, Some(storey)) => {
-            geometry.insert("base_storey_of_dwelling".into(), json!(storey));
+            geometry.insert(
+                "ventilation_zone_base_height".into(),
+                json!(storey as f64 * STOREY_BELOW),
+            );
         }
         (None, None) => ctx.errors.push(error("STOREYS", "/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or storey of dwelling, which the existing-building EPC needs. Give the ventilation zone base height in Global Settings > Ventilation Environment, or the storey of dwelling in Dwelling Details.".into())),
     }
     // DESNZ-defined: a part's base height defaults to the dwelling's; a part that starts higher
     // states its own. With no dwelling base the error is already reported, so 0 stands in.
-    let dwelling = parts::dwelling_base(&geometry);
+    let dwelling = geometry
+        .get("ventilation_zone_base_height")
+        .and_then(Value::as_f64);
     let bases = match parts::base_heights(&parts, dwelling.unwrap_or(0.0)) {
         Ok(bases) => bases,
         Err(i) => {
@@ -3680,7 +3689,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         // With an air test, the base storey stands for the base height.
         let (tested, errors, notices) = run_on(&house(gable_roof()), model.clone());
         assert!(errors.is_empty(), "{errors:#?}");
-        assert_eq!(tested["Zone"]["base_storey_of_dwelling"], 0);
+        assert_eq!(tested["Zone"]["ventilation_zone_base_height"], 0.0);
         assert!(tested["InfiltrationVentilation"]
             .get("shield_class")
             .is_none());

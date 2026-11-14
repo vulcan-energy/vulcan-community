@@ -10,9 +10,6 @@ use super::*;
 /// The party flag Vulcan sets on a horizontal conditioned-space element: a party floor (pitch
 /// 180) or party ceiling (pitch 0).
 const PARTY_FLAG: &str = "_vulcan_ui_party_element";
-/// DESNZ-defined: the floor-to-ceiling height of each storey of the building under the dwelling
-/// when its base height comes from its base storey (average 2.2 m plus the 0.25 m storey gap).
-const STOREY_BELOW_DWELLING: f64 = 2.2 + STOREY_GAP;
 
 fn horizontal(e: &El, ty: &str) -> bool {
     e.ty == ty && e.pts.len() >= 3
@@ -167,18 +164,6 @@ pub(super) fn basement_storey(
         .map(|b| -b);
     ctx.notices.push(notice(&basement.path(), format!("Floor {level} is basement '{}'. The existing-building EPC enters it as the floor of floor {}, its storey 0, and takes the basement walls' U-value and thickness from that storey's external walls, so the constructions of walls {} are not used.", basement.name, level + 1, names(&floor))));
     Ok(Some(Basement { level, depth }))
-}
-
-/// The dwelling's base height above the ground: the stated ventilation zone base height, or
-/// HEMIE's estimate from the base storey (DESNZ-defined).
-pub(super) fn dwelling_base(geometry: &Map<String, Value>) -> Option<f64> {
-    geometry
-        .get("ventilation_zone_base_height")
-        .and_then(Value::as_f64)
-        .or_else(|| {
-            let storey = geometry.get("base_storey_of_dwelling")?.as_f64()?;
-            Some(storey * STOREY_BELOW_DWELLING)
-        })
 }
 
 /// A construction from the model setting alone, for a floor no element describes.
@@ -476,10 +461,24 @@ mod tests {
                 ),
             ),
         );
+        // The base height goes on Geometry only, as HEMIE estimates it from the base storey
+        // (two storeys of 2.45 m below the third), or as stated.
+        for (storey, stated, base) in [(2, None, 2.45), (3, None, 4.9), (3, Some(7.0), 7.0)] {
+            let mut flat = flat_model(storey);
+            if let Some(height) = stated {
+                flat["InfiltrationVentilation"]["ventilation_zone_base_height"] = json!(height);
+            }
+            let (model, errors, _) = run_on(&text, flat);
+            assert!(errors.is_empty(), "{errors:#?}");
+            assert_eq!(model["Zone"]["ventilation_zone_base_height"], base);
+            assert!(model["Zone"].get("base_storey_of_dwelling").is_none());
+            let ventilation = &model["InfiltrationVentilation"];
+            assert!(ventilation.get("ventilation_zone_base_height").is_none());
+            assert!(ventilation.get("base_storey_of_dwelling").is_none());
+        }
         let (model, errors, notices) = run_on(&text, flat_model(3));
         assert!(errors.is_empty(), "{errors:#?}");
         let zone = &model["Zone"];
-        assert_eq!(zone["base_storey_of_dwelling"], 2);
         let main = &zone["building_parts"]["Main"];
         assert_eq!(main["floor"]["floor_type"], "party");
         assert_eq!(main["roof"]["roof_type"], "Party");
