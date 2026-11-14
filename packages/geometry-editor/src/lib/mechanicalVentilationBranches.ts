@@ -21,6 +21,7 @@ export const MECHANICAL_VENTILATION_HOSTED_FAN_TYPES = new Set([
   'Intermittent MEV',
   'Centralised continuous MEV',
   'Decentralised continuous MEV',
+  'Positive input ventilation',
 ]);
 
 export type MechanicalVentilationFanInputMode = 'measured' | 'sfp';
@@ -53,6 +54,7 @@ export function normalizeMechanicalVentilationVentType(value: unknown): string |
   if (lower === 'centralised continuous mev') return 'Centralised continuous MEV';
   if (lower === 'decentralised continuous mev') return 'Decentralised continuous MEV';
   if (lower === 'intermittent mev') return 'Intermittent MEV';
+  if (lower === 'positive input ventilation') return 'Positive input ventilation';
   if (lower === 'mvhr') return 'MVHR';
   return trimmed;
 }

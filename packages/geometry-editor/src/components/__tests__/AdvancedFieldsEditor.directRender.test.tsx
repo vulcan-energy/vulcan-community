@@ -1398,10 +1398,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'pressure_difference_ref | Pressure Difference Ref | textbox | 0 | - | - | tip',
   ],
   // Core names its window shading item WindowShadingObject (FHS: WindowShading).
-  'core/WindowShading [every subtype]': [
-    'type | Type | select | - | - | - | tip',
-    'distance | Distance | textbox | 0 | - | - | tip',
-  ],
 };
 
 describe('R4.6b-1 standing invariant: what every Advanced Fields row actually renders', () => {
@@ -1411,7 +1407,7 @@ describe('R4.6b-1 standing invariant: what every Advanced Fields row actually re
     // Floors would let this pass vacuously; these are the exact populations the pinned
     // inventory below was captured from, so they are equalities.
     expect(routesSwept).toBe(674);
-    expect(routesWithRows).toBe(402);
+    expect(routesWithRows).toBe(387);
 
     expect(inventory).toEqual(EXPECTED_RENDERED_ROWS);
   });
@@ -1453,7 +1449,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       onChange,
     });
     const select = within(fieldRow(container, 'areal_heat_capacity')).getByRole('combobox') as HTMLSelectElement;
-    expect(Array.from(select.options).map((option) => option.value)).toEqual(expect.arrayContaining(['Very light', 'Light', 'Medium', 'number']));
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual(expect.arrayContaining(['Very light', 'Light', 'Medium', 'Number (J/m²·K)']));
     expect(select.options.length).toBe(5);
     fireEvent.change(select, { target: { value: 'number' } });
     const input = within(container.querySelectorAll<HTMLElement>('[data-field-key="areal_heat_capacity"]')[1]).getByRole('textbox') as HTMLInputElement;

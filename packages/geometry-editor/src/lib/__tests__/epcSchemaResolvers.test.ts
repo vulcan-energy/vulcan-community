@@ -3,7 +3,9 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { canonicalGeometrySchemaPort, configureGeometrySchemaAssetSource, resetGeometrySchemaAssetsForTests } from '../geometrySchemaPort';
+import { validateElementCore } from '../../geometry/validation/validateElement';
 import {
   __setSchemaObjectForTests,
   getConditionalRequiredFieldsForMode,
@@ -20,7 +22,7 @@ describe('HEM:EPC schema resolvers', () => {
     expect(mv('MVHR').required).toContain('mvhr_location');
     expect(mv('MVHR').properties).not.toHaveProperty('vent_position');
     const intermittent = mv('Intermittent MEV');
-    expect(intermittent.required).toContain('leakage_when_stopped');
+    expect(intermittent.required).toEqual(expect.arrayContaining(["leakage_when_stopped", "SFP"]));
     expect(intermittent.properties).not.toHaveProperty('installation_type');
     expect(mv('Positive input ventilation').properties).not.toHaveProperty('leakage_when_stopped');
     expect(mv('Centralised continuous MEV').properties).toHaveProperty('installation_type');
@@ -47,5 +49,28 @@ describe('HEM:EPC schema resolvers', () => {
     } as never;
     expect(allowedWindowShadingTypes(port, 'core')).toEqual(['overhang', 'sidefinright', 'sidefinleft', 'reveal', 'object']);
     expect(allowedWindowShadingTypes(port, 'core', true)).not.toContain('reveal');
+  });
+});
+
+describe('HEM:EPC conditions in the live validation', () => {
+  afterAll(() => resetGeometrySchemaAssetsForTests());
+
+  it('names U-or-R and the roof and orientation inputs while editing', async () => {
+    configureGeometrySchemaAssetSource({ loadText: async () => JSON.stringify(epc) });
+    await canonicalGeometrySchemaPort.preload('core');
+    const wall = {
+      id: 'w1', name: 'Wall', zoneId: 'z', floorId: 'f', type: 'BuildingElementOpaque', width: 3, height: 2.4, area: 7.2,
+      pitch: 45, base_height: 0, coordinates: [{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }], isPlaceholder: false,
+    };
+    const UR = 'State the U-value or the thermal resistance (one, not both).';
+    const run = (element: object, complianceSettings = {}) => validateElementCore(element as never, {
+      schemaPort: { ...canonicalGeometrySchemaPort, targetSchemaMode: () => 'core' }, elementsById: { w1: element as never }, complianceValidationEnabled: false, complianceSettings,
+    } as never).issues.map((issue) => issue.message).join('|');
+    const none = run(wall);
+    expect(none).toContain(UR);
+    expect(none).toContain('Orientation360');
+    expect(none).toContain('Is Unheated Pitched Roof');
+    expect(run({ ...wall, u_value: 0.3, thermal_resistance_construction: 3 })).toContain(UR);
+    expect(run({ ...wall, u_value: 0.3 })).not.toContain(UR);
   });
 });

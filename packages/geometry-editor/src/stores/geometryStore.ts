@@ -1471,7 +1471,7 @@ export const APPLIANCE_KEYS = [
 ] as const;
 
 // NEW: InfiltrationVentilation constants
-export const VENT_TYPES = ['Intermittent MEV', 'Centralised continuous MEV', 'Decentralised continuous MEV', 'MVHR'] as const;
+export const VENT_TYPES = ['Intermittent MEV', 'Centralised continuous MEV', 'Decentralised continuous MEV', 'Positive input ventilation', 'MVHR'] as const;
 export const APPLIANCE_TYPES = ['open_fireplace', 'closed_with_fan', 'open_gas_flue_balancer', 'open_gas_kitchen_stove', 'open_gas_fire', 'closed_fire'] as const;
 export const EXHAUST_SITUATIONS = ['into_room', 'into_separate_duct', 'into_mech_vent'] as const;
 export const FUEL_TYPES = ['wood', 'gas', 'oil', 'coal'] as const;

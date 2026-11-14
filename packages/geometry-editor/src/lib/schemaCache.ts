@@ -668,6 +668,9 @@ function getCoreBuildingElementContainerSchema(schema: SchemaNode): SchemaNode |
  * product shape; a continuous extract system takes the product shape. Null for a schema that
  * declares none of them (HEM Core and FHS), which keep their own handling.
  */
+// The target estimates the design outdoor air flow rate when it is not stated.
+const AIR_FLOW = 'design_outdoor_air_flow_rate';
+
 function resolveEpcMechanicalVentilationVariant(schema: SchemaNode, subtype: string | undefined): SchemaNode | null {
   const defs = schema.$defs;
   const product = defs?.MechanicalVentilationWithoutHeatRecoveryProduct;
@@ -677,10 +680,10 @@ function resolveEpcMechanicalVentilationVariant(schema: SchemaNode, subtype: str
   // `vent_position` is read for a vent hosted in a wall, window or door (not a drawn MVHR terminal).
   const position = { $ref: '#/$defs/VentPosition', description: 'Where in its host element the vent sits.' };
   if (subtype === 'MVHR') {
-    // The ductwork descriptor is the converter's (drawn ducts); no form edits that object.
+    // No form edits the ductwork descriptor object. An existing building takes the target default; a new build's converter does not build it yet (open converter item), so it stays out of the required list.
     const properties = { ...(mvhr.properties as Record<string, SchemaNode>) };
     delete properties.ductwork;
-    return { type: 'object', properties, required: (mvhr.required ?? []).filter((key: string) => key !== 'ductwork'), $defs: defs };
+    return { type: 'object', properties, required: (mvhr.required ?? []).filter((key: string) => key !== 'ductwork' && key !== AIR_FLOW), $defs: defs };
   }
   if (subtype === 'Intermittent MEV' || subtype === 'Positive input ventilation') {
     const properties: Record<string, SchemaNode> = { ...fan.properties, vent_position: position };
@@ -693,11 +696,12 @@ function resolveEpcMechanicalVentilationVariant(schema: SchemaNode, subtype: str
     return {
       type: 'object',
       properties,
-      required: ['EnergySupply', 'design_outdoor_air_flow_rate', ...(intermittent ? ['leakage_when_stopped'] : [])],
+      // An existing building's non-MVHR system requires its SFP.
+      required: ['EnergySupply', 'SFP', ...(intermittent ? ['leakage_when_stopped'] : [])],
       $defs: defs,
     };
   }
-  return { type: 'object', properties: { ...product.properties, vent_position: position }, required: [...(product.required ?? [])], $defs: defs };
+  return { type: 'object', properties: { ...product.properties, vent_position: position }, required: (product.required ?? []).filter((key: string) => key !== AIR_FLOW), $defs: defs };
 }
 
 function resolveCoreMechanicalVentilationBaseSchema(schema: SchemaNode, schemaKey: string): SchemaNode | null {
@@ -1864,7 +1868,7 @@ export function getBaseFieldsForElementType(elementType: string): string[] {
       'heat_transfer_coeff', 'parent_element', 'type'
     ],
     'WindowShading': [
-      'shading_type', 'depth', 'width', 'height', 'parent_element'
+      'shading_type', 'depth', 'width', 'height', 'distance', 'transparency', 'type', 'parent_element'
     ],
     'Lighting': [
       'simplified_lighting', 'efficacy', 'count', 'power', 'bulbs'

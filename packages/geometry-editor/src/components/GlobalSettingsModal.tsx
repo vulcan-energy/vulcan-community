@@ -2743,8 +2743,8 @@ export function GlobalSettingsModal({
                         });
                       }}
                       options={[
-                        { value: "Standard", label: "Blower door (50 Pa)" },
-                        { value: "Pulse test only", label: "Pulse (4 Pa)" },
+                        { value: "Standard", label: "Standard" },
+                        { value: "Pulse test only", label: "Pulse test only" },
                       ]}
                       placeholder="Select test pressure..."
                       variant="ghost"
