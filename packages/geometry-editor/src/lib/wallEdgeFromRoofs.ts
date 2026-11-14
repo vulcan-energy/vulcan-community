@@ -20,7 +20,7 @@ export const ROOF_FIT_TOLERANCE_M = 0.005;
 
 // A plan point this close to a roof edge running alongside the wall counts as covered: a gable
 // wall sits on the roof's edge in plan, and drawn models put it a few centimetres either side
-// (H482: 6.4 cm). Within a wall thickness, so a roof this close is the one over or under the
+// (6.4 cm in one test house). Within a wall thickness, so a roof this close is the one over or under the
 // wall. An edge the wall crosses does not stretch the roof: the wall leaves the roof there.
 const OUTLINE_TOL_M = 0.1;
 // Sine of the largest angle between the wall and a roof edge "alongside" it (about 6°).

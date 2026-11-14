@@ -11676,7 +11676,7 @@ Radiator 1,Living,WetEmitter,radiator,1,"{""length"":2,""c_per_m"":1.2,""thermal
 
     #[test]
     fn radiator_per_metre_mode_prefers_per_metre_thermal_mass() {
-        // H283 case: both thermal_mass_per_m and thermal_mass set alongside the
+        // A drawn model with both thermal_mass_per_m and thermal_mass set alongside the
         // per-metre c. The per-metre thermal mass wins; lumped thermal_mass is dropped.
         let csv = r#"Zone
 Name,Type,volume,floor_area
