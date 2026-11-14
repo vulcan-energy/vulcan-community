@@ -69,8 +69,9 @@ const ELEMENT_OVERRIDE_KEYS: [&str; 5] = [
 ];
 /// Fields only this converter reads from an element row; no HEM input takes them, so the
 /// full-input build leaves them out of the HEM element.
-pub(crate) const ELEMENT_ONLY_KEYS: [&str; 13] = [
+pub(crate) const ELEMENT_ONLY_KEYS: [&str; 14] = [
     "age_band",
+    "thatched",
     "is_front_door",
     "wall_construction_type",
     "glazing_type",
@@ -637,6 +638,8 @@ struct Constructions {
     documented: BTreeSet<String>,
     /// Windows that state their own g-value or frame area fraction.
     stated_glazing: BTreeSet<String>,
+    /// Elements that state their own heat capacity, mass distribution class or solar absorption.
+    stated_mass: BTreeSet<String>,
     /// Party walls that state no cavity type: HEMIE takes it from the age band (DESNZ-defined).
     party_walls_by_age_band: BTreeSet<String>,
     /// Elements whose stated heat capacity is set aside: their type sets it.
@@ -731,7 +734,12 @@ impl Ctx<'_> {
         let first = elements[0];
         // A park home construction takes none of these (HEMIE rejects them).
         let park_home = construction_type.starts_with("park_home");
-        for key in ELEMENT_OVERRIDE_KEYS.into_iter().filter(|_| !park_home) {
+        // A thatched roof takes no insulation location (HEMIE rejects it).
+        let thatched = construction_type == "thatched_roof";
+        for key in ELEMENT_OVERRIDE_KEYS
+            .into_iter()
+            .filter(|k| !(park_home || thatched && *k == "insulation_location"))
+        {
             if let Some(value) = self.agreed(elements, key) {
                 c.insert(key.into(), value.clone());
             }
@@ -749,6 +757,7 @@ impl Ctx<'_> {
                     | "heated_pitched_roof"
                     | "mini_flat_roof"
                     | "mini_pitched_roof"
+                    | "thatched_roof"
             );
         for (key, takes) in [
             ("retrofit_insulation", walls),
@@ -761,6 +770,7 @@ impl Ctx<'_> {
         // Every construction this builds takes a mass distribution class (HEMIE's own default
         // otherwise); only those with an outside surface take a colour or solar absorption, and
         // HEMIE rejects a field its construction type does not take.
+        let mut stated_mass = Vec::new();
         if let Some(class) = self.agreed(elements, "mass_distribution_class") {
             match class
                 .as_str()
@@ -768,6 +778,7 @@ impl Ctx<'_> {
             {
                 Some(full) => {
                     c.insert("mass_distribution_class".into(), json!(full));
+                    stated_mass.push(format!("mass distribution class {full}"));
                 }
                 None => self.errors.push(error(
                     "CONSTRUCTION",
@@ -799,6 +810,7 @@ impl Ctx<'_> {
             }
             if let Some(coeff) = self.agreed(elements, "solar_absorption_coeff") {
                 c.insert("solar_absorption_coefficient".into(), coeff.clone());
+                stated_mass.push(format!("solar absorption {coeff}"));
             }
         }
         let u_values: BTreeSet<String> = elements
@@ -886,6 +898,19 @@ impl Ctx<'_> {
         }
         if let Some(capacity) = self.heat_capacity(construction_type, elements) {
             c.insert("areal_heat_capacity".into(), json!(capacity));
+            // Windows and doors have no default to replace (see `require`).
+            if !matches!(
+                construction_type,
+                "window" | "external_door" | "party_or_sheltered_door"
+            ) {
+                stated_mass.push(format!("areal heat capacity {capacity}"));
+            }
+        }
+        if !stated_mass.is_empty() {
+            let names = quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>());
+            self.constructions
+                .stated_mass
+                .insert(format!("{names} ({})", stated_mass.join(", ")));
         }
         for (key, value) in extra {
             c.entry(*key).or_insert_with(|| value.clone());
@@ -931,6 +956,11 @@ impl Ctx<'_> {
                 .extend(elements.iter().map(|e| e.path()));
         }
         key
+    }
+
+    /// The insulation location of a registered construction.
+    fn insulation_location(&self, key: &str) -> Option<&str> {
+        self.constructions.by_name[key]["insulation_location"].as_str()
     }
 
     /// The value the elements state for a field, alike on each; HEMIE gives the group one
@@ -1069,6 +1099,17 @@ impl Ctx<'_> {
     }
 }
 
+/// DESNZ-defined: a flat or unheated pitched roof is cold or warm by where its insulation is. A
+/// flat roof insulated at the joists is cold, above them warm; a pitched roof insulated at the
+/// joists (alone or with the rafters) is cold, at the rafters warm. Otherwise Unknown.
+fn roof_kind(location: Option<&str>, flat: bool) -> &'static str {
+    match (location, flat) {
+        (Some("at_joists"), _) | (Some("at_joists_and_rafters"), false) => "Cold",
+        (Some("above_joists"), true) | (Some("at_rafters"), false) => "Warm",
+        _ => "Unknown",
+    }
+}
+
 const HEAT_CAPACITY_BANDS: [&str; 5] = ["Very light", "Light", "Medium", "Heavy", "Very heavy"];
 /// DESNZ-defined: the class values of walls, floors and party walls (half the wall values), J/m2.K.
 const WALL: [f64; 5] = [240_000.0, 450_000.0, 650_000.0, 850_000.0, 1_350_000.0];
@@ -1103,7 +1144,8 @@ fn heat_capacity_rule(construction_type: &str) -> HeatCapacity {
         | "flat_roof"
         | "unheated_pitched_roof"
         | "mini_flat_roof"
-        | "mini_pitched_roof" => HeatCapacity::Fixed,
+        | "mini_pitched_roof"
+        | "thatched_roof" => HeatCapacity::Fixed,
         _ => HeatCapacity::Number,
     }
 }
@@ -1349,6 +1391,12 @@ fn convert_existing_building(
         .collect();
     if !stated_glazing.is_empty() {
         notices.push(notice("/Zone/constructions", format!("These windows state their own values, which the existing-building EPC uses in place of those for their glazing type and frame material: {}.", stated_glazing.join(", "))));
+    }
+    let stated_mass: Vec<String> = std::mem::take(&mut ctx.constructions.stated_mass)
+        .into_iter()
+        .collect();
+    if !stated_mass.is_empty() {
+        notices.push(notice("/Zone/constructions", format!("These elements state their own thermal mass or solar absorption, which the existing-building EPC uses in place of its defaults: {}. Lodgement needs evidence for each.", stated_mass.join("; "))));
     }
     let set_aside = std::mem::take(&mut ctx.constructions.heat_capacity_set_aside);
     if !set_aside.is_empty() {
@@ -2336,8 +2384,16 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
     if construction_type == "edge_insulated_ground_attached_floor" {
         match edge_insulation(g) {
             Some(edge) => extra.push(("edge_insulation", edge)),
-            None if ctx.settings.construction(construction_type).contains_key("edge_insulation") => {}
-            None => ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' is a slab with edge insulation but states no edge insulation. Give its horizontal or vertical edge insulation.", g.name))),
+            None if ctx
+                .settings
+                .construction(construction_type)
+                .contains_key("edge_insulation") => {}
+            // DESNZ-defined: edge insulation known to be present with no details takes the
+            // standard configuration (vertical, 0.26 m deep, 25 mm mineral wool).
+            None => {
+                extra.push(("edge_insulation", json!({"vertical": {}})));
+                ctx.notices.push(notice(&g.path(), format!("Ground floor '{}' is a slab with edge insulation but gives no details, so it uses the default: vertical edge insulation 0.26 m deep, 25 mm mineral wool. Give its edge insulation to change it.", g.name)));
+            }
         }
     }
     let key = ctx.construction(construction_type, &[g], &extra);
@@ -2448,13 +2504,18 @@ fn roof(
         ctx.errors.push(error("ROOF", flat[0].path(), format!("Building part '{part}' has flat roof '{}' and pitched roof '{}'. The existing-building EPC gives each building part one roof.", flat[0].name, pitched[0].name)));
         None
     } else if !flat.is_empty() {
-        let (roof_type, construction_type) = if is_park_home(ctx.model) {
-            ("Park Home Flat", "park_home_flat_roof")
+        let park_home = is_park_home(ctx.model);
+        let construction_type = if park_home {
+            "park_home_flat_roof"
         } else {
-            // ours: Vulcan does not record whether a flat roof is cold or warm, so it is Unknown.
-            ("Unknown Flat", "flat_roof")
+            "flat_roof"
         };
         let key = ctx.construction(construction_type, &flat, &[]);
+        let roof_type = if park_home {
+            "Park Home Flat".to_string()
+        } else {
+            format!("{} Flat", roof_kind(ctx.insulation_location(&key), true))
+        };
         let lights = roof_windows(ctx, windows, &flat, placed);
         Some(ctx.with_age_band(
             &flat,
@@ -2519,13 +2580,22 @@ fn roof(
             ));
         }
         rectangularity_notice(ctx, part, top_ring);
-        let (roof_type, construction_type) = if is_park_home(ctx.model) {
-            ("Park Home Pitched", "park_home_pitched_roof")
-        } else {
-            // ours: Vulcan does not record cold or warm, so it is Unknown.
-            ("Unknown Pitched (Unheated)", "unheated_pitched_roof")
+        let park_home = is_park_home(ctx.model);
+        let thatched = ctx.agreed(&pitched, "thatched") == Some(&json!(true));
+        let construction_type = match (park_home, thatched) {
+            (true, _) => "park_home_pitched_roof",
+            (false, true) => "thatched_roof",
+            (false, false) => "unheated_pitched_roof",
         };
         let key = ctx.construction(construction_type, &pitched, &[]);
+        let roof_type = match (park_home, thatched) {
+            (true, _) => "Park Home Pitched".to_string(),
+            (false, true) => "Thatched Pitched (Unheated)".to_string(),
+            (false, false) => format!(
+                "{} Pitched (Unheated)",
+                roof_kind(ctx.insulation_location(&key), false)
+            ),
+        };
         Some(ctx.with_age_band(
             &pitched,
             json!({"roof_type": roof_type, "construction": key, "pitch_type": pitch_type,
@@ -2826,7 +2896,7 @@ fn room_in_roof(
             else {
                 continue;
             };
-            if let Some(d) = dormer(ctx, anchor, bundle, host, windows, placed) {
+            if let Some(d) = dormer(ctx, anchor, bundle, host, dormers, windows, placed) {
                 dormer_values.push(d);
             }
         }
@@ -2841,6 +2911,7 @@ fn dormer<'e>(
     anchor: &El,
     bundle: &Value,
     host: &El,
+    members: &[&El],
     windows: &[&'e El<'e>],
     placed: &mut BTreeSet<String>,
 ) -> Option<Value> {
@@ -2930,9 +3001,46 @@ fn dormer<'e>(
     };
     placed.insert(front.name.to_string());
     let front_window = window(ctx, front, true)?;
+    // DESNZ-defined: one side window serves both cheek walls, or none.
+    let cheek = |role: &str| {
+        members.iter().find(|m| {
+            m.bundle().is_some_and(|b| {
+                b["bundle_id"] == bundle["bundle_id"] && b["role"].as_str() == Some(role)
+            })
+        })
+    };
+    let side = |role: &str| -> Vec<&El> {
+        cheek(role).map_or(Vec::new(), |c| {
+            windows
+                .iter()
+                .copied()
+                .filter(|w| w.host() == Some(c.name))
+                .collect()
+        })
+    };
+    let side_window = match (&side("left-cheek-wall")[..], &side("right-cheek-wall")[..]) {
+        ([], []) => None,
+        ([x], [y]) => {
+            placed.insert(x.name.to_string());
+            placed.insert(y.name.to_string());
+            let (wx, wy) = (window(ctx, x, true)?, window(ctx, y, true)?);
+            if wx != wy {
+                ctx.errors.push(error("DORMER", x.path(), format!("Dormer side windows '{}' and '{}' differ. Both sides of a dormer share one window: make them the same.", x.name, y.name)));
+                return None;
+            }
+            Some(wx)
+        }
+        _ => {
+            ctx.errors.push(error("DORMER", anchor.path(), format!("The side walls of dormer '{}' do not each have one window. Give both sides the same window, or neither a window.", anchor.name)));
+            return None;
+        }
+    };
     let key = ctx.construction("external_wall", &[anchor], &[]);
     let mut value = json!({"dormer_width": width, "dormer_height": height, "dormer_base_height": base,
         "wall_construction": key, "roof_pitch_type": pitch_type, "front_window": front_window});
+    if let Some(side_window) = side_window {
+        value["side_window"] = side_window;
+    }
     if !pitch.is_null() {
         value["roof_pitch"] = pitch;
     }
@@ -3330,14 +3438,17 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 .replace("|0,6,0\"", &format!("|0,6,0\",{extra}"))
         };
         let exposed = [box_walls(&BOX, &[0, 1]), gable_roof()].concat();
-        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &edge("")));
-        assert!(
-            errors
-                .iter()
-                .any(|e| e.path.ends_with("/Floor")
-                    && e.message.contains("states no edge insulation")),
-            "{errors:#?}"
+        // Present with no details: the standard configuration, reported.
+        let (model, errors, notices) = run(&csv(SETTINGS, &exposed, &edge("")));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let key = model["Zone"]["building_parts"]["Main"]["floor"]["construction"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            model["Zone"]["constructions"][key]["edge_insulation"],
+            json!({"vertical": {}})
         );
+        assert!(notices.iter().any(|n| n.message.contains("0.26 m deep")));
         let stated = r#""{""edge_insulation"":[{""type"":""vertical"",""depth"":0.5,""edge_thermal_resistance"":1.2},{""type"":""horizontal"",""width"":1,""edge_thermal_resistance"":1}]}""#;
         let (model, errors, _) = run(&csv(SETTINGS, &exposed, &edge(stated)));
         assert!(errors.is_empty(), "{errors:#?}");
@@ -4190,6 +4301,52 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 && e.message
                     .contains("state an insulation thickness but no insulation location")),
             "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn a_lofts_insulation_location_sets_cold_or_warm_and_thatch_its_own_roof() {
+        let roof = |extra: &str| {
+            let model = house(gable_roof().iter().map(|r| format!("{r}{extra}")).collect());
+            let (model, errors, notices) = run(&model);
+            assert!(errors.is_empty(), "{errors:#?}");
+            // The geometry is valid HEMIE input.
+            let schema: Value = serde_json::from_str(include_str!(
+                "../../../data/schemas/hem_epc_orchestrator_input.schema.json"
+            ))
+            .unwrap();
+            let geometry = json!({"$ref": "#/$defs/Geometry", "$defs": schema["$defs"]});
+            let validator = jsonschema::validator_for(&geometry).unwrap();
+            let invalid: Vec<String> = validator
+                .iter_errors(&model["Zone"])
+                .map(|e| format!("{}: {e}", e.instance_path()))
+                .collect();
+            assert!(invalid.is_empty(), "{invalid:#?}");
+            let roof = model["Zone"]["building_parts"]["Main"]["roof"].clone();
+            let kind = model["Zone"]["constructions"][roof["construction"].as_str().unwrap()]
+                ["construction_type"]
+                .clone();
+            (roof["roof_type"].clone(), kind, notices)
+        };
+        let at =
+            |location: &str| roof(&format!(r#""{{""insulation_location"":""{location}""}}""#)).0;
+        assert_eq!(at("at_rafters"), "Warm Pitched (Unheated)");
+        assert_eq!(at("at_joists"), "Cold Pitched (Unheated)");
+        assert_eq!(at("unknown"), "Unknown Pitched (Unheated)");
+        // A thatched roof, with a stated mass distribution class that is reported.
+        let (roof_type, kind, notices) =
+            roof(r#""{""thatched"":true,""mass_distribution_class"":""I""}""#);
+        assert_eq!(
+            (roof_type, kind),
+            (json!("Thatched Pitched (Unheated)"), json!("thatched_roof"))
+        );
+        assert!(
+            notices
+                .iter()
+                .any(|n| n.message.contains("state their own thermal mass")
+                    && n.message
+                        .contains("'Roof S', 'Roof N' (mass distribution class I")),
+            "{notices:#?}"
         );
     }
 

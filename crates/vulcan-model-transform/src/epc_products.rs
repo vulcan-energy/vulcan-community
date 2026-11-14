@@ -348,13 +348,11 @@ fn pick(tables: &'static [&'static str], ask: impl Into<String>) -> Option<Rule>
     })
 }
 
-/// A system type Vulcan has no row type for: it fails, naming the system, unless picked.
-fn no_row_type(tables: &'static [&'static str], what: &str) -> Option<Rule> {
+/// A system type with no default product: it fails, naming the system, unless picked.
+fn no_default(tables: &'static [&'static str], what: &str) -> Option<Rule> {
     pick(
         tables,
-        format!(
-            "Vulcan has no {what} system yet, so there is no default; pick its product on the row"
-        ),
+        format!("there is no default {what} product; pick it on the row"),
     )
 }
 
@@ -399,12 +397,12 @@ pub(crate) fn rule(
         ("HeatSourceWet/*", "BackBoiler") => Some(Rule::Pick {
             tables: &["RoomHeater"],
             filter: Some((CHILD_TABLE, "BackBoiler".into())),
-            ask: "Vulcan has no back boiler system yet, so there is no default; pick its room heater with back boiler on the row".into(),
+            ask: "there is no default back boiler product; pick its room heater with back boiler on the row".into(),
             setting: None,
         }),
-        ("HeatSourceWet/*", "DirectElectricBoiler") => no_row_type(&["ElectricBoiler"], "electric boiler"),
-        ("HeatSourceWet/*", "SolidFuelBoiler") => no_row_type(&["SolidFuelBoiler"], "solid-fuel boiler"),
-        ("HeatSourceWet/*", "PrimaryThermalStore") => no_row_type(&["PrimaryThermalStore"], "primary thermal store"),
+        ("HeatSourceWet/*", "DirectElectricBoiler") => no_default(&["ElectricBoiler"], "electric boiler"),
+        ("HeatSourceWet/*", "SolidFuelBoiler") => no_default(&["SolidFuelBoiler"], "solid-fuel boiler"),
+        ("HeatSourceWet/*", "PrimaryThermalStore") => no_default(&["PrimaryThermalStore"], "primary thermal store"),
         // Single product for the type (DESNZ also names it).
         ("HeatSourceWet/*", "HIU") => auto("HeatInterfaceUnit"),
         // Single product for each battery type.
@@ -429,7 +427,7 @@ pub(crate) fn rule(
         // Single product for the type.
         ("HeatSourceWarmAir/*", "WarmAirCombustion") => auto("WarmAirCombustion"),
         ("HeatSourceWarmAir/*", "WarmAirElectric") => pick(&["WarmAirElectric"], "the pinned HEM Database has no electric warm-air product, so there is none to pick yet"),
-        ("SpaceHeatSystem/*", "CombustionRoomHeater") => no_row_type(&["RoomHeater"], "room heater"),
+        ("SpaceHeatSystem/*", "CombustionRoomHeater") => no_default(&["RoomHeater"], "room heater"),
         // DESNZ: the assessor selects; high heat retention or standard is a user choice and
         // capacity rounding would be our interpretation (question to Baz).
         ("SpaceHeatSystem/*", "ElecStorageHeater") => pick(&["StorageHeater"], "pick the storage heater product: high heat retention or standard, and its capacity"),
@@ -573,6 +571,7 @@ pub(crate) fn resolve_products(
     candidates: &mut BTreeMap<String, Vec<ProductCandidate>>,
 ) -> Vec<ProductSlot> {
     let snapshot = model.clone();
+    let existing = snapshot["IsExistingBuilding"] == true;
     let mut slots = Vec::new();
     for slot_rule in crate::epc_mappings::PRODUCT_SLOTS {
         let mut found = Vec::new();
@@ -594,6 +593,11 @@ pub(crate) fn resolve_products(
                     .inline
                     .is_some_and(|(f, values)| values.contains(&text(object, f)))
             {
+                continue;
+            }
+            // DESNZ-defined: an existing building's direct electric boiler takes its HEMIE form,
+            // which has no product.
+            if existing && kind == "DirectElectricBoiler" {
                 continue;
             }
             let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
@@ -873,10 +877,16 @@ pub(crate) fn apply_weather_curves(
             .get("ecodesign_control_class")
             .and_then(Value::as_u64)
             .unwrap_or_default();
+        let path = format!("/SpaceHeatSystem/{name}/ecodesign_controller");
+        // Classes V to VIII need load compensation coefficients; DESNZ gives no value (plan
+        // question E57).
+        let load = ["load_comp_a", "load_comp_b", "load_comp_c"];
+        if (5..=8).contains(&class) && load.iter().any(|k| !controller.contains_key(*k)) {
+            errors.push(error("E_EPC_LOAD_COMPENSATION", path.clone(), format!("'{name}' has ecodesign class {class} (load compensation), which needs {}. There is no default: state them on its heating controls, or choose the class without load compensation.", load.join(", "))));
+        }
         if !matches!(class, 2 | 3 | 6 | 7) {
             continue;
         }
-        let path = format!("/SpaceHeatSystem/{name}/ecodesign_controller");
         let curve_id = controller
             .get("weather_compensation_curve_id")
             .and_then(Value::as_u64);
@@ -1463,7 +1473,7 @@ pub(crate) mod tests {
             "SpaceHeatSystem": {
                 "hp rads": wet("hp", "radiator", json!({"ecodesign_control_class": 2, "min_flow_temp": 30})),
                 "hp ufh": wet("hp", "ufh", json!({"ecodesign_control_class": 3})),
-                "b rads": wet("b", "radiator", json!({"ecodesign_control_class": 6})),
+                "b rads": wet("b", "radiator", json!({"ecodesign_control_class": 6, "load_comp_a": 1, "load_comp_b": 1, "load_comp_c": 1})),
                 "b ufh": wet("b", "ufh", json!({"ecodesign_control_class": 7})),
                 "stated": wet("hp", "radiator", json!({"ecodesign_control_class": 2, "weather_comp_a": 1, "weather_comp_b": 1, "weather_comp_c": 1, "min_flow_temp": 25})),
                 "no comp": wet("hp", "radiator", json!({"ecodesign_control_class": 1})),
@@ -1499,10 +1509,17 @@ pub(crate) mod tests {
                 .iter()
                 .map(|e| (e.code.as_str(), e.path.as_str()))
                 .collect::<Vec<_>>(),
-            [(
-                "E_WEATHER_CURVE_REQUIRED",
-                "/SpaceHeatSystem/hiu/ecodesign_controller"
-            )]
+            [
+                // Class VII needs load compensation coefficients, which have no default.
+                (
+                    "E_EPC_LOAD_COMPENSATION",
+                    "/SpaceHeatSystem/b ufh/ecodesign_controller"
+                ),
+                (
+                    "E_WEATHER_CURVE_REQUIRED",
+                    "/SpaceHeatSystem/hiu/ecodesign_controller"
+                )
+            ]
         );
     }
 

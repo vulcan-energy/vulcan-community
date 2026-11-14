@@ -247,6 +247,11 @@ pub(super) fn map_systems(
             let mut hemie = system.clone();
             hemie.as_object_mut().expect("system").remove("Zone");
             hemie["model_type"] = json!("hemie");
+            if hemie["type"] == "DirectElectricBoiler"
+                && !direct_electric_boiler(&mut hemie, name, &path, errors, notices)
+            {
+                continue;
+            }
             let tanks_ok = match system["type"].as_str() {
                 Some("StorageTank") => {
                     tank_descriptors(&mut hemie, "tank_volume_category", &path, errors, notices)
@@ -270,6 +275,69 @@ pub(super) fn map_systems(
             }
         }
     }
+    // DESNZ-defined: an existing building's PV takes its HEMIE form, which derives what the row
+    // does not state (peak power from the array area, the inverter) and the panel ventilation
+    // from the mounting type. A stated panel count gives the array size in place of the drawn one.
+    for (name, system) in model
+        .get_mut("OnSiteGeneration")
+        .and_then(Value::as_object_mut)
+        .into_iter()
+        .flatten()
+    {
+        let mut hemie = system.clone();
+        let form = hemie.as_object_mut().expect("system");
+        form.remove("type");
+        form.insert("model_type".into(), json!("hemie"));
+        for panel in form
+            .get_mut("panels")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object_mut)
+        {
+            if let Some(pitch) = panel.get("pitch").filter(|p| p.is_number()).cloned() {
+                panel.insert("pitch".into(), json!("Custom"));
+                panel.insert("custom_pitch".into(), pitch);
+            }
+            if panel.contains_key("panel_count") {
+                panel.remove("height");
+                panel.remove("width");
+            }
+        }
+        let path = json_pointer(&["OnSiteGeneration", name]);
+        if let Some(projected) = to_form(
+            &hemie,
+            "PhotovoltaicSystem",
+            &path,
+            &mut defs,
+            errors,
+            notices,
+        ) {
+            *system = projected;
+        }
+    }
+}
+
+/// An existing building's direct electric boiler: its size category or rated power is an
+/// assessor input with no default; with neither its circulation pump power nor its manufacture
+/// year, the year is unknown (DESNZ-defined). False when it cannot convert.
+fn direct_electric_boiler(
+    boiler: &mut Value,
+    name: &str,
+    path: &str,
+    errors: &mut Vec<ValidationError>,
+    notices: &mut Vec<SchemaOmission>,
+) -> bool {
+    let has = |key: &str| boiler.get(key).is_some_and(|v| !v.is_null());
+    if !has("rated_power") && !has("size_category") {
+        errors.push(error("SYSTEM", format!("{path}/size_category"), format!("Direct electric boiler '{name}': state its size category, or its rated power, on its Systems row. There is no default.")));
+        return false;
+    }
+    if !has("electricity_circ_pump") && !has("manufacture_year") {
+        boiler["manufacture_year"] = json!("unknown");
+        notices.push(notice(path, format!("Direct electric boiler '{name}' states no manufacture year or circulation pump power, so it uses the default: manufacture year unknown.")));
+    }
+    true
 }
 
 /// A mechanical vent: a non-MVHR system's own row, or an MVHR terminal row.
@@ -518,6 +586,50 @@ mod tests {
         let heater = &model["SpaceHeatSystem"]["c"];
         assert_eq!(heater["model_type"], "hemie");
         assert!(heater.get("Zone").is_none());
+    }
+
+    #[test]
+    fn a_direct_electric_boiler_and_pv_take_their_hemie_forms() {
+        let pv = |panel: Value| json!({"type": "PhotovoltaicSystem", "EnergySupply": "mains elec", "panels": [panel]});
+        let (model, errors, notices) = run(json!({
+            "HeatSourceWet": {"e": {"type": "DirectElectricBoiler", "EnergySupply": "mains elec", "size_category": "Boiler used for top-up or localised heating"}},
+            "OnSiteGeneration": {
+                "drawn": pv(json!({"mounting_type": "rail-mounted", "pitch": 35, "orientation360": 180, "base_height": 5, "height": 2, "width": 4, "ventilation_strategy": "moderately_ventilated", "shading": []})),
+                "counted": pv(json!({"mounting_type": "integrated", "panel_count": 10, "orientation360": 90, "base_height": 5, "height": 2, "width": 4}))
+            }
+        }));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(model["HeatSourceWet"]["e"]["manufacture_year"], "unknown");
+        assert!(notices
+            .iter()
+            .any(|n| n.message.contains("manufacture year unknown")));
+        let panel = |name: &str| model["OnSiteGeneration"][name]["panels"][0].clone();
+        assert_eq!(model["OnSiteGeneration"]["drawn"]["model_type"], "hemie");
+        assert_eq!(
+            (
+                panel("drawn")["pitch"].clone(),
+                panel("drawn")["custom_pitch"].clone()
+            ),
+            (json!("Custom"), json!(35))
+        );
+        // A stated panel count sizes the array in place of the drawn height and width.
+        assert_eq!(panel("counted")["panel_count"], 10);
+        assert!(panel("counted").get("height").is_none());
+        // With no mounting type or size, each fails naming the field.
+        let (_, errors, _) = run(json!({
+            "HeatSourceWet": {"e": {"type": "DirectElectricBoiler", "EnergySupply": "mains elec"}},
+            "OnSiteGeneration": {"pv": pv(json!({"orientation360": 180, "base_height": 5, "height": 2, "width": 4}))}
+        }));
+        let found: Vec<&str> = errors.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(
+            found,
+            [
+                "/HeatSourceWet/e/size_category",
+                "/OnSiteGeneration/pv/panels/0"
+            ],
+            "{errors:#?}"
+        );
+        assert!(errors[1].message.contains("mounting_type"));
     }
 
     #[test]
