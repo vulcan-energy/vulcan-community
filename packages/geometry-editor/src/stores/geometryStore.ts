@@ -73,6 +73,7 @@ import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../lib/overrideProvenance
 import {
   getFloorStackWarningElementIds,
   validateElementCore,
+  heatingSizingWarningsFor,
   targetValidationFlags,
 } from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
@@ -2850,6 +2851,7 @@ const validateElementForState = (
     linearThermalBridgeIssues,
     partFFindings,
     hostFindings: state.hostValidationFindings,
+    heatingSizingWarnings: heatingSizingWarningsFor(state.heatingSizing, eb),
   });
 };
 

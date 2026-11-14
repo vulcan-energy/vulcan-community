@@ -307,6 +307,7 @@ import {
   getFloorStackWarningElementIds,
   targetValidationFlags,
   validateElementCore,
+  heatingSizingWarningsFor,
   type ValidationContext,
 } from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
@@ -2023,7 +2024,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     canUndo, canRedo, complianceSettings,
     defaultsPath, defaultsJson, defaultsLoading, defaultsLookup, junctionPsiDefaultsPath, junctionPsiDefaultsMap,
     calculateContextShadingDistance,
-    canvasViewResetKey, csvValidationCache, targetValidation, hostValidationFindings,
+    canvasViewResetKey, csvValidationCache, targetValidation, hostValidationFindings, heatingSizing,
   } = useGeometryStore(
     useShallow((s) => ({
       zones: s.zones,
@@ -2060,6 +2061,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       csvValidationCache: s.csvValidationCache,
       targetValidation: s.targetValidation,
       hostValidationFindings: s.hostValidationFindings,
+      heatingSizing: s.heatingSizing,
     }))
   );
 
@@ -2677,7 +2679,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
     return [...byKey.entries()];
   }, [linearGeometryIssues]);
-  const sharedElementValidationContext = useMemo<ValidationContext>(() => {
+  // Everything but the sizing warnings, so a sizing result alone never reruns the Part F data below.
+  const baseElementValidationContext = useMemo<ValidationContext>(() => {
     return {
       schemaPort,
       elementsById,
@@ -2727,6 +2730,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     spaceLabelsById,
     zones,
   ]);
+  // The same map for the same result and elements, so a status change alone leaves the context as it was.
+  const sizingWarnings = heatingSizingWarningsFor(heatingSizing, elementsById);
+  const sharedElementValidationContext = useMemo<ValidationContext>(
+    () => ({ ...baseElementValidationContext, heatingSizingWarnings: sizingWarnings }),
+    [baseElementValidationContext, sizingWarnings],
+  );
 
   // Deduplicate element validation calls within a geometry state snapshot while reusing
   // model-wide validation inputs that are identical for every element row.

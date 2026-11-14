@@ -27,7 +27,8 @@ export interface MissingElement {
   batchPlan?: BatchPlan;
 }
 
-export type ValidationSource = 'geometry' | 'schema' | 'fhs';
+/** `sizing`: heating sizing (heatingSizingWarnings); always a warning. */
+export type ValidationSource = 'geometry' | 'schema' | 'fhs' | 'sizing';
 
 export interface ValidationIssue {
   message: string;

@@ -92,6 +92,8 @@ import {
   roofFootprintIssueMessage,
 } from '../../lib/roofCutouts';
 import { inferPsiSourceFromValue } from '../../lib/simplifiedFabricMap';
+import { type HeatingSizing, type HeatSourceSizing, type SystemSizing } from '../../lib/heatingSizing';
+import { fmtTemp, subjectOf } from '../../lib/heatingSizingView';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
 import { getPApportionedLinearPsiForEditor } from '../thermalBridge/linearTbPsi';
 import { computeOpaqueUAndTotals, matchesFhsDiscreteArealHeatCapacity } from '../../lib/assemblyCalculator';
@@ -518,6 +520,125 @@ export interface ValidationContext {
   floorStackWarningElementIds?: ReadonlySet<string>;
   /** Issues the host adds for a task the user chose to run. */
   hostFindings?: HostValidationFindings | null;
+  /** {@link heatingSizingWarnings}. Added after the host findings, so they always stay warnings. */
+  heatingSizingWarnings?: ReadonlyMap<string, readonly ValidationIssue[]>;
+}
+
+/** A System element's wrapped `{ "<section>": { key: {...} } }` fragment, if it has one. */
+function systemFragment(element: Element, section: string): Record<string, unknown> | null {
+  const fragment = (element.extra_json as Record<string, unknown> | undefined)?.[section];
+  return fragment && typeof fragment === 'object' && !Array.isArray(fragment) ? (fragment as Record<string, unknown>) : null;
+}
+
+/**
+ * The model keys a System element writes for `section`, as the transform writes them (builder.rs
+ * csv_row_entries, merge_wrapped_system_fragment): every key of its extra_json fragment as it is,
+ * else its name, trimmed as the CSV parser trims a cell. Names are never case-folded or deduplicated.
+ */
+function systemModelKeys(element: Element, section: 'HeatSourceWet' | 'SpaceHeatSystem'): Set<string> {
+  if (element.type !== 'System' || element.subcategory !== section) return new Set();
+  const fragment = systemFragment(element, section);
+  if (fragment) return new Set(Object.keys(fragment));
+  const name = element.name?.trim();
+  return new Set(name ? [name] : []);
+}
+
+/**
+ * The SpaceHeatSystem model keys an element belongs to: its own for a SpaceHeatSystem System, the linked
+ * system's for a WetEmitter. The link resolves as builder.rs authored_space_heat_system_aliases_from_systems_csv
+ * does: a fragment key to itself; the element's name to its one key, or to itself when one of several keys
+ * is the name; a flat element's name to itself; anything else stays the literal link.
+ */
+function spaceHeatSystemKeyResolver(elements: readonly Element[]): (element: Element) => Set<string> {
+  const alias = new Map<string, string>();
+  for (const e of elements) {
+    if (e.type !== 'System' || e.subcategory !== 'SpaceHeatSystem') continue;
+    const name = e.name?.trim() || null;
+    const fragment = systemFragment(e, 'SpaceHeatSystem');
+    if (!fragment) {
+      if (name) alias.set(name, name);
+      continue;
+    }
+    const keys = Object.keys(fragment);
+    for (const key of keys) alias.set(key, key);
+    if (name && keys.length === 1) alias.set(name, keys[0]);
+    else if (name && Object.prototype.hasOwnProperty.call(fragment, name)) alias.set(name, name);
+  }
+  return (element) => {
+    if (element.type !== 'WetEmitter') return systemModelKeys(element, 'SpaceHeatSystem');
+    const link = element.space_heat_system?.trim();
+    return new Set(link ? [alias.get(link) ?? link] : []);
+  };
+}
+
+/** The sizing entry of a heat source's System element (the first, when its fragment holds several). */
+export function heatSourceSizingFor(sizing: HeatingSizing, element: Element): HeatSourceSizing | null {
+  const keys = systemModelKeys(element, 'HeatSourceWet');
+  return sizing.heatSources.find((s) => keys.has(s.name)) ?? null;
+}
+
+/** The sizing entry of a SpaceHeatSystem's System element, or of the system a WetEmitter links. */
+export function systemSizingFor(sizing: HeatingSizing, element: Element, elements: readonly Element[]): SystemSizing | null {
+  const keys = spaceHeatSystemKeyResolver(elements)(element);
+  return sizing.systems.find((s) => keys.has(s.name)) ?? null;
+}
+
+/**
+ * Heating sizing problems as warnings, keyed by element id: on the heat source's System element,
+ * on the SpaceHeatSystem's System element and on each WetEmitter linked to it. Only a result
+ * with a verdict of too small or too big speaks; anything unsized or unknown says nothing.
+ * A result is kept while the next model computes (stale while revalidating), as it already is
+ * while the live target check waits, so the flags do not flicker on each edit.
+ */
+export function heatingSizingWarnings(
+  sizing: { status: string; result?: HeatingSizing },
+  elements: readonly Element[],
+): Map<string, ValidationIssue[]> {
+  const out = new Map<string, ValidationIssue[]>();
+  if (!sizing.result || (sizing.status !== 'ready' && sizing.status !== 'computing')) return out;
+  const add = (id: string, message: string) => out.set(id, [...(out.get(id) ?? []), { message, source: 'sizing' }]);
+
+  const subject = subjectOf(sizing.result.zoneCount);
+  // The flag says the verdict only. The numbers, the range and the basis live in the element panel's
+  // Sizing block, so the two never repeat each other.
+  for (const s of sizing.result.heatSources) {
+    if (s.status !== 'ok' || s.designLossKw === null) continue;
+    const word = s.kind === 'HeatPump' ? 'heat pump' : 'boiler';
+    let message: string;
+    if (s.verdict === 'too-small' && s.maxKw !== null) message = `The ${word} is too small for the ${subject} on the design day.`;
+    else if (s.verdict === 'too-big' && s.minKw !== null) message = `The ${word} is too big for the ${subject}. It switches on and off all year.`;
+    else continue;
+    for (const e of elements) if (systemModelKeys(e, 'HeatSourceWet').has(s.name)) add(e.id, message);
+  }
+
+  const systemKey = spaceHeatSystemKeyResolver(elements);
+  for (const s of sizing.result.systems) {
+    if (s.status !== 'ok' || s.verdict !== 'too-small') continue;
+    if (s.outputAtDesignKw === null || s.flowTempAtDesignC === null || s.designLossKw === null) continue;
+    const message = `The radiators are too small at ${fmtTemp(s.flowTempAtDesignC)} flow.`;
+    for (const e of elements) if (systemKey(e).has(s.name)) add(e.id, message);
+  }
+  return out;
+}
+
+const NO_SIZING_WARNINGS: ReadonlyMap<string, readonly ValidationIssue[]> = new Map();
+const sizingWarningCache = new WeakMap<HeatingSizing, WeakMap<object, Map<string, ValidationIssue[]>>>();
+
+/**
+ * {@link heatingSizingWarnings}, built once per (sizing result, element set): the same map comes back
+ * for the same result and `elementsById`, whatever the store status, so a computing to ready change
+ * that carries the same result, or any number of per-element validations, reuses it.
+ */
+export function heatingSizingWarningsFor(
+  sizing: { status: string; result?: HeatingSizing },
+  elementsById: Record<string, Element>,
+): ReadonlyMap<string, readonly ValidationIssue[]> {
+  if (!sizing.result || (sizing.status !== 'ready' && sizing.status !== 'computing')) return NO_SIZING_WARNINGS;
+  let byElements = sizingWarningCache.get(sizing.result);
+  if (!byElements) sizingWarningCache.set(sizing.result, (byElements = new WeakMap()));
+  let warnings = byElements.get(elementsById);
+  if (!warnings) byElements.set(elementsById, (warnings = heatingSizingWarnings(sizing, Object.values(elementsById))));
+  return warnings;
 }
 
 function jsonSchemaPropertyIsBoolean(
@@ -2919,10 +3040,10 @@ export const validateElementCore = (
   const host = context.hostFindings;
   const withHost = withHostFindings(issues, warnings, host?.elements?.[element.id], host?.blockingWarnings);
   const prefixedIssues = withHost.issues.map(withPrefix);
-  const prefixedWarnings = withHost.warnings.map(withPrefix);
+  const prefixedWarnings = [...withHost.warnings, ...(context.heatingSizingWarnings?.get(element.id) ?? [])].map(withPrefix);
 
   const deduplicateByFieldKey = (items: ValidationIssue[]): ValidationIssue[] => {
-    const sourcePriority: Record<ValidationSource, number> = { geometry: 0, schema: 1, fhs: 2 };
+    const sourcePriority: Record<ValidationSource, number> = { geometry: 0, schema: 1, fhs: 2, sizing: 3 };
     const byFieldKey = new Map<string, ValidationIssue>();
     const noFieldKey: ValidationIssue[] = [];
     for (const item of items) {
