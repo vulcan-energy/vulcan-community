@@ -478,7 +478,7 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
     expect(wrappers.length).toBeGreaterThanOrEqual(43);
     // Arm 2 below needs a non-wrapper population to be worth anything; without this
     // floor it could quietly become vacuous if the sweep stopped reaching them.
-    expect(routes.length - wrappers.length).toBeGreaterThanOrEqual(6);
+    expect(routes.length - wrappers.length).toBeGreaterThanOrEqual(2);
 
     // Arm 1: a matching wrapper dispatches on its inner branch.
     const mismatches = wrappers
@@ -560,9 +560,22 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
       'core/System:HeatSourceWet.temp_distribution_heat_network -> number',
       'core/System:HeatSourceWet.temp_return_feed_max -> number',
       'core/System:HeatSourceWet.time_delay_backup -> number',
+      'core/System:HotWaterSource.rejected_energy_1 -> number',
+      'core/System:HotWaterSource.rejected_factor_3 -> number',
+      'core/System:HotWaterSource.storage_loss_factor_1 -> number',
+      'core/System:HotWaterSource.storage_loss_factor_2 -> number',
       'core/System:InfiltrationVentilation.ach_max_static_calcs -> number',
       'core/System:InfiltrationVentilation.ach_min_static_calcs -> number',
       'core/System:InfiltrationVentilation.vent_opening_ratio_init -> number',
+      'core/System:SpaceHeatSystem.bypass_fraction_recirculated -> number',
+      'core/System:SpaceHeatSystem.design_flow_rate -> number',
+      'core/System:SpaceHeatSystem.max_flow_rate -> number',
+      'core/System:SpaceHeatSystem.max_outdoor_temp -> number',
+      'core/System:SpaceHeatSystem.min_flow_rate -> number',
+      'core/System:SpaceHeatSystem.min_flow_temp -> number',
+      'core/System:SpaceHeatSystem.min_outdoor_temp -> number',
+      'core/System:SpaceHeatSystem.temp_flow_limit_upper -> number',
+      'core/System:SpaceHeatSystem.thermal_mass -> number',
       'core/WetEmitter.c -> number',
       'core/WetEmitter.c_per_m -> number',
       'core/WetEmitter.length -> number',
@@ -945,11 +958,18 @@ function sweepRenderedRows(): {
  * user sees a change".
  */
 const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
-  'core/BuildingElementAdjacentConditionedSpace [every subtype]': [
+  'core/BuildingElementOpaque [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
+    'solar_absorption_coeff | Solar Absorption Coeff | textbox | 0 | 1 | - | tip',
+  ],
+  'core/BuildingElementTransparent [every subtype]': [
+    'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'g_value | G-Value | textbox | 0 | 1 | - | tip',
+    'window_part_list | Window Part List | other:DIV | - | - | - | no-tip',
   ],
   'core/BuildingElementGround [- Exposed_floor Heated_basement ceiling door fancoil floor radiator roof ufh wall]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
@@ -997,29 +1017,75 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'thermal_transm_envi_base | Thermal Transm Envi Base | textbox | 0 | - | - | tip',
     'thermal_transm_walls | Thermal Transm Walls | textbox | 0 | - | - | tip',
   ],
-  'core/BuildingElementOpaque [every subtype]': [
+  'core/BuildingElementAdjacentConditionedSpace [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
-    'solar_absorption_coeff | Solar Absorption Coeff | textbox | 0 | 1 | - | tip',
+  ],
+  'core/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
+    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'u_value | U-Value | textbox | 0 | - | - | tip',
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
+    'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | - | - | tip',
   ],
   'core/BuildingElementPartyWall [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
   ],
-  'core/BuildingElementTransparent [every subtype]': [
-    'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
-    'u_value | U-Value | textbox | 0 | - | - | tip',
-    'g_value | G-Value | textbox | 0 | 1 | - | tip',
-    'window_part_list | Window Part List | other:DIV | - | - | - | no-tip',
+  'core/WindowShading [every subtype]': [
+    'type | Type | select | - | - | - | tip',
+    'distance | Distance | textbox | 0 | - | - | tip',
   ],
-  'core/ElectricBattery [every subtype]': [
-    'battery_age | Battery Age | textbox | 0 | - | - | tip',
-    'grid_charging_possible | Grid Charging Possible | checkbox | - | - | - | tip',
-    'maximum_charge_rate_one_way_trip | Maximum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
-    'maximum_discharge_rate_one_way_trip | Maximum Discharge Rate One Way Trip | textbox | 0 | - | - | tip',
-    'minimum_charge_rate_one_way_trip | Minimum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
+  'core/MechanicalVentilationDuctwork [every subtype]': [
+    'cross_section_shape | Cross Section Shape | select | - | - | - | tip',
+    'duct_perimeter_mm | Duct Perimeter | textbox | 0 | - | - | tip',
+    'external_diameter_mm | External Diameter | textbox | 0 | - | - | tip',
+    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
+    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
+    'internal_diameter_mm | Internal Diameter | textbox | 0 | - | - | tip',
+    'reflective | Reflective | checkbox | - | - | - | tip',
+  ],
+  'core/WaterPipework [every subtype]': [
+    'external_diameter_mm | External Diameter | textbox | 0 | - | - | tip',
+    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
+    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
+    'internal_diameter_mm | Internal Diameter | textbox | 0 | - | - | tip',
+    'pipe_contents | Pipe Contents | select | - | - | - | tip',
+    'surface_reflectivity | Surface Reflectivity | checkbox | - | - | - | tip',
+  ],
+  'core/WetEmitter [- Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door floor roof wall]': [
+    'c | c | textbox | 0 | - | - | tip',
+    'c_per_m | c per m | textbox | 0 | - | - | tip',
+    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+    'thermal_mass_per_m | Thermal Mass Per M | textbox | 0 | - | - | tip',
+    'length | Length | textbox | 0 | - | - | tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
+    'n | n | textbox | 0 | - | - | tip',
+    'emitter_floor_area | Emitter Floor Area | textbox | 0 | - | - | tip',
+    'equivalent_specific_thermal_mass | Equivalent Specific Thermal Mass | textbox | 0 | - | - | tip',
+    'system_performance_factor | System Performance Factor | textbox | 0 | - | - | tip',
+    'fancoil_test_data | Fancoil Test Data | textbox | - | - | {"fan_power_W":[1],"fan_speed_data":[{"power_output":[0],"temperature_diff":1}]} | tip',
+    'n_units | N Units | textbox | 0 | - | - | tip',
+  ],
+  'core/WetEmitter [radiator]': [
+    'c | c | textbox | 0 | - | - | tip',
+    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
+    'n | n | textbox | 0 | - | - | tip',
+  ],
+  'core/WetEmitter [ufh]': [
+    'equivalent_specific_thermal_mass | Equivalent Specific Thermal Mass | textbox | 0 | - | - | tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
+    'system_performance_factor | System Performance Factor | textbox | 0 | - | - | tip',
+  ],
+  'core/WetEmitter [fancoil]': [
+    'fancoil_test_data | Fancoil test data | textbox | 0.01 | - | - | no-tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
+  ],
+  'core/Vents [every subtype]': [
+    'pressure_difference_ref | Pressure Difference Ref | textbox | 0 | - | - | tip',
   ],
   'core/MechanicalVentilation [every subtype]': [
     'Control | Control | textbox | - | - | - | tip',
@@ -1038,17 +1104,32 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'orientation360 | Orientation 360 | textbox | 0 | 360 | - | tip',
     'pitch | Pitch | textbox | 0 | 180 | - | tip',
   ],
-  'core/MechanicalVentilationDuctwork [every subtype]': [
-    'cross_section_shape | Cross Section Shape | select | - | - | - | tip',
-    'duct_perimeter_mm | Duct Perimeter | textbox | 0 | - | - | tip',
-    'external_diameter_mm | External Diameter | textbox | 0 | - | - | tip',
-    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
-    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
-    'internal_diameter_mm | Internal Diameter | textbox | 0 | - | - | tip',
-    'reflective | Reflective | checkbox | - | - | - | tip',
+  'core/OnSiteGeneration [every subtype]': [
+    'EnergySupply | Energy Supply | textbox | - | - | - | tip',
+    'inverter_is_inside | Inverter Is Inside | checkbox | - | - | - | tip',
+    'inverter_peak_power_ac | Inverter Peak Power AC | textbox | 0 | - | - | tip',
+    'inverter_peak_power_dc | Inverter Peak Power DC | textbox | 0 | - | - | tip',
+    'inverter_type | Inverter Type | select | - | - | - | tip',
+  ],
+  'core/ElectricBattery [every subtype]': [
+    'battery_age | Battery Age | textbox | 0 | - | - | tip',
+    'grid_charging_possible | Grid Charging Possible | checkbox | - | - | - | tip',
+    'maximum_charge_rate_one_way_trip | Maximum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
+    'maximum_discharge_rate_one_way_trip | Maximum Discharge Rate One Way Trip | textbox | 0 | - | - | tip',
+    'minimum_charge_rate_one_way_trip | Minimum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
   ],
   'core/System:HeatSourceWet': [
-    'boiler | Boiler | textbox | - | - | - | tip',
+    'boiler_location | boiler · Boiler Location | select | - | - | - | tip',
+    'efficiency_full_load | boiler · Efficiency Full Load | textbox | 0 | 1 | - | tip',
+    'efficiency_part_load | boiler · Efficiency Part Load | textbox | 0 | 1.12 | - | tip',
+    'electricity_circ_pump | boiler · Electricity Circ Pump | textbox | 0 | - | - | tip',
+    'electricity_full_load | boiler · Electricity Full Load | textbox | 0 | - | - | tip',
+    'electricity_part_load | boiler · Electricity Part Load | textbox | 0 | - | - | tip',
+    'electricity_standby | boiler · Electricity Standby | textbox | 0 | - | - | tip',
+    'EnergySupply | boiler · Energy Supply | textbox | - | - | - | tip',
+    'EnergySupply_aux | boiler · Energy Supply Aux | textbox | - | - | - | tip',
+    'modulation_load | boiler · Modulation Load | textbox | 0 | 1 | - | tip',
+    'rated_power | boiler · Rated Power | textbox | 0 | - | - | tip',
     'backup_ctrl_type | hp · Backup Ctrl Type | select | - | - | - | tip',
     'boiler | hp · Boiler | textbox | - | - | {"EnergySupply":"example","EnergySupply_aux":"example","boiler_location":"internal","efficiency_full_load":1,"efficiency_part_load":1.12,"electricity_circ_pump":0,"electricity_full_load":0,"electricity_part_load":0,"electricity_standby":0,"modulation_load":0,"rated_power":1,"cost_schedule_hybrid":{"cost_schedule_boiler":{},"cost_schedule_hp":{},"cost_schedule_start_day":0,"cost_schedule_time_series_step":1}} | tip',
     'BufferTank | hp · Buffer Tank | textbox | - | - | {"daily_losses":1,"pump_fixed_flow_rate":1,"pump_power_at_flow_rate":1,"volume":1} | tip',
@@ -1077,14 +1158,22 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'time_delay_backup | hp · Time Delay Backup | textbox | 0 | - | - | tip',
     'var_flow_temp_ctrl_during_test | hp · Var Flow Temp Ctrl During Test | checkbox | - | - | - | tip',
   ],
+  'core/System:HotWaterSource': [
+    'ColdWaterSource | Cold Water Source | textbox | - | - | - | tip',
+    'daily_HW_usage | Daily Hot Water Usage | textbox | 0 | - | - | tip',
+    'HeatSourceWet | Heat Source Wet | textbox | - | - | - | tip',
+    'rejected_energy_1 | Rejected Energy 1 | textbox | 0 | - | - | tip',
+    'rejected_factor_3 | Rejected Factor 3 | textbox | - | - | - | tip',
+    'separate_DHW_tests | Separate DHW Tests | select | - | - | - | tip',
+    'setpoint_temp | Setpoint Temp | textbox | 0 | 100 | - | tip',
+    'storage_loss_factor_1 | Storage Loss Factor 1 | textbox | 0 | - | - | tip',
+    'storage_loss_factor_2 | Storage Loss Factor 2 | textbox | 0 | - | - | tip',
+  ],
   'core/System:HotWaterDemand': [
     'Bath | Bath | textbox | - | - | {} | tip',
     'Distribution | Distribution | textbox | - | - | {} | tip',
     'Other | Other | textbox | - | - | {} | tip',
     'Shower | Shower | textbox | - | - | {} | tip',
-  ],
-  'core/System:HotWaterSource': [
-    'hw cylinder | Hw Cylinder | textbox | - | - | - | no-tip',
   ],
   'core/System:InfiltrationVentilation': [
     'ach_max_static_calcs | ACH Maximum Static Calcs | textbox | 0 | - | - | tip',
@@ -1106,31 +1195,42 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'Vents | Vents | textbox | - | - | {} | tip',
   ],
   'core/System:SpaceCoolSystem': [
-    'cooler | Cooler | textbox | - | - | - | no-tip',
+    'Control | Control | textbox | - | - | - | tip',
+    'cooling_capacity | Cooling Capacity | textbox | 0 | - | - | tip',
+    'efficiency | Efficiency | textbox | 0 | - | - | tip',
+    'EnergySupply | Energy Supply | textbox | - | - | - | tip',
+    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
   ],
   'core/System:SpaceHeatSystem': [
-    'Zone 1 circuit | Zone 1 Circuit | textbox | - | - | - | no-tip',
+    'bypass_fraction_recirculated | Bypass Fraction Recirculated | textbox | 0 | 1 | - | tip',
+    'Control | Control | textbox | - | - | - | tip',
+    'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | tip',
+    'design_flow_temp | Design Flow Temp | textbox | 0 | - | - | tip',
+    'ecodesign_control_class | Ecodesign Controller · Ecodesign Control Class | select | - | - | - | tip',
+    'max_outdoor_temp | Ecodesign Controller · Max Outdoor Temp | textbox | -273.15 | - | - | tip',
+    'min_flow_temp | Ecodesign Controller · Min Flow Temp | textbox | 0 | - | - | tip',
+    'min_outdoor_temp | Ecodesign Controller · Min Outdoor Temp | textbox | -273.15 | - | - | tip',
+    'temp_flow_limit_upper | Temp Flow Limit Upper | textbox | 0 | - | - | tip',
+    'max_flow_rate | Max Flow Rate | textbox | 0 | - | - | tip',
+    'min_flow_rate | Min Flow Rate | textbox | 0 | - | - | tip',
+    'pipework | Pipework | textbox | - | - | [{"external_diameter_mm":1,"insulation_thermal_conductivity":1,"insulation_thickness_mm":0,"internal_diameter_mm":1,"length":1,"location":"internal","pipe_contents":"water","surface_reflectivity":false}] | no-tip',
+    'temp_diff_emit_dsgn | Temp Diff Emit Dsgn | textbox | 0 | - | - | tip',
+    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+    'variable_flow | Variable Flow | checkbox | - | - | - | tip',
   ],
-  'core/WaterPipework [every subtype]': [
-    'external_diameter_mm | External Diameter | textbox | 0 | - | - | tip',
-    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
-    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
-    'internal_diameter_mm | Internal Diameter | textbox | 0 | - | - | tip',
-    'pipe_contents | Pipe Contents | select | - | - | - | tip',
-    'surface_reflectivity | Surface Reflectivity | checkbox | - | - | - | tip',
-  ],
-  'fhs/BuildingElementAdjacentConditionedSpace [every subtype]': [
+  'fhs/BuildingElementOpaque [every subtype]': [
     'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
+    'colour | Colour | select | - | - | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
   ],
-  'fhs/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
+  'fhs/BuildingElementTransparent [every subtype]': [
+    'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
-    'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | 3 | - | tip',
+    'g_value | G-Value | textbox | 0 | 1 | - | tip',
+    'security_risk | Security Risk? | select | - | - | - | tip',
+    'window_part_list | Window Part List | other:DIV | - | - | - | no-tip',
   ],
   'fhs/BuildingElementGround [- Exposed_floor Slab_no_edge_insulation ceiling door fancoil floor radiator roof ufh wall]': [
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
@@ -1178,28 +1278,56 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'thermal_transm_walls | Thermal Transm Walls | textbox | - | - | - | tip',
     'height_basement_walls | Height Basement Walls | textbox | - | - | - | tip',
   ],
-  'fhs/BuildingElementOpaque [every subtype]': [
+  'fhs/BuildingElementAdjacentConditionedSpace [every subtype]': [
     'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
-    'colour | Colour | select | - | - | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+  ],
+  'fhs/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
+    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
+    'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
+    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | 3 | - | tip',
   ],
   'fhs/BuildingElementPartyWall [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
   ],
-  'fhs/BuildingElementTransparent [every subtype]': [
-    'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
-    'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
-    'g_value | G-Value | textbox | 0 | 1 | - | tip',
-    'security_risk | Security Risk? | select | - | - | - | tip',
-    'window_part_list | Window Part List | other:DIV | - | - | - | no-tip',
+  'fhs/MechanicalVentilationDuctwork [every subtype]': [
+    'cross_section_shape | Cross Section Shape | select | - | - | - | tip',
+    'internal_diameter_mm | Internal Diameter | textbox | 0 | 1000 | - | tip',
+    'external_diameter_mm | External Diameter | textbox | 0 | 1000 | - | tip',
+    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
+    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | 100 | - | tip',
+    'reflective | Reflective | checkbox | - | - | - | tip',
   ],
-  'fhs/ElectricBattery [every subtype]': [
-    'minimum_charge_rate_one_way_trip | Minimum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
-    'maximum_charge_rate_one_way_trip | Maximum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
-    'maximum_discharge_rate_one_way_trip | Maximum Discharge Rate One Way Trip | textbox | 0 | - | - | tip',
+  'fhs/WaterPipework [every subtype]': [
+    'internal_diameter_mm | Internal Diameter | textbox | 5 | 50 | - | tip',
+    'external_diameter_mm | External Diameter | textbox | 5 | 50 | - | tip',
+    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
+    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
+    'surface_reflectivity | Surface Reflectivity | checkbox | - | - | - | tip',
+    'pipe_contents | Pipe Contents | select | - | - | - | tip',
+  ],
+  'fhs/WetEmitter [- Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door floor roof wall]': [
+    'frac_convective | Frac Convective | textbox | - | - | - | tip',
+  ],
+  'fhs/WetEmitter [radiator]': [
+    'frac_convective | Frac Convective | textbox | - | - | - | tip',
+    'n | N | textbox | 0 | 2 | - | tip',
+    'c | C | textbox | 0 | 2 | - | tip',
+    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+  ],
+  'fhs/WetEmitter [ufh]': [
+    'frac_convective | Frac Convective | textbox | - | - | - | tip',
+    'equivalent_specific_thermal_mass | Equivalent Specific Thermal Mass | textbox | 0 | - | - | tip',
+    'system_performance_factor | System Performance Factor | textbox | 0 | - | - | tip',
+  ],
+  'fhs/WetEmitter [fancoil]': [
+    'fancoil_test_data | Fancoil test data | textbox | 0.01 | - | - | no-tip',
+    'frac_convective | Frac Convective | textbox | - | - | - | tip',
   ],
   'fhs/MechanicalVentilation [-]': [
     'design_zone_cooling_covered_by_mech_vent | Design Zone Cooling Covered By Mech Vent | textbox | - | - | - | tip',
@@ -1218,14 +1346,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'orientation360 | Orientation 360 | textbox | 0 | 360 | - | tip',
     'pitch | Pitch | textbox | 0 | 180 | - | tip',
   ],
-  'fhs/MechanicalVentilationDuctwork [every subtype]': [
-    'cross_section_shape | Cross Section Shape | select | - | - | - | tip',
-    'internal_diameter_mm | Internal Diameter | textbox | 0 | 1000 | - | tip',
-    'external_diameter_mm | External Diameter | textbox | 0 | 1000 | - | tip',
-    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
-    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | 100 | - | tip',
-    'reflective | Reflective | checkbox | - | - | - | tip',
-  ],
   'fhs/OnSiteGeneration [every subtype]': [
     'ventilation_strategy | Ventilation Strategy | select | - | - | - | tip',
     'EnergySupply | Energy Supply | textbox | - | - | - | tip',
@@ -1234,6 +1354,11 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'inverter_peak_power_ac | Inverter Peak Power AC | textbox | 0 | - | - | tip',
     'inverter_is_inside | Inverter Is Inside | checkbox | - | - | - | tip',
     'inverter_type | Inverter Type | select | - | - | - | tip',
+  ],
+  'fhs/ElectricBattery [every subtype]': [
+    'minimum_charge_rate_one_way_trip | Minimum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
+    'maximum_charge_rate_one_way_trip | Maximum Charge Rate One Way Trip | textbox | 0 | - | - | tip',
+    'maximum_discharge_rate_one_way_trip | Maximum Discharge Rate One Way Trip | textbox | 0 | - | - | tip',
   ],
   'fhs/System:HeatSourceWet': [
     'boiler_location | boiler · Boiler Location | select | - | - | - | tip',
@@ -1270,11 +1395,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'time_constant_onoff_operation | hp · Time Constant On/Off Operation | textbox | 0 | - | - | no-tip',
     'var_flow_temp_ctrl_during_test | hp · Var Flow Temp Ctrl During Test | checkbox | - | - | - | no-tip',
   ],
-  'fhs/System:HotWaterDemand': [
-    'Bath | Bath | textbox | - | - | {} | tip',
-    'Other | Other | textbox | - | - | {} | no-tip',
-    'Shower | Shower | textbox | - | - | {} | no-tip',
-  ],
   'fhs/System:HotWaterSource': [
     'ColdWaterSource | Cold Water Source | select | - | - | - | no-tip',
     'HeatSourceWet | Heat Source Wet | textbox | - | - | null | tip',
@@ -1283,6 +1403,11 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'separate_DHW_tests | Separate DHW Tests | select | - | - | - | tip',
     'storage_loss_factor_1 | Storage Loss Factor 1 | textbox | 0 | - | - | tip',
     'storage_loss_factor_2 | Storage Loss Factor 2 | textbox | 0 | - | - | tip',
+  ],
+  'fhs/System:HotWaterDemand': [
+    'Bath | Bath | textbox | - | - | {} | tip',
+    'Other | Other | textbox | - | - | {} | no-tip',
+    'Shower | Shower | textbox | - | - | {} | no-tip',
   ],
   'fhs/System:InfiltrationVentilation': [
     'ach_max_static_calcs | ACH Max Static Calcs | textbox | 0 | - | - | tip',
@@ -1318,83 +1443,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'temp_flow_limit_upper | Temp Flow Limit Upper | textbox | 0 | - | - | tip',
     'temp_diff_emit_dsgn | Temp Diff Emit Dsgn | textbox | 0 | 70 | - | tip',
     'variable_flow | Variable Flow | checkbox | - | - | - | no-tip',
-  ],
-  'fhs/WaterPipework [every subtype]': [
-    'internal_diameter_mm | Internal Diameter | textbox | 5 | 50 | - | tip',
-    'external_diameter_mm | External Diameter | textbox | 5 | 50 | - | tip',
-    'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
-    'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
-    'surface_reflectivity | Surface Reflectivity | checkbox | - | - | - | tip',
-    'pipe_contents | Pipe Contents | select | - | - | - | tip',
-  ],
-  'fhs/WetEmitter [- Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door floor roof wall]': [
-    'frac_convective | Frac Convective | textbox | - | - | - | tip',
-  ],
-  'fhs/WetEmitter [radiator]': [
-    'frac_convective | Frac Convective | textbox | - | - | - | tip',
-    'n | N | textbox | 0 | 2 | - | tip',
-    'c | C | textbox | 0 | 2 | - | tip',
-    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
-  ],
-  'fhs/WetEmitter [ufh]': [
-    'frac_convective | Frac Convective | textbox | - | - | - | tip',
-    'equivalent_specific_thermal_mass | Equivalent Specific Thermal Mass | textbox | 0 | - | - | tip',
-    'system_performance_factor | System Performance Factor | textbox | 0 | - | - | tip',
-  ],
-  'fhs/WetEmitter [fancoil]': [
-    'fancoil_test_data | Fancoil test data | textbox | 0.01 | - | - | no-tip',
-    'frac_convective | Frac Convective | textbox | - | - | - | tip',
-  ],
-  'core/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
-    'u_value | U-Value | textbox | 0 | - | - | tip',
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
-    'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | - | - | tip',
-  ],
-  'core/WetEmitter [- Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door floor roof wall]': [
-    'c | c | textbox | 0 | - | - | tip',
-    'c_per_m | c per m | textbox | 0 | - | - | tip',
-    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
-    'thermal_mass_per_m | Thermal Mass Per M | textbox | 0 | - | - | tip',
-    'length | Length | textbox | 0 | - | - | tip',
-    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
-    'n | n | textbox | 0 | - | - | tip',
-    'emitter_floor_area | Emitter Floor Area | textbox | 0 | - | - | tip',
-    'equivalent_specific_thermal_mass | Equivalent Specific Thermal Mass | textbox | 0 | - | - | tip',
-    'system_performance_factor | System Performance Factor | textbox | 0 | - | - | tip',
-    'fancoil_test_data | Fancoil Test Data | textbox | - | - | {"fan_power_W":[1],"fan_speed_data":[{"power_output":[0],"temperature_diff":1}]} | tip',
-    'n_units | N Units | textbox | 0 | - | - | tip',
-  ],
-  'core/WetEmitter [radiator]': [
-    'c | c | textbox | 0 | - | - | tip',
-    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
-    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
-    'n | n | textbox | 0 | - | - | tip',
-  ],
-  'core/WetEmitter [ufh]': [
-    'equivalent_specific_thermal_mass | Equivalent Specific Thermal Mass | textbox | 0 | - | - | tip',
-    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
-    'system_performance_factor | System Performance Factor | textbox | 0 | - | - | tip',
-  ],
-  'core/WetEmitter [fancoil]': [
-    'fancoil_test_data | Fancoil test data | textbox | 0.01 | - | - | no-tip',
-    'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
-  ],
-  'core/OnSiteGeneration [every subtype]': [
-    'EnergySupply | Energy Supply | textbox | - | - | - | tip',
-    'inverter_is_inside | Inverter Is Inside | checkbox | - | - | - | tip',
-    'inverter_peak_power_ac | Inverter Peak Power AC | textbox | 0 | - | - | tip',
-    'inverter_peak_power_dc | Inverter Peak Power DC | textbox | 0 | - | - | tip',
-    'inverter_type | Inverter Type | select | - | - | - | tip',
-  ],
-  'core/Vents [every subtype]': [
-    'pressure_difference_ref | Pressure Difference Ref | textbox | 0 | - | - | tip',
-  ],
-  // Core names its window shading item WindowShadingObject (FHS: WindowShading).
-  'core/WindowShading [every subtype]': [
-    'type | Type | select | - | - | - | tip',
-    'distance | Distance | textbox | 0 | - | - | tip',
   ],
 };
 

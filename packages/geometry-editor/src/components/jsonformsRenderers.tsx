@@ -1912,6 +1912,8 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
           variant="ghost"
           onChange={(e) => {
             const next = e.currentTarget.value;
+            // Text never replaces an object: it would turn a structured input into a string.
+            if (!isJsonLike && data !== null && typeof data === 'object') return;
             if (!isJsonLike && elementType && propKey) {
               const res = validateAdvancedFieldPrimitive(cfg, elementType, propKey, next);
               setLocalError(res.valid ? null : (res.errors?.[0] ?? 'Invalid value'));
