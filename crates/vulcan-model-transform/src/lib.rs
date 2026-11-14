@@ -653,6 +653,20 @@ pub fn validate_target_input(
             schema_path: None, keyword: None,
         });
     }
+    if contract.uses_exact_empty_shading_sectors
+        && model
+            .pointer("/ExternalConditions/shading_segments")
+            .and_then(Value::as_array)
+            .and_then(|sectors| target_mappings::flat_sky_sum(sectors))
+            .is_some_and(|sum| sum > 1.0)
+    {
+        errors.push(ValidationError {
+            code: "E_PYTHON_FHS_SKY_SUM".into(),
+            path: "/ExternalConditions/shading_segments".into(),
+            message: format!("{hem} adds each shading segment's width / 360 for a flat element, and these segments sum to more than the whole sky in its arithmetic, so the run fails. Move one Context Shading angle by 1 degree."),
+            schema_path: None, keyword: None,
+        });
+    }
     if contract.requires_detailed_thermal_bridges {
         if let Some(zones) = model.get("Zone").and_then(Value::as_object) {
             for (name, zone) in zones {

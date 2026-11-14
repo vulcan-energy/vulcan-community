@@ -9,6 +9,7 @@ import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
+import { contextShadingDistanceDetails } from '../../lib/contextShadingGeometry';
 import { elementSchemaTakesField, simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
 import {
@@ -1854,8 +1855,14 @@ export const validateElementCore = (
         const parent = Object.values(elementsById).find(e => e.name === contextElement.parent_element);
         if (parent && contextElement.coordinates && parent.coordinates && context.calculateContextShadingDistance) {
           const derivedDistance = context.calculateContextShadingDistance(contextElement, parent);
-          if (derivedDistance === 0) {
-            issues.push(geo('Distance 0 (derived)', 'distance'));
+          if (!(derivedDistance > 0)) {
+            issues.push(geo(`Distance is ${derivedDistance} m: the object is level with or behind the facade of the dwelling's closest external wall (for example beside it, or beyond a party wall), not in front of it. HEM needs a distance above 0. Vulcan measures it at right angles from the nearest external wall to the obstacle's nearest face.`, 'distance'));
+          }
+          // A warning, never blocking: before the thickness rule the distance ran from the internal line.
+          // A thickness the model gives (wall layers, floor, ground floor) needs no message.
+          const thickness = contextShadingDistanceDetails(contextElement, parent, Object.values(elementsById))?.thickness;
+          if (thickness?.source === 'none') {
+            warnings.push(geo('No wall thickness in the model (no construction layers on the closest external wall, no thickness_walls on the floor or the ground floor), so the distance is measured from the internal wall line.', 'distance'));
           }
         } else {
           issues.push(geo('Missing parent or coordinates', 'parent_element'));

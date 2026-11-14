@@ -36,7 +36,7 @@ import { getDormerBundleInfo } from '../../lib/dormerGeometry';
 import { deriveRoofCutout, effectiveFloorsOf, elementsOf } from '../../lib/roofCutouts';
 import { isElementOnActiveCanvasFloor } from '../../lib/elementCanvasFloor';
 import { isDevelopmentContextGeneratedShading } from '../../lib/developmentContextShading';
-import { getPlanCenter } from '../../lib/contextShadingGeometry';
+import { contextShadingDistanceDetails, getPlanCenter } from '../../lib/contextShadingGeometry';
 import {
   cascadeHostedDescendantGeometry,
   collectHostedDescendantElementIds,
@@ -2713,13 +2713,18 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               if (!parentCenter) return null;
               const parentCenterCanvas = worldToCanvas(parentCenter, scale, panOffset, canvasCenter);
 
-              // Calculate ContextShading center using current coordinates (real-time during drag)
-              const contextCenter = getPlanCenter(coordinates);
-              if (!contextCenter) return null;
-              const contextCenterCanvas = worldToCanvas(contextCenter, scale, panOffset, canvasCenter);
-
-              // Calculate distance
-              const distance = Math.hypot(contextCenter.x - parentCenter.x, contextCenter.y - parentCenter.y);
+              // The distance, from the same function that stores
+              // it, using current coordinates (real-time during drag).
+              const measured = contextShadingDistanceDetails(
+                { coordinates },
+                parentElement,
+                elementIds.map((id) => elementsById[id]).filter(Boolean),
+              );
+              if (!measured) return null;
+              const measuredFrom = worldToCanvas(measured.from, scale, panOffset, canvasCenter);
+              const measuredTo = worldToCanvas(measured.to, scale, panOffset, canvasCenter);
+              const distanceColor = measured.distance > 0 ? canvasInteractionPalette.guide : canvasInteractionPalette.warningGuide;
+              const distanceLabel = `${measured.distance.toFixed(2)}m${measured.thickness.source === 'none' ? ' (internal line)' : ''}`;
 
               // Calculate angles in real-time using current coordinates
               const { calculateShadingAngularRange } = geometryStore.getState();
@@ -2800,22 +2805,22 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     );
                   })()}
 
-                  {/* Distance line to ContextShading center */}
+                  {/* Distance: closest external wall's outside face to the object's closest face */}
                   <Line
-                    points={[parentCenterCanvas.x, parentCenterCanvas.y, contextCenterCanvas.x, contextCenterCanvas.y]}
-                    stroke={canvasInteractionPalette.guide}
+                    points={[measuredFrom.x, measuredFrom.y, measuredTo.x, measuredTo.y]}
+                    stroke={distanceColor}
                     strokeWidth={2}
                     dash={[5, 5]}
                     listening={false}
                   />
 
-                  {/* Distance label */}
+                  {/* Distance label: the value stored and sent to HEM */}
                   <Text
-                    x={parentCenterCanvas.x + 15}
-                    y={parentCenterCanvas.y - 15}
-                    text={`${distance.toFixed(1)}m`}
+                    x={(measuredFrom.x + measuredTo.x) / 2 + 8}
+                    y={(measuredFrom.y + measuredTo.y) / 2 - 6}
+                    text={distanceLabel}
                     fontSize={12}
-                    fill={canvasInteractionPalette.guide}
+                    fill={distanceColor}
                     fontStyle="bold"
                     listening={false}
                   />

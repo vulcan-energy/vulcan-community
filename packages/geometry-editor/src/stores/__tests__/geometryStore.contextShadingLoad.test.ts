@@ -6,7 +6,8 @@ import { createGeometryStore } from '../geometryStore';
 import type { ContextShading } from '../../geometry/types';
 
 // A 10 x 6 floor whose east edge carries a bay-like vertex cluster: area centroid (5, 3),
-// vertex mean (~7.2, 3). The shading is a point 20 m due north of the area centroid.
+// vertex mean (~7.2, 3). The shading is a point due north of the area centroid, 17 m from
+// the north wall.
 const csvWithShading = (startAngle: string, endAngle: string, distance: string) => `Metadata,,
 GlobalOrientationOffset,0,
 VulcanCsvVersion,3
@@ -32,13 +33,13 @@ it('re-derives stale context shading angles and distance from the drawing on loa
   const result = store.getState().loadFromCSV(csvWithShading('350', '355', '21.5'));
 
   expect(result.upgraded).toBe(true);
-  expect(tree(store)).toMatchObject({ start_angle: 0, end_angle: 0, distance: 20 });
+  expect(tree(store)).toMatchObject({ start_angle: 0, end_angle: 0, distance: 17 });
   expect(store.getState().getDocumentCsv()).not.toBe(store.getState().lastSavedCsv);
 });
 
 it('leaves a model whose stored values already match its drawing clean', () => {
   const store = createGeometryStore({ defaultDefaultsPath: null });
-  const result = store.getState().loadFromCSV(csvWithShading('0', '0', '20'));
+  const result = store.getState().loadFromCSV(csvWithShading('0', '0', '17'));
 
   expect(result.upgraded).toBe(false);
   expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);

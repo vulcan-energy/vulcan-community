@@ -150,7 +150,7 @@ describe('developmentContextShading', () => {
     const generated = Object.values(first.elementsById).find((element) => element.type === 'ContextShading') as any;
     expect(generated).toBeDefined();
     expect(generated.parent_element).toBe('Active Ground');
-    expect(generated.distance).toBe(8);
+    expect(generated.distance).toBe(4);
     expect(generated.height).toBe(2.7);
     expect(generated.extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.sourceStem).toBe('plot-b');
 
@@ -365,7 +365,7 @@ describe('developmentContextShading', () => {
     expect(sharedContext.shading_type).toBe('overhang');
     expect(sharedContext.parent_element).toBe('Active Ground');
     expect(sharedContext.height).toBe(6.5);
-    expect(sharedContext.distance).toBe(19);
+    expect(sharedContext.distance).toBe(16);
     expect(sharedContext.start_angle).not.toBe(0);
     expect(isDevelopmentContextGeneratedShading(sharedContext)).toBe(false);
     expect(sharedContext.extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.sourceKind).toBeUndefined();

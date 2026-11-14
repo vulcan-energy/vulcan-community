@@ -521,6 +521,8 @@ function buildGeneratedContextShadingFromCoordinates(args: {
   id: string;
   name: string;
   parent: Element;
+  /** The active model's elements, for its wall types. */
+  activeElements: readonly Element[];
   sourceModel: DevelopmentContextShadingModel;
   sourceElementId: string;
   sourceKind: DevelopmentContextShadingSourceKind;
@@ -561,7 +563,7 @@ function buildGeneratedContextShadingFromCoordinates(args: {
   );
   draft.start_angle = roundToTwoDecimals(angles.start_angle);
   draft.end_angle = roundToTwoDecimals(angles.end_angle);
-  draft.distance = calculateContextShadingDistanceFromCoordinates(draft, args.parent);
+  draft.distance = calculateContextShadingDistanceFromCoordinates(draft, args.parent, args.activeElements);
 
   const metaWithoutSignature = {
     version: 1 as const,
@@ -593,6 +595,8 @@ function buildGeneratedContextShading(args: {
   id: string;
   name: string;
   parent: Element;
+  /** The active model's elements, for its wall types. */
+  activeElements: readonly Element[];
   sourceModel: DevelopmentContextShadingModel;
   sourceFootprint: FootprintCandidate;
   sourceVertical: DevelopmentModelVerticalContext;
@@ -606,6 +610,7 @@ function buildGeneratedContextShading(args: {
     id: args.id,
     name: args.name,
     parent: args.parent,
+    activeElements: args.activeElements,
     sourceModel: args.sourceModel,
     sourceElementId: args.sourceFootprint.element.id,
     sourceKind: 'model_footprint',
@@ -719,6 +724,7 @@ export function syncDevelopmentContextShadingElements(
             id: existing?.id ?? generatedElementId(key),
             name,
             parent: activeParent.element,
+          activeElements,
             sourceModel: model,
             sourceFootprint,
             sourceVertical,
@@ -750,6 +756,7 @@ export function syncDevelopmentContextShadingElements(
           id: existing?.id ?? generatedElementId(key),
           name,
           parent: activeParent.element,
+          activeElements,
           sourceModel: model,
           sourceElementId: sourceContext.id,
           sourceKind: 'explicit_context_shading',
@@ -769,6 +776,10 @@ export function syncDevelopmentContextShadingElements(
     }
   }
 
+  // HEM takes only a distance above 0 (an object beside the dwelling measures 0 or less), so a generated object without one is left out; every other one is kept.
+  for (const [key, target] of targets) {
+    if (!(target.distance > 0)) targets.delete(key);
+  }
   for (const [key, target] of targets) {
     const existing = existingGenerated.get(key);
     const elementToWrite: ContextShading = {

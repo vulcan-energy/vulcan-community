@@ -4088,104 +4088,102 @@ impl JSONBuilder {
                     obstacles.push((row, start, end, shading_type));
                 }
             }
-            let mut shading_segments = Vec::new();
-
-            // Create 36 segments (0-360 degrees)
-            for i in 0..36 {
-                let start_angle = i * 10;
-                let end_angle = (i + 1) * 10;
-
-                let mut segment = serde_json::Map::new();
-                segment.insert(
-                    "start360".to_string(),
-                    Value::Number(serde_json::Number::from(start_angle)),
-                );
-                segment.insert(
-                    "end360".to_string(),
-                    Value::Number(serde_json::Number::from(end_angle)),
-                );
-
-                // Check if any shading objects fall within this segment
-                let mut shading_objects = Vec::new();
-                for &(shading_row, start, end, shading_type) in &obstacles {
-                    {
-                        // FHS schema expects integer angles (start360/end360). Round early so overlap logic
-                        // is stable even if CSV contains fractional degrees.
-                        let start = start.round();
-                        let end = end.round();
-
-                        // Normalize angles to 0-360 range (like Python)
-                        let mut normalized_start = start % 360.0;
-                        let mut normalized_end = end % 360.0;
-
-                        // Handle negative angles
-                        if normalized_start < 0.0 {
-                            normalized_start += 360.0;
-                        }
-                        if normalized_end < 0.0 {
-                            normalized_end += 360.0;
-                        }
-
-                        // Check if this is a wraparound case
-                        let is_wraparound = normalized_end < normalized_start;
-
-                        // A full circle (0 to 360) normalises to an empty arc; it shades every segment.
-                        let mut overlaps = (end - start).abs() >= 360.0;
-
-                        if overlaps {
-                        } else if is_wraparound {
-                            // For wraparound cases, check if segment overlaps with either:
-                            // 1. The range from start_angle to 360°
-                            // 2. The range from 0° to end_angle
-                            if (normalized_start < end_angle as f64 && 360.0 > start_angle as f64)
-                                || (0.0 < end_angle as f64 && normalized_end > start_angle as f64)
-                            {
-                                overlaps = true;
-                            }
-                        } else {
-                            // For normal cases, check if object overlaps with segment
-                            // Use general overlap logic - include if any part of the object overlaps with the segment
-                            if normalized_start < end_angle as f64
-                                && normalized_end > start_angle as f64
-                            {
-                                overlaps = true;
-                            }
-                        }
-
-                        if overlaps {
-                            let mut shading_obj = serde_json::Map::new();
-                            shading_obj.insert(
-                                "type".to_string(),
-                                Value::String(shading_type.to_string()),
-                            );
-
-                            for key in ["height", "distance"] {
-                                if let Some(value) =
-                                    shading_row.get(key).filter(|v| csv_cell_is_set(v))
-                                {
-                                    shading_obj.insert(key.to_string(), value.clone());
-                                }
-                            }
-
-                            shading_objects.push(Value::Object(shading_obj));
-                        }
+            // Each object shades its own arc, at any size. The schema takes
+            // whole degrees, and a segment may not cross north, so an arc across 0/360 is split.
+            let mut arcs: Vec<(u32, u32, Value)> = Vec::new();
+            for &(row, start, end, shading_type) in &obstacles {
+                let mut object = serde_json::Map::new();
+                object.insert("type".into(), Value::String(shading_type.to_string()));
+                for key in ["height", "distance"] {
+                    if let Some(value) = row.get(key).filter(|v| csv_cell_is_set(v)) {
+                        object.insert(key.to_string(), value.clone());
                     }
                 }
-
-                if !shading_objects.is_empty() {
-                    let shading_count = shading_objects.len();
-                    segment.insert("shading".to_string(), Value::Array(shading_objects));
-                    tracing::debug!(
-                        "Segment {} ({}°-{}°) has {} shading objects",
-                        i + 1,
-                        start_angle,
-                        end_angle,
-                        shading_count
+                let object = Value::Object(object);
+                let (from, to) = (
+                    start.round().rem_euclid(360.0) as u32,
+                    end.round().rem_euclid(360.0) as u32,
+                );
+                if (end - start).abs() >= 360.0 {
+                    arcs.push((0, 360, object));
+                } else if from < to {
+                    arcs.push((from, to, object));
+                } else if from > to {
+                    arcs.push((from, 360, object.clone()));
+                    if to > 0 {
+                        arcs.push((0, to, object));
+                    }
+                } else {
+                    let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+                    self.push_non_fatal(
+                        "E027",
+                        &crate::json_pointer(&["Context Shading", name, "end_angle"]),
+                        &format!("Context Shading row '{name}' is narrower than 1 degree, so its shading is not in the model. Draw it wider or remove it."),
                     );
                 }
-
-                shading_segments.push(Value::Object(segment));
             }
+            let mut bounds: BTreeSet<u32> = BTreeSet::from([0, 360]);
+            bounds.extend(arcs.iter().flat_map(|(from, to, _)| [*from, *to]));
+            let bounds: Vec<u32> = bounds.into_iter().collect();
+            let mut segments: Vec<(u32, u32, Vec<Value>)> = Vec::new();
+            for pair in bounds.windows(2) {
+                let (from, to) = (pair[0], pair[1]);
+                let shading: Vec<Value> = arcs
+                    .iter()
+                    .filter(|(a, b, _)| *a <= from && to <= *b)
+                    .map(|(_, _, object)| object.clone())
+                    .collect();
+                match segments.last_mut() {
+                    Some(last) if last.2 == shading => last.1 = to,
+                    _ => segments.push((from, to, shading)),
+                }
+            }
+            let shaded = |segments: &[(u32, u32, Vec<Value>)]| {
+                let count = segments.iter().filter(|s| !s.2.is_empty()).count();
+                // One shaded segment across north is two in the schema.
+                let wraps = segments.len() > 1
+                    && !segments[0].2.is_empty()
+                    && segments[0].2 == segments[segments.len() - 1].2;
+                count - usize::from(wraps)
+            };
+            let shaded_count = shaded(&segments);
+            if shaded_count > 18 {
+                self.push_non_fatal(
+                    "E027",
+                    "/Context Shading",
+                    &format!("Context Shading makes {shaded_count} shaded segments. The model takes at most 18. Combine neighbouring objects of similar height into one."),
+                );
+            }
+            let (min_segments, max_segments) = self.shading_segment_limits();
+            if let Some(max) = max_segments.filter(|max| segments.len() > *max) {
+                self.push_non_fatal(
+                    "E027",
+                    "/Context Shading",
+                    &format!("Context Shading makes {} segments, shaded and unshaded, and this HEM version's schema takes at most {max}. An arc across north counts twice. Combine neighbouring objects of similar height into one.", segments.len()),
+                );
+            }
+            // The schema may need a minimum number of segments. Splitting a segment keeps its
+            // shading, so the result does not change. `map_contract_unobstructed_shading` keeps
+            // the pinned Python a8/a9 flat-sky sum at most 1.
+            while segments.len() < min_segments.unwrap_or(1) {
+                let i = (0..segments.len())
+                    .max_by_key(|&i| (segments[i].1 - segments[i].0, std::cmp::Reverse(i)))
+                    .unwrap();
+                let at = segments[i].0 + (segments[i].1 - segments[i].0) / 2;
+                let tail = (at, segments[i].1, segments[i].2.clone());
+                segments[i].1 = at;
+                segments.insert(i + 1, tail);
+            }
+            let shading_segments: Vec<Value> = segments
+                .into_iter()
+                .map(|(from, to, shading)| {
+                    let mut segment = serde_json::json!({"start360": from, "end360": to});
+                    if !shading.is_empty() {
+                        segment["shading"] = Value::Array(shading);
+                    }
+                    segment
+                })
+                .collect();
 
             tracing::debug!("Created {} shading segments", shading_segments.len());
             result["ExternalConditions"]["shading_segments"] = Value::Array(shading_segments);
@@ -4211,6 +4209,28 @@ impl JSONBuilder {
         }
 
         Ok(())
+    }
+
+    /// `minItems` and `maxItems` of `shading_segments` in the target schema.
+    fn shading_segment_limits(&self) -> (Option<usize>, Option<usize>) {
+        fn find(value: &Value) -> Option<&Value> {
+            match value {
+                Value::Object(map) => map
+                    .get("shading_segments")
+                    .filter(|v| v.get("type").and_then(Value::as_str) == Some("array"))
+                    .or_else(|| map.values().find_map(find)),
+                Value::Array(items) => items.iter().find_map(find),
+                _ => None,
+            }
+        }
+        let definition = find(&self.schema);
+        let limit = |key: &str| {
+            definition
+                .and_then(|d| d.get(key))
+                .and_then(Value::as_u64)
+                .map(|n| n as usize)
+        };
+        (limit("minItems"), limit("maxItems"))
     }
 
     fn read_context_shading_angle(
@@ -14035,6 +14055,127 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
             shading[0],
             serde_json::json!({"type": "overhang", "height": 7})
         );
+    }
+
+    /// Each object shades its own start-to-end arc at any size, and the
+    /// model takes at most 18 shaded segments.
+    #[test]
+    fn context_shading_segments_follow_each_objects_own_arc() {
+        let build = |rows: &[&str], profile: crate::ConversionProfile| {
+            let csv = format!(
+                "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n\nContext Shading\nName,Type,shading_type,start_angle,end_angle,distance,height\n{}\n",
+                rows.join("\n")
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            builder.set_conversion_profile(profile);
+            let mut result = builder.defaults.clone();
+            builder.build_zone_structure(&mut result, &data).unwrap();
+            builder
+                .process_root_level_sections(&mut result, &data)
+                .unwrap();
+            crate::target_mappings::map_contract_unobstructed_shading(
+                &mut result,
+                builder.input_contract,
+            );
+            let segments: Vec<(u64, u64, usize)> = result["ExternalConditions"]["shading_segments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|seg| {
+                    (
+                        seg["start360"].as_u64().unwrap(),
+                        seg["end360"].as_u64().unwrap(),
+                        seg.get("shading")
+                            .and_then(Value::as_array)
+                            .map_or(0, Vec::len),
+                    )
+                })
+                .collect();
+            (segments, builder.take_non_fatal_errors())
+        };
+        let rust = crate::ConversionProfile::CurrentRustFhs;
+
+        // An arc that crosses a 10-degree line keeps its own angles; the sky is padded to the
+        // schema's 8 segments by splitting the widest unshaded one.
+        let (segments, errors) = build(&["A,ContextShading,obstacle,12.4,46.6,5,7"], rust);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            segments,
+            vec![
+                (0, 12, 0),
+                (12, 47, 1),
+                (47, 86, 0),
+                (86, 125, 0),
+                (125, 203, 0),
+                (203, 281, 0),
+                (281, 320, 0),
+                (320, 360, 0)
+            ]
+        );
+
+        // An arc across north is split at 0/360; overlapping arcs share the overlap.
+        let (segments, _) = build(
+            &[
+                "A,ContextShading,obstacle,350,20,5,7",
+                "B,ContextShading,obstacle,10,30,5,7",
+            ],
+            rust,
+        );
+        assert_eq!(&segments[..3], &[(0, 10, 1), (10, 20, 2), (20, 30, 1)]);
+        assert_eq!(segments.last(), Some(&(350, 360, 1)));
+
+        // 19 separate objects exceed the 18 shaded segments the model takes.
+        let rows: Vec<String> = (0..19)
+            .map(|i| format!("S{i},ContextShading,obstacle,{},{},5,7", i * 18, i * 18 + 9))
+            .collect();
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let (_, errors) = build(&rows, rust);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.path == "/Context Shading" && e.message.contains("19 shaded segments")),
+            "{errors:?}"
+        );
+        let (_, errors) = build(&rows[..18], rust);
+        assert!(errors.is_empty(), "{errors:?}");
+        // 18 objects that start after north leave an unshaded segment at each end: 37 segments,
+        // one more than the FHS schema takes, though the shaded limit holds.
+        let rows: Vec<String> = (0..18)
+            .map(|i| {
+                format!(
+                    "S{i},ContextShading,obstacle,{},{},5,7",
+                    i * 18 + 1,
+                    i * 18 + 10
+                )
+            })
+            .collect();
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let (_, errors) = build(&rows, rust);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.starts_with("Context Shading makes 37 segments, shaded and unshaded, and this HEM version's schema takes at most 36."),
+            "{errors:?}"
+        );
+
+        // Python a8/a9 take acos of the flat-sky sum: the segments keep it at most 1.
+        for profile in [
+            crate::ConversionProfile::PythonFhsA8,
+            crate::ConversionProfile::PythonFhsA9,
+        ] {
+            for (start, end) in (0..360).step_by(7).map(|s| (s, (s + 23) % 360)) {
+                let (segments, errors) = build(
+                    &[&format!("A,ContextShading,obstacle,{start},{end},5,7")],
+                    profile,
+                );
+                assert!(errors.is_empty(), "{errors:?}");
+                let sum = segments
+                    .iter()
+                    .fold(0.0, |sum, (s, e, _)| sum + (e - s) as f64 / 360.0);
+                assert!(sum <= 1.0, "{start}-{end}: {segments:?}");
+            }
+        }
     }
 
     #[test]

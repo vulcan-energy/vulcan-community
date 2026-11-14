@@ -785,7 +785,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'degrees',
   },
   'distance': {
-    description: 'Distance measurement. For ContextShading: horizontal distance from the parent element to the shading object (unit: m). Used to calculate the shading effect on solar gains based on the geometry and position of external obstructions.',
+    description: 'Distance measurement. For ContextShading: distance measured at right angles from the nearest external wall to the obstacle\'s nearest face (unit: m). Vulcan derives it from the drawing.',
     type: 'number',
     units: 'm',
   },
@@ -814,7 +814,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'string',
   },
   'context_shading_distance': {
-    description: 'Horizontal distance from the parent element to the shading object (unit: m). Used to calculate the shading effect on solar gains based on the geometry and position of external obstructions.',
+    description: 'Distance measured at right angles from the nearest external wall to the obstacle\'s nearest face (unit: m). Vulcan derives it from the drawing.',
     type: 'number',
     units: 'm',
   },
