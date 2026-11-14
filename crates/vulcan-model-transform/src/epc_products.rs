@@ -1080,12 +1080,24 @@ pub(crate) fn derive_zone_frac_convective(
                 notices.push(notice(&zone_path, format!("Zone '{zone}' takes frac_convective_heating {value}, derived by {rule}. State frac_convective_heating on the Zone row to change it.")));
             }
             None => {
-                let why = if found.iter().any(Option::is_none) || found.is_empty() {
-                    "an emitter of its heating systems gives no convective fraction"
+                // The heating systems whose emitter gives no fraction, by name.
+                let mut unknown: Vec<String> = considered
+                    .iter()
+                    .zip(&found)
+                    .filter(|(_, f)| f.is_none())
+                    .filter_map(|((path, _), _)| {
+                        path.split('/')
+                            .nth(2)
+                            .map(|s| s.replace("~1", "/").replace("~0", "~"))
+                    })
+                    .collect();
+                unknown.dedup();
+                let message = if unknown.is_empty() {
+                    format!("Zone '{zone}': the emitters of its heating have different convection fractions, so the zone's fraction cannot be found. Give them all the same Convection fraction.")
                 } else {
-                    "the emitters of its heating systems have different convective fractions"
+                    format!("Zone '{zone}': an emitter of '{}' has no convection fraction, so the zone's fraction cannot be found. Enter the emitter's Convection fraction, or pick a product that gives one.", unknown.join("', '"))
                 };
-                errors.push(error("E_EPC_ZONE_FRAC_CONVECTIVE", zone_path, format!("Zone '{zone}' needs frac_convective_heating, and {why}, so it cannot be derived. State frac_convective_heating on the Zone row.")));
+                errors.push(error("E_EPC_ZONE_FRAC_CONVECTIVE", zone_path, message));
             }
         }
     }
@@ -1546,9 +1558,19 @@ pub(crate) mod tests {
             let (mut errors, mut notices) = (Vec::new(), Vec::new());
             derive_zone_frac_convective(&mut model, &db(), &slots, &mut errors, &mut notices);
             let codes: Vec<String> = errors.iter().map(|e| e.path.clone()).collect();
-            (model, codes, notices)
+            let messages: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
+            (model, codes, notices, messages)
         };
-        let (new, errors, notices) = run(false);
+        let (new, errors, notices, messages) = run(false);
+        // Each names what to change in the editor: the emitters' Convection fraction.
+        assert!(
+            messages[0].contains("Zone 'b'")
+                && messages[0].contains("Give them all the same Convection fraction")
+        );
+        assert!(
+            messages[1].contains("an emitter of 'none' has no convection fraction")
+                && messages[1].contains("Enter the emitter's Convection fraction")
+        );
         assert_eq!(new["Zone"]["a"]["frac_convective_heating"], 0.82);
         assert_eq!(new["Zone"]["c"]["frac_convective_heating"], 0.95);
         assert_eq!(new["Zone"]["f"]["frac_convective_heating"], 0.5);
@@ -1564,7 +1586,7 @@ pub(crate) mod tests {
             .message
             .contains("the fraction all 2 emitter(s) of its heating systems share"));
         // Existing build: HEMIE takes the first emitter, so mixed emitters derive.
-        let (existing, errors, notices) = run(true);
+        let (existing, errors, notices, _) = run(true);
         assert_eq!(existing["Zone"]["b"]["frac_convective_heating"], 0.82);
         assert_eq!(errors, ["/Zone/d/frac_convective_heating"]);
         assert!(notices
