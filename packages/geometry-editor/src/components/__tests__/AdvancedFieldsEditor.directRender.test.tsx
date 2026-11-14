@@ -993,7 +993,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
   ],
   'core/BuildingElementGround [Slab_edge_insulation]': [
-    'edge_insulation | Edge Insulation | select | - | - | - | no-tip',
+    'edge_insulation | Edge Insulation | textbox | - | - | - | no-tip',
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
@@ -1240,7 +1240,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
   ],
   'fhs/BuildingElementGround [Slab_edge_insulation]': [
-    'edge_insulation | Edge Insulation | select | - | - | - | no-tip',
+    'edge_insulation | Edge Insulation | textbox | - | - | - | no-tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',

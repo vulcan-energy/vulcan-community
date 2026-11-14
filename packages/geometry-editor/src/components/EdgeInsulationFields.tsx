@@ -68,9 +68,9 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
       label: dimLabel,
     }, schemaPort);
     return (
-      <div key={type} data-field-key={`edge_insulation_${type}`}>
+      <div key={type}>
         <div style={{ margin: ROW_MARGIN(compact), fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
-          {type === 'vertical' ? 'Vertical' : 'Horizontal'}
+          {type === 'vertical' ? 'Vertical edge insulation' : 'Horizontal edge insulation'}
         </div>
         <div style={{ margin: ROW_MARGIN(compact) }}>
           <StandardInput
