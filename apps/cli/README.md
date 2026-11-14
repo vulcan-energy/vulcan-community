@@ -28,6 +28,10 @@ Community model WASM, so `convert` and `preflight` need the CLI built from sourc
 they first read the defaults file its `DefaultsPath` names, relative to the current directory, and
 stop with "Defaults file not found" if it is missing; `--defaults <file>` overrides it.
 
+`--profile epc` converts to HEM:EPC input instead of FHS input: a new build, or an existing
+building (HEMIE) when the CSV's Metadata has `IsExistingBuilding,TRUE`. EPC `preflight` is the
+conversion and the HEM:EPC schema check; the EPC wrapper itself is not run.
+
 Every command takes `--json` for machine-readable output, for scripts and AI agents. Node.js
 22.19 or later.
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Runs the upstream FHS ingest and Part F preprocessing on a HEM model, without simulation.
+// HEM:EPC has no Rust wrapper to run: its preflight is the conversion and the EPC schema check.
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -25,8 +26,11 @@ export async function preflightModel(path: string, options: ConvertOptions): Pro
   if (path.toLowerCase().endsWith('.csv')) {
     const converted = await convertCsv(path, options);
     if (!converted.ok) return { validation: converted.validation, conversionError: converted.error };
+    if (options.profile === 'epc') return { validation: converted.validation };
     modelJson = JSON.stringify(converted.json);
     validation = converted.validation;
+  } else if (options.profile === 'epc') {
+    throw new Error('EPC preflight checks a geometry CSV: its conversion and the HEM:EPC schema. Pass the CSV.');
   } else {
     modelJson = readFileSync(resolve(path), 'utf8');
   }
@@ -35,8 +39,8 @@ export async function preflightModel(path: string, options: ConvertOptions): Pro
   return { ...(validation === undefined ? {} : { validation }), preflight };
 }
 
-export function preflightPassed(result: PreflightResult): boolean {
+export function preflightPassed(result: PreflightResult, options: ConvertOptions = {}): boolean {
   return result.conversionError === undefined
     && result.validation?.is_valid !== false
-    && result.preflight?.is_valid === true;
+    && (options.profile === 'epc' ? result.validation?.is_valid === true : result.preflight?.is_valid === true);
 }

@@ -6,6 +6,11 @@ declare module '*?raw' {
   export default content;
 }
 
+/** Vite's eager raw glob (the CLI bundles the HEM Database product CSVs with it). */
+interface ImportMeta {
+  glob(pattern: string, options: { query: '?raw'; import: 'default'; eager: true }): Record<string, string>;
+}
+
 declare module 'https://cdn.jsdelivr.net/pyodide/v0.28.0a3/full/pyodide.mjs' {
   export function loadPyodide(options: Readonly<{ indexURL: string }>): Promise<unknown>;
 }
