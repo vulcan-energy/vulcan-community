@@ -57,16 +57,52 @@ export function sizingGate(state: { status: string; result?: HeatingSizing; reas
 
 // ---- Label placement ----
 
-/** `soft`: another label, padded by 4 px each side, so up to 8 px of overlap still leaves the text clear. */
+/** `soft`: another label. Padded rects may overlap by up to 4 px: the text boxes as drawn (ascent and descent included) stay clear. */
 export interface Rect { x: number; y: number; w: number; h: number; soft?: boolean }
 const overlaps = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 const inside = (r: Rect, b: Rect): boolean => r.x >= b.x && r.y >= b.y && r.x + r.w <= b.x + b.w && r.y + r.h <= b.y + b.h;
 
 /** Width estimate for SVG text; generous, so a label placed clear of others is clear in any font. */
-const textWidth = (text: string, fontSize: number): number => text.length * fontSize * 0.6;
+const textWidth = (text: string, fontSize: number): number => text.length * fontSize * 0.55;
 
-/** `tier`: 0 sits next to what it names; 1 is a fallback, taken only when every tier-0 spot is blocked. */
-export interface SvgLabel { text: string; x: number; y: number; anchor: 'start' | 'middle' | 'end'; tier?: number }
+/**
+ * `tier`: 0 sits next to what it names; 1 is a fallback, taken only when every tier-0 spot is blocked.
+ * `leader`: the label stands clear of its dot; a thin line is drawn from this point to the dot.
+ */
+export interface SvgLabel { text: string; x: number; y: number; anchor: 'start' | 'middle' | 'end'; tier?: number; leader?: { x: number; y: number; len: number } }
+
+/**
+ * Short leader spots, used only when every spot beside the dot is blocked. A leader never crosses the
+ * curve (the dot itself sits on it, so samples within 9 px of the dot do not count) and is at most MAX_LEADER_PX long.
+ */
+const leaderCandidates = (text: string, x: number, y: number, points: { x: number; y: number }[]): SvgLabel[] => {
+  const crosses = (px: number, py: number): boolean => {
+    const [dx, dy] = [x - px, y - py];
+    const len2 = dx * dx + dy * dy;
+    return points.some((p) => {
+      if (Math.hypot(p.x - x, p.y - y) < 9) return false;
+      const t = Math.max(0, Math.min(1, ((p.x - px) * dx + (p.y - py) * dy) / len2));
+      return Math.hypot(p.x - (px + t * dx), p.y - (py + t * dy)) < 2;
+    });
+  };
+  const beside = [14, 26].flatMap((dx) => [-18, 22, -30, 34, -46, 46, -58, 58].flatMap((dy): SvgLabel[] => {
+    const out: SvgLabel[] = [];
+    for (const side of [1, -1]) {
+      const lx = x + side * (dx - 3);
+      const ly = y + dy - 4;
+      const len = Math.hypot(lx - x, ly - y);
+      if (len <= MAX_LEADER_PX && !crosses(lx, ly)) out.push({ text, x: x + side * dx, y: y + dy, anchor: side === 1 ? 'start' : 'end', leader: { x: lx, y: ly, len } });
+    }
+    return out;
+  }));
+  // Centred straight above or below the dot: room a steep or long curve leaves on neither side.
+  const centred = [-22, -30, -46, 30, 46].flatMap((dy): SvgLabel[] => {
+    const ly = dy < 0 ? y + dy + 4 : y + dy - 14;
+    const len = Math.abs(ly - y);
+    return len <= MAX_LEADER_PX && !crosses(x, ly) ? [{ text, x, y: y + dy, anchor: 'middle', leader: { x, y: ly, len } }] : [];
+  });
+  return [...beside, ...centred];
+};
 
 const labelRect = (l: SvgLabel, fontSize: number): Rect => {
   const w = textWidth(l.text, fontSize);
@@ -82,24 +118,32 @@ export interface LabelObstacles {
 }
 
 const OUT_OF_BOUNDS = 1e6;
-const RECT_HIT = 1000;
+/**
+ * Covering the curve, the dashed line, a dot or another label disqualifies a spot: it never wins while
+ * any clear spot exists, however far or by leader. Among covering spots the one covering least wins.
+ */
+const RECT_HIT = 1e5;
+const CURVE_CROSS = 1e5;
 const POINT_HIT = 40;
-/** Crossing the curve is cheaper than any rect hit, and a fallback tier costs more than any curve crossing. */
-const CURVE_CAP = 900;
+/** A fallback tier costs more than a rect hit. */
 const TIER_COST = 950;
+/** A leader is a last resort: it loses to any clear spot beside the dot and wins over any crossing. Longer leaders cost more. */
+const LEADER_COST = 160;
+const LEADER_COST_PER_PX = 3;
+const MAX_LEADER_PX = 60;
 
 function labelCost(c: SvgLabel, fontSize: number, bounds: Rect, obstacles: LabelObstacles): number {
   const r = labelRect(c, fontSize);
-  let cost = (c.tier ?? 0) * TIER_COST + (inside(r, bounds) ? 0 : OUT_OF_BOUNDS);
+  let cost = (c.tier ?? 0) * TIER_COST + (c.leader ? LEADER_COST + LEADER_COST_PER_PX * c.leader.len : 0) + (inside(r, bounds) ? 0 : OUT_OF_BOUNDS);
   for (const o of obstacles.rects) {
     if (!overlaps(r, o)) continue;
     const vertical = Math.min(r.y + r.h, o.y + o.h) - Math.max(r.y, o.y);
-    cost += o.soft && vertical <= 8 ? 5 * vertical : RECT_HIT + Math.min(r.x + r.w, o.x + o.w) - Math.max(r.x, o.x);
+    cost += o.soft && vertical <= 4 ? 5 * vertical : RECT_HIT + Math.min(r.x + r.w, o.x + o.w) - Math.max(r.x, o.x);
   }
   const ink = { x: r.x - 2, y: r.y + 2, w: r.w + 4, h: r.h - 2 };
   let onCurve = 0;
   for (const p of obstacles.points) if (p.x >= ink.x && p.x <= ink.x + ink.w && p.y >= ink.y && p.y <= ink.y + ink.h) onCurve += POINT_HIT;
-  return cost + Math.min(onCurve, CURVE_CAP);
+  return cost + (onCurve > 0 ? CURVE_CROSS + onCurve : 0);
 }
 
 /** The candidate that covers the least; the first of equals, so the caller orders candidates by preference. */
@@ -129,12 +173,18 @@ export function designConditions(sizing: Pick<HeatingSizing, 'coldestHourC' | 's
 /** What a too small or too big heat source means; null for a source that is big enough. */
 export function heatSourceSentence(entry: HeatSourceSizing): string | null {
   if (entry.verdict === 'too-small' && entry.balancePointC !== null) {
-    return entry.hasBackupHeater
-      ? `Below ${fmtTemp(entry.balancePointC)} outside, the backup heater covers the gap.`
-      : `Below ${fmtTemp(entry.balancePointC)} outside, rooms run below set-point.`;
+    const below = `Below ${fmtTemp(entry.balancePointC)} outside,`;
+    if (entry.hasBackupHeater) return `${below} the backup heater covers the gap.`;
+    return entry.otherSystemsInZone ? `${below} another heating system in the zone must cover the gap.` : `${below} rooms run below set-point.`;
   }
   return entry.verdict === 'too-big' ? 'It will switch on and off all year.' : null;
 }
+
+const sourceName = (entry: Pick<HeatSourceSizing, 'kind'>): string => (entry.kind === 'HeatPump' ? 'Heat pump' : 'Boiler');
+
+/** The unit's design-day output, then the lowest output it turns down to. */
+export const heatSourceGivesSentence = (entry: Pick<HeatSourceSizing, 'kind' | 'minKw'>, maxKw: number): string =>
+  `${sourceName(entry)} gives ${fmtKw(maxKw)} on the design day${entry.minKw === null ? '' : ` and turns down to ${fmtKw(entry.minKw)}`}.`;
 
 /** The basis line after the design conditions. */
 export function heatSourceExtras(entry: HeatSourceSizing): string[] {
@@ -158,6 +208,12 @@ export function emitterSentence(s: Pick<SystemSizing, 'minFlowC' | 'curve' | 'fl
     ? `Radiators give enough heat at any flow temperature from ${fmtTemp(first)}.`
     : `Radiators give enough heat from ${fmtTemp(s.minFlowC)} flow.`;
 }
+
+/** The system's one sentence: the lower design flow temperature when one is suggested (SystemSizing.suggestedFlowC), else where the radiators start to give enough heat. */
+export const systemSentence = (s: SystemSizing): string =>
+  s.suggestedFlowC === null
+    ? emitterSentence(s)
+    : `You could lower the design flow temperature to ${fmtTemp(s.suggestedFlowC)}. The radiators still give enough heat, and the heat pump runs more efficiently.`;
 
 /** The emitters' output at the design flow temperature against the need. */
 export function emitterOutputSentence(s: SizedSystem, zoneCount: number): string {
@@ -205,7 +261,6 @@ export function heatSourceView(
   const segStartPct = entry.minKw === null ? 0 : pct(entry.minKw);
   const segEndPct = Math.max(pct(maxKw), segStartPct + MIN_SEGMENT_PCT);
   const markerPct = pct(designLossKw);
-  const source = entry.kind === 'HeatPump' ? 'Heat pump' : 'Boiler';
   const segCentrePct = (segStartPct + segEndPct) / 2;
 
   return {
@@ -219,7 +274,7 @@ export function heatSourceView(
       markerPct,
       tone,
       markerLabel: needsLabel(designLossKw, sizing.zoneCount),
-      segLabel: entry.minKw === null ? `${source} up to ${fmtKw(maxKw)}` : `${source} ${entry.minKw.toFixed(1)} to ${fmtKw(maxKw)}`,
+      segLabel: `${fmtKw(maxKw)} on the design day${entry.minKw === null ? '' : ` · min ${fmtKw(entry.minKw)}`}`,
       markerLabelShiftPct: -markerPct,
       segLabelShiftPct: -segCentrePct,
     },
@@ -230,14 +285,18 @@ export function heatSourceView(
 
 /** The sizing block's content width in the 340 px panel: 1 user unit is 1 px, so text is not scaled. */
 export const CHART_WIDTH = 292;
-export const CHART_HEIGHT = 156;
-const MARGIN = { l: 34, r: 12, t: 28, b: 40 };
+export const CHART_HEIGHT = 148;
+/** Inner padding of both scales: first and last points, and a dot on the domain edge, sit fully inside the rounded plot. */
+const SCALE_PAD = 7;
+const MARGIN = { l: 34, r: 12, t: 24, b: 36 };
+/** Corner radius of the plot area, the --radius-md token. */
+const PLOT_RADIUS = 8;
 const LABEL_FONT = 12;
 
 export interface EmitterChart {
   width: number;
   height: number;
-  plot: { x0: number; x1: number; y0: number; y1: number };
+  plot: { x0: number; x1: number; y0: number; y1: number; radius: number };
   curvePath: string;
   designLineY: number;
   needLabel: SvgLabel;
@@ -286,18 +345,18 @@ const systemPill = (s: SizedSystem): SizingPill => ({
 function emitterChart(s: SizedSystem, zoneCount: number): EmitterChart {
   const W = CHART_WIDTH;
   const H = CHART_HEIGHT;
-  const plot = { x0: MARGIN.l, x1: W - MARGIN.r, y0: MARGIN.t, y1: H - MARGIN.b };
+  const plot = { x0: MARGIN.l, x1: W - MARGIN.r, y0: MARGIN.t, y1: H - MARGIN.b, radius: PLOT_RADIUS };
   const pw = plot.x1 - plot.x0;
   const ph = plot.y1 - plot.y0;
   // The curve sets the x domain: 30 to 70 C, or to the design flow temperature when that is higher.
   const f0 = s.curve[0].flowC;
   const f1 = Math.max(s.curve[s.curve.length - 1].flowC, f0 + 1);
-  const xOf = (flow: number) => plot.x0 + ((flow - f0) / (f1 - f0)) * pw;
+  const xOf = (flow: number) => plot.x0 + SCALE_PAD + ((flow - f0) / (f1 - f0)) * (pw - 2 * SCALE_PAD);
 
   const peak = Math.max(s.designLossKw, ...s.curve.map((p) => p.outputKw));
   const { step, decimals } = yTickStep(peak * 1.05);
   const yMax = Math.ceil((peak * 1.05) / step - 1e-9) * step;
-  const yOf = (kw: number) => plot.y1 - (kw / yMax) * ph;
+  const yOf = (kw: number) => plot.y1 - SCALE_PAD - (kw / yMax) * (ph - 2 * SCALE_PAD);
 
   const yTicks: EmitterChart['yTicks'] = [];
   for (let i = 0; i * step <= yMax + 1e-9; i++) yTicks.push({ y: yOf(i * step), text: (i * step).toFixed(decimals) });
@@ -314,10 +373,11 @@ function emitterChart(s: SizedSystem, zoneCount: number): EmitterChart {
   const redZone = split > plot.x0 ? { x: plot.x0, width: split - plot.x0 } : null;
   const greenZone = split < plot.x1 ? { x: split, width: plot.x1 - split } : null;
   const zoneLabel = (zone: { x: number; width: number } | null, text: string): SvgLabel | null =>
-    zone && zone.width >= textWidth(text, LABEL_FONT) + 8 ? { text, x: zone.x + zone.width / 2, y: plot.y0 - 7, anchor: 'middle' } : null;
+    zone && zone.width >= textWidth(text, LABEL_FONT) + 8 ? { text, x: zone.x + zone.width / 2, y: plot.y0 - 6, anchor: 'middle' } : null;
   const cross = m !== null && m > f0 && m <= f1 ? { x: xOf(m), y: designLineY } : null;
 
-  const bounds: Rect = { x: plot.x0 + 1, y: plot.y0 + 1, w: pw - 2, h: ph - 2 };
+  // The label's padded rect may reach 2 px past the plot top and bottom: its text still sits inside.
+  const bounds: Rect = { x: plot.x0 + 1, y: plot.y0 - 2, w: pw - 2, h: ph + 4 };
   // Curve samples 1.6 px apart.
   const points: LabelObstacles['points'] = [];
   for (let i = 0; i + 1 < s.curve.length; i++) {
@@ -346,23 +406,29 @@ function emitterChart(s: SizedSystem, zoneCount: number): EmitterChart {
     const text = `Your design: ${fmtKw(s.outputAtDesignKw)}`;
     // The curve usually rises to the right, so the room is below-right and above-left of the dot.
     const rising = yOf(s.curve[s.curve.length - 1].outputKw) < yOf(s.curve[0].outputKw);
-    const right = (dy: number, tier: number): SvgLabel => ({ text, x: x + 8, y: y + dy, anchor: 'start', tier });
-    const left = (dy: number, tier: number): SvgLabel => ({ text, x: x - 8, y: y + dy, anchor: 'end', tier });
+    const right = (dy: number, tier: number, k = 0): SvgLabel => ({ text, x: x + 8 + k, y: y + dy, anchor: 'start', tier });
+    const left = (dy: number, tier: number, k = 0): SvgLabel => ({ text, x: x - 8 - k, y: y + dy, anchor: 'end', tier });
     const dotCandidates = [
       ...(rising ? [right(16, 0), left(-8, 0), right(-8, 0), left(16, 0)] : [right(-8, 0), left(16, 0), right(16, 0), left(-8, 0)]),
-      right(30, 1), left(-22, 1), right(-22, 1), left(30, 1),
+      // Further along the same side, level with or above the dot: clear of the curve where it leaves the dot.
+      ...[0, 8, 16, 24, 32].flatMap((k) => [0, -8, 16, -22, 30, 44].flatMap((dy) => [right(dy, 0, k), left(dy, 0, k)])),
+      ...leaderCandidates(text, x, y, points),
     ];
     // Both labels are chosen together: the best "Your design" spot is no good if it leaves "House needs" none.
     const dotObstacles = { rects: [...obstacles.rects, { x: x - 6, y: y - 6, w: 12, h: 12 }], points };
     let bestCost = Infinity;
     let bestDot = dotCandidates[0];
     needLabel = needCandidates[0];
-    for (const d of dotCandidates) {
+    const consider = (d: SvgLabel) => {
       const withDot = { ...dotObstacles, rects: [...dotObstacles.rects, { ...labelRect(d, LABEL_FONT), soft: true }] };
       const n = chooseLabel(needCandidates, LABEL_FONT, bounds, withDot);
-      const cost = labelCost(d, LABEL_FONT, bounds, dotObstacles) + labelCost(n, LABEL_FONT, bounds, withDot);
+      const own = labelCost(d, LABEL_FONT, bounds, dotObstacles);
+      const cost = own + labelCost(n, LABEL_FONT, bounds, withDot);
       if (cost < bestCost) [bestCost, bestDot, needLabel] = [cost, d, n];
-    }
+    };
+    // A clear pair beside the dot always wins over a leader: leaders are tried only when every such pair covers something.
+    for (const d of dotCandidates) if (!d.leader) consider(d);
+    if (bestCost >= RECT_HIT) for (const d of dotCandidates) if (d.leader) consider(d);
     dot = { x, y, label: bestDot, tone: s.verdict === 'ok' ? 'success' : 'error' };
   } else {
     needLabel = chooseLabel(needCandidates, LABEL_FONT, bounds, obstacles);
@@ -384,7 +450,7 @@ function emitterChart(s: SizedSystem, zoneCount: number): EmitterChart {
     xTicks,
     yTicks,
     xTitle: { text: 'Flow temperature, °C', x: (plot.x0 + plot.x1) / 2, y: H - 4, anchor: 'middle' },
-    yTitle: { text: 'kW', x: 4, y: plot.y0 - 13, anchor: 'start' },
+    yTitle: { text: 'kW', x: 4, y: plot.y0 - 12, anchor: 'start' },
   };
 }
 
@@ -393,7 +459,7 @@ export function systemView(entry: SystemSizing, sizing: Pick<HeatingSizing, 'zon
   return {
     kind: 'system',
     pill: systemPill(entry),
-    sentence: emitterSentence(entry),
+    sentence: systemSentence(entry),
     chart: emitterChart(entry, sizing.zoneCount),
     caption: 'Radiator output at each flow temperature.',
   };

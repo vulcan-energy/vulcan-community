@@ -19,8 +19,12 @@ const loss = (zones: Record<string, number>, coldestHourC = -1): DesignHeatLoss 
   zones: Object.fromEntries(Object.entries(zones).map(([k, v]) => [k, zoneLoss(v)])),
 });
 
-// One radiator, c chosen so output at 55 C flow is exactly 6 kW: c x (55 - 21)^1.3.
-const C6 = 6 / 34 ** 1.3;
+// One radiator, c chosen so output at 55 C flow is exactly 6 kW. The engine's emitter
+// formula is c x (mean water - room)^n; with variable flow inside its range the return is
+// flow - temp_diff_emit_dsgn (5 K), so the mean water temperature is 55 - 2.5 = 52.5 C.
+const C6 = 6 / 31.5 ** 1.3;
+/** kW carried per l/min per K of water (1 kg/l, 4184 J/kg K, as the engine). */
+const K_WATER = 4.184 / 60;
 const radiator = (c = C6) => ({ wet_emitter_type: 'radiator', c, n: 1.3, frac_convective: 0.7 });
 
 const wet = (over: Record<string, unknown> = {}) => ({
@@ -29,6 +33,10 @@ const wet = (over: Record<string, unknown> = {}) => ({
   Zone: 'zone 1',
   design_flow_temp: 55,
   temp_diff_emit_dsgn: 5,
+  // Wide enough that every load below 34.9 kW (100 l/min x 5 K) runs at the design drop.
+  variable_flow: true,
+  min_flow_rate: 1,
+  max_flow_rate: 100,
   emitters: [radiator()],
   ecodesign_controller: { ecodesign_control_class: 1 },
   ...over,
@@ -227,7 +235,8 @@ describe('sizeHeating: heat sources', () => {
     };
     const result = sizeHeating(m, loss({ 'whole dwelling': 5 }));
     expect(result.systems.map((s) => s.status)).toEqual(['ok', 'unsupported']);
-    expect(result.heatSources[0]).toMatchObject({ status: 'ok', verdict: 'ok' });
+    expect(result.heatSources[0]).toMatchObject({ status: 'ok', verdict: 'ok', otherSystemsInZone: true });
+    expect(sizeHeating(model({ radiators: wet({ Zone: 'whole dwelling' }) }), loss({ 'whole dwelling': 5 })).heatSources[0].otherSystemsInZone).toBe(false);
   });
 
   it('a heat source no system uses has no data', () => {
@@ -257,37 +266,37 @@ describe('sizeHeating: heat sources', () => {
 });
 
 describe('sizeHeating: emitters', () => {
-  it('radiator output uses flow minus set-point and finds the minimum flow', () => {
+  it('radiator output uses the mean water temperature (flow - drop / 2) and finds the minimum flow', () => {
     const [s] = sizeHeating(model({ s: wet() }), loss({ 'zone 1': 3 })).systems;
-    expect(s).toMatchObject({ status: 'ok', verdict: 'ok', flowTempAtDesignC: 55 });
-    expect(s.outputAtDesignKw).toBeCloseTo(6);
+    expect(s).toMatchObject({ status: 'ok', verdict: 'ok', flowTempAtDesignC: 55, designFlowTempC: 55 });
+    expect(s.outputAtDesignKw).toBeCloseTo(6, 9);
     expect(s.curve).toHaveLength(41);
-    const expected = Math.ceil((21 + 34 * 0.5 ** (1 / 1.3)) * 10) / 10;
-    expect(s.minFlowC).toBe(expected);
+    // 3 kW needs a mean water temperature 31.5 x 0.5^(1/1.3) K above the room; the flow is 2.5 K above that.
+    expect(s.minFlowC).toBe(Math.ceil((21 + 2.5 + 31.5 * 0.5 ** (1 / 1.3)) * 10) / 10);
   });
 
   it('sums several radiators, c_per_m x length included', () => {
     const emitters = [radiator(), { wet_emitter_type: 'radiator', c_per_m: C6 / 2, length: 2, n: 1.3 }];
     const [s] = sizeHeating(model({ s: wet({ emitters }) }), loss({ 'zone 1': 3 })).systems;
-    expect(s.outputAtDesignKw).toBeCloseTo(12);
+    expect(s.outputAtDesignKw).toBeCloseTo(12, 9);
   });
 
-  it('too small when output is below loss, with no minimum flow up to 70 C', () => {
+  it('too small when output is below loss, with no minimum flow up to 100 C', () => {
     const [s] = sizeHeating(model({ s: wet() }), loss({ 'zone 1': 50 })).systems;
     expect(s).toMatchObject({ verdict: 'too-small', minFlowC: null });
   });
 
   it('design flow above 70 C: the curve reaches it and the minimum flow is found above 70 C', () => {
-    // 12 kW needs 21 + 34 x 2^(1/1.3) = 78.9 C flow.
+    // 12 kW needs a mean water temperature 31.5 x 2^(1/1.3) K above 21 C, so 21 + 2.5 + 53.7 = 77.2 C flow.
     const [s] = sizeHeating(model({ s: wet({ design_flow_temp: 80 }) }), loss({ 'zone 1': 12 })).systems;
     expect(s.verdict).toBe('ok');
     expect(s.curve.at(-1)!.flowC).toBe(80);
-    expect(s.minFlowC).toBe(Math.ceil((21 + 34 * 2 ** (1 / 1.3)) * 10) / 10);
+    expect(s.minFlowC).toBe(Math.ceil((23.5 + 31.5 * 2 ** (1 / 1.3)) * 10) / 10);
     expect(s.flowTempAtDesignC! >= s.minFlowC!).toBe(true);
   });
 
   it('fractional design flow: the minimum flow is exact to 0.1 C and agrees with the verdict', () => {
-    const fiveAt533 = C6 * (53.3 - 21) ** 1.3;
+    const fiveAt533 = C6 * (53.3 - 2.5 - 21) ** 1.3;
     const [s] = sizeHeating(model({ s: wet({ design_flow_temp: 53.3 }) }), loss({ 'zone 1': fiveAt533 })).systems;
     expect(s).toMatchObject({ verdict: 'ok', minFlowC: 53.3, flowTempAtDesignC: 53.3 });
     const [short] = sizeHeating(model({ s: wet({ design_flow_temp: 53.3 }) }), loss({ 'zone 1': fiveAt533 + 0.001 })).systems;
@@ -296,14 +305,64 @@ describe('sizeHeating: emitters', () => {
 
   it.each([30, 41.7, 53.25, 55, 68.9, 80, 95])('verdict is ok exactly when the design flow (%s C) reaches the minimum flow', (flow) => {
     for (const designLossKw of [1, 2.5, 4, 6, 7.3, 9, 14, 30]) {
-      const [s] = sizeHeating(model({ s: wet({ design_flow_temp: flow }) }), loss({ 'zone 1': designLossKw })).systems;
-      expect(s.verdict === 'ok').toBe(s.minFlowC !== null && s.flowTempAtDesignC! >= s.minFlowC);
+      for (const circuit of [{}, { variable_flow: false, design_flow_rate: 8 }, { max_flow_rate: 10 }]) {
+        const [s] = sizeHeating(model({ s: wet({ design_flow_temp: flow, ...circuit }) }), loss({ 'zone 1': designLossKw })).systems;
+        expect(s.verdict === 'ok').toBe(s.minFlowC !== null && s.flowTempAtDesignC! >= s.minFlowC);
+        // The output at the design flow and the verdict say the same thing.
+        expect(s.outputAtDesignKw! >= designLossKw - 1e-9).toBe(s.verdict === 'ok');
+      }
     }
   });
 
   it('no flow up to 100 C covers the loss: no minimum flow', () => {
     const [s] = sizeHeating(model({ s: wet({ design_flow_temp: 55 }) }), loss({ 'zone 1': 25 })).systems;
     expect(s).toMatchObject({ verdict: 'too-small', minFlowC: null });
+  });
+
+  // One radiator with n = 1 and c = 0.2 kW/K gives closed forms. At output P the water drops
+  // dT(P) = P / (K_WATER x rate); the radiator gives c x (flow - dT(P) / 2 - 21).
+  const linear = [{ wet_emitter_type: 'radiator', c: 0.2, n: 1 }];
+  it('fixed flow: the return comes from the energy balance at design_flow_rate', () => {
+    const kq = K_WATER * 6; // 6 l/min
+    const [s] = sizeHeating(model({ s: wet({ emitters: linear, variable_flow: false, design_flow_rate: 6 }) }), loss({ 'zone 1': 4 })).systems;
+    // P = 0.2 x (55 - P / (2 kq) - 21)  =>  P = 0.2 x 34 / (1 + 0.2 / (2 kq)) = 5.488 kW
+    expect(s.outputAtDesignKw).toBeCloseTo((0.2 * 34) / (1 + 0.2 / (2 * kq)), 9);
+    // 4 kW: flow = 21 + 4 / 0.2 + 4 / (2 kq) = 45.78 C
+    expect(s.minFlowC).toBe(Math.ceil((21 + 20 + 4 / (2 * kq)) * 10) / 10);
+  });
+
+  it('variable flow above max_flow_rate: the flow rate stays at the maximum and the drop grows', () => {
+    // 6 l/min x 5 K carries 2.09 kW. Above that the circuit runs as fixed flow at 6 l/min.
+    const kq = K_WATER * 6;
+    const [s] = sizeHeating(model({ s: wet({ emitters: linear, max_flow_rate: 6 }) }), loss({ 'zone 1': 4 })).systems;
+    expect(s.outputAtDesignKw).toBeCloseTo((0.2 * 34) / (1 + 0.2 / (2 * kq)), 9);
+    expect(s.minFlowC).toBe(Math.ceil((41 + 4 / (2 * kq)) * 10) / 10);
+    // 1 kW is inside the range: the drop is the design 5 K, so 21 + 5 + 2.5 = 28.5 C.
+    const [low] = sizeHeating(model({ s: wet({ emitters: linear, max_flow_rate: 6 }) }), loss({ 'zone 1': 1 })).systems;
+    expect(low.minFlowC).toBe(28.5);
+  });
+
+  it('variable flow below min_flow_rate: the flow rate stays at the minimum and the drop shrinks', () => {
+    // 20 l/min x 5 K is 6.97 kW. At 30 C flow the output is below that, so the rate is 20 l/min.
+    const kq = K_WATER * 20;
+    const [s] = sizeHeating(model({ s: wet({ emitters: linear, min_flow_rate: 20, design_flow_temp: 30 }) }), loss({ 'zone 1': 1 })).systems;
+    expect(s.outputAtDesignKw).toBeCloseTo((0.2 * 9) / (1 + 0.2 / (2 * kq)), 9);
+  });
+
+  it.each([
+    ['no variable_flow', { variable_flow: undefined }, /variable_flow/],
+    ['variable flow without max_flow_rate', { max_flow_rate: undefined }, /min_flow_rate and max_flow_rate/],
+    ['variable flow without temp_diff_emit_dsgn', { temp_diff_emit_dsgn: undefined }, /temp_diff_emit_dsgn/],
+    ['fixed flow without design_flow_rate', { variable_flow: false }, /design_flow_rate/],
+  ])('%s has no data', (_label, over, reason) => {
+    const [s] = sizeHeating(model({ s: wet(over) }), loss({ 'zone 1': 3 })).systems;
+    expect(s).toMatchObject({ status: 'no-data', verdict: null, curve: [], reason: expect.stringMatching(reason) });
+  });
+
+  it('a bypass that recirculates return water is not sized yet', () => {
+    const [s] = sizeHeating(model({ s: wet({ bypass_fraction_recirculated: 0.2 }) }), loss({ 'zone 1': 3 })).systems;
+    expect(s).toMatchObject({ status: 'unsupported', verdict: null });
+    expect(sizeHeating(model({ s: wet({ bypass_fraction_recirculated: 0 }) }), loss({ 'zone 1': 3 })).systems[0].status).toBe('ok');
   });
 
   it('design flow at or below set-point gives zero output', () => {
@@ -367,6 +426,42 @@ describe('sizeHeating: emitters', () => {
     );
     expect(result.systems[0]).toMatchObject({ name: 'x', zone: 'x', heatSources: ['x'], designLossKw: 5 });
     expect(result.heatSources[0]).toMatchObject({ name: 'x', systems: ['x'], verdict: 'ok' });
+  });
+});
+
+describe('sizeHeating: suggested lower flow', () => {
+  // 5 kW: the mean water is 21 + 31.5 x (5/6)^(1/1.3) = 48.4 C, so the radiators cover it from 50.9 C
+  // flow: 51 C. The heat pump at 51 C: 6.4 kW down to 0.48 x 6.4 = 3.1 kW, so 5 kW is inside its range.
+  const suggested = (systems: Record<string, unknown>, sources?: Record<string, unknown>, kw = 5, coldest = -1) =>
+    sizeHeating(model(systems, sources), loss({ 'zone 1': kw }, coldest)).systems[0].suggestedFlowC;
+  it('suggests ceil(minFlowC) when the heat pump is still big enough and not too big there', () => {
+    expect(suggested({ s: wet() })).toBe(51);
+  });
+  it('none when lowering the flow makes the heat pump too small', () => {
+    // 5.2 kW at 55 C covers 5 kW; at 51 C it is 3 + 0.8 x 2.2 = 4.76 kW.
+    const rows = [testRow('A', 35, 3, -7), testRow('A', 55, 5.2, -7)];
+    expect(suggested({ s: wet() }, { hp: heatPump({ test_data_EN14825: rows }) })).toBeNull();
+  });
+  it('none when the heat pump is too big at the lower flow', () => {
+    // 2 kW: 38 C. The heat pump turns down only to 0.415 x 7.7 = 3.2 kW there.
+    expect(suggested({ s: wet() }, undefined, 2)).toBeNull();
+  });
+  it('none for a boiler, or a heat pump with a boiler on the same system', () => {
+    expect(suggested({ s: wet({ HeatSource: { name: 'b' } }) }, { b: boiler })).toBeNull();
+    expect(suggested({ s: wet({ HeatSource: [{ name: 'hp' }, { name: 'b' }] }) }, { hp: heatPump(), b: boiler })).toBeNull();
+  });
+  it('none when ceil(minFlowC) is less than 1 C below the design flow', () => {
+    // 5.875 kW is covered from 54.5 C: 55 C is not lower.
+    expect(suggested({ s: wet() }, undefined, 6 * (31 / 31.5) ** 1.3)).toBeNull();
+  });
+  it('none when weather compensation runs a milder design day below the setting', () => {
+    const ctrl = { ecodesign_control_class: 2, min_outdoor_temp: -5, max_outdoor_temp: 15, min_flow_temp: 35 };
+    expect(suggested({ s: wet({ ecodesign_controller: ctrl }) }, undefined, 5, 5)).toBeNull();
+    // At -8 C the design day runs the 55 C setting; test point F (-10 C) gives 5.4 kW at 51 C.
+    expect(suggested({ s: wet({ ecodesign_controller: ctrl }) }, undefined, 5, -8)).toBe(51);
+  });
+  it('none when the radiators are too small', () => {
+    expect(suggested({ s: wet() }, undefined, 7)).toBeNull();
   });
 });
 

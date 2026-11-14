@@ -45,7 +45,10 @@ export interface SystemSizing {
   status: SizingStatus;
   reason: string | null;
   designLossKw: number | null;
+  /** The system's design_flow_temp setting. Weather compensation runs it only at or below min_outdoor_temp. */
+  designFlowTempC: number | null;
   flowTempAtDesignC: number | null;
+  /** The most the radiators give at flowTempAtDesignC, in steady state (see radiatorOutputKw). */
   outputAtDesignKw: number | null;
   /** Emitter output in 1 K steps from CURVE_MIN_FLOW_C to CURVE_MAX_FLOW_C, or to the design flow temperature (rounded up) when that is higher. */
   curve: CurvePoint[];
@@ -57,6 +60,15 @@ export interface SystemSizing {
    */
   minFlowC: number | null;
   verdict: 'ok' | 'too-small' | null;
+  /**
+   * ceil(minFlowC) when it is worth suggesting as the design flow temperature, else null. Only when
+   * the radiators are big enough, the design day runs the design_flow_temp setting (with weather
+   * compensation: a design day at or below min_outdoor_temp, or a curve clamped at the setting; a
+   * milder design day runs less than the setting, so the two are not the same thing), it is at
+   * least 1 °C below that flow, and every heat source is an outside air heat pump still big enough
+   * and not too big at it.
+   */
+  suggestedFlowC: number | null;
   notes: string[];
 }
 
@@ -77,6 +89,8 @@ export interface HeatSourceSizing {
   balancePointC: number | null;
   /** Heat pumps only: power_max_backup > 0 or a backup boiler. */
   hasBackupHeater: boolean | null;
+  /** A zone it serves also has a heating system that is not sized (e.g. a direct electric heater), which can cover a shortfall. */
+  otherSystemsInZone: boolean;
   /** Heat pumps only: temp_test of the EN 14825 point whose capacity is maxKw. */
   testPointC: number | null;
   /** Heat pumps only: how far the coldest hour is below testPointC (K); null when it is not. */
@@ -201,13 +215,7 @@ function flowAtDesign(system: Json, coldestC: number): number | string {
   return minFlow + (coldestC - hi) * ((design - minFlow) / (lo - hi));
 }
 
-/**
- * Radiator output c x (flow - setpoint)^n, clamped at 0. This is the FHS notional's own
- * sizing convention (hem_fhs_upstream/src/future_homes_standard/
- * future_homes_standard_notional.rs, `replace_space_heating_system`): flow temperature
- * minus set-point, not mean water temperature. c_per_m x length as the engine reads it
- * (emitters.rs, Emitters::new).
- */
+/** c and n of each radiator; c_per_m x length as the engine reads it (emitters.rs, Emitters::new). */
 function radiatorConstants(emitters: Json[]): [number, number][] | string {
   const out: [number, number][] = [];
   for (const e of emitters) {
@@ -221,8 +229,70 @@ function radiatorConstants(emitters: Json[]): [number, number][] | string {
   return out;
 }
 
-const radiatorOutputKw = (rads: [number, number][], flowC: number, setpointC: number) =>
-  rads.reduce((sum, [c, n]) => sum + c * Math.max(0, flowC - setpointC) ** n, 0);
+/*
+ * Radiator output follows the HEM engine's own steady state. Rust: hem_engine_upstream/src/core/
+ * heating_systems/emitters.rs; Python (HEM:EPC): hem-core heating_systems/emitters.py. The two
+ * are the same here, so one form serves every target.
+ *
+ * 1. Output from the mean water temperature T_E (`power_output_emitter`, emitters.rs:773,
+ *    emitters.py:802): P = sum of c x max(0, T_E - T_room)^n over the radiators.
+ * 2. T_E is the mean of flow and return (`demand_energy_flow_return`, emitters.rs:1430-1434,
+ *    emitters.py:1725): temp_emitter_max = (flow + return) / 2. In steady state the emitters sit
+ *    at that maximum while they give all they can.
+ * 3. The return comes from the circuit (`return_temp_from_flow_rate`, emitters.rs:1705-1838,
+ *    emitters.py:2109-2251). Variable flow: return = flow - temp_diff_emit_dsgn while the flow
+ *    rate P / (cp x temp_diff_emit_dsgn) is inside min_flow_rate..max_flow_rate (l/min);
+ *    outside it the rate stays at the limit. Fixed flow: the rate is design_flow_rate. At a set
+ *    rate the return solves P = cp x rate x (flow - return) (`update_return_temp`, bisection,
+ *    emitters.rs:1867, emitters.py:2290). The 6/7 rule in `temp_flow_return` (emitters.rs:752-758,
+ *    emitters.py:752-754) is only that bisection's starting point; it does not reach the result.
+ *    Water is 1 kg/l and 4184 J/kg K (material_properties.rs:68, material_properties.py:72).
+ * 4. T_room is the zone air temperature (`temp_internal_air`). This check takes it as the
+ *    heat-loss set-point.
+ *
+ * So the water drop dT(P) = P / (cp x rate(P)) and the radiators give P at flow F when
+ * P = sum c x (F - dT(P) / 2 - T_room)^n.
+ */
+const radiatorOutputKw = (rads: [number, number][], meanWaterC: number, roomC: number) =>
+  rads.reduce((sum, [c, n]) => sum + c * Math.max(0, meanWaterC - roomC) ** n, 0);
+
+/** kW that 1 l/min of water carries per K of drop: 1 kg/l x 4.184 kJ/kg K / 60 s. */
+const WATER_KW_PER_L_MIN_K = 4.184 / 60;
+
+/** The drop across the radiators (K) when they give `kw`, from the circuit's flow rate (step 3 above). */
+function waterDrop(system: Json): ((kw: number) => number) | string {
+  if (system.variable_flow === true) {
+    const dropK = num(system.temp_diff_emit_dsgn);
+    const [lo, hi] = [num(system.min_flow_rate), num(system.max_flow_rate)];
+    if (dropK === null) return 'Variable flow needs temp_diff_emit_dsgn.';
+    if (lo === null || hi === null) return 'Variable flow needs min_flow_rate and max_flow_rate.';
+    return (kw) => {
+      if (kw <= 0) return 0;
+      const rate = Math.min(hi, Math.max(lo, kw / (WATER_KW_PER_L_MIN_K * dropK)));
+      return kw / (WATER_KW_PER_L_MIN_K * rate);
+    };
+  }
+  if (system.variable_flow === false) {
+    const rate = num(system.design_flow_rate);
+    if (rate === null) return 'Fixed flow needs design_flow_rate.';
+    return (kw) => kw / (WATER_KW_PER_L_MIN_K * rate);
+  }
+  return 'The system has no variable_flow.';
+}
+
+/**
+ * The most the radiators give at `flowC`: the P that solves P = output(flow - dT(P) / 2). The
+ * right side falls as P rises, so bisection between 0 and the output at mean = flow finds it.
+ */
+function maxOutputKw(rads: [number, number][], drop: (kw: number) => number, flowC: number, roomC: number): number {
+  let [lo, hi] = [0, radiatorOutputKw(rads, flowC, roomC)];
+  for (let i = 0; i < 100 && hi - lo > 1e-12; i++) {
+    const mid = (lo + hi) / 2;
+    if (radiatorOutputKw(rads, flowC - drop(mid) / 2, roomC) >= mid) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
 
 /** True when any object nested in v has name === target (a HeatSource reference). */
 const refersTo = (v: unknown, target: string): boolean =>
@@ -241,11 +311,13 @@ function sizeSystem(name: string, system: Json, zone: string | null, loss: Desig
     status: 'ok',
     reason: null,
     designLossKw: null,
+    designFlowTempC: null,
     flowTempAtDesignC: null,
     outputAtDesignKw: null,
     curve: [],
     minFlowC: null,
     verdict: null,
+    suggestedFlowC: null,
     notes: [],
   };
   const fail = (status: SizingStatus, reason: string) => ({ ...result, status, reason });
@@ -269,37 +341,46 @@ function sizeSystem(name: string, system: Json, zone: string | null, loss: Desig
   }
   const rads = radiatorConstants(emitters);
   if (typeof rads === 'string') return fail('no-data', rads);
+  if ((num(system.bypass_fraction_recirculated) ?? 0) > 0) {
+    return fail('unsupported', 'A bypass that sends return water back into the flow is not sized yet.');
+  }
+  const drop = waterDrop(system);
+  if (typeof drop === 'string') return fail('no-data', drop);
   const flowC = flowAtDesign(system, loss.coldestHourC);
   if (typeof flowC === 'string') return fail('no-data', flowC);
 
-  const output = (f: number) => radiatorOutputKw(rads, f, loss.setpointC);
+  const roomC = loss.setpointC;
+  const lossKw = zoneLoss.designLossKw;
   for (let f = CURVE_MIN_FLOW_C; f <= Math.max(CURVE_MAX_FLOW_C, Math.ceil(flowC)); f++) {
-    result.curve.push({ flowC: f, outputKw: output(f) });
+    result.curve.push({ flowC: f, outputKw: maxOutputKw(rads, drop, f, roomC) });
   }
+  result.designFlowTempC = num(system.design_flow_temp);
   result.flowTempAtDesignC = flowC;
-  result.outputAtDesignKw = output(flowC);
-  result.verdict = result.outputAtDesignKw >= zoneLoss.designLossKw ? 'ok' : 'too-small';
-  const minFlowC = lowestFlowCovering(output, zoneLoss.designLossKw, loss.setpointC, Math.max(MIN_FLOW_SEARCH_MAX_C, flowC));
+  result.outputAtDesignKw = maxOutputKw(rads, drop, flowC, roomC);
+  // Flow F covers the loss when the radiators give it with the water dropping dT(loss).
+  const covers = (f: number) => radiatorOutputKw(rads, f - drop(lossKw) / 2, roomC) >= lossKw;
+  result.verdict = covers(flowC) ? 'ok' : 'too-small';
+  const minFlowC = lowestFlowCovering(covers, roomC, Math.max(MIN_FLOW_SEARCH_MAX_C, flowC));
   // Rounding up can pass a design flow that already covers the loss; then that flow is the answer.
   result.minFlowC = minFlowC !== null && result.verdict === 'ok' ? Math.min(minFlowC, flowC) : minFlowC;
   return result;
 }
 
 /**
- * Lowest flow up to `maxC` whose output covers `lossKw`, rounded up to 0.1 C, by bisection:
- * output rises with flow above the set-point and is zero at or below it.
+ * Lowest flow up to `maxC` that covers the loss, rounded up to 0.1 C, by bisection: output
+ * rises with flow above the room temperature and is zero at or below it.
  */
-function lowestFlowCovering(output: (flowC: number) => number, lossKw: number, setpointC: number, maxC: number): number | null {
-  if (output(maxC) < lossKw) return null;
-  let [lo, hi] = [setpointC, maxC];
+function lowestFlowCovering(covers: (flowC: number) => boolean, roomC: number, maxC: number): number | null {
+  if (!covers(maxC)) return null;
+  let [lo, hi] = [roomC, maxC];
   for (let i = 0; i < 60; i++) {
     const mid = (lo + hi) / 2;
-    if (output(mid) >= lossKw) hi = mid;
+    if (covers(mid)) hi = mid;
     else lo = mid;
   }
   // `hi` covers the loss. Round up to 0.1 C, stepping once more if floating point fell short.
   const rounded = Math.ceil(Math.round(hi * 1e6) / 1e5) / 10;
-  return output(rounded) >= lossKw ? rounded : Math.round(rounded * 10 + 1) / 10;
+  return covers(rounded) ? rounded : Math.round(rounded * 10 + 1) / 10;
 }
 
 type Range = {
@@ -435,6 +516,7 @@ function sizeHeatSource(
     shortfallKw: null,
     balancePointC: null,
     hasBackupHeater: null,
+    otherSystemsInZone: false,
     testPointC: null,
     designBelowTestPointK: null,
     notes: [],
@@ -451,6 +533,8 @@ function sizeHeatSource(
 
   // Sum each served zone once: two systems in one zone share its loss.
   const zones = new Map(served.map((s) => [s.sizing.zone, s.sizing.zone ? loss.zones[s.sizing.zone] : undefined]));
+  // Sized systems on other heat sources fail the shared-zone rule below; what is left is unsized (unsupported).
+  result.otherSystemsInZone = systems.some((s) => !served.includes(s) && s.sizing.zone !== null && zones.has(s.sizing.zone));
   const unknown = served.find((s) => !s.sizing.zone || !loss.zones[s.sizing.zone]);
   if (!unknown) {
     result.designLossKw = [...zones.values()].reduce((sum, z) => sum + z!.designLossKw, 0);
@@ -494,6 +578,24 @@ function sizeHeatSource(
   return result;
 }
 
+/** SystemSizing.suggestedFlowC. */
+function suggestedFlow(s: SystemSizing, sources: Map<string, Json>, heatSources: Map<string, HeatSourceSizing>, coldestC: number): number | null {
+  if (s.status !== 'ok' || s.verdict !== 'ok' || s.minFlowC === null || s.flowTempAtDesignC === null || s.designFlowTempC === null) return null;
+  // Interpolation at exactly min_outdoor_temp can land a rounding error away from the setting.
+  if (Math.abs(s.flowTempAtDesignC - s.designFlowTempC) > 1e-9) return null;
+  const flowC = Math.ceil(s.minFlowC);
+  if (flowC > s.flowTempAtDesignC - 1 || s.heatSources.length === 0) return null;
+  for (const name of s.heatSources) {
+    const src = sources.get(name);
+    const entry = heatSources.get(name);
+    if (!src || str(src.type) !== 'HeatPump' || entry?.status !== 'ok' || entry.designLossKw === null) return null;
+    // ponytail: a heat pump serving several systems is judged at this system's lower flow alone.
+    const range = heatPumpRange(src, flowC, coldestC);
+    if ('reason' in range || range.maxKw < entry.designLossKw || (range.minKw !== null && range.minKw > entry.designLossKw)) return null;
+  }
+  return flowC;
+}
+
 /** Sizes every SpaceHeatSystem and HeatSourceWet of a prepared HEM core input. */
 export function sizeHeating(model: Json, loss: DesignHeatLoss): HeatingSizing {
   // WetDistribution names its Zone. Other systems are named by Zone.SpaceHeatSystem (input.rs ZoneInput).
@@ -523,6 +625,9 @@ export function sizeHeating(model: Json, loss: DesignHeatLoss): HeatingSizing {
     }
   }
   const heatSources = sources.map(([name, src]) => sizeHeatSource(name, src, systems, sources, loss, sharedZones));
+  const sourceByName = new Map(sources);
+  const sizingByName = new Map(heatSources.map((h) => [h.name, h]));
+  for (const s of systems) s.sizing.suggestedFlowC = suggestedFlow(s.sizing, sourceByName, sizingByName, loss.coldestHourC);
   return {
     coldestHourC: loss.coldestHourC,
     setpointC: loss.setpointC,

@@ -84,7 +84,7 @@ describe('heating sizing slice', () => {
     const NO_EXPORT = `${NO_TARGET_SIZING_REASON_PREFIX} This HEM target build cannot compute the design heat loss. Released targets do not have it yet.`;
     const store = createGeometryStore();
     store.getState().requestHeatingSizing(request(heated(24)));
-    expect(selectHeatingSizing(store.getState())).toEqual({ status: 'unavailable', reason: NO_HEATING_SIZING_PROVIDER });
+    expect(selectHeatingSizing(store.getState())).toEqual({ status: 'unavailable', reason: `${NO_TARGET_SIZING_REASON_PREFIX} ${NO_HEATING_SIZING_PROVIDER}` });
 
     const { provider, calls } = deferredProvider();
     const hosted = createGeometryStore({ heatingSizingProvider: provider });
@@ -93,19 +93,64 @@ describe('heating sizing slice', () => {
     await flush();
     expect(selectHeatingSizing(hosted.getState())).toMatchObject({ status: 'unavailable', reason: NO_EXPORT });
 
-    hosted.getState().setHeatingSizingUnavailable('HEM 1.0.0a9 is not downloaded.');
-    expect(selectHeatingSizing(hosted.getState())).toEqual({ status: 'unavailable', reason: 'HEM 1.0.0a9 is not downloaded.' });
   });
 
-  it('shows a provider error and computes again on the next request', async () => {
-    const { provider, calls } = deferredProvider();
-    const store = createGeometryStore({ heatingSizingProvider: provider });
-    store.getState().requestHeatingSizing(request(heated(24)));
-    calls[0].reject(new Error('Static heat loss failed: no zones'));
-    await flush();
-    expect(selectHeatingSizing(store.getState())).toMatchObject({ status: 'error', reason: 'Static heat loss failed: no zones' });
-    store.getState().requestHeatingSizing(request(heated(24)));
-    expect(provider.compute).toHaveBeenCalledTimes(2);
+  describe('on a target not yet known to size (released, not downloaded, never sized), shows nothing', () => {
+    it('hides the preflight reasons', () => {
+      const { provider } = deferredProvider();
+      const store = createGeometryStore({ heatingSizingProvider: provider });
+      store.setState({ targetBundleId: 'rust-fhs-a9' });
+      for (const reason of ['Fix the model errors to size the heating.', 'HEM 1.0.0a9 is not downloaded. Run the model once to download it.']) {
+        store.getState().setHeatingSizingUnavailable(reason);
+        expect(selectHeatingSizing(store.getState())).toEqual({ status: 'unavailable', reason: `${NO_TARGET_SIZING_REASON_PREFIX} ${reason}` });
+      }
+    });
+
+    it('hides a provider error (e.g. HEM:EPC preprocessing failed) and computes again on the next request', async () => {
+      const { provider, calls } = deferredProvider();
+      const store = createGeometryStore({ heatingSizingProvider: provider });
+      store.setState({ targetBundleId: 'rust-fhs-a9' });
+      store.getState().requestHeatingSizing(request(heated(24)));
+      calls[0].reject(new Error('EPC preprocessing failed'));
+      await flush();
+      expect(selectHeatingSizing(store.getState())).toMatchObject({ status: 'unavailable', reason: `${NO_TARGET_SIZING_REASON_PREFIX} EPC preprocessing failed` });
+      store.getState().requestHeatingSizing(request(heated(24)));
+      expect(provider.compute).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('once the target has sized a model', () => {
+    async function sizedStore() {
+      const { provider, calls } = deferredProvider();
+      const store = createGeometryStore({ heatingSizingProvider: provider });
+      store.setState({ targetBundleId: 'rust-fhs-a9' });
+      store.getState().requestHeatingSizing(request(heated(24)));
+      calls[0].resolve({ status: 'ready', model: heated(24), designHeatLoss: loss });
+      await flush();
+      return { store, calls };
+    }
+
+    it('gives the preflight reason', async () => {
+      const { store } = await sizedStore();
+      store.getState().setHeatingSizingUnavailable('Fix the model errors to size the heating.');
+      expect(selectHeatingSizing(store.getState())).toEqual({ status: 'unavailable', reason: 'Fix the model errors to size the heating.' });
+    });
+
+    it('shows a provider error', async () => {
+      const { store, calls } = await sizedStore();
+      store.getState().requestHeatingSizing(request(heated(2)));
+      calls[1].reject(new Error('EPC preprocessing failed'));
+      await flush();
+      expect(selectHeatingSizing(store.getState())).toMatchObject({ status: 'error', reason: 'EPC preprocessing failed' });
+    });
+
+    it('forgets it when the target changes', async () => {
+      const { store } = await sizedStore();
+      store.setState({ targetBundleId: 'rust-fhs-a7' });
+      store.setState({ targetBundleId: 'rust-fhs-a9' });
+      store.getState().setHeatingSizingUnavailable('Fix the model errors to size the heating.');
+      expect(selectHeatingSizing(store.getState()).reason).toBe(`${NO_TARGET_SIZING_REASON_PREFIX} Fix the model errors to size the heating.`);
+    });
   });
 
   it('keeps the last result while the next model computes, and the element warnings with it', async () => {

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { unavailableGeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import type { HeatingSizing, HeatSourceSizing, SystemSizing } from '../../../lib/heatingSizing';
 import type { Element } from '../../types';
-import { heatingSizingWarnings, heatingSizingWarningsFor, heatSourceSizingFor, systemSizingFor, validateElementCore } from '../validateElement';
+import { heatingSizingWarnings, heatingSizingWarningsFor, heatSourceSizingsFor, systemSizingFor, validateElementCore } from '../validateElement';
 
 const system = (id: string, name: string, subcategory: string, extra_json?: Record<string, unknown>) =>
   ({ id, name, type: 'System', subcategory, extra_json }) as unknown as Element;
@@ -14,7 +14,7 @@ const emitter = (id: string, name: string, space_heat_system?: string) =>
 
 const sys = (over: Partial<SystemSizing> = {}): SystemSizing => ({
   name: 'rads', kind: 'WetDistribution', zone: 'zone', heatSources: ['hp'], status: 'ok', reason: null,
-  designLossKw: 5.6, flowTempAtDesignC: 45, outputAtDesignKw: 4.64, curve: [], minFlowC: 49, verdict: 'too-small', notes: [],
+  designLossKw: 5.6, designFlowTempC: 45, flowTempAtDesignC: 45, outputAtDesignKw: 4.64, curve: [], minFlowC: 49, verdict: 'too-small', suggestedFlowC: null, notes: [],
   ...over,
 });
 const src = (over: Partial<HeatSourceSizing> = {}): HeatSourceSizing => ({
@@ -170,13 +170,19 @@ describe('heating sizing entries by element name', () => {
     expect([...heatingSizingWarnings(ready(result), list).keys()].sort()).toEqual(flagged);
   });
 
-  it('gives the panel the same entry the flag uses, or none', () => {
+  it('gives the panel the entries the flags use, or none', () => {
     const plant = system('a', 'Plant room', 'HeatSourceWet', { HeatSourceWet: { boiler: {}, hp: {} } });
     const sizing = ready({ heatSources: [src({ name: 'hp' })], systems: [sys()] }).result;
-    expect(heatSourceSizingFor(sizing, plant)?.name).toBe('hp');
-    expect(heatSourceSizingFor(sizing, system('g', 'ghost', 'HeatSourceWet'))).toBeNull();
+    expect(heatSourceSizingsFor(sizing, plant).map((s) => s.name)).toEqual(['hp']);
+    expect(heatSourceSizingsFor(sizing, system('g', 'ghost', 'HeatSourceWet'))).toEqual([]);
     expect(systemSizingFor(sizing, emitter('r', 'R1', 'Radiators'), [system('s', 'Radiators', 'SpaceHeatSystem', { SpaceHeatSystem: { rads: {} } })])?.name).toBe('rads');
     expect(systemSizingFor(sizing, emitter('r', 'R1', 'nowhere'), [])).toBeNull();
+  });
+
+  it('names the plant in the flag when the element holds several, one flag per verdict', () => {
+    const plant = system('a', 'Plant room', 'HeatSourceWet', { HeatSourceWet: { boiler: {}, hp: {} } });
+    const result = ready({ heatSources: [src({ name: 'boiler', kind: 'Boiler', verdict: 'ok' }), src({ name: 'hp' })] });
+    expect(messages(heatingSizingWarnings(result, [plant]))).toEqual({ a: ['The heat pump "hp" is too small for the house on the design day.'] });
   });
 
   // A stale result after a rename: until the next model computes, the result names the old key.

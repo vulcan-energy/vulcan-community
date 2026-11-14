@@ -62,6 +62,7 @@ import type { Element } from '../../geometry/types';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
+import { HeatingSizingBlock } from '../HeatingSizingBlock';
 import {
   decimalInputProps,
   integerInputProps,
@@ -169,6 +170,8 @@ export const wetEmitterFormModule: ElementFormModule<WetEmitterFormState> = {
       comparisonFieldIndicators,
       commitExistingElementDraft,
       renderSpaceHeatSystemPicker,
+      selectedElement,
+      elementsById,
     } = ctx;
 
     return (
@@ -192,6 +195,7 @@ export const wetEmitterFormModule: ElementFormModule<WetEmitterFormState> = {
           />
         </div>
         {renderSpaceHeatSystemPicker()}
+        <HeatingSizingBlock element={selectedElement} elements={Object.values(elementsById)} />
         {subcategory === 'ufh' && (
           <>
             {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}

@@ -571,10 +571,10 @@ function spaceHeatSystemKeyResolver(elements: readonly Element[]): (element: Ele
   };
 }
 
-/** The sizing entry of a heat source's System element (the first, when its fragment holds several). */
-export function heatSourceSizingFor(sizing: HeatingSizing, element: Element): HeatSourceSizing | null {
+/** The sizing entries of a heat source's System element: one per plant its fragment holds. */
+export function heatSourceSizingsFor(sizing: HeatingSizing, element: Element): HeatSourceSizing[] {
   const keys = systemModelKeys(element, 'HeatSourceWet');
-  return sizing.heatSources.find((s) => keys.has(s.name)) ?? null;
+  return sizing.heatSources.filter((s) => keys.has(s.name));
 }
 
 /** The sizing entry of a SpaceHeatSystem's System element, or of the system a WetEmitter links. */
@@ -603,12 +603,16 @@ export function heatingSizingWarnings(
   // Sizing block, so the two never repeat each other.
   for (const s of sizing.result.heatSources) {
     if (s.status !== 'ok' || s.designLossKw === null) continue;
-    const word = s.kind === 'HeatPump' ? 'heat pump' : 'boiler';
-    let message: string;
-    if (s.verdict === 'too-small' && s.maxKw !== null) message = `The ${word} is too small for the ${subject} on the design day.`;
-    else if (s.verdict === 'too-big' && s.minKw !== null) message = `The ${word} is too big for the ${subject}. It switches on and off all year.`;
+    const kind = s.kind === 'HeatPump' ? 'heat pump' : 'boiler';
+    let verdict: string;
+    if (s.verdict === 'too-small' && s.maxKw !== null) verdict = `too small for the ${subject} on the design day.`;
+    else if (s.verdict === 'too-big' && s.minKw !== null) verdict = `too big for the ${subject}. It switches on and off all year.`;
     else continue;
-    for (const e of elements) if (systemModelKeys(e, 'HeatSourceWet').has(s.name)) add(e.id, message);
+    for (const e of elements) {
+      const keys = systemModelKeys(e, 'HeatSourceWet');
+      // An element holding several plants names the one the flag is about, as its panel does.
+      if (keys.has(s.name)) add(e.id, `The ${kind}${keys.size > 1 ? ` "${s.name}"` : ''} is ${verdict}`);
+    }
   }
 
   const systemKey = spaceHeatSystemKeyResolver(elements);

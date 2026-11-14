@@ -3,7 +3,7 @@
 
 import type { StateCreator } from 'zustand';
 import type { GeometryState } from '../../geometryStore';
-import { sizeHeating, type DesignHeatLoss, type HeatingSizing } from '../../../lib/heatingSizing';
+import { NO_TARGET_SIZING_REASON_PREFIX, sizeHeating, type DesignHeatLoss, type HeatingSizing } from '../../../lib/heatingSizing';
 
 type Json = Record<string, unknown>;
 
@@ -40,7 +40,10 @@ export interface HeatingSizingSlice {
    * older one; an unchanged model is answered from the cache.
    */
   requestHeatingSizing: (request: HeatingSizingRequest) => void;
-  /** No prepared model to size (target not downloaded, preparation failed). */
+  /**
+   * No prepared model to size (target not downloaded, preparation failed). Like a provider error,
+   * the reason shows only once the current target has sized a model; otherwise it is hidden.
+   */
   setHeatingSizingUnavailable: (reason: string) => void;
 }
 
@@ -74,6 +77,15 @@ export const createHeatingSizingSlice = (
 ): StateCreator<GeometryState, [], [], HeatingSizingSlice> => (set, get, api) => {
   const cache = new Map<string, HeatingSizingState>();
   let active: AbortController | undefined;
+  /**
+   * The bundle that last gave a result. Only a target known to size explains why it did not: on
+   * any other (every released target, a7, one not yet downloaded or run) reasons are hidden.
+   */
+  let sizedBundleId: string | undefined;
+  const hideUnlessSized = (bundleId: string | null | undefined, reason: string): HeatingSizingState =>
+    (bundleId && bundleId === sizedBundleId) || reason.startsWith(NO_TARGET_SIZING_REASON_PREFIX)
+      ? { status: 'unavailable', reason }
+      : { status: 'unavailable', reason: `${NO_TARGET_SIZING_REASON_PREFIX} ${reason}` };
   const settle = (state: HeatingSizingState) => {
     active?.abort();
     active = undefined;
@@ -81,17 +93,21 @@ export const createHeatingSizingSlice = (
   };
   // A load, new document or target change clears the target check; the old sizing goes with it.
   api.subscribe((state, prev) => {
+    if (state.targetBundleId !== prev.targetBundleId) sizedBundleId = undefined;
     if (prev.targetValidation && !state.targetValidation && state.heatingSizing !== IDLE) settle(IDLE);
   });
   return {
     heatingSizing: IDLE,
-    setHeatingSizingUnavailable: (reason) => settle({ status: 'unavailable', reason }),
+    setHeatingSizingUnavailable: (reason) => settle(hideUnlessSized(get().targetBundleId, reason)),
     requestHeatingSizing: (request) => {
       if (!hasSpaceHeating(request.model)) return settle(IDLE);
-      if (!provider) return settle({ status: 'unavailable', reason: NO_HEATING_SIZING_PROVIDER });
+      if (!provider) return settle(hideUnlessSized(undefined, NO_HEATING_SIZING_PROVIDER));
       const modelKey = hash(`${request.targetBundleId}\n${JSON.stringify(request.model)}`);
       const cached = cache.get(modelKey);
-      if (cached) return settle(cached);
+      if (cached) {
+        sizedBundleId = request.targetBundleId;
+        return settle(cached);
+      }
       if (get().heatingSizing.modelKey === modelKey && get().heatingSizing.status === 'computing') return;
       settle({ status: 'computing', modelKey, result: get().heatingSizing.result });
       const controller = new AbortController();
@@ -99,17 +115,22 @@ export const createHeatingSizingSlice = (
       void provider.compute(request, controller.signal)
         .then((computed): HeatingSizingState => computed.status === 'ready'
           ? { status: 'ready', modelKey, result: sizeHeating(computed.model, computed.designHeatLoss) }
-          : { status: 'unavailable', modelKey, reason: computed.reason })
+          : { ...hideUnlessSized(request.targetBundleId, computed.reason), modelKey })
         .then(
           (state) => {
             if (controller.signal.aborted) return;
             // Only results are cached: an unavailable target can become available (downloaded) unchanged.
-            if (state.status === 'ready') cache.set(modelKey, state);
+            if (state.status === 'ready') {
+              cache.set(modelKey, state);
+              sizedBundleId = request.targetBundleId;
+            }
             if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
             settle(state);
           },
           (error: unknown) => {
-            if (!controller.signal.aborted) settle({ status: 'error', modelKey, reason: error instanceof Error ? error.message : String(error) });
+            if (controller.signal.aborted) return;
+            const reason = error instanceof Error ? error.message : String(error);
+            settle(request.targetBundleId === sizedBundleId ? { status: 'error', modelKey, reason } : { ...hideUnlessSized(request.targetBundleId, reason), modelKey });
           },
         );
     },

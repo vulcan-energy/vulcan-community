@@ -25,8 +25,10 @@ const zone = (htcWPerK: number, designLossKw: number) => ({
   designLossKw,
 });
 
-// Two radiators c 0.08 n 1.2 and c 0.1 n 1.3, by hand at a given flow above 21 C.
-const pair = (flowC: number) => 0.08 * (flowC - 21) ** 1.2 + 0.1 * (flowC - 21) ** 1.3;
+// Two radiators c 0.08 n 1.2 and c 0.1 n 1.3, by hand at a mean water temperature above 21 C.
+const pair = (meanC: number) => 0.08 * (meanC - 21) ** 1.2 + 0.1 * (meanC - 21) ** 1.3;
+/** kW per K of drop at `lPerMin`: 1 kg/l x 4.184 kJ/kg K / 60 s, as the engine. */
+const carries = (lPerMin: number) => (lPerMin * 4.184) / 60;
 
 const hpRows = [
   ['A', 35, 8.4, -7], ['B', 35, 8.3, 2], ['C', 35, 8.3, 7], ['D', 35, 8.2, 12], ['F', 35, 8.4, -7],
@@ -50,6 +52,9 @@ const fhsPrepared = {
       Zone: 'whole dwelling',
       design_flow_temp: 55.0,
       temp_diff_emit_dsgn: 10.0,
+      variable_flow: true,
+      min_flow_rate: 3.0,
+      max_flow_rate: 18.0,
       ecodesign_controller: { ecodesign_control_class: 2, min_outdoor_temp: -4.0, max_outdoor_temp: 20.0, min_flow_temp: 30.0 },
       emitters: [0.08, 0.1, 0.08, 0.1].map((c, i) => ({
         wet_emitter_type: 'radiator', c, n: i % 2 ? 1.3 : 1.2, frac_convective: 0.4,
@@ -73,10 +78,18 @@ describe('sizeHeating on real prepared models', () => {
     const [radiators, backup] = systems;
     // -6.5 C is below min_outdoor_temp -4 C, so the flow is design_flow_temp.
     expect(radiators).toMatchObject({ status: 'ok', verdict: 'ok', flowTempAtDesignC: 55 });
-    expect(radiators.outputAtDesignKw).toBeCloseTo(2 * pair(55), 9);
+    // 2 x pair(50) = 25.0 kW would need 25.0 / (10 K x 0.0697) = 36 l/min, above max_flow_rate 18, so the
+    // rate stays at 18 l/min and the output P solves P = 2 pair(55 - P / (2 x 1.255)): 21.3 kW.
+    const p = radiators.outputAtDesignKw!;
+    expect(p).toBeCloseTo(2 * pair(55 - p / (2 * carries(18))), 9);
+    expect(p).toBeCloseTo(21.29, 2);
+    // 9.08 kW runs at 13.0 l/min, inside 3..18, so the drop is the design 10 K and the flow is mean + 5 K.
+    expect(radiators.minFlowC).toBe(39);
+    // At 39 C the heat pump gives 8.48 kW, below 9.08 kW: no lower flow is suggested.
+    expect(radiators.suggestedFlowC).toBeNull();
     expect(backup).toMatchObject({ zone: 'whole dwelling', status: 'unsupported', designLossKw: 9.078270175138618 });
     expect(heatSources[0]).toMatchObject({
-      status: 'ok', verdict: 'too-small', maxKw: 8.8, hasBackupHeater: true, testPointC: -7, designBelowTestPointK: null,
+      status: 'ok', verdict: 'too-small', maxKw: 8.8, hasBackupHeater: true, otherSystemsInZone: true, testPointC: -7, designBelowTestPointK: null,
     });
     expect(heatSources[0].minKw).toBeCloseTo(0.4 * 8.8, 9);
     expect(heatSources[0].shortfallKw).toBeCloseTo(9.078270175138618 - 8.8, 9);
@@ -95,7 +108,10 @@ describe('sizeHeating on real prepared models', () => {
     };
     const { systems, heatSources } = sizeHeating(coreExample('demo_hp_no_variable_flow'), loss);
     expect(systems[0]).toMatchObject({ status: 'ok', verdict: 'ok' });
-    expect(systems[0].outputAtDesignKw).toBeCloseTo(pair(55), 9);
+    // Fixed flow at 12 l/min: P solves P = pair(55 - P / (2 x 0.837)).
+    const p = systems[0].outputAtDesignKw!;
+    expect(p).toBeCloseTo(pair(55 - p / (2 * carries(12))), 9);
+    expect(p).toBeCloseTo(11.50, 2);
     expect(systems[1]).toMatchObject({ status: 'unsupported', reason: expect.stringMatching(/Underfloor heating is not sized yet/) });
     // A and F are both declared at -7 C; F at 55 C is 8.8 kW. 0.4 x 8.8 kW is above 2.28 kW.
     expect(heatSources[0]).toMatchObject({ status: 'ok', verdict: 'too-big', maxKw: 8.8, testPointC: -7 });
@@ -107,9 +123,10 @@ describe('sizeHeating on real prepared models', () => {
   it('Core combi boiler demo: 30% of 24 kW is above the design loss', () => {
     const loss: DesignHeatLoss = { coldestHourC: -7.2, setpointC: 21, weatherName: 'London', zones: { 'zone 1': zone(100.20768463832593, 2.825856706800791) } };
     const { systems, heatSources } = sizeHeating(coreExample('demo_combiBoiler'), loss);
-    expect(systems[0].outputAtDesignKw).toBeCloseTo(pair(55), 9);
-    // pair(30) = 2.86 kW covers 2.83 kW; 30 C is the lowest flow the curve samples.
-    expect(systems[0].minFlowC).toBe(30);
+    expect(systems[0].outputAtDesignKw).toBeCloseTo(12.51, 2);
+    // 2.83 kW runs at 4.1 l/min, inside 3..18: the drop is 10 K. pair(30) = 2.86 kW covers it with
+    // the mean water at 29.9 C, so the flow is 29.9 + 5 = 34.9 C, rounded up to 35 C.
+    expect(systems[0].minFlowC).toBe(35);
     expect(heatSources[0]).toMatchObject({ kind: 'Boiler', status: 'ok', verdict: 'too-big', maxKw: 24 });
     expect(heatSources[0].minKw).toBeCloseTo(7.2, 9);
   });

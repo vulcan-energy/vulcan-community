@@ -2377,6 +2377,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/EmitterSizingChart.tsx",
+      "source_path": "packages/geometry-editor/src/components/EmitterSizingChart.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/ExperimentalPill.css",
       "source_path": "packages/geometry-editor/src/components/ExperimentalPill.css",
       "license": "AGPL-3.0-only",
@@ -2483,6 +2491,30 @@
     {
       "path": "packages/geometry-editor/src/components/GroundUValueCalculatorModal.tsx",
       "source_path": "packages/geometry-editor/src/components/GroundUValueCalculatorModal.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/HeatingSizing.css",
+      "source_path": "packages/geometry-editor/src/components/HeatingSizing.css",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/HeatingSizingBlock.tsx",
+      "source_path": "packages/geometry-editor/src/components/HeatingSizingBlock.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/HeatSourceSizingBar.tsx",
+      "source_path": "packages/geometry-editor/src/components/HeatSourceSizingBar.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

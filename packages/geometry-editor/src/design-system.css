@@ -62,6 +62,7 @@
   --status-success-bg: var(--success-bg);
   --status-success-border: var(--success-border);
   --status-success-text: var(--success-text);
+  --status-ok-fill: #22C55E;                /* Saturated green fill (bars); not overridden like --success-text */
   --status-warning-bg: var(--validation-warning-badge-bg);
   --status-warning-border: var(--validation-warning-badge-border);
   --status-warning-text: var(--validation-warning-text);
