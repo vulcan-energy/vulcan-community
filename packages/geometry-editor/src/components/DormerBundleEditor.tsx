@@ -162,6 +162,7 @@ import type { ElementFormSelection } from './elementForms/types';
 import type { WallSharedFormGroup } from './elementForms/wallShared';
 import { ParentElementDropdown } from './ParentElementDropdown';
 import { StandardDropdown } from './StandardDropdown';
+import { useTargetRules } from '../hooks/useTargetRules';
 import { StandardInput } from './StandardInput';
 
 /** Local copy of ElementCreator's shared inline-note style — see
@@ -248,6 +249,9 @@ export function useDormerBundleEditor(args: {
     fieldUnit,
     renderFieldLabel,
   } = args;
+  // A flat dormer is HEMIE's dormer roof type; elsewhere a dormer is plain geometry, where a
+  // mono-pitch dormer at 0° draws the same roof.
+  const { hemieBundles } = useTargetRules();
 
   const selectedElement = selection.id ? getElementById(selection.id) ?? null : null;
   const selectedIsDormerAnchor = isDormerAnchorElement(selectedElement);
@@ -701,6 +705,7 @@ export function useDormerBundleEditor(args: {
           }}
           options={[
             { value: 'mono-pitch', label: 'Mono-pitch' },
+            ...(hemieBundles || selectedDormerType === 'flat' ? [{ value: 'flat', label: 'Flat' }] : []),
             { value: 'gable-front', label: 'Gable-front' },
             { value: 'hip', label: 'Hip' },
           ]}
@@ -744,7 +749,7 @@ export function useDormerBundleEditor(args: {
           size="md"
         />
       </div>
-      {selectedDormerType === 'mono-pitch' ? (
+      {selectedDormerType === 'flat' ? null : selectedDormerType === 'mono-pitch' ? (
         <>
           {renderFieldLabel('Dormer Roof Pitch (degrees):', elementType, 'pitch')}
           <div className="element-input">

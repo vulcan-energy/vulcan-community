@@ -9,6 +9,7 @@ import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
 import { useGeometrySchemaPort } from '../../../../geometry-editor-host/src/editorServicePorts';
 import { elementTypeAvailability } from '../../lib/schemaCache';
 import { useGeometryStore } from '../../stores/geometryStore';
+import { useTargetRules } from '../../hooks/useTargetRules';
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { StandardDropdown } from '../StandardDropdown';
 import { ElementTypePicker } from '../ElementTypePicker';
@@ -37,7 +38,7 @@ function getDefaultDrawModeForElementType(type: ElementType): DrawMode {
   return 'none';
 }
 
-function getDrawModeOptionsForElementType(type: ElementType): { value: string; label: string }[] {
+function getDrawModeOptionsForElementType(type: ElementType, hemieBundles: boolean): { value: string; label: string }[] {
   const options: { value: string; label: string }[] = [];
   if (drawingTypeIncludes(CANVAS_CONSTANTS.DRAWING_ELEMENT_TYPES.ROOM, type)) {
     options.push({ value: 'room', label: 'Room [K]' });
@@ -60,6 +61,10 @@ function getDrawModeOptionsForElementType(type: ElementType): { value: string; l
   }
   if (type === 'BuildingElementOpaque') {
     options.push({ value: 'dormer', label: '⌂ Dormer' });
+    if (hemieBundles) {
+      options.push({ value: 'bay', label: '⌓ Bay window' });
+      options.push({ value: 'conservatory', label: '▤ Conservatory' });
+    }
   }
   if (drawingTypeIncludes(CANVAS_CONSTANTS.DRAWING_ELEMENT_TYPES.POINT, type)) {
     options.push({ value: 'point', label: '• Point [O]' });
@@ -160,9 +165,10 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
     [drawElementType, schemaPort, modelSettings]
   );
   const drawElementTypeExcluded = 'reason' in elementTypeAvailability(schemaPort, drawElementType, modelSettings);
+  const { hemieBundles } = useTargetRules();
   const drawModeOptions = useMemo(
-    () => getDrawModeOptionsForElementType(drawElementType),
-    [drawElementType],
+    () => getDrawModeOptionsForElementType(drawElementType, hemieBundles),
+    [drawElementType, hemieBundles],
   );
 
   const resetDraftForMode = useCallback((mode: DrawMode) => {

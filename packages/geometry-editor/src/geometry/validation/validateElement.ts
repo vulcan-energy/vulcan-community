@@ -135,6 +135,7 @@ import {
   terminalConnectsToDuctEndpoint,
 } from '../../lib/mvhrDuctwork';
 import { MVHR_DUCT_ROLES, isMvhrDuctRole, isMvhrTerminalRole } from '../../lib/mvhrRoles';
+import { getHemieBundle, hemieBundleHostProblem } from '../../lib/hemieBundles';
 
 // ---------------- Module-level pure helpers ----------------
 // Hoisted from inside `validateElementCore` because they have no closure state. Available to
@@ -1037,6 +1038,11 @@ export const validateElementCore = (
   issues.push(...nonNumericCellIssues(element.nonNumericCells));
   const wallFaceIssue = profiledWallFaceIssue(element);
   if (wallFaceIssue) issues.push(geoIssue(wallFaceIssue, 'height'));
+  // A bay or conservatory whose host wall moved or went: named on its anchor.
+  const bundleHostIssue = context.elementsById && getHemieBundle(element)?.role === 'front-wall'
+    ? hemieBundleHostProblem(element, Object.values(context.elementsById))
+    : null;
+  if (bundleHostIssue) issues.push(geoIssue(bundleHostIssue, 'coordinates'));
   const warnings: ValidationIssue[] = [];
   // Local aliases for the module-level helpers (geoIssue/schemaIssue/fhsIssue) so the long
   // switch below stays readable. Per-type validators in subsequent refactors call the

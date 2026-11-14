@@ -96,6 +96,18 @@ describe('elementNameRemap', () => {
     expect(bundle.bundle_id).toBe('bundle-1');
   });
 
+  it('remaps the host wall of a bay or conservatory bundle member', () => {
+    const side = makeElement({
+      id: 'side',
+      name: 'Bay 1 left side',
+      extra_json: { hemie_bundle: { kind: 'bay', bundle_id: 'bay-1', role: 'left-wall', host_wall: 'Wall (S)' } },
+    });
+
+    const result = remapElementNameReferences(side, new Map([['Wall (S)', 'Front wall']]));
+
+    expect(result.extra_json?.hemie_bundle).toEqual({ kind: 'bay', bundle_id: 'bay-1', role: 'left-wall', host_wall: 'Front wall' });
+  });
+
   it('remaps wet emitter distribution system references', () => {
     const emitter = makeElement({
       id: 'emitter',

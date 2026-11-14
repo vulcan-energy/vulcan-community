@@ -52,6 +52,8 @@ import { readProfiledLineFace } from '../../lib/profileLineFace';
 import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeometry';
 import { findSuspendedGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
 import { isDormerAnchorElement } from '../../lib/dormerGeometry';
+import { getHemieBundle } from '../../lib/hemieBundles';
+import { HemieBundleEditor } from '../HemieBundleEditor';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import {
   mergeUnheatedPitchedRoofCeilingElevationExtraJson,
@@ -374,6 +376,9 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
 
     return (
       <>
+        {selectedElement && getHemieBundle(selectedElement)?.role === 'front-wall' ? (
+          <HemieBundleEditor key={selectedElement.id} anchor={selectedElement} />
+        ) : null}
         {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
         <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element'])}>
           <ParentElementDropdown

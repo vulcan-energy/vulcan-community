@@ -684,6 +684,24 @@ describe('dormerGeometry', () => {
     ]);
   });
 
+  it('builds flat dormers as one level roof whatever roof pitch is requested', () => {
+    const host = makeHostRoof();
+    const windowCenterPlanPoint = { x: 2, y: 1 };
+    const draft = buildDormerBundleDraft({
+      host,
+      dormerType: 'flat',
+      windowCenterPlanPoint,
+      placementDefaults: { dormerRoofPitch: 15 },
+    });
+
+    expect(draft?.dormerType).toBe('flat');
+    expect(draft?.roofs.map((roof) => roof.role)).toEqual(['roof']);
+    expect(draft?.roofs[0]?.element.pitch).toBe(0);
+    expect(draft?.names.roofs[0]).toContain('Flat Dormer');
+    const metadata = getDormerBundleMetadata({ ...host, extra_json: draft?.frontWall.extra_json } as any);
+    expect(metadata?.dormerType).toBe('flat');
+  });
+
   it('builds hip dormers with three stored roof members', () => {
     const host = makeHostRoof();
     const windowCenterPlanPoint = { x: 2, y: 1 };

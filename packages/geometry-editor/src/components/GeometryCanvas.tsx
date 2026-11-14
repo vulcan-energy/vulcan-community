@@ -260,6 +260,17 @@ import {
   isValidDormerHost,
 } from '../lib/dormerGeometry';
 import {
+  BAY_DEFAULTS,
+  CONSERVATORY_DEFAULTS,
+  bayParametersProblem,
+  buildBayBundleDraft,
+  buildConservatoryBundleDraft,
+  centreOnHost,
+  conservatoryParametersProblem,
+  groundFloorUnderWall,
+  isHemieBundleHost,
+} from '../lib/hemieBundles';
+import {
   cascadeHostedDescendantGeometry,
   cascadeHostedDescendantTranslation,
   collectHostedDescendantElementIds,
@@ -270,7 +281,7 @@ import {
   spaceLabelPlanAreaM2,
 } from '../lib/spaceLabelDerivation';
 import { getSpaceLabelBaseNameForRoomType } from '../lib/spaceLabelNaming';
-import type { ContextShading, SpaceLabel, Element, ElementDraft, ElementType, Floor } from '../geometry/types';
+import type { BuildingElementOpaque, ContextShading, SpaceLabel, Element, ElementDraft, ElementType, Floor } from '../geometry/types';
 import { geometryPerf } from '../lib/geometryPerf';
 import {
   getDevelopmentContextStems,
@@ -3743,7 +3754,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   });
 
   const tryPopLastDrawPoint = useCallback((): boolean => {
-    if (drawMode === 'none' || drawMode === 'dormer' || drawMode === 'orthogonal-room') {
+    if (drawMode === 'none' || drawMode === 'dormer' || drawMode === 'bay' || drawMode === 'conservatory' || drawMode === 'orthogonal-room') {
       return false;
     }
     if (drawMode === 'room') {
@@ -4769,6 +4780,21 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return null;
   }, [currentFloorZ, floors, globalOrientationOffset, sortedElementCanvasData]);
 
+  const findHemieBundleHostAtPoint = useCallback((point: { x: number; y: number }) => {
+    const tolerance = getProjectDefaults(geometryStore).snapTol * 2;
+    let best: { host: BuildingElementOpaque; d: number } | null = null;
+    for (const { element } of sortedElementCanvasData) {
+      if (!element || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
+      if (!isHemieBundleHost(element)) continue;
+      const [A, B] = element.coordinates;
+      const vx = B.x - A.x; const vy = B.y - A.y;
+      const t = Math.max(0, Math.min(1, ((point.x - A.x) * vx + (point.y - A.y) * vy) / (vx * vx + vy * vy || 1)));
+      const d = Math.hypot(point.x - (A.x + t * vx), point.y - (A.y + t * vy));
+      if (d <= tolerance && (!best || d < best.d)) best = { host: element, d };
+    }
+    return best?.host ?? null;
+  }, [currentFloorZ, floors, geometryStore, sortedElementCanvasData]);
+
   const dormerDrawPreviewCutout = useMemo(() => {
     if (drawMode !== 'dormer' || !drawCursor) return null;
     const host = findDormerHostAtPoint(drawCursor);
@@ -5670,6 +5696,53 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           setSelectedElementIds(dormerSelectionIds);
           setDrawingTooltip({ visible: false, text: '', position: { x: 0, y: 0 } });
 
+          if (!multiDrawModifierHeldRef.current) {
+            setDrawMode('none');
+          }
+          return;
+        } else if (drawMode === 'bay' || drawMode === 'conservatory') {
+          const host = findHemieBundleHostAtPoint(mouseWorld);
+          const pointerPosition = getStageViewportPointer(stage);
+          const showTip = (text: string) => {
+            if (pointerPosition) {
+              setDrawingTooltip({ visible: true, text, position: { x: pointerPosition.x + 10, y: pointerPosition.y - 10 } });
+            }
+          };
+          if (!host) {
+            showTip(`Place a ${drawMode === 'bay' ? 'bay window' : 'conservatory'} on a wall: click the wall.`);
+            return;
+          }
+          const state = geometryStore.getState();
+          const allElements = Object.values(state.elementsById);
+          const input = {
+            host,
+            groundFloor: groundFloorUnderWall(host, allElements),
+            existingNames: allElements.map((element) => element.name),
+            globalOrientationOffset: state.globalOrientationOffset,
+          };
+          let draft;
+          if (drawMode === 'bay') {
+            const parameters = { ...BAY_DEFAULTS, centre: centreOnHost(host, mouseWorld, BAY_DEFAULTS.openingWidth / 2) };
+            const problem = bayParametersProblem(host, parameters);
+            if (problem) { showTip(problem); return; }
+            draft = buildBayBundleDraft({ ...input, parameters });
+          } else {
+            const parameters = { ...CONSERVATORY_DEFAULTS, centre: centreOnHost(host, mouseWorld, CONSERVATORY_DEFAULTS.width / 2) };
+            const problem = conservatoryParametersProblem(host, parameters);
+            if (problem) { showTip(problem); return; }
+            draft = buildConservatoryBundleDraft({ ...input, parameters });
+          }
+          const ids = state.addElements(draft.members.map((member) => ({
+            ...member.updates,
+            name: member.name,
+            type: member.type,
+            zoneId: host.zoneId,
+            parent_element: member.parent_element,
+          }) as ElementDraft));
+          // The front wall is the anchor: its inspector shows the bundle's parameters.
+          setSelection({ type: 'element', id: ids[0] });
+          setSelectedElementIds([ids[0]]);
+          setDrawingTooltip({ visible: false, text: '', position: { x: 0, y: 0 } });
           if (!multiDrawModifierHeldRef.current) {
             setDrawMode('none');
           }

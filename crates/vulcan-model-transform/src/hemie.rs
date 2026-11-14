@@ -25,6 +25,8 @@ mod parts;
 #[path = "hemie_shading.rs"]
 mod shading;
 pub use shading::{HemieQuadrant, HemieShading};
+#[path = "hemie_bundles.rs"]
+mod bundles;
 
 type Row = BTreeMap<String, Value>;
 type Rows = BTreeMap<String, Vec<Row>>;
@@ -660,6 +662,24 @@ impl Ctx<'_> {
         value
     }
 
+    /// A wall's height to its eaves: the lowest point of a profiled top, else its height.
+    /// Derived from the model: the exported height of a profiled wall is its mean height, and
+    /// the gable above the eaves is not part of the storey.
+    fn eaves(&mut self, e: &El) -> Option<f64> {
+        let height = self.need(e, "height")?;
+        let profile_low = e
+            .get("geometry_face")
+            .and_then(|face| face.get("top_profile"))
+            .and_then(Value::as_array)
+            .and_then(|points| {
+                points
+                    .iter()
+                    .filter_map(|p| p.get("h")?.as_f64())
+                    .reduce(f64::min)
+            });
+        Some(profile_low.unwrap_or(height))
+    }
+
     /// The model setting for a construction type, overlaid with what the elements state. A
     /// U-value on the element is a documented U-value (derived from the model).
     fn construction(
@@ -695,7 +715,7 @@ impl Ctx<'_> {
             // surface resistances (BS EN ISO 13789 coefficients: radiative 5.13, convective 2.5
             // sideways, 5.0 upwards, 0.7 downwards; outside 20 + 4.14).
             let h_ci = match construction_type {
-                "flat_roof" | "unheated_pitched_roof" | "heated_pitched_roof" => 5.0,
+                t if t.ends_with("_roof") => 5.0,
                 t if t.ends_with("_floor") => 0.7,
                 _ => 2.5,
             };
@@ -909,7 +929,7 @@ fn merge_edges<'e>(ring: Vec<P>, walls: &[&'e El<'e>]) -> (Vec<P>, Vec<Option<&'
         let merge = (0..n).find(|&i| {
             let prev = (i + n - 1) % n;
             let same = match (carried[prev], carried[i]) {
-                (Some(x), Some(y)) => x.name == y.name,
+                (Some(x), Some(y)) => std::ptr::eq(x, y),
                 (None, None) => true,
                 _ => false,
             };
@@ -992,6 +1012,12 @@ pub(crate) fn map_existing_building(
 
 fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let els = elements(csv);
+    let left_out = bundles::left_out(ctx, &els);
+    let (hosts, pieces, conservatory_floors) = bundles::conservatory_hosts(ctx, &els);
+    let els: Vec<El> = els
+        .into_iter()
+        .filter(|e| !left_out.contains(e.name))
+        .collect();
     let model = ctx.model;
     let zone_name = model["Zone"]
         .as_object()
@@ -1002,12 +1028,19 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let region = region(ctx);
 
     // Line walls and the elements HEMIE geometry cannot hold yet.
-    let mut walls: Vec<(&El, Kind)> = Vec::new();
+    let bays = bundles::bays(ctx, &els);
+    let mut walls: Vec<(&El, Kind)> = pieces
+        .iter()
+        .map(|(p, _)| (p, wall_kind(p).expect("host wall")))
+        .collect();
     for e in &els {
+        if bundles::is_bay_wall(e) || hosts.contains(e.name) {
+            continue;
+        }
         if let Some(kind) = wall_kind(e) {
             if e.num("pitch").is_some_and(|p| (p - 90.0).abs() > 1e-6) {
                 ctx.errors.push(error(e.path(), format!("'{}' is a leaning wall (pitch {}). The existing-building converter takes vertical walls only.", e.name, e.num("pitch").unwrap_or_default())));
-            } else if e.text("parent_element").is_some() {
+            } else if e.text("parent_element").is_some() && bundles::tag(e).is_none() {
                 ctx.errors.push(error(e.path(), format!("'{}' is a wall inside another element, which the existing-building converter does not take. Draw it as a wall of the storey outline.", e.name)));
             } else {
                 walls.push((e, kind));
@@ -1112,9 +1145,20 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
     }
 
+    if bundles::box_in_roof(
+        ctx,
+        &rings,
+        &on_level(*storey_levels.last().expect("storeys")),
+        &planes,
+    ) {
+        return None;
+    }
+
     // Building parts: one per column of storeys, so each has one roof (ours; HEMIE also allows
-    // parts stacked on one another, 0.25 m apart).
-    let cells = match faces(&rings) {
+    // parts stacked on one another, 0.25 m apart). Derived from the model: a conservatory is its
+    // own building part, even on a bungalow.
+    let arrangement: Vec<Vec<P>> = rings.iter().chain(&conservatory_floors).cloned().collect();
+    let cells = match faces(&arrangement) {
         Ok(cells) => cells,
         Err(message) => {
             ctx.errors.push(error("/Zone".into(), message));
@@ -1195,6 +1239,8 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         })
         .collect();
 
+    let conservatory = bundles::conservatories(ctx, &els, &parts, &names);
+
     // Storey outlines and their walls.
     let mut hemie_walls: Vec<HemieWall> = Vec::new();
     let mut used: BTreeSet<&str> = BTreeSet::new();
@@ -1231,7 +1277,14 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 match wall {
                     Some(w) => {
                         used.insert(w.name);
-                        let Some(h) = ctx.need(w, "height") else {
+                        // A conservatory wall runs to its eaves; a gable above them is the
+                        // roof's. Other walls keep their stated height.
+                        let h = if bundles::tag(w).is_some() {
+                            ctx.eaves(w)
+                        } else {
+                            ctx.need(w, "height")
+                        };
+                        let Some(h) = h else {
                             continue;
                         };
                         if h <= STOREY_GAP && !low.iter().any(|x: &&El| x.name == w.name) {
@@ -1240,11 +1293,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                         lengths += dist(a, b);
                         height_sum += h * dist(a, b);
                         heights.insert(format!("{h}"));
-                        let kind = walls
-                            .iter()
-                            .find(|(x, _)| x.name == w.name)
-                            .map(|(_, k)| *k)
-                            .expect("wall");
+                        let kind = wall_kind(w).expect("wall");
                         let mut value = Map::new();
                         value.insert("wall_type".into(), json!(kind.wall_type()));
                         value.insert("storey_index".into(), json!(s - bottom));
@@ -1287,9 +1336,12 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             // included (the roof sits a gap above it). Derived from the model: a Vulcan wall runs
             // from its floor to the next floor or to the roof, so the ceiling height is the wall
             // height less the gap on every storey.
+            // DESNZ-defined: a conservatory has no separating ceiling, so its walls run to the
+            // eaves (HEMIE conservatory roofs take no gap).
+            let gap = if conservatory[pi] { 0.0 } else { STOREY_GAP };
             parts[pi]
                 .ceilings
-                .push(parts::round_ceiling(storey_height - STOREY_GAP));
+                .push(parts::round_ceiling(storey_height - gap));
             parts[pi].storeys.push(ring);
         }
     }
@@ -1330,12 +1382,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         .collect();
     let mut placed: BTreeSet<String> = BTreeSet::new();
     for wi in 0..hemie_walls.len() {
+        if conservatory[hemie_walls[wi].part] {
+            continue;
+        }
         let source = hemie_walls[wi].source;
-        let kind = walls
-            .iter()
-            .find(|(x, _)| x.name == source.name)
-            .map(|(_, k)| *k)
-            .expect("wall");
+        let kind = wall_kind(source).expect("wall");
         let construction_type = match kind {
             Kind::External => "external_wall",
             Kind::Party => "party_wall",
@@ -1351,7 +1402,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 .insert("age_band".into(), band.clone());
         }
         if kind == Kind::Sheltered {
-            match source.text("adjacent_space_type") {
+            // A sheltered piece of an unheated conservatory's host wall takes the bundle's space.
+            let piece = pieces.iter().find(|(p, _)| std::ptr::eq(p, source));
+            match piece.map_or(source.text("adjacent_space_type"), |(_, space)| *space) {
                 Some(space) => {
                     hemie_walls[wi].value.insert("adjacent_space_type".into(), json!(space));
                 }
@@ -1405,6 +1458,14 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 .insert("doors".into(), Value::Array(door));
         }
     }
+    bundles::conservatory_walls(
+        ctx,
+        &conservatory,
+        &mut hemie_walls,
+        &windows,
+        &doors,
+        &mut placed,
+    );
     passive_vents(ctx, csv, &mut hemie_walls);
     systems::wall_vents(ctx, &mut hemie_walls);
 
@@ -1414,6 +1475,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let mut roofs: Vec<Vec<&El>> = vec![Vec::new(); parts.len()];
     let party_ceilings: Vec<&El> = els.iter().filter(|e| parts::is_party_ceiling(e)).collect();
     for plane in planes.iter().chain(&party_ceilings) {
+        if bundles::over_bay(&bays, plane) {
+            continue;
+        }
         let c = centroid(&plane.pts);
         let part = (0..parts.len())
             .find(|&i| inside(c, &parts[i].poly))
@@ -1445,6 +1509,16 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         );
         (0..parts.len()).find(|&i| parts[i].top == rings.len() - 1 && inside(c, &parts[i].poly))
     });
+    bundles::attach_bays(
+        ctx,
+        &bays,
+        &mut hemie_walls,
+        &parts,
+        &planes,
+        &windows,
+        &doors,
+        &mut placed,
+    );
     let grounds: Vec<&El> = els
         .iter()
         .filter(|e| e.ty == "BuildingElementGround")
@@ -1469,6 +1543,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             .map(|w| Value::Object(w.value.clone()))
             .collect();
         let mut bp = Map::new();
+        if conservatory[pi] {
+            bp.insert("is_non_separated_conservatory".into(), json!(true));
+        }
         bp.insert("storeys".into(), Value::Array(storeys));
         bp.insert("walls".into(), Value::Array(part_walls));
         let floor_of = parts::PartFloor {
@@ -1497,6 +1574,22 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 &windows,
                 &top_ring,
                 &orient,
+                &mut placed,
+            )
+        } else if conservatory[pi] {
+            let gables: Vec<(&El, Kind, P, P)> = hemie_walls
+                .iter()
+                .filter(|w| w.part == pi)
+                .map(|w| (w.source, wall_kind(w.source).expect("wall"), w.a, w.b))
+                .collect();
+            bundles::conservatory_roof(
+                ctx,
+                &roofs[pi],
+                &windows,
+                &names[pi],
+                &top_ring,
+                &orient,
+                &gables,
                 &mut placed,
             )
         } else {
@@ -2002,10 +2095,12 @@ fn room_in_roof(
         .iter()
         .filter(|p| p.num("pitch") != Some(0.0))
         .partition(|p| p.flag("is_unheated_pitched_roof"));
-    if let Some(flat) = planes.iter().find(|p| p.num("pitch") == Some(0.0)) {
-        ctx.errors.push(error(flat.path(), format!("Flat roof '{}' is part of a room in the roof. The converter does not take a roof room's flat ceiling yet.", flat.name)));
-        return None;
-    }
+    // Flat planes in a roof room: the flat ceiling under the ridge (checked below).
+    let ceilings: Vec<&El> = planes
+        .iter()
+        .copied()
+        .filter(|p| p.num("pitch") == Some(0.0))
+        .collect();
     if heated.is_empty() {
         ctx.errors.push(error("/Zone".into(), "The room in the roof has no heated slope over it. Draw its heated roof slopes over the room.".into()));
         return None;
@@ -2031,7 +2126,34 @@ fn room_in_roof(
     let width = along(&mut walls.iter().flat_map(|w| w.pts.clone()), u);
     let length = along(&mut walls.iter().flat_map(|w| w.pts.clone()), v);
     let full_width = along(&mut top_ring.iter().copied(), u);
-    let Some(max_height) = gables
+    // Derived from the model: a flat plane lying between the heated slopes, under the ridge, or
+    // in a mono room between the slope and its high wall, is the room's flat ceiling. DESNZ-defined: a roof with a flat section anywhere else is not
+    // covered.
+    let across = |e: &El| {
+        let values: Vec<f64> = e.pts.iter().map(|p| dot(*p, u)).collect();
+        (
+            values.iter().copied().fold(f64::MAX, f64::min),
+            values.iter().copied().fold(f64::MIN, f64::max),
+        )
+    };
+    for c in &ceilings {
+        let (lo, hi) = across(c);
+        let slope_below = heated.iter().any(|h| across(h).1 <= lo + TOL);
+        let slope_above = heated.iter().any(|h| across(h).0 >= hi - TOL);
+        // Mono (HEMIE's single-slope form): the ceiling runs from the slope to the high wall.
+        let wall_at = |x: f64| knees.iter().any(|k| (across(k).0 - x).abs() <= TOL);
+        let between = (slope_below && (slope_above || wall_at(hi))) || (slope_above && wall_at(lo));
+        if !between {
+            ctx.errors.push(error(c.path(), format!("Flat roof '{}' is part of the room in the roof but is not a flat ceiling between its two slopes, or between its one slope and its high wall. A roof room with a flat section elsewhere cannot be entered: make the flat part the roof of its own building part, or draw it as slopes.", c.name)));
+            return None;
+        }
+    }
+    let ceiling_width = if ceilings.is_empty() {
+        0.0
+    } else {
+        along(&mut ceilings.iter().flat_map(|c| c.pts.clone()), u)
+    };
+    let Some(gable_top) = gables
         .iter()
         .filter_map(|g| g.top_height())
         .reduce(f64::max)
@@ -2043,12 +2165,34 @@ fn room_in_roof(
         ));
         return None;
     };
+    // Derived from the model: the room's highest point is its flat ceiling, measured from the
+    // room's floor, else the top of its gables (the ridge).
+    let max_height = if ceilings.is_empty() {
+        gable_top
+    } else {
+        let floor = ctx.need(gables[0], "base_height");
+        let tops: Option<Vec<f64>> = ceilings
+            .iter()
+            .map(|c| ctx.need(c, "base_height"))
+            .collect();
+        tops?.into_iter().fold(f64::MIN, f64::max) - floor?
+    };
     // DESNZ-defined: the mean knee wall height, zero with no knee walls.
-    let knee_heights: Vec<Option<f64>> = knees.iter().map(|k| ctx.need(k, "height")).collect();
-    let knee_height = if knees.is_empty() {
+    let both_sides = heated.iter().any(|p| side(centroid(&p.pts)) < 0.0)
+        && heated.iter().any(|p| side(centroid(&p.pts)) >= 0.0);
+    // DESNZ-defined, as HEMIE's mono form: a mono room's back wall is its full-height wall
+    // (HEMIE gives it the maximum ceiling height), so only the walls under the slope count.
+    let under_slope: Vec<&El> = knees
+        .iter()
+        .copied()
+        .filter(|k| both_sides || side(k.plan_mid()) >= 0.0)
+        .collect();
+    let knee_heights: Vec<Option<f64>> =
+        under_slope.iter().map(|k| ctx.need(k, "height")).collect();
+    let knee_height = if under_slope.is_empty() {
         0.0
     } else {
-        knee_heights.into_iter().sum::<Option<f64>>()? / knees.len() as f64
+        knee_heights.into_iter().sum::<Option<f64>>()? / under_slope.len() as f64
     };
     let room_wall = |ctx: &mut Ctx, w: &El, placed: &mut BTreeSet<String>| -> Value {
         let kind = wall_kind(w).expect("roof-room walls are wall lines");
@@ -2109,8 +2253,6 @@ fn room_in_roof(
     if let Some(band) = ctx.agreed(&heated, "age_band") {
         roof.insert("age_band".into(), band.clone());
     }
-    let both_sides = heated.iter().any(|p| side(centroid(&p.pts)) < 0.0)
-        && heated.iter().any(|p| side(centroid(&p.pts)) >= 0.0);
     if knees.is_empty() && !both_sides {
         // HEMIE requires a mono-pitched room's back wall, which would be a knee wall here.
         ctx.errors.push(error(main.path(), "The room in the roof slopes one way and has no wall under its high side. Draw that wall.".into()));
@@ -2127,6 +2269,9 @@ fn room_in_roof(
     // top storey, so the roof space is at least as wide as the room (HEMIE requires it).
     roof.insert("full_width".into(), json!(full_width.max(width)));
     roof.insert("maximum_ceiling_height".into(), json!(max_height));
+    if ceiling_width > 0.0 {
+        roof.insert("ceiling_width".into(), json!(ceiling_width));
+    }
     roof.insert("average_knee_wall_height".into(), json!(knee_height));
     roof.insert("left_gable_wall".into(), room_wall(ctx, left_gable, placed));
     roof.insert(
@@ -2147,6 +2292,9 @@ fn room_in_roof(
     }
     let key = ctx.construction("heated_pitched_roof", &heated, &[]);
     roof.insert("heated_pitched_roof_construction".into(), json!(key));
+    // DESNZ-defined: the surfaces above a flat ceiling or behind a void take the unheated
+    // pitched roof construction.
+    let unheated: Vec<&El> = unheated.into_iter().chain(ceilings).collect();
     if !unheated.is_empty() {
         let key = ctx.construction("unheated_pitched_roof", &unheated, &[]);
         roof.insert("unheated_pitched_roof_construction".into(), json!(key));
@@ -2196,6 +2344,8 @@ fn dormer<'e>(
 ) -> Option<Value> {
     let parameters = &bundle["parameters"];
     let (pitch_type, pitch_key) = match parameters["dormerType"].as_str() {
+        // Derived from the model: HEMIE takes no pitch for a flat dormer roof.
+        Some("flat") => ("flat", ""),
         Some("mono-pitch") => ("mono", "dormerRoofPitch"),
         // Derived from the model: a gable-fronted dormer has two slopes either side of a ridge.
         Some("gable-front") => ("dual", "gableRoofPitch"),
@@ -2225,8 +2375,27 @@ fn dormer<'e>(
     // Derived from the model: the bundle's own measurements; the dormer face is its front wall
     // rectangle (the gable above it comes from the roof).
     let measured = |key: &str| parameters[key].as_f64();
-    let (Some(pitch), Some(height)) = (measured(pitch_key), measured("frontWallHeight")) else {
-        ctx.errors.push(error(anchor.path(), format!("Dormer '{}' does not state its roof pitch ({pitch_key}) or front wall height (frontWallHeight). Open the dormer and set them.", anchor.name)));
+    let pitch = if pitch_type == "flat" {
+        Some(Value::Null)
+    } else {
+        measured(pitch_key).map(|p| json!(p))
+    };
+    let (Some(pitch), Some(height)) = (pitch, measured("frontWallHeight")) else {
+        let mut missing = Vec::new();
+        if pitch_type != "flat" && measured(pitch_key).is_none() {
+            missing.push(format!("roof pitch ({pitch_key})"));
+        }
+        if measured("frontWallHeight").is_none() {
+            missing.push("front wall height (frontWallHeight)".to_string());
+        }
+        ctx.errors.push(error(
+            anchor.path(),
+            format!(
+                "Dormer '{}' does not state its {}. Open the dormer and set it.",
+                anchor.name,
+                missing.join(" or ")
+            ),
+        ));
         return None;
     };
     let width = ctx.need(anchor, "width");
@@ -2253,10 +2422,12 @@ fn dormer<'e>(
     placed.insert(front.name.to_string());
     let front_window = window(ctx, front, true)?;
     let key = ctx.construction("external_wall", &[anchor], &[]);
-    Some(
-        json!({"dormer_width": width, "dormer_height": height, "dormer_base_height": base,
-        "wall_construction": key, "roof_pitch_type": pitch_type, "roof_pitch": pitch, "front_window": front_window}),
-    )
+    let mut value = json!({"dormer_width": width, "dormer_height": height, "dormer_base_height": base,
+        "wall_construction": key, "roof_pitch_type": pitch_type, "front_window": front_window});
+    if !pitch.is_null() {
+        value["roof_pitch"] = pitch;
+    }
+    Some(value)
 }
 
 fn window_vents<'r>(csv: &'r Rows, window: &'r str) -> impl Iterator<Item = &'r Row> {
@@ -2688,12 +2859,12 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     /// A gable wall on the roof room's floor: a wall with a sloped top profile.
-    fn gable(name: &str, a: P, b: P) -> String {
+    pub(super) fn gable(name: &str, a: P, b: P) -> String {
         wall(name, 2, a, b, 0.0)
             + r#""{""geometry_face"":{""top_profile"":[{""h"":0},{""h"":2.5},{""h"":0}]}}""#
     }
 
-    fn heated_roof() -> Vec<String> {
+    pub(super) fn heated_roof() -> Vec<String> {
         gable_roof()
             .into_iter()
             .map(|p| p.replace(",TRUE,FALSE,,", ",FALSE,FALSE,,"))

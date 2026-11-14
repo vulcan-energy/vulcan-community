@@ -23,7 +23,12 @@ import {
   slopedPolygonPlaneBasis,
 } from './slopePitchAxis';
 
-export type DormerType = 'mono-pitch' | 'gable-front' | 'hip';
+export type DormerType = 'mono-pitch' | 'flat' | 'gable-front' | 'hip';
+
+/** Mono-pitch and flat dormers have one roof sloping (or level) back onto the host roof. */
+function hasSingleRoof(dormerType: DormerType): boolean {
+  return dormerType === 'mono-pitch' || dormerType === 'flat';
+}
 export type DormerBundleRole =
   | 'front-wall-anchor'
   | 'left-cheek-wall'
@@ -524,9 +529,15 @@ function buildDormerBundleNames(
 ): DormerBundleNames {
   const hostLabel = hostName.trim() || 'Dormer';
   const typeLabel =
-    dormerType === 'gable-front' ? 'Gable Dormer' : dormerType === 'hip' ? 'Hip Dormer' : 'Dormer';
+    dormerType === 'gable-front'
+      ? 'Gable Dormer'
+      : dormerType === 'hip'
+        ? 'Hip Dormer'
+        : dormerType === 'flat'
+          ? 'Flat Dormer'
+          : 'Dormer';
   const roofNames =
-    dormerType === 'mono-pitch'
+    hasSingleRoof(dormerType)
       ? [generateUniqueName(`${hostLabel} ${typeLabel} Roof`, existingNames)]
       : dormerType === 'gable-front'
         ? [
@@ -582,7 +593,10 @@ function parseDormerParameters(raw: unknown): Partial<DormerBundleParameters> {
 
   return {
     dormerType:
-      params.dormerType === 'gable-front' || params.dormerType === 'hip' || params.dormerType === 'mono-pitch'
+      params.dormerType === 'gable-front' ||
+      params.dormerType === 'hip' ||
+      params.dormerType === 'mono-pitch' ||
+      params.dormerType === 'flat'
         ? params.dormerType
         : undefined,
     windowCenterPlanPoint,
@@ -1071,7 +1085,9 @@ export function resolveDormerGeometry(params: {
   );
   if (!Number.isFinite(maxAvailableDepth) || maxAvailableDepth <= MIN_DORMER_DEPTH_M) return null;
 
-  const desiredDormerRoofPitch = clamp(requested.dormerRoofPitch, 0, Math.max(0, hostPitchDeg - 0.5));
+  // A flat dormer is a single roof with no pitch.
+  const desiredDormerRoofPitch =
+    dormerType === 'flat' ? 0 : clamp(requested.dormerRoofPitch, 0, Math.max(0, hostPitchDeg - 0.5));
   const desiredGableRoofPitch = clamp(requested.gableRoofPitch, 5, 85);
   const hostPitchTan = Math.tan((hostPitchDeg * Math.PI) / 180);
   const requestedFrontWallHeight = Math.max(MIN_FRONT_WALL_HEIGHT_M, requested.frontWallHeight);
@@ -1087,7 +1103,7 @@ export function resolveDormerGeometry(params: {
   let dormerRoofPitch = roundToThreeDecimals(desiredDormerRoofPitch);
   let gableRoofPitch = roundToThreeDecimals(desiredGableRoofPitch);
 
-  if (dormerType === 'mono-pitch') {
+  if (hasSingleRoof(dormerType)) {
     const dormerPitchTan = Math.tan((desiredDormerRoofPitch * Math.PI) / 180);
     const pitchGap = hostPitchTan - dormerPitchTan;
     if (pitchGap <= 1e-6) return null;
@@ -1141,7 +1157,7 @@ export function resolveDormerGeometry(params: {
     elevation: roundToThreeDecimals(valleyElevation),
   };
   const cutoutPolygon =
-    dormerType === 'mono-pitch'
+    hasSingleRoof(dormerType)
       ? [frontLeft, frontRight, backRight, backLeft]
       : [frontLeft, frontRight, rightValleyPlanPoint, backCenter, leftValleyPlanPoint];
 
@@ -1155,7 +1171,7 @@ export function resolveDormerGeometry(params: {
   let leftRoofFacePoints: Array<{ x: number; y: number; z: number }> = [];
   let rightRoofFacePoints: Array<{ x: number; y: number; z: number }> = [];
 
-  if (dormerType === 'mono-pitch') {
+  if (hasSingleRoof(dormerType)) {
     const dormerPitchTan = Math.tan((desiredDormerRoofPitch * Math.PI) / 180);
     roofFrontBaseHeight = rearBaseHeight - dormerPitchTan * dormerDepth;
     frontWallHeight = roofFrontBaseHeight - frontBaseHeight;
@@ -1398,7 +1414,7 @@ export function buildDormerBundleDraft(params: {
     thermal_overrides: thermalOverrides,
   };
 
-  const isMonoPitchDormer = resolved.dormerType === 'mono-pitch';
+  const isMonoPitchDormer = hasSingleRoof(resolved.dormerType);
   const leftCheekEnd = isMonoPitchDormer ? resolved.backLeft : resolved.leftValleyPoint;
   const rightCheekEnd = isMonoPitchDormer ? resolved.backRight : resolved.rightValleyPoint;
   const leftCheekSpan = Math.hypot(
@@ -1545,7 +1561,7 @@ export function buildDormerBundleDraft(params: {
   const hipFrontRoofArea = calculatePlanarFaceArea3D(hipFrontRoofPoints);
 
   const roofs: Array<{ role: DormerBundleRole; name: string; element: Partial<BuildingElementOpaque> }> =
-    resolved.dormerType === 'mono-pitch'
+    hasSingleRoof(resolved.dormerType)
       ? [
           {
             role: 'roof',

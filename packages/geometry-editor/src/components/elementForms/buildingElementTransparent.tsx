@@ -171,6 +171,8 @@ import {
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { ResetFieldButton } from '../ResetFieldButton';
 import { StandardInput } from '../StandardInput';
+import { StandardDropdown } from '../StandardDropdown';
+import { conservatoryGlazingOpeningType, isConservatoryGlazing, withConservatoryGlazingOpeningType } from '../../lib/hemieBundles';
 import { CompactSegmentedControl } from '../WindowDetailControls';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import type { Element } from '../../geometry/types';
@@ -758,6 +760,28 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
         </div>
         </>}
         {openingNote ? <div style={INLINE_FIELD_NOTE_STYLE}>{openingNote}</div> : null}
+        {selectedElement?.type === 'BuildingElementTransparent' && isConservatoryGlazing(selectedElement, ctx.elementsById) ? (
+          <>
+            <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Opening type:</div>
+            <div className="element-input">
+              <StandardDropdown
+                value={conservatoryGlazingOpeningType(selectedElement) ?? ''}
+                onChange={(value) => commitExistingElementDraft({
+                  extra_json: withConservatoryGlazingOpeningType(selectedElement, value || null),
+                })}
+                options={[
+                  { value: '', label: 'Closed (DESNZ default)' },
+                  { value: 'closed', label: 'Closed' },
+                  { value: 'half opening top', label: 'Half opening (top)' },
+                  { value: 'top third opening', label: 'Third opening (top)' },
+                ]}
+                aria-label="Opening type"
+                variant="ghost"
+                size="md"
+              />
+            </div>
+          </>
+        ) : null}
         {renderFieldLabel('Frame Area Fraction:', elementType)}
         <div className="element-input" ref={registerBaseFieldRef('frame_area_fraction')}>
           <StandardInput

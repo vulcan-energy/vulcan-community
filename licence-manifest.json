@@ -2489,6 +2489,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/HemieBundleEditor.tsx",
+      "source_path": "packages/geometry-editor/src/components/HemieBundleEditor.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/jsonformsRenderers.tsx",
       "source_path": "packages/geometry-editor/src/components/jsonformsRenderers.tsx",
       "license": "AGPL-3.0-only",
@@ -4178,6 +4186,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/lib/__tests__/hemieBundles.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/hemieBundles.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/__tests__/hemieFabric.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/hemieFabric.test.ts",
       "license": "AGPL-3.0-only",
@@ -5084,6 +5100,14 @@
     {
       "path": "packages/geometry-editor/src/lib/heatSourceWetNamesFromProject.ts",
       "source_path": "packages/geometry-editor/src/lib/heatSourceWetNamesFromProject.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/hemieBundles.ts",
+      "source_path": "packages/geometry-editor/src/lib/hemieBundles.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
