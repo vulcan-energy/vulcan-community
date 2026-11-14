@@ -153,6 +153,11 @@ import { createHistorySlice, type HistorySlice } from './geometryStore/slices/hi
 import { createFloorSlice, type FloorSlice } from './geometryStore/slices/floorSlice';
 import { createIoSlice, DEFAULT_DEFAULTS_PATH, metadataFillRoot, type IoSlice } from './geometryStore/slices/ioSlice';
 import {
+  createHeatingSizingSlice,
+  type HeatingSizingProvider,
+  type HeatingSizingSlice,
+} from './geometryStore/slices/heatingSizingSlice';
+import {
   createDefaultNamingPreferences,
   formatAutoElementName,
   formatFloorLabel,
@@ -1482,6 +1487,7 @@ export type DuctType = typeof DUCT_TYPES[number];
 export interface GeometryState extends
   ComplianceSlice,
   FloorSlice,
+  HeatingSizingSlice,
   HistorySlice,
   IoSlice,
   MetadataSlice,
@@ -2895,6 +2901,8 @@ export interface CreateGeometryStoreOptions {
   workspaceResourcePort?: GeometryWorkspaceResourcePort;
   /** Exact metadata row keys interpreted by a private host and preserved by this store. */
   hostDocumentMetadataKeys?: readonly string[];
+  /** Computes design heat loss for heating sizing; without it the sizing is unavailable. */
+  heatingSizingProvider?: HeatingSizingProvider;
 }
 
 const resolveDefaultDefaultsPath = (
@@ -3180,6 +3188,7 @@ const createGeometryState = (
   defaultsLookup: createDefaultsLookup(null),
   getDefaultsLookup: () => get().defaultsLookup,
   ...createComplianceSlice(set, get, api),
+  ...createHeatingSizingSlice(options.heatingSizingProvider)(set, get, api),
   validateElement: (element, elementsById) =>
     validateElementForState(get(), get().defaultsLookup, schemaPort, element, elementsById),
 
