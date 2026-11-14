@@ -393,7 +393,9 @@ impl ConversionProfile {
                 ElementInputConvention::DividedOpeningHalfPartition
             },
             party_wall_requires_whole_u: whole_u,
-            requires_main_hot_water_source: physical_openings,
+            // FHS notional indexes the `hw cylinder` key; the EPC wrapper takes any key.
+            requires_main_hot_water_source: physical_openings
+                && !matches!(self, Self::EpcFullInputV1),
             requires_detailed_thermal_bridges: detailed_bridges,
             uses_exact_empty_shading_sectors: physical_openings,
             fan_coil_needs_energy_supply: physical_openings,
@@ -652,9 +654,9 @@ pub fn validate_target_input(
         // PointOfUse). Notional edit_storagetank indexes it unconditionally;
         // an empty schema-valid object is not a usable hot-water source.
         errors.push(ValidationError {
-            code: "E_PYTHON_FHS_HOT_WATER_SOURCE".into(),
+            code: "E_FHS_HOT_WATER_SOURCE".into(),
             path: "/HotWaterSource/hw cylinder".into(),
-            message: format!("{hem} requires the main hot-water source under 'hw cylinder', including point-of-use systems. Supply a compatible main source; unsupported names are preserved in the authored CSV and are not renamed automatically."),
+            message: "This HEM version reads only the main hot water source, and this model has none. Add a hot water system in Systems. Vulcan does not rename a hot water source given in other model data.".into(),
             schema_path: None, keyword: None,
         });
     }
@@ -666,9 +668,9 @@ pub fn validate_target_input(
             .is_some_and(|sum| sum > 1.0)
     {
         errors.push(ValidationError {
-            code: "E_PYTHON_FHS_SKY_SUM".into(),
+            code: "E_SKY_SUM".into(),
             path: "/ExternalConditions/shading_segments".into(),
-            message: format!("{hem} adds each shading segment's width / 360 for a flat element, and these segments sum to more than the whole sky in its arithmetic, so the run fails. Move one Context Shading angle by 1 degree."),
+            message: "The context shading segments add up to more than the whole sky for a flat roof or roof window, so the calculation fails. Move one Context Shading angle by 1 degree.".into(),
             schema_path: None, keyword: None,
         });
     }
