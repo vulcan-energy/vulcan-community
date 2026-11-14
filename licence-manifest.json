@@ -118,7 +118,7 @@
     {
       "path": "data/defaults/defaults_template_epc.json",
       "source_path": "data/defaults/defaults_template_epc.json",
-      "source_sha256": "5485f299ce5cea0c51b82d7390cac9e543e5a06d06c766adc7c70992f237ed4d",
+      "source_sha256": "0893d11a6cda76589678724c6ba124e55cdd089de5c63719f606c72bc5225358",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
