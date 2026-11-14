@@ -209,6 +209,8 @@ export interface ElementsZonesPanelProps {
    */
   cmdASelectIdsRef?: React.MutableRefObject<(() => string[] | null) | null>;
   people?: GeometryCanvasPeople;
+  /** The colour-by-fabric switch, offered under construction bands. */
+  fabricColouring?: Readonly<{ on: boolean; onToggle: () => void }>;
   /** Colleagues' selections on this floor: their discs mark the rows they have selected. */
   remoteSelections?: readonly GeometryCanvasRemoteSelection[];
 }
@@ -406,6 +408,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   unhideElement,
   cmdASelectIdsRef,
   people,
+  fabricColouring,
   remoteSelections = NO_COLLEAGUES,
 }: ElementsZonesPanelProps) {
   const geometryStore = useGeometryStoreApi();
@@ -1042,6 +1045,21 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                     />
                   </div>
                 </div>
+                {fabricColouring ? (
+                  <div className="hide-control" data-fabric-colouring>
+                    <div className="hide-control__label">Colour</div>
+                    <div className="hide-control__buttons">
+                      <button
+                        type="button"
+                        aria-pressed={fabricColouring.on}
+                        className={`draw-button hide-elements-button hide-control-button${fabricColouring.on ? ' hide-elements-button--active' : ''}`}
+                        onClick={fabricColouring.onToggle}
+                      >
+                        <span className="hide-elements-button__label">By fabric</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 {people ? <PeopleControl people={people} /> : null}
               </div>
             </div>

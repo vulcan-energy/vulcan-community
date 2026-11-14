@@ -415,13 +415,12 @@ const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
   "BuildingWidth",
   "KitchenExtractorHoodExternal",
   "HasElectricitySmartMeter",
-  "IsExistingBuilding",
 ]);
 
 /** Where a CSV Metadata key is edited in Global Settings; null when it is not. */
 export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSection | null {
   if (key.startsWith("DefaultAssembly")) return "defaults";
-  if (key === "TargetBundleId") return "target";
+  if (key === "TargetBundleId" || key === "IsExistingBuilding") return "target";
   if (key.startsWith("AirPermeability_test_")) return "airTightness";
   if (key.startsWith("Ventilation_") || key === "AirPermeability_ventilation_zone_height") return "ventilation";
   if (key === "JunctionPsiDefaultsPath" || key.startsWith("DetailedBridgePsiProfile")) return "thermalBridging";

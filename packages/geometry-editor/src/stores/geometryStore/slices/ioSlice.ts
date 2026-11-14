@@ -1061,7 +1061,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
-    for (const [key, cell] of Object.entries(compliance.productSettings ?? {})) {
+    for (const [key, cell] of [...Object.entries(compliance.productSettings ?? {}), ...Object.entries(compliance.hemieSettings ?? {})]) {
       lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
     // Only a host with no target catalogue (the community editor) keeps the community CLI's core mode.

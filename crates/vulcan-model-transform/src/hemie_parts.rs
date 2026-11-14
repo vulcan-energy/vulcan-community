@@ -191,13 +191,17 @@ fn setting_construction(ctx: &mut Ctx, construction_type: &str) -> String {
 
 /// DESNZ-defined: a party floor or ceiling takes only its construction weight; with none
 /// stated, HEMIE takes light (timber), reported.
-fn party_construction(ctx: &mut Ctx, construction_type: &str, e: &El) -> String {
+fn party_construction(ctx: &mut Ctx, construction_type: &str, elements: &[&El]) -> String {
     let mut c = ctx.settings.construction(construction_type);
     c.insert("construction_type".into(), json!(construction_type));
-    if let Some(weight) = e.text("construction_weight") {
+    if let Some(weight) = ctx
+        .agreed(elements, "construction_weight")
+        .and_then(Value::as_str)
+    {
         c.insert("construction_weight".into(), json!(weight));
     }
     if !c.contains_key("construction_weight") {
+        let e = elements[0];
         ctx.notices.push(notice(&e.path(), format!("'{}' states no construction weight, so HEMIE takes a light (timber) party floor or ceiling.", e.name)));
     }
     ctx.constructions.add(c)
@@ -211,8 +215,8 @@ pub(super) fn party_ceiling_roof(ctx: &mut Ctx, ceilings: &[&El], planes: &[&El]
         ctx.errors.push(error(first.path(), format!("Party ceiling '{}' and roof '{}' cover one building part. HEMIE gives each building part one roof; draw them over separate parts or remove one.", first.name, plane.name)));
         return None;
     }
-    let key = party_construction(ctx, "party_ceiling", first);
-    Some(json!({"roof_type": "Party", "construction": key}))
+    let key = party_construction(ctx, "party_ceiling", ceilings);
+    Some(ctx.with_age_band(ceilings, json!({"roof_type": "Party", "construction": key})))
 }
 
 pub(super) struct PartFloor<'p> {
@@ -269,7 +273,10 @@ pub(super) fn part_floor<'e>(
         "BuildingElementGround" => ground_floor(ctx, e, part, ground_total),
         "BuildingElementOpaque" => {
             let key = ctx.construction("above_external_area_floor", &[e], &[]);
-            Some(json!({"floor_type": "not next to ground (external)", "construction": key}))
+            Some(ctx.with_age_band(
+                &[e],
+                json!({"floor_type": "not next to ground (external)", "construction": key}),
+            ))
         }
         "BuildingElementAdjacentUnconditionedSpace_Simple" => {
             let Some(space) = e.text("adjacent_space_type") else {
@@ -277,13 +284,14 @@ pub(super) fn part_floor<'e>(
                 return None;
             };
             let key = ctx.construction("above_internal_unconditioned_area_floor", &[e], &[]);
-            Some(
+            Some(ctx.with_age_band(
+                &[e],
                 json!({"floor_type": "not next to ground (unconditioned)", "adjacent_space": space, "construction": key}),
-            )
+            ))
         }
         _ => {
-            let key = party_construction(ctx, "party_floor", e);
-            Some(json!({"floor_type": "party", "construction": key}))
+            let key = party_construction(ctx, "party_floor", &[e]);
+            Some(ctx.with_age_band(&[e], json!({"floor_type": "party", "construction": key})))
         }
     }
 }
@@ -502,6 +510,32 @@ mod tests {
         assert!(notices.iter().any(|n| n
             .message
             .contains("'Party floor' states no construction weight")));
+    }
+
+    #[test]
+    fn party_ceilings_over_one_part_agree_on_their_construction_weight() {
+        let text = csv(
+            SETTINGS,
+            &box_walls(&BOX, &[0]),
+            &format!(
+                "{NON_EXPOSED}\n{}\n{}\n{}",
+                party_plane("Party floor", 0, 180.0, ""),
+                party_plane(
+                    "Ceiling A",
+                    1,
+                    0.0,
+                    ",\"\"construction_weight\"\":\"\"heavy (concrete)\"\""
+                ),
+                party_plane("Ceiling B", 1, 0.0, ""),
+            ),
+        );
+        let (_, errors, _) = run_on(&text, flat_model(2));
+        assert!(
+            errors.iter().any(|e| e
+                .message
+                .contains("HEMIE gives 'Ceiling A', 'Ceiling B' one construction weight")),
+            "{errors:#?}"
+        );
     }
 
     #[test]

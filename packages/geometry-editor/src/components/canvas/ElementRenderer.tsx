@@ -617,6 +617,8 @@ export interface ElementRendererProps {
   spaceLabellerSuppressFabricInteraction?: boolean;
   /** Temporary preview emphasis; never persisted into the element style. */
   previewOpacity?: number;
+  /** The colour-by-fabric view's colour for this element, over its type colour. */
+  fabricColor?: string;
   /** Pre-projected canvas coords from the parent's elementCanvasData. Skips a redundant worldToCanvas pass per element per render. */
   canvasCoords?: Array<{ x: number; y: number }>;
   /** Live project offset; required by Orientation-axis slope visuals and editing. */
@@ -689,6 +691,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   categoryGhostOnCanvas = false,
   spaceLabellerSuppressFabricInteraction = false,
   previewOpacity = 1,
+  fabricColor,
   canvasCoords: canvasCoordsProp,
   globalOrientationOffset,
   snappedVertices,
@@ -1442,7 +1445,9 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   // the overlap menu's hover also switches to the hover colour.
   const isHovered = elementHover === element.id;
   const isHoveredFromMenu = isHovered && overlapBadgeMenu !== null;
-  const typeColor = getElementColor(element as any, isSelected, canvasElementPalette);
+  const typeColor = fabricColor && !isSelected
+    ? { stroke: fabricColor, fill: `${fabricColor}66` }
+    : getElementColor(element as any, isSelected, canvasElementPalette);
   const elementColor = typeColor.stroke || CANVAS_CONSTANTS.COLORS.WALL;
   const hoverGlow = isHovered ? { shadowColor: elementColor, ...HOVER_GLOW } : undefined;
   const elementFill = typeColor.fill || elementColor;
@@ -3300,6 +3305,7 @@ export const ElementRenderer = memo(ElementRendererComponent, (prevProps, nextPr
   // Category hide/show from Elements panel (useElementCategoryGhost) — not part of store element
   if (prevProps.categoryGhostOnCanvas !== nextProps.categoryGhostOnCanvas) return false;
   if (prevProps.previewOpacity !== nextProps.previewOpacity) return false;
+  if (prevProps.fabricColor !== nextProps.fabricColor) return false;
   if (prevProps.snappedVertices !== nextProps.snappedVertices) return false;
   if (prevProps.mvhrBadgeInline !== nextProps.mvhrBadgeInline) return false;
   if (prevProps.spaceLabellerSuppressFabricInteraction !== nextProps.spaceLabellerSuppressFabricInteraction)

@@ -2991,6 +2991,7 @@ impl JSONBuilder {
                                     && key != "position_xyz"
                                     && key != "pitch"
                                     && key != "is_external_door"
+                                    && !crate::hemie::ELEMENT_ONLY_KEYS.contains(&key.as_str())
                                 {
                                     let processed_value = self.coerce_building_element_value(
                                         key,
@@ -11239,6 +11240,34 @@ FrontWallGround,Living,BuildingElementOpaque,10,90,4,2.5,0,0,FALSE,FALSE,,"0.000
             !wall.contains_key("colour"),
             "Missing colour should surface as a validation issue rather than being auto-filled"
         );
+    }
+
+    #[test]
+    fn existing_building_element_fields_do_not_reach_the_hem_element() {
+        use crate::parser::CSVParser;
+
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Exposed Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Wall,Living,BuildingElementOpaque,10,90,4,2.5,0,0,FALSE,FALSE,,"0,0,0|4,0,0","{""age_band"":""K"",""wall_construction_type"":""cavity"",""is_front_door"":true,""thermal_resistance_construction"":0.75}"
+"#;
+        let data = CSVParser::new().parse_csv(csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder
+            .build_zone_structure(&mut result, &data)
+            .expect("Zone structure should build");
+        let wall = result["Zone"]["Living"]["BuildingElement"]["Wall"]
+            .as_object()
+            .expect("wall");
+        for key in ["age_band", "wall_construction_type", "is_front_door"] {
+            assert!(!wall.contains_key(key), "{key} reached the HEM element");
+        }
+        assert_eq!(wall["thermal_resistance_construction"], 0.75);
     }
 
     fn build_non_exposed_row(row: &str) -> Result<Value, BuildError> {

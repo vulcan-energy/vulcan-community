@@ -3931,11 +3931,14 @@ const createGeometryState = (
         throw new Error('Unknown element type');
     }
 
-    newElement = applyCreationDefaultAssemblyToElement(newElement, {
-      library: get().bundledAssemblyLibrary,
-      ids: get().creationDefaultAssemblyIds,
-      fhsComplianceSnapArealHeat: true,
-    }) as Element;
+    // Under construction bands the bands give the fabric; the stored default assemblies wait unused.
+    if (!targetRules(schemaPort, get().complianceSettings).constructionBands) {
+      newElement = applyCreationDefaultAssemblyToElement(newElement, {
+        library: get().bundledAssemblyLibrary,
+        ids: get().creationDefaultAssemblyIds,
+        fhsComplianceSnapArealHeat: true,
+      }) as Element;
+    }
     newElement = { ...newElement, _nameAutoSync: true };
 
     const selectionType = isGlobalObject(newElement) ? 'global' : 'element';

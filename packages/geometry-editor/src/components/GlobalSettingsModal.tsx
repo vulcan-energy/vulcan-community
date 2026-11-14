@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import { targetRules, targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import { targetValidationFlags } from '../geometry/validation/validateElement';
 import React, {
   useCallback,
@@ -22,6 +22,7 @@ import {
 } from "../../../geometry-editor-host/src/editorServicePorts";
 import type { GeometrySchemaPort } from "../../../geometry-editor-host/src/schemaPort";
 import { targetFieldAvailability } from "../lib/schemaCache";
+import { HEMIE_NATION, NATIONS, postcodeBorderArea } from "../lib/hemieFabric";
 import type { AssemblyExample } from "../lib/assemblyTypes";
 import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingFootprintDimensions";
 
@@ -92,6 +93,8 @@ export type GlobalSettingsModalProps = Readonly<{
   ) => void;
   evidenceSection?: ReactNode;
   calculationTargetSection?: ReactNode;
+  /** Host groups at the end of the Defaults tab, such as fabric and emitter defaults. */
+  defaultsSection?: ReactNode;
   renderEvidencePill?: (fieldKey: string, label: string) => ReactNode;
   externalDetailProfileSection?: ReactNode;
   onIndicatorChange?: (indicator: GlobalSettingsIndicator | null) => void;
@@ -515,6 +518,7 @@ export function GlobalSettingsModal({
   onEditDefaults,
   evidenceSection,
   calculationTargetSection,
+  defaultsSection,
   renderEvidencePill = () => null,
   externalDetailProfileSection,
   onIndicatorChange,
@@ -593,6 +597,9 @@ export function GlobalSettingsModal({
   const setCreationDefaultAssemblyIds = useGeometryStore(
     (state) => state.setCreationDefaultAssemblyIds
   );
+  // Under construction bands the host's fabric defaults replace the default assemblies.
+  const { constructionBands } = targetRules(schemaPort, complianceSettings);
+  const borderArea = postcodeBorderArea(propertyPostcode);
   const openSpaceLabeller = useGeometryStore(
     (state) => state.openSpaceLabeller
   );
@@ -1622,6 +1629,7 @@ export function GlobalSettingsModal({
                 )}
               </div>
 
+              {constructionBands ? null : (
               <div
                 style={{
                   marginTop: 12,
@@ -1717,6 +1725,8 @@ export function GlobalSettingsModal({
                   </div>
                 ) : null}
               </div>
+              )}
+              {defaultsSection}
             </>
           )}
 
@@ -1736,6 +1746,13 @@ export function GlobalSettingsModal({
               </div>
 
               {calculationTargetSection}
+
+              {/* With the target: it decides which inputs and defaults the model takes. */}
+              {requiredRows.has("IsExistingBuilding") && (
+                <div data-field-section="target" style={{ marginBottom: "var(--spacing-md)" }}>
+                  <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />
+                </div>
+              )}
 
               {/* Evidence linking for global settings */}
               {evidenceSection}
@@ -1803,11 +1820,29 @@ export function GlobalSettingsModal({
                             setPropertyPostcode(value || undefined);
                           }}
                           placeholder="e.g. MK40 1AA"
-                          helperText="Used only as property metadata in the SAP report. It does not select the native SAP calculator's climate data."
+                          helperText={constructionBands
+                            ? "Sets the nation, which sets the years of each age band."
+                            : "Used only as property metadata in the SAP report. It does not select the native SAP calculator's climate data."}
                           autoComplete="postal-code"
                           variant="ghost"
                           size="md"
                         />
+                        {constructionBands && borderArea ? (
+                          <StandardDropdown
+                            label={<span data-field-key={HEMIE_NATION}>Nation</span>}
+                            value={complianceSettings.hemieSettings?.[HEMIE_NATION] ?? ""}
+                            onChange={(value) => {
+                              const others = { ...complianceSettings.hemieSettings };
+                              delete others[HEMIE_NATION];
+                              setComplianceSettings({ hemieSettings: value ? { ...others, [HEMIE_NATION]: value } : others });
+                            }}
+                            options={NATIONS.map((nation) => ({ value: nation, label: nation }))}
+                            placeholder="Choose the nation"
+                            helperText={`Postcode area ${borderArea} spans two nations.`}
+                            variant="ghost"
+                            size="md"
+                          />
+                        ) : null}
 
                         <div
                           style={{
@@ -2561,7 +2596,6 @@ export function GlobalSettingsModal({
                         size="md"
                       />
 
-                      {requiredRows.has("IsExistingBuilding") && <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />}
                       {requiredRows.has("HasElectricitySmartMeter") && <RequiredYesNo {...requiredYesNoProps("HasElectricitySmartMeter")} />}
                       {requiredRows.has("PartGcompliance") ? <RequiredYesNo {...requiredYesNoProps("PartGcompliance", "Part G Compliance")} /> : (
                       <label

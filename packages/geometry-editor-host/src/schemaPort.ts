@@ -62,6 +62,12 @@ export interface TargetRules {
    * target's schema states no condition for them.
    */
   storeyBuildTypes: readonly string[];
+  /**
+   * Fabric comes from construction bands: the model's age band and a construction per
+   * construction type (the `HEMIE_` model settings), which an element may override. The host's
+   * fabric defaults replace the default assemblies, and the canvas can colour elements by fabric.
+   */
+  constructionBands: boolean;
 }
 
 export interface GeometrySchemaPropertyValidation {
@@ -135,7 +141,7 @@ export function targetSchemaMode(port?: GeometrySchemaPort): GeometrySchemaMode 
  * The host's rules over the defaults: model-validity checks run for every target, the FHS input
  * rules and Building Regulations checks for an FHS target, nothing is excluded or hidden,
  * products come from the host's own sources, and no Metadata row is required beyond what the
- * schema and defaults decide.
+ * schema and defaults decide; fabric comes from elements and default assemblies.
  */
 export function targetRules(
   port: GeometrySchemaPort | undefined,
@@ -151,6 +157,7 @@ export function targetRules(
     requiredMetadataRows: [],
     batteryGridInputs: false,
     storeyBuildTypes: ['flat'],
+    constructionBands: false,
     ...port?.targetRules?.(modelSettings),
   };
 }
