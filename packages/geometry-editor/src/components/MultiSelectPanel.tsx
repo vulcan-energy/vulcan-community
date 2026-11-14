@@ -22,7 +22,7 @@ import type { AssemblyExample, VulcanAssemblyV1Envelope } from '../lib/assemblyT
 import { parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
 import type { GroundFloorType } from '../lib/groundUValueCalculator';
 import { getElementTypeDisplayName } from '../lib/displayNames';
-import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch } from '../lib/assemblyMaterialFabric';
+import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch, PARTY_WALL_LINING_CAVITY_TYPES, PARTY_WALL_LINING_OPTIONS } from '../lib/assemblyMaterialFabric';
 import {
   assemblyElementMode,
   assemblyPitchDegForElement,
@@ -65,6 +65,7 @@ import {
 } from '../../../geometry-editor-host/src/workspaceResourcePort';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import type { GeometryInspectorContributions } from '../../../geometry-editor-host/src/inspectorContributions';
 import { hemieConstructionType, hemieHeatCapacityBands } from '../lib/hemieFabric';
 import { useTargetRules } from '../hooks/useTargetRules';
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
@@ -205,6 +206,8 @@ const MANUAL_METRIC_TOOLTIP_FIELD_KEY: Record<string, string> = {
 interface MultiSelectPanelProps {
   selectedElementIds: string[];
   onDelete: () => void;
+  /** The host's element fields, shown when the selected elements of the active type share one construction. */
+  inspectorContributions?: GeometryInspectorContributions;
   workspaceResourcePort?: GeometryWorkspaceResourcePort;
   externalDetailCatalogue?: ExternalDetailCataloguePort;
 }
@@ -963,15 +966,6 @@ const FLOOR_TYPE_OPTIONS = [
   { value: 'Suspended_floor', label: 'Suspended Floor' },
   { value: 'Unheated_basement', label: 'Unheated Basement' },
 ] as const;
-const PARTY_WALL_LINING_OPTIONS = [
-  { value: 'wet_plaster', label: 'Wet plaster' },
-  { value: 'dry_lined', label: 'Dry lined' },
-] as const;
-const PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES = new Set([
-  'unfilled_unsealed',
-  'unfilled_sealed',
-  'filled_unsealed',
-]);
 const CROSS_SECTION_OPTIONS = [
   { value: 'circular', label: 'Circular' },
   { value: 'rectangular', label: 'Rectangular' },
@@ -1065,6 +1059,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   onDelete,
   workspaceResourcePort = unavailableGeometryWorkspaceResourcePort,
   externalDetailCatalogue,
+  inspectorContributions,
 }) => {
   const geometryStore = useGeometryStoreApi();
   const schemaPort = useGeometrySchemaPort();
@@ -1625,16 +1620,43 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     [constructionTargetElements],
   );
   // Under construction bands, only the heat capacity bands every target's construction takes;
-  // none (a door or window among them) leaves heat capacity to each element.
+  // none (a door or window among them, or one that takes no heat capacity) leaves it to each element.
   const { constructionBands } = useTargetRules();
   const arealBandOptions = useMemo(() => {
     if (!constructionBands) return AREAL_HEAT_CAPACITY_ENUM;
     const all = Object.values(elementsById) as Element[];
     return constructionTargetElements.reduce<readonly string[]>((allowed, el) => {
-      const bands = hemieHeatCapacityBands(hemieConstructionType(el, all));
-      return bands ? allowed.filter((band) => bands.includes(band)) : allowed;
+      const bands = hemieHeatCapacityBands(hemieConstructionType(el, all)) ?? [];
+      return allowed.filter((band) => bands.includes(band));
     }, AREAL_HEAT_CAPACITY_ENUM);
   }, [constructionBands, constructionTargetElements, elementsById]);
+  // Under construction bands, the host's element fields for active elements of one construction
+  // type: shown with the extra_json values they share; a change applies to each (one undo step).
+  const ElementFieldsRenderer = inspectorContributions?.elementFields?.render;
+  const sharedFabricElement = useMemo(() => {
+    if (!constructionBands || !ElementFieldsRenderer || activeElements.length < 2) return null;
+    if (!inspectorContributions?.elementFields?.elementTypes.includes(activeElements[0]!.type)) return null;
+    const all = Object.values(elementsById) as Element[];
+    const types = new Set(activeElements.map((el) => hemieConstructionType(el, all)));
+    if (types.size !== 1 || types.has(undefined)) return null;
+    const [first, ...rest] = activeElements;
+    const shared = Object.entries(extraJsonRecord(first!)).filter(([key, value]) =>
+      rest.every((el) => extraJsonValuesEqual(extraJsonRecord(el)[key], value)));
+    return { ...first!, extra_json: Object.fromEntries(shared) } as Element;
+  }, [ElementFieldsRenderer, activeElements, constructionBands, elementsById, inspectorContributions]);
+  const patchActiveExtraJson = useCallback((update: (current: Record<string, unknown>) => Record<string, unknown>) => {
+    const patches: Record<string, Record<string, unknown>> = {};
+    for (const el of activeElements) {
+      const current = extraJsonRecord(el);
+      const next = update({ ...current });
+      const patch: Record<string, unknown> = {};
+      for (const key of new Set([...Object.keys(current), ...Object.keys(next)])) {
+        if (!extraJsonValuesEqual(current[key], next[key])) patch[key] = next[key];
+      }
+      if (Object.keys(patch).length) patches[el.id] = patch;
+    }
+    applyExtraJsonMergeBulk(patches);
+  }, [activeElements, applyExtraJsonMergeBulk]);
   const constructionFieldScopeKey = useMemo(() => {
     if (activeType === 'BuildingElementOpaque') return `opaque:${activeOpaqueSurfaceMode ?? 'all'}`;
     return activeConstructionScope ?? activeType ?? 'fabric';
@@ -3031,7 +3053,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
                   ...extraJsonRecord(el),
                   party_wall_cavity_type: value,
                 };
-                if (!PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES.has(value)) {
+                if (!PARTY_WALL_LINING_CAVITY_TYPES.has(value)) {
                   delete nextExtra.party_wall_lining_type;
                 }
                 if (value !== 'defined_resistance') {
@@ -3836,6 +3858,12 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               arealBandOptions.map((value) => ({ value, label: value })),
               (_el, value) => ({ areal_heat_capacity: value }),
             )}
+          </div>
+        )}
+
+        {sharedFabricElement && ElementFieldsRenderer && (
+          <div className="multi-select-field-group">
+            <ElementFieldsRenderer multiple element={sharedFabricElement as unknown as Readonly<Record<string, unknown>>} onPatchExtraJson={patchActiveExtraJson} />
           </div>
         )}
 

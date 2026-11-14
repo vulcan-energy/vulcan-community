@@ -5,6 +5,27 @@ import type { ValidationIssue, ValidationResult } from '../geometry/validation/t
 import type { BuildErrorItem, TargetValidation } from '../types/buildErrors';
 import { issuePathSegments, resolveIssueTarget, type IssueTarget } from './issueTarget';
 import { HEMIE_NATION, hemieConstructionTypeLabel } from './hemieFabric';
+import { globalSettingsFieldSection, type GlobalSettingsFieldSection } from './globalSettingsValidation';
+
+const SECTION_LOCATIONS: Readonly<Record<GlobalSettingsFieldSection, string>> = {
+  defaults: 'Global Settings > Defaults',
+  target: 'Global Settings',
+  dwelling: 'Global Settings > Dwelling Details',
+  airTightness: 'Global Settings > Air Tightness',
+  ventilation: 'Global Settings > Ventilation Environment',
+  thermalBridging: 'Global Settings > Thermal Bridging',
+};
+const VENTILATION_SETTINGS = new Set(['cross_vent_possible', 'terrain_class', 'altitude', 'shield_class', 'noise_nuisance', 'ventilation_zone_base_height']);
+
+/** The Metadata row a model-settings path comes from: a Metadata row, or an air test or ventilation setting. */
+const settingsRow = (segments: string[]): string | undefined => {
+  if (segments[0] === 'Metadata') return segments[1];
+  if (segments[0] !== 'InfiltrationVentilation') return undefined;
+  if (segments[1] === 'Leaks') {
+    return segments[2] === 'ventilation_zone_height' ? 'AirPermeability_ventilation_zone_height' : 'AirPermeability_test_result';
+  }
+  return segments[1] && VENTILATION_SETTINGS.has(segments[1]) ? `Ventilation_${segments[1]}` : undefined;
+};
 
 export type DisplayBuildError = {
   item: BuildErrorItem;
@@ -52,6 +73,11 @@ const buildErrorLocation = (path?: string) => {
         : `Global Settings > Defaults > Fabric${constructionType ? ` > ${hemieConstructionTypeLabel(constructionType)}` : ''}`,
     };
   }
+
+  // Other model settings, where Global Settings shows them.
+  const row = settingsRow(segments);
+  const section = row ? globalSettingsFieldSection(row) : null;
+  if (section) return { location: SECTION_LOCATIONS[section] };
 
   if (segments.length >= 2) {
     return {

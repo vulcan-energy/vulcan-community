@@ -41,7 +41,7 @@
 //   have a schema `pitch` field that hydrate reads and renderPanel edits;
 //   left untouched per the brief's explicit carve-out).
 // - The merged renderAttributePanel case (party-wall lining/cavity UI,
-//   PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES, the Pitch/Surface-facing field
+//   the lining cavity types (now PARTY_WALL_LINING_CAVITY_TYPES in lib/assemblyMaterialFabric.ts), the Pitch/Surface-facing field
 //   — now via wallPitchField.tsx's shared renderWallPitchField, this stage's
 //   first (plain) caller — and the Base Height / viewer-elevation block).
 // - PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES itself (grep-verified zero
@@ -164,26 +164,18 @@ import { roundToTwoDecimals } from '../../geometry/constants';
 import { deriveWallProperties } from '../../stores/geometryStore';
 import { getElementGrossArea, isAdjacentLikeElement } from '../../lib/elementArea';
 import { isAdjacentConditionedInternalFloorDoubled } from '../../lib/polygonSync';
-import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch, type PartyWallFabricField } from '../../lib/assemblyMaterialFabric';
+import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch, PARTY_WALL_LINING_CAVITY_TYPES, PARTY_WALL_LINING_OPTIONS, type PartyWallFabricField } from '../../lib/assemblyMaterialFabric';
 import { ResetFieldButton } from '../ResetFieldButton';
 import { StandardDropdown } from '../StandardDropdown';
 import { StandardInput } from '../StandardInput';
 import type { Element } from '../../geometry/types';
 import { renderWallPitchField } from './wallPitchField';
+import { useTargetRules } from '../../hooks/useTargetRules';
 import type {
   ElementFormModule,
   ElementFormSelection,
   ElementFormStateCtx,
 } from './types';
-
-// Moved from ElementCreator.tsx (grep-verified its only two callers were
-// both inside the adjacent-like renderPanel case).
-const PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES = new Set([
-  'unfilled_unsealed',
-  'unfilled_sealed',
-  'filled_sealed',
-  'filled_unsealed',
-]);
 
 // readFiniteNumber/formatToTwoDecimals/INLINE_FIELD_NOTE_STYLE: RESOLVED in
 // slice-6 STAGE 6 — now imported from formPrimitives.ts above instead of
@@ -195,6 +187,8 @@ export interface AdjacentLikeElementFormState {
   partyWallHalfUInput: NumericDraftInputBinding;
   partyWallFabricFields: readonly PartyWallFabricField[];
   partyWallCavityFields: ReturnType<typeof getPartyWallCavityFields>;
+  /** Existing-building fabric: a blank party wall cavity comes from the age band. */
+  constructionBands: boolean;
   partyWallConstructionRInput: NumericDraftInputBinding;
   adjacentViewerBaseHeightInput: NumericDraftInputBinding;
   /** Shared with the wall family — see module header comment. */
@@ -286,12 +280,15 @@ function useFormState(ctx: ElementFormStateCtx): AdjacentLikeElementFormState {
   const partyWallWholeUInput = useDecimalInput('', commitPartyWallFabric('u_value_whole_wall'), { commitOnChange: true, formatOnBlur: 'preserve' });
   const partyWallConstructionRInput = useDecimalInput('', commitPartyWallFabric('thermal_resistance_construction'), { commitOnChange: true, formatOnBlur: 'preserve' });
 
+  const { constructionBands } = useTargetRules();
+
   return {
     partyWallCavityResistanceInput,
     partyWallWholeUInput,
     partyWallHalfUInput,
     partyWallFabricFields,
     partyWallCavityFields: getPartyWallCavityFields(schemaPort, useFhs ? 'fhs' : 'core'),
+    constructionBands,
     partyWallConstructionRInput,
     adjacentViewerBaseHeightInput,
     widthInput: ctx.shared.widthInput,
@@ -425,9 +422,10 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
       typeof currentExtra.party_wall_cavity_type === 'string' ? currentExtra.party_wall_cavity_type : '';
     const partyWallLiningType =
       typeof currentExtra.party_wall_lining_type === 'string' ? currentExtra.party_wall_lining_type : '';
+    // Under construction bands a blank cavity comes from the age band, so the lining shows for it too.
     const showPartyWallLining =
       elementType === 'BuildingElementPartyWall' &&
-      PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES.has(partyWallCavityType);
+      (PARTY_WALL_LINING_CAVITY_TYPES.has(partyWallCavityType) || (state.constructionBands && !partyWallCavityType));
     const showPartyWallCavityResistance =
       elementType === 'BuildingElementPartyWall' &&
       state.partyWallCavityFields.supportsResistance && partyWallCavityType === 'defined_resistance';
@@ -564,7 +562,7 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
                     ...currentExtra,
                     party_wall_cavity_type: value || undefined,
                   };
-                  if (!PARTY_WALL_LINING_REQUIRED_CAVITY_TYPES.has(String(value))) {
+                  if (!PARTY_WALL_LINING_CAVITY_TYPES.has(String(value)) && !(state.constructionBands && !value)) {
                     delete nextExtra.party_wall_lining_type;
                   }
                   if (value !== 'defined_resistance') {
@@ -598,10 +596,9 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
                       } as Partial<Element>);
                     }}
                     options={[
-                      { value: 'wet_plaster', label: 'Wet plaster' },
-                      { value: 'dry_lined', label: 'Dry lined' },
+                      { value: '', label: state.constructionBands ? 'Wet plaster (default)' : 'Not stated' },
+                      ...PARTY_WALL_LINING_OPTIONS,
                     ]}
-                    placeholder="Select lining type..."
                     variant="ghost"
                     size="md"
                   />

@@ -9,6 +9,7 @@ import { useState, type ReactNode } from 'react';
 import type { Element, ElementDraft } from '../geometry/types';
 import { useGeometryStore, useGeometryStoreApi } from '../stores/geometryStore';
 import {
+  bayParameters,
   bayParametersProblem,
   buildBayBundleDraft,
   buildConservatoryBundleDraft,
@@ -28,7 +29,7 @@ import { StandardInput } from './StandardInput';
 import { INLINE_FIELD_NOTE_STYLE } from './elementForms/formPrimitives';
 
 type Field<P> = (
-  | { key: keyof P; label: string; kind: 'number'; unit?: string }
+  | { key: keyof P; label: string; kind: 'number'; unit?: string; optional?: true }
   | { key: keyof P; label: string; kind: 'choice'; options: Array<{ value: string; label: string }> }
 ) & { shown?: (p: P) => boolean; note?: string };
 
@@ -36,7 +37,8 @@ const BAY_FIELDS: Field<BayParameters>[] = [
   { key: 'centre', label: 'Opening centre from wall start', kind: 'number', unit: 'm' },
   { key: 'openingWidth', label: 'Opening width', kind: 'number', unit: 'm' },
   { key: 'depth', label: 'Projection', kind: 'number', unit: 'm' },
-  { key: 'sideAngle', label: 'Side angle (90° square)', kind: 'number', unit: '°' },
+  { key: 'frontWidth', label: 'Front width (b)', kind: 'number', unit: 'm' },
+  { key: 'wallHeight', label: 'Bay wall height', kind: 'number', unit: 'm', optional: true },
   { key: 'roof', label: 'Roof', kind: 'choice', options: [{ value: 'flat', label: 'Flat' }, { value: 'pitched', label: 'Pitched' }, { value: 'none', label: 'None (a bay above)' }] },
   { key: 'sideWindows', label: 'Side windows', kind: 'choice', options: [{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }] },
   { key: 'sillHeight', label: 'Window sill height', kind: 'number', unit: 'm' },
@@ -69,9 +71,10 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
   const tag = getHemieBundle(anchor)!;
   // Typed but not yet committed values, over the saved parameters.
   const [edits, setEdits] = useState<Record<string, unknown>>({});
-  const draft = { ...(tag.parameters as unknown as Record<string, unknown>), ...edits };
-  const host = hemieBundleHost(anchor, Object.values(elementsById));
   const isBay = tag.kind === 'bay';
+  const saved = isBay ? bayParameters(tag.parameters as BayParameters) : tag.parameters;
+  const draft = { ...(saved as unknown as Record<string, unknown>), ...edits };
+  const host = hemieBundleHost(anchor, Object.values(elementsById));
   const fields = (isBay ? BAY_FIELDS : CONSERVATORY_FIELDS) as Field<Record<string, unknown>>[];
   const parameters = draft as unknown as BayParameters & ConservatoryParameters;
   const hostProblem = hemieBundleHostProblem(anchor, Object.values(elementsById));
@@ -133,7 +136,8 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
               unit={field.unit}
               step="0.1"
               aria-label={field.label}
-              onChange={(e) => setEdits({ ...edits, [field.key]: e.target.value === '' ? '' : Number(e.target.value) })}
+              placeholder={field.optional && host ? String(host.height) : undefined}
+              onChange={(e) => setEdits({ ...edits, [field.key]: e.target.value === '' ? (field.optional ? undefined : '') : Number(e.target.value) })}
               onBlur={() => commit(draft)}
               onKeyDown={(e) => { if (e.key === 'Enter') commit(draft); }}
               variant="ghost"

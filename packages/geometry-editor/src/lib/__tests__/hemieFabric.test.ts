@@ -25,6 +25,26 @@ it('maps elements to the construction type the converter gives them', () => {
   expect(hemieConstructionType(el({ ...party, pitch: 180 }))).toBe('party_floor');
   expect(hemieConstructionType(el({ ...party, pitch: 0 }))).toBe('party_ceiling');
   expect(hemieConstructionType(el({ ...party, pitch: 0, extra_json: {} }))).toBeUndefined();
+  const unheated = { type: 'BuildingElementAdjacentUnconditionedSpace_Simple', coordinates: plane };
+  expect(hemieConstructionType(el({ ...unheated, pitch: 180 }))).toBe('above_internal_unconditioned_area_floor');
+  expect(hemieConstructionType(el({ ...unheated, pitch: 0 }))).toBeUndefined();
+  const bayRoof = { type: 'BuildingElementOpaque', coordinates: plane, extra_json: { hemie_bundle: { kind: 'bay', role: 'roof' } } };
+  expect(hemieConstructionType(el({ ...bayRoof, pitch: 0 }))).toBe('mini_flat_roof');
+  expect(hemieConstructionType(el({ ...bayRoof, pitch: 35 }))).toBe('mini_pitched_roof');
+});
+
+it("gives a room in the roof's flat ceiling the unheated pitched roof construction", () => {
+  const up = (z: number) => [{ x: 0, y: 0, z }, { x: 4, y: 0, z }];
+  const storey = [el({ id: 'w0', type: 'BuildingElementOpaque', coordinates: up(0), pitch: 90, height: 2.5 })];
+  const room = [
+    el({ id: 'k', type: 'BuildingElementOpaque', coordinates: up(1), pitch: 90, height: 1.2 }),
+    el({ id: 'g', type: 'BuildingElementOpaque', coordinates: up(1), pitch: 90, height: 2, extra_json: { geometry_face: { top_profile: [] } } }),
+    el({ id: 's', type: 'BuildingElementOpaque', coordinates: plane.map((p) => ({ ...p, z: 2 })), pitch: 45 }),
+  ];
+  const ceiling = el({ id: 'c', type: 'BuildingElementOpaque', coordinates: plane.map((p) => ({ ...p, z: 2 })), pitch: 0 });
+  expect(hemieConstructionType(ceiling, [...storey, ...room, ceiling])).toBe('unheated_pitched_roof');
+  // Without the gable the top floor is a storey, and the flat plane a flat roof.
+  expect(hemieConstructionType(ceiling, [...storey, room[0]!, room[2]!, ceiling])).toBe('flat_roof');
 });
 
 it('gives a door in a party or sheltered wall the party or sheltered door construction', () => {
@@ -53,6 +73,10 @@ it('labels fields and values for people, with units', () => {
   expect(hemieValueLabel('glazing_gap', 12)).toBe('12 mm');
   expect(hemieValueLabel('frame_material', 'wood or PVC')).toBe('Wood or PVC');
   expect(hemieValueLabel('insulation_location', 'at_joists')).toBe('At joists');
+  expect(hemieValueLabel('insulation_location', 'at_joists', 'flat_roof')).toBe('At joists (cold roof)');
+  expect(hemieValueLabel('insulation_location', 'above_joists', 'mini_flat_roof')).toBe('Above joists (warm roof)');
+  expect(hemieValueLabel('glazing_gap', 16)).toBe('16 mm or more');
+  expect(hemieValueLabel('retrofit_insulation', true)).toBe('Yes');
 });
 
 it('lists the existing-building fields an element holds', () => {
@@ -98,15 +122,29 @@ it('derives the region from the postcode area, and asks it in a border area', ()
   for (const malformed of ['', 'MK40', 'XX1 1AA', 'M1X 1AA1', undefined]) expect(postcodeRegion(malformed)).toBeUndefined();
 });
 
-it('offers each construction type only the heat capacity bands the converter has a value for', () => {
-  // The converter's class tables (`Ctx::heat_capacity`): their lengths are the bands it takes.
+it('offers each construction type the areal heat capacity the converter takes', () => {
+  // `heat_capacity_rule` in hemie.rs: each match arm's types and what they take.
   const rust = readFileSync(join(import.meta.dirname, '../../../../../crates/vulcan-model-transform/src/hemie.rs'), 'utf8');
-  const length = (table: string) => Number(new RegExp(`const ${table}: \\[f64; (\\d)\\]`).exec(rust)?.[1]);
-  expect(hemieHeatCapacityBands('external_wall')).toHaveLength(length('WALL'));
-  expect(hemieHeatCapacityBands('suspended_floor')).toHaveLength(length('FLOOR'));
-  expect(hemieHeatCapacityBands('flat_roof')).toEqual(['Very light', 'Light', 'Medium']);
-  expect(hemieHeatCapacityBands('flat_roof')).toHaveLength(length('ROOF'));
-  expect(hemieHeatCapacityBands('external_door')).toEqual([]);
-  expect(hemieHeatCapacityBands('window')).toEqual([]);
-  expect(hemieHeatCapacityBands(undefined)).toBeUndefined();
+  const body = /fn heat_capacity_rule[^{]*\{([\s\S]*?)\n\}/.exec(rust)![1]!;
+  const arms = [...body.matchAll(/((?:\|?\s*"[a-z_]+"\s*)+)=> HeatCapacity::(\w+)(?:\(&(\w+)\))?/g)]
+    .map(([, types, rule, table]) => ({ types: [...types!.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!), rule, table }));
+  expect(arms.length).toBeGreaterThan(2);
+  const labels = JSON.parse(/const HEAT_CAPACITY_BANDS: \[&str; \d\] = (\[[^\]]*\])/.exec(rust)![1]!);
+  for (const { types, rule, table } of arms) {
+    for (const type of types) {
+      if (rule === 'Fixed') expect(hemieHeatCapacityBands(type), type).toBeUndefined();
+      else {
+        expect(rule, type).toBe('Bands');
+        const length = Number(new RegExp(`const ${table}: \\[f64; (\\d)\\]`).exec(rust)![1]);
+        expect(hemieHeatCapacityBands(type), type).toEqual(labels);
+        expect(hemieHeatCapacityBands(type), type).toHaveLength(length);
+      }
+    }
+  }
+  // The `_ =>` arm: a number only; party floors and ceilings take no heat capacity.
+  for (const type of ['heated_basement_floor', 'heated_pitched_roof', 'window', 'external_door', 'party_or_sheltered_door']) {
+    expect(arms.some(({ types }) => types.includes(type)), type).toBe(false);
+    expect(hemieHeatCapacityBands(type), type).toEqual([]);
+  }
+  for (const type of ['party_floor', 'party_ceiling', 'park_home_wall', undefined]) expect(hemieHeatCapacityBands(type)).toBeUndefined();
 });

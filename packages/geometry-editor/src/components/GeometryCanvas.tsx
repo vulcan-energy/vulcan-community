@@ -5652,6 +5652,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             existingBundleNames,
             floors,
             globalOrientationOffset: geometryStore.getState().globalOrientationOffset,
+            omitFrameAreaFraction: constructionBands,
           });
 
           if (!draft) {
@@ -9699,6 +9700,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     'GeometryCanvas.details.multiSelect',
                     <MultiSelectPanel
                       selectedElementIds={selectedElementIds}
+                      inspectorContributions={inspectorContributions}
                       workspaceResourcePort={workspaceResourcePort}
                       externalDetailCatalogue={externalDetailCatalogue}
                       onDelete={() => {

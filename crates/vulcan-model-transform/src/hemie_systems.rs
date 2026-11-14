@@ -67,7 +67,7 @@ fn to_form(
     let (projected, omitted) = match project_model(candidate, branch) {
         Ok(result) => result,
         Err(message) => {
-            errors.push(error(path.into(), message));
+            errors.push(error("SYSTEM", path.into(), message));
             return None;
         }
     };
@@ -86,6 +86,7 @@ fn to_form(
                 ""
             };
             errors.push(error(
+                "SYSTEM",
                 format!("{path}{at}"),
                 format!(
                     "'{}' in its existing-building form: {message}.{fix}",
@@ -166,7 +167,7 @@ fn tank_descriptors(
             } else {
                 (dims[1], dims[0])
             };
-            errors.push(error(path.into(), format!("The tank states its {given} but not its {absent}. Give both, or its volume or volume descriptor instead.")));
+            errors.push(error("SYSTEM", path.into(), format!("The tank states its {given} but not its {absent}. Give both, or its volume or volume descriptor instead.")));
         }
         both => {
             let sizes: Vec<&str> = [
@@ -184,7 +185,7 @@ fn tank_descriptors(
                     applied.push("volume descriptor Inaccessible");
                 }
                 [_] => {}
-                _ => errors.push(error(path.into(), format!("The tank states its size more than once ({}). The existing-building EPC takes one: keep the most specific.", sizes.join(", ")))),
+                _ => errors.push(error("SYSTEM", path.into(), format!("The tank states its size more than once ({}). The existing-building EPC takes one: keep the most specific.", sizes.join(", ")))),
             }
         }
     }
@@ -202,10 +203,10 @@ fn tank_descriptors(
         });
         applied.push("install year unknown");
     } else if buffer && year && pump {
-        errors.push(error(path.into(), "The buffer tank states both its pump power and its install year. The existing-building EPC takes the install year only in place of the pump power: remove the install year, and give the standing loss or efficiency class if it is unknown.".into()));
+        errors.push(error("SYSTEM", path.into(), "The buffer tank states both its pump power and its install year. The existing-building EPC takes the install year only in place of the pump power: remove the install year, and give the standing loss or efficiency class if it is unknown.".into()));
     } else if !year && !loss {
         // The buffer tank's pump power and its install year are alternatives (HEMIE code).
-        errors.push(error(path.into(), "The buffer tank states its pump power but no standing loss, efficiency class or install year, and the existing-building EPC takes the install year only in place of the pump power. State its standing loss or efficiency class.".into()));
+        errors.push(error("SYSTEM", path.into(), "The buffer tank states its pump power but no standing loss, efficiency class or install year, and the existing-building EPC takes the install year only in place of the pump power. State its standing loss or efficiency class.".into()));
     }
     if !applied.is_empty() {
         notices.push(notice(
@@ -337,13 +338,13 @@ pub(super) fn check_vents(ctx: &mut Ctx) {
         let path = json_pointer(&[VENTILATION, vent.name]);
         match text(vent.row, "vent_position") {
             Some("bottom" | "middle" | "top") => {}
-            Some(other) => ctx.errors.push(error(path.clone(), format!("Vent '{}' has vent_position '{other}'. Give bottom, middle or top.", vent.name))),
+            Some(other) => ctx.errors.push(error("VENT", path.clone(), format!("Vent '{}' has position '{other}'. Choose bottom, middle or top.", vent.name))),
             // DESNZ-defined: a vent's position in its element defaults to middle.
-            None => ctx.notices.push(notice(&path, format!("Vent '{}' states no vent_position, so it uses the default: the middle of its element.", vent.name))),
+            None => ctx.notices.push(notice(&path, format!("Vent '{}' states no position, so it uses the default: the middle of its element.", vent.name))),
         }
         if let Some(host) = vent.host() {
             if els.iter().filter(|e| e.name == host).count() > 1 {
-                ctx.errors.push(error(path, format!("Vent '{}' is in '{host}', which more than one element is called. Rename one so the vent's element is unambiguous.", vent.name)));
+                ctx.errors.push(error("VENT", path, format!("Vent '{}' is in '{host}', which more than one element is called. Rename one so the vent's element is unambiguous.", vent.name)));
             }
         }
     }
@@ -374,7 +375,7 @@ pub(super) fn no_roof_window_vents(ctx: &mut Ctx, window: &str, value: &mut Valu
         return;
     };
     for name in vents.keys() {
-        ctx.errors.push(error(json_pointer(&[VENTILATION, name]), format!("Vent '{name}' is in roof window '{window}'. The existing-building EPC takes no mechanical vents in roof windows; name the wall, window or door it vents through.")));
+        ctx.errors.push(error("VENT", json_pointer(&[VENTILATION, name]), format!("Vent '{name}' is in roof window '{window}'. The existing-building EPC takes no mechanical vents in roof windows; name the wall, window or door it vents through.")));
     }
 }
 
@@ -427,7 +428,7 @@ pub(super) fn mechanical_ventilation(
             continue;
         }
         let path = json_pointer(&[VENTILATION, vent.name]);
-        errors.push(error(path, match vent.host() {
+        errors.push(error("SYSTEM", path, match vent.host() {
             None => format!("Vent '{}' of '{}' does not name the wall, window or door it sits in. An existing-building EPC places each mechanical vent in one, and takes its height, orientation and pitch from it: name that element.", vent.name, vent.system),
             Some(host) => format!("Vent '{}' of '{}' is in '{host}', which is not a storey wall, window or door of the existing-building model. Name the wall, window or door it sits in.", vent.name, vent.system),
         }));

@@ -598,7 +598,14 @@ pub fn transform_geometry_csv(
     // An EPC mapping error (`E_EPC_*`) explains a value it left out on purpose; the schema's
     // "required" error for the same field would only repeat it. Other converter errors keep
     // their schema errors, so FHS and Core validation is unchanged.
+    // A failed existing-building conversion leaves the full-input zone in place; its schema
+    // errors are about an input that is not used, so the conversion errors stand alone.
+    let hemie_failed = errors.iter().any(|e| e.code.starts_with("E_EPC_HEMIE_"));
     schema_errors.retain(|schema_error| {
+        if hemie_failed && (schema_error.path == "/Zone" || schema_error.path.starts_with("/Zone/"))
+        {
+            return false;
+        }
         let missing = (schema_error.keyword.as_deref() == Some("required"))
             .then(|| schema_error.message.split('"').nth(1))
             .flatten()
