@@ -72,10 +72,10 @@ export function newlyForbiddenFieldKeys(subschema: unknown, before: unknown, aft
 }
 
 /** {@link forbiddenFieldKeys} for one plant of an expanded System subtype map. */
-export function forbiddenPlantKeys(subschema: unknown, subtype: string, plantName: string, plant: unknown, root?: unknown): string[] {
+export function forbiddenPlantKeys(subschema: unknown, subtype: string, plantName: string, plant: unknown, root?: unknown, existingBuilding = false): string[] {
   const node = readRecord(readRecord(readRecord(readRecord(subschema).properties)[subtype]).properties)[plantName];
   const instance = plantInstanceForFlatten(subtype, plant);
-  return forbiddenFieldKeys(plantVariantForFlatten(node, plant, instance), instance, root);
+  return forbiddenFieldKeys(plantVariantForFlatten(node, plant, instance, root, existingBuilding), instance, root);
 }
 
 function isOptionalNestedObjectSchema(sch: unknown): boolean {
@@ -290,7 +290,9 @@ export function flattenIfThenAllOfProperties(
           ])),
         };
       } else {
-        next[k] = flattenIfThenAllOfProperties(v, childInstance, fullRoot);
+        // An optional object (`anyOf [object, null]`) gets its fields, not one JSON box.
+        const unwrapped = isRecord(v) ? unwrapNullableSchema(v) : v;
+        next[k] = flattenIfThenAllOfProperties(isRecord(unwrapped) && isRecord(unwrapped.properties) ? unwrapped : v, childInstance, fullRoot);
       }
     }
     out.properties = next;
@@ -318,24 +320,83 @@ function plantInstanceForFlatten(subtype: string, plant: unknown): unknown {
   return subtype === 'HeatSourceWet' ? normalizeHeatSourceWetPlantInstanceForFlatten(plant) : plant;
 }
 
-function plantVariantForFlatten(node: unknown, plant: unknown, instance: unknown): unknown {
-  const plantType = readRecord(plant).type;
-  return plantType === 'StorageTank' || plantType === 'HeatPump' ? selectPlantVariant(node, instance) : node;
+function plantVariantForFlatten(node: unknown, plant: unknown, instance: unknown, root?: unknown, existingBuilding = false): unknown {
+  return readRecord(plant).type ? selectPlantVariant(node, instance, root, existingBuilding) : node;
 }
 
-function selectPlantVariant(node: unknown, instanceData: unknown): unknown {
-  if (!isRecord(node)) return node;
-  let n = node as Record<string, unknown>;
-  // Core schemas use discriminated unions where FHS uses if/then branches.
-  const variants = n.oneOf ?? n.anyOf;
-  if (Array.isArray(variants) && isRecord(instanceData)) {
-    const match = variants.find((variant) => {
-      const type = readRecord(readRecord(readRecord(variant).properties).type);
-      return type.const === instanceData.type && type.const !== undefined;
+/** The typed variants under a plant schema, however deep the unions nest (EPC: pathway union, then type union). */
+function typedPlantVariants(node: unknown, root: unknown): Record<string, unknown>[] {
+  const found: Record<string, unknown>[] = [];
+  const walk = (candidate: unknown) => {
+    const resolved = isRecord(candidate) && typeof candidate.$ref === 'string' && root ? readRecord(dereferenceSchemaNodeInRoot(candidate, root)) : candidate;
+    if (!isRecord(resolved)) return;
+    if (isRecord(readRecord(resolved.properties).type)) { found.push(resolved); return; }
+    for (const alternative of [...(Array.isArray(resolved.oneOf) ? resolved.oneOf : []), ...(Array.isArray(resolved.anyOf) ? resolved.anyOf : [])]) walk(alternative);
+  };
+  const n = readRecord(node);
+  for (const alternative of [...(Array.isArray(n.oneOf) ? n.oneOf : []), ...(Array.isArray(n.anyOf) ? n.anyOf : [])]) walk(alternative);
+  return found;
+}
+
+/**
+ * The plant types a System section takes, from the target schema's own variants (the converter marker
+ * `meta` is not a system). The existing-building forms are a subset of these, so one list serves both.
+ */
+export function systemPlantTypes(root: unknown, section: string): string[] {
+  const map = readRecord(readRecord(readRecord(root).properties)[section]);
+  const entries = isRecord(map.additionalProperties) ? map.additionalProperties : (Array.isArray(map.anyOf) ? map.anyOf.map((a) => readRecord(a).additionalProperties).find(isRecord) : undefined);
+  const types = typedPlantVariants(entries, root).map((variant) => readRecord(readRecord(variant.properties).type).const);
+  return [...new Set(types.filter((type): type is string => typeof type === 'string' && type !== 'meta'))];
+}
+
+/**
+ * The row's extra_json after its single plant takes `type` (the plant's other inputs do not carry over).
+ * A row holding several plants has no one plant to retype: null, so none is ever replaced.
+ */
+export function withSystemPlantType(extraJson: unknown, section: string, rowName: string, type: string): Record<string, unknown> | null {
+  const extra = readRecord(extraJson);
+  const plants = Object.keys(readRecord(extra[section]));
+  if (plants.length > 1) return null;
+  return { ...extra, [section]: { [plants[0] ?? rowName]: { type } } };
+}
+
+/** An existing-building (HEMIE) form is the one that carries `model_type`. */
+function isHemiePlantVariant(variant: Record<string, unknown>): boolean {
+  return 'model_type' in readRecord(variant.properties);
+}
+
+/**
+ * Core schemas use discriminated unions where FHS uses if/then branches. The variant is the one whose
+ * `type` (and any other `const` the plant states, such as a heat battery's `battery_type`) matches the
+ * plant. Both pathways can carry a type; an existing building takes its own form, a new build the full one.
+ * `model_type` is the converter's marker, never a field the user fills.
+ */
+function selectPlantVariant(node: unknown, instanceData: unknown, root?: unknown, existingBuilding = false): unknown {
+  if (!isRecord(node) || !isRecord(instanceData)) return node;
+  const sameType = typedPlantVariants(node, root).filter((variant) => readRecord(readRecord(variant.properties).type).const === instanceData.type);
+  const agreeing = sameType.filter((variant) => Object.entries(readRecord(variant.properties)).every(([key, schema]) => (
+    key === 'type' || key === 'model_type' || !isRecord(schema) || !('const' in schema) || instanceData[key] === undefined || instanceData[key] === schema.const
+  )));
+  const pool = agreeing.length ? agreeing : sameType;
+  const match = pool.find((variant) => isHemiePlantVariant(variant) === existingBuilding) ?? pool[0];
+  if (!match) return node;
+  const properties = { ...readRecord(match.properties) };
+  delete properties.model_type;
+  // Variants of one type that differ by a `const` the plant has not stated (a heat battery's `battery_type`):
+  // offer the choice, which then selects the variant.
+  const sameForm = pool.filter((variant) => isHemiePlantVariant(variant) === isHemiePlantVariant(match));
+  for (const [key, schema] of Object.entries(properties)) {
+    if (key === 'type' || instanceData[key] !== undefined || !isRecord(schema) || !('const' in schema)) continue;
+    const choices = sameForm.flatMap((variant) => {
+      const value = readRecord(readRecord(variant.properties)[key]).const;
+      return typeof value === 'string' ? [value] : [];
     });
-    if (isRecord(match)) n = { ...n, ...match, oneOf: undefined, anyOf: undefined };
+    if (choices.length > 1) properties[key] = { type: 'string', enum: [...new Set(choices)], title: schema.title };
   }
-  return n;
+  return {
+    ...node, ...match, oneOf: undefined, anyOf: undefined, properties,
+    ...(Array.isArray(match.required) ? { required: match.required.filter((key) => key !== 'model_type') } : {}),
+  };
 }
 
 /** Deep-flatten each plant schema under `properties[subtype].properties` using live plant JSON. */
@@ -344,6 +405,7 @@ export function flattenSystemSubtypePlantSchemas(
   subtype: string,
   plantDataMap?: Record<string, unknown> | null,
   fullRoot?: unknown,
+  existingBuilding = false,
 ): Record<string, unknown> {
   const rootProps = subschema.properties as Record<string, unknown> | undefined;
   const inner = rootProps?.[subtype] as Record<string, unknown> | undefined;
@@ -357,7 +419,7 @@ export function flattenSystemSubtypePlantSchemas(
         ? plantDataMap[k]
         : undefined;
     const plantInstance = plantInstanceForFlatten(subtype, raw);
-    const selected = plantVariantForFlatten(v, raw, plantInstance);
+    const selected = plantVariantForFlatten(v, raw, plantInstance, fullRoot, existingBuilding);
     let flat = flattenIfThenAllOfProperties(cloneForFlatten(selected), plantInstance, fullRoot) as Record<string, unknown>;
     if (plantInstance && typeof plantInstance === 'object' && !Array.isArray(plantInstance)) {
       flat = omitAbsentOptionalObjectPropertiesFromSchema(flat, plantInstance) as Record<string, unknown>;

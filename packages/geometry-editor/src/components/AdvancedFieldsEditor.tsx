@@ -13,6 +13,7 @@ import {
   mergeSystemExtraJsonAfterJsonForms,
 } from '../lib/systemAdvancedSchemaExpand';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
+import { isExistingBuilding } from '../lib/windowOpenings';
 import { flattenSystemSubtypePlantSchemas, forbiddenFieldKeys, forbiddenPlantKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import { buildSystemAdvancedUischema, type AdvancedFieldsLayoutNode } from '../lib/systemAdvancedUischema';
 import {
@@ -839,7 +840,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         : null,
     [schemaMode, schemaPort],
   );
-  const { hiddenFields } = useTargetRules();
+  const { hiddenFields, hemDatabaseProducts } = useTargetRules();
+  const existingBuilding = useGeometryStore(isExistingBuilding);
   // Fields Advanced does not show: those the standard form owns, and those the target hides.
   const getBaseFields = useCallback(
     (type: string): readonly string[] => [
@@ -1085,6 +1087,21 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     // Ductwork: a8/a9 forbid diameters or perimeter by shape, so show only the sizes this shape takes.
     if (elementType === 'MechanicalVentilationDuctwork') {
       forbiddenFieldKeys(fullSchema, advancedFieldsData, getActiveRootSchema()).forEach((key) => delete advancedProperties[key]);
+    }
+
+    // An existing building's pipework takes the existing-building limits (diameters).
+    if (elementType === 'WaterPipework' && existingBuilding) {
+      const rootSchema = getActiveRootSchema();
+      const hemie = Object.entries((rootSchema?.$defs ?? {}) as Record<string, SchemaNode>).find(([name]) => name.startsWith('hemie__') && name.endsWith('__WaterPipework'))?.[1];
+      for (const key of ['external_diameter_mm', 'internal_diameter_mm']) {
+        const limits = hemie?.properties?.[key];
+        if (limits && advancedProperties[key]) {
+          const { minimum, maximum } = limits as { minimum?: number; maximum?: number };
+          const limited = { ...advancedProperties[key], minimum, maximum } as Record<string, unknown>;
+          delete limited.exclusiveMinimum;
+          advancedProperties[key] = limited as SchemaNode;
+        }
+      }
     }
 
     // a8/a9 accept a class or a number; offer the classes. A saved number stays visible.
@@ -1346,6 +1363,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             ? (systemSubtypePlantMapSlice as Record<string, unknown>)
             : null,
           rootFull,
+          existingBuilding,
         ) as typeof result;
       }
     }
@@ -1420,6 +1438,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     currentHotWaterCombiHeatSourceWetLink,
     projectHeatSourceWetLabels,
     projectHeatSourceWetNames,
+    existingBuilding,
   ]);
 
   const systemAdvancedUischema = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {
@@ -2022,7 +2041,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         advancedFieldsData as Record<string, unknown>,
         nextExtra as Record<string, unknown>,
         subtype,
-        plantSchemas ? (name, plant) => forbiddenPlantKeys(plantSchemas, subtype, name, plant, systemRoot) : undefined,
+        plantSchemas ? (name, plant) => forbiddenPlantKeys(plantSchemas, subtype, name, plant, systemRoot, existingBuilding) : undefined,
       );
       if (subtype === 'SpaceHeatSystem') {
         nextExtra = pruneSpaceHeatSystemUnusedWeatherCompensationValues(
@@ -2429,7 +2448,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         </div>
       )}
 
-      {elementType === 'System' && systemPlantTypes.length > 0 && (
+      {elementType === 'System' && !(hemDatabaseProducts && systemPlantTypes.length === 1) && systemPlantTypes.length > 0 && (
         <div style={{ marginBottom: flat ? '10px' : 'var(--spacing-md)' }}>
           {systemPlantTypes.map(({ plantKey, typeLabel }) => (
             <div key={plantKey} style={{ marginBottom: '8px' }}>

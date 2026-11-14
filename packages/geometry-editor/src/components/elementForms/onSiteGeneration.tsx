@@ -38,6 +38,9 @@ import {
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { ResetFieldButton } from '../ResetFieldButton';
+import { StandardDropdown } from '../StandardDropdown';
+import { dereferenceSchemaNodeInRoot } from '../../lib/subschemaCache';
+import { readRecord } from '../../lib/jsonTypes';
 import {
   decimalInputProps,
   integerInputProps,
@@ -69,6 +72,23 @@ export interface OnSiteGenerationFormState {
    * contract calls with no ctx) can still compute orientation the same way
    * the orchestrator's shared getCurrentOrientation does. */
   getCurrentOrientation: (element: Element) => number;
+  /** The panel's ventilation strategies, from the target schema (empty when the schema has none). */
+  ventilationStrategies: string[];
+}
+
+const VENTILATION_STRATEGY_LABELS: Record<string, string> = {
+  unventilated: 'Unventilated',
+  moderately_ventilated: 'Moderately ventilated',
+  strongly_or_forced_ventilated: 'Strongly or forced ventilated',
+  rear_surface_free: 'Rear surface free',
+};
+
+function panelVentilationStrategies(ctx: ElementFormStateCtx): string[] {
+  if (ctx.schemaPort.availability !== 'available') return [];
+  const root = ctx.schemaPort.getRootSchema(ctx.schemaMode);
+  const panel = Object.values(readRecord(readRecord(root).$defs)).map(readRecord).find((def) => 'ventilation_strategy' in readRecord(def.properties));
+  const strategy = readRecord(dereferenceSchemaNodeInRoot(readRecord(readRecord(panel?.properties).ventilation_strategy), root));
+  return Array.isArray(strategy.enum) ? strategy.enum.filter((value): value is string => typeof value === 'string') : [];
 }
 
 function useFormState(ctx: ElementFormStateCtx): OnSiteGenerationFormState {
@@ -245,6 +265,7 @@ function useFormState(ctx: ElementFormStateCtx): OnSiteGenerationFormState {
     onSiteWidthInput,
     onSiteHeightInput,
     getCurrentOrientation: ctx.getCurrentOrientation,
+    ventilationStrategies: panelVentilationStrategies(ctx),
   };
 }
 
@@ -338,7 +359,10 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
       getGlobalOrientationOffset,
       onSiteHostDerivation,
       selectedPvDimensionNotes,
+      hemDatabaseProducts,
     } = ctx;
+    const pvElement = selection?.id ? getElementById(selection.id) : undefined;
+    const ventilationStrategy = readRecord(pvElement?.extra_json).ventilation_strategy;
 
     /** Rebuild plan footprint from the bottom edge using current width/height fields */
     const resetOnSiteDimensions = () => {
@@ -645,6 +669,22 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
           <div style={INLINE_FIELD_NOTE_STYLE}>
             {selectedPvDimensionNotes.height}
           </div>
+        ) : null}
+        {/* A products target's PV root has no such field, and the panel needs one: it is stated here. */}
+        {hemDatabaseProducts && state.ventilationStrategies.length > 0 && pvElement ? (
+          <>
+            <div className="element-label">Panel ventilation:</div>
+            <div className="element-input">
+              <StandardDropdown
+                value={typeof ventilationStrategy === 'string' ? ventilationStrategy : ''}
+                onChange={(value) => updateElement(pvElement.id, { extra_json: { ...readRecord(pvElement.extra_json), ventilation_strategy: value || undefined } } as Partial<Element>)}
+                options={state.ventilationStrategies.map((value) => ({ value, label: VENTILATION_STRATEGY_LABELS[value] ?? value }))}
+                placeholder="Select…"
+                variant="ghost"
+                size="md"
+              />
+            </div>
+          </>
         ) : null}
         <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           <button

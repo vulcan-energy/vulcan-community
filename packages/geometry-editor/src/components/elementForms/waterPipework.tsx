@@ -85,7 +85,7 @@ export const waterPipeworkFormModule: ElementFormModule<WaterPipeworkFormState> 
 
   renderPanel(state, ctx) {
     const { location, setLocation, pipeworkType, setPipeworkType, serviceLine } = state;
-    const { elementType, renderFieldLabel, registerBaseFieldRefs, commitExistingElementDraft } = ctx;
+    const { elementType, renderFieldLabel, registerBaseFieldRefs, commitExistingElementDraft, hemDatabaseProducts } = ctx;
 
     return (
       <>
@@ -118,7 +118,8 @@ export const waterPipeworkFormModule: ElementFormModule<WaterPipeworkFormState> 
             options={[
               { value: '', label: 'Select pipework type' },
               { value: 'primary', label: 'Primary' },
-              { value: 'distribution', label: 'Distribution' },
+              // A products target reads primary pipework only; distribution pipework is not read there.
+              ...(hemDatabaseProducts && pipeworkType !== 'distribution' ? [] : [{ value: 'distribution', label: 'Distribution' }]),
             ]}
             variant="ghost"
             size="md"
