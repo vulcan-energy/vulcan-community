@@ -4699,7 +4699,17 @@ impl JSONBuilder {
                         // template's ducts (they add heat losses the user never
                         // authored); the missing required `ductwork` surfaces as a
                         // schema validation error instead.
-                        if vt == "MVHR" && self.profile.references_products() {
+                        // An existing building's MVHR takes HEMIE's own ductwork (its system
+                        // form has none), so only a new build maps the drawn ducts.
+                        let existing = csv_data.get("Metadata").into_iter().flatten().any(|row| {
+                            let (name, value) = extract_metadata_field(row);
+                            name.as_deref() == Some("IsExistingBuilding")
+                                && value.is_some_and(|v| {
+                                    v == Value::Bool(true)
+                                        || v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("true"))
+                                })
+                        });
+                        if vt == "MVHR" && self.profile.references_products() && !existing {
                             // The full input takes one ductwork descriptor, not a duct list.
                             let (descriptor, notice) = crate::epc_mappings::mvhr_ductwork(
                                 vent_name,

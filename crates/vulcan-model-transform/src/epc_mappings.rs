@@ -353,14 +353,14 @@ pub(crate) fn mvhr_ductwork(
             .filter(|d| d["duct_type"] == *duct_type)
             .filter_map(|d| d["length"].as_f64())
             .collect();
-        if !lengths.is_empty() {
-            set(
-                &format!("{duct_type}_length"),
-                Some(json!(lengths.iter().sum::<f64>())),
-                &mut missing,
-                "length",
-            );
-        }
+        let label = match *duct_type {
+            "intake" => "intake duct length",
+            "exhaust" => "exhaust duct length",
+            "supply" => "supply duct length",
+            _ => "extract duct length",
+        };
+        let length = (!lengths.is_empty()).then(|| json!(lengths.iter().sum::<f64>()));
+        set(&format!("{duct_type}_length"), length, &mut missing, label);
     }
     let shape = one(ducts
         .iter()
@@ -411,7 +411,7 @@ pub(crate) fn mvhr_ductwork(
         "reflective surface",
     );
     let notice = (!missing.is_empty()).then(|| {
-        notice(&path, format!("The drawn ducts of the MVHR '{name}' do not give one {}, so its ductwork uses the default. Give its ducts the same value to change it.", missing.join(", ")))
+        notice(&path, format!("The MVHR '{name}' ductwork uses the default {}: its drawn ducts give no single value. Draw the missing ducts, or give the drawn ones one value, to change it.", missing.join(", ")))
     });
     (Value::Object(out), notice)
 }
