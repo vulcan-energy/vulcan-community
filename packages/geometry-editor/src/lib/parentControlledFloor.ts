@@ -42,6 +42,20 @@ function isFloorControlledChildOf(element: Element, parent: Element): boolean {
   }
 }
 
+const lookups = new WeakMap<Record<string, Element>, {
+  byName: ReturnType<typeof createElementNameLookup>;
+  parentOf: ReturnType<typeof createParentElementLookup>;
+}>();
+/** The name and parent lookups once per element record: validation asks for every element. */
+function lookupsFor(elementsById: Record<string, Element>) {
+  let found = lookups.get(elementsById);
+  if (!found) {
+    const elements = Object.values(elementsById);
+    lookups.set(elementsById, (found = { byName: createElementNameLookup(elements), parentOf: createParentElementLookup(elements) }));
+  }
+  return found;
+}
+
 export function getFloorControlParentElement(
   element: Element | undefined,
   elementsById: Record<string, Element>,
@@ -49,10 +63,10 @@ export function getFloorControlParentElement(
   if (!element) return null;
   const parentName = normalizedFloorControlParentName(element);
   if (!parentName) return null;
-  const elements = Object.values(elementsById);
+  const { byName, parentOf } = lookupsFor(elementsById);
   const parent = element.type === 'MechanicalVentilationTerminal'
-    ? createElementNameLookup(elements)(parentName, undefined, isMvhrTerminalHost)
-    : createParentElementLookup(elements)(element);
+    ? byName(parentName, undefined, isMvhrTerminalHost)
+    : parentOf(element);
   if (!parent || parent.id === element.id) return null;
   return isFloorControlledChildOf(element, parent) ? parent : null;
 }

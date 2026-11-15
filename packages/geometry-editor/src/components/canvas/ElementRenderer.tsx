@@ -1696,7 +1696,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                 listening={isInteractive}
               />
               {lucideIconNodeToKonva(iconNode, {
-                stroke: readRootCssVar('--canvas-label-text', '#ffffff'),
+                stroke: canvasElementPalette.labelText,
                 strokeWidth: lucideStrokeW,
                 keyPrefix: `${element.id}-pticon`,
                 listening: false,
