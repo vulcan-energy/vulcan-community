@@ -1078,9 +1078,9 @@ impl Ctx<'_> {
                 // glazing type without a documented U- and g-value, glazing gap without a
                 // documented U-value unless the glazing is single.
                 let documented = has(c, "u_value") && has(c, "g_value");
-                // HEMIE takes the frame area fraction from the frame material unless it is
-                // stated, documented values or not (`window.py` `frame_area_fraction`).
-                if !has(c, "frame_material") && (!documented || !has(c, "frame_area_fraction")) {
+                // A documented window in an external element still needs its frame material
+                // or frame area fraction: see `window`.
+                if !documented && !has(c, "frame_material") {
                     need("frame_material");
                 }
                 if !documented && !has(c, "glazing_type") {
@@ -1901,7 +1901,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             placed.insert(opening.name.to_string());
             on_edge.push(opening);
             if opening.ty == "BuildingElementTransparent" {
-                if let Some(mut w) = window(ctx, opening) {
+                if let Some(mut w) = window(ctx, opening, kind == Kind::External) {
                     w[SOURCE] = json!(opening.path());
                     win.push(w);
                 }
@@ -2339,13 +2339,29 @@ fn front_door<'e>(ctx: &mut Ctx, doors: &[&'e El<'e>]) -> Option<&'e El<'e>> {
     }
 }
 
-fn window(ctx: &mut Ctx, e: &El) -> Option<Value> {
+/// A window, and whether it is in an external element (a wall, roof or bay) rather than a party or
+/// sheltered wall.
+fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
     let Some(sections) = e.get("window_sections") else {
         // DESNZ-defined: the opening type has no default, so the window must state it.
         ctx.errors.push(error("OPENING", e.path(), format!("Window '{}' does not state its opening type. Choose its opening type on the window.", e.name)));
         return None;
     };
     let key = ctx.construction("window", &[e], &[]);
+    // HEMIE takes an external window's frame area fraction from its frame material unless it is
+    // stated, documented U- and g-values or not (`window.py` `frame_area_fraction`); a window in a
+    // party or sheltered wall uses none.
+    if in_external_element {
+        let c = &ctx.constructions.by_name[&key];
+        let has = |k: &str| c.get(k).is_some_and(|v| !v.is_null());
+        if !has("frame_material") && !has("frame_area_fraction") {
+            ctx.settings
+                .missing
+                .entry(format!("{SETTING}construction_window"))
+                .or_default()
+                .insert("frame_material".into());
+        }
+    }
     let mut w = ctx.with_age_band(
         &[e],
         json!({"width": e.num("width"), "height": e.num("height"), "window_sections": sections, "construction": key}),
@@ -2494,7 +2510,7 @@ fn roof_windows(
         .filter(|w| hosts.iter().any(|h| w.host() == Some(h.name)))
         .filter_map(|w| {
             placed.insert(w.name.to_string());
-            let mut value = window(ctx, w)?;
+            let mut value = window(ctx, w, true)?;
             systems::no_roof_window_vents(ctx, w.name, &mut value);
             Some(value)
         })
@@ -2809,7 +2825,7 @@ fn room_in_roof(
             .filter(|x| x.host() == Some(w.name))
             .filter_map(|x| {
                 placed.insert(x.name.to_string());
-                window(ctx, x)
+                window(ctx, x, kind == Kind::External)
             })
             .collect();
         if kind == Kind::External || !lights.is_empty() {
@@ -3022,7 +3038,7 @@ fn dormer<'e>(
         return None;
     };
     placed.insert(front.name.to_string());
-    let front_window = window(ctx, front)?;
+    let front_window = window(ctx, front, true)?;
     // DESNZ-defined: one side window serves both cheek walls, or none.
     let cheek = |role: &str| {
         members.iter().find(|m| {
@@ -3045,7 +3061,7 @@ fn dormer<'e>(
         ([x], [y]) => {
             placed.insert(x.name.to_string());
             placed.insert(y.name.to_string());
-            let (wx, wy) = (window(ctx, x)?, window(ctx, y)?);
+            let (wx, wy) = (window(ctx, x, true)?, window(ctx, y, true)?);
             if wx != wy {
                 ctx.errors.push(error("DORMER", x.path(), format!("Dormer side windows '{}' and '{}' differ. Both sides of a dormer share one window: make them the same.", x.name, y.name)));
                 return None;
@@ -4338,11 +4354,49 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
 
     #[test]
     fn a_documented_window_still_needs_its_frame_material_or_frame_fraction() {
-        let no_frame = |extra: &str| window_house(extra, "").replace("\"\"frame_material\"\":\"\"wood or PVC\"\",", "");
+        let no_frame = |extra: &str| {
+            window_house(extra, "").replace("\"\"frame_material\"\":\"\"wood or PVC\"\",", "")
+        };
         let (_, errors, _) = run(&no_frame(r#","u_value":1.4,"g_value":0.6"#));
-        assert!(errors.iter().any(|e| e.message.contains("frame_material") || e.message.contains("frame material")), "{errors:#?}");
-        let (_, errors, _) = run(&no_frame(r#","u_value":1.4,"g_value":0.6,"frame_area_fraction":0.25"#));
-        assert!(!errors.iter().any(|e| e.message.contains("frame_material") || e.message.contains("frame material")), "{errors:#?}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("frame_material")
+                    || e.message.contains("frame material")),
+            "{errors:#?}"
+        );
+        let (_, errors, _) = run(&no_frame(
+            r#","u_value":1.4,"g_value":0.6,"frame_area_fraction":0.25"#,
+        ));
+        assert!(
+            !errors
+                .iter()
+                .any(|e| e.message.contains("frame_material")
+                    || e.message.contains("frame material")),
+            "{errors:#?}"
+        );
+        // A window in a party wall uses no frame area fraction (`window.py` `_party_window_building_element`).
+        let party = no_frame(r#","u_value":1.4,"g_value":0.6"#)
+            .lines()
+            .map(|line| {
+                if line.starts_with("W00,") {
+                    "W00,Z,BuildingElementPartyWall,1,90,8,2.8,180,0,FALSE,FALSE,,\"0,0,0|8,0,0\","
+                        .to_string()
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(party.contains("W00,Z,BuildingElementPartyWall"));
+        let (_, errors, _) = run(&party);
+        // The box's door in that wall becomes a party door, which needs its own heat capacity.
+        assert!(
+            errors
+                .iter()
+                .all(|e| e.message.contains("party or sheltered door")),
+            "{errors:#?}"
+        );
     }
 
     #[test]

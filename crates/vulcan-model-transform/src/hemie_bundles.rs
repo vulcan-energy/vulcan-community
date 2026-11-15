@@ -444,7 +444,7 @@ pub(super) fn attach_bays(
         };
         let mut bay_value = Map::new();
         placed.insert(front_window.name.to_string());
-        let Some(w) = window(ctx, front_window) else {
+        let Some(w) = window(ctx, front_window, true) else {
             continue;
         };
         bay_value.insert("front_window".into(), w);
@@ -454,7 +454,7 @@ pub(super) fn attach_bays(
             ([x], [y]) => {
                 placed.insert(x.name.to_string());
                 placed.insert(y.name.to_string());
-                let (wx, wy) = (window(ctx, x), window(ctx, y));
+                let (wx, wy) = (window(ctx, x, true), window(ctx, y, true));
                 if wx != wy {
                     ctx.errors.push(error("BAY", x.path(), format!("Bay side windows '{}' and '{}' differ. Both sides of a bay share one window: make them the same.", x.name, y.name)));
                     continue;
