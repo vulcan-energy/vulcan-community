@@ -5,12 +5,12 @@ import type { ValidationIssue, ValidationResult } from '../geometry/validation/t
 import type { BuildErrorItem, TargetValidation } from '../types/buildErrors';
 import { issuePathSegments, resolveIssueTarget, type IssueTarget } from './issueTarget';
 import { HEMIE_NATION, hemieConstructionTypeLabel } from './hemieFabric';
-import { globalSettingsFieldSection, type GlobalSettingsFieldSection } from './globalSettingsValidation';
+import { globalSettingsFieldSection, METADATA_INPUT_LABELS, type GlobalSettingsFieldSection } from './globalSettingsValidation';
 
 const SECTION_LOCATIONS: Readonly<Record<GlobalSettingsFieldSection, string>> = {
   defaults: 'Global Settings > Defaults',
   target: 'Global Settings',
-  dwelling: 'Global Settings > Dwelling Details',
+  dwelling: 'Global Settings > Dwelling details',
   airTightness: 'Global Settings > Air Tightness',
   ventilation: 'Global Settings > Ventilation environment',
   thermalBridging: 'Global Settings > Thermal bridging',
@@ -69,7 +69,7 @@ const buildErrorLocation = (path?: string) => {
     const constructionType = segments[1].match(/^HEMIE_construction_(.+)$/)?.[1];
     return {
       location: segments[1] === HEMIE_NATION
-        ? 'Global Settings > Dwelling Details'
+        ? 'Global Settings > Dwelling details'
         : `Global Settings > Defaults > Fabric${constructionType ? ` > ${hemieConstructionTypeLabel(constructionType)}` : ''}`,
     };
   }
@@ -136,9 +136,19 @@ const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => 
   const unexpectedFields = unexpectedFieldsFromMessage(item.message);
   const explicitUserMessage = item.userMessage?.trim();
 
+  const unstatedInput = item.code === 'E_EPC_REQUIRED_INPUT' && pathSegments[0] === 'Metadata' && pathSegments[1]
+    ? METADATA_INPUT_LABELS[pathSegments[1]]
+    : undefined;
+
   let userMessage: string;
   if (explicitUserMessage) {
     userMessage = explicitUserMessage;
+  } else if (unstatedInput) {
+    // Lower-case the label mid-sentence, keeping proper names (Part G, SAP).
+    const label = /^[A-Z][a-z]/.test(unstatedInput) && !/^Part\b/.test(unstatedInput)
+      ? unstatedInput[0].toLowerCase() + unstatedInput.slice(1)
+      : unstatedInput;
+    userMessage = `Enter ${label}.`;
   } else if (
     location === 'Appliances' &&
     (item.message.includes('is not allowed for {}') || item.message.includes('has less than'))

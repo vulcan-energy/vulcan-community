@@ -2638,7 +2638,10 @@ export const validateElementCore = (
               label: resolveFieldLabelContent(field, undefined, element.type),
             }, schemaPort);
             const unit = fieldUnitForAdornment(presentation);
-            const displayName = unit ? `${presentation.label} (${unit})` : presentation.label;
+            // The form shows a stopped fan's leakage as its two parts (DirectAdvancedFields), so name those.
+            const displayName = field === 'leakage_when_stopped'
+              ? ['back_draught_protection', 'diameter'].map((part) => resolveFieldLabelContent(part, undefined, element.type)).join(' and ')
+              : unit ? `${presentation.label} (${unit})` : presentation.label;
             const message = `${complianceValidationEnabled ? 'FHS: ' : ''}${enterFieldMessage(displayName, isYesNoField(schemaProperties[field]))}`;
             issues.push(issueFactory(message, field));
           }

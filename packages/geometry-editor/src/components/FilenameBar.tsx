@@ -354,6 +354,13 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     setIsSaveErrorModalOpen(true);
   }, [positionSaveErrorDropdown]);
 
+  // A host surface opens this same list by the event.
+  useEffect(() => {
+    const open = () => openSaveErrorDropdown(buildErrorChipRef.current ?? saveButtonRef.current);
+    window.addEventListener('open-build-errors', open);
+    return () => window.removeEventListener('open-build-errors', open);
+  }, [openSaveErrorDropdown]);
+
   const updateSaveErrorPosition = useCallback(() => {
     const anchor = errorAnchorRef.current || saveButtonRef.current;
     if (!anchor) return;

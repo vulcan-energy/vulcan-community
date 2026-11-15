@@ -54,7 +54,7 @@ const UNUSED_WINDOW_HEAT_CAPACITY: f64 = 0.0;
 const SETTING: &str = "HEMIE_";
 /// Metadata rows older saved files carry that the converter no longer reads, with the fix.
 const RETIRED_SETTINGS: [(&str, &str); 3] = [
-    ("HEMIE_region", "The region comes from the postcode. Remove the row. For a postcode area that spans two nations, choose the Nation under the Postcode in Dwelling Details."),
+    ("HEMIE_region", "The region comes from the postcode. Remove the row. For a postcode area that spans two nations, choose the Nation under the Postcode in Global Settings."),
     ("HEMIE_front_door", "Remove the row and mark the front door on the door itself."),
     ("HEMIE_infiltration_properties", "An existing building needs an air test. Remove the row and enter the air test result in Global Settings."),
 ];
@@ -778,7 +778,10 @@ impl Ctx<'_> {
             {
                 Some(full) => {
                     c.insert("mass_distribution_class".into(), json!(full));
-                    stated_mass.push(format!("mass distribution class {full}"));
+                    stated_mass.push(format!(
+                        "mass distribution class {}",
+                        full.split(':').next().unwrap_or(&full)
+                    ));
                 }
                 None => self.errors.push(error(
                     "CONSTRUCTION",
@@ -903,7 +906,7 @@ impl Ctx<'_> {
                 construction_type,
                 "window" | "external_door" | "party_or_sheltered_door"
             ) {
-                stated_mass.push(format!("areal heat capacity {capacity}"));
+                stated_mass.push(format!("areal heat capacity {} kJ/m²K", capacity / 1000.0));
             }
         }
         if !stated_mass.is_empty() {
@@ -2212,9 +2215,9 @@ fn region(ctx: &mut Ctx) -> Option<String> {
     let path = "/Metadata/Postcode".to_string();
     let Some((area, derived)) = postcode_region(postcode) else {
         ctx.errors.push(error("POSTCODE", path, if postcode.trim().is_empty() {
-            "The model has no postcode. The existing-building converter takes the region from it; give the Postcode in Dwelling Details.".into()
+            "The model has no postcode, which gives the region. Enter the postcode in Global Settings.".into()
         } else {
-            format!("Postcode '{postcode}' is not a postcode in England, Wales, Scotland or Northern Ireland, so the region is not known. Check the Postcode in Dwelling Details.")
+            format!("Postcode '{postcode}' is not a postcode in England, Wales, Scotland or Northern Ireland, so the region is not known. Check the Postcode in Global Settings.")
         }));
         return None;
     };
@@ -2242,7 +2245,7 @@ fn region(ctx: &mut Ctx) -> Option<String> {
             Some(nation.into())
         }
         stated => {
-            ctx.errors.push(error("POSTCODE", format!("/Metadata/{field}"), format!("Postcode area {area} spans two nations{}. State the nation under the Postcode in Dwelling Details.", stated.map_or(String::new(), |s| format!(", and '{s}' is not England, Wales, Scotland or Northern Ireland")))));
+            ctx.errors.push(error("POSTCODE", format!("/Metadata/{field}"), format!("Postcode area {area} spans two nations{}. State the nation under the Postcode in Global Settings.", stated.map_or(String::new(), |s| format!(", and '{s}' is not England, Wales, Scotland or Northern Ireland")))));
             None
         }
     }

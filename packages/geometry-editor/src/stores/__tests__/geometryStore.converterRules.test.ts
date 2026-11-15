@@ -125,20 +125,20 @@ const CASES: Case[] = [
   { name: 'text in a ventilation unit position', edit: replace(',,2.7,,0,180,Centralised', ',,2.7,,north,180,Centralised'),
     blocks: ['Centralised Continuous MEV|orientation360'], saves: { 'Ventilation Systems|Centralised Continuous MEV|orientation360': 'north' } },
   { name: 'text in a Metadata count', edit: replace('NumberOfBedrooms,2,', 'NumberOfBedrooms,two,'), defaults: true,
-    blocks: ["Number of Bedrooms is 'two', which the target does not accept"], saves: { 'Metadata|NumberOfBedrooms': 'two' } },
+    blocks: ["Number of bedrooms is 'two', which the target does not accept"], saves: { 'Metadata|NumberOfBedrooms': 'two' } },
   { name: 'text in a Metadata length', edit: replace('BuildingLength,8.9,', 'BuildingLength,long,'),
     blocks: ["Building length (m) is 'long'"], saves: { 'Metadata|BuildingLength': 'long' } },
   { name: 'text in a Metadata air test result', edit: replace('AirPermeability_test_result,4,', 'AirPermeability_test_result,x,'),
-    blocks: ["Test Result is 'x'"], saves: { 'Metadata|AirPermeability_test_result': 'x' } },
+    blocks: ["Test result is 'x'"], saves: { 'Metadata|AirPermeability_test_result': 'x' } },
   { name: 'a part count', edit: replace('NumberOfBedrooms,2,', 'NumberOfBedrooms,2.5,'), defaults: true,
-    blocks: ["Number of Bedrooms is '2.5'"], saves: { 'Metadata|NumberOfBedrooms': '2.5' } },
+    blocks: ["Number of bedrooms is '2.5'"], saves: { 'Metadata|NumberOfBedrooms': '2.5' } },
   // A Metadata value outside its fixed options is E026 or E055 in the converter: kept and blocking.
   { name: 'a test pressure that is not an option', edit: replace('AirPermeability_test_pressure,Standard,', 'AirPermeability_test_pressure,50,'), defaults: true,
-    blocks: ["Test Pressure is '50'"], saves: { 'Metadata|AirPermeability_test_pressure': '50' } },
+    blocks: ["Test pressure is '50'"], saves: { 'Metadata|AirPermeability_test_pressure': '50' } },
   { name: 'a heating control that is not an option', edit: replace('HeatingControlType,SeparateTempControl,', 'HeatingControlType,Thermostat,'), defaults: true,
-    blocks: ["Heating Control Type is 'Thermostat'"], saves: { 'Metadata|HeatingControlType': 'Thermostat' } },
+    blocks: ["Heating control type is 'Thermostat'"], saves: { 'Metadata|HeatingControlType': 'Thermostat' } },
   { name: 'a yes/no setting that is not TRUE or FALSE', edit: replace('PartGcompliance,TRUE,', 'PartGcompliance,yes,'), defaults: true,
-    blocks: ["Part G Compliance is 'yes'"], saves: { 'Metadata|PartGcompliance': 'yes' } },
+    blocks: ["Part G compliance is 'yes'"], saves: { 'Metadata|PartGcompliance': 'yes' } },
   { name: 'a number typed over the text is saved', edit: replace('Light,Zone 1,80,', 'Light,Zone 1,80lm,'),
     then: (store) => {
       const light = Object.values(store.getState().elementsById).find((element) => element.name === 'Light')!;
@@ -154,12 +154,12 @@ const CASES: Case[] = [
   { name: 'ufh area 0', edit: replace('Underfloor Heating,Zone 1,WetEmitter,ufh,8.89,', 'Underfloor Heating,Zone 1,WetEmitter,ufh,0,'), blocks: ['Underfloor Heating|area'] },
   // An absent Metadata row takes the converter's value: a Systems InfiltrationVentilation row
   // first, then the defaults template (which a load always reads after the file).
-  { name: 'absent rows take the defaults', edit: withoutShieldAndAltitude, defaults: true, notice: 'Shield Class Normal (from the defaults file)',
+  { name: 'absent rows take the defaults', edit: withoutShieldAndAltitude, defaults: true, notice: 'Shield class Normal (from the defaults file)',
     saves: { 'Metadata|Ventilation_shield_class': 'Normal', 'Metadata|Ventilation_altitude': '30' } },
   // With no Systems row and no defaults value, the converter has nothing: the row stays absent and
   // blocks where the target requires it, with what the labels or geometry show as a hint.
   { name: 'absent base height with no defaults value', defaults: true, edit: replace('Ventilation_ventilation_zone_base_height,0,,,,,,,,,,,,,\n', ''),
-    blocks: ['Ventilation Zone Base Height (m) is not set. Enter it in Global Settings. The geometry gives 0.'], saves: { 'Metadata|Ventilation_ventilation_zone_base_height': null } },
+    blocks: ['Ventilation zone base height (m) is not set. Enter it in Global Settings. The geometry gives 0.'], saves: { 'Metadata|Ventilation_ventilation_zone_base_height': null } },
   // FHS requires these only for a flat (the schema's `if build_type flat`): the converter blocks a flat without them.
   { name: 'a flat with no storeys in building', defaults: true, edit: replace('General_build_type,house,', 'General_build_type,flat,'),
     blocks: ['Storeys in building is not set. Enter it in Global Settings.'], saves: { 'Metadata|General_storeys_in_building': null } },
@@ -169,8 +169,8 @@ const CASES: Case[] = [
   { name: 'a house needs no storeys in building', defaults: true, edit: (csv) => csv, allows: ['Storeys in building is not set'] },
   { name: 'absent bathroom count with no defaults value', defaults: true, edit: replace('NumberOfBathrooms,1,,,,,,,,,,,,,\n', ''),
     blocks: ['Number of bathrooms is not set. Enter it in Global Settings. Space labels show 1.'], saves: { 'Metadata|NumberOfBathrooms': null } },
-  { name: 'a Systems row supplies the absent rows', edit: systemsVentilation, defaults: true, noNotice: 'Shield Class',
-    allows: ['Shield Class', 'Altitude (m)'], saves: { 'Metadata|Ventilation_shield_class': null, 'Metadata|Ventilation_altitude': null, 'Metadata|Ventilation_ventilation_zone_base_height': null } },
+  { name: 'a Systems row supplies the absent rows', edit: systemsVentilation, defaults: true, noNotice: 'Shield class',
+    allows: ['Shield class', 'Altitude (m)'], saves: { 'Metadata|Ventilation_shield_class': null, 'Metadata|Ventilation_altitude': null, 'Metadata|Ventilation_ventilation_zone_base_height': null } },
   // The converter does not read Space Labels: every row loads and saves as it is, and none blocks.
   { name: 'label with blank Zone', edit: kitchen('', 'kitchen'), notice: 'Kitchen',
     saves: { 'Space Labels|Kitchen|Zone': '', 'Space Labels|Kitchen|room_type': 'kitchen' } },
@@ -183,7 +183,7 @@ const CASES: Case[] = [
   { name: 'blank BuildingLength row', edit: replace('BuildingLength,8.9,', 'BuildingLength,,'),
     blocks: ['Building length (m) is not set. Enter it in Global Settings. The geometry gives'], saves: { 'Metadata|BuildingLength': '' } },
   { name: 'blank HeatingControlType row', edit: replace('HeatingControlType,SeparateTempControl,', 'HeatingControlType,,'), defaults: true,
-    blocks: ['Heating Control Type is not set'], saves: { 'Metadata|HeatingControlType': '' } },
+    blocks: ['Heating control type is not set'], saves: { 'Metadata|HeatingControlType': '' } },
   // The converter ignores ComplianceValidationEnabled: FALSE still takes false for an absent
   // KitchenExtractorHoodExternal row. Only a host without targets saves FALSE, for the community core mode.
   { name: 'compliance validation off changes nothing', defaults: true,

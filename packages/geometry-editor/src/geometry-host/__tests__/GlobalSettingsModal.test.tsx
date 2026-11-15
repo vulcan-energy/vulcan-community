@@ -135,6 +135,8 @@ describe("GlobalSettingsModal existing building", () => {
     const order = (a: Node, b: Node) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
     expect(order(screen.getByText("HEM model version"), existing)).toBeTruthy();
     expect(order(existing, screen.getByText("Dwelling details"))).toBeTruthy();
+    // A new build states its build type up front; its EPC input takes no postcode.
+    expect(order(screen.getByText("Build type"), screen.getByText("Dwelling details"))).toBeTruthy();
     expect(screen.queryByLabelText("Property postcode")).not.toBeInTheDocument();
   });
 });

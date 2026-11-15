@@ -97,6 +97,6 @@ describe('displayBuildErrorRows', () => {
     expect(location('/InfiltrationVentilation/Leaks')).toBe('Global Settings > Air Tightness');
     expect(location('/InfiltrationVentilation/ventilation_zone_base_height')).toBe('Global Settings > Ventilation environment');
     expect(location('/InfiltrationVentilation/Leaks/ventilation_zone_height')).toBe('Global Settings > Ventilation environment');
-    expect(location('/Metadata/NumberOfBedrooms')).toBe('Global Settings > Dwelling Details');
+    expect(location('/Metadata/NumberOfBedrooms')).toBe('Global Settings > Dwelling details');
   });
 });

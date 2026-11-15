@@ -2208,10 +2208,20 @@ impl JSONBuilder {
                 ) {
                     Ok((build_type, sides)) => {
                         result["General"]["build_type"] = Value::String(build_type.into());
+                        let label = match build_type {
+                            "semi_detached_end_terrace" => "semi-detached or end-terrace",
+                            "mid_terrace" => "mid-terrace",
+                            other => other,
+                        };
+                        let walls = match sides {
+                            0 => "it has no party walls".to_string(),
+                            1 => "its party walls are on 1 side".to_string(),
+                            n => format!("its party walls are on {n} sides"),
+                        };
                         notices.push(crate::finalization::SchemaOmission {
                             code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
                             path: "/General/build_type".into(),
-                            message: format!("The Metadata section states no EPC built form ('house' or no General_build_type row), so the model uses {build_type}, derived from party walls on {sides} side(s) of the dwelling. Add the row to state it, for example for a park home."),
+                            message: format!("Build type is {label}, as {walls}. To change it, choose Build type in Global Settings."),
                         });
                     }
                     Err(message) => {
@@ -2248,13 +2258,7 @@ impl JSONBuilder {
             );
             crate::epc_products::apply_weather_curves(result, db, &mut errors, &mut notices);
             crate::epc_products::check_product_fuels(result, db, &mut errors);
-            crate::epc_products::derive_zone_frac_convective(
-                result,
-                db,
-                &slots,
-                &mut errors,
-                &mut notices,
-            );
+            crate::epc_products::derive_zone_frac_convective(result, db, &slots, &mut errors);
             let rows = self.slot_rows.borrow();
             *self.product_slots.borrow_mut() = slots
                 .into_iter()
@@ -5517,6 +5521,9 @@ impl JSONBuilder {
                 }
                 if self.profile.required_metadata_rows().contains(name)
                     || self.profile.desnz_default_rows().contains(name)
+                    // The party walls give it, and that note says so.
+                    || *name == "General_build_type"
+                        && self.profile.derives_build_type_from_party_walls()
                 {
                     return None;
                 }
@@ -5561,11 +5568,12 @@ impl JSONBuilder {
                 missing.push(*name);
             }
         }
-        if !missing.is_empty() {
+        // One error per input, on its own row, so the editor names the field and opens it.
+        for name in missing {
             self.push_non_fatal(
                 "E_EPC_REQUIRED_INPUT",
-                "/Metadata",
-                &format!("HEM:EPC requires these inputs and the Metadata section has no row for them: {}. Add each row with its value.", missing.join(", ")),
+                &format!("/Metadata/{name}"),
+                &format!("{name} is not stated. Enter it in Global Settings."),
             );
         }
         if !used.is_empty() {
