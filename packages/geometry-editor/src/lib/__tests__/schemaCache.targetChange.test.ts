@@ -3,8 +3,8 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode, applianceRequiresEnergySupply, thermalBridgingAcceptsTotal, elementTypeAvailability, resolveElementSubschemaForProfile } from '../schemaCache';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode, applianceRequiresEnergySupply, thermalBridgingAcceptsTotal, elementTypeAvailability, resolveElementSubschemaForProfile, validateValueAgainstPropertyNode } from '../schemaCache';
 import { ELEMENT_TYPE_ORDER } from '../elementTypeMetadata';
 import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import { ensureRootSchema, getAjvInstance, resetGeometrySchemaValidators } from '../ajvCache';
@@ -22,6 +22,19 @@ describe('thermalBridgingAcceptsTotal', () => {
   it('says nothing without a schema or the field', () => {
     expect(thermalBridgingAcceptsTotal(null)).toBe(true);
     expect(thermalBridgingAcceptsTotal({ properties: {} })).toBe(true);
+  });
+});
+
+describe('validateValueAgainstPropertyNode', () => {
+  // Editor paths dereference per render, so the same property schema arrives as a fresh copy.
+  it('compiles a property schema once, copies included', () => {
+    const root = { $defs: { Kind: { enum: ['a', 'b'] } } };
+    const node = { $ref: '#/$defs/Kind' };
+    const compile = vi.spyOn(getAjvInstance(), 'compile');
+    expect(validateValueAgainstPropertyNode(root, node, 'X', 'k', 'a').valid).toBe(true);
+    expect(validateValueAgainstPropertyNode(root, structuredClone(node), 'X', 'k', 'c').valid).toBe(false);
+    expect(compile).toHaveBeenCalledTimes(1);
+    compile.mockRestore();
   });
 });
 

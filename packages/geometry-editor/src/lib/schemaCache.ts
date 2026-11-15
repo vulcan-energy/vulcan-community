@@ -73,6 +73,9 @@ let preloadCoreSchemaPromise: Promise<void> | null = null;
 // Note: WeakMaps can't be cleared, so we reassign on schema (re)load/reset.
 let compiledPropValidatorCore: WeakMap<object, PropertyValidator> = new WeakMap();
 let compiledPropValidatorFhs: WeakMap<object, PropertyValidator> = new WeakMap();
+// Second level, by the property schema's text under the root's `$defs`: editor paths that
+// dereference per render hand in a fresh copy of the same node, and each compile costs ~4 ms.
+const compiledPropValidatorByText = new WeakMap<object, Map<string, PropertyValidator>>();
 
 // Normalised System subtype nodes (see normalizeSystemSubtypeNode), keyed the same way and
 // reassigned at every site that reassigns the compiled-validator caches above (both preloads,
@@ -2109,22 +2112,33 @@ export function validateValueAgainstPropertyNode(
     const cache = isFhsRoot ? compiledPropValidatorFhs : compiledPropValidatorCore;
     let validate = (propertySchema && typeof propertySchema === 'object') ? cache.get(propertySchema as object) : undefined;
     if (!validate) {
-      // Build a minimal schema for just this property. Include $defs so $ref can resolve.
-      const minimal = {
-        type: 'object',
-        properties: { v: propertySchema },
-        required: [],
-        $defs: rootSchema.$defs,
-      };
-      let t0 = 0;
-      if (dbg) t0 = performance.now();
-      validate = ajv.compile(minimal);
+      const defsKey: object = isRecord(rootSchema.$defs) ? rootSchema.$defs : rootSchema;
+      let byText = compiledPropValidatorByText.get(defsKey);
+      if (!byText) {
+        byText = new Map();
+        compiledPropValidatorByText.set(defsKey, byText);
+      }
+      const text = JSON.stringify(propertySchema);
+      validate = byText.get(text);
+      if (!validate) {
+        // Build a minimal schema for just this property. Include $defs so $ref can resolve.
+        const minimal = {
+          type: 'object',
+          properties: { v: propertySchema },
+          required: [],
+          $defs: rootSchema.$defs,
+        };
+        let t0 = 0;
+        if (dbg) t0 = performance.now();
+        validate = ajv.compile(minimal);
+        byText.set(text, validate);
+        if (dbg) {
+          dbgCompileCalls++;
+          dbgCompileMs += (performance.now() - t0);
+        }
+      }
       if (propertySchema && typeof propertySchema === 'object') {
         cache.set(propertySchema as object, validate);
-      }
-      if (dbg) {
-        dbgCompileCalls++;
-        dbgCompileMs += (performance.now() - t0);
       }
     }
     if (dbg) {
@@ -2525,14 +2539,33 @@ export function simplifiedThermalBridgingOffered(port: GeometrySchemaPort, mode:
 export function thermalBridgingAcceptsTotal(root: unknown): boolean {
   if (!isRecord(root)) return true;
   const zones = findFieldInSchemaBranches(root, 'Zone', root);
-  const zone = isRecord(zones) ? dereferenceSchemaNodeInRoot(zones, root) as Record<string, unknown> : undefined;
+  const zone = isRecord(zones) ? resolvedInRoot(zones, root) : undefined;
   const field = zone ? findFieldInSchemaBranches(zone.additionalProperties, 'ThermalBridging', root) : undefined;
   return field === undefined || schemaNodeAcceptsNumber(field, root);
 }
 
+// Lookups start at the root, and dereferencing a whole target schema costs ~100 ms for HEM:EPC.
+// Loaded schemas are never mutated, so each node is dereferenced once per root.
+const resolvedNodesByRoot = new WeakMap<object, WeakMap<object, Record<string, unknown>>>();
+
+function resolvedInRoot(node: Record<string, unknown>, root: unknown): Record<string, unknown> {
+  if (!isRecord(root)) return dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
+  let resolvedNodes = resolvedNodesByRoot.get(root);
+  if (!resolvedNodes) {
+    resolvedNodes = new WeakMap();
+    resolvedNodesByRoot.set(root, resolvedNodes);
+  }
+  let resolved = resolvedNodes.get(node);
+  if (!resolved) {
+    resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
+    resolvedNodes.set(node, resolved);
+  }
+  return resolved;
+}
+
 function findFieldInSchemaBranches(node: unknown, key: string, root: unknown): unknown {
   if (!isRecord(node)) return undefined;
-  const resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
+  const resolved = resolvedInRoot(node, root);
   const properties = isRecord(resolved.properties) ? resolved.properties : {};
   if (properties[key] !== undefined && !isForbiddenSchemaNode(properties[key])) return properties[key];
   const branches = [resolved.then, resolved.else, ...[resolved.allOf, resolved.anyOf, resolved.oneOf].flatMap((list) => (Array.isArray(list) ? list : []))];
