@@ -150,12 +150,22 @@ function proposalFloorZIndexForSort(
   return Number.isFinite(best) ? best : 0;
 }
 
-/** Lower junction tier first; then longer segment; then lower storey; then proposalId. */
+/**
+ * Position of the element a proposal belongs to in the element list. `openingId` is an element id, or
+ * `wgcont:`/`wicont:`/`corner:` plus one. Ids are random per load, so only this order is stable.
+ */
+function proposalElementOrder(p: FacadeOpeningTbProposal, order: ReadonlyMap<string, number> | undefined): number {
+  if (!order) return 0;
+  return order.get(p.openingId) ?? order.get(p.openingId.split(':')[1] ?? '') ?? Number.POSITIVE_INFINITY;
+}
+
+/** Lower junction tier first; then longer segment; then lower storey; then element order; then proposalId. */
 export function compareProposalsForDedupePrecedence(
   a: FacadeOpeningTbProposal,
   b: FacadeOpeningTbProposal,
   byId: Record<string, Element>,
   floors: Floor[] | undefined,
+  elementOrder?: ReadonlyMap<string, number>,
 ): number {
   const ta = junctionDedupeTier(a.junctionCode);
   const tb = junctionDedupeTier(b.junctionCode);
@@ -168,6 +178,10 @@ export function compareProposalsForDedupePrecedence(
   const fa = proposalFloorZIndexForSort(a, byId, floors);
   const fb = proposalFloorZIndexForSort(b, byId, floors);
   if (fa !== fb) return fa - fb;
+
+  const oa = proposalElementOrder(a, elementOrder);
+  const ob = proposalElementOrder(b, elementOrder);
+  if (oa !== ob) return oa < ob ? -1 : 1;
 
   return a.proposalId.localeCompare(b.proposalId);
 }
@@ -188,11 +202,15 @@ export function dedupeFacadeThermalBridgeProposals(
   if (proposals.length <= 1) return [...proposals];
 
   const byId: Record<string, Element> = {};
-  for (const e of ctx.elements) {
-    if (e?.id) byId[e.id] = e;
-  }
+  const elementOrder = new Map<string, number>();
+  ctx.elements.forEach((e, i) => {
+    if (e?.id) {
+      byId[e.id] = e;
+      elementOrder.set(e.id, i);
+    }
+  });
 
-  const sorted = [...proposals].sort((a, b) => compareProposalsForDedupePrecedence(a, b, byId, ctx.floors));
+  const sorted = [...proposals].sort((a, b) => compareProposalsForDedupePrecedence(a, b, byId, ctx.floors, elementOrder));
 
   const kept: FacadeOpeningTbProposal[] = [];
   for (const cand of sorted) {
