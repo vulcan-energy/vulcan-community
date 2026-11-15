@@ -96,7 +96,7 @@ import { type HeatingSizing, type HeatSourceSizing, type SystemSizing } from '..
 import { fmtTemp, subjectOf } from '../../lib/heatingSizingView';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
 import { getPApportionedLinearPsiForEditor } from '../thermalBridge/linearTbPsi';
-import { computeOpaqueUAndTotals, matchesFhsDiscreteArealHeatCapacity } from '../../lib/assemblyCalculator';
+import { AREAL_HEAT_CAPACITY_CLASSES, arealHeatCapacityWrite, computeOpaqueUAndTotals, matchesArealHeatCapacityClass } from '../../lib/assemblyCalculator';
 import { effectiveFabricDisplayValues } from '../../lib/multiSelectAssemblyApply';
 import { parseVulcanAssemblyV1FromExtraJson } from '../../lib/assemblyAppliedUi';
 import { roundToTwoDecimals } from '../constants';
@@ -2697,7 +2697,8 @@ export const validateElementCore = (
     }
   }
 
-  // FHS strict: areal heat capacity on fabric elements must be one of the discrete mass bands (J/m²K).
+  // FHS strict: areal heat capacity on fabric elements must be a class on the target's scale, unless the
+  // target takes a number for the element type (the schema then states its range).
   // Use the same effective value as the construction table / HEM merge: extra_json, assembly envelope,
   // then project defaults_template (via getDefaultValueForElementField inside effectiveFabricDisplayValues).
   const fabricTypesForArealHeat = [
@@ -2707,19 +2708,22 @@ export const validateElementCore = (
     'BuildingElementAdjacentUnconditionedSpace_Simple',
     'BuildingElementPartyWall',
   ];
+  const arealWrite = arealHeatCapacityWrite(targetRules(context.schemaPort, context.complianceSettings ?? {}).arealHeatCapacity, element.type);
   if (
     complianceValidationEnabled &&
     !defaultsLoading &&
+    arealWrite !== 'number' &&
     fabricTypesForArealHeat.includes(element.type)
   ) {
-    const eff = effectiveFabricDisplayValues(element, context.defaultsLookup);
+    const eff = effectiveFabricDisplayValues(element, arealWrite, context.defaultsLookup);
     const kJ = eff.arealHeat_kJ_m2K;
     if (kJ != null && Number.isFinite(kJ)) {
       const ahc = kJ * 1000;
-      if (!matchesFhsDiscreteArealHeatCapacity(ahc)) {
+      if (!matchesArealHeatCapacityClass(ahc, arealWrite)) {
+        const values = Object.values(AREAL_HEAT_CAPACITY_CLASSES[arealWrite]).map((v) => v.toLocaleString('en-GB')).join(' / ');
         issues.push(
           fhs(
-            `FHS: areal heat capacity must be one of 50,000 / 75,000 / 110,000 / 175,000 / 250,000 J/(m²·K) (effective ${Math.round(ahc)})`,
+            `FHS: areal heat capacity must be one of ${values} J/(m²·K) (effective ${Math.round(ahc)})`,
             'areal_heat_capacity',
           ),
         );

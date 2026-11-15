@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { toFhsMassDistributionClass } from '../../lib/assemblyMassHeuristic';
-import { arealHeatCapacityBandFromJPerM2K } from '../../lib/assemblyCalculator';
+import { alignedArealHeatCapacity } from '../../lib/assemblyAppliedUi';
+import { documentArealHeatCapacity, type PinnedArealHeatCapacity } from '../../../../geometry-editor-host/src/schemaPort';
 import { HEMIE_RETIRED_ROWS } from '../../lib/hemieFabric';
 import type { ExternalDetailProfileLink } from '../../lib/assemblyTypes';
 import {
@@ -271,8 +272,8 @@ export type ParsedCsvGeometry = {
 
 export type ParseCsvToGeometryOptions = Readonly<{
   hostDocumentMetadataKeys?: readonly string[];
-  /** See `CreateGeometryStoreOptions.numericArealHeatCapacityForTarget`; absent, numbers snap to bands. */
-  numericArealHeatCapacityForTarget?: (targetBundleId: string | undefined) => boolean;
+  /** See `CreateGeometryStoreOptions.arealHeatCapacityForPin`. */
+  arealHeatCapacityForPin?: PinnedArealHeatCapacity;
   /**
    * Replaces freshly minted ids (in place) before anything links by id, so
    * thermal-bridge host links resolve to the assigned ids. Used by Undo/Redo.
@@ -713,7 +714,10 @@ export const parseCsvToGeometry = (
   }
 
   const warnings: string[] = [...retiredRows];
-  const keepNumericHeatCapacity = options.numericArealHeatCapacityForTarget?.(targetBundleId) === true;
+  const arealHeatCapacityInput = documentArealHeatCapacity(targetBundleId, options.arealHeatCapacityForPin);
+  if (!arealHeatCapacityInput) {
+    warnings.push(`This editor does not know the target this file pins (${targetBundleId}), so areal heat capacity values stay as saved: a class means what that target reads it as.`);
+  }
   const parseExtraJson = (jsonString: string, elementName?: string): Record<string, unknown> | undefined => {
     if (!jsonString || jsonString.trim() === '') return undefined;
     try {
@@ -725,10 +729,6 @@ export const parseCsvToGeometry = (
       // A number typed as text ("90000") is the number it says, so display, validation and save agree.
       if (typeof parsed.areal_heat_capacity === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(parsed.areal_heat_capacity)) {
         parsed.areal_heat_capacity = Number(parsed.areal_heat_capacity);
-      }
-      if (typeof parsed.areal_heat_capacity === 'number' && !keepNumericHeatCapacity) {
-        parsed.areal_heat_capacity =
-          arealHeatCapacityBandFromJPerM2K(parsed.areal_heat_capacity) ?? parsed.areal_heat_capacity;
       }
       return parsed;
     } catch (error) {
@@ -792,6 +792,8 @@ export const parseCsvToGeometry = (
       : null;
 
   for (const el of newElements) {
+    const aligned = arealHeatCapacityInput && alignedArealHeatCapacity(el, arealHeatCapacityInput);
+    if (aligned) (el as { extra_json?: unknown }).extra_json = aligned;
     if (el.type === 'ThermalBridgeLinear') {
       ingestThermalBridgeLinearPostParse(el, newElements);
     }

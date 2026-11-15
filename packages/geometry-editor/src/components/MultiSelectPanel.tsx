@@ -1613,7 +1613,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   );
   // Under construction bands, only the heat capacity bands every target's construction takes;
   // none (a door or window among them, or one that takes no heat capacity) leaves it to each element.
-  const { constructionBands } = useTargetRules();
+  const { constructionBands, arealHeatCapacity } = useTargetRules();
   const buildType = useGeometryStore((s) => statedBuildType(s.complianceSettings));
   const arealBandOptions = useMemo(() => {
     if (!constructionBands) return AREAL_HEAT_CAPACITY_ENUM;
@@ -1701,7 +1701,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         mode,
         assemblyPitchDegForElement(el),
         {
-          fhsComplianceSnapArealHeat: targetSchemaMode(schemaPort) === 'fhs',
+          arealHeatCapacity,
           groundFloorType: el.type === 'BuildingElementGround' ? el.floor_type : null,
         },
       );
@@ -1710,7 +1710,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         continue;
       }
 
-      const current = effectiveFabricDisplayValues(el, defaultsLookup);
+      const current = effectiveFabricDisplayValues(el, arealHeatCapacity.classes, defaultsLookup);
       currentU.push(current.u);
       nextU.push(comp.preview.u);
       currentR.push(current.r);
@@ -1735,7 +1735,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         ].join(' · ');
 
     return { patches, appliedCount, skippedCount, description };
-  }, [assemblyLibrary, constructionTargetElements, defaultsLookup, schemaPort]);
+  }, [arealHeatCapacity, assemblyLibrary, constructionTargetElements, defaultsLookup]);
 
   const assemblyOptions = useMemo<SearchableDescribedOption[]>(() => {
     if (!assemblyLibrary || constructionTargetElements.length === 0) return [];
@@ -1859,24 +1859,24 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   const windowSecurityRiskSummary = describeDistribution(windowSecurityRiskDistribution);
   const constructionUValueSummary = describeDistribution(
     computeDistribution(constructionTargetElements, isAnyElement, (el) =>
-      effectiveFabricDisplayValues(el, defaultsLookup).u,
+      effectiveFabricDisplayValues(el, arealHeatCapacity.classes, defaultsLookup).u,
     ),
   );
   const constructionResistanceSummary = describeDistribution(
     computeDistribution(constructionTargetElements, isAnyElement, (el) =>
-      effectiveFabricDisplayValues(el, defaultsLookup).r,
+      effectiveFabricDisplayValues(el, arealHeatCapacity.classes, defaultsLookup).r,
     ),
   );
   const constructionMassSummary = describeDistribution(
     computeScalarDistribution(constructionTargetElements, isAnyElement, (el) =>
-      effectiveFabricDisplayValues(el, defaultsLookup).mass,
+      effectiveFabricDisplayValues(el, arealHeatCapacity.classes, defaultsLookup).mass,
     ),
   );
   const constructionArealSummary = describeDistribution(
     computeScalarDistribution(constructionTargetElements, isAnyElement, (el) => {
       const band = extraJsonRecord(el).areal_heat_capacity;
       if (typeof band === 'string' && band.trim().length > 0) return band;
-      const effective = effectiveFabricDisplayValues(el, defaultsLookup).arealHeat_kJ_m2K;
+      const effective = effectiveFabricDisplayValues(el, arealHeatCapacity.classes, defaultsLookup).arealHeat_kJ_m2K;
       return effective == null ? null : `${formatValueLabel(effective)} kJ/(m²·K)`;
     }),
   );

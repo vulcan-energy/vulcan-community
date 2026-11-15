@@ -261,6 +261,57 @@ pub(crate) fn map_window_own_airflow_height(row: &Row, model: &mut Value) {
     };
 }
 
+/// The areal heat capacity an applied assembly wrote, worked out again from its layer sum for this
+/// target: the number where the target takes one, else the nearest class on the target's scale. The
+/// value is the assembly's while it still equals the envelope's written value (an override removes
+/// the envelope); a user's own value stays. Returns the row with the derived value in `extra_json`,
+/// or `None` when nothing changes.
+pub(crate) fn derive_assembly_areal_heat_capacity(
+    row: &Row,
+    input: Option<crate::ArealHeatCapacityInput>,
+    element_type: &str,
+) -> Option<Row> {
+    let input = input?;
+    let extra = row.get("extra_json")?.as_object()?;
+    let envelope = extra.get("vulcan_assembly_v1")?;
+    let layer_sum = envelope.get("arealHeatCapacity_J_m2K")?.as_f64()?;
+    let written = envelope
+        .get("arealHeatCapacityWrittenToElement_J_m2K")?
+        .as_f64()?;
+    let stored = extra.get("areal_heat_capacity")?;
+    let own = match stored {
+        Value::Number(n) => n.as_f64().is_some_and(|n| (n - written).abs() <= 1e-6),
+        Value::String(label) => crate::AREAL_HEAT_CAPACITY_CLASSES
+            .iter()
+            .position(|c| c == label)
+            .is_some_and(|i| {
+                [
+                    &crate::SURFACE_AREAL_HEAT_CAPACITY,
+                    &crate::FULL_DEPTH_AREAL_HEAT_CAPACITY,
+                ]
+                .iter()
+                .any(|scale| (scale[i] - written).abs() <= 1e-6)
+            }),
+        _ => false,
+    };
+    if !own {
+        return None;
+    }
+    let derived = if input.takes_number(element_type) {
+        json!(layer_sum.round() as i64)
+    } else {
+        json!(input.nearest_class(layer_sum))
+    };
+    if &derived == stored {
+        return None;
+    }
+    let mut row = row.clone();
+    row.get_mut("extra_json")?
+        .as_object_mut()?
+        .insert("areal_heat_capacity".into(), derived);
+    Some(row)
+}
+
 pub(crate) fn map_physical_opening_full_partition_element(
     row: &Row,
     model: &mut Value,
@@ -1192,6 +1243,51 @@ mod tests {
         );
         assert!(e.is_empty());
         assert_eq!(v["window_part_list"], parts);
+    }
+    #[test]
+    fn an_applied_assembly_takes_the_class_or_number_of_each_target() {
+        // A 303 kJ wall snapped on the a7 scale; a user's own class has no envelope.
+        let row = |stored: Value| -> Row {
+            serde_json::from_value(json!({"extra_json":{"areal_heat_capacity":stored,
+                "vulcan_assembly_v1":{"arealHeatCapacity_J_m2K":303000,"arealHeatCapacityWrittenToElement_J_m2K":250000}}}))
+            .unwrap()
+        };
+        let derive = |stored: Value, profile: crate::ConversionProfile, ty: &str| {
+            derive_assembly_areal_heat_capacity(
+                &row(stored),
+                profile.areal_heat_capacity_input(),
+                ty,
+            )
+            .map(|r| r["extra_json"]["areal_heat_capacity"].clone())
+        };
+        let wall = "BuildingElementOpaque";
+        let partition = "BuildingElementAdjacentConditionedSpace";
+        use crate::ConversionProfile::*;
+        assert_eq!(derive(json!("Very heavy"), CurrentRustFhs, wall), None);
+        assert_eq!(
+            derive(json!("Very heavy"), PythonFhsA9, wall),
+            Some(json!("Very light"))
+        );
+        assert_eq!(
+            derive(json!("Very heavy"), PythonFhsA9, partition),
+            Some(json!(303000))
+        );
+        assert_eq!(
+            derive(json!("Very heavy"), EpcFullInputV1, wall),
+            Some(json!(303000))
+        );
+        // The user changed the class, or the profile has no checked table: unchanged.
+        assert_eq!(derive(json!("Light"), PythonFhsA9, wall), None);
+        assert_eq!(derive(json!("Very heavy"), PythonFhsA8, wall), None);
+        let user: Row =
+            serde_json::from_value(json!({"extra_json":{"areal_heat_capacity":"Very heavy"}}))
+                .unwrap();
+        assert!(derive_assembly_areal_heat_capacity(
+            &user,
+            PythonFhsA9.areal_heat_capacity_input(),
+            wall
+        )
+        .is_none());
     }
     #[test]
     fn full_partition_recovery_is_exactly_once_and_does_not_double_qualitative_capacity() {

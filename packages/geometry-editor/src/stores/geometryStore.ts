@@ -38,6 +38,7 @@ import {
   targetSchemaMode,
   unavailableGeometrySchemaPort,
   type GeometrySchemaPort,
+  type PinnedArealHeatCapacity,
 } from '../../../geometry-editor-host/src/schemaPort';
 import {
   unavailableGeometryWorkspaceResourcePort,
@@ -2901,10 +2902,13 @@ export interface CreateGeometryStoreOptions {
    */
   defaultsPathForTarget?: (targetBundleId: string) => string | undefined;
   /**
-   * True when a pinned target takes a number for areal heat capacity, so a load keeps an
-   * element's number instead of snapping it to the nearest band (which loses it).
+   * The host's areal heat capacity input per pinned target (`documentArealHeatCapacity` gives an
+   * unpinned document HEM:FHS 1.0.0a7's). A load and a target change keep a number where the target
+   * takes one, snap it to the nearest class on the target's scale elsewhere, and re-derive the
+   * value an applied assembly wrote. Absent (a host with no target catalogue) or undefined for a
+   * pin, the values stay as they are and the load says so: the editor never guesses a target.
    */
-  numericArealHeatCapacityForTarget?: (targetBundleId: string | undefined) => boolean;
+  arealHeatCapacityForPin?: PinnedArealHeatCapacity;
   /**
    * Whether the document's own pinned target references database products (`TargetRules.
    * hemDatabaseProducts`); undefined for a pin the host does not know. Export-time values follow
@@ -3225,7 +3229,7 @@ const createGeometryState = (
   ...createIoSlice({
     defaultDefaultsPath,
     defaultsPathForTarget: options.defaultsPathForTarget,
-    numericArealHeatCapacityForTarget: options.numericArealHeatCapacityForTarget,
+    arealHeatCapacityForPin: options.arealHeatCapacityForPin,
     hemDatabaseProductsForTarget: options.hemDatabaseProductsForTarget,
     hostDocumentMetadataKeys,
     modelSchemaProfilePort,
@@ -3972,11 +3976,12 @@ const createGeometryState = (
     }
 
     // Under construction bands the bands give the fabric; the stored default assemblies wait unused.
-    if (!targetRules(schemaPort, get().complianceSettings).constructionBands) {
+    const creationRules = targetRules(schemaPort, get().complianceSettings);
+    if (!creationRules.constructionBands) {
       newElement = applyCreationDefaultAssemblyToElement(newElement, {
         library: get().bundledAssemblyLibrary,
         ids: get().creationDefaultAssemblyIds,
-        fhsComplianceSnapArealHeat: true,
+        arealHeatCapacity: creationRules.arealHeatCapacity,
       }) as Element;
     }
     newElement = { ...newElement, _nameAutoSync: true };

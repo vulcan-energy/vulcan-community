@@ -3148,6 +3148,25 @@ impl JSONBuilder {
                     let target_path =
                         crate::json_pointer(&["Zone", zone_name, "BuildingElement", element_name]);
                     let contract = self.input_contract;
+                    let element_type = element_obj
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    let derived_row = crate::target_mappings::derive_assembly_areal_heat_capacity(
+                        element_row,
+                        contract.areal_heat_capacity,
+                        &element_type,
+                    );
+                    if let Some(row) = &derived_row {
+                        if let Some(element) = element_obj.as_object_mut() {
+                            element.insert(
+                                "areal_heat_capacity".into(),
+                                row["extra_json"]["areal_heat_capacity"].clone(),
+                            );
+                        }
+                    }
+                    let element_row = derived_row.as_ref().unwrap_or(element_row);
                     crate::target_mappings::map_window_own_airflow_height(
                         element_row,
                         &mut element_obj,

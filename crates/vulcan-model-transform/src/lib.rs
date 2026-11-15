@@ -370,9 +370,82 @@ pub(crate) struct InputContract {
     pub fan_reads_flat_exhaust_position: bool,
     /// Rust a7's schema rejects Appliances that name neither Fridge nor Fridge-Freezer.
     pub schema_needs_named_cold_appliance: bool,
+    /// What the wrapper reads an areal heat capacity class as, and where it takes a number;
+    /// `None` where no pinned wrapper source was checked.
+    pub areal_heat_capacity: Option<ArealHeatCapacityInput>,
+}
+
+/// The areal heat capacity classes, lightest first.
+pub const AREAL_HEAT_CAPACITY_CLASSES: [&str; 5] =
+    ["Very light", "Light", "Medium", "Heavy", "Very heavy"];
+/// J/(m²·K) per class, EN ISO 52016-1 Table B.14: HEM:FHS 1.0.0a7 (`AREAL_HEAT_MAP`,
+/// future_homes_standard.rs at c5ba2673).
+pub const SURFACE_AREAL_HEAT_CAPACITY: [f64; 5] =
+    [50_000.0, 75_000.0, 110_000.0, 175_000.0, 250_000.0];
+/// J/(m²·K) per class over the full depth of the element: HEM:FHS 1.0.0a9 (`AREAL_HEAT_MAP` at
+/// f2c2425f) and HEM:EPC 0.13.2 (`ArealHeatCapacity.as_core_value`, epc_wrapper enums.py at 18032feb).
+pub const FULL_DEPTH_AREAL_HEAT_CAPACITY: [f64; 5] =
+    [240_000.0, 450_000.0, 650_000.0, 850_000.0, 1_350_000.0];
+/// The element types whose a9 schema takes a number in place of a class.
+pub const AREAL_HEAT_CAPACITY_NUMBER_PARTITIONS: [&str; 2] = [
+    "BuildingElementAdjacentConditionedSpace",
+    "BuildingElementAdjacentUnconditionedSpace_Simple",
+];
+
+/// Where a wrapper takes a number in J/(m²·K) in place of a class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArealHeatCapacityNumbers {
+    NoElement,
+    Partitions,
+    AllElements,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArealHeatCapacityInput {
+    pub classes: &'static [f64; 5],
+    pub numbers: ArealHeatCapacityNumbers,
+}
+
+impl ArealHeatCapacityInput {
+    pub fn takes_number(&self, element_type: &str) -> bool {
+        match self.numbers {
+            ArealHeatCapacityNumbers::NoElement => false,
+            ArealHeatCapacityNumbers::Partitions => {
+                AREAL_HEAT_CAPACITY_NUMBER_PARTITIONS.contains(&element_type)
+            }
+            ArealHeatCapacityNumbers::AllElements => true,
+        }
+    }
+    /// The class whose value is nearest; on a tie, the lighter one.
+    pub fn nearest_class(&self, j_per_m2k: f64) -> &'static str {
+        let mut best = 0;
+        for (i, value) in self.classes.iter().enumerate() {
+            if (j_per_m2k - value).abs() < (j_per_m2k - self.classes[best]).abs() - 1e-3 {
+                best = i;
+            }
+        }
+        AREAL_HEAT_CAPACITY_CLASSES[best]
+    }
 }
 
 impl ConversionProfile {
+    /// The pinned wrapper's areal heat capacity input. Python a8 has no checked source; its pins
+    /// are retired and run on Rust a9.
+    pub fn areal_heat_capacity_input(self) -> Option<ArealHeatCapacityInput> {
+        use ArealHeatCapacityNumbers::*;
+        let (classes, numbers) = match self {
+            Self::CurrentRustFhs | Self::DividedOpeningHalfPartitionV1 => {
+                (&SURFACE_AREAL_HEAT_CAPACITY, NoElement)
+            }
+            Self::PythonFhsA9 | Self::PhysicalOpeningFullPartitionPartyWallUV1 => {
+                (&FULL_DEPTH_AREAL_HEAT_CAPACITY, Partitions)
+            }
+            Self::EpcFullInputV1 => (&FULL_DEPTH_AREAL_HEAT_CAPACITY, AllElements),
+            Self::PythonFhsA8 | Self::PhysicalOpeningFullPartitionV1 => return None,
+        };
+        Some(ArealHeatCapacityInput { classes, numbers })
+    }
+
     /// Compatibility boundary for published preparation artifacts. New profiles
     /// describe the same contracts without tying them to a language or release.
     pub(crate) fn input_contract(self) -> InputContract {
@@ -401,6 +474,7 @@ impl ConversionProfile {
             fan_coil_needs_energy_supply: physical_openings,
             fan_reads_flat_exhaust_position: physical_openings,
             schema_needs_named_cold_appliance: !physical_openings,
+            areal_heat_capacity: self.areal_heat_capacity_input(),
         }
     }
 }

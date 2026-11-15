@@ -56,9 +56,10 @@ import {
 } from '../../../lib/groundSuspendedFabricSync';
 import { deriveForExport } from '../../../lib/deriveForExport';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
+import { alignedArealHeatCapacity } from '../../../lib/assemblyAppliedUi';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
-import { targetRules, targetSchemaMode, type GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
+import { documentArealHeatCapacity, targetRules, targetSchemaMode, type GeometrySchemaPort, type PinnedArealHeatCapacity } from '../../../../../geometry-editor-host/src/schemaPort';
 import type { GeometryWorkspaceResourcePort } from '../../../../../geometry-editor-host/src/workspaceResourcePort';
 import {
   alignHostedSlopedPanelToHostOrientation,
@@ -187,7 +188,7 @@ export type GeometryStoreSlice = StateCreator<GeometryState, [], [], IoSlice>;
 export type IoSliceOptions = Readonly<{
   defaultDefaultsPath: string | undefined;
   defaultsPathForTarget: ((targetBundleId: string) => string | undefined) | undefined;
-  numericArealHeatCapacityForTarget: ((targetBundleId: string | undefined) => boolean) | undefined;
+  arealHeatCapacityForPin: PinnedArealHeatCapacity | undefined;
   hemDatabaseProductsForTarget: ((targetBundleId: string | undefined) => boolean | undefined) | undefined;
   modelSchemaProfilePort: GeometryModelSchemaProfilePort;
   schemaPort: GeometrySchemaPort;
@@ -800,8 +801,9 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
       const before = (authored[column] ?? authored[LEGACY_COLUMN[column]] ?? '').trim();
       const after = saved[column]?.trim();
       if (column === 'extra_json' && after !== undefined) {
-        // The load snaps a numeric areal_heat_capacity to its band and a legacy mass_distribution_class
-        // code to its label (parseCsvToGeometry), values the converter rejects as they were.
+        // The load fits areal_heat_capacity to the document's target (a class on its scale, a number
+        // where it takes one, an applied assembly's value re-derived) and a legacy
+        // mass_distribution_class code to its label (parseCsvToGeometry).
         for (const field of ['areal_heat_capacity', 'mass_distribution_class']) {
           const was = extraJsonField(before, field);
           const now = extraJsonField(after, field);
@@ -894,6 +896,18 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       loadAwaitsDefaults: true,
       complianceSettings: { ...state.complianceSettings, scenariosBaseModelEnabled: false },
     });
+    // An applied assembly's areal heat capacity follows the new target's scale; a pin the host
+    // cannot resolve keeps every value.
+    const arealInput = documentArealHeatCapacity(targetBundleId, options.arealHeatCapacityForPin);
+    if (arealInput) {
+      const aligned = Object.values(get().elementsById).flatMap((element) => {
+        const extra = alignedArealHeatCapacity(element, arealInput);
+        return extra ? [[element.id, { ...element, extra_json: extra } as Element] as const] : [];
+      });
+      if (aligned.length > 0) {
+        get().writeAs('derived', () => set({ elementsById: { ...get().elementsById, ...Object.fromEntries(aligned) } }));
+      }
+    }
     // The host selects the port's target before it sets the pin, so these are the new target's rules.
     followTarget();
   },
@@ -1832,7 +1846,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels, metadata, warnings: parseWarnings } =
       parseCsvToGeometry(csvContent, {
         hostDocumentMetadataKeys: options.hostDocumentMetadataKeys,
-        numericArealHeatCapacityForTarget: options.numericArealHeatCapacityForTarget,
+        arealHeatCapacityForPin: options.arealHeatCapacityForPin,
         assignIds: replace
           ? ({ zones, elements, spaceLabels }) => reuseKnownIds(get(), knownIds, zones, elements, spaceLabels)
           : undefined,

@@ -48,7 +48,7 @@ import {
   parseWindShieldLocation,
   WIND_SHIELD_LOCATION_ENUM,
 } from '../lib/groundUValueCalculator';
-import { arealHeatCapacityBandFromJPerM2K } from '../lib/assemblyCalculator';
+import { arealHeatCapacityBandFromJPerM2K, arealHeatCapacityWrite } from '../lib/assemblyCalculator';
 import { EdgeInsulationFields } from './EdgeInsulationFields';
 import { WindowTreatmentFields } from './WindowTreatmentFields';
 import { FancoilTestDataFields } from './FancoilTestDataFields';
@@ -991,7 +991,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         : null,
     [schemaMode, schemaPort],
   );
-  const { hiddenFields, hemDatabaseProducts, constructionBands } = useTargetRules();
+  const { hiddenFields, hemDatabaseProducts, constructionBands, arealHeatCapacity } = useTargetRules();
   // On a products target (EPC) the defaults file's supplies are the model's: a system picks one.
   const defaultsJson = useGeometryStore((state) => state.defaultsJson);
   const energySupplies = useMemo(() => (hemDatabaseProducts ? readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply) : {}), [hemDatabaseProducts, defaultsJson]);
@@ -1789,10 +1789,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     }
     if (typeof envelope.arealHeatCapacityWrittenToElement_J_m2K === 'number') {
       const jWritten = envelope.arealHeatCapacityWrittenToElement_J_m2K;
-      // FHS advanced schema stores enum labels (e.g. "Very light"); assembly envelope keeps snapped J/(m²·K).
-      out.areal_heat_capacity = useFHSSchema
-        ? arealHeatCapacityBandFromJPerM2K(jWritten) ?? jWritten
-        : jWritten;
+      // A target that takes a class stores its label; the envelope keeps the class's J/(m²·K).
+      const write = arealHeatCapacityWrite(arealHeatCapacity, elementType);
+      out.areal_heat_capacity = write === 'number' ? jWritten : arealHeatCapacityBandFromJPerM2K(jWritten, write);
     }
     if (typeof envelope.massDistributionClass === 'string') {
       out.mass_distribution_class = envelope.massDistributionClass;
@@ -1806,7 +1805,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       out.height_upper_surface = roundToTwoDecimals(envelope.suspendedHeightUpperSurfaceM);
     }
     return out;
-  }, [currentData.extra_json, elementType, subtype, useFHSSchema]);
+  }, [arealHeatCapacity, currentData.extra_json, elementType, subtype]);
 
   const groundUComputedWPerM2K = useMemo(
     () =>

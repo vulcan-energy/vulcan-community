@@ -11,6 +11,7 @@ import './GlobalButtonSystem.css';
 import {
   arealHeatCapacityBandFromJPerM2K,
   arealHeatCapacityJPerM2KFromBand,
+  arealHeatCapacityWrite,
   CALCULATION_ENGINE_VERSION,
   computeIso6946CombinedConstructionResistance,
   computeOpaqueUAndTotals,
@@ -79,7 +80,7 @@ import { roundToTwoDecimals } from '../geometry/constants';
 import type { GroundFloorType } from '../lib/groundUValueCalculator';
 import type { GeometryWorkspaceResourcePort } from '../../../geometry-editor-host/src';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import { targetRules } from '../../../geometry-editor-host/src/schemaPort';
 import type {
   ExternalConstructionDetailProfile,
   ExternalDetailCataloguePort,
@@ -223,8 +224,12 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
   initialOpaqueSubtype = null,
   groundFloorType = null,
 }) => {
-  // An FHS target takes areal heat capacity as a band label.
-  const snapsToFhsBand = targetSchemaMode(useGeometrySchemaPort()) === 'fhs';
+  // The target takes areal heat capacity as a number or as a class on its own scale.
+  // The rule follows the target alone, not the model settings, so the modal needs no store.
+  const arealHeatCapacityInput = targetRules(useGeometrySchemaPort(), {}).arealHeatCapacity;
+  const arealWrite = arealHeatCapacityWrite(arealHeatCapacityInput, elementMode);
+  const arealScale = arealHeatCapacityInput.classes;
+  const snapsToFhsBand = arealWrite !== 'number';
   const heatedAdjacentHalfConstruction = useMemo(
     () => shouldUseHeatedAdjacentHalfConstructionFabric(elementMode),
     [elementMode],
@@ -655,19 +660,19 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
   }, [massSuggestion]);
 
   const arealWrittenValue = useMemo(
-    () => resolveFabricArealHeatCapacityForElement(calc.arealJPerM2K, snapsToFhsBand),
-    [calc.arealJPerM2K, snapsToFhsBand],
+    () => resolveFabricArealHeatCapacityForElement(calc.arealJPerM2K, arealWrite),
+    [calc.arealJPerM2K, arealWrite],
   );
   const arealWrittenJ = useMemo(
-    () => arealHeatCapacityJPerM2KFromBand(arealWrittenValue),
-    [arealWrittenValue],
+    () => arealHeatCapacityJPerM2KFromBand(arealWrittenValue, arealScale),
+    [arealWrittenValue, arealScale],
   );
   const arealWrittenBand = useMemo(
     () =>
       typeof arealWrittenValue === 'string'
         ? arealWrittenValue
-        : arealHeatCapacityBandFromJPerM2K(arealWrittenValue),
-    [arealWrittenValue],
+        : arealHeatCapacityBandFromJPerM2K(arealWrittenValue, arealScale),
+    [arealWrittenValue, arealScale],
   );
 
   const assemblyApplyErrors = useMemo(
@@ -803,12 +808,12 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
       calc.arealJPerM2K != null ? roundToTwoDecimals(calc.arealJPerM2K) : undefined;
     const arealElementValue = resolveFabricArealHeatCapacityForElement(
       calc.arealJPerM2K,
-      snapsToFhsBand,
+      arealWrite,
     );
     if (arealRawJ != null) {
       envelope.arealHeatCapacity_J_m2K = arealRawJ;
     }
-    const arealElementJ = arealHeatCapacityJPerM2KFromBand(arealElementValue);
+    const arealElementJ = arealHeatCapacityJPerM2KFromBand(arealElementValue, arealScale);
     if (arealElementJ != null) {
       envelope.arealHeatCapacityWrittenToElement_J_m2K = arealElementJ;
     }
@@ -869,7 +874,8 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
     elementMode,
     elementPitchDeg,
     externalDetailProfile,
-    snapsToFhsBand,
+    arealWrite,
+    arealScale,
     heatedAdjacentHalfConstruction,
     suspendedGroundAssembly,
     suspendedGroundVoidSplit,
@@ -2138,7 +2144,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
                       {appliedEnvelope.arealHeatCapacityWrittenToElement_J_m2K != null ? (
                         <>
                           {', on element '}
-                          <strong>{arealHeatCapacityBandFromJPerM2K(appliedEnvelope.arealHeatCapacityWrittenToElement_J_m2K) ?? '—'}</strong>
+                          <strong>{arealHeatCapacityBandFromJPerM2K(appliedEnvelope.arealHeatCapacityWrittenToElement_J_m2K, arealScale) ?? '—'}</strong>
                           {' ('}
                           {(appliedEnvelope.arealHeatCapacityWrittenToElement_J_m2K / 1000).toFixed(2)} kJ/(m²·K)
                           {')'}
@@ -2352,7 +2358,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
                       {appliedEnvelope.arealHeatCapacityWrittenToElement_J_m2K != null ? (
                         <>
                           {', on element '}
-                          <strong>{arealHeatCapacityBandFromJPerM2K(appliedEnvelope.arealHeatCapacityWrittenToElement_J_m2K) ?? '—'}</strong>
+                          <strong>{arealHeatCapacityBandFromJPerM2K(appliedEnvelope.arealHeatCapacityWrittenToElement_J_m2K, arealScale) ?? '—'}</strong>
                           {' ('}
                           {(appliedEnvelope.arealHeatCapacityWrittenToElement_J_m2K / 1000).toFixed(2)} kJ/(m²·K)
                           {')'}

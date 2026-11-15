@@ -206,7 +206,8 @@ function resolveOpaqueWallUAutofillSource(
     };
   }
 
-  const effective = effectiveFabricDisplayValues(element, defaultsLookup);
+  // Reads U only, so the areal heat capacity scale does not matter.
+  const effective = effectiveFabricDisplayValues(element, 'surface', defaultsLookup);
   if (effective.u != null && effective.u > 0 && effective.uIsDefault) {
     return {
       uValue_W_m2K: effective.u,

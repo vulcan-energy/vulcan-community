@@ -25,6 +25,40 @@ export interface GeometrySchemaParameterInfo {
   source?: 'schema' | 'hem_guidance';
 }
 
+/**
+ * The value scale a wrapper maps the areal heat capacity classes (Very light to Very heavy) to:
+ * `surface`, EN ISO 52016-1 Table B.14 (HEM:FHS 1.0.0a7); `full_depth`, the full depth of the
+ * element (HEM:FHS 1.0.0a9, HEM:EPC). The values are `AREAL_HEAT_CAPACITY_CLASSES` in the editor.
+ */
+export type ArealHeatCapacityScale = 'surface' | 'full_depth';
+
+/** The areal heat capacity a target takes. */
+export interface ArealHeatCapacityInput {
+  /** What the target's wrapper reads a class as. */
+  classes: ArealHeatCapacityScale;
+  /** Element types that take a number in J/(m²·K) in place of a class; `all` for every type. */
+  numberTypes: readonly string[] | 'all';
+}
+
+/** HEM:FHS 1.0.0a7, the target an unpinned CSV converts as: classes only, on the surface scale. */
+export const A7_AREAL_HEAT_CAPACITY_INPUT: ArealHeatCapacityInput = Object.freeze({ classes: 'surface', numberTypes: Object.freeze([]) });
+
+/** A host's areal heat capacity input for a pinned target id; undefined for a pin it cannot resolve. */
+export type PinnedArealHeatCapacity = (targetBundleId: string) => ArealHeatCapacityInput | undefined;
+
+/**
+ * The areal heat capacity a document's own target takes, from its TargetBundleId: an unpinned
+ * document converts as HEM:FHS 1.0.0a7 (the legacy rule); a pin goes to the host's resolver.
+ * Undefined when the host has no resolver or cannot resolve the pin: the caller keeps the
+ * values as they are and says so.
+ */
+export function documentArealHeatCapacity(
+  targetBundleId: string | undefined,
+  pinned: PinnedArealHeatCapacity | undefined,
+): ArealHeatCapacityInput | undefined {
+  return targetBundleId === undefined ? A7_AREAL_HEAT_CAPACITY_INPUT : pinned?.(targetBundleId);
+}
+
 /** A host's per-target rules the schema cannot state. */
 export interface TargetRules {
   /** Checks that the model is complete and consistent for this target, such as a wet emitter needing a heat source. */
@@ -87,6 +121,8 @@ export interface TargetRules {
   zoneAreaSplit: boolean;
   /** The bay window and conservatory bundles an existing building's HEMIE description takes. */
   hemieBundles: boolean;
+  /** The areal heat capacity the target takes: what a class means, and where a number goes instead. */
+  arealHeatCapacity: ArealHeatCapacityInput;
 }
 
 export interface GeometrySchemaPropertyValidation {
@@ -160,8 +196,8 @@ export function targetSchemaMode(port?: GeometrySchemaPort): GeometrySchemaMode 
  * The host's rules over the defaults: model-validity checks run for every target, the FHS input
  * rules and Building Regulations checks for an FHS target, nothing is excluded or hidden,
  * products come from the host's own sources, no Metadata row is required beyond what the
- * schema and defaults decide, fabric comes from elements and default assemblies, and no HEMIE
- * bundles are offered.
+ * schema and defaults decide, fabric comes from elements and default assemblies, no HEMIE
+ * bundles are offered, and areal heat capacity is HEM:FHS 1.0.0a7's (a number on a Core schema).
  */
 export function targetRules(
   port: GeometrySchemaPort | undefined,
@@ -183,6 +219,8 @@ export function targetRules(
     constructionBands: false,
     hemieBundles: false,
     zoneAreaSplit: targetSchemaMode(port) === 'fhs',
+    // A Core-shaped schema takes a number on every element.
+    arealHeatCapacity: targetSchemaMode(port) === 'fhs' ? A7_AREAL_HEAT_CAPACITY_INPUT : { classes: 'surface', numberTypes: 'all' },
     ...port?.targetRules?.(modelSettings),
   };
 }

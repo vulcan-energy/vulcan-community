@@ -1280,7 +1280,22 @@ pub(crate) fn map_existing_building(
     notices: &mut Vec<SchemaOmission>,
 ) -> Option<(shading::HemieShading, Provenance)> {
     let before = errors.len();
-    let converted = convert_existing_building(model, csv, schema, errors, notices);
+    // HEM:EPC takes a number everywhere: an applied assembly's value is its layer sum.
+    let input = crate::ConversionProfile::EpcFullInputV1.areal_heat_capacity_input();
+    let csv: Rows = csv
+        .iter()
+        .map(|(section, rows)| {
+            let rows = rows
+                .iter()
+                .map(|row| {
+                    crate::target_mappings::derive_assembly_areal_heat_capacity(row, input, "")
+                        .unwrap_or_else(|| row.clone())
+                })
+                .collect();
+            (section.clone(), rows)
+        })
+        .collect();
+    let converted = convert_existing_building(model, &csv, schema, errors, notices);
     report_silent_stop(converted.is_none(), before, errors);
     converted
 }

@@ -3,6 +3,7 @@
 
 import { expect, it } from 'vitest';
 import { createGeometryStore } from '../geometryStore';
+import { A7_AREAL_HEAT_CAPACITY_INPUT, type ArealHeatCapacityInput } from '../../../../geometry-editor-host/src/schemaPort';
 
 it('never writes a model-input metadata row with a blank value', () => {
   const store = createGeometryStore({ defaultDefaultsPath: null });
@@ -53,17 +54,79 @@ Exposed Elements,,
 Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
 Door,Living,BuildingElementOpaque,2,90,1,2,180,0,FALSE,TRUE,,"0,0,0|1,0,0","{""areal_heat_capacity"":20000}"
 `;
-  const capacity = (numeric: boolean) => {
-    const store = createGeometryStore({ defaultDefaultsPath: null, numericArealHeatCapacityForTarget: (id) => numeric && id === 'epc-target' });
-    store.getState().loadFromCSV(csv);
+  const capacity = (input: ArealHeatCapacityInput | undefined) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, arealHeatCapacityForPin: (id) => (id === 'epc-target' ? input : undefined) });
+    const { warnings } = store.getState().loadFromCSV(csv);
+    // A pin the host cannot resolve keeps the value and says so.
+    expect(warnings.some((w) => w.includes('does not know the target this file pins (epc-target)'))).toBe(!input);
     const saved = store.getState().generateCSV({ allowUnresolvedMigration: true });
     store.getState().loadFromCSV(saved);
     const door = Object.values(store.getState().elementsById).find((e) => e.name === 'Door');
     return (door?.extra_json as Record<string, unknown> | undefined)?.areal_heat_capacity ?? (door as unknown as Record<string, unknown>)?.areal_heat_capacity;
   };
-  expect(capacity(true)).toBe(20000);
-  // An FHS target reads bands only, so the load snaps to the nearest one.
-  expect(capacity(false)).toBe('Very light');
+  expect(capacity({ classes: 'full_depth', numberTypes: 'all' })).toBe(20000);
+  // A target that reads classes only: the nearest class on its scale.
+  expect(capacity(A7_AREAL_HEAT_CAPACITY_INPUT)).toBe('Very light');
+  expect(capacity(undefined)).toBe(20000);
+});
+
+it('re-derives the class an applied assembly wrote for the target, and keeps a user\'s class', () => {
+  // A 303 kJ/(m²·K) cavity wall snapped on the a7 scale (Very heavy, 250 kJ), a partition whose
+  // halved layer sum was snapped the same way, and a wall whose class the user chose.
+  const envelope = (layerSum: number, written: number) =>
+    `""vulcan_assembly_v1"":{""schemaVersion"":1,""assemblyId"":""a"",""arealHeatCapacity_J_m2K"":${layerSum},""arealHeatCapacityWrittenToElement_J_m2K"":${written}}`;
+  const csv = (target: string) => `Metadata,,
+TargetBundleId,${target}
+
+Zone,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Exposed Elements,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Cavity,Living,BuildingElementOpaque,10,90,4,2.5,180,0,FALSE,FALSE,,"0,0,0|4,0,0","{""areal_heat_capacity"":""Very heavy"",${envelope(303000, 250000)}}"
+Chosen,Living,BuildingElementOpaque,10,90,4,2.5,0,0,FALSE,FALSE,,"0,4,0|4,4,0","{""areal_heat_capacity"":""Very heavy""}"
+Partition,Living,BuildingElementAdjacentConditionedSpace,10,90,4,2.5,90,0,FALSE,FALSE,,"0,0,0|0,4,0","{""areal_heat_capacity"":""Light"",${envelope(85000, 75000)}}"
+`;
+  const a9 = { classes: 'full_depth', numberTypes: ['BuildingElementAdjacentConditionedSpace'] } as const;
+  const targets: Record<string, ArealHeatCapacityInput> = { a7: A7_AREAL_HEAT_CAPACITY_INPUT, a9, epc: { classes: 'full_depth', numberTypes: 'all' } };
+  const load = (target: string) => {
+    const store = createGeometryStore({
+      defaultDefaultsPath: null,
+      arealHeatCapacityForPin: (id) => targets[id],
+    });
+    store.getState().loadFromCSV(csv(target));
+    // Save and load again: the derived values are stable.
+    store.getState().loadFromCSV(store.getState().generateCSV({ allowUnresolvedMigration: true }));
+    const extra = (name: string) => Object.values(store.getState().elementsById).find((e) => e.name === name)!.extra_json as Record<string, any>;
+    return { cavity: extra('Cavity'), chosen: extra('Chosen'), partition: extra('Partition') };
+  };
+  const a7 = load('a7');
+  expect(a7.cavity.areal_heat_capacity).toBe('Very heavy');
+  expect(a7.cavity.vulcan_assembly_v1.arealHeatCapacityWrittenToElement_J_m2K).toBe(250000);
+  expect(a7.partition.areal_heat_capacity).toBe('Light');
+  const onA9 = load('a9');
+  expect(onA9.cavity.areal_heat_capacity).toBe('Very light');
+  expect(onA9.cavity.vulcan_assembly_v1.arealHeatCapacityWrittenToElement_J_m2K).toBe(240000);
+  // a9 takes a number on a partition: the half layer sum, which the converter doubles.
+  expect(onA9.partition.areal_heat_capacity).toBe(85000);
+  expect(onA9.partition.vulcan_assembly_v1.arealHeatCapacityWrittenToElement_J_m2K).toBe(85000);
+  expect(onA9.chosen.areal_heat_capacity).toBe('Very heavy');
+  // HEM:EPC takes a number on every element.
+  const onEpc = load('epc');
+  expect(onEpc.cavity.areal_heat_capacity).toBe(303000);
+  expect(onEpc.partition.areal_heat_capacity).toBe(85000);
+  expect(onEpc.chosen.areal_heat_capacity).toBe('Very heavy');
+
+  // Changing the target in the session re-derives them the same way: a7 → a9 → a7.
+  const store = createGeometryStore({ defaultDefaultsPath: null, arealHeatCapacityForPin: (id) => targets[id] });
+  store.getState().loadFromCSV(csv('a7'));
+  const extra = (name: string) => Object.values(store.getState().elementsById).find((e) => e.name === name)!.extra_json as Record<string, any>;
+  store.getState().setTargetBundleId('a9');
+  expect([extra('Cavity').areal_heat_capacity, extra('Partition').areal_heat_capacity, extra('Chosen').areal_heat_capacity]).toEqual(['Very light', 85000, 'Very heavy']);
+  store.getState().setTargetBundleId('a7');
+  expect([extra('Cavity').areal_heat_capacity, extra('Partition').areal_heat_capacity, extra('Chosen').areal_heat_capacity]).toEqual(['Very heavy', 'Light', 'Very heavy']);
+  expect(extra('Partition').vulcan_assembly_v1.arealHeatCapacityWrittenToElement_J_m2K).toBe(75000);
 });
 
 it('keeps the HEMIE_ model settings as typed through load and save', () => {

@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { arealHeatCapacityJPerM2KFromBand } from './assemblyCalculator';
+import {
+  arealHeatCapacityBandFromJPerM2K,
+  arealHeatCapacityJPerM2KFromBand,
+  arealHeatCapacityWrite,
+  resolveFabricArealHeatCapacityForElement,
+} from './assemblyCalculator';
+import type { ArealHeatCapacityInput } from '../../../geometry-editor-host/src/schemaPort';
 import type { FhsMassDistributionClass } from './assemblyMassHeuristic';
 import { toFhsMassDistributionClass } from './assemblyMassHeuristic';
 import { shouldUseHeatedAdjacentHalfConstructionFabric } from './assemblyMaterialFabric';
@@ -85,13 +91,18 @@ const ASSEMBLY_FABRIC_FIELDS: Record<string, (e: Record<string, unknown>) => unk
 
 function comparableFabricValue(field: string, value: unknown): unknown {
   if (value === undefined || value === null || value === '') return undefined;
-  if (field === 'areal_heat_capacity') return arealHeatCapacityJPerM2KFromBand(value) ?? value;
   if (field === 'mass_distribution_class') return toFhsMassDistributionClass(String(value)) ?? value;
   const n = typeof value === 'number' ? value : Number(String(value).trim());
   return Number.isFinite(n) ? n : value;
 }
 
 function sameFabricValue(field: string, a: unknown, b: unknown): boolean {
+  // The envelope keeps the J/(m²·K) of the class it wrote, on its target's scale; the scales share no value.
+  if (field === 'areal_heat_capacity' && typeof a !== typeof b && (typeof a === 'string' || typeof b === 'string')) {
+    const [label, j] = typeof a === 'string' ? [a, b] : [b as string, a];
+    return typeof j === 'number' && (['surface', 'full_depth'] as const)
+      .some((scale) => Math.abs((arealHeatCapacityJPerM2KFromBand(label, scale) ?? Number.NaN) - j) <= 1e-6);
+  }
   const x = comparableFabricValue(field, a);
   const y = comparableFabricValue(field, b);
   return typeof x === 'number' && typeof y === 'number' ? Math.abs(x - y) <= 1e-6 : x === y;
@@ -137,4 +148,37 @@ export function dropAssemblyEnvelopeOnFabricOverride(
     delete rest.thermal_resistance_construction;
   }
   return rest;
+}
+
+/**
+ * A loaded element's `extra_json` with its areal heat capacity fitted to its target, or undefined
+ * when it already fits. A value an applied assembly wrote
+ * (it still equals the envelope's) is derived: it is worked out again from the assembly's layer
+ * sum, so a class written on another target's scale follows this target's. A user's own value has
+ * no envelope (overriding removes it) and stays, except that a number where the target takes a
+ * class becomes the nearest class on the target's scale.
+ */
+export function alignedArealHeatCapacity(
+  element: { type: string; extra_json?: unknown },
+  input: ArealHeatCapacityInput,
+): Record<string, unknown> | undefined {
+  const extra = element.extra_json;
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return undefined;
+  const record = extra as Record<string, unknown>;
+  const write = arealHeatCapacityWrite(input, element.type);
+  const value = record.areal_heat_capacity;
+  const envelope = record.vulcan_assembly_v1 as Record<string, unknown> | undefined;
+  const layerSum = envelope?.arealHeatCapacity_J_m2K;
+  const written = envelope?.arealHeatCapacityWrittenToElement_J_m2K;
+  if (typeof layerSum === 'number' && typeof written === 'number' && sameFabricValue('areal_heat_capacity', value, written)) {
+    const derived = resolveFabricArealHeatCapacityForElement(layerSum, write);
+    const derivedJ = write === 'number' ? derived : arealHeatCapacityJPerM2KFromBand(derived, write);
+    if (derived === value && derivedJ === written) return undefined;
+    return { ...record, areal_heat_capacity: derived, vulcan_assembly_v1: { ...envelope, arealHeatCapacityWrittenToElement_J_m2K: derivedJ } };
+  }
+  if (typeof value === 'number' && write !== 'number') {
+    const band = arealHeatCapacityBandFromJPerM2K(value, write);
+    return band === undefined ? undefined : { ...record, areal_heat_capacity: band };
+  }
+  return undefined;
 }
