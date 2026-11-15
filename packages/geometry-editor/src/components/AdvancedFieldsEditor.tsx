@@ -1520,7 +1520,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     if (elementType === 'System' && subtype) {
       const rootFull = getActiveRootSchema();
       if (rootFull && result) {
-        const derefed = dereferenceSchemaNodeInRoot(result, rootFull) as typeof result;
+        // Keep the root's `$defs` rather than a dereferenced copy: copying them cost ~40 ms per
+        // System selection, and a new `$defs` each time recompiled every field validator.
+        const { $defs, ...withoutDefs } = result;
+        const derefed = { ...(dereferenceSchemaNodeInRoot(withoutDefs, rootFull) as typeof result), ...($defs === undefined ? {} : { $defs }) };
         result = flattenSystemSubtypePlantSchemas(
           derefed as Record<string, unknown>,
           subtype,

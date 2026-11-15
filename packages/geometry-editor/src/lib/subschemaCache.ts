@@ -104,6 +104,22 @@ export function dereferenceSchemaNodeInRoot(node: unknown, fullRoot: unknown): u
   return derefSchema(deepClone(node), fullRoot, new WeakSet(), 0);
 }
 
+// Read-only callers on a hot path (target field lookups start at the root, and dereferencing a
+// whole HEM:EPC schema costs ~190 ms) share one dereferenced copy per node, keyed by root identity
+// like the subschema cache above. Loaded roots are never mutated; callers must not mutate the result.
+const sharedDereferencedNodes = new WeakMap<object, WeakMap<object, unknown>>();
+
+export function sharedDereferencedNodeInRoot(node: object, fullRoot: unknown): unknown {
+  if (!isSchemaRecord(fullRoot)) return dereferenceSchemaNodeInRoot(node, fullRoot);
+  let nodes = sharedDereferencedNodes.get(fullRoot);
+  if (!nodes) {
+    nodes = new WeakMap();
+    sharedDereferencedNodes.set(fullRoot, nodes);
+  }
+  if (!nodes.has(node)) nodes.set(node, dereferenceSchemaNodeInRoot(node, fullRoot));
+  return nodes.get(node);
+}
+
 export async function getDereferencedByPointer(fullSchema: unknown, pointer: string): Promise<unknown> {
   const key = `ptr:${schemaRootCacheId(fullSchema)}:${pointer}`;
   const cached = cache.get(key);
